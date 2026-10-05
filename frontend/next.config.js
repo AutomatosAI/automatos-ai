@@ -113,9 +113,14 @@ const nextConfig = {
               // every API call ("Failed to fetch") before it leaves the page. In SaaS the
               // value is https://api.automatos.app, already covered by the wildcard.
               `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev https://api.clerk.com https://cdn.jsdelivr.net wss: ws:`,
-              "frame-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+              // F352 (night 10b): a PDF preview (Deliverables side panel, Explorer, chat file card)
+              // is fetched with the Bearer header and shown as a blob: URL in an <iframe>
+              // (useAuthenticatedBlobUrl). 'self' never matches blob:, so frame-src names it. The
+              // blob document inherits this policy, and the browser's PDF viewer is a plugin, so
+              // object-src allows blob: too. Only this page's own script can mint a blob: URL.
+              "frame-src 'self' blob: https://*.clerk.accounts.dev https://challenges.cloudflare.com",
               "worker-src 'self' blob:",
-              "object-src 'none'",
+              "object-src blob:",
               "base-uri 'self'",
               "form-action 'self'",
               "frame-ancestors 'none'",

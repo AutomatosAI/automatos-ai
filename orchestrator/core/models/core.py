@@ -570,7 +570,10 @@ class Workflow(Base):
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
     owner = Column(String(255), nullable=True)
-    tags = Column(JSON, nullable=True)
+    # JSONB (#840): the only type Postgres gives a default GIN opclass to, so
+    # ix_workflows_tags_gin can exist and Workflow.tags.contains([tag]) (api/workflows.py)
+    # compiles to the native @> operator instead of falling back to a text-cast ILIKE scan.
+    tags = Column(JSONB, nullable=True)
     default_policy_id = Column(String(128), nullable=True)
     last_execution = Column(JSON, nullable=True)  # Latest execution summary (9-stage enhancement)
     created_at = Column(DateTime, default=func.now())
@@ -741,6 +744,9 @@ class AgentCreate(BaseModel):
     tool_ids: Optional[List[int]] = []  # NEW: Phase 3 - Tools
     tags: Optional[List[str]] = []
     marketplace_category: Optional[str] = None
+    # #831: org-chart fields, previously writable only through Auto's tools.
+    team: Optional[str] = Field(None, max_length=100)
+    reports_to_id: Optional[int] = None
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
@@ -753,6 +759,10 @@ class AgentUpdate(BaseModel):
     skill_ids: Optional[List[int]] = None
     tool_ids: Optional[List[int]] = None  # NEW: Allow updating tool assignments
     tags: Optional[List[str]] = None
+    # #831: org-chart fields, previously writable only through Auto's tools.
+    # An empty string clears team (matches job_title); reports_to_id=0 clears the manager.
+    team: Optional[str] = Field(None, max_length=100)
+    reports_to_id: Optional[int] = None
 
 class AgentResponse(BaseModel):
     id: int
@@ -760,6 +770,9 @@ class AgentResponse(BaseModel):
     name: str
     description: Optional[str]
     job_title: Optional[str] = None
+    # #831: previously only GET /api/agents/org-chart returned these.
+    team: Optional[str] = None
+    reports_to_id: Optional[int] = None
     agent_type: str
     status: str
     configuration: Optional[Dict[str, Any]]

@@ -14,12 +14,17 @@ The keys the report shape does not print now print here, by what they hold:
 * a list of text: a list, one line per item;
 * an object: a table of its fields.
 
+F347: a bare number under an amount key (``total``, ``unit_price``) prints with two
+decimals, and no currency is added (``modules.documents.amounts``).
+
 Pure: blocks only, no IO.
 """
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Tuple
 
+from ..amounts import field_text
+from ..variables.catalog import is_blank
 from .markdown_body import blocks_from_markdown, section_text
 from .schema import HeadingBlock, TableBlock, TextRun
 
@@ -36,13 +41,7 @@ Ids = Callable[[str], str]
 
 def is_carried(value: Any) -> bool:
     """A value that holds something to print: not None, not empty or blank text."""
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, (list, tuple, dict)):
-        return bool(value)
-    return True
+    return not is_blank(value)
 
 
 def carried_keys(data: Dict[str, Any], skip: Iterable[str] = ()) -> List[str]:
@@ -71,6 +70,13 @@ def cell_text(value: Any) -> str:
     return str(value)
 
 
+def keyed_text(key: Any, value: Any) -> str:
+    """A value as one cell under ``key``: a bare amount with two decimals (F347), else :func:`cell_text`."""
+    if isinstance(value, (dict, list, tuple)):
+        return cell_text(value)
+    return field_text(key, value)
+
+
 def _row(cells: Iterable[str], bold_first: bool = False) -> List[List[TextRun]]:
     """One table row; a details row's label in bold."""
     return [
@@ -84,7 +90,7 @@ def _heading(text: str, bid: Ids) -> HeadingBlock:
 
 
 def _pairs_table(pairs: List[Tuple[Any, Any]], bid: Ids) -> TableBlock:
-    rows = [_row([label(key), cell_text(value)], bold_first=True) for key, value in pairs]
+    rows = [_row([label(key), keyed_text(key, value)], bold_first=True) for key, value in pairs]
     return TableBlock(id=bid("tbl"), header=False, rows=rows)
 
 
@@ -100,7 +106,7 @@ def _columns(items: List[Dict[str, Any]]) -> List[Any]:
 def _records_table(items: List[Dict[str, Any]], bid: Ids) -> TableBlock:
     columns = _columns(items)
     rows = [_row([label(column) for column in columns])]
-    rows += [_row([cell_text(item.get(column)) for column in columns]) for item in items]
+    rows += [_row([keyed_text(column, item.get(column)) for column in columns]) for item in items]
     return TableBlock(id=bid("tbl"), header=True, rows=rows)
 
 
@@ -128,4 +134,4 @@ def extra_blocks(data: Dict[str, Any], printed: FrozenSet[str], bid: Ids) -> Tup
     return details, structured
 
 
-__all__ = ["carried_keys", "cell_text", "extra_blocks", "is_carried", "label", "structured_blocks"]
+__all__ = ["carried_keys", "cell_text", "extra_blocks", "is_carried", "keyed_text", "label", "structured_blocks"]

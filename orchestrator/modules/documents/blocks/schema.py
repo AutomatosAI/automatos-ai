@@ -135,11 +135,16 @@ class VariableBlock(_Base):
 
 class DataTableColumn(_Base):
     """One column of a :class:`DataTableBlock`: ``key`` is read from each row object,
-    ``label`` is the header text (defaults to the key)."""
+    ``label`` is the header text (defaults to the key).
+
+    F345: every row must fill every column (a missing key or a blank cell blocks the
+    document, naming the row and the column) unless the author marks the column
+    ``optional``, e.g. a "Notes" column that may stay empty."""
 
     key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
     label: str = ""
     align: Literal["left", "right", "center"] = "left"
+    optional: bool = False
 
 
 class DataTableBlock(_Base):

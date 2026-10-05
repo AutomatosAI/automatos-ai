@@ -30,6 +30,11 @@ F336: "Sincerely, [Your Company Name]" shipped in two documents. A company place
 becomes the company's name (:func:`company_name`), a different fill from the person who
 signs; a bare "[Company Name]" only where a signature goes, as with "[Name]".
 
+F337 (night 10): Auto's own chat was left out: its flyer said "Harbour Coffee Roasters" and
+"delightful", its letters "Sincerely, [Your Company Name]". ``consumers.chatbot.brand_turn``
+gives Auto the rules block and passes its reply through :func:`placeholders_filled` and
+:func:`banned_note_for`, the two halves of :func:`on_brand_text`.
+
 Who signs (:func:`sign_off_name`): the voice's own sign-off, else the company
 contact's name, else the brand's name. Reads are cached per workspace for
 :data:`KIT_CACHE_SECONDS`: a run reads the kit several times (prompt, answer,
@@ -366,11 +371,6 @@ def banned_note(found: Sequence[str]) -> str:
     return f"{BANNED_NOTE_LEAD}: {_quoted(found)}. Change them before it goes out." if found else ""
 
 
-def _without_note(text: str) -> str:
-    """The text before an earlier banned-words note: the note quotes the words itself."""
-    return text.split(BANNED_NOTE_LEAD, 1)[0]
-
-
 def _split_rules(text: str) -> Tuple[str, str, str]:
     """(before, rules block, after): an answer that repeats its prompt carries the block, whose
     placeholder example and banned list are the rules, not the answer. ("", "", text) without one."""
@@ -385,6 +385,25 @@ def _split_rules(text: str) -> Tuple[str, str, str]:
     return text[:start], block, text[start + len(block):]
 
 
+def banned_note_for(text: str, kit: Optional[Dict[str, Any]]) -> str:
+    """The note :func:`on_brand_text` puts after ``text``: the banned words it uses outside a
+    rules block it repeats. Empty when it uses none, or already carries the note."""
+    if not kit or not isinstance(text, str) or BANNED_NOTE_LEAD in text:
+        return ""
+    before, _block, after = _split_rules(text)
+    phrases = (kit.get("voice") or {}).get("banned_phrases") or []
+    return banned_note(banned_found(before + after, phrases))
+
+
+def placeholders_filled(text: str, kit: Optional[Dict[str, Any]]) -> str:
+    """``text`` with its placeholder signature and company filled from ``kit`` (F337: Auto's chat
+    reply, as :func:`result_on_brand` fills a run's answer), outside a rules block it repeats."""
+    if not kit or not isinstance(text, str) or "[" not in text:
+        return text
+    before, block, after = _split_rules(text)
+    return f"{fill_placeholders(before, kit)}{block}{fill_placeholders(after, kit)}"
+
+
 def on_brand_text(text: str, kit: Optional[Dict[str, Any]]) -> str:
     """Finished ``text`` with its placeholder signature filled and, when it uses a banned
     word, the note after it (once). A repeated rules block is left as it is and not checked."""
@@ -392,12 +411,8 @@ def on_brand_text(text: str, kit: Optional[Dict[str, Any]]) -> str:
         return text
     signer = sign_off_name(kit)
     before, block, after = _split_rules(text)
-    before, after = fill_sign_off(before, signer), fill_sign_off(after, signer)
-    filled = f"{before}{block}{after}"
-    if BANNED_NOTE_LEAD in filled:
-        return filled
-    phrases = (kit.get("voice") or {}).get("banned_phrases") or []
-    note = banned_note(banned_found(_without_note(before + after), phrases))
+    filled = f"{fill_sign_off(before, signer)}{block}{fill_sign_off(after, signer)}"
+    note = banned_note_for(filled, kit)
     return f"{filled.rstrip()}\n\n{note}" if note else filled
 
 
@@ -434,8 +449,8 @@ def result_on_brand(result: Any, kit: Optional[Dict[str, Any]], workspace_id: An
 
 __all__ = [
     "BANNED_NOTE_LEAD", "KIT_CACHE_SECONDS", "KIT_WINS_LINE", "RULES_HEADING", "banned_found", "banned_note",
-    "brand_assets", "brand_rules_block", "company_name", "fill_company", "fill_placeholders", "fill_sign_off",
-    "forget_cached_kits", "kit_off_loop", "on_brand_result",
-    "on_brand_result_off_loop", "on_brand_text", "prompt_with_rules", "result_on_brand", "rules_for_kit",
+    "banned_note_for", "brand_assets", "brand_rules_block", "company_name", "fill_company", "fill_placeholders",
+    "fill_sign_off", "forget_cached_kits", "kit_off_loop", "on_brand_result", "on_brand_result_off_loop",
+    "on_brand_text", "placeholders_filled", "prompt_with_rules", "result_on_brand", "rules_for_kit",
     "document_author", "sign_off_name", "stored_kit", "with_brand_rules", "with_brand_rules_off_loop", "without_flushing",
 ]

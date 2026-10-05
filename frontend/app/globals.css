@@ -1494,6 +1494,10 @@
   /* Page frame */
   .cc-page {
     --cc-page-pad-top: 24px;
+    /* #850: the floor a main-content panel keeps under `.cc-body` — short
+       or narrow windows scroll the page instead of squeezing the panel to
+       0px (see .cc-panel-floor below). */
+    --cc-panel-floor-min: clamp(280px, 45vh, 560px);
     display: flex; flex-direction: column;
     height: 100%; min-height: 0;
     padding: var(--cc-page-pad-top) 28px 0;
@@ -1690,6 +1694,17 @@
     background: hsl(var(--card)); border: 1px solid hsl(var(--border));
     border-radius: 10px; display: flex; flex-direction: column;
     overflow: hidden;
+  }
+  /* #850: a panel that IS the tab's main content under `.cc-body` (e.g.
+     Activity's Live stream) used `flex: 1; min-height: 0`, so a short or
+     narrow window — taller stats strip, wrapped toolbar pills — left it
+     nothing and it collapsed to 0px, header included, with nothing to
+     scroll. `flex: 1 0 auto` + a floor keeps it readable; `.cc-body` (or
+     the page) scrolls instead, and the panel's own list keeps scrolling
+     inside it as before. */
+  :is(.studio, .cc-page) .cc-panel-floor {
+    flex: 1 0 auto;
+    min-height: var(--cc-panel-floor-min, clamp(280px, 45vh, 560px));
   }
   :is(.studio, .cc-page) .cc-panel-head {
     display: flex; align-items: center; gap: 10px;

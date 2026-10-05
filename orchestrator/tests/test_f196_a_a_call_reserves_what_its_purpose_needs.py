@@ -52,16 +52,13 @@ def _config(max_tokens=8000, ceiling=None):
 @pytest.fixture
 def settings_built(monkeypatch):
     """A manager built from settings: the category's max_tokens is 8,000 on night 6,
-    and no llm_output_budget rows exist."""
+    no llm_output_budget rows exist, and (night 6's measure) no model thinks."""
+    from core.llm import budget_snapshot, output_budget
     from core.llm import manager as llm_manager
 
     monkeypatch.setattr(llm_manager.LLMManager, "_load_config_from_settings", lambda self, *a, **k: _config())
-    try:
-        from core.llm import output_budget
-
-        monkeypatch.setattr(output_budget, "_stored", lambda purpose: None)
-    except ImportError:
-        pass
+    monkeypatch.setattr(output_budget, "_stored", lambda purpose: None)
+    monkeypatch.setattr(budget_snapshot, "model_facts", lambda model: budget_snapshot.NOT_THINKING)
 
     def build(service_name, **kwargs):
         mgr = llm_manager.LLMManager(service_name=service_name, **kwargs)
@@ -269,27 +266,29 @@ def test_a_json_helpers_cut_inside_a_chat_turn_is_left_parseable(settings_built)
 
 def test_a_budget_setting_is_never_read_on_the_event_loop(monkeypatch):
     """Code review: a stale cache read system_settings on the loop, once a
-    minute (F105's shape). It is read on a thread; the table answers meanwhile."""
+    minute (F105's shape). #836: the rows and the model catalogue are loaded
+    whole, on a thread; a manager built on the loop before that load reads the
+    table meanwhile."""
     import threading
 
+    from core.llm import budget_snapshot
     from core.llm import manager as llm_manager
-    from core.llm import output_budget
 
     on_loop_thread = []
 
-    def read(category, key):
+    def load():
         on_loop_thread.append(threading.current_thread() is threading.main_thread())
-        return None
+        return {}
 
-    monkeypatch.setattr(llm_manager, "read_system_setting", read)
-    monkeypatch.setattr(output_budget, "_stored_cache", {})
-    monkeypatch.setattr(output_budget, "_refreshing", set(), raising=False)
+    monkeypatch.setattr(budget_snapshot, "_load_budgets", load)
+    monkeypatch.setattr(budget_snapshot, "_load_thinking_models", dict)
+    monkeypatch.setattr(budget_snapshot, "_snapshot", None)
     monkeypatch.setattr(llm_manager.LLMManager, "_load_config_from_settings", lambda self, *a, **k: _config())
 
     async def build():
         mgr = llm_manager.LLMManager(service_name="digest")
         for _ in range(200):
-            if len(on_loop_thread) >= 2:
+            if on_loop_thread:
                 break
             await asyncio.sleep(0.01)
         return mgr

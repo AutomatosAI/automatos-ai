@@ -10,7 +10,9 @@ function's blanket ``except`` turned the AttributeError into the tool's answer.
 ``data`` is now read here, before anything renders:
 
 * an object is used as it is (copied: generation fills in its title);
-* an object the model wrote out as JSON text is parsed;
+* an object the model wrote out as JSON text is parsed, an apostrophe written as
+  ``\\'`` read as ``'`` (F346: 4 of 55 calls failed on it); text that still is
+  not JSON is refused naming the problem and where it is;
 * plain text, for a PDF with no template, is the document's body (``content``);
 * a list, for a PDF with no template, is its sections;
 * anything else is refused in plain words that say what to send instead.
@@ -22,7 +24,6 @@ the agent is told the document was not made and what to do next.
 """
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -35,6 +36,7 @@ from core.media_render_client import MediaRenderError
 from core.media_render_quota import RenderQuotaExceeded
 from core.social_templates import is_social_format
 from modules.documents.models import UnresolvedDeliverableError
+from modules.tools.execution.json_text import JSONTextProblem, loads_lenient
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 
 logger = logging.getLogger(__name__)
@@ -62,8 +64,8 @@ DATA_NOT_AN_OBJECT = (
     "{{\"sections\": [{{\"title\": \"...\", \"content\": \"...\"}}]}}, not {kind}."
 )
 DATA_BAD_JSON = (
-    "The document was not made: 'data' looks like JSON but is not a complete object. "
-    "Send 'data' as an object, for example {\"sections\": [{\"title\": \"...\", \"content\": \"...\"}]}."
+    "The document was not made: 'data' looks like JSON but is not a complete object ({problem}). "
+    "Send 'data' as an object, for example {{\"sections\": [{{\"title\": \"...\", \"content\": \"...\"}}]}}."
 )
 TEMPLATE_NEEDS_FIELDS = (
     "The document was not made: a template is filled from named fields, so 'data' must be an object "
@@ -117,9 +119,9 @@ def _from_text(text: str, fmt: str, has_template: bool) -> Dict[str, Any]:
         return {}
     if stripped.startswith("{"):
         try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError as exc:
-            raise DocumentArgsRefused(DATA_BAD_JSON) from exc
+            parsed = loads_lenient(stripped)
+        except JSONTextProblem as problem:
+            raise DocumentArgsRefused(DATA_BAD_JSON.format(problem=problem)) from problem
         if isinstance(parsed, dict):
             return parsed
     if has_template:
@@ -250,6 +252,7 @@ async def make_document(db: Session, request: DocumentRequest, agent: Any, works
 
     logger.info("[generate_document] %s document: %r", request.fmt.upper(), request.title)
     service = DocumentGenerationService(db, workspace_id)
+    # No user_id: no person makes an agent's call, so {{user.*}} is the workspace owner's (F344).
     result = await service.generate(
         title=request.title,
         format=request.fmt,
@@ -257,7 +260,6 @@ async def make_document(db: Session, request: DocumentRequest, agent: Any, works
         workspace_id=workspace_id,
         template_name=request.template_name,
         template_id=request.template_id,
-        user_id=getattr(agent, "user_id", None),
     )
     # PRD-167 S6: the rendered document is a Deliverable with source attribution.
     registration = service.register_as_deliverable(

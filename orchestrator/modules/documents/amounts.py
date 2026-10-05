@@ -1,0 +1,58 @@
+"""Money amounts as a document prints them (F347, night 10b).
+
+F347: the Branded Invoice printed an agent's ``"total": 311.0`` as "311.0", and
+the seeded legacy "Invoice" put a "$" in front of every amount, whatever the
+business's currency. A document never invents a currency: an amount prints as
+the value was given ("€19.50", "1,500.00 EUR"), and a bare number (311, 311.0,
+"311") prints with at least two decimals ("311.00"). Digits are never rounded
+away: 0.125 stays 0.125.
+
+Which values are amounts is read from the key they are sent under: its last
+word (``total``, ``unit_price``, ``amount_due``). ``quantity``, ``tax_rate`` and
+``total_hours`` are not amounts. A workspace currency is not a setting yet.
+
+Pure: no IO.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+# The last word of a key that holds money: "unit_price", "line_total", "amount_due".
+AMOUNT_WORDS = frozenset({
+    "amount", "balance", "cost", "deposit", "discount", "due", "fee", "fees",
+    "price", "shipping", "subtotal", "tax", "total", "vat",
+})
+KEY_WORD_SEPARATORS = re.compile(r"[\s_.-]+")
+MIN_DECIMALS = 2
+# A bare number: digits, an optional sign and decimals; no grouping, no currency, no exponent.
+_BARE_NUMBER = re.compile(r"^-?(?:0|[1-9]\d*)(?:\.\d+)?$")
+
+
+def is_amount_key(key: Any) -> bool:
+    """Whether a value sent under ``key`` is money, by the key's last word."""
+    words = [word for word in KEY_WORD_SEPARATORS.split(str(key).strip().lower()) if word]
+    return bool(words) and words[-1] in AMOUNT_WORDS
+
+
+def amount_text(value: Any) -> str:
+    """An amount as printed: a bare number with at least two decimals, anything else as given."""
+    if value is None:
+        return ""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return str(value)
+    text = value.strip() if isinstance(value, str) else str(value)
+    if not _BARE_NUMBER.match(text):
+        return str(value)
+    whole, _, decimals = text.partition(".")
+    return f"{whole}.{decimals.ljust(MIN_DECIMALS, '0')}"
+
+
+def field_text(key: Any, value: Any) -> str:
+    """A value as printed under ``key``: an amount key's bare number with two decimals, else ``str``."""
+    if value is None:
+        return ""
+    return amount_text(value) if is_amount_key(key) else str(value)
+
+
+__all__ = ["AMOUNT_WORDS", "amount_text", "field_text", "is_amount_key"]

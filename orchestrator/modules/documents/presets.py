@@ -17,6 +17,12 @@ document. Optional contact details carry ``fallback=""`` so a workspace without 
 phone number is not blocked; the fields a document is *about* have no fallback —
 an empty one is a blocked document, by design (P2-09 S3).
 
+F345: business and legal terms (payment terms, tax and VAT, how long a price holds,
+the terms of business, the governing law) have no fallback either. A default there
+printed "Net 30", "0.00" or "the laws of Ireland" for a business that never said
+so; now the guard asks for them. A cosmetic line ("Thank you for your business")
+keeps its default. A table column that may stay empty is marked ``optional``.
+
 Pure data + pure helpers; no DB, no IO.
 """
 
@@ -26,6 +32,10 @@ from typing import Any, Dict, List, Optional
 
 from modules.documents.blocks import collect_list_fields, collect_variable_paths, validate_blocks
 from modules.documents.variables.catalog import DYNAMIC_PREFIX
+
+# F350: one letterhead logo size on every starter. It was 40-50 mm (the top fifth of
+# an A4 page) on the invoice, report and proposal; the owner's own copies used 22 mm.
+LETTERHEAD_LOGO_MM = 22
 
 # ---------------------------------------------------------------------------
 # Block-tree builders (readable presets, no hand-written ids)
@@ -51,7 +61,7 @@ def _para(bid: str, *runs: Dict[str, Any]) -> Dict[str, Any]:
     return {"type": "text", "id": bid, "content": list(runs)}
 
 
-def _logo(bid: str = "logo", width_mm: int = 40) -> Dict[str, Any]:
+def _logo(bid: str = "logo", width_mm: int = LETTERHEAD_LOGO_MM) -> Dict[str, Any]:
     return {"type": "image", "id": bid, "source": "brand_logo", "alt": "Logo", "width_mm": width_mm}
 
 
@@ -59,12 +69,20 @@ def _section(bid: str, title: str, *children: Dict[str, Any]) -> Dict[str, Any]:
     return {"type": "section", "id": bid, "title": title, "children": list(children)}
 
 
+def _column(key: str, label: str, align: str, optional: bool = False) -> Dict[str, Any]:
+    column: Dict[str, Any] = {"key": key, "label": label, "align": align}
+    if optional:
+        column["optional"] = True
+    return column
+
+
 def _data_table(bid: str, path: str, columns: List[tuple], empty_text: Optional[str] = None) -> Dict[str, Any]:
+    """``columns``: ``(key, label, align)``, with ``True`` fourth for a column that may stay empty."""
     block: Dict[str, Any] = {
         "type": "data_table",
         "id": bid,
         "path": path,
-        "columns": [{"key": k, "label": label, "align": align} for k, label, align in columns],
+        "columns": [_column(*column) for column in columns],
     }
     if empty_text is not None:
         block["empty_text"] = empty_text
@@ -75,16 +93,13 @@ def _table(bid: str, rows: List[List[List[Dict[str, Any]]]], header: bool = Fals
     return {"type": "table", "id": bid, "header": header, "rows": rows}
 
 
-def _page_break(bid: str = "pb") -> Dict[str, Any]:
-    return {"type": "page_break", "id": bid}
-
-
 def _doc(*blocks: Dict[str, Any]) -> Dict[str, Any]:
     return {"version": 1, "blocks": list(blocks)}
 
 
 # Reusable letterhead: logo + company name + contact line (optional details fall back to "").
-# The Branded Letter's, and (F331) the top of a branded PDF made with no template.
+# The Branded Letter's and Invoice's, and (F331) the top of a branded PDF made with no
+# template. Its block ids are what the page style keys on (blocks/page_style.py).
 def letterhead() -> List[Dict[str, Any]]:
     return [
         _logo(),
@@ -104,9 +119,13 @@ def letterhead() -> List[Dict[str, Any]]:
 LETTER = {
     "category": "letter",
     "name": "Branded Letter",
-    "description": "Letterhead with your logo and company details, the recipient block, a subject line, the body and a sign-off.",
+    "description": (
+        "Letterhead with your logo and company details, the date, the recipient block, a subject line, "
+        "the greeting, the body and a sign-off. Send the greeting (\"Dear Jordan,\") in greeting; "
+        "the body has no greeting or sign-off: the template adds them."
+    ),
     "format": "pdf",
-    "includes": ["Letterhead from your brand kit", "Recipient and subject", "Body", "Sign-off with your name and email"],
+    "includes": ["Letterhead from your brand kit", "Date, recipient and subject", "Greeting from data.greeting", "Body", "Sign-off with your name and email"],
     "blocks": _doc(
         *letterhead(),
         _para("date", _v("date.long")),
@@ -114,7 +133,7 @@ LETTER = {
         _para("to-company", _v("data.recipient_company", "")),
         _para("to-address", _v("data.recipient_address", "")),
         _para("subject", _t("Re: ", "bold"), _v("data.subject")),
-        _para("salutation", _t("Dear "), _v("data.recipient_name"), _t(",")),
+        _para("greeting", _v("data.greeting", "")),
         _para("body", _v("data.body")),
         _para("closing", _t("Kind regards,")),
         _para("sig-name", _v("user.name")),
@@ -126,6 +145,7 @@ LETTER = {
             "recipient_company": "Northwind Traders",
             "recipient_address": "12 Harbour Street, Dublin 2",
             "subject": "Your proposal for the spring campaign",
+            "greeting": "Dear Jordan,",
             "body": "Thank you for meeting us last week. As discussed, we would be delighted to support the spring campaign and have set out the details below.",
         }
     },
@@ -136,18 +156,15 @@ INVOICE = {
     "name": "Branded Invoice",
     "description": "Your details and the client's, invoice number and dates, a line-items table filled from data, totals and payment terms.",
     "format": "pdf",
-    "includes": ["From / bill-to blocks", "Invoice number, date, due date", "Line items from data.line_items", "Subtotal, tax, total", "Payment terms"],
+    "includes": ["Letterhead from your brand kit", "Invoice number, date, due date", "Bill-to block", "Line items from data.line_items", "Subtotal, tax, total under the Total column", "Payment terms"],
     "blocks": _doc(
-        _logo(),
-        _heading("title", 1, _t("Invoice ")),
-        _para("from", _t("From: ", "bold"), _v("company.name"), _t(" · "), _v("company.address", ""), _t(" · "), _v("company.email", "")),
-        _para("bill-to", _t("Bill to: ", "bold"), _v("data.client_name"), _t(" · "), _v("data.client_address", ""), _t(" · "), _v("data.client_email", "")),
-        _para(
-            "meta",
-            _t("Invoice #", "bold"), _v("data.invoice_number"),
-            _t("    Date: ", "bold"), _v("date.today"),
-            _t("    Due: ", "bold"), _v("data.due_date"),
-        ),
+        *letterhead(),
+        _heading("title", 1, _t("Invoice "), _v("data.invoice_number")),
+        _para("meta", _t("Date: ", "bold"), _v("date.long"), _t("  ·  "), _t("Due: ", "bold"), _v("data.due_date")),
+        _para("bill-to-label", _t("BILL TO", "bold")),
+        _para("bill-to", _v("data.client_name")),
+        _para("bill-to-address", _v("data.client_address", "")),
+        _para("bill-to-email", _v("data.client_email", "")),
         _data_table(
             "items", "data.line_items",
             [("description", "Description", "left"), ("quantity", "Qty", "right"), ("unit_price", "Unit price", "right"), ("total", "Total", "right")],
@@ -156,11 +173,11 @@ INVOICE = {
             "totals",
             [
                 [[_t("Subtotal")], [_v("data.subtotal")]],
-                [[_t("Tax")], [_v("data.tax", "0.00")]],
+                [[_t("Tax")], [_v("data.tax")]],
                 [[_t("Total due", "bold")], [_v("data.total")]],
             ],
         ),
-        _para("terms", _t("Payment terms: ", "bold"), _v("data.payment_terms", "Net 30")),
+        _para("terms", _t("Payment terms: ", "bold"), _v("data.payment_terms")),
         _para("thanks", _t("Thank you for your business.")),
     ),
     "sample_data": {
@@ -169,7 +186,7 @@ INVOICE = {
             "client_address": "12 Harbour Street, Dublin 2",
             "client_email": "accounts@northwind.example",
             "invoice_number": "INV-0042",
-            "due_date": "2026-10-15",
+            "due_date": "4 November 2026",
             "line_items": [
                 {"description": "Consulting — discovery workshop", "quantity": 1, "unit_price": "1,500.00", "total": "1,500.00"},
                 {"description": "Implementation (days)", "quantity": 4, "unit_price": "900.00", "total": "3,600.00"},
@@ -187,22 +204,20 @@ REPORT = {
     "name": "Branded Report",
     "description": "Title and byline, executive summary, findings, a metrics table from data, recommendations, next steps and an appendix.",
     "format": "pdf",
-    "includes": ["Title page block with byline", "Executive summary", "Key findings", "Metrics table from data.metrics", "Recommendations and next steps", "Appendix on a new page"],
+    "includes": ["Title block with byline", "Executive summary", "Key findings", "Metrics table from data.metrics", "Recommendations and next steps", "Appendix"],
     "blocks": _doc(
-        _logo(bid="logo", width_mm=50),
+        _logo(),
         _heading("title", 1, _v("data.title")),
         _para("byline", _t("Prepared by "), _v("user.name"), _t(" · "), _v("company.name"), _t(" · "), _v("date.long")),
         _section("s-summary", "Executive summary", _para("summary", _v("data.summary"))),
         _section("s-findings", "Key findings", _para("findings", _v("data.findings"))),
         _section(
             "s-metrics", "Key metrics",
-            _data_table("metrics", "data.metrics", [("metric", "Metric", "left"), ("value", "Value", "right"), ("change", "Change", "right")], empty_text="No metrics reported for this period."),
+            _data_table("metrics", "data.metrics", [("metric", "Metric", "left"), ("value", "Value", "right"), ("change", "Change", "right", True)], empty_text="No metrics reported for this period."),
         ),
         _section("s-recs", "Recommendations", _para("recs", _v("data.recommendations"))),
         _section("s-next", "Next steps", _para("next", _v("data.next_steps", ""))),
-        _page_break(),
-        _heading("appendix", 2, _t("Appendix")),
-        _para("appendix-body", _v("data.appendix", "Methodology and source data available on request.")),
+        _section("s-appendix", "Appendix", _para("appendix-body", _v("data.appendix", "Methodology and source data available on request."))),
     ),
     "sample_data": {
         "data": {
@@ -227,7 +242,7 @@ PROPOSAL = {
     "format": "pdf",
     "includes": ["Cover with client and date", "Overview and scope", "Timeline", "Pricing table from data.pricing", "Terms and next steps", "Your sign-off"],
     "blocks": _doc(
-        _logo(bid="logo", width_mm=50),
+        _logo(),
         _heading("title", 1, _v("data.title")),
         _para("cover", _t("Prepared for "), _v("data.client_name"), _t(" by "), _v("company.name"), _t(" · "), _v("date.long")),
         _section("s-overview", "Overview", _para("overview", _v("data.overview"))),
@@ -236,9 +251,9 @@ PROPOSAL = {
         _section(
             "s-pricing", "Pricing",
             _data_table("pricing", "data.pricing", [("item", "Item", "left"), ("description", "Description", "left"), ("price", "Price", "right")]),
-            _para("pricing-note", _v("data.pricing_note", "Prices exclude VAT. Valid for 30 days.")),
+            _para("pricing-note", _v("data.pricing_note")),
         ),
-        _section("s-terms", "Terms", _para("terms", _v("data.terms", "Standard terms of business apply; a signed proposal and a purchase order start the work."))),
+        _section("s-terms", "Terms", _para("terms", _v("data.terms"))),
         _section("s-next", "Next steps", _para("next", _v("data.next_steps"))),
         _para("sig", _v("user.name"), _t(" · "), _v("user.email", ""), _t(" · "), _v("company.name")),
     ),
@@ -254,6 +269,8 @@ PROPOSAL = {
                 {"item": "Design and build", "description": "Design system, templates, CMS", "price": "€14,000"},
                 {"item": "Launch support", "description": "Two weeks post-launch", "price": "€1,500"},
             ],
+            "pricing_note": "Prices exclude VAT. Valid for 30 days.",
+            "terms": "Standard terms of business apply; a signed proposal and a purchase order start the work.",
             "next_steps": "Confirm scope by 20 September; kick-off the following Monday.",
         }
     },
@@ -284,7 +301,7 @@ CONTRACT = {
             "c5", "5. Termination",
             _para("termination", _t("Either party may terminate on thirty days' written notice, or immediately if the other party materially breaches this agreement and does not remedy the breach within fourteen days of notice.")),
         ),
-        _section("c6", "6. Governing law", _para("law", _t("This agreement is governed by the laws of "), _v("data.governing_law", "Ireland"), _t("."))),
+        _section("c6", "6. Governing law", _para("law", _t("This agreement is governed by the laws of "), _v("data.governing_law"), _t("."))),
         _heading("sig-title", 2, _t("Signed")),
         _table(
             "signatures",
@@ -321,7 +338,7 @@ DATA = {
         _logo(),
         _heading("title", 1, _v("data.title")),
         _para("desc", _v("data.description", "")),
-        _data_table("rows", "data.rows", [("name", "Name", "left"), ("value", "Value", "right"), ("notes", "Notes", "left")]),
+        _data_table("rows", "data.rows", [("name", "Name", "left"), ("value", "Value", "right"), ("notes", "Notes", "left", True)]),
         _para("footer", _t("Generated "), _v("date.long"), _t(" by "), _v("user.name"), _t(" · "), _v("company.name")),
     ),
     "sample_data": {

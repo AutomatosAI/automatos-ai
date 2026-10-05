@@ -45,7 +45,7 @@ CATALOG: List[VariableEntry] = [
     {"path": "brand.font_family", "category": "brand", "label": "Font family", "sample": "Inter"},
     # --- date.* (computed at render time) ---
     {"path": "date.today", "category": "date", "label": "Today (YYYY-MM-DD)", "sample": "2026-06-12"},
-    {"path": "date.long", "category": "date", "label": "Today (long form)", "sample": "June 12, 2026"},
+    {"path": "date.long", "category": "date", "label": "Today (long form)", "sample": "12 June 2026"},
     {"path": "date.year", "category": "date", "label": "Current year", "sample": "2026"},
     {"path": "date.month", "category": "date", "label": "Current month", "sample": "06"},
     {"path": "date.day", "category": "date", "label": "Current day", "sample": "12"},
@@ -76,6 +76,20 @@ def walk_dynamic(data: Any, path: str) -> Any:
     return cur
 
 
+def is_blank(value: Any) -> bool:
+    """Whether a value fills nothing: ``None``, empty or whitespace-only text, or an
+    empty list/object (F345: "Bill to: ·" printed a field sent as spaces). The one rule
+    the resolver (scalar chips), the ``data_table`` cell guard and the legacy lane's
+    required fields share."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, dict)):
+        return not value
+    return False
+
+
 def is_known_path(path: str) -> bool:
     return path in KNOWN_PATHS
 
@@ -98,5 +112,6 @@ __all__ = [
     "is_known_path",
     "is_dynamic_path",
     "is_valid_path",
+    "is_blank",
     "walk_dynamic",
 ]

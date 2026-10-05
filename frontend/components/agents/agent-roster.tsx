@@ -139,6 +139,9 @@ interface AgentWithPerformance {
   status: string
   description?: string
   job_title?: string
+  // #831: previously only the org-chart endpoint returned these.
+  team?: string
+  reports_to_id?: number
   created_at?: string
   skills?: Array<{ id: string; name: string }>
   plugins?: Array<{ plugin_id: string; slug: string; name: string; skills_count: number; commands_count: number }>

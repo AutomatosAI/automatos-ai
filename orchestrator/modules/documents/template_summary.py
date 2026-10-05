@@ -11,6 +11,9 @@ The Template Studio needs to tell a non-technical author three things a raw
 * **what must an agent (or a person) supply at generation time?**
   (``data_fields`` — every ``data.*`` chip the template references, which is
   exactly the contract ``generate_document(template_id, data)`` has to fill).
+* **which of them block when empty, and which fill themselves?** (F345:
+  ``required_fields``, ``fallback_fields`` and ``tables`` with their optional
+  columns, from ``field_requirements``, the same answer the agents' schema tool gives).
 
 Pure — no DB, no IO — so the list endpoint can call it per row and tests can
 drive it with plain objects.
@@ -25,12 +28,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from core.social_templates import is_social_format
+from modules.documents.field_requirements import requirements_of
 from modules.documents.blocks import (
     BlockValidationError,
     collect_list_fields,
     collect_variable_paths,
     validate_blocks,
 )
+from modules.documents.template_formats import supported_formats
 from modules.documents.variables.catalog import DYNAMIC_PREFIX
 
 STARTER_CREATOR = "system"
@@ -84,6 +89,8 @@ def summarize_template(t: Any) -> Dict[str, Any]:
         "name": getattr(t, "name", ""),
         "description": getattr(t, "description", None),
         "format": getattr(t, "format", "pdf"),
+        # F348: what generate_document may ask of it (a PDF template asked for xlsx is refused by name).
+        "supported_formats": supported_formats(t),
         "category": getattr(t, "category", "general"),
         "tags": list(getattr(t, "tags", None) or []),
         "version": getattr(t, "version", 1),
@@ -95,6 +102,7 @@ def summarize_template(t: Any) -> Dict[str, Any]:
         "variable_paths": paths,
         "data_fields": data_fields_of(paths),
         "list_fields": [] if social else list_fields_of(blocks),
+        **requirements_of(t),  # F345: what blocks when empty, what fills itself
         "created_at": created_at.isoformat() if created_at else None,
         "updated_at": updated_at.isoformat() if updated_at else None,
     }

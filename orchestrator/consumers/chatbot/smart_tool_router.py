@@ -22,6 +22,7 @@ import logging
 from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass
 
+from .document_conversation import keeps_document_tools
 from .intent_classifier import Intent, IntentResult, get_intent_classifier
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,7 @@ class SmartToolRouter:
             )
         return names
 
+    @keeps_document_tools  # F351 (night 10b): a document conversation keeps generate_document on every branch
     async def route(
         self,
         query: str,

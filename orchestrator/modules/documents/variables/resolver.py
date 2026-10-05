@@ -1,8 +1,8 @@
 """Variable resolution service (PRD-167 S3).
 
 Resolves ``{{user.*}} / {{company.*}} / {{brand.*}} / {{date.*}}`` against the
-requesting user's profile, the workspace business profile, the workspace brand kit and
-the render-time clock.
+requesting user's profile (the workspace owner's when no person asks, F344), the
+workspace business profile, the workspace brand kit and the render-time clock.
 
 Unresolved policy (PRD-167 S3): a *known* path that resolves empty is reported as
 ``unresolved`` (the caller surfaces a render-time error list — never a silent blank);
@@ -23,9 +23,11 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from ..amounts import field_text
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
 from .catalog import is_dynamic_path, is_known_path, walk_dynamic
+from .document_user import document_user
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +40,9 @@ class ResolvedVariables:
 
 
 def _long_date(now: datetime) -> str:
+    # Day month year, "5 October 2026" (F350: it printed US-style, "October 5, 2026").
     # Avoid %-d (not portable to Windows); build the long form manually.
-    return f"{now.strftime('%B')} {now.day}, {now.year}"
+    return f"{now.day} {now.strftime('%B')} {now.year}"
 
 
 def build_context(
@@ -119,17 +122,17 @@ def resolve_paths(context: Dict[str, Any], paths: Iterable[str]) -> ResolvedVari
     for path in sorted(set(paths)):
         if is_dynamic_path(path):
             value = walk_dynamic(context.get("data", {}), path)
-            if value is None or value == "":
+            if is_blank(value):  # F345: whitespace fills nothing
                 out.unresolved.append(path)
             else:
-                out.values[path] = str(value)
+                out.values[path] = field_text(path, value)  # F347: "311.0" prints as "311.00"
             continue
         if not is_known_path(path):
             out.unknown.append(path)
             continue
         category, _, key = path.partition(".")
         value = context.get(category, {}).get(key)
-        if value is None or value == "":
+        if is_blank(value):  # F345: whitespace fills nothing
             out.unresolved.append(path)
         else:
             out.values[path] = str(value)
@@ -167,10 +170,8 @@ class VariableResolver:
         # Imported here to keep the pure helpers import-light and avoid a circular
         # import with the model layer at module load.
         from core.models.business_profiles import BusinessProfile
-        from core.models.core import User
         from core.models.workspaces import Workspace
 
-        user = self.db.query(User).filter(User.id == user_id).first() if user_id else None
         workspace = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
         business_profile = (
             self.db.query(BusinessProfile)
@@ -179,6 +180,8 @@ class VariableResolver:
             .first()
         )
         brand_kit = get_brand_kit(getattr(workspace, "settings", None))
+        # F344: with no person asking (an agent, Auto), user.* is this workspace's owner.
+        user = document_user(self.db, workspace, user_id, brand_kit)
         return build_context(user, business_profile, brand_kit, now, extra_data)
 
 

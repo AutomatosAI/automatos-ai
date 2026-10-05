@@ -8,10 +8,11 @@ workspace gets them when it turns Socials on (``PUT /api/workspaces/current/soci
 D1 keeps Socials out of sight until then, and the platform switch is off by default.
 """
 
+import hashlib
 import logging
 import os
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -24,6 +25,17 @@ from modules.documents.template_summary import STARTER_CREATOR
 logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+
+# F347: the sha-256 of each source a legacy seed file shipped before its current one.
+# A platform-owned row still holding one of them, byte for byte, takes the current
+# file; a row anyone edited holds something else and is left alone. invoice.html:
+# PRD-63's (the Automatos orange) and PRD-167's, both printing a hardcoded "$".
+RETIRED_SEED_SOURCES = {
+    "invoice.html": frozenset({
+        "46617dfe5eb1ea2a8d1f939a02d2a1813f426374b0f495d492a4cda48a5c8103",
+        "5e2edf70209917bead0b13fdfa5b2245bb38989c3f5c4a158673a327992b78d7",
+    }),
+}
 
 STARTER_TEMPLATES = [
     {
@@ -77,10 +89,12 @@ STARTER_TEMPLATES = [
                 "company": {
                     "type": "object",
                     "properties": {"name": {"type": "string"}, "address": {"type": "string"}, "email": {"type": "string"}},
+                    "required": ["name"],
                 },
                 "client": {
                     "type": "object",
                     "properties": {"name": {"type": "string"}, "address": {"type": "string"}, "email": {"type": "string"}},
+                    "required": ["name"],
                 },
                 "invoice_number": {"type": "string"},
                 "date": {"type": "string"},
@@ -95,6 +109,7 @@ STARTER_TEMPLATES = [
                             "unit_price": {"type": "number"},
                             "total": {"type": "number"},
                         },
+                        "required": ["description", "quantity", "unit_price", "total"],
                     },
                 },
                 "subtotal": {"type": "number"},
@@ -102,7 +117,11 @@ STARTER_TEMPLATES = [
                 "total": {"type": "number"},
                 "payment_terms": {"type": "string"},
             },
-            "required": ["company", "client", "line_items", "total"],
+            # F345: the client, the invoice number, the figures and the payment terms are
+            # asked for, never defaulted ("Client Name", "INV-001", "Net 30").
+            "required": [
+                "company", "client", "invoice_number", "line_items", "subtotal", "tax", "total", "payment_terms",
+            ],
         },
         "sample_data": {
             "company": {"name": "Acme Corp", "address": "123 Main St", "email": "billing@acme.com"},
@@ -219,10 +238,11 @@ STARTER_TEMPLATES = [
 def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
     """Insert starter templates into document_templates for a workspace.
 
-    Skips templates that already exist (by name + workspace).
-    Returns the number of templates created.
+    Skips templates that already exist (by name + workspace), except that a
+    platform-owned one still holding a retired seed source takes the current one
+    (F347, :func:`refresh_retired_source`). Returns the number of templates created.
     """
-    created = 0
+    created = legacy_refreshed = 0
     for tmpl in STARTER_TEMPLATES:
         exists = (
             db.query(DocumentTemplate)
@@ -233,15 +253,10 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
             .first()
         )
         if exists:
+            legacy_refreshed += refresh_retired_source(exists, tmpl)
             continue
 
-        template_content = None
-        if tmpl["template_file"]:
-            html_path = os.path.join(TEMPLATES_DIR, tmpl["template_file"])
-            if os.path.exists(html_path):
-                with open(html_path, "r") as f:
-                    template_content = f.read()
-
+        template_content = seed_source(tmpl)
         record = DocumentTemplate(
             workspace_id=workspace_id,
             name=tmpl["name"],
@@ -264,6 +279,7 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
     # a row a user made under the same name is never touched.
     added, refreshed = _seed_presets(db, workspace_id, PRESETS)
     created += added
+    refreshed += legacy_refreshed
 
     if created or refreshed:
         db.commit()
@@ -271,6 +287,37 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
             "Seeded starter templates for workspace %s: %d created, %d refreshed", workspace_id, created, refreshed
         )
     return created
+
+
+def seed_source(tmpl: dict) -> Optional[str]:
+    """The current source of a legacy seed's template file; ``None`` when it has none."""
+    if not tmpl.get("template_file"):
+        return None
+    html_path = os.path.join(TEMPLATES_DIR, tmpl["template_file"])
+    if not os.path.exists(html_path):
+        return None
+    with open(html_path, "r") as f:
+        return f.read()
+
+
+def holds_retired_source(existing, tmpl: dict) -> bool:
+    """Whether ``existing`` is a platform-owned, active row still holding a retired seed source. Pure."""
+    retired = RETIRED_SEED_SOURCES.get(tmpl.get("template_file") or "", frozenset())
+    content = getattr(existing, "template_content", None)
+    if not retired or not isinstance(content, str):
+        return False
+    owned = (getattr(existing, "created_by", None) or "") == STARTER_CREATOR and getattr(existing, "is_active", True) is not False
+    return owned and hashlib.sha256(content.encode("utf-8")).hexdigest() in retired
+
+
+def refresh_retired_source(existing, tmpl: dict) -> int:
+    """Give a row :func:`holds_retired_source` finds the seed's current source (F347); 1 when it did."""
+    source = seed_source(tmpl)
+    if source is None or not holds_retired_source(existing, tmpl):
+        return 0
+    existing.template_content = source
+    existing.updated_at = datetime.utcnow()
+    return 1
 
 
 def seed_social_starters(db: Session, workspace_id: UUID, *, commit: bool = True) -> dict:

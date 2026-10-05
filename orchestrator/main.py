@@ -380,8 +380,10 @@ async def _seed_semantic_embeddings():
         embed_all_agents_on_startup,
         ensure_field_memory_collection,
         warm_action_index_on_startup,
+        warm_output_budgets_on_startup,
     )
 
+    await warm_output_budgets_on_startup()  # #836: before the worker serves
     _asyncio.create_task(embed_all_agents_on_startup())
     _asyncio.create_task(ensure_field_memory_collection())
     _asyncio.create_task(warm_action_index_on_startup())

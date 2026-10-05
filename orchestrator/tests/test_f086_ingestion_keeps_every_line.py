@@ -138,7 +138,6 @@ def _ingest(monkeypatch, text, chunk_texts):
             DocumentChunk(document_id=9, chunk_index=i, content=c) for i, c in enumerate(chunk_texts)
         ],
     )
-    monkeypatch.setattr(manager, "_ensure_database_initialized", lambda: None)
     monkeypatch.setattr(manager, "_emit_ingest_heartbeat", lambda **_kw: None)
 
     async def embed(texts):

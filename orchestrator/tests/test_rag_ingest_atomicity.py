@@ -198,7 +198,6 @@ def _bare_manager(*, workspace_id="ws-rag-1", use_s3=True, s3_backend=None):
     mgr.workspace_id = workspace_id
     mgr.use_s3_vectors = use_s3
     mgr._s3_backend = s3_backend if s3_backend is not None else MagicMock()
-    mgr._db_initialized = True
     mgr.db_config = {"host": "x"}
     mgr.s3_bucket = "test-bucket"
     return mgr

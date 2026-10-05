@@ -28,7 +28,6 @@ from urllib.parse import urlparse
 
 import jinja2
 from jinja2.sandbox import SandboxedEnvironment
-import jsonschema
 from sqlalchemy.orm import Session
 
 
@@ -80,7 +79,7 @@ from modules.documents.models import GeneratedDocument, UnresolvedDeliverableErr
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.documents.brand_logo import brand_kit_for_render
+from modules.documents.legacy_jinja import with_document_filters
 from modules.documents.blocks import (
     legacy_render_data,
     collect_variable_paths,
@@ -93,7 +92,9 @@ from modules.documents.xlsx_render import write_xlsx
 from modules.documents.brand_signing import a_document_is_signed
 from modules.documents.deliverable_extra import deliverable_extra, the_parties_are_remembered
 from modules.documents.data_coverage import template_for, unused_data_keys
+from modules.documents.legacy_guard import legacy_fields_are_required
 from modules.documents.letterhead import fallback_blocks
+from modules.documents.template_formats import refuse_unsupported_format
 from modules.documents.pdf_writer import write_pdf
 
 logger = logging.getLogger(__name__)
@@ -144,8 +145,8 @@ class DocumentGenerationService:
         self.workspace_id = workspace_id
         self.template_service = DocumentTemplateService(db)
         # PRD-156 S4: SandboxedEnvironment blocks SSTI (e.g. accessing __globals__
-        # via cycler/class chains) in user-authored template content.
-        self._jinja_env = SandboxedEnvironment(autoescape=True)
+        # via cycler/class chains) in user-authored template content. F347: ``| amount``.
+        self._jinja_env = with_document_filters(SandboxedEnvironment(autoescape=True))
 
     # ------------------------------------------------------------------
     # Public dispatch
@@ -174,9 +175,9 @@ class DocumentGenerationService:
 
         # The named template; else, for a PDF, Basic Report only where it prints every key (F331).
         template = template_for(self.template_service, ws, format, data, template_id, template_name)
+        refuse_unsupported_format(template, format)  # F348: say which formats the template makes
 
-        # Inject top-level title into data so templates can reference {{ title }}.
-        # The tool schema separates title from data, but templates expect it inside data.
+        # Inject top-level title into data so templates can reference {{ title }} (the tool keeps it apart).
         if "title" not in data:
             data["title"] = title
 
@@ -233,10 +234,10 @@ class DocumentGenerationService:
     # ------------------------------------------------------------------
 
     def _brand_kit_for(self, workspace_id: UUID) -> dict:
-        """The workspace brand kit, render-ready: an uploaded logo is inlined as a
-        ``data:`` URI so neither renderer needs to reach the object store (PRD-242 S3)."""
+        """The workspace brand kit, render-ready: an uploaded logo (PRD-242 S3) and the uploaded
+        font files (F347: the PDF's ``@font-face``) inlined as ``data:`` URIs, so no renderer reaches the store."""
         ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
-        return brand_kit_for_render(get_brand_kit(getattr(ws, "settings", None)))
+        return brand_kit_for_media_render(get_brand_kit(getattr(ws, "settings", None)))
 
     def _render_block_html(self, block_doc, data, workspace_id, user_id, title, brand_kit=None):
         """Resolve a block document's variables and render it to a full HTML page.
@@ -338,6 +339,7 @@ class DocumentGenerationService:
     # PDF Generation (Jinja2 + WeasyPrint)
     # ------------------------------------------------------------------
 
+    @legacy_fields_are_required(page=True)  # F345: a legacy template's required fields block, never backfilled
     async def generate_pdf(
         self,
         template: Optional[DocumentTemplate],
@@ -379,8 +381,6 @@ class DocumentGenerationService:
         elif template and template.template_content:
             # Path 2: legacy user-authored Jinja HTML (kept until per-workspace
             # templates are migrated to blocks — see PRD-167 sunset note).
-            if hasattr(template, "data_schema"):
-                self._validate_and_backfill(data, template.data_schema)
             # PRD-167 S4: expose the brand kit to legacy templates as {{ brand.* }} so
             # they pick up workspace palette instead of hardcoded Automatos colours.
             template_lane = "legacy"
@@ -414,6 +414,7 @@ class DocumentGenerationService:
     # DOCX Generation (python-docx-template)
     # ------------------------------------------------------------------
 
+    @legacy_fields_are_required(page=False)  # F345: an uploaded .docx's required fields block too
     async def generate_docx(
         self,
         template: Optional[DocumentTemplate],
@@ -426,19 +427,19 @@ class DocumentGenerationService:
 
         Block templates (PRD-167 S2, Q71) compile directly to a python-docx Document
         from the same block tree — no uploaded ``.docx`` file required. Legacy templates
-        with an uploaded ``.docx`` still render via docxtpl.
+        with an uploaded ``.docx`` still render via docxtpl; no body renders the data (F348).
         """
         output_path = self._output_path(workspace_id, title, "docx")
 
         block_payload = getattr(template, "blocks", None) if template else None
-        if block_payload:
-            # Path 1: canonical block template → compiled DOCX (Q71).
-            block_doc = validate_blocks(block_payload)
-            paths = collect_variable_paths(block_doc)
-            resolved = VariableResolver(self.db).resolve(
-                workspace_id, user_id, paths, extra_data=data
-            )
+        if block_payload or not getattr(template, "template_file_path", None):
+            # Path 1: the block template → compiled DOCX (Q71). F348: a template with no body
+            # (the Meeting Notes starter), or none, is its data under the letterhead, as a PDF is.
             brand_kit = self._brand_kit_for(workspace_id)
+            block_doc = validate_blocks(block_payload) if block_payload else await fallback_blocks(
+                data, self.db, workspace_id, brand_kit)
+            paths = collect_variable_paths(block_doc)
+            resolved = VariableResolver(self.db).resolve(workspace_id, user_id, paths, extra_data=data)
             rendered = render_document_docx(block_doc, resolved.values, brand_kit, data=data)
             # P2-09 S3: capture the render-honesty lists for the finalisation
             # gate in generate() — same unknown/unresolved split as the HTML path.
@@ -458,13 +459,6 @@ class DocumentGenerationService:
             raise ImportError(
                 "docxtpl is required for legacy .docx template generation. "
                 "Install with: pip install docxtpl>=0.18.0"
-            )
-
-        if not template or not template.template_file_path:
-            raise ValueError(
-                "DOCX generation requires either a block template or an uploaded .docx "
-                "file. Create a block template in the editor, or upload one via "
-                "/api/documents/templates/upload."
             )
 
         if not os.path.exists(template.template_file_path):
@@ -656,41 +650,6 @@ class DocumentGenerationService:
                     "[DocGen] Section '%s' has empty content. Keys present: %s",
                     section.get("title", "?"), list(section.keys()),
                 )
-
-    def _validate_and_backfill(self, data: dict, schema: dict) -> None:
-        """Validate data against the template's JSON Schema.
-
-        Non-fatal: missing required fields are backfilled with sensible
-        defaults so Jinja2 rendering doesn't crash on {% for %} loops.
-        """
-        if not schema:
-            return
-
-        # Backfill missing required fields with type-appropriate defaults
-        # so templates render gracefully even with partial LLM output.
-        props = schema.get("properties", {})
-        for field in schema.get("required", []):
-            if field not in data:
-                field_type = props.get(field, {}).get("type", "string")
-                default = {
-                    "string": "",
-                    "array": [],
-                    "object": {},
-                    "number": 0,
-                    "integer": 0,
-                    "boolean": False,
-                }.get(field_type, "")
-                data[field] = default
-                logger.warning(
-                    f"[DocGen] Backfilled missing required field '{field}' "
-                    f"with default {type(default).__name__}"
-                )
-
-        try:
-            jsonschema.validate(instance=data, schema=schema)
-        except jsonschema.ValidationError as e:
-            # Log but don't raise — let Jinja2 try rendering.
-            logger.warning(f"[DocGen] Schema validation warning: {e.message}")
 
     def _embed_charts(self, html: str, data: dict) -> str:
         """Replace {{ chart:field_name }} tags with base64 PNG images."""

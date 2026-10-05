@@ -45,7 +45,9 @@ from core.database.read_release import release_if_read_only
 from modules.tools.discovery.card_note import grounds_the_cards  # F241 (night 8): the cards the owner named
 
 # Import from consumer's own modules
-from consumers.chatbot.atom_prompt import atom_memory_block, atom_system_prompt, resolve_atom_attachments
+from consumers.chatbot.atom_prompt import (
+    atom_memory_block, atom_system_prompt, resolve_atom_attachments, todays_line_off_loop,
+)
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
 from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
@@ -70,12 +72,19 @@ from consumers.chatbot.empty_completion import is_empty_completion, with_fallbac
 from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passive_claim
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
+from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
+    a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
+)
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 (night 9)
+from consumers.chatbot.named_template_note import fills_the_named_template  # F351 (night 10b)
 from consumers.chatbot.shop_figures import counts_from_the_shop  # F316 (night 9b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
 from consumers.chatbot.team_corrections import tells_the_team_honestly  # F324 (night 9b)
+from consumers.chatbot.document_conversation import (  # F351 (night 10b)
+    about_a_document, full_path_for_documents, with_document_actions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -714,6 +723,7 @@ _BASE64_IMG_RE = re.compile(
 )
 
 
+@a_saved_reply_is_on_brand  # F337 (night 10): the saved reply's placeholder company and sign-off are filled
 async def _upload_inline_images(text: str, workspace_id: str = None) -> str:
     """Find base64 image markdown in text, upload to S3, replace with URLs."""
     matches = list(_BASE64_IMG_RE.finditer(text))
@@ -993,7 +1003,8 @@ class StreamingChatService:
             workspace_id=self.workspace_id,
             query=query,
             is_super_admin=is_super_admin,
-            page_actions=page_actions,
+            # F351: a document conversation's template actions survive the ranking too.
+            page_actions=with_document_actions(page_actions, getattr(self, "_document_turn", False)),
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -1003,6 +1014,7 @@ class StreamingChatService:
     # Message preparation
     # ─────────────────────────────────────────────────────────────────────
 
+    @autos_prompt_carries_the_brand_kit  # F337 (night 10): the brand kit's rules end Auto's system prompt
     async def _prepare_messages(
         self,
         messages: List[Dict[str, Any]],
@@ -1186,6 +1198,7 @@ class StreamingChatService:
             identity=atom_identity_clause(smart_chat.get_user_name()),
             memory_block=memory_block,
             facts=product_facts(self.db, self.workspace_id),
+            today=await todays_line_off_loop(self.db, self.workspace_id),  # F337: in the workspace's zone
         )
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
             messages, system_prompt=_atom_prompt, available_tools=tools,
@@ -1585,6 +1598,7 @@ class StreamingChatService:
     @counts_from_the_shop  # F316 (night 9b): a shop figure is counted from the shop, this turn
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     @tells_the_team_honestly  # F324 (night 9b): memory is Auto's own; the owner's documents reach the team
+    @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model
@@ -1647,6 +1661,7 @@ class StreamingChatService:
             return False
 
     @staticmethod
+    @a_reply_says_its_banned_words  # F337 (night 10): the banned words a reply uses, said after it
     @never_all_clear_unread  # F307 (night 9): never "all clear" while Needs you holds something
     def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:
         """What the answer gains after it streamed, in order: F187's correction
@@ -2592,6 +2607,10 @@ class StreamingChatService:
         from core.llm.usage_context import LANE_CHAT, usage_scope
         from core.security.surface import WIDGET, turn_surface
 
+        # F351 (night 10b): a document conversation keeps its document tools on a follow-up —
+        # the full path (never the dispatcher-only ATOM lane) and the template actions ranked in.
+        self._document_turn = not self.widget_mode and about_a_document(messages)
+        complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it

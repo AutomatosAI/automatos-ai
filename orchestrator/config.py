@@ -1108,6 +1108,15 @@ class Config:
     # were billed in full ($9.06 of a $9.60 line). Extraction gets its own,
     # lower ceiling, and a prompt that fits inside it.
     GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", "2000"))
+    # #836: a thinking model's reasoning tokens count toward max_tokens. A call to
+    # one reserves its visible-answer budget plus this many times it for thinking.
+    # 4 keeps the whole answer at OpenRouter's "high" effort, which gives thinking
+    # 80% of max_tokens (budget_tokens = max_tokens x 0.8).
+    LLM_THINKING_ALLOWANCE_RATIO: float = float(os.getenv("LLM_THINKING_ALLOWANCE_RATIO", "4"))
+    # #836: how often each worker re-reads the llm_output_budget rows and which
+    # models think (core/llm/budget_snapshot.py). A new row is in force on every
+    # worker within this many seconds; 0 reads once, at boot.
+    LLM_OUTPUT_BUDGET_REFRESH_SECONDS: float = float(os.getenv("LLM_OUTPUT_BUDGET_REFRESH_SECONDS", "30"))
     # F206 (night 6): 20 of 25 calls ended at the cap. 25 nodes and 40 edges run
     # to about 68 lines, and the cap held about 36, so what was cut was mostly
     # edges. The contract now fits the cap: a full answer (node about 43
@@ -1580,6 +1589,8 @@ class Config:
     AUTOMATOS_DOCUMENTS_DIRS: str = os.getenv("AUTOMATOS_DOCUMENTS_DIRS") or os.getenv("AUTOMATOS_DOCUMENTS_DIR") or os.getenv("DOCUMENTS_DIR")
     GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
     DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "documents")
+    # F353: draw a document Deliverable's first page for its card, after it is made.
+    DOCUMENT_THUMBNAILS_ENABLED: bool = os.getenv("DOCUMENT_THUMBNAILS_ENABLED", "true").lower() == "true"
 
     INJECT_DAILY_LOGS: bool = os.getenv("INJECT_DAILY_LOGS", "true").lower() == "true"
     COMPLEXITY_CACHE_TTL_HOURS: int = int(os.getenv("COMPLEXITY_CACHE_TTL_HOURS", "24"))

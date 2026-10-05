@@ -44,6 +44,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.workspace_client import WorkspaceClient
+from modules.documents.thumbnails.eligibility import thumbnail_url_for
+from modules.documents.thumbnails.schedule import thumbnail_after_register
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +179,7 @@ class DeliverableService:
     # register
     # ------------------------------------------------------------------
 
+    @thumbnail_after_register  # F353: a PDF, Word document or sheet gets its first page drawn
     def register(
         self,
         *,
@@ -829,6 +832,7 @@ class DeliverableService:
                 else row.preview_url
             ),
             "preview_type": row.preview_type,
+            "thumbnail_url": thumbnail_url_for(row),  # F353: the card's first-page picture
             "extra": row.extra or {},
             "status": shown_status(row),
             "created_at": row.created_at.isoformat() if row.created_at else None,

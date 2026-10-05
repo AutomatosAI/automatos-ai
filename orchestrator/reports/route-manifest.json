@@ -1027,6 +1027,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/deliverables/{deliverable_id}/thumbnail"
+    },
+    {
+      "method": "GET",
       "path": "/api/documents"
     },
     {
