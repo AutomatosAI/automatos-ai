@@ -4,13 +4,18 @@ F356: a block document's Word tables wore Word's "Light Grid Accent 1" (theme
 blue grid lines), whatever the kit said. They now follow the PDF's table rules
 (``page_style``), from the same ``design_tokens``:
 
-* a header row filled with the kit's primary, its text white (or the kit's text
-  colour where white does not read), repeated on every page;
+* a header row repeated on every page;
 * body rows with a hairline under each and zebra tints, no row split over pages;
 * a data table's columns aligned as the template says (numbers right);
-* an invoice's totals and a proposal's total: no fill, the last row bold over an
-  accent rule; an agreement's signatures: a plain header over an accent rule;
+* an invoice's totals and a proposal's total: no fill, the last row bold over a
+  rule; an agreement's signatures: a plain header over a rule;
 * a report's KPIs (``data.kpis``) as one row of tiles, as in the PDF.
+
+PRD-255 (US-004): the colours are the kit's roles (``design_tokens``): the header
+row on ``surface_2`` in ``heading`` (on the accent, its text white where white
+reads, only when ``accent_use`` is ``bold``), zebra rows on ``surface``, hairlines
+in ``rule``, strong rules in ``heading``; KPI tiles on ``surface`` with the figure
+in the accent; sizes from the kit's type scale.
 
 :func:`keep_together` keeps a run of blocks on one page (the Agreement's last
 clause with its signatures).
@@ -20,11 +25,10 @@ from __future__ import annotations
 from typing import Any, List, Mapping, Optional, Sequence
 
 from . import design_tokens as t
-from .docx_style import cell_edges, full_width, rgb
+from .docx_style import cell_edges, full_width, rgb, text_width
 
 HAIRLINE_EIGHTHS = 4
 RULE_EIGHTHS = 8
-TILE_RULE_EIGHTHS = 16
 TOTALS_IDS = frozenset({"totals", "pricing-total"})
 SIGNATURES_ID = "signatures"
 KPIS_ID = "kpis"
@@ -80,46 +84,48 @@ def _align(cell: Any, align: str) -> None:
         paragraph.alignment = where
 
 
-def _header_row(row: Any, roles: t.Palette) -> None:
+def _header_row(row: Any, design: t.Design) -> None:
+    roles = design.palette
     for cell in row.cells:
         cell_edges(cell, {"bottom": NO_EDGE})
         shade(cell, roles.header_fill)
-        _runs(cell, bold=True, colour=roles.header_text, size=t.SMALL_PT)
+        _runs(cell, bold=True, colour=roles.header_text, size=design.type["small"].size_pt)
     _row_props(row, header=True)
 
 
 def _body_row(row: Any, roles: t.Palette, number: int) -> None:
     for cell in row.cells:
-        cell_edges(cell, {"bottom": (roles.hairline, HAIRLINE_EIGHTHS)})
+        cell_edges(cell, {"bottom": (roles.rule, HAIRLINE_EIGHTHS)})
         if number % 2 == 1:
-            shade(cell, roles.zebra)
+            shade(cell, roles.surface)
         _runs(cell)
     _row_props(row, header=False)
 
 
 def style_table(table: Any, kit: Mapping[str, Any], header: bool, aligns: Sequence[str] = ()) -> None:
     """A table in the PDF's look: a filled header row, hairlines, zebra rows, columns aligned."""
-    roles = t.palette(kit)
-    full_width(table)
+    design = t.design(kit)
+    full_width(table, text_width(design))
     rows = list(table.rows)
     for index, row in enumerate(rows):
         if header and index == 0:
-            _header_row(row, roles)
+            _header_row(row, design)
         else:
-            _body_row(row, roles, index - (1 if header else 0))
+            _body_row(row, design.palette, index - (1 if header else 0))
         for cell, align in zip(row.cells, aligns):
             _align(cell, align)
 
 
 def style_totals(table: Any, kit: Mapping[str, Any]) -> None:
-    """Totals: amounts right-aligned, no fill, the last row bold over an accent rule."""
-    roles = t.palette(kit)
-    full_width(table)
+    """Totals: amounts right-aligned, no fill, the last row bold over a rule in ``heading``."""
+    design = t.design(kit)
+    roles = design.palette
+    full_width(table, text_width(design))
     rows = list(table.rows)
     for index, row in enumerate(rows):
         last = index == len(rows) - 1
         for cell in row.cells:
-            edges = {"top": (roles.rule, RULE_EIGHTHS)} if last else {"bottom": (roles.hairline, HAIRLINE_EIGHTHS)}
+            edges = {"top": (roles.heading, RULE_EIGHTHS)} if last else {"bottom": (roles.rule, HAIRLINE_EIGHTHS)}
             cell_edges(cell, edges)
             _runs(cell, bold=True if last else None)
         _align(row.cells[-1], "right")
@@ -127,27 +133,30 @@ def style_totals(table: Any, kit: Mapping[str, Any]) -> None:
 
 
 def style_signatures(table: Any, kit: Mapping[str, Any]) -> None:
-    """Signatures: a plain header row in the accent over a rule; the lines below open."""
-    roles = t.palette(kit)
-    full_width(table)
+    """Signatures: a plain header row in ``heading`` over a rule; the lines below open."""
+    design = t.design(kit)
+    roles = design.palette
+    full_width(table, text_width(design))
     for index, row in enumerate(table.rows):
         for cell in row.cells:
-            cell_edges(cell, {"bottom": (roles.rule, RULE_EIGHTHS)} if index == 0 else {"bottom": NO_EDGE})
+            cell_edges(cell, {"bottom": (roles.heading, RULE_EIGHTHS)} if index == 0 else {"bottom": NO_EDGE})
             _runs(cell, bold=True if index == 0 else None, colour=roles.heading if index == 0 else None)
         _row_props(row, header=index == 0)
 
 
 def kpi_tiles(document: Any, tiles: List[Sequence[str]], kit: Mapping[str, Any], font: Optional[str]) -> Any:
-    """``tiles`` (label, value, change) as one row of tiles: a tinted cell each, a primary rule on top."""
+    """``tiles`` (label, value, change) as one row of tiles: a cell on ``surface`` each, the figure in the accent."""
     from docx.shared import Pt
 
-    roles = t.palette(kit)
+    design = t.design(kit)
+    roles, steps = design.palette, design.type
     table = document.add_table(rows=1, cols=len(tiles))
-    full_width(table)
-    sizes = ((t.SMALL_PT, False, roles.muted), (t.TITLE_PT, True, roles.heading), (t.CAPTION_PT, False, roles.muted))
+    full_width(table, text_width(design))
+    sizes = ((steps["small"].size_pt, False, roles.muted), (steps["h1"].size_pt, steps["h1"].bold, roles.accent),
+             (steps["caption"].size_pt, False, roles.muted))
     for cell, tile in zip(table.rows[0].cells, tiles):
-        cell_edges(cell, {"top": (roles.title, TILE_RULE_EIGHTHS)})
-        shade(cell, roles.panel)
+        cell_edges(cell, {"top": NO_EDGE})
+        shade(cell, roles.surface)
         cell.paragraphs[0]._p.getparent().remove(cell.paragraphs[0]._p)
         for text, (size, bold, colour) in zip(tile, sizes):
             run = cell.add_paragraph().add_run(text)

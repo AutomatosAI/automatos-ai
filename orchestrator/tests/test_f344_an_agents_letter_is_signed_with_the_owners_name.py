@@ -190,7 +190,7 @@ def test_another_workspaces_owner_never_signs_our_letter(generate):
     answer, text, registered = generate(_session(our_owner_id=None, members=(theirs,)), call=call)
 
     assert answer["success"] is False
-    assert "user.name" in answer["error"]
+    assert "brand.sign_off" in answer["error"]  # PRD-255: the Letter signs with brand.sign_off (the kit's, else the owner's name)
     assert THEIR_OWNER.name not in text and not registered
 
 

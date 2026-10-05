@@ -30,7 +30,7 @@ from modules.documents.blocks import (
 )
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.data_coverage import block_template_keys, legacy_template_keys
-from modules.documents.legacy_jinja import with_document_filters
+from modules.documents.legacy_jinja import legacy_brand, with_document_filters
 from modules.documents.presets import MEETING_NOTES_BLOCKS
 from modules.documents.seed_templates import (
     RETIRED_SEED_SOURCES, STARTER_TEMPLATES, refresh_retired_source, seed_source, seed_starter_templates,
@@ -84,7 +84,8 @@ def _read(tmp_path, html: str) -> List[Any]:
 
 def _legacy_html(name: str, data: Dict[str, Any]) -> str:
     env = with_document_filters(SandboxedEnvironment(autoescape=True))
-    return env.from_string(seed_source(SEEDS[name])).render(**legacy_render_data(data), brand=KIT)
+    # As generation_service hands it over: the kit with its colour roles and type scale (PRD-255).
+    return env.from_string(seed_source(SEEDS[name])).render(**legacy_render_data(data), brand=legacy_brand(KIT))
 
 
 def _block_render(data: Dict[str, Any]) -> Any:

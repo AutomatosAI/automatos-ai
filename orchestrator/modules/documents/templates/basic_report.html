@@ -3,9 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <style>{{ brand | document_style }}
-  .report-section { margin-bottom: 12pt; }
-  .report-section h2:first-child { margin-top: 16pt; }
-  [data-block="logo"] { width: 14mm; }
+  .doc-section h2 { padding-bottom: 4pt; border-bottom: 0.5pt solid {{ brand.palette.rule }}; }
+  .section-content { color: {{ brand.palette.ink }}; font-size: {{ brand.type.body.size_pt }}pt; line-height: {{ brand.type.body.line_pt }}pt; }
 </style>
 </head>
 <body>
@@ -31,7 +30,7 @@
   {% endif %}
 
   {% for section in sections %}
-  <section class="report-section">
+  <section class="doc-section">
     {% if section.title %}<h2>{{ section.title }}</h2>{% endif %}
     <div class="section-content">{{ section.content }}</div>
   </section>

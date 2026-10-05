@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <style>{{ brand | document_style }}
-  [data-block="logo"] { width: 14mm; }
+  [data-block="bill-to-label"] strong { font-size: {{ brand.type.caption.size_pt }}pt; color: {{ brand.palette.muted }}; }
+  [data-block="totals"] tr:last-child td { color: {{ brand.palette.heading }}; font-size: {{ brand.type.h3.size_pt }}pt; }
 </style>
 </head>
 <body>

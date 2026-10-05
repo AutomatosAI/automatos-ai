@@ -4,10 +4,10 @@ F356: the seeded "Data Export" starter is a spreadsheet, and next to the Branded
 documents it was a logo over a bare grid. With a brand kit, the sheet now has
 what the documents have, from the same design system (``blocks.design_tokens``):
 
-* under the logo, the title in the kit's primary (its text colour when the
-  primary does not read on white) and a line with the company and the date;
-* zebra rows in the accent's tint, hairlines between rows, numbers with
-  thousands separators and two decimals when they carry decimals;
+* under the logo, the title in the kit's ``heading`` colour (PRD-255: not the
+  primary) and a line with the company and the date (in the kit's date style);
+* zebra rows on the kit's ``surface``, ``rule`` hairlines between rows, numbers
+  with thousands separators and two decimals when they carry decimals;
 * the header row frozen and filterable;
 * printed: landscape, one page wide, the header row repeated on every page, and
   a footer with the company, the title and "Page X of Y".
@@ -19,11 +19,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Mapping, Optional
 
-from core.brand_palette import WHITE, contrast, parse_hex
-
 from .blocks import design_tokens as tokens
+from .locale_text import date_style_of, long_date
 
-TITLE_MIN_CONTRAST = 3.0
 DECIMAL_FORMAT = "#,##0.00"
 HAIR_BORDER = 7  # XlsxWriter's hairline border style
 FOOTER_TEXT_PT = 8
@@ -36,23 +34,19 @@ def kit_of(brand: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     return {f"{role}_color": colours.get(role) for role in ("primary", "secondary", "accent", "text")}
 
 
-def title_colour(brand: Optional[Mapping[str, Any]]) -> str:
-    """The primary when it reads on white, else the kit's text colour."""
-    roles = tokens.palette(kit_of(brand))
-    return roles.title if contrast(parse_hex(roles.title), WHITE) >= TITLE_MIN_CONTRAST else roles.text
-
-
 def branded_formats(workbook: Any, brand: Mapping[str, Any], font: Mapping[str, str]) -> Dict[str, Any]:
     """The letterhead's and the body rows' formats for a kit."""
-    roles = tokens.palette(kit_of(brand))
-    row = {"bottom": HAIR_BORDER, "bottom_color": roles.hairline, **font}
+    design = tokens.design(kit_of(brand))
+    roles, steps = design.palette, design.type
+    row = {"bottom": HAIR_BORDER, "bottom_color": roles.rule, **font}
     return {
-        "title": workbook.add_format({"bold": True, "font_size": tokens.H2_PT, "font_color": title_colour(brand), **font}),
-        "company": workbook.add_format({"font_size": tokens.SMALL_PT, "font_color": roles.muted, **font}),
+        "title": workbook.add_format({"bold": steps["h2"].bold, "font_size": steps["h2"].size_pt,
+                                      "font_color": roles.heading, **font}),
+        "company": workbook.add_format({"font_size": steps["small"].size_pt, "font_color": roles.muted, **font}),
         "body": workbook.add_format(row),
-        "zebra": workbook.add_format({**row, "bg_color": roles.zebra}),
+        "zebra": workbook.add_format({**row, "bg_color": roles.surface}),
         "decimal": workbook.add_format({**row, "num_format": DECIMAL_FORMAT}),
-        "decimal_zebra": workbook.add_format({**row, "num_format": DECIMAL_FORMAT, "bg_color": roles.zebra}),
+        "decimal_zebra": workbook.add_format({**row, "num_format": DECIMAL_FORMAT, "bg_color": roles.surface}),
     }
 
 
@@ -60,7 +54,7 @@ def write_letterhead(worksheet: Any, top: int, title: str, brand: Mapping[str, A
     """The title and the company line from row ``top``; the row the table's header goes on."""
     today = datetime.utcnow()
     company = str(brand.get("name") or "").strip()
-    dated = f"{today.day} {today.strftime('%B')} {today.year}"
+    dated = long_date(today, date_style_of(brand))
     worksheet.write_string(top, 0, title, formats["title"])
     worksheet.write_string(top + 1, 0, f"{company}  ·  {dated}" if company else dated, formats["company"])
     return top + LETTERHEAD_ROWS
@@ -90,4 +84,4 @@ def set_print_layout(worksheet: Any, header_row: int, columns: int, title: str, 
     worksheet.set_footer(f"&L{size}{company}&C{size}{_footer_text(title)}&R{size}Page &P of &N")
 
 
-__all__ = ["body_format", "branded_formats", "kit_of", "set_print_layout", "title_colour", "write_letterhead"]
+__all__ = ["body_format", "branded_formats", "kit_of", "set_print_layout", "write_letterhead"]

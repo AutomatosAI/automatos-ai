@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ..amounts import field_text
+from ..locale_text import currency_of
 from ..variables.catalog import walk_dynamic
 from .letterhead_run import company_of, logo_of, split_letterhead
 from .optional_parts import block_is_blank, row_is_blank
@@ -72,7 +73,8 @@ def _render_inline(content: list, values: Dict[str, str], unresolved: List[str])
     return "".join(parts)
 
 
-def _render_image(block, brand_kit: Dict, unresolved: List[str]) -> str:
+def _render_image(block, brand_kit: Dict, unresolved: List[str], sized: bool = True) -> str:
+    """An image; ``sized=False`` leaves its size to the sheet (the letterhead logo: the kit's logo rules)."""
     if block.source == "brand_logo":
         src = (brand_kit or {}).get("logo_url") or ""
         if not src:
@@ -82,7 +84,8 @@ def _render_image(block, brand_kit: Dict, unresolved: List[str]) -> str:
         src = block.src or ""
     style = f"width:{block.width_mm}mm;" if block.width_mm else "max-width:100%;"
     alt = _esc(block.alt or "")
-    return f'<img class="doc-image"{_tag(block)} src="{_esc(src)}" alt="{alt}" style="{style}" />'
+    sizing = f' style="{style}"' if sized else ""
+    return f'<img class="doc-image"{_tag(block)} src="{_esc(src)}" alt="{alt}"{sizing} />'
 
 
 def _render_table(block, values: Dict[str, str], unresolved: List[str]) -> str:
@@ -100,19 +103,20 @@ def _render_table(block, values: Dict[str, str], unresolved: List[str]) -> str:
     return f'<table class="doc-table"{_tag(block)}>{"".join(rows_html)}</table>'
 
 
-def _cell_value(row: Any, key: str, index: int) -> str:
+def _cell_value(row: Any, key: str, index: int, currency: str = "") -> str:
     if isinstance(row, dict):
         value = row.get(key, "")
     elif isinstance(row, (list, tuple)):
         value = row[index] if index < len(row) else ""
     else:
         value = row if index == 0 else ""
-    return field_text(key, value)  # F347: a bare amount with two decimals, never a currency added
+    return field_text(key, value, currency)  # F347: two decimals; PRD-255: the kit's currency, never another
 
 
-def _render_data_table(block, data: Optional[Dict[str, Any]], unresolved: List[str]) -> str:
+def _render_data_table(block, data: Optional[Dict[str, Any]], unresolved: List[str], currency: str = "") -> str:
     """Rows from the per-generation ``data.*`` list (PRD-243). Empty/missing is
-    unresolved (a blocked document) unless the author allowed ``empty_text``."""
+    unresolved (a blocked document) unless the author allowed ``empty_text``.
+    Amounts print in ``currency``, the kit's ISO code (PRD-255 FR-7)."""
     rows = walk_dynamic(data or {}, block.path)
     if not isinstance(rows, list) or not rows:
         if block.empty_text is not None:
@@ -129,7 +133,7 @@ def _render_data_table(block, data: Optional[Dict[str, Any]], unresolved: List[s
     body: List[str] = []
     for row in rows:
         cells = "".join(
-            f'<td style="text-align:{c.align}">{_esc(_cell_value(row, c.key, i))}</td>'
+            f'<td style="text-align:{c.align}">{_esc(_cell_value(row, c.key, i, currency))}</td>'
             for i, c in enumerate(block.columns)
         )
         body.append(f"<tr>{cells}</tr>")
@@ -150,7 +154,7 @@ def _render_block(
     if kind == "image":
         return _render_image(block, brand_kit, unresolved)
     if kind == "data_table":
-        return _render_data_table(block, data, unresolved)
+        return _render_data_table(block, data, unresolved, currency_of(brand_kit))
     if kind == "page_break":
         return '<div class="page-break"></div>'
     if kind == "section":
@@ -174,7 +178,7 @@ def _render_letterhead(head, values: Dict[str, str], brand_kit: Dict, unresolved
     if not head:
         return ""
     logo = logo_of(head)
-    mark = _render_image(logo, brand_kit, unresolved) if logo is not None else ""
+    mark = _render_image(logo, brand_kit, unresolved, sized=False) if logo is not None else ""
     company = "".join(_render_block(block, values, brand_kit, unresolved) for block in company_of(head))
     return f'<div class="letterhead"><div class="lh-mark">{mark}</div><div class="lh-company">{company}</div></div>'
 

@@ -9,8 +9,15 @@ legacy Jinja starters print the same ids, so they share the letterhead.
 F356 (5 Oct): the letterhead logo sits beside the company block, not above it:
 the renderer prints the letterhead as one row (``letterhead_run``), the logo on
 the left, the company's name, address and contact line set right, and one rule
-in the kit's accent under both. Every size, gap and colour is a
-``design_tokens`` value, substituted by ``page_style.build_styles``.
+under both. Every size, gap and colour is a ``design_tokens`` value, substituted
+by ``page_style.build_styles``.
+
+PRD-255 (US-004): the values are the kit's. The letterhead logo is
+``logo_rules.letterhead_mm`` high with its clear space beside it, and the rule under
+the letterhead is a ``rule`` hairline. Under ``accent_use: sparing`` the accent is
+one element per starter section: a report's summary bar and its KPI figures (KPI
+tiles on ``surface``), a proposal's cover bar. Strong rules (over a total, under
+the signature names) are ``heading``.
 """
 from __future__ import annotations
 
@@ -20,10 +27,12 @@ LETTERHEAD = Template("""
   .letterhead { display: table; width: 100%; border-bottom: ${rule_pt}pt solid $rule; padding-bottom: ${s3}pt;
     margin-bottom: ${s5}pt; }
   .lh-mark, .lh-company { display: table-cell; vertical-align: middle; }
-  .lh-mark .doc-image { margin: 0; }
+  .lh-mark { padding-right: ${logo_clear_mm}mm; }
+  .lh-mark .doc-image { margin: 0; height: ${logo_mm}mm; width: auto; }
   .lh-company { text-align: right; }
-  [data-block="lh-name"] { margin: 0; font-size: ${h3}pt; color: $heading; }
-  [data-block="lh-address"], [data-block="lh-contact"] { margin: 0; font-size: ${small}pt; line-height: 1.4; color: $muted; }
+  [data-block="lh-name"] { margin: 0; font-size: ${h3}pt; line-height: ${h3_line}pt; color: $heading; }
+  [data-block="lh-address"], [data-block="lh-contact"] { margin: 0; font-size: ${small}pt; line-height: ${small_line}pt;
+    color: $muted; }
 """)
 
 LETTER = Template("""
@@ -47,36 +56,39 @@ INVOICE = Template("""
   [data-block="totals"] { width: auto; min-width: 45%; margin: 0 0 ${s5}pt auto; break-inside: avoid; }
   [data-block="totals"] td { background: none !important; }
   [data-block="totals"] td:last-child { text-align: right; white-space: nowrap; }
-  [data-block="totals"] tr:last-child td { font-weight: $bold; font-size: ${h3}pt; border-top: ${rule_pt}pt solid $rule; border-bottom: none; }
+  [data-block="totals"] tr:last-child td { font-weight: $bold; font-size: ${h3}pt; border-top: ${rule_pt}pt solid $heading;
+    border-bottom: none; }
   [data-block="totals"] + [data-block="terms"] { margin-top: ${s4}pt; }
   [data-block="thanks"], [data-block="footer"] { margin-top: ${s4}pt; font-size: ${small}pt; color: $muted; }
 """)
 
 REPORT = Template("""
-  [data-block="s-summary"] { border-left: 3pt solid $rule; background: $panel; padding: ${s1}pt ${s3}pt ${s1}pt ${s3}pt; }
+  [data-block="s-summary"] { border-left: ${title_rule_pt}pt solid $accent; background: $surface;
+    padding: ${s1}pt ${s3}pt ${s1}pt ${s3}pt; }
   [data-block="s-summary"] h2 { margin-top: ${s2}pt; }
   table[data-block="kpis"] { display: block; width: 100%; margin: ${s1}pt 0 ${s2}pt 0; }
   [data-block="kpis"] thead { display: none; }
   [data-block="kpis"] tbody { display: flex; flex-wrap: wrap; }
   [data-block="kpis"] tr { display: block; flex: 1 1 20%; margin: 0 ${s2}pt ${s2}pt 0; padding: ${s2}pt ${s3}pt;
-    background: $panel; border-top: 2pt solid $title; }
+    background: $surface; }
   [data-block="kpis"] tr:last-child { margin-right: 0; }
   [data-block="kpis"] td { display: block; border: none; padding: 0; background: none !important; }
   [data-block="kpis"] td:nth-child(1) { font-size: ${small}pt; color: $muted; }
-  [data-block="kpis"] td:nth-child(2) { font-size: ${title_pt}pt; font-weight: $bold; line-height: 1.2; color: $heading; }
+  [data-block="kpis"] td:nth-child(2) { font-size: ${h1}pt; font-weight: $h1_weight; line-height: ${h1_line}pt; color: $accent; }
   [data-block="kpis"] td:nth-child(3) { font-size: ${caption}pt; color: $muted; }
 """)
 
 PROPOSAL = Template("""
-  [data-block="cover-header"] { background: $panel; border-left: 4pt solid $title; padding: ${s4}pt ${s4}pt ${s3}pt ${s4}pt;
+  [data-block="cover-header"] { background: $surface; border-left: ${title_rule_pt}pt solid $accent;
+    padding: ${s4}pt ${s4}pt ${s3}pt ${s4}pt;
     margin: 0 0 ${s4}pt 0; }
   [data-block="cover-header"] h1 { margin-top: 0; }
   [data-block="eyebrow"] { font-size: ${caption}pt; font-weight: $bold; letter-spacing: 0.12em; color: $heading; margin: 0 0 ${s1}pt 0; }
-  [data-block="subtitle"] { font-size: ${h3}pt; margin: 0 0 ${s2}pt 0; }
+  [data-block="subtitle"] { font-size: ${h3}pt; line-height: ${h3_line}pt; margin: 0 0 ${s2}pt 0; }
   [data-block="cover-header"] [data-block="cover"] { margin: 0; }
   [data-block="pricing"] { margin-bottom: 0; }
   [data-block="pricing-total"] { margin: 0 0 ${s3}pt 0; }
-  [data-block="pricing-total"] td { background: none !important; font-weight: $bold; border-top: ${rule_pt}pt solid $rule;
+  [data-block="pricing-total"] td { background: none !important; font-weight: $bold; border-top: ${rule_pt}pt solid $heading;
     border-bottom: none; }
   [data-block="pricing-total"] td:last-child { text-align: right; white-space: nowrap; }
   [data-block="pricing-note"] { font-size: ${small}pt; color: $muted; }
@@ -87,7 +99,7 @@ CONTRACT = Template("""
   [data-block="parties"] { margin-top: ${s2}pt; }
   [data-block="sign-off"] { break-inside: avoid; }
   [data-block="signatures"] { break-inside: avoid; }
-  [data-block="signatures"] th { background: none; color: $heading; border-bottom: ${rule_pt}pt solid $rule; padding-left: 0; }
+  [data-block="signatures"] th { background: none; color: $heading; border-bottom: ${rule_pt}pt solid $heading; padding-left: 0; }
   [data-block="signatures"] td { background: none !important; border-bottom: none; padding: ${s2}pt ${s2}pt 0 0; }
   [data-block="desc"] { color: $muted; }
 """)

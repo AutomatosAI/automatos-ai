@@ -6,7 +6,7 @@ said. A chip printed a list as Python wrote it: "['Alice', 'Bob']". A list whose
 items are all plain text or numbers now prints one "- item" line per item, which
 the text block reads as a bulleted list (``blocks.text_body``, F347). Anything
 else prints as before (``amounts.field_text``: an amount key's bare number with
-two decimals, else ``str``). Pure.
+two decimals, else ``str``; PRD-255: in the kit's currency when it has one). Pure.
 """
 from __future__ import annotations
 
@@ -24,11 +24,11 @@ def _plain_list(value: Any) -> bool:
     )
 
 
-def chip_text(path: str, value: Any) -> str:
-    """``value`` as a chip under ``path`` prints it."""
+def chip_text(path: str, value: Any, currency: str = "") -> str:
+    """``value`` as a chip under ``path`` prints it (an amount in ``currency``, the kit's ISO code)."""
     if _plain_list(value):
         return "\n".join(f"{BULLET}{str(item).strip()}" for item in value)
-    return field_text(path, value)
+    return field_text(path, value, currency)
 
 
 __all__ = ["chip_text"]

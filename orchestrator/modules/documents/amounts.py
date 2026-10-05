@@ -9,7 +9,11 @@ away: 0.125 stays 0.125.
 
 Which values are amounts is read from the key they are sent under: its last
 word (``total``, ``unit_price``, ``amount_due``). ``quantity``, ``tax_rate`` and
-``total_hours`` are not amounts. A workspace currency is not a setting yet.
+``total_hours`` are not amounts.
+
+PRD-255 (FR-7): the kit can hold a currency (``locale_text``). A bare number then
+prints with its symbol and two decimals ("£311.00"); an amount given with its own
+currency still prints as given, and a kit without a currency prints none.
 
 Pure: no IO.
 """
@@ -17,6 +21,8 @@ from __future__ import annotations
 
 import re
 from typing import Any
+
+from .locale_text import currency_prefix
 
 # The last word of a key that holds money: "unit_price", "line_total", "amount_due".
 AMOUNT_WORDS = frozenset({
@@ -35,8 +41,9 @@ def is_amount_key(key: Any) -> bool:
     return bool(words) and words[-1] in AMOUNT_WORDS
 
 
-def amount_text(value: Any) -> str:
-    """An amount as printed: a bare number with at least two decimals, anything else as given."""
+def amount_text(value: Any, currency: str = "") -> str:
+    """An amount as printed: a bare number with at least two decimals (after the symbol of
+    ``currency``, an ISO 4217 code, when there is one), anything else as given."""
     if value is None:
         return ""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
@@ -44,15 +51,17 @@ def amount_text(value: Any) -> str:
     text = value.strip() if isinstance(value, str) else str(value)
     if not _BARE_NUMBER.match(text):
         return str(value)
-    whole, _, decimals = text.partition(".")
-    return f"{whole}.{decimals.ljust(MIN_DECIMALS, '0')}"
+    sign, digits = ("-", text[1:]) if text.startswith("-") else ("", text)
+    whole, _, decimals = digits.partition(".")
+    return f"{sign}{currency_prefix(currency)}{whole}.{decimals.ljust(MIN_DECIMALS, '0')}"
 
 
-def field_text(key: Any, value: Any) -> str:
-    """A value as printed under ``key``: an amount key's bare number with two decimals, else ``str``."""
+def field_text(key: Any, value: Any, currency: str = "") -> str:
+    """A value as printed under ``key``: an amount key's bare number with two decimals (in
+    ``currency`` when the kit has one), else ``str``."""
     if value is None:
         return ""
-    return amount_text(value) if is_amount_key(key) else str(value)
+    return amount_text(value, currency) if is_amount_key(key) else str(value)
 
 
 __all__ = ["AMOUNT_WORDS", "amount_text", "field_text", "is_amount_key"]

@@ -36,6 +36,7 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..amounts import field_text
+from ..locale_text import currency_of
 from ..variables.catalog import walk_dynamic
 from . import design_tokens as tokens
 from .docx_style import add_footer, add_letterhead, apply_styles, rgb
@@ -181,14 +182,14 @@ def _add_inline(paragraph, content: list, values: Dict[str, str], unresolved: Li
                 run.font.name = font
 
 
-def _cell_value(row: Any, key: str, index: int) -> str:
+def _cell_value(row: Any, key: str, index: int, currency: str = "") -> str:
     if isinstance(row, dict):
         value = row.get(key, "")
     elif isinstance(row, (list, tuple)):
         value = row[index] if index < len(row) else ""
     else:
         value = row if index == 0 else ""
-    return field_text(key, value)  # F347: a bare amount with two decimals, never a currency added
+    return field_text(key, value, currency)  # F347: two decimals; PRD-255: the kit's currency, never another
 
 
 def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List[str], font: Optional[str], kit=None):
@@ -205,16 +206,17 @@ def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List
         doc.add_paragraph(f"[[{block.path}]]")
         return
     unresolved.extend(unfilled_cells(block, rows))  # F345: every row fills every required column
+    currency = currency_of(kit)
     if block.id == KPIS_ID:
-        tiles = [[_cell_value(row, col.key, i) for i, col in enumerate(block.columns)] for row in rows]
+        tiles = [[_cell_value(row, col.key, i, currency) for i, col in enumerate(block.columns)] for row in rows]
         kpi_tiles(doc, tiles, kit or {}, font)
         return
     table = doc.add_table(rows=len(rows) + 1, cols=len(block.columns))
-    _fill_data_table(table, block, rows, font)
+    _fill_data_table(table, block, rows, font, currency)
     style_table(table, kit or {}, header=True, aligns=[col.align for col in block.columns])
 
 
-def _fill_data_table(table, block, rows: List[Any], font: Optional[str]) -> None:
+def _fill_data_table(table, block, rows: List[Any], font: Optional[str], currency: str = "") -> None:
     for c_idx, col in enumerate(block.columns):
         para = table.cell(0, c_idx).paragraphs[0]
         run = para.add_run(col.label or col.key)
@@ -223,7 +225,7 @@ def _fill_data_table(table, block, rows: List[Any], font: Optional[str]) -> None
             run.font.name = font
     for r_idx, row in enumerate(rows, start=1):
         for c_idx, col in enumerate(block.columns):
-            run = table.cell(r_idx, c_idx).paragraphs[0].add_run(_cell_value(row, col.key, c_idx))
+            run = table.cell(r_idx, c_idx).paragraphs[0].add_run(_cell_value(row, col.key, c_idx, currency))
             if font:
                 run.font.name = font
 
@@ -272,7 +274,7 @@ def _add_text_body(doc, groups: List[Group], font: Optional[str]) -> None:
 
 
 def _add_heading(doc, block, values, unresolved, font) -> None:
-    """A heading in its level's style (F356: the title in the primary, the rest in the accent)."""
+    """A heading in its level's style (PRD-255: the kit's heading colour and type scale; the title over an accent rule)."""
     p = doc.add_heading(level=min(block.level, 9))
     p.clear()
     _add_inline(p, block.content, values, unresolved, font)
@@ -382,7 +384,7 @@ def _document_title(blocks, values: Dict[str, str]) -> str:
 
 
 def _letterhead_logo(logo, kit: Dict, unresolved: List[str]):
-    """Writes the letterhead's logo into a header cell."""
+    """Writes the letterhead's logo into a header cell, ``logo_rules.letterhead_mm`` high (PRD-255)."""
     def write(cell) -> None:
         from docx.shared import Mm
 
@@ -393,7 +395,7 @@ def _letterhead_logo(logo, kit: Dict, unresolved: List[str]):
         if stream is None:
             return
         try:
-            cell.paragraphs[0].add_run().add_picture(stream, width=Mm(logo.width_mm or DEFAULT_IMAGE_MM))
+            cell.paragraphs[0].add_run().add_picture(stream, height=Mm(tokens.design(kit or {}).logo_mm))
         except Exception:  # noqa: BLE001 — unreadable image format: the letterhead goes without it
             logger.warning("[DocxRender] the letterhead logo could not be embedded; left out", exc_info=True)
     return write
@@ -404,16 +406,17 @@ def _letterhead_company(blocks, values: Dict[str, str], kit: Dict, unresolved: L
     def write(cell) -> None:
         from docx.shared import Pt
 
-        roles = tokens.palette(kit or {})
+        design = tokens.design(kit or {})
+        roles = design.palette
         for index, block in enumerate(blocks):
             paragraph = cell.paragraphs[0] if index == 0 else cell.add_paragraph()
             paragraph.paragraph_format.space_after = Pt(0)
             _add_inline(paragraph, block.content, values, unresolved, font)
-            name = block.type == "heading"
+            step = design.type["h3" if block.type == "heading" else "small"]
             for run in paragraph.runs:
-                run.bold = name
-                run.font.size = Pt(tokens.H3_PT if name else tokens.SMALL_PT)
-                run.font.color.rgb = rgb(roles.heading if name else roles.muted)
+                run.bold = block.type == "heading" and step.bold
+                run.font.size = Pt(step.size_pt)
+                run.font.color.rgb = rgb(roles.heading if block.type == "heading" else roles.muted)
     return write
 
 

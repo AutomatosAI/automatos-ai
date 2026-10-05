@@ -7,6 +7,10 @@ section headings in its accent, the letterhead as the first page's header, a
 footer with the company, the title and Word page-number fields on every page,
 tables with a primary header row, zebra rows and aligned figures, the report's
 KPI tiles, and the Agreement's sign-off kept together.
+
+PRD-255 (US-004): the design system is the kit's. Heading 1-3 are the kit's h1-h3
+in its ``heading`` colour (no longer the primary and the accent: "a lot of orange
+in there"), Normal its body, and a table's header row is ``surface_2``.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ from typing import Any, Dict, List
 import pytest
 
 from modules.documents.blocks import collect_variable_paths, render_document_docx, validate_blocks
+from modules.documents.blocks import design_tokens as tokens
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.presets import preset_for
 from modules.documents.variables.resolver import build_context, resolve_paths
@@ -73,11 +78,19 @@ def _texts(document: Any) -> List[str]:
     return [p.text for p in document.paragraphs]
 
 
+def _hex(colour: str) -> str:
+    return colour.lstrip("#").upper()
+
+
 def test_the_styles_take_the_kits_colours_and_the_type_scale():
     styles = _docx("report").styles
-    assert str(styles["Heading 1"].font.color.rgb) == ORANGE and styles["Heading 1"].font.size.pt == 22
-    assert str(styles["Heading 2"].font.color.rgb) == NAVY and styles["Heading 2"].font.size.pt == 13
-    assert styles["Normal"].font.size.pt == 10
+    design = tokens.design(KIT)
+    heading = _hex(design.palette.heading)
+    assert str(styles["Heading 1"].font.color.rgb) == heading != ORANGE
+    assert styles["Heading 1"].font.size.pt == design.type["h1"].size_pt
+    assert str(styles["Heading 2"].font.color.rgb) == heading and styles["Heading 2"].font.size.pt == design.type["h2"].size_pt
+    assert styles["Normal"].font.size.pt == design.type["body"].size_pt
+    assert str(styles["Normal"].font.color.rgb) == _hex(design.palette.ink)
     fonts = styles["Heading 1"].element.rPr.find(qn("w:rFonts"))
     assert fonts is None or fonts.get(qn("w:asciiTheme")) is None  # Word's theme font no longer wins
 
@@ -104,12 +117,12 @@ def test_every_page_has_a_footer_with_page_numbers():
         assert COMPANY in text and "Invoice INV-0042" in text
 
 
-def test_a_data_table_has_a_primary_header_zebra_rows_and_right_aligned_figures():
+def test_a_data_table_has_a_surface_header_zebra_rows_and_right_aligned_figures():
     document = _docx("invoice")
     items = document.tables[0]
     assert items.style is None or "Grid" not in items.style.name
     header, first, second = items.rows[0], items.rows[1], items.rows[2]
-    assert set(_fills(header)) == {ORANGE}
+    assert set(_fills(header)) == {_hex(tokens.palette(KIT).surface_2)}
     assert header._tr.trPr.find(qn("w:tblHeader")) is not None
     assert not _fills(first) and _fills(second)  # zebra: every second body row is tinted
     assert first.cells[3].paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.RIGHT

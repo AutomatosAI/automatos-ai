@@ -3,15 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <style>{{ brand | document_style }}
-  [data-block="logo"] { width: 14mm; }
   .highlights { list-style: none; padding: 0; margin: 0 0 8pt 0; }
-  .highlights li { padding: 8pt 12pt; margin: 0 0 4pt 0; background: {{ brand.accent_color }}10; border-left: 3pt solid {{ brand.accent_color }}; }
+  .highlights li { padding: 8pt 12pt; margin: 0 0 4pt 0; background: {{ brand.palette.surface }}; border-left: 2pt solid {{ brand.palette.accent }}; }
   .metrics-grid { display: flex; flex-wrap: wrap; margin: 4pt 0 8pt 0; }
-  .metric-card { flex: 1 1 18%; margin: 0 8pt 8pt 0; padding: 8pt 12pt; background: {{ brand.primary_color }}; color: white; }
-  .metric-card .label { font-size: 8.5pt; }
-  .metric-card .value { font-size: 22pt; font-weight: 700; color: white; } /* F350: the accent (navy) on the primary (orange) card was unreadable */
+  .metric-card { flex: 1 1 18%; margin: 0 8pt 8pt 0; padding: 8pt 12pt; background: {{ brand.palette.surface }}; }
+  .metric-card .label { font-size: {{ brand.type.small.size_pt }}pt; color: {{ brand.palette.muted }}; }
+  .metric-card .value { font-size: {{ brand.type.h1.size_pt }}pt; line-height: {{ brand.type.h1.line_pt }}pt; font-weight: {{ brand.type.h1.weight }}; color: {{ brand.palette.accent }}; }
   .recommendations { padding-left: 16pt; }
-  .recommendations li { padding: 4pt 0; border-bottom: 0.5pt solid {{ brand.accent_color }}40; }
+  .recommendations li { padding: 4pt 0; border-bottom: 0.5pt solid {{ brand.palette.rule }}; }
 </style>
 </head>
 <body>
