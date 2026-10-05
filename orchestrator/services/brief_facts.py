@@ -34,6 +34,17 @@ BRIEF_RULES = (
     "\"past_work\"). If one gives a different figure, say so in your answer, and which is right and why."
 )
 
+# F337 (night 10): Auto's counter flyer (PDF 1fc4eef7) said the box posts "October 15th" (the owner's
+# note: Monday 5 October; Auto never read it), "green apple" (red), "a hint of jasmine" (not in the
+# note); its letter to Quay said "our standard payment terms will change" when only Quay's did. The
+# brand kit's rules (consumers/chatbot/brand_turn) give the voice; this gives the facts.
+AUTO_OWN_FACTS_RULE = (
+    "- **Words the owner never gave** — In anything written for their customers (a flyer, a letter, a post, a "
+    "quote), I use only facts the owner gave me or the workspace holds: products, prices, names, dates, terms, "
+    "each exactly as given (one customer's change is theirs, not everyone's). I never add descriptions, tasting "
+    "notes, ingredients, colours or claims of my own. When a fact is missing I look it up, and ask if it isn't there"
+)
+
 # Auto's half (F322 and F327): "You're right, Lantern Kitchen is a great customer!" (chat
 # e95c1b6b; the shop said 82 kg, 28th of 31), and an "account id" and a "lot code" asked
 # of the owner (chat a6db3262). Both of Auto's chat prompts carry it: the full path's
@@ -48,7 +59,7 @@ AUTO_OWNER_RULES = (
     "they already gave: I find them with my tools. Their own stock, orders and customers are in their system and "
     "documents, never on the web\n"
     "- **Guessing a document's id** — To read a document I pass platform_read_document the file name a search "
-    "result showed (\"wholesale-terms-2026.md\"), never an id I haven't seen in a tool result"
-)
+    "result showed (\"wholesale-terms-2026.md\"), never an id I haven't seen in a tool result\n"
+) + AUTO_OWN_FACTS_RULE
 
-__all__ = ["AUTO_OWNER_RULES", "BRIEF_HEADING", "BRIEF_RULES"]
+__all__ = ["AUTO_OWNER_RULES", "AUTO_OWN_FACTS_RULE", "BRIEF_HEADING", "BRIEF_RULES"]
