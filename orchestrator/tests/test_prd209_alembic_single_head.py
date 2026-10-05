@@ -93,7 +93,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # migration of the results and voice wave (social_post_stats, social_voice_examples).
 # 2026-10-04 (Deliverables): outputs_heartbeat_reports chains onto prd251c_wave4 — a CLI
 # heartbeat's ticket report is a heartbeat in v_workspace_outputs, and the old ones re-typed.
-EXPECTED_HEAD = "outputs_heartbeat_reports"
+# 2026-10-05 (#840): workflows_tags_jsonb chains onto that — workflows.tags becomes JSONB
+# so ix_workflows_tags_gin can actually be built (Postgres has no GIN opclass for json).
+EXPECTED_HEAD = "workflows_tags_jsonb"
 
 
 def _literal(node: ast.AST):
