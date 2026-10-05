@@ -33,6 +33,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from ..amounts import field_text
 from ..variables.catalog import walk_dynamic
 from .schema import BlockDocument
+from .table_cells import unfilled_cells
 from .text_body import BULLETED, MISSING, PARAGRAPH, Group, block_groups
 
 logger = logging.getLogger(__name__)
@@ -197,6 +198,7 @@ def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List
         unresolved.append(block.path)
         doc.add_paragraph(f"[[{block.path}]]")
         return
+    unresolved.extend(unfilled_cells(block, rows))  # F345: every row fills every required column
     table = doc.add_table(rows=len(rows) + 1, cols=len(block.columns))
     table.style = "Light Grid Accent 1"
     for c_idx, col in enumerate(block.columns):

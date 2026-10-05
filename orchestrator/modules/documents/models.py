@@ -32,6 +32,24 @@ class UnresolvedDeliverableError(Exception):
         )
 
 
+EMPTY_PAGE = (
+    "Document blocked at finalisation — the page came out empty: the template printed none of "
+    "the data sent. It reads: {fields}. Send them in data, then regenerate."
+)
+
+
+class EmptyDocumentError(UnresolvedDeliverableError):
+    """A legacy template rendered nothing but its title (F345: a blank Executive Summary).
+
+    ``unresolved`` holds the ``data.*`` fields the template reads, so callers that
+    answer an unresolved document already name what to send.
+    """
+
+    def __init__(self, fields: List[str]):
+        super().__init__(unresolved=fields)
+        self.args = (EMPTY_PAGE.format(fields=", ".join(self.unresolved)),)
+
+
 @dataclass
 class GeneratedDocument:
     """Result of a document generation operation."""
