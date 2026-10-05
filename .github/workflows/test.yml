@@ -1341,7 +1341,7 @@ jobs:
       - name: Install pytest
         run: python -m pip install --upgrade pip pytest
       - name: Run the ported CLI host tests
-        run: pytest -q tests/test_ptyproc.py tests/test_filelock.py
+        run: pytest -q tests/test_ptyproc.py tests/test_filelock.py tests/test_lifecycle.py
 
   # PRD-247: the simulation harness's own unit tests (tests/sim/tests). Pure
   # standard library, no database, no platform — parsers, pack validation,

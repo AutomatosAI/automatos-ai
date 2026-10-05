@@ -44,7 +44,7 @@ def test_nudge_signals_the_pid_file_and_reports_absence(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(os, "kill", lambda pid, sig: seen.append((pid, sig)))
     assert service.nudge(cfg) is True
-    assert seen == [(os.getpid(), signal.SIGHUP)]
+    assert seen == [(os.getpid(), 0), (os.getpid(), signal.SIGHUP)]   # is it running, then the request
 
 
 def _bare_host() -> Host:
