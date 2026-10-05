@@ -255,69 +255,74 @@ def completed_task_counts(db: Session, agent_ids: List[int]) -> Dict[int, int]:
     return {int(row.agent_id): int(row.completed) for row in rows}
 
 
-def _build_agent_response(agent: Agent, db: Session, tasks_completed: Optional[int] = None) -> AgentResponse:
-    """Build agent response with skills, tools, and plugins"""
-    # PRD-15: Debug logging for model_config
-    model_cfg = getattr(agent, 'model_config', None)
-    logger.debug(f"Agent {agent.id} model_config: {model_cfg}")
-    
-    # Build tools list from the NEW assignment table (agent_app_assignments).
-    tools: List[Dict[str, Any]] = []
+def _build_agent_tools_list(agent: Agent, db: Session) -> List[Dict[str, Any]]:
+    """Active tool assignments (agent_app_assignments), enriched from the Composio app cache."""
     assignments = (
         db.query(AgentAppAssignment)
         .filter(AgentAppAssignment.agent_id == agent.id, AgentAppAssignment.is_active == True)
         .all()
     )
-    if assignments:
-        app_names = [a.app_name.upper() for a in assignments if a.app_name]
-        cache = {
-            a.app_name: a
-            for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
-        }
-        for assignment in assignments:
-            app_name = (assignment.app_name or "").upper()
-            cached = cache.get(app_name)
-            tools.append(
-                {
-                    "id": cached.id if cached else None,
-                    "assignment_id": assignment.id,
-                    "name": app_name,
-                    "description": (cached.description if cached else "") or "",
-                    "provider": "Composio" if cached else None,
-                    "category": ((cached.categories or [None])[0] if cached else None),
-                    "icon": cached.logo_url if cached else None,
-                    "permissions": {},
-                    "configuration": assignment.config or {},
-                    "assigned_at": assignment.assigned_at,
-                }
-            )
-    
-    # Build plugins list from assigned_plugins relationship (eager-loaded or queried)
-    plugins: List[Dict[str, Any]] = []
+    if not assignments:
+        return []
+    app_names = [a.app_name.upper() for a in assignments if a.app_name]
+    cache = {
+        a.app_name: a
+        for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
+    }
+    tools = []
+    for assignment in assignments:
+        app_name = (assignment.app_name or "").upper()
+        cached = cache.get(app_name)
+        tools.append({
+            "id": cached.id if cached else None,
+            "assignment_id": assignment.id,
+            "name": app_name,
+            "description": (cached.description if cached else "") or "",
+            "provider": "Composio" if cached else None,
+            "category": ((cached.categories or [None])[0] if cached else None),
+            "icon": cached.logo_url if cached else None,
+            "permissions": {},
+            "configuration": assignment.config or {},
+            "assigned_at": assignment.assigned_at,
+        })
+    return tools
+
+
+def _build_agent_plugins_list(agent: Agent, db: Session) -> List[Dict[str, Any]]:
+    """Assigned marketplace plugins, from the eager-loaded relationship or a fallback query."""
     assigned_plugins = getattr(agent, 'assigned_plugins', None)
     if assigned_plugins is None:
-        # Fallback: query if relationship wasn't eager-loaded
         assigned_plugins = (
             db.query(AgentAssignedPlugin)
             .filter(AgentAssignedPlugin.agent_id == agent.id)
             .all()
         )
-    if assigned_plugins:
-        for ap in assigned_plugins:
-            mp = getattr(ap, 'plugin', None)
-            if mp is None:
-                # Relationship not loaded — single fallback query
-                mp = db.query(MarketplacePlugin).filter(MarketplacePlugin.id == ap.plugin_id).first()
-            if mp:
-                plugins.append({
-                    "plugin_id": str(mp.id),
-                    "slug": mp.slug,
-                    "name": mp.name,
-                    "version": mp.version,
-                    "description": mp.description or "",
-                    "skills_count": mp.skills_count or 0,
-                    "commands_count": mp.commands_count or 0,
-                })
+    plugins = []
+    for ap in assigned_plugins or []:
+        mp = getattr(ap, 'plugin', None)
+        if mp is None:
+            # Relationship not loaded — single fallback query
+            mp = db.query(MarketplacePlugin).filter(MarketplacePlugin.id == ap.plugin_id).first()
+        if mp:
+            plugins.append({
+                "plugin_id": str(mp.id),
+                "slug": mp.slug,
+                "name": mp.name,
+                "version": mp.version,
+                "description": mp.description or "",
+                "skills_count": mp.skills_count or 0,
+                "commands_count": mp.commands_count or 0,
+            })
+    return plugins
+
+
+def _build_agent_response(agent: Agent, db: Session, tasks_completed: Optional[int] = None) -> AgentResponse:
+    """Build agent response with skills, tools, and plugins"""
+    # PRD-15: Debug logging for model_config
+    logger.debug(f"Agent {agent.id} model_config: {getattr(agent, 'model_config', None)}")
+
+    tools = _build_agent_tools_list(agent, db)
+    plugins = _build_agent_plugins_list(agent, db)
 
     # Read-time legacy cleanup: remove tags from configuration if present
     # agent.tags is the single source of truth, configuration should not contain tags
@@ -332,6 +337,9 @@ def _build_agent_response(agent: Agent, db: Session, tasks_completed: Optional[i
         name=agent.name,
         description=agent.description,
         job_title=getattr(agent, 'job_title', None),
+        # #831: previously only GET /api/agents/org-chart returned these.
+        team=getattr(agent, 'team', None),
+        reports_to_id=getattr(agent, 'reports_to_id', None),
         agent_type=agent.agent_type,
         status=agent.status,
         configuration=configuration,
@@ -432,6 +440,83 @@ def _refuse_past_the_agent_limit(db: Session, workspace_id: Any, adding: int = 1
         raise HTTPException(status_code=refusal.get("http_status", AGENT_LIMIT_STATUS), detail=refusal["message"])
 
 
+def _resolve_agent_org_fields(db: Session, workspace_id: Any, agent_data: AgentCreate) -> tuple:
+    """#831: validate a new agent's ``team``/``reports_to_id`` — same rule the
+    tool handler uses (``services.agent_org_fields``). 422 on a rule violation."""
+    from services.agent_org_fields import AgentOrgFieldError, normalized_team_or_none, validate_manager
+
+    try:
+        clean_team = normalized_team_or_none(agent_data.team)
+        manager_id = validate_manager(db, workspace_id, agent_id=None, reports_to_id=agent_data.reports_to_id)
+    except AgentOrgFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return clean_team, manager_id
+
+
+def _sync_agent_tool_assignments(db: Session, ctx: RequestContext, agent: Agent, tool_ids: List[int]) -> None:
+    """Reconcile ``agent_app_assignments`` with ``tool_ids``: disable anything no
+    longer selected, re-enable or create everything that is."""
+    desired_apps = _resolve_tool_ids_to_app_names(db, ctx, tool_ids)
+    desired_set = {a.upper() for a in desired_apps}
+
+    current = db.query(AgentAppAssignment).filter(AgentAppAssignment.agent_id == agent.id).all()
+    current_map = {c.app_name.upper(): c for c in current if c.app_name}
+
+    for app_name, row in current_map.items():
+        if app_name not in desired_set:
+            row.is_active = False
+
+    for app_name in desired_set:
+        if app_name in current_map:
+            current_map[app_name].is_active = True
+        else:
+            db.add(
+                AgentAppAssignment(
+                    agent_id=agent.id,
+                    app_name=app_name,
+                    app_type="EXTERNAL",
+                    assigned_by=_assigned_by_user_id(ctx),
+                    is_active=True,
+                    priority=0,
+                    config={},
+                )
+            )
+
+
+def _add_agent_tool_assignments(db: Session, ctx: RequestContext, agent_id: int, tool_ids: List[int]) -> None:
+    """Create active tool assignments (agent_app_assignments) for a newly created agent."""
+    desired_apps = _resolve_tool_ids_to_app_names(db, ctx, tool_ids)
+    for app_name in desired_apps:
+        db.add(
+            AgentAppAssignment(
+                agent_id=agent_id,
+                app_name=app_name,
+                app_type="EXTERNAL",
+                assigned_by=_assigned_by_user_id(ctx),
+                is_active=True,
+                priority=0,
+                config={},
+            )
+        )
+
+
+def _apply_agent_org_update(db: Session, workspace_id: Any, agent: Agent, agent_update: AgentUpdate) -> None:
+    """#831: validate and apply a ``team``/``reports_to_id`` edit in place —
+    same rule the tool handler uses (``services.agent_org_fields``). 422 on a
+    rule violation (cross-workspace manager, self-report, or a cycle)."""
+    from services.agent_org_fields import AgentOrgFieldError, normalized_team_or_none, validate_manager
+
+    try:
+        if agent_update.team is not None:
+            agent.team = normalized_team_or_none(agent_update.team)
+        if agent_update.reports_to_id is not None:
+            agent.reports_to_id = validate_manager(
+                db, workspace_id, agent_id=agent.id, reports_to_id=agent_update.reports_to_id,
+            )
+    except AgentOrgFieldError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create multiple agents at once"""
@@ -509,7 +594,8 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         
         tags = _normalize_tags(agent_data.tags if hasattr(agent_data, 'tags') else None)
         _reject_invalid_runtime(agent_data.configuration)  # PRD-234 S1a
-        
+        clean_team, manager_id = _resolve_agent_org_fields(db, ctx.workspace_id, agent_data)  # #831
+
         # Create agent with workspace
         from uuid import uuid4 as _uuid4
         agent = Agent(
@@ -517,6 +603,8 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
             name=agent_data.name,
             description=agent_data.description,
             job_title=getattr(agent_data, 'job_title', None),
+            team=clean_team,
+            reports_to_id=manager_id,
             agent_type=agent_data.agent_type,
             configuration=agent_data.configuration or {},
             marketplace_category=getattr(agent_data, 'marketplace_category', None),
@@ -539,20 +627,8 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         
         # Add tools (NEW: agent_app_assignments)
         if agent_data.tool_ids:
-            desired_apps = _resolve_tool_ids_to_app_names(db, ctx, agent_data.tool_ids)
-            for app_name in desired_apps:
-                db.add(
-                    AgentAppAssignment(
-                        agent_id=agent.id,
-                        app_name=app_name,
-                        app_type="EXTERNAL",
-                        assigned_by=_assigned_by_user_id(ctx),
-                        is_active=True,
-                        priority=0,
-                        config={},
-                    )
-                )
-        
+            _add_agent_tool_assignments(db, ctx, agent.id, agent_data.tool_ids)
+
         db.commit()
         db.refresh(agent)
 
@@ -954,6 +1030,8 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
             trimmed = agent_update.job_title.strip()
             agent.job_title = trimmed if trimmed else None
 
+        _apply_agent_org_update(db, ctx.workspace_id, agent, agent_update)  # #831: team / reports_to_id
+
         if agent_update.status is not None:
             agent.status = agent_update.status.value
 
@@ -985,38 +1063,8 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
 
         # Handle tool updates (NEW: agent_app_assignments)
         if agent_update.tool_ids is not None:
-            desired_apps = _resolve_tool_ids_to_app_names(db, ctx, agent_update.tool_ids)
-            desired_set = {a.upper() for a in desired_apps}
+            _sync_agent_tool_assignments(db, ctx, agent, agent_update.tool_ids)
 
-            current = (
-                db.query(AgentAppAssignment)
-                .filter(AgentAppAssignment.agent_id == agent.id)
-                .all()
-            )
-            current_map = {c.app_name.upper(): c for c in current if c.app_name}
-
-            # Disable anything no longer selected
-            for app_name, row in current_map.items():
-                if app_name not in desired_set:
-                    row.is_active = False
-
-            # Add or re-enable selected apps
-            for app_name in desired_set:
-                if app_name in current_map:
-                    current_map[app_name].is_active = True
-                else:
-                    db.add(
-                        AgentAppAssignment(
-                            agent_id=agent.id,
-                            app_name=app_name,
-                            app_type="EXTERNAL",
-                            assigned_by=_assigned_by_user_id(ctx),
-                            is_active=True,
-                            priority=0,
-                            config={},
-                        )
-                    )
-        
         db.commit()
         db.refresh(agent)
 

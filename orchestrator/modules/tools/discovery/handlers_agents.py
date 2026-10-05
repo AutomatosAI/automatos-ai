@@ -248,16 +248,12 @@ def _namesakes_refusal(namesakes: List[Any]) -> str:
             "Use one of them, or give the new one a different name.")
 
 
-async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+def _refuse_if_namesake(db: Session, workspace_id: UUID, name: str) -> Optional[Dict[str, Any]]:
+    """F134 (night 4, B55): asked to use an existing agent, Auto created a namesake,
+    whose dead model then answered nothing (B56). One active agent per name.
+    F144: a workspace may already hold several (WRITER 58/306/309): name them all."""
     from core.models import Agent
 
-    name = params.get("name")
-    if not name:
-        return {"success": False, "error": "Missing required parameter: name"}
-
-    # F134 (night 4, B55): asked to use an existing agent, Auto created a namesake,
-    # whose dead model then answered nothing (B56). One active agent per name.
-    # F144: a workspace may already hold several (WRITER 58/306/309): name them all.
     namesakes = (
         db.query(Agent.id, Agent.name, Agent.team, Agent.job_title)
         .filter(
@@ -268,42 +264,34 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         .order_by(Agent.id)
         .all()
     )
-    if namesakes:
-        return {
-            "success": False,
-            "existing_agent_id": namesakes[0].id,
-            "existing_agent_ids": [agent.id for agent in namesakes],
-            "error": _namesakes_refusal(namesakes),
-        }
+    if not namesakes:
+        return None
+    return {
+        "success": False,
+        "existing_agent_id": namesakes[0].id,
+        "existing_agent_ids": [agent.id for agent in namesakes],
+        "error": _namesakes_refusal(namesakes),
+    }
 
-    agent_type = params.get("agent_type", "chatbot")
-    description = params.get("description", "")
-    model_id = params.get("model_id") or params.get("model")  # back-compat
-    system_prompt = params.get("system_prompt")
-    temperature = params.get("temperature")
-    tags = params.get("tags")
 
-    # Build model_config from shared defaults (core.llm.defaults is the single source)
+def _resolve_create_model_config(db: Session, workspace_id: UUID, params: Dict[str, Any]):
+    """Build a new agent's ``model_config``. PRD-223 W1: the catalog is the sole
+    authority on an explicit ``model_id``; an unknown or retired one falls back
+    to the workspace default instead of failing the create (F141 told in the
+    result, not silently). Returns ``(model_config, model_note, error)`` —
+    ``error`` is a ready-to-return failure dict, or ``None``."""
     from core.llm.defaults import get_default_model_config
+
     model_config: Dict[str, Any] = get_default_model_config()
+    model_id = params.get("model_id") or params.get("model")  # back-compat
     model_note = None
     if model_id:
-        # PRD-223 W1: this chat tool was an unvalidated model-write path —
-        # any string became an agent's brain, provider guessed by substring.
-        # The registry is now the authority for existence AND provider, and
-        # the policy gate runs like every other writer.
         from api.llm_marketplace import _get_or_create_from_cache
         from core.llm.model_policy import check_model_for_agent
 
         resolved = _get_or_create_from_cache(db, model_id, params.get("provider"))
         not_offered = _model_not_offered(resolved, model_id)
         if not_offered:
-            # Prod 2026-09-02 (post-#672): told "omit model_id to use the default",
-            # the model retried the SAME unknown id twice and the build stalled.
-            # An unknown id means the governed default in practice (PRD-223: the
-            # registry decides, never the caller's string) — use it and SAY so,
-            # in the result and in the log. The agent is still created. F141: a
-            # route its provider no longer offers goes the same way.
             default_id = model_config.get("model_id")
             logger.warning(
                 "[create_agent] %s model %r — using the workspace default %r",
@@ -316,11 +304,76 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
                 provider=resolved.serving_provider,
             )
             if not allowed:
-                return {"success": False, "error": f"Model rejected: {reason}"}
+                return None, None, {"success": False, "error": f"Model rejected: {reason}"}
             model_config["model_id"] = model_id
             model_config["provider"] = resolved.serving_provider  # PRD-236 W1: the route, never the vendor
+    temperature = params.get("temperature")
     if temperature is not None:
         model_config["temperature"] = max(0.0, min(2.0, float(temperature)))
+    return model_config, model_note, None
+
+
+def _create_agent_success_response(agent: Any, name: str, model_config: Dict[str, Any],
+                                    system_prompt: Optional[str], model_note: Optional[str]) -> Dict[str, Any]:
+    """The success payload for a newly created agent."""
+    return {
+        "success": True,
+        "agent": {
+            "id": agent.id,
+            "name": agent.name,
+            "type": agent.agent_type,
+            "status": agent.status,
+            "description": agent.description,
+            "model_id": model_config["model_id"],
+            "provider": model_config["provider"],
+            "temperature": model_config["temperature"],
+            "has_system_prompt": bool(system_prompt),
+            "tags": agent.tags or [],
+        },
+        "message": f"Agent '{name}' created successfully with ID {agent.id}."
+        + (f" {model_note}" if model_note else ""),
+        "model_note": model_note,
+    }
+
+
+def _apply_create_org_fields(db: Session, workspace_id: UUID, agent: Any, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """#831: team/manager validated the way the REST API validates them
+    (``services.agent_org_fields`` — one rule, both callers)."""
+    from services.agent_org_fields import AgentOrgFieldError, normalized_team_or_none, validate_manager
+
+    if params.get("team"):
+        agent.team = normalized_team_or_none(params["team"])
+    if params.get("job_title"):
+        agent.job_title = params["job_title"]
+    if params.get("reports_to_id") is not None:
+        try:
+            agent.reports_to_id = validate_manager(
+                db, workspace_id, agent_id=None, reports_to_id=params["reports_to_id"],
+            )
+        except AgentOrgFieldError as exc:
+            return {"success": False, "error": str(exc)}
+    return None
+
+
+async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    from core.models import Agent
+
+    name = params.get("name")
+    if not name:
+        return {"success": False, "error": "Missing required parameter: name"}
+
+    refusal = _refuse_if_namesake(db, workspace_id, name)
+    if refusal:
+        return refusal
+
+    agent_type = params.get("agent_type", "chatbot")
+    description = params.get("description", "")
+    system_prompt = params.get("system_prompt")
+    tags = params.get("tags")
+
+    model_config, model_note, error = _resolve_create_model_config(db, workspace_id, params)
+    if error:
+        return error
 
     # F200: the plan's agent limit, told before it is crossed; nothing is created.
     from services.agent_quota import agent_limit_refusal
@@ -351,87 +404,67 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if tags:
         agent.tags = tags
 
-    # Org fields
-    if params.get("team"):
-        agent.team = params["team"]
-    if params.get("job_title"):
-        agent.job_title = params["job_title"]
-    if params.get("reports_to_id") is not None:
-        agent.reports_to_id = int(params["reports_to_id"])
+    org_error = _apply_create_org_fields(db, workspace_id, agent, params)  # #831
+    if org_error:
+        return org_error
 
     db.add(agent)
     db.flush()  # Get the ID without committing (caller commits)
 
     logger.info(f"[PlatformExecutor] Created agent '{name}' (id={agent.id}) in workspace {workspace_id}")
 
-    return {
-        "success": True,
-        "agent": {
-            "id": agent.id,
-            "name": agent.name,
-            "type": agent.agent_type,
-            "status": agent.status,
-            "description": agent.description,
-            "model_id": model_config["model_id"],
-            "provider": model_config["provider"],
-            "temperature": model_config["temperature"],
-            "has_system_prompt": bool(system_prompt),
-            "tags": agent.tags or [],
-        },
-        "message": f"Agent '{name}' created successfully with ID {agent.id}."
-        + (f" {model_note}" if model_note else ""),
-        "model_note": model_note,
-    }
+    return _create_agent_success_response(agent, name, model_config, system_prompt, model_note)
 
 
-async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    from core.models import Agent
-
-    agent_id = params.get("agent_id")
-    agent_name = params.get("agent_name")
-
-    query = db.query(Agent).filter(Agent.workspace_id == workspace_id)
-    if agent_id:
-        query = query.filter(Agent.id == agent_id)
-    elif agent_name:
-        query = query.filter(Agent.name.ilike(f"%{agent_name}%"))
-    else:
-        return {"success": False, "error": "Provide agent_name or agent_id"}
-
-    agent = query.first()
-    if not agent:
-        return {"success": False, "error": "Agent not found"}
-
-    # F141: a new model is checked before anything changes, as create_agent and
-    # the Model tab check it. This path stored any string and guessed the provider
-    # by substring: BEANCOUNTER got 'anthropic/claude-sonnet-4-20250514', an id
-    # OpenRouter never offered, and every turn routed to it failed.
+def _validate_update_model(db: Session, workspace_id: UUID, agent: Any, params: Dict[str, Any]):
+    """F141: a new model is checked before anything changes, as create_agent and
+    the Model tab check it (previously stored any string, provider guessed by
+    substring). Returns ``(route, error)`` — ``error`` is a ready-to-return
+    failure dict, or ``None`` when there is no ``model_id`` edit or it passes."""
     model_id = params.get("model_id")
-    route = None
-    if model_id:
-        from api.llm_marketplace import _get_or_create_from_cache
-        from core.llm.model_policy import check_model_for_agent
+    if not model_id:
+        return None, None
+    from api.llm_marketplace import _get_or_create_from_cache
+    from core.llm.model_policy import check_model_for_agent
 
-        route = _get_or_create_from_cache(db, model_id, params.get("provider"))
-        not_offered = _model_not_offered(route, model_id)
-        if not_offered:
-            current = (agent.model_config or {}).get("model_id") or "the default model"
-            return {
-                "success": False,
-                "error": (f"{not_offered}, so '{agent.name}' keeps {current}. "
-                          "Use a model that platform_list_workspace_models lists."),
-            }
-        allowed, reason = check_model_for_agent(
-            db, workspace_id, model_id,
-            orchestrator_seat=agent.name == "Auto" and bool(getattr(agent, "is_system_agent", False)),
-            provider=route.serving_provider,
-        )
-        if not allowed:
-            return {"success": False, "error": f"Model rejected: {reason}"}
+    route = _get_or_create_from_cache(db, model_id, params.get("provider"))
+    not_offered = _model_not_offered(route, model_id)
+    if not_offered:
+        current = (agent.model_config or {}).get("model_id") or "the default model"
+        return None, {
+            "success": False,
+            "error": (f"{not_offered}, so '{agent.name}' keeps {current}. "
+                      "Use a model that platform_list_workspace_models lists."),
+        }
+    allowed, reason = check_model_for_agent(
+        db, workspace_id, model_id,
+        orchestrator_seat=agent.name == "Auto" and bool(getattr(agent, "is_system_agent", False)),
+        provider=route.serving_provider,
+    )
+    if not allowed:
+        return None, {"success": False, "error": f"Model rejected: {reason}"}
+    return route, None
 
-    changes = []
 
-    # Basic fields
+def _validate_update_manager(db: Session, workspace_id: UUID, agent: Any, params: Dict[str, Any]):
+    """#831: a bad manager (cross-workspace, self, or a cycle) is also checked
+    before anything changes — same rule the REST API uses, for the same
+    reason. Returns ``(provided, manager_id, error)``."""
+    reports_to_id = params.get("reports_to_id")
+    if reports_to_id is None:
+        return False, None, None
+    from services.agent_org_fields import AgentOrgFieldError, validate_manager
+
+    try:
+        manager_id = validate_manager(db, workspace_id, agent_id=agent.id, reports_to_id=reports_to_id)
+    except AgentOrgFieldError as exc:
+        return True, None, {"success": False, "error": str(exc)}
+    return True, manager_id, None
+
+
+def _apply_basic_and_model_fields(agent: Any, params: Dict[str, Any], model_id: Optional[str], route: Any) -> List[str]:
+    """Name/description/status and the model/temperature edit; return the change log."""
+    changes: List[str] = []
     if params.get("new_name"):
         agent.name = params["new_name"]
         changes.append(f"name -> '{params['new_name']}'")
@@ -442,7 +475,6 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         agent.status = params["status"]
         changes.append(f"status -> '{params['status']}'")
 
-    # Model configuration
     temperature = params.get("temperature")
     if model_id or temperature is not None:
         mc = dict(agent.model_config or {})
@@ -457,33 +489,65 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             mc["temperature"] = max(0.0, min(2.0, float(temperature)))
             changes.append(f"temperature -> {mc['temperature']}")
         agent.model_config = mc
+    return changes
 
-    # System prompt
+
+def _apply_persona_org_and_tag_fields(agent: Any, params: Dict[str, Any],
+                                       reports_to_provided: bool, manager_id: Optional[int]) -> List[str]:
+    """System prompt, team/job_title/reports_to_id (#831) and tags; return the change log."""
+    from services.agent_org_fields import normalized_team_or_none
+
+    changes: List[str] = []
     system_prompt = params.get("system_prompt")
     if system_prompt is not None:
         agent.custom_persona_prompt = system_prompt
         agent.use_custom_persona = True
         changes.append("system prompt updated")
 
-    # Org fields
     team = params.get("team")
     if team is not None:
-        agent.team = team
-        changes.append(f"team -> '{team}'")
+        agent.team = normalized_team_or_none(team)
+        changes.append(f"team -> '{agent.team}'")
     job_title = params.get("job_title")
     if job_title is not None:
         agent.job_title = job_title
         changes.append(f"job_title -> '{job_title}'")
-    reports_to_id = params.get("reports_to_id")
-    if reports_to_id is not None:
-        agent.reports_to_id = int(reports_to_id) if reports_to_id else None
-        changes.append(f"reports_to_id -> {reports_to_id}")
+    if reports_to_provided:
+        agent.reports_to_id = manager_id
+        changes.append(f"reports_to_id -> {manager_id}")
 
-    # Tags
     tags = params.get("tags")
     if tags is not None:
         agent.tags = tags
         changes.append(f"tags -> {tags}")
+
+    return changes
+
+
+def _apply_update_fields(agent: Any, params: Dict[str, Any], model_id: Optional[str], route: Any,
+                          reports_to_provided: bool, manager_id: Optional[int]) -> List[str]:
+    """Apply every already-validated field edit to ``agent`` in place; return the change log."""
+    return (
+        _apply_basic_and_model_fields(agent, params, model_id, route)
+        + _apply_persona_org_and_tag_fields(agent, params, reports_to_provided, manager_id)
+    )
+
+
+async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    agent, err = _resolve_agent(db, workspace_id, params)
+    if err:
+        return err
+
+    model_id = params.get("model_id")
+    route, model_error = _validate_update_model(db, workspace_id, agent, params)
+    if model_error:
+        return model_error
+
+    reports_to_provided, manager_id, org_error = _validate_update_manager(db, workspace_id, agent, params)  # #831
+    if org_error:
+        return org_error
+
+    changes = _apply_update_fields(agent, params, model_id, route, reports_to_provided, manager_id)
 
     if not changes:
         from modules.tools.discovery.action_registry import nothing_changed
