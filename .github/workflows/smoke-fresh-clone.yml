@@ -17,6 +17,8 @@ name: smoke-fresh-clone
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - "docker-compose.yml"
       - "orchestrator/docker-entrypoint.sh"
@@ -29,7 +31,6 @@ on:
   pull_request:
     branches:
       - main
-      - studio
     paths:
       - "docker-compose.yml"
       - "orchestrator/docker-entrypoint.sh"
