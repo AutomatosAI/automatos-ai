@@ -20,7 +20,11 @@ const made: Blob[] = []
 
 beforeEach(() => {
   made.length = 0
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['<script>x()</script>'], { type: 'text/html' }))))
+  // The served type rides on the header: a jsdom Blob body is stringified as text/plain by Node's Response.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('<script>x()</script>', { headers: { 'Content-Type': 'text/html' } })),
+  )
   URL.createObjectURL = vi.fn((blob: Blob) => {
     made.push(blob)
     return 'blob:app/1'
