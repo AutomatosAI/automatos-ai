@@ -10,6 +10,9 @@ deps to build or unit-test.
 
 Brand kit (PRD-167 S4): heading colour comes from ``brand.primary_color`` and the body
 font from ``brand.font_family`` — no hardcoded Automatos styling.
+
+F347: a text block keeps its paragraphs, line breaks, lists and bold/italic, read the
+same way as for the PDF (``text_body``).
 """
 
 from __future__ import annotations
@@ -27,13 +30,19 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from ..amounts import field_text
 from ..variables.catalog import walk_dynamic
 from .schema import BlockDocument
+from .text_body import BULLETED, MISSING, PARAGRAPH, Group, block_groups
 
 logger = logging.getLogger(__name__)
 
 _MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB cap on fetched images
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+# F347: a bulleted item takes Word's own bullet style; a numbered one is indented and
+# carries its number as text (Word's numbered style counts on across separate lists).
+DOCX_BULLET_STYLE = "List Bullet"
+DOCX_LIST_INDENT_MM = 6.35
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -174,7 +183,7 @@ def _cell_value(row: Any, key: str, index: int) -> str:
         value = row[index] if index < len(row) else ""
     else:
         value = row if index == 0 else ""
-    return "" if value is None else str(value)
+    return field_text(key, value)  # F347: a bare amount with two decimals, never a currency added
 
 
 def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List[str], font: Optional[str]):
@@ -203,62 +212,120 @@ def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List
                 run.font.name = font
 
 
-def _add_block(doc, block, values, brand_kit, unresolved, *, primary_rgb, font, data=None):
+def _styled_run(paragraph, text: str, marks, font: Optional[str]):
+    run = paragraph.add_run(text)
+    run.bold = "bold" in marks
+    run.italic = "italic" in marks
+    run.underline = "underline" in marks
+    if font:
+        run.font.name = font
+    return run
+
+
+def _add_segs(paragraph, line, font: Optional[str]) -> None:
+    for seg in line:
+        text = f"[[{seg.text}]]" if seg.kind == MISSING else seg.text
+        _styled_run(paragraph, text, seg.marks, font)
+
+
+def _add_list(doc, group: Group, font: Optional[str]) -> None:
+    """One paragraph per item: Word's bullet style, or the item's number written before it."""
     from docx.shared import Mm
 
+    for index, line in enumerate(group.lines):
+        if group.kind == BULLETED:
+            paragraph = doc.add_paragraph(style=DOCX_BULLET_STYLE)
+        else:
+            paragraph = doc.add_paragraph()
+            paragraph.paragraph_format.left_indent = Mm(DOCX_LIST_INDENT_MM)
+            _styled_run(paragraph, f"{group.start + index}. ", (), font)
+        _add_segs(paragraph, line, font)
+
+
+def _add_text_body(doc, groups: List[Group], font: Optional[str]) -> None:
+    """F347: a text block's paragraphs (their line breaks kept), lists and bold/italic."""
+    for group in groups or [Group(kind=PARAGRAPH)]:
+        if group.kind != PARAGRAPH:
+            _add_list(doc, group, font)
+            continue
+        paragraph = doc.add_paragraph()
+        for index, line in enumerate(group.lines):
+            if index:
+                paragraph.add_run().add_break()
+            _add_segs(paragraph, line, font)
+
+
+def _add_heading(doc, block, values, unresolved, primary_rgb, font) -> None:
+    p = doc.add_heading(level=min(block.level, 9))
+    p.clear()
+    _add_inline(p, block.content, values, unresolved, font)
+    if primary_rgb is not None:
+        for run in p.runs:
+            run.font.color.rgb = primary_rgb
+
+
+def _add_table(doc, block, values, unresolved, font) -> None:
+    n_rows = len(block.rows)
+    n_cols = max((len(r) for r in block.rows), default=0)
+    if not (n_rows and n_cols):
+        return
+    table = doc.add_table(rows=n_rows, cols=n_cols)
+    table.style = "Light Grid Accent 1"
+    for r_idx, row in enumerate(block.rows):
+        for c_idx, cell in enumerate(row):
+            para = table.cell(r_idx, c_idx).paragraphs[0]
+            _add_inline(para, cell, values, unresolved, font)
+            if block.header and r_idx == 0:
+                for run in para.runs:
+                    run.bold = True
+
+
+def _add_image(doc, block, brand_kit, unresolved) -> None:
+    from docx.shared import Mm
+
+    src = (brand_kit or {}).get("logo_url", "") if block.source == "brand_logo" else (block.src or "")
+    if block.source == "brand_logo" and not src:
+        unresolved.append("brand.logo_url")
+        return
+    stream = _safe_image_bytes(src)
+    if stream is None:
+        doc.add_paragraph(block.alt or "")
+        return
+    try:
+        width = Mm(block.width_mm) if block.width_mm else Mm(60)
+        doc.add_picture(stream, width=width)
+    except Exception:  # noqa: BLE001 — unreadable image format: the alt text instead
+        logger.warning("[DocxRender] image block %s could not be embedded; its alt text is printed", block.id, exc_info=True)
+        doc.add_paragraph(block.alt or "")
+
+
+def _add_section(doc, block, values, brand_kit, unresolved, *, primary_rgb, font, data=None) -> None:
+    if block.title:
+        h = doc.add_heading(block.title, level=2)
+        if primary_rgb is not None:
+            for run in h.runs:
+                run.font.color.rgb = primary_rgb
+    for child in block.children:
+        _add_block(doc, child, values, brand_kit, unresolved, primary_rgb=primary_rgb, font=font, data=data)
+
+
+def _add_block(doc, block, values, brand_kit, unresolved, *, primary_rgb, font, data=None):
     kind = block.type
     if kind == "heading":
-        p = doc.add_heading(level=min(block.level, 9))
-        p.clear()
-        _add_inline(p, block.content, values, unresolved, font)
-        if primary_rgb is not None:
-            for run in p.runs:
-                run.font.color.rgb = primary_rgb
-    elif kind == "text":
-        p = doc.add_paragraph()
-        _add_inline(p, block.content, values, unresolved, font)
-    elif kind == "table":
-        n_rows = len(block.rows)
-        n_cols = max((len(r) for r in block.rows), default=0)
-        if n_rows and n_cols:
-            table = doc.add_table(rows=n_rows, cols=n_cols)
-            table.style = "Light Grid Accent 1"
-            for r_idx, row in enumerate(block.rows):
-                for c_idx, cell in enumerate(row):
-                    para = table.cell(r_idx, c_idx).paragraphs[0]
-                    _add_inline(para, cell, values, unresolved, font)
-                    if block.header and r_idx == 0:
-                        for run in para.runs:
-                            run.bold = True
-    elif kind == "image":
-        src = (brand_kit or {}).get("logo_url", "") if block.source == "brand_logo" else (block.src or "")
-        if block.source == "brand_logo" and not src:
-            unresolved.append("brand.logo_url")
-            return
-        stream = _safe_image_bytes(src)
-        if stream is not None:
-            try:
-                width = Mm(block.width_mm) if block.width_mm else Mm(60)
-                doc.add_picture(stream, width=width)
-            except Exception:  # noqa: BLE001 — unreadable image format
-                doc.add_paragraph(block.alt or "")
-        else:
-            doc.add_paragraph(block.alt or "")
-    elif kind == "variable":
-        p = doc.add_paragraph()
-        p.add_run(_resolve_var(block.path, block.fallback, values, unresolved))
-    elif kind == "data_table":
-        _add_data_table(doc, block, data, unresolved, font)
-    elif kind == "page_break":
-        doc.add_page_break()
-    elif kind == "section":
-        if block.title:
-            h = doc.add_heading(block.title, level=2)
-            if primary_rgb is not None:
-                for run in h.runs:
-                    run.font.color.rgb = primary_rgb
-        for child in block.children:
-            _add_block(doc, child, values, brand_kit, unresolved, primary_rgb=primary_rgb, font=font, data=data)
+        return _add_heading(doc, block, values, unresolved, primary_rgb, font)
+    if kind in ("text", "variable"):
+        return _add_text_body(doc, block_groups(block, values, unresolved), font)
+    if kind == "table":
+        return _add_table(doc, block, values, unresolved, font)
+    if kind == "image":
+        return _add_image(doc, block, brand_kit, unresolved)
+    if kind == "data_table":
+        return _add_data_table(doc, block, data, unresolved, font)
+    if kind == "page_break":
+        return doc.add_page_break()
+    if kind == "section":
+        return _add_section(doc, block, values, brand_kit, unresolved, primary_rgb=primary_rgb, font=font, data=data)
+    return None
 
 
 def render_document_docx(

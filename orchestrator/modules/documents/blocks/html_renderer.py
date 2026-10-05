@@ -8,7 +8,9 @@ SSRF-safe URL fetcher).
 Security: unlike the legacy Jinja templates, blocks are *not* a template language — we
 build HTML directly here and **HTML-escape every text run, resolved value, attribute
 and brand string**. There is no user-controlled markup surface, so the SSTI class from
-PRD-156 does not apply to block templates.
+PRD-156 does not apply to block templates. A text block's paragraphs, lists and emphasis
+are read by ``text_body`` and escaped as they are written (F347); the kit's uploaded
+font files and heading font are ``page_fonts`` (F347), the rest of the sheet ``page_style``.
 
 Variable policy (PRD-167 S3): a variable with no resolved value and no explicit
 ``fallback`` is recorded in ``unresolved`` and emitted as a *visible* marker
@@ -21,17 +23,12 @@ import html
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..amounts import field_text
 from ..variables.catalog import walk_dynamic
+from .page_fonts import font_css
 from .page_style import KEEP_CLASS, KEEP_TOGETHER_MAX_HTML_CHARS, build_styles
 from .schema import BlockDocument
-
-_MARK_TAGS = {
-    "bold": ("<strong>", "</strong>"),
-    "italic": ("<em>", "</em>"),
-    "underline": ("<u>", "</u>"),
-    "strike": ("<s>", "</s>"),
-    "code": ("<code>", "</code>"),
-}
+from .text_body import MARK_TAGS, block_groups, body_html, unresolved_html
 
 
 @dataclass
@@ -55,7 +52,7 @@ def _resolve_var(path: str, fallback, values: Dict[str, str], unresolved: List[s
     if fallback is not None:
         return _esc(fallback)
     unresolved.append(path)
-    return f'<span class="unresolved-var" data-path="{_esc(path)}">[[{_esc(path)}]]</span>'
+    return unresolved_html(path)
 
 
 def _render_inline(content: list, values: Dict[str, str], unresolved: List[str]) -> str:
@@ -64,7 +61,7 @@ def _render_inline(content: list, values: Dict[str, str], unresolved: List[str])
         if run.type == "text":
             text = _esc(run.text)
             for mark in run.marks:
-                open_tag, close_tag = _MARK_TAGS.get(mark, ("", ""))
+                open_tag, close_tag = MARK_TAGS.get(mark, ("", ""))
                 text = f"{open_tag}{text}{close_tag}"
             parts.append(text)
         elif run.type == "variable":
@@ -103,7 +100,7 @@ def _cell_value(row: Any, key: str, index: int) -> str:
         value = row[index] if index < len(row) else ""
     else:
         value = row if index == 0 else ""
-    return "" if value is None else str(value)
+    return field_text(key, value)  # F347: a bare amount with two decimals, never a currency added
 
 
 def _render_data_table(block, data: Optional[Dict[str, Any]], unresolved: List[str]) -> str:
@@ -138,14 +135,12 @@ def _render_block(
     if kind == "heading":
         inner = _render_inline(block.content, values, unresolved)
         return f"<h{block.level}{_tag(block)}>{inner}</h{block.level}>"
-    if kind == "text":
-        return f"<p{_tag(block)}>{_render_inline(block.content, values, unresolved)}</p>"
+    if kind in ("text", "variable"):  # F347: paragraphs, line breaks, lists and emphasis kept
+        return body_html(block_groups(block, values, unresolved), _tag(block))
     if kind == "table":
         return _render_table(block, values, unresolved)
     if kind == "image":
         return _render_image(block, brand_kit, unresolved)
-    if kind == "variable":
-        return f"<p{_tag(block)}>{_resolve_var(block.path, block.fallback, values, unresolved)}</p>"
     if kind == "data_table":
         return _render_data_table(block, data, unresolved)
     if kind == "page_break":
@@ -183,7 +178,7 @@ def render_document_html(
 <head>
 <meta charset="utf-8" />
 <title>{_esc(title)}</title>
-<style>{build_styles(brand_kit)}</style>
+<style>{build_styles(brand_kit)}{font_css(brand_kit or {})}</style>
 </head>
 <body>
 {body}

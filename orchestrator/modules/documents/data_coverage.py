@@ -27,6 +27,7 @@ from jinja2 import Environment, TemplateSyntaxError, meta
 
 from modules.documents.blocks import collect_variable_paths, validate_blocks
 from modules.documents.blocks.data_details import carried_keys
+from modules.documents.legacy_jinja import with_document_filters
 from modules.documents.variables.catalog import DYNAMIC_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ BODY_KEY = "content"
 # The seeded legacy template a PDF that names no template is filled by, when it fits.
 DEFAULT_PDF_TEMPLATE = "Basic Report"
 # Parses a legacy template's source to list the names it reads; renders nothing.
-_PARSER = Environment(autoescape=True)
+_PARSER = with_document_filters(Environment(autoescape=True))
 
 
 def block_template_keys(blocks: Any) -> FrozenSet[str]:
