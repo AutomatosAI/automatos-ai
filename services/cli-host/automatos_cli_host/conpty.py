@@ -21,6 +21,7 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import List, Mapping, Optional, Sequence
 
+from . import winjob
 from .ptyproc import HANGUP, KILL, TERMINATE, PtyChild, environment_block, windows_command_line
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -30,8 +31,6 @@ CREATE_UNICODE_ENVIRONMENT = 0x00000400
 CREATE_SUSPENDED = 0x00000004
 STARTF_USESTDHANDLES = 0x00000100
 PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
-JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
-JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 INFINITE = 0xFFFFFFFF
 WAIT_OBJECT_0 = 0x0
 WAIT_TIMEOUT = 0x102
@@ -63,29 +62,6 @@ class PROCESS_INFORMATION(ctypes.Structure):
                 ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD)]
 
 
-class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-    _fields_ = [
-        ("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
-        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
-        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
-        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD),
-    ]
-
-
-class IO_COUNTERS(ctypes.Structure):
-    _fields_ = [(name, ctypes.c_uint64) for name in (
-        "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-        "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
-
-
-class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-    _fields_ = [
-        ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION), ("IoInfo", IO_COUNTERS),
-        ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
-        ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t),
-    ]
-
-
 def _fn(name: str, restype, *argtypes):
     fn = getattr(_kernel32, name)
     fn.restype, fn.argtypes = restype, list(argtypes)
@@ -106,11 +82,6 @@ _DeleteProcThreadAttributeList = _fn("DeleteProcThreadAttributeList", None, ctyp
 _CreateProcessW = _fn("CreateProcessW", wintypes.BOOL, wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p,
                       ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR,
                       _P(STARTUPINFOEXW), _P(PROCESS_INFORMATION))
-_CreateJobObjectW = _fn("CreateJobObjectW", wintypes.HANDLE, ctypes.c_void_p, wintypes.LPCWSTR)
-_SetInformationJobObject = _fn("SetInformationJobObject", wintypes.BOOL, wintypes.HANDLE, ctypes.c_int,
-                               ctypes.c_void_p, wintypes.DWORD)
-_AssignProcessToJobObject = _fn("AssignProcessToJobObject", wintypes.BOOL, wintypes.HANDLE, wintypes.HANDLE)
-_TerminateJobObject = _fn("TerminateJobObject", wintypes.BOOL, wintypes.HANDLE, wintypes.UINT)
 _TerminateProcess = _fn("TerminateProcess", wintypes.BOOL, wintypes.HANDLE, wintypes.UINT)
 _ResumeThread = _fn("ResumeThread", wintypes.DWORD, wintypes.HANDLE)
 _ReadFile = _fn("ReadFile", wintypes.BOOL, wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
@@ -136,18 +107,6 @@ def _pipe():
     read, write = wintypes.HANDLE(), wintypes.HANDLE()
     _check(_CreatePipe(ctypes.byref(read), ctypes.byref(write), None, 0))
     return read, write
-
-
-def _kill_on_close_job():
-    job = _CreateJobObjectW(None, None)
-    _check(job)
-    info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if not _SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info)):
-        error = ctypes.get_last_error()
-        _close(job)
-        raise ctypes.WinError(error)
-    return job
 
 
 def _attributes(console):
@@ -197,7 +156,7 @@ class ConPtyChild(PtyChild):
             hr = _CreatePseudoConsole(COORD(cols, rows), console_input, console_output, 0, ctypes.byref(self._console))
             if hr != 0:
                 raise OSError(f"CreatePseudoConsole failed (0x{hr & 0xFFFFFFFF:08x}); ConPTY needs Windows 10 1809 or later")
-            self._job = _kill_on_close_job()
+            self._job = winjob.kill_on_close_job()
             self._start(args, cwd, env)
         except BaseException:
             self.close()
@@ -212,7 +171,7 @@ class ConPtyChild(PtyChild):
         info = _create_suspended(args, cwd, env, self._console)
         self._process, self.pid = info.hProcess, int(info.dwProcessId)
         try:
-            _check(_AssignProcessToJobObject(self._job, self._process))
+            winjob.assign(self._job, self._process)
             if _ResumeThread(info.hThread) == 0xFFFFFFFF:
                 raise ctypes.WinError(ctypes.get_last_error())
         except BaseException:
@@ -277,7 +236,7 @@ class ConPtyChild(PtyChild):
             self._close_console()      # a second request finds it closed and simply waits
             return True
         if stage == KILL and self._job:
-            return bool(_TerminateJobObject(self._job, STOPPED_EXIT_CODE))
+            return winjob.terminate(self._job)
         return False
 
     def close(self) -> None:
