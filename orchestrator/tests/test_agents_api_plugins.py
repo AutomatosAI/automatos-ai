@@ -78,6 +78,8 @@ def _make_full_agent(assigned_plugins=None):
     agent.required_role = None
     agent.marketplace_category = None
     agent.voice_profile_id = None
+    agent.team = None  # #831
+    agent.reports_to_id = None  # #831
     return agent
 
 
