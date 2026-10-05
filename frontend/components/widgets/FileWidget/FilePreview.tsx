@@ -49,17 +49,19 @@ import 'prismjs/components/prism-markdown'
 import 'prismjs/components/prism-docker'
 import { MarkdownView } from '@/components/shared/markdown-view'
 import { apiClient } from '@/lib/api-client'
+import { apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
 
 /**
  * Fetch a URL with Automatos Bearer auth. Relative URLs are prefixed with
  * the API base URL. Used by DocxPreview/XlsxPreview for binary files served
  * by the authenticated /files/raw endpoint. Returns the response arrayBuffer.
  */
-async function authenticatedArrayBufferFetch(url: string): Promise<ArrayBuffer> {
+export async function authenticatedArrayBufferFetch(url: string): Promise<ArrayBuffer> {
   const isAbsolute = /^https?:\/\//i.test(url)
-  const fullUrl = isAbsolute ? url : `${apiClient.getBaseUrl()}${url}`
-  const headers = isAbsolute ? {} : await apiClient.getAuthHeaders()
-  const resp = await fetch(fullUrl, { headers, credentials: isAbsolute ? 'include' : 'omit' })
+  const apiUrl = isAbsolute ? null : apiFileUrl(apiClient.getBaseUrl(), url)  // F352: the token goes to the API only
+  if (!isAbsolute && !apiUrl) throw new Error(NOT_AN_API_FILE)
+  const headers = apiUrl ? await apiClient.getAuthHeaders() : {}
+  const resp = await fetch(apiUrl ?? url, { headers, credentials: isAbsolute ? 'include' : 'omit' })
   if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`)
   return resp.arrayBuffer()
 }
@@ -70,7 +72,11 @@ async function authenticatedArrayBufferFetch(url: string): Promise<ArrayBuffer> 
  * behind a Bearer-auth API. For already-absolute URLs (presigned S3 etc.)
  * the URL is returned unchanged. The blob URL is revoked on cleanup.
  */
-export function useAuthenticatedBlobUrl(url: string | undefined): {
+// F352: a PDF preview is framed as a blob: URL, which runs as this page's origin. Its bytes
+// are always typed as a PDF, so a file that is really HTML can never run as the app.
+const PDF_TYPE = 'application/pdf'
+
+export function useAuthenticatedBlobUrl(url: string | undefined, forcedType?: string): {
   src: string | null
   error: string | null
 } {
@@ -93,11 +99,14 @@ export function useAuthenticatedBlobUrl(url: string | undefined): {
     let createdUrl: string | null = null
     ;(async () => {
       try {
-        const fullUrl = `${apiClient.getBaseUrl()}${url}`
+        // F358: only a path on the API's own origin gets the Authorization header.
+        const fullUrl = apiFileUrl(apiClient.getBaseUrl(), url)
+        if (!fullUrl) throw new Error(NOT_AN_API_FILE)
         const headers = await apiClient.getAuthHeaders()
         const resp = await fetch(fullUrl, { headers })
         if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`)
-        const blob = await resp.blob()
+        const fetched = await resp.blob()
+        const blob = forcedType ? new Blob([fetched], { type: forcedType }) : fetched
         if (cancelled) return
         createdUrl = URL.createObjectURL(blob)
         setSrc(createdUrl)
@@ -111,7 +120,7 @@ export function useAuthenticatedBlobUrl(url: string | undefined): {
       cancelled = true
       if (createdUrl) URL.revokeObjectURL(createdUrl)
     }
-  }, [url])
+  }, [url, forcedType])
 
   return { src, error }
 }
@@ -353,7 +362,7 @@ function PdfContent({
   filename?: string
   className?: string
 }) {
-  const { src, error } = useAuthenticatedBlobUrl(url)
+  const { src, error } = useAuthenticatedBlobUrl(url, PDF_TYPE)
   if (!url) return <NotAvailable message="No PDF URL" className={className} />
   if (error) return <NotAvailable message={`PDF load failed: ${error}`} className={className} />
   if (!src) return <LoadingPane message="Loading PDF…" />
