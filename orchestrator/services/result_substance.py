@@ -25,6 +25,11 @@ kilograms per account …:" #1881's, "I'll attempt a query to list all tables in
 #1888's. A result whose last line announces a step it never took
 (``modules.tools.execution.nudges.announced_step``) is said plainly the same way
 (``stopped_mid_step``): it goes to review, or is a failed attempt for a mission step.
+
+F334 (night 10): an answer that says its own work isn't done ("I couldn't make the
+invoice you asked for", "Invoice HL-2026-0142 isn't done") goes to review too, with
+that sentence quoted (``services.said_not_done``), even when the card's review mode
+is auto.
 """
 from __future__ import annotations
 
@@ -32,6 +37,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from core.services.ticket_reasons import NOTHING_DONE_NOTE_PREFIX
+from services.said_not_done import said_not_done_note
 
 # The agent path's header when a run ends without an answer (agent_factory).
 TOOL_RESULTS_HEADER = "Based on the tool results:"
@@ -64,8 +70,14 @@ def is_skip_message(content: str) -> bool:
 
 
 def nothing_done_note(result: str) -> Optional[str]:
-    """The review note for a result that is only skipped tool calls (F093), or one
-    that says the run wrote no answer (F297), else None."""
+    """The review note for a result that is only skipped tool calls (F093), says the
+    run wrote no answer (F297) or stopped mid-step (F306), or whose answer says its
+    work isn't done (F334), else None."""
+    return _nothing_produced_note(result) or said_not_done_note(result)
+
+
+def _nothing_produced_note(result: str) -> Optional[str]:
+    """The F093 / F297 / F306 note: the run produced no answer."""
     lines: List[str] = [ln.strip() for ln in (result or "").splitlines() if ln.strip()]
     if lines and lines[0] == NO_ANSWER_HEADER:
         return NO_ANSWER_NOTE
