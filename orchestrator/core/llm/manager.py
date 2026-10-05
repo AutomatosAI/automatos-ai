@@ -428,48 +428,42 @@ class LLMManager:
         if config is None:
             config = self._load_config_from_settings(service_name, provider, model)
         elif not config.api_key:
-            # Config provided but no api_key - look up credential
-            logger.debug(f"Config provided without api_key, looking up credential for {config.provider.value}")
-            cred_data = get_credential_data(config.provider.value, service_name=service_name)
-            
-            # Extract API key based on provider
-            api_key = None
-            if config.provider == LLMProvider.HUGGINGFACE:
-                api_key = cred_data.get("api_token") or cred_data.get("api_key")
-            elif config.provider == LLMProvider.GROK:
-                api_key = cred_data.get("api_key") or cred_data.get("api_token")
-            else:
-                api_key = cred_data.get("api_key") or cred_data.get("api_token")
-            
-            if api_key:
-                config = LLMConfig(
-                    provider=config.provider,
-                    model=config.model,
-                    temperature=config.temperature,
-                    max_tokens=config.max_tokens,
-                    api_key=api_key,
-                    base_url=config.base_url,
-                    output_ceiling=config.output_ceiling,
-                )
-                logger.info(f"Credential found for {config.provider.value}")
+            config = self._with_stored_credential(config, service_name)
         
         self.config = config
         self.provider = None  # Lazy initialization
 
-        # F196: this manager's output budgets, read once here: a settings read is
-        # a sync database read, so never per call. A service manager (built from
-        # settings) has its purpose's budget; an agent's (given a config) keeps
-        # its configured one.
         self._own_purpose = request_type or service_name
         self._from_settings = built_from_settings
-        self._service_budget = (
-            output_budget.budget_for(self._own_purpose, config.output_ceiling) if built_from_settings else None
-        )
-        self._long_budget = output_budget.budget_for(output_budget.LONG_DELIVERABLE, config.output_ceiling)
+        self._service_budget, self._long_budget = output_budget.manager_budgets(
+            self._own_purpose, config, from_settings=built_from_settings)
 
         # Don't create provider immediately - lazy loading
         logger.debug(f"LLMManager initialized for service '{service_name}' with provider '{config.provider.value}', model '{config.model}'")
     
+    @staticmethod
+    def _with_stored_credential(config: LLMConfig, service_name: str) -> LLMConfig:
+        """A config given without an api_key, with the credential store's key
+        for its provider (unchanged when the store has none)."""
+        logger.debug(f"Config provided without api_key, looking up credential for {config.provider.value}")
+        cred_data = get_credential_data(config.provider.value, service_name=service_name)
+        if config.provider == LLMProvider.HUGGINGFACE:
+            api_key = cred_data.get("api_token") or cred_data.get("api_key")
+        else:
+            api_key = cred_data.get("api_key") or cred_data.get("api_token")
+        if not api_key:
+            return config
+        logger.info(f"Credential found for {config.provider.value}")
+        return LLMConfig(
+            provider=config.provider,
+            model=config.model,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            api_key=api_key,
+            base_url=config.base_url,
+            output_ceiling=config.output_ceiling,
+        )
+
     def _load_config_from_settings(
         self,
         service_name: str,
