@@ -708,7 +708,13 @@ class DocumentManager:
         Returns ``(document_id, s3_key)``. When the workspace already holds a
         processed copy of these exact bytes in the same provenance scope, nothing
         is written and its id comes back with ``s3_key`` None.
+
+        F357 (5 Oct): a manager without a workspace refuses before it touches
+        the database. Its duplicate lookup could match no tenant's documents and
+        its row would belong to none, so there is nothing safe for it to do.
         """
+        if not self.workspace_id:
+            raise ValueError("workspace_id required to upload a document")
         conn = psycopg2.connect(**self.db_config)
         try:
             cursor = conn.cursor()
@@ -734,6 +740,10 @@ class DocumentManager:
         output never stands in for the owner's upload, nor the reverse (F305).
         A copy that failed or is still processing is left alone — the upload
         gets a row of its own rather than deleting someone else's document.
+
+        F357 (5 Oct): the workspace filter is what keeps tenants apart. Before
+        #834 the lookup was ``WHERE file_hash = %s`` across every workspace, so
+        identical bytes returned another tenant's document id.
         """
         cursor.execute(
             "SELECT id FROM documents WHERE content_hash = %s AND workspace_id = %s "
@@ -1744,31 +1754,3 @@ class DocumentManager:
         except Exception as e:
             logger.error(f"Error getting document stats: {e}")
             raise
-
-# Example usage
-if __name__ == "__main__":
-    import asyncio
-    from config import config
-
-    # Database configuration
-    db_config = {
-        'host': config.POSTGRES_HOST or '127.0.0.1',
-        'database': 'orchestrator_db',
-        'user': 'postgres',
-        'password': 'your_password'
-    }
-    
-    # Initialize document manager
-    doc_manager = DocumentManager(db_config, "your_openai_api_key")
-    
-    # Upload a document
-    async def test_upload():
-        doc_id = await doc_manager.upload_document(
-            "/path/to/document.pdf",
-            tags=["business", "process"],
-            description="Business process documentation"
-        )
-        print(f"Uploaded document with ID: {doc_id}")
-    
-    # Run test
-    # asyncio.run(test_upload())
