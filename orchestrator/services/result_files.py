@@ -131,18 +131,21 @@ def worker_paths(named: Sequence[str], *, workspace_id: str, runtime_ref: Option
     workspace paths; a session's are relative to the folder it ran in, which must
     itself map into the workspace, or written from the deliverables root."""
     from services.cli_host_service import workspace_relative_path
+    from services.host_paths import as_host_path, is_absolute_host_path, is_windows_drive_path
 
     ref = runtime_ref or {}
     session = bool(ref.get("host_id"))
     base = _session_base(runtime_ref, workspace_id, projects_dir)
+    windows_host = session and is_windows_drive_path(str(ref.get("cwd") or ""))   # #818: its names use backslashes
     out: List[Tuple[str, str]] = []
     for name in named:
-        if name.startswith("/"):
-            places = [workspace_relative_path(name, workspace_id, projects_dir)]
+        path = as_host_path(name) if windows_host else name
+        if is_absolute_host_path(path):
+            places = [workspace_relative_path(path, workspace_id, projects_dir)]
         elif session:
-            places = _session_places(name, base) if base else []
+            places = _session_places(path, base) if base else []
         else:
-            places = _workspace_places(name)
+            places = _workspace_places(path)
         for rel in places:
             if rel and rel != "." and not rel.startswith(("../", "/")) and rel != "..":
                 out.append((name, rel))
