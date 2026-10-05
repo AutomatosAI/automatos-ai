@@ -11,10 +11,16 @@ guarded fetcher can't drive.
 from __future__ import annotations
 
 import base64
+import io
 
-ONE_PIXEL_PNG = base64.b64encode(bytes.fromhex(
-    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
-    "1f15c4890000000d49444154789c6360f8cfc0f01f0005000201e2216bc80000000049454e44ae426082")).decode()
+
+def _png() -> str:
+    """A real 8x8 PNG (Pillow ships with WeasyPrint), base64 for a data: URI."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "#1E3A5F").save(buf, "PNG")
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 def test_a_pdf_with_an_inline_image_renders_through_the_guarded_fetcher():
@@ -22,7 +28,7 @@ def test_a_pdf_with_an_inline_image_renders_through_the_guarded_fetcher():
 
     from modules.documents.generation_service import _safe_url_fetcher
 
-    html = f'<h1>Harbourline</h1><img src="data:image/png;base64,{ONE_PIXEL_PNG}">'
+    html = f'<h1>Harbourline</h1><img src="data:image/png;base64,{_png()}">'
     pdf = HTML(string=html, url_fetcher=_safe_url_fetcher).write_pdf()
     assert pdf.startswith(b"%PDF")
 
