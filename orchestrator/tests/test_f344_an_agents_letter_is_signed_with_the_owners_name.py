@@ -14,6 +14,8 @@ the letter's text back out of the PDF.
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import uuid
 from types import SimpleNamespace as NS
 from typing import Any, Dict, List
@@ -36,7 +38,19 @@ OWNER = NS(id=11, name="Gerard Kavanagh", email="gerard@harbourline.ie", usernam
 THEIR_OWNER = NS(id=22, name="Someone Else", email="someone@elsewhere.example", username="someone")
 LOCAL_PLACEHOLDER = "local@automatos.local"
 COMPANY_EMAIL = "hello@harbourline.ie"
-KIT = {"name": "Harbourline Coffee Roasters",
+
+
+def _logo_data_uri() -> str:
+    """A real 8x8 PNG as a data: URI. The Branded Letter carries a brand_logo block, and
+    a kit with no logo blocks it at finalisation (brand.logo_url), so the kit needs one."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), "#1E3A5F").save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+KIT = {"name": "Harbourline Coffee Roasters", "logo_url": _logo_data_uri(),
        "company": {"name": "Harbourline Coffee Roasters", "email": COMPANY_EMAIL}}
 LETTER_DATA = dict(LETTER["sample_data"]["data"])
 CALL = {"title": "Spring campaign letter", "format": "pdf", "template_name": "Branded Letter", "data": LETTER_DATA}
@@ -203,7 +217,8 @@ def test_on_the_local_edition_the_operator_signs_and_the_placeholder_email_is_ne
 def test_with_no_company_email_the_placeholder_is_left_out_not_printed(generate, monkeypatch):
     operator = NS(id=1, name="Gerard", email=LOCAL_PLACEHOLDER, username="local")
     monkeypatch.setattr(config, "LOCAL_OPERATOR_EMAIL", LOCAL_PLACEHOLDER)
-    db = _session(our_owner_id=None, users=(operator,), kit={"name": "Harbourline Coffee Roasters"})
+    kit = {"name": "Harbourline Coffee Roasters", "logo_url": KIT["logo_url"]}
+    db = _session(our_owner_id=None, users=(operator,), kit=kit)
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
 
     answer, text, _ = generate(db)
