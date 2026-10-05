@@ -15,8 +15,12 @@ Fills ``llm_models`` with one row per ROUTE — ``(serving_provider, model_id)``
   Non-chat ids (embeddings, rerankers, reward models, OCR/parsers, safety
   classifiers) are skipped — this is the chat catalogue.
 
-Direct providers (OpenAI, Anthropic, Google, DeepSeek…) keep their seeded
-rows; their ``/models`` endpoints need a key and publish no prices.
+- ``anthropic`` (#829): reads Anthropic's Models API with the workspace's own
+  Anthropic key and writes rows served by Anthropic
+  (``core.services.anthropic_catalog_sync``).
+
+The other direct providers (OpenAI, Google, DeepSeek…) keep their seeded rows;
+their ``/models`` endpoints need a key and publish no prices.
 
 Job history rides on ``openrouter_sync_jobs`` (``job_type`` distinguishes the
 provider) — no new table (CLAUDE.md §4).
@@ -39,8 +43,8 @@ from core.services.openrouter_sync_service import OpenRouterSyncService
 
 logger = logging.getLogger(__name__)
 
-SYNCABLE_PROVIDERS = ("openrouter", "nvidia")
-JOB_TYPES = {"openrouter": "full_sync", "nvidia": "nvidia_sync"}
+SYNCABLE_PROVIDERS = ("openrouter", "nvidia", "anthropic")
+JOB_TYPES = {"openrouter": "full_sync", "nvidia": "nvidia_sync", "anthropic": "anthropic_sync"}
 
 # NVIDIA lists embeddings, rerankers, reward models, OCR/parsers and safety
 # classifiers next to chat models. None of them answer chat completions.
@@ -64,12 +68,14 @@ class ProviderCatalogSync:
     # Dispatch
     # ------------------------------------------------------------------ #
 
-    def sync(self, provider: str, api_key: Optional[str] = None) -> Dict[str, Any]:
+    def sync(self, provider: str, api_key: Optional[str] = None, workspace_id: Any = None) -> Dict[str, Any]:
         slug = registry.normalize_slug(provider)
         if slug == "openrouter":
             return self.sync_openrouter()
         if slug == "nvidia":
             return self.sync_nvidia(api_key=api_key)
+        if slug == "anthropic":
+            return self.sync_anthropic(workspace_id=workspace_id)
         raise ValueError(f"Provider '{provider}' has no catalogue sync (syncable: {', '.join(SYNCABLE_PROVIDERS)})")
 
     def last_synced(self) -> Dict[str, Optional[str]]:
@@ -154,6 +160,16 @@ class ProviderCatalogSync:
             external_id=cached.model_id,
             pricing_updated_at=datetime.utcnow(),
         )
+
+    # ------------------------------------------------------------------ #
+    # Anthropic: the Models API, with the workspace's own key (#829)
+    # ------------------------------------------------------------------ #
+
+    def sync_anthropic(self, workspace_id: Any = None) -> Dict[str, Any]:
+        """Anthropic's model list, read with the key that pays for the workspace's Anthropic calls."""
+        from core.services.anthropic_catalog_sync import run_anthropic_sync
+
+        return run_anthropic_sync(self, workspace_id=workspace_id)
 
     # ------------------------------------------------------------------ #
     # NVIDIA: public list + borrowed metadata
@@ -290,16 +306,22 @@ class ProviderCatalogSync:
     # Upsert
     # ------------------------------------------------------------------ #
 
-    def _upsert_route(self, serving_provider: str, model_id: str, values: Dict[str, Any]) -> None:
+    def _upsert_route(
+        self, serving_provider: str, model_id: str, values: Dict[str, Any],
+        insert_only: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """INSERT … ON CONFLICT (serving_provider, model_id) DO UPDATE.
 
         Workspace-facing state (install_count, featured/default flags,
-        workspace_id, created_at) is never overwritten by a sync.
+        workspace_id, created_at) is never overwritten by a sync, and neither
+        is anything in ``insert_only`` (#829: what a new row starts with but an
+        existing row keeps, e.g. the price the Anthropic API does not publish).
         """
         now = datetime.utcnow()
         update = dict(values, serving_provider=serving_provider, model_id=model_id, updated_at=now)
         insert = dict(
-            update,
+            insert_only or {},
+            **update,
             created_at=now,
             install_count=0,
             popularity_score=0,
