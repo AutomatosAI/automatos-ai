@@ -76,6 +76,9 @@ from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 
 from consumers.chatbot.shop_figures import counts_from_the_shop  # F316 (night 9b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
 from consumers.chatbot.team_corrections import tells_the_team_honestly  # F324 (night 9b)
+from consumers.chatbot.document_conversation import (  # F351 (night 10b)
+    about_a_document, full_path_for_documents, with_document_actions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -993,7 +996,8 @@ class StreamingChatService:
             workspace_id=self.workspace_id,
             query=query,
             is_super_admin=is_super_admin,
-            page_actions=page_actions,
+            # F351: a document conversation's template actions survive the ranking too.
+            page_actions=with_document_actions(page_actions, getattr(self, "_document_turn", False)),
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -2592,6 +2596,10 @@ class StreamingChatService:
         from core.llm.usage_context import LANE_CHAT, usage_scope
         from core.security.surface import WIDGET, turn_surface
 
+        # F351 (night 10b): a document conversation keeps its document tools on a follow-up —
+        # the full path (never the dispatcher-only ATOM lane) and the template actions ranked in.
+        self._document_turn = not self.widget_mode and about_a_document(messages)
+        complexity_assessment = full_path_for_documents(complexity_assessment, self._document_turn, force_text_only)
         # F155: every tool call of a widget turn carries the widget surface, so the
         # gates treat it as a visitor's whatever caller context the call built.
         # PRD-251B US-B106 (B3): what this workspace is not shown (Socials while it
