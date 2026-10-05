@@ -9,7 +9,8 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
+from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, run_blocking
+from .openai_chat_request import chat_kwargs, tool_calls_from
 
 try:
     from openai import OpenAI
@@ -61,6 +62,12 @@ class OpenAIProvider(BaseLLMProvider):
             self.client = OpenAI(**client_kwargs)
             logger.info(f"Initialized OpenAI client with model: {self.config.model}")
     
+    def _chat_kwargs(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        """#873: a reasoning model (o3, gpt-5) gets no sampling parameters and its
+        budget as ``max_completion_tokens``; every other model is sent as before."""
+        reasoning = not accepts_sampling_params(self.config.model)
+        return chat_kwargs(self.config, messages, sampling=not reasoning, completion_tokens=reasoning)
+
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response using OpenAI API without blocking the event loop"""
         if self.client is None:
@@ -71,20 +78,7 @@ class OpenAIProvider(BaseLLMProvider):
         
         try:
             def _call():
-                kwargs = {
-                    "model": self.config.model,
-                    "messages": messages,
-                    "temperature": self.config.temperature,
-                    "max_tokens": request_max_tokens(self.config),
-                }
-                if self.config.top_p is not None:
-                    kwargs["top_p"] = self.config.top_p
-                if self.config.frequency_penalty is not None:
-                    kwargs["frequency_penalty"] = self.config.frequency_penalty
-                if self.config.presence_penalty is not None:
-                    kwargs["presence_penalty"] = self.config.presence_penalty
-                if self.config.stop is not None:
-                    kwargs["stop"] = self.config.stop
+                kwargs = self._chat_kwargs(messages)
                 # PRD-17: Add tools if provided
                 if tools:
                     formatted_tools = self._sanitize_tools(tools, keep_strict=True)
@@ -105,22 +99,10 @@ class OpenAIProvider(BaseLLMProvider):
                 raise
             
             # PRD-17: Extract tool calls if present
-            tool_calls = None
+            tool_calls = tool_calls_from(response.choices[0].message)
             content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason
-            
-            if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
-                tool_calls = []
-                for tc in response.choices[0].message.tool_calls:
-                    tool_calls.append({
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    })
-            
+
             return LLMResponse(
                 content=content or "",  # May be None if tool_calls present
                 usage=usage_from_openai(response.usage),
@@ -142,21 +124,7 @@ class OpenAIProvider(BaseLLMProvider):
             )
         
         try:
-            sync_kwargs = {
-                "model": self.config.model,
-                "messages": messages,
-                "temperature": self.config.temperature,
-                "max_tokens": request_max_tokens(self.config),
-            }
-            if self.config.top_p is not None:
-                sync_kwargs["top_p"] = self.config.top_p
-            if self.config.frequency_penalty is not None:
-                sync_kwargs["frequency_penalty"] = self.config.frequency_penalty
-            if self.config.presence_penalty is not None:
-                sync_kwargs["presence_penalty"] = self.config.presence_penalty
-            if self.config.stop is not None:
-                sync_kwargs["stop"] = self.config.stop
-            response = self.client.chat.completions.create(**sync_kwargs)
+            response = self.client.chat.completions.create(**self._chat_kwargs(messages))
             
             return LLMResponse(
                 content=response.choices[0].message.content,

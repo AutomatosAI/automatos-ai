@@ -29,6 +29,8 @@ class ResolvedKey:
     source: str  # "byok", "platform_workspace", "platform", "env"
     is_byok: bool
     provider: str = ""
+    # #873: a BYOK key's own endpoint (Azure); None keeps the client's own default
+    base_url: Optional[str] = None
 
 
 def resolve_provider_key(db: Any, provider_name: str, *, workspace_id: Any = None,
@@ -65,10 +67,26 @@ def _byok_key(db: Any, provider_name: str, workspace_id: Any) -> Optional[Resolv
             return None
         logger.info("Resolved BYOK API key for '%s' workspace=%s", provider_name, workspace_id)
         return ResolvedKey(api_key=get_encryption_service().decrypt(row.encrypted_key), source="byok", is_byok=True,
-                           provider=provider_name)
+                           provider=provider_name, base_url=getattr(row, "base_url", None) or None)
     except Exception:
         logger.exception("BYOK key lookup failed for %s; trying the platform's keys", provider_name)
         return None
+
+
+def byok_endpoint(provider_name: str, workspace_id: Any) -> Optional[str]:
+    """The endpoint saved with the workspace's BYOK key for ``provider_name`` (#873), or None.
+
+    The same row ``resolve_provider_key`` picks, read in a session of its own: an
+    ``LLMManager`` built from a key alone asks for it (``byok_endpoint.with_key_endpoint``).
+    """
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        resolved = _byok_key(db, provider_name, workspace_id)
+    finally:
+        db.close()
+    return resolved.base_url if resolved else None
 
 
 def _platform_key(provider_name: str, agent_name: str) -> Optional[ResolvedKey]:
@@ -102,4 +120,4 @@ def _credential(resolver: Any, name: str) -> Optional[str]:
         return None
 
 
-__all__ = ["ResolvedKey", "resolve_provider_key"]
+__all__ = ["ResolvedKey", "byok_endpoint", "resolve_provider_key"]

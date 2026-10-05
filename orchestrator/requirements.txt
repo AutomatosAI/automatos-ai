@@ -91,7 +91,7 @@ opencv-python-headless>=4.10.0  # Upgraded for numpy 2.x compat (needed by camel
 
 # AI provider clients (API-based, no local models)
 tiktoken>=0.5.0  # Token counting for context management (RAG, context_guard)
-openai>=1.10.0
+openai>=1.45.0
 anthropic>=0.40.0,<1.0.0
 google-generativeai>=0.8.0  # Google Gemini native API
 

@@ -95,7 +95,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # heartbeat's ticket report is a heartbeat in v_workspace_outputs, and the old ones re-typed.
 # 2026-10-05 (#840): workflows_tags_jsonb chains onto that — workflows.tags becomes JSONB
 # so ix_workflows_tags_gin can actually be built (Postgres has no GIN opclass for json).
-EXPECTED_HEAD = "workflows_tags_jsonb"
+# 2026-10-05 (#873): user_api_keys_base_url chains onto that — a workspace key carries
+# its own endpoint (Azure's resource URL).
+EXPECTED_HEAD = "user_api_keys_base_url"
 
 
 def _literal(node: ast.AST):

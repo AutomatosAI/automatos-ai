@@ -210,7 +210,7 @@ def _patch_handler(monkeypatch, *, valid, message="API key is valid"):
     monkeypatch.setattr(uak, "get_encryption_service", lambda: _FakeEnc())
     monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
 
-    async def _stub(provider, key):
+    async def _stub(provider, key, base_url=None):
         return ApiKeyValidation(valid=valid, message=message, tested_at=datetime.utcnow())
 
     monkeypatch.setattr(uak, "_validate_provider_key", _stub)

@@ -33,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { keyPlaceholder, providerNotes, useProviderRegistry } from '@/hooks/use-provider-registry'
+import { endpointPlaceholder, keyPlaceholder, providerNotes, useProviderRegistry } from '@/hooks/use-provider-registry'
 import type { AddKeyPayload, ApiKeyOut, ProviderOption } from './api-keys-types'
 
 interface AddApiKeyDialogProps {
@@ -48,12 +48,15 @@ export function AddApiKeyDialog({ providers }: AddApiKeyDialogProps) {
   const [provider, setProvider] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [endpoint, setEndpoint] = useState('')
   const selectedNotes = providerNotes(registry, provider)
+  const endpointHint = endpointPlaceholder(registry, provider)
 
   function resetForm() {
     setProvider('')
     setApiKey('')
     setDisplayName('')
+    setEndpoint('')
   }
 
   const addKeyMutation = useMutation({
@@ -82,7 +85,8 @@ export function AddApiKeyDialog({ providers }: AddApiKeyDialogProps) {
       toast.error('Provider and API key are required')
       return
     }
-    addKeyMutation.mutate({ provider, api_key: apiKey, display_name: displayName })
+    const base_url = endpointHint && endpoint.trim() ? endpoint.trim() : undefined
+    addKeyMutation.mutate({ provider, api_key: apiKey, display_name: displayName, base_url })
   }
 
   return (
@@ -146,6 +150,20 @@ export function AddApiKeyDialog({ providers }: AddApiKeyDialogProps) {
                 </div>
               )}
             </div>
+
+            {endpointHint && (
+              <div className="space-y-2">
+                <Label htmlFor="endpoint">Endpoint</Label>
+                <Input
+                  id="endpoint"
+                  type="url"
+                  placeholder={endpointHint}
+                  value={endpoint}
+                  onChange={(e) => setEndpoint(e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="display-name">Display Name</Label>

@@ -85,6 +85,7 @@ class LLMConfig:
     stop: Optional[list] = None  # Stop sequences
     timeout: Optional[int] = None  # Request timeout in seconds
     output_ceiling: Optional[int] = None  # The model's own output maximum, when known (F196)
+    endpoint_from_key: bool = False  # base_url is a workspace key's own endpoint: user input (#873)
 
 
 def request_max_tokens(config: Any) -> int:
@@ -99,10 +100,26 @@ def request_max_tokens(config: Any) -> int:
 # later, Sonnet 5, Fable, Mythos. Matches API, Bedrock and OpenRouter ids.
 _REJECTS_SAMPLING = re.compile(r"claude-(opus-4[.-][78]|opus-5|sonnet-5|fable|mythos)")
 
+# #873: OpenAI's reasoning models refuse temperature, top_p and the penalties,
+# and take max_completion_tokens instead of max_tokens: the o-series, codex-mini
+# and the first GPT-5 family (gpt-5, -mini, -nano, -pro, -codex). gpt-5-chat and
+# the later gpt-5.N models are left out: at their default reasoning effort they
+# take temperature. Matches a bare id, a dated id ("o3-mini-2025-01-31") and an
+# OpenRouter id ("openai/o3").
+_OPENAI_REASONING = re.compile(
+    r"(?:^|/)(?:o[134](?:-[a-z]+)*|codex-mini(?:-[a-z]+)*|gpt-5(?:-(?:mini|nano|pro|codex))?)"
+    r"(?:-\d{4}-\d{2}-\d{2})?$"
+)
+
 
 def accepts_sampling_params(model: Optional[str]) -> bool:
-    """Whether a request to ``model`` may carry temperature, top_p or top_k."""
-    return not _REJECTS_SAMPLING.search(model or "")
+    """Whether a request to ``model`` may carry temperature, top_p or top_k.
+
+    False for the Claude models that answer them with a 400 and, since #873,
+    for OpenAI's reasoning models (which also need ``max_completion_tokens``).
+    """
+    name = (model or "").strip().lower()
+    return not (_REJECTS_SAMPLING.search(name) or _OPENAI_REASONING.search(name))
 
 
 _T = TypeVar("_T")

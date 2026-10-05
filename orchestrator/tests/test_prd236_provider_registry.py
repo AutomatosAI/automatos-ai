@@ -455,6 +455,7 @@ def test_providers_endpoint_returns_the_public_registry(monkeypatch):
     assert set(payload["providers"][0].keys()) == {
         "slug", "label", "kind", "chat", "embeddings", "byok", "platform_key",
         "hosts_vendor_models", "free", "key_placeholder", "docs_url", "terms_note", "rate_limit_note",
+        "setup_note", "endpoint_placeholder",
     }
 
 

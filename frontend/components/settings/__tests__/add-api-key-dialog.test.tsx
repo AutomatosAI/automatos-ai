@@ -55,7 +55,10 @@ vi.mock('@/components/ui/select', () => ({
 
 import { AddApiKeyDialog } from '../AddApiKeyDialog'
 
-const PROVIDERS = [{ value: 'openai', label: 'OpenAI' }]
+const PROVIDERS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'azure', label: 'Azure OpenAI (Microsoft Foundry)' },
+]
 
 function savedKey(overrides: Record<string, unknown> = {}) {
   return {
@@ -147,5 +150,51 @@ describe('AddApiKeyDialog (issue #830)', () => {
 
     expect(toastError).toHaveBeenCalledWith('Provider and API key are required')
     expect(postMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('AddApiKeyDialog: a key with its own endpoint (issue #873)', () => {
+  beforeEach(() => {
+    postMock.mockReset()
+    postMock.mockResolvedValue(
+      savedKey({
+        provider: 'azure',
+        is_active: true,
+        validation: { valid: true, message: 'API key is valid', tested_at: '2026-10-05T00:00:00Z' },
+      }),
+    )
+  })
+
+  it('asks for the Azure endpoint and sends it with the key', async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: /add api key/i }))
+    fireEvent.change(screen.getByTestId('provider-select'), { target: { value: 'azure' } })
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'azure-key-0001' } })
+
+    const endpoint = await screen.findByLabelText('Endpoint')
+    expect(endpoint).toHaveAttribute('placeholder', 'https://<resource>.openai.azure.com')
+    fireEvent.change(endpoint, { target: { value: ' https://contoso.openai.azure.com ' } })
+    fireEvent.click(screen.getByRole('button', { name: /^add key$/i }))
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled())
+    expect(postMock).toHaveBeenCalledWith('/api/keys', {
+      provider: 'azure',
+      api_key: 'azure-key-0001',
+      display_name: '',
+      base_url: 'https://contoso.openai.azure.com',
+    })
+  })
+
+  it('shows no endpoint field and sends none for a provider with a fixed address', async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: /add api key/i }))
+    fireEvent.change(screen.getByTestId('provider-select'), { target: { value: 'openai' } })
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-good-key' } })
+
+    expect(screen.queryByLabelText('Endpoint')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^add key$/i }))
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled())
+    expect(postMock.mock.calls[0][1]).not.toHaveProperty('base_url', expect.anything())
   })
 })

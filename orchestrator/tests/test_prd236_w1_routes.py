@@ -255,7 +255,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # JSONB so ix_workflows_tags_gin can actually be built; the guard follows it.
     tags_jsonb = (versions / "workflows_tags_jsonb.py").read_text()
     assert 'down_revision = "outputs_heartbeat_reports"' in tags_jsonb
-    assert 'EXPECTED_HEAD = "workflows_tags_jsonb"' in guard
+    # 2026-10-05 (#873): user_api_keys_base_url chains onto it — a workspace key carries
+    # its own endpoint (Azure's resource URL); the guard follows it.
+    key_endpoint = (versions / "user_api_keys_base_url.py").read_text()
+    assert 'down_revision = "workflows_tags_jsonb"' in key_endpoint
+    assert 'EXPECTED_HEAD = "user_api_keys_base_url"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
