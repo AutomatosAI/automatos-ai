@@ -189,7 +189,10 @@ Then try the seeded **Two-minute brief** Playbook.
 ## Optional — session mode (your own Claude Code as agents)
 
 Session mode runs your Claude Code subscription as agents. It runs on **macOS,
-Linux, or WSL2 on Windows**, not on native Windows.
+Linux, or WSL2 on Windows**, and these steps use WSL2 on Windows. It also runs
+natively on Windows 10 1809 or later, with differences: see
+[the self-hosting guide](docs/getting-started/self-hosting.md), §1a, *Session
+mode on native Windows*.
 
 0. **Windows (WSL2) only, first:** the host installs as a `systemd --user`
    service, so enable systemd and lingering before step 4 (tested in
@@ -276,7 +279,7 @@ Day to day: `make up` starts it, `make down` stops it (your data is kept), and
 | `required variable POSTGRES_PASSWORD is missing` | `.env` is missing or the secrets are empty | Redo step 3 |
 | Backend stays `unhealthy` | Usually a slow first boot | Wait 2–3 minutes, then `docker compose logs backend --tail 50` |
 | Session files don't appear under their session in Explorer | `AUTOMATOS_WORKSPACE_DIR` is relative (`./workspaces`), or the code is under `/mnt/c` while Docker sees `C:\` | Use an absolute Linux path (step 3) and keep everything inside WSL2 |
-| `Session mode needs macOS, Linux or WSL2` | The host was started on native Windows | Run it inside Ubuntu (WSL2) |
+| `Session mode on Windows needs Windows 10 version 1809 or later` | The host was started on an older Windows | Run it inside Ubuntu (WSL2) |
 | Session mode says `claude_sandbox_unavailable` | `bubblewrap` / `socat` missing, or blocked by AppArmor on Ubuntu 24.04+ | Session mode, step 2 |
 | Disk filling up | Old image layers from rebuilds | `make clean`: safe, never touches your data |
 

@@ -1321,9 +1321,10 @@ jobs:
       - name: Run the CLI host suite
         run: pytest -q tests
 
-  # #818: the CLI host on native Windows. Its pseudo-terminal is ConPTY there
-  # (conpty.py, ctypes), which only a Windows machine can run. The rest of the
-  # suite joins this lane as each part of the host is ported.
+  # #818: the CLI host on native Windows: ConPTY, the job objects, the hook pipe,
+  # the login task's supervisor, and one whole ticket through a session. The rest
+  # of the suite exercises Unix internals (/bin/sh, AF_UNIX, POSIX signals) and
+  # runs on the Linux lane above.
   cli-host-windows:
     name: CLI host on Windows — ConPTY (non-required)
     runs-on: windows-latest
@@ -1341,7 +1342,10 @@ jobs:
       - name: Install pytest
         run: python -m pip install --upgrade pip pytest
       - name: Run the ported CLI host tests
-        run: pytest -q tests/test_ptyproc.py tests/test_filelock.py tests/test_lifecycle.py tests/test_winservice.py
+        run: >-
+          pytest -q tests/test_ptyproc.py tests/test_filelock.py tests/test_lifecycle.py
+          tests/test_winservice.py tests/test_hook_pipe.py tests/test_platform_guard.py
+          tests/test_session_on_windows.py
 
   # PRD-247: the simulation harness's own unit tests (tests/sim/tests). Pure
   # standard library, no database, no platform — parsers, pack validation,

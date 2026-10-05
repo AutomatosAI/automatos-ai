@@ -27,6 +27,7 @@ import json
 import os
 import re
 import shlex
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -206,6 +207,11 @@ def find_rollout(home: Path, session_id: str) -> Optional[Path]:
 
 # ── the adapter ─────────────────────────────────────────────────────────────
 
+# #818: OpenAI recommends WSL for Codex on Windows, so a native Windows host leaves it out.
+CODEX_ON_WINDOWS = ("Codex is not served on native Windows: OpenAI recommends running it in WSL. "
+                    "Run the CLI host inside WSL2 for Codex agents.")
+
+
 class CodexAdapter(PresetAdapter):
     def __init__(self, preset, binary: Optional[str] = None, home: Optional[Path] = None,
                  sandbox: Optional[SessionSandbox] = None) -> None:
@@ -216,6 +222,11 @@ class CodexAdapter(PresetAdapter):
     # ── identity ────────────────────────────────────────────────────────────
     def operator_home(self) -> Path:
         return (self._home or Path.home()) / ".codex"
+
+    def preflight(self) -> Optional[Refusal]:
+        if sys.platform == "win32":
+            return Refusal("codex_windows", CODEX_ON_WINDOWS)
+        return super().preflight()
 
     def _auth_state(self) -> Optional[Dict[str, Any]]:
         """The login file's SHAPE — which keys exist and the mode label. Values are

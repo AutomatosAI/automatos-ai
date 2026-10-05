@@ -40,7 +40,10 @@ One host per machine serves every `runtime: cli` agent of the workspace, so
 "my agents are always available" means "this process is always running". A
 terminal window is not that. `make cli-host-install` registers the host with
 your login session manager — a launchd LaunchAgent on macOS, a `systemd --user`
-unit on Linux — with the same directories `make cli-host` would use:
+unit on Linux, a Task Scheduler login task on Windows (`--install`; the task runs
+the host under a small supervisor, `winservice.py`, because Task Scheduler only
+restarts a task that fails to start) — with the same directories `make cli-host`
+would use:
 
 - starts at login, restarts within 15 s whenever it exits non-zero (a crash,
   the backend not being up yet, or a deliberate drift restart);
@@ -59,6 +62,25 @@ rebuilt). `make up` also sends it a nudge (`SIGHUP`) after every rebuild.
 "Drain" means: no new claims, running sessions finish, then exit `75` — the
 service manager restarts it on the new code. In a terminal, `make cli-host`
 simply exits; start it again.
+
+## Native Windows (#818)
+
+The host runs on Windows 10 1809 and later as well as macOS and Linux, standard
+library only. The guide's §1a (*Session mode on native Windows*) is the operator's
+view; underneath:
+
+| Unix | Windows | Where |
+|---|---|---|
+| a pty; stop = SIGHUP/SIGTERM/SIGKILL to the process group | ConPTY through ctypes; each session in a kill-on-close job object; stop = close the console, then end the job | `ptyproc.py`, `conpty.py`, `winjob.py` |
+| hooks over `hooks.sock`, peer-PID checked | a named pipe, random per start; an HMAC handshake on each connection's own thread with a key handed to the session; the shim checks the server PID and denies rather than wait | `hook_pipe.py`, `hook_shim.py` |
+| `--nudge` = SIGHUP | a restart-request file the host watches; `--uninstall` leaves a stop request | `lifecycle.py` |
+| launchd / systemd | a Task Scheduler login task running a supervisor | `winservice.py` |
+| `flock` | `msvcrt.locking` | `filelock.py` |
+| the login shell | PowerShell (`pwsh`, then `powershell`, then `cmd.exe`) | `terminal_server.py` |
+
+Refused on Windows, each with a sentence: an older Windows (`__main__.py`), a
+`.cmd` or `.bat` launcher (`ptyproc.windows_command_line`), a sandboxed session
+(`sandbox.WINDOWS_HINT`) and Codex (`codex_windows`).
 
 ## What it does, in one turn
 
@@ -202,8 +224,10 @@ refused, never asked. `failIfUnavailable` and `allowUnsandboxedCommands: false`
 leave no unsandboxed path, and `autoAllowBashIfSandboxed: false` keeps the gate
 deciding every call first. On Linux the host checks for `bwrap` and `socat` and,
 without them, does not serve Claude (`claude_sandbox_unavailable`, with the
-install command). `--no-session-sandbox` turns it off for a host that is
-already isolated (a VM, a container, a dedicated user with no credentials).
+install command). On native Windows there is no sandbox to configure, so a
+sandboxed session is refused with the same reason and the way out.
+`--no-session-sandbox` turns it off for a host that is already isolated (a VM, a
+container, a dedicated user with no credentials).
 Codex sandboxes itself (`-s workspace-write`). GitHub Copilot sessions get
 Copilot's own sandbox, configured the same way ([below](#github-copilot-cli-prd-253)).
 
@@ -368,7 +392,7 @@ no default root copies nothing.
 | `~/.automatos/cli-host/host.json` (0600) | the host token minted at pairing — the only secret |
 | `~/.automatos/cli-host/allowlist.json` | directories sessions may work in |
 | `~/.automatos/cli-host/sessions.json` | process table (killed on the next start if left behind) |
-| `~/.automatos/cli-host/hooks.sock` | the loopback socket hooks talk to |
+| `~/.automatos/cli-host/hooks.sock` | the loopback socket hooks talk to (on Windows: a named pipe with a random name, both ends holding a per-start key) |
 | `~/.automatos/cli-host/sessions/<ticket>/` | ticket, system prompt, settings, terminal log for one session; what the session writes here is copied to the deliverables folder |
 | `~/.automatos/cli-host/agents/<agent>/.codex`, `.copilot` | an agent's own config home for Codex and GitHub Copilot: rebuilt on every spawn, never holding a token; the CLI's session index lives here |
 | `<default root>/sessions/<ticket>/` | the ticket's deliverables folder (the backend registers what lands here) |

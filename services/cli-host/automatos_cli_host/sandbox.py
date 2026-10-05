@@ -57,6 +57,11 @@ INSTALL_HINT = ("Session sandbox unavailable: install bubblewrap and socat "
                 "or run the host with --no-session-sandbox on a machine that is already isolated.")
 
 
+WINDOWS_HINT = ("Session sandbox unavailable on Windows: Claude Code sandboxes its commands on macOS and "
+                "Linux only. Run the host with --no-session-sandbox on a Windows machine you accept as "
+                "isolated, or run it inside WSL2 with bubblewrap and socat.")
+
+
 @dataclass(frozen=True)
 class SessionSandbox:
     """The host's choice, from its flags: sandbox sessions or not, and which
@@ -80,6 +85,8 @@ def unavailable_reason(sandbox: Optional[SessionSandbox], system: Optional[str] 
     the ticket and in the fleet view."""
     if sandbox is None or not sandbox.enabled:
         return None
+    if (system or platform.system()) == "Windows":   # #818: no sandbox exists for it there; fail closed
+        return WINDOWS_HINT
     missing = missing_tools(system, path)
     return f"{INSTALL_HINT} Missing: {', '.join(missing)}." if missing else None
 
