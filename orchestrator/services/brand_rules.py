@@ -359,15 +359,33 @@ def _without_note(text: str) -> str:
     return text.split(BANNED_NOTE_LEAD, 1)[0]
 
 
+def _split_rules(text: str) -> Tuple[str, str, str]:
+    """(before, rules block, after): an answer that repeats its prompt carries the block, whose
+    placeholder example and banned list are the rules, not the answer. ("", "", text) without one."""
+    start = text.find(RULES_HEADING)
+    if start < 0:
+        return "", "", text
+    lines = text[start:].split("\n")
+    end = 1
+    while end < len(lines) and (lines[end] == RULES_LEAD or lines[end].startswith("- ")):
+        end += 1
+    block = "\n".join(lines[:end])
+    return text[:start], block, text[start + len(block):]
+
+
 def on_brand_text(text: str, kit: Optional[Dict[str, Any]]) -> str:
     """Finished ``text`` with its placeholder signature filled and, when it uses a banned
-    word, the note after it (once)."""
+    word, the note after it (once). A repeated rules block is left as it is and not checked."""
     if not kit or not isinstance(text, str) or not text.strip():
         return text
-    filled = fill_sign_off(text, sign_off_name(kit))
+    signer = sign_off_name(kit)
+    before, block, after = _split_rules(text)
+    before, after = fill_sign_off(before, signer), fill_sign_off(after, signer)
+    filled = f"{before}{block}{after}"
     if BANNED_NOTE_LEAD in filled:
         return filled
-    note = banned_note(banned_found(_without_note(filled), (kit.get("voice") or {}).get("banned_phrases") or []))
+    phrases = (kit.get("voice") or {}).get("banned_phrases") or []
+    note = banned_note(banned_found(_without_note(before + after), phrases))
     return f"{filled.rstrip()}\n\n{note}" if note else filled
 
 
