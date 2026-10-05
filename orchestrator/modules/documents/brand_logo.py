@@ -24,7 +24,12 @@ The logo is now a stored file, referenced by a storage-relative ``logo_path``
 PRD-251 D5 adds the logo MARK, a square mark separate from the wordmark: the
 same upload rules plus a square shape, stored at ``<workspace_id>/brand/logo-mark.png``
 (``logo_mark_path``) and served by ``/api/documents/brand-kit/logo-mark``. The
-brand files share one store (:func:`store_brand_file`, :func:`load_brand_file`,
+PRD-255 (Brand Kit v2) adds the logo's VARIANTS, uploaded by the owner and never
+generated (FR-9): the logo for dark backgrounds (``logo_dark_path``,
+``<workspace_id>/brand/logo-dark.png``) and the one-colour logo (``logo_mono_path``,
+``logo-mono.png``), each with the logo's upload rules and its own routes.
+
+The brand files share one store (:func:`store_brand_file`, :func:`load_brand_file`,
 :func:`delete_brand_file`): the logo, the mark, and the font files
 (``modules/documents/brand_fonts.py``).
 
@@ -48,6 +53,8 @@ logger = logging.getLogger(__name__)
 # The UI routes that stream the stored logo and logo mark (mounted under /api/documents).
 BRAND_LOGO_ROUTE = "/api/documents/brand-kit/logo"
 BRAND_LOGO_MARK_ROUTE = "/api/documents/brand-kit/logo-mark"
+BRAND_LOGO_DARK_ROUTE = "/api/documents/brand-kit/logo-dark"
+BRAND_LOGO_MONO_ROUTE = "/api/documents/brand-kit/logo-mono"
 
 MAX_LOGO_BYTES = 2 * 1024 * 1024  # 2 MB — a letterhead logo, not a poster
 # The PDF renderer rasterises the logo in-process; a tiny file can still declare
@@ -61,6 +68,15 @@ LOGO_STEM = "logo"
 # The bucket brand files are mirrored to when no documents bucket is configured.
 DEFAULT_BRAND_BUCKET = "automatos-ai"
 LOGO_MARK_STEM = "logo-mark"
+# PRD-255: the logo's variants, uploaded like the logo.
+LOGO_DARK_STEM = "logo-dark"
+LOGO_MONO_STEM = "logo-mono"
+# Each wide-logo stem and how an upload refusal names it.
+LOGO_UPLOAD_NAMES = {
+    LOGO_STEM: "Logo",
+    LOGO_DARK_STEM: "The logo for dark backgrounds",
+    LOGO_MONO_STEM: "The one-colour logo",
+}
 
 # Accepted image types, keyed by the magic bytes we sniff (never trust the
 # declared Content-Type). SVG is deliberately absent: python-docx cannot embed it.
@@ -274,14 +290,14 @@ def _store_image(workspace_id: UUID, stem: str, data: bytes, mime: str, ext: str
     return path
 
 
-def save_brand_logo(workspace_id: UUID, data: bytes) -> str:
-    """Validate and persist an uploaded logo; return its storage-relative path.
+def save_brand_logo(workspace_id: UUID, data: bytes, stem: str = LOGO_STEM) -> str:
+    """Validate and persist an uploaded logo, or one of its variants (``stem``); return its storage-relative path.
 
     Raises :class:`BrandLogoError` with a user-facing message on a bad upload.
     The S3 mirror is best-effort (local serving covers the container's lifetime).
     """
-    mime, ext, _ = _checked_image(data, "Logo")
-    return _store_image(workspace_id, LOGO_STEM, data, mime, ext)
+    mime, ext, _ = _checked_image(data, LOGO_UPLOAD_NAMES[stem])
+    return _store_image(workspace_id, stem, data, mime, ext)
 
 
 def save_brand_logo_mark(workspace_id: UUID, data: bytes) -> str:
@@ -339,7 +355,11 @@ def brand_kit_for_render(kit: Dict[str, Any]) -> Dict[str, Any]:
 
 
 __all__ = [
+    "BRAND_LOGO_DARK_ROUTE",
     "BRAND_LOGO_MARK_ROUTE",
+    "BRAND_LOGO_MONO_ROUTE",
+    "LOGO_DARK_STEM",
+    "LOGO_MONO_STEM",
     "BRAND_LOGO_ROUTE",
     "MAX_LOGO_BYTES",
     "MAX_LOGO_DIMENSION",

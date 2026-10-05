@@ -83,8 +83,9 @@ async def update_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[st
             "success": False,
             "error": (
                 f"platform_update_brand_kit cannot set {', '.join(refused)}; nothing saved. "
-                f"It sets {', '.join(brand_kit.PATCH_FIELDS)}. The logo, logo mark and font "
-                "files are uploaded by a person in the brand kit settings."
+                f"It sets {', '.join(brand_kit.PATCH_FIELDS)}. The logo, its dark-background and "
+                "one-colour versions, the logo mark and the font files are uploaded by a person "
+                "in the brand kit settings."
             ),
         }
     patch = {k: v for k, v in fields.items() if v is not None}

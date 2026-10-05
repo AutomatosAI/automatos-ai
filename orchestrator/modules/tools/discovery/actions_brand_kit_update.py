@@ -7,7 +7,19 @@ signature with it): the schema lists every BrandVoice field, so an agent sees it
 
 import copy
 
+from modules.documents.brand_system import DATE_STYLES, TYPE_STEPS
+
 from .action_registry import ActionDefinition, ActionRegistry
+
+_TYPE_STEP = {
+    "type": "object",
+    "description": "One type step; a field left out keeps its value.",
+    "properties": {
+        "size_pt": {"type": "number", "description": "Size in points (5 to 96)."},
+        "line_pt": {"type": "number", "description": "Line height in points: from size_pt to 3 times it."},
+        "weight": {"type": "integer", "description": "100 to 900, in hundreds."},
+    },
+}
 
 _PARAMETERS = {
     "type": "object",
@@ -60,8 +72,22 @@ _PARAMETERS = {
             "properties": {
                 "tone": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": "3 to 5 tone words, such as warm, plain, confident. An empty list clears them.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "word": {"type": "string", "description": "The tone word (up to 32 characters)."},
+                            "meaning": {
+                                "type": "string",
+                                "description": "One line on what the word means for this brand (up to 120 characters).",
+                            },
+                        },
+                        "required": ["word"],
+                    },
+                    "description": (
+                        "3 to 5 tone words, each with an optional one-line meaning, such as "
+                        "{\"word\": \"warm\", \"meaning\": \"friendly, never gushing\"}. Replaces the "
+                        "whole list; an empty list clears them."
+                    ),
                 },
                 "banned_phrases": {
                     "type": "array",
@@ -105,6 +131,37 @@ _PARAMETERS = {
                 "also fills table headers with it."
             ),
         },
+        "type_scale": {
+            "type": "object",
+            "description": (
+                "The type scale (PRD-255), merged step by step and a step field by field: "
+                "display, h1, h2, h3, body, small and caption. A step not sent keeps its value."
+            ),
+            "properties": {step: copy.deepcopy(_TYPE_STEP) for step in TYPE_STEPS},
+        },
+        "spacing_unit_pt": {"type": "number", "description": "The spacing grid's unit in points (2 to 12; 4 by default)."},
+        "page_margin_mm": {"type": "number", "description": "The page margin in millimetres (6 to 50; 18 by default)."},
+        "logo_rules": {
+            "type": "object",
+            "description": "How the logo is placed; merged key by key.",
+            "properties": {
+                "letterhead_mm": {"type": "number", "description": "The letterhead logo's height in mm (6 to 60)."},
+                "clear_space": {"type": "number", "description": "Clear space round the logo, in logo heights (0 to 2)."},
+                "min_mm": {"type": "number", "description": "The least height the logo prints at, in mm (4 to 40)."},
+            },
+        },
+        "currency": {
+            "type": "string",
+            "description": (
+                "The brand's currency as a three-letter ISO 4217 code, such as GBP. Empty: "
+                "amounts print with no currency."
+            ),
+        },
+        "date_style": {
+            "type": "string",
+            "enum": list(DATE_STYLES),
+            "description": "How dates print: d MMMM yyyy (5 October 2026, the default) or MMMM d, yyyy (October 5, 2026).",
+        },
     },
     "required": [],
 }
@@ -120,8 +177,8 @@ def register_brand_kit_update_action(registry: ActionRegistry) -> None:
             "social_handles replaces the whole map, so send every handle to keep (a "
             "network left out, or given an empty handle, is removed). The kit is "
             "validated first: an invalid value is refused with the reason and nothing "
-            "is saved. The logo, logo mark and font files are uploaded by a person in "
-            "the brand kit settings; this tool sets text, colours, fonts and http(s) "
+            "is saved. The logo, its dark-background and one-colour versions, the logo mark "
+            "and the font files are uploaded by a person in the brand kit settings; this tool sets text, colours, fonts and http(s) "
             "logo URLs only."
         ),
         category="documents",

@@ -173,7 +173,8 @@ def test_the_prompt_carries_the_voice_templates_channels_limits_candidates_and_s
     system, material = messages[0]["content"], json.loads(messages[1]["content"])
     assert SKILL_TEXT in system
     assert material["brief"] == BRIEF
-    assert material["brand_voice"]["tone"] == ["warm", "plain", "local"]
+    # PRD-255 US-002: the kit stores each tone word with its meaning (empty here).
+    assert [t["word"] for t in material["brand_voice"]["tone"]] == ["warm", "plain", "local"]
     assert material["brand_voice"]["banned_phrases"] == ["game-changer"]
     assert [t["id"] for t in material["templates"]] == [composer.template]  # never another workspace's
     assert material["templates"][0]["variables_schema"] == SCHEMA

@@ -120,6 +120,11 @@ def woff2_header(*, flavor: int = 0x00010000, num_tables: int = 10, length: int 
     return header + b"\x00" * (size - len(header))
 
 
+def _tone(*words: str) -> list:
+    """Tone words as the kit stores them since PRD-255 US-002: each with its (here empty) meaning."""
+    return [{"word": word, "meaning": ""} for word in words]
+
+
 def _data_uri(mime: str, data: bytes) -> str:
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
@@ -259,7 +264,8 @@ def test_handles_are_keyed_by_toolkit_an_empty_one_is_removed_and_the_map_is_rep
 @pytest.mark.parametrize("count", [0, 3, 4, 5])
 def test_three_to_five_tone_words_or_none(count):
     words = ["warm", "plain", "bold", "precise", "curious"][:count]
-    assert validate_brand_kit({"voice": {"tone": words}})["voice"]["tone"] == words
+    # PRD-255 US-002: a plain word is stored as a tone word with no meaning.
+    assert validate_brand_kit({"voice": {"tone": words}})["voice"]["tone"] == _tone(*words)
 
 
 @pytest.mark.parametrize("count", [1, 2, 6])
@@ -271,7 +277,7 @@ def test_any_other_number_of_tone_words_is_refused(count):
 
 def test_tone_words_are_trimmed_counted_once_and_each_one_short_line_with_a_letter():
     kit = validate_brand_kit({"voice": {"tone": [" Warm ", "warm", "", "plain-spoken", "bold"]}})
-    assert kit["voice"]["tone"] == ["Warm", "plain-spoken", "bold"]
+    assert kit["voice"]["tone"] == _tone("Warm", "plain-spoken", "bold")
     for bad, reason in ((["warm", "plain", "x" * 33], "at most 32"), (["warm", "plain", "123"], "a letter"), (["warm", "plain\nbold", "dry"], "one line")):
         with pytest.raises(ValidationError, match=reason):
             validate_brand_kit({"voice": {"tone": bad}})
@@ -288,7 +294,7 @@ def test_banned_phrases_are_capped_and_the_voice_merges_key_by_key():
             validate_brand_kit({"voice": {"banned_phrases": [bad]}})
     # A patch naming only the banned phrases keeps the tone words.
     merged = validate_brand_kit({"voice": {"banned_phrases": ["game-changer", "Game-Changer"]}}, kit)
-    assert merged["voice"] == {"tone": ["warm", "plain", "bold"], "banned_phrases": ["game-changer"], "sign_off": ""}
+    assert merged["voice"] == {"tone": _tone("warm", "plain", "bold"), "banned_phrases": ["game-changer"], "sign_off": ""}
 
 
 def test_a_client_patch_cannot_point_the_kit_at_a_stored_file():
@@ -585,7 +591,7 @@ def test_the_put_saves_the_new_fields_and_keeps_the_stored_files(api):
     kit = response.json()
     assert kit["heading_font"] == '"Brand Display", serif' and kit["logo_mark_url"] == "https://cdn.example/mark.png"
     assert kit["social_handles"] == {"twitter": "acme", "linkedin": "acme-inc"}
-    assert kit["voice"] == {"tone": ["warm", "plain", "bold"], "banned_phrases": ["game-changer"], "sign_off": ""}
+    assert kit["voice"] == {"tone": _tone("warm", "plain", "bold"), "banned_phrases": ["game-changer"], "sign_off": ""}
     assert kit["font_files"] == [] and kit["logo_mark_path"] == ""
     # A refusal names the field and the rule (the detail serialises: no exception objects in it).
     for body, loc, rule in (

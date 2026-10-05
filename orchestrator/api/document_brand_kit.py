@@ -15,6 +15,11 @@ actually brand a document:
 PRD-255 (Brand Kit v2) answers GET and PUT with the kit's effective colour roles
 (``palette``: stored, else derived) and ``palette_source`` (each role ``set`` or
 ``derived``), and the PUT refuses a palette whose text does not read on its page.
+It adds the logo's variants, each with routes that mirror the logo's (FR-9: a
+variant is uploaded by the owner, never generated):
+
+* ``POST/GET/DELETE /brand-kit/logo-dark`` — the logo for dark backgrounds;
+* ``POST/GET/DELETE /brand-kit/logo-mono`` — the one-colour logo.
 
 PRD-251 D5 (S1.3) extends the kit in place, same GET/PUT: a heading font, social
 handles and a brand voice on the PUT, plus the stored files a social render
@@ -148,26 +153,37 @@ async def get_brand_kit_suggestions(
 # Logo and logo mark upload / stream / delete (PRD-242 S3, PRD-251 D5)
 # ------------------------------------------------------------------
 
-# kit field of the stored file -> the external-URL field an upload supersedes
+# kit field of the stored file -> the external-URL field an upload supersedes (the
+# logo's variants have none: they are uploads only)
 _LOGO_FIELDS = {"logo_path": "logo_url", "logo_mark_path": "logo_mark_url"}
+LOGO_FIELD, LOGO_MARK_FIELD = "logo_path", "logo_mark_path"
+LOGO_DARK_FIELD, LOGO_MONO_FIELD = "logo_dark_path", "logo_mono_path"
+
+
+def _save_logo_file(workspace_id, data: bytes, path_field: str) -> str:
+    """Validate and store the upload for ``path_field``; its storage-relative path."""
+    from modules.documents import brand_logo as bl
+
+    savers = {
+        LOGO_FIELD: lambda: bl.save_brand_logo(workspace_id, data),
+        LOGO_MARK_FIELD: lambda: bl.save_brand_logo_mark(workspace_id, data),
+        LOGO_DARK_FIELD: lambda: bl.save_brand_logo(workspace_id, data, bl.LOGO_DARK_STEM),
+        LOGO_MONO_FIELD: lambda: bl.save_brand_logo(workspace_id, data, bl.LOGO_MONO_STEM),
+    }
+    if path_field not in savers:
+        raise ValueError(f"no stored logo file is kept at {path_field!r}")
+    return savers[path_field]()
 
 
 async def _store_logo_upload(file: UploadFile, ctx: RequestContext, db: Session, path_field: str) -> Dict[str, Any]:
-    """Store an uploaded logo or logo mark and point the kit at it; the old file goes."""
+    """Store an uploaded logo, logo variant or logo mark and point the kit at it; the old file goes."""
     from modules.documents.brand_kit import get_brand_kit, save_brand_kit
-    from modules.documents.brand_logo import (
-        MAX_LOGO_BYTES,
-        BrandLogoError,
-        delete_brand_logo,
-        save_brand_logo,
-        save_brand_logo_mark,
-    )
+    from modules.documents.brand_logo import MAX_LOGO_BYTES, BrandLogoError, delete_brand_logo
 
-    save = save_brand_logo_mark if path_field == "logo_mark_path" else save_brand_logo
     ws = _workspace_or_404(db, ctx.workspace_id)
     data = await file.read(MAX_LOGO_BYTES + 1)
     try:
-        stored_path = save(ctx.workspace_id, data)
+        stored_path = _save_logo_file(ctx.workspace_id, data, path_field)
     except BrandLogoError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -176,7 +192,8 @@ async def _store_logo_upload(file: UploadFile, ctx: RequestContext, db: Session,
     if previous and previous != stored_path:
         delete_brand_logo(previous)
     # An uploaded file supersedes any external URL the kit carried.
-    new_kit = {**kit, path_field: stored_path, _LOGO_FIELDS[path_field]: ""}
+    superseded = {_LOGO_FIELDS[path_field]: ""} if path_field in _LOGO_FIELDS else {}
+    new_kit = {**kit, path_field: stored_path, **superseded}
     save_brand_kit(db, ws, new_kit)
     logger.info("[BrandKit] %s uploaded for workspace %s (%d bytes)", path_field, ctx.workspace_id, len(data))
     return new_kit
@@ -273,6 +290,73 @@ async def delete_brand_logo_mark_endpoint(
 ):
     """Remove the stored logo mark and clear it from the kit."""
     return _remove_logo(ctx, db, "logo_mark_path")
+
+
+# ------------------------------------------------------------------
+# The logo's variants: for dark backgrounds, and one colour (PRD-255 FR-9)
+# ------------------------------------------------------------------
+
+
+@router.post("/brand-kit/logo-dark", dependencies=[_MANAGE])
+async def upload_brand_logo_dark(
+    file: UploadFile = File(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Store the PNG/JPEG logo for dark backgrounds and point the brand kit at it."""
+    from modules.documents.brand_logo import BRAND_LOGO_DARK_ROUTE
+
+    new_kit = await _store_logo_upload(file, ctx, db, LOGO_DARK_FIELD)
+    return {**new_kit, "logo_dark_route": BRAND_LOGO_DARK_ROUTE}
+
+
+@router.get("/brand-kit/logo-dark")
+def stream_brand_logo_dark(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Stream the stored logo for dark backgrounds (local file, then object storage)."""
+    return _stream_logo(ctx, db, LOGO_DARK_FIELD, "No logo for dark backgrounds uploaded")
+
+
+@router.delete("/brand-kit/logo-dark", dependencies=[_MANAGE])
+def delete_brand_logo_dark_endpoint(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Remove the stored logo for dark backgrounds and clear it from the kit."""
+    return _remove_logo(ctx, db, LOGO_DARK_FIELD)
+
+
+@router.post("/brand-kit/logo-mono", dependencies=[_MANAGE])
+async def upload_brand_logo_mono(
+    file: UploadFile = File(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Store the one-colour PNG/JPEG logo and point the brand kit at it."""
+    from modules.documents.brand_logo import BRAND_LOGO_MONO_ROUTE
+
+    new_kit = await _store_logo_upload(file, ctx, db, LOGO_MONO_FIELD)
+    return {**new_kit, "logo_mono_route": BRAND_LOGO_MONO_ROUTE}
+
+
+@router.get("/brand-kit/logo-mono")
+def stream_brand_logo_mono(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Stream the stored one-colour logo (local file, then object storage)."""
+    return _stream_logo(ctx, db, LOGO_MONO_FIELD, "No one-colour logo uploaded")
+
+
+@router.delete("/brand-kit/logo-mono", dependencies=[_MANAGE])
+def delete_brand_logo_mono_endpoint(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Remove the stored one-colour logo and clear it from the kit."""
+    return _remove_logo(ctx, db, LOGO_MONO_FIELD)
 
 
 # ------------------------------------------------------------------

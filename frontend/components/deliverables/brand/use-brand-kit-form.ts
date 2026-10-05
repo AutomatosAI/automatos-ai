@@ -11,7 +11,7 @@ import { toast } from 'sonner'
 
 import { templateBlocksApi } from '@/components/documents/blocks/api'
 import { useUploadedFontFaces } from '@/components/documents/blocks/BrandKitFonts'
-import { toneWordsProblem } from '@/components/documents/blocks/BrandKitSocial'
+import { toneWordsFrom, toneWordsProblem } from '@/components/documents/blocks/BrandKitSocial'
 import { useBrandImage } from '@/components/documents/blocks/useBrandImage'
 import type { BrandKit, BrandPaletteRole, BrandSuggestions } from '@/components/documents/blocks/types'
 
@@ -35,7 +35,7 @@ export function withD5Fields(kit: BrandKit): BrandKit {
     logo_mark_url: kit.logo_mark_url ?? '',
     logo_mark_path: kit.logo_mark_path ?? '',
     voice: {
-      tone: kit.voice?.tone ?? [],
+      tone: toneWordsFrom(kit.voice?.tone),
       banned_phrases: kit.voice?.banned_phrases ?? [],
       sign_off: kit.voice?.sign_off ?? '',
     },

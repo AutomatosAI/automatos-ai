@@ -33,7 +33,10 @@ and :func:`brand_kit_suggestions` supplies the prefill candidates.
 PRD-255 (Brand Kit v2) gives the colours roles: ``palette`` stores the roles the
 owner sets (``modules/documents/brand_system.py``; every other role is derived at
 read time), and ``accent_use`` says how far the accent goes. The PUT refuses a
-palette whose text does not read on its page.
+palette whose text does not read on its page. US-002 adds the rest of one designer's
+rules: ``type_scale``, ``spacing_unit_pt``, ``page_margin_mm``, ``logo_rules``, the
+logo variants ``logo_dark_path`` / ``logo_mono_path`` (uploaded, server-managed),
+``currency``, ``date_style``, and a one-line meaning on each tone word.
 
 Defaults are a neutral professional palette — an unconfigured workspace renders cleanly
 (and *not* in Automatos orange).
@@ -48,7 +51,26 @@ from typing import Any, Dict, List, Literal, Optional, Pattern, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 from core.media_render_bundle import FONT_FAMILY, FONT_STYLES, MAX_TOKEN_CHARS, TOKEN_UNSAFE
-from modules.documents.brand_system import DEFAULT_ACCENT_USE, BrandPalette, require_readable_palette
+from modules.documents.brand_system import (
+    DEFAULT_ACCENT_USE,
+    DEFAULT_CURRENCY,
+    DEFAULT_DATE_STYLE,
+    DEFAULT_PAGE_MARGIN_MM,
+    DEFAULT_SPACING_UNIT_PT,
+    MAX_PAGE_MARGIN_MM,
+    MAX_SPACING_UNIT_PT,
+    MIN_PAGE_MARGIN_MM,
+    MIN_SPACING_UNIT_PT,
+    BrandPalette,
+    DateStyle,
+    LogoRules,
+    ToneWord,
+    TypeScale,
+    currency_code,
+    one_line_text,
+    require_readable_palette,
+    within,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +96,6 @@ MAX_FONT_FILE_NAME_CHARS = 255
 
 # PRD-251 D5: the brand voice.
 MIN_TONE_WORDS, MAX_TONE_WORDS = 3, 5
-MAX_TONE_WORD_CHARS = 32
 MAX_BANNED_PHRASES = 50
 MAX_BANNED_PHRASE_CHARS = 120
 MAX_SIGN_OFF_CHARS = 120
@@ -108,9 +129,10 @@ GENERIC_HANDLE_RULE: Tuple[Pattern[str], str] = (
 
 # Written only by the upload and delete routes: a client patch never points the
 # kit at a stored file.
-SERVER_MANAGED_FIELDS = frozenset({"logo_path", "logo_mark_path", "font_files"})
-# A patch merges into these records key by key; every other field it names is replaced.
-MERGED_RECORDS = ("company", "voice", "palette")
+SERVER_MANAGED_FIELDS = frozenset({"logo_path", "logo_mark_path", "logo_dark_path", "logo_mono_path", "font_files"})
+# A patch merges into these records key by key (a type step field by field); every
+# other field it names is replaced.
+MERGED_RECORDS = ("company", "voice", "palette", "type_scale", "logo_rules")
 
 
 class CompanyContact(BaseModel):
@@ -122,21 +144,12 @@ class CompanyContact(BaseModel):
     website: str = ""
 
 
-def _one_line(value: str, what: str, max_chars: int) -> str:
-    text = value.strip()
-    if len(text) > max_chars:
-        raise ValueError(f"each {what} is at most {max_chars} characters")
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
-        raise ValueError(f"each {what} is one line of text")
-    return text
-
-
 def _distinct(values: List[str], what: str, max_chars: int) -> List[str]:
     """The values trimmed, blanks dropped, the first of each case-insensitive repeat kept."""
     seen = set()
     kept: List[str] = []
     for value in values:
-        text = _one_line(value, what, max_chars)
+        text = one_line_text(value, what, max_chars)
         if text and text.casefold() not in seen:
             seen.add(text.casefold())
             kept.append(text)
@@ -148,17 +161,21 @@ class BrandVoice(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tone: List[str] = Field(default_factory=list)
+    # PRD-255: each word may carry a one-line meaning; a plain string is a word without one.
+    tone: List[ToneWord] = Field(default_factory=list)
     banned_phrases: List[str] = Field(default_factory=list)
     # Who signs what the agents draft, as it is written under a letter; empty: none set.
     sign_off: str = ""
 
     @field_validator("tone")
     @classmethod
-    def _three_to_five_words(cls, words: List[str]) -> List[str]:
-        kept = _distinct(words, "tone word", MAX_TONE_WORD_CHARS)
-        if any(not any(ch.isalpha() for ch in word) for word in kept):
-            raise ValueError("each tone word needs a letter")
+    def _three_to_five_words(cls, words: List[ToneWord]) -> List[ToneWord]:
+        seen = set()
+        kept: List[ToneWord] = []
+        for tone in words:
+            if tone.word and tone.word.casefold() not in seen:
+                seen.add(tone.word.casefold())
+                kept.append(tone)
         if kept and not MIN_TONE_WORDS <= len(kept) <= MAX_TONE_WORDS:
             raise ValueError(f"give {MIN_TONE_WORDS} to {MAX_TONE_WORDS} tone words, or none (got {len(kept)})")
         return kept
@@ -174,7 +191,7 @@ class BrandVoice(BaseModel):
     @field_validator("sign_off")
     @classmethod
     def _sign_off(cls, value: str) -> str:
-        return _one_line(value, "sign-off", MAX_SIGN_OFF_CHARS)
+        return one_line_text(value, "sign-off", MAX_SIGN_OFF_CHARS)
 
 
 class BrandFontFile(BaseModel):
@@ -231,7 +248,7 @@ class BrandFontFile(BaseModel):
     @field_validator("file_name")
     @classmethod
     def _file_name(cls, v: str) -> str:
-        return _one_line(v, "file name", MAX_FONT_FILE_NAME_CHARS)
+        return one_line_text(v, "file name", MAX_FONT_FILE_NAME_CHARS)
 
     @field_validator("bytes")
     @classmethod
@@ -286,6 +303,18 @@ class BrandKit(BaseModel):
     # far the accent goes: "sparing" (every kit's default, Decision Q1) or "bold".
     palette: BrandPalette = Field(default_factory=BrandPalette)
     accent_use: Literal["sparing", "bold"] = DEFAULT_ACCENT_USE
+    # PRD-255 US-002: the type scale, the spacing grid, the page margin and the logo's rules.
+    type_scale: TypeScale = Field(default_factory=TypeScale)
+    spacing_unit_pt: float = DEFAULT_SPACING_UNIT_PT
+    page_margin_mm: float = DEFAULT_PAGE_MARGIN_MM
+    logo_rules: LogoRules = Field(default_factory=LogoRules)
+    # The logo for dark backgrounds and the one-colour logo: uploads only, server-managed
+    # like logo_path. One not set is never invented (FR-9).
+    logo_dark_path: str = ""
+    logo_mono_path: str = ""
+    # Locale: an ISO 4217 code (empty: no currency is printed, FR-7) and the date style.
+    currency: str = DEFAULT_CURRENCY
+    date_style: DateStyle = DEFAULT_DATE_STYLE
 
     @field_validator("primary_color", "secondary_color", "accent_color", "text_color")
     @classmethod
@@ -293,6 +322,21 @@ class BrandKit(BaseModel):
         if v and not _HEX_RE.match(v):
             raise ValueError("must be a hex color such as #1a1a2e or #abc")
         return v
+
+    @field_validator("spacing_unit_pt")
+    @classmethod
+    def _spacing_unit(cls, v: float) -> float:
+        return within(v, MIN_SPACING_UNIT_PT, MAX_SPACING_UNIT_PT, "spacing_unit_pt", " pt")
+
+    @field_validator("page_margin_mm")
+    @classmethod
+    def _page_margin(cls, v: float) -> float:
+        return within(v, MIN_PAGE_MARGIN_MM, MAX_PAGE_MARGIN_MM, "page_margin_mm", " mm")
+
+    @field_validator("currency")
+    @classmethod
+    def _currency(cls, v: str) -> str:
+        return currency_code(v)
 
     @field_validator("heading_font")
     @classmethod
@@ -366,6 +410,14 @@ class BrandKitPatch(BaseModel):
     # PRD-255 FR-1: roles merge key by key; an empty role goes back to derived.
     palette: Optional[dict] = None
     accent_use: Optional[str] = None
+    # PRD-255 US-002: type_scale merges step by step (and a step field by field),
+    # logo_rules key by key.
+    type_scale: Optional[dict] = None
+    spacing_unit_pt: Optional[float] = None
+    page_margin_mm: Optional[float] = None
+    logo_rules: Optional[dict] = None
+    currency: Optional[str] = None
+    date_style: Optional[str] = None
 
     @field_validator("logo_url", "logo_mark_url")
     @classmethod
@@ -403,23 +455,33 @@ def get_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return BrandKit().model_dump()
 
 
+def _merged(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+    """``patch`` over ``base`` key by key, and a record inside both (a type step) field by field."""
+    return {
+        **base,
+        **{k: _merged(base[k], v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
+           for k, v in patch.items()},
+    }
+
+
 def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Validate + merge a brand-kit patch over the existing kit, returning the new dict.
 
-    ``company``, ``voice`` and ``palette`` merge key by key (an empty palette role
-    goes back to derived); any other field in the patch replaces the stored one
+    ``company``, ``voice``, ``palette``, ``type_scale`` and ``logo_rules`` merge key
+    by key (an empty palette role goes back to derived; a type step field by field);
+    any other field in the patch replaces the stored one
     (``social_handles`` is the whole map: a network left out, or given an empty
     handle, is removed). Raises ``pydantic.ValidationError`` (surfaced as 422 by
     the API) on bad input, and on a palette whose text does not read on its page.
     """
     base = get_brand_kit({BRAND_KIT_SETTINGS_KEY: existing} if existing else None)
-    # The stored files (logo, logo mark, fonts) are owned by the upload/delete
-    # routes; a client patch cannot point the kit at an arbitrary stored file.
+    # The stored files (logo, its variants, logo mark, fonts) are owned by the
+    # upload/delete routes; a client patch cannot point the kit at an arbitrary stored file.
     patch = {k: v for k, v in patch.items() if k not in SERVER_MANAGED_FIELDS}
     merged = {**base, **{k: v for k, v in patch.items() if v is not None}}
     for record in MERGED_RECORDS:
         if isinstance(patch.get(record), dict):
-            merged[record] = {**base.get(record, {}), **patch[record]}
+            merged[record] = _merged(base.get(record, {}), patch[record])
     kit = BrandKit.model_validate(merged).model_dump()
     require_readable_palette(kit)
     return kit

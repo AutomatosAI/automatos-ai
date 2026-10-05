@@ -204,12 +204,20 @@ def company_name(kit: Optional[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
+def _tone_line(kit: Dict[str, Any]) -> str:
+    """The tone words, each with its meaning when the owner gave one (PRD-255)."""
+    from modules.documents.brand_system import tone_words
+
+    words = [f"{t['word']} ({t['meaning']})" if t["meaning"] else t["word"] for t in tone_words(kit)]
+    return f"- Tone: {', '.join(words)}." if words else ""
+
+
 def _voice_lines(kit: Dict[str, Any]) -> List[str]:
     """Who the brand writes as, its tone, who signs and the words it never uses."""
     voice = kit.get("voice") or {}
     name, signer = (kit.get("name") or "").strip(), sign_off_name(kit)
     return [f"- Write as {name}." if name else "",
-            f"- Tone: {', '.join(voice.get('tone') or [])}." if voice.get("tone") else "",
+            _tone_line(kit),
             (f'- Sign it "{signer}". Never leave a placeholder such as [Your name].' if signer else ""),
             (f"- Never use these words or phrases: {_quoted(voice['banned_phrases'])}."
              if voice.get("banned_phrases") else "")]

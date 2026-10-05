@@ -231,8 +231,9 @@ describe('the basics', () => {
     expect(path).toBe('/api/documents/brand-kit')
     expect(body.heading_font).toBe('"Brand Serif", Georgia, serif')
     expect(body.social_handles).toEqual({ linkedin: 'acme-inc', twitter: 'acme', instagram: 'acme.studio' })
+    // PRD-255 US-002: the tone words go as {word, meaning}; a typed word has no meaning yet.
     expect(body.voice).toEqual({
-      tone: ['warm', 'precise', 'curious'],
+      tone: [{ word: 'warm', meaning: '' }, { word: 'precise', meaning: '' }, { word: 'curious', meaning: '' }],
       banned_phrases: ['game-changer', 'synergy'],
       sign_off: 'Sam, Acme Coffee',
     })
