@@ -84,7 +84,8 @@ def _doc(*blocks: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # Reusable letterhead: logo + company name + contact line (optional details fall back to "").
-def _letterhead() -> List[Dict[str, Any]]:
+# The Branded Letter's, and (F331) the top of a branded PDF made with no template.
+def letterhead() -> List[Dict[str, Any]]:
     return [
         _logo(),
         _heading("lh-name", 3, _v("company.name")),
@@ -107,7 +108,7 @@ LETTER = {
     "format": "pdf",
     "includes": ["Letterhead from your brand kit", "Recipient and subject", "Body", "Sign-off with your name and email"],
     "blocks": _doc(
-        *_letterhead(),
+        *letterhead(),
         _para("date", _v("date.long")),
         _para("to-name", _v("data.recipient_name")),
         _para("to-company", _v("data.recipient_company", "")),
@@ -384,4 +385,4 @@ def preset_payload(preset: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-__all__ = ["PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "preset_for", "preset_payload"]
+__all__ = ["PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "letterhead", "preset_for", "preset_payload"]

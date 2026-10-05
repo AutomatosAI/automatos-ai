@@ -15,6 +15,9 @@ in both editions because the page fetches the file as the signed-in owner, or
 anonymously in the local edition), and keeps the signed share link for people
 outside the workspace only, saying a changed character breaks it. A summary
 that has to be cut leaves the share link out rather than cutting it mid-way.
+
+F331 (night 10): the summary also names the data keys the template had no place
+for, so an agent never reports a document done over a page that lacks them.
 """
 from __future__ import annotations
 
@@ -27,6 +30,12 @@ TRUNCATION_MARK = "..."
 # What generate_document made, by the file it returned: a social template
 # renders an MP4 or a PNG (PRD-251 US-117); anything else is a document.
 GENERATED_FILE_KINDS = {"mp4": "video", "png": "image"}
+# F331: eleven invoices went out a title on an empty page, each card saying "done".
+UNUSED_KEYS_LINE = (
+    "NOT IN THE {kind}: the template has no place for these data keys, so the page does not show them: "
+    "{keys}. Do not call it done: make it again with the fields the template lists "
+    "(platform_get_template_schema), or, for a PDF, with no template, which prints every key."
+)
 
 
 def _document(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -42,6 +51,9 @@ def document_lines(doc: Dict[str, Any]) -> List[str]:
     lines = [f"Generated {fmt.upper()} {kind}: {doc.get('filename', 'document')} ({doc.get('size_kb', 0)} KB)"]
     if doc.get("template_name"):
         lines.append(f"Template used: {doc['template_name']}")
+    unused = doc.get("unused_data_keys") or []
+    if unused:
+        lines.append(UNUSED_KEYS_LINE.format(kind=kind.upper(), keys=", ".join(str(key) for key in unused)))
     link = doc.get("open_url") or doc.get("app_url")
     if link:
         lines.append(
