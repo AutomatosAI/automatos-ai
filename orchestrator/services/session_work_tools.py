@@ -90,7 +90,8 @@ GENERATE_DOCUMENT_SPEC: Dict[str, Any] = {
     "reads_only": False,
     "description": (
         "Make a finished document from data: a PDF, Word or Excel file, or a social image or video "
-        "from one of the workspace's templates. It is saved to Deliverables, attributed to you. Use "
+        "from one of the workspace's templates. It is saved to Deliverables, attributed to you, and "
+        "a copy is put in your folder (the answer names it) so you can open and check it. Use "
         "it when the work's result is a document the owner will open, send or print; your report "
         "still goes through submit_report."
     ),

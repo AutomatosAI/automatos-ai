@@ -9,9 +9,10 @@ F346 (night 10b):
   with its description, social templates included (18 of them), and a chat turn
   keeps about 2,000 tokens of a tool's answer: the list was cut alphabetically and
   the owner's own templates (Invoice, Meeting Notes, anything after "E") were never
-  seen. Now a template is one line (``name | format | category | id``), the
-  document templates are listed by default (social ones with ``format``), the
-  count comes first, and ``name`` searches by part of a name.
+  seen. Now a template is one line (``name | format | category | makes … | id``,
+  with F348's supported formats), the document templates are listed by default
+  (social ones with ``format``), the count comes first, and ``name`` searches by
+  part of a name.
 * **A template made by POST had guessed columns.** The schema answer said a table
   was ``data.line_items`` and nothing more, so its columns were read off the
   sample data, and a template with no sample had none. Now the answer carries the
@@ -29,8 +30,9 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-TEMPLATE_ROW = "{name} | {format} | {category} | {id}"
-ROW_FORMAT = "name | format | category | id"
+TEMPLATE_ROW = "{name} | {format} | {category} | makes {makes} | {id}"
+ROW_FORMAT = "name | format | category | makes (the formats generate_document may ask of it) | id"
+FORMAT_JOINER = ", "
 SOCIAL_NOTE = (
     "Document templates only: pass format social_image or social_video for the social ones. "
     "get_template_schema (by id or name) says what a template needs."
@@ -44,8 +46,11 @@ def _text(value: Any) -> Optional[str]:
 
 
 def template_row(template: Any) -> str:
-    """One template as one line of the list."""
-    return TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category, id=template.id)
+    """One template as one line of the list, with what it makes (F348's ``supported_formats``)."""
+    from modules.documents.template_formats import supported_formats
+
+    return TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category,
+                               makes=FORMAT_JOINER.join(supported_formats(template)), id=template.id)
 
 
 def list_templates_answer(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

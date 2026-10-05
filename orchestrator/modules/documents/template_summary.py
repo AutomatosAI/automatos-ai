@@ -35,6 +35,7 @@ from modules.documents.blocks import (
     collect_variable_paths,
     validate_blocks,
 )
+from modules.documents.template_formats import supported_formats
 from modules.documents.variables.catalog import DYNAMIC_PREFIX
 
 STARTER_CREATOR = "system"
@@ -88,6 +89,8 @@ def summarize_template(t: Any) -> Dict[str, Any]:
         "name": getattr(t, "name", ""),
         "description": getattr(t, "description", None),
         "format": getattr(t, "format", "pdf"),
+        # F348: what generate_document may ask of it (a PDF template asked for xlsx is refused by name).
+        "supported_formats": supported_formats(t),
         "category": getattr(t, "category", "general"),
         "tags": list(getattr(t, "tags", None) or []),
         "version": getattr(t, "version", 1),

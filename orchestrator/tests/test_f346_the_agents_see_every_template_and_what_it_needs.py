@@ -117,7 +117,7 @@ def test_social_templates_are_listed_with_their_format_and_a_name_search_narrows
     found = asyncio.run(list_templates(rows, WS, {"name": "zeb"}))
 
     assert socials["count"] and all(" | social_image | " in line for line in socials["templates"])
-    assert found["count"] == 1 and found["templates"][0].startswith("Zebra | pdf | invoice | ")
+    assert found["count"] == 1 and found["templates"][0].startswith("Zebra | pdf | invoice | makes pdf, docx | ")
 
 
 def test_the_session_tool_forwards_the_name_search():
