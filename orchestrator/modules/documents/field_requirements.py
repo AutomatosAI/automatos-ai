@@ -28,8 +28,11 @@ from modules.documents.blocks.schema import DataTableBlock, SectionBlock, TableB
 from modules.documents.variables.catalog import DYNAMIC_PREFIX
 
 DATA = "data"
-# ``{{ client.address | default('') }}``: the field and the text printed in its place.
-_JINJA_DEFAULT = re.compile(r"""\{\{\s*([A-Za-z_][\w.]*)\s*\|\s*default\(\s*(['"])(.*?)\2\s*\)""")
+# ``{{ client.address | default('') }}``: the field and the text printed in its place
+# (also ``default('', true)``, which prints it for a blank value too, as F356's starters do).
+_JINJA_DEFAULT = re.compile(
+    r"""\{\{\s*([A-Za-z_][\w.]*)\s*\|\s*default\(\s*(['"])(.*?)\2\s*(?:,\s*(?:boolean\s*=\s*)?(?:true|True)\s*)?\)"""
+)
 # A legacy default that reads the brand kit is the platform's, not a data field.
 _PLATFORM_ROOTS = ("brand.",)
 

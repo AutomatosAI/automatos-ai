@@ -35,7 +35,8 @@ from modules.documents.variables.catalog import DYNAMIC_PREFIX
 
 # F350: one letterhead logo size on every starter. It was 40-50 mm (the top fifth of
 # an A4 page) on the invoice, report and proposal; the owner's own copies used 22 mm.
-LETTERHEAD_LOGO_MM = 22
+# F356: 14 mm, beside the company block rather than above it (blocks/letterhead_run.py).
+LETTERHEAD_LOGO_MM = 14
 
 # ---------------------------------------------------------------------------
 # Block-tree builders (readable presets, no hand-written ids)
@@ -65,7 +66,7 @@ def _logo(bid: str = "logo", width_mm: int = LETTERHEAD_LOGO_MM) -> Dict[str, An
     return {"type": "image", "id": bid, "source": "brand_logo", "alt": "Logo", "width_mm": width_mm}
 
 
-def _section(bid: str, title: str, *children: Dict[str, Any]) -> Dict[str, Any]:
+def _section(bid: str, title: Optional[str], *children: Dict[str, Any]) -> Dict[str, Any]:
     return {"type": "section", "id": bid, "title": title, "children": list(children)}
 
 
@@ -202,13 +203,18 @@ INVOICE = {
 REPORT = {
     "category": "report",
     "name": "Branded Report",
-    "description": "Title and byline, executive summary, findings, a metrics table from data, recommendations, next steps and an appendix.",
+    "description": (
+        "Letterhead, title and byline, an optional row of KPI tiles (data.kpis: label, value, change), "
+        "executive summary, findings, a metrics table from data, recommendations, next steps and an appendix."
+    ),
     "format": "pdf",
-    "includes": ["Title block with byline", "Executive summary", "Key findings", "Metrics table from data.metrics", "Recommendations and next steps", "Appendix"],
+    "includes": ["Letterhead from your brand kit", "Title block with byline", "Optional KPI tiles from data.kpis", "Executive summary", "Key findings", "Metrics table from data.metrics", "Recommendations and next steps", "Appendix"],
     "blocks": _doc(
-        _logo(),
+        *letterhead(),
         _heading("title", 1, _v("data.title")),
         _para("byline", _t("Prepared by "), _v("user.name"), _t(" · "), _v("company.name"), _t(" · "), _v("date.long")),
+        # F356: optional KPI tiles; an empty or missing data.kpis prints nothing.
+        _data_table("kpis", "data.kpis", [("label", "KPI", "left"), ("value", "Value", "left"), ("change", "Change", "left", True)], empty_text=""),
         _section("s-summary", "Executive summary", _para("summary", _v("data.summary"))),
         _section("s-findings", "Key findings", _para("findings", _v("data.findings"))),
         _section(
@@ -222,6 +228,11 @@ REPORT = {
     "sample_data": {
         "data": {
             "title": "Weekly Market Report",
+            "kpis": [
+                {"label": "Revenue", "value": "€182k", "change": "+6% week on week"},
+                {"label": "New customers", "value": "312", "change": "+41"},
+                {"label": "Net promoter score", "value": "61", "change": "+3"},
+            ],
             "summary": "Demand held steady across the core segments this week while acquisition costs fell for the second week running.",
             "findings": "Organic traffic up 12% week on week. Paid conversion improved after the landing-page change. Two competitor price cuts observed.",
             "metrics": [
@@ -238,19 +249,30 @@ REPORT = {
 PROPOSAL = {
     "category": "proposal",
     "name": "Branded Proposal",
-    "description": "Cover block, overview, scope of work, timeline, a pricing table from data, terms and next steps.",
+    "description": (
+        "Letterhead, a cover header (title, an optional subtitle in data.subtitle, client and date), overview, "
+        "scope of work, timeline, a pricing table from data with an optional total (data.pricing_total), terms and next steps."
+    ),
     "format": "pdf",
-    "includes": ["Cover with client and date", "Overview and scope", "Timeline", "Pricing table from data.pricing", "Terms and next steps", "Your sign-off"],
+    "includes": ["Letterhead from your brand kit", "Cover header with an optional subtitle", "Overview and scope", "Timeline", "Pricing table from data.pricing with an optional total row", "Terms and next steps", "Your sign-off"],
     "blocks": _doc(
-        _logo(),
-        _heading("title", 1, _v("data.title")),
-        _para("cover", _t("Prepared for "), _v("data.client_name"), _t(" by "), _v("company.name"), _t(" · "), _v("date.long")),
+        *letterhead(),
+        # F356: the cover header, one panel; delete the section to drop it. The subtitle is optional.
+        _section(
+            "cover-header", None,
+            _para("eyebrow", _t("PROPOSAL")),
+            _heading("title", 1, _v("data.title")),
+            _para("subtitle", _v("data.subtitle", "")),
+            _para("cover", _t("Prepared for "), _v("data.client_name"), _t(" by "), _v("company.name"), _t(" · "), _v("date.long")),
+        ),
         _section("s-overview", "Overview", _para("overview", _v("data.overview"))),
         _section("s-scope", "Scope of work", _para("scope", _v("data.scope"))),
         _section("s-timeline", "Timeline", _para("timeline", _v("data.timeline"))),
         _section(
             "s-pricing", "Pricing",
             _data_table("pricing", "data.pricing", [("item", "Item", "left"), ("description", "Description", "left"), ("price", "Price", "right")]),
+            # F356: an optional total row under the Price column; left out when data.pricing_total is not sent.
+            _table("pricing-total", [[[_t("Total", "bold")], [_v("data.pricing_total", "")]]]),
             _para("pricing-note", _v("data.pricing_note")),
         ),
         _section("s-terms", "Terms", _para("terms", _v("data.terms"))),
@@ -260,6 +282,7 @@ PROPOSAL = {
     "sample_data": {
         "data": {
             "title": "Website Redesign Proposal",
+            "subtitle": "A faster, clearer site that turns visitors into enquiries",
             "client_name": "Northwind Traders",
             "overview": "A refreshed marketing site that loads fast, ranks well and converts visitors into enquiries.",
             "scope": "Discovery workshop, information architecture, design system, 12 page templates, CMS setup, launch support.",
@@ -269,6 +292,7 @@ PROPOSAL = {
                 {"item": "Design and build", "description": "Design system, templates, CMS", "price": "€14,000"},
                 {"item": "Launch support", "description": "Two weeks post-launch", "price": "€1,500"},
             ],
+            "pricing_total": "€18,000",
             "pricing_note": "Prices exclude VAT. Valid for 30 days.",
             "terms": "Standard terms of business apply; a signed proposal and a purchase order start the work.",
             "next_steps": "Confirm scope by 20 September; kick-off the following Monday.",
@@ -281,9 +305,9 @@ CONTRACT = {
     "name": "Branded Agreement",
     "description": "A services agreement skeleton: parties, services, term, fees, confidentiality, termination, governing law and signature blocks. Edit the clauses to suit.",
     "format": "docx",
-    "includes": ["Parties and date", "Numbered clauses (services, term, fees)", "Standard confidentiality and termination text to edit", "Signature table"],
+    "includes": ["Letterhead from your brand kit", "Parties and date", "Numbered clauses (services, term, fees)", "Standard confidentiality and termination text to edit", "Signature table, kept with the last clause"],
     "blocks": _doc(
-        _logo(),
+        *letterhead(),
         _heading("title", 1, _v("data.title", "Services Agreement")),
         _para(
             "parties",
@@ -301,18 +325,23 @@ CONTRACT = {
             "c5", "5. Termination",
             _para("termination", _t("Either party may terminate on thirty days' written notice, or immediately if the other party materially breaches this agreement and does not remedy the breach within fourteen days of notice.")),
         ),
-        _section("c6", "6. Governing law", _para("law", _t("This agreement is governed by the laws of "), _v("data.governing_law"), _t("."))),
-        _heading("sig-title", 2, _t("Signed")),
-        _table(
-            "signatures",
-            [
-                [[_t("For the Provider", "bold")], [_t("For the Client", "bold")]],
-                [[_v("company.name")], [_v("data.counterparty_name")]],
-                [[_t("Name: "), _v("user.name")], [_t("Name: "), _v("data.counterparty_signatory", "")]],
-                [[_t("Signature: ________________")], [_t("Signature: ________________")]],
-                [[_t("Date: ________________")], [_t("Date: ________________")]],
-            ],
-            header=True,
+        # F356: the last clause, the heading and the signatures are one block that never splits,
+        # so the signatures never stand alone on a page.
+        _section(
+            "sign-off", None,
+            _section("c6", "6. Governing law", _para("law", _t("This agreement is governed by the laws of "), _v("data.governing_law"), _t("."))),
+            _heading("sig-title", 2, _t("Signed")),
+            _table(
+                "signatures",
+                [
+                    [[_t("For the Provider", "bold")], [_t("For the Client", "bold")]],
+                    [[_v("company.name")], [_v("data.counterparty_name")]],
+                    [[_t("Name: "), _v("user.name")], [_t("Name: "), _v("data.counterparty_signatory", "")]],
+                    [[_t("Signature: ________________")], [_t("Signature: ________________")]],
+                    [[_t("Date: ________________")], [_t("Date: ________________")]],
+                ],
+                header=True,
+            ),
         ),
     ),
     "sample_data": {
@@ -333,12 +362,13 @@ DATA = {
     "name": "Branded Data Sheet",
     "description": "A titled table of rows supplied at generation time, with a short description and a generated-on line. Change the columns to match your data.",
     "format": "pdf",
-    "includes": ["Title and description", "Table from data.rows (edit the columns)", "Generated-on line"],
+    "includes": ["Letterhead from your brand kit", "Title and description", "Table from data.rows (edit the columns)", "Generated-on line"],
     "blocks": _doc(
-        _logo(),
+        *letterhead(),
         _heading("title", 1, _v("data.title")),
         _para("desc", _v("data.description", "")),
-        _data_table("rows", "data.rows", [("name", "Name", "left"), ("value", "Value", "right"), ("notes", "Notes", "left", True)]),
+        # F356: the figure column is headed "Quantity", not "Value"; rename it to suit the data.
+        _data_table("rows", "data.rows", [("name", "Item", "left"), ("value", "Quantity", "right"), ("notes", "Notes", "left", True)]),
         _para("footer", _t("Generated "), _v("date.long"), _t(" by "), _v("user.name"), _t(" · "), _v("company.name")),
     ),
     "sample_data": {
@@ -359,9 +389,9 @@ GENERAL = {
     "name": "Branded Page",
     "description": "A clean branded page: logo, title, body text and a footer with your company name and the date. The blank-but-branded starting point.",
     "format": "pdf",
-    "includes": ["Logo and title", "Body", "Footer with company and date"],
+    "includes": ["Letterhead from your brand kit", "Title", "Body", "Footer with company and date"],
     "blocks": _doc(
-        _logo(),
+        *letterhead(),
         _heading("title", 1, _v("data.title")),
         _para("body", _v("data.body")),
         _para("footer", _v("company.name"), _t(" · "), _v("date.long")),
@@ -373,6 +403,25 @@ GENERAL = {
         }
     },
 }
+
+# F356: the seeded "Meeting Notes" starter (seed_templates.STARTER_TEMPLATES) had no
+# template at all, so its own format (docx) could not render and its PDF was the
+# no-template fallback. It is now this block layout, on its data fields as they were
+# (title, date, attendees, agenda, notes, action_items) plus an optional decisions.
+# Not a category preset: Branded Page stays the "general" starting point.
+MEETING_NOTES_BLOCKS = _doc(
+    *letterhead(),
+    _heading("title", 1, _v("data.title")),
+    _para("meta", _t("Date: ", "bold"), _v("data.date")),
+    _section("s-attendees", "Attendees", _para("attendees", _v("data.attendees"))),
+    _section("s-agenda", "Agenda", _para("agenda", _v("data.agenda", ""))),
+    _section("s-notes", "Discussion", _para("notes", _v("data.notes", ""))),
+    _section("s-decisions", "Decisions", _para("decisions", _v("data.decisions", ""))),
+    _section(
+        "s-actions", "Actions",
+        _data_table("actions", "data.action_items", [("task", "Action", "left"), ("owner", "Owner", "left", True), ("due_date", "Due", "right", True)], empty_text=""),
+    ),
+)
 
 PRESETS: List[Dict[str, Any]] = [LETTER, INVOICE, REPORT, PROPOSAL, CONTRACT, DATA, GENERAL]
 PRESET_BY_CATEGORY: Dict[str, Dict[str, Any]] = {p["category"]: p for p in PRESETS}
@@ -402,4 +451,6 @@ def preset_payload(preset: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-__all__ = ["PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "letterhead", "preset_for", "preset_payload"]
+__all__ = [
+    "MEETING_NOTES_BLOCKS", "PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "letterhead", "preset_for", "preset_payload",
+]

@@ -9,7 +9,9 @@ value, columns sized to their text) with the kit's look when there is one
 * the header row filled with the primary colour, its text white or the kit's text
   colour, whichever reads on it;
 * every cell in the kit's body font;
-* the logo above the table, when the kit has an uploaded logo or a public one.
+* the logo above the table, when the kit has an uploaded logo or a public one;
+* F356: under the logo the title and a company line, zebra rows and hairlines,
+  a frozen, filterable header, and a printed footer (``xlsx_letterhead``).
 
 Without a kit (``brand`` None) the sheet is exactly what it was.
 """
@@ -19,6 +21,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.brand_palette import WHITE, contrast, parse_hex
+
+from .xlsx_letterhead import body_format, branded_formats, set_print_layout, write_letterhead
 
 DEFAULT_HEADER_FILL = "#1a1a2e"
 DEFAULT_HEADER_TEXT = "white"
@@ -62,13 +66,14 @@ def logo_image(brand: Optional[Mapping[str, Any]]) -> Optional[Tuple[Any, float]
     return data, LOGO_HEIGHT_PX / size[1]
 
 
-def _write_cell(worksheet: Any, row: int, col: int, value: Any, formats: Mapping[str, Any]) -> None:
+def _write_cell(worksheet: Any, row: int, col: int, value: Any, formats: Mapping[str, Any], cell: Any = None) -> None:
+    """One body cell; ``cell`` is its format when the sheet is branded (F356), else the plain one."""
     if isinstance(value, (int, float)):
-        worksheet.write_number(row, col, value, formats["body"])
+        worksheet.write_number(row, col, value, cell or formats["body"])
     elif isinstance(value, datetime):
         worksheet.write_datetime(row, col, value, formats["date"])
     else:
-        worksheet.write_string(row, col, str(value) if value is not None else "", formats["body"])
+        worksheet.write_string(row, col, str(value) if value is not None else "", cell or formats["body"])
 
 
 def _widths(columns: Sequence[Any], rows: Sequence[Sequence[Any]]) -> List[int]:
@@ -101,6 +106,15 @@ def _place_logo(worksheet: Any, brand: Optional[Mapping[str, Any]]) -> int:
     return LOGO_ROWS
 
 
+def _write_rows(worksheet: Any, rows: Sequence[Sequence[Any]], width: int, top: int,
+                formats: Mapping[str, Any], branded: Optional[Mapping[str, Any]]) -> None:
+    """The body rows under the header at ``top``; zebra and hairlines when ``branded`` formats are given."""
+    for number, row in enumerate(rows):
+        for col_idx, value in enumerate(row[:width]):
+            cell = body_format(branded, number, value) if branded else None
+            _write_cell(worksheet, top + 1 + number, col_idx, value, formats, cell)
+
+
 def write_xlsx(path: str, title: str, data: Mapping[str, Any], brand: Optional[Mapping[str, Any]]) -> None:
     """Write ``data``'s ``columns`` and ``rows`` to ``path`` as one sheet named ``title``."""
     import xlsxwriter
@@ -112,13 +126,16 @@ def write_xlsx(path: str, title: str, data: Mapping[str, Any], brand: Optional[M
     worksheet = workbook.add_worksheet(title[:SHEET_NAME_MAX_CHARS])
     formats = _formats(workbook, brand)
     top = _place_logo(worksheet, brand)
+    branded = branded_formats(workbook, brand, _font(brand)) if brand else None
+    if brand:
+        top = write_letterhead(worksheet, top, title, brand, branded)
     for col, name in enumerate(columns):
         worksheet.write(top, col, name, formats["header"])
-    for row_idx, row in enumerate(rows, top + 1):
-        for col_idx, value in enumerate(row[:len(columns)]):
-            _write_cell(worksheet, row_idx, col_idx, value, formats)
+    _write_rows(worksheet, rows, len(columns), top, formats, branded)
     for col, width in enumerate(_widths(columns, rows)):
         worksheet.set_column(col, col, width)
+    if brand:
+        set_print_layout(worksheet, top, len(columns), title, brand)
     workbook.close()
 
 

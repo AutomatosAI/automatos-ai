@@ -1,52 +1,40 @@
 <!DOCTYPE html>
 <html>
 <head>
-<style>
-  @page {
-    size: A4;
-    margin: 2cm;
-    @top-center { content: "{{ company_name | default(brand.name) }}"; font-size: 9pt; color: #999; }
-    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #999; }
-  }
-  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: {{ brand.primary_color }}; line-height: 1.6; }
-  .header { border-bottom: 3px solid {{ brand.accent_color }}; padding-bottom: 1rem; margin-bottom: 2rem; }
-  .header h1 { margin: 0 0 0.5rem 0; font-size: 28pt; color: {{ brand.primary_color }}; }
-  .header .meta { color: #666; font-size: 10pt; }
-  h2 { color: {{ brand.primary_color }}; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 2rem; }
-  .metrics { display: flex; gap: 1rem; margin: 1.5rem 0; }
-  .metric-card {
-    flex: 1; background: #f8f9fa; border-radius: 8px; padding: 1rem;
-    border-left: 4px solid {{ brand.accent_color }}; text-align: center;
-  }
-  .metric-card .label { font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
-  .metric-card .value { font-size: 24pt; font-weight: 700; color: {{ brand.primary_color }}; }
-  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-  th { background: {{ brand.primary_color }}; color: white; padding: 0.75rem; text-align: left; font-size: 9pt; text-transform: uppercase; }
-  td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; }
-  tr:nth-child(even) { background: #fafafa; }
-  .section-content { margin-bottom: 1.5rem; }
+<meta charset="utf-8" />
+<style>{{ brand | document_style }}
+  .report-section { margin-bottom: 12pt; }
+  .report-section h2:first-child { margin-top: 16pt; }
+  [data-block="logo"] { width: 14mm; }
 </style>
 </head>
 <body>
-  <div class="header">
-    <h1>{{ title }}</h1>
-    <div class="meta">Generated: {{ date | default('') }} | Author: {{ author | default(brand.name) }}</div>
+  {% set co = brand.company or {} %}
+  <div class="letterhead">
+    <div class="lh-mark">{% if brand.logo_url %}<img class="doc-image" data-block="logo" src="{{ brand.logo_url }}" alt="Logo" />{% endif %}</div>
+    <div class="lh-company">
+      <h3 data-block="lh-name">{{ company_name | default(co.name or brand.name, true) }}</h3>
+      <p data-block="lh-address">{{ co.address | default('', true) }}</p>
+      <p data-block="lh-contact">{{ [co.email, co.phone, co.website] | select | join('  ·  ') }}</p>
+    </div>
   </div>
 
+  <h1>{{ title }}</h1>
+  <p data-block="byline">{{ [date, author | default(brand.name, true)] | select | join('  ·  ') }}</p>
+
   {% if metrics %}
-  <div class="metrics">
+  <table class="doc-table" data-block="kpis"><tbody>
     {% for key, value in metrics.items() %}
-    <div class="metric-card">
-      <div class="label">{{ key }}</div>
-      <div class="value">{{ value }}</div>
-    </div>
+    <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
     {% endfor %}
-  </div>
+  </tbody></table>
   {% endif %}
 
   {% for section in sections %}
-  <h2>{{ section.title }}</h2>
-  <div class="section-content">{{ section.content }}</div>
+  <section class="report-section">
+    {% if section.title %}<h2>{{ section.title }}</h2>{% endif %}
+    <div class="section-content">{{ section.content }}</div>
+  </section>
   {% endfor %}
 </body>
 </html>

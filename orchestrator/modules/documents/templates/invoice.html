@@ -1,79 +1,51 @@
 <!DOCTYPE html>
 <html>
 <head>
-<style>
-  @page { size: A4; margin: 2cm; }
-  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: {{ brand.primary_color }}; line-height: 1.5; }
-  .invoice-header { display: flex; justify-content: space-between; margin-bottom: 2rem; }
-  .invoice-header .company { font-size: 20pt; font-weight: 700; color: {{ brand.primary_color }}; }
-  .invoice-header .invoice-badge {
-    background: {{ brand.accent_color }}; color: white; font-size: 14pt; font-weight: 700;
-    padding: 0.5rem 1.5rem; border-radius: 4px;
-  }
-  .info-grid { display: flex; justify-content: space-between; margin-bottom: 2rem; }
-  .info-block h3 { margin: 0 0 0.5rem 0; font-size: 9pt; text-transform: uppercase; color: #999; letter-spacing: 0.5px; }
-  .info-block p { margin: 0.2rem 0; }
-  table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; }
-  th { background: {{ brand.primary_color }}; color: white; padding: 0.75rem; text-align: left; font-size: 9pt; text-transform: uppercase; }
-  th:last-child, td:last-child { text-align: right; }
-  td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #eee; }
-  .totals { margin-left: auto; width: 300px; margin-top: 1rem; }
-  .totals .row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #eee; }
-  .totals .row.total { font-weight: 700; font-size: 14pt; border-top: 2px solid {{ brand.primary_color }}; border-bottom: none; padding-top: 0.75rem; }
-  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #eee; font-size: 9pt; color: #999; }
+<meta charset="utf-8" />
+<style>{{ brand | document_style }}
+  [data-block="logo"] { width: 14mm; }
 </style>
 </head>
 <body>
-  <div class="invoice-header">
-    <div>
-      <div class="company">{{ company.name }}</div>
-      <div>{{ company.address | default('') }}</div>
-      <div>{{ company.email | default('') }}</div>
-    </div>
-    <div class="invoice-badge">INVOICE</div>
-  </div>
-
-  <div class="info-grid">
-    <div class="info-block">
-      <h3>Bill To</h3>
-      <p><strong>{{ client.name }}</strong></p>
-      <p>{{ client.address | default('') }}</p>
-      <p>{{ client.email | default('') }}</p>
-    </div>
-    <div class="info-block" style="text-align: right;">
-      <h3>Invoice Details</h3>
-      <p>Invoice #: {{ invoice_number }}</p>
-      <p>Date: {{ date | default('') }}</p>
-      <p>Due: {{ due_date | default('') }}</p>
+  <div class="letterhead">
+    <div class="lh-mark">{% if brand.logo_url %}<img class="doc-image" data-block="logo" src="{{ brand.logo_url }}" alt="Logo" />{% endif %}</div>
+    <div class="lh-company">
+      <h3 data-block="lh-name">{{ company.name }}</h3>
+      <p data-block="lh-address">{{ company.address | default('', true) }}</p>
+      <p data-block="lh-contact">{{ company.email | default('', true) }}</p>
     </div>
   </div>
 
-  <table>
+  <h1>Invoice {{ invoice_number }}</h1>
+  <p data-block="meta">{{ ['Date: ' ~ date if date else '', 'Due: ' ~ due_date if due_date else ''] | select | join('  ·  ') }}</p>
+
+  <p data-block="bill-to-label"><strong>BILL TO</strong></p>
+  <p data-block="bill-to">{{ client.name }}</p>
+  <p data-block="bill-to-address">{{ client.address | default('', true) }}</p>
+  <p data-block="bill-to-email">{{ client.email | default('', true) }}</p>
+
+  <table class="doc-table" data-block="items">
     <thead>
-      <tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr>
+      <tr><th style="text-align:left">Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit price</th><th style="text-align:right">Total</th></tr>
     </thead>
     <tbody>
       {% for item in line_items %}
       <tr>
-        <td>{{ item.description }}</td>
-        <td>{{ item.quantity }}</td>
-        <td>{{ item.unit_price | amount }}</td>
-        <td>{{ item.total | amount }}</td>
+        <td style="text-align:left">{{ item.description }}</td>
+        <td style="text-align:right">{{ item.quantity }}</td>
+        <td style="text-align:right">{{ item.unit_price | amount }}</td>
+        <td style="text-align:right">{{ item.total | amount }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 
-  <div class="totals">
-    <div class="row"><span>Subtotal</span><span>{{ subtotal | amount }}</span></div>
-    {% if tax %}<div class="row"><span>Tax</span><span>{{ tax | amount }}</span></div>{% endif %}
-    <div class="row total"><span>Total</span><span>{{ total | amount }}</span></div>
-  </div>
+  <table class="doc-table" data-block="totals">
+    <tr><td>Subtotal</td><td>{{ subtotal | amount }}</td></tr>
+    {% if tax %}<tr><td>Tax</td><td>{{ tax | amount }}</td></tr>{% endif %}
+    <tr><td><strong>Total due</strong></td><td>{{ total | amount }}</td></tr>
+  </table>
 
-  {% if payment_terms %}
-  <div class="footer">
-    <strong>Payment Terms:</strong> {{ payment_terms }}
-  </div>
-  {% endif %}
+  {% if payment_terms %}<p data-block="terms"><strong>Payment terms:</strong> {{ payment_terms }}</p>{% endif %}
 </body>
 </html>
