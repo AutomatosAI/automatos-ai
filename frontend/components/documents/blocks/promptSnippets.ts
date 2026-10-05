@@ -30,8 +30,12 @@ export function schedulePrompt(t: TemplateRef, topic = '<what to research>', whe
   return `${when.charAt(0).toUpperCase()}${when.slice(1)}: ${autoPrompt(t, topic)}`
 }
 
+// The example's recipient, to replace before sending: example.com is reserved (RFC 2606) and
+// never delivers, so a prompt pasted unedited mails no one (F348: it named a real-looking address).
+export const EXAMPLE_RECIPIENT = 'you@example.com'
+
 // Deliver by email — the tool result carries a no-sign-in share link (valid 7 days).
-export function emailPrompt(t: TemplateRef, topic = '<what to research>', recipient = 'marketing@yourcompany.com'): string {
+export function emailPrompt(t: TemplateRef, topic = '<what to research>', recipient = EXAMPLE_RECIPIENT): string {
   return `${autoPrompt(t, topic)} Then email the share link to ${recipient} with a two-line summary.`
 }
 

@@ -93,6 +93,7 @@ from modules.documents.xlsx_render import write_xlsx
 from modules.documents.brand_signing import a_document_is_signed
 from modules.documents.data_coverage import template_for, unused_data_keys
 from modules.documents.letterhead import fallback_blocks
+from modules.documents.template_formats import refuse_unsupported_format
 from modules.documents.pdf_writer import write_pdf
 
 logger = logging.getLogger(__name__)
@@ -172,9 +173,9 @@ class DocumentGenerationService:
 
         # The named template; else, for a PDF, Basic Report only where it prints every key (F331).
         template = template_for(self.template_service, ws, format, data, template_id, template_name)
+        refuse_unsupported_format(template, format)  # F348: say which formats the template makes
 
-        # Inject top-level title into data so templates can reference {{ title }}.
-        # The tool schema separates title from data, but templates expect it inside data.
+        # Inject top-level title into data so templates can reference {{ title }} (the tool keeps it apart).
         if "title" not in data:
             data["title"] = title
 
@@ -438,19 +439,19 @@ class DocumentGenerationService:
 
         Block templates (PRD-167 S2, Q71) compile directly to a python-docx Document
         from the same block tree — no uploaded ``.docx`` file required. Legacy templates
-        with an uploaded ``.docx`` still render via docxtpl.
+        with an uploaded ``.docx`` still render via docxtpl; no body renders the data (F348).
         """
         output_path = self._output_path(workspace_id, title, "docx")
 
         block_payload = getattr(template, "blocks", None) if template else None
-        if block_payload:
-            # Path 1: canonical block template → compiled DOCX (Q71).
-            block_doc = validate_blocks(block_payload)
-            paths = collect_variable_paths(block_doc)
-            resolved = VariableResolver(self.db).resolve(
-                workspace_id, user_id, paths, extra_data=data
-            )
+        if block_payload or not getattr(template, "template_file_path", None):
+            # Path 1: the block template → compiled DOCX (Q71). F348: a template with no body
+            # (the Meeting Notes starter), or none, is its data under the letterhead, as a PDF is.
             brand_kit = self._brand_kit_for(workspace_id)
+            block_doc = validate_blocks(block_payload) if block_payload else await fallback_blocks(
+                data, self.db, workspace_id, brand_kit)
+            paths = collect_variable_paths(block_doc)
+            resolved = VariableResolver(self.db).resolve(workspace_id, user_id, paths, extra_data=data)
             rendered = render_document_docx(block_doc, resolved.values, brand_kit, data=data)
             # P2-09 S3: capture the render-honesty lists for the finalisation
             # gate in generate() — same unknown/unresolved split as the HTML path.
@@ -470,13 +471,6 @@ class DocumentGenerationService:
             raise ImportError(
                 "docxtpl is required for legacy .docx template generation. "
                 "Install with: pip install docxtpl>=0.18.0"
-            )
-
-        if not template or not template.template_file_path:
-            raise ValueError(
-                "DOCX generation requires either a block template or an uploaded .docx "
-                "file. Create a block template in the editor, or upload one via "
-                "/api/documents/templates/upload."
             )
 
         if not os.path.exists(template.template_file_path):

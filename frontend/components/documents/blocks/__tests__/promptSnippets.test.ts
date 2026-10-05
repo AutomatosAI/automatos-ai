@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { autoPrompt, emailPrompt, playbookStepJson, schedulePrompt } from '../promptSnippets'
+import { EXAMPLE_RECIPIENT, autoPrompt, emailPrompt, playbookStepJson, schedulePrompt } from '../promptSnippets'
 
 const t = { id: '11111111-1111-1111-1111-111111111111', name: 'Weekly Report', format: 'pdf', data_fields: ['title', 'summary'] }
 
@@ -16,7 +16,12 @@ describe('promptSnippets', () => {
   })
   it('prefixes the schedule and appends the email delivery', () => {
     expect(schedulePrompt(t, 'x', 'every Friday at 17:00')).toMatch(/^Every Friday at 17:00: Research x/)
-    expect(emailPrompt(t, 'x', 'marketing@acme.com')).toContain('email the share link to marketing@acme.com')
+    expect(emailPrompt(t, 'x', 'marketing@example.org')).toContain('email the share link to marketing@example.org')
+  })
+  it('emails an address that can never be delivered unless the person replaces it (F348)', () => {
+    expect(EXAMPLE_RECIPIENT).toBe('you@example.com')
+    expect(emailPrompt(t, 'x')).toContain('email the share link to you@example.com')
+    expect(emailPrompt(t, 'x')).not.toContain('yourcompany.com')
   })
   it('explains list fields as rows with keys (PRD-243)', () => {
     const inv = { ...t, name: 'Branded Invoice', data_fields: ['client_name', 'line_items'], list_fields: [{ field: 'line_items', columns: ['description', 'quantity', 'total'] }] }
