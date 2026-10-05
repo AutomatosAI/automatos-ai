@@ -7,6 +7,7 @@ home?") is exactly the kind of turn that takes this path.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -55,11 +56,23 @@ def time_of_day(now: Optional[datetime] = None) -> str:
     return "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
 
 
-def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts: str) -> str:
+async def todays_line_off_loop(db: Any, workspace_id: Any) -> str:
+    """Today's date in the workspace's zone (``services.todays_date``), read on a worker thread:
+    the zone is a database read, and a pool wait on the event loop stops the process (F105)."""
+    from services.todays_date import today_line
+
+    return await asyncio.to_thread(today_line, db, workspace_id)
+
+
+def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts: str,
+                       today: Optional[str] = None) -> str:
     """The ATOM system prompt: who the agent is, how it talks and, since F232,
     what Automatos is in this workspace (``facts``, empty on a widget turn). F323
     (night 9b): it carried no date, and Auto searched the web for "current date"
-    (chat 32bb645f); it now says today's date, in UTC as its greeting always was."""
+    (chat 32bb645f); it now says today's date. F337 (night 10): in the workspace's
+    zone (``today``, from :func:`todays_line_off_loop`) as the full path's
+    DatetimeContextSection does, so late on a Sunday in London is Monday, not UTC's
+    Sunday; UTC without one. The greeting stays on the UTC hour."""
     from services.brief_facts import AUTO_OWNER_RULES
     from services.todays_date import today_line
 
@@ -71,7 +84,7 @@ def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts
     owner_block = f"\n\n## What I Avoid\n{AUTO_OWNER_RULES}\n" if facts else ""
     return (
         f"You are {metadata.name}, an AI assistant on the Automatos platform.\n\n"
-        f"{time_of_day()}. {today_line(None, None)}{identity} "
+        f"{time_of_day()}. {today or today_line(None, None)}{identity} "
         "Read the conversation and match the user's energy. "
         "If they're frustrated, be direct — skip the niceties and lead with the answer. "
         "If they're curious, explain the why. If they're casual, be casual back. "
