@@ -156,6 +156,10 @@ def compact_event(event: str, payload: Dict[str, Any], subject: Optional[str] = 
 class Session:
     """Runs one ticket. ``events`` is drained by the host and shipped in batches."""
 
+    # How the session's hooks reach the host (``HookRegistry.session_env``), set by
+    # the host; without it, the Unix socket at ``sock_path``.
+    hook_env: Optional[Dict[str, str]] = None
+
     def __init__(self, ticket: Dict[str, Any], cfg: HostConfig, allow_roots: List[str],
                  sock_path: Path, default_root: Optional[str], workspace_id: str = ""):
         self.ticket = ticket
@@ -553,7 +557,7 @@ class Session:
         assert_args_honour_invariant(args, preset.forbidden_args)
         assert_secret_not_in_args(args, (session_tools or {}).get("token"))
         env = build_session_env(preset, extra={
-            "AUTOMATOS_HOST_SOCK": str(self.sock_path),
+            **(self.hook_env or {"AUTOMATOS_HOST_SOCK": str(self.sock_path)}),
             "AUTOMATOS_HOST_PID": str(os.getpid()),      # the shim talks to this process only (F234)
             "AUTOMATOS_TASK_ID": self.task_id,
             "AUTOMATOS_CLI": preset.id,

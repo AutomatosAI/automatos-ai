@@ -234,3 +234,29 @@ def test_a_claude_plan_turn_without_exitplanmode_still_hands_its_plan_over(short
         events.append(s.events.get_nowait())
     assert [e["text"] for e in events if e.get("event") == PLAN_EVENT] == [out.result_text]
     assert any(f.endswith("plan.md") for f in out.files_touched)
+
+
+def test_a_whole_turn_runs_over_the_keyed_hook_channel(short_tmp, fake_home, env_clean):
+    """#818: Windows' hook channel (a named pipe both ends authenticate; here the same
+    server over a Unix socket) carries a whole turn: the gate, the contract, Stop."""
+    from automatos_cli_host.hook_pipe import PipeHookServer
+
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    ticket = _ticket(workdir)
+    cfg = _cfg(short_tmp)
+    hooks = PipeHookServer(address=str(short_tmp / "k.sock"), family="AF_UNIX")
+    hooks.start()
+    s = Session(ticket, cfg, [str(short_tmp / "ws")], cfg.socket_path, default_root=str(short_tmp / "ws"))
+    s.hook_env = hooks.session_env()
+    hooks.register("42", s.handle_hook)
+    try:
+        out = s.run()
+    finally:
+        hooks.unregister("42")
+        hooks.stop()
+
+    assert out.status == "success", out
+    assert "Push was denied by policy" in out.result_text and "Contract seen" in out.result_text
+    assert (workdir / "hello.txt").read_text() == "hi\n"
+    assert not cfg.socket_path.exists()          # nothing went over the Unix hook socket

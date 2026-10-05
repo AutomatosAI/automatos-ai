@@ -2,7 +2,9 @@
 
 Reads the hook payload from stdin, forwards it to the host over the loopback
 Unix socket (``AUTOMATOS_HOST_SOCK``, set in the session's environment by the
-host), prints the host's one-line JSON answer to stdout, exits 0.
+host), prints the host's one-line JSON answer to stdout, exits 0. On Windows the
+host is a named pipe instead, and ``AUTOMATOS_HOST_KEY`` is set: both ends prove
+they hold that key (``hook_pipe.py``) before the payload moves.
 
 Fail posture: for the two events where silence would hand control to the CLI's
 own permission prompt (``PreToolUse``, ``PermissionRequest``) an unreachable
@@ -37,6 +39,11 @@ NOT_THE_HOST = f"the {NOT_THE_HOST_MARK} — call denied"
 # sandboxed command unlink it and bind its own. So the process at the other end
 # must be the host (``AUTOMATOS_HOST_PID``, set in the session's environment).
 _SOL_LOCAL, _LOCAL_PEERPID = 0, 0x002          # macOS <sys/un.h>
+_PIPE_PREFIX = "\\\\.\\pipe\\"                    # hook_pipe.PIPE_PREFIX, without importing the host
+
+
+class _NotTheHost(Exception):
+    """The other end of the channel is not the process that started this session."""
 
 
 def _deny_claude_shaped(event: str, reason: str) -> dict:
@@ -114,6 +121,66 @@ def _is_the_host(s: socket.socket) -> bool:
     return peer <= 0 or str(peer) == expected
 
 
+def _pipe_server_pid(handle: int):
+    """The PID serving a named pipe; None when Windows cannot say (treated as not the host)."""
+    import ctypes
+    from ctypes import wintypes
+
+    pid = wintypes.ULONG(0)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    if not kernel32.GetNamedPipeServerProcessId(wintypes.HANDLE(handle), ctypes.byref(pid)):
+        return None
+    return int(pid.value)
+
+
+def _keyed_peer_is_the_host(conn, family: str) -> bool:
+    expected = (os.environ.get("AUTOMATOS_HOST_PID") or "").strip()
+    if not expected:
+        return True
+    if family == "AF_PIPE":
+        server = _pipe_server_pid(conn.fileno())       # a pipe connection's fileno() is its handle
+        return server is not None and str(server) == expected
+    with socket.socket(fileno=os.dup(conn.fileno())) as s:
+        return _is_the_host(s)
+
+
+def _ask_keyed(address: str, key_hex: str, payload: dict, wait: float) -> str:
+    """One payload over the keyed channel: Windows' named pipe (a Unix socket in tests)."""
+    from multiprocessing import AuthenticationError
+    from multiprocessing.connection import Client
+
+    family = "AF_PIPE" if address.startswith(_PIPE_PREFIX) else "AF_UNIX"
+    try:
+        conn = Client(address, family=family, authkey=bytes.fromhex(key_hex))
+    except AuthenticationError as exc:            # it does not hold the host's key
+        raise _NotTheHost() from exc
+    with conn:
+        if not _keyed_peer_is_the_host(conn, family):
+            raise _NotTheHost()
+        conn.send_bytes(json.dumps(payload).encode("utf-8"))
+        if not conn.poll(wait):
+            raise TimeoutError("the host did not answer")
+        return conn.recv_bytes().decode("utf-8", "replace").strip()
+
+
+def _ask_unix(sock_path: str, payload: dict, wait: float) -> str:
+    """One payload over the host's Unix socket, one line back."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(_CONNECT_TIMEOUT)
+        s.connect(sock_path)
+        if not _is_the_host(s):           # nothing is sent to an impostor
+            raise _NotTheHost()
+        s.settimeout(wait)
+        s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+        buf = b""
+        while not buf.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+    return buf.decode("utf-8", "replace").strip()
+
+
 def main(argv=None) -> int:
     payload = _payload(sys.stdin.read(), sys.argv[1:] if argv is None else argv)
     event = payload.get("hook_event_name") or ""
@@ -130,30 +197,20 @@ def main(argv=None) -> int:
     # The host may hold PreToolUse while the approvals inbox answers; wait as
     # long as the hook's own timeout allows (the host answers before that).
     wait = float(os.environ.get("AUTOMATOS_HOOK_WAIT_SECONDS", "560"))
+    key = os.environ.get("AUTOMATOS_HOST_KEY")
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.settimeout(_CONNECT_TIMEOUT)
-            s.connect(sock_path)
-            if not _is_the_host(s):           # nothing is sent to an impostor
-                if event in _GATED_EVENTS:
-                    sys.stdout.write(_deny(event, NOT_THE_HOST))
-                return 0
-            s.settimeout(wait)
-            s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-            buf = b""
-            while not buf.endswith(b"\n"):
-                chunk = s.recv(65536)
-                if not chunk:
-                    break
-                buf += chunk
-        answer = buf.decode("utf-8", "replace").strip()
-        if answer and answer != "{}":
-            sys.stdout.write(answer)
+        answer = _ask_keyed(sock_path, key, payload, wait) if key else _ask_unix(sock_path, payload, wait)
+    except _NotTheHost:                   # nothing was sent to an impostor
+        if event in _GATED_EVENTS:
+            sys.stdout.write(_deny(event, NOT_THE_HOST))
         return 0
-    except (OSError, socket.timeout):
+    except (OSError, EOFError, ValueError, socket.timeout):
         if event in _GATED_EVENTS:
             sys.stdout.write(_deny(event, UNREACHABLE))
         return 0
+    if answer and answer != "{}":
+        sys.stdout.write(answer)
+    return 0
 
 
 if __name__ == "__main__":
