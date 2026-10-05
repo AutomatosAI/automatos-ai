@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from ..amounts import field_text
 from ..variables.catalog import walk_dynamic
 from .letterhead_run import company_of, logo_of, split_letterhead
+from .optional_parts import block_is_blank, row_is_blank
 from .page_fonts import font_css
 from .page_style import KEEP_CLASS, KEEP_TOGETHER_MAX_HTML_CHARS, build_styles
 from .schema import BlockDocument
@@ -87,11 +88,15 @@ def _render_image(block, brand_kit: Dict, unresolved: List[str]) -> str:
 def _render_table(block, values: Dict[str, str], unresolved: List[str]) -> str:
     rows_html: List[str] = []
     for r_idx, row in enumerate(block.rows):
+        if row_is_blank(row, values):  # F356: an optional row (a total not sent) is left out
+            continue
         cell_tag = "th" if (block.header and r_idx == 0) else "td"
         cells = "".join(
             f"<{cell_tag}>{_render_inline(cell, values, unresolved)}</{cell_tag}>" for cell in row
         )
         rows_html.append(f"<tr>{cells}</tr>")
+    if block.rows and not rows_html:
+        return ""  # every row was an empty optional one: no table at all
     return f'<table class="doc-table"{_tag(block)}>{"".join(rows_html)}</table>'
 
 
@@ -154,7 +159,10 @@ def _render_block(
 
 
 def _render_section(block, values: Dict[str, str], brand_kit: Dict, unresolved: List[str], data) -> str:
-    """A titled group; a short one (F350) is kept on one page rather than split over two."""
+    """A titled group; a short one (F350) is kept on one page rather than split over two.
+    F356: one with nothing to print (every child an empty optional part) is left out."""
+    if block_is_blank(block, values, data):
+        return ""
     title = f"<h2>{_esc(block.title)}</h2>" if block.title else ""
     inner = title + "".join(_render_block(child, values, brand_kit, unresolved, data) for child in block.children)
     classes = "doc-section" if len(inner) > KEEP_TOGETHER_MAX_HTML_CHARS else f"doc-section {KEEP_CLASS}"

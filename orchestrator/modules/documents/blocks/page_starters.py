@@ -48,16 +48,50 @@ INVOICE = Template("""
   [data-block="totals"] td { background: none !important; }
   [data-block="totals"] td:last-child { text-align: right; white-space: nowrap; }
   [data-block="totals"] tr:last-child td { font-weight: $bold; font-size: ${h3}pt; border-top: ${rule_pt}pt solid $rule; border-bottom: none; }
-  [data-block="terms"] { margin-top: ${s4}pt; }
+  [data-block="totals"] + [data-block="terms"] { margin-top: ${s4}pt; }
   [data-block="thanks"], [data-block="footer"] { margin-top: ${s4}pt; font-size: ${small}pt; color: $muted; }
 """)
 
 REPORT = Template("""
   [data-block="s-summary"] { border-left: 3pt solid $rule; background: $panel; padding: ${s1}pt ${s3}pt ${s1}pt ${s3}pt; }
   [data-block="s-summary"] h2 { margin-top: ${s2}pt; }
-  [data-block="signatures"] { break-inside: avoid; }
+  table[data-block="kpis"] { display: block; width: 100%; margin: ${s1}pt 0 ${s4}pt 0; }
+  [data-block="kpis"] thead { display: none; }
+  [data-block="kpis"] tbody { display: flex; }
+  [data-block="kpis"] tr { display: block; flex: 1 1 0; margin: 0 ${s2}pt 0 0; padding: ${s2}pt ${s3}pt;
+    background: $panel; border-top: 2pt solid $title; }
+  [data-block="kpis"] tr:last-child { margin-right: 0; }
+  [data-block="kpis"] td { display: block; border: none; padding: 0; background: none !important; }
+  [data-block="kpis"] td:nth-child(1) { font-size: ${small}pt; color: $muted; }
+  [data-block="kpis"] td:nth-child(2) { font-size: ${title_pt}pt; font-weight: $bold; line-height: 1.2; color: $heading; }
+  [data-block="kpis"] td:nth-child(3) { font-size: ${caption}pt; color: $muted; }
 """)
 
-STARTER_RULES = (LETTERHEAD, LETTER, INVOICE, REPORT)
+PROPOSAL = Template("""
+  [data-block="cover-header"] { background: $panel; border-left: 4pt solid $title; padding: ${s4}pt ${s4}pt ${s3}pt ${s4}pt;
+    margin: 0 0 ${s4}pt 0; }
+  [data-block="cover-header"] h1 { margin-top: 0; }
+  [data-block="eyebrow"] { font-size: ${caption}pt; font-weight: $bold; letter-spacing: 0.12em; color: $heading; margin: 0 0 ${s1}pt 0; }
+  [data-block="subtitle"] { font-size: ${h3}pt; margin: 0 0 ${s2}pt 0; }
+  [data-block="cover-header"] [data-block="cover"] { margin: 0; }
+  [data-block="pricing"] { margin-bottom: 0; }
+  [data-block="pricing-total"] { margin: 0 0 ${s3}pt 0; }
+  [data-block="pricing-total"] td { background: none !important; font-weight: $bold; border-top: ${rule_pt}pt solid $rule;
+    border-bottom: none; }
+  [data-block="pricing-total"] td:last-child { text-align: right; white-space: nowrap; }
+  [data-block="pricing-note"] { font-size: ${small}pt; color: $muted; }
+  [data-block="sig"] { margin-top: ${s5}pt; color: $muted; }
+""")
+
+CONTRACT = Template("""
+  [data-block="parties"] { margin-top: ${s2}pt; }
+  [data-block="sign-off"] { break-inside: avoid; }
+  [data-block="signatures"] { break-inside: avoid; }
+  [data-block="signatures"] th { background: none; color: $heading; border-bottom: ${rule_pt}pt solid $rule; padding-left: 0; }
+  [data-block="signatures"] td { background: none !important; border-bottom: none; padding: ${s2}pt ${s2}pt 0 0; }
+  [data-block="desc"] { color: $muted; }
+""")
+
+STARTER_RULES = (LETTERHEAD, LETTER, INVOICE, REPORT, PROPOSAL, CONTRACT)
 
 __all__ = ["STARTER_RULES"]

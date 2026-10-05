@@ -53,11 +53,11 @@ KEEP_TOGETHER_MAX_HTML_CHARS = 1600
 KEEP_CLASS = "keep"
 
 _BASE = Template("""
-  @page { size: A4; margin: 20mm 20mm 22mm 20mm; font-family: $font;
-    @bottom-left { content: "$footer_name"; font-size: ${caption}pt; color: $muted; vertical-align: top; }
-    @bottom-center { content: string(doctitle, first); font-size: ${caption}pt; color: $muted; vertical-align: top; }
+  @page { size: A4; margin: 20mm 20mm 24mm 20mm; font-family: $font;
+    @bottom-left { content: "$footer_name"; font-size: ${caption}pt; color: $muted; vertical-align: middle; }
+    @bottom-center { content: string(doctitle, first); font-size: ${caption}pt; color: $muted; vertical-align: middle; }
     @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: ${caption}pt; color: $muted;
-      vertical-align: top; }
+      vertical-align: middle; }
   }
   body { font-family: $font; color: $text; line-height: $leading; font-size: ${body}pt; font-weight: $regular; }
   h1, h2, h3, h4, h5, h6 { color: $heading; font-weight: $bold; line-height: 1.2; margin: 0; break-after: avoid; }
