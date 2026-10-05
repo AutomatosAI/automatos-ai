@@ -35,6 +35,7 @@ from core.cli_runtime import (
     CLI_PRESETS, CONFIG_ALLOWED_TOOLS_KEY, CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, CONFIG_WORKTREE_KEY, PROVIDER_CLAUDE, RUNTIME_CLI, registry_public,
 )
 from core.llm.usage_context import LANE_BOARD_TASK, LANE_SESSION
+from core.local_projects_mount import PROJECTS_FOLDER, clean_relative
 from core.models.approval_grants import SUBJECT_BOARD_TASK
 from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
@@ -1181,11 +1182,17 @@ def _owned_task(db: Session, host: CliHost, task_id: int) -> BoardTask:
 
 def _record_session_cwd(ref: Dict[str, Any], task: BoardTask, cwd: str) -> None:
     """The directory the session actually runs in, plus the explorer root that
-    follows from it. One writer for SessionStart and the result (PRD-239)."""
+    follows from it. One writer for SessionStart and the result (PRD-239).
+    F333: a folder the platform cannot read gets a note on the ticket saying so."""
+    from services.session_folder_reach import notes_with_unreadable_folder
+
+    projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
     ref["cwd"] = cwd
-    ref["explorer_root"] = explorer_root_for(
-        task.id, cwd, task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
-    )
+    ref["explorer_root"] = explorer_root_for(task.id, cwd, task.workspace_id, projects_dir)
+    notes = notes_with_unreadable_folder(ref, SESSION_NOTES_KEY, task_id=task.id, cwd=cwd,
+                                         workspace_dir=configured_workspace_dir(), projects_dir=projects_dir)
+    if notes is not None:
+        ref[SESSION_NOTES_KEY] = notes
 
 
 TERMINAL_EVENTS = ("TerminalOpened", "TerminalClosed")
@@ -1982,7 +1989,7 @@ def tally_tool_decision(tally: Any, decided: Dict[str, Any]) -> Dict[str, int]:
 _DELIVERABLE_TYPE_OVERRIDES = {"report": "document"}
 
 
-PROJECTS_PREFIX = "projects"
+PROJECTS_PREFIX = PROJECTS_FOLDER
 # The explorer root for the deliverables folder itself — the Canvas's own root
 # token (frontend `WORKSPACE_ROOT`), so a session rooted there browses everything.
 WORKSPACE_ROOT_FOLDER = "."
@@ -1996,13 +2003,6 @@ def configured_workspace_dir() -> Optional[str]:
     plain ``docker compose up`` with the default) means nothing to this process."""
     raw = (getattr(config, "AUTOMATOS_WORKSPACE_DIR", "") or "").strip().rstrip("/")
     return raw if raw.startswith("/") else None
-
-
-def _clean_relative(rel: str) -> Optional[str]:
-    rel = rel.strip("/")
-    if not rel or any(part in ("", ".", "..") for part in rel.split("/")):
-        return None
-    return rel
 
 
 def workspace_relative_path(
@@ -2034,7 +2034,7 @@ def workspace_relative_path(
     marker = f"/{workspace_id}/"
     idx = path.find(marker)
     if idx >= 0:
-        return _clean_relative(path[idx + len(marker):])
+        return clean_relative(path[idx + len(marker):])
     if workspace_dir is None:
         workspace_dir = configured_workspace_dir()
     anchors = [
@@ -2044,7 +2044,7 @@ def workspace_relative_path(
     ]
     for root, prefix in sorted(anchors, key=lambda a: len(a[0]), reverse=True):
         if path == root or path.startswith(root + "/"):
-            rel = _clean_relative(path[len(root):])
+            rel = clean_relative(path[len(root):])
             if not rel:
                 return None
             return f"{prefix}/{rel}" if prefix else rel
