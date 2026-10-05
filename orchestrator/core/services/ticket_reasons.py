@@ -8,7 +8,7 @@ hold. The codes come from what the ticket already records:
 * a code a path wrote when it moved the ticket (``runtime_ref.review_reason``,
   stamped with the ``completed_at`` it set, so an older entry never speaks for
   a newer one);
-* the notes a run's checks append to its result (the two ``*_NOTE_PREFIX``
+* the notes a run's checks append to its result (the ``*_NOTE_PREFIX``
   constants, which their writers build their notes from);
 * the session's refused calls, the ticket's approval action, its review mode,
   its source, and the reason line a park wrote (``blocked_reason``).
@@ -26,9 +26,12 @@ REVIEW_REASON_KEY = "review_reason"
 SPEND_HOLD_KEY = "spend_hold"
 
 # What the run's checks append to a result that goes to review instead of done
-# (services/result_files.py and services/result_substance.py write them).
+# (services/result_files.py, services/result_substance.py and services/said_not_done.py
+# write them).
 FILE_MISSING_NOTE_PREFIX = "Not found when this ticket closed:"
 NOTHING_DONE_NOTE_PREFIX = "Nothing was produced:"
+# F334: the agent's own answer says the work isn't done (services/said_not_done.py).
+SAYS_NOT_DONE_NOTE_PREFIX = "Not done, by the agent's own account:"
 # The lines a ticket out of attempts carries: the dispatcher's, for a run that
 # never reported but left its files; the CLI host's park_exhausted. Both are
 # written in place (test_prd252_ticket_reasons guards that they still match).
@@ -40,6 +43,7 @@ MISSION_CHECKING = "mission_checking"   # a mission step its mission is checking
 MISSION_PLAN = "mission_plan"           # a mission's own card: its plan waits for the owner's OK
 FILE_MISSING = "file_missing"
 NOTHING_DONE = "nothing_done"
+SAYS_NOT_DONE = "says_not_done"         # F334: its answer says the work isn't done
 HELD_COMMAND = "held_command"           # a session's held tool call was refused
 RETRIES_USED_UP = "retries_used_up"
 APPROVAL_ACTION = "approval_action"     # filed for the owner's OK to run its action
@@ -127,6 +131,8 @@ def _from_result(task: Any, ref: Dict[str, Any]) -> Optional[str]:
         return FILE_MISSING
     if NOTHING_DONE_NOTE_PREFIX in result:
         return NOTHING_DONE
+    if SAYS_NOT_DONE_NOTE_PREFIX in result:
+        return SAYS_NOT_DONE
     denials = ref.get("denials")
     if (isinstance(denials, int) and denials > 0) or ref.get("permission_denials"):
         return HELD_COMMAND
