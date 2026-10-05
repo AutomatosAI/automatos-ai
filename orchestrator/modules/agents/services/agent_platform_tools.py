@@ -35,13 +35,13 @@ def _routes_generate_document(execute_tool: Callable[..., Awaitable[Dict[str, An
     the arguments and answers every failure in plain words.
     """
     @functools.wraps(execute_tool)
-    async def route(self, tool_name: str, parameters: Dict[str, Any], agent_id: int) -> Dict[str, Any]:
+    async def route(self, tool_name: str, parameters: Dict[str, Any], agent_id: int, card_id: Optional[int] = None) -> Dict[str, Any]:
         if tool_name != "generate_document":
             return await execute_tool(self, tool_name, parameters, agent_id)
         # Imported here: modules.tools imports this module (UnifiedToolExecutor).
         from modules.tools.execution.generate_document_tool import run_generate_document
 
-        return await run_generate_document(self.db, parameters, agent_id)
+        return await run_generate_document(self.db, parameters, agent_id, card_id=card_id)  # F341: the card's Deliverable
 
     return route
 

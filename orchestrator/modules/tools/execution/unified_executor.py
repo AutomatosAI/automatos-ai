@@ -1312,8 +1312,8 @@ class UnifiedToolExecutor:
     async def _execute_composio_tool_router(self, tool_name, parameters, agent_id, workspace_id=None, trace_id=None):
         return await exec_composio.execute_composio_tool_router(self, tool_name, parameters, agent_id, workspace_id=workspace_id, trace_id=trace_id)
 
-    async def _execute_generate_document(self, tool_name, parameters, agent_id, workspace_id=None, trace_id=None):
-        return await exec_document.execute_generate_document(self, tool_name, parameters, agent_id, workspace_id=workspace_id, trace_id=trace_id)
+    async def _execute_generate_document(self, tool_name, parameters, agent_id, workspace_id=None, trace_id=None, caller_context=None):
+        return await exec_document.execute_generate_document(self, tool_name, parameters, agent_id, workspace_id=workspace_id, trace_id=trace_id, caller_context=caller_context)  # F341: the card it works
 
     async def _execute_document_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_document.execute_document_tool(self, tool_name, parameters, agent_id)
