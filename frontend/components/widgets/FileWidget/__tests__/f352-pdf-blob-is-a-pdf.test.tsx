@@ -14,7 +14,7 @@ vi.mock('@/lib/api-client', () => {
   return { apiClient, default: apiClient }
 })
 
-import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
+import { authenticatedArrayBufferFetch, useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
 
 const made: Blob[] = []
 
@@ -56,5 +56,20 @@ describe('useAuthenticatedBlobUrl', () => {
     await waitFor(() => expect(result.current.error).toBeTruthy())
     expect(fetch).not.toHaveBeenCalled()
     expect(result.current.src).toBeNull()
+  })
+})
+
+describe('authenticatedArrayBufferFetch (Word and Excel previews)', () => {
+  it('sends the token to a path on the API', async () => {
+    await authenticatedArrayBufferFetch('/api/workspaces/files/raw?path=a.docx')
+    expect(fetch).toHaveBeenCalledWith('https://api.test/api/workspaces/files/raw?path=a.docx', {
+      headers: { Authorization: 'Bearer t' },
+      credentials: 'omit',
+    })
+  })
+
+  it('never sends the token to a path that would leave the API', async () => {
+    await expect(authenticatedArrayBufferFetch('@evil.example/steal')).rejects.toThrow()
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

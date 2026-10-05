@@ -56,11 +56,12 @@ import { apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
  * the API base URL. Used by DocxPreview/XlsxPreview for binary files served
  * by the authenticated /files/raw endpoint. Returns the response arrayBuffer.
  */
-async function authenticatedArrayBufferFetch(url: string): Promise<ArrayBuffer> {
+export async function authenticatedArrayBufferFetch(url: string): Promise<ArrayBuffer> {
   const isAbsolute = /^https?:\/\//i.test(url)
-  const fullUrl = isAbsolute ? url : `${apiClient.getBaseUrl()}${url}`
-  const headers = isAbsolute ? {} : await apiClient.getAuthHeaders()
-  const resp = await fetch(fullUrl, { headers, credentials: isAbsolute ? 'include' : 'omit' })
+  const apiUrl = isAbsolute ? null : apiFileUrl(apiClient.getBaseUrl(), url)  // F352: the token goes to the API only
+  if (!isAbsolute && !apiUrl) throw new Error(NOT_AN_API_FILE)
+  const headers = apiUrl ? await apiClient.getAuthHeaders() : {}
+  const resp = await fetch(apiUrl ?? url, { headers, credentials: isAbsolute ? 'include' : 'omit' })
   if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`)
   return resp.arrayBuffer()
 }
