@@ -19,7 +19,6 @@ import mimetypes
 import os
 import re
 import tempfile
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -509,8 +508,6 @@ class DocumentManager:
     ):
         self.db_config = db_config
         self.processor = DocumentProcessor()
-        self._db_initialized = False
-        self._init_lock = False  # Simple flag to prevent concurrent initialization
         self.workspace_id = workspace_id
         self.use_s3_vectors = use_s3_vectors
         self._s3_backend = None
@@ -542,8 +539,6 @@ class DocumentManager:
         from core.llm import create_embedding_manager
         self.embedding_manager = create_embedding_manager()
         logger.info(f"DocumentManager using {self.embedding_manager.get_provider_info()['provider']} embeddings")
-        
-        # Don't initialize database at import time - do it lazily on first use
 
     @property
     def s3_client(self):
@@ -628,106 +623,6 @@ class DocumentManager:
 
         return "\n\n".join(parts)
 
-    def _ensure_database_initialized(self, max_retries: int = 5, retry_delay: float = 2.0):
-        """Ensure database is initialized with retry logic"""
-        if self._db_initialized:
-            return
-        
-        if self._init_lock:
-            # Wait for concurrent initialization
-            for _ in range(max_retries):
-                time.sleep(retry_delay)
-                if self._db_initialized:
-                    return
-            raise RuntimeError("Database initialization timeout")
-        
-        self._init_lock = True
-        try:
-            for attempt in range(max_retries):
-                try:
-                    self._init_database()
-                    self._db_initialized = True
-                    logger.info("Database initialized successfully")
-                    return
-                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-                    if "the database system is starting up" in str(e) or "connection" in str(e).lower():
-                        if attempt < max_retries - 1:
-                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                            logger.warning(f"Database not ready (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s...")
-                            time.sleep(wait_time)
-                            continue
-                    raise
-            raise RuntimeError(f"Failed to initialize database after {max_retries} attempts")
-        finally:
-            self._init_lock = False
-    
-    def _init_database(self):
-        """Initialize database tables if they don't exist"""
-        conn = psycopg2.connect(**self.db_config)
-        try:
-            cursor = conn.cursor()
-            
-            # Create documents table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS documents (
-                    id SERIAL PRIMARY KEY,
-                    filename VARCHAR(255) NOT NULL,
-                    file_type VARCHAR(50) NOT NULL,
-                    file_size INTEGER NOT NULL,
-                    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    processed_date TIMESTAMP,
-                    status VARCHAR(50) DEFAULT 'pending',
-                    chunk_count INTEGER DEFAULT 0,
-                    metadata JSONB DEFAULT '{}',
-                    created_by VARCHAR(100) DEFAULT 'system',
-                    tags TEXT[] DEFAULT ARRAY[]::TEXT[],
-                    description TEXT DEFAULT '',
-                    file_hash VARCHAR(64) UNIQUE,
-                    workspace_id TEXT,
-                    source_type VARCHAR(50)
-                );
-            """)
-            
-            # Create document_chunks table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS document_chunks (
-                    id SERIAL PRIMARY KEY,
-                    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
-                    chunk_index INTEGER NOT NULL,
-                    content TEXT NOT NULL,
-                    embedding TEXT,
-                    metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    workspace_id TEXT,
-                    parent_content TEXT,
-                    headers JSONB DEFAULT '{}'
-                );
-            """)
-            
-            # Create context_usage table for analytics
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS context_usage (
-                    id SERIAL PRIMARY KEY,
-                    document_id INTEGER REFERENCES documents(id),
-                    chunk_id INTEGER REFERENCES document_chunks(id),
-                    query_text TEXT,
-                    relevance_score FLOAT,
-                    used_in_response BOOLEAN DEFAULT FALSE,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            
-            # Create indexes for better performance
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);")
-            # cursor.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks USING ivfflat (embedding vector_cosine_ops);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_file_type ON documents(file_type);")
-            
-            conn.commit()
-        finally:
-            cursor.close()
-            conn.close()
-    
     def _calculate_file_hash(self, file_path: str) -> str:
         """Calculate SHA-256 hash of file for deduplication"""
         hash_sha256 = hashlib.sha256()
@@ -784,97 +679,93 @@ class DocumentManager:
         an agent output (mission synthesis / generated document / report)
         through this manager.
         """
-        self._ensure_database_initialized()
         try:
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"File not found: {file_path}")
-            
-            if filename is None:
-                filename = os.path.basename(file_path)
-
-            # Calculate file metadata from local temp file
-            file_size = os.path.getsize(file_path)
-            file_hash = self._calculate_file_hash(file_path)
+            filename = filename or os.path.basename(file_path)
             file_type = self.processor.detect_file_type(file_path)
-            
-            # Check if document already exists
-            conn = psycopg2.connect(**self.db_config)
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT id, status FROM documents WHERE file_hash = %s", (file_hash,))
-            existing = cursor.fetchone()
-            if existing:
-                existing_id, existing_status = existing
-                # Only return existing document if it was successfully processed
-                if existing_status == DocumentStatus.COMPLETED.value:
-                    logger.info(f"Document with hash {file_hash} already exists with ID {existing_id} (status: {existing_status})")
-                    cursor.close()
-                    conn.close()
-                    return existing_id
-                else:
-                    # Document exists but failed/pending - delete and re-process
-                    logger.warning(f"Document with hash {file_hash} exists with ID {existing_id} but has status '{existing_status}'. Deleting and re-processing...")
-                    cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (existing_id,))
-                    cursor.execute("DELETE FROM documents WHERE id = %s", (existing_id,))
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    logger.info(f"Deleted failed document {existing_id}, will re-process")
-
-                    # Reopen connection for new document creation
-                    conn = psycopg2.connect(**self.db_config)
-                    cursor = conn.cursor()
-
-            # Create document record (without file_path yet)
             metadata = DocumentMetadata(
-                filename=filename,
-                file_type=file_type.value,
-                file_size=file_size,
-                upload_date=datetime.now(),
-                tags=tags or [],
-                description=description,
-                created_by=created_by
+                filename=filename, file_type=file_type.value, file_size=os.path.getsize(file_path),
+                upload_date=datetime.now(), tags=tags or [], description=description,
+                created_by=created_by,
             )
-
-            cursor.execute("""
-                INSERT INTO documents (filename, file_type, file_size, upload_date, status,
-                                     metadata, created_by, tags, description, file_hash, workspace_id,
-                                     source_type)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
-                metadata.filename, metadata.file_type, metadata.file_size,
-                metadata.upload_date, DocumentStatus.PROCESSING.value,
-                json.dumps(metadata.to_dict()), metadata.created_by,
-                metadata.tags, metadata.description, file_hash, self.workspace_id,
-                source_type
-            ))
-
-            document_id = cursor.fetchone()[0]
-            conn.commit()
-
-            # Upload to S3 with workspace isolation
-            s3_key = self._upload_to_s3(file_path, document_id, filename)
-
-            # Update document with S3 path
-            cursor.execute("""
-                UPDATE documents SET file_path = %s WHERE id = %s
-            """, (f"s3://{self.s3_bucket}/{s3_key}", document_id))
-            conn.commit()
-
+            content_hash = self._calculate_file_hash(file_path)
+            document_id, s3_key = self._record_upload(file_path, metadata, content_hash, source_type)
+            if s3_key is None:
+                return document_id
             # Process document (it will read from local temp file)
             await self._process_document(document_id, file_path, file_type, s3_key, filename=filename)
-            
-            cursor.close()
-            conn.close()
-            
-            logger.info(f"Document uploaded successfully with ID: {document_id}")
+            logger.info("Document uploaded successfully with ID: %s", document_id)
             return document_id
-            
-        except Exception as e:
-            logger.error(f"Error uploading document: {e}")
+        except Exception:
+            logger.exception("Error uploading document %s", filename)
             raise
-    
+
+    def _record_upload(self, file_path: str, metadata: DocumentMetadata, content_hash: str,
+                       source_type: Optional[str]) -> Tuple[int, Optional[str]]:
+        """Store an upload's ``documents`` row and its source copy in object storage.
+
+        Returns ``(document_id, s3_key)``. When the workspace already holds a
+        processed copy of these exact bytes in the same provenance scope, nothing
+        is written and its id comes back with ``s3_key`` None.
+        """
+        conn = psycopg2.connect(**self.db_config)
+        try:
+            cursor = conn.cursor()
+            existing_id = self._processed_copy(cursor, content_hash, source_type)
+            if existing_id is not None:
+                logger.info("Document with hash %s already processed as ID %s", content_hash, existing_id)
+                return existing_id, None
+            document_id = self._insert_document(cursor, metadata, content_hash, source_type)
+            conn.commit()
+            s3_key = self._upload_to_s3(file_path, document_id, metadata.filename)
+            cursor.execute("UPDATE documents SET file_path = %s WHERE id = %s",
+                           (f"s3://{self.s3_bucket}/{s3_key}", document_id))
+            conn.commit()
+            return document_id, s3_key
+        finally:
+            conn.close()
+
+    def _processed_copy(self, cursor, content_hash: str, source_type: Optional[str]) -> Optional[int]:
+        """The id of this workspace's processed document with these bytes, or None.
+
+        Matched on ``content_hash``, the column the model and the upload API use
+        (#834), within the caller's workspace and provenance scope: an agent
+        output never stands in for the owner's upload, nor the reverse (F305).
+        A copy that failed or is still processing is left alone — the upload
+        gets a row of its own rather than deleting someone else's document.
+        """
+        cursor.execute(
+            "SELECT id FROM documents WHERE content_hash = %s AND workspace_id = %s "
+            "AND source_type IS NOT DISTINCT FROM %s AND status = %s ORDER BY id DESC LIMIT 1",
+            (content_hash, self.workspace_id, source_type, DocumentStatus.COMPLETED.value),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def _insert_document(self, cursor, metadata: DocumentMetadata, content_hash: str,
+                         source_type: Optional[str]) -> int:
+        """Insert the upload's ``documents`` row, status processing, and return its id.
+
+        Writes the model's columns (``core.models.core.Document``):
+        ``content_hash`` and ``doc_metadata``. The legacy ``file_hash`` and
+        ``metadata`` were dropped by migration 208275450a15 and are not on the
+        model, so no database has them (#834).
+        """
+        cursor.execute(
+            """
+            INSERT INTO documents (filename, file_type, file_size, upload_date, status, doc_metadata,
+                                   created_by, tags, description, content_hash, workspace_id,
+                                   source_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (metadata.filename, metadata.file_type, metadata.file_size, metadata.upload_date,
+             DocumentStatus.PROCESSING.value, json.dumps(metadata.to_dict()), metadata.created_by,
+             metadata.tags, metadata.description, content_hash, self.workspace_id, source_type),
+        )
+        return cursor.fetchone()[0]
+
     async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None, filename: str = None, update_graph: bool = True):
         """
         Process document: extract text, chunk, and generate embeddings.
@@ -889,7 +780,6 @@ class DocumentManager:
                 same source leaves the graph as it was — it is built from the
                 source, not the chunks)
         """
-        self._ensure_database_initialized()
         # W3-S8: track S3 vector_ids the persist helper stored so the outer
         # except can clean up if a later step (status update, commit) fails
         # after the dual-write already succeeded.
@@ -1649,7 +1539,6 @@ class DocumentManager:
                       file_type: Optional[DocumentType] = None,
                       limit: int = 100, offset: int = 0) -> List[Dict]:
         """List documents with optional filtering"""
-        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1682,7 +1571,6 @@ class DocumentManager:
     
     def get_document(self, document_id: int) -> Optional[Dict]:
         """Get document by ID"""
-        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -1704,7 +1592,6 @@ class DocumentManager:
         its table and formula rows, its S3 vectors — and keep the document row,
         so ``_process_document`` can run again under the same id. Returns the
         number of chunks removed."""
-        self._ensure_database_initialized()
         conn = psycopg2.connect(**self.db_config)
         try:
             cursor = conn.cursor()
@@ -1737,7 +1624,6 @@ class DocumentManager:
         search filters by workspace + the doc_id is gone from Postgres so
         the orphan never surfaces.
         """
-        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
@@ -1780,7 +1666,6 @@ class DocumentManager:
     
     def search_documents(self, query: str, limit: int = 10) -> List[Dict]:
         """Search documents by content similarity"""
-        self._ensure_database_initialized()
         try:
             # Generate query embedding
             query_embedding = asyncio.run(self._generate_embedding(query))
@@ -1822,7 +1707,6 @@ class DocumentManager:
     
     def get_document_stats(self) -> Dict:
         """Get document statistics"""
-        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()

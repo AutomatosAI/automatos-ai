@@ -377,12 +377,11 @@ class TestDeliverableHandlerValidationNoDB:
 # Integration layer (real Postgres — CI authority)
 # ===========================================================================
 
-# Prod-shape columns the raw-SQL ingestion manager writes but the model-built
-# CI schema lacks (known model/DDL drift: metadata vs doc_metadata, file_hash
-# vs content_hash; chunk embedding columns). Additive + idempotent.
+# Chunk columns the raw-SQL ingestion manager writes that a model-built CI
+# schema may lack (``document_chunks`` has no model). Additive + idempotent.
+# The ``documents`` row needs nothing: the manager writes the model's columns
+# (#834).
 _PROD_SHAPE_DDL = """
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS metadata JSONB;
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);
 ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS embedding TEXT;
 ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS parent_content TEXT;
 ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS headers JSONB;
