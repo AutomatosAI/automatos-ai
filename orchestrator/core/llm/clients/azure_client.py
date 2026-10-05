@@ -60,8 +60,15 @@ class AzureProvider(BaseLLMProvider):
             return
         self.base_url = v1_base_url(endpoint)
         timeout = float(self.config.timeout) if self.config.timeout else DEFAULT_TIMEOUT_SECONDS
-        self.client = OpenAI(api_key=api_key, base_url=self.base_url, timeout=timeout)
+        self.client = OpenAI(api_key=api_key, base_url=self.base_url, timeout=timeout, **self._pinned(timeout))
         logger.info(f"Initialized Azure OpenAI v1 client at {self.base_url} for deployment: {self.config.model}")
+
+    def _pinned(self, timeout: float) -> Dict[str, Any]:
+        """A key's own endpoint is user input: on saas every call to it is pinned (#873)."""
+        from core.llm.byok_endpoint import endpoint_http_client
+
+        http_client = endpoint_http_client(timeout) if self.config.base_url else None
+        return {"http_client": http_client} if http_client else {}
 
     def _deployment(self) -> DeploymentKey:
         return (self.base_url or "", self.config.model)

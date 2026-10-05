@@ -79,6 +79,7 @@ class ProviderSpec:
     terms_note: Optional[str] = None
     rate_limit_note: Optional[str] = None
     setup_note: Optional[str] = None       # how to fill in the provider's fields (#873)
+    endpoint_placeholder: Optional[str] = None  # set: a key carries its own endpoint (#873)
 
     @property
     def chat(self) -> bool:
@@ -101,9 +102,10 @@ _NVIDIA_RATE_LIMIT = (
 _AZURE_DOCS = "https://learn.microsoft.com/azure/foundry/openai/api-version-lifecycle"
 _AZURE_SETUP = (
     "The model field is your deployment name in Microsoft Foundry, not the model's "
-    "name. The endpoint is your resource URL (https://<resource>.openai.azure.com); "
-    "it comes from AZURE_OPENAI_ENDPOINT on the API service, not from this key."
+    "name. The endpoint is your resource URL (https://<resource>.openai.azure.com), "
+    "saved with this key."
 )
+_AZURE_ENDPOINT_PLACEHOLDER = "https://<resource>.openai.azure.com"
 
 _SPECS: Tuple[ProviderSpec, ...] = (
     ProviderSpec(
@@ -148,7 +150,7 @@ _SPECS: Tuple[ProviderSpec, ...] = (
     ProviderSpec(
         slug="azure", label="Azure OpenAI (Microsoft Foundry)", kind=KIND_DIRECT, adapter=ADAPTER_AZURE,
         enum_value="azure", env_key="AZURE_OPENAI_API_KEY", aliases=("azure_openai",),
-        docs_url=_AZURE_DOCS, setup_note=_AZURE_SETUP,
+        docs_url=_AZURE_DOCS, setup_note=_AZURE_SETUP, endpoint_placeholder=_AZURE_ENDPOINT_PLACEHOLDER,
     ),
     ProviderSpec(
         slug="bedrock", label="AWS Bedrock", kind=KIND_DIRECT, adapter=ADAPTER_BEDROCK,
@@ -286,6 +288,34 @@ def hosts_vendor_models(provider: Optional[str]) -> bool:
     return bool(spec and spec.hosts_vendor_models)
 
 
+def model_is_deployment_name(provider: Optional[str]) -> bool:
+    """Is this provider's model field a name the customer chose (Azure deployments, #873)?"""
+    spec = get_spec(provider)
+    return bool(spec and spec.adapter == ADAPTER_AZURE)
+
+
+# A bare model id that names its vendor, for the factory's mismatch rule.
+_VENDOR_BY_MODEL_PREFIX = (
+    ("gemini", "google"),
+    ("claude", "anthropic"),
+    (("gpt-", "o1", "o3", "o4"), "openai"),
+    ("grok", "grok"),
+)
+
+
+def mismatched_vendor(provider: str, model_lower: str, direct_providers) -> Optional[str]:
+    """The vendor a model id names when it isn't ``provider``'s, else None.
+
+    #873: an Azure model field is a deployment name, and Foundry suggests the model's
+    own name for it ("gpt-4o"). It names no vendor, so Azure is never "corrected" to
+    OpenAI, which sent those agents' calls to OpenAI or OpenRouter instead.
+    """
+    if provider not in direct_providers or model_is_deployment_name(provider):
+        return None
+    inferred = next((vendor for prefix, vendor in _VENDOR_BY_MODEL_PREFIX if model_lower.startswith(prefix)), None)
+    return inferred if inferred != provider else None
+
+
 def openrouter_prefix_for(provider: Optional[str]) -> Optional[str]:
     spec = get_spec(provider)
     return spec.openrouter_prefix if spec else None
@@ -314,6 +344,7 @@ def to_public_dict(spec: ProviderSpec, edition: Optional[str] = None) -> Dict[st
         "terms_note": spec.terms_note,
         "rate_limit_note": spec.rate_limit_note,
         "setup_note": spec.setup_note,
+        "endpoint_placeholder": spec.endpoint_placeholder,
     }
 
 

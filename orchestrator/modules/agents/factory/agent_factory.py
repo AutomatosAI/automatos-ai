@@ -387,7 +387,7 @@ class AgentFactory:
         """
         # PRD-236: every provider the factory can route to (slugs, aliases, enum
         # values of registry entries with a chat adapter).
-        from core.llm.providers import routable_provider_names, hosts_vendor_models
+        from core.llm.providers import routable_provider_names, hosts_vendor_models, mismatched_vendor
         DIRECT_PROVIDERS = routable_provider_names()
         # Known OpenRouter vendor prefixes for bare model-id recovery
         VENDOR_PREFIX_RULES = (
@@ -437,18 +437,8 @@ class AgentFactory:
                 )
                 return "openrouter", model_id
 
-        # Fix provider-model mismatches
-        inferred = None
-        if model_lower.startswith("gemini"):
-            inferred = "google"
-        elif model_lower.startswith("claude"):
-            inferred = "anthropic"
-        elif model_lower.startswith(("gpt-", "o1", "o3", "o4")):
-            inferred = "openai"
-        elif model_lower.startswith("grok"):
-            inferred = "grok"
-
-        if inferred and inferred != provider_str and provider_str in DIRECT_PROVIDERS:
+        inferred = mismatched_vendor(provider_str, model_lower, DIRECT_PROVIDERS)
+        if inferred:
             self.logger.warning(
                 f"Provider-model mismatch: provider='{provider_str}' but model='{model_id}' "
                 f"suggests '{inferred}'. Auto-correcting."

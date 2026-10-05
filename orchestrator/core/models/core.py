@@ -160,6 +160,8 @@ class UserApiKey(Base):
     provider = Column(String(50), nullable=False)  # openai, anthropic, google, openrouter
     encrypted_key = Column(Text, nullable=False)
     display_name = Column(String(255))
+    # #873: the key's own endpoint (Azure's resource URL); NULL for providers with a fixed one
+    base_url = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime)
     usage_count = Column(Integer, default=0)

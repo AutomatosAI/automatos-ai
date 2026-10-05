@@ -31,6 +31,8 @@ export interface AddKeyPayload {
   provider: string
   api_key: string
   display_name: string
+  /** The key's own endpoint, for providers that take one (Azure, #873). */
+  base_url?: string
 }
 
 /** Mirrors `ApiKeyTestResult` returned by `POST /api/keys/{id}/test`. */

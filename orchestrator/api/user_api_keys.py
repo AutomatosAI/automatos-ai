@@ -21,6 +21,7 @@ from core.database.database import get_db
 from core.models.core import UserApiKey
 from core.credentials.encryption import get_encryption_service
 from core.llm import providers as provider_registry
+from core.llm.byok_endpoint import EndpointRefused, clean_endpoint, endpoint_required
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,9 @@ router = APIRouter(prefix="/api/keys", tags=["API Keys"])
 
 # PRD-236: the registry is the one list of providers (core/llm/providers.py).
 SUPPORTED_PROVIDERS = provider_registry.byok_slugs()
+# A customer's endpoint must answer the key check quickly or the save fails.
+AZURE_CHECK_TIMEOUT_SECONDS = 15.0
+KEY_VALID = "API key is valid"
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────
@@ -36,6 +40,9 @@ class ApiKeyCreate(BaseModel):
     provider: str = Field(..., description="LLM provider name")
     api_key: str = Field(..., min_length=8, description="The raw API key")
     display_name: Optional[str] = Field(None, description="Friendly label")
+    base_url: Optional[str] = Field(
+        None, max_length=2048, description="The key's own endpoint (Azure: https://<resource>.openai.azure.com)"
+    )
 
 
 class ApiKeyValidation(BaseModel):
@@ -116,7 +123,86 @@ def _openai_compatible_models_list(provider: str) -> bool:
     )
 
 
-async def _validate_provider_key(provider: str, raw_key: str) -> ApiKeyValidation:
+def _key_endpoint(provider: str, raw: Optional[str]) -> Optional[str]:
+    """The endpoint to save with a key (#873), or a 400 the dialog can show."""
+    try:
+        endpoint = clean_endpoint(provider, raw)
+    except EndpointRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if endpoint is None and endpoint_required(provider):
+        raise HTTPException(400, "Enter the endpoint for this key, e.g. https://<resource>.openai.azure.com")
+    return endpoint
+
+
+def _check_openai(_provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+    from openai import OpenAI
+    OpenAI(api_key=raw_key).models.list()
+    return KEY_VALID
+
+
+def _check_anthropic(_provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+    import anthropic
+    anthropic.Anthropic(api_key=raw_key).models.list()
+    return KEY_VALID
+
+
+def _check_google(_provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+    import google.generativeai as genai
+    genai.configure(api_key=raw_key)
+    genai.list_models()
+    return KEY_VALID
+
+
+def _check_openai_compatible(provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+    """OpenRouter, NVIDIA, DeepSeek: a models-list call against the provider's own base URL (PRD-236 S0.3)."""
+    from openai import OpenAI
+    spec = provider_registry.get_spec(provider)
+    kwargs = {"api_key": raw_key, "base_url": provider_registry.base_url_for(spec.slug)}
+    headers = provider_registry.headers_for(spec.slug)
+    if headers:
+        kwargs["default_headers"] = headers
+    OpenAI(**kwargs).models.list()
+    return KEY_VALID
+
+
+def _check_azure(_provider: str, raw_key: str, base_url: Optional[str]) -> str:
+    """A models-list call on the key's own v1 endpoint, pinned on saas (#873).
+
+    An endpoint that answers 404 to the list has accepted the key and simply has no
+    list to give, so the key is saved and the message says it wasn't checked.
+    """
+    endpoint = base_url or config.AZURE_OPENAI_ENDPOINT
+    if not endpoint:
+        return "Key saved (no endpoint to check it against)"
+    from openai import OpenAI
+    from core.llm.byok_endpoint import endpoint_http_client
+    from core.llm.clients.azure_v1 import v1_base_url
+
+    kwargs = {"api_key": raw_key, "base_url": v1_base_url(endpoint), "timeout": AZURE_CHECK_TIMEOUT_SECONDS,
+              "max_retries": 0}
+    http_client = endpoint_http_client(AZURE_CHECK_TIMEOUT_SECONDS) if base_url else None
+    if http_client:
+        kwargs["http_client"] = http_client
+    try:
+        OpenAI(**kwargs).models.list()
+    except Exception as exc:
+        if getattr(exc, "status_code", None) != 404:
+            raise
+        return "Key saved (this endpoint has no models list, so the key was not checked)"
+    return KEY_VALID
+
+
+_LIVE_CHECKS = {"openai": _check_openai, "anthropic": _check_anthropic, "google": _check_google, "azure": _check_azure}
+
+
+def _live_check_for(provider: str):
+    """The provider's live key check, or None when there is none to run."""
+    if provider in _LIVE_CHECKS:
+        return _LIVE_CHECKS[provider]
+    return _check_openai_compatible if _openai_compatible_models_list(provider) else None
+
+
+async def _validate_provider_key(provider: str, raw_key: str, base_url: Optional[str] = None) -> ApiKeyValidation:
     """Make a real, minimal provider call to prove a BYOK key works (PRD-222 US-006).
 
     Shared by ``add_api_key`` (validate-on-save — the fix for the 2026-07-29
@@ -125,39 +211,22 @@ async def _validate_provider_key(provider: str, raw_key: str) -> ApiKeyValidatio
     no live check for returns ``valid=True`` with an honest "not available"
     message — we never CLAIM a validation we did not run. Never raises: a failed
     call becomes ``valid=False`` carrying the provider's own error text.
+    ``base_url`` is the key's own endpoint, for a provider that takes one (#873).
     """
     provider = (provider or "").lower()
     tested_at = datetime.utcnow()
+    check = _live_check_for(provider)
+    if check is None:
+        return ApiKeyValidation(
+            valid=True,
+            message="Key saved (live validation not available for this provider)",
+            tested_at=tested_at,
+        )
     try:
-        if provider == "openai":
-            from openai import OpenAI
-            OpenAI(api_key=raw_key).models.list()
-        elif provider == "anthropic":
-            import anthropic
-            anthropic.Anthropic(api_key=raw_key).models.list()
-        elif provider == "google":
-            import google.generativeai as genai
-            genai.configure(api_key=raw_key)
-            genai.list_models()
-        elif _openai_compatible_models_list(provider):
-            # OpenRouter, NVIDIA, DeepSeek — a models-list call against the
-            # provider's own base URL proves the key (PRD-236 S0.3).
-            from openai import OpenAI
-            spec = provider_registry.get_spec(provider)
-            kwargs = {"api_key": raw_key, "base_url": provider_registry.base_url_for(spec.slug)}
-            headers = provider_registry.headers_for(spec.slug)
-            if headers:
-                kwargs["default_headers"] = headers
-            OpenAI(**kwargs).models.list()
-        else:
-            return ApiKeyValidation(
-                valid=True,
-                message="Key saved (live validation not available for this provider)",
-                tested_at=tested_at,
-            )
-        return ApiKeyValidation(valid=True, message="API key is valid", tested_at=tested_at)
+        message = check(provider, raw_key, base_url)
     except Exception as e:
         return ApiKeyValidation(valid=False, message=f"Invalid key: {str(e)[:200]}", tested_at=tested_at)
+    return ApiKeyValidation(valid=True, message=message, tested_at=tested_at)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -176,6 +245,7 @@ async def add_api_key(
     if provider not in SUPPORTED_PROVIDERS:
         raise HTTPException(400, f"Unsupported provider. Supported: {SUPPORTED_PROVIDERS}")
 
+    endpoint = _key_endpoint(provider, body.base_url)
     encryption = get_encryption_service()
     encrypted = encryption.encrypt(body.api_key)
 
@@ -185,12 +255,13 @@ async def add_api_key(
     # persisted where _resolve_api_key filters (is_active) and where the frontend
     # BYOK badge reads (is_active); tested_at rides on last_used_at. A dead key is
     # stored is_active=False → it never resolves and never wears a "BYOK" badge.
-    validation = await _validate_provider_key(provider, body.api_key)
+    validation = await _validate_provider_key(provider, body.api_key, endpoint)
 
     row = UserApiKey(
         workspace_id=ctx.workspace_id,
         provider=provider,
         encrypted_key=encrypted,
+        base_url=endpoint,
         display_name=body.display_name or f"My {body.provider.title()} Key",
         is_active=validation.valid,
         usage_count=0,
@@ -288,7 +359,7 @@ async def test_api_key(
 
     # Reuse the single validate-on-save path (PRD-222 US-006) so the manual test
     # and the save-time check can never diverge.
-    result = await _validate_provider_key(row.provider, raw_key)
+    result = await _validate_provider_key(row.provider, raw_key, getattr(row, "base_url", None))
     if result.valid:
         row.last_used_at = result.tested_at or datetime.utcnow()
         db.commit()
