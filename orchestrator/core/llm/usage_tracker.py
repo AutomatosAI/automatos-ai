@@ -97,7 +97,7 @@ def _rate_from_openrouter_cache(db, model_id: str) -> Optional[Tuple[float, floa
     try:
         from core.models.openrouter_cache import OpenRouterModelCache
 
-        row = db.query(OpenRouterModelCache).filter(OpenRouterModelCache.model_id == model_id).first()
+        row = _cache_row(db, OpenRouterModelCache, model_id)
     except Exception:
         return None
     if row is None:
@@ -105,10 +105,33 @@ def _rate_from_openrouter_cache(db, model_id: str) -> Optional[Tuple[float, floa
     return float(row.prompt_cost or 0) * 1000.0, float(row.completion_cost or 0) * 1000.0
 
 
+def _has_price(row: Any) -> bool:
+    """#829: a catalogue row with NO input and NO output price is unpriced (a new
+    Anthropic route the Models API listed without prices), not free. A row with an
+    explicit 0 is priced: free and local routes are 0 on purpose."""
+    return row.input_cost_per_1k_tokens is not None or row.output_cost_per_1k_tokens is not None
+
+
+def _cache_row(db, cache_model: Any, model_id: str) -> Any:
+    """The cache row for ``model_id``; failing that (#829), for the OpenRouter twin of a
+    direct Anthropic id (``claude-opus-5`` → ``anthropic/claude-opus-5``), which is how
+    a model the Anthropic sync added without a price gets OpenRouter's."""
+    from core.llm.anthropic_ids import openrouter_twin_ids
+
+    for candidate in [model_id, *openrouter_twin_ids(model_id)]:
+        row = db.query(cache_model).filter(cache_model.model_id == candidate).first()
+        if row is not None:
+            return row
+    return None
+
+
 def resolve_price(db, model_id: str, provider: Optional[str]) -> Dict[str, Any]:
     """``{input_per_1k, output_per_1k, tier, source, multiplier}`` for the route
     that served ``model_id``. ``source`` names where the price came from so a
-    test (or a curious operator) can tell an estimate from a catalogue price."""
+    test (or a curious operator) can tell an estimate from a catalogue price.
+    An unpriced row (``_has_price``) is passed over, as a missing row is (#829)."""
+    from sqlalchemy import or_
+
     from core.llm.providers import get_spec, normalize_slug, price_multiplier_for
     from core.models.core import LLMModel
 
@@ -124,7 +147,7 @@ def resolve_price(db, model_id: str, provider: Optional[str]) -> Dict[str, Any]:
             .filter(LLMModel.model_id == model_id, LLMModel.serving_provider == route)
             .first()
         )
-    if row is not None:
+    if row is not None and _has_price(row):
         return {
             "input_per_1k": float(row.input_cost_per_1k_tokens or 0),
             "output_per_1k": float(row.output_cost_per_1k_tokens or 0),
@@ -132,8 +155,15 @@ def resolve_price(db, model_id: str, provider: Optional[str]) -> Dict[str, Any]:
             "source": "route",
             "multiplier": 1.0,
         }
-    any_row = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
-    if any_row is not None:
+    any_row = (
+        db.query(LLMModel)
+        .filter(
+            LLMModel.model_id == model_id,
+            or_(LLMModel.input_cost_per_1k_tokens.isnot(None), LLMModel.output_cost_per_1k_tokens.isnot(None)),
+        )
+        .first()
+    )
+    if any_row is not None and _has_price(any_row):
         return {
             "input_per_1k": float(any_row.input_cost_per_1k_tokens or 0),
             "output_per_1k": float(any_row.output_cost_per_1k_tokens or 0),

@@ -10,7 +10,8 @@ Browse, compare, and install LLM ROUTES to workspaces. A route is one row of
 routes to.
 
 Catalogue rows are written by ``core.services.provider_catalog_sync``
-(OpenRouter via its cache, NVIDIA from its public list); direct providers keep
+(OpenRouter via its cache, NVIDIA from its public list, Anthropic from its
+Models API with the workspace's own key, #829); the other direct providers keep
 their seeded rows.
 """
 
@@ -630,7 +631,8 @@ async def sync_provider(
     db: Session = Depends(get_db),
 ):
     """Refresh one provider's catalogue (admin). OpenRouter: cache sync + projection;
-    NVIDIA: the public model list, metadata borrowed from OpenRouter's rows."""
+    NVIDIA: the public model list, metadata borrowed from OpenRouter's rows;
+    Anthropic: its Models API, read with the key this workspace's calls use."""
     from core.services.provider_catalog_sync import ProviderCatalogSync, SYNCABLE_PROVIDERS
 
     slug = registry.normalize_slug(provider)
@@ -638,7 +640,7 @@ async def sync_provider(
         raise HTTPException(400, f"'{provider}' has no catalogue sync. Syncable: {', '.join(SYNCABLE_PROVIDERS)}")
     logger.info(f"Catalogue sync for {slug} requested by workspace {ctx.workspace_id}")
     try:
-        result = ProviderCatalogSync(db).sync(slug)
+        result = ProviderCatalogSync(db).sync(slug, workspace_id=ctx.workspace_id)
     except Exception as exc:
         raise HTTPException(502, f"{slug} catalogue sync failed: {str(exc)[:300]}")
     logger.info(f"Catalogue sync for {slug} completed: {result}")
