@@ -1,8 +1,8 @@
 """Variable resolution service (PRD-167 S3).
 
 Resolves ``{{user.*}} / {{company.*}} / {{brand.*}} / {{date.*}}`` against the
-requesting user's profile, the workspace business profile, the workspace brand kit and
-the render-time clock.
+requesting user's profile (the workspace owner's when no person asks, F344), the
+workspace business profile, the workspace brand kit and the render-time clock.
 
 Unresolved policy (PRD-167 S3): a *known* path that resolves empty is reported as
 ``unresolved`` (the caller surfaces a render-time error list — never a silent blank);
@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
 from .catalog import is_blank, is_dynamic_path, is_known_path, walk_dynamic
+from .document_user import document_user
 
 logger = logging.getLogger(__name__)
 
@@ -167,10 +168,8 @@ class VariableResolver:
         # Imported here to keep the pure helpers import-light and avoid a circular
         # import with the model layer at module load.
         from core.models.business_profiles import BusinessProfile
-        from core.models.core import User
         from core.models.workspaces import Workspace
 
-        user = self.db.query(User).filter(User.id == user_id).first() if user_id else None
         workspace = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
         business_profile = (
             self.db.query(BusinessProfile)
@@ -179,6 +178,8 @@ class VariableResolver:
             .first()
         )
         brand_kit = get_brand_kit(getattr(workspace, "settings", None))
+        # F344: with no person asking (an agent, Auto), user.* is this workspace's owner.
+        user = document_user(self.db, workspace, user_id, brand_kit)
         return build_context(user, business_profile, brand_kit, now, extra_data)
 
 

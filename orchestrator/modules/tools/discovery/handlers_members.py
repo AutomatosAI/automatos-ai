@@ -22,23 +22,9 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core.workspaces.owner import owner_member_user_id
+
 logger = logging.getLogger(__name__)
-
-
-def _workspace_owner_user_id(db: Session, workspace_id: UUID) -> Optional[int]:
-    """Resolve the workspace owner's internal users.id (the audit principal)."""
-    from core.workspaces.models import WorkspaceMember
-
-    owner = (
-        db.query(WorkspaceMember)
-        .filter(
-            WorkspaceMember.workspace_id == workspace_id,
-            WorkspaceMember.role == "owner",
-            WorkspaceMember.is_active == True,  # noqa: E712
-        )
-        .first()
-    )
-    return owner.user_id if owner else None
 
 
 def _audit(db: Session, workspace_id: UUID, user_id: Optional[int], action: str,
@@ -109,7 +95,7 @@ async def invite_member(db: Session, workspace_id: UUID, params: Dict[str, Any])
     try:
         # F148: the person the call is made for sends the invitation (as REST
         # records its caller); the owner only when a lane names nobody.
-        inviter_internal_id = params.get("_driving_user_id") or _workspace_owner_user_id(db, workspace_id)
+        inviter_internal_id = params.get("_driving_user_id") or owner_member_user_id(db, workspace_id)
         if inviter_internal_id is None:
             return {
                 "success": False,
@@ -162,7 +148,7 @@ async def set_member_role(db: Session, workspace_id: UUID, params: Dict[str, Any
     # super admin's bypass). The executor injects who the call is made for.
     driver = params.get("_driving_user_id")
     if params.get("_driving_super_admin") is not True and (
-            driver is None or driver != _workspace_owner_user_id(db, workspace_id)):
+            driver is None or driver != owner_member_user_id(db, workspace_id)):
         return {"success": False,
                 "error": "Only the workspace owner changes member roles. Ask the owner, or have them do it in chat."}
 
@@ -196,7 +182,7 @@ async def set_member_role(db: Session, workspace_id: UUID, params: Dict[str, Any
         db.commit()
 
         _audit(
-            db, workspace_id, driver or _workspace_owner_user_id(db, workspace_id),
+            db, workspace_id, driver or owner_member_user_id(db, workspace_id),
             "member:role_changed", resource_id=member.id,
             details={"old_role": old_role, "new_role": new_role},
         )
@@ -240,7 +226,7 @@ async def remove_member(db: Session, workspace_id: UUID, params: Dict[str, Any])
         db.commit()
 
         _audit(
-            db, workspace_id, _workspace_owner_user_id(db, workspace_id),
+            db, workspace_id, owner_member_user_id(db, workspace_id),
             "member:removed", resource_id=member.id,
             details={"removed_user_id": member.user_id},
         )

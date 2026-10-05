@@ -252,6 +252,7 @@ async def make_document(db: Session, request: DocumentRequest, agent: Any, works
 
     logger.info("[generate_document] %s document: %r", request.fmt.upper(), request.title)
     service = DocumentGenerationService(db, workspace_id)
+    # No user_id: no person makes an agent's call, so {{user.*}} is the workspace owner's (F344).
     result = await service.generate(
         title=request.title,
         format=request.fmt,
@@ -259,7 +260,6 @@ async def make_document(db: Session, request: DocumentRequest, agent: Any, works
         workspace_id=workspace_id,
         template_name=request.template_name,
         template_id=request.template_id,
-        user_id=getattr(agent, "user_id", None),
     )
     # PRD-167 S6: the rendered document is a Deliverable with source attribution.
     registration = service.register_as_deliverable(
