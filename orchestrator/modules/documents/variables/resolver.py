@@ -23,6 +23,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from ..amounts import field_text
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
 from .catalog import is_blank, is_dynamic_path, is_known_path, walk_dynamic
@@ -39,8 +40,9 @@ class ResolvedVariables:
 
 
 def _long_date(now: datetime) -> str:
+    # Day month year, "5 October 2026" (F350: it printed US-style, "October 5, 2026").
     # Avoid %-d (not portable to Windows); build the long form manually.
-    return f"{now.strftime('%B')} {now.day}, {now.year}"
+    return f"{now.day} {now.strftime('%B')} {now.year}"
 
 
 def build_context(
@@ -123,7 +125,7 @@ def resolve_paths(context: Dict[str, Any], paths: Iterable[str]) -> ResolvedVari
             if is_blank(value):  # F345: whitespace fills nothing
                 out.unresolved.append(path)
             else:
-                out.values[path] = str(value)
+                out.values[path] = field_text(path, value)  # F347: "311.0" prints as "311.00"
             continue
         if not is_known_path(path):
             out.unknown.append(path)

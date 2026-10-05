@@ -57,17 +57,17 @@
       <tr>
         <td>{{ item.description }}</td>
         <td>{{ item.quantity }}</td>
-        <td>${{ "%.2f" | format(item.unit_price) }}</td>
-        <td>${{ "%.2f" | format(item.total) }}</td>
+        <td>{{ item.unit_price | amount }}</td>
+        <td>{{ item.total | amount }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 
   <div class="totals">
-    <div class="row"><span>Subtotal</span><span>${{ "%.2f" | format(subtotal) }}</span></div>
-    {% if tax %}<div class="row"><span>Tax</span><span>${{ "%.2f" | format(tax) }}</span></div>{% endif %}
-    <div class="row total"><span>Total</span><span>${{ "%.2f" | format(total) }}</span></div>
+    <div class="row"><span>Subtotal</span><span>{{ subtotal | amount }}</span></div>
+    {% if tax %}<div class="row"><span>Tax</span><span>{{ tax | amount }}</span></div>{% endif %}
+    <div class="row total"><span>Total</span><span>{{ total | amount }}</span></div>
   </div>
 
   {% if payment_terms %}
