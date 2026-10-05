@@ -21,17 +21,24 @@ async def execute_generate_document(
     agent_id: int,
     workspace_id: Optional[UUID] = None,
     trace_id: Optional[str] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     PRD-63: Generate a polished document via DocumentGenerationService.
 
     Routes to AgentPlatformTools.execute_tool which handles workspace
-    resolution, template selection, and file generation.
+    resolution, template selection, and file generation. F341 (night 10): the
+    card the call works (``caller_context``, server-built) goes with it, so the
+    document is that card's Deliverable.
     """
+    from modules.tools.execution.generate_document_tool import card_of
+
+    card_id = card_of(caller_context)
     return await executor.platform_tools.execute_tool(
         tool_name="generate_document",
         parameters=parameters,
         agent_id=agent_id,
+        **({"card_id": card_id} if card_id is not None else {}),
     )
 
 

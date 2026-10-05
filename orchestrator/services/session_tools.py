@@ -46,6 +46,8 @@ PLATFORM_DISPATCHER = "platform_execute"
 # router itself — so it is dispatched DIRECTLY under that name.
 DISPATCH_PLATFORM_ACTION = "platform_action"
 DISPATCH_TOOL_NAME = "tool_name"
+# The session tools whose result is a Deliverable saved on the ticket's card (F341).
+CARD_ATTRIBUTED_TOOLS = ("generate_document",)
 
 # A session may not move its own ticket OUT of ``in_progress`` at all.
 #
@@ -767,19 +769,23 @@ async def call_tool(db: Any, tool: SessionTool, params: Dict[str, Any], ctx: Ses
         agent_id=int(ctx.agent_id or 0),
         workspace_id=ctx.workspace_id,
         trace_id=f"session:{ctx.task_id}:{tool.name}",
-        # A session speaks as its AGENT, never as a human operator: no user
-        # context, so an admin-gated action refuses exactly as it would for any
-        # workspace agent. The ONE thing threaded is the mission field this
-        # ticket belongs to — resolved server-side from the run, so a session
-        # cannot name another mission's field (PRD-178 S1's rule, kept).
-        caller_context=(
-            {"field_context": {"field_id": ctx.mission_field_id}}
-            if ctx.mission_field_id else None
-        ),
+        # A session speaks as its AGENT, never a human operator: no user context, so an
+        # admin-gated action refuses as it would for any workspace agent.
+        caller_context=_caller_context(tool, ctx),
     )
     if not isinstance(result, dict):
         return {"success": False, "error": "the executor returned no result"}
     return _projected(tool, result)
+
+
+def _caller_context(tool: SessionTool, ctx: SessionContext) -> Optional[Dict[str, Any]]:
+    """The executor's context, resolved server-side: this ticket's mission field (PRD-178 S1)
+    and, for a tool that saves a Deliverable, the ticket (F341: #2099's PDF had no card)."""
+    from modules.tools.execution.generate_document_tool import SESSION_CARD_KEY
+    context: Dict[str, Any] = {"field_context": {"field_id": ctx.mission_field_id}} if ctx.mission_field_id else {}
+    if tool.name in CARD_ATTRIBUTED_TOOLS:
+        context = {**context, SESSION_CARD_KEY: ctx.task_id}
+    return context or None
 
 
 def _projected(tool: SessionTool, result: Any) -> Any:
