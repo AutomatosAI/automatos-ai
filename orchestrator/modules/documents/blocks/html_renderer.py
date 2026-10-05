@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from ..amounts import field_text
 from ..variables.catalog import walk_dynamic
+from .letterhead_run import company_of, logo_of, split_letterhead
 from .page_fonts import font_css
 from .page_style import KEEP_CLASS, KEEP_TOGETHER_MAX_HTML_CHARS, build_styles
 from .schema import BlockDocument
@@ -160,6 +161,16 @@ def _render_section(block, values: Dict[str, str], brand_kit: Dict, unresolved: 
     return f'<section class="{classes}"{_tag(block)}>{inner}</section>'
 
 
+def _render_letterhead(head, values: Dict[str, str], brand_kit: Dict, unresolved: List[str]) -> str:
+    """F356: the letterhead as one row: the logo, and the company block beside it."""
+    if not head:
+        return ""
+    logo = logo_of(head)
+    mark = _render_image(logo, brand_kit, unresolved) if logo is not None else ""
+    company = "".join(_render_block(block, values, brand_kit, unresolved) for block in company_of(head))
+    return f'<div class="letterhead"><div class="lh-mark">{mark}</div><div class="lh-company">{company}</div></div>'
+
+
 def render_document_html(
     doc: BlockDocument,
     values: Dict[str, str],
@@ -174,7 +185,10 @@ def render_document_html(
     ``data`` is the raw per-generation object; ``data_table`` blocks read their rows
     from it (scalar chips still come pre-resolved in ``values``)."""
     unresolved: List[str] = []
-    body = "".join(_render_block(b, values, brand_kit, unresolved, data) for b in doc.blocks)
+    head, rest = split_letterhead(doc.blocks)
+    body = _render_letterhead(head, values, brand_kit, unresolved) + "".join(
+        _render_block(b, values, brand_kit, unresolved, data) for b in rest
+    )
     page = f"""<!DOCTYPE html>
 <html>
 <head>

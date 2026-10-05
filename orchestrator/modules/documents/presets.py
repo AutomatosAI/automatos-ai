@@ -35,7 +35,8 @@ from modules.documents.variables.catalog import DYNAMIC_PREFIX
 
 # F350: one letterhead logo size on every starter. It was 40-50 mm (the top fifth of
 # an A4 page) on the invoice, report and proposal; the owner's own copies used 22 mm.
-LETTERHEAD_LOGO_MM = 22
+# F356: 14 mm, beside the company block rather than above it (blocks/letterhead_run.py).
+LETTERHEAD_LOGO_MM = 14
 
 # ---------------------------------------------------------------------------
 # Block-tree builders (readable presets, no hand-written ids)
