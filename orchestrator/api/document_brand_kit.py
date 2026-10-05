@@ -12,6 +12,10 @@ actually brand a document:
   already knows about itself (workspace name, the onboarding business profile,
   the signed-in user) so the kit starts filled rather than blank.
 
+PRD-255 (Brand Kit v2) answers GET and PUT with the kit's effective colour roles
+(``palette``: stored, else derived) and ``palette_source`` (each role ``set`` or
+``derived``), and the PUT refuses a palette whose text does not read on its page.
+
 PRD-251 D5 (S1.3) extends the kit in place, same GET/PUT: a heading font, social
 handles and a brand voice on the PUT, plus the stored files a social render
 inlines, each with routes that mirror the logo's:
@@ -42,6 +46,7 @@ from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from modules.documents.brand_kit import BrandKitPatch
+from modules.documents.brand_system import brand_kit_view
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["document-generation"])
@@ -86,11 +91,12 @@ def get_brand_kit_endpoint(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Return the workspace brand kit (defaults merged in; no social handles while Socials is off)."""
+    """Return the workspace brand kit (defaults merged in, every colour role and its source;
+    no social handles while Socials is off)."""
     from modules.documents.brand_kit import get_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    return _shown(ws, get_brand_kit(ws.settings))
+    return _shown(ws, brand_kit_view(get_brand_kit(ws.settings)))
 
 
 @router.put("/brand-kit", dependencies=[_MANAGE])
@@ -113,7 +119,7 @@ def update_brand_kit_endpoint(
     if _handles_hidden(ws):
         patch = {key: value for key, value in patch.items() if key != SOCIAL_HANDLES_FIELD}
     try:
-        return _shown(ws, update_brand_kit(db, ws, patch))
+        return _shown(ws, brand_kit_view(update_brand_kit(db, ws, patch)))
     except ValidationError as e:
         raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": brand_kit_errors(e)})
 

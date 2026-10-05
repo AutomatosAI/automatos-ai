@@ -76,6 +76,35 @@ _PARAMETERS = {
                 },
             },
         },
+        "palette": {
+            "type": "object",
+            "description": (
+                "The colour roles (PRD-255), merged key by key. Each is a hex colour; a role "
+                "not set is derived from the four kit colours, and an empty string returns a "
+                "set role to derived. ink, heading and muted must read at 4.5:1 on paper and "
+                "surface_2; accent and accent_2 at 3:1. A role that does not is refused with "
+                "its ratio."
+            ),
+            "properties": {
+                "ink": {"type": "string", "description": "Body text."},
+                "heading": {"type": "string", "description": "Headings: near-black, not the accent."},
+                "paper": {"type": "string", "description": "The page background."},
+                "surface": {"type": "string", "description": "Cards and zebra rows."},
+                "surface_2": {"type": "string", "description": "Table header fills."},
+                "accent": {"type": "string", "description": "Highlights: the title rule, key numbers, links."},
+                "accent_2": {"type": "string", "description": "An optional second accent."},
+                "muted": {"type": "string", "description": "Secondary text."},
+                "rule": {"type": "string", "description": "Hairlines."},
+            },
+        },
+        "accent_use": {
+            "type": "string",
+            "enum": ["sparing", "bold"],
+            "description": (
+                "How far the accent goes: sparing (the default) keeps it to highlights; bold "
+                "also fills table headers with it."
+            ),
+        },
     },
     "required": [],
 }

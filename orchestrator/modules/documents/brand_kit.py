@@ -30,6 +30,11 @@ PRD-251 US-115 gives agents the kit through ``platform_get_brand_kit`` and
 applies a :class:`BrandKitPatch`, :func:`save_brand_kit` is the kit's one writer,
 and :func:`brand_kit_suggestions` supplies the prefill candidates.
 
+PRD-255 (Brand Kit v2) gives the colours roles: ``palette`` stores the roles the
+owner sets (``modules/documents/brand_system.py``; every other role is derived at
+read time), and ``accent_use`` says how far the accent goes. The PUT refuses a
+palette whose text does not read on its page.
+
 Defaults are a neutral professional palette — an unconfigured workspace renders cleanly
 (and *not* in Automatos orange).
 """
@@ -38,11 +43,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Pattern, Tuple
+from typing import Any, Dict, List, Literal, Optional, Pattern, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 from core.media_render_bundle import FONT_FAMILY, FONT_STYLES, MAX_TOKEN_CHARS, TOKEN_UNSAFE
+from modules.documents.brand_system import DEFAULT_ACCENT_USE, BrandPalette, require_readable_palette
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +110,7 @@ GENERIC_HANDLE_RULE: Tuple[Pattern[str], str] = (
 # kit at a stored file.
 SERVER_MANAGED_FIELDS = frozenset({"logo_path", "logo_mark_path", "font_files"})
 # A patch merges into these records key by key; every other field it names is replaced.
-MERGED_RECORDS = ("company", "voice")
+MERGED_RECORDS = ("company", "voice", "palette")
 
 
 class CompanyContact(BaseModel):
@@ -276,6 +282,10 @@ class BrandKit(BaseModel):
     logo_mark_path: str = ""
     social_handles: Dict[str, str] = Field(default_factory=dict)
     voice: BrandVoice = Field(default_factory=BrandVoice)
+    # PRD-255 FR-1: the colour roles the owner sets (the rest are derived), and how
+    # far the accent goes: "sparing" (every kit's default, Decision Q1) or "bold".
+    palette: BrandPalette = Field(default_factory=BrandPalette)
+    accent_use: Literal["sparing", "bold"] = DEFAULT_ACCENT_USE
 
     @field_validator("primary_color", "secondary_color", "accent_color", "text_color")
     @classmethod
@@ -353,6 +363,9 @@ class BrandKitPatch(BaseModel):
     logo_mark_url: Optional[str] = None
     social_handles: Optional[Dict[str, str]] = None
     voice: Optional[dict] = None
+    # PRD-255 FR-1: roles merge key by key; an empty role goes back to derived.
+    palette: Optional[dict] = None
+    accent_use: Optional[str] = None
 
     @field_validator("logo_url", "logo_mark_url")
     @classmethod
@@ -393,10 +406,11 @@ def get_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Validate + merge a brand-kit patch over the existing kit, returning the new dict.
 
-    ``company`` and ``voice`` merge key by key; any other field in the patch
-    replaces the stored one (``social_handles`` is the whole map: a network left
-    out, or given an empty handle, is removed). Raises ``pydantic.ValidationError``
-    (surfaced as 422 by the API) on bad input.
+    ``company``, ``voice`` and ``palette`` merge key by key (an empty palette role
+    goes back to derived); any other field in the patch replaces the stored one
+    (``social_handles`` is the whole map: a network left out, or given an empty
+    handle, is removed). Raises ``pydantic.ValidationError`` (surfaced as 422 by
+    the API) on bad input, and on a palette whose text does not read on its page.
     """
     base = get_brand_kit({BRAND_KIT_SETTINGS_KEY: existing} if existing else None)
     # The stored files (logo, logo mark, fonts) are owned by the upload/delete
@@ -406,7 +420,9 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     for record in MERGED_RECORDS:
         if isinstance(patch.get(record), dict):
             merged[record] = {**base.get(record, {}), **patch[record]}
-    return BrandKit.model_validate(merged).model_dump()
+    kit = BrandKit.model_validate(merged).model_dump()
+    require_readable_palette(kit)
+    return kit
 
 
 def save_brand_kit(db: Any, workspace: Any, kit: Dict[str, Any]) -> Dict[str, Any]:

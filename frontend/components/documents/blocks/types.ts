@@ -150,7 +150,21 @@ export interface BrandKit {
   // the stored handles and answers without them, and the dialog shows no handles editor.
   social_handles?: Record<string, string>
   voice: BrandVoice
+  // PRD-255 FR-1: the colour roles. GET answers every effective role (stored, else derived
+  // from the four colours) and, per role, whether it is set or derived; a save sends only
+  // the set roles (an empty role goes back to derived). Optional: an older backend has none.
+  palette?: BrandPalette
+  palette_source?: Partial<Record<BrandPaletteRole, BrandRoleSource>>
+  // How far the accent goes: sparing (every kit's default) keeps it to highlights.
+  accent_use?: BrandAccentUse
 }
+
+// modules/documents/brand_system.py BrandPalette (core/brand_palette.py PALETTE_ROLES).
+export type BrandPaletteRole =
+  | 'ink' | 'heading' | 'paper' | 'surface' | 'surface_2' | 'accent' | 'accent_2' | 'muted' | 'rule'
+export type BrandPalette = Partial<Record<BrandPaletteRole, string>>
+export type BrandRoleSource = 'set' | 'derived'
+export type BrandAccentUse = 'sparing' | 'bold'
 
 // One uploaded font file and the face it provides (modules/documents/brand_kit.py BrandFontFile).
 export interface BrandFontFile {

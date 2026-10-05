@@ -13,7 +13,7 @@ import { templateBlocksApi } from '@/components/documents/blocks/api'
 import { useUploadedFontFaces } from '@/components/documents/blocks/BrandKitFonts'
 import { toneWordsProblem } from '@/components/documents/blocks/BrandKitSocial'
 import { useBrandImage } from '@/components/documents/blocks/useBrandImage'
-import type { BrandKit, BrandSuggestions } from '@/components/documents/blocks/types'
+import type { BrandKit, BrandPaletteRole, BrandSuggestions } from '@/components/documents/blocks/types'
 
 const SOURCE_LABEL: Record<string, string> = {
   business_profile: 'your business profile',
@@ -59,6 +59,20 @@ export function saveErrorMessage(e: any): string {
     // Not a validation detail: the message as it came.
   }
   return e?.message || 'Failed to save brand kit'
+}
+
+/**
+ * PRD-255: the kit as Save sends it. GET answers every effective colour role, the derived
+ * ones too; sending those back would store them as set, and they would stop following the
+ * kit's colours. So only the roles marked `set` go, and `palette_source` (the server's
+ * answer, not a field) stays behind.
+ */
+export function kitToSave(kit: BrandKit): Partial<BrandKit> {
+  const { palette, palette_source: sources, ...rest } = kit
+  if (!palette) return rest
+  if (!sources) return { ...rest, palette }
+  const set = Object.fromEntries(Object.entries(palette).filter(([role]) => sources[role as BrandPaletteRole] === 'set'))
+  return { ...rest, palette: set }
 }
 
 /** Empty fields filled from what the platform already knows; a toast names where from. */
@@ -120,7 +134,7 @@ export function useBrandKitForm() {
     try {
       // The stored files (logo_path, logo_mark_path, font_files) are server-managed;
       // the update route ignores them (validate_brand_kit strips them).
-      setKit(withD5Fields(await templateBlocksApi.updateBrandKit(kit)))
+      setKit(withD5Fields(await templateBlocksApi.updateBrandKit(kitToSave(kit))))
       toast.success('Brand kit saved')
     } catch (e: any) {
       toast.error(saveErrorMessage(e))
