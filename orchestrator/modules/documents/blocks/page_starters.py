@@ -16,8 +16,9 @@ PRD-255 (US-004): the values are the kit's. The letterhead logo is
 ``logo_rules.letterhead_mm`` high with its clear space beside it, and the rule under
 the letterhead is a ``rule`` hairline. Under ``accent_use: sparing`` the accent is
 one element per starter section: a report's summary bar and its KPI figures (KPI
-tiles on ``surface``), a proposal's cover bar. Strong rules (over a total, under
-the signature names) are ``heading``.
+tiles on ``surface``), a proposal's cover bar (its title, inside the cover, has no
+second accent rule). Strong rules (over a total, under the signature names) are
+``heading``. Small and caption text take the kit's own line heights.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ from string import Template
 
 LETTERHEAD = Template("""
   .letterhead { display: table; width: 100%; border-bottom: ${rule_pt}pt solid $rule; padding-bottom: ${s3}pt;
-    margin-bottom: ${s5}pt; }
+    margin-bottom: ${s4}pt; }
   .lh-mark, .lh-company { display: table-cell; vertical-align: middle; }
   .lh-mark { padding-right: ${logo_clear_mm}mm; }
   .lh-mark .doc-image { margin: 0; height: ${logo_mm}mm; width: auto; }
@@ -48,8 +49,10 @@ LETTER = Template("""
 """)
 
 INVOICE = Template("""
-  [data-block="byline"], [data-block="meta"], [data-block="cover"] { color: $muted; font-size: ${small}pt; margin: 0 0 ${s4}pt 0; }
-  [data-block="bill-to-label"] { margin: ${s4}pt 0 ${s1}pt 0; font-size: ${caption}pt; letter-spacing: 0.08em; color: $heading; }
+  [data-block="byline"], [data-block="meta"], [data-block="cover"] { color: $muted; font-size: ${small}pt;
+    line-height: ${small_line}pt; margin: 0 0 ${s4}pt 0; }
+  [data-block="bill-to-label"] { margin: ${s4}pt 0 ${s1}pt 0; font-size: ${caption}pt; line-height: ${caption_line}pt;
+    letter-spacing: 0.08em; color: $heading; }
   [data-block="bill-to"], [data-block="bill-to-address"], [data-block="bill-to-email"] { margin: 0; line-height: 1.4; }
   [data-block="bill-to"] { font-weight: $bold; }
   [data-block="bill-to-email"] { margin-bottom: ${s4}pt; }
@@ -59,7 +62,8 @@ INVOICE = Template("""
   [data-block="totals"] tr:last-child td { font-weight: $bold; font-size: ${h3}pt; border-top: ${rule_pt}pt solid $heading;
     border-bottom: none; }
   [data-block="totals"] + [data-block="terms"] { margin-top: ${s4}pt; }
-  [data-block="thanks"], [data-block="footer"] { margin-top: ${s4}pt; font-size: ${small}pt; color: $muted; }
+  [data-block="thanks"], [data-block="footer"] { margin-top: ${s4}pt; font-size: ${small}pt; line-height: ${small_line}pt;
+    color: $muted; }
 """)
 
 REPORT = Template("""
@@ -73,9 +77,9 @@ REPORT = Template("""
     background: $surface; }
   [data-block="kpis"] tr:last-child { margin-right: 0; }
   [data-block="kpis"] td { display: block; border: none; padding: 0; background: none !important; }
-  [data-block="kpis"] td:nth-child(1) { font-size: ${small}pt; color: $muted; }
+  [data-block="kpis"] td:nth-child(1) { font-size: ${small}pt; line-height: ${small_line}pt; color: $muted; }
   [data-block="kpis"] td:nth-child(2) { font-size: ${h1}pt; font-weight: $h1_weight; line-height: ${h1_line}pt; color: $accent; }
-  [data-block="kpis"] td:nth-child(3) { font-size: ${caption}pt; color: $muted; }
+  [data-block="kpis"] td:nth-child(3) { font-size: ${caption}pt; line-height: ${caption_line}pt; color: $muted; }
 """)
 
 PROPOSAL = Template("""
@@ -83,7 +87,9 @@ PROPOSAL = Template("""
     padding: ${s4}pt ${s4}pt ${s3}pt ${s4}pt;
     margin: 0 0 ${s4}pt 0; }
   [data-block="cover-header"] h1 { margin-top: 0; }
-  [data-block="eyebrow"] { font-size: ${caption}pt; font-weight: $bold; letter-spacing: 0.12em; color: $heading; margin: 0 0 ${s1}pt 0; }
+  [data-block="cover-header"] h1::after { display: none; }
+  [data-block="eyebrow"] { font-size: ${caption}pt; line-height: ${caption_line}pt; font-weight: $bold; letter-spacing: 0.12em;
+    color: $heading; margin: 0 0 ${s1}pt 0; }
   [data-block="subtitle"] { font-size: ${h3}pt; line-height: ${h3_line}pt; margin: 0 0 ${s2}pt 0; }
   [data-block="cover-header"] [data-block="cover"] { margin: 0; }
   [data-block="pricing"] { margin-bottom: 0; }
@@ -91,7 +97,7 @@ PROPOSAL = Template("""
   [data-block="pricing-total"] td { background: none !important; font-weight: $bold; border-top: ${rule_pt}pt solid $heading;
     border-bottom: none; }
   [data-block="pricing-total"] td:last-child { text-align: right; white-space: nowrap; }
-  [data-block="pricing-note"] { font-size: ${small}pt; color: $muted; }
+  [data-block="pricing-note"] { font-size: ${small}pt; line-height: ${small_line}pt; color: $muted; }
   [data-block="sig"] { margin-top: ${s5}pt; color: $muted; }
 """)
 

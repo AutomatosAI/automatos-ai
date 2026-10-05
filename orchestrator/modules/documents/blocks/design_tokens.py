@@ -61,8 +61,6 @@ RULE_PT = 1
 TITLE_RULE_PT = 2
 # The title's accent rule is this many spacing units long (24 pt on the default grid).
 TITLE_RULE_UNITS = 6
-# The footer prints in the bottom margin: it gets this much more than the other margins.
-FOOTER_BAND_MM = 6
 # AA for text: white on a filled header, and an accent printed as small text on the paper.
 TEXT_MIN_CONTRAST = 4.5
 WHITE_HEX = "#ffffff"
@@ -116,11 +114,6 @@ class Design:
     def space(self, step: int) -> float:
         """Gap ``step`` (1-6) in points."""
         return self.spacing_unit_pt * SPACE_STEPS[step - 1]
-
-    @property
-    def bottom_margin_mm(self) -> float:
-        """The bottom margin, with room for the footer."""
-        return self.page_margin_mm + FOOTER_BAND_MM
 
 
 def header_text(fill: str, text: str) -> str:
@@ -188,6 +181,6 @@ def design(kit: Mapping[str, Any]) -> Design:
 
 
 __all__ = [
-    "BOLD", "Design", "FOOTER_BAND_MM", "HAIRLINE_PT", "Palette", "RULE_PT", "SPACE_STEPS", "Step", "TITLE_RULE_PT",
+    "BOLD", "Design", "HAIRLINE_PT", "Palette", "RULE_PT", "SPACE_STEPS", "Step", "TITLE_RULE_PT",
     "TITLE_RULE_UNITS", "design", "header_text", "palette", "type_scale",
 ]

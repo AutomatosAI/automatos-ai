@@ -148,7 +148,7 @@ def _accent_share(pdf: bytes, kit: Dict[str, Any]) -> float:
 
 def _chars(pdf: bytes, kit: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Page 1's characters above the footer (the footer repeats the title, in the caption's size)."""
-    footer_top = tokens.design(kit).bottom_margin_mm * POINTS_PER_MM
+    footer_top = tokens.design(kit).page_margin_mm * POINTS_PER_MM
     with pdfplumber.open(io.BytesIO(pdf)) as document:
         page = document.pages[0]
         return [c for c in page.chars if c["bottom"] < page.height - footer_top]
@@ -281,7 +281,7 @@ def test_changing_the_accent_changes_only_the_accent_elements(category):
 
 def test_the_margins_and_gaps_follow_the_kits_spacing():
     style = build_styles({**AUTOMATOS, "spacing_unit_pt": 5, "page_margin_mm": 25})
-    assert "margin: 25.0mm 25.0mm 31.0mm 25.0mm;" in style
+    assert "@page { size: A4; margin: 25.0mm;" in style
     assert "p { margin: 0 0 10.0pt 0;" in style  # two spacing units
 
 
@@ -313,9 +313,10 @@ def test_the_word_styles_are_the_kits_type_and_roles():
     styles = _docx("report", AUTOMATOS).styles
     for name, step in (("Heading 1", "h1"), ("Heading 2", "h2"), ("Heading 3", "h3"), ("Caption", "caption")):
         assert styles[name].font.size.pt == design.type[step].size_pt, name
+    for name in ("Heading 1", "Heading 2", "Heading 3"):
+        assert str(styles[name].font.color.rgb) == design.palette.heading.lstrip("#").upper(), name
+        assert styles[name].element.pPr.find(qn("w:pBdr")) is None, name  # no full-width rules under headings (PRD-243)
     assert str(styles["Caption"].font.color.rgb) == design.palette.muted.lstrip("#").upper()
-    bottom = styles["Heading 1"].element.pPr.find(qn("w:pBdr")).find(qn("w:bottom"))
-    assert bottom.get(qn("w:color")) == design.palette.accent.lstrip("#")  # the title's accent rule
 
 
 def test_a_word_tables_header_is_the_accent_only_when_bold():

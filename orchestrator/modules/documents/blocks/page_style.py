@@ -58,21 +58,23 @@ DEFAULT_FONT = "Inter, 'Segoe UI', system-ui, sans-serif"
 # A section whose rendered HTML is at most this long is kept on one page.
 KEEP_TOGETHER_MAX_HTML_CHARS = 1600
 KEEP_CLASS = "keep"
+# The body's line height is printed as a ratio of its size, so smaller text inherits a proportional one.
+LEADING_DECIMALS = 3
 
 _BASE = Template("""
-  @page { size: A4; margin: ${margin}mm ${margin}mm ${margin_bottom}mm ${margin}mm; font-family: $font; background: $paper;
+  @page { size: A4; margin: ${margin}mm; font-family: $font; background: $paper;
     @bottom-left { content: "$footer_name"; font-size: ${caption}pt; color: $muted; vertical-align: middle; }
     @bottom-center { content: string(doctitle, first); font-size: ${caption}pt; color: $muted; vertical-align: middle; }
     @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: ${caption}pt; color: $muted;
       vertical-align: middle; }
   }
-  body { font-family: $font; color: $ink; font-size: ${body}pt; line-height: ${body_line}pt; font-weight: $body_weight; }
+  body { font-family: $font; color: $ink; font-size: ${body}pt; line-height: $body_leading; font-weight: $body_weight; }
   h1, h2, h3, h4, h5, h6 { color: $heading; margin: 0; break-after: avoid; }
-  h1 { font-size: ${h1}pt; line-height: ${h1_line}pt; font-weight: $h1_weight; margin: ${s2}pt 0 ${s3}pt 0;
+  h1 { font-size: ${h1}pt; line-height: ${h1_line}pt; font-weight: $h1_weight; margin: ${s2}pt 0 ${s2}pt 0;
     string-set: doctitle content(); }
   h1::after { content: ""; display: block; width: ${title_rule_length}pt; border-top: ${title_rule_pt}pt solid $accent;
-    margin: ${s2}pt 0 0 0; }
-  h2 { font-size: ${h2}pt; line-height: ${h2_line}pt; font-weight: $h2_weight; margin: ${s5}pt 0 ${s2}pt 0; }
+    margin: ${s1}pt 0 0 0; }
+  h2 { font-size: ${h2}pt; line-height: ${h2_line}pt; font-weight: $h2_weight; margin: ${s5}pt 0 ${s1}pt 0; }
   h3 { font-size: ${h3}pt; line-height: ${h3_line}pt; font-weight: $h3_weight; margin: ${s4}pt 0 ${s1}pt 0; }
   h4, h5, h6 { font-size: ${body}pt; font-weight: $h3_weight; margin: ${s3}pt 0 ${s1}pt 0; }
   p { margin: 0 0 ${s2}pt 0; orphans: 2; widows: 2; }
@@ -125,10 +127,11 @@ def footer_name(brand_kit: Dict[str, Any]) -> str:
 
 
 def _type_tokens(design: t.Design) -> Dict[str, Any]:
-    """Each step's size (``h1``), line height (``h1_line``) and weight (``h1_weight``)."""
+    """Each step's size (``h1``), line height (``h1_line``; ``h1_leading`` as a ratio) and weight (``h1_weight``)."""
     found: Dict[str, Any] = {}
     for name, step in design.type.items():
-        found.update({name: step.size_pt, f"{name}_line": step.line_pt, f"{name}_weight": step.weight})
+        found.update({name: step.size_pt, f"{name}_line": step.line_pt, f"{name}_weight": step.weight,
+                      f"{name}_leading": round(step.line_pt / step.size_pt, LEADING_DECIMALS)})
     return found
 
 
@@ -138,7 +141,7 @@ def _layout_tokens(design: t.Design) -> Dict[str, Any]:
         **{f"s{step}": design.space(step) for step in range(1, len(t.SPACE_STEPS) + 1)},
         "hairline_pt": t.HAIRLINE_PT, "rule_pt": t.RULE_PT, "title_rule_pt": t.TITLE_RULE_PT,
         "title_rule_length": design.spacing_unit_pt * t.TITLE_RULE_UNITS,
-        "margin": design.page_margin_mm, "margin_bottom": design.bottom_margin_mm,
+        "margin": design.page_margin_mm,
         "logo_mm": design.logo_mm, "logo_clear_mm": design.logo_clear_mm,
     }
 

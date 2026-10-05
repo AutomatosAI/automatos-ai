@@ -13,9 +13,11 @@ no letterhead, no footer and no page numbers. Now, from ``design_tokens``:
   numbers as Word fields (PAGE, NUMPAGES), so they stay right when the file is edited.
 
 PRD-255 (US-004): every value is the kit's (``design_tokens.design``): the margins
-are ``page_margin_mm``; Heading 1-3 are the kit's h1-h3 in ``heading`` (the title
-over a rule in the accent), Normal its body in ``ink``, Caption its caption in
-``muted``; gaps are multiples of ``spacing_unit_pt``; the letterhead logo is
+are ``page_margin_mm``; Heading 1-3 are the kit's h1-h3 in ``heading``, Normal its
+body in ``ink``, Caption its caption in ``muted``; gaps are multiples of
+``spacing_unit_pt``. Word draws a paragraph rule the full width of the text, and
+headings carry no full-width rules (PRD-243), so the PDF's short accent mark under
+the title has no Word counterpart; the letterhead logo is
 ``logo_rules.letterhead_mm`` high (``docx_renderer``). Tables take the same roles
 (``docx_tables``).
 """
@@ -28,10 +30,10 @@ from . import design_tokens as t
 PAGE_WIDTH_MM, PAGE_HEIGHT_MM = 210, 297
 # Word's style for each step of the kit's type scale, and its gaps before and after (spacing steps).
 STEP_STYLES = {"Heading 1": "h1", "Heading 2": "h2", "Heading 3": "h3", "Caption": "caption"}
-STEP_GAPS = {"h1": (2, 3), "h2": (5, 2), "h3": (4, 1), "caption": (1, 1)}
+STEP_GAPS = {"h1": (2, 2), "h2": (5, 1), "h3": (4, 1), "caption": (1, 1)}
+MARGIN_SIDES = ("top_margin", "right_margin", "bottom_margin", "left_margin")
 THEME_FONT_ATTRS = ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme")
 RULE_EIGHTHS = 8  # a 1 pt rule, in Word's eighths of a point
-TITLE_RULE_EIGHTHS = int(t.TITLE_RULE_PT * RULE_EIGHTHS)  # the title's accent rule
 LOGO_COLUMN_MM = 30
 # What follows a paragraph border (w:pBdr) in a paragraph's properties.
 PBDR_SUCCESSORS = (
@@ -85,12 +87,10 @@ def text_width(design: t.Design) -> Any:
 def _page(document: Any, design: t.Design) -> None:
     from docx.shared import Mm
 
-    margins = {"top_margin": design.page_margin_mm, "right_margin": design.page_margin_mm,
-               "bottom_margin": design.bottom_margin_mm, "left_margin": design.page_margin_mm}
     for section in document.sections:
         section.page_width, section.page_height = Mm(PAGE_WIDTH_MM), Mm(PAGE_HEIGHT_MM)
-        for side, mm in margins.items():
-            setattr(section, side, Mm(mm))
+        for side in MARGIN_SIDES:
+            setattr(section, side, Mm(design.page_margin_mm))
 
 
 def apply_styles(document: Any, kit: Mapping[str, Any], font: Optional[str]) -> None:
@@ -109,7 +109,6 @@ def apply_styles(document: Any, kit: Mapping[str, Any], font: Optional[str]) -> 
         before, after = STEP_GAPS[step]
         style.paragraph_format.space_before = Pt(design.space(before))
         style.paragraph_format.space_after = Pt(design.space(after))
-    _border_under(document.styles["Heading 1"].element.get_or_add_pPr(), roles.accent, TITLE_RULE_EIGHTHS)
 
 
 EDGE_ORDER = ("top", "left", "bottom", "right")  # the order Word's schema wants them in
