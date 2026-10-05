@@ -19,6 +19,7 @@ from typing import Any, AsyncIterator, Dict, Optional, Union
 
 import httpx
 from config import config
+from core.local_projects_mount import worker_workspace_for
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +70,18 @@ class WorkspaceClient:
     def __init__(self, workspace_id: str) -> None:
         self.workspace_id = workspace_id
 
+    def _read_url(self, path: str, endpoint: str) -> str:
+        """The worker URL a READ of ``path`` goes to. F333: on a local stack a
+        ``projects/…`` path is served from the one projects mount, whichever
+        workspace asks (core/local_projects_mount.py); writes stay in their own."""
+        return _worker_url(worker_workspace_for(self.workspace_id, path), endpoint)
+
     # ── File operations ────────────────────────────────────────────
 
     async def read_file(self, path: str) -> Dict[str, Any]:
         """Read a file from the workspace."""
         client = _get_client()
-        url = _worker_url(self.workspace_id, "/files/content")
+        url = self._read_url(path, "/files/content")
         try:
             resp = await client.get(url, params={"path": path})
             if resp.status_code != 200:
@@ -125,7 +132,7 @@ class WorkspaceClient:
     async def list_dir(self, path: str = ".") -> Dict[str, Any]:
         """List directory contents."""
         client = _get_client()
-        url = _worker_url(self.workspace_id, "/files")
+        url = self._read_url(path, "/files")
         try:
             resp = await client.get(url, params={"path": path})
             if resp.status_code == 404:
@@ -139,7 +146,7 @@ class WorkspaceClient:
     async def download_file(self, path: str) -> Dict[str, Any]:
         """Download a raw binary file from the workspace. Returns bytes content."""
         client = _get_client()
-        url = _worker_url(self.workspace_id, "/files/download")
+        url = self._read_url(path, "/files/download")
         try:
             resp = await client.get(url, params={"path": path})
             if resp.status_code != 200:
