@@ -2207,54 +2207,73 @@ def _register_session_deliverables(
     db: Session, task: BoardTask, files: Iterable[str], *, agent_id: Optional[int],
     agent_name: Optional[str], session_id: Optional[str],
 ) -> List[Dict[str, Any]]:
-    """PRD-234 S2: every file a session wrote under the workspace volume becomes a
-    deliverable of the ticket (``source_type='task'``), through the same
+    """PRD-234 S2: the files a session wrote under the workspace volume become
+    deliverables of the ticket (``source_type='task'``), through the same
     ``DeliverableService.register`` mission promotion uses (#611). Metadata only:
-    the bytes already sit where the worker serves them. Fail-soft per file."""
-    from services.deliverable_service import (
-        AGENT_REGISTERABLE_ARTIFACT_TYPES, DeliverableService, _infer_artifact_type,
-    )
+    the bytes already sit where the worker serves them. Fail-soft per file.
+    F335 (night 10): the document, not the script that built it, and each set of
+    bytes once (``services.session_outputs.pick_deliverables``)."""
+    from services.deliverable_service import DeliverableService
+    from services.session_outputs import pick_deliverables
+
+    service = DeliverableService(db, str(task.workspace_id))
+    brief = "\n".join(str(getattr(task, field, None) or "") for field in ("title", "description"))
+    entries = [
+        _register_session_output(service, task, output, agent_id=agent_id, agent_name=agent_name,
+                                 session_id=session_id)
+        for output in pick_deliverables(_session_outputs(task, files), brief)
+    ]
+    return [entry for entry in entries if entry is not None]
+
+
+def _session_outputs(task: BoardTask, files: Iterable[str]) -> List[Any]:
+    """Each file the session wrote that can be a deliverable: under the workspace, of
+    a type agents register, and (outside the projects folder) visible from here."""
+    from services.deliverable_service import AGENT_REGISTERABLE_ARTIFACT_TYPES, _infer_artifact_type
+    from services.session_outputs import SessionOutput, visible_size
+
     workspace_id = str(task.workspace_id)
     volume = Path(config.WORKSPACE_VOLUME_PATH) / workspace_id
-    service = DeliverableService(db, workspace_id)
-    registered: List[Dict[str, Any]] = []
     projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
+    outputs: List[SessionOutput] = []
     for host_path in files:
         rel = workspace_relative_path(str(host_path), workspace_id, projects_dir)
-        if rel is None:
-            continue
-        inferred = _infer_artifact_type(rel)
+        inferred = _infer_artifact_type(rel) if rel is not None else None
         if inferred not in AGENT_REGISTERABLE_ARTIFACT_TYPES:
             continue
+        artifact_type = _DELIVERABLE_TYPE_OVERRIDES.get(inferred, inferred)
         if rel.startswith(PROJECTS_PREFIX + "/"):
             # The projects folder is mounted into the worker, not here: register
             # without a size; the worker serves the bytes behind preview_url.
-            size = None
-        else:
-            full = volume / rel
-            try:
-                size = full.stat().st_size if full.is_file() else None
-            except OSError:
-                size = None
-            if size is None:
-                continue  # not visible from this container → reference only
-        artifact_type = _DELIVERABLE_TYPE_OVERRIDES.get(inferred, inferred)
-        try:
-            res = service.register(
-                file_path=rel, source_type="task", source_id=str(task.id),
-                agent_id=agent_id, agent_name=agent_name, artifact_type=artifact_type,
-                file_size_bytes=size,
-                summary=f"Written by a Claude Code session for {ticket_label(task)}",
-                extra={"task_id": task.id, "session_id": session_id, "host_path": str(host_path),
-                       "runtime": RUNTIME_CLI},
-            )
-        except Exception as exc:  # noqa: BLE001 — one bad file must not lose the result
-            logger.warning("[CliHost] deliverable registration failed for %s: %s", rel, exc)
+            outputs = [*outputs, SessionOutput(str(host_path), rel, artifact_type)]
             continue
-        if res.get("success"):
-            registered.append({"id": res.get("deliverable_id"), "file_path": rel,
-                               "title": rel.rsplit("/", 1)[-1], "artifact_type": artifact_type})
-    return registered
+        size = visible_size(volume / rel)
+        if size is not None:  # else not visible from this container → reference only
+            outputs = [*outputs, SessionOutput(str(host_path), rel, artifact_type, size, volume / rel)]
+    return outputs
+
+
+def _register_session_output(
+    service: Any, task: BoardTask, output: Any, *, agent_id: Optional[int],
+    agent_name: Optional[str], session_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Register one of the session's files; its entry for the ticket, or ``None``."""
+    try:
+        res = service.register(
+            file_path=output.rel, source_type="task", source_id=str(task.id),
+            agent_id=agent_id, agent_name=agent_name, artifact_type=output.artifact_type,
+            file_size_bytes=output.size,
+            summary=f"Written by a Claude Code session for {ticket_label(task)}",
+            extra={"task_id": task.id, "session_id": session_id, "host_path": output.host_path,
+                   "runtime": RUNTIME_CLI},
+        )
+    except Exception as exc:  # noqa: BLE001 — one bad file must not lose the result
+        logger.warning("[CliHost] deliverable registration failed for %s: %s", output.rel, exc)
+        return None
+    if not res.get("success"):
+        return None
+    return {"id": res.get("deliverable_id"), "file_path": output.rel,
+            "title": output.rel.rsplit("/", 1)[-1], "artifact_type": output.artifact_type}
 
 
 MAX_DENIALS_KEPT = 20
