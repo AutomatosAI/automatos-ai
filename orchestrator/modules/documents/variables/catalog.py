@@ -45,7 +45,7 @@ CATALOG: List[VariableEntry] = [
     {"path": "brand.font_family", "category": "brand", "label": "Font family", "sample": "Inter"},
     # --- date.* (computed at render time) ---
     {"path": "date.today", "category": "date", "label": "Today (YYYY-MM-DD)", "sample": "2026-06-12"},
-    {"path": "date.long", "category": "date", "label": "Today (long form)", "sample": "June 12, 2026"},
+    {"path": "date.long", "category": "date", "label": "Today (long form)", "sample": "12 June 2026"},
     {"path": "date.year", "category": "date", "label": "Current year", "sample": "2026"},
     {"path": "date.month", "category": "date", "label": "Current month", "sample": "06"},
     {"path": "date.day", "category": "date", "label": "Current day", "sample": "12"},
