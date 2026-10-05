@@ -236,8 +236,10 @@ class Config:
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY")
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY")
+    # #873: the resource URL (https://<resource>.openai.azure.com). The client calls
+    # Microsoft Foundry's v1 route, <endpoint>/openai/v1/, which takes no api-version,
+    # so AZURE_OPENAI_API_VERSION is retired.
     AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT")
-    AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     XAI_API_KEY: str = os.getenv("XAI_API_KEY")
     # PRD-236: BYO-key providers served through the generic OpenAI-compatible
     # adapter. NVIDIA (build.nvidia.com) is a TRIAL endpoint — the key is the

@@ -1,36 +1,54 @@
 """
-Azure OpenAI Provider Implementation
-====================================
+Azure OpenAI (Microsoft Foundry) Provider
+=========================================
 
-Azure OpenAI service provider (OpenAI-compatible API).
+#873: this client used the legacy ``AzureOpenAI`` client pinned to
+``api-version=2024-02-15-preview`` and sent ``max_tokens`` and ``temperature`` on
+every call, which reasoning-model deployments refuse.
+
+It now calls Foundry's v1 route (``<resource>/openai/v1/``) with the plain
+OpenAI client and no api-version, which also reaches Foundry's non-OpenAI
+models through Chat Completions. ``model`` is the deployment name. The output
+budget goes out as ``max_completion_tokens``; temperature and the other sampling
+parameters go out unless the deployment is known to refuse them, and a 400 that
+names one as unsupported is retried once without it (``azure_v1``).
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from config import config
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
+from .azure_v1 import QUIRKS, DeploymentKey, quirks_after_refusal, quirks_after_response, refused_params, v1_base_url
+from .base import BaseLLMProvider, LLMResponse, run_blocking
+from .openai_chat_request import chat_kwargs, tool_calls_from
+from .openai_client import usage_from_openai
 
 try:
-    from openai import AzureOpenAI
+    from openai import OpenAI
 except ImportError:
-    AzureOpenAI = None
+    OpenAI = None
 
 logger = logging.getLogger(__name__)
 
+PROVIDER = "azure"
+DEFAULT_TIMEOUT_SECONDS = 180.0
+NOT_CONFIGURED = (
+    "Azure OpenAI credentials not configured. Cannot generate response. "
+    "Please configure Azure credential or set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT env vars."
+)
+
 
 class AzureProvider(BaseLLMProvider):
-    """Azure OpenAI provider implementation"""
-    
+    """Azure OpenAI (Microsoft Foundry) over the v1 route."""
+
     def _initialize_client(self):
-        if AzureOpenAI is None:
+        if OpenAI is None:
             raise ImportError("OpenAI package not installed. Run: pip install openai")
-        
-        # Azure requires API key, endpoint, and API version
+
         api_key = self.config.api_key or config.AZURE_OPENAI_API_KEY
         endpoint = self.config.base_url or config.AZURE_OPENAI_ENDPOINT
-        api_version = config.AZURE_OPENAI_API_VERSION
-        
+        self.base_url: Optional[str] = None
+
         # BOOTSTRAP STRATEGY: Don't require key at initialization
         if not api_key or not endpoint:
             logger.warning(
@@ -39,101 +57,78 @@ class AzureProvider(BaseLLMProvider):
                 "Configure Azure credential or set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT env vars."
             )
             self.client = None
-        else:
-            self.client = AzureOpenAI(
-                api_key=api_key,
-                azure_endpoint=endpoint,
-                api_version=api_version
-            )
-            logger.info(f"Initialized Azure OpenAI client with model: {self.config.model}")
-    
-    async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
-        """Generate response using Azure OpenAI API"""
-        if self.client is None:
-            raise ValueError(
-                "Azure OpenAI credentials not configured. Cannot generate response. "
-                "Please configure Azure credential or set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT env vars."
-            )
-        
-        
-        try:
-            def _call():
-                kwargs = {
-                    "model": self.config.model,
-                    "messages": messages,
-                    "temperature": self.config.temperature,
-                    "max_tokens": request_max_tokens(self.config)
-                }
-                # PRD-17: Add tools if provided
-                if tools:
-                    kwargs["tools"] = self._sanitize_tools(tools, keep_strict=True)
-                    kwargs["tool_choice"] = "auto"
-                return self.client.chat.completions.create(**kwargs)
-            
-            response = await run_blocking(_call)
-            
-            # Extract tool calls if present
-            tool_calls = None
-            content = response.choices[0].message.content
-            finish_reason = response.choices[0].finish_reason
-            
-            if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
-                tool_calls = []
-                for tc in response.choices[0].message.tool_calls:
-                    tool_calls.append({
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    })
-            
-            return LLMResponse(
-                content=content or "",
-                usage={
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
-                },
-                model=response.model,
-                provider="azure",
-                tool_calls=tool_calls,
-                finish_reason=finish_reason
-            )
-        except Exception as e:
-            logger.error(f"Azure OpenAI API error: {e}")
-            raise
-    
-    def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
-        """Generate response using Azure OpenAI API (synchronous)"""
-        if self.client is None:
-            raise ValueError(
-                "Azure OpenAI credentials not configured. Cannot generate response. "
-                "Please configure Azure credential or set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT env vars."
-            )
-        
-        try:
-            kwargs = {
-                "model": self.config.model,
-                "messages": messages,
-                "temperature": self.config.temperature,
-                "max_tokens": request_max_tokens(self.config)
-            }
-            
-            response = self.client.chat.completions.create(**kwargs)
-            
-            return LLMResponse(
-                content=response.choices[0].message.content,
-                usage={
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
-                },
-                model=response.model,
-                provider="azure"
-            )
-        except Exception as e:
-            logger.error(f"Azure OpenAI API error: {e}")
-            raise
+            return
+        self.base_url = v1_base_url(endpoint)
+        timeout = float(self.config.timeout) if self.config.timeout else DEFAULT_TIMEOUT_SECONDS
+        self.client = OpenAI(api_key=api_key, base_url=self.base_url, timeout=timeout)
+        logger.info(f"Initialized Azure OpenAI v1 client at {self.base_url} for deployment: {self.config.model}")
 
+    def _deployment(self) -> DeploymentKey:
+        return (self.base_url or "", self.config.model)
+
+    def _request(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]], quirks) -> Dict[str, Any]:
+        kwargs = chat_kwargs(
+            self.config, messages, sampling=quirks.sampling, completion_tokens=quirks.completion_tokens,
+        )
+        if tools:
+            kwargs["tools"] = self._sanitize_tools(tools, keep_strict=True)
+            kwargs["tool_choice"] = "auto"
+        return kwargs
+
+    def _complete(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict]] = None) -> Any:
+        """One Chat Completions call (blocking), retried once when the deployment
+        refuses a parameter, with what it refuses remembered."""
+        key = self._deployment()
+        quirks = QUIRKS.recall(key)
+        kwargs = self._request(messages, tools, quirks)
+        try:
+            response = self.client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            refused = refused_params(exc, kwargs.keys())
+            if not refused:
+                raise
+            quirks = quirks_after_refusal(quirks, refused)
+            QUIRKS.remember(key, quirks)
+            logger.warning(f"Azure deployment {key[1]} refuses {sorted(refused)}; retrying once without them")
+            response = self.client.chat.completions.create(**self._request(messages, tools, quirks))
+        learned = quirks_after_response(quirks, getattr(response, "model", None))
+        if learned != quirks:
+            QUIRKS.remember(key, learned)
+        return response
+
+    def _require_client(self) -> None:
+        if self.client is None:
+            raise ValueError(NOT_CONFIGURED)
+
+    async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
+        """Generate a response through the Azure v1 route."""
+        self._require_client()
+        try:
+            response = await run_blocking(self._complete, messages, tools)
+        except Exception:
+            logger.exception("Azure OpenAI API error")
+            raise
+        choice = response.choices[0]
+        return LLMResponse(
+            content=choice.message.content or "",
+            usage=usage_from_openai(response.usage),
+            model=response.model,
+            provider=PROVIDER,
+            tool_calls=tool_calls_from(choice.message),
+            finish_reason=choice.finish_reason,
+        )
+
+    def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
+        """Generate a response through the Azure v1 route (synchronous)."""
+        self._require_client()
+        try:
+            response = self._complete(messages)
+        except Exception:
+            logger.exception("Azure OpenAI API error")
+            raise
+        return LLMResponse(
+            content=response.choices[0].message.content,
+            usage=usage_from_openai(response.usage),
+            model=response.model,
+            provider=PROVIDER,
+        )
