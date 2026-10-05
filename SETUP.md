@@ -245,6 +245,9 @@ To be asked more, pick **Manual**, **Edit automatically** or **Plan** under
   stops with it. To keep it alive, create a Windows **Task Scheduler** task that
   runs at logon with no time limit:
   `conhost.exe --headless wsl.exe -d Ubuntu-24.04 -u root -- sleep infinity`.
+  Task Scheduler stops a task after 72 hours unless you turn that off. The
+  PowerShell commands that create the task are in the
+  [self-hosting guide → Windows](docs/getting-started/self-hosting.md#1a-windows).
 
 Details: [self-hosting guide → Session mode](docs/getting-started/self-hosting.md).
 

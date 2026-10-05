@@ -8,11 +8,16 @@ to both PDF and DOCX from one source.
 python-docx is pure-Python (no system libraries), so this path needs no Docker / native
 deps to build or unit-test.
 
-Brand kit (PRD-167 S4): heading colour comes from ``brand.primary_color`` and the body
-font from ``brand.font_family`` — no hardcoded Automatos styling.
+Brand kit (PRD-167 S4): the body font from ``brand.font_family`` — no hardcoded
+Automatos styling.
 
 F347: a text block keeps its paragraphs, line breaks, lists and bold/italic, read the
 same way as for the PDF (``text_body``).
+
+F356: the Word file matches the PDF. Its styles, page, letterhead (the first page's
+header) and footer with page numbers are ``docx_style``; its tables, KPI tiles and
+the Agreement's kept-together sign-off are ``docx_tables``; an optional part with
+nothing to print is left out, as in the PDF (``optional_parts``).
 """
 
 from __future__ import annotations
@@ -32,6 +37,12 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..amounts import field_text
 from ..variables.catalog import walk_dynamic
+from . import design_tokens as tokens
+from .docx_style import add_footer, add_letterhead, apply_styles, rgb
+from .docx_tables import KPIS_ID, SIGNATURES_ID, TOTALS_IDS, keep_together, kpi_tiles, style_signatures, style_table, style_totals
+from .letterhead_run import company_of, logo_of, split_letterhead
+from .optional_parts import block_is_blank, row_is_blank
+from .page_style import footer_name
 from .schema import BlockDocument
 from .table_cells import unfilled_cells
 from .text_body import BULLETED, MISSING, PARAGRAPH, Group, block_groups
@@ -44,6 +55,12 @@ _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 # carries its number as text (Word's numbered style counts on across separate lists).
 DOCX_BULLET_STYLE = "List Bullet"
 DOCX_LIST_INDENT_MM = 6.35
+# F356: the Agreement's last clause and signatures, kept on one page.
+KEEP_TOGETHER_IDS = frozenset({"sign-off"})
+# F356: the lines of an address block sit tight, as in the PDF (page_starters).
+TIGHT_IDS = frozenset({"bill-to-label", "bill-to", "bill-to-address", "to-name", "to-company", "sig-name"})
+RIGHT_ALIGNED_IDS = frozenset({"date"})  # a letter's date, set right as in the PDF
+DEFAULT_IMAGE_MM = 60
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -58,20 +75,6 @@ class _NoRedirect(HTTPRedirectHandler):
 class RenderedDocx:
     document: object  # docx.document.Document (typed loosely to avoid import at module load)
     unresolved: List[str] = field(default_factory=list)
-
-
-def _hex_to_rgb(value: Optional[str]):
-    from docx.shared import RGBColor
-
-    if not value:
-        return None
-    v = value.lstrip("#")
-    if len(v) == 3:
-        v = "".join(c * 2 for c in v)
-    try:
-        return RGBColor(int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16))
-    except (ValueError, IndexError):
-        return None
 
 
 def _safe_local_image(src: str) -> Optional[BytesIO]:
@@ -165,9 +168,10 @@ def _add_inline(paragraph, content: list, values: Dict[str, str], unresolved: Li
     for run_spec in content:
         if run_spec.type == "text":
             run = paragraph.add_run(run_spec.text)
-            run.bold = "bold" in run_spec.marks
-            run.italic = "italic" in run_spec.marks
-            run.underline = "underline" in run_spec.marks
+            # F356: an unmarked run inherits its style (a heading's bold), never forced off.
+            run.bold = True if "bold" in run_spec.marks else None
+            run.italic = True if "italic" in run_spec.marks else None
+            run.underline = True if "underline" in run_spec.marks else None
             if font:
                 run.font.name = font
         elif run_spec.type == "variable":
@@ -187,20 +191,30 @@ def _cell_value(row: Any, key: str, index: int) -> str:
     return field_text(key, value)  # F347: a bare amount with two decimals, never a currency added
 
 
-def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List[str], font: Optional[str]):
+def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List[str], font: Optional[str], kit=None):
     """Rows from the per-generation ``data.*`` list (PRD-243); mirrors the HTML renderer's
-    empty policy (unresolved unless ``empty_text`` is set)."""
+    empty policy (unresolved unless ``empty_text`` is set; F356: an ``empty_text`` of ""
+    prints nothing). F356: styled like the PDF's tables; a report's KPIs as tiles."""
     rows = walk_dynamic(data or {}, block.path)
     if not isinstance(rows, list) or not rows:
         if block.empty_text is not None:
-            doc.add_paragraph(block.empty_text)
+            if block.empty_text:
+                doc.add_paragraph(block.empty_text)
             return
         unresolved.append(block.path)
         doc.add_paragraph(f"[[{block.path}]]")
         return
     unresolved.extend(unfilled_cells(block, rows))  # F345: every row fills every required column
+    if block.id == KPIS_ID:
+        tiles = [[_cell_value(row, col.key, i) for i, col in enumerate(block.columns)] for row in rows]
+        kpi_tiles(doc, tiles, kit or {}, font)
+        return
     table = doc.add_table(rows=len(rows) + 1, cols=len(block.columns))
-    table.style = "Light Grid Accent 1"
+    _fill_data_table(table, block, rows, font)
+    style_table(table, kit or {}, header=True, aligns=[col.align for col in block.columns])
+
+
+def _fill_data_table(table, block, rows: List[Any], font: Optional[str]) -> None:
     for c_idx, col in enumerate(block.columns):
         para = table.cell(0, c_idx).paragraphs[0]
         run = para.add_run(col.label or col.key)
@@ -257,29 +271,31 @@ def _add_text_body(doc, groups: List[Group], font: Optional[str]) -> None:
             _add_segs(paragraph, line, font)
 
 
-def _add_heading(doc, block, values, unresolved, primary_rgb, font) -> None:
+def _add_heading(doc, block, values, unresolved, font) -> None:
+    """A heading in its level's style (F356: the title in the primary, the rest in the accent)."""
     p = doc.add_heading(level=min(block.level, 9))
     p.clear()
     _add_inline(p, block.content, values, unresolved, font)
-    if primary_rgb is not None:
-        for run in p.runs:
-            run.font.color.rgb = primary_rgb
 
 
-def _add_table(doc, block, values, unresolved, font) -> None:
-    n_rows = len(block.rows)
+def _add_table(doc, block, values, unresolved, font, kit=None) -> None:
+    """A table; F356: an optional row whose chips are all empty is left out, and the
+    table is styled like the PDF's (totals and signatures by their block ids)."""
+    kept = [(index, row) for index, row in enumerate(block.rows) if not row_is_blank(row, values)]
     n_cols = max((len(r) for r in block.rows), default=0)
-    if not (n_rows and n_cols):
+    if not (kept and n_cols):
         return
-    table = doc.add_table(rows=n_rows, cols=n_cols)
-    table.style = "Light Grid Accent 1"
-    for r_idx, row in enumerate(block.rows):
+    table = doc.add_table(rows=len(kept), cols=n_cols)
+    for r_idx, (_, row) in enumerate(kept):
         for c_idx, cell in enumerate(row):
-            para = table.cell(r_idx, c_idx).paragraphs[0]
-            _add_inline(para, cell, values, unresolved, font)
-            if block.header and r_idx == 0:
-                for run in para.runs:
-                    run.bold = True
+            _add_inline(table.cell(r_idx, c_idx).paragraphs[0], cell, values, unresolved, font)
+    header = block.header and kept[0][0] == 0
+    if block.id in TOTALS_IDS:
+        style_totals(table, kit or {})
+    elif block.id == SIGNATURES_ID:
+        style_signatures(table, kit or {})
+    else:
+        style_table(table, kit or {}, header=header)
 
 
 def _add_image(doc, block, brand_kit, unresolved) -> None:
@@ -294,40 +310,111 @@ def _add_image(doc, block, brand_kit, unresolved) -> None:
         doc.add_paragraph(block.alt or "")
         return
     try:
-        width = Mm(block.width_mm) if block.width_mm else Mm(60)
+        width = Mm(block.width_mm) if block.width_mm else Mm(DEFAULT_IMAGE_MM)
         doc.add_picture(stream, width=width)
     except Exception:  # noqa: BLE001 — unreadable image format: the alt text instead
         logger.warning("[DocxRender] image block %s could not be embedded; its alt text is printed", block.id, exc_info=True)
         doc.add_paragraph(block.alt or "")
 
 
-def _add_section(doc, block, values, brand_kit, unresolved, *, primary_rgb, font, data=None) -> None:
+def _add_section(doc, block, values, brand_kit, unresolved, *, font, data=None) -> None:
+    """A titled group; F356: left out when it has nothing to print, kept on one page
+    when it is the Agreement's sign-off."""
+    if block_is_blank(block, values, data):
+        return
+    start = len(doc.element.body) - 1  # the body's last element is its section properties
     if block.title:
-        h = doc.add_heading(block.title, level=2)
-        if primary_rgb is not None:
-            for run in h.runs:
-                run.font.color.rgb = primary_rgb
+        doc.add_heading(block.title, level=2)
     for child in block.children:
-        _add_block(doc, child, values, brand_kit, unresolved, primary_rgb=primary_rgb, font=font, data=data)
+        _add_block(doc, child, values, brand_kit, unresolved, font=font, data=data)
+    if block.id in KEEP_TOGETHER_IDS:
+        keep_together(doc, start)
 
 
-def _add_block(doc, block, values, brand_kit, unresolved, *, primary_rgb, font, data=None):
+def _add_text_block(doc, block, values, unresolved, font) -> None:
+    """A text block; F356: an empty optional line adds no empty paragraph."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    groups = block_groups(block, values, unresolved)
+    if groups or not block_is_blank(block, values):
+        _add_text_body(doc, groups, font)
+        if block.id in TIGHT_IDS:
+            doc.paragraphs[-1].paragraph_format.space_after = Pt(0)
+        if block.id in RIGHT_ALIGNED_IDS:
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+
+def _add_block(doc, block, values, brand_kit, unresolved, *, font, data=None):
     kind = block.type
     if kind == "heading":
-        return _add_heading(doc, block, values, unresolved, primary_rgb, font)
+        return _add_heading(doc, block, values, unresolved, font)
     if kind in ("text", "variable"):
-        return _add_text_body(doc, block_groups(block, values, unresolved), font)
+        return _add_text_block(doc, block, values, unresolved, font)
     if kind == "table":
-        return _add_table(doc, block, values, unresolved, font)
+        return _add_table(doc, block, values, unresolved, font, brand_kit)
     if kind == "image":
         return _add_image(doc, block, brand_kit, unresolved)
     if kind == "data_table":
-        return _add_data_table(doc, block, data, unresolved, font)
+        return _add_data_table(doc, block, data, unresolved, font, brand_kit)
     if kind == "page_break":
         return doc.add_page_break()
     if kind == "section":
-        return _add_section(doc, block, values, brand_kit, unresolved, primary_rgb=primary_rgb, font=font, data=data)
+        return _add_section(doc, block, values, brand_kit, unresolved, font=font, data=data)
     return None
+
+
+def _plain_text(content: list, values: Dict[str, str]) -> str:
+    """Inline content as plain text (a chip with no value prints nothing)."""
+    return "".join(run.text if run.type == "text" else values.get(run.path, run.fallback or "") for run in content)
+
+
+def _document_title(blocks, values: Dict[str, str]) -> str:
+    """The first level-1 heading's text: what the footer names the document by, as the PDF's does."""
+    for block in blocks:
+        if block.type == "heading" and block.level == 1:
+            return _plain_text(block.content, values)
+        if block.type == "section":
+            found = _document_title(block.children, values)
+            if found:
+                return found
+    return ""
+
+
+def _letterhead_logo(logo, kit: Dict, unresolved: List[str]):
+    """Writes the letterhead's logo into a header cell."""
+    def write(cell) -> None:
+        from docx.shared import Mm
+
+        src = (kit or {}).get("logo_url", "") if logo is not None else ""
+        stream = _safe_image_bytes(src) if src else None
+        if logo is not None and not src:
+            unresolved.append("brand.logo_url")
+        if stream is None:
+            return
+        try:
+            cell.paragraphs[0].add_run().add_picture(stream, width=Mm(logo.width_mm or DEFAULT_IMAGE_MM))
+        except Exception:  # noqa: BLE001 — unreadable image format: the letterhead goes without it
+            logger.warning("[DocxRender] the letterhead logo could not be embedded; left out", exc_info=True)
+    return write
+
+
+def _letterhead_company(blocks, values: Dict[str, str], kit: Dict, unresolved: List[str], font: Optional[str]):
+    """Writes the letterhead's company block into a header cell: the name, then the muted lines."""
+    def write(cell) -> None:
+        from docx.shared import Pt
+
+        roles = tokens.palette(kit or {})
+        for index, block in enumerate(blocks):
+            paragraph = cell.paragraphs[0] if index == 0 else cell.add_paragraph()
+            paragraph.paragraph_format.space_after = Pt(0)
+            _add_inline(paragraph, block.content, values, unresolved, font)
+            name = block.type == "heading"
+            for run in paragraph.runs:
+                run.bold = name
+                run.font.size = Pt(tokens.H3_PT if name else tokens.SMALL_PT)
+                run.font.color.rgb = rgb(roles.heading if name else roles.muted)
+    return write
 
 
 def render_document_docx(
@@ -339,13 +426,18 @@ def render_document_docx(
 
     document = Document()
     bk = brand_kit or {}
-    primary_rgb = _hex_to_rgb(bk.get("primary_color"))
     # font_family may be a CSS stack ("Inter, 'Segoe UI', ..."); take the first family.
     font_stack = (bk.get("font_family") or "").split(",")[0].strip().strip("'\"") or None
+    apply_styles(document, bk, font_stack)  # F356: the PDF's type, spacing and colours
 
     unresolved: List[str] = []
-    for block in doc_model.blocks:
-        _add_block(document, block, values, bk, unresolved, primary_rgb=primary_rgb, font=font_stack, data=data)
+    head, rest = split_letterhead(doc_model.blocks)
+    if head:  # F356: the letterhead is the first page's header
+        logo = _letterhead_logo(logo_of(head), bk, unresolved)
+        add_letterhead(document, bk, logo, _letterhead_company(company_of(head), values, bk, unresolved, font_stack))
+    for block in rest:
+        _add_block(document, block, values, bk, unresolved, font=font_stack, data=data)
+    add_footer(document, bk, footer_name(bk), _document_title(doc_model.blocks, values))
 
     seen: Dict[str, None] = {}
     for path in unresolved:

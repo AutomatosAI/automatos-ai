@@ -167,7 +167,7 @@ def test_invoice_and_report_presets_fill_tables_from_data():
     invoice = preset_payload(preset_for("invoice"))
     assert {"field": "line_items", "columns": ["description", "quantity", "unit_price", "total"]} in invoice["list_fields"]
     report = preset_payload(preset_for("report"))
-    assert [lf["field"] for lf in report["list_fields"]] == ["metrics"]
+    assert [lf["field"] for lf in report["list_fields"]] == ["kpis", "metrics"]  # F356: the optional KPI tiles
 
 
 # --------------------------------------------------------------------------- #

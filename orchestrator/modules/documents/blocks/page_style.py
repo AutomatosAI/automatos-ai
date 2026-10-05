@@ -1,4 +1,4 @@
-"""The stylesheet a block document prints with (PRD-167 S2; F350 design pass).
+"""The stylesheet a block document prints with (PRD-167 S2; F350 and F356 design passes).
 
 F350 (night 10b, 5 Oct): the Branded starters printed as a stack of same-size
 lines under a logo that took the top fifth of the page, with no footer, no page
@@ -12,19 +12,20 @@ gives every block document:
 * number columns (a data table's right- or centre-aligned columns) that keep to
   one line and take only their content's width, so text columns take the rest;
 * rows that never split across pages, headings kept with what follows them, and
-  short sections kept on one page (``KEEP_CLASS``, set by the renderer);
-* the kit's accent colour (the owner's navy) on the rules: under the letterhead,
-  under a report's or proposal's byline, above an invoice's total, beside a
-  report's executive summary.
+  short sections kept on one page (``KEEP_CLASS``, set by the renderer).
 
-The starters' blocks carry stable ids (``modules/documents/presets.py``); the
-renderer prints each block's id as ``data-block`` and the starter rules below
-style them by it. A copy of a starter keeps its ids, so it keeps the look; a
-block a person adds has an id of its own and prints with the plain rules.
+F356 (5 Oct): every size, gap and colour now comes from one design system
+(``design_tokens``): a six-step type scale in two weights, a 4 pt spacing grid,
+the kit's primary for the title and table headers, its accent for section
+headings and rules, its text colour for body text. Tables have zebra rows,
+hairlines and tabular figures. A paragraph left empty (an optional line whose
+chips had nothing) takes no space. The starters' own rules, keyed on their block
+ids, are ``page_starters``; the legacy Jinja starters print with this same sheet
+(``legacy_jinja``'s ``document_style`` filter).
 
 Brand strings land inside ``<style>``, where HTML entities are NOT decoded:
 
-* colours are hex, validated by the brand kit;
+* colours are hex, normalised by ``design_tokens.palette``;
 * the font stack is printed as it is when it is one safe CSS value
   (``core.media_render_bundle.TOKEN_UNSAFE``), else the default stack. It used to
   be HTML-escaped, so the default ``Inter, 'Segoe UI', …`` printed as
@@ -37,83 +38,58 @@ Brand strings land inside ``<style>``, where HTML entities are NOT decoded:
 
 from __future__ import annotations
 
-import html
+from dataclasses import asdict
 from string import Template
 from typing import Any, Dict
 
 from core.media_render_bundle import MAX_TOKEN_CHARS, TOKEN_UNSAFE
 
-DEFAULT_PRIMARY = "#1a1a2e"
-DEFAULT_SECONDARY = "#16213e"
-DEFAULT_ACCENT = "#0f3460"
-DEFAULT_TEXT = "#1a1a2e"
+from . import design_tokens as t
+from .page_starters import STARTER_RULES
+
 DEFAULT_FONT = "Inter, 'Segoe UI', system-ui, sans-serif"
-# Hex alpha suffixes: the soft row rules and muted print (footer, contact line).
-RULE_ALPHA = "33"
-MUTED_ALPHA = "b3"
-TINT_ALPHA = "0d"
 # A section whose rendered HTML is at most this long is kept on one page.
 KEEP_TOGETHER_MAX_HTML_CHARS = 1600
 KEEP_CLASS = "keep"
 
 _BASE = Template("""
-  @page { size: A4; margin: 2cm 2cm 2.2cm 2cm; font-family: $font;
-    @bottom-left { content: "$footer_name"; font-size: 8pt; color: $text$muted; }
-    @bottom-center { content: string(doctitle, first); font-size: 8pt; color: $text$muted; }
-    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: $text$muted; }
+  @page { size: A4; margin: 20mm 20mm 24mm 20mm; font-family: $font;
+    @bottom-left { content: "$footer_name"; font-size: ${caption}pt; color: $muted; vertical-align: middle; }
+    @bottom-center { content: string(doctitle, first); font-size: ${caption}pt; color: $muted; vertical-align: middle; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: ${caption}pt; color: $muted;
+      vertical-align: middle; }
   }
-  body { font-family: $font; color: $text; line-height: 1.55; font-size: 10.5pt; }
-  h1, h2, h3, h4, h5, h6 { color: $primary; margin: 1.3rem 0 0.4rem 0; line-height: 1.25; break-after: avoid; }
-  h1 { font-size: 21pt; margin-top: 0.4rem; string-set: doctitle content(); }
-  h2 { font-size: 13.5pt; }
-  h3 { font-size: 12pt; }
-  h4, h5, h6 { font-size: 10.5pt; }
-  p { margin: 0.45rem 0; orphans: 2; widows: 2; }
-  .doc-section { margin-bottom: 1.1rem; }
+  body { font-family: $font; color: $text; line-height: $leading; font-size: ${body}pt; font-weight: $regular; }
+  h1, h2, h3, h4, h5, h6 { color: $heading; font-weight: $bold; line-height: 1.2; margin: 0; break-after: avoid; }
+  h1 { color: $title; font-size: ${title_pt}pt; margin: ${s2}pt 0 ${s1}pt 0; string-set: doctitle content(); }
+  h2 { font-size: ${h2}pt; margin: ${s5}pt 0 ${s2}pt 0; }
+  h3 { font-size: ${h3}pt; margin: ${s4}pt 0 ${s1}pt 0; }
+  h4, h5, h6 { font-size: ${body}pt; margin: ${s3}pt 0 ${s1}pt 0; }
+  p { margin: 0 0 ${s2}pt 0; orphans: 2; widows: 2; }
+  p:empty { display: none; }
+  strong { font-weight: $bold; }
+  ul, ol { margin: 0 0 ${s2}pt 0; padding-left: ${s4}pt; }
+  li { margin: 0 0 ${s1}pt 0; }
+  .doc-section { margin-bottom: ${s3}pt; }
+  .doc-section > h2:first-child { margin-top: ${s4}pt; }
   .doc-section p { white-space: pre-line; }
   .doc-section.$keep { break-inside: avoid; }
-  .doc-image { display: block; margin: 0 0 0.8rem 0; }
-  .doc-empty { color: $secondary; font-style: italic; }
+  .doc-image { display: block; margin: 0 0 ${s3}pt 0; }
+  .doc-empty { color: $muted; font-style: italic; }
+  .doc-empty:empty { display: none; }
   .page-break { page-break-after: always; }
   .unresolved-var { color: #b00020; background: #fde7ea; padding: 0 2px; border-radius: 2px; }
 """)
 
 _TABLES = Template("""
-  .doc-table { border-collapse: collapse; width: 100%; margin: 0.75rem 0 1rem 0; }
-  .doc-table th { background: $primary; color: #fff; text-align: left; padding: 0.4rem 0.65rem; font-size: 9.5pt; }
-  .doc-table td { border-bottom: 1px solid $secondary$rule; padding: 0.4rem 0.65rem; vertical-align: top; }
+  .doc-table { border-collapse: collapse; width: 100%; margin: ${s2}pt 0 ${s4}pt 0; font-variant-numeric: tabular-nums; }
+  .doc-table th { background: $header_fill; color: $header_text; font-weight: $bold; font-size: ${small}pt;
+    text-align: left; padding: ${s1}pt ${s2}pt; }
+  .doc-table td { border-bottom: ${hairline_pt}pt solid $hairline; padding: ${s1}pt ${s2}pt; vertical-align: top; }
+  .doc-table tbody tr:nth-child(even) td { background: $zebra; }
   .doc-table tr { break-inside: avoid; }
   .doc-table th[style*="text-align:right"], .doc-table td[style*="text-align:right"],
   .doc-table th[style*="text-align:center"], .doc-table td[style*="text-align:center"] { white-space: nowrap; width: 1%; }
-""")
-
-# The starters' own blocks, by id (presets.py): letterhead, letter, invoice, report.
-_STARTERS = Template("""
-  [data-block="lh-name"] { margin: 0.2rem 0 0.15rem 0; font-size: 13pt; }
-  [data-block="lh-address"], [data-block="lh-contact"] { margin: 0; font-size: 9pt; color: $text$muted; }
-  [data-block="lh-contact"], [data-block="byline"], [data-block="cover"] {
-    padding-bottom: 0.6rem; border-bottom: 1.5pt solid $accent; margin-bottom: 1.3rem; }
-  [data-block="byline"], [data-block="cover"] { color: $text$muted; }
-  [data-block="date"] { text-align: right; margin: 0 0 1.1rem 0; }
-  [data-block="to-name"], [data-block="to-company"], [data-block="to-address"] { margin: 0; line-height: 1.4; }
-  [data-block="to-name"] { font-weight: 600; }
-  [data-block="subject"] { font-weight: 600; margin: 1.4rem 0 1rem 0; }
-  [data-block="greeting"] { margin: 0 0 0.6rem 0; }
-  [data-block="body"] { white-space: pre-line; }
-  [data-block="closing"] { margin-top: 1.4rem; }
-  [data-block="sig-name"] { font-weight: 600; margin: 2rem 0 0 0; }
-  [data-block="sig-email"] { margin: 0; color: $text$muted; }
-  [data-block="meta"] { color: $text$muted; margin-top: 0; }
-  [data-block="bill-to-label"] { margin: 1rem 0 0.1rem 0; font-size: 8.5pt; letter-spacing: 0.06em; color: $accent; }
-  [data-block="bill-to"], [data-block="bill-to-address"], [data-block="bill-to-email"] { margin: 0; line-height: 1.4; }
-  [data-block="bill-to"] { font-weight: 600; }
-  [data-block="totals"] { width: auto; min-width: 50%; margin: 0 0 1.2rem auto; break-inside: avoid; }
-  [data-block="totals"] td:last-child { text-align: right; white-space: nowrap; }
-  [data-block="totals"] tr:last-child td { font-weight: 700; font-size: 11.5pt; border-top: 1.5pt solid $accent; border-bottom: none; }
-  [data-block="s-summary"] { border-left: 3pt solid $accent; background: $accent$tint; padding: 0.3rem 0.9rem; }
-  [data-block="s-summary"] h2 { margin-top: 0.4rem; }
-  [data-block="signatures"] { break-inside: avoid; }
-  [data-block="footer"] { margin-top: 1.4rem; font-size: 9pt; color: $text$muted; }
 """)
 
 
@@ -137,19 +113,28 @@ def footer_name(brand_kit: Dict[str, Any]) -> str:
     return str(company.get("name") or (brand_kit or {}).get("name") or "").strip()
 
 
-def build_styles(brand_kit: Dict[str, Any]) -> str:
-    """The stylesheet for a block document printed under ``brand_kit``. Pure."""
+def style_tokens(brand_kit: Dict[str, Any]) -> Dict[str, Any]:
+    """Every value the sheets substitute: the kit's colour roles and the type and spacing scales. Pure."""
     bk = brand_kit or {}
-    tokens = {
-        "primary": html.escape(bk.get("primary_color") or DEFAULT_PRIMARY, quote=True),
-        "secondary": html.escape(bk.get("secondary_color") or DEFAULT_SECONDARY, quote=True),
-        "accent": html.escape(bk.get("accent_color") or DEFAULT_ACCENT, quote=True),
-        "text": html.escape(bk.get("text_color") or DEFAULT_TEXT, quote=True),
+    return {
+        **asdict(t.palette(bk)),
         "font": font_stack(bk.get("font_family")),
         "footer_name": css_string(footer_name(bk)),
-        "rule": RULE_ALPHA, "muted": MUTED_ALPHA, "tint": TINT_ALPHA, "keep": KEEP_CLASS,
+        "keep": KEEP_CLASS,
+        "title_pt": t.TITLE_PT, "h2": t.H2_PT, "h3": t.H3_PT, "body": t.BODY_PT, "small": t.SMALL_PT,
+        "caption": t.CAPTION_PT, "regular": t.REGULAR, "bold": t.BOLD, "leading": t.LEADING,
+        "s1": t.SPACE_1, "s2": t.SPACE_2, "s3": t.SPACE_3, "s4": t.SPACE_4, "s5": t.SPACE_5, "s6": t.SPACE_6,
+        "hairline_pt": t.HAIRLINE_PT, "rule_pt": t.RULE_PT,
     }
-    return "".join(sheet.substitute(tokens) for sheet in (_BASE, _TABLES, _STARTERS))
 
 
-__all__ = ["KEEP_CLASS", "KEEP_TOGETHER_MAX_HTML_CHARS", "build_styles", "css_string", "font_stack", "footer_name"]
+def build_styles(brand_kit: Dict[str, Any]) -> str:
+    """The stylesheet for a block document printed under ``brand_kit``. Pure."""
+    tokens = style_tokens(brand_kit)
+    return "".join(sheet.substitute(tokens) for sheet in (_BASE, _TABLES, *STARTER_RULES))
+
+
+__all__ = [
+    "DEFAULT_FONT", "KEEP_CLASS", "KEEP_TOGETHER_MAX_HTML_CHARS", "build_styles", "css_string", "font_stack",
+    "footer_name", "style_tokens",
+]

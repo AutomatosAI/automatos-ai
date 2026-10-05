@@ -23,10 +23,10 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from ..amounts import field_text
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
 from .catalog import is_blank, is_dynamic_path, is_known_path, walk_dynamic
+from .chip_text import chip_text
 from .document_user import document_user
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def resolve_paths(context: Dict[str, Any], paths: Iterable[str]) -> ResolvedVari
             if is_blank(value):  # F345: whitespace fills nothing
                 out.unresolved.append(path)
             else:
-                out.values[path] = field_text(path, value)  # F347: "311.0" prints as "311.00"
+                out.values[path] = chip_text(path, value)  # F347: "311.00"; F356: a list of names as bullets
             continue
         if not is_known_path(path):
             out.unknown.append(path)

@@ -3,7 +3,7 @@
  * this task and asks the shared hook with source_id=<task id>.
  */
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 
 const useDeliverablesMock = vi.hoisted(() => vi.fn())
 
@@ -12,6 +12,13 @@ vi.mock('@/hooks/use-deliverables-api', () => ({
   useDeliverables: useDeliverablesMock,
 }))
 vi.mock('next/link', () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
+// F358: Open shows the Deliverable in the Deliverables page's own preview, which loads
+// the file through the API client with auth (covered in its own tests).
+vi.mock('@/components/workspace/gallery-view/deliverable-preview', () => ({
+  DeliverablePreview: ({ deliverableId }: { deliverableId: string | null }) => (
+    <div data-testid="deliverable-preview" data-deliverable-id={deliverableId ?? ''} />
+  ),
+}))
 
 import { TaskDeliverablesPanel } from '../task-deliverables-panel'
 
@@ -29,7 +36,13 @@ describe('TaskDeliverablesPanel', () => {
     expect(useDeliverablesMock).toHaveBeenCalledWith(expect.objectContaining({ source_id: '68' }))
     expect(screen.getAllByTestId('task-deliverable-row')).toHaveLength(2)
     expect(screen.getByText('sessions/68/hello.py')).toBeInTheDocument()
-    expect(screen.getByLabelText('Open hello.py')).toHaveAttribute('href', expect.stringContaining('/files/content'))
+    // F358: not a link to the relative /files/content route, but the authenticated preview.
+    const open = screen.getByLabelText('Open hello.py')
+    expect(open).not.toHaveAttribute('href')
+    fireEvent.click(open)
+    expect(screen.getByTestId('deliverable-preview')).toHaveAttribute('data-deliverable-id', 'd1')
+    // A row with no file to open offers no Open control.
+    expect(screen.queryByLabelText('Open README.md')).toBeNull()
   })
 
   it('says so when nothing is registered', () => {

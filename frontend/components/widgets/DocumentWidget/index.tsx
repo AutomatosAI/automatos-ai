@@ -8,8 +8,6 @@
  */
 
 import { useState, useCallback } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import {
   FileText,
   Download,
@@ -29,7 +27,8 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
+import { downloadFilename, useApiFileDownload } from '@/hooks/use-api-file-download'
+import { DocumentContent, DocumentInfoBar, downloadMarkdownFile } from './document-content'
 
 export function DocumentWidget({
   id,
@@ -57,34 +56,22 @@ export function DocumentWidget({
     }, 100)
   }, [])
 
-  // Handle download - use downloadUrl for generated files, blob fallback for RAG docs
+  // A file route (generated document, knowledge file) downloads with auth (F358);
+  // a knowledge document with no route saves the text the widget holds.
+  const { download } = useApiFileDownload()
   const handleDownload = useCallback(() => {
     if (data.downloadUrl) {
-      const a = document.createElement('a')
-      a.href = data.downloadUrl
-      a.download = data.filename || title || 'document'
-      a.target = '_blank'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      toast.success('Document download started')
+      void download(data.downloadUrl, downloadFilename(data.downloadUrl, data.filename || title))
       return
     }
     try {
-      const blob = new Blob([data.content], { type: 'text/markdown' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = data.filename || title || 'document.md'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      downloadMarkdownFile(data.content, data.filename || title || 'document.md')
       toast.success('Document downloaded')
-    } catch (error) {
+    } catch (err) {
+      console.error('[DocumentWidget] markdown download failed', err)
       toast.error('Failed to download document')
     }
-  }, [data.content, data.filename, data.downloadUrl, title])
+  }, [data.content, data.filename, data.downloadUrl, title, download])
 
   // Copy content to clipboard
   const handleCopyContent = useCallback(async () => {
@@ -108,148 +95,6 @@ export function DocumentWidget({
     }
   }, [])
 
-  // Calculate relevance percentage
-  const relevancePercent = data.similarity !== undefined
-    ? Math.round((data.similarity < 1 ? data.similarity * 100 : data.similarity))
-    : data.relevance !== undefined
-    ? Math.round((data.relevance < 1 ? data.relevance * 100 : data.relevance))
-    : null
-
-  // Detect if content is JSON
-  const isJsonContent = (() => {
-    if (data.format === 'json') return true
-    if (data.filename?.endsWith('.json')) return true
-    const trimmed = data.content?.trim() || ''
-    return (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-           (trimmed.startsWith('[') && trimmed.endsWith(']'))
-  })()
-
-  // Format JSON nicely
-  const formattedContent = (() => {
-    if (!isJsonContent) return data.content
-    try {
-      const parsed = JSON.parse(data.content)
-      return JSON.stringify(parsed, null, 2)
-    } catch {
-      return data.content
-    }
-  })()
-
-  // GitHub-style markdown components
-  const markdownComponents = {
-    // Links
-    a: ({ href, children, ...props }: any) => (
-      <a
-        {...props}
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className="text-[#58a6ff] hover:underline"
-      >
-        {children}
-      </a>
-    ),
-    // react-markdown v9 has no `inline` prop: inline code is any code node
-    // NOT wrapped in a pre, so the pre wrapper below re-styles its child and
-    // this renderer only ever handles inline spans.
-    code: ({ className, children, ...props }: any) => {
-      if (/language-/.test(className || '')) {
-        // Fenced block child (rendered inside the pre wrapper below)
-        return (
-          <code className={cn("text-[13px] font-mono text-[#e6edf3]", className)} {...props}>
-            {children}
-          </code>
-        )
-      }
-      return (
-        <code className="rounded-md bg-[#343942] px-1.5 py-0.5 text-[13px] font-mono text-[#e6edf3]" {...props}>
-          {children}
-        </code>
-      )
-    },
-    // Code blocks wrapper — normalizes the child so even untagged fenced
-    // blocks lose the inline pill styling.
-    pre: ({ children }: any) => (
-      <pre className="rounded-md bg-[#161b22] border border-[#30363d] p-4 overflow-x-auto my-4 [&_code]:rounded-none [&_code]:bg-transparent [&_code]:p-0 [&_code]:border-0">
-        {children}
-      </pre>
-    ),
-    // Headings - GitHub style with bottom border
-    h1: ({ children }: any) => (
-      <h1 className="text-[2em] font-semibold text-[#e6edf3] border-b border-[#30363d] pb-2 mt-6 mb-4">{children}</h1>
-    ),
-    h2: ({ children }: any) => (
-      <h2 className="text-[1.5em] font-semibold text-[#e6edf3] border-b border-[#30363d] pb-2 mt-6 mb-4">{children}</h2>
-    ),
-    h3: ({ children }: any) => (
-      <h3 className="text-[1.25em] font-semibold text-[#e6edf3] mt-6 mb-4">{children}</h3>
-    ),
-    h4: ({ children }: any) => (
-      <h4 className="text-[1em] font-semibold text-[#e6edf3] mt-6 mb-4">{children}</h4>
-    ),
-    h5: ({ children }: any) => (
-      <h5 className="text-[0.875em] font-semibold text-[#e6edf3] mt-6 mb-4">{children}</h5>
-    ),
-    h6: ({ children }: any) => (
-      <h6 className="text-[0.85em] font-semibold text-[#8b949e] mt-6 mb-4">{children}</h6>
-    ),
-    // Paragraphs
-    p: ({ children }: any) => (
-      <p className="text-[#e6edf3] leading-[1.6] mb-4">{children}</p>
-    ),
-    // Lists
-    ul: ({ children }: any) => (
-      <ul className="list-disc pl-8 mb-4 space-y-1 text-[#e6edf3]">{children}</ul>
-    ),
-    ol: ({ children }: any) => (
-      <ol className="list-decimal pl-8 mb-4 space-y-1 text-[#e6edf3]">{children}</ol>
-    ),
-    li: ({ children }: any) => (
-      <li className="text-[#e6edf3] leading-[1.6]">{children}</li>
-    ),
-    // Blockquote - GitHub style with left border
-    blockquote: ({ children }: any) => (
-      <blockquote className="border-l-4 border-[#30363d] pl-4 my-4 text-[#8b949e]">{children}</blockquote>
-    ),
-    // Horizontal rule
-    hr: () => (
-      <hr className="border-t border-[#30363d] my-6" />
-    ),
-    // Tables - GitHub style
-    table: ({ children }: any) => (
-      <div className="overflow-x-auto my-4">
-        <table className="min-w-full border-collapse border border-[#30363d] text-sm">{children}</table>
-      </div>
-    ),
-    thead: ({ children }: any) => (
-      <thead className="bg-[#161b22]">{children}</thead>
-    ),
-    tbody: ({ children }: any) => (
-      <tbody className="divide-y divide-[#30363d]">{children}</tbody>
-    ),
-    tr: ({ children }: any) => (
-      <tr className="even:bg-[#161b22]/50">{children}</tr>
-    ),
-    th: ({ children }: any) => (
-      <th className="px-4 py-3 text-left text-[#e6edf3] font-semibold border border-[#30363d]">{children}</th>
-    ),
-    td: ({ children }: any) => (
-      <td className="px-4 py-3 text-[#e6edf3] border border-[#30363d]">{children}</td>
-    ),
-    // Strong/bold
-    strong: ({ children }: any) => (
-      <strong className="font-semibold text-[#e6edf3]">{children}</strong>
-    ),
-    // Emphasis/italic
-    em: ({ children }: any) => (
-      <em className="italic text-[#e6edf3]">{children}</em>
-    ),
-    // Images
-    img: ({ src, alt, ...props }: any) => (
-      <img src={src} alt={alt} className="max-w-full rounded-md border border-[#30363d] my-4" {...props} />
-    ),
-  }
-
   return (
     <WidgetBase
       title={title}
@@ -266,32 +111,7 @@ export function DocumentWidget({
       canCopy
     >
       <div className="flex flex-col h-full">
-        {/* Info bar */}
-        <div className="flex items-center flex-wrap gap-2 px-3 py-2 bg-[#252525] border-b border-[#3a3a3a]">
-          {relevancePercent !== null && (
-            <Badge
-              variant="secondary"
-              className={cn(
-                'text-xs',
-                relevancePercent >= 80 && 'bg-success/10 text-success',
-                relevancePercent >= 50 && relevancePercent < 80 && 'bg-warning/10 text-warning',
-                relevancePercent < 50 && 'bg-destructive/10 text-destructive'
-              )}
-            >
-              {relevancePercent}% match
-            </Badge>
-          )}
-          {data.chunkCount !== undefined && (
-            <Badge variant="outline" className="text-xs">
-              {data.chunkCount} chunks
-            </Badge>
-          )}
-          {data.filename && (
-            <span className="text-xs text-muted-foreground font-mono truncate max-w-[200px]">
-              {data.filename}
-            </span>
-          )}
-        </div>
+        <DocumentInfoBar data={data} />
 
         {/* Tabs for content vs chunks */}
         {data.chunks && data.chunks.length > 0 ? (
@@ -314,20 +134,7 @@ export function DocumentWidget({
             <TabsContent value="content" className="flex-1 m-0 min-h-0 bg-[#0d1117]">
               <ScrollArea className="h-full">
                 <div className="px-6 py-4">
-                  {isJsonContent ? (
-                    <pre className="rounded-md bg-[#161b22] border border-[#30363d] p-4 overflow-x-auto text-[13px] font-mono text-[#e6edf3]">
-                      <code>{formattedContent}</code>
-                    </pre>
-                  ) : (
-                    <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={markdownComponents}
-                      >
-                        {data.content}
-                      </ReactMarkdown>
-                    </article>
-                  )}
+                  <DocumentContent data={data} />
                 </div>
               </ScrollArea>
             </TabsContent>
@@ -352,20 +159,7 @@ export function DocumentWidget({
         ) : (
           <ScrollArea className="flex-1 bg-[#0d1117]">
             <div className="px-6 py-4">
-              {isJsonContent ? (
-                <pre className="rounded-md bg-[#161b22] border border-[#30363d] p-4 overflow-x-auto text-[13px] font-mono text-[#e6edf3]">
-                  <code>{formattedContent}</code>
-                </pre>
-              ) : (
-                <article className="prose prose-sm prose-invert max-w-none break-words [overflow-wrap:anywhere]">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={markdownComponents}
-                  >
-                    {data.content}
-                  </ReactMarkdown>
-                </article>
-              )}
+              <DocumentContent data={data} />
             </div>
           </ScrollArea>
         )}

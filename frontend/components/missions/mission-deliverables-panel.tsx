@@ -17,9 +17,9 @@ import {
   Image as ImageIcon,
   Package,
   Presentation,
-  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { DeliverableOpenButton } from '@/components/deliverables/deliverable-open-button'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
@@ -63,7 +63,6 @@ function formatWhen(iso: string | null | undefined): string {
 
 function DeliverableRow({ deliverable }: { deliverable: Deliverable }) {
   const Icon = artifactIcon(deliverable.artifact_type)
-  const openHref = deliverable.preview_url ?? deliverable.content_url ?? null
 
   return (
     <li
@@ -91,17 +90,7 @@ function DeliverableRow({ deliverable }: { deliverable: Deliverable }) {
           </p>
         )}
       </div>
-      {openHref && (
-        <a
-          href={openHref}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`Open ${deliverable.title}`}
-          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
-      )}
+      <DeliverableOpenButton deliverable={deliverable} />
     </li>
   )
 }
