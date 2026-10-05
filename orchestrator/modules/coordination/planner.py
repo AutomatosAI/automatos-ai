@@ -15,15 +15,16 @@ Source: PRD-82A Section 12 (US-011), PRD-82B US-001/US-002
 """
 
 import asyncio
+import functools
 import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 from config import COMPLEXITY_TOKEN_BUDGET, Config
-from core.llm import create_llm_manager
+from core.llm import create_llm_manager, output_budget
 from core.models.core import Agent
 from core.utils.exception_telemetry import record_error
 from core.models.orchestration_enums import ComplexityTier, TaskType
@@ -171,6 +172,14 @@ _TASK_RANGE_RULE = (
     "only to reach a count.\n"
 )
 MAX_PLAN_RETRIES = 3
+# Max power mode plans a focused few tasks.
+MAX_MODE_TASK_BOUNDS = (1, 3)
+# What a retry (and, after the last, the owner) is told was wrong with an answer.
+LLM_CALL_FAILED_ERROR = "LLM call failed — retrying"
+NO_JSON_ERROR = "LLM response did not contain valid JSON. Ensure your response is a single JSON object."
+# #836: an answer cut at its output budget (F196) is said to be cut, with the budget.
+PLAN_CUT_ERROR = ("LLM output cut at {budget:,} tokens (the planner's output budget) before the plan was "
+                  "complete, so it held no valid JSON. Return a shorter plan as a single JSON object.")
 TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback
 
 
@@ -398,111 +407,27 @@ class MissionPlanner:
         """
         llm = create_llm_manager(service_name="planner", model=Config().PLANNER_MODEL)
         agent_roster = _render_agent_roster(agents)
-        last_errors: List[str] = []
-
         # PRD-164 S1 (Q61): same one planning pack as decompose().
         planning_context = await _build_planning_context(goal, workspace_id, db)
-
-        for attempt in range(1, MAX_PLAN_RETRIES + 1):
-            logger.info(
-                "MissionPlanner.replan: attempt %d/%d for goal='%s' workspace=%s",
-                attempt,
-                MAX_PLAN_RETRIES,
-                goal[:80],
-                workspace_id,
-            )
-
-            prompt = _build_replan_prompt(
-                goal=goal,
-                agent_roster=agent_roster,
-                completed_outputs=completed_outputs,
-                failed_task_title=failed_task_title,
-                failed_task_reason=failed_task_reason,
-                user_notes=user_notes,
-                validation_errors=last_errors if attempt > 1 else None,
-                planning_context=planning_context,
-                staffing=staffing,
-            )
-
-            messages = [
-                {"role": "system", "content": _REPLAN_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
-
-            try:
-                response = await llm.generate_response(messages)
-            except Exception:
-                logger.error(
-                    "MissionPlanner.replan: LLM call failed on attempt %d",
-                    attempt,
-                    exc_info=True,
-                )
-                last_errors = ["LLM call failed — retrying"]
-                continue
-
-            raw = _extract_json(response.content)
-            if raw is None:
-                last_errors = [
-                    "LLM response did not contain valid JSON. "
-                    "Ensure your response is a single JSON object."
-                ]
-                logger.warning(
-                    "MissionPlanner.replan: no JSON in LLM response on attempt %d",
-                    attempt,
-                )
-                continue
-
-            parse_errors: List[str] = []
-            tasks, deps = _parse_plan(raw, parse_errors)
-            if parse_errors:
-                last_errors = parse_errors
-                logger.warning(
-                    "MissionPlanner.replan: parse errors on attempt %d: %s",
-                    attempt,
-                    parse_errors,
-                )
-                continue
-
-            if not staffing:
-                tasks, deps = _ensure_synthesis_tasks(tasks, deps)
-            validation_errors = _validate_plan(tasks, deps, agents) + _staffing_errors(
-                tasks, staffing, every_named=False)
-            if validation_errors:
-                last_errors = validation_errors
-                logger.warning(
-                    "MissionPlanner.replan: validation errors on attempt %d: %s",
-                    attempt,
-                    validation_errors,
-                )
-                continue
-
-            token_estimate = _estimate_token_budget(tasks)
-            # Compute max_concurrent same as decompose()
-            max_concurrent = _complexity_to_max_concurrent(
-                _detect_complexity(goal, None)
-            )
-            logger.info(
-                "MissionPlanner.replan: generated %d replacement tasks (attempt %d, max_concurrent=%d)",
-                len(tasks),
-                attempt,
-                max_concurrent,
-            )
-            return DecompositionResult(
-                tasks=tasks,
-                dependencies=deps,
-                token_estimate=token_estimate,
-                max_concurrent=max_concurrent,
-            )
-
-        err = PlanValidationError(last_errors)
-        record_error(
-            subsystem="planner",
-            operation="replan",
-            error=err,
-            workspace_id=workspace_id,
-            extra={"goal": goal[:200], "failed_task_title": failed_task_title},
+        build_prompt = functools.partial(
+            _build_replan_prompt, goal=goal, agent_roster=agent_roster, completed_outputs=completed_outputs,
+            failed_task_title=failed_task_title, failed_task_reason=failed_task_reason, user_notes=user_notes,
+            planning_context=planning_context, staffing=staffing,
         )
-        raise err
+        check = functools.partial(_replan_errors, agents=agents, staffing=staffing)
+        call = _PlanCall("replan", goal, _REPLAN_SYSTEM_PROMPT, build_prompt, check, staffing)
+        try:
+            tasks, deps = await _plan_with_llm(llm, call)
+        except PlanValidationError as err:
+            record_error(subsystem="planner", operation="replan", error=err, workspace_id=workspace_id,
+                         extra={"goal": goal[:200], "failed_task_title": failed_task_title})
+            raise
+        # Compute max_concurrent same as decompose()
+        max_concurrent = _complexity_to_max_concurrent(_detect_complexity(goal, None))
+        logger.info("MissionPlanner.replan: generated %d replacement tasks (max_concurrent=%d)",
+                    len(tasks), max_concurrent)
+        return DecompositionResult(tasks=tasks, dependencies=deps,
+                                   token_estimate=_estimate_token_budget(tasks), max_concurrent=max_concurrent)
 
     @staticmethod
     async def decompose(
@@ -515,6 +440,7 @@ class MissionPlanner:
     ) -> DecompositionResult:
         """
         Decompose *goal* into a task DAG validated against available *agents*.
+        A template (82B) plans it when one fits; otherwise the model does.
 
         Args:
             goal: Natural-language goal string from the user.
@@ -532,232 +458,213 @@ class MissionPlanner:
         Raises:
             PlanValidationError: if all retry attempts fail structural validation.
         """
-        # --- Complexity detection (82C US-004) ---
-        attachment_ids_for_complexity = (config or {}).get("attachment_ids", [])
-        complexity = _detect_complexity(goal, attachment_ids_for_complexity)
-        max_concurrent = _complexity_to_max_concurrent(complexity)
-        logger.info(
-            "MissionPlanner: complexity=%s max_concurrent=%d for goal='%s'",
-            complexity.value,
-            max_concurrent,
-            goal[:80],
-        )
+        config = config or {}
+        max_concurrent = _mission_concurrency(goal, config.get("attachment_ids", []))
+        bounds = _task_bounds(config.get("power_mode", "standard"))
+        staffing = list(config.get("staffing") or [])
+        template = _pick_template(goal, config, staffing, owner_feedback)
+        planned = _plan_from_template(template, goal, agents, bounds, max_concurrent) if template else None
+        if planned is not None:
+            return planned
 
-        # --- Power mode (mission modes) ---
-        power_mode = (config or {}).get("power_mode", "standard")
-        if power_mode == "max":
-            min_tasks_bound = 1
-            max_tasks_bound = 3
-            logger.info("MissionPlanner: Max power mode — task bounds [%d, %d]", min_tasks_bound, max_tasks_bound)
-        else:
-            min_tasks_bound = MIN_TASKS
-            max_tasks_bound = MAX_TASKS
-
-        # --- Template matching (82B US-002) — try before LLM ---
-        # Max power mode skips templates — go straight to LLM for focused decomposition.
-        # If config provides a template_id hint, use it directly (PRD-120 US-011)
-        template_id_hint = (config or {}).get("template_id") if power_mode != "max" else None
-        template = None
-        if template_id_hint:
-            from modules.coordination.templates import TEMPLATE_REGISTRY
-            matching = [t for t in TEMPLATE_REGISTRY if t.id == template_id_hint]
-            if matching:
-                template = matching[0]
-                logger.info(
-                    "MissionPlanner: template_id hint '%s' resolved directly",
-                    template_id_hint,
-                )
-            else:
-                logger.warning(
-                    "MissionPlanner: template_id hint '%s' not found in registry — falling back to keyword match",
-                    template_id_hint,
-                )
-        if template is None:
-            template = match_template(goal)
-        # F142 (b): a template knows nothing of the owner's named staffing.
-        staffing = list((config or {}).get("staffing") or [])
-        if staffing and template is not None:
-            logger.info("MissionPlanner: the owner named who does what; template %s skipped", template.id)
-            template = None
-        # F171: nor of why the owner turned the last plan down.
-        if owner_feedback and template is not None:
-            logger.info("MissionPlanner: the owner turned a plan down; template %s skipped", template.id)
-            template = None
-        if template is not None:
-            logger.info(
-                "MissionPlanner: template=%s matched for goal='%s'",
-                template.id,
-                goal[:80],
-            )
-            raw_tasks = render_template(template, goal)
-            parse_errors: List[str] = []
-            tasks, deps = _parse_plan({"tasks": raw_tasks}, parse_errors)
-            if not parse_errors:
-                tasks, deps = _ensure_synthesis_tasks(tasks, deps)
-                validation_errors = _validate_plan(tasks, deps, agents, min_tasks=min_tasks_bound, max_tasks=max_tasks_bound)
-                if not validation_errors:
-                    token_estimate = _estimate_token_budget(tasks)
-                    logger.info(
-                        "MissionPlanner: template=%s produced %d tasks",
-                        template.id,
-                        len(tasks),
-                    )
-                    return DecompositionResult(
-                        tasks=tasks,
-                        dependencies=deps,
-                        token_estimate=token_estimate,
-                        template_used=template.id,
-                        max_concurrent=max_concurrent,
-                    )
-                else:
-                    logger.warning(
-                        "MissionPlanner: template=%s failed validation: %s — falling through to LLM",
-                        template.id,
-                        validation_errors,
-                    )
-            else:
-                logger.warning(
-                    "MissionPlanner: template=%s failed parsing: %s — falling through to LLM",
-                    template.id,
-                    parse_errors,
-                )
-        else:
-            logger.info(
-                "MissionPlanner: no template match, using LLM decomposition"
-            )
-
-        # --- LLM decomposition fallback ---
+        logger.info("MissionPlanner: using LLM decomposition")
         llm = create_llm_manager(service_name="planner", model=Config().PLANNER_MODEL)
-        agent_roster = _render_agent_roster(agents)
-        last_errors: List[str] = []
+        call = await _decomposition_call(goal, workspace_id, agents, config, db, owner_feedback, staffing, bounds)
+        try:
+            tasks, deps = await _plan_with_llm(llm, call)
+        except PlanValidationError as err:
+            # All retries exhausted — the ERRORS-by-subsystem tile shows it.
+            record_error(subsystem="planner", operation="decompose", error=err, workspace_id=workspace_id,
+                         extra={"goal": goal[:200]})
+            raise
+        logger.info("MissionPlanner: decomposed goal into %d tasks", len(tasks))
+        return DecompositionResult(tasks=tasks, dependencies=deps,
+                                   token_estimate=_estimate_token_budget(tasks), max_concurrent=max_concurrent)
 
-        # PRD-164 S1 (Q61): the ONE planning context pack — RAG on the goal,
-        # prior mission summaries/failures, KG subgraph — built once, reused
-        # across retries.
-        planning_context = await _build_planning_context(goal, workspace_id, db)
 
-        # PRD-127: Resolve attachment_ids for planner context
-        attachment_contents: Optional[List[Dict[str, str]]] = None
-        mission_attachment_ids: List[str] = (config or {}).get("attachment_ids", [])
-        if mission_attachment_ids:
-            attachment_contents = await _resolve_attachments_for_planning(
-                mission_attachment_ids, workspace_id
-            )
-            logger.info(
-                "MissionPlanner: resolved %d attachment(s) for context",
-                len(attachment_contents),
-            )
+# ---------------------------------------------------------------------------
+# Template planning (82B) — tried before the model
+# ---------------------------------------------------------------------------
 
-        for attempt in range(1, MAX_PLAN_RETRIES + 1):
-            logger.info(
-                "MissionPlanner.decompose: attempt %d/%d for goal='%s' workspace=%s",
-                attempt,
-                MAX_PLAN_RETRIES,
-                goal[:80],
-                workspace_id,
-            )
 
-            # PRD-125 Phase 1: Extract chat context from config when source is "chat"
-            chat_context = None
-            if (config or {}).get("source") == "chat":
-                chat_context = (config or {}).get("context_messages")
+def _mission_concurrency(goal: str, attachment_ids: List[str]) -> int:
+    """How many tasks may run at once, from the goal's complexity (82C US-004)."""
+    complexity = _detect_complexity(goal, attachment_ids)
+    max_concurrent = _complexity_to_max_concurrent(complexity)
+    logger.info("MissionPlanner: complexity=%s max_concurrent=%d for goal='%s'",
+                complexity.value, max_concurrent, goal[:80])
+    return max_concurrent
 
-            prompt = _build_decomposition_prompt(
-                goal=goal,
-                agent_roster=agent_roster,
-                validation_errors=last_errors if attempt > 1 else None,
-                attachment_contents=attachment_contents,
-                chat_context=chat_context,
-                power_mode=power_mode,
-                planning_context=planning_context,
-                staffing=staffing,
-                owner_feedback=owner_feedback,
-            )
 
-            messages = [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
+def _task_bounds(power_mode: str) -> Tuple[int, int]:
+    """(min, max) tasks a plan may have; Max power mode plans a focused few."""
+    if power_mode == "max":
+        logger.info("MissionPlanner: Max power mode — task bounds [%d, %d]", *MAX_MODE_TASK_BOUNDS)
+        return MAX_MODE_TASK_BOUNDS
+    return MIN_TASKS, MAX_TASKS
 
-            try:
-                response = await llm.generate_response(messages)
-            except Exception:
-                logger.error(
-                    "MissionPlanner: LLM call failed on attempt %d",
-                    attempt,
-                    exc_info=True,
-                )
-                last_errors = ["LLM call failed — retrying"]
-                continue
 
-            raw = _extract_json(response.content)
-            if raw is None:
-                last_errors = [
-                    "LLM response did not contain valid JSON. "
-                    "Ensure your response is a single JSON object."
-                ]
-                logger.warning(
-                    "MissionPlanner: no JSON in LLM response on attempt %d",
-                    attempt,
-                )
-                continue
+def _hinted_template(config: Dict[str, Any]) -> Optional[Any]:
+    """The template ``config`` names (PRD-120 US-011), never in Max power mode."""
+    hint = config.get("template_id") if config.get("power_mode", "standard") != "max" else None
+    if not hint:
+        return None
+    from modules.coordination.templates import TEMPLATE_REGISTRY
 
-            # Parse into PlannedTask list
-            parse_errors: List[str] = []
-            tasks, deps = _parse_plan(raw, parse_errors)
-            if parse_errors:
-                last_errors = parse_errors
-                logger.warning(
-                    "MissionPlanner: parse errors on attempt %d: %s",
-                    attempt,
-                    parse_errors,
-                )
-                continue
+    matching = [t for t in TEMPLATE_REGISTRY if t.id == hint]
+    if matching:
+        logger.info("MissionPlanner: template_id hint '%s' resolved directly", hint)
+        return matching[0]
+    logger.warning("MissionPlanner: template_id hint '%s' not found in registry — falling back to keyword match", hint)
+    return None
 
-            # Auto-insert synthesis tasks for parallel convergence (82C US-008),
-            # unless the owner named who does what (F142 b: no step they didn't ask for).
-            if not staffing:
-                tasks, deps = _ensure_synthesis_tasks(tasks, deps)
 
-            # Structural validation, and the owner's staffing kept (F142 b)
-            validation_errors = (
-                _validate_plan(tasks, deps, agents, min_tasks=min_tasks_bound, max_tasks=max_tasks_bound)
-                + _staffing_errors(tasks, staffing)
-            )
-            if validation_errors:
-                last_errors = validation_errors
-                logger.warning(
-                    "MissionPlanner: validation errors on attempt %d: %s",
-                    attempt,
-                    validation_errors,
-                )
-                continue
+def _pick_template(goal: str, config: Dict[str, Any], staffing: List[Dict[str, Any]],
+                   owner_feedback: Optional[str]) -> Optional[Any]:
+    """The template that plans ``goal``: the hinted one, else a keyword match.
+    None when the owner named who does what (F142 b: a template knows nothing of
+    it) or turned the last plan down (F171: nor of why)."""
+    template = _hinted_template(config) or match_template(goal)
+    if template is None:
+        return None
+    if staffing:
+        logger.info("MissionPlanner: the owner named who does what; template %s skipped", template.id)
+        return None
+    if owner_feedback:
+        logger.info("MissionPlanner: the owner turned a plan down; template %s skipped", template.id)
+        return None
+    logger.info("MissionPlanner: template=%s matched for goal='%s'", template.id, goal[:80])
+    return template
 
-            # Success
-            token_estimate = _estimate_token_budget(tasks)
-            logger.info(
-                "MissionPlanner: decomposed goal into %d tasks (attempt %d)",
-                len(tasks),
-                attempt,
-            )
-            return DecompositionResult(
-                tasks=tasks,
-                dependencies=deps,
-                token_estimate=token_estimate,
-                max_concurrent=max_concurrent,
-            )
 
-        # All retries exhausted — record the terminal planning failure so the
-        # ERRORS-by-subsystem tile reflects it, then surface to the caller.
-        err = PlanValidationError(last_errors)
-        record_error(
-            subsystem="planner",
-            operation="decompose",
-            error=err,
-            workspace_id=workspace_id,
-            extra={"goal": goal[:200]},
-        )
-        raise err
+def _plan_from_template(template: Any, goal: str, agents: Sequence[Agent], bounds: Tuple[int, int],
+                        max_concurrent: int) -> Optional[DecompositionResult]:
+    """The template's plan, or None (logged) when it does not parse or validate:
+    the model plans instead."""
+    parse_errors: List[str] = []
+    tasks, deps = _parse_plan({"tasks": render_template(template, goal)}, parse_errors)
+    if parse_errors:
+        logger.warning("MissionPlanner: template=%s failed parsing: %s — falling through to LLM",
+                       template.id, parse_errors)
+        return None
+    tasks, deps = _ensure_synthesis_tasks(tasks, deps)
+    validation_errors = _validate_plan(tasks, deps, agents, min_tasks=bounds[0], max_tasks=bounds[1])
+    if validation_errors:
+        logger.warning("MissionPlanner: template=%s failed validation: %s — falling through to LLM",
+                       template.id, validation_errors)
+        return None
+    logger.info("MissionPlanner: template=%s produced %d tasks", template.id, len(tasks))
+    return DecompositionResult(tasks=tasks, dependencies=deps, token_estimate=_estimate_token_budget(tasks),
+                               template_used=template.id, max_concurrent=max_concurrent)
+
+
+# ---------------------------------------------------------------------------
+# Planning with the model — decompose() and replan() share the retry loop
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _PlanCall:
+    """What one planning conversation fixes: its name (logs), the goal, the
+    system prompt, the user prompt for the errors the last answer had, and the
+    checks a parsed plan must pass."""
+
+    operation: str
+    goal: str
+    system_prompt: str
+    build_prompt: Callable[..., str]
+    check: Callable[[List[PlannedTask], List[PlannedDependency]], List[str]]
+    staffing: Optional[List[Dict[str, Any]]]
+
+
+async def _planning_attachments(attachment_ids: List[str], workspace_id: UUID) -> Optional[List[Dict[str, str]]]:
+    """PRD-127: the mission's attachments, for the planner's prompt."""
+    if not attachment_ids:
+        return None
+    contents = await _resolve_attachments_for_planning(attachment_ids, workspace_id)
+    logger.info("MissionPlanner: resolved %d attachment(s) for context", len(contents))
+    return contents
+
+
+async def _decomposition_call(goal: str, workspace_id: UUID, agents: Sequence[Agent], config: Dict[str, Any],
+                              db: Any, owner_feedback: Optional[str], staffing: List[Dict[str, Any]],
+                              bounds: Tuple[int, int]) -> _PlanCall:
+    """decompose()'s conversation. The PRD-164 S1 (Q61) planning pack (RAG on
+    the goal, prior missions, KG subgraph) is built once and reused across
+    retries; PRD-125: a chat-born mission brings its chat."""
+    agent_roster = _render_agent_roster(agents)
+    planning_context = await _build_planning_context(goal, workspace_id, db)
+    attachment_contents = await _planning_attachments(config.get("attachment_ids", []), workspace_id)
+    chat_context = config.get("context_messages") if config.get("source") == "chat" else None
+    build_prompt = functools.partial(
+        _build_decomposition_prompt, goal=goal, agent_roster=agent_roster, attachment_contents=attachment_contents,
+        chat_context=chat_context, power_mode=config.get("power_mode", "standard"),
+        planning_context=planning_context, staffing=staffing, owner_feedback=owner_feedback,
+    )
+    check = functools.partial(_decomposition_errors, agents=agents, bounds=bounds, staffing=staffing)
+    return _PlanCall("decompose", goal, _SYSTEM_PROMPT, build_prompt, check, staffing)
+
+
+def _decomposition_errors(tasks: List[PlannedTask], deps: List[PlannedDependency], *, agents: Sequence[Agent],
+                          bounds: Tuple[int, int], staffing: List[Dict[str, Any]]) -> List[str]:
+    """Structural validation, and the owner's staffing kept (F142 b)."""
+    return (_validate_plan(tasks, deps, agents, min_tasks=bounds[0], max_tasks=bounds[1])
+            + _staffing_errors(tasks, staffing))
+
+
+def _replan_errors(tasks: List[PlannedTask], deps: List[PlannedDependency], *, agents: Sequence[Agent],
+                   staffing: Optional[List[Dict[str, Any]]]) -> List[str]:
+    """A replacement plan's checks: a named agent's work keeps its agent (F142 b)."""
+    return _validate_plan(tasks, deps, agents) + _staffing_errors(tasks, staffing, every_named=False)
+
+
+def _unreadable_plan_error(response: Any) -> str:
+    """Why an answer held no plan. #836: an answer cut at its output budget
+    (F196 flagged it) says so, with the budget; it is not "no JSON"."""
+    budget = output_budget.cut_at(response)
+    return PLAN_CUT_ERROR.format(budget=budget) if budget is not None else NO_JSON_ERROR
+
+
+async def _plan_attempt(llm: Any, messages: List[Dict[str, str]], call: _PlanCall,
+                        attempt: int) -> Tuple[List[PlannedTask], List[PlannedDependency], List[str]]:
+    """One answer, read and checked: (tasks, deps, []) or ([], [], what was wrong)."""
+    try:
+        response = await llm.generate_response(messages)
+    except Exception:  # noqa: BLE001 — logged; the next attempt asks again
+        logger.exception("MissionPlanner.%s: LLM call failed on attempt %d", call.operation, attempt)
+        return [], [], [LLM_CALL_FAILED_ERROR]
+    raw = _extract_json(response.content)
+    if raw is None:
+        error = _unreadable_plan_error(response)
+        logger.warning("MissionPlanner.%s: no plan in the answer on attempt %d: %s", call.operation, attempt, error)
+        return [], [], [error]
+    parse_errors: List[str] = []
+    tasks, deps = _parse_plan(raw, parse_errors)
+    # Synthesis steps for parallel convergence (82C US-008), unless the owner
+    # named who does what (F142 b: no step they didn't ask for).
+    if not parse_errors and not call.staffing:
+        tasks, deps = _ensure_synthesis_tasks(tasks, deps)
+    errors = parse_errors or call.check(tasks, deps)
+    if errors:
+        logger.warning("MissionPlanner.%s: plan errors on attempt %d: %s", call.operation, attempt, errors)
+        return [], [], errors
+    return tasks, deps, []
+
+
+async def _plan_with_llm(llm: Any, call: _PlanCall) -> Tuple[List[PlannedTask], List[PlannedDependency]]:
+    """Ask the model for the plan up to MAX_PLAN_RETRIES times, each retry told
+    what was wrong with the last answer. Raises PlanValidationError with the
+    last attempt's errors."""
+    errors: List[str] = []
+    for attempt in range(1, MAX_PLAN_RETRIES + 1):
+        logger.info("MissionPlanner.%s: attempt %d/%d for goal='%s'",
+                    call.operation, attempt, MAX_PLAN_RETRIES, call.goal[:80])
+        prompt = call.build_prompt(validation_errors=errors if attempt > 1 else None)
+        messages = [{"role": "system", "content": call.system_prompt}, {"role": "user", "content": prompt}]
+        tasks, deps, errors = await _plan_attempt(llm, messages, call, attempt)
+        if not errors:
+            return tasks, deps
+    raise PlanValidationError(errors)
 
 
 # ---------------------------------------------------------------------------

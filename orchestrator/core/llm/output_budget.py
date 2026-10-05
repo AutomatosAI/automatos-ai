@@ -20,23 +20,31 @@ Now each purpose has a budget, keyed like llm_usage.request_type:
 - Long deliverables (a report, a generated document, a mission's final write)
   get 16,000.
 
-Budgets are read when a manager is built, never per call, because
-read_system_setting is a sync database read (F105). Each is capped by the
-model's ceiling when it is known. A call cut at its budget is logged and flagged,
-and a text answer carries a note saying so.
+#836: the table measures visible answers. A thinking model's reasoning tokens
+count toward max_tokens too, so a call to a model the catalogue says thinks
+reserves its purpose's budget plus LLM_THINKING_ALLOWANCE_RATIO times it, capped
+by the model's ceiling. A settings row is the operator's whole reservation and
+gets no allowance.
+
+Budgets are read when a manager is built, never per call, from the worker's
+in-memory snapshot (core.llm.budget_snapshot), which is loaded at boot and kept
+fresh on a thread (F105). Each is capped by the model's ceiling when it is
+known. A call cut at its budget is logged and flagged, and a text answer carries
+a note saying so.
 """
 from __future__ import annotations
 
-import asyncio
 import contextvars
 import logging
-import time
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple
+
+from config import config
+from core.llm import budget_snapshot
 
 logger = logging.getLogger(__name__)
 
-SETTINGS_CATEGORY = "llm_output_budget"
+SETTINGS_CATEGORY = budget_snapshot.SETTINGS_CATEGORY
 
 CHAT = "chat"
 AGENT_RUN = "agent_run"
@@ -78,52 +86,48 @@ _purpose: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("llm_ou
 _call_budget: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar("llm_call_budget", default=None)
 
 
-_STORED_TTL_S = 60.0
-_stored_cache: Dict[str, Tuple[Optional[int], float]] = {}
-_refreshing: Set[str] = set()
-
-
-def _read_stored(purpose: str) -> Optional[int]:
-    try:
-        from core.llm.manager import read_system_setting
-
-        raw = read_system_setting(SETTINGS_CATEGORY, purpose)
-        value = int(raw) if raw not in (None, "") else None
-    except Exception:  # noqa: BLE001 — a missing or unreadable row falls back to the table
-        value = None
-    _stored_cache[purpose] = (value, time.monotonic() + _STORED_TTL_S)
-    _refreshing.discard(purpose)
-    return value
-
-
 def _stored(purpose: str) -> Optional[int]:
-    """The settings row for ``purpose``, read at most once a minute. The read
-    is a sync database round trip, so on an event loop it is never waited for
-    (F105): the cached value, or the table's, answers, and the read runs on a
-    thread for the next manager."""
-    cached = _stored_cache.get(purpose)
-    if cached and cached[1] > time.monotonic():
-        return cached[0]
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return _read_stored(purpose)
-    if purpose not in _refreshing:
-        _refreshing.add(purpose)
-        loop.run_in_executor(None, _read_stored, purpose)
-    return cached[0] if cached else None
+    """The settings row for ``purpose``, from the worker's snapshot (never a
+    database read on the event loop)."""
+    return budget_snapshot.stored_budget(purpose)
 
 
-def budget_for(purpose: Optional[str], ceiling: Optional[int] = None) -> Optional[int]:
+def with_thinking(budget: int, model: Optional[str]) -> int:
+    """#836: ``budget`` for the visible answer, plus the thinking allowance when
+    the catalogue says ``model`` thinks, capped by the model's own maximum. A
+    model that does not think keeps ``budget``."""
+    facts = budget_snapshot.model_facts(model)
+    if not facts.thinks:
+        return budget
+    total = budget + int(budget * config.LLM_THINKING_ALLOWANCE_RATIO)
+    return min(total, facts.ceiling) if facts.ceiling else total
+
+
+def budget_for(purpose: Optional[str], ceiling: Optional[int] = None, *, model: Optional[str] = None) -> Optional[int]:
     """The budget the table (or its settings row) gives ``purpose``, capped by
-    the model's ceiling; None for a purpose the table does not know. Reads
-    system_settings: call it when a manager is built, not per call."""
+    the model's ceiling; None for a purpose the table does not know. A table
+    budget on a thinking ``model`` carries its thinking allowance; a settings
+    row is the operator's whole reservation. On the event loop it reads memory
+    only (budget_snapshot): call it when a manager is built, not per call."""
     if not purpose:
         return None
-    value = _stored(purpose) or DEFAULT_BUDGETS.get(purpose)
+    stored = _stored(purpose)
+    value = stored or DEFAULT_BUDGETS.get(purpose)
     if value is None:
         return None
+    if not stored:
+        value = with_thinking(value, model)
     return min(value, ceiling) if ceiling else value
+
+
+def manager_budgets(purpose: str, config: Any, *, from_settings: bool) -> Tuple[Optional[int], Optional[int]]:
+    """F196: a manager's (service budget, long-deliverable budget), read once
+    when it is built, never per call. A service manager (built from settings)
+    has its purpose's budget; an agent's (given a config) keeps its configured
+    one (None here). #836: on a thinking model each carries its allowance."""
+    ceiling, model = config.output_ceiling, config.model
+    service = budget_for(purpose, ceiling, model=model) if from_settings else None
+    return service, budget_for(LONG_DELIVERABLE, ceiling, model=model)
 
 
 def for_call(lane: Optional[str], configured: int, *, own_purpose: Optional[str],
@@ -191,12 +195,19 @@ def note_cut(response: Any, *, purpose: str, budget: int, model: str) -> None:
         pass
 
 
+def cut_at(response: Any) -> Optional[int]:
+    """The budget ``response`` was cut at (note_cut flagged it, and it still
+    ends at the limit), else None."""
+    budget = getattr(response, "cut", None)
+    if getattr(response, "finish_reason", None) != "length" or not isinstance(budget, int) or isinstance(budget, bool):
+        return None
+    return budget
+
+
 def cut_note_for(response: Any) -> Optional[str]:
     """The note a finished text answer carries when it is still cut at its
     budget, else None."""
-    budget = getattr(response, "cut", None)
-    if (getattr(response, "finish_reason", None) != "length" or not isinstance(budget, int)
-            or isinstance(budget, bool) or getattr(response, "tool_calls", None)
-            or not getattr(response, "content", None)):
+    budget = cut_at(response)
+    if budget is None or getattr(response, "tool_calls", None) or not getattr(response, "content", None):
         return None
     return CUT_NOTE.format(budget=budget)
