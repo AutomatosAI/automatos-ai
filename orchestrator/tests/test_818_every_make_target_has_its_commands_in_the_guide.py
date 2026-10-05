@@ -57,7 +57,7 @@ def _expected_commands(recipe: list, variables: dict) -> list:
     for line in recipe:
         for name, value in variables.items():
             if line.startswith(f"$({name}) "):
-                expected.append(f"{value} {line[len(name) + 3:]}".split(OUTPUT_ONLY_FLAG)[0])
+                expected.append(f"{value} {line[len(name) + 3:].strip()}".split(OUTPUT_ONLY_FLAG)[0])
         expected.extend(DOCKER_COMMAND.findall(line))
         if "automatos_cli_host" in line:
             expected.extend(HOST_FLAG.findall(line.split("automatos_cli_host", 1)[1]))
