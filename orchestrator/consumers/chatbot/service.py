@@ -73,6 +73,7 @@ from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 (night 9)
+from consumers.chatbot.named_template_note import fills_the_named_template  # F351 (night 10b)
 from consumers.chatbot.shop_figures import counts_from_the_shop  # F316 (night 9b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
 from consumers.chatbot.team_corrections import tells_the_team_honestly  # F324 (night 9b)
@@ -1589,6 +1590,7 @@ class StreamingChatService:
     @counts_from_the_shop  # F316 (night 9b): a shop figure is counted from the shop, this turn
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     @tells_the_team_honestly  # F324 (night 9b): memory is Auto's own; the owner's documents reach the team
+    @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
         """F085-A: search the documents for a question before the first model
