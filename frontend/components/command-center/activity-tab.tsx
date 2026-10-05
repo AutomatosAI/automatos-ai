@@ -198,7 +198,7 @@ export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
         </div>
       </div>
 
-      <div className="cc-panel" style={{ flex: 1, minHeight: 0 }}>
+      <div className="cc-panel cc-panel-floor">
         <div className="cc-panel-head">
           <span className="t">Live stream</span>
           <span className="meta">
