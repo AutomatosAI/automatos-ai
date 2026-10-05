@@ -3,7 +3,8 @@
  * =====================================================
  *
  * Slide-over sheet that shows a single deliverable's content with Download,
- * Delete, and "Open in Explorer" actions. Fetches full content via useDeliverable
+ * Delete, "Open in Explorer" and, for a document, "Add to Knowledge" (F354) actions
+ * (deliverable-preview-actions.tsx). Fetches full content via useDeliverable
  * with include_content=true. All rendering is delegated to the shared
  * FilePreview component so Outputs, Chat, and Explorer stay aligned.
  */
@@ -13,13 +14,7 @@
 import { useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
-import {
-  Download,
-  ExternalLink,
-  FileWarning,
-  Loader2,
-  Trash2,
-} from 'lucide-react'
+import { Download, FileWarning, Loader2 } from 'lucide-react'
 import {
   FilePreview,
   inferPreviewType,
@@ -38,6 +33,7 @@ import {
   type Deliverable,
 } from '@/hooks/use-deliverables-api'
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
+import { DeliverablePreviewActions } from './deliverable-preview-actions'
 
 interface DeliverablePreviewProps {
   deliverableId: string | null
@@ -207,41 +203,15 @@ export function DeliverablePreview({
                 {deliverable.title}
               </SheetTitle>
               <DeliverableMeta deliverable={deliverable} />
-              <div className="flex flex-wrap gap-2 pt-1">
-                {downloadUrl && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDownload}
-                    disabled={downloading}
-                  >
-                    {downloading ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Download className="mr-2 h-4 w-4" />
-                    )}
-                    Download
-                  </Button>
-                )}
-                <Button variant="outline" size="sm" onClick={handleOpenInCanvas}>
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Open in Explorer
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDelete}
-                  disabled={deleteMutation.isLoading}
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                >
-                  {deleteMutation.isLoading ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="mr-2 h-4 w-4" />
-                  )}
-                  Delete
-                </Button>
-              </div>
+              <DeliverablePreviewActions
+                deliverable={deliverable}
+                downloadUrl={downloadUrl}
+                downloading={downloading}
+                deleting={deleteMutation.isLoading}
+                onDownload={handleDownload}
+                onOpenInExplorer={handleOpenInCanvas}
+                onDelete={handleDelete}
+              />
             </SheetHeader>
 
             {/* Content body — delegated to shared FilePreview */}

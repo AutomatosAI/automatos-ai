@@ -91,6 +91,7 @@ from modules.documents.blocks import (
 from modules.documents.variables import VariableResolver
 from modules.documents.xlsx_render import write_xlsx
 from modules.documents.brand_signing import a_document_is_signed
+from modules.documents.deliverable_extra import deliverable_extra, the_parties_are_remembered
 from modules.documents.data_coverage import template_for, unused_data_keys
 from modules.documents.letterhead import fallback_blocks
 from modules.documents.template_formats import refuse_unsupported_format
@@ -151,6 +152,7 @@ class DocumentGenerationService:
     # Public dispatch
     # ------------------------------------------------------------------
 
+    @the_parties_are_remembered  # F354: who the document is for rides to its Deliverable
     @a_document_is_signed  # brand kit at generation (night 9b): a placeholder signature takes the kit's sign-off
     async def generate(
         self,
@@ -289,21 +291,7 @@ class DocumentGenerationService:
             # Deliverable (streamed, with a player), never a document.
             is_social = result.template_lane == SOCIAL_LANE
             artifact_type = _infer_artifact_type(result.filename) if is_social else "document"
-            extra = {
-                "render": {
-                    "unresolved_count": len(result.unresolved),
-                    "unknown_count": len(result.unknown),
-                    "template_lane": result.template_lane,
-                }
-            }
-            if template_id:
-                extra["template_id"] = str(template_id)
-            if getattr(result, "template_name", None):
-                extra["template_name"] = result.template_name
-            # PRD-251 S1.6: the music a social video mixed; a post that attaches
-            # this Deliverable carries its credit line (modules/socials/credits.py).
-            if getattr(result, "music", None):
-                extra["music"] = dict(result.music)
+            extra = deliverable_extra(result, template_id)  # render, template, music, parties (F354)
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",
                 title=title or result.filename,

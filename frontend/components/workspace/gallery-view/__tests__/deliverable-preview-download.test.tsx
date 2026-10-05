@@ -49,6 +49,9 @@ vi.mock('@/hooks/use-deliverables-api', () => ({
   useDeleteDeliverable: () => ({ mutate: vi.fn(), isLoading: false }),
 }))
 
+// F354's Add to Knowledge button sits in the same action row; its own test covers it.
+vi.mock('../add-to-knowledge-button', () => ({ AddToKnowledgeButton: () => null }))
+
 import { DeliverablePreview } from '../deliverable-preview'
 import { API_FILE_DOWNLOAD_FAILED } from '@/hooks/use-api-file-download'
 
