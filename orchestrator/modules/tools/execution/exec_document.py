@@ -29,17 +29,20 @@ async def execute_generate_document(
     Routes to AgentPlatformTools.execute_tool which handles workspace
     resolution, template selection, and file generation. F341 (night 10): the
     card the call works (``caller_context``, server-built) goes with it, so the
-    document is that card's Deliverable.
+    document is that card's Deliverable. F349: a session's ticket also gets a copy
+    in its folder, which the session can open (``session_document_folder``).
     """
     from modules.tools.execution.generate_document_tool import card_of
+    from modules.tools.execution.session_document_folder import with_session_copy
 
     card_id = card_of(caller_context)
-    return await executor.platform_tools.execute_tool(
+    result = await executor.platform_tools.execute_tool(
         tool_name="generate_document",
         parameters=parameters,
         agent_id=agent_id,
         **({"card_id": card_id} if card_id is not None else {}),
     )
+    return await with_session_copy(result, caller_context, workspace_id)
 
 
 async def execute_document_tool(

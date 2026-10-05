@@ -26,6 +26,8 @@ from core.media_render_quota import RenderQuotaExceeded
 from core.social_templates import InvalidVariableValues, SocialTemplateError, is_social_format
 from config import config
 from modules.documents.models import UnresolvedDeliverableError
+from modules.documents.template_formats import UnsupportedTemplateFormat
+from modules.documents.template_preview import preview_data
 from modules.documents.template_service import UnknownTemplateFormat
 from api.document_brand_kit import router as brand_kit_router
 
@@ -119,6 +121,19 @@ SOCIAL_RENDER_ERRORS = (SocialTemplateError, RenderQuotaExceeded, MediaRenderErr
 RENDER_NOT_CONFIGURED = "Rendering is not configured on this server."
 RENDER_UNREACHABLE = "The renderer cannot be reached right now. Try again in a few minutes."
 RENDER_WORKSPACE_BUSY = "This workspace has too many renders in progress. Try again when one of them ends."
+
+
+def _unresolved_422(e: UnresolvedDeliverableError) -> HTTPException:
+    """P2-09 S3, the finalisation gate: a Deliverable with [[unresolved]]/unknown variables
+    is blocked, and the caller is told WHICH paths, to fill the data / brand kit / template."""
+    return HTTPException(
+        status_code=422,
+        detail={
+            "message": "Document blocked: template variables did not resolve",
+            "unresolved": e.unresolved,
+            "unknown": e.unknown,
+        },
+    )
 
 
 def _template_error_422(e: ValueError) -> HTTPException:
@@ -309,7 +324,11 @@ async def preview_template(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Generate a preview using sample data or provided data."""
+    """Generate a preview from the data sent, else the template's stored sample.
+
+    F348: either shape is taken, the data itself or ``{"data": {...}}`` (how the
+    starters and the Studio store a sample), and the stored sample is never written to.
+    """
     from modules.documents.generation_service import DocumentGenerationService
     from modules.documents.template_service import DocumentTemplateService
 
@@ -318,8 +337,8 @@ async def preview_template(
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    preview_data = data if data else template.sample_data
-    if not preview_data:
+    sample = preview_data(data, template.sample_data)
+    if not sample:
         raise HTTPException(status_code=400, detail="No data provided and template has no sample_data")
 
     gen_service = DocumentGenerationService(db, ctx.workspace_id)
@@ -327,26 +346,19 @@ async def preview_template(
         result = await gen_service.generate(
             title=f"Preview_{template.name}",
             format=template.format,
-            data=preview_data,
+            data=sample,
             workspace_id=ctx.workspace_id,
             template_id=template.id,
             user_id=resolve_user_pk(db, ctx),
         )
     except UnresolvedDeliverableError as e:
-        # P2-09 S3: the finalisation gate — tell the caller WHICH variables
-        # blocked the file so they can fill the data / brand kit / template.
         # (The Studio live preview, /templates/preview-blocks, stays the
         # visible-marker surface and is not gated.)
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "Document blocked: template variables did not resolve",
-                "unresolved": e.unresolved,
-                "unknown": e.unknown,
-            },
-        )
+        raise _unresolved_422(e) from e
     except SOCIAL_RENDER_ERRORS as e:
         raise _social_render_error(e)
+    except UnsupportedTemplateFormat as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Document preview failed: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Document preview failed")
@@ -432,7 +444,7 @@ async def generate_document(
     response carries the same links an agent gets: the in-app feed and a
     no-sign-in share link when object storage holds a copy.
     """
-    from modules.documents.generation_service import DocumentGenerationService, deliverables_app_url
+    from modules.documents.generation_service import DocumentGenerationService
 
     try:
         template_uuid = UUID(body.template_id) if body.template_id else None
@@ -451,20 +463,14 @@ async def generate_document(
             user_id=resolve_user_pk(db, ctx),
         )
     except UnresolvedDeliverableError as e:
-        # P2-09 S3: a Deliverable with [[unresolved]]/unknown variables is
-        # blocked at finalisation — surface the offending paths, loudly.
         logger.warning(f"Document generation blocked by unresolved variables: {e}")
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "Document blocked: template variables did not resolve",
-                "unresolved": e.unresolved,
-                "unknown": e.unknown,
-            },
-        )
+        raise _unresolved_422(e) from e
     except SOCIAL_RENDER_ERRORS as e:
         # PRD-251 S1.2: a social format renders through media-render.
         raise _social_render_error(e)
+    except UnsupportedTemplateFormat as e:
+        # F348: name the formats this template makes, never a bare "invalid request".
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except (ValueError, FileNotFoundError) as e:
         logger.warning(f"Document generation validation error: {e}")
         raise HTTPException(status_code=400, detail="Invalid document generation request")
@@ -474,10 +480,16 @@ async def generate_document(
     except Exception as e:
         logger.exception("Document generation failed")
         raise HTTPException(status_code=500, detail="Internal server error")
+    return _registered_response(service, result, body.title)
+
+
+def _registered_response(service, result, title: str) -> GenerateDocumentResponse:
+    """Register a UI/API generation as a Deliverable and answer with its links (PRD-242 S4)."""
+    from modules.documents.generation_service import deliverables_app_url
 
     registration = service.register_as_deliverable(
         result,
-        title=body.title,
+        title=title,
         source_type="document",
         template_id=UUID(result.template_id) if result.template_id else None,
     )
