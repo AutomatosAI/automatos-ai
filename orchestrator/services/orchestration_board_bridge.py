@@ -17,7 +17,7 @@ Source: PRD-82A Section 4.3, PRD-101 Section 7.2
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -25,7 +25,6 @@ from core.models.core import BoardTask
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import (
     BOARD_STATUS_MAP,
-    TERMINAL_RUN_STATES,
     RunState,
     TaskState,
 )
@@ -42,6 +41,9 @@ logger = logging.getLogger(__name__)
 STEP_CARD_SOURCE_TYPE = "orchestration_task"
 # A card closed by a person or a cancel: the mission never moves it again (F245).
 CLOSED_CARD_STATUSES = ("cancelled", "closed")
+# Every step card's own tag, and how much of the mission's goal its ``mission:<goal>`` tag keeps.
+STEP_CARD_TAG = "mission"
+MISSION_TAG_GOAL_CHARS = 60
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +120,7 @@ def create_mission_board_task(
         created_by_id="coordinator",
         source_type="orchestration",
         orchestration_run_id=run.id,
-        tags=["mission", "orchestration", *_owner_tags(run)],
+        tags=["mission", "orchestration", *owner_card_tags(run.config)],
         sla_deadline=datetime.now(timezone.utc) + timedelta(hours=_PRIORITY_SLA_HOURS.get("medium", 24)),
     )
     db.add(board_task)
@@ -132,13 +134,22 @@ def create_mission_board_task(
     return board_task
 
 
-def _owner_tags(run: OrchestrationRun) -> list:
+def owner_card_tags(run_config: Any) -> list:
     """The tags the owner asked for on the mission's card (F262, night 7b:
     ``config.card_tags``, from platform_create_mission's tags). Night 8: the Missions
     page's call and some of Auto's put them in ``config.tags`` (#0295, #0333, #0433)."""
-    config = run.config if isinstance(run.config, dict) else {}
+    config = run_config if isinstance(run_config, dict) else {}
     tags = config.get("card_tags") or config.get("tags")
     return [str(t) for t in tags if str(t).strip()] if isinstance(tags, list) else []
+
+
+def step_card_tags(run: OrchestrationRun) -> list:
+    """A step card's tags: ``mission``, the mission's own tag, then the owner's tags
+    on the mission, each once, in that order. F338 (night 10): missions #0195 and
+    #0224 were made with ``card_tags: ['sim-night-2026-10-05']`` and their step cards
+    carried ``mission`` only, so the owner's tag found the mission but none of its work."""
+    own = [STEP_CARD_TAG, f"{STEP_CARD_TAG}:{(run.goal or 'Mission')[:MISSION_TAG_GOAL_CHARS]}"]
+    return list(dict.fromkeys([*own, *owner_card_tags(run.config)]))
 
 
 # ---------------------------------------------------------------------------
@@ -179,19 +190,7 @@ def create_task_board_task(
         )
         return None
 
-    # Find parent mission board task
-    parent_board_task = db.query(BoardTask).filter(
-        BoardTask.source_type == "orchestration",
-        BoardTask.orchestration_run_id == run.id,
-    ).first()
-
-    parent_id = parent_board_task.id if parent_board_task else None
-    if parent_id is None:
-        logger.warning(
-            "No parent board task found for run %s when creating task board task for %s",
-            run.id,
-            task.id,
-        )
+    parent_id = _mission_card_id(db, run, task)
 
     # Resolve initial board status from orchestration task state
     task_state = TaskState(task.state)
@@ -210,7 +209,7 @@ def create_task_board_task(
         parent_task_id=parent_id,
         source_type="orchestration_task",
         orchestration_task_id=task.id,
-        tags=["mission", f"mission:{(run.goal or 'Mission')[:60]}"],
+        tags=step_card_tags(run),
         planning_data={
             "sequence_number": task.sequence_number,
             "agent_role": task.agent_role,
@@ -227,6 +226,23 @@ def create_task_board_task(
         task.sequence_number,
     )
     return board_task
+
+
+def _mission_card_id(db: Session, run: OrchestrationRun, task: OrchestrationTask) -> Optional[int]:
+    """The id of the mission's own card, the parent of its step cards (``None``,
+    with a warning, when the mission has no card)."""
+    parent_board_task = db.query(BoardTask).filter(
+        BoardTask.source_type == "orchestration",
+        BoardTask.orchestration_run_id == run.id,
+    ).first()
+    if parent_board_task is None:
+        logger.warning(
+            "No parent board task found for run %s when creating task board task for %s",
+            run.id,
+            task.id,
+        )
+        return None
+    return parent_board_task.id
 
 
 # ---------------------------------------------------------------------------
