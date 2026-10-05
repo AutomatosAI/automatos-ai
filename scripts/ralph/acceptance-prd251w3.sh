@@ -248,7 +248,12 @@ PY
 # Polls up to 40 min. A newer push cancels an older run, so only HEAD's own run counts.
 # "Code standards on changed lines" is marked non-required on pull requests; this run holds
 # its own changes to it (AGENTS.md → Code shape).
-REQUIRED_JOBS=("orchestrator-tests" "Alembic from-zero" "Schema-drift check" "Frontend CI" "Prod images built" "media-render" "Code standards on changed lines")
+# On a PR run the two image lanes are path-gated by test.yml's `changes` job: skipped
+# means the branch touches none of their paths. The gate job itself must be green, or
+# a failed gate would pass as two skips.
+REQUIRED_JOBS=("orchestrator-tests" "Alembic from-zero" "Schema-drift check" "Frontend CI" "Prod images built" "media-render" "Code standards on changed lines" "Which image lanes this change needs")
+PATH_GATED_JOBS=("Prod images built" "media-render")
+path_gated() { local g; for g in "${PATH_GATED_JOBS[@]}"; do [ "$g" = "$1" ] && return 0; done; return 1; }
 ci_green_on_head() {
   command -v gh >/dev/null || { echo "   gh is required"; return 1; }
   local br sha remote waited=0 run="" status="" id jobs job hits bad=0
@@ -270,12 +275,14 @@ ci_green_on_head() {
     hits=$(echo "$jobs" | grep -F "$(printf '\t')$job" || true)
     if [ -z "$hits" ]; then
       echo "   required job missing from run $id: $job"; bad=1
+    elif path_gated "$job" && ! echo "$hits" | grep -qvE '^(success|skipped)'; then
+      echo "$hits" | grep -q '^skipped' && echo "   $job: skipped (the branch touches none of its paths)"
     elif echo "$hits" | grep -qv '^success'; then
       echo "   required job not green: $job"; bad=1
     fi
   done
   [ "$bad" -eq 0 ] || return 1
-  echo "   test.yml run $id is green on $sha for all ${#REQUIRED_JOBS[@]} required jobs"
+  echo "   test.yml run $id is green on $sha for all ${#REQUIRED_JOBS[@]} required jobs (path-gated lanes: green or skipped)"
 }
 # ── Wave 3 helpers ───────────────────────────────────────────────────────────
 PUB_FILES="$SOC/publisher.py $(ls $SOC/publishing*.py $SOC/publish_*.py 2>/dev/null | tr '\n' ' ')"
