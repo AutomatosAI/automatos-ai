@@ -9,6 +9,7 @@ Foundry, and tells the user the model field is the deployment name."""
 import asyncio
 from types import SimpleNamespace as NS
 from unittest.mock import MagicMock
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -52,8 +53,9 @@ def test_a_chat_model_gets_the_request_it_always_got():
 def test_the_azure_provider_is_named_for_microsoft_foundry():
     spec = registry.get_spec("azure")
     assert spec.label == "Azure OpenAI (Microsoft Foundry)"
-    assert "learn.microsoft.com" in spec.docs_url and "foundry" in spec.docs_url
-    assert "portal.azure.com" not in spec.docs_url
+    docs = urlsplit(spec.docs_url)
+    assert docs.scheme == "https" and docs.hostname == "learn.microsoft.com"
+    assert docs.path.startswith("/azure/foundry/")
     assert "deployment name" in spec.setup_note
 
 
