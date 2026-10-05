@@ -155,6 +155,18 @@ def test_a_chat_deployment_gets_max_completion_tokens_and_its_temperature(monkey
     assert out.usage["total_tokens"] == 5
 
 
+def test_this_calls_budget_crosses_the_thread_hop_into_max_completion_tokens(monkeypatch):
+    from core.llm.output_budget import call_budget
+
+    provider, _ = _provider(monkeypatch=monkeypatch)
+
+    async def run():
+        with call_budget(256):
+            await provider.generate_response(HI)
+    asyncio.run(run())
+    assert _sent(provider)[0]["max_completion_tokens"] == 256  # not the config's 1,024
+
+
 def test_tools_go_out_and_the_tool_calls_come_back(monkeypatch):
     call = NS(id="call_1", type="function", function=NS(name="lookup", arguments='{"q": "x"}'))
     provider, _ = _provider(script=[_reply(tool_calls=[call])], monkeypatch=monkeypatch)
