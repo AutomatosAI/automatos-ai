@@ -25,18 +25,13 @@ Shape (standard library only):
 from __future__ import annotations
 
 import base64
-import fcntl
 import hashlib
 import json
 import logging
 import os
-import pty
 import re
-import signal
 import socket
 import struct
-import subprocess
-import termios
 import threading
 import time
 from dataclasses import dataclass
@@ -47,8 +42,28 @@ from urllib.parse import parse_qs, urlparse
 from .adapters import NotServed, UnknownCli, adapter_for
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed
 from .env import build_session_env, build_shell_env, hook_pythonpath
+from .ptyproc import HANGUP, KILL, TERMINATE, PtyChild
+from .ptyproc import spawn as spawn_on_pty
 from .session import assert_args_honour_invariant
 from .transcript import empty_usage, usage_delta
+
+
+def _pump_output(proc: PtyChild, conn: socket.socket, closed: threading.Event) -> None:
+    """The terminal's output to the operator's socket, until either side ends."""
+    try:
+        while not closed.is_set():
+            try:
+                chunk = proc.read(65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            try:
+                conn.sendall(encode_frame(chunk, OPCODE_BINARY))
+            except OSError:
+                break
+    finally:
+        closed.set()
 
 
 def _public(launched: Dict[str, Any]) -> Dict[str, Any]:
@@ -515,104 +530,85 @@ class TerminalServer:
     # ── the PTY bridge ──────────────────────────────────────────────────────
     def _bridge(self, conn: socket.socket, cwd: Path, grant: Grant, command: List[str],
                 launched: Optional[Dict[str, Any]]) -> None:
+        proc = spawn_on_pty(command, cwd=cwd, env=self._bridge_env(grant, launched), rows=DEFAULT_ROWS, cols=DEFAULT_COLS)
+        self._opened(proc, cwd, grant, launched)
+        closed = threading.Event()
+        threading.Thread(target=_pump_output, args=(proc, conn, closed), daemon=True, name="automatos-terminal-out").start()
+        try:
+            self._pump_input(conn, proc, closed, cwd)
+        finally:
+            closed.set()
+            self._closed(conn, proc, cwd, grant, launched)
+
+    def _bridge_env(self, grant: Grant, launched: Optional[Dict[str, Any]]) -> Dict[str, str]:
         # The operator's own shell inherits no CLI's credential (the union over every
         # preset); a launched session gets its CLI's own hygiene.
         build = (lambda **kw: build_session_env(adapter_for(launched["cli"], self._cli_binaries).preset, **kw)) if launched else build_shell_env
-        env = build(extra={"TERM": "xterm-256color", "AUTOMATOS_TERMINAL": "1",
-                                       **({"AUTOMATOS_TASK_ID": grant.task_id} if grant.task_id else {})})
-        master, slave = pty.openpty()
-        try:
-            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", DEFAULT_ROWS, DEFAULT_COLS, 0, 0))
-        except OSError:
-            pass
+        return build(extra={"TERM": "xterm-256color", "AUTOMATOS_TERMINAL": "1",
+                            **({"AUTOMATOS_TASK_ID": grant.task_id} if grant.task_id else {})})
 
-        def _child_setup() -> None:  # runs in the child after setsid()
-            try:
-                fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-            except OSError:
-                pass
-
-        proc = subprocess.Popen(
-            command, stdin=slave, stdout=slave, stderr=slave, cwd=str(cwd), env=env,
-            start_new_session=True, preexec_fn=_child_setup, close_fds=True,
-        )
-        os.close(slave)
+    def _opened(self, proc: PtyChild, cwd: Path, grant: Grant, launched: Optional[Dict[str, Any]]) -> None:
         if launched:
             log.info("terminal: %s session %s %s in %s (pid %s, ticket %s)", launched.get("cli"), launched["session_id"],
                      "resumed" if launched["resumed"] else "started", cwd, proc.pid, grant.task_id)
             self._emit(grant, "TerminalOpened", {**_public(launched), "cwd": str(cwd), "pid": proc.pid})
         else:
             log.info("terminal opened in %s (pid %s%s)", cwd, proc.pid, f", ticket {grant.task_id}" if grant.task_id else "")
-        closed = threading.Event()
 
-        def _pump_output() -> None:
-            try:
-                while not closed.is_set():
-                    try:
-                        chunk = os.read(master, 65536)
-                    except OSError:
-                        break
-                    if not chunk:
-                        break
-                    try:
-                        conn.sendall(encode_frame(chunk, OPCODE_BINARY))
-                    except OSError:
-                        break
-            finally:
-                closed.set()
-
-        threading.Thread(target=_pump_output, daemon=True, name="automatos-terminal-out").start()
+    def _pump_input(self, conn: socket.socket, proc: PtyChild, closed: threading.Event, cwd: Path) -> None:
+        """The operator's keystrokes and resizes into the terminal, until it closes, idles out or exits."""
         reader = FrameReader()
         conn.settimeout(1.0)
         last_input = time.time()
+        while not closed.is_set() and proc.poll() is None:
+            if time.time() - last_input > self._idle_timeout:
+                log.info("terminal in %s idle for %ss — closing", cwd, int(self._idle_timeout))
+                return
+            try:
+                data = conn.recv(65536)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            if not data:
+                return
+            if self._apply_frames(reader.feed(data), conn, proc, closed):
+                last_input = time.time()
+
+    def _apply_frames(self, frames, conn: socket.socket, proc: PtyChild, closed: threading.Event) -> bool:
+        """Apply the frames that arrived; True when any of them was the operator's input."""
+        typed = False
+        for opcode, payload in frames:
+            if opcode == OPCODE_CLOSE:
+                closed.set()
+                break
+            if opcode == OPCODE_PING:
+                conn.sendall(encode_frame(payload, OPCODE_PONG))
+            elif opcode == OPCODE_BINARY:
+                proc.write(payload)
+                typed = True
+            elif opcode == OPCODE_TEXT:
+                self._control(proc, payload)
+                typed = True
+        return typed
+
+    def _closed(self, conn: socket.socket, proc: PtyChild, cwd: Path, grant: Grant,
+                launched: Optional[Dict[str, Any]]) -> None:
         try:
-            while not closed.is_set():
-                if proc.poll() is not None:
-                    break
-                if time.time() - last_input > self._idle_timeout:
-                    log.info("terminal in %s idle for %ss — closing", cwd, int(self._idle_timeout))
-                    break
-                try:
-                    data = conn.recv(65536)
-                except socket.timeout:
-                    continue
-                except OSError:
-                    break
-                if not data:
-                    break
-                for opcode, payload in reader.feed(data):
-                    if opcode == OPCODE_CLOSE:
-                        closed.set()
-                        break
-                    if opcode == OPCODE_PING:
-                        conn.sendall(encode_frame(payload, OPCODE_PONG))
-                        continue
-                    if opcode == OPCODE_BINARY:
-                        last_input = time.time()
-                        os.write(master, payload)
-                    elif opcode == OPCODE_TEXT:
-                        last_input = time.time()
-                        self._control(master, payload)
-        finally:
-            closed.set()
-            try:
-                conn.sendall(encode_frame(b"", OPCODE_CLOSE))
-            except OSError:
-                pass
-            self._terminate(proc)
-            try:
-                os.close(master)
-            except OSError:
-                pass
-            log.info("terminal in %s closed", cwd)
-            if launched:
-                self._emit(grant, "TerminalClosed", {
-                    **_public(launched), "cwd": str(cwd), "exit_code": proc.returncode,
-                    "usage": self._turn_usage(cwd, launched),
-                })
+            conn.sendall(encode_frame(b"", OPCODE_CLOSE))
+        except OSError:
+            pass
+        self._terminate(proc)
+        proc.close()
+        log.info("terminal in %s closed", cwd)
+        if launched:
+            self._emit(grant, "TerminalClosed", {
+                **_public(launched), "cwd": str(cwd), "exit_code": proc.returncode,
+                "usage": self._turn_usage(cwd, launched),
+            })
 
     @staticmethod
-    def _control(master: int, payload: bytes) -> None:
+    def _control(proc: PtyChild, payload: bytes) -> None:
         try:
             message = json.loads(payload.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
@@ -621,21 +617,10 @@ class TerminalServer:
             try:
                 cols = max(2, min(500, int(message.get("cols") or DEFAULT_COLS)))
                 rows = max(2, min(200, int(message.get("rows") or DEFAULT_ROWS)))
-                fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                proc.resize(rows, cols)
             except (OSError, TypeError, ValueError):
                 pass
 
     @staticmethod
-    def _terminate(proc: subprocess.Popen) -> None:
-        if proc.poll() is not None:
-            return
-        for sig, grace in ((signal.SIGHUP, 1.0), (signal.SIGTERM, 2.0), (signal.SIGKILL, 2.0)):
-            try:
-                os.killpg(proc.pid, sig)
-            except OSError:
-                return
-            deadline = time.time() + grace
-            while time.time() < deadline:
-                if proc.poll() is not None:
-                    return
-                time.sleep(0.05)
+    def _terminate(proc: PtyChild) -> None:
+        proc.stop(((HANGUP, 1.0), (TERMINATE, 2.0), (KILL, 2.0)))
