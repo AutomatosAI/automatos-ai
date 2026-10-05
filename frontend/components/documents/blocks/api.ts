@@ -1,5 +1,6 @@
 // API helpers for the document-template studio (PRD-167 S3/S4/S5 → PRD-242).
 import { apiClient } from '@/lib/api-client'
+import { apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
 import type {
   BlockDocument,
   BrandFontFile,
@@ -85,8 +86,10 @@ export const templateBlocksApi = {
   // <img src> or @font-face cannot send (SaaS), so fetch it and hand back an
   // object URL (the FilePreview pattern). null = none.
   fetchBrandFileObjectUrl: async (path: string): Promise<string | null> => {
+    const url = apiFileUrl(apiClient.getBaseUrl(), path)  // F358: the token goes to the API only
+    if (!url) return null
     const headers = await apiClient.getAuthHeaders()
-    const resp = await fetch(`${apiClient.getBaseUrl()}${path}`, { headers })
+    const resp = await fetch(url, { headers })
     if (!resp.ok) return null
     return URL.createObjectURL(await resp.blob())
   },
@@ -99,8 +102,10 @@ export const templateBlocksApi = {
 // Generated files sit behind an authenticated route; a plain <a href> cannot send the
 // Authorization header in SaaS. Fetch with auth and hand the bytes to the browser.
 export async function downloadGeneratedFile(downloadUrl: string, filename: string): Promise<void> {
+  const url = apiFileUrl(apiClient.getBaseUrl(), downloadUrl)  // F358: the token goes to the API only
+  if (!url) throw new Error(NOT_AN_API_FILE)
   const headers = await apiClient.getAuthHeaders()
-  const resp = await fetch(`${apiClient.getBaseUrl()}${downloadUrl}`, { headers })
+  const resp = await fetch(url, { headers })
   if (!resp.ok) throw new Error(`Download failed (HTTP ${resp.status})`)
   const objectUrl = URL.createObjectURL(await resp.blob())
   const anchor = document.createElement('a')
