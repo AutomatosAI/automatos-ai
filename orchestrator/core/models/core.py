@@ -741,6 +741,9 @@ class AgentCreate(BaseModel):
     tool_ids: Optional[List[int]] = []  # NEW: Phase 3 - Tools
     tags: Optional[List[str]] = []
     marketplace_category: Optional[str] = None
+    # #831: org-chart fields, previously writable only through Auto's tools.
+    team: Optional[str] = Field(None, max_length=100)
+    reports_to_id: Optional[int] = None
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
@@ -753,6 +756,10 @@ class AgentUpdate(BaseModel):
     skill_ids: Optional[List[int]] = None
     tool_ids: Optional[List[int]] = None  # NEW: Allow updating tool assignments
     tags: Optional[List[str]] = None
+    # #831: org-chart fields, previously writable only through Auto's tools.
+    # An empty string clears team (matches job_title); reports_to_id=0 clears the manager.
+    team: Optional[str] = Field(None, max_length=100)
+    reports_to_id: Optional[int] = None
 
 class AgentResponse(BaseModel):
     id: int
@@ -760,6 +767,9 @@ class AgentResponse(BaseModel):
     name: str
     description: Optional[str]
     job_title: Optional[str] = None
+    # #831: previously only GET /api/agents/org-chart returned these.
+    team: Optional[str] = None
+    reports_to_id: Optional[int] = None
     agent_type: str
     status: str
     configuration: Optional[Dict[str, Any]]
