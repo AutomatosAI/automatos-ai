@@ -47,6 +47,21 @@ class _Resolver:
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
 
 
+class _Body(httpx.SyncByteStream):
+    """A body that streams as a network response does (``content=`` is read at once)."""
+
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+
+    def __iter__(self):
+        for start in range(0, len(self.data), 16):
+            yield self.data[start:start + 16]
+
+
+def _streamed(status: int, data: bytes, **headers: str) -> httpx.Response:
+    return httpx.Response(status, stream=_Body(data), headers=headers)
+
+
 def _transport(handler: Callable[[httpx.Request], httpx.Response], sent: List[httpx.Request]):
     def record(request: httpx.Request) -> httpx.Response:
         sent.append(request)
@@ -68,7 +83,7 @@ def test_the_request_goes_to_the_address_that_was_checked(dns):
     resolver = dns({"cdn.example": [PUBLIC_IP, PRIVATE_IP]})  # a second lookup would rebind
     sent: List[httpx.Request] = []
     fetched = fetch_public("https://cdn.example/logo.png", max_bytes=1024, client_factory=_transport(
-        lambda r: httpx.Response(200, content=PNG, headers={"content-type": "image/png; q=1"}), sent))
+        lambda r: _streamed(200, PNG, **{"content-type": "image/png; q=1"}), sent))
 
     (request,) = sent
     assert request.url.host == PUBLIC_IP and request.headers["host"] == "cdn.example"
@@ -102,7 +117,7 @@ def test_a_redirect_to_a_public_host_is_checked_pinned_and_followed(dns):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.headers["host"] == "cdn.example":
             return httpx.Response(301, headers={"location": "https://img.example/final.png"})
-        return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})
+        return _streamed(200, PNG, **{"content-type": "image/png"})
 
     fetched = fetch_public("https://cdn.example/a.png", max_bytes=1024, client_factory=_transport(handler, sent))
     assert [(r.url.host, r.headers["host"]) for r in sent] == [(PUBLIC_IP, "cdn.example"), (OTHER_PUBLIC_IP, "img.example")]
@@ -118,6 +133,9 @@ def test_too_many_redirects_and_too_many_bytes_are_refused(dns):
     assert len(loop) == pinned_fetch.MAX_REDIRECTS + 1
     with pytest.raises(FetchRefused, match="larger"):
         fetch_public("http://cdn.example/big", max_bytes=8, client_factory=_transport(
+            lambda r: _streamed(200, b"x" * 64), []))
+    with pytest.raises(FetchRefused, match="larger"):  # a body a transport already loaded: capped too
+        fetch_public("http://cdn.example/big", max_bytes=8, client_factory=_transport(
             lambda r: httpx.Response(200, content=b"x" * 64), []))
 
 
@@ -125,7 +143,7 @@ def test_the_weasyprint_fetcher_hands_back_what_the_pinned_fetch_read(dns, monke
     dns({"cdn.example": [PUBLIC_IP]})
     sent: List[httpx.Request] = []
     monkeypatch.setattr(pinned_fetch, "_client", _transport(
-        lambda r: httpx.Response(200, content=PNG, headers={"content-type": "image/png"}), sent))
+        lambda r: _streamed(200, PNG, **{"content-type": "image/png"}), sent))
     got = url_fetcher._safe_url_fetcher("https://cdn.example/logo.png")
     assert got == {"string": PNG, "mime_type": "image/png", "redirected_url": "https://cdn.example/logo.png"}
     assert sent[0].url.host == PUBLIC_IP
@@ -168,3 +186,10 @@ def test_the_whole_fetch_has_a_deadline(dns, monkeypatch):
     with pytest.raises(FetchRefused, match="longer than"):
         fetch_public("http://cdn.example/slow", max_bytes=1024, client_factory=_transport(
             lambda r: httpx.Response(200, content=PNG), []))
+
+
+def test_a_body_a_transport_already_loaded_is_read_within_the_cap(dns):
+    dns({"cdn.example": [PUBLIC_IP]})
+    fetched = fetch_public("http://cdn.example/logo.png", max_bytes=1024, client_factory=_transport(
+        lambda r: httpx.Response(200, content=PNG, headers={"content-type": "image/png"}), []))
+    assert fetched.data == PNG

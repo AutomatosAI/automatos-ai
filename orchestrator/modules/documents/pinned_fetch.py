@@ -79,6 +79,11 @@ def _read_capped(response: httpx.Response, max_bytes: int, deadline: float) -> b
     declared = response.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > max_bytes:
         raise FetchRefused(f"Document resource is larger than {max_bytes} bytes")
+    if response.is_stream_consumed:  # a transport that loaded the body already: its bytes, capped
+        data = response.content
+        if len(data) > max_bytes:
+            raise FetchRefused(f"Document resource is larger than {max_bytes} bytes")
+        return data
     chunks, size = [], 0
     for chunk in response.iter_raw(RAW_CHUNK_BYTES):
         size += len(chunk)
