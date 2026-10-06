@@ -55,7 +55,7 @@ def _png(width: int = 11, height: int = 13) -> bytes:
 
 KIT = {
     **get_brand_kit({"brand_kit": {
-        "name": COMPANY, "primary_color": ORANGE, "secondary_color": NAVY, "accent_color": NAVY,
+        "name": COMPANY, "primary_color": ORANGE, "secondary_color": NAVY,
         "company": {"name": COMPANY, "address": "14 Wapping Quay, Bristol BS1 4RW", "email": "gerard@automatos.app"},
     }}),
     "logo_url": "data:image/png;base64," + base64.b64encode(_png()).decode("ascii"),

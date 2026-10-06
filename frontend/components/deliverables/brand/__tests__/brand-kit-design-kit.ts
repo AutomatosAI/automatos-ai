@@ -4,7 +4,7 @@ import type { BrandKit } from '@/components/documents/blocks/types'
 export function designKit(extra: Partial<BrandKit> = {}): BrandKit {
   return {
     name: 'Harbourline', tagline: 'Coffee by the water', logo_url: '', logo_path: '',
-    primary_color: '#c2410c', secondary_color: '#64748b', accent_color: '#c2410c', text_color: '#1a1a2e',
+    primary_color: '#c2410c', secondary_color: '#64748b', text_color: '#1a1a2e',
     font_family: 'Inter, sans-serif',
     company: { name: 'Harbourline Ltd', address: '', email: '', phone: '', website: 'harbourline.co' },
     heading_font: '"Brand Serif", serif', font_files: [], logo_mark_url: '', logo_mark_path: '',

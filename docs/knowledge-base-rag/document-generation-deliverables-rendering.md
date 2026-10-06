@@ -91,7 +91,7 @@ Built-in starter templates are seeded into the database for immediate profession
 | **Invoice** | PDF | invoice | Professional invoice structure including bill-to blocks, line item tables, and calculated totals [orchestrator/modules/documents/seed_templates.py:58-112]() |
 | **Executive Summary** | PDF | report | Executive summary layout with highlight lists, metrics grid, and numbered recommendations [orchestrator/modules/documents/seed_templates.py:113-142]() |
 
-HTML templates leverage Jinja2 syntax referencing brand variables (`brand.primary_color`, `brand.accent_color`) and structured data payloads [orchestrator/modules/documents/templates/basic_report.html:1-52](), [orchestrator/modules/documents/templates/invoice.html:1-79](), [orchestrator/modules/documents/templates/executive_summary.html:1-74]().
+HTML templates leverage Jinja2 syntax referencing brand variables (`brand.primary_color`, `brand.palette.accent`) and structured data payloads [orchestrator/modules/documents/templates/basic_report.html:1-52](), [orchestrator/modules/documents/templates/invoice.html:1-79](), [orchestrator/modules/documents/templates/executive_summary.html:1-74]().
 
 Sources:
 - [orchestrator/modules/documents/seed_templates.py:1-142]()

@@ -42,8 +42,6 @@ EVERY_FIELD = {
     "logo_url": "https://harbourline.ie/logo.png",
     "primary_color": "#0b2545",
     "secondary_color": "#13315c",
-    # F361: the third colour must read at 3:1 on the page when a save changes it (#e0a458 is 2.1:1).
-    "accent_color": "#9c5a14",
     "text_color": "#1b1b1b",
     "font_family": "Source Sans 3, sans-serif",
     "company": {"phone": "+353 21 400 1234"},
@@ -66,7 +64,7 @@ EVERY_FIELD = {
 
 LOOK_KIT = {
     "name": "Harbourline Coffee Roasters",
-    "primary_color": "#0b2545", "secondary_color": "#13315c", "accent_color": "#e0a458", "text_color": "#1b1b1b",
+    "primary_color": "#0b2545", "secondary_color": "#13315c", "text_color": "#1b1b1b",
     "palette": {"heading": "#111111"},
     "currency": "GBP",
     "date_style": DATE_STYLE_MONTH_FIRST,
@@ -98,7 +96,7 @@ def test_every_field_the_tool_takes_round_trips_through_the_get_tool(api):
     assert read["success"] is True, read
     kit = read["brand_kit"]
     assert kit == result["brand_kit"] == api.client.get(KIT_ROUTE).json()
-    for field in ("name", "tagline", "logo_url", "primary_color", "secondary_color", "accent_color",
+    for field in ("name", "tagline", "logo_url", "primary_color", "secondary_color",
                   "text_color", "font_family", "heading_font", "logo_mark_url", "accent_use", "date_style"):
         assert kit[field] == EVERY_FIELD[field], field
     assert kit["company"]["phone"] == "+353 21 400 1234"

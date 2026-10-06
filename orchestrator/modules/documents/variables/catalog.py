@@ -41,7 +41,6 @@ CATALOG: List[VariableEntry] = [
     {"path": "brand.logo_url", "category": "brand", "label": "Brand logo URL", "sample": "/logo.png"},
     {"path": "brand.primary_color", "category": "brand", "label": "Primary color", "sample": "#1a1a2e"},
     {"path": "brand.secondary_color", "category": "brand", "label": "Secondary color", "sample": "#16213e"},
-    {"path": "brand.accent_color", "category": "brand", "label": "Third colour", "sample": "#0f3460"},
     {"path": "brand.font_family", "category": "brand", "label": "Font family", "sample": "Inter"},
     # PRD-255: who signs a letter: the brand voice's sign-off, else the person signing (user.name).
     {"path": "brand.sign_off", "category": "brand", "label": "Sign-off name", "sample": "The Acme team"},

@@ -135,9 +135,6 @@ export interface BrandKit {
   logo_path: string
   primary_color: string
   secondary_color: string
-  // F361: "the third colour" (social videos tint with it), not the documents' accent:
-  // that is palette.accent.
-  accent_color: string
   text_color: string
   // The body font (PRD-251 D5's body_font): every renderer reads this key.
   font_family: string

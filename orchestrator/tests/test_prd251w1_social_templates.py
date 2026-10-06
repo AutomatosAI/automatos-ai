@@ -545,7 +545,7 @@ KIT = {
     "tagline": "Build better",
     "primary_color": "#ff0000",
     "secondary_color": "#00ff00",
-    "accent_color": "#0000ff",
+    "palette": {"accent_2": "#0000ff"},  # the accent token is the palette's
     "text_color": "#111111",
     "font_family": "Inter, sans-serif",
     "logo_url": PNG_URI,

@@ -50,13 +50,12 @@ from core.brand_palette import (
 )
 
 ORANGE, NAVY, AUTOMATOS_TEXT = "#c44a1a", "#1d3658", "#1a1a2e"
-V1_DEFAULT_ACCENT = "#0f3460"
-AUTOMATOS = {"primary_color": ORANGE, "secondary_color": NAVY, "accent_color": V1_DEFAULT_ACCENT, "text_color": AUTOMATOS_TEXT}
-HARBOURLINE = {"primary_color": "#1E3A5F", "secondary_color": "#C26A2E", "accent_color": V1_DEFAULT_ACCENT, "text_color": AUTOMATOS_TEXT}
-DARK_ONLY = {"primary_color": "#111111", "secondary_color": "#1b1b1b", "accent_color": "#222222", "text_color": "#000000"}
-LIGHT_ONLY = {"primary_color": "#ffe9a8", "secondary_color": "#f5f0e6", "accent_color": "#e8f4ff", "text_color": "#fafafa"}
+AUTOMATOS = {"primary_color": ORANGE, "secondary_color": NAVY, "text_color": AUTOMATOS_TEXT}
+HARBOURLINE = {"primary_color": "#1E3A5F", "secondary_color": "#C26A2E", "text_color": AUTOMATOS_TEXT}
+DARK_ONLY = {"primary_color": "#111111", "secondary_color": "#1b1b1b", "text_color": "#000000"}
+LIGHT_ONLY = {"primary_color": "#ffe9a8", "secondary_color": "#f5f0e6", "text_color": "#fafafa"}
 # The v1 kit's own defaults (modules/documents/brand_kit.py): every colour dark navy.
-V1_DEFAULTS = {"primary_color": "#1a1a2e", "secondary_color": "#16213e", "accent_color": V1_DEFAULT_ACCENT, "text_color": "#1a1a2e"}
+V1_DEFAULTS = {"primary_color": "#1a1a2e", "secondary_color": "#16213e", "text_color": "#1a1a2e"}
 KITS = {"automatos": AUTOMATOS, "harbourline": HARBOURLINE, "dark_only": DARK_ONLY, "light_only": LIGHT_ONLY}
 
 AA_TEXT = 4.5

@@ -15,7 +15,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 function kit(extra: Partial<BrandKit>): BrandKit {
   return {
     name: 'Harbourline', tagline: '', logo_url: '', logo_path: '',
-    primary_color: '#1e3a5f', secondary_color: '#c26a2e', accent_color: '#0f3460', text_color: '#1a1a2e',
+    primary_color: '#1e3a5f', secondary_color: '#c26a2e', text_color: '#1a1a2e',
     font_family: 'Inter, sans-serif',
     company: { name: '', address: '', email: '', phone: '', website: '' },
     heading_font: '', font_files: [], logo_mark_url: '', logo_mark_path: '',

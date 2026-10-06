@@ -37,13 +37,12 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_serializer, model_validator
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from core.brand_palette import (
-    KIT_COLOUR_FIELDS,
     PALETTE_ROLES,
     RGB,
     ROLE_ACCENT,
@@ -109,13 +108,6 @@ CONTRAST_ERROR = "palette_contrast"
 GROUND_WORDS = {ROLE_PAPER: "the page", ROLE_SURFACE_2: "table header fills"}
 GROUND_NOUNS = {ROLE_PAPER: "page", ROLE_SURFACE_2: "table header fill"}
 SHADE_WORDS = {"#ffffff": "white", "#000000": "black"}
-# F361: the one kit colour drawn as it is, ``accent_color``, "the third colour" (the
-# Brand kit page's name for it): social videos tint and mark with it, the social brand
-# board shows it, {{brand.accent_color}} prints it, and a pale one becomes the page.
-# The other three kit colours reach a page only through the roles derived from them,
-# which the role check measures. A save that changes it measures it as the accents are.
-KIT_COLOUR_CHECKS = {"accent_color": ("accent_color (the third colour)", SAVE_LARGE_TEXT_MIN_CONTRAST)}
-BECOMES_THE_PAGE = "; a colour this light becomes the page itself: choose a darker one"
 HEX_RULE = "must be a hex colour such as #1a1a2e or #abc"
 
 
@@ -214,37 +206,13 @@ def palette_contrast_errors(kit: Mapping[str, Any]) -> List[InitErrorDetails]:
     return errors
 
 
-def changed_kit_colours(before: Mapping[str, Any], after: Mapping[str, Any]) -> Tuple[str, ...]:
-    """The kit colours (``primary_color`` .. ``text_color``) ``after`` holds at another colour than ``before``."""
-    return tuple(field for field in KIT_COLOUR_FIELDS if parse_hex(after.get(field)) != parse_hex(before.get(field)))
-
-
-def kit_colour_contrast_errors(kit: Mapping[str, Any], fields: Iterable[str]) -> List[InitErrorDetails]:
-    """Each of ``fields`` with a check (:data:`KIT_COLOUR_CHECKS`) that does not read on the kit's grounds (F361)."""
-    roles, _sources = effective_palette(kit)
-    errors: List[InitErrorDetails] = []
-    for field in fields:
-        check, colour = KIT_COLOUR_CHECKS.get(field), parse_hex(kit.get(field))
-        failures = contrast_failures(colour, roles, check[1]) if check and colour is not None else []
-        if failures:
-            message = contrast_message(check[0], failures, roles, check[1])
-            if parse_hex(roles[ROLE_PAPER]) == colour:
-                message += BECOMES_THE_PAGE
-            errors.append(InitErrorDetails(
-                type=PydanticCustomError(CONTRAST_ERROR, message),
-                loc=(field,),
-                input=kit[field],
-            ))
-    return errors
-
-
-def require_readable_palette(kit: Mapping[str, Any], changed_colours: Iterable[str] = ()) -> None:
+def require_readable_palette(kit: Mapping[str, Any]) -> None:
     """Raise ``pydantic.ValidationError`` (a 422 on the PUT) naming each role and its failing ratio.
 
-    ``changed_colours``: the kit colours this save changes; the one drawn as it is
-    (``accent_color``) is measured too (F361).
+    The kit's colours themselves are never measured: they reach a page only through the
+    roles derived from them, which this measures.
     """
-    errors = palette_contrast_errors(kit) + kit_colour_contrast_errors(kit, changed_colours)
+    errors = palette_contrast_errors(kit)
     if errors:
         raise ValidationError.from_exception_data("BrandKit", errors)
 
@@ -503,12 +471,10 @@ __all__ = [
     "TypeScale",
     "TypeStep",
     "brand_kit_view",
-    "changed_kit_colours",
     "contrast_failures",
     "contrast_message",
     "currency_code",
     "default_type_step",
-    "kit_colour_contrast_errors",
     "one_line_text",
     "palette_contrast_errors",
     "require_readable_palette",

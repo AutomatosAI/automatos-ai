@@ -220,19 +220,19 @@ def test_an_update_through_the_tool_is_what_get_returns_and_the_put_shares_its_w
 
     result = _dispatch(api.db, "platform_update_brand_kit", {
         "_agent_id": 7,  # server-injected keys are not kit fields
-        "accent_color": "#e4572e",
+        "secondary_color": "#e4572e",
         "social_handles": {"twitter": "@acme_hq", "instagram": "acme.studio"},
         "voice": {"banned_phrases": ["synergy"]},
         "company": {"phone": "+44 20 7946 0000"},
     })
     assert result["success"] is True, result
-    assert result["changed"] == ["accent_color", "company", "social_handles", "voice"]
+    assert result["changed"] == ["company", "secondary_color", "social_handles", "voice"]
     assert calls == ["update", "save"]
     api.db.commit.assert_called_once()
 
     rest = api.client.get(KIT_ROUTE).json()
     assert rest == result["brand_kit"]
-    assert rest["accent_color"] == "#e4572e"
+    assert rest["secondary_color"] == "#e4572e"
     # A partial merge: company and voice merge key by key, the handles map is replaced,
     # and every field the change left out keeps its value.
     assert rest["company"] == {**brand_kit.CompanyContact().model_dump(), **STORED_KIT["company"], "phone": "+44 20 7946 0000"}

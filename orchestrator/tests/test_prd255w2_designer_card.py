@@ -52,7 +52,7 @@ OTHER_WS = UUID("6f1d5c3b-8e2a-4b4c-9d3e-2f3a4b5c6d72")
 BOARD_PNG = b"\x89PNG\r\n\x1a\n the proposed board"
 STORED = {"brand_kit": {"name": "Hollow Leaf", "primary_color": "#1F3A2E"}}
 # accent_use "sparing" is the default already: the card must not list it as a change.
-PROPOSAL = {"accent_color": "#C8553D", "accent_use": "sparing"}
+PROPOSAL = {"secondary_color": "#C8553D", "accent_use": "sparing"}
 
 
 # ── the fakes ──────────────────────────────────────────────────────────────
@@ -177,17 +177,17 @@ def test_a_sessions_proposal_card_carries_the_proposal_and_the_board_and_saves_n
     path = answer["board_path"]
     assert path == f"sessions/{TICKET}/{card.board_name(PROPOSAL)}"
     assert _Worker.written == {(str(WS), path): BOARD_PNG}
-    assert filed["board"][0]["fmt"] == "png" and filed["board"][0]["kit"]["accent_color"] == "#C8553D"
+    assert filed["board"][0]["fmt"] == "png" and filed["board"][0]["kit"]["secondary_color"] == "#C8553D"
     asked = filed["session"][0]
     assert asked["task_id"] == TICKET and asked["workspace_id"] == WS and asked["agent_id"] == AGENT_ID
     assert asked["options"] == ["Approve", "Revise"]
     assert asked["details"][card.PROPOSAL_MARKER] == {
         "proposal": PROPOSAL, "board_path": path, "base": card.fingerprint(STORED["brand_kit"])}
     assert "Brand Designer" in asked["question"] and "terracotta" in asked["question"]
-    assert "`accent_color`" in asked["question"] and "`#C8553D`" in asked["question"]
+    assert "`secondary_color`" in asked["question"] and "`#C8553D`" in asked["question"]
     assert "accent_use" not in asked["question"]           # unchanged: not listed
     assert path in asked["question"] and "**Approve** on the Questions tab in Automatos saves it" in asked["question"]
-    assert answer["changes"] == [{"field": "accent_color", "old": answer["changes"][0]["old"], "new": "`#C8553D`"}]
+    assert answer["changes"] == [{"field": "secondary_color", "old": answer["changes"][0]["old"], "new": "`#C8553D`"}]
     assert db.workspace.settings == STORED and db.commits == 0
 
 
@@ -215,7 +215,7 @@ def test_another_workspaces_card_and_a_finished_card_are_refused(filed):
 
 
 @pytest.mark.parametrize("proposal, words", [
-    ({"accent_color": "orange"}, "must be a hex color"),
+    ({"secondary_color": "orange"}, "must be a hex color"),
     ({"logo_path": "brand/evil.png"}, "The kit has no field logo_path"),
     ({"name": "Hollow Leaf"}, "changes nothing"),
     ("less orange", "brand_kit is an object of kit fields"),
@@ -309,7 +309,7 @@ def test_an_approved_proposal_is_saved_exactly_once(ticket_param):
 
     assert saved["success"] is True and saved["ask_id"] == 41 and saved["changed"] == sorted(PROPOSAL)
     kit = db.workspace.settings["brand_kit"]
-    assert kit["accent_color"] == "#C8553D" and kit["name"] == "Hollow Leaf" and db.commits == 1
+    assert kit["secondary_color"] == "#C8553D" and kit["name"] == "Hollow Leaf" and db.commits == 1
     assert grant.details[card.PROPOSAL_MARKER]["saved_at"]
     assert grant.details["cli_ask"] == {"task_id": TICKET}
     assert "ApprovalGrant" in db.locked and "Workspace" in db.locked     # held from the check to the commit
@@ -368,7 +368,7 @@ def test_a_save_outside_a_ticket_is_refused():
 
 
 def test_a_stored_proposal_the_kit_now_refuses_is_rolled_back():
-    db = _Db([_grant(90, proposal={"accent_color": "terracotta"})])
+    db = _Db([_grant(90, proposal={"secondary_color": "terracotta"})])
     saved = _save(db)
     assert saved["success"] is False and "must be a hex color" in saved["error"]
     assert db.rollbacks == 1 and db.commits == 0 and db.workspace.settings == STORED
@@ -411,8 +411,8 @@ def test_the_session_tools_work_their_own_ticket_and_the_save_takes_no_fields():
         assert tool.action == action and tool.reads_only is reads and name in documents.tools
     for name in ("propose_brand_kit", "save_approved_brand_kit"):
         assert name in st.CARD_ATTRIBUTED_TOOLS
-    sent = {"brand_kit": PROPOSAL, "why": "w", SESSION_TICKET_PARAM: 9, "accent_color": "#000000"}
+    sent = {"brand_kit": PROPOSAL, "why": "w", SESSION_TICKET_PARAM: 9, "secondary_color": "#000000"}
     assert st.resolve_parameters(st.get_tool("propose_brand_kit"), sent, ctx) == {"brand_kit": PROPOSAL, "why": "w"}
-    assert st.resolve_parameters(st.get_tool("save_approved_brand_kit"), {"accent_color": "#000000"}, ctx) == {}
+    assert st.resolve_parameters(st.get_tool("save_approved_brand_kit"), {"secondary_color": "#000000"}, ctx) == {}
     with pytest.raises(st.SessionToolRefused):
         st.resolve_parameters(st.get_tool("propose_brand_kit"), {"why": "w"}, ctx)

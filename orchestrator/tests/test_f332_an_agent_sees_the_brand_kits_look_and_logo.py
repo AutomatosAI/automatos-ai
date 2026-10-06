@@ -34,14 +34,14 @@ quiet_claims = t245._quiet_side_effects      # no approval lookup, no completion
 KIT_WINS = "- The brand kit wins over any document that says otherwise."
 KIT = {
     "name": "Harbourline Coffee Roasters",
-    "primary_color": "#0b2545", "secondary_color": "#13315c", "accent_color": "#e0a458", "text_color": "#1b1b1b",
+    "primary_color": "#0b2545", "secondary_color": "#13315c", "text_color": "#1b1b1b",
     "font_family": "Source Sans 3, sans-serif", "heading_font": "'Playfair Display', serif",
     "company": {"name": "Harbourline Coffee Roasters Ltd", "address": "12 Quay Street,\nCork T12 X2Y3",
                 "phone": "+353 21 400 1234", "email": "hello@harbourline.ie", "website": "https://harbourline.ie"},
     "voice": {"tone": ["warm", "plain", "local"], "sign_off": "Gerard, Harbourline Coffee Roasters"},
 }
 THE_LOOK = (
-    "- Colours (hex): primary #0b2545, secondary #13315c, accent #e0a458, text #1b1b1b.",
+    "- Colours (hex): primary #0b2545, secondary #13315c, text #1b1b1b.",
     "- Fonts: Playfair Display for headings, Source Sans 3 for body text.",
     "- Company: Harbourline Coffee Roasters Ltd. Address: 12 Quay Street, Cork T12 X2Y3. "
     "Phone: +353 21 400 1234. Email: hello@harbourline.ie. Website: https://harbourline.ie.",
@@ -70,8 +70,8 @@ def test_only_what_the_kit_sets_is_said():
     block = _rules(voice_only)       # the neutral default palette and font are not the brand's
     assert "Colours" not in block and "Font" not in block and "Company" not in block and "Logo" not in block
     assert block.endswith(KIT_WINS)
-    partial = _rules({**voice_only, "accent_color": "#e0a458", "company": {"phone": "+353 21 400 1234"}})
-    assert "- Colours (hex): accent #e0a458." in partial
+    partial = _rules({**voice_only, "secondary_color": "#13315c", "company": {"phone": "+353 21 400 1234"}})
+    assert "- Colours (hex): secondary #13315c." in partial
     assert "- Company details: Phone: +353 21 400 1234." in partial
     assert _rules(get_brand_kit({})) is None
 
