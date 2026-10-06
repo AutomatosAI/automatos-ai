@@ -21,7 +21,7 @@ disagree, the file wins — open an issue.
 | Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
 | Git | to clone and to pull updates. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
-| Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: §1b lists the commands behind every `make` target. The smooth path is everything inside WSL2: §1a has the recipe, and [SETUP.md](../../SETUP.md) walks through it step by step. Session mode needs WSL2. |
+| Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: §1b lists the commands behind every `make` target. The smooth path is everything inside WSL2: §1a has the recipe, and [SETUP.md](../../SETUP.md) walks through it step by step. Session mode runs inside WSL2, or natively on Windows 10 1809 or later (§1a). |
 
 Nothing else. No cloud account, no identity provider, no AWS.
 
@@ -37,8 +37,40 @@ usual. The repository's `.gitattributes` keeps every file the containers run
 at LF line endings, even with Git's default `core.autocrlf=true`, and the
 *Checkout line endings* CI lane checks that whenever one of them changes.
 `make` is not installed, so run the commands in §1b from PowerShell. Session
-mode does not run on native Windows: the host needs a Unix pty and launchd or
-`systemd --user`, and it exits with a message saying so.
+mode runs natively too: see *Session mode on native Windows* below.
+
+**Session mode on native Windows.** The session host also runs on Windows 10
+version 1809 or later (Windows 11 included) without WSL2. Older Windows gets a
+message pointing at WSL2. What it needs, and what differs from macOS and Linux:
+
+- **Python 3.9 or later** from python.org, with the `py` launcher. Nothing else
+  to install.
+- **Claude Code installed natively** (`claude.exe`), or **GitHub Copilot CLI's
+  standalone `copilot.exe`** (`winget install GitHub.Copilot`). A CLI installed
+  with npm runs through a `.cmd` file, which the host refuses: `cmd.exe` would
+  read the session's prompt as commands. **Codex** is not served on native
+  Windows; for Codex agents, run the host inside WSL2.
+- **No session sandbox.** Claude Code sandboxes its commands on macOS and Linux
+  only. Start the host with `--no-session-sandbox` on a machine you accept as
+  isolated. Without it, every session is refused with that reason.
+- **The login task.** `--install` registers a Task Scheduler task, *Automatos
+  CLI host*, that starts at your logon without elevation. It runs the host under
+  a small supervisor that restarts it 15 s after a non-zero exit and logs to
+  `%USERPROFILE%\.automatos\cli-host\host.log`. `--uninstall` first asks the
+  host to stop and let go of its tickets. `--nudge` leaves a request the host
+  picks up, since Windows has no SIGHUP.
+- **Under the hood.** Sessions run on a ConPTY pseudo console, each in a job
+  object that ends with it. Hooks reach the host over a named pipe that both ends
+  authenticate, instead of `hooks.sock`. The Canvas terminal opens PowerShell.
+
+```powershell
+cd services\cli-host
+py -m automatos_cli_host --allow C:/Users/you/automatos-deliverables --default-root C:/Users/you/automatos-deliverables --no-session-sandbox --pair XXXX-XXXX
+py -m automatos_cli_host --install --allow C:/Users/you/automatos-deliverables --default-root C:/Users/you/automatos-deliverables --no-session-sandbox
+```
+
+The deliverables folder is the same one `AUTOMATOS_WORKSPACE_DIR` gives Docker
+Desktop (the *Docker Desktop, native Windows* row in the table below).
 
 **Everything inside WSL2: the stack and session mode.**
 
@@ -171,7 +203,9 @@ they tell a running session host to pick up the new code
 (`make cli-host-nudge`, below).
 
 The session-host targets run Python 3.9 or later, with nothing to install, on
-macOS, Linux or WSL2. Run them from `services/cli-host`. Add
+macOS, Linux, WSL2 or Windows 10 1809 and later (there, type `py` for `python3`
+and see *Session mode on native Windows* in §1a). Run them from
+`services/cli-host`. Add
 `--allow <your projects>` when `LOCAL_PROJECTS_DIR` is set:
 
 ```bash
@@ -902,9 +936,11 @@ exactly as before — an agent is either `api` or `cli`, and you mix them freely
   (`claude`, then `claude login`). The host never logs in for you.
 - `CLI_RUNTIME_ENABLED=true` in `.env`, then `make up` (or restart the backend).
   The flag is refused outside the local edition.
-- **macOS, Linux or WSL2.** The host drives sessions through a Unix pty and
-  installs as a launchd or `systemd --user` service, so it does not run on
-  native Windows; started there, it exits with a message saying so. On Windows,
+- **macOS, Linux, WSL2, or Windows 10 1809 and later.** On macOS and Linux the
+  host drives sessions through a Unix pty and installs as a launchd or
+  `systemd --user` service. On native Windows it uses ConPTY and a Task Scheduler
+  login task, without a session sandbox and without Codex: §1a, *Session mode on
+  native Windows*. Alternatively, on Windows,
   run the stack and the host inside a WSL2 distro with systemd enabled, and run
   `loginctl enable-linger <user>` so the host keeps running without a login.
   The recipe, including keeping the distro alive, is in §1a, and
