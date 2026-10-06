@@ -322,6 +322,7 @@ def _install(monkeypatch, engine):
 
 def test_matcher_call_site_only_shadows_when_the_dial_is_on(monkeypatch):
     from modules.coordination import agent_matcher as am
+    from modules.coordination.assignment_shadow import shadow_assignment
 
     ranked = [am.MatchResult(agent_id=7, agent_name="Jim", total_score=0.9, tool_coverage=1, skill_match=1, model_fit=1, availability=1, history=0)]
     task = SimpleNamespace(id=41, title="t", description="d")
@@ -329,14 +330,14 @@ def test_matcher_call_site_only_shadows_when_the_dial_is_on(monkeypatch):
 
     off = _OffEngine()
     _install(monkeypatch, off)
-    am._shadow_assignment(task, agents, ranked, "writer", [])
+    shadow_assignment(task, agents, ranked, "writer", [])
     assert off.calls == 0
 
     on = _ShadowEngine()
     _install(monkeypatch, on)
-    am._shadow_assignment(task, agents, ranked, "writer", [])
+    shadow_assignment(task, agents, ranked, "writer", [])
     assert on.purposes == ["ticket_assign"]
-    am._shadow_assignment(task, agents, [], "writer", [])  # nothing ranked → nothing to judge
+    shadow_assignment(task, agents, [], "writer", [])  # nothing ranked → nothing to judge
     assert on.purposes == ["ticket_assign"]
 
 
@@ -362,8 +363,8 @@ def test_grant_creation_call_site_only_shadows_when_the_dial_is_on(monkeypatch):
 
 
 def test_session_end_report_and_heartbeat_call_sites_only_shadow_when_on(monkeypatch):
-    from services import cli_host_service as chs
     from services import heartbeat_service as hb
+    from services import session_end_shadow as chs
     from services import report_service as rs
 
     task = SimpleNamespace(id=177, workspace_id=WS, title="t", description="d")
@@ -372,14 +373,14 @@ def test_session_end_report_and_heartbeat_call_sites_only_shadow_when_on(monkeyp
 
     off = _OffEngine()
     _install(monkeypatch, off)
-    chs._shadow_session_end(task, {}, payload, exec_result, [], [], [])
+    chs.shadow_session_end(task, {}, payload, exec_result, [], [], [])
     rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=False, action_items=[], recommendations=[], attachments=[], linked_task_ids=[])
     hb._shadow_heartbeat_triage(workspace_id=WS, link_id=1, agent_id=1, agent_name="A", title="t", message="m", status="ok", source_type="agent", platform_action="report_to=workspace")
     assert off.calls == 0
 
     on = _ShadowEngine()
     _install(monkeypatch, on)
-    chs._shadow_session_end(task, {}, payload, exec_result, ["a.md"], [{"tool": "bash"}], [])
+    chs.shadow_session_end(task, {}, payload, exec_result, ["a.md"], [{"tool": "bash"}], [])
     rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=True, action_items=[{"title": "Approve"}], recommendations=[], attachments=[], linked_task_ids=[])
     hb._shadow_heartbeat_triage(workspace_id=WS, link_id=1, agent_id=1, agent_name="A", title="t", message="m", status="ok", source_type="agent", platform_action="report_to=auto")
     assert on.purposes == ["session_end", "report_triage", "report_triage"]

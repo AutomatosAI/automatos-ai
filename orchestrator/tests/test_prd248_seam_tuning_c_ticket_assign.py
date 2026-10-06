@@ -57,6 +57,7 @@ def test_the_pick_is_the_best_fit_and_the_roster_order_breaks_a_tie():
 
 def test_the_matcher_hands_the_missions_goal_to_the_shadow(monkeypatch):
     from modules.coordination import agent_matcher as am
+    from modules.coordination import assignment_shadow as asg
 
     seen: List[Any] = []
 
@@ -91,9 +92,9 @@ def test_the_matcher_hands_the_missions_goal_to_the_shadow(monkeypatch):
     task = SimpleNamespace(id=41, run_id="run-1", title="Draft the email", description="Write the copy.")
     agents = [SimpleNamespace(id=7, name="Jim", description="Writes", workspace_id=WS)]
 
-    am._shadow_assignment(task, agents, ranked, "writer", [], db=_Db())
+    asg.shadow_assignment(task, agents, ranked, "writer", [], db=_Db())
 
     (frame,) = seen
     assert frame["mission_brief"] == GOAL
-    assert am._mission_goal(None, task) is None
-    assert am._mission_goal(_Db(), SimpleNamespace(run_id=None)) is None
+    assert asg._mission_goal(None, task) is None
+    assert asg._mission_goal(_Db(), SimpleNamespace(run_id=None)) is None

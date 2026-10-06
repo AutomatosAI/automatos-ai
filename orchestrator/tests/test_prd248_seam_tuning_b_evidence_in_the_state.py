@@ -145,40 +145,62 @@ def test_a_deliverables_first_lines_are_read_from_the_workspace(monkeypatch, tmp
     assert made[2]["first_lines"] == "" and made[3]["first_lines"] == ""
 
 
-def test_the_cli_call_site_runs_after_the_deliverables_and_passes_them(monkeypatch):
-    import inspect
-
+def test_the_session_is_judged_once_its_result_has_landed_with_its_deliverables(monkeypatch):
+    """``apply_result`` is wrapped: the judgement reads what the ticket records after the
+    result landed (deliverables, files, refusals), never runs for a result that hands the
+    ticket back to the queue, and never runs with the dial off."""
     from services import cli_host_service as chs
+    from services import session_end_shadow as ses
 
-    source = inspect.getsource(chs.apply_result)
-    assert source.index('exec_result["deliverables"] = deliverables') < source.index("_shadow_session_end(")
-
+    assert chs.apply_result.__wrapped__  # the decorator, not a call inside apply_result
     captured: List[Any] = []
 
     class _On:
+        def __init__(self, mode="shadow"):
+            self.mode = mode
+
         def dials(self):
-            return SimpleNamespace(session_end_mode="shadow")
+            return SimpleNamespace(session_end_mode=self.mode)
 
         def shadow(self, coro, purpose="shadow"):
             captured.append(coro.cr_frame.f_locals)
             coro.close()
             return True
 
+    task = SimpleNamespace(
+        id=673, workspace_id=WS, title="Weekly facts", description=BRIEF_673,
+        created_at=datetime(2026, 9, 15, 9, tzinfo=timezone.utc),
+        runtime_ref={"files_touched": ["a.md"], "permission_denials": [{"tool": "Bash", "subject": "curl x"}],
+                     "deliverables": [{"file_path": "sessions/673/a.md", "title": "a.md", "artifact_type": "document"}]},
+    )
+
+    class _Db:
+        def query(self, model):
+            return self
+
+        def filter(self, *criteria):
+            return self
+
+        def first(self):
+            return task
+
+    async def landed(db, host, task_id, payload):
+        return {"applied": True, "status": "done"}
+
     import core.llm.decisions as pkg
 
+    wrapped = ses.judged_after_landing(landed)
     monkeypatch.setattr(pkg, "get_decision_engine", lambda: _On())
-    task = SimpleNamespace(id=673, workspace_id=WS, title="Weekly facts", description=BRIEF_673,
-                           created_at=datetime(2026, 9, 15, 9, tzinfo=timezone.utc))
-    chs._shadow_session_end(
-        task, {}, {"result_text": "Done", "attempt": 1}, {"status": "success"}, ["a.md"],
-        [{"tool": "Bash", "input": {"command": "curl x"}, "reason": "outside"}],
-        [{"id": "d1", "file_path": "sessions/673/a.md", "title": "a.md", "artifact_type": "document"}],
-    )
+    asyncio.run(wrapped(_Db(), None, 673, {"result_text": "Done", "attempt": 1, "status": "success"}))
+    asyncio.run(wrapped(_Db(), None, 673, {"status": "usage_limit"}))
+    monkeypatch.setattr(pkg, "get_decision_engine", lambda: _On("off"))
+    asyncio.run(wrapped(_Db(), None, 673, {"result_text": "Done", "status": "success"}))
+
     (frame,) = captured
     values = frame["values"]
     assert frame["deliverable_refs"][0]["file_path"] == "sessions/673/a.md"
     assert values["asked_on"] == "15 Sep 2026" and values["files"] == ["a.md"]
-    assert values["denials"][0]["subject"] == "curl x"
+    assert values["denials"][0]["subject"] == "curl x" and values["platform_status"] == "success"
 
 
 # --------------------------------------------------------------------------- #
@@ -218,3 +240,29 @@ def test_the_report_call_site_reads_the_linked_tickets_in_the_shadow_task(monkey
     ))
     assert row["linked_tickets"] == 1 and row["jev_matches_the_ask"] == 0.2
     assert engine.calls[0]["state"]["linked_tickets"][0]["title"] == "Weekly facts"
+
+
+def test_a_report_is_triaged_once_it_is_written_with_its_lists(monkeypatch):
+    """``create_report`` is wrapped: the triage gets the report's id and its lists from the
+    call, after the report is written, and only for a report that was written."""
+    from services import report_service as rs
+
+    assert rs.ReportService.create_report.__wrapped__
+    seen: List[Dict[str, Any]] = []
+    monkeypatch.setattr(rs, "_shadow_report_triage", lambda **kw: seen.append(kw))
+
+    async def create_report(self, agent_id, agent_name, title, content, report_type="standup", status="ok",
+                            summary=None, metrics=None, attachments=None, heartbeat_result_id=None,
+                            recommendations=None, action_items=None, linked_task_ids=None, requires_approval=False):
+        return {"success": title != "fails", "report_id": "9"}
+
+    wrapped = rs._triaged_after_report(create_report)
+    me = SimpleNamespace(workspace_id=WS)
+    asyncio.run(wrapped(me, 3, "Writer", "Weekly facts done", "Posted for 22 Sep.", action_items=[{"title": "Approve"}],
+                        linked_task_ids=[673], requires_approval=True))
+    asyncio.run(wrapped(me, 3, "Writer", "fails", "x"))
+
+    (call,) = seen
+    assert call["report_id"] == "9" and call["linked_task_ids"] == [673] and call["action_items"] == [{"title": "Approve"}]
+    assert call["summary"] == "Posted for 22 Sep." and call["requires_approval"] is True
+
