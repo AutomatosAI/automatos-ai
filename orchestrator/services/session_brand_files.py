@@ -11,13 +11,14 @@ one-colour logo, which the rules block names by :func:`session_file_name`.
 
 Tenant isolation: the files are read from the CLAIMED ticket's workspace, which is the
 host's own (the claim is filtered by it), and a stored path outside that workspace's
-``<workspace_id>/brand/`` folder is never read.
+``<workspace_id>/brand/`` folder (a ``..`` in it included) is never read.
 """
 from __future__ import annotations
 
 import base64
 import logging
 import os
+import posixpath
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ def _brand_file(workspace_id: str, path: str, stem: str) -> Optional[Dict[str, s
 
     if not path:
         return None
-    if not path.startswith(f"{workspace_id}/brand/"):
+    if posixpath.normpath(path) != path or not path.startswith(f"{workspace_id}/brand/"):
         logger.warning("[SessionBrandFiles] workspace %s's kit names another folder's logo; not sent", workspace_id)
         return None
     data = load_brand_logo(path)

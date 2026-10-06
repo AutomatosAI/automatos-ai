@@ -134,7 +134,9 @@ def currency_line(kit: Mapping[str, Any]) -> str:
     code = currency_of(kit)
     if not code:
         return ""
-    return f"- Currency: {code} ({currency_prefix(code).strip()}). Print every amount in it, never another currency."
+    symbol = currency_prefix(code).strip()
+    named = f"{code} ({symbol})" if symbol != code else code
+    return f"- Currency: {named}. Print every amount in it, never another currency."
 
 
 def date_line(kit: Optional[Mapping[str, Any]]) -> str:

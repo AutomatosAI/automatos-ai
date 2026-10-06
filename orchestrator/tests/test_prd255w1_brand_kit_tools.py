@@ -206,6 +206,10 @@ def test_a_kit_of_neutral_defaults_says_nothing_of_the_look_and_no_currency_is_i
     assert "Currency" not in rules_for_kit(_kit({**LOOK_KIT, "currency": ""}))
 
 
+def test_a_currency_without_a_symbol_is_named_once():
+    assert "- Currency: CHF. Print every amount in it" in rules_for_kit(_kit({**LOOK_KIT, "currency": "CHF"}))
+
+
 def test_an_answer_that_repeats_the_whole_block_keeps_it_as_it_is():
     kit = _kit(LOOK_KIT)
     block = rules_for_kit(kit)
@@ -240,3 +244,13 @@ def test_a_session_gets_the_uploaded_logo_variants_under_the_names_the_rules_giv
     assert files == {"logo-dark.png": dark, "logo-mono.jpg": mono}
     variants = next(line for line in rules_for_kit(_kit(kit)).split("\n") if line.startswith("- Logo variants"))
     assert all(f"brand/{name}" in variants for name in files)
+
+
+def test_a_stored_path_that_climbs_out_of_the_brand_folder_is_never_read(storage):
+    from services.session_brand_files import session_brand_files
+
+    ws, other = uuid4(), uuid4()
+    theirs = bl.save_brand_logo(other, logo_tests.png_bytes(160, 50), stem=bl.LOGO_DARK_STEM)
+    kit = {"logo_dark_path": f"{ws}/brand/../../{theirs}"}
+    db = NS(get=lambda model, key: NS(settings={"brand_kit": kit}) if model is Workspace and key == ws else None)
+    assert session_brand_files(db, ws) == []
