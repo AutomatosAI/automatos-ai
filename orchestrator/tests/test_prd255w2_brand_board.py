@@ -220,7 +220,10 @@ def test_a_kit_without_a_logo_prints_its_name_and_says_so():
 def test_the_type_scale_spacing_and_clear_space_are_the_kits():
     kit = _kit(type_scale={"h1": {"size_pt": 26, "line_pt": 32}}, spacing_unit_pt=5, logo_rules={"clear_space": 1})
     page = _board_html(kit)
-    assert "H1 26/32 pt, 600" in _part(page, "board-type") and "font-size:26pt;line-height:32pt" in page
+    type_part = _part(page, "board-type")
+    assert "H1 26/32 pt, 600" in type_part and "font-size:26pt;line-height:32pt" in page
+    # one line a step: the sample's box is its line height (a long sample is cut, never wrapped); no table to squeeze
+    assert "font-weight:600;height:32pt" in type_part and "board-type-row" not in type_part
     spacing = _part(page, "board-spacing")
     assert "A 5 pt grid" in spacing and "width:40pt" in spacing  # the sixth gap: 8 units
     assert "Logo clear space: 1 of its height (16 mm round the 16 mm letterhead logo)" in spacing

@@ -81,11 +81,11 @@ def colours_html(block: Any, kit: Mapping[str, Any]) -> str:
 
 
 def type_html(block: Any, kit: Mapping[str, Any]) -> str:
-    """Each step of the type scale: its size, line height and weight, and a sample set in it."""
+    """Each step of the type scale: its size, line height and weight, and a sample set in it, on one line."""
     rows = "".join(
-        f'<div class="board-type-row"><p class="board-caption board-type-label">{_esc(sample.label)}</p>'
-        f'<div class="board-type-cell"><p class="board-type-sample" style="font-size:{sample.size_pt:g}pt;'
-        f'line-height:{sample.line_pt:g}pt;font-weight:{sample.weight}">{_esc(bb.TYPE_SAMPLE)}</p></div></div>'
+        f'<p class="board-type-sample" style="font-size:{sample.size_pt:g}pt;line-height:{sample.line_pt:g}pt;'
+        f'font-weight:{sample.weight};height:{sample.line_pt:g}pt">'
+        f'<span class="board-type-label">{_esc(sample.label)}</span>{_esc(bb.TYPE_SAMPLE)}</p>'
         for sample in bb.type_samples(kit)
     )
     return _part(block, "Type", rows)

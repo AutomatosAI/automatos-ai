@@ -9,14 +9,16 @@ board's own sizes, in millimetres, are :data:`BOARD_TOKENS`.
 
 Nothing on the board overflows its box: WeasyPrint breaks the page on a child's own
 height, clipped or not, so a miniature is cropped to its frame (``object-fit``) and
-the social card's lines fit inside theirs.
+the social card's lines fit inside theirs. A type sample is one line, its label
+inline beside it and its height its own line height, so a long sample is cut, never
+wrapped.
 """
 from __future__ import annotations
 
 from string import Template
 
 # The board's own sizes (mm): the logo row's logo, a variant's ground and the logo on it,
-# a swatch's chip, and an application's frame.
+# a swatch's chip, an application's frame, and the type scale's label column.
 BOARD_TOKENS = {
     "board_logo_mm": 18,
     "board_variant_mm": 16,
@@ -24,6 +26,7 @@ BOARD_TOKENS = {
     "board_chip_mm": 10,
     "board_chip_pad_mm": 1.5,
     "board_app_mm": 34,
+    "board_type_label_mm": 32,
 }
 
 BOARD = Template("""
@@ -63,10 +66,9 @@ BOARD = Template("""
   .board-on-chip img { margin-top: 0; }
   .board-tone { margin: 0 0 ${s1}pt 0; font-size: ${small}pt; line-height: ${small_line}pt; }
   .board-tone strong { color: $heading; }
-  .board-type-row { display: table; width: 100%; table-layout: fixed; }
-  .board-type-label { display: table-cell; width: 36%; vertical-align: middle; }
-  .board-type-cell { display: table-cell; vertical-align: middle; }
   .board-type-sample { color: $heading; white-space: nowrap; overflow: hidden; margin: 0; }
+  .board-type-label { display: inline-block; width: ${board_type_label_mm}mm; font-size: ${caption}pt;
+    line-height: ${caption_line}pt; font-weight: $body_weight; color: $muted; vertical-align: baseline; }
   .board-gaps { margin: 0 0 ${s1}pt 0; }
   .board-gap { display: inline-block; vertical-align: bottom; margin-right: ${s3}pt; }
   .board-gap-bar { height: ${s2}pt; background: $surface_2; border-left: ${rule_pt}pt solid $heading; }
