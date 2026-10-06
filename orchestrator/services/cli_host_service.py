@@ -2328,21 +2328,25 @@ def decide_session_permission(db: Session, task: BoardTask, request_id: str, app
 
 def _shadow_session_end(
     task: Any, ref: Dict[str, Any], payload: Dict[str, Any], exec_result: Dict[str, Any],
-    files: Any, denials: Any,
+    files: Any, denials: Any, deliverables: Sequence[Dict[str, Any]],
 ) -> None:
-    """PRD-248 S5 (shadow only): the decision engine reads the session's final
-    message and says whether the work is complete, whether nothing was done, and
-    whether the owner is needed — logged beside the status the board is about to
-    apply. Lazy, off by default, fail-open; the result is never touched."""
+    """PRD-248 S5 (shadow only): the decision engine reads what the session made (its
+    deliverables and their first lines, the files written, the commands refused) beside
+    the ticket's brief and dates, and its final message, and says whether the work is
+    complete, whether nothing was done, and whether the owner is needed. Logged beside
+    the status the board is about to apply. Lazy, off by default, fail-open; the result
+    is never touched. It runs after the deliverables are registered, so it sees them."""
     try:
         from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
+        from services import decision_evidence
 
         engine = get_decision_engine()
         if engine.dials().session_end_mode == MODE_OFF:
             return
         engine.shadow(
-            judgements.shadow_session_end(
+            decision_evidence.shadow_session_end(
                 engine,
+                deliverable_refs=[dict(d) for d in deliverables],
                 workspace_id=getattr(task, "workspace_id", None),
                 task_id=getattr(task, "id", None),
                 attempt=payload.get("attempt", ref.get("attempt")),
@@ -2350,8 +2354,10 @@ def _shadow_session_end(
                 description=getattr(task, "description", "") or "",
                 final_text=str(payload.get("result_text") or payload.get("error") or ""),
                 exit_reason=str(payload.get("exit_reason") or exec_result.get("status") or ""),
-                files_touched=len(files) if isinstance(files, (list, tuple)) else 0,
-                denials=len(denials) if isinstance(denials, (list, tuple)) else 0,
+                files=list(files) if isinstance(files, (list, tuple)) else [],
+                denials=[_denial_summary(d) for d in denials] if isinstance(denials, (list, tuple)) else [],
+                asked_on=decision_evidence.day_label(getattr(task, "created_at", None)),
+                finished_on=decision_evidence.today_label(),
                 platform_status=str(exec_result.get("status") or ""),
             ),
             purpose=judgements.PURPOSE_SESSION_END,
@@ -2413,7 +2419,6 @@ async def apply_result(
         "files_touched": files,
         "permission_denials": denials,
     }
-    _shadow_session_end(task, ref, payload, exec_result, files, denials)
     ref.update(
         {
             "finished_at": _iso(_now()),
@@ -2455,6 +2460,7 @@ async def apply_result(
     )
     ref["deliverables"] = deliverables
     exec_result["deliverables"] = deliverables
+    _shadow_session_end(task, ref, payload, exec_result, files, denials, deliverables)
     exec_result["session"] = {
         "session_id": ref.get("session_id"),
         "host_id": str(host.id),

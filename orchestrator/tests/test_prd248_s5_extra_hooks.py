@@ -107,8 +107,8 @@ def test_states_carry_only_the_fields_the_question_needs():
     st = J.assignment_state(title="Draft the board pack", description="x" * 5000, role="writer", required_tools=["docs"])
     assert st["task"] == "Draft the board pack" and len(st["details"]) == J.TEXT_MAX_CHARS
     assert st["role_wanted"] == "writer" and st["tools_needed"] == ["docs"]
-    se = J.session_end_state(title="t", description="d", final_text="done", attempt=3, exit_reason="success", files_touched=2, denials=1)
-    assert se["attempt"] == 3 and se["files_written"] == 2 and se["commands_refused"] == 1
+    se = J.session_end_state(title="t", description="d", final_text="done", attempt=3, exit_reason="success", files=["out/a.md", "b.md"], denials=[{"tool": "bash"}])
+    assert se["attempt"] == 3 and se["files_written"] == ["out/a.md", "b.md"] and se["commands_refused"] == ["bash"]
     hs = J.hold_state(kind="question", subject_type="board_task", tool_name="bash", question_md="Allow `comm -23 a b`?", options=["allow", "deny"], reason="outside the allowlist")
     assert hs["tool"] == "bash" and hs["answers_offered"] == ["allow", "deny"] and "allowlist" in hs["why_it_was_raised"]
     rs = J.report_state(kind="report", title="Weekly", summary="all fine", status="ok", agent_name="OPS", report_type="standup", action_items=2)
@@ -203,10 +203,11 @@ async def test_session_end_row_derives_a_verdict():
     row = await J.shadow_session_end(
         engine, workspace_id=WS, task_id=177, attempt=110, title="Ethiopian blog post", description="...",
         final_text="110th dispatch, ticket unchanged. #177 is complete; no action taken.", exit_reason="success",
-        files_touched=0, denials=0, platform_status="success",
+        files=[], denials=[], platform_status="success",
     )
     assert row["purpose"] == "session_end" and row["jev_verdict"] == "nothing_done" and row["attempt"] == 110
     assert row["platform_status"] == "success" and row["final_preview"].startswith("110th dispatch")
+    assert row["files_touched"] == 0 and row["denials"] == 0
     assert J.session_end_verdict(_result(work_complete=_noul(0.9), nothing_done=_noul(0.1), needs_owner=_noul(0.2))) == "complete"
     assert J.session_end_verdict(_result(work_complete=_noul(0.1), nothing_done=_noul(0.1), needs_owner=_noul(0.9))) == "needs_owner"
     assert J.session_end_verdict(_result(work_complete=_noul(0.3), nothing_done=_noul(0.2), needs_owner=_noul(0.2))) == "incomplete"
@@ -370,14 +371,14 @@ def test_session_end_report_and_heartbeat_call_sites_only_shadow_when_on(monkeyp
 
     off = _OffEngine()
     _install(monkeypatch, off)
-    chs._shadow_session_end(task, {}, payload, exec_result, [], [])
-    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=False, action_items=0, recommendations=0)
+    chs._shadow_session_end(task, {}, payload, exec_result, [], [], [])
+    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=False, action_items=[], recommendations=[], attachments=[], linked_task_ids=[])
     hb._shadow_heartbeat_triage(workspace_id=WS, link_id=1, agent_id=1, agent_name="A", title="t", message="m", status="ok", source_type="agent", platform_action="report_to=workspace")
     assert off.calls == 0
 
     on = _ShadowEngine()
     _install(monkeypatch, on)
-    chs._shadow_session_end(task, {}, payload, exec_result, ["a.md"], [{"tool": "bash"}])
-    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=True, action_items=1, recommendations=0)
+    chs._shadow_session_end(task, {}, payload, exec_result, ["a.md"], [{"tool": "bash"}], [])
+    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=True, action_items=[{"title": "Approve"}], recommendations=[], attachments=[], linked_task_ids=[])
     hb._shadow_heartbeat_triage(workspace_id=WS, link_id=1, agent_id=1, agent_name="A", title="t", message="m", status="ok", source_type="agent", platform_action="report_to=auto")
     assert on.purposes == ["session_end", "report_triage", "report_triage"]

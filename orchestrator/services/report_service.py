@@ -37,21 +37,28 @@ def _shadow_report_triage(
     status: str,
     report_type: str,
     requires_approval: bool,
-    action_items: int,
-    recommendations: int,
+    action_items: List[Any],
+    recommendations: List[Any],
+    attachments: List[Any],
+    linked_task_ids: List[Any],
 ) -> None:
     """PRD-248 S5 (shadow only): the decision engine says whether the owner
     should act on this report today and how severe it is, logged beside what
-    the platform did with it. Lazy, off by default, fail-open."""
+    the platform did with it. It reads the evidence beside the report's own
+    words: its action items and recommendations, its attachments, and the
+    tickets it links with their briefs (read in the shadow task, never here).
+    Lazy, off by default, fail-open."""
     try:
         from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
+        from services import decision_evidence
 
         engine = get_decision_engine()
         if engine.dials().report_triage_mode == MODE_OFF:
             return
         engine.shadow(
-            judgements.shadow_report_triage(
+            decision_evidence.shadow_report_triage(
                 engine,
+                linked_task_ids=list(linked_task_ids),
                 workspace_id=workspace_id,
                 kind="report",
                 subject_id=report_id,
@@ -62,8 +69,10 @@ def _shadow_report_triage(
                 agent_id=agent_id,
                 report_type=report_type,
                 platform_action="requires_approval" if requires_approval else "report_submitted",
-                action_items=action_items,
-                recommendations=recommendations,
+                action_items=list(action_items),
+                recommendations=list(recommendations),
+                attachments=list(attachments),
+                requires_approval=requires_approval,
             ),
             purpose=judgements.PURPOSE_REPORT,
         )
@@ -199,7 +208,8 @@ class ReportService:
                 workspace_id=self.workspace_id, report_id=report_id, agent_id=agent_id,
                 agent_name=agent_name, title=title, summary=summary or "", status=status,
                 report_type=report_type, requires_approval=requires_approval,
-                action_items=len(action_items or []), recommendations=len(recommendations or []),
+                action_items=action_items or [], recommendations=recommendations or [],
+                attachments=attachments or [], linked_task_ids=linked_task_ids or [],
             )
 
             # PRD-128: dispatch report_submitted before commit so the

@@ -19,6 +19,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from . import evidence
 from .questions import CHOICE_MAX_OPTIONS, Choice, DecisionResult, Noul, Question, Score
 
 PURPOSE_ASSIGN = "ticket_assign"
@@ -201,12 +202,19 @@ async def shadow_assignment(
 # ---------------------------------------------------------------------------
 
 
-def session_end_questions() -> Dict[str, Question]:
-    return {
-        "work_complete": Noul("The final message reports the task's work as finished."),
+def session_end_questions(*, brief_has_dates: bool = False) -> Dict[str, Question]:
+    """``work_complete`` reads the evidence (the deliverables and the files written), never
+    the agent's account alone: wrong runs reported themselves as done as confidently as
+    right ones (night 4). When the brief names dates, ``dates_match`` asks about them on
+    their own, beside the dates the state lists."""
+    questions: Dict[str, Question] = {
+        "work_complete": Noul("The deliverables and the files written hold the finished work the brief asks for."),
         "nothing_done": Noul("The final message says the work was already done before, or that no action was taken."),
         "needs_owner": Noul("The final message asks the owner for a decision or information before it can continue."),
     }
+    if brief_has_dates:
+        questions["dates_match"] = Noul("The work is for the dates the brief asks for.")
+    return questions
 
 
 def session_end_state(
@@ -216,29 +224,42 @@ def session_end_state(
     final_text: str,
     attempt: Any,
     exit_reason: Optional[str],
-    files_touched: int,
-    denials: int,
+    files: Sequence[Any] = (),
+    denials: Sequence[Any] = (),
+    deliverables: Sequence[Mapping[str, Any]] = (),
+    asked_on: Optional[str] = None,
+    finished_on: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    """The ticket's brief and dates, what the session made (deliverables with their first
+    lines, the files written, the commands refused), then its own final message."""
+    made = evidence.deliverable_lines(deliverables)
+    state: Dict[str, Any] = {
         "task": _preview(title),
         "brief": _preview(description, 1000),
+        "asked_on": asked_on or "",
+        "finished_on": finished_on or "",
+        "deliverables": made,
+        "files_written": evidence.file_names(files),
+        "commands_refused": evidence.refusals(denials),
         "final_message": _preview(final_text, TEXT_MAX_CHARS),
         "attempt": attempt,
         "ended_because": exit_reason or "",
-        "files_written": int(files_touched or 0),
-        "commands_refused": int(denials or 0),
     }
+    work = [final_text, *(d["name"] for d in made), *(d.get("first_lines", "") for d in made)]
+    state.update(evidence.date_evidence(f"{title}\n{description}", work))
+    return state
 
 
 def session_end_verdict(result: DecisionResult) -> Optional[str]:
     complete = result.get("work_complete")
     nothing = result.get("nothing_done")
     owner = result.get("needs_owner")
+    dates = result.get("dates_match")
     if owner is not None and owner.yes:
         return "needs_owner"
     if nothing is not None and nothing.yes:
         return "nothing_done"
-    if complete is not None and complete.yes:
+    if complete is not None and complete.yes and (dates is None or dates.yes):
         return "complete"
     if complete is not None:
         return "incomplete"
@@ -255,10 +276,18 @@ async def shadow_session_end(
     description: str,
     final_text: str,
     exit_reason: Optional[str],
-    files_touched: int,
-    denials: int,
+    files: Sequence[Any] = (),
+    denials: Sequence[Any] = (),
+    deliverables: Sequence[Mapping[str, Any]] = (),
+    asked_on: Optional[str] = None,
+    finished_on: Optional[str] = None,
     platform_status: str,
 ) -> Dict[str, Any]:
+    state = session_end_state(
+        title=title, description=description, final_text=final_text, attempt=attempt,
+        exit_reason=exit_reason, files=files, denials=denials, deliverables=deliverables,
+        asked_on=asked_on, finished_on=finished_on,
+    )
     row: Dict[str, Any] = {
         "purpose": PURPOSE_SESSION_END,
         "workspace_id": workspace_id,
@@ -267,21 +296,24 @@ async def shadow_session_end(
         "title": _preview(title),
         "final_preview": _preview(final_text),
         "exit_reason": exit_reason,
-        "files_touched": int(files_touched or 0),
-        "denials": int(denials or 0),
+        "files_touched": len(files),
+        "denials": len(denials),
+        "deliverables": len(deliverables),
+        "brief_dates": state.get("brief_dates", []),
+        "brief_dates_missing_from_the_work": state.get("brief_dates_missing_from_the_work", []),
         "platform_status": platform_status,
     }
 
     def finish(r: Dict[str, Any], result: DecisionResult) -> None:
         r["jev_verdict"] = session_end_verdict(result)
+        dates = result.get("dates_match")
+        if dates is not None and dates.noul is not None:
+            r["jev_dates_match"] = round(dates.noul, 4)
 
     return await _ask_and_record(
-        engine, purpose=PURPOSE_SESSION_END, row=row,
-        state=session_end_state(
-            title=title, description=description, final_text=final_text, attempt=attempt,
-            exit_reason=exit_reason, files_touched=files_touched, denials=denials,
-        ),
-        questions=session_end_questions(), workspace_id=workspace_id, finish=finish,
+        engine, purpose=PURPOSE_SESSION_END, row=row, state=state,
+        questions=session_end_questions(brief_has_dates=bool(state.get("brief_dates"))),
+        workspace_id=workspace_id, finish=finish,
     )
 
 
@@ -375,11 +407,48 @@ async def shadow_hold(
 # ---------------------------------------------------------------------------
 
 
-def report_questions() -> Dict[str, Question]:
-    return {
+def report_questions(*, has_tickets: bool = False) -> Dict[str, Question]:
+    """When the report links tickets, ``matches_the_ask`` asks on its own whether the work
+    reported is what they asked for: night 4's wrong runs mostly read as fine."""
+    questions: Dict[str, Question] = {
         "needs_attention": Noul("The owner should act on this today."),
         "severity": Choice("How should the owner treat this?", SEVERITY_CRITERIA),
     }
+    if has_tickets:
+        questions["matches_the_ask"] = Noul("The work this report describes is the work the linked tickets ask for.")
+    return questions
+
+
+def _texts(items: Sequence[Any]) -> List[str]:
+    """Action items or recommendations as one line each (their text, not the whole object)."""
+    out: List[str] = []
+    for item in list(items or [])[: evidence.LIST_MAX]:
+        if isinstance(item, Mapping):
+            text = item.get("title") or item.get("text") or item.get("description") or item.get("action") or ""
+        else:
+            text = item
+        if str(text).strip():
+            out.append(_preview(text))
+    return out
+
+
+def _attachment_names(attachments: Sequence[Any]) -> List[str]:
+    names = []
+    for item in list(attachments or [])[: evidence.LIST_MAX]:
+        name = item.get("name") or item.get("filename") or item.get("path") if isinstance(item, Mapping) else item
+        if name:
+            names.append(_preview(name, evidence.NAME_MAX_CHARS))
+    return names
+
+
+def _ticket_evidence(state: Dict[str, Any], tickets: Sequence[Mapping[str, Any]], summary: str) -> None:
+    linked = [
+        {"title": _preview(t.get("title")), "brief": _preview(t.get("brief"), 600), "asked_on": t.get("asked_on") or ""}
+        for t in list(tickets)[:5]
+    ]
+    state["linked_tickets"] = linked
+    briefs = "\n".join(f"{t['title']}\n{t['brief']}" for t in linked)
+    state.update(evidence.date_evidence(briefs, [summary, state.get("title", "")]))
 
 
 def report_state(
@@ -390,9 +459,15 @@ def report_state(
     status: Optional[str],
     agent_name: Optional[str],
     report_type: Optional[str],
-    action_items: int = 0,
-    recommendations: int = 0,
+    action_items: Any = 0,
+    recommendations: Any = 0,
+    attachments: Sequence[Any] = (),
+    linked_tickets: Sequence[Mapping[str, Any]] = (),
+    requires_approval: bool = False,
 ) -> Dict[str, Any]:
+    """The report as written, then the evidence beside it: what it asks the owner to do,
+    what it attaches, and the tickets it was written for with their briefs and dates.
+    ``action_items`` / ``recommendations`` take the lists (a count still reads as before)."""
     state: Dict[str, Any] = {
         "kind": kind,
         "from": agent_name or "",
@@ -402,10 +477,18 @@ def report_state(
     }
     if report_type:
         state["report_type"] = str(report_type)
-    if action_items:
-        state["action_items"] = int(action_items)
-    if recommendations:
-        state["recommendations"] = int(recommendations)
+    if requires_approval:
+        state["waits_for_approval"] = True
+    for key, value in (("action_items", action_items), ("recommendations", recommendations)):
+        if isinstance(value, (list, tuple)):
+            if _texts(value):
+                state[key] = _texts(value)
+        elif value:
+            state[key] = int(value)
+    if attachments:
+        state["attachments"] = _attachment_names(attachments)
+    if linked_tickets:
+        _ticket_evidence(state, linked_tickets, summary)
     return state
 
 
@@ -421,8 +504,11 @@ async def shadow_report_triage(
     agent_name: Optional[str],
     report_type: Optional[str],
     platform_action: str,
-    action_items: int = 0,
-    recommendations: int = 0,
+    action_items: Any = 0,
+    recommendations: Any = 0,
+    attachments: Sequence[Any] = (),
+    linked_tickets: Sequence[Mapping[str, Any]] = (),
+    requires_approval: bool = False,
     agent_id: Any = None,
 ) -> Dict[str, Any]:
     row: Dict[str, Any] = {
@@ -435,6 +521,7 @@ async def shadow_report_triage(
         "title": _preview(title),
         "status": status,
         "platform_action": platform_action,
+        "linked_tickets": len(linked_tickets),
     }
 
     def finish(r: Dict[str, Any], result: DecisionResult) -> None:
@@ -445,12 +532,16 @@ async def shadow_report_triage(
         if severity is not None:
             r["jev_severity"] = severity.choice
             r["jev_severity_confidence"] = round(severity.certainty, 4)
+        matches = result.get("matches_the_ask")
+        if matches is not None and matches.noul is not None:
+            r["jev_matches_the_ask"] = round(matches.noul, 4)
 
     return await _ask_and_record(
         engine, purpose=PURPOSE_REPORT, row=row,
         state=report_state(
             kind=kind, title=title, summary=summary, status=status, agent_name=agent_name,
             report_type=report_type, action_items=action_items, recommendations=recommendations,
+            attachments=attachments, linked_tickets=linked_tickets, requires_approval=requires_approval,
         ),
-        questions=report_questions(), workspace_id=workspace_id, finish=finish,
+        questions=report_questions(has_tickets=bool(linked_tickets)), workspace_id=workspace_id, finish=finish,
     )
