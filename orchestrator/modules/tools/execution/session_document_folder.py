@@ -100,6 +100,31 @@ async def copy_to_session(workspace_id: Any, ticket: int, filename: Any) -> Opti
     return target
 
 
+async def _one_piece(data: bytes) -> AsyncIterator[bytes]:
+    yield data
+
+
+async def write_to_session(workspace_id: Any, ticket: int, filename: Any, data: bytes) -> Optional[str]:
+    """Write ``data`` as ``sessions/<ticket>/<filename>`` (PRD-255 US-012's previews); the path, or ``None``.
+
+    The same folder rule as the copy: a bare file name, in the ticket's own folder of
+    ``workspace_id``. A refusal or a failed write is logged and answers ``None``.
+    """
+    target = session_copy_path(ticket, filename)
+    if target is None:
+        logger.warning("[session-folder] %r is not a bare file name: nothing written for ticket %s", filename, ticket)
+        return None
+    try:
+        written = await WorkspaceClient(str(workspace_id)).write_binary(target, _one_piece(data))
+    except Exception:
+        logger.exception("[session-folder] ticket %s's file %s could not be written", ticket, target)
+        return None
+    if not written.get("success"):
+        logger.warning("[session-folder] ticket %s's folder is not writable (%s): %s", ticket, target, written.get("error"))
+        return None
+    return target
+
+
 async def with_session_copy(result: Any, caller_context: Any, workspace_id: Any) -> Any:
     """``result`` with the copy's path on its first row when a session's ticket made it; a new dict."""
     ticket = session_ticket(caller_context)
@@ -114,4 +139,4 @@ async def with_session_copy(result: Any, caller_context: Any, workspace_id: Any)
 
 
 __all__ = ["COPY_NOTE", "SESSION_COPY_KEY", "copy_to_session", "session_copy_path", "session_ticket",
-           "with_session_copy"]
+           "with_session_copy", "write_to_session"]

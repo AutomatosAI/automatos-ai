@@ -20,9 +20,10 @@ import re
 from typing import Optional
 
 # What paperwork for a customer is called, and the asking that makes one.
-_PAPER = (r"(?P<kind>letters?|invoices?|quotes?|quotations?|estimates?|proposals?|agreements?|contracts?|"
-          r"flyers?|leaflets?|posters?|brochures?|price ?lists?|welcome sheets?|receipts?|newsletters?|"
-          r"one-pagers?|menus?)")
+PAPER_KINDS = (r"letters?|invoices?|quotes?|quotations?|estimates?|proposals?|agreements?|contracts?|"
+               r"flyers?|leaflets?|posters?|brochures?|price ?lists?|welcome sheets?|receipts?|newsletters?|"
+               r"one-pagers?|menus?")
+_PAPER = rf"(?P<kind>{PAPER_KINDS})"
 _MAKE = (r"\b(?:make|write|draft|create|prepare|produce|generate|design|put together|draw up|knock up|mock up|"
          r"do (?:me |us )?(?:a|an|the))\b")
 _ASKS_FOR = re.compile(_MAKE + r"[^.!?\n]{0,80}?\b" + _PAPER + r"\b", re.I)
@@ -42,11 +43,16 @@ TEAM_NOTE = (
 )
 
 
+def keeps_it_with_auto(text: object) -> bool:
+    """The owner keeps the work with Auto: "do it yourself", "don't bother the team"."""
+    return bool(_AUTO_ITSELF.search(str(text or "")))
+
+
 def asks_for_paperwork(text: object) -> Optional[str]:
     """The kind of customer paperwork ``text`` asks to be made ("price list"), or None: a
     question about one, a message that keeps it with Auto, or nothing of the kind."""
     said = str(text or "")
-    if _AUTO_ITSELF.search(said):
+    if keeps_it_with_auto(said):
         return None
     found = _ASKS_FOR.search(said)
     return " ".join(found.group("kind").lower().split()) if found else None
@@ -65,4 +71,4 @@ def team_note(text: object) -> Optional[str]:
     return f"{TEAM_NOTE.format(article=article, kind=kind)}\n\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}"
 
 
-__all__ = ["TEAM_NOTE", "asks_for_paperwork", "team_note"]
+__all__ = ["PAPER_KINDS", "TEAM_NOTE", "asks_for_paperwork", "keeps_it_with_auto", "team_note"]

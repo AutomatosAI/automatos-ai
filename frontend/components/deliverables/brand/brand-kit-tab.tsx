@@ -4,14 +4,16 @@
  * PRD-251B US-B301 — the Brand kit tab: one brand kit, on its own Deliverables tab, for
  * Templates and Socials alike (it replaces the BrandKitDialog everywhere; Template Studio
  * and Socials link here). Always visible: everyone in the workspace reads it, and owners
- * and admins (workspace:manage) change it. The basics, the design system (PRD-255: colour
- * roles, type, spacing and logo, logo variants, locale), the style references and what Auto
+ * and admins (workspace:manage) change it. The brand board (PRD-255 US-010: the kit on one
+ * page, drawn again after each save, to download as a PDF or a PNG), the basics, the design
+ * system (PRD-255: colour roles, type, spacing and logo, logo variants, locale), the style references and what Auto
  * takes from them, the owner's voice examples (PRD-251C US-C406), and the AI tools.
  */
 import { useWorkspace } from '@/components/workspace-provider'
 import { useBrandStyle } from '@/hooks/use-brand-style'
 import { canEditBrandKit } from '../socials/socials-status'
 import { BrandAiTools } from './brand-ai-tools'
+import { BrandBoardPreview } from './brand-board-preview'
 import { BrandKitBasics } from './brand-kit-basics'
 import { BrandKitDesign } from './brand-kit-design'
 import { BrandReferences } from './brand-references'
@@ -35,6 +37,7 @@ export function BrandKitTab() {
         </p>
         {!canEdit && <p className="mt-1 text-xs text-muted-foreground">{READ_ONLY_NOTE}</p>}
       </div>
+      <BrandBoardPreview version={form.boardVersion} />
       <BrandKitBasics form={form} canEdit={canEdit} />
       <BrandKitDesign form={form} canEdit={canEdit} />
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">

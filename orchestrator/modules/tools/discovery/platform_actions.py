@@ -20,6 +20,7 @@ from .actions_brand_kit_update import (  # night 9b, PRD-255: left actions_docum
     register_brand_kit_get_action,
     register_brand_kit_update_action,
 )
+from .actions_brand_proposals import register_brand_proposal_actions  # PRD-255 US-014: the designer's card
 from .actions_workspace import register_workspace_actions_defs
 from .actions_memory_store import register_store_memory_action
 from .actions_monitoring import register_monitoring_actions
@@ -70,6 +71,7 @@ def _register_documents_actions(registry: ActionRegistry) -> None:
     register_documents_actions(registry)
     register_brand_kit_get_action(registry)
     register_brand_kit_update_action(registry)
+    register_brand_proposal_actions(registry)
 
 
 def register_all_actions(registry: ActionRegistry) -> None:

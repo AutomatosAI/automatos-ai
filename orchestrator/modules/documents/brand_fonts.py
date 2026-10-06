@@ -15,7 +15,8 @@ brand file inline, inside media-render's limit.
 
 At render time :func:`brand_kit_for_media_render` inlines every uploaded brand
 file as a data: URI: the logo, the logo mark (into ``logo_mark_url``), the logo
-for dark backgrounds (PRD-255 FR-9, into ``logo_dark_url``) and the
+for dark backgrounds (PRD-255 FR-9, into ``logo_dark_url``), the one-colour logo
+(into ``logo_mono_url``: the brand board shows it, PRD-255 US-009) and the
 fonts (``font_files`` becomes ``[{family, weight, style, data_uri}]``), the
 shapes ``core/media_render_bundle.py`` reads. A render reads only what its
 bundle carries (D9), so the fonts never have to be fetched.
@@ -55,7 +56,9 @@ WOFF2_COLLECTION_FLAVOR = 0x74746366  # "ttcf"
 MAX_FONT_BYTES = 2 * 1024 * 1024  # 2 MB: a full Latin face is 20-200 KB in woff2
 MAX_FONT_FAMILY_CHARS = 64
 # The stored logo variants a social render inlines: (the field the bundle reads, the kit's stored path).
-INLINED_LOGOS = (("logo_mark_url", "logo_mark_path"), ("logo_dark_url", "logo_dark_path"))
+INLINED_LOGOS = (
+    ("logo_mark_url", "logo_mark_path"), ("logo_dark_url", "logo_dark_path"), ("logo_mono_url", "logo_mono_path"),
+)
 
 
 class BrandFontError(ValueError):
@@ -165,7 +168,7 @@ def brand_kit_for_media_render(kit: Dict[str, Any]) -> Dict[str, Any]:
 
     The logo as :func:`brand_kit_for_render` inlines it, an uploaded logo mark
     in ``logo_mark_url``, an uploaded logo for dark backgrounds in
-    ``logo_dark_url``, and ``font_files`` as ``[{family, weight, style,
+    ``logo_dark_url``, an uploaded one-colour logo in ``logo_mono_url``, and ``font_files`` as ``[{family, weight, style,
     data_uri}]``. A stored file whose bytes are gone is left out (a font) or
     left as the kit had it (a mark, a dark logo); the template's fallbacks apply.
     """

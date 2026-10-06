@@ -9,7 +9,10 @@ Block types (PRD-167 S2): ``heading``, ``text``, ``table``, ``image`` (incl. log
 ``source="brand_logo"``), ``variable``, ``page_break``, ``section``; PRD-243 adds
 ``data_table`` — a table whose ROWS come from a ``data.*`` list supplied at
 generation time (invoice line items, report metrics), the gap the invoice and
-report presets could not be built without.
+report presets could not be built without. PRD-255 (US-009) adds ``brand``: one
+part of the brand board (the logo, its variants, the colour roles, the type scale,
+the spacing, the voice, the applications), drawn from the brand kit itself, with
+no chip and no data field.
 
 Inline content is a list of *runs*: ``text`` runs (with marks) and ``variable`` runs —
 the chips that resolve from profiles/workspace/brand/date at render time.
@@ -21,7 +24,7 @@ swallow").
 
 from __future__ import annotations
 
-from typing import Annotated, List, Literal, Optional, Union
+from typing import Annotated, List, Literal, Optional, Union, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -183,6 +186,22 @@ class PageBreakBlock(_Base):
     id: str
 
 
+# PRD-255 US-009: the parts of the brand board, each drawn from the kit (``brand_board``).
+BrandPart = Literal["logo", "variants", "colours", "type", "spacing", "voice", "applications"]
+BRAND_PARTS = get_args(BrandPart)
+
+
+class BrandBlock(_Base):
+    """One part of the brand board, laid out from the brand kit itself (PRD-255 US-009).
+
+    It holds no chip and no data field: what it prints is the kit (FR-10), so the
+    Template Studio shows it read-only and an agent has nothing to fill."""
+
+    type: Literal["brand"] = "brand"
+    id: str
+    part: BrandPart
+
+
 class SectionBlock(_Base):
     """A titled grouping container. Renders its (optional) title as a heading and then
     its child blocks. Sections may nest."""
@@ -203,6 +222,7 @@ Block = Annotated[
         DataTableBlock,
         PageBreakBlock,
         SectionBlock,
+        BrandBlock,
     ],
     Field(discriminator="type"),
 ]
@@ -235,6 +255,9 @@ __all__ = [
     "DataTableBlock",
     "PageBreakBlock",
     "SectionBlock",
+    "BrandBlock",
+    "BrandPart",
+    "BRAND_PARTS",
     "Block",
     "BlockDocument",
 ]

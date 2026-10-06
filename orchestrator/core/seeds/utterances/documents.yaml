@@ -26,6 +26,39 @@
 version: 1
 category: documents
 actions:
+  platform_create_template:
+  - text: make a quote template in our brand
+    source: example
+  - text: create a price list template
+    source: example
+  - text: copy the invoice starter so we can customise it
+    source: example
+  - text: build us a proposal template
+    source: authored
+  - text: new template for purchase orders
+    source: authored
+  - text: set up a branded letterhead template
+    source: authored
+  - text: design a template for our monthly report
+    source: authored
+  - text: i need a statement of work template
+    source: authored
+  - text: make a copy of the letter starter i can change
+    source: authored
+  - text: create a docx template for meeting minutes
+    source: authored
+  - text: add a new excel template for the price list
+    source: authored
+  - text: template for a delivery note please
+    source: authored
+  - text: start a fresh invoice layout based on the starter
+    source: authored
+  - text: can you make a receipt template
+    source: authored
+  - text: draft a one-page flyer template as a pdf
+    source: authored
+  - text: create a block template for client onboarding
+    source: authored
   platform_delete_document:
   - text: delete document 5
     source: example
@@ -256,6 +289,37 @@ actions:
     source: authored
   - text: any receipt or quote templates available?
     source: authored
+  platform_propose_brand_kit:
+  - text: propose the new brand kit to the owner
+    source: example
+  - text: send the owner the palette proposal to approve
+    source: example
+  - text: ask the owner to approve a less orange accent
+    source: example
+  - text: put the brand kit proposal on a card for approval
+    source: authored
+  - text: show the owner the proposed colours before saving
+    source: authored
+  - text: file a proposal card with the new type scale
+    source: authored
+  - text: let the owner sign off the brand changes first
+    source: authored
+  - text: propose a calmer palette drawn from the logo
+    source: authored
+  - text: get approval for the new accent colour
+    source: authored
+  - text: send the brand board from the proposal to the owner
+    source: authored
+  - text: ask them to approve the kit before i change it
+    source: authored
+  - text: propose more space between sections
+    source: authored
+  - text: draft a brand kit change for the owner to review
+    source: authored
+  - text: card the owner with the proposed fonts
+    source: authored
+  - text: propose the revised kit after their feedback
+    source: authored
   platform_read_document:
   - text: read the rest of that document
     source: example
@@ -292,6 +356,39 @@ actions:
   - text: read document 6 page by page
     source: authored
   - text: continue reading the contract from page 2
+    source: authored
+  platform_render_preview:
+  - text: show me page 1 of the brand board
+    source: example
+  - text: render the invoice template with the proposed colours
+    source: example
+  - text: look at page 2 of the report I just made
+    source: example
+  - text: draw the letter template so i can see it
+    source: authored
+  - text: preview the brand board as a picture
+    source: authored
+  - text: let me see how the proposal template looks
+    source: authored
+  - text: render page 3 of that pdf
+    source: authored
+  - text: what does the invoice look like with the new navy?
+    source: authored
+  - text: snapshot the first page of the quote template
+    source: authored
+  - text: check how the report deliverable came out
+    source: authored
+  - text: png of the letterhead page please
+    source: authored
+  - text: show the contract template rendered with our brand kit
+    source: authored
+  - text: try the type scale change on the report template and show me
+    source: authored
+  - text: visual preview of the document i generated
+    source: authored
+  - text: open a picture of page one of the branded letter
+    source: authored
+  - text: how would the invoice look with a warmer accent colour?
     source: authored
   platform_reprocess_document:
   - text: reprocess document 3
@@ -331,6 +428,37 @@ actions:
   - text: refresh the embeddings on that file
     source: authored
   - text: reprocess document 2 from scratch
+    source: authored
+  platform_save_approved_brand_kit:
+  - text: the owner approved the brand kit proposal, save it
+    source: example
+  - text: apply the approved palette to the brand kit
+    source: example
+  - text: save the kit change the owner signed off
+    source: example
+  - text: they said approve, now save the brand kit
+    source: authored
+  - text: commit the approved proposal to the kit
+    source: authored
+  - text: the card came back approved so apply it
+    source: authored
+  - text: save the proposal from my ticket's card
+    source: authored
+  - text: store the brand changes the owner agreed to
+    source: authored
+  - text: apply the brand kit proposal now it's approved
+    source: authored
+  - text: owner approved, update the kit
+    source: authored
+  - text: write the approved colours into the brand kit
+    source: authored
+  - text: make the approved kit live
+    source: authored
+  - text: finalise the approved brand proposal
+    source: authored
+  - text: save what the owner approved on the card
+    source: authored
+  - text: the brand proposal is approved, save it to the kit
     source: authored
   platform_search_documents:
   - text: what do the docs say about our refund policy?
@@ -411,6 +539,39 @@ actions:
   - text: our brand voice should sound friendly and precise
     source: authored
   - text: set up our brand kit
+    source: authored
+  platform_update_template:
+  - text: add a terms section to our quote template
+    source: example
+  - text: change the price list template's table columns
+    source: example
+  - text: rename the proposal template
+    source: example
+  - text: edit the quote template
+    source: authored
+  - text: put our bank details at the bottom of the invoice copy
+    source: authored
+  - text: update the sample data on the report template
+    source: authored
+  - text: change the heading on the letter template
+    source: authored
+  - text: move the logo to the right in our proposal template
+    source: authored
+  - text: tweak the price list layout
+    source: authored
+  - text: add a signature block to the contract template
+    source: authored
+  - text: fix the columns in the order template
+    source: authored
+  - text: retag the quote template as sales
+    source: authored
+  - text: change the category of that template to invoice
+    source: authored
+  - text: swap the intro text in the brochure template
+    source: authored
+  - text: make the totals row bold in our invoice copy
+    source: authored
+  - text: update the template we made yesterday
     source: authored
   platform_upload_document:
   - text: add this FAQ to the knowledge base

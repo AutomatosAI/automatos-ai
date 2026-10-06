@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from core.models.core import Agent, Skill, agent_skills
+from core.seeds.seed_brand_designer import seed_brand_designer
 from core.seeds.seed_builtin_skills import ensure_builtin_skill
 
 logger = logging.getLogger(__name__)
@@ -351,7 +352,8 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
     """Create or return the Auto agent for a workspace.
 
     Safe to call multiple times — returns existing agent if already seeded.
-    Also ensures the platform-management skill is assigned to Auto.
+    Also ensures the platform-management skill is assigned to Auto, and the
+    workspace's Brand designer is seeded (PRD-255 US-011, insert-if-absent).
     """
     slug = f"auto-{workspace_id}"
 
@@ -399,4 +401,20 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
     if platform_skill:
         _assign_skill_to_agent(db, agent, platform_skill)
 
+    # PRD-255 US-011: every workspace that has its Auto has its Brand designer.
+    _seed_workspace_designer(db, workspace_id)
+
     return agent
+
+
+def _seed_workspace_designer(db: Session, workspace_id: UUID) -> None:
+    """Seed the workspace's Brand designer in its own savepoint.
+
+    A failure is logged and rolled back to the savepoint: it never costs the
+    workspace its Auto, whose seed the callers commit right after this.
+    """
+    try:
+        with db.begin_nested():
+            seed_brand_designer(db, workspace_id)
+    except Exception:
+        logger.exception("Brand designer: seeding failed for workspace %s; Auto is seeded without it", workspace_id)

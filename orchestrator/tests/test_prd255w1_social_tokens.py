@@ -93,7 +93,8 @@ HARBOURLINE = {"name": "Harbourline Coffee Roasters", "primary_color": "#1E3A5F"
 # Every token name brand_tokens emitted on the base (PRD-251): all 18 templates read them.
 BASE_TOKENS = {"primary", "secondary", "accent", "text", "body-font", "heading-font"} | set(STAGE_TOKENS) | set(PAPER_TOKENS)
 DARK_STAGES = {"app-promo", "cinematic-product-promo", "data-story", "ui-story-promo",
-               "photo-headline", "photo-highlights", "photo-offer", "photo-only", "photo-review", "before-after"}
+               "photo-headline", "photo-highlights", "photo-offer", "photo-only", "photo-review", "before-after",
+               "brand-board"}  # PRD-255 US-009: the board shows the logo on the dark stage
 # A task card in the promos' mock app screen keeps the screen's own sizes: its 40-character
 # titles fill two lines of a 288 px card.
 MOCK_SCREEN = {slug: {".card .ty", ".card .t", ".card .ag"} for slug in ("ui-story-promo", "cinematic-product-promo")}
@@ -198,7 +199,7 @@ def _style(html: str) -> str:
 
 def test_every_seeded_template_scales_every_font_size_by_the_kits_type_scale():
     starters = social_starters()
-    assert len(starters) == 18
+    assert len(starters) == 19  # PRD-255 US-009: the brand board too
     for starter in starters:
         css = _style(starter["blocks"]["html"])
         assert "--display-scale: var(--brand-display-scale, 1);" in css, starter["slug"]

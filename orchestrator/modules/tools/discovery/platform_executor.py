@@ -57,8 +57,7 @@ from modules.tools.discovery.handlers_documents import (
     search_documents,
     list_templates,
     get_template_schema,
-    get_brand_kit_tool,  # PRD-251 US-115
-    update_brand_kit_tool,  # PRD-251 US-115
+    get_brand_kit_tool, update_brand_kit_tool,  # PRD-251 US-115
 )
 from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
     list_channels,
@@ -67,10 +66,9 @@ from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
     start_channel,
     stop_channel,
 )
-from modules.tools.discovery.handlers_widgets import (  # PRD-143 S10
-    get_widget_config,
-    update_widget_config,
-)
+from modules.tools.discovery.handlers_widgets import get_widget_config, update_widget_config  # PRD-143 S10
+from modules.tools.discovery.handlers_render_preview import render_preview  # PRD-255 US-012
+from modules.tools.discovery.handlers_template_writes import create_template, update_template  # PRD-255 US-013
 from modules.tools.discovery.handlers_workspace import (
     get_workspace_info,
     get_memory_stats,
@@ -82,16 +80,9 @@ from modules.tools.discovery.handlers_workspace import (
     list_system_settings,  # PRD-143 S11
     update_system_setting,  # PRD-143 S11
 )
-from modules.tools.discovery.handlers_members import (  # PRD-143 S11
-    list_members,
-    invite_member,
-    set_member_role,
-    remove_member,
-)
-from modules.tools.discovery.handlers_api_keys import (  # PRD-143 S11
-    list_api_keys,
-    revoke_api_key,
-)
+from modules.tools.discovery.handlers_members import list_members, invite_member, set_member_role, remove_member  # PRD-143 S11
+from modules.tools.discovery.handlers_brand_proposals import propose_brand_kit, save_approved_brand_kit  # PRD-255 US-014
+from modules.tools.discovery.handlers_api_keys import list_api_keys, revoke_api_key  # PRD-143 S11
 from modules.tools.discovery.handlers_monitoring import (
     get_logs,
     list_services,
@@ -142,6 +133,7 @@ from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
 )
 from modules.tools.discovery.handlers_board_task_review import create_board_task  # F180: the owner's review kept
 from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
+from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
     list_board_tasks,
@@ -931,6 +923,7 @@ class PlatformActionExecutor:
         return Cleared(action_def, full_autonomy, approved_via_grant_id, human_directed)
 
     @follows_the_owner  # F241/F280/F281/F289 (night 8): a call in the owner's chat follows their words
+    @carries_the_session_ticket  # PRD-255 US-012: the session's ticket, server-side, to the tools that write there
     async def execute(
         self,
         action_name: str,
@@ -1353,9 +1346,12 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_search_documents": or_past_work(owners_passages_only("results")(search_documents)),  # F305
     "platform_list_templates": list_templates,
     "platform_get_template_schema": get_template_schema,
+    "platform_render_preview": render_preview,  # PRD-255 US-012: a page into the session's folder
+    "platform_create_template": create_template, "platform_update_template": update_template,  # PRD-255 US-013
     # PRD-251 US-115: the brand kit (the REST routes' functions)
-    "platform_get_brand_kit": get_brand_kit_tool,
-    "platform_update_brand_kit": update_brand_kit_tool,
+    "platform_get_brand_kit": get_brand_kit_tool, "platform_update_brand_kit": update_brand_kit_tool,
+    # PRD-255 US-014 (FR-11): the designer's proposal card, and the save of the proposal the owner approved
+    "platform_propose_brand_kit": propose_brand_kit, "platform_save_approved_brand_kit": save_approved_brand_kit,
     # PRD-251 US-116 (S4.1): Socials drafts. No tool approves, schedules or publishes.
     "platform_create_social_post": create_social_post,
     "platform_update_social_post": update_social_post,

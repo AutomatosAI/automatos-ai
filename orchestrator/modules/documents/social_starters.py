@@ -18,6 +18,8 @@ Highlights, Before / after and Just the photo, for any business. Each shows a
 photo slot behind its words (an upload, a Library file or an AI image), with the
 words on the brand's ink so they read over any photo; with no photo, the brand's
 backdrop. Their sizes are the feed post, the story, the square and the link card.
+The brand board (PRD-255 US-009): the kit as one card, the logo on light and on
+dark, the colours with their hex codes and the type, from the kit's tokens alone.
 
 Each is two seed files under ``templates/social/``: ``<slug>.html``, the
 composition, and ``<slug>.json``: its name, description, format, category and
@@ -76,7 +78,11 @@ SOCIAL_PHOTO_STARTER_SLUGS: Tuple[str, ...] = (
     "before-after",
     "photo-only",
 )
-SOCIAL_STARTER_SLUGS: Tuple[str, ...] = SOCIAL_VIDEO_STARTER_SLUGS + SOCIAL_IMAGE_STARTER_SLUGS + SOCIAL_PHOTO_STARTER_SLUGS
+# PRD-255 US-009: the brand board as a card (4:5 and 9:16), drawn from the kit's tokens alone.
+SOCIAL_BRAND_STARTER_SLUGS: Tuple[str, ...] = ("brand-board",)
+SOCIAL_STARTER_SLUGS: Tuple[str, ...] = (
+    SOCIAL_VIDEO_STARTER_SLUGS + SOCIAL_IMAGE_STARTER_SLUGS + SOCIAL_BRAND_STARTER_SLUGS + SOCIAL_PHOTO_STARTER_SLUGS
+)
 # The composition's own keys in a seed file: every block the contract takes but
 # the html, which is the seed's .html file. The row fields describe the row, and
 # ``preview`` is the media-render CI job's. A seed file carries nothing else.
@@ -128,6 +134,7 @@ def social_starters(fmt: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 __all__ = [
+    "SOCIAL_BRAND_STARTER_SLUGS",
     "SOCIAL_IMAGE_STARTER_SLUGS",
     "SOCIAL_PHOTO_STARTER_SLUGS",
     "SOCIAL_STARTER_SLUGS",

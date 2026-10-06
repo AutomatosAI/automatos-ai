@@ -74,6 +74,15 @@ export interface PageBreakBlock {
   id: string
 }
 
+// PRD-255 US-009: one part of the brand board, drawn from the brand kit itself (no chips, no data).
+export type BrandPart = 'logo' | 'variants' | 'colours' | 'type' | 'spacing' | 'voice' | 'applications'
+
+export interface BrandBlock {
+  type: 'brand'
+  id: string
+  part: BrandPart
+}
+
 export interface SectionBlock {
   type: 'section'
   id: string
@@ -90,6 +99,7 @@ export type Block =
   | DataTableBlock
   | PageBreakBlock
   | SectionBlock
+  | BrandBlock
 
 export interface BlockDocument {
   version: number

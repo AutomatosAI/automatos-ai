@@ -40,6 +40,7 @@ import { insertToken, newBlockId, parseInline, serializeInline } from './inline'
 import type {
   Block,
   BlockType,
+  BrandPart,
   HeadingBlock,
   ImageBlock,
   Inline,
@@ -283,6 +284,8 @@ function makeBlock(type: BlockType): Block {
       return { type, id }
     case 'section':
       return { type, id, title: 'Section', children: [] }
+    case 'brand':
+      return { type, id, part: 'colours' }
   }
 }
 
@@ -325,6 +328,18 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   variable: 'Variable',
   page_break: 'Page break',
   section: 'Section',
+  brand: 'Brand board',
+}
+
+// PRD-255 US-009: what each brand-board part shows; the kit draws it, so it is read-only here.
+const BRAND_PART_LABELS: Record<BrandPart, string> = {
+  logo: 'The logo, large, with the brand name and tagline',
+  variants: 'The logo on light, on dark and in one colour',
+  colours: 'The colour roles, with their hex codes',
+  type: 'The type scale, with samples',
+  spacing: 'The spacing grid and the logo clear space',
+  voice: 'The tone words and their meanings',
+  applications: 'An invoice, a letter and a social card in the brand',
 }
 
 // ---- recursive list ----
@@ -370,6 +385,11 @@ export function BlockEditor({ blocks, variables, onChange }: BlockEditorProps) {
           {block.type === 'variable' && <VariableBlockEditor block={block} onChange={(b) => updateAt(i, b)} variables={variables} />}
           {block.type === 'data_table' && <DataTableEditor block={block} onChange={(b) => updateAt(i, b)} />}
           {block.type === 'page_break' && <p className="text-xs italic text-muted-foreground">Forces a new page when rendered.</p>}
+          {block.type === 'brand' && (
+            <p className="text-xs italic text-muted-foreground">
+              {BRAND_PART_LABELS[block.part]}: drawn from your brand kit. Change the kit to change it.
+            </p>
+          )}
           {block.type === 'section' && (
             <div className="space-y-2">
               <Input

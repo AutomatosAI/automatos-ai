@@ -6,6 +6,7 @@
  * (PUT palette {role: ""}, merged key by key on the server) and reads the kit back, so the
  * role shows the colour it now derives from the kit's four colours. A 422 from the save's
  * contrast check names a role (loc ['palette', role]): its message shows under that swatch.
+ * A reset is stored at once, so `onStored` runs after it (the brand board redraws, US-010).
  */
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
@@ -40,7 +41,7 @@ function without(errors: RoleErrors, role: BrandPaletteRole): RoleErrors {
   return Object.fromEntries(Object.entries(errors).filter(([key]) => key !== role))
 }
 
-export function useBrandPalette(setKit: Dispatch<SetStateAction<BrandKit | null>>) {
+export function useBrandPalette(setKit: Dispatch<SetStateAction<BrandKit | null>>, onStored: () => void) {
   const [roleErrors, setRoleErrors] = useState<RoleErrors>({})
   const [resetting, setResetting] = useState<BrandPaletteRole | null>(null)
 
@@ -56,6 +57,7 @@ export function useBrandPalette(setKit: Dispatch<SetStateAction<BrandKit | null>
       const fresh = await templateBlocksApi.getBrandKit()
       setKit((k) => (k ? withPaletteFrom(k, fresh, role) : k))
       setRoleErrors((errors) => without(errors, role))
+      onStored()
       toast.success(`${role} follows the kit's colours again`)
     } catch (e: any) {
       setRoleErrors(roleErrorsFrom(e))

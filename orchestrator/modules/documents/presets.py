@@ -425,6 +425,37 @@ MEETING_NOTES_BLOCKS = _doc(
     ),
 )
 
+# PRD-255 US-009: the brand board, the kit on one page. Its parts are ``brand`` blocks, each
+# drawn from the kit itself (blocks/brand_board.py): no chip and no data field to fill. Not a
+# category preset: it is a starter of its own, seeded beside them (seed_templates).
+BRAND_BOARD_CATEGORY = "brand"
+
+
+def _brand(bid: str, part: str) -> Dict[str, Any]:
+    return {"type": "brand", "id": bid, "part": part}
+
+
+BRAND_BOARD = {
+    "category": BRAND_BOARD_CATEGORY,
+    "name": "Brand Board",
+    "description": (
+        "Your brand kit on one page: the logo and its variants on light and dark, the colour roles with their "
+        "hex codes, the type scale, the spacing, the tone words and three applications. Drawn from the kit; "
+        "nothing to fill in."
+    ),
+    "format": "pdf",
+    "includes": ["The logo, large, and its variants", "Colour roles with hex codes", "The type scale with samples",
+                 "Spacing and logo clear space", "Tone words with meanings", "An invoice, a letter and a social card"],
+    "blocks": _doc(
+        _brand("board-logo", "logo"),  # the logo, large, beside the title, the name and the tagline
+        _brand("board-colours", "colours"),
+        _section("board-row-1", None, _brand("board-variants", "variants"), _brand("board-voice", "voice")),
+        _section("board-row-2", None, _brand("board-type", "type"), _brand("board-spacing", "spacing")),
+        _brand("board-applications", "applications"),
+    ),
+    "sample_data": {},
+}
+
 PRESETS: List[Dict[str, Any]] = [LETTER, INVOICE, REPORT, PROPOSAL, CONTRACT, DATA, GENERAL]
 PRESET_BY_CATEGORY: Dict[str, Dict[str, Any]] = {p["category"]: p for p in PRESETS}
 CATEGORIES: List[str] = [p["category"] for p in PRESETS]
@@ -454,5 +485,5 @@ def preset_payload(preset: Dict[str, Any]) -> Dict[str, Any]:
 
 
 __all__ = [
-    "MEETING_NOTES_BLOCKS", "PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "letterhead", "preset_for", "preset_payload",
+    "BRAND_BOARD", "BRAND_BOARD_CATEGORY", "MEETING_NOTES_BLOCKS", "PRESETS", "PRESET_BY_CATEGORY", "CATEGORIES", "letterhead", "preset_for", "preset_payload",
 ]

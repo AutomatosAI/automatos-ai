@@ -571,13 +571,20 @@ def test_the_bundle_stages_the_mark_and_falls_back_to_the_logo():
     assert 'src="assets/brand/logo-mark.png"' in parsed.composition.html
 
 
+# PRD-255 US-009 (FR-10): the brand board exists to show the logo as uploaded, on light and on dark.
+LOGO_AS_UPLOADED = {"brand-board"}
+
+
 def test_every_seeded_template_shows_the_mark_where_it_showed_the_logo():
     # PRD-255 FR-9: a dark stage shows {{ brand.logo_on_dark }}, which is the mark unless the
     # kit has a logo for dark backgrounds (test_prd255w1_social_tokens.py).
     for starter in social_starters():
         html = starter["blocks"]["html"]
         assert "{{ brand.logo_mark }}" in html or "{{ brand.logo_on_dark }}" in html, starter["slug"]
-        assert "{{ brand.logo }}" not in html, starter["slug"]
+        if starter["slug"] in LOGO_AS_UPLOADED:
+            assert "{{ brand.logo }}" in html and "{{ brand.logo_mark }}" not in html, starter["slug"]
+        else:
+            assert "{{ brand.logo }}" not in html, starter["slug"]
 
 
 def test_the_put_saves_the_new_fields_and_keeps_the_stored_files(api):

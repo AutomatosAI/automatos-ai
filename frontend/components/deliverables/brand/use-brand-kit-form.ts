@@ -4,7 +4,9 @@
  * PRD-251B US-B301 — the brand kit's basics as the Brand kit tab edits them (it replaces
  * the BrandKitDialog): the kit loaded from GET /api/documents/brand-kit with the D5 fields
  * filled in, the prefill suggestions, the logo, the logo mark and the logo's variants, the
- * colour roles (PRD-255), and Save (PUT /api/documents/brand-kit).
+ * colour roles (PRD-255), and Save (PUT /api/documents/brand-kit). `boardVersion` counts the
+ * changes the server has stored (a save, an image or a font file uploaded or removed, a
+ * colour role reset), so the brand board (PRD-255 US-010) is drawn again after each.
  */
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
@@ -80,6 +82,7 @@ function useKitSave(
   blocked: boolean,
   setKit: Dispatch<SetStateAction<BrandKit | null>>,
   setRoleErrors: (errors: RoleErrors) => void,
+  onSaved: () => void,
 ) {
   const [saving, setSaving] = useState(false)
   const save = async () => {
@@ -90,6 +93,7 @@ function useKitSave(
       // server-managed; the update route ignores them (validate_brand_kit strips them).
       setKit(withD5Fields(await templateBlocksApi.updateBrandKit(kitToSave(kit))))
       setRoleErrors({})
+      onSaved()
       toast.success('Brand kit saved')
     } catch (e: any) {
       setRoleErrors(roleErrorsFrom(e))
@@ -107,11 +111,15 @@ export function useBrandKitForm() {
   const [suggestions, setSuggestions] = useState<BrandSuggestions>({})
   // Each load remounts the fields that keep their own typed text (the voice lists).
   const [loads, setLoads] = useState(0)
+  const [boardVersion, setBoardVersion] = useState(0)
+  const redrawBoard = useCallback(() => setBoardVersion((n) => n + 1), [])
 
   const patch = useCallback((p: Partial<BrandKit>) => setKit((k) => (k ? { ...k, ...p } : k)), [])
   const patchCompany = (p: Partial<BrandKit['company']>) => setKit((k) => (k ? { ...k, company: { ...k.company, ...p } } : k))
-  const images = useBrandImages(patch)
-  const palette = useBrandPalette(setKit)
+  // An image or a font file is stored by the server as it is uploaded or removed: the board redraws.
+  const patchStored = useCallback((p: Partial<BrandKit>) => { patch(p); redrawBoard() }, [patch, redrawBoard])
+  const images = useBrandImages(patchStored)
+  const palette = useBrandPalette(setKit, redrawBoard)
   useUploadedFontFaces(kit?.font_files ?? NO_FONTS)
 
   useEffect(() => {
@@ -136,12 +144,12 @@ export function useBrandKitForm() {
   }
 
   const voiceProblem = kit ? toneWordsProblem(kit.voice.tone) : null
-  const { saving, save } = useKitSave(kit, !!voiceProblem, setKit, palette.setRoleErrors)
+  const { saving, save } = useKitSave(kit, !!voiceProblem, setKit, palette.setRoleErrors, redrawBoard)
 
   return {
-    kit, loadError, saving, suggestions, loads, ...images, palette, voiceProblem,
+    kit, loadError, saving, suggestions, loads, boardVersion, ...images, palette, voiceProblem,
     hasSuggestions: Object.keys(suggestions).length > 0,
-    patch, patchCompany, applySuggestions, save,
+    patch, patchStored, patchCompany, applySuggestions, save,
   }
 }
 

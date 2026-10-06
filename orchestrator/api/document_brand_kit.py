@@ -8,6 +8,8 @@ actually brand a document:
 * ``POST/GET/DELETE /brand-kit/logo`` — upload a PNG/JPEG logo into platform
   storage (the renderers inline it; see ``modules.documents.brand_logo``),
   stream it back for the UI, remove it;
+* ``GET /brand-kit/board?format=pdf|png`` — the brand board (PRD-255 US-010),
+  printed from the caller's kit in a child process (``modules.documents.brand_board_render``);
 * ``GET /brand-kit/suggestions`` — prefill candidates from what the workspace
   already knows about itself (workspace name, the onboarding business profile,
   the signed-in user) so the kit starts filled rather than blank.
@@ -41,7 +43,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -50,14 +52,20 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from modules.documents.brand_board_render import BOARD_MEDIA_TYPES, BOARD_PDF, render_board_isolated
 from modules.documents.brand_kit import BrandKitPatch
 from modules.documents.brand_system import brand_kit_view
+from modules.documents.thumbnails.render import ThumbnailError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["document-generation"])
 
 _MANAGE = Depends(require_workspace_permission("workspace:manage"))
 SOCIAL_HANDLES_FIELD = "social_handles"
+# The board is printed live from the kit: never kept by a cache, so a save shows at once.
+BOARD_CACHE_CONTROL = "private, no-store"
+BOARD_FILE_STEM = "brand-board"
+BOARD_RENDER_FAILED = "The brand board could not be drawn. Try again in a moment."
 
 
 def _handles_hidden(workspace) -> bool:
@@ -127,6 +135,45 @@ def update_brand_kit_endpoint(
         return _shown(ws, brand_kit_view(update_brand_kit(db, ws, patch)))
     except ValidationError as e:
         raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": brand_kit_errors(e)})
+
+
+# ------------------------------------------------------------------
+# The brand board: the kit on one page (PRD-255 US-010)
+# ------------------------------------------------------------------
+
+
+@router.get("/brand-kit/board")
+def get_brand_board(
+    fmt: str = Query(BOARD_PDF, alias="format"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Response:
+    """The brand board printed from the caller's own kit, as a PDF or a PNG (page 1).
+
+    A plain ``def``: the kit and its stored files are read synchronously, and the
+    print itself runs in a child process under a time limit (``render_board_isolated``),
+    never on the API process.
+    """
+    from modules.documents.brand_fonts import brand_kit_for_media_render
+    from modules.documents.brand_kit import get_brand_kit
+
+    if fmt not in BOARD_MEDIA_TYPES:
+        raise HTTPException(status_code=422, detail=f"format must be one of: {', '.join(BOARD_MEDIA_TYPES)}")
+    if not ctx.workspace_id:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    ws = _workspace_or_404(db, ctx.workspace_id)
+    kit = brand_kit_for_media_render(get_brand_kit(ws.settings))
+    try:
+        data = render_board_isolated(kit, fmt)
+    except ThumbnailError:
+        logger.exception("[BrandKit] the brand board (%s) could not be drawn for workspace %s", fmt, ws.id)
+        raise HTTPException(status_code=500, detail=BOARD_RENDER_FAILED) from None
+    disposition = f'inline; filename="{BOARD_FILE_STEM}.{fmt}"'
+    return Response(
+        content=data,
+        media_type=BOARD_MEDIA_TYPES[fmt],
+        headers={"Cache-Control": BOARD_CACHE_CONTROL, "Content-Disposition": disposition},
+    )
 
 
 # ------------------------------------------------------------------

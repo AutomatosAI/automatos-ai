@@ -52,6 +52,7 @@ from typing import Any, Dict
 from core.media_render_bundle import MAX_TOKEN_CHARS, TOKEN_UNSAFE
 
 from . import design_tokens as t
+from .brand_board_style import BOARD, BOARD_TOKENS
 from .page_starters import STARTER_RULES
 
 DEFAULT_FONT = "Inter, 'Segoe UI', system-ui, sans-serif"
@@ -154,6 +155,7 @@ def style_tokens(brand_kit: Dict[str, Any]) -> Dict[str, Any]:
         **asdict(design.palette),
         **_type_tokens(design),
         **_layout_tokens(design),
+        **BOARD_TOKENS,
         "font": font_stack(bk.get("font_family")),
         "footer_name": css_string(footer_name(bk)),
         "keep": KEEP_CLASS,
@@ -164,7 +166,7 @@ def style_tokens(brand_kit: Dict[str, Any]) -> Dict[str, Any]:
 def build_styles(brand_kit: Dict[str, Any]) -> str:
     """The stylesheet for a block document printed under ``brand_kit``. Pure."""
     tokens = style_tokens(brand_kit)
-    return "".join(sheet.substitute(tokens) for sheet in (_BASE, _TABLES, *STARTER_RULES))
+    return "".join(sheet.substitute(tokens) for sheet in (_BASE, _TABLES, *STARTER_RULES, BOARD))
 
 
 __all__ = [
