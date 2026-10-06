@@ -42,7 +42,8 @@ EVERY_FIELD = {
     "logo_url": "https://harbourline.ie/logo.png",
     "primary_color": "#0b2545",
     "secondary_color": "#13315c",
-    "accent_color": "#e0a458",
+    # F361: the third colour must read at 3:1 on the page when a save changes it (#e0a458 is 2.1:1).
+    "accent_color": "#9c5a14",
     "text_color": "#1b1b1b",
     "font_family": "Source Sans 3, sans-serif",
     "company": {"phone": "+353 21 400 1234"},
@@ -53,6 +54,7 @@ EVERY_FIELD = {
                        {"word": "local", "meaning": ""}],
               "banned_phrases": ["exquisite"], "sign_off": "Gerard, Harbourline"},
     "palette": {"accent": "#8a3b12", "heading": "#111111"},
+    "palette_source": {"accent": "set", "heading": "set"},
     "accent_use": "bold",
     "type_scale": {"h1": {"size_pt": 24, "line_pt": 30}},
     "spacing_unit_pt": 6,
@@ -136,7 +138,9 @@ def test_the_tool_never_sets_a_logo_variants_file(api):
 def test_an_unreadable_role_is_refused_with_its_ratio_and_nothing_is_saved(api):
     before = dict(api.workspace.settings["brand_kit"])
     result = _dispatch(api.db, "platform_update_brand_kit", {"palette": {"ink": "#eeeeee"}})
-    assert result["success"] is False and "ink on" in result["error"] and ":1" in result["error"]
+    # F366: the refusal names what the colour sits on in plain words, beside the role.
+    assert result["success"] is False and "ink is" in result["error"] and "on the page" in result["error"]
+    assert ":1" in result["error"]
     assert api.workspace.settings["brand_kit"] == before
 
 

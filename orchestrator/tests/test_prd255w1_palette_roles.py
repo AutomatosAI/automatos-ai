@@ -145,7 +145,8 @@ def test_a_stored_role_that_is_not_hex_costs_the_read_only_the_palette():
 @pytest.mark.parametrize("role", ["ink", "heading", "muted"])
 def test_a_text_role_under_4_5_to_1_on_the_paper_is_refused_naming_the_role_and_ratio(role):
     msg = _error_at(_refusal({"palette": {**WHITE_GROUNDS, role: LIGHT_GREY}}), "palette", role)
-    assert msg == f"{role} on paper is {_ratio_text(LIGHT_GREY, WHITE)}:1; text needs 4.5:1"
+    assert msg == (f"{role} is {_ratio_text(LIGHT_GREY, WHITE)}:1 on the page and table header fills "
+                   "(paper and surface_2, white); text needs 4.5:1")
 
 
 @pytest.mark.parametrize("role", ["accent", "accent_2"])
@@ -158,17 +159,21 @@ def test_an_accent_over_3_to_1_is_kept_for_large_text(role):
 @pytest.mark.parametrize("role", ["accent", "accent_2"])
 def test_an_accent_under_3_to_1_is_refused_naming_the_ratio(role):
     msg = _error_at(_refusal({"palette": {**WHITE_GROUNDS, role: PALE_GREY}}), "palette", role)
-    assert msg == f"{role} on paper is {_ratio_text(PALE_GREY, WHITE)}:1; text needs 4.5:1 (large text 3:1)"
+    assert msg == (f"{role} is {_ratio_text(PALE_GREY, WHITE)}:1 on the page and table header fills "
+                   "(paper and surface_2, white); text needs 4.5:1 (large text 3:1)")
 
 
 def test_text_is_measured_on_the_table_fill_too():
     errors = _refusal({"palette": {"paper": WHITE, "surface_2": DARK_GREY, "heading": "#222222"}})
-    assert _error_at(errors, "palette", "heading").startswith("heading on surface_2 is ")
+    msg = _error_at(errors, "palette", "heading")
+    assert msg.startswith("heading is ") and f"on table header fills (surface_2, {DARK_GREY})" in msg
+    assert "on the page" not in msg  # it reads on the white page
 
 
 def test_a_dark_paper_fails_the_derived_ink_and_says_how_to_fix_it():
     msg = _error_at(_refusal({"palette": {"paper": BLACK}}), "palette", "ink")
-    assert msg.startswith("ink on ") and "derived from the kit's colours: set it, or choose a lighter" in msg
+    assert msg.startswith("ink is ") and "on the page (paper, black)" in msg
+    assert msg.endswith("derived from the kit's colours: set it, or choose a lighter page")
 
 
 def test_every_derived_palette_of_a_v1_kit_saves():
@@ -233,7 +238,8 @@ def test_a_put_that_fails_contrast_is_a_422_naming_the_role_and_saves_nothing(ap
     detail = refused.json()["detail"]
     assert detail["message"] == "Invalid brand kit"
     assert [(error["loc"], error["msg"]) for error in detail["errors"]] == [
-        (["palette", "ink"], f"ink on paper is {_ratio_text(LIGHT_GREY, WHITE)}:1; text needs 4.5:1"),
+        (["palette", "ink"], f"ink is {_ratio_text(LIGHT_GREY, WHITE)}:1 on the page and table header fills "
+                             "(paper and surface_2, white); text needs 4.5:1"),
     ]
     assert api.workspace.settings == before
 

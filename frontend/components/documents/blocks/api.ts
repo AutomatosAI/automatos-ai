@@ -31,8 +31,11 @@ export const BRAND_LOGO_MONO_PATH = '/api/documents/brand-kit/logo-mono'
 export const BRAND_BOARD_PATH = '/api/documents/brand-kit/board'
 export type BrandBoardFormat = 'pdf' | 'png'
 
-/** The board's path in ``format``; ``version`` changes the path so a fetch hook draws it again after a save. */
-export function brandBoardPath(format: BrandBoardFormat, version?: number): string {
+/**
+ * The board's path in ``format``; ``version`` (the kit's `updated_at`, F372) changes the path so a
+ * fetch hook draws it again whenever the kit changed, by any route.
+ */
+export function brandBoardPath(format: BrandBoardFormat, version?: string): string {
   const query = new URLSearchParams({ format })
   if (version !== undefined) query.set('v', String(version))
   return `${BRAND_BOARD_PATH}?${query.toString()}`
@@ -66,7 +69,9 @@ export const templateBlocksApi = {
 
   // Brand kit (defaults merged in).
   getBrandKit: () => apiClient.get<BrandKit>('/api/documents/brand-kit'),
-  updateBrandKit: (patch: Partial<BrandKit>) => apiClient.put<BrandKit>('/api/documents/brand-kit', patch),
+  // F372: `if_updated_at`, the stamp the page loaded: a kit changed since is a 409 and nothing is saved.
+  updateBrandKit: (patch: Partial<BrandKit> & { if_updated_at?: string }) =>
+    apiClient.put<BrandKit>('/api/documents/brand-kit', patch),
   getBrandSuggestions: () =>
     apiClient.get<{ suggestions: BrandSuggestions }>('/api/documents/brand-kit/suggestions'),
 

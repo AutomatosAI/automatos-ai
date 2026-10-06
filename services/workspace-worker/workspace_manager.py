@@ -99,6 +99,9 @@ class WorkspaceManager:
         # Approved Socials posts, copied from object storage (orchestrator modules/socials/workspace_copies.py).
         "socials/images",
         "socials/videos",
+        # Generated documents (PDF, Word, spreadsheets), copied in when registered
+        # (orchestrator modules/documents/workspace_documents.py, F370).
+        "documents",
     )
 
     def ensure_workspace_exists(self) -> bool:

@@ -254,7 +254,9 @@ PROPOSE_BRAND_KIT_SPEC: Dict[str, Any] = {
         "Propose a brand kit change to the owner: the kit fields to change and one line on why. It is "
         "checked as the kit checks it, the Brand Board is drawn from it into your folder (NOT saved), and "
         "a card goes on this ticket listing what changes and linking the board, with the options Approve "
-        "and Revise. Then end your turn: the answer resumes you. Any answer other than Approve is a revision."
+        "and Revise. Then end your turn: the answer resumes you. Any answer other than Approve is a revision. "
+        "Every call puts a real card in front of the owner: there is no test mode, and a why that says the "
+        "card is a probe or a test is refused. A proposal the kit refuses comes back with its reasons."
     ),
     "input_schema": _schema({
         "brand_kit": {"type": "object", "description": "The kit fields to change (palette, accent_use, "

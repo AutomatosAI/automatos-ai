@@ -20,7 +20,7 @@ Pure: no IO.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Iterator, List
 
 from .locale_text import currency_prefix
 
@@ -56,6 +56,30 @@ def amount_text(value: Any, currency: str = "") -> str:
     return f"{sign}{currency_prefix(currency)}{whole}.{decimals.ljust(MIN_DECIMALS, '0')}"
 
 
+def is_bare_amount(value: Any) -> bool:
+    """Whether ``value`` is a bare number (311, 311.0, "269.00"): one that would print with no currency
+    sign unless the kit has a currency. Pure."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return False
+    return bool(_BARE_NUMBER.match(value.strip() if isinstance(value, str) else str(value)))
+
+
+def _bare_amounts(value: Any) -> Iterator[str]:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if is_amount_key(key) and is_bare_amount(item):
+                yield str(key)
+            yield from _bare_amounts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _bare_amounts(item)
+
+
+def bare_amount_keys(data: Any) -> List[str]:
+    """The amount keys in ``data`` (rows of a table too) sent as bare numbers, each once, in order. Pure."""
+    return list(dict.fromkeys(_bare_amounts(data)))
+
+
 def field_text(key: Any, value: Any, currency: str = "") -> str:
     """A value as printed under ``key``: an amount key's bare number with two decimals (in
     ``currency`` when the kit has one), else ``str``."""
@@ -64,4 +88,4 @@ def field_text(key: Any, value: Any, currency: str = "") -> str:
     return amount_text(value, currency) if is_amount_key(key) else str(value)
 
 
-__all__ = ["AMOUNT_WORDS", "amount_text", "field_text", "is_amount_key"]
+__all__ = ["AMOUNT_WORDS", "amount_text", "bare_amount_keys", "field_text", "is_amount_key", "is_bare_amount"]

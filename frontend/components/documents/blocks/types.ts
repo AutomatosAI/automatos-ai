@@ -135,6 +135,8 @@ export interface BrandKit {
   logo_path: string
   primary_color: string
   secondary_color: string
+  // F361: "the third colour" (social videos tint with it), not the documents' accent:
+  // that is palette.accent.
   accent_color: string
   text_color: string
   // The body font (PRD-251 D5's body_font): every renderer reads this key.
@@ -179,6 +181,8 @@ export interface BrandKit {
   // An ISO 4217 code such as GBP; empty: amounts print with no currency.
   currency?: string
   date_style?: BrandDateStyle
+  // F372: when the kit last changed, by any route (ISO 8601; empty: not saved since). Server-set.
+  updated_at?: string
 }
 
 export type BrandTypeStepName = 'display' | 'h1' | 'h2' | 'h3' | 'body' | 'small' | 'caption'

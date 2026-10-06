@@ -15,6 +15,7 @@ import { canEditBrandKit } from '../socials/socials-status'
 import { BrandAiTools } from './brand-ai-tools'
 import { BrandBoardPreview } from './brand-board-preview'
 import { BrandKitBasics } from './brand-kit-basics'
+import { KitChangedElsewhere } from './brand-kit-changed-elsewhere'
 import { BrandKitDesign } from './brand-kit-design'
 import { BrandReferences } from './brand-references'
 import { BrandStyleProfileCard } from './brand-style-profile'
@@ -37,7 +38,8 @@ export function BrandKitTab() {
         </p>
         {!canEdit && <p className="mt-1 text-xs text-muted-foreground">{READ_ONLY_NOTE}</p>}
       </div>
-      <BrandBoardPreview version={form.boardVersion} />
+      <BrandBoardPreview changes={form.boardVersion} />
+      <KitChangedElsewhere form={form} canEdit={canEdit} />
       <BrandKitBasics form={form} canEdit={canEdit} />
       <BrandKitDesign form={form} canEdit={canEdit} />
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">

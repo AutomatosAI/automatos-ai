@@ -109,7 +109,7 @@ IMAGE_STARTER_NAMES = [
 # PRD-251B (Gerard's pass): the photo cards, after the eight.
 PHOTO_STARTER_NAMES = ["Photo + headline", "Offer", "Review", "Highlights", "Before / after", "Just the photo"]
 # PRD-255 US-009: the brand board as a card, before the photo cards.
-BRAND_STARTER_NAMES = ["Brand board"]
+BRAND_STARTER_NAMES = ["Brand board (social)"]  # F368: "Brand board" until night 10c
 ALL_STARTER_NAMES = STARTER_NAMES + IMAGE_STARTER_NAMES + BRAND_STARTER_NAMES + PHOTO_STARTER_NAMES
 REFERENCES = _ROOT / "docs" / "PRDS" / "prd251-reference"
 REFERENCE_OF = {

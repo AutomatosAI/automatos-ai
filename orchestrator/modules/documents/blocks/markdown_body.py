@@ -22,6 +22,11 @@ text starts its own block first.
   bleach: no raw HTML, no images, links only to http(s) and mailto).
 * :func:`legacy_render_data` hands a legacy template that HTML for each section.
 * :func:`blocks_from_markdown` is the same text as blocks, for the block renderer.
+* :func:`view_html` is the text as the report view shows it, for the picture of a
+  report's first page (F374).
+
+F374: a list nests two or three spaces a level at any depth, and a fenced block is
+left as written.
 """
 from __future__ import annotations
 
@@ -55,6 +60,9 @@ _TASK_PREFIX = re.compile(r"^\s*\[([ xX])\]\s+")
 _LIST_LINE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+")
 _TABLE_LINE = re.compile(r"^\s*\|")
 _HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}\s")
+_FENCE_LINE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+# Python-Markdown nests a list item four spaces under its parent.
+NESTED_INDENT = 4
 _WRAPPING_P = re.compile(r"^<p>(.*)</p>$", re.S)
 
 ALLOWED_TAGS = frozenset({
@@ -64,6 +72,8 @@ ALLOWED_TAGS = frozenset({
 ALLOWED_ATTRIBUTES = {
     "a": ["href"], "ul": ["class"], "ol": ["class"], "li": ["class"], "span": ["class"],
 }
+VIEW_TAGS = ALLOWED_TAGS | {"img"}
+VIEW_ATTRIBUTES = {**ALLOWED_ATTRIBUTES, "img": ["src", "alt", "title"]}
 # Trusted, fixed CSS for the markup above; a legacy template's own styles stay in charge of the rest.
 BODY_CSS = (
     "<style>"
@@ -85,6 +95,8 @@ BODY_CSS = (
 def _line_kind(line: str) -> str:
     if not line.strip():
         return "blank"
+    if _FENCE_LINE.match(line):
+        return "fence"
     if _HEADING_LINE.match(line):
         return "heading"
     if _TABLE_LINE.match(line):
@@ -94,24 +106,57 @@ def _line_kind(line: str) -> str:
     return "indented" if line[:1].isspace() else "text"
 
 
-def _nested(line: str) -> str:
-    """A list item indented by one to three spaces under another is nested (markdown wants four)."""
-    indent = len(_LIST_LINE.match(line).group(1))
-    return " " * 4 + line.lstrip() if 0 < indent < 4 else line
+def _in_list(line: str, kind: str, items: List[int]) -> Tuple[str, List[int]]:
+    """A list line re-indented four spaces a level, the nesting Python-Markdown reads.
+
+    Agents write CommonMark, as the report view reads it: an item (or an item's next
+    line) sits under an open item when it starts at or past that item's text column,
+    two or three spaces in, at any depth. ``items`` holds the text columns of the open
+    items, outermost first; the new list is returned. Pure.
+    """
+    indent = len(line) - len(line.lstrip())
+    depth = 0
+    while depth < len(items) and indent >= items[depth]:
+        depth += 1
+    if kind == "indented":
+        extra = indent - items[depth - 1] if depth else 0
+        return (" " * (NESTED_INDENT * depth + extra) + line.lstrip() if depth else line), items
+    column = len(_LIST_LINE.match(line).group(0))
+    return " " * (NESTED_INDENT * depth) + line.lstrip(), [*items[:depth], column]
+
+
+def _dedented(line: str, indent: int) -> str:
+    """The line without up to ``indent`` leading spaces (a fence's own indent). Pure."""
+    return line[min(indent, len(line) - len(line.lstrip(" "))):]
 
 
 def as_agents_mean(text: str) -> str:
-    """The text with each list, table and heading starting its own block, and two-space
-    nesting made four. Pure."""
+    """The text with each list, table, heading and code fence starting its own block, and
+    lists nested two or three spaces a level made four. A fenced block keeps its lines as
+    written, moved to the margin, where Python-Markdown reads a fence. Pure."""
     out: List[str] = []
     previous = "blank"
+    items: List[int] = []
+    fence: Optional[Tuple[str, int]] = None  # the open fence's marker and indent
     for line in text.replace("\r\n", "\n").split("\n"):
+        if fence is not None:
+            closes = line.strip().startswith(fence[0])
+            out.extend([_dedented(line, fence[1]), ""] if closes else [_dedented(line, fence[1])])
+            fence, previous = (None, "blank") if closes else (fence, previous)
+            continue
         kind = _line_kind(line)
-        opens_block = kind in ("list", "table", "heading") and previous == "text"
+        opens_block = kind in ("list", "table", "heading", "fence") and previous == "text"
         leaves_block = kind == "text" and previous in ("list", "table")
         if opens_block or leaves_block:
             out.append("")
-        out.append(_nested(line) if kind == "list" and previous == "list" else line)
+        if kind == "list" or (kind == "indented" and items):
+            line, items = _in_list(line, kind, items)
+        elif kind != "blank":
+            items = []
+        if kind == "fence":
+            marker = _FENCE_LINE.match(line)
+            fence, line = (marker.group(1), marker.start(1)), line.lstrip(" ")
+        out.append(line)
         previous = kind
     return "\n".join(out)
 
@@ -155,10 +200,14 @@ class _DocumentMarkdown(Extension):
         md.treeprocessors.register(_Capture(md), "f298_capture", CAPTURE_PRIORITY)
 
 
-def _converted(text: str) -> Tuple[str, Element]:
-    md = markdown.Markdown(
-        extensions=["tables", "sane_lists", "nl2br", _DocumentMarkdown()],
-    )
+# A printed document keeps each line the agent wrote on its own line (F298).
+PRINT_EXTENSIONS = ("tables", "sane_lists", "nl2br")
+# The report view (react-markdown with GFM) reads a single line break as a space, and fences.
+VIEW_EXTENSIONS = ("tables", "fenced_code", "sane_lists")
+
+
+def _converted(text: str, extensions: Tuple[str, ...] = PRINT_EXTENSIONS) -> Tuple[str, Element]:
+    md = markdown.Markdown(extensions=[*extensions, _DocumentMarkdown()])
     html = md.convert(as_agents_mean(text))
     # Python-Markdown skips its processors for blank text, so nothing was captured.
     tree = getattr(md, "captured_tree", None)
@@ -172,6 +221,14 @@ def _clean(html: str) -> str:
 def markdown_html(text: str) -> Markup:
     """The text as safe HTML for a legacy template to print as it is."""
     return Markup(f'{BODY_CSS}<div class="doc-md">{_clean(_converted(text)[0])}</div>')
+
+
+def view_html(text: str) -> str:
+    """The text as the report view shows it, sanitised: for the picture of a report's first
+    page (F374). The view's rules, not a print's: a single line break is a space, a fenced
+    block is code, an image stays (the page renderer fetches nothing)."""
+    html = _converted(text, VIEW_EXTENSIONS)[0]
+    return bleach.clean(html, tags=VIEW_TAGS, attributes=VIEW_ATTRIBUTES, strip=True)
 
 
 def inline_html(text: str) -> Markup:
@@ -318,6 +375,6 @@ def legacy_render_data(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 __all__ = [
-    "markdown_html", "inline_html", "blocks_from_markdown", "legacy_render_data", "section_text",
+    "markdown_html", "inline_html", "view_html", "blocks_from_markdown", "legacy_render_data", "section_text",
     "as_agents_mean", "UNCHECKED_BOX", "CHECKED_BOX",
 ]

@@ -10,6 +10,8 @@ The Brand designer changes the kit only after the owner approves a proposal card
   caller's own ticket (``kind='question'``, options Approve / Revise, free text always
   allowed) that lists what changes and links the board. The card carries the proposal
   in its ``details`` (``brand_proposal_card.PROPOSAL_MARKER``). Nothing else is written.
+  There is no test mode: a ``why`` that says the card is not real ("VALIDATION PROBE
+  ONLY", F365) files nothing.
 * **Save.** Only the newest proposal card on the caller's own ticket, only when its
   answer is a plain Approve given on the Questions tab (its route requires a workspace
   owner or admin, ``api/approval_grants.py``; a Telegram reply proves no role and never
@@ -49,6 +51,11 @@ TERMINAL_STATUSES = ("done", "failed", "cancelled")
 
 NEEDS_A_TICKET = ("{tool} works the ticket you are on (a session's, or a board card you are running), and this "
                   "call has none. Nothing was {done}.")
+# F362 (night 10c): a proposal with no ticket is Auto's, in a chat. Told only "this call has none", Auto
+# offered to "ask a human" three times; the ask goes to the designer on a ticket.
+TO_THE_DESIGNER = ("A brand kit change asked for in a chat is the {name}'s work, not yours: file the owner's ask "
+                   "for them with platform_create_task (assigned_agent_name \"{name}\", the owner's words exactly) and "
+                   "start it. Their proposal comes to the owner as a card to approve.")
 PROPOSAL_NOT_AN_OBJECT = "brand_kit is an object of kit fields, the ones platform_update_brand_kit takes."
 UNKNOWN_FIELDS = ("The kit has no field {fields}: propose only the fields platform_update_brand_kit takes. "
                   "Nothing was asked.")
@@ -214,11 +221,26 @@ def _ask(params: Dict[str, Any], prepared: Dict[str, Any]) -> Dict[str, Any]:
             "details": {card.PROPOSAL_MARKER: prepared["marker"]}}
 
 
+def _to_the_designer(db: Session, workspace_id: UUID) -> str:
+    """Where a proposal with no ticket goes: the workspace's Brand designer, by name (F362)."""
+    from core.seeds.seed_brand_designer import BRAND_DESIGNER_NAME, find_brand_designer
+
+    try:
+        designer = find_brand_designer(db, workspace_id)
+    except Exception:
+        logger.exception("[F362] the Brand designer could not be read for workspace %s", workspace_id)
+        designer = None
+    return TO_THE_DESIGNER.format(name=getattr(designer, "name", None) or BRAND_DESIGNER_NAME)
+
+
 async def propose_brand_kit(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Check a kit proposal, draw the Brand Board from it unsaved, and file the Approve / Revise card on the ticket."""
     ticket, in_session = ticket_of(params)
     if ticket is None:
-        return _failed(NEEDS_A_TICKET.format(tool="propose_brand_kit", done="asked"))
+        return _failed(f"{NEEDS_A_TICKET.format(tool='propose_brand_kit', done='asked')} {_to_the_designer(db, workspace_id)}")
+    not_real = card.not_a_real_proposal(params.get(WHY_PARAM))
+    if not_real:
+        return _failed(card.NOT_A_REAL_PROPOSAL.format(words=not_real))
     task, problem = _open_ticket(db, workspace_id, ticket)
     if task is None:
         return _failed(problem or TASK_NOT_FOUND.format(ticket=ticket))

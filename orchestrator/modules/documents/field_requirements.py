@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional
 from core.social_templates import is_social_format
 from modules.documents.blocks import BlockValidationError, validate_blocks
 from modules.documents.blocks.schema import DataTableBlock, SectionBlock, TableBlock, VariableBlock, VariableRun
-from modules.documents.variables.catalog import DYNAMIC_PREFIX
+from modules.documents.blocks.table_cells import QUANTITY_KEY, UNIT_KEY, UNIT_NOTE
+from modules.documents.variables.catalog import DYNAMIC_PREFIX, SIGN_OFF_PATH, SIGNER_FALLBACK_TEXT, SIGNER_KEY
 
 DATA = "data"
 # ``{{ client.address | default('') }}``: the field and the text printed in its place
@@ -46,12 +47,16 @@ def _answer(required: set, fallbacks: Dict[str, str], tables: List[Dict[str, Any
 
 
 def _table(block: DataTableBlock) -> Dict[str, Any]:
-    return {
+    """A table's columns, the ones that may stay empty, and (F369) the row keys it reads beside its columns:
+    a table with a quantity column prints a row's ``unit`` after it."""
+    keys = [column.key for column in block.columns]
+    table: Dict[str, Any] = {
         "field": block.path[len(DYNAMIC_PREFIX):],
-        "columns": [column.key for column in block.columns],
+        "columns": keys,
         "optional_columns": [column.key for column in block.columns if column.optional],
         "required": block.empty_text is None,
     }
+    return {**table, "also_reads": {UNIT_KEY: UNIT_NOTE}} if QUANTITY_KEY in keys else table
 
 
 def _chips(block: Any) -> List[Any]:
@@ -82,6 +87,8 @@ def block_requirements(blocks: Any) -> Dict[str, Any]:
             if block.empty_text is None:
                 required.add(block.path)
         for chip in _chips(block):
+            if chip.path == SIGN_OFF_PATH:  # F364: a named signer (data.signer) signs in its place
+                fallbacks.setdefault(f"{DATA}.{SIGNER_KEY}", SIGNER_FALLBACK_TEXT)
             if chip.fallback is None:
                 required.add(chip.path)
             else:

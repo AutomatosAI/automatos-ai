@@ -228,7 +228,9 @@ def _voice_lines(kit: Dict[str, Any]) -> List[str]:
     name, signer = (kit.get("name") or "").strip(), sign_off_name(kit)
     return [f"- Write as {name}." if name else "",
             _tone_line(kit),
-            (f'- Sign it "{signer}". Never leave a placeholder such as [Your name].' if signer else ""),
+            (f'- Sign it "{signer}", unless the person names who signs ("sign it from me, Gerard"): then sign '
+             "with that name, and send it as signer in a document's data. Never leave a placeholder such as "
+             "[Your name]." if signer else ""),
             (f"- Never use these words or phrases: {_quoted(voice['banned_phrases'])}."
              if voice.get("banned_phrases") else "")]
 

@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from ..amounts import field_text
+from ..bundled_fonts import families
 from ..locale_text import currency_of
 from ..variables.catalog import walk_dynamic
 from . import design_tokens as tokens
@@ -46,7 +46,7 @@ from .letterhead_run import company_of, logo_of, split_letterhead
 from .optional_parts import block_is_blank, row_is_blank
 from .page_style import footer_name
 from .schema import BlockDocument
-from .table_cells import unfilled_cells
+from .table_cells import cell_text, unfilled_cells
 from .text_body import BULLETED, MISSING, PARAGRAPH, Group, block_groups, kept_runs
 
 logger = logging.getLogger(__name__)
@@ -183,16 +183,6 @@ def _add_inline(paragraph, content: list, values: Dict[str, str], unresolved: Li
                 run.font.name = font
 
 
-def _cell_value(row: Any, key: str, index: int, currency: str = "") -> str:
-    if isinstance(row, dict):
-        value = row.get(key, "")
-    elif isinstance(row, (list, tuple)):
-        value = row[index] if index < len(row) else ""
-    else:
-        value = row if index == 0 else ""
-    return field_text(key, value, currency)  # F347: two decimals; PRD-255: the kit's currency, never another
-
-
 def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List[str], font: Optional[str], kit=None):
     """Rows from the per-generation ``data.*`` list (PRD-243); mirrors the HTML renderer's
     empty policy (unresolved unless ``empty_text`` is set; F356: an ``empty_text`` of ""
@@ -209,7 +199,7 @@ def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List
     unresolved.extend(unfilled_cells(block, rows))  # F345: every row fills every required column
     currency = currency_of(kit)
     if block.id == KPIS_ID:
-        tiles = [[_cell_value(row, col.key, i, currency) for i, col in enumerate(block.columns)] for row in rows]
+        tiles = [[cell_text(row, col.key, i, currency) for i, col in enumerate(block.columns)] for row in rows]
         kpi_tiles(doc, tiles, kit or {}, font)
         return
     table = doc.add_table(rows=len(rows) + 1, cols=len(block.columns))
@@ -226,7 +216,7 @@ def _fill_data_table(table, block, rows: List[Any], font: Optional[str], currenc
             run.font.name = font
     for r_idx, row in enumerate(rows, start=1):
         for c_idx, col in enumerate(block.columns):
-            run = table.cell(r_idx, c_idx).paragraphs[0].add_run(_cell_value(row, col.key, c_idx, currency))
+            run = table.cell(r_idx, c_idx).paragraphs[0].add_run(cell_text(row, col.key, c_idx, currency))
             if font:
                 run.font.name = font
 
@@ -274,11 +264,12 @@ def _add_text_body(doc, groups: List[Group], font: Optional[str]) -> None:
             _add_segs(paragraph, line, font)
 
 
-def _add_heading(doc, block, values, unresolved, font) -> None:
-    """A heading in its level's style (PRD-255: the kit's heading colour and type scale; the title over an accent rule)."""
+def _add_heading(doc, block, values, unresolved) -> None:
+    """A heading in its level's style (PRD-255: the kit's heading colour and type scale; the title over an accent rule).
+    F360: its runs name no font, so they take the style's: the kit's heading font when it sets one."""
     p = doc.add_heading(level=min(block.level, 9))
     p.clear()
-    _add_inline(p, block.content, values, unresolved, font)
+    _add_inline(p, block.content, values, unresolved, None)
 
 
 def _add_table(doc, block, values, unresolved, font, kit=None) -> None:
@@ -351,7 +342,7 @@ def _add_text_block(doc, block, values, unresolved, font) -> None:
 def _add_block(doc, block, values, brand_kit, unresolved, *, font, data=None):
     kind = block.type
     if kind == "heading":
-        return _add_heading(doc, block, values, unresolved, font)
+        return _add_heading(doc, block, values, unresolved)
     if kind in ("text", "variable"):
         return _add_text_block(doc, block, values, unresolved, font)
     if kind == "table":
@@ -433,8 +424,10 @@ def render_document_docx(
     document = Document()
     bk = brand_kit or {}
     # font_family may be a CSS stack ("Inter, 'Segoe UI', ..."); take the first family.
-    font_stack = (bk.get("font_family") or "").split(",")[0].strip().strip("'\"") or None
-    apply_styles(document, bk, font_stack)  # F356: the PDF's type, spacing and colours
+    font_stack = next(iter(families(bk.get("font_family"))), None)
+    # F360: the headings in the kit's heading font, as in the PDF (Word used the body font for them).
+    heading_font = next(iter(families(bk.get("heading_font"))), None)
+    apply_styles(document, bk, font_stack, heading_font)  # F356: the PDF's type, spacing and colours
 
     unresolved: List[str] = []
     head, rest = split_letterhead(doc_model.blocks)

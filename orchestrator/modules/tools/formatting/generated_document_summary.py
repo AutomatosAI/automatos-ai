@@ -18,6 +18,8 @@ that has to be cut leaves the share link out rather than cutting it mid-way.
 
 F331 (night 10): the summary also names the data keys the template had no place
 for, so an agent never reports a document done over a page that lacks them.
+F367 (night 10c): and the amounts that printed with no currency sign, the kit
+having none, with the one question to ask the owner.
 """
 from __future__ import annotations
 
@@ -37,6 +39,14 @@ UNUSED_KEYS_LINE = (
     "(platform_get_template_schema), or, for a PDF, with no template, which prints every key."
 )
 
+# F367: "Total due 269.00": the kit had no currency and nothing said so. Ask once, then the kit holds it.
+NO_CURRENCY_LINE = (
+    "NO CURRENCY SIGN: the brand kit has no currency, so these amounts printed as bare numbers: {keys}. "
+    "Ask the owner once which currency they bill in; save it as the brand kit's currency (platform_update_brand_kit, "
+    "currency such as GBP, or the owner sets it on the Brand kit page) and make the document again. Never add a "
+    "currency sign the owner did not give."
+)
+
 
 def _document(result: Dict[str, Any]) -> Dict[str, Any]:
     results = result.get("results")
@@ -54,6 +64,9 @@ def document_lines(doc: Dict[str, Any]) -> List[str]:
     unused = doc.get("unused_data_keys") or []
     if unused:
         lines.append(UNUSED_KEYS_LINE.format(kind=kind.upper(), keys=", ".join(str(key) for key in unused)))
+    unpriced = doc.get("amounts_without_currency") or []
+    if unpriced:
+        lines.append(NO_CURRENCY_LINE.format(keys=", ".join(str(key) for key in unpriced)))
     link = doc.get("open_url") or doc.get("app_url")
     if link:
         lines.append(

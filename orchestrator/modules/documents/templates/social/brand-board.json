@@ -1,5 +1,5 @@
 {
-  "name": "Brand board",
+  "name": "Brand board (social)",
   "description": "Your brand kit as one card: the logo on light and on dark, the colours with their hex codes and the type, all from the brand kit. Nothing to write: share it with anyone who makes things for you.",
   "format": "social_image",
   "category": "social",
@@ -66,9 +66,9 @@
     },
     "accent_label": {
       "type": "text",
-      "label": "Accent",
-      "description": "The name of the accent colour's swatch.",
-      "default": "Accent",
+      "label": "Third colour",
+      "description": "The name of the third colour's swatch.",
+      "default": "Third colour",
       "max_chars": 24
     },
     "paper_label": {

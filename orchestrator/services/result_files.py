@@ -65,6 +65,12 @@ _WHOLE_PATH_RE = re.compile(rf"^{_PATH}$")
 # file in it: #0234 wrote `workspace/decaf_colombia_margin.csv` for the file its
 # tool had saved as `decaf_colombia_margin.csv`, and the ticket said no such file.
 WORKSPACE_ROOT_NAME = "workspace"
+# F365 (night 10c, #2140): the folders the platform's own tools write at the
+# workspace root for a session. ``platform_submit_report`` (the session's
+# ``submit_report``) saves ``reports/<agent>/<when>_<title>.md``
+# (services/report_service.py) and answers with that path, which the session then
+# names in its result. Such a name is looked for from the root as well.
+PLATFORM_ROOT_FOLDERS = frozenset({"reports"})
 
 
 def named_files(text: str) -> List[str]:
@@ -104,16 +110,25 @@ def _session_places(name: str, base: str) -> List[str]:
     and, when the name is written from the deliverables root, from that root:
     night 5's #980 ran in ``sessions/980`` and named
     ``deliverables/sessions/980/…overview.md``, which the join alone looked for
-    as ``sessions/980/deliverables/sessions/980/…`` (F161)."""
+    as ``sessions/980/deliverables/sessions/980/…`` (F161). A name in a folder
+    the platform writes at the root, ``reports/…``, is looked for there too (F365)."""
     from services.cli_host_service import configured_workspace_dir
 
     places = [posixpath.normpath(posixpath.join(base, name))]
     root = configured_workspace_dir()
     head, _, rest = name.partition("/")
     rooted = rest if root and rest and head == posixpath.basename(root) else name
-    if rooted != name or rooted.startswith(base + "/"):
+    if rooted != name or rooted.startswith(base + "/") or _platform_written(rooted):
         places.append(posixpath.normpath(rooted))
     return list(dict.fromkeys(places))
+
+
+def _platform_written(name: str) -> bool:
+    """A name in a folder the platform's own tools write at the root (F365):
+    #2140's report, ``reports/brand-designer/…ticket-2140….md``, was looked for
+    only as ``sessions/2140/reports/…`` and the ticket went to review."""
+    head, _, rest = posixpath.normpath(name).partition("/")
+    return bool(rest) and head in PLATFORM_ROOT_FOLDERS
 
 
 def _workspace_places(name: str) -> List[str]:

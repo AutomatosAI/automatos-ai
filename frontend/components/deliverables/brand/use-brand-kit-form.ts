@@ -5,8 +5,10 @@
  * the BrandKitDialog): the kit loaded from GET /api/documents/brand-kit with the D5 fields
  * filled in, the prefill suggestions, the logo, the logo mark and the logo's variants, the
  * colour roles (PRD-255), and Save (PUT /api/documents/brand-kit). `boardVersion` counts the
- * changes the server has stored (a save, an image or a font file uploaded or removed, a
- * colour role reset), so the brand board (PRD-255 US-010) is drawn again after each.
+ * changes the page has stored (a save, an image or a font file uploaded or removed, a
+ * colour role reset): after each, the brand board (PRD-255 US-010) reads the kit's stamp again
+ * (F372; changes made elsewhere reach it through the stamp alone). F372 too: every save carries
+ * the stamp the page loaded (`sync`, use-kit-sync.ts), and `reload` reads the kit again.
  */
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
@@ -18,6 +20,7 @@ import type { BrandKit, BrandPaletteRole, BrandSuggestions } from '@/components/
 import { roleErrorsFrom, saveErrorMessage, type RoleErrors } from './save-errors'
 import { useBrandImages } from './use-brand-images'
 import { useBrandPalette } from './use-brand-palette'
+import { useKitSync, type KitSync } from './use-kit-sync'
 
 const SOURCE_LABEL: Record<string, string> = {
   business_profile: 'your business profile',
@@ -76,80 +79,112 @@ export function withSuggestions(kit: BrandKit, suggestions: BrandSuggestions): B
   }
 }
 
-/** Save: PUT the kit; a refusal names the fields, and each colour role it names shows under its swatch. */
+/** The status of a save refused because the kit changed since the page read it (F372). */
+const CONFLICT_STATUS = 409
+
+/**
+ * Save: PUT the kit with the stamp the page loaded (F372: a kit changed elsewhere since is a 409,
+ * and the page offers to reload or to save over it); a refusal names the fields, and each colour
+ * role it names shows under its swatch. `saveOver` sends no stamp: the owner chose to overwrite.
+ */
 function useKitSave(
   kit: BrandKit | null,
   blocked: boolean,
   setKit: Dispatch<SetStateAction<BrandKit | null>>,
   setRoleErrors: (errors: RoleErrors) => void,
+  sync: KitSync,
   onSaved: () => void,
 ) {
   const [saving, setSaving] = useState(false)
-  const save = async () => {
+  const store = async (expected: string | undefined) => {
     if (!kit || blocked) return
     setSaving(true)
     try {
       // The stored files (logo_path and its variants, logo_mark_path, font_files) are
       // server-managed; the update route ignores them (validate_brand_kit strips them).
-      setKit(withD5Fields(await templateBlocksApi.updateBrandKit(kitToSave(kit))))
+      const body = expected === undefined ? kitToSave(kit) : { ...kitToSave(kit), if_updated_at: expected }
+      const saved = withD5Fields(await templateBlocksApi.updateBrandKit(body))
+      setKit(saved)
+      sync.synced(saved)
       setRoleErrors({})
       onSaved()
       toast.success('Brand kit saved')
     } catch (e: any) {
-      setRoleErrors(roleErrorsFrom(e))
+      if (e?.status === CONFLICT_STATUS) sync.setConflict(true)
+      else setRoleErrors(roleErrorsFrom(e))
       toast.error(saveErrorMessage(e))
     } finally {
       setSaving(false)
     }
   }
-  return { saving, save }
+  return { saving, save: () => store(sync.loadedStamp), saveOver: () => store(undefined) }
+}
+
+/** The kit read from the server into the page: on load, and again on Reload (F372). */
+function useKitLoad(
+  setKit: Dispatch<SetStateAction<BrandKit | null>>,
+  showStored: (kit: BrandKit) => void,
+  synced: KitSync['synced'],
+) {
+  const [loadError, setLoadError] = useState<string | null>(null)
+  // Each load remounts the fields that keep their own typed text (the voice lists).
+  const [loads, setLoads] = useState(0)
+  const load = useCallback(async () => {
+    try {
+      const k = withD5Fields(await templateBlocksApi.getBrandKit())
+      setKit(k)
+      synced(k)
+      setLoads((n) => n + 1)
+      showStored(k)
+    } catch (e: any) {
+      setLoadError(e?.message || 'Failed to load brand kit')
+    }
+  }, [setKit, showStored, synced])
+  return { loadError, loads, load }
 }
 
 export function useBrandKitForm() {
   const [kit, setKit] = useState<BrandKit | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<BrandSuggestions>({})
-  // Each load remounts the fields that keep their own typed text (the voice lists).
-  const [loads, setLoads] = useState(0)
   const [boardVersion, setBoardVersion] = useState(0)
+  const sync = useKitSync()
+  const { markEdited, expectOwnChange } = sync
   const redrawBoard = useCallback(() => setBoardVersion((n) => n + 1), [])
+  // A change the page stored itself (an upload, a role reset): its new stamp is the page's own.
+  const ownStored = useCallback(() => { expectOwnChange(); redrawBoard() }, [expectOwnChange, redrawBoard])
 
-  const patch = useCallback((p: Partial<BrandKit>) => setKit((k) => (k ? { ...k, ...p } : k)), [])
-  const patchCompany = (p: Partial<BrandKit['company']>) => setKit((k) => (k ? { ...k, company: { ...k.company, ...p } } : k))
+  const patch = useCallback((p: Partial<BrandKit>) => { setKit((k) => (k ? { ...k, ...p } : k)); markEdited() }, [markEdited])
+  const patchCompany = (p: Partial<BrandKit['company']>) => {
+    setKit((k) => (k ? { ...k, company: { ...k.company, ...p } } : k))
+    markEdited()
+  }
   // An image or a font file is stored by the server as it is uploaded or removed: the board redraws.
-  const patchStored = useCallback((p: Partial<BrandKit>) => { patch(p); redrawBoard() }, [patch, redrawBoard])
+  const patchStored = useCallback((p: Partial<BrandKit>) => { setKit((k) => (k ? { ...k, ...p } : k)); ownStored() }, [ownStored])
   const images = useBrandImages(patchStored)
-  const palette = useBrandPalette(setKit, redrawBoard)
+  const palette = useBrandPalette(setKit, ownStored, markEdited)
   useUploadedFontFaces(kit?.font_files ?? NO_FONTS)
+  const { loadError, loads, load } = useKitLoad(setKit, images.showStored, sync.synced)
 
   useEffect(() => {
-    templateBlocksApi
-      .getBrandKit()
-      .then((loaded) => {
-        const k = withD5Fields(loaded)
-        setKit(k)
-        setLoads((n) => n + 1)
-        images.showStored(k)
-      })
-      .catch((e: any) => setLoadError(e?.message || 'Failed to load brand kit'))
+    void load()
     templateBlocksApi.getBrandSuggestions().then((r) => setSuggestions(r.suggestions || {})).catch(() => setSuggestions({}))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const applySuggestions = () => {
     if (!kit) return
-    setKit(withSuggestions(kit, suggestions))
+    patch(withSuggestions(kit, suggestions))
     const sources = Array.from(new Set(Object.values(suggestions).map((s) => SOURCE_LABEL[s.source] || s.source)))
     toast.success(`Filled empty fields from ${sources.join(' and ')}`)
   }
 
   const voiceProblem = kit ? toneWordsProblem(kit.voice.tone) : null
-  const { saving, save } = useKitSave(kit, !!voiceProblem, setKit, palette.setRoleErrors, redrawBoard)
+  const { saving, save, saveOver } = useKitSave(kit, !!voiceProblem, setKit, palette.setRoleErrors, sync, redrawBoard)
 
   return {
-    kit, loadError, saving, suggestions, loads, boardVersion, ...images, palette, voiceProblem,
+    kit, loadError, saving, suggestions, loads, boardVersion, ...images, palette, voiceProblem, sync,
     hasSuggestions: Object.keys(suggestions).length > 0,
-    patch, patchStored, patchCompany, applySuggestions, save,
+    patch, patchStored, patchCompany, applySuggestions, save, saveOver, reload: load,
   }
 }
 

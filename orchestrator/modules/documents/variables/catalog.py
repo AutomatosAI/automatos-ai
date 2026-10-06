@@ -41,7 +41,7 @@ CATALOG: List[VariableEntry] = [
     {"path": "brand.logo_url", "category": "brand", "label": "Brand logo URL", "sample": "/logo.png"},
     {"path": "brand.primary_color", "category": "brand", "label": "Primary color", "sample": "#1a1a2e"},
     {"path": "brand.secondary_color", "category": "brand", "label": "Secondary color", "sample": "#16213e"},
-    {"path": "brand.accent_color", "category": "brand", "label": "Accent color", "sample": "#0f3460"},
+    {"path": "brand.accent_color", "category": "brand", "label": "Third colour", "sample": "#0f3460"},
     {"path": "brand.font_family", "category": "brand", "label": "Font family", "sample": "Inter"},
     # PRD-255: who signs a letter: the brand voice's sign-off, else the person signing (user.name).
     {"path": "brand.sign_off", "category": "brand", "label": "Sign-off name", "sample": "The Acme team"},
@@ -63,6 +63,21 @@ KNOWN_PATHS = frozenset(CATALOG_BY_PATH)
 # dict (e.g. an agent calling generate_document), not from the static catalog. They are
 # *valid* paths (not authoring errors) but resolve to empty unless data supplies them.
 DYNAMIC_PREFIX = "data."
+
+
+# F364 (night 10c): "Sign it from me, Gerard" was signed with the kit's sign-off
+# ("Automatos AI"): a letter's signer came only from ``brand.sign_off``. A document's
+# data may name its signer (``data.signer``); where a template prints
+# ``brand.sign_off``, a named signer wins, then the kit's sign-off, then the person.
+SIGN_OFF_PATH = "brand.sign_off"
+SIGNER_KEY = "signer"
+SIGNER_FALLBACK_TEXT = "your brand kit's sign-off (else your name)"
+
+
+def signer_of(data: Any) -> str:
+    """The signer a document's data names (``data.signer``), trimmed; ``""`` without one."""
+    value = data.get(SIGNER_KEY) if isinstance(data, dict) else None
+    return value.strip() if isinstance(value, str) else ""
 
 
 def walk_dynamic(data: Any, path: str) -> Any:
@@ -110,10 +125,14 @@ __all__ = [
     "CATALOG_BY_PATH",
     "KNOWN_PATHS",
     "DYNAMIC_PREFIX",
+    "SIGNER_FALLBACK_TEXT",
+    "SIGNER_KEY",
+    "SIGN_OFF_PATH",
     "VariableEntry",
     "is_known_path",
     "is_dynamic_path",
     "is_valid_path",
     "is_blank",
+    "signer_of",
     "walk_dynamic",
 ]

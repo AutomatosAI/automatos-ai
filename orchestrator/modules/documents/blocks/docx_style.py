@@ -93,8 +93,9 @@ def _page(document: Any, design: t.Design) -> None:
             setattr(section, side, Mm(design.page_margin_mm))
 
 
-def apply_styles(document: Any, kit: Mapping[str, Any], font: Optional[str]) -> None:
-    """The page size and margins, and Normal, Heading 1-3 and Caption in the kit's type and colours."""
+def apply_styles(document: Any, kit: Mapping[str, Any], font: Optional[str], heading_font: Optional[str] = None) -> None:
+    """The page size and margins, and Normal, Heading 1-3 and Caption in the kit's type and colours.
+    Heading 1-3 take ``heading_font`` when the kit sets one, as the PDF's headings do (F360)."""
     from docx.shared import Pt
 
     design = t.design(kit)
@@ -105,7 +106,8 @@ def apply_styles(document: Any, kit: Mapping[str, Any], font: Optional[str]) -> 
     normal.paragraph_format.space_after = Pt(design.space(2))
     for name, step in STEP_STYLES.items():
         style = document.styles[name]
-        _set_font(style, font, design.type[step], roles.muted if step == "caption" else roles.heading)
+        family = font if step == "caption" else heading_font or font
+        _set_font(style, family, design.type[step], roles.muted if step == "caption" else roles.heading)
         before, after = STEP_GAPS[step]
         style.paragraph_format.space_before = Pt(design.space(before))
         style.paragraph_format.space_after = Pt(design.space(after))

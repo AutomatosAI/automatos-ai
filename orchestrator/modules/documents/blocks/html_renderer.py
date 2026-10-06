@@ -23,7 +23,6 @@ import html
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from ..amounts import field_text
 from ..locale_text import currency_of
 from ..variables.catalog import walk_dynamic
 from .brand_board_html import brand_part_html
@@ -32,7 +31,7 @@ from .optional_parts import block_is_blank, row_is_blank
 from .page_fonts import font_css
 from .page_style import KEEP_CLASS, KEEP_TOGETHER_MAX_HTML_CHARS, build_styles
 from .schema import BlockDocument
-from .table_cells import unfilled_cells
+from .table_cells import cell_text, unfilled_cells
 from .text_body import MARK_TAGS, block_groups, body_html, kept_runs, unresolved_html
 
 
@@ -104,16 +103,6 @@ def _render_table(block, values: Dict[str, str], unresolved: List[str]) -> str:
     return f'<table class="doc-table"{_tag(block)}>{"".join(rows_html)}</table>'
 
 
-def _cell_value(row: Any, key: str, index: int, currency: str = "") -> str:
-    if isinstance(row, dict):
-        value = row.get(key, "")
-    elif isinstance(row, (list, tuple)):
-        value = row[index] if index < len(row) else ""
-    else:
-        value = row if index == 0 else ""
-    return field_text(key, value, currency)  # F347: two decimals; PRD-255: the kit's currency, never another
-
-
 def _render_data_table(block, data: Optional[Dict[str, Any]], unresolved: List[str], currency: str = "") -> str:
     """Rows from the per-generation ``data.*`` list (PRD-243). Empty/missing is
     unresolved (a blocked document) unless the author allowed ``empty_text``.
@@ -134,7 +123,7 @@ def _render_data_table(block, data: Optional[Dict[str, Any]], unresolved: List[s
     body: List[str] = []
     for row in rows:
         cells = "".join(
-            f'<td style="text-align:{c.align}">{_esc(_cell_value(row, c.key, i, currency))}</td>'
+            f'<td style="text-align:{c.align}">{_esc(cell_text(row, c.key, i, currency))}</td>'
             for i, c in enumerate(block.columns)
         )
         body.append(f"<tr>{cells}</tr>")

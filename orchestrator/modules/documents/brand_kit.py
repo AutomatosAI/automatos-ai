@@ -46,11 +46,14 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Literal, Optional, Pattern, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Literal, Optional, Pattern, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
+from core.brand_palette import PALETTE_ROLES
 from core.media_render_bundle import FONT_FAMILY, FONT_STYLES, MAX_TOKEN_CHARS, TOKEN_UNSAFE
+from modules.documents.brand_palette_source import with_palette_resolved
 from modules.documents.brand_system import (
     DEFAULT_ACCENT_USE,
     DEFAULT_CURRENCY,
@@ -66,6 +69,7 @@ from modules.documents.brand_system import (
     LogoRules,
     ToneWord,
     TypeScale,
+    changed_kit_colours,
     currency_code,
     one_line_text,
     require_readable_palette,
@@ -127,9 +131,12 @@ GENERIC_HANDLE_RULE: Tuple[Pattern[str], str] = (
     "1 to 100 letters, digits, periods, hyphens or underscores",
 )
 
-# Written only by the upload and delete routes: a client patch never points the
-# kit at a stored file.
-SERVER_MANAGED_FIELDS = frozenset({"logo_path", "logo_mark_path", "logo_dark_path", "logo_mono_path", "font_files"})
+# Written only by the server: the stored files by the upload and delete routes (a client
+# patch never points the kit at a stored file), and ``updated_at`` by the kit's one writer.
+UPDATED_AT_FIELD = "updated_at"
+SERVER_MANAGED_FIELDS = frozenset(
+    {"logo_path", "logo_mark_path", "logo_dark_path", "logo_mono_path", "font_files", UPDATED_AT_FIELD}
+)
 # A patch merges into these records key by key (a type step field by field); every
 # other field it names is replaced.
 MERGED_RECORDS = ("company", "voice", "palette", "type_scale", "logo_rules")
@@ -283,6 +290,9 @@ class BrandKit(BaseModel):
     logo_path: str = ""
     primary_color: str = DEFAULT_PRIMARY
     secondary_color: str = DEFAULT_SECONDARY
+    # F361: "the third colour", not the documents' accent (that is ``palette.accent``):
+    # social videos tint and mark with it, the social brand board shows it, and
+    # {{brand.accent_color}} prints it. A save that changes it is contrast-checked.
     accent_color: str = DEFAULT_ACCENT
     text_color: str = DEFAULT_TEXT
     # The body font (PRD-251 D5's body_font): every renderer reads this key.
@@ -315,6 +325,10 @@ class BrandKit(BaseModel):
     # Locale: an ISO 4217 code (empty: no currency is printed, FR-7) and the date style.
     currency: str = DEFAULT_CURRENCY
     date_style: DateStyle = DEFAULT_DATE_STYLE
+    # F372: when the kit last changed, by any route (ISO 8601, UTC), stamped by
+    # :func:`save_brand_kit`; empty for a kit not saved since. The Brand kit page keys
+    # its brand board on it, so a change by Auto, the designer or the API redraws it.
+    updated_at: str = ""
 
     @field_validator("primary_color", "secondary_color", "accent_color", "text_color")
     @classmethod
@@ -391,6 +405,11 @@ class BrandKitPatch(BaseModel):
     ``platform_update_brand_kit``. The stored files (:data:`SERVER_MANAGED_FIELDS`)
     are not here: only their upload routes write them. A field this model does not
     know is dropped, as the PUT always did.
+
+    GET's answer may be sent back as it is: it changes nothing (F366). A colour role
+    goes back to derived when it is sent empty (``{"palette": {"accent": null}}``) or
+    marked so (``{"palette_source": {"accent": "derived"}}``); every role at once
+    with ``{"palette_source": "derived"}``.
     """
 
     name: Optional[str] = None
@@ -409,6 +428,10 @@ class BrandKitPatch(BaseModel):
     voice: Optional[dict] = None
     # PRD-255 FR-1: roles merge key by key; an empty role goes back to derived.
     palette: Optional[dict] = None
+    # F366: GET's palette_source, sent back: a role "derived" goes back to (or stays)
+    # derived unless the body changes its colour, "set" pins it, and the string
+    # "derived" is every role (modules/documents/brand_palette_source.py). Not stored.
+    palette_source: Optional[Union[Literal["derived"], Dict[str, Literal["set", "derived"]]]] = None
     accent_use: Optional[str] = None
     # PRD-255 US-002: type_scale merges step by step (and a step field by field),
     # logo_rules key by key.
@@ -418,6 +441,14 @@ class BrandKitPatch(BaseModel):
     logo_rules: Optional[dict] = None
     currency: Optional[str] = None
     date_style: Optional[str] = None
+
+    @field_validator("palette_source")
+    @classmethod
+    def _known_roles(cls, v: Any) -> Any:
+        unknown = sorted(set(v) - set(PALETTE_ROLES)) if isinstance(v, dict) else []
+        if unknown:
+            raise ValueError(f"palette_source has no role {', '.join(unknown)}; the roles are {', '.join(PALETTE_ROLES)}")
+        return v
 
     @field_validator("logo_url", "logo_mark_url")
     @classmethod
@@ -469,21 +500,26 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
 
     ``company``, ``voice``, ``palette``, ``type_scale`` and ``logo_rules`` merge key
     by key (an empty palette role goes back to derived; a type step field by field);
+    a role sent at the colour it derives to, or that ``palette_source`` marks
+    derived, stays derived (``brand_palette_source``, F366);
     any other field in the patch replaces the stored one
     (``social_handles`` is the whole map: a network left out, or given an empty
     handle, is removed). Raises ``pydantic.ValidationError`` (surfaced as 422 by
-    the API) on bad input, and on a palette whose text does not read on its page.
+    the API) on bad input, on a palette whose text does not read on its page, and
+    on a third colour (``accent_color``) this save changes that does not (F361).
     """
     base = get_brand_kit({BRAND_KIT_SETTINGS_KEY: existing} if existing else None)
     # The stored files (logo, its variants, logo mark, fonts) are owned by the
     # upload/delete routes; a client patch cannot point the kit at an arbitrary stored file.
     patch = {k: v for k, v in patch.items() if k not in SERVER_MANAGED_FIELDS}
+    # F366: a role sent back at its derived colour, or marked derived, stays derived.
+    patch = with_palette_resolved(patch, base)
     merged = {**base, **{k: v for k, v in patch.items() if v is not None}}
     for record in MERGED_RECORDS:
         if isinstance(patch.get(record), dict):
             merged[record] = _merged(base.get(record, {}), patch[record])
     kit = BrandKit.model_validate(merged).model_dump()
-    require_readable_palette(kit)
+    require_readable_palette(kit, changed_kit_colours(base, kit))
     return kit
 
 
@@ -491,12 +527,14 @@ def save_brand_kit(db: Any, workspace: Any, kit: Dict[str, Any]) -> Dict[str, An
     """Store ``kit`` as the workspace's brand kit and commit: the kit's one writer.
 
     The PUT, the logo, logo mark and font uploads and deletes, and
-    ``platform_update_brand_kit`` all save through here.
+    ``platform_update_brand_kit`` all save through here. Each save stamps
+    ``updated_at`` (F372): a file uploaded again at the same path changes it too.
     """
+    stamped = {**kit, UPDATED_AT_FIELD: datetime.now(timezone.utc).isoformat()}
     # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
-    workspace.settings = {**(workspace.settings or {}), BRAND_KIT_SETTINGS_KEY: kit}
+    workspace.settings = {**(workspace.settings or {}), BRAND_KIT_SETTINGS_KEY: stamped}
     db.commit()
-    return kit
+    return stamped
 
 
 def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -505,9 +543,13 @@ def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str
     The patch is read as a :class:`BrandKitPatch` and merged by
     :func:`validate_brand_kit`; either raises ``pydantic.ValidationError`` before
     anything is written (:func:`brand_kit_errors` lists why). The PUT route and
-    ``platform_update_brand_kit`` both call this.
+    ``platform_update_brand_kit`` both call this. A patch that changes nothing (GET's
+    answer sent back, F366) is not saved, so ``updated_at`` stays as it was (F372).
     """
-    return save_brand_kit(db, workspace, proposed_brand_kit(workspace.settings, patch))
+    proposed = proposed_brand_kit(workspace.settings, patch)
+    if proposed == get_brand_kit(workspace.settings):
+        return proposed
+    return save_brand_kit(db, workspace, proposed)
 
 
 def proposed_brand_kit(settings: Optional[Dict[str, Any]], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -592,6 +634,7 @@ __all__ = [
     "MAX_FONT_FILES",
     "PATCH_FIELDS",
     "SERVER_MANAGED_FIELDS",
+    "UPDATED_AT_FIELD",
     "brand_kit_errors",
     "brand_kit_suggestions",
     "build_brand_suggestions",

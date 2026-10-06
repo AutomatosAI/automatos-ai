@@ -47,6 +47,10 @@ TARGET_LEVELS = (
 )
 # Named by role or by name: at least level 2, more than "suits its role" (1).
 TARGET_PICK_FLOOR = 1.5
+# The Tier-3 routing roster's lines (``roster_lines``).
+ROSTER_DESCRIPTION_CHARS = 80
+ROSTER_SESSION_LANE = " [Claude Code session]"
+ROSTER_REST = "- Also on the team: "
 
 COMPLEXITY_CRITERIA: Dict[str, str] = {
     "atom": (
@@ -115,6 +119,13 @@ NEEDS_MEMORY = Noul(
 NEEDS_MULTI_AGENT = Noul("Would this need several different agents working together?")
 
 
+def agent_role(agent: Any) -> Optional[str]:
+    """An agent's role as the roster says it. An Agent row has no ``role``: its role is its
+    ``job_title`` (F362: the roster read ``role`` and so never said "Brand Designer")."""
+    role = getattr(agent, "job_title", None) or getattr(agent, "role", None)
+    return str(role) if role else None
+
+
 def roster_entries(agents: Iterable[Any]) -> List[Dict[str, Any]]:
     """The active roster as the classifier sees it: each agent's name and role only. The
     full descriptions drew the model away from the complexity and action questions."""
@@ -124,11 +135,41 @@ def roster_entries(agents: Iterable[Any]) -> List[Dict[str, Any]]:
         if not name:
             continue
         entry: Dict[str, Any] = {"name": name}
-        role = getattr(agent, "role", None)
+        role = agent_role(agent)
         if role:
-            entry["role"] = str(role)
+            entry["role"] = role
         entries.append(entry)
     return entries
+
+
+def _labelled(agent: Any) -> str:
+    name = getattr(agent, "name", None) or getattr(agent, "slug", None) or "agent"
+    role = agent_role(agent)
+    return f"{name} ({role})" if role else str(name)
+
+
+def _described(agent: Any) -> str:
+    """One roster line: name, role, its lane and the start of its description. PRD-234: a Claude
+    Code session agent runs on the user's machine under their own login, so it says so."""
+    desc = (getattr(agent, "description", None) or "").strip()
+    cfg = getattr(agent, "configuration", None) or {}
+    lane = ROSTER_SESSION_LANE if isinstance(cfg, dict) and cfg.get("runtime") == "cli" else ""
+    return f"- {_labelled(agent)}{lane}" + (f": {desc[:ROSTER_DESCRIPTION_CHARS]}" if desc else "")
+
+
+def _by_id(agent: Any) -> int:
+    agent_id = getattr(agent, "id", None)
+    return agent_id if isinstance(agent_id, int) else 0
+
+
+def roster_lines(agents: Iterable[Any], described: int) -> List[str]:
+    """The Tier-3 routing roster: the first ``described`` agents (oldest first) each on a line of
+    its own, and every one after them named on one last line, so no agent is left out (F362: a
+    capped roster never named #347, the workspace's 49th agent)."""
+    ordered = sorted(agents, key=_by_id)
+    lines = [_described(agent) for agent in ordered[:described]]
+    rest = [_labelled(agent) for agent in ordered[described:]]
+    return lines + ([ROSTER_REST + ", ".join(rest)] if rest else [])
 
 
 def build_state(

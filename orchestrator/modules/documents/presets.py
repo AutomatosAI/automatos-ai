@@ -125,10 +125,12 @@ LETTER = {
     "description": (
         "Letterhead with your logo and company details, the date, the recipient block, a subject line, "
         "the greeting, the body and a sign-off. Send the greeting (\"Dear Jordan,\") in greeting; "
-        "the body has no greeting or sign-off: the template adds them."
+        "the body has no greeting or sign-off: the template adds them. When the letter is from a named "
+        "person (\"sign it from me, Gerard\"), send their name in signer: it signs in place of your "
+        "brand kit's sign-off."
     ),
     "format": "pdf",
-    "includes": ["Letterhead from your brand kit", "Date, recipient and subject", "Greeting from data.greeting", "Body", "Sign-off with your brand kit's sign-off (or your name) and your email"],
+    "includes": ["Letterhead from your brand kit", "Date, recipient and subject", "Greeting from data.greeting", "Body", "Sign-off with the signer you send, else your brand kit's sign-off (or your name), and your email"],
     "blocks": _doc(
         *letterhead(),
         _para("date", _v("date.long")),
@@ -139,7 +141,7 @@ LETTER = {
         _para("greeting", _v("data.greeting", "")),
         _para("body", _v("data.body")),
         _para("closing", _t("Kind regards,")),
-        _para("sig-name", _v("brand.sign_off")),  # PRD-255: the kit's sign-off, else the person (F344)
+        _para("sig-name", _v("brand.sign_off")),  # data.signer (F364), else the kit's sign-off, else the person (F344)
         _para("sig-email", _v("user.email", "")),
     ),
     "sample_data": {
@@ -157,9 +159,14 @@ LETTER = {
 INVOICE = {
     "category": "invoice",
     "name": "Branded Invoice",
-    "description": "Your details and the client's, invoice number and dates, a line-items table filled from data, totals and payment terms.",
+    "description": (
+        "Your details and the client's, invoice number and dates, a line-items table filled from data, totals and "
+        "payment terms. Each line item: description, quantity (how many units, e.g. 12), unit when it is sold by one "
+        "(\"kg\", \"hours\": it prints after the quantity, \"12 kg\"), unit_price (the price of one unit) and "
+        "total. Never fold a quantity into the description."
+    ),
     "format": "pdf",
-    "includes": ["Letterhead from your brand kit", "Invoice number, date, due date", "Bill-to block", "Line items from data.line_items", "Subtotal, tax, total under the Total column", "Payment terms"],
+    "includes": ["Letterhead from your brand kit", "Invoice number, date, due date", "Bill-to block", "Line items from data.line_items (quantity, unit, unit price, total)", "Subtotal, tax, total under the Total column", "Payment terms"],
     "blocks": _doc(
         *letterhead(),
         _heading("title", 1, _t("Invoice "), _v("data.invoice_number")),
@@ -192,7 +199,7 @@ INVOICE = {
             "due_date": "4 November 2026",
             "line_items": [
                 {"description": "Consulting — discovery workshop", "quantity": 1, "unit_price": "1,500.00", "total": "1,500.00"},
-                {"description": "Implementation (days)", "quantity": 4, "unit_price": "900.00", "total": "3,600.00"},
+                {"description": "Implementation", "quantity": 4, "unit": "days", "unit_price": "900.00", "total": "3,600.00"},
             ],
             "subtotal": "5,100.00",
             "tax": "1,173.00",
@@ -437,7 +444,8 @@ def _brand(bid: str, part: str) -> Dict[str, Any]:
 
 BRAND_BOARD = {
     "category": BRAND_BOARD_CATEGORY,
-    "name": "Brand Board",
+    # F368: "Brand Board" until night 10c, beside the social "Brand board": two names one capital apart.
+    "name": "Brand board (PDF)",
     "description": (
         "Your brand kit on one page: the logo and its variants on light and dark, the colour roles with their "
         "hex codes, the type scale, the spacing, the tone words and three applications. Drawn from the kit; "

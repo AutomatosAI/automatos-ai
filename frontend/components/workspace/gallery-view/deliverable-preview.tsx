@@ -58,6 +58,17 @@ function getPreviewTypeForDeliverable(d: Deliverable) {
   )
 }
 
+/**
+ * F373: a PDF (or HTML page) renders in a frame with no height of its own, so its
+ * box must fill the panel; an image, a report or a sheet keeps its natural height.
+ */
+const FILL_PANEL_TYPES: ReadonlySet<string> = new Set(['pdf', 'html'])
+
+function previewBodyClass(d: Deliverable): string | undefined {
+  if (d.content_error || !FILL_PANEL_TYPES.has(getPreviewTypeForDeliverable(d))) return undefined
+  return 'flex min-h-[50vh] flex-1 flex-col'
+}
+
 // ============= FALLBACK =============
 
 function ContentUnavailable({
@@ -182,7 +193,7 @@ export function DeliverablePreview({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full overflow-y-auto sm:max-w-2xl lg:max-w-3xl"
+        className="flex w-full flex-col overflow-y-auto sm:max-w-2xl lg:max-w-3xl"
       >
         {isLoading && (
           <div className="flex h-full items-center justify-center">
@@ -197,7 +208,7 @@ export function DeliverablePreview({
         )}
 
         {deliverable && !isLoading && (
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-1 flex-col gap-6">
             <SheetHeader className="space-y-3">
               <SheetTitle className="pr-8 text-left text-lg leading-tight">
                 {deliverable.title}
@@ -215,7 +226,7 @@ export function DeliverablePreview({
             </SheetHeader>
 
             {/* Content body — delegated to shared FilePreview */}
-            <div>
+            <div data-testid="deliverable-preview-body" className={previewBodyClass(deliverable)}>
               {deliverable.content_error ? (
                 <ContentUnavailable
                   message={`Unable to load content: ${deliverable.content_error}`}
@@ -232,7 +243,7 @@ export function DeliverablePreview({
                   url={downloadUrl ?? undefined}
                   previewType={getPreviewTypeForDeliverable(deliverable)}
                   filename={filename}
-                  className="rounded-lg border border-border/50"
+                  className="flex-1 rounded-lg border border-border/50"
                 />
               )}
             </div>

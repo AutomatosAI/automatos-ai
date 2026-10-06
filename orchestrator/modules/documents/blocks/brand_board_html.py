@@ -18,7 +18,10 @@ from typing import Any, Callable, Dict, Mapping
 from core.brand_palette import ROLE_DERIVED
 
 from . import brand_board as bb
+from .page_fonts import BOARD_HEADING_SAMPLE
 
+# A heading step's sample is set in the kit's heading font (``page_fonts``, F360).
+HEADING_SAMPLE_CLASS = f" {BOARD_HEADING_SAMPLE}"
 # A role the owner did not set, derived from the kit's colours (FR-2), says so under its swatch.
 DERIVED_NOTE = "derived"
 
@@ -80,14 +83,27 @@ def colours_html(block: Any, kit: Mapping[str, Any]) -> str:
     return _part(block, "Colour", f'<div class="board-swatches">{"".join(cells)}</div>{rule}')
 
 
-def type_html(block: Any, kit: Mapping[str, Any]) -> str:
-    """Each step of the type scale: its size, line height and weight, and a sample set in it, on one line."""
-    rows = "".join(
-        f'<p class="board-type-sample" style="font-size:{sample.size_pt:g}pt;line-height:{sample.line_pt:g}pt;'
-        f'font-weight:{sample.weight};height:{sample.line_pt:g}pt">'
-        f'<span class="board-type-label">{_esc(sample.label)}</span>{_esc(bb.TYPE_SAMPLE)}</p>'
-        for sample in bb.type_samples(kit)
+def _font_lines_html(kit: Mapping[str, Any]) -> str:
+    """The body's and headings' fonts; a substitute the PDF prints says so, as a note (F360)."""
+    return "".join(
+        f'<p class="{"board-note" if line.substitute else "board-caption"} board-font">{_esc(line.text)}</p>'
+        for line in bb.font_lines(kit)
     )
+
+
+def _sample_html(sample: Any) -> str:
+    """One step: its label, then the whole words of its sample that fit the column, on one line (F368)."""
+    heading = HEADING_SAMPLE_CLASS if sample.heading else ""
+    return (
+        f'<p class="board-type-label">{_esc(sample.label)}</p>'
+        f'<p class="board-type-sample{heading}" style="font-size:{sample.size_pt:g}pt;line-height:{sample.line_pt:g}pt;'
+        f'font-weight:{sample.weight};height:{sample.line_pt:g}pt">{_esc(sample.text)}</p>'
+    )
+
+
+def type_html(block: Any, kit: Mapping[str, Any]) -> str:
+    """The fonts, then each step of the type scale: its size, line height and weight, and a sample set in it."""
+    rows = _font_lines_html(kit) + "".join(_sample_html(sample) for sample in bb.type_samples(kit))
     return _part(block, "Type", rows)
 
 
@@ -104,7 +120,17 @@ def spacing_html(block: Any, kit: Mapping[str, Any]) -> str:
         f'<p class="board-caption">Logo clear space: {grid.clear_space:.2g} of its height '
         f'({grid.clear_mm:.3g} mm round the {grid.logo_mm:g} mm letterhead logo).</p>'
     )
-    return _part(block, "Spacing", f'<div class="board-gaps">{bars}</div>' + lines)
+    return _part(block, "Spacing", f'<div class="board-gaps">{bars}</div>' + lines + _locale_html(kit))
+
+
+def _locale_html(kit: Mapping[str, Any]) -> str:
+    """The kit's money and dates under the spacing (F368): its currency, or a note that it has none, and its date style."""
+    lines = "".join(
+        f'<p class="{"board-note" if line.note else "board-caption"}">{_esc(line.text)}</p>' for line in bb.locale_lines(kit)
+    )
+    return f'<p class="board-label board-sublabel">{_esc(bb.LOCALE_LABEL)}</p>{lines}'
+
+
 
 
 def voice_html(block: Any, kit: Mapping[str, Any]) -> str:

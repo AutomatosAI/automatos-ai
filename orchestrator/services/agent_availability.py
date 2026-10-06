@@ -20,6 +20,8 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from services.agent_roster_fit import every_agent_fits
+
 logger = logging.getLogger(__name__)
 
 CREDIT_OUT = ("Can't run now: your AI credit ran out. Top up the AI provider account, or give the card to a "
@@ -88,7 +90,8 @@ def _agent_id(agent: Any) -> Any:
 
 def says_who_can_run(handler: Callable[..., Awaitable[Dict[str, Any]]]) -> Callable[..., Awaitable[Dict[str, Any]]]:
     """Wrap platform_list_agents: each agent says whether it can run now, and why not,
-    so Auto suggests one that can. Never on a public widget turn."""
+    so Auto suggests one that can, and every agent reaches the model however long the
+    team (F362). Never on a public widget turn."""
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         from core.security.surface import widget_turn
@@ -102,7 +105,7 @@ def says_who_can_run(handler: Callable[..., Awaitable[Dict[str, Any]]]) -> Calla
             for a in agents])
         listed = [{**a, "can_run": a.get("id") not in reasons, **({"why": reasons[a["id"]]} if a.get("id") in reasons
                                                                    else {})} for a in agents]
-        return {**result, "agents": listed}
+        return every_agent_fits({**result, "agents": listed})  # F362: a long team is shortened, never cut
     return wrapped
 
 

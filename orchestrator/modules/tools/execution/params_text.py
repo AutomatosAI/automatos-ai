@@ -12,9 +12,16 @@ So the decoding lives at the one boundary every caller crosses: the unified
 executor's ``execute_tool``. A ``params`` string that holds a JSON object runs
 as that object, then is validated as before; anything else is refused in plain
 words and never runs.
+
+F369 (night 10c, chat 16bb619c 18:11): Auto sent platform_execute's ``params`` as
+"{'task_id': 2147, 'tags': ['sim-night-2026-10-06']}", a Python dict written out,
+and the tag never reached ticket #0892. Text that is no JSON is read as a Python
+literal (``ast.literal_eval``, which builds values and runs nothing; never
+``eval``), and kept only when it is a dict that JSON could carry.
 """
 from __future__ import annotations
 
+import ast
 import functools
 import json
 import logging
@@ -31,8 +38,26 @@ MAX_DECODE_LAYERS = 2
 PARAMS_KEY = "params"
 
 
+# F369: the longest params text read as a Python literal (literal_eval's parser recurses).
+MAX_LITERAL_CHARS = 100_000
+
+
+def _python_dict(text: str) -> Any:
+    """``text`` as the dict it writes out in Python ("{'task_id': 2147}"), or None. Only a literal
+    (``ast.literal_eval`` runs nothing), only a dict, and only one JSON can carry (no sets or bytes): it
+    comes back as JSON would read it, so a tuple is a list."""
+    if len(text) > MAX_LITERAL_CHARS:
+        return None
+    try:
+        value = json.loads(json.dumps(ast.literal_eval(text.strip()), allow_nan=False))
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def params_object(raw: Any) -> Any:
-    """``raw`` as an object when it is JSON text holding one, else ``raw`` as it came.
+    """``raw`` as an object when it is JSON text holding one, or Python text of a dict (F369),
+    else ``raw`` as it came.
 
     Literal newlines inside the text's strings are accepted (``strict=False``):
     a model writing a long report into ``content`` often leaves them unescaped.
@@ -44,7 +69,8 @@ def params_object(raw: Any) -> Any:
         try:
             value = json.loads(value, strict=False)
         except json.JSONDecodeError:
-            return raw
+            value = _python_dict(value)
+            break
     return value if isinstance(value, dict) else raw
 
 

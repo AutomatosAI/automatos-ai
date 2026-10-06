@@ -16,7 +16,11 @@ actually brand a document:
 
 PRD-255 (Brand Kit v2) answers GET and PUT with the kit's effective colour roles
 (``palette``: stored, else derived) and ``palette_source`` (each role ``set`` or
-``derived``), and the PUT refuses a palette whose text does not read on its page.
+``derived``), and the PUT refuses a palette whose text does not read on its page,
+saying what the colour sits on ("on the page (paper, white)"). GET's answer PUT
+back unchanged changes nothing (F366): a derived role sent at its colour stays
+derived, and ``palette_source`` is read (``{"palette_source": {"accent":
+"derived"}}`` resets a role, ``{"palette_source": "derived"}`` every role).
 It adds the logo's variants, each with routes that mirror the logo's (FR-9: a
 variant is uploaded by the owner, never generated):
 
@@ -41,7 +45,7 @@ The body of the PUT, the kit's one writer and the suggestions live in
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -53,7 +57,7 @@ from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from modules.documents.brand_board_render import BOARD_MEDIA_TYPES, BOARD_PDF, render_board_isolated
-from modules.documents.brand_kit import BrandKitPatch
+from modules.documents.brand_kit import UPDATED_AT_FIELD, BrandKitPatch
 from modules.documents.brand_system import brand_kit_view
 from modules.documents.thumbnails.render import ThumbnailError
 
@@ -66,6 +70,19 @@ SOCIAL_HANDLES_FIELD = "social_handles"
 BOARD_CACHE_CONTROL = "private, no-store"
 BOARD_FILE_STEM = "brand-board"
 BOARD_RENDER_FAILED = "The brand board could not be drawn. Try again in a moment."
+# F372: a Brand kit page left open never saves over a change made elsewhere.
+KIT_CHANGED_ELSEWHERE = "The brand kit changed since this page loaded; reload to see it"
+
+
+class BrandKitPut(BrandKitPatch):
+    """The PUT's body: a kit patch and, optionally, the kit's ``updated_at`` as the caller loaded it (F372).
+
+    Sent (the Brand kit page sends it with every save), a stamp that is no longer the
+    stored one is a 409 and nothing is saved. Left out (the agent tool, the designer's
+    save, an API caller), the PUT saves as it always did. Not a kit field.
+    """
+
+    if_updated_at: Optional[str] = None
 
 
 def _handles_hidden(workspace) -> bool:
@@ -114,7 +131,7 @@ def get_brand_kit_endpoint(
 
 @router.put("/brand-kit", dependencies=[_MANAGE])
 def update_brand_kit_endpoint(
-    body: BrandKitPatch,
+    body: BrandKitPut,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -122,13 +139,16 @@ def update_brand_kit_endpoint(
 
     While Socials is off for the workspace the social handles are not part of the
     change (PRD-251B US-B106): the stored ones stay, and the answer leaves them out.
+    ``if_updated_at`` other than the stored stamp is a 409 that saves nothing (F372).
     """
     from pydantic import ValidationError
 
-    from modules.documents.brand_kit import brand_kit_errors, update_brand_kit
+    from modules.documents.brand_kit import brand_kit_errors, get_brand_kit, update_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    patch = body.model_dump()
+    if body.if_updated_at is not None and body.if_updated_at != get_brand_kit(ws.settings)[UPDATED_AT_FIELD]:
+        raise HTTPException(status_code=409, detail=KIT_CHANGED_ELSEWHERE)
+    patch = body.model_dump(exclude={"if_updated_at"})
     if _handles_hidden(ws):
         patch = {key: value for key, value in patch.items() if key != SOCIAL_HANDLES_FIELD}
     try:

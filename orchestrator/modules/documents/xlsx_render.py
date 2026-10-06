@@ -17,9 +17,16 @@ value, columns sized to their text) with the kit's look when there is one
   a frozen, filterable header, and a printed footer (``xlsx_letterhead``).
 
 Without a kit (``brand`` None) the sheet is exactly what it was.
+
+F370 (night 10c): the sheet's title (its name, the letterhead's title line and the
+printed header) was the request's title, never the data's: "Wholesale price list
+XLSX" over a list whose ``data.title`` said otherwise. It is now ``data.title`` when
+the data gives one (the request's title fills it in when it does not), and the
+sheet's name is cleaned of the characters Excel refuses in one.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -32,6 +39,9 @@ from .xlsx_letterhead import (
 DEFAULT_HEADER_FILL = "#1a1a2e"
 DEFAULT_HEADER_TEXT = "white"
 SHEET_NAME_MAX_CHARS = 31  # Excel's limit
+# The characters Excel refuses in a sheet's name; a name may not start or end with an apostrophe.
+SHEET_NAME_REFUSED = re.compile(r"[\[\]:*?/\\]")
+SHEET_NAME_FALLBACK = "Sheet1"
 COLUMN_PADDING = 2
 COLUMN_MAX_WIDTH = 50
 DATE_FORMAT = "yyyy-mm-dd"
@@ -110,15 +120,28 @@ def _write_rows(worksheet: Any, columns: Sequence[Any], rows: Sequence[Sequence[
             _write_cell(worksheet, top + 1 + number, col_idx, value, formats, cell)
 
 
+def sheet_title(title: str, data: Mapping[str, Any]) -> str:
+    """The sheet's title: ``data.title`` when the data gives one, else the request's ``title`` (F370). Pure."""
+    given = data.get("title")
+    return given.strip() if isinstance(given, str) and given.strip() else title
+
+
+def sheet_name(title: str) -> str:
+    """``title`` as Excel takes a sheet's name: no square brackets, colon, star, question mark or slash, no edge apostrophe, 31 characters. Pure."""
+    name = SHEET_NAME_REFUSED.sub(" ", title)[:SHEET_NAME_MAX_CHARS].strip().strip("'").strip()
+    return name or SHEET_NAME_FALLBACK
+
+
 def write_xlsx(path: str, title: str, data: Mapping[str, Any], brand: Optional[Mapping[str, Any]]) -> None:
-    """Write ``data``'s ``columns`` and ``rows`` to ``path`` as one sheet named ``title``."""
+    """Write ``data``'s ``columns`` and ``rows`` to ``path`` as one sheet, titled ``data.title`` (else ``title``)."""
     import xlsxwriter
 
     columns, rows = data.get("columns") or [], data.get("rows") or []
     if not columns:
         raise ValueError("XLSX generation requires 'columns' in data.")
+    title = sheet_title(title, data)
     workbook = xlsxwriter.Workbook(path)
-    worksheet = workbook.add_worksheet(title[:SHEET_NAME_MAX_CHARS])
+    worksheet = workbook.add_worksheet(sheet_name(title))
     design = sheet_design(brand) if brand else None
     formats = _formats(workbook, brand, design)
     top, branded = 0, None
@@ -135,4 +158,4 @@ def write_xlsx(path: str, title: str, data: Mapping[str, Any], brand: Optional[M
     workbook.close()
 
 
-__all__ = ["header_colours", "logo_image", "write_xlsx"]
+__all__ = ["header_colours", "logo_image", "sheet_name", "sheet_title", "write_xlsx"]

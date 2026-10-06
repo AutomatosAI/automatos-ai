@@ -86,9 +86,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams('tab=brand'),
 }))
-vi.mock('@/components/workspace-provider', () => ({
-  useWorkspace: () => ({ workspace: { id: 'w1', role: server.role, socials: { available: true, enabled: server.socials } } }),
-}))
+vi.mock('@/components/workspace-provider', () => {
+  const useWorkspace = () => ({ workspace: { id: 'w1', role: server.role, socials: { available: true, enabled: server.socials } } })
+  return { useWorkspace, useWorkspaceOptional: useWorkspace }
+})
 vi.mock('@/hooks/use-authed-image', () => ({ useAuthedImage: () => null }))
 vi.mock('@/hooks/use-composio-api', () => ({ useInitiateConnection: () => ({ mutateAsync: vi.fn(), isLoading: false }) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
@@ -398,5 +399,15 @@ describe('the voice helpers', () => {
     expect(toneWordsProblem([])).toBeNull()
     expect(toneWordsProblem(['a', 'b', 'c', 'd', 'e'])).toBeNull()
     expect(toneWordsProblem(['a'])).toBe('Give 3 to 5 tone words, or none (1 now).')
+  })
+})
+
+describe('the kit has one preview (F371)', () => {
+  it('shows the brand board and no "How it renders" swatch beside the basics', async () => {
+    renderTab()
+    const card = await basics()
+    expect(within(card).queryByText('How it renders')).toBeNull()
+    expect(screen.queryByText('Table header')).toBeNull()
+    expect(screen.getAllByRole('region', { name: 'Brand board' })).toHaveLength(1)
   })
 })

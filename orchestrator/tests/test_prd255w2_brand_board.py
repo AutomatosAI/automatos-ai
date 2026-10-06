@@ -1,6 +1,6 @@
 """PRD-255 Wave 2 US-009: the brand board, the kit on one page (and as a social card).
 
-The board is a block starter ("Brand Board", category ``brand``) whose parts are
+The board is a block starter ("Brand board (PDF)", category ``brand``; F368 renamed it from "Brand Board") whose parts are
 ``brand`` blocks, each drawn from the kit itself: the logo large and its variants
 on light and dark (an unset variant shown as its FR-9 fallback, never invented),
 the colour roles as swatches with their hex codes, the type scale, the spacing and
@@ -120,7 +120,7 @@ def _parts(blocks):
 
 
 def test_the_brand_board_is_a_brand_starter_with_no_data_field():
-    assert (BRAND_BOARD["name"], BRAND_BOARD["category"], BRAND_BOARD["format"]) == ("Brand Board", "brand", "pdf")
+    assert (BRAND_BOARD["name"], BRAND_BOARD["category"], BRAND_BOARD["format"]) == ("Brand board (PDF)", "brand", "pdf")
     doc = validate_blocks(BRAND_BOARD["blocks"])
     assert collect_variable_paths(doc) == set() and collect_list_fields(doc) == []
     assert sorted(_parts(BRAND_BOARD["blocks"]["blocks"])) == sorted(BRAND_PARTS)
@@ -362,7 +362,7 @@ def _social_board():
 def test_the_social_brand_board_is_a_4_5_and_9_16_image_from_the_kits_tokens():
     starter = _social_board()
     blocks = starter["blocks"]
-    assert (starter["name"], starter["format"], blocks["sizes"]) == ("Brand board", SOCIAL_IMAGE, ["1080x1350", "1080x1920"])
+    assert (starter["name"], starter["format"], blocks["sizes"]) == ("Brand board (social)", SOCIAL_IMAGE, ["1080x1350", "1080x1920"])
     assert brand_literals(blocks["html"], blocks.get("css") or "") == []
     assert "{{ brand.logo }}" in blocks["html"] and "{{ brand.logo_on_dark }}" in blocks["html"]
     values = resolve_variables(blocks["variables_schema"], starter["sample_data"])

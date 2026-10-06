@@ -13,6 +13,14 @@ our accent?") asks nothing to be made, and "do it yourself" keeps it with Auto. 
 workspace with no designer yet gets its one (``seed_brand_designer``, find-or-seed; an
 existing hosted workspace whose Auto was seeded before PRD-255 gets it here). One the
 owner removed is not brought back: the note says so instead.
+
+F362 (night 10c): three of four brand asks never got the note. "Make the orange an accent
+only" named no brand word, "More space between sections" no look word, and "Warmer, please"
+opened its chat with nothing else; Auto tried the kit tool itself, reached for a platform
+setting and built a three-task mission. Now a colour given a role ("make the orange an
+accent") and spacing between sections are brand asks, and so is a bare style word that
+opens a conversation (``opening``): with nothing before it, the look is all it can mean.
+AutoBrain pins such a turn to the ASSIGN lane for the designer (``brand_assign_lane``).
 """
 from __future__ import annotations
 
@@ -50,7 +58,14 @@ _LOOK_TWEAK = re.compile(rf"\b(?:(?:less|more)\s+(?:space|spacing|white ?space|b
                          r"warmer|cooler|bolder|brighter|darker|lighter|softer|calmer|friendlier|cleaner|"
                          r"more (?:modern|playful|premium|professional|elegant|minimal))\b", re.I)
 _LOOK_WORD = re.compile(r"\b(?:brand(?:ing)?|kit|palette|colou?rs?|fonts?|look|style|templates?|board|layout|"
-                        r"pages?|margins?|header|headings?|design)\b", re.I)
+                        r"pages?|margins?|header|headings?|design|sections?|paragraphs?)\b", re.I)
+# F362: a colour given a role in the look: "make the orange an accent only", "use the navy as the main colour".
+_COLOUR_ROLE = re.compile(rf"\b(?:make|use|keep|turn|set|have)\s+(?:the|our|my)\s+(?:{_COLOURS})\s+"
+                          r"(?:(?:as|into|to)\s+)?(?:an?\s+|the\s+|our\s+)?(?:accent|highlight|main colou?r|"
+                          r"primary|secondary|background)\b", re.I)
+# F362: a style word on its own ("Warmer, please"), read as brand work only when it opens the conversation.
+_BARE_TWEAK = re.compile(r"^\W*(?:(?:a\s+)?(?:bit|little|touch|lot)\s+)?(?:" + _LOOK_TWEAK.pattern + r"|"
+                         + _COLOUR_TWEAK.pattern + r")[\s,]*(?:please|thanks|thank you)?\W*$", re.I)
 _QUESTION = re.compile(r"^\s*(?:what|which|who|whose|when|where|why|how|did|does|is|are|was|were|has|have)\b", re.I)
 
 DESIGNER_NOTE = (
@@ -64,7 +79,9 @@ DESIGNER_NOTE = (
     "the owner approves; make the sample set (an invoice, a letter, a proposal and three social cards) as "
     "Deliverables; report back with the board and the set. Start it (platform_update_task_status to "
     "'in_progress'). Tell the owner in one line that the {name} has it, its card number, and that its proposal "
-    "will come to them as a card to approve or send back."
+    "will come to them as a card to approve or send back. A style ask (warmer, more space, less orange) is that "
+    "one ticket: never a mission (platform_create_mission) and never a platform setting "
+    "(platform_update_system_setting)."
 )
 REMOVED_NOTE = (
     "The owner asked for brand work, and this workspace has no Brand designer: the owner removed it. Don't change "
@@ -77,13 +94,16 @@ UNAVAILABLE_NOTE = (
 )
 
 
-def asks_for_brand_work(text: object) -> bool:
+def asks_for_brand_work(text: object, opening: bool = False) -> bool:
     """Whether ``text`` asks for the brand, the kit or the templates to be designed or changed in look:
-    not a question about them, and not one the owner keeps with Auto."""
+    not a question about them, and not one the owner keeps with Auto. ``opening``: ``text`` opens the
+    conversation, so a style word on its own ("Warmer, please") can only mean the look (F362)."""
     said = str(text or "")
     if not said.strip() or keeps_it_with_auto(said) or _QUESTION.search(said):
         return False
-    if _ASKS_FOR_BRAND.search(said) or _COLOUR_TWEAK.search(said):
+    if _ASKS_FOR_BRAND.search(said) or _COLOUR_TWEAK.search(said) or _COLOUR_ROLE.search(said):
+        return True
+    if opening and _BARE_TWEAK.search(said):
         return True
     return bool(_LOOK_TWEAK.search(said) and _LOOK_WORD.search(said))
 
@@ -117,10 +137,11 @@ def designer_name(db: Any, workspace_id: UUID, seed: Seeder = _seed_in_own_sessi
     return found.name if found is not None else seed(workspace_id)
 
 
-def designer_note(db: Any, workspace_id: UUID, text: object, seed: Seeder = _seed_in_own_session) -> Optional[str]:
+def designer_note(db: Any, workspace_id: UUID, text: object, seed: Seeder = _seed_in_own_session, *,
+                  opening: bool = False) -> Optional[str]:
     """The hand-to-the-designer note for the owner's latest message, or None when it asks for no brand work.
-    The ASSIGN lane's dispatch contract and board rule go with it."""
-    if not asks_for_brand_work(text):
+    ``opening``: the message opens the conversation. The ASSIGN lane's dispatch contract and board rule go with it."""
+    if not asks_for_brand_work(text, opening):
         return None
     try:
         name = designer_name(db, workspace_id, seed)

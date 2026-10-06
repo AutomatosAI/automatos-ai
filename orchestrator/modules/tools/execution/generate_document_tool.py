@@ -296,6 +296,8 @@ def _answer(service: Any, result: Any, registration: Dict[str, Any]) -> Dict[str
         "template_name": result.template_name,
         # F331: the data keys the page does not show; an agent cannot see the page.
         "unused_data_keys": list(getattr(result, "unused_keys", None) or []),
+        # F367: the amounts that printed with no currency sign, the kit having none.
+        "amounts_without_currency": list(getattr(result, "unpriced_keys", None) or []),
     }
 
 

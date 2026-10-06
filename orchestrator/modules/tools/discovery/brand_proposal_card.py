@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 APPROVE, REVISE = "Approve", "Revise"
@@ -34,6 +35,12 @@ NAME_HASH_CHARS = 12            # the board picture's name carries the proposal'
 CARD_HEAD = "**Brand kit proposal** from {agent} (not saved yet)"
 CHANGES_HEAD = "What changes:"
 CHANGE_LINE = "- `{field}`: {old} → {new}"
+# F364 (night 10c): approving a sign-off of "Automatos AI" replaced the owner's name on every
+# letter and the card never said so. A change whose reach is wider than its name says it.
+CHANGE_EFFECTS = {
+    "voice.sign_off": ("this changes the signature on every letter and document that signs with the kit's sign-off "
+                       "(a document that names its own signer keeps it)"),
+}
 BOARD_LINE = "The Brand Board drawn from it: `{path}`"
 CARD_FOOT = ("**Approve** on the Questions tab in Automatos saves it to the brand kit. Anything else, such as "
              "\"less orange\", \"warmer\" or \"more space\", sends it back for a revision.")
@@ -50,6 +57,23 @@ NOT_IN_APP = ("The Approve on your proposal card (question #{ask}) came from {wh
               "where only a workspace owner or admin answers: nothing was saved. Propose again and ask the owner "
               "to approve it in Automatos.")
 ALREADY_SAVED = "The proposal the owner approved (question #{ask}) is already saved. Propose again to change more."
+
+# F365 (night 10c, #1788): the designer filed a card whose whole reason was "VALIDATION
+# PROBE ONLY" (spacing 4 → 6, matching nothing in its notes) to see whether the kit took
+# the value, and the owner got it as the real proposal. The tool has no test mode, and a
+# card whose reason says it is not real is never filed: the kit's checks already run
+# before any card is, so a proposal the kit refuses asks nothing.
+NOT_A_REAL_PROPOSAL = (
+    "Your why says this card is not a real proposal ({words!r}). Every propose_brand_kit call puts a real "
+    "card in front of the owner: there is no test or probe mode. Nothing was asked. The kit checks a "
+    "proposal before any card is filed, and one it refuses comes back with its reasons and asks nothing. "
+    "Propose only the change you want the owner to approve, with one line on why.")
+_NOT_REAL = re.compile(
+    r"\bprobes?\b|\bdry[\s-]?run\b"
+    r"|\b(?:validation|validating|test|testing|smoke)\s+(?:only|probe|card|proposal|call)\b"
+    r"|\bjust\s+(?:a\s+)?(?:test|testing|checking)\b|\bthis\s+is\s+(?:only\s+|just\s+)?a\s+test\b"
+    r"|\b(?:ignore|disregard)\s+this\b|\b(?:do\s+not|don't|dont)\s+approve\b|\bnot\s+(?:a\s+)?real\b",
+    re.IGNORECASE)
 
 
 def fingerprint(stored_kit: Any) -> str:
@@ -84,6 +108,13 @@ def changes(current: Mapping[str, Any], proposed: Mapping[str, Any], fields: Seq
     return out
 
 
+def _change_line(change: Mapping[str, str]) -> str:
+    """One change as the card lists it, with what it reaches when that is wider than its name (F364)."""
+    effect = CHANGE_EFFECTS.get(change["field"])
+    line = CHANGE_LINE.format(**change)
+    return f"{line}: {effect}" if effect else line
+
+
 def card_text(agent: str, why: str, changed: Sequence[Mapping[str, str]], board_path: str) -> str:
     """The card's markdown: who proposes, why, every change in full, where the board is, and what Approve does.
 
@@ -93,9 +124,16 @@ def card_text(agent: str, why: str, changed: Sequence[Mapping[str, str]], board_
     why = " ".join(str(why or "").split())
     if why:
         lines.append(why if len(why) <= MAX_WHY_CHARS else why[:MAX_WHY_CHARS - 1] + ELLIPSIS)
-    lines.append("\n".join([CHANGES_HEAD, *(CHANGE_LINE.format(**c) for c in changed)]))
+    lines.append("\n".join([CHANGES_HEAD, *(_change_line(c) for c in changed)]))
     lines += [BOARD_LINE.format(path=board_path), CARD_FOOT]
     return "\n\n".join(lines)
+
+
+def not_a_real_proposal(why: Any) -> Optional[str]:
+    """The words in ``why`` that say the card is not a real proposal (a probe, a test, "do not
+    approve"), or ``None``. Such a card is never filed (F365)."""
+    found = _NOT_REAL.search(" ".join(str(why or "").replace("\u2019", "'").split()))
+    return found.group(0) if found else None
 
 
 def too_long(text: str) -> bool:
@@ -146,6 +184,7 @@ def latest_proposal(grants: Sequence[Any]) -> Optional[Any]:
 
 
 __all__ = [
-    "APPROVE", "CARD_OPTIONS", "MAX_CARD_CHARS", "PENDING", "PROPOSAL_MARKER", "REVISE", "STILL_WAITING", "board_name", "card_text", "changes",
-    "fingerprint", "is_approve", "latest_proposal", "marker_of", "status_of", "too_long", "why_not_saved",
+    "APPROVE", "CARD_OPTIONS", "CHANGE_EFFECTS", "MAX_CARD_CHARS", "NOT_A_REAL_PROPOSAL", "PENDING", "PROPOSAL_MARKER",
+    "REVISE", "STILL_WAITING", "board_name", "card_text", "changes", "fingerprint", "is_approve", "latest_proposal",
+    "marker_of", "not_a_real_proposal", "status_of", "too_long", "why_not_saved",
 ]
