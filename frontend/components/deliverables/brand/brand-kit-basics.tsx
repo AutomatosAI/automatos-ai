@@ -3,8 +3,9 @@
 /**
  * PRD-251B US-B301 — the Brand kit tab's basics card (the mockup's): the brand's name and
  * tagline, the logo and the logo mark, its colours and fonts, the company contact, the
- * social handles and the voice, with a live swatch beside them. What the BrandKitDialog
- * held, on the tab; owners and admins (workspace:manage) change it, everyone reads it.
+ * social handles and the voice. What the BrandKitDialog held, on the tab; owners and admins
+ * (workspace:manage) change it, everyone reads it. F371: the "How it renders" swatch beside it
+ * is gone; the brand board above the card (brand-board-preview.tsx) is the kit's one preview.
  */
 import { Loader2, Sparkles } from 'lucide-react'
 
@@ -16,7 +17,6 @@ import { BrandKitSocial } from '@/components/documents/blocks/BrandKitSocial'
 import type { BrandKitForm } from './use-brand-kit-form'
 import { BrandColours, BrandFonts, CompanyFields } from './brand-kit-fields'
 import { BrandImageField } from './brand-kit-images'
-import { BrandKitPreview } from './brand-kit-preview'
 
 interface BrandKitBasicsProps {
   form: BrandKitForm
@@ -34,8 +34,8 @@ export function BrandKitBasics({ form, canEdit }: BrandKitBasicsProps) {
     )
   }
   return (
-    <section aria-label="The basics" className="grid grid-cols-1 gap-4 rounded-xl border bg-card p-4 md:grid-cols-5">
-      <fieldset disabled={!canEdit} className="min-w-0 space-y-4 md:col-span-3">
+    <section aria-label="The basics" className="rounded-xl border bg-card p-4">
+      <fieldset disabled={!canEdit} className="min-w-0 space-y-4">
         {canEdit && form.hasSuggestions && (
           <Button type="button" variant="outline" size="sm" className="gap-2" onClick={form.applySuggestions}>
             <Sparkles className="h-4 w-4" aria-hidden /> Use my profile details
@@ -81,12 +81,6 @@ export function BrandKitBasics({ form, canEdit }: BrandKitBasicsProps) {
           </div>
         )}
       </fieldset>
-      <div className="md:col-span-2">
-        <Label className="text-xs text-muted-foreground">How it renders</Label>
-        <div className="mt-1">
-          <BrandKitPreview kit={kit} logoUrl={logo.objectUrl} markUrl={mark.objectUrl} />
-        </div>
-      </div>
     </section>
   )
 }

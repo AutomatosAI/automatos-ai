@@ -400,3 +400,13 @@ describe('the voice helpers', () => {
     expect(toneWordsProblem(['a'])).toBe('Give 3 to 5 tone words, or none (1 now).')
   })
 })
+
+describe('the kit has one preview (F371)', () => {
+  it('shows the brand board and no "How it renders" swatch beside the basics', async () => {
+    renderTab()
+    const card = await basics()
+    expect(within(card).queryByText('How it renders')).toBeNull()
+    expect(screen.queryByText('Table header')).toBeNull()
+    expect(screen.getAllByRole('region', { name: 'Brand board' })).toHaveLength(1)
+  })
+})

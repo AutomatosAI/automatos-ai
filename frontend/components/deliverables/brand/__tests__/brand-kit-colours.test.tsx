@@ -48,7 +48,6 @@ import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { BrandKitDesign } from '../brand-kit-design'
 import { ROLE_LABELS } from '../brand-kit-colours'
-import { headerColours } from '../brand-kit-preview'
 import { roleErrorsFrom, saveErrorMessage } from '../save-errors'
 import { useBrandKitForm } from '../use-brand-kit-form'
 import { withPaletteFrom } from '../use-brand-palette'
@@ -178,10 +177,5 @@ describe('the palette helpers', () => {
     const merged = withPaletteFrom(local, fresh, 'accent')
     expect(merged.palette).toMatchObject({ heading: '#0b2545', accent: '#c2410c' })
     expect(merged.palette_source).toMatchObject({ heading: 'set', accent: 'derived' })
-  })
-
-  it('paints the preview\'s table header as the renderers do: surface_2 when sparing, the accent when bold', () => {
-    expect(headerColours(designKit())).toEqual({ fill: '#ebe8e1', text: '#111118' })
-    expect(headerColours(designKit({ accent_use: 'bold' }))).toEqual({ fill: '#9a3412', text: '#ffffff' })
   })
 })
