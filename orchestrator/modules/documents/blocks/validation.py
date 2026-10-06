@@ -37,7 +37,7 @@ class BlockValidationError(Exception):
 # Discriminator tags Pydantic injects into error locations (the Literal `type` values).
 # Stripped from `loc` so an editor sees `blocks.0.level`, not `blocks.0.heading.level`.
 _DISCRIMINATOR_TAGS = frozenset(
-    {"heading", "text", "table", "image", "variable", "data_table", "page_break", "section"}
+    {"heading", "text", "table", "image", "variable", "data_table", "page_break", "section", "brand"}
 )
 
 

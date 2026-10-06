@@ -1,0 +1,120 @@
+{
+  "name": "Brand board",
+  "description": "Your brand kit as one card: the logo on light and on dark, the colours with their hex codes and the type, all from the brand kit. Nothing to write: share it with anyone who makes things for you.",
+  "format": "social_image",
+  "category": "social",
+  "sizes": [
+    "1080x1350",
+    "1080x1920"
+  ],
+  "variables_schema": {
+    "title": {
+      "type": "text",
+      "label": "Title",
+      "description": "The card's title, top left.",
+      "default": "Brand board",
+      "max_chars": 40
+    },
+    "handle": {
+      "type": "text",
+      "label": "Handle",
+      "description": "The account handle shown top right, e.g. @yourbrand. Leave empty for none.",
+      "default": "",
+      "max_chars": 40
+    },
+    "logo_label": {
+      "type": "text",
+      "label": "Logo heading",
+      "description": "The heading over the logo on light and on dark.",
+      "default": "Logo",
+      "max_chars": 40
+    },
+    "on_light_label": {
+      "type": "text",
+      "label": "On light",
+      "description": "The caption under the logo on the brand's paper.",
+      "default": "On light",
+      "max_chars": 40
+    },
+    "on_dark_label": {
+      "type": "text",
+      "label": "On dark",
+      "description": "The caption under the logo on the dark stage.",
+      "default": "On dark",
+      "max_chars": 40
+    },
+    "colour_label": {
+      "type": "text",
+      "label": "Colour heading",
+      "description": "The heading over the colour swatches.",
+      "default": "Colour",
+      "max_chars": 40
+    },
+    "primary_label": {
+      "type": "text",
+      "label": "Primary",
+      "description": "The name of the primary colour's swatch.",
+      "default": "Primary",
+      "max_chars": 24
+    },
+    "secondary_label": {
+      "type": "text",
+      "label": "Secondary",
+      "description": "The name of the secondary colour's swatch.",
+      "default": "Secondary",
+      "max_chars": 24
+    },
+    "accent_label": {
+      "type": "text",
+      "label": "Accent",
+      "description": "The name of the accent colour's swatch.",
+      "default": "Accent",
+      "max_chars": 24
+    },
+    "paper_label": {
+      "type": "text",
+      "label": "Paper",
+      "description": "The name of the page colour's swatch.",
+      "default": "Paper",
+      "max_chars": 24
+    },
+    "text_label": {
+      "type": "text",
+      "label": "Text",
+      "description": "The name of the text colour's swatch.",
+      "default": "Text",
+      "max_chars": 24
+    },
+    "dark_label": {
+      "type": "text",
+      "label": "Dark",
+      "description": "The name of the dark stage colour's swatch.",
+      "default": "Dark",
+      "max_chars": 24
+    },
+    "type_label": {
+      "type": "text",
+      "label": "Type heading",
+      "description": "The heading over the type sample.",
+      "default": "Type",
+      "max_chars": 40
+    },
+    "type_mark": {
+      "type": "text",
+      "label": "Type mark",
+      "description": "The letters set large in the heading font.",
+      "default": "Aa",
+      "max_chars": 4
+    },
+    "type_sample": {
+      "type": "text",
+      "label": "Type sample",
+      "description": "A line set in the body font.",
+      "default": "The quick brown fox jumps over the lazy dog",
+      "max_chars": 80
+    }
+  },
+  "sample_data": {
+    "handle": "@yourbrand"
+  }
+}

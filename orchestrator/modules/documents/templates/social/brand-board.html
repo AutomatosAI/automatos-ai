@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width={{ size.width }}, height={{ size.height }}" />
+    <title>Brand board</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      /* PRD-255 US-009: the brand board as a social card, built from the same kit as the document's.
+         Every colour, font and size reads the kit's --brand-* tokens; the swatches print each token's own
+         hex, written by the script below from the token itself. The logo shows as uploaded: on the paper,
+         and on the dark stage the logo for dark backgrounds, or the logo on a light chip (FR-9). */
+      :root {
+        --paper: var(--brand-paper, #f1e9dd);
+        --card: var(--brand-paper-card, #e3d9c8);
+        --ink: var(--brand-on-paper, #191919);
+        --muted: var(--brand-on-paper-muted, #463f37);
+        --dim: var(--brand-on-paper-dim, #5a5248);
+        --accent-large: var(--brand-primary-on-paper-large, #c24f25);
+        --brand: var(--brand-primary, #ff6932);
+        --dark: var(--brand-ink, #1a1714);
+        --on-dark: var(--brand-on-ink, #f0e8db);
+        --logo-chip: var(--brand-logo-chip, transparent);
+        --display: var(--brand-heading-font, sans-serif);
+        --body: var(--brand-body-font, sans-serif);
+        --mono: var(--brand-mono-font, monospace);
+        /* One design pixel: the 1080-wide feed post is the reference. */
+        --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
+        /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
+        --display-scale: var(--brand-display-scale, 1);
+        --body-scale: var(--brand-body-scale, 1);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: {{ size.width }}px; height: {{ size.height }}px; overflow: hidden; background: var(--paper); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--ink); background: var(--paper); }
+      .clip { position: absolute; inset: 0; }
+      #stripe { position: absolute; left: 0; top: 0; width: 100%; height: calc(14 * var(--u)); background: var(--brand); }
+
+      .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
+        gap: calc(30 * var(--s)); padding: calc(64 * var(--u)) calc(68 * var(--u)) calc(56 * var(--u)); }
+      .page.wrap-words * { overflow-wrap: anywhere; }
+      .top { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
+        font-family: var(--mono); font-size: calc(26 * var(--s) * var(--body-scale)); line-height: 1.2; }
+      .title { color: var(--ink); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+      .handle { color: var(--dim); font-weight: 500; margin-left: auto; text-align: right; }
+      .main { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; gap: calc(30 * var(--s)); }
+      .label { font-family: var(--mono); font-size: calc(22 * var(--s) * var(--body-scale)); font-weight: 600;
+        letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-bottom: calc(12 * var(--s)); }
+      .logos { display: grid; grid-template-columns: 1fr 1fr; gap: calc(16 * var(--s)); }
+      .ground { display: flex; align-items: center; justify-content: center; height: calc(190 * var(--s));
+        border-radius: calc(14 * var(--s)); background: var(--card); }
+      .ground.on-dark { background: var(--dark); }
+      .logo { max-width: 80%; max-height: calc(110 * var(--s)); object-fit: contain; }
+      .dark-logo { background: var(--logo-chip); border-radius: calc(10 * var(--s)); padding: calc(12 * var(--s));
+        max-width: 80%; max-height: calc(134 * var(--s)); object-fit: contain; }
+      .logo[src^="data:image/gif"], .dark-logo[src^="data:image/gif"] { display: none; }
+      .caption { font-family: var(--mono); font-size: calc(20 * var(--s) * var(--body-scale)); line-height: 1.3;
+        color: var(--dim); margin-top: calc(8 * var(--s)); }
+      .name { font-family: var(--display); font-weight: 800; font-size: calc(76 * var(--s) * var(--display-scale));
+        line-height: 1; letter-spacing: -0.02em; color: var(--ink); }
+      .tagline { font-family: var(--body); font-size: calc(32 * var(--s) * var(--body-scale)); line-height: 1.35;
+        color: var(--muted); margin-top: calc(10 * var(--s)); }
+      .swatches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(14 * var(--s)); }
+      .chip { height: calc(84 * var(--s)); border-radius: calc(12 * var(--s)); border: calc(2 * var(--u)) solid var(--card); }
+      .swatch-name { font-family: var(--body); font-size: calc(24 * var(--s) * var(--body-scale)); font-weight: 700;
+        line-height: 1.25; color: var(--ink); margin-top: calc(8 * var(--s)); }
+      .hex { font-family: var(--mono); font-size: calc(22 * var(--s) * var(--body-scale)); line-height: 1.25; color: var(--muted); }
+      .type { display: flex; align-items: baseline; gap: calc(28 * var(--s)); }
+      .aa { font-family: var(--display); font-weight: 800; font-size: calc(132 * var(--s) * var(--display-scale)); line-height: 1;
+        color: var(--accent-large); }
+      .type-lines { min-width: 0; }
+      .type-sample { font-family: var(--body); font-size: calc(32 * var(--s) * var(--body-scale)); line-height: 1.4; color: var(--ink); }
+      .font-name { font-family: var(--mono); font-size: calc(22 * var(--s) * var(--body-scale)); line-height: 1.3; color: var(--dim); }
+      .foot { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
+        padding-top: calc(20 * var(--s)); border-top: calc(2 * var(--u)) solid var(--card);
+        font-family: var(--mono); font-size: calc(26 * var(--s) * var(--body-scale)); line-height: 1.2; }
+      .brand { color: var(--ink); font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="1" data-width="{{ size.width }}" data-height="{{ size.height }}">
+      <section id="card" class="clip" data-start="0" data-duration="1" data-track-index="0">
+        <div class="page">
+          <div class="top fit">
+            <span class="title v">{{ title }}</span>
+            <span class="handle v">{{ handle }}</span>
+          </div>
+          <div class="main fit">
+            <div class="lead fit">
+              <div class="name v">{{ brand.name }}</div>
+              <div class="tagline v">{{ brand.tagline }}</div>
+            </div>
+            <div class="fit">
+              <div class="label v">{{ logo_label }}</div>
+              <div class="logos">
+                <div><div class="ground"><img class="logo" src="{{ brand.logo }}" alt="" /></div><div class="caption v">{{ on_light_label }}</div></div>
+                <div><div class="ground on-dark"><img class="dark-logo" src="{{ brand.logo_on_dark }}" alt="" /></div><div class="caption v">{{ on_dark_label }}</div></div>
+              </div>
+            </div>
+            <div class="fit">
+              <div class="label v">{{ colour_label }}</div>
+              <div class="swatches">
+                <div class="swatch" data-optional><div class="chip" style="background: var(--brand-primary, transparent)"></div><div class="swatch-name v">{{ primary_label }}</div><div class="hex" data-token="primary"></div></div>
+                <div class="swatch" data-optional><div class="chip" style="background: var(--brand-secondary, transparent)"></div><div class="swatch-name v">{{ secondary_label }}</div><div class="hex" data-token="secondary"></div></div>
+                <div class="swatch" data-optional><div class="chip" style="background: var(--brand-accent, transparent)"></div><div class="swatch-name v">{{ accent_label }}</div><div class="hex" data-token="accent"></div></div>
+                <div class="swatch" data-optional><div class="chip" style="background: var(--brand-paper, transparent)"></div><div class="swatch-name v">{{ paper_label }}</div><div class="hex" data-token="paper"></div></div>
+                <div class="swatch" data-optional><div class="chip" style="background: var(--brand-on-paper, transparent)"></div><div class="swatch-name v">{{ text_label }}</div><div class="hex" data-token="on-paper"></div></div>
+                <div class="swatch" data-optional><div class="chip" style="background: var(--brand-ink, transparent)"></div><div class="swatch-name v">{{ dark_label }}</div><div class="hex" data-token="ink"></div></div>
+              </div>
+            </div>
+            <div class="fit">
+              <div class="label v">{{ type_label }}</div>
+              <div class="type">
+                <div class="aa v">{{ type_mark }}</div>
+                <div class="type-lines">
+                  <div class="type-sample v">{{ type_sample }}</div>
+                  <div class="font-name" data-font="heading-font"></div>
+                  <div class="font-name" data-font="body-font"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="foot fit">
+            <span class="brand v">{{ brand.name }}</span>
+          </div>
+        </div>
+      </section>
+      <div id="stripe"></div>
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="1" data-track-index="1" data-volume="1"></audio>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+
+      // ---------- setup: the kit's own values written in, then the card fitted before anything is sampled ----------
+      const MIN_FIT = 0.5;
+      const FIT_STEP = 0.04;
+      const kit = getComputedStyle(document.documentElement);
+      // Each swatch prints the hex of the token it shows; a token the kit does not have takes the swatch out.
+      document.querySelectorAll("[data-token]").forEach((el) => {
+        const value = kit.getPropertyValue("--brand-" + el.getAttribute("data-token")).trim();
+        if (value) el.textContent = value.toUpperCase();
+        else el.closest(".swatch").remove();
+      });
+      // The fonts: the first family each font token names, as the kit has it.
+      document.querySelectorAll("[data-font]").forEach((el) => {
+        const value = kit.getPropertyValue("--brand-" + el.getAttribute("data-font")).trim();
+        const family = value.split(",")[0].trim().replace(/^["']|["']$/g, "");
+        if (family) el.textContent = family;
+        else el.remove();
+      });
+      document.querySelectorAll("[data-optional]").forEach((block) => {
+        const values = block.querySelectorAll(".v");
+        const filled = Array.from(values.length ? values : [block]).some((el) => el.textContent.trim());
+        if (!filled) block.remove();
+      });
+      document.querySelectorAll(".v").forEach((el) => {
+        if (!el.textContent.trim()) el.remove();
+      });
+      // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function overflowing(page) {
+        const box = page.getBoundingClientRect();
+        const style = getComputedStyle(page);
+        const bottom = box.bottom - parseFloat(style.paddingBottom) + 1;
+        const right = box.right - parseFloat(style.paddingRight) + 1;
+        for (const child of page.children) {
+          const rect = child.getBoundingClientRect();
+          if (rect.bottom > bottom || rect.right > right) return true;
+        }
+        return Array.from(page.querySelectorAll(".fit")).some(
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+        );
+      }
+      function fit(page) {
+        if (!page.getClientRects().length) return;
+        page.classList.remove("wrap-words");
+        for (let step = 0; ; step += 1) {
+          const scale = Math.max(MIN_FIT, 1 - step * FIT_STEP);
+          page.style.setProperty("--fit", scale.toFixed(2));
+          if (!overflowing(page) || scale === MIN_FIT) break;
+        }
+        if (overflowing(page)) page.classList.add("wrap-words");
+      }
+      function fitAll() {
+        document.querySelectorAll(".page").forEach(fit);
+      }
+      fitAll();
+      // A brand font file loads after this script: the card fits again once it has.
+      document.fonts.addEventListener("loadingdone", fitAll);
+      document.fonts.ready.then(fitAll);
+
+      // A still: nothing moves. The timeline only spans the card's one second.
+      const tl = gsap.timeline({ paused: true });
+      tl.set({}, {}, 1);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

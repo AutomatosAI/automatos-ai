@@ -39,6 +39,7 @@ from ..amounts import field_text
 from ..locale_text import currency_of
 from ..variables.catalog import walk_dynamic
 from . import design_tokens as tokens
+from .brand_board_docx import add_brand_part
 from .docx_style import add_footer, add_letterhead, apply_styles, rgb
 from .docx_tables import KPIS_ID, SIGNATURES_ID, TOTALS_IDS, keep_together, kpi_tiles, style_signatures, style_table, style_totals
 from .letterhead_run import company_of, logo_of, split_letterhead
@@ -363,6 +364,8 @@ def _add_block(doc, block, values, brand_kit, unresolved, *, font, data=None):
         return doc.add_page_break()
     if kind == "section":
         return _add_section(doc, block, values, brand_kit, unresolved, font=font, data=data)
+    if kind == "brand":  # PRD-255 US-009: a part of the brand board, drawn from the kit
+        return add_brand_part(doc, block, brand_kit, font, _safe_image_bytes)
     return None
 
 

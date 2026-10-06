@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from ..amounts import field_text
 from ..locale_text import currency_of
 from ..variables.catalog import walk_dynamic
+from .brand_board_html import brand_part_html
 from .letterhead_run import company_of, logo_of, split_letterhead
 from .optional_parts import block_is_blank, row_is_blank
 from .page_fonts import font_css
@@ -159,6 +160,8 @@ def _render_block(
         return '<div class="page-break"></div>'
     if kind == "section":
         return _render_section(block, values, brand_kit, unresolved, data)
+    if kind == "brand":  # PRD-255 US-009: a part of the brand board, drawn from the kit
+        return brand_part_html(block, brand_kit)
     return ""
 
 

@@ -17,7 +17,7 @@ import { collectDataFields, collectListFields, collectMissingOnFile, collectVari
 import { SCHEMA_VERSION } from './types'
 import type { Block, TemplatePreset, VariableEntry } from './types'
 
-export const CATEGORIES = ['general', 'report', 'invoice', 'contract', 'letter', 'proposal', 'data']
+export const CATEGORIES = ['general', 'report', 'invoice', 'contract', 'letter', 'proposal', 'data', 'brand']
 export const FORMATS = ['pdf', 'docx']
 
 export interface EditorDraft {

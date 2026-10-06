@@ -18,7 +18,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from core.models.core import DocumentTemplate
-from modules.documents.presets import MEETING_NOTES_BLOCKS, PRESETS
+from modules.documents.presets import BRAND_BOARD, MEETING_NOTES_BLOCKS, PRESETS
 from modules.documents.social_starters import social_starters
 from modules.documents.template_summary import STARTER_CREATOR
 
@@ -306,8 +306,9 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
     # PRD-167 S2 → PRD-243: block-native starters, ONE per category, from the
     # presets the Studio itself offers. Copy-on-customise, so a platform-owned
     # starter (created_by="system") is refreshed in place when the preset changes;
-    # a row a user made under the same name is never touched.
-    added, refreshed = _seed_presets(db, workspace_id, PRESETS)
+    # a row a user made under the same name is never touched. PRD-255 US-009: the Brand
+    # Board is a starter of its own, under the same rule.
+    added, refreshed = _seed_presets(db, workspace_id, [*PRESETS, BRAND_BOARD])
     created += added
     refreshed += legacy_refreshed
 

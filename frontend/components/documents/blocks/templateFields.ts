@@ -25,6 +25,7 @@ function blockPaths(block: Block): string[] {
     case 'section':
       return block.children.flatMap(blockPaths)
     case 'page_break':
+    case 'brand':
       return []
   }
 }
