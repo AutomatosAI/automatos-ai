@@ -45,6 +45,8 @@ from sqlalchemy.orm import Session
 
 from core.workspace_client import WorkspaceClient
 from modules.documents.thumbnails.eligibility import thumbnail_url_for
+from services.deliverable_filters import list_filter
+from services.deliverable_tags import card_tags_on_register, tags_in
 from modules.documents.thumbnails.schedule import thumbnail_after_register
 
 logger = logging.getLogger(__name__)
@@ -180,6 +182,7 @@ class DeliverableService:
     # ------------------------------------------------------------------
 
     @thumbnail_after_register  # F353: a PDF, Word document or sheet gets its first page drawn
+    @card_tags_on_register  # 7 Oct: a board card's Deliverable carries the card's tags
     def register(
         self,
         *,
@@ -334,18 +337,10 @@ class DeliverableService:
     # ------------------------------------------------------------------
 
     def list_deliverables(
-        self,
-        *,
-        artifact_type: Optional[str] = None,
-        source_type: Optional[str] = None,
-        source_type_exclude: Optional[str] = None,
-        source_id: Optional[str] = None,
-        agent_id: Optional[int] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-        search: Optional[str] = None,
-        limit: int = 24,
-        offset: int = 0,
+        self, *, artifact_type: Optional[str] = None, source_type: Optional[str] = None,
+        source_type_exclude: Optional[str] = None, source_id: Optional[str] = None, agent_id: Optional[int] = None,
+        date_from: Optional[str] = None, date_to: Optional[str] = None, search: Optional[str] = None,
+        tag: Optional[str] = None, limit: int = 24, offset: int = 0,
     ) -> Dict[str, Any]:
         """List deliverables with filters. Excludes soft-deleted rows.
 
@@ -356,43 +351,17 @@ class DeliverableService:
         ``source_id`` (PRD-164 S3) scopes to one originating mission/task/
         heartbeat — the mission-page Deliverables tab and the
         platform_list_deliverables tool filter on it.
+
+        ``tag`` (7 Oct) keeps the Deliverables carrying that tag in ``extra.tags``,
+        whatever case it was stored in (services/deliverable_filters.py).
         """
         limit = max(1, min(int(limit or 24), 100))
         offset = max(0, int(offset or 0))
-
-        conditions = ["o.workspace_id = :workspace_id", "o.deleted_at IS NULL"]
-        params: Dict[str, Any] = {"workspace_id": str(self.workspace_id)}
-
-        if artifact_type:
-            conditions.append("o.artifact_type = :artifact_type")
-            params["artifact_type"] = artifact_type
-        if source_type:
-            conditions.append("o.source_type = :source_type")
-            params["source_type"] = source_type
-        if source_type_exclude:
-            excluded = [s.strip() for s in source_type_exclude.split(",") if s.strip()]
-            if excluded:
-                placeholders = ", ".join(f":excl_src_{i}" for i in range(len(excluded)))
-                conditions.append(f"o.source_type NOT IN ({placeholders})")
-                for i, s in enumerate(excluded):
-                    params[f"excl_src_{i}"] = s
-        if source_id:
-            conditions.append("o.source_id = :source_id")
-            params["source_id"] = str(source_id)
-        if agent_id is not None:
-            conditions.append("o.agent_id = :agent_id")
-            params["agent_id"] = agent_id
-        if date_from:
-            conditions.append("o.created_at >= :date_from")
-            params["date_from"] = date_from
-        if date_to:
-            conditions.append("o.created_at <= :date_to")
-            params["date_to"] = date_to
-        if search:
-            conditions.append("(o.title ILIKE :search OR o.summary ILIKE :search OR o.file_path ILIKE :search)")
-            params["search"] = f"%{search}%"
-
-        where = " AND ".join(conditions)
+        where, params = list_filter(self.workspace_id, {
+            "artifact_type": artifact_type, "source_type": source_type, "source_type_exclude": source_type_exclude,
+            "source_id": source_id, "agent_id": agent_id, "date_from": date_from, "date_to": date_to,
+            "search": search, "tag": tag,
+        })
 
         try:
             total = self.db.execute(
@@ -421,26 +390,12 @@ class DeliverableService:
                 {**params, "limit": limit, "offset": offset},
             ).fetchall()
 
-            return {
-                "success": True,
-                "deliverables": [self._row_to_dict(r) for r in rows],
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-            }
+            return {"success": True, "deliverables": [self._row_to_dict(r) for r in rows], "total": total,
+                    "limit": limit, "offset": offset}
         except Exception as exc:
-            logger.error(
-                "[DeliverableService] list_deliverables() failed: %s",
-                exc, exc_info=True,
-            )
-            return {
-                "success": False,
-                "error": f"list failed: {exc}",
-                "deliverables": [],
-                "total": 0,
-                "limit": limit,
-                "offset": offset,
-            }
+            logger.error("[DeliverableService] list_deliverables() failed: %s", exc, exc_info=True)
+            return {"success": False, "error": f"list failed: {exc}", "deliverables": [], "total": 0,
+                    "limit": limit, "offset": offset}
 
     # ------------------------------------------------------------------
     # get_deliverable
@@ -834,6 +789,7 @@ class DeliverableService:
             "preview_type": row.preview_type,
             "thumbnail_url": thumbnail_url_for(row),  # F353: the card's first-page picture
             "extra": row.extra or {},
+            "tags": tags_in(row.extra),  # 7 Oct: the Deliverable's tags, as its panel shows them
             "status": shown_status(row),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,

@@ -6,7 +6,7 @@ REST endpoints for the consumer-facing Gallery view of agent deliverables.
 
 Routes
 ------
-- GET    /api/deliverables                 List with filters + pagination
+- GET    /api/deliverables                 List with filters + pagination (``tag``: 7 Oct)
 - GET    /api/deliverables/stats           Aggregate counts (by_type, by_agent)
 - GET    /api/deliverables/{id}            Fetch one (optional ?include_content=)
 - DELETE /api/deliverables/{id}            Soft delete
@@ -51,6 +51,7 @@ async def list_deliverables(
     date_from: Optional[str] = Query(None, description="ISO timestamp — include rows created_at >= date_from"),
     date_to: Optional[str] = Query(None, description="ISO timestamp — include rows created_at <= date_to"),
     search: Optional[str] = Query(None, description="Case-insensitive search over title, summary, file_path"),
+    tag: Optional[str] = Query(None, description="Only Deliverables carrying this tag, any case (7 Oct)"),
     limit: int = Query(24, ge=1, le=100),
     offset: int = Query(0, ge=0),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -70,6 +71,7 @@ async def list_deliverables(
         date_from=date_from,
         date_to=date_to,
         search=search,
+        tag=tag,
         limit=limit,
         offset=offset,
     )

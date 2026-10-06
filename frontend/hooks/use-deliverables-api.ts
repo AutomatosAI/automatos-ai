@@ -77,6 +77,8 @@ export interface Deliverable {
   content_error?: string
   /** F354: the owner's document this Deliverable was added to knowledge as, or null. */
   knowledge_document_id?: number | null
+  /** 7 Oct: the Deliverable's tags (lowercase, at most 10); a board card's tags included. */
+  tags?: string[]
 }
 
 export interface DeliverableListResponse {
@@ -115,6 +117,8 @@ export interface FilterState {
   agent_id: number | null
   date_range: DateRange
   search: string
+  /** 7 Oct: only Deliverables carrying this tag (any case). */
+  tag?: string | null
 }
 
 export const DEFAULT_FILTERS: FilterState = {
@@ -125,6 +129,7 @@ export const DEFAULT_FILTERS: FilterState = {
   agent_id: null,
   date_range: 'all',
   search: '',
+  tag: null,
 }
 
 /**
@@ -159,7 +164,7 @@ function dateRangeToFrom(range: DateRange): string | null {
   return from.toISOString()
 }
 
-function buildListQuery(filters: FilterState, offset: number): string {
+export function buildListQuery(filters: FilterState, offset: number): string {
   const params = new URLSearchParams()
   params.set('limit', String(PAGE_SIZE))
   params.set('offset', String(offset))
@@ -171,6 +176,7 @@ function buildListQuery(filters: FilterState, offset: number): string {
   if (filters.source_id) params.set('source_id', filters.source_id)
   if (filters.agent_id !== null) params.set('agent_id', String(filters.agent_id))
   if (filters.search.trim()) params.set('search', filters.search.trim())
+  if (filters.tag?.trim()) params.set('tag', filters.tag.trim().toLowerCase())
   const dateFrom = dateRangeToFrom(filters.date_range)
   if (dateFrom) params.set('date_from', dateFrom)
   return params.toString()

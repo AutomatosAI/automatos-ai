@@ -17,6 +17,9 @@ function's blanket ``except`` turned the AttributeError into the tool's answer.
 * a list, for a PDF with no template, is its sections;
 * anything else is refused in plain words that say what to send instead.
 
+``tags`` (7 Oct) are the Deliverable's own: refused in plain words when they break
+the rules (services/deliverable_tags.py); a card's tags join them on registration.
+
 A failure while the document is made answers in plain words too. The errors the
 platform words itself (a missing column, an unfilled template field, the month's
 render minutes) say what they say; anything else is logged with its stack, and
@@ -26,7 +29,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -38,6 +41,7 @@ from core.social_templates import is_social_format
 from modules.documents.models import UnresolvedDeliverableError
 from modules.tools.execution.json_text import JSONTextProblem, loads_lenient
 from modules.tools.formatting.result_formatter import ToolResultFormatter
+from services.deliverable_tags import TagsRefused, validated_tags
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +89,7 @@ BAD_TEMPLATE_ID = (
     "The document was not made: template_id {value!r} is not a template id. "
     "Use an id platform_list_templates gives, or pass template_name instead."
 )
+BAD_TAGS = "The document was not made: {problem} Send 'tags' as a list, or leave it out."
 NOT_MADE = (
     "The document was not made because of a problem on our side (it has been logged). "
     "Try once more; if it fails again, put the content in your answer as text instead."
@@ -106,6 +111,8 @@ class DocumentRequest:
     data: Dict[str, Any]
     template_name: Optional[str]
     template_id: Optional[UUID]
+    # 7 Oct: the Deliverable's own tags (a card's tags join them when it is registered).
+    tags: Tuple[str, ...] = ()
 
 
 def _kind(value: Any) -> str:
@@ -155,6 +162,13 @@ def _template_id(raw: Any) -> Optional[UUID]:
         raise DocumentArgsRefused(BAD_TEMPLATE_ID.format(value=raw)) from exc
 
 
+def _tags(raw: Any) -> Tuple[str, ...]:
+    try:
+        return tuple(validated_tags(raw))
+    except TagsRefused as refused:
+        raise DocumentArgsRefused(BAD_TAGS.format(problem=refused)) from refused
+
+
 def _has_content(data: Dict[str, Any], fmt: str) -> bool:
     """A no-template document is built only from ``data``: it must carry something."""
     if not data:
@@ -177,7 +191,7 @@ def document_request(parameters: Dict[str, Any]) -> DocumentRequest:
     if not has_template and not _has_content(data, fmt):
         raise DocumentArgsRefused(MISSING_CONTENT)
     title = str(parameters.get("title") or DEFAULT_TITLE)
-    return DocumentRequest(title, fmt, data, template_name, template_id)
+    return DocumentRequest(title, fmt, data, template_name, template_id, _tags(parameters.get("tags")))
 
 
 def deliverable_open_url(deliverable_id: Optional[str]) -> str:
@@ -270,6 +284,7 @@ async def make_document(db: Session, request: DocumentRequest, agent: Any, works
         agent_id=getattr(agent, "id", None),
         agent_name=getattr(agent, "name", None),
         template_id=request.template_id,
+        tags=request.tags,
     ) or {}
     await _ingest(db, workspace_id, result, request.title, agent, registration)
     return ToolResultFormatter.standardize_result(

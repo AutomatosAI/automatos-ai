@@ -7,6 +7,7 @@
  *   - Artifact type dropdown
  *   - Source type dropdown
  *   - Date range dropdown
+ *   - Tag box (7 Oct: only Deliverables carrying the tag; tag-filter.tsx)
  *   - Clear filters button (appears when any filter active)
  *   - Total count on the right
  */
@@ -38,15 +39,8 @@ import {
   type FilterState,
 } from '@/hooks/use-deliverables-api'
 
-// ---- Local debounce hook (kept local; no shared hook in repo) ----
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState<T>(value)
-  useEffect(() => {
-    const handle = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(handle)
-  }, [value, delay])
-  return debounced
-}
+import { TagFilter } from './tag-filter'
+import { useDebouncedValue } from './use-debounced-value'
 
 // ---- Option definitions ----
 const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -93,14 +87,54 @@ function hasActiveFilters(filters: FilterState): boolean {
     filters.source_type !== null ||
     filters.agent_id !== null ||
     filters.date_range !== 'all' ||
-    filters.search.trim() !== ''
+    filters.search.trim() !== '' ||
+    Boolean(filters.tag)
+  )
+}
+
+function TypeSelect({ value, onChange }: { value: string | null; onChange: (value: string) => void }) {
+  const typedValue = value && isDeliverableType(value) ? (value as DeliverableType) : null
+  return (
+    <Select value={value ?? 'all'} onValueChange={onChange}>
+      <SelectTrigger className="w-[170px]" aria-label="Filter by type">
+        <div className="flex items-center gap-2">
+          {typedValue ? (
+            <span className={DELIVERABLE_ACCENTS[typedValue].tw}>
+              <DeliverableIcon type={typedValue} size="badge" />
+            </span>
+          ) : (
+            <FileType className="h-4 w-4 text-muted-foreground" />
+          )}
+          <SelectValue />
+        </div>
+      </SelectTrigger>
+      <SelectContent>
+        {TYPE_OPTIONS.map((opt) => {
+          const typed = isDeliverableType(opt.value) ? (opt.value as DeliverableType) : null
+          return (
+            <SelectItem key={opt.value} value={opt.value}>
+              <div className="flex items-center gap-2">
+                {typed ? (
+                  <span className={DELIVERABLE_ACCENTS[typed].tw}>
+                    <DeliverableIcon type={typed} size="badge" />
+                  </span>
+                ) : (
+                  <FileType className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span>{opt.label}</span>
+              </div>
+            </SelectItem>
+          )
+        })}
+      </SelectContent>
+    </Select>
   )
 }
 
 export function FilterBar({ filters, onFiltersChange, total, viewMode, onViewModeChange }: FilterBarProps) {
   // Local search state so typing feels instant; debounce pushes to parent.
   const [searchInput, setSearchInput] = useState(filters.search)
-  const debouncedSearch = useDebounce(searchInput, 300)
+  const debouncedSearch = useDebouncedValue(searchInput, 300)
 
   // Keep local state in sync if parent resets filters externally (e.g., Clear).
   useEffect(() => {
@@ -158,42 +192,7 @@ export function FilterBar({ filters, onFiltersChange, total, viewMode, onViewMod
       </div>
 
       {/* Type */}
-      <Select
-        value={filters.artifact_type ?? 'all'}
-        onValueChange={handleTypeChange}
-      >
-        <SelectTrigger className="w-[170px]" aria-label="Filter by type">
-          <div className="flex items-center gap-2">
-            {filters.artifact_type && isDeliverableType(filters.artifact_type) ? (
-              <span className={DELIVERABLE_ACCENTS[filters.artifact_type as DeliverableType].tw}>
-                <DeliverableIcon type={filters.artifact_type as DeliverableType} size="badge" />
-              </span>
-            ) : (
-              <FileType className="h-4 w-4 text-muted-foreground" />
-            )}
-            <SelectValue />
-          </div>
-        </SelectTrigger>
-        <SelectContent>
-          {TYPE_OPTIONS.map((opt) => {
-            const typed = isDeliverableType(opt.value) ? (opt.value as DeliverableType) : null
-            return (
-              <SelectItem key={opt.value} value={opt.value}>
-                <div className="flex items-center gap-2">
-                  {typed ? (
-                    <span className={DELIVERABLE_ACCENTS[typed].tw}>
-                      <DeliverableIcon type={typed} size="badge" />
-                    </span>
-                  ) : (
-                    <FileType className="h-4 w-4 text-muted-foreground" />
-                  )}
-                  <span>{opt.label}</span>
-                </div>
-              </SelectItem>
-            )
-          })}
-        </SelectContent>
-      </Select>
+      <TypeSelect value={filters.artifact_type} onChange={handleTypeChange} />
 
       {/* Source */}
       <Select
@@ -231,6 +230,9 @@ export function FilterBar({ filters, onFiltersChange, total, viewMode, onViewMod
           ))}
         </SelectContent>
       </Select>
+
+      {/* Tag */}
+      <TagFilter value={filters.tag} onChange={(tag) => onFiltersChange({ ...filters, tag })} />
 
       {/* Clear */}
       {active && (

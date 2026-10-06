@@ -8,12 +8,12 @@ REST endpoints for template CRUD, document generation, and file serving.
 import logging
 import os
 import shutil
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from core.auth.hybrid import get_request_context_hybrid
@@ -28,6 +28,7 @@ from config import config
 from modules.documents.models import UnresolvedDeliverableError
 from modules.documents.template_formats import UnsupportedTemplateFormat
 from modules.documents.template_preview import preview_data
+from services.deliverable_tags import validated_tags
 from modules.documents.template_validation import (
     INVALID_BLOCKS, INVALID_TEMPLATE, TEMPLATE_SAVE_ERRORS, save_errors, validated_blocks,
 )
@@ -81,6 +82,13 @@ class GenerateDocumentRequest(BaseModel):
     data: dict
     template_name: Optional[str] = None
     template_id: Optional[str] = None
+    # 7 Oct: the Deliverable's tags, at most 10 of at most 40 characters (services/deliverable_tags.py).
+    tags: List[str] = Field(default_factory=list)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _tags_follow_the_rules(cls, value):
+        return validated_tags(value)
 
 
 class GenerateDocumentResponse(BaseModel):
@@ -478,11 +486,11 @@ async def generate_document(
     except Exception as e:
         logger.exception("Document generation failed")
         raise HTTPException(status_code=500, detail="Internal server error")
-    return _registered_response(service, result, body.title)
+    return _registered_response(service, result, body.title, body.tags)
 
 
-def _registered_response(service, result, title: str) -> GenerateDocumentResponse:
-    """Register a UI/API generation as a Deliverable and answer with its links (PRD-242 S4)."""
+def _registered_response(service, result, title: str, tags: List[str]) -> GenerateDocumentResponse:
+    """Register a UI/API generation as a Deliverable, with its tags, and answer with its links (PRD-242 S4)."""
     from modules.documents.generation_service import deliverables_app_url
 
     registration = service.register_as_deliverable(
@@ -490,6 +498,7 @@ def _registered_response(service, result, title: str) -> GenerateDocumentRespons
         title=title,
         source_type="document",
         template_id=UUID(result.template_id) if result.template_id else None,
+        tags=tags,
     )
     return GenerateDocumentResponse(
         status="success",

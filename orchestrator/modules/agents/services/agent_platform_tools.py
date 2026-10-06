@@ -22,6 +22,7 @@ from modules.rag import RAGService
 from modules.codegraph import CodeGraphService
 from config import config
 from services.past_work_schemas import chat_search_takes_a_scope  # F305 (night 9)
+from services.deliverable_tag_schemas import chat_document_takes_tags  # 7 Oct
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ class AgentPlatformTools:
         return None
 
     @chat_search_takes_a_scope  # F305: search_knowledge's scope 'past_work'
+    @chat_document_takes_tags  # 7 Oct: generate_document's tags for its Deliverable
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools for function calling"""
         from core.models.core import DOCUMENT_TEMPLATE_FORMATS
@@ -267,8 +269,6 @@ class AgentPlatformTools:
                 }
             },
         ]
-
-
 
     @_routes_generate_document
     async def execute_tool(
