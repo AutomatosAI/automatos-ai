@@ -6,6 +6,10 @@ left actions_documents.py, whose one register function is past the length rule.
 
 PRD-255 US-012: platform_render_preview draws a page of a template or a Deliverable
 into the calling session's folder, so the agent can open it and judge it.
+
+PRD-255 US-013: platform_create_template and platform_update_template build the
+owner's document templates in the studio's block format, through the studio's own
+checks (handlers_template_writes); a starter is copied, never changed.
 """
 
 from __future__ import annotations
@@ -19,10 +23,13 @@ Register = Callable[[ActionRegistry], None]
 
 
 def register_template_actions(registry: ActionRegistry) -> None:
-    """platform_list_templates and platform_get_template_schema (PRD-167 S6, F346), platform_render_preview."""
+    """platform_list_templates and platform_get_template_schema (PRD-167 S6, F346), platform_render_preview,
+    platform_create_template and platform_update_template (PRD-255 US-013)."""
     _register_list_templates(registry)
     _register_get_template_schema(registry)
     _register_render_preview(registry)
+    _register_create_template(registry)
+    _register_update_template(registry)
 
 
 def _register_list_templates(registry: ActionRegistry) -> None:
@@ -147,6 +154,91 @@ def _register_render_preview(registry: ActionRegistry) -> None:
             "show me page 1 of the brand board",
             "render the invoice template with the proposed colours",
             "look at page 2 of the report I just made",
+        ],
+    ))
+
+
+# The fields a template is made of, as create and update take them (PRD-255 US-013).
+_TEMPLATE_BODY_FIELDS = {
+    "name": {"type": "string", "description": "The template's name, unique in the workspace."},
+    "description": {"type": "string", "description": "One line on what the template is for."},
+    "category": {"type": "string", "description": "e.g. 'invoice', 'quote', 'letter', 'report' (default 'general')."},
+    "blocks": {
+        "type": "object",
+        "description": (
+            "The studio's block tree: {\"version\": 1, \"blocks\": [...]} (headings, text with chips, tables, "
+            "data tables, images, sections, brand parts). Checked as the studio checks it; field-level errors "
+            "come back when it is refused."
+        ),
+    },
+    "sample_data": {"type": "object", "description": "Example data.* values the template shows in previews."},
+    "tags": {"type": "array", "items": {"type": "string"}, "description": "Labels to find it by."},
+}
+
+
+def _register_create_template(registry: ActionRegistry) -> None:
+    # PRD-255 US-013: the workspace's own content, saved like the studio's POST
+    # /templates (documents:create); on the hierarchy gate's ALLOW_LIST.
+    registry.register(ActionDefinition(
+        name="platform_create_template",
+        description=(
+            "Make a new document template (pdf, docx or xlsx) in the studio's block format: a name, a "
+            "format and the block tree, or copy_of a template's id to start from its layout (a platform "
+            "starter is customised this way: copy it, then update the copy). Saved through the studio's "
+            "own checks and listed in the studio like any template, tagged with who made it. Social "
+            "templates are not made here."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                **_TEMPLATE_BODY_FIELDS,
+                "format": {"type": "string", "enum": ["pdf", "docx", "xlsx"], "description": "The file it makes."},
+                "copy_of": {
+                    "type": "string",
+                    "description": "A template's id (from platform_list_templates) to copy; fields you send replace its own.",
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["documents", "templates", "studio", "brand", "create"],
+        examples=[
+            "make a quote template in our brand",
+            "create a price list template",
+            "copy the invoice starter so we can customise it",
+        ],
+    ))
+
+
+def _register_update_template(registry: ActionRegistry) -> None:
+    # PRD-255 US-013: like the studio's PUT /templates/{id} (documents:update), but
+    # a platform starter is refused (copy it first); on the gate's ALLOW_LIST.
+    registry.register(ActionDefinition(
+        name="platform_update_template",
+        description=(
+            "Change a document template of this workspace: send its template_id and only what changes "
+            "(name, description, category, blocks, sample_data, tags). The block tree is checked as the "
+            "studio checks it. A platform starter is never changed: copy it with platform_create_template "
+            "(copy_of) and update the copy. Social templates are not changed here; nothing is deleted."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "string", "description": "The template's id, from platform_list_templates."},
+                **_TEMPLATE_BODY_FIELDS,
+            },
+            "required": ["template_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["documents", "templates", "studio", "brand", "edit"],
+        examples=[
+            "add a terms section to our quote template",
+            "change the price list template's table columns",
+            "rename the proposal template",
         ],
     ))
 

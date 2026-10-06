@@ -68,6 +68,7 @@ from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
 )
 from modules.tools.discovery.handlers_widgets import get_widget_config, update_widget_config  # PRD-143 S10
 from modules.tools.discovery.handlers_render_preview import render_preview  # PRD-255 US-012
+from modules.tools.discovery.handlers_template_writes import create_template, update_template  # PRD-255 US-013
 from modules.tools.discovery.handlers_workspace import (
     get_workspace_info,
     get_memory_stats,
@@ -85,10 +86,7 @@ from modules.tools.discovery.handlers_members import (  # PRD-143 S11
     set_member_role,
     remove_member,
 )
-from modules.tools.discovery.handlers_api_keys import (  # PRD-143 S11
-    list_api_keys,
-    revoke_api_key,
-)
+from modules.tools.discovery.handlers_api_keys import list_api_keys, revoke_api_key  # PRD-143 S11
 from modules.tools.discovery.handlers_monitoring import (
     get_logs,
     list_services,
@@ -1353,6 +1351,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_list_templates": list_templates,
     "platform_get_template_schema": get_template_schema,
     "platform_render_preview": render_preview,  # PRD-255 US-012: a page into the session's folder
+    "platform_create_template": create_template, "platform_update_template": update_template,  # PRD-255 US-013
     # PRD-251 US-115: the brand kit (the REST routes' functions)
     "platform_get_brand_kit": get_brand_kit_tool,
     "platform_update_brand_kit": update_brand_kit_tool,

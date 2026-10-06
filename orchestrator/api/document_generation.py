@@ -23,12 +23,14 @@ from core.auth.dependencies import RequestContext
 from core.database.database import get_db
 from core.media_render_client import NOT_CONFIGURED, WORKSPACE_BUSY, MediaRenderError, MediaRenderUnavailable
 from core.media_render_quota import RenderQuotaExceeded
-from core.social_templates import InvalidVariableValues, SocialTemplateError, is_social_format
+from core.social_templates import InvalidVariableValues, SocialTemplateError
 from config import config
 from modules.documents.models import UnresolvedDeliverableError
 from modules.documents.template_formats import UnsupportedTemplateFormat
 from modules.documents.template_preview import preview_data
-from modules.documents.template_service import UnknownTemplateFormat
+from modules.documents.template_validation import (
+    INVALID_BLOCKS, INVALID_TEMPLATE, TEMPLATE_SAVE_ERRORS, save_errors, validated_blocks,
+)
 from api.document_brand_kit import router as brand_kit_router
 
 logger = logging.getLogger(__name__)
@@ -102,21 +104,19 @@ class GenerateDocumentResponse(BaseModel):
 # ------------------------------------------------------------------
 
 
-def _validate_blocks_or_422(blocks: Optional[dict]) -> Optional[dict]:
+def _validate_blocks_or_422(format: str, blocks: Optional[dict]) -> Optional[dict]:
     """Validate a block body, returning the normalized dict or raising 422 with
-    field-level errors (PRD-167 S2 — no silent swallow)."""
-    if blocks is None:
-        return None
-    from modules.documents.blocks import BlockValidationError, validate_blocks
+    field-level errors (PRD-167 S2 — no silent swallow). The check is the one the
+    agents' template tools run too (PRD-255 US-013, ``template_validation``)."""
+    from modules.documents.blocks import BlockValidationError
 
     try:
-        return validate_blocks(blocks).model_dump()
+        return validated_blocks(format, blocks)
     except BlockValidationError as e:
-        raise HTTPException(status_code=422, detail={"message": "Invalid blocks", "errors": e.errors})
+        raise HTTPException(status_code=422, detail={"message": INVALID_BLOCKS, "errors": e.errors})
 
 
-# PRD-251 S1.2: what a social template's save or render can fail with.
-SOCIAL_TEMPLATE_ERRORS = (SocialTemplateError, UnknownTemplateFormat)
+# PRD-251 S1.2: what a social template's render can fail with (its save: TEMPLATE_SAVE_ERRORS).
 SOCIAL_RENDER_ERRORS = (SocialTemplateError, RenderQuotaExceeded, MediaRenderError)
 RENDER_NOT_CONFIGURED = "Rendering is not configured on this server."
 RENDER_UNREACHABLE = "The renderer cannot be reached right now. Try again in a few minutes."
@@ -138,8 +138,7 @@ def _unresolved_422(e: UnresolvedDeliverableError) -> HTTPException:
 
 def _template_error_422(e: ValueError) -> HTTPException:
     """A social template that breaks its contract, or an unknown format: 422 naming each problem."""
-    errors = e.errors if isinstance(e, SocialTemplateError) else [{"field": "format", "message": str(e)}]
-    return HTTPException(status_code=422, detail={"message": "Invalid template", "errors": errors})
+    return HTTPException(status_code=422, detail={"message": INVALID_TEMPLATE, "errors": save_errors(e)})
 
 
 def _social_render_error(e: Exception) -> HTTPException:
@@ -185,7 +184,7 @@ async def create_template(
 
     # PRD-167 S2: validate the block body up-front; malformed blocks return 422 with
     # field-level errors (no silent swallow). A social composition is no block tree.
-    normalized_blocks = body.blocks if is_social_format(body.format) else _validate_blocks_or_422(body.blocks)
+    normalized_blocks = _validate_blocks_or_422(body.format, body.blocks)
 
     service = DocumentTemplateService(db)
     try:
@@ -202,7 +201,7 @@ async def create_template(
             created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
             blocks=normalized_blocks,
         )
-    except SOCIAL_TEMPLATE_ERRORS as e:
+    except TEMPLATE_SAVE_ERRORS as e:
         raise _template_error_422(e)
     return {
         "id": str(template.id),
@@ -290,11 +289,10 @@ async def update_template(
         current = service.get_template(template_id, ctx.workspace_id)
         if not current:
             raise HTTPException(status_code=404, detail="Template not found")
-        if not is_social_format(current.format):
-            updates["blocks"] = _validate_blocks_or_422(updates["blocks"])
+        updates["blocks"] = _validate_blocks_or_422(current.format, updates["blocks"])
     try:
         template = service.update_template(template_id, ctx.workspace_id, **updates)
-    except SOCIAL_TEMPLATE_ERRORS as e:
+    except TEMPLATE_SAVE_ERRORS as e:
         raise _template_error_422(e)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")

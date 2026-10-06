@@ -26,6 +26,39 @@
 version: 1
 category: documents
 actions:
+  platform_create_template:
+  - text: make a quote template in our brand
+    source: example
+  - text: create a price list template
+    source: example
+  - text: copy the invoice starter so we can customise it
+    source: example
+  - text: build us a proposal template
+    source: authored
+  - text: new template for purchase orders
+    source: authored
+  - text: set up a branded letterhead template
+    source: authored
+  - text: design a template for our monthly report
+    source: authored
+  - text: i need a statement of work template
+    source: authored
+  - text: make a copy of the letter starter i can change
+    source: authored
+  - text: create a docx template for meeting minutes
+    source: authored
+  - text: add a new excel template for the price list
+    source: authored
+  - text: template for a delivery note please
+    source: authored
+  - text: start a fresh invoice layout based on the starter
+    source: authored
+  - text: can you make a receipt template
+    source: authored
+  - text: draft a one-page flyer template as a pdf
+    source: authored
+  - text: create a block template for client onboarding
+    source: authored
   platform_delete_document:
   - text: delete document 5
     source: example
@@ -444,6 +477,39 @@ actions:
   - text: our brand voice should sound friendly and precise
     source: authored
   - text: set up our brand kit
+    source: authored
+  platform_update_template:
+  - text: add a terms section to our quote template
+    source: example
+  - text: change the price list template's table columns
+    source: example
+  - text: rename the proposal template
+    source: example
+  - text: edit the quote template
+    source: authored
+  - text: put our bank details at the bottom of the invoice copy
+    source: authored
+  - text: update the sample data on the report template
+    source: authored
+  - text: change the heading on the letter template
+    source: authored
+  - text: move the logo to the right in our proposal template
+    source: authored
+  - text: tweak the price list layout
+    source: authored
+  - text: add a signature block to the contract template
+    source: authored
+  - text: fix the columns in the order template
+    source: authored
+  - text: retag the quote template as sales
+    source: authored
+  - text: change the category of that template to invoice
+    source: authored
+  - text: swap the intro text in the brochure template
+    source: authored
+  - text: make the totals row bold in our invoice copy
+    source: authored
+  - text: update the template we made yesterday
     source: authored
   platform_upload_document:
   - text: add this FAQ to the knowledge base

@@ -18,6 +18,9 @@ fields its schema declares forwarded.
   the owner's branded template instead of guessing its name and its fields.
 * ``render_preview`` (PRD-255 US-012) draws a page of a template or a Deliverable into
   the ticket's folder, so the session opens what it made and judges it.
+* ``create_template`` / ``update_template`` (PRD-255 US-013) build the owner's document
+  templates in the studio's block format, through the studio's own checks; a starter
+  is copied (``copy_of``), never changed. Two more writes.
 * ``run_playbook`` starts a run in the session's workspace: the second write here.
 * Missions: the read tools a mission's step agent uses. ``platform_list_missions``
   and ``platform_get_mission`` read the board's missions; ``platform_field_query``
@@ -175,6 +178,56 @@ RENDER_PREVIEW_SPEC: Dict[str, Any] = {
     "tags": ("documents",),
 }
 
+TEMPLATE_BODY_FIELDS: Tuple[str, ...] = ("name", "description", "category", "blocks", "sample_data", "tags")
+TEMPLATE_BODY_SCHEMA: Dict[str, Any] = {
+    "name": _string("The template's name, unique in the workspace."),
+    "description": _string("One line on what the template is for."),
+    "category": _string("e.g. 'invoice', 'quote', 'letter', 'report' (default 'general')."),
+    "blocks": {"type": "object", "description": "The studio's block tree, {\"version\": 1, \"blocks\": [...]}, "
+               "checked as the studio checks it; field-level errors come back when it is refused."},
+    "sample_data": {"type": "object", "description": "Example data.* values the template shows in previews."},
+    "tags": {"type": "array", "items": {"type": "string"}, "description": "Labels to find it by."},
+}
+
+CREATE_TEMPLATE_SPEC: Dict[str, Any] = {
+    "name": "create_template",
+    "action": "platform_create_template",
+    "reads_only": False,
+    "description": (
+        "Make a new document template (pdf, docx or xlsx) in the studio's block format: a name, a format and "
+        "the block tree, or copy_of a template's id to start from its layout (customise a platform starter "
+        "this way: copy it, then update_template the copy). Saved through the studio's checks, listed in the "
+        "studio and tagged as made by you. Look at it with render_preview before you report. No social templates."
+    ),
+    "input_schema": _schema({
+        **TEMPLATE_BODY_SCHEMA,
+        "format": {"type": "string", "enum": ["pdf", "docx", "xlsx"], "description": "The file it makes."},
+        "copy_of": _string("A template's id (from list_templates) to copy; the fields you send replace its own."),
+    }),
+    "scope": forward({k: k for k in (*TEMPLATE_BODY_FIELDS, "format", "copy_of")},
+                     needs="create_template needs a name, a format and blocks, or copy_of a template's id.",
+                     one_of=("name", "copy_of")),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
+UPDATE_TEMPLATE_SPEC: Dict[str, Any] = {
+    "name": "update_template",
+    "action": "platform_update_template",
+    "reads_only": False,
+    "description": (
+        "Change one of this workspace's document templates: its template_id and only what changes. The block "
+        "tree is checked as the studio checks it. A platform starter is never changed: copy it with "
+        "create_template(copy_of=...) and update the copy. Nothing is deleted."
+    ),
+    "input_schema": _schema({"template_id": _string("The template's id, from list_templates."),
+                             **TEMPLATE_BODY_SCHEMA}, ("template_id",)),
+    "scope": forward({k: k for k in ("template_id", *TEMPLATE_BODY_FIELDS)}, ("template_id",),
+                     "update_template needs the template_id, from list_templates, and what changes."),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
 LIST_PLAYBOOKS_SPEC: Dict[str, Any] = {
     "name": "list_playbooks",
     "action": "platform_list_playbooks",
@@ -286,6 +339,7 @@ SEARCH_MISSION_FINDINGS_SPEC: Dict[str, Any] = {
 
 WORK_TOOL_SPECS: Tuple[Dict[str, Any], ...] = (
     GENERATE_DOCUMENT_SPEC, LIST_TEMPLATES_SPEC, GET_TEMPLATE_SCHEMA_SPEC, RENDER_PREVIEW_SPEC,
+    CREATE_TEMPLATE_SPEC, UPDATE_TEMPLATE_SPEC,
     LIST_PLAYBOOKS_SPEC, GET_PLAYBOOK_SPEC, RUN_PLAYBOOK_SPEC,
     GET_LATEST_REPORT_SPEC,
     LIST_MISSIONS_SPEC, GET_MISSION_SPEC, SEARCH_MISSION_FINDINGS_SPEC,
