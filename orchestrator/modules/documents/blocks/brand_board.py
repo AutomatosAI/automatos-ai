@@ -12,6 +12,10 @@ FR-9: a logo variant is shown only when the owner uploaded it; one that is not s
 is shown as its fallback (the logo on a light chip on a dark ground; the logo
 itself for one colour), with a line saying so. Nothing is generated.
 
+F360: the type part names the body's and the headings' fonts, and when the PDF
+prints one in a substitute (the kit names a family it neither uploaded nor the
+code bundles), it says which, and how to fix it (``page_fonts.kit_font_uses``).
+
 Pure: the kit in, values out.
 """
 from __future__ import annotations
@@ -23,6 +27,7 @@ from core.brand_palette import PALETTE_ROLES, effective_palette
 
 from ..brand_system import ACCENT_BOLD, ACCENT_SPARING, ACCENT_USES, DEFAULT_ACCENT_USE, ROLE_JOBS, TYPE_STEPS, tone_words
 from . import design_tokens as t
+from .page_fonts import kit_font_uses
 
 # The render-ready kit's inlined logo variants (``brand_fonts.INLINED_LOGOS``).
 LOGO_FIELD, LOGO_DARK_FIELD, LOGO_MONO_FIELD = "logo_url", "logo_dark_url", "logo_mono_url"
@@ -32,9 +37,12 @@ NO_MONO_LOGO_NOTE = "Not uploaded: the logo itself."
 BOARD_TITLE = "Brand board"
 # The type samples print this line at each step of the scale.
 TYPE_SAMPLE = "The quick brown fox jumps over the lazy dog"
+# The steps headings print at: their samples are set in the kit's heading font (F360).
+HEADING_STEPS = frozenset({"display", "h1", "h2", "h3"})
 TYPE_STEP_LABELS = {"display": "Display", "h1": "H1", "h2": "H2", "h3": "H3", "body": "Body", "small": "Small",
                     "caption": "Caption"}
 NO_TONE_NOTE = "No tone words yet: add three to five on the Brand kit page."
+FONT_SUBSTITUTE_NOTE = "{role}: {named} is not uploaded, so PDFs print it in {prints_in}. Upload its woff2 on the Brand kit page."
 # The three miniature applications, in the order the board shows them.
 APPLICATION_INVOICE, APPLICATION_LETTER, APPLICATION_SOCIAL = "invoice", "letter", "social"
 APPLICATIONS = ((APPLICATION_INVOICE, "Invoice"), (APPLICATION_LETTER, "Letter"), (APPLICATION_SOCIAL, "Social card"))
@@ -75,6 +83,7 @@ class TypeSample:
     size_pt: float
     line_pt: float
     weight: int
+    heading: bool = False
 
 
 @dataclass(frozen=True)
@@ -143,8 +152,25 @@ def type_samples(kit: Mapping[str, Any]) -> List[TypeSample]:
     for step in TYPE_STEPS:
         found = scale[step]
         label = f"{TYPE_STEP_LABELS[step]} {found.size_pt:g}/{found.line_pt:g} pt, {found.weight}"
-        samples.append(TypeSample(step, label, found.size_pt, found.line_pt, found.weight))
+        samples.append(TypeSample(step, label, found.size_pt, found.line_pt, found.weight, step in HEADING_STEPS))
     return samples
+
+
+@dataclass(frozen=True)
+class FontLine:
+    """One role's font on the board, and whether it says the PDF prints a substitute."""
+
+    text: str
+    substitute: bool
+
+
+def font_lines(kit: Mapping[str, Any]) -> List[FontLine]:
+    """"Body: Geist", "Headings: Newsreader"; a role the PDF prints in a substitute says so."""
+    return [
+        FontLine(FONT_SUBSTITUTE_NOTE.format(role=use.role, named=use.named, prints_in=use.prints_in), True)
+        if use.substitute else FontLine(f"{use.role}: {use.named}", False)
+        for use in kit_font_uses(kit)
+    ]
 
 
 def spacing(kit: Mapping[str, Any]) -> Spacing:
@@ -175,6 +201,7 @@ def miniature(miniatures: Optional[Mapping[str, str]], key: str) -> str:
 
 __all__ = [
     "ACCENT_USE_SHORT", "APPLICATIONS", "BOARD_TITLE", "APPLICATION_INVOICE", "APPLICATION_LETTER", "APPLICATION_SOCIAL", "SOCIAL_SAMPLE_HEADLINE",
-    "Spacing", "Swatch", "TYPE_SAMPLE", "TypeSample", "Variant", "accent_rule", "brand_name", "logo", "miniature",
+    "FONT_SUBSTITUTE_NOTE", "FontLine", "Spacing", "Swatch", "TYPE_SAMPLE", "TypeSample", "Variant", "accent_rule",
+    "brand_name", "font_lines", "logo", "miniature",
     "social_colours", "spacing", "swatches", "tagline", "type_samples", "variants", "voice",
 ]

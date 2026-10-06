@@ -138,6 +138,8 @@ def type_part(ctx: _Ctx) -> None:
     from docx.shared import Pt
 
     _label(ctx, "Type")
+    for line in bb.font_lines(ctx.kit):  # F360: the fonts, and a substitute the PDF prints
+        _line(ctx.doc, ctx, line.text)
     samples = bb.type_samples(ctx.kit)
     table = _table(ctx, len(samples), 2)
     for row, sample in enumerate(samples):

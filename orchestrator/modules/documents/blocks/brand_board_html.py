@@ -18,7 +18,10 @@ from typing import Any, Callable, Dict, Mapping
 from core.brand_palette import ROLE_DERIVED
 
 from . import brand_board as bb
+from .page_fonts import BOARD_HEADING_SAMPLE
 
+# A heading step's sample is set in the kit's heading font (``page_fonts``, F360).
+HEADING_SAMPLE_CLASS = f" {BOARD_HEADING_SAMPLE}"
 # A role the owner did not set, derived from the kit's colours (FR-2), says so under its swatch.
 DERIVED_NOTE = "derived"
 
@@ -80,10 +83,18 @@ def colours_html(block: Any, kit: Mapping[str, Any]) -> str:
     return _part(block, "Colour", f'<div class="board-swatches">{"".join(cells)}</div>{rule}')
 
 
+def _font_lines_html(kit: Mapping[str, Any]) -> str:
+    """The body's and headings' fonts; a substitute the PDF prints says so, as a note (F360)."""
+    return "".join(
+        f'<p class="{"board-note" if line.substitute else "board-caption"} board-font">{_esc(line.text)}</p>'
+        for line in bb.font_lines(kit)
+    )
+
+
 def type_html(block: Any, kit: Mapping[str, Any]) -> str:
-    """Each step of the type scale: its size, line height and weight, and a sample set in it, on one line."""
-    rows = "".join(
-        f'<p class="board-type-sample" style="font-size:{sample.size_pt:g}pt;line-height:{sample.line_pt:g}pt;'
+    """The fonts, then each step of the type scale: its size, line height and weight, and a sample set in it, on one line."""
+    rows = _font_lines_html(kit) + "".join(
+        f'<p class="board-type-sample{HEADING_SAMPLE_CLASS if sample.heading else ""}" style="font-size:{sample.size_pt:g}pt;line-height:{sample.line_pt:g}pt;'
         f'font-weight:{sample.weight};height:{sample.line_pt:g}pt">'
         f'<span class="board-type-label">{_esc(sample.label)}</span>{_esc(bb.TYPE_SAMPLE)}</p>'
         for sample in bb.type_samples(kit)

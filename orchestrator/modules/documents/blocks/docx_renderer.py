@@ -36,6 +36,7 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..amounts import field_text
+from ..bundled_fonts import families
 from ..locale_text import currency_of
 from ..variables.catalog import walk_dynamic
 from . import design_tokens as tokens
@@ -274,11 +275,12 @@ def _add_text_body(doc, groups: List[Group], font: Optional[str]) -> None:
             _add_segs(paragraph, line, font)
 
 
-def _add_heading(doc, block, values, unresolved, font) -> None:
-    """A heading in its level's style (PRD-255: the kit's heading colour and type scale; the title over an accent rule)."""
+def _add_heading(doc, block, values, unresolved) -> None:
+    """A heading in its level's style (PRD-255: the kit's heading colour and type scale; the title over an accent rule).
+    F360: its runs name no font, so they take the style's: the kit's heading font when it sets one."""
     p = doc.add_heading(level=min(block.level, 9))
     p.clear()
-    _add_inline(p, block.content, values, unresolved, font)
+    _add_inline(p, block.content, values, unresolved, None)
 
 
 def _add_table(doc, block, values, unresolved, font, kit=None) -> None:
@@ -351,7 +353,7 @@ def _add_text_block(doc, block, values, unresolved, font) -> None:
 def _add_block(doc, block, values, brand_kit, unresolved, *, font, data=None):
     kind = block.type
     if kind == "heading":
-        return _add_heading(doc, block, values, unresolved, font)
+        return _add_heading(doc, block, values, unresolved)
     if kind in ("text", "variable"):
         return _add_text_block(doc, block, values, unresolved, font)
     if kind == "table":
@@ -433,8 +435,10 @@ def render_document_docx(
     document = Document()
     bk = brand_kit or {}
     # font_family may be a CSS stack ("Inter, 'Segoe UI', ..."); take the first family.
-    font_stack = (bk.get("font_family") or "").split(",")[0].strip().strip("'\"") or None
-    apply_styles(document, bk, font_stack)  # F356: the PDF's type, spacing and colours
+    font_stack = next(iter(families(bk.get("font_family"))), None)
+    # F360: the headings in the kit's heading font, as in the PDF (Word used the body font for them).
+    heading_font = next(iter(families(bk.get("heading_font"))), None)
+    apply_styles(document, bk, font_stack, heading_font)  # F356: the PDF's type, spacing and colours
 
     unresolved: List[str] = []
     head, rest = split_letterhead(doc_model.blocks)

@@ -69,7 +69,8 @@ BOARD = Template("""
   .board-tone { margin: 0 0 ${s1}pt 0; font-size: ${small}pt; line-height: ${small_line}pt; }
   .board-tone strong { color: $heading; }
   .board-part p.board-type-sample { color: $heading; white-space: nowrap; overflow: hidden; margin: 0; }
-  .board-type-label { display: inline-block; width: ${board_type_label_mm}mm; font-size: ${caption}pt;
+  .board-part p.board-font { margin: 0 0 ${s1}pt 0; }
+  .board-type-label { display: inline-block; width: ${board_type_label_mm}mm; font-family: $font; font-size: ${caption}pt;
     line-height: ${caption_line}pt; font-weight: $body_weight; color: $muted; vertical-align: baseline; }
   .board-gaps { margin: 0 0 ${s1}pt 0; }
   .board-gap { display: inline-block; vertical-align: bottom; margin-right: ${s3}pt; }
