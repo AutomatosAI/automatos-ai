@@ -96,8 +96,9 @@ def test_the_stop_signals_that_exist_stop_the_host(monkeypatch):
     host = _host()
     lifecycle.install_signal_handlers(host)
     assert signal.SIGINT in installed
-    for name in ("SIGTERM", "SIGBREAK", "SIGHUP"):
-        assert (getattr(signal, name) in installed) == hasattr(signal, name)
+    for name in ("SIGTERM", "SIGBREAK", "SIGHUP"):     # each platform has only some of these
+        exists = hasattr(signal, name)
+        assert (exists and getattr(signal, name) in installed) == exists, name
     installed[signal.SIGINT](signal.SIGINT, None)
     assert host.stop.is_set() and "SIGINT" in host.stopping
 
