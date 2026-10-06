@@ -155,6 +155,9 @@ def spacing_part(ctx: _Ctx) -> None:
     _line(ctx.doc, ctx, f"A {grid.unit_pt:g} pt grid: gaps of {gaps} pt; page margins {grid.margin_mm:g} mm.")
     _line(ctx.doc, ctx, f"Logo clear space: {grid.clear_space:.2g} of its height "
                         f"({grid.clear_mm:.3g} mm round the {grid.logo_mm:g} mm letterhead logo).")
+    _label(ctx, bb.LOCALE_LABEL)  # F368: the kit's currency (or that it has none) and its date style
+    for line in bb.locale_lines(ctx.kit):
+        _line(ctx.doc, ctx, line.text)
 
 
 def voice_part(ctx: _Ctx) -> None:

@@ -25,6 +25,12 @@ from modules.documents.template_summary import STARTER_CREATOR
 logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+# F368 (night 10c): the names a starter had before, by its name now. The PDF board was "Brand Board"
+# and the social card "Brand board"; their platform-owned rows are renamed in place.
+FORMER_STARTER_NAMES = {
+    "Brand board (PDF)": ("Brand Board",),
+    "Brand board (social)": ("Brand board",),
+}
 
 # F347: the sha-256 of each source a legacy seed file shipped before its current one.
 # A platform-owned row still holding one of them, byte for byte, takes the current
@@ -437,18 +443,31 @@ def seed_social_starters_where_on(db: Session, socials_on: Callable[[Any], bool]
     return totals
 
 
+def _row_named(db: Session, workspace_id: UUID, name: str):
+    return (
+        db.query(DocumentTemplate)
+        .filter(DocumentTemplate.workspace_id == workspace_id, DocumentTemplate.name == name)
+        .first()
+    )
+
+
+def starter_row(db: Session, workspace_id: UUID, preset: dict):
+    """The row a starter lives in: the one under its name, else a platform-owned one under a name it
+    had before (F368: a renamed starter is refreshed in place, never seeded twice). A person's own
+    row under a former name is theirs: it is never renamed, and the starter is seeded beside it."""
+    existing = _row_named(db, workspace_id, preset["name"])
+    for former in () if existing is not None else FORMER_STARTER_NAMES.get(preset["name"], ()):
+        row = _row_named(db, workspace_id, former)
+        if row is not None and (getattr(row, "created_by", None) or "") == STARTER_CREATOR:
+            return row
+    return existing
+
+
 def _seed_presets(db: Session, workspace_id: UUID, presets) -> tuple:
     """Create or refresh each starter in ``presets`` (``starter_outcome``); ``(created, refreshed)``. No commit."""
     created = refreshed = 0
     for preset in presets:
-        existing = (
-            db.query(DocumentTemplate)
-            .filter(
-                DocumentTemplate.workspace_id == workspace_id,
-                DocumentTemplate.name == preset["name"],
-            )
-            .first()
-        )
+        existing = starter_row(db, workspace_id, preset)
         outcome = starter_outcome(existing, preset)
         if outcome == "created":
             db.add(

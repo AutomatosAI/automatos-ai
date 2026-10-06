@@ -9,11 +9,16 @@ board's own sizes, in millimetres, are :data:`BOARD_TOKENS`.
 
 Nothing on the board overflows its box: WeasyPrint breaks the page on a child's own
 height, clipped or not, so a miniature is cropped to its frame (``object-fit``) and
-the social card's lines fit inside theirs. A type sample is one line, its label
-inline beside it and its height its own line height, so a long sample is cut, never
-wrapped. Its rule outranks the base sheet's ``.doc-section p { white-space: pre-line }``
-(the type scale sits in a section row): without that, a sample wrapped at its own size
-and the clipped lines still pushed the applications onto a second page.
+the social card's lines fit inside theirs. A type sample is one line, its height its
+own line height, so it never wraps. Its rule outranks the base sheet's
+``.doc-section p { white-space: pre-line }`` (the type scale sits in a section row):
+without that, a sample wrapped at its own size and the clipped lines still pushed the
+applications onto a second page.
+
+F368 (night 10c): the sample was cut mid-word at the column's edge ("The quick |") on
+every board. Each step's label now sits on its own line above its sample, so the
+sample has the column's whole width, and the sample holds only the whole words that
+fit it (``brand_board.fitted_sample``); the clip stays as a backstop only.
 """
 from __future__ import annotations
 
@@ -29,6 +34,8 @@ BOARD_TOKENS = {
     "board_chip_pad_mm": 1.5,
     "board_app_mm": 34,
     "board_type_label_mm": 32,
+    # The variants' and the type scale's share of their row (the type samples are fitted to it, F368).
+    "board_type_share_pct": 58,
 }
 
 BOARD = Template("""
@@ -40,7 +47,7 @@ BOARD = Template("""
   [data-block^="board-row"] { display: table; width: 100%; table-layout: fixed; margin: 0 0 ${s2}pt 0; }
   [data-block^="board-row"] > .board-part { display: table-cell; vertical-align: top; padding-right: ${s5}pt; }
   [data-block^="board-row"] > .board-part:last-child { padding-right: 0; }
-  [data-block="board-variants"], [data-block="board-type"] { width: 58%; }
+  [data-block="board-variants"], [data-block="board-type"] { width: ${board_type_share_pct}%; }
   .board-logo { display: table; width: 100%; }
   .board-logo-mark, .board-logo-name { display: table-cell; vertical-align: middle; }
   .board-logo-img { display: block; height: ${board_logo_mm}mm; width: auto; max-width: 100%; }
@@ -70,8 +77,9 @@ BOARD = Template("""
   .board-tone strong { color: $heading; }
   .board-part p.board-type-sample { color: $heading; white-space: nowrap; overflow: hidden; margin: 0; }
   .board-part p.board-font { margin: 0 0 ${s1}pt 0; }
-  .board-type-label { display: inline-block; width: ${board_type_label_mm}mm; font-family: $font; font-size: ${caption}pt;
-    line-height: ${caption_line}pt; font-weight: $body_weight; color: $muted; vertical-align: baseline; }
+  .board-part p.board-sublabel { margin: ${s3}pt 0 ${s1}pt 0; }
+  .board-part p.board-type-label { font-family: $font; font-size: ${caption}pt; line-height: ${caption_line}pt;
+    font-weight: $body_weight; color: $muted; margin: 0; }
   .board-gaps { margin: 0 0 ${s1}pt 0; }
   .board-gap { display: inline-block; vertical-align: bottom; margin-right: ${s3}pt; }
   .board-gap-bar { height: ${s2}pt; background: $surface_2; border-left: ${rule_pt}pt solid $heading; }

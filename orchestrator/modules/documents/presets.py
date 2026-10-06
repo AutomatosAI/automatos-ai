@@ -439,7 +439,8 @@ def _brand(bid: str, part: str) -> Dict[str, Any]:
 
 BRAND_BOARD = {
     "category": BRAND_BOARD_CATEGORY,
-    "name": "Brand Board",
+    # F368: "Brand Board" until night 10c, beside the social "Brand board": two names one capital apart.
+    "name": "Brand board (PDF)",
     "description": (
         "Your brand kit on one page: the logo and its variants on light and dark, the colour roles with their "
         "hex codes, the type scale, the spacing, the tone words and three applications. Drawn from the kit; "

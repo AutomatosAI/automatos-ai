@@ -20,6 +20,7 @@ import sys
 from typing import Any, Mapping
 
 from modules.documents.blocks import render_document_html, validate_blocks
+from modules.documents.blocks.brand_board import BOARD_TITLE
 from modules.documents.brand_board_miniatures import print_page
 from modules.documents.presets import BRAND_BOARD
 from modules.documents.thumbnails.render import RENDER_TIMEOUT_S, ThumbnailError, pdf_first_page_png, run_isolated
@@ -41,7 +42,7 @@ def _known_format(fmt: str) -> None:
 def board_page(kit: Mapping[str, Any]) -> str:
     """The Brand Board starter rendered with ``kit`` (render-ready) and no data, as a full HTML page."""
     doc = validate_blocks(BRAND_BOARD["blocks"])
-    return render_document_html(doc, {}, dict(kit), title=BRAND_BOARD["name"], data={}).html
+    return render_document_html(doc, {}, dict(kit), title=BOARD_TITLE, data={}).html
 
 
 def render_board(kit: Mapping[str, Any], fmt: str) -> bytes:
