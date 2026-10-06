@@ -144,9 +144,22 @@ def owner_question(output: Any, result: Dict[str, Any], prompt_template: str) ->
     marked = _NEEDS_YOU_AT.search(text)
     if marked and text[marked.end():].strip():
         return {"question": text[marked.end():].strip(), "options": None}
+    choice = _choice_for_owner(text, prompt_template)
+    if choice:
+        return {"question": text, "options": choice}
     if _asks_for_what_it_needs(text, prompt_template):
         return {"question": text, "options": None}
     return None
+
+
+def _choice_for_owner(text: str, prompt_template: str) -> Optional[List[str]]:
+    """F365: the options a result asks the owner to pick between ("the owner replies
+    A, B, C or D"), unless the result is a draft written to someone else."""
+    from services.owner_choice import choice_options
+
+    if _DRAFT.search(text.replace("’", "'")) or writes_to_someone(prompt_template):
+        return None
+    return choice_options(text)
 
 
 def _asks_for_what_it_needs(text: str, prompt_template: str) -> bool:
