@@ -423,7 +423,7 @@ async def _run_read_step_file(db: Any, params: Dict[str, Any], ctx: SessionConte
     The read itself is the executor's own ``platform_get_deliverable``."""
     from config import config
     from modules.tools.execution.unified_executor import UnifiedToolExecutor
-    from services.step_files import NOT_A_MISSION_STEP, files_for_ticket, not_listed, step_file_text
+    from services.step_files import NOT_A_MISSION_STEP, files_for_ticket, not_listed, step_file_answer
 
     files = files_for_ticket(db, ticket_id=ctx.task_id, workspace_id=ctx.workspace_id)
     if files is None:
@@ -444,7 +444,7 @@ async def _run_read_step_file(db: Any, params: Dict[str, Any], ctx: SessionConte
     )
     configured = int(getattr(config, "SESSION_STEP_FILE_MAX_CHARS", 0) or 0)
     ceiling = MAX_TOOL_RESULT_CHARS - STEP_FILE_FRAME_CHARS
-    return step_file_text(chosen, result, min(configured, ceiling) if configured > 0 else ceiling)
+    return await step_file_answer(chosen, result, min(configured, ceiling) if configured > 0 else ceiling, ctx)
 
 
 class SessionToolRefused(Exception):
@@ -671,8 +671,8 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         description=(
             "Read a file an earlier step of THIS mission saved. Your session opens only its own "
             "folder; your ticket lists the files the mission's other steps saved, each with an id. "
-            "Pass that id, never a path: only those files can be read, read-only, and a long file "
-            "comes back cut with a note saying where."
+            "Pass that id, never a path: only those files can be read, read-only, a long file comes "
+            "back cut with a note saying where, and a picture is copied into your folder to open there."
         ),
         input_schema={
             "type": "object",
