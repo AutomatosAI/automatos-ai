@@ -447,8 +447,7 @@ BRAND_BOARD = {
     "includes": ["The logo, large, and its variants", "Colour roles with hex codes", "The type scale with samples",
                  "Spacing and logo clear space", "Tone words with meanings", "An invoice, a letter and a social card"],
     "blocks": _doc(
-        _heading("title", 1, _t("Brand board")),
-        _brand("board-logo", "logo"),
+        _brand("board-logo", "logo"),  # the logo, large, beside the title, the name and the tagline
         _brand("board-colours", "colours"),
         _section("board-row-1", None, _brand("board-variants", "variants"), _brand("board-voice", "voice")),
         _section("board-row-2", None, _brand("board-type", "type"), _brand("board-spacing", "spacing")),

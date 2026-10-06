@@ -20,7 +20,7 @@ BOARD_TOKENS = {
     "board_chip_mm": 10,
     "board_chip_pad_mm": 1.5,
     "board_clear_logo_mm": 7,
-    "board_app_mm": 42,
+    "board_app_mm": 38,
 }
 
 BOARD = Template("""
@@ -61,12 +61,12 @@ BOARD = Template("""
   .board-tone { margin: 0 0 ${s1}pt 0; font-size: ${small}pt; line-height: ${small_line}pt; }
   .board-tone strong { color: $heading; }
   .board-type-row { display: table; width: 100%; table-layout: fixed; }
-  .board-type-label { display: table-cell; width: 32%; vertical-align: middle; }
+  .board-type-label { display: table-cell; width: 36%; vertical-align: middle; }
   .board-type-cell { display: table-cell; vertical-align: middle; }
   .board-type-sample { color: $heading; white-space: nowrap; overflow: hidden; margin: 0; }
-  .board-gap { margin: 0 0 ${s1}pt 0; }
-  .board-gap-bar { display: inline-block; height: ${s2}pt; background: $surface_2; border-left: ${rule_pt}pt solid $heading;
-    vertical-align: middle; margin-right: ${s2}pt; }
+  .board-gaps { margin: 0 0 ${s1}pt 0; }
+  .board-gap { display: inline-block; vertical-align: bottom; margin-right: ${s3}pt; }
+  .board-gap-bar { height: ${s2}pt; background: $surface_2; border-left: ${rule_pt}pt solid $heading; }
   .board-clear { display: inline-block; border: ${hairline_pt}pt dashed $muted; margin: ${s1}pt 0 0 0; }
   .board-clear img { display: block; height: ${board_clear_logo_mm}mm; width: auto; outline: ${hairline_pt}pt solid $rule; }
   .board-apps { display: table; width: 100%; table-layout: fixed; }

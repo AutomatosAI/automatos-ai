@@ -101,7 +101,7 @@ def _pdf(page: str) -> bytes:
 
 def _part(page: str, block_id: str) -> str:
     """The HTML of the board part ``block_id``, up to the next part."""
-    start = page.index(f'data-block="{block_id}"')
+    start = page.index(f'class="board-part" data-block="{block_id}"')
     following = page.find('class="board-part"', start + 1)
     return page[start:following if following != -1 else len(page)]
 
@@ -162,7 +162,7 @@ def test_the_board_prints_the_automatos_kit_on_one_a4_page_with_every_roles_hex(
         assert roles[role].upper() in text, role
     for tone in TONES:
         assert tone["word"] in text
-    assert "Brandboard" in text and COMPANY.replace(" ", "") in text
+    assert "BRANDBOARD" in text.upper() and COMPANY.replace(" ", "") in text
 
 
 def test_each_swatch_is_filled_with_its_role_and_a_derived_role_says_so():
@@ -180,6 +180,7 @@ def test_each_swatch_is_filled_with_its_role_and_a_derived_role_says_so():
 def test_the_logo_prints_large_as_uploaded_beside_the_name_and_tagline():
     logo = _part(_board_html(AUTOMATOS), "board-logo")
     assert f'src="{LOGO}"' in logo and "Agents that do the work" in logo and COMPANY in logo
+    assert bb.BOARD_TITLE in logo
 
 
 def test_an_unset_variant_is_its_fr9_fallback_and_never_invented():
@@ -226,8 +227,8 @@ def test_the_applications_are_the_invoice_and_letter_printed_with_the_kit_and_a_
     assert f'board-social" style="background:{paper}"' in apps and f"background:{accent}" in apps
     assert f'style="color:{ink}"' in apps
     invoice, letter = (starter_page(preset, AUTOMATOS, _now()) for preset in (INVOICE, LETTER))
-    assert "INV-0042" in invoice and COMPANY in invoice and "unresolved-var" not in invoice
-    assert SIGN_OFF in letter and "unresolved-var" not in letter
+    assert "INV-0042" in invoice and COMPANY in invoice and 'class="unresolved-var"' not in invoice
+    assert SIGN_OFF in letter and 'class="unresolved-var"' not in letter
 
 
 def _now():

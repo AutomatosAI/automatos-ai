@@ -21,14 +21,15 @@ from typing import Any, List, Mapping, Optional, Tuple
 
 from core.brand_palette import PALETTE_ROLES, effective_palette
 
-from ..brand_system import ACCENT_USE_RULES, DEFAULT_ACCENT_USE, ROLE_JOBS, TYPE_STEPS, tone_words
+from ..brand_system import ACCENT_BOLD, ACCENT_SPARING, ACCENT_USES, DEFAULT_ACCENT_USE, ROLE_JOBS, TYPE_STEPS, tone_words
 from . import design_tokens as t
 
 # The render-ready kit's inlined logo variants (``brand_fonts.INLINED_LOGOS``).
 LOGO_FIELD, LOGO_DARK_FIELD, LOGO_MONO_FIELD = "logo_url", "logo_dark_url", "logo_mono_url"
 NO_LOGO_NOTE = "No logo yet: upload one on the Brand kit page."
-NO_DARK_LOGO_NOTE = "No logo for dark backgrounds yet: the logo sits on a light chip."
-NO_MONO_LOGO_NOTE = "No one-colour logo yet: the logo is used."
+NO_DARK_LOGO_NOTE = "Not uploaded: the logo on a light chip."
+NO_MONO_LOGO_NOTE = "Not uploaded: the logo itself."
+BOARD_TITLE = "Brand board"
 # The type samples print this line at each step of the scale.
 TYPE_SAMPLE = "The quick brown fox jumps over the lazy dog"
 TYPE_STEP_LABELS = {"display": "Display", "h1": "H1", "h2": "H2", "h3": "H3", "body": "Body", "small": "Small",
@@ -38,6 +39,8 @@ NO_TONE_NOTE = "No tone words yet: add three to five on the Brand kit page."
 APPLICATION_INVOICE, APPLICATION_LETTER, APPLICATION_SOCIAL = "invoice", "letter", "social"
 APPLICATIONS = ((APPLICATION_INVOICE, "Invoice"), (APPLICATION_LETTER, "Letter"), (APPLICATION_SOCIAL, "Social card"))
 SOCIAL_SAMPLE_HEADLINE = "Your headline, in your type"
+# What each accent use lets the accent do, in one line (``brand_system.ACCENT_USE_RULES`` says it in full).
+ACCENT_USE_SHORT = {ACCENT_SPARING: "highlights only", ACCENT_BOLD: "highlights and table header fills"}
 
 
 @dataclass(frozen=True)
@@ -113,8 +116,8 @@ def swatches(kit: Mapping[str, Any]) -> List[Swatch]:
 
 def accent_rule(kit: Mapping[str, Any]) -> str:
     """How the kit uses its accent, in words (sparing, every kit's default, Decision Q1)."""
-    use = kit.get("accent_use") if kit.get("accent_use") in ACCENT_USE_RULES else DEFAULT_ACCENT_USE
-    return f"Accent use: {use}, {ACCENT_USE_RULES[use]}."
+    use = kit.get("accent_use") if kit.get("accent_use") in ACCENT_USES else DEFAULT_ACCENT_USE
+    return f"Accent use: {use} ({ACCENT_USE_SHORT[use]})."
 
 
 def variants(kit: Mapping[str, Any]) -> List[Variant]:
@@ -166,7 +169,7 @@ def miniature(miniatures: Optional[Mapping[str, str]], key: str) -> str:
 
 
 __all__ = [
-    "APPLICATIONS", "APPLICATION_INVOICE", "APPLICATION_LETTER", "APPLICATION_SOCIAL", "SOCIAL_SAMPLE_HEADLINE",
+    "ACCENT_USE_SHORT", "APPLICATIONS", "BOARD_TITLE", "APPLICATION_INVOICE", "APPLICATION_LETTER", "APPLICATION_SOCIAL", "SOCIAL_SAMPLE_HEADLINE",
     "Spacing", "Swatch", "TYPE_SAMPLE", "TypeSample", "Variant", "accent_rule", "brand_name", "logo", "miniature",
     "social_colours", "spacing", "swatches", "tagline", "type_samples", "variants", "voice",
 ]

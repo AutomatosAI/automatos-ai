@@ -94,7 +94,9 @@ def logo_part(ctx: _Ctx) -> None:
     if not _picture(mark, ctx, bb.logo(ctx.kit), height=Mm(BOARD_TOKENS["board_logo_mm"])):
         _line(mark, ctx, name, "display", roles.heading)
         _line(mark, ctx, bb.NO_LOGO_NOTE)
-    for text, step, colour in ((name, "h2", roles.heading), (bb.tagline(ctx.kit), "body", roles.muted)):
+    lines = ((bb.BOARD_TITLE.upper(), "caption", roles.heading), (name, "h2", roles.heading),
+             (bb.tagline(ctx.kit), "body", roles.muted))
+    for text, step, colour in lines:
         if text:
             _line(words, ctx, text, step, colour).alignment = WD_ALIGN_PARAGRAPH.RIGHT
 

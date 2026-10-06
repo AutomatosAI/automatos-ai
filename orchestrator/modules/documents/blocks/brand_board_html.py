@@ -47,8 +47,9 @@ def logo_html(block: Any, kit: Mapping[str, Any]) -> str:
         mark = _img(src, "Logo", "board-logo-img")
     else:
         mark = f'<p class="board-wordmark">{_esc(name)}</p><p class="board-note">{_esc(bb.NO_LOGO_NOTE)}</p>'
-    lines = "".join(f'<p class="{css}">{_esc(text)}</p>'
-                    for css, text in (("board-name", name), ("board-tagline", bb.tagline(kit))) if text)
+    lines = f'<p class="board-label">{_esc(bb.BOARD_TITLE)}</p>' + "".join(
+        f'<p class="{css}">{_esc(text)}</p>' for css, text in (("board-name", name), ("board-tagline", bb.tagline(kit))) if text
+    )
     inner = f'<div class="board-logo"><div class="board-logo-mark">{mark}</div><div class="board-logo-name">{lines}</div></div>'
     return _part(block, "", inner)
 
@@ -97,11 +98,12 @@ def spacing_html(block: Any, kit: Mapping[str, Any]) -> str:
     """The spacing grid as bars, the page margin, and the logo's clear space (drawn round the logo when there is one)."""
     grid = bb.spacing(kit)
     bars = "".join(
-        f'<p class="board-caption board-gap"><span class="board-gap-bar" style="width:{gap:g}pt"></span>{gap:g} pt</p>'
+        f'<div class="board-gap"><div class="board-gap-bar" style="width:{gap:g}pt"></div>'
+        f'<p class="board-caption">{gap:g}</p></div>'
         for gap in grid.gaps_pt
     )
     lines = (
-        f'<p class="board-caption">A {grid.unit_pt:g} pt grid; page margins {grid.margin_mm:g} mm.</p>'
+        f'<p class="board-caption">A {grid.unit_pt:g} pt grid (gaps in pt); page margins {grid.margin_mm:g} mm.</p>'
         f'<p class="board-caption">Logo clear space: {grid.clear_space:.2g} of its height '
         f'({grid.clear_mm:.3g} mm round the {grid.logo_mm:g} mm letterhead logo).</p>'
     )
@@ -110,7 +112,7 @@ def spacing_html(block: Any, kit: Mapping[str, Any]) -> str:
     if src:
         pad = round(grid.clear_space * float(BOARD_CLEAR_LOGO_MM), 2)
         drawing = f'<div class="board-clear" style="padding:{pad:g}mm">{_img(src, "Logo clear space")}</div>'
-    return _part(block, "Spacing", bars + lines + drawing)
+    return _part(block, "Spacing", f'<div class="board-gaps">{bars}</div>' + lines + drawing)
 
 
 def voice_html(block: Any, kit: Mapping[str, Any]) -> str:
