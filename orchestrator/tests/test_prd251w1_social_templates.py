@@ -564,8 +564,7 @@ def test_the_bundle_carries_the_brand_kit_as_tokens_inlined_files_and_variables(
         "body-font": "Inter, sans-serif", "heading-font": "Inter, sans-serif",
     }
     # US-106: and the dark stage a social video reads, derived from those colours (core/brand_palette.py);
-    # US-107: and the paper a social image reads.
-    # PRD-255 US-006: and the kit's type scale as ratios, and the chip a dark stage sets the logo on.
+    # US-107: and the paper a social image reads; PRD-255 US-006: the type scale and the dark stage's logo chip.
     assert set(tokens) - set(raw) == set(STAGE_TOKENS) | set(PAPER_TOKENS) | {"display-scale", "body-scale", "logo-chip"}
     assert bundle["brand"]["fonts"] == [
         {"family": "Geist", "weight": "700", "style": "normal", "path": "assets/brand/fonts/font-0.woff2"}
@@ -578,9 +577,7 @@ def test_the_bundle_carries_the_brand_kit_as_tokens_inlined_files_and_variables(
         "headline": "Hi", "stat": 3, "subtitle": "",
         "brand.name": "Acme", "brand.tagline": "Build better", "brand.logo": "assets/brand/logo.png",
         # US-108: the square mark, which without an uploaded mark is the logo.
-        "brand.logo_mark": "assets/brand/logo.png",
-        # PRD-255 FR-9: no logo for dark backgrounds, so a dark stage shows the mark (here the logo).
-        "brand.logo_on_dark": "assets/brand/logo.png",
+        "brand.logo_mark": "assets/brand/logo.png", "brand.logo_on_dark": "assets/brand/logo.png",  # FR-9: no dark logo
         "size.width": 1080, "size.height": 1920,
     }
     assert bundle["audio"] == BLOCKS["audio_plan"]

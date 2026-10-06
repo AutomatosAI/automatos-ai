@@ -152,8 +152,9 @@
 
       /* ---------- S6: the grade ---------- */
       #s6 { z-index: 3; }
+      /* PRD-255: the caveat sits under the grade, moved down as far as the grade grows with the kit's display scale. */
       #aplus { position: absolute; left: 0; right: 0; top: 520px; text-align: center; font-size: calc(460px * var(--display-scale)); line-height: 1; color: var(--gold); text-shadow: 0 0 80px color-mix(in srgb, var(--gold) 45%, transparent), 0 20px 60px color-mix(in srgb, black 50%, transparent); opacity: 0; }
-      #ornot { position: absolute; left: 0; right: 0; top: 1030px; text-align: center; font-size: calc(96px * var(--display-scale)); color: var(--accent-2); opacity: 0; }
+      #ornot { position: absolute; left: 0; right: 0; top: calc(1030px + 460px * (var(--display-scale) - 1)); text-align: center; font-size: calc(96px * var(--display-scale)); color: var(--accent-2); opacity: 0; }
       #passed { position: absolute; left: 0; right: 0; top: 380px; text-align: center; font-size: calc(30px * var(--body-scale)); color: var(--paper); opacity: 0; }
 
       /* ---------- S7: the tracks ---------- */

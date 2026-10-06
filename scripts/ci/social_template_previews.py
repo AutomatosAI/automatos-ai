@@ -89,7 +89,7 @@ NIGHT_KITS: Dict[str, Dict[str, Any]] = {
     "harbourline": {"name": "Harbourline Coffee Roasters", "primary_color": "#1E3A5F", "secondary_color": "#C26A2E",
                     "accent_color": "#0f3460", "text_color": "#1a1a2e", **LIBERATION, "accent_use": "sparing",
                     "palette": {"paper": "#faf7f2", "accent": "#1e3a5f"},
-                    "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 11}}},
+                    "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 12}}},
 }
 # The reference videos' own copy, by starter: what the seeded rows no longer carry
 # (P251W1-RVW-6), laid back over a video's sample data for its preview.

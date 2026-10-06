@@ -12,7 +12,8 @@ render-ready with a drawn logo:
 * each bundle is checked before it is sent. Automatos is a v1 kit with no logo for
   dark backgrounds: its dark stages set the logo on a light chip (FR-9).
   Harbourline is a v2 kit: its paper token is its stored paper, its type-scale
-  tokens are its sizes as ratios, and its dark stages show its uploaded dark logo
+  tokens are its sizes as ratios (at the social bound: the worst case a kit can
+  reach), and its dark stages show its uploaded dark logo
   (a drawn one here: a variant is never generated);
 * on Harbourline's Title card the page, read back from the PNG, is its stored paper.
 """
@@ -28,6 +29,8 @@ from core.media_render_bundle import (
     DISPLAY_SCALE_TOKEN,
     LOGO_CHIP_CLEAR,
     LOGO_CHIP_TOKEN,
+    MAX_SOCIAL_TYPE_SCALE,
+    MIN_SOCIAL_TYPE_SCALE,
     VAR_BRAND_LOGO_ON_DARK,
 )
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO
@@ -64,7 +67,9 @@ def night_bundles(driver: Any, name: str, kit: Mapping[str, Any]) -> Iterator[Tu
 
 
 def _ratio(kit: Mapping[str, Any], step: str) -> str:
-    return f"{kit['type_scale'][step]['size_pt'] / DEFAULT_TYPE_SCALE[step][0]:g}"
+    """The kit's ``step`` size over the default, within the social bounds, as the token carries it."""
+    ratio = kit["type_scale"][step]["size_pt"] / DEFAULT_TYPE_SCALE[step][0]
+    return f"{min(max(ratio, MIN_SOCIAL_TYPE_SCALE), MAX_SOCIAL_TYPE_SCALE):g}"
 
 
 def bundle_findings(kit: Mapping[str, Any], starter: Mapping[str, Any], bundle: Mapping[str, Any]) -> List[str]:

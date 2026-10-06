@@ -12,7 +12,9 @@ the 18 seeded social templates, and the media-render CI driver):
 * **The type scale reaches the templates.** ``display-scale`` / ``body-scale`` are
   the kit's display and body sizes over the default (a ratio, bounded), and every
   font size in every seeded template is multiplied by one of them, with a
-  fallback of 1: a template without the token renders as it always did.
+  fallback of 1: a template without the token renders as it always did. The one
+  exception is a mock app screen's task cards (the UI story and cinematic promos),
+  whose text keeps the screen's sizes as a screenshot would.
 * **The dark logo (FR-9).** An uploaded logo for dark backgrounds is staged and is
   what ``{{ brand.logo_on_dark }}`` fills, with nothing behind it; without one,
   the mark on a light chip in the paper's colour. It is never generated: an
@@ -87,11 +89,14 @@ HARBOURLINE_PAPER, HARBOURLINE_ACCENT = "#faf7f2", "#1e3a5f"
 HARBOURLINE = {"name": "Harbourline Coffee Roasters", "primary_color": "#1E3A5F", "secondary_color": "#C26A2E",
                "accent_color": "#0f3460", "text_color": "#1a1a2e", "accent_use": "sparing",
                "palette": {"paper": HARBOURLINE_PAPER, "accent": HARBOURLINE_ACCENT},
-               "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 11}}}
+               "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 12}}}
 # Every token name brand_tokens emitted on the base (PRD-251): all 18 templates read them.
 BASE_TOKENS = {"primary", "secondary", "accent", "text", "body-font", "heading-font"} | set(STAGE_TOKENS) | set(PAPER_TOKENS)
 DARK_STAGES = {"app-promo", "cinematic-product-promo", "data-story", "ui-story-promo",
                "photo-headline", "photo-highlights", "photo-offer", "photo-only", "photo-review", "before-after"}
+# A task card in the promos' mock app screen keeps the screen's own sizes: its 40-character
+# titles fill two lines of a 288 px card.
+MOCK_SCREEN = {slug: {".card .ty", ".card .t", ".card .ag"} for slug in ("ui-story-promo", "cinematic-product-promo")}
 TEXT_HEAVY = ("quote-card", "definition-card", "fact-card", "stats-card", "data-story", "carousel")
 # A text-heavy card's surfaces: its page, its cards and panels, its pills.
 SURFACES = {"html", "body", "#root", ".clip", ".page", ".main", ".card", ".note", ".bg-base", ".glass",
@@ -176,7 +181,9 @@ def test_a_stored_role_that_would_not_read_there_is_left_to_todays_derivation():
 
 def test_the_type_scale_is_a_ratio_to_the_default_and_bounded():
     assert type_scale_tokens(AUTOMATOS) == {"display-scale": "1", "body-scale": "1"}
-    assert type_scale_tokens(HARBOURLINE) == {"display-scale": "1.125", "body-scale": "1.1"}
+    # 36 / 32 is the bound itself; 12 / 10 is over it.
+    assert type_scale_tokens(HARBOURLINE) == {"display-scale": "1.125", "body-scale": f"{MAX_SOCIAL_TYPE_SCALE:g}"}
+    assert type_scale_tokens({"type_scale": {"body": {"size_pt": 9}}}) == {"display-scale": "1", "body-scale": "0.9"}
     huge = {"type_scale": {"display": {"size_pt": 96}, "body": {"size_pt": 5}}}
     assert type_scale_tokens(huge) == {"display-scale": f"{MAX_SOCIAL_TYPE_SCALE:g}", "body-scale": f"{MIN_SOCIAL_TYPE_SCALE:g}"}
     junk = {"type_scale": {"display": {"size_pt": "big"}, "body": {"size_pt": True}}}
@@ -184,9 +191,9 @@ def test_the_type_scale_is_a_ratio_to_the_default_and_bounded():
 
 
 def _style(html: str) -> str:
-    """The template's css, its ``{{ size.width }}``-style placeholders masked so its rules parse."""
+    """The template's css without comments, its ``{{ size.width }}``-style placeholders masked so its rules parse."""
     css = "".join(re.findall(r"<style>(.*?)</style>", html, re.S))
-    return re.sub(r"\{\{[^{}]*\}\}", "0", css)
+    return re.sub(r"/\*.*?\*/", "", re.sub(r"\{\{[^{}]*\}\}", "0", css), flags=re.S)
 
 
 def test_every_seeded_template_scales_every_font_size_by_the_kits_type_scale():
@@ -196,10 +203,12 @@ def test_every_seeded_template_scales_every_font_size_by_the_kits_type_scale():
         css = _style(starter["blocks"]["html"])
         assert "--display-scale: var(--brand-display-scale, 1);" in css, starter["slug"]
         assert "--body-scale: var(--brand-body-scale, 1);" in css, starter["slug"]
-        sizes = re.findall(r"font-size:\s*([^;}]+)", css)
-        assert sizes, starter["slug"]
-        unscaled = [size for size in sizes if not re.search(r"var\(--(display|body)-scale\)", size)]
-        assert unscaled == [], (starter["slug"], unscaled)
+        exempt = MOCK_SCREEN.get(starter["slug"], set())
+        rules = [(sel.strip(), size) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+                 for size in re.findall(r"font-size:\s*([^;}]+)", body)]
+        assert rules, starter["slug"]
+        unscaled = [sel for sel, size in rules if not re.search(r"var\(--(display|body)-scale\)", size)]
+        assert sorted(unscaled) == sorted(exempt), (starter["slug"], unscaled)
         assert "var(--display-scale)" in css, starter["slug"]  # every template has display type
 
 

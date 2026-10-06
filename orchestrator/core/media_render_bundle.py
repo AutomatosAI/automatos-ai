@@ -94,10 +94,12 @@ COLOUR_TOKENS = (
 BODY_FONT_TOKEN = "body-font"
 HEADING_FONT_TOKEN = "heading-font"
 # PRD-255 US-006: the kit's display and body sizes as ratios to the default scale.
-# The bounds keep a card's layout (a 96 pt display would otherwise triple a headline).
+# The bounds keep a card's layout: the videos are fixed geometry (absolute boxes at
+# 1080x1920), so a kit nudges their type and never triples a headline (a 96 pt
+# display). The media-render CI job renders every template at the upper bound.
 DISPLAY_SCALE_TOKEN, BODY_SCALE_TOKEN = "display-scale", "body-scale"
 SCALE_TOKENS = ((DISPLAY_SCALE_TOKEN, DISPLAY_STEP), (BODY_SCALE_TOKEN, BODY_STEP))
-MIN_SOCIAL_TYPE_SCALE, MAX_SOCIAL_TYPE_SCALE = 0.8, 1.25
+MIN_SOCIAL_TYPE_SCALE, MAX_SOCIAL_TYPE_SCALE = 0.8, 1.125
 SCALE_DECIMALS = 3
 # FR-9: what a dark stage puts behind the logo. Nothing behind the kit's logo for
 # dark backgrounds; a light chip (the paper, else white) behind any other logo.

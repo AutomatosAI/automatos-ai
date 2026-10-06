@@ -168,12 +168,14 @@
       .tone-progress { background: var(--progress); }
       .tone-ok { background: var(--ok); }
       .tone-accent { background: var(--accent); }
+      /* PRD-255: a task card is the app's own screen, as a screenshot shows it: its text keeps the screen's
+         sizes, not the kit's type scale (two-line titles in a 288 px card). */
       .card { position: absolute; left: 78px; width: 288px; height: 176px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); padding: 16px 16px 14px;
         box-shadow: 0 16px 40px color-mix(in srgb, black 45%, transparent); opacity: 0; }
-      .card .ty { font-family: var(--mono); font-size: calc(15px * var(--body-scale)); letter-spacing: 0.08em; color: var(--dim); display: flex; justify-content: space-between; }
+      .card .ty { font-family: var(--mono); font-size: 15px; letter-spacing: 0.08em; color: var(--dim); display: flex; justify-content: space-between; }
       .card .ty .hi { color: var(--accent-text); }
-      .card .t { font-family: var(--display); font-weight: 500; font-size: calc(27px * var(--body-scale)); line-height: 1.12; margin-top: 10px; height: 62px; overflow: hidden; }
-      .card .ag { position: absolute; left: 16px; right: 16px; bottom: 14px; height: 26px; font-family: var(--mono); font-size: calc(16px * var(--body-scale)); letter-spacing: 0.08em; color: var(--muted); }
+      .card .t { font-family: var(--display); font-weight: 500; font-size: 27px; line-height: 1.12; margin-top: 10px; height: 62px; overflow: hidden; }
+      .card .ag { position: absolute; left: 16px; right: 16px; bottom: 14px; height: 26px; font-family: var(--mono); font-size: 16px; letter-spacing: 0.08em; color: var(--muted); }
       .card .un, .card .as { position: absolute; left: 0; top: 0; right: 30px; height: 26px; display: flex; align-items: center; gap: 10px; }
       .card .un { color: var(--dim); }
       .card .as { opacity: 0; color: var(--paper); }
