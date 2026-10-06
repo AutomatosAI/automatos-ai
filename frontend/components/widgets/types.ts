@@ -336,7 +336,10 @@ export interface EmailAttachment {
   filename: string
   mimeType: string
   size: number
-  downloadUrl?: string
+  /** A link the mail provider gave (Outlook's contentLocation): opened only when it is http(s). */
+  downloadUrl?: string | null
+  /** The API path a Gmail attachment downloads from, fetched with auth (Gmail attachments have no link). */
+  downloadPath?: string | null
 }
 
 /**
