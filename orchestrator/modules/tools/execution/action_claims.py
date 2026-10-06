@@ -77,6 +77,18 @@ Night 9b (F319), lines that said the opposite of what happened:
   after the move to done was refused: a change told in passing allowed only a few
   characters between the card and "has been", so a quoted title hid it. A card's title
   between them is read now, so the claim is nudged and corrected like any other.
+
+Night 10c (F363), chat ee769185:
+
+- "I'll get the Brand Designer to prepare the approval card for you" (17:57:26) ran only
+  platform_store_memory, and nothing reached the board: work handed to someone else is a
+  ticket, and no family read the handing over. "I'll get/have/ask <someone> to <do it>" is
+  work said to be under way now, backed only by work the turn started.
+- "You should now see this on your board" is a board claim too, as "it's now on your
+  board" is.
+- The reply that did file the ticket (#0891) repeated "I've noted your decision" and was
+  told "I didn't save anything in this reply" under it: the decision went onto the card the
+  turn made, so a ticket made backs "noted".
 """
 from __future__ import annotations
 
@@ -126,7 +138,9 @@ _SWITCHES_OFF = ("update_", "schedule_", "pause_", "set_", "configure_")
 _SENDS_BACK = ("send_back", "update_task_status:assigned", "reject")
 # What backs a save: F314 (night 9) adds a post's own actions (create_social_post).
 _SAVES = ("store_memory", "update_", "field_inject", "submit_report", "write", "upload", "save", "document",
-          "_post")
+          "_post", "create_task")   # F363: a decision filed on the card the turn made is saved there
+# F363 (night 10c): what puts a card on the board.
+_FILES_A_CARD = ("create_task", "assign_task", "schedule_task", "create_mission")
 # F303 (night 9): what re-checks a figure: a count, a query, or a read of the source.
 _RECHECKS = _COUNTS + ("search", "read", "grep", "fetch", "graph", "nl2sql")
 # A read of the board, a mission or a playbook: what a change told in passing may report.
@@ -202,6 +216,12 @@ _ACTION_CLAIMS: Tuple[_Family, ...] = (
                                            + _I_HAVE + r"(?:created|opened|added|raised) (?:a |an |the |your )?"
                                            r"(?:new )?(?:task|ticket|card)\b", re.I),
             ("create_task", "assign_task", "schedule_task")),
+    # F363: "You should now see this on your board", "It's now on your board".
+    _Family("put on the board", re.compile(
+        r"\byou(?:'ll|’ll| will| should| can)\s+(?:now\s+)?see\s+(?:it|this|that|them|the (?:new )?(?:task|ticket|card)s?)"
+        r"\b[^.!?\n]{0,40}?\bon (?:your|the) board\b"
+        r"|\b(?:it|this|that|the (?:new )?(?:task|ticket|card))(?:'s|’s| is)\s+now\s+on (?:your|the) board\b", re.I),
+            _FILES_A_CARD),
     _Family("created", re.compile(_I_HAVE + r"(?:created|set up|added|built) (?:a |an |the |your )?(?:new )?" + _NAMED
                                   + r"(?:agent|mission|playbook|watch|schedule|skill|blueprint|api key|blog post|"
                                   r"routing rule)", re.I),
@@ -227,7 +247,16 @@ _ACTION_CLAIMS: Tuple[_Family, ...] = (
                                   re.I), _READS, kinds=True),
     _Family("counted exactly", _EXACT, _COUNTS),
 )
-_PROMISES: Tuple[_Family, ...] = (_Family("under way", _UNDER_WAY, _STARTS_WORK, unless=_ASKING),)
+# F363 (night 10c): "I'll get the Brand Designer to prepare the approval card": work handed to someone else,
+# never "I'll have to…", "I'll ask you to…", or handed over once something else has happened.
+_HANDS_IT_ON = re.compile(_I_WILL + r"\s+(?:get|have(?!\s+to\b)|ask|tell)\s+(?!you\b|yourself\b)[^.!?\n]{1,60}?"
+                          r"\bto\s+(?!you\b)[a-z]+", re.I)
+_LATER = re.compile(r"\b(?:once|when|after|as soon as|if)\b", re.I)
+_PROMISES: Tuple[_Family, ...] = (
+    _Family("under way", _UNDER_WAY, _STARTS_WORK, unless=_ASKING),
+    _Family("put on the board", _HANDS_IT_ON, _STARTS_WORK,
+            unless=re.compile(_ASKING.pattern + "|" + _LATER.pattern, re.I)),
+)
 # F303 (night 9): a figure said to be right or wrong, or what an earlier one "was based on".
 _FIGURE_VERDICT = re.compile(
     r"^(?=[^\n]*\d)[^\n]*?\b(?:(?:is|are|was|were)(?:\s+(?:not|definitely|actually|indeed))?\s+"
