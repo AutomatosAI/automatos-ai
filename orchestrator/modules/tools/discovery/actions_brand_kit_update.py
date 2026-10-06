@@ -105,8 +105,9 @@ _PARAMETERS = {
                 "sign_off": {
                     "type": "string",
                     "description": ("Who signs the brand's letters, emails and documents, one line (up to 120 "
-                                    "characters), such as the owner's name and the business's. An empty string "
-                                    "clears it."),
+                                    "characters), such as the owner's name and the business's. It signs every "
+                                    "letter that names no signer of its own (a document's data.signer wins). An "
+                                    "empty string clears it."),
                 },
             },
         },

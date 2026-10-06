@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from core.social_templates import is_social_format
 from modules.documents.blocks import BlockValidationError, validate_blocks
 from modules.documents.blocks.schema import DataTableBlock, SectionBlock, TableBlock, VariableBlock, VariableRun
-from modules.documents.variables.catalog import DYNAMIC_PREFIX
+from modules.documents.variables.catalog import DYNAMIC_PREFIX, SIGN_OFF_PATH, SIGNER_FALLBACK_TEXT, SIGNER_KEY
 
 DATA = "data"
 # ``{{ client.address | default('') }}``: the field and the text printed in its place
@@ -82,6 +82,8 @@ def block_requirements(blocks: Any) -> Dict[str, Any]:
             if block.empty_text is None:
                 required.add(block.path)
         for chip in _chips(block):
+            if chip.path == SIGN_OFF_PATH:  # F364: a named signer (data.signer) signs in its place
+                fallbacks.setdefault(f"{DATA}.{SIGNER_KEY}", SIGNER_FALLBACK_TEXT)
             if chip.fallback is None:
                 required.add(chip.path)
             else:

@@ -65,6 +65,21 @@ KNOWN_PATHS = frozenset(CATALOG_BY_PATH)
 DYNAMIC_PREFIX = "data."
 
 
+# F364 (night 10c): "Sign it from me, Gerard" was signed with the kit's sign-off
+# ("Automatos AI"): a letter's signer came only from ``brand.sign_off``. A document's
+# data may name its signer (``data.signer``); where a template prints
+# ``brand.sign_off``, a named signer wins, then the kit's sign-off, then the person.
+SIGN_OFF_PATH = "brand.sign_off"
+SIGNER_KEY = "signer"
+SIGNER_FALLBACK_TEXT = "your brand kit's sign-off (else your name)"
+
+
+def signer_of(data: Any) -> str:
+    """The signer a document's data names (``data.signer``), trimmed; ``""`` without one."""
+    value = data.get(SIGNER_KEY) if isinstance(data, dict) else None
+    return value.strip() if isinstance(value, str) else ""
+
+
 def walk_dynamic(data: Any, path: str) -> Any:
     """Read a ``data.*`` path (or a bare dotted key) out of nested dicts; ``None`` when
     absent. Shared by the resolver (scalar chips) and the ``data_table`` renderer
@@ -110,10 +125,14 @@ __all__ = [
     "CATALOG_BY_PATH",
     "KNOWN_PATHS",
     "DYNAMIC_PREFIX",
+    "SIGNER_FALLBACK_TEXT",
+    "SIGNER_KEY",
+    "SIGN_OFF_PATH",
     "VariableEntry",
     "is_known_path",
     "is_dynamic_path",
     "is_valid_path",
     "is_blank",
+    "signer_of",
     "walk_dynamic",
 ]

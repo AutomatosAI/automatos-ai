@@ -28,7 +28,7 @@ from jinja2 import Environment, TemplateSyntaxError, meta
 from modules.documents.blocks import collect_variable_paths, validate_blocks
 from modules.documents.blocks.data_details import carried_keys
 from modules.documents.legacy_jinja import with_document_filters
-from modules.documents.variables.catalog import DYNAMIC_PREFIX
+from modules.documents.variables.catalog import DYNAMIC_PREFIX, SIGN_OFF_PATH, SIGNER_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +46,12 @@ _PARSER = with_document_filters(Environment(autoescape=True))
 
 
 def block_template_keys(blocks: Any) -> FrozenSet[str]:
-    """The top-level ``data`` keys a block template's chips and tables read."""
+    """The top-level ``data`` keys a block template's chips and tables read; one that prints the
+    sign-off reads ``signer`` too (F364: a named signer signs in its place)."""
     paths = collect_variable_paths(validate_blocks(blocks))
+    signer = {SIGNER_KEY} if SIGN_OFF_PATH in paths else set()
     return frozenset(
-        path[len(DYNAMIC_PREFIX):].split(".")[0] for path in paths if path.startswith(DYNAMIC_PREFIX)
+        {path[len(DYNAMIC_PREFIX):].split(".")[0] for path in paths if path.startswith(DYNAMIC_PREFIX)} | signer
     )
 
 

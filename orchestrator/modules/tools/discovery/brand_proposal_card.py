@@ -34,6 +34,12 @@ NAME_HASH_CHARS = 12            # the board picture's name carries the proposal'
 CARD_HEAD = "**Brand kit proposal** from {agent} (not saved yet)"
 CHANGES_HEAD = "What changes:"
 CHANGE_LINE = "- `{field}`: {old} → {new}"
+# F364 (night 10c): approving a sign-off of "Automatos AI" replaced the owner's name on every
+# letter and the card never said so. A change whose reach is wider than its name says it.
+CHANGE_EFFECTS = {
+    "voice.sign_off": ("this changes the signature on every letter and document that signs with the kit's sign-off "
+                       "(a document that names its own signer keeps it)"),
+}
 BOARD_LINE = "The Brand Board drawn from it: `{path}`"
 CARD_FOOT = ("**Approve** on the Questions tab in Automatos saves it to the brand kit. Anything else, such as "
              "\"less orange\", \"warmer\" or \"more space\", sends it back for a revision.")
@@ -84,6 +90,13 @@ def changes(current: Mapping[str, Any], proposed: Mapping[str, Any], fields: Seq
     return out
 
 
+def _change_line(change: Mapping[str, str]) -> str:
+    """One change as the card lists it, with what it reaches when that is wider than its name (F364)."""
+    effect = CHANGE_EFFECTS.get(change["field"])
+    line = CHANGE_LINE.format(**change)
+    return f"{line}: {effect}" if effect else line
+
+
 def card_text(agent: str, why: str, changed: Sequence[Mapping[str, str]], board_path: str) -> str:
     """The card's markdown: who proposes, why, every change in full, where the board is, and what Approve does.
 
@@ -93,7 +106,7 @@ def card_text(agent: str, why: str, changed: Sequence[Mapping[str, str]], board_
     why = " ".join(str(why or "").split())
     if why:
         lines.append(why if len(why) <= MAX_WHY_CHARS else why[:MAX_WHY_CHARS - 1] + ELLIPSIS)
-    lines.append("\n".join([CHANGES_HEAD, *(CHANGE_LINE.format(**c) for c in changed)]))
+    lines.append("\n".join([CHANGES_HEAD, *(_change_line(c) for c in changed)]))
     lines += [BOARD_LINE.format(path=board_path), CARD_FOOT]
     return "\n\n".join(lines)
 
@@ -146,6 +159,6 @@ def latest_proposal(grants: Sequence[Any]) -> Optional[Any]:
 
 
 __all__ = [
-    "APPROVE", "CARD_OPTIONS", "MAX_CARD_CHARS", "PENDING", "PROPOSAL_MARKER", "REVISE", "STILL_WAITING", "board_name", "card_text", "changes",
+    "APPROVE", "CARD_OPTIONS", "CHANGE_EFFECTS", "MAX_CARD_CHARS", "PENDING", "PROPOSAL_MARKER", "REVISE", "STILL_WAITING", "board_name", "card_text", "changes",
     "fingerprint", "is_approve", "latest_proposal", "marker_of", "status_of", "too_long", "why_not_saved",
 ]

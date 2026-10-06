@@ -125,10 +125,12 @@ LETTER = {
     "description": (
         "Letterhead with your logo and company details, the date, the recipient block, a subject line, "
         "the greeting, the body and a sign-off. Send the greeting (\"Dear Jordan,\") in greeting; "
-        "the body has no greeting or sign-off: the template adds them."
+        "the body has no greeting or sign-off: the template adds them. When the letter is from a named "
+        "person (\"sign it from me, Gerard\"), send their name in signer: it signs in place of your "
+        "brand kit's sign-off."
     ),
     "format": "pdf",
-    "includes": ["Letterhead from your brand kit", "Date, recipient and subject", "Greeting from data.greeting", "Body", "Sign-off with your brand kit's sign-off (or your name) and your email"],
+    "includes": ["Letterhead from your brand kit", "Date, recipient and subject", "Greeting from data.greeting", "Body", "Sign-off with the signer you send, else your brand kit's sign-off (or your name), and your email"],
     "blocks": _doc(
         *letterhead(),
         _para("date", _v("date.long")),
@@ -139,7 +141,7 @@ LETTER = {
         _para("greeting", _v("data.greeting", "")),
         _para("body", _v("data.body")),
         _para("closing", _t("Kind regards,")),
-        _para("sig-name", _v("brand.sign_off")),  # PRD-255: the kit's sign-off, else the person (F344)
+        _para("sig-name", _v("brand.sign_off")),  # data.signer (F364), else the kit's sign-off, else the person (F344)
         _para("sig-email", _v("user.email", "")),
     ),
     "sample_data": {

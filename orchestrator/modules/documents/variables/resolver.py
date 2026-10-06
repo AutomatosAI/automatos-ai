@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
 from ..locale_text import currency_of, date_style_of, long_date
-from .catalog import is_blank, is_dynamic_path, is_known_path, walk_dynamic
+from .catalog import is_blank, is_dynamic_path, is_known_path, signer_of, walk_dynamic
 from .chip_text import chip_text
 from .document_user import document_user
 
@@ -73,15 +73,18 @@ def _company_context(business_profile: Any, brand_kit: Dict[str, Any]) -> Dict[s
     }
 
 
-def _sign_off(brand_kit: Dict[str, Any], person: str) -> str:
-    """Who signs (PRD-255 ``brand.sign_off``): the kit voice's sign-off, else the person signing (F344:
-    an agent's letter is signed with the owner's name); empty when neither is known."""
+def _sign_off(brand_kit: Dict[str, Any], person: str, signer: str = "") -> str:
+    """Who signs (PRD-255 ``brand.sign_off``): the signer the document's data names (F364: "sign it
+    from me, Gerard"), else the kit voice's sign-off, else the person signing (F344: an agent's
+    letter is signed with the owner's name); empty when none is known."""
+    if signer:
+        return signer
     voice = brand_kit.get("voice") if isinstance(brand_kit.get("voice"), dict) else {}
     sign_off = voice.get("sign_off")
     return sign_off.strip() if isinstance(sign_off, str) and sign_off.strip() else person
 
 
-def _brand_context(brand_kit: Dict[str, Any], company_name: str, person: str) -> Dict[str, str]:
+def _brand_context(brand_kit: Dict[str, Any], company_name: str, person: str, signer: str = "") -> Dict[str, str]:
     """``brand.*``; ``currency`` is not a chip: it is what ``data.*`` amounts print in (PRD-255 FR-7)."""
     # PRD-242 S3: an uploaded logo has no public URL; the chip resolves to the
     # platform route that streams it (the renderers inline the bytes instead).
@@ -96,7 +99,7 @@ def _brand_context(brand_kit: Dict[str, Any], company_name: str, person: str) ->
         "secondary_color": brand_kit.get("secondary_color", ""),
         "accent_color": brand_kit.get("accent_color", ""),
         "font_family": brand_kit.get("font_family", ""),
-        "sign_off": _sign_off(brand_kit, person),
+        "sign_off": _sign_off(brand_kit, person, signer),
         CURRENCY_KEY: currency_of(brand_kit),
     }
 
@@ -131,7 +134,7 @@ def build_context(
     return {
         "user": user_ctx,
         "company": company_ctx,
-        "brand": _brand_context(kit, company_ctx["name"], user_ctx["name"]),
+        "brand": _brand_context(kit, company_ctx["name"], user_ctx["name"], signer_of(extra_data)),
         "date": _date_context(now, kit),
         "data": extra_data or {},
     }
