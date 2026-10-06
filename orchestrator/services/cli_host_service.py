@@ -1377,8 +1377,8 @@ def session_hold_question(task_id: Any, entry: Dict[str, Any], *, ticket: Option
     subject = str(entry.get("subject") or entry.get("tool") or "?")
     intent = str(entry.get("intent") or entry.get("description") or "").strip()
 
-    lines = [f"**Allow this command in {ticket or f'ticket {task_id}'}?**", ""]
-    lines += [intent or _plain_intent(subject), ""]
+    from services.held_code_summary import with_code_summary  # F370: inline Python, in plain words
+    lines = [f"**Allow this command in {ticket or f'ticket {task_id}'}?**", "", with_code_summary(intent or _plain_intent(subject), subject), ""]
     # The full command, never truncated, but folded away — the summary line is
     # what most decisions are made on.
     lines += ["<details><summary>The exact command</summary>", "", "```sh", subject, "```", "", "</details>"]
