@@ -150,7 +150,7 @@ def read_note(db: Any, workspace_id: UUID, texts: Sequence[str]) -> Optional[str
 
     try:
         with db.begin_nested():
-            brand = designer_note(db, workspace_id, texts[0] if texts else "")
+            brand = designer_note(db, workspace_id, texts[0] if texts else "", opening=len(texts) == 1)  # F362
             if brand:
                 return brand
             named = named_in_conversation(texts, DocumentTemplateService(db).list_templates(workspace_id))

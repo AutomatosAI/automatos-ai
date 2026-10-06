@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from consumers.chatbot import auto_decisions
 from consumers.chatbot.board_questions import about_the_board
+from consumers.chatbot.brand_assign_lane import brand_work_goes_to_the_designer  # F362 (night 10c)
 from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_engine
 
 # PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
@@ -48,10 +49,10 @@ BOARD_MOVES_THE_CARD = ("The board moves the card when the agent answers: the br
 
 logger = logging.getLogger(__name__)
 
-# Tier-3 classification uses a cheap active-agent roster (not the planners'
-# full ContextService pack) — the chat hot path can't afford ~80-113s of
-# doc-RAG + graph BFS just to classify. Cap the roster so the prompt stays lean.
-_ROSTER_LIMIT = 40
+# Tier-3 classification uses a cheap active-agent roster (not the planners' full ContextService
+# pack: ~80-113s of doc-RAG + graph BFS). F362: every active agent is read and named (a capped read
+# lost #347, the 49th); only the first _ROSTER_LIMIT are described. _ROSTER_READ_CAP stops a runaway.
+_ROSTER_LIMIT, _ROSTER_READ_CAP = 40, 500
 
 # PRD-248: shadow decision tasks in flight. asyncio keeps only a weak reference
 # to a running task, so a fire-and-forget shadow must be held here until done.
@@ -829,6 +830,7 @@ class AutoBrain:
     # Main entry point
     # ------------------------------------------------------------------
 
+    @brand_work_goes_to_the_designer  # F362: a brand ask is the Brand designer's ticket (PRD-255 US-014)
     async def assess(
         self,
         message: str,
@@ -1216,7 +1218,7 @@ class AutoBrain:
         return False
 
     def _active_agents(self) -> List[Any]:
-        """The capped active-agent roster — the shared source for the Tier-3
+        """The whole active roster (F362) — the shared source for the Tier-3
         routing context block AND ASSIGN-lane name matching. Fail-soft: an empty
         list on any error, so the classifier never breaks because of this."""
         try:
@@ -1228,7 +1230,7 @@ class AutoBrain:
                     Agent.workspace_id == self._workspace_id,
                     Agent.status == "active",
                 )
-                .limit(_ROSTER_LIMIT)
+                .limit(_ROSTER_READ_CAP)
                 .all()
             )
         except Exception:
@@ -1319,21 +1321,9 @@ class AutoBrain:
         agents = agents if agents is not None else self._active_agents()
         if not agents:
             return ""
-        lines = []
-        for a in agents:
-            name = getattr(a, "name", None) or getattr(a, "slug", None) or "agent"
-            role = getattr(a, "role", None)
-            desc = (getattr(a, "description", None) or "").strip()
-            label = f"{name} ({role})" if role else str(name)
-            summary = f": {desc[:80]}" if desc else ""
-            # PRD-234: a Claude Code session agent is a different kind of worker —
-            # it runs on the user's machine under their own login. Say so.
-            cfg = getattr(a, "configuration", None) or {}
-            lane = " [Claude Code session]" if isinstance(cfg, dict) and cfg.get("runtime") == "cli" else ""
-            lines.append(f"- {label}{lane}{summary}")
         return (
             "\n## Available agents (for routing)\n"
-            + "\n".join(lines)
+            + "\n".join(auto_decisions.roster_lines(agents, _ROSTER_LIMIT))
             + "\n\nThe roster shows which specialisations exist to delegate or assign to.\n"
         )
 
