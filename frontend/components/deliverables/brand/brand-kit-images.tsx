@@ -3,6 +3,7 @@
 /**
  * PRD-251B US-B301 — the logo and the logo mark on the Brand kit tab: upload (PNG or JPEG,
  * checked on the server), replace, remove, or a public image URL while none is stored.
+ * PRD-255: the logo's dark and mono variants use it too, uploads only (no URL field).
  */
 import { useRef, type ChangeEvent } from 'react'
 import { ImagePlus, Loader2, Trash2 } from 'lucide-react'
@@ -15,18 +16,19 @@ import type { BrandImage } from '@/components/documents/blocks/useBrandImage'
 
 interface BrandImageFieldProps {
   title: string
-  help: string
+  help?: string
   image: BrandImage
   stored: boolean
-  url: string
+  url?: string
   /** The words on the upload button while none is stored, and once one is. */
   uploadLabel: string
   replaceLabel: string
   fileLabel?: string
-  urlId: string
-  urlPlaceholder: string
+  urlId?: string
+  urlPlaceholder?: string
   disabled: boolean
-  onUrl: (url: string) => void
+  /** Absent: the image is an upload only, with no URL field. */
+  onUrl?: (url: string) => void
 }
 
 export function BrandImageField(props: BrandImageFieldProps) {
@@ -40,7 +42,7 @@ export function BrandImageField(props: BrandImageFieldProps) {
   return (
     <div className="rounded-md border p-3">
       <Label className="flex items-center text-xs">
-        {title} <FieldHelp id={help} />
+        {title} {help && <FieldHelp id={help} />}
       </Label>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <input ref={input} type="file" accept="image/png,image/jpeg" className="hidden" aria-label={fileLabel} onChange={pick} />
@@ -54,10 +56,10 @@ export function BrandImageField(props: BrandImageFieldProps) {
           </Button>
         )}
       </div>
-      {!stored && (
+      {!stored && onUrl && (
         <div className="mt-2">
           <Label htmlFor={urlId} className="text-xs text-muted-foreground">…or a public image URL</Label>
-          <Input id={urlId} value={url} disabled={disabled} onChange={(e) => onUrl(e.target.value)} placeholder={urlPlaceholder} />
+          <Input id={urlId} value={url ?? ''} disabled={disabled} onChange={(e) => onUrl(e.target.value)} placeholder={urlPlaceholder} />
         </div>
       )}
     </div>

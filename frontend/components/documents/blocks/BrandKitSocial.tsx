@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { FieldHelp } from '@/components/ui/help-tooltip'
+import { BrandKitToneMeanings } from './BrandKitToneMeanings'
 import type { BrandVoice, ToneWord } from './types'
 
 // The Socials channels, keyed by Composio toolkit.
@@ -126,6 +127,7 @@ export function BrandKitSocial({ handles, voice, onHandlesChange, onVoiceChange 
             {problem}
           </p>
         )}
+        <BrandKitToneMeanings tone={voice.tone} onChange={(tone) => onVoiceChange({ ...voice, tone })} />
         <Label htmlFor="brand-voice-banned" className="mt-3 block text-xs">
           Phrases the brand never uses (one a line)
         </Label>

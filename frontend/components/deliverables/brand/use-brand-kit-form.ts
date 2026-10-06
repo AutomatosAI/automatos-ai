@@ -3,17 +3,19 @@
 /**
  * PRD-251B US-B301 — the brand kit's basics as the Brand kit tab edits them (it replaces
  * the BrandKitDialog): the kit loaded from GET /api/documents/brand-kit with the D5 fields
- * filled in, the prefill suggestions, the logo and the logo mark, and Save
- * (PUT /api/documents/brand-kit). The routes are the kit's own, unchanged.
+ * filled in, the prefill suggestions, the logo, the logo mark and the logo's variants, the
+ * colour roles (PRD-255), and Save (PUT /api/documents/brand-kit).
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
 
 import { templateBlocksApi } from '@/components/documents/blocks/api'
 import { useUploadedFontFaces } from '@/components/documents/blocks/BrandKitFonts'
 import { toneWordsFrom, toneWordsProblem } from '@/components/documents/blocks/BrandKitSocial'
-import { useBrandImage } from '@/components/documents/blocks/useBrandImage'
 import type { BrandKit, BrandPaletteRole, BrandSuggestions } from '@/components/documents/blocks/types'
+import { roleErrorsFrom, saveErrorMessage, type RoleErrors } from './save-errors'
+import { useBrandImages } from './use-brand-images'
+import { useBrandPalette } from './use-brand-palette'
 
 const SOURCE_LABEL: Record<string, string> = {
   business_profile: 'your business profile',
@@ -40,25 +42,6 @@ export function withD5Fields(kit: BrandKit): BrandKit {
       sign_off: kit.voice?.sign_off ?? '',
     },
   }
-}
-
-/** A 422 from PUT /brand-kit names each refused field and why: the kit's own check
- * (`{message, errors}`) or the request's (a list). */
-export function saveErrorMessage(e: any): string {
-  try {
-    const detail = JSON.parse(e?.message ?? '')
-    const errors: Array<{ loc?: unknown[]; msg?: string }> = Array.isArray(detail)
-      ? detail
-      : Array.isArray(detail?.errors) ? detail.errors : []
-    if (errors.length) {
-      return errors
-        .map((err) => `${(err.loc ?? []).filter((part) => part !== 'body').join('.')}: ${(err.msg ?? '').replace(/^Value error, /, '')}`)
-        .join('; ')
-    }
-  } catch {
-    // Not a validation detail: the message as it came.
-  }
-  return e?.message || 'Failed to save brand kit'
 }
 
 /**
@@ -91,18 +74,44 @@ export function withSuggestions(kit: BrandKit, suggestions: BrandSuggestions): B
   }
 }
 
+/** Save: PUT the kit; a refusal names the fields, and each colour role it names shows under its swatch. */
+function useKitSave(
+  kit: BrandKit | null,
+  blocked: boolean,
+  setKit: Dispatch<SetStateAction<BrandKit | null>>,
+  setRoleErrors: (errors: RoleErrors) => void,
+) {
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    if (!kit || blocked) return
+    setSaving(true)
+    try {
+      // The stored files (logo_path and its variants, logo_mark_path, font_files) are
+      // server-managed; the update route ignores them (validate_brand_kit strips them).
+      setKit(withD5Fields(await templateBlocksApi.updateBrandKit(kitToSave(kit))))
+      setRoleErrors({})
+      toast.success('Brand kit saved')
+    } catch (e: any) {
+      setRoleErrors(roleErrorsFrom(e))
+      toast.error(saveErrorMessage(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+  return { saving, save }
+}
+
 export function useBrandKitForm() {
   const [kit, setKit] = useState<BrandKit | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
   const [suggestions, setSuggestions] = useState<BrandSuggestions>({})
   // Each load remounts the fields that keep their own typed text (the voice lists).
   const [loads, setLoads] = useState(0)
 
   const patch = useCallback((p: Partial<BrandKit>) => setKit((k) => (k ? { ...k, ...p } : k)), [])
   const patchCompany = (p: Partial<BrandKit['company']>) => setKit((k) => (k ? { ...k, company: { ...k.company, ...p } } : k))
-  const logo = useBrandImage('logo', patch)
-  const mark = useBrandImage('mark', patch)
+  const images = useBrandImages(patch)
+  const palette = useBrandPalette(setKit)
   useUploadedFontFaces(kit?.font_files ?? NO_FONTS)
 
   useEffect(() => {
@@ -112,8 +121,7 @@ export function useBrandKitForm() {
         const k = withD5Fields(loaded)
         setKit(k)
         setLoads((n) => n + 1)
-        logo.refresh(!!k.logo_path)
-        mark.refresh(!!k.logo_mark_path)
+        images.showStored(k)
       })
       .catch((e: any) => setLoadError(e?.message || 'Failed to load brand kit'))
     templateBlocksApi.getBrandSuggestions().then((r) => setSuggestions(r.suggestions || {})).catch(() => setSuggestions({}))
@@ -128,23 +136,10 @@ export function useBrandKitForm() {
   }
 
   const voiceProblem = kit ? toneWordsProblem(kit.voice.tone) : null
-  const save = async () => {
-    if (!kit || voiceProblem) return
-    setSaving(true)
-    try {
-      // The stored files (logo_path, logo_mark_path, font_files) are server-managed;
-      // the update route ignores them (validate_brand_kit strips them).
-      setKit(withD5Fields(await templateBlocksApi.updateBrandKit(kitToSave(kit))))
-      toast.success('Brand kit saved')
-    } catch (e: any) {
-      toast.error(saveErrorMessage(e))
-    } finally {
-      setSaving(false)
-    }
-  }
+  const { saving, save } = useKitSave(kit, !!voiceProblem, setKit, palette.setRoleErrors)
 
   return {
-    kit, loadError, saving, suggestions, loads, logo, mark, voiceProblem,
+    kit, loadError, saving, suggestions, loads, ...images, palette, voiceProblem,
     hasSuggestions: Object.keys(suggestions).length > 0,
     patch, patchCompany, applySuggestions, save,
   }

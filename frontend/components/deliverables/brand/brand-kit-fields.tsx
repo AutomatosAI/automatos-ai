@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * PRD-251B US-B301 — the Brand kit tab's colour, font and company fields: every colour the
- * renderers use, the body and heading fonts with the uploaded font files, and the contact
+ * PRD-251B US-B301 — the Brand kit tab's colour, font and company fields: the kit's four
+ * colours (the colour roles derive from them, PRD-255), the body and heading fonts with the uploaded font files, and the contact
  * details that fill {{company.*}}.
  */
 import { Input } from '@/components/ui/input'
@@ -37,13 +37,17 @@ interface KitFieldsProps {
   patch: (p: Partial<BrandKit>) => void
 }
 
+/** The kit's four colours: every colour role the owner has not set derives from them (PRD-255). */
 export function BrandColours({ kit, patch }: KitFieldsProps) {
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <ColorField label="Primary (headings)" value={kit.primary_color} onChange={(v) => patch({ primary_color: v })} />
-      <ColorField label="Accent (rules)" value={kit.accent_color} onChange={(v) => patch({ accent_color: v })} />
-      <ColorField label="Secondary (borders)" value={kit.secondary_color} onChange={(v) => patch({ secondary_color: v })} />
-      <ColorField label="Body text" value={kit.text_color} onChange={(v) => patch({ text_color: v })} />
+    <div>
+      <div className="grid grid-cols-2 gap-3">
+        <ColorField label="Primary (brand colour)" value={kit.primary_color} onChange={(v) => patch({ primary_color: v })} />
+        <ColorField label="Accent" value={kit.accent_color} onChange={(v) => patch({ accent_color: v })} />
+        <ColorField label="Secondary" value={kit.secondary_color} onChange={(v) => patch({ secondary_color: v })} />
+        <ColorField label="Body text" value={kit.text_color} onChange={(v) => patch({ text_color: v })} />
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">The colour roles below derive from these; Save to see them follow.</p>
     </div>
   )
 }

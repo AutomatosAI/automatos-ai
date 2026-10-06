@@ -1,14 +1,15 @@
 'use client'
 
-// The stored logo (PRD-242 S3) and logo mark (PRD-251 D5): upload, remove, and an
-// object URL to show it (a stored file needs auth headers a plain <img src> cannot
-// send in SaaS). One hook for both, so the two behave the same.
+// The stored logo (PRD-242 S3), logo mark (PRD-251 D5) and the logo's dark and mono
+// variants (PRD-255 FR-9): upload, remove, and an object URL to show it (a stored file
+// needs auth headers a plain <img src> cannot send in SaaS). One hook for all, so they
+// behave the same.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { BRAND_LOGO_MARK_PATH, BRAND_LOGO_PATH, templateBlocksApi } from './api'
+import { BRAND_LOGO_DARK_PATH, BRAND_LOGO_MARK_PATH, BRAND_LOGO_MONO_PATH, BRAND_LOGO_PATH, templateBlocksApi } from './api'
 import type { BrandKit } from './types'
 
-export type BrandImageKind = 'logo' | 'mark'
+export type BrandImageKind = 'logo' | 'mark' | 'dark' | 'mono'
 
 interface BrandImageSpec {
   path: string
@@ -45,6 +46,28 @@ const SPECS: Record<BrandImageKind, BrandImageSpec> = {
     uploadFailed: 'Logo mark upload failed',
     removed: 'Logo mark removed',
     removeFailed: 'Could not remove the logo mark',
+  },
+  dark: {
+    path: BRAND_LOGO_DARK_PATH,
+    upload: (file) => templateBlocksApi.uploadLogoVariant(BRAND_LOGO_DARK_PATH, file),
+    remove: () => templateBlocksApi.deleteLogoVariant(BRAND_LOGO_DARK_PATH),
+    afterUpload: (saved) => ({ logo_dark_path: saved.logo_dark_path }),
+    afterRemove: (saved) => ({ logo_dark_path: saved.logo_dark_path }),
+    uploaded: 'Logo for dark backgrounds uploaded',
+    uploadFailed: 'Logo for dark backgrounds upload failed',
+    removed: 'Logo for dark backgrounds removed',
+    removeFailed: 'Could not remove the logo for dark backgrounds',
+  },
+  mono: {
+    path: BRAND_LOGO_MONO_PATH,
+    upload: (file) => templateBlocksApi.uploadLogoVariant(BRAND_LOGO_MONO_PATH, file),
+    remove: () => templateBlocksApi.deleteLogoVariant(BRAND_LOGO_MONO_PATH),
+    afterUpload: (saved) => ({ logo_mono_path: saved.logo_mono_path }),
+    afterRemove: (saved) => ({ logo_mono_path: saved.logo_mono_path }),
+    uploaded: 'One-colour logo uploaded',
+    uploadFailed: 'One-colour logo upload failed',
+    removed: 'One-colour logo removed',
+    removeFailed: 'Could not remove the one-colour logo',
   },
 }
 
