@@ -319,6 +319,31 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
     return created
 
 
+def seed_starters_everywhere(db: Session) -> dict:
+    """The document starters for every workspace, at boot (F356 / #996).
+
+    ``seed_starter_templates`` runs when a workspace is provisioned (hosted) and at every
+    local-edition boot. A hosted workspace made before a starter changed kept its old row
+    until something re-ran the seeder; this re-runs it for each. The seeder's own rules
+    hold: a platform-owned row that drifted is refreshed, a missing starter is created, a
+    row a person made or edited is left alone, and a starter they deleted stays deleted.
+    Each workspace commits on its own, so one that fails is logged and the others go on.
+    """
+    from core.models.workspaces import Workspace
+
+    totals = {"workspaces": 0, "created": 0, "failed": 0}
+    for row in db.query(Workspace.id).all():
+        try:
+            totals["created"] += seed_starter_templates(db, row.id)
+        except Exception:
+            db.rollback()
+            logger.exception("Document starters for workspace %s could not be seeded", row.id)
+            totals["failed"] += 1
+            continue
+        totals["workspaces"] += 1
+    return totals
+
+
 def seed_source(tmpl: dict) -> Optional[str]:
     """The current source of a legacy seed's template file; ``None`` when it has none."""
     if not tmpl.get("template_file"):
