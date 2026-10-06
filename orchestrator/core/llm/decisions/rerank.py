@@ -1,8 +1,11 @@
 """PRD-248 S4 — rerank a candidate list with typed decisions (pure).
 
 The retriever proposes; the decision engine judges. Each candidate gets one
-yes/no question — would this action help with the request? — answered in a
-single call with a probability per candidate. The cut keeps the candidates
+four-level Score — how far would this action help with the request? — answered
+in a single call; the score, scaled to 0..1, is the candidate's probability.
+(PRD-248 tuning, 6 Oct: it was one yes/no per candidate, and a Noul's P(yes) is
+calibrated for its own proposition, not comparable across candidates, which a
+ranking needs.) The cut keeps the candidates
 above a probability floor, ordered by probability, tops up to a minimum so an
 unsure turn never strips the surface, and caps at the caller's top-K. When no
 candidate clears the floor the cut carries a "nothing fits" signal.
@@ -16,7 +19,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .questions import DecisionResult, Noul, Question
+from .questions import DecisionAnswer, DecisionResult, Question, Score
 
 PURPOSE = "tool_rerank"
 QUERY_MAX_CHARS = 2000
@@ -35,22 +38,43 @@ def build_state(query: str) -> Dict[str, Any]:
     return {"request": (query or "")[:QUERY_MAX_CHARS]}
 
 
+# How far one action helps with the request, low to high.
+HELP_LEVELS: Sequence[str] = (
+    "Unrelated to the request.",
+    "Related to the request, for other work.",
+    "Helps with part of the request.",
+    "Does what the request asks.",
+)
+
+
 def build_questions(candidates: Sequence[Candidate]) -> Dict[str, Question]:
-    """One Noul per candidate, keyed by name, the description folded into the
-    proposition. Terse on purpose: wordier instructions measured worse
+    """One Score per candidate, keyed by name, the description folded into the
+    instruction. Terse on purpose: wordier instructions measured worse
     calibration in the early-access tests."""
     questions: Dict[str, Question] = {}
     for name, description in candidates:
         if not name:
             continue
         desc = (description or "").strip()[:DESCRIPTION_MAX_CHARS]
-        text = f"Calling the action `{name}`"
+        text = f"How far would calling the action `{name}`"
         if desc:
             text += f" ({desc})"
-        questions[name] = Noul(text + " would help with the request.")
+        questions[name] = Score(text + " help with the request?", list(HELP_LEVELS))
     if not questions:
         raise ValueError("a rerank needs at least one candidate")
     return questions
+
+
+def help_probability(answer: Optional[DecisionAnswer]) -> Optional[float]:
+    """A candidate's 0..1 weight: its Score scaled by the top level (a Noul's P(yes) from a
+    backend that still answers yes/no); None when it has neither."""
+    if answer is None:
+        return None
+    if answer.score is not None:
+        return round(max(0.0, min(1.0, float(answer.score) / (len(HELP_LEVELS) - 1))), 4)
+    if answer.noul is not None:
+        return float(answer.noul)
+    return None
 
 
 @dataclass
@@ -84,9 +108,9 @@ def apply_rerank(
         return None
     probabilities: Dict[str, float] = {}
     for name in names:
-        answer = result.get(name)
-        if answer is not None and answer.noul is not None:
-            probabilities[name] = float(answer.noul)
+        weight = help_probability(result.get(name))
+        if weight is not None:
+            probabilities[name] = weight
     if len(probabilities) < max(1, int(len(names) * MIN_ANSWERED_SHARE)):
         return None
 

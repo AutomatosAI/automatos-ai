@@ -7,11 +7,13 @@ Reports combine DB metadata (for discovery/filtering) with
 workspace files (for full content).
 """
 
+import functools
+import inspect
 import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import desc, func, text
@@ -37,21 +39,28 @@ def _shadow_report_triage(
     status: str,
     report_type: str,
     requires_approval: bool,
-    action_items: int,
-    recommendations: int,
+    action_items: List[Any],
+    recommendations: List[Any],
+    attachments: List[Any],
+    linked_task_ids: List[Any],
 ) -> None:
     """PRD-248 S5 (shadow only): the decision engine says whether the owner
     should act on this report today and how severe it is, logged beside what
-    the platform did with it. Lazy, off by default, fail-open."""
+    the platform did with it. It reads the evidence beside the report's own
+    words: its action items and recommendations, its attachments, and the
+    tickets it links with their briefs (read in the shadow task, never here).
+    Lazy, off by default, fail-open."""
     try:
         from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
+        from services import decision_evidence
 
         engine = get_decision_engine()
         if engine.dials().report_triage_mode == MODE_OFF:
             return
         engine.shadow(
-            judgements.shadow_report_triage(
+            decision_evidence.shadow_report_triage(
                 engine,
+                linked_task_ids=list(linked_task_ids),
                 workspace_id=workspace_id,
                 kind="report",
                 subject_id=report_id,
@@ -62,13 +71,44 @@ def _shadow_report_triage(
                 agent_id=agent_id,
                 report_type=report_type,
                 platform_action="requires_approval" if requires_approval else "report_submitted",
-                action_items=action_items,
-                recommendations=recommendations,
+                action_items=list(action_items),
+                recommendations=list(recommendations),
+                attachments=list(attachments),
+                requires_approval=requires_approval,
             ),
             purpose=judgements.PURPOSE_REPORT,
         )
     except Exception:  # noqa: BLE001 — never into a report
         logger.debug("[decision] report triage shadow skipped", exc_info=True)
+
+
+def _triaged_after_report(create_report: Callable[..., Any]) -> Callable[..., Any]:
+    """PRD-248 S5 (shadow only): once a report is written, the decision engine says
+    whether the owner should act on it today, reading the report and its evidence (its
+    action items, recommendations, attachments and linked tickets). A decorator, so the
+    long ``create_report`` stays as it is; the returned result is never touched. The
+    summary is the one given, else the report's own text."""
+
+    @functools.wraps(create_report)
+    async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        result = await create_report(self, *args, **kwargs)
+        if result.get("success"):
+            try:
+                given = inspect.signature(create_report).bind(self, *args, **kwargs)
+                given.apply_defaults()
+                a = given.arguments
+                _shadow_report_triage(
+                    workspace_id=self.workspace_id, report_id=result.get("report_id"), agent_id=a["agent_id"],
+                    agent_name=a["agent_name"], title=a["title"], summary=a["summary"] or a["content"] or "",
+                    status=a["status"], report_type=a["report_type"], requires_approval=a["requires_approval"],
+                    action_items=a["action_items"] or [], recommendations=a["recommendations"] or [],
+                    attachments=a["attachments"] or [], linked_task_ids=a["linked_task_ids"] or [],
+                )
+            except Exception:  # noqa: BLE001 — never into a report
+                logger.debug("[decision] report triage shadow skipped", exc_info=True)
+        return result
+
+    return wrapper
 
 
 def _slugify(value: str) -> str:
@@ -93,6 +133,7 @@ class ReportService:
         self.workspace_id = workspace_id
 
     @thumbnail_after_report  # F353: a report's card shows its first page
+    @_triaged_after_report  # PRD-248 S5: shadow triage, once the report is written
     async def create_report(
         self,
         agent_id: Optional[int],
@@ -192,15 +233,6 @@ class ReportService:
             )
             row = result.fetchone()
             report_id = str(row[0]) if row else None
-
-            # PRD-248 S5 (shadow only): does this report need the owner today?
-            # Logged beside the dispatch; never changes it.
-            _shadow_report_triage(
-                workspace_id=self.workspace_id, report_id=report_id, agent_id=agent_id,
-                agent_name=agent_name, title=title, summary=summary or "", status=status,
-                report_type=report_type, requires_approval=requires_approval,
-                action_items=len(action_items or []), recommendations=len(recommendations or []),
-            )
 
             # PRD-128: dispatch report_submitted before commit so the
             # notification row joins the same transaction as the report

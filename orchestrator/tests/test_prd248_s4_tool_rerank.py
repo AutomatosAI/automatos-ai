@@ -37,7 +37,9 @@ _ORCH = Path(__file__).resolve().parent.parent
 
 
 def _result(**probs: float) -> DecisionResult:
-    answers = {name: DecisionAnswer(type="noul", noul=p) for name, p in probs.items()}
+    """Each candidate answered with the Score that scales to ``p`` (PRD-248 tuning: one Score per candidate)."""
+    top = len(rr.HELP_LEVELS) - 1
+    answers = {name: DecisionAnswer(type="score", score=p * top, confidence=0.8) for name, p in probs.items()}
     return DecisionResult(answers=answers, provider="fake", model="fake-1", latency_ms=280, input_tokens=1200)
 
 
@@ -46,11 +48,12 @@ def _result(**probs: float) -> DecisionResult:
 # --------------------------------------------------------------------------- #
 
 
-def test_questions_are_one_noul_per_candidate_with_the_description_folded_in():
+def test_questions_are_one_score_per_candidate_with_the_description_folded_in():
     q = rr.build_questions([("platform_list_agents", "List agents"), ("platform_x", "x" * 400), ("", "skip")])
     assert list(q) == ["platform_list_agents", "platform_x"]
     wire = q["platform_list_agents"].to_wire()
-    assert wire["type"] == "noul" and "`platform_list_agents` (List agents) would help" in wire["instructions"]
+    assert wire["type"] == "score" and wire["criteria"] == list(rr.HELP_LEVELS)
+    assert "`platform_list_agents` (List agents) help with the request" in wire["instructions"]
     assert len(q["platform_x"].instructions) < 400 + 80
     with pytest.raises(ValueError):
         rr.build_questions([])

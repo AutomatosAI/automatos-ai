@@ -19,6 +19,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from . import evidence
 from .questions import CHOICE_MAX_OPTIONS, Choice, DecisionResult, Noul, Question, Score
 
 PURPOSE_ASSIGN = "ticket_assign"
@@ -47,6 +48,16 @@ INTENT_CRITERIA: Dict[str, str] = {
     "change_system_or_data": "Install, configure, delete, publish, send, pay, or change shared data.",
     "unclear": "The text does not say enough to tell.",
 }
+
+# A candidate's fit for a mission step, low to high (one Score per candidate).
+FIT_LEVELS: Sequence[str] = (
+    "Its role is for other kinds of work.",
+    "It could do part of this step.",
+    "Its role suits this step.",
+    "Its role is exactly the work this step needs.",
+)
+# The pick needs at least "its role suits this step" (level 2) more than "part of it" (1).
+FIT_PICK_FLOOR = 1.5
 
 SEVERITY_CRITERIA: Dict[str, str] = {
     "fyi": "Routine; nothing for the owner to do.",
@@ -124,22 +135,50 @@ def assignment_options(candidates: Sequence[Tuple[str, str]]) -> Dict[str, Optio
 
 
 def assignment_questions(candidates: Sequence[Tuple[str, str]]) -> Dict[str, Question]:
+    """One four-level fit Score per candidate, keyed by its name. It replaced one Choice over
+    the whole roster (9 to 30 options on the nights): the vendor's own figures are 40% right
+    for a 12-way choice and 91% when it is split into small questions."""
     options = assignment_options(candidates)
     if len(options) < 1:
         raise ValueError("an assignment needs at least one candidate")
-    options[NONE_OPTION] = "No listed agent fits this work."
     return {
-        "assignee": Choice(
-            "Which agent should do this task? Pick by the task's needs and the agent's role.",
-            options,
+        name: Score(
+            f"How well does the agent {name} fit this step?" + (f" Its role: {role}" if role else ""),
+            list(FIT_LEVELS),
         )
+        for name, role in options.items()
     }
 
 
+def assignment_pick(result: DecisionResult, names: Sequence[str]) -> Optional[Tuple[str, float, Dict[str, float]]]:
+    """``(pick, top fit 0..1, every fit)``: the best-fitting candidate (the roster's order
+    breaks a tie), or ``none`` when even the best fits below "its role suits this step".
+    None when no candidate was answered."""
+    fits = {
+        name: float(answer.score)
+        for name in names
+        if (answer := result.get(name)) is not None and answer.score is not None
+    }
+    if not fits:
+        return None
+    best = max(fits, key=lambda name: (fits[name], -list(names).index(name)))
+    top = fits[best] / (len(FIT_LEVELS) - 1)
+    pick = best if fits[best] >= FIT_PICK_FLOOR else NONE_OPTION
+    return pick, top, {name: round(fit, 4) for name, fit in fits.items()}
+
+
 def assignment_state(
-    *, title: str, description: str, role: Optional[str], required_tools: Sequence[str]
+    *, title: str, description: str, role: Optional[str], required_tools: Sequence[str],
+    mission_brief: Optional[str] = None,
 ) -> Dict[str, Any]:
-    state: Dict[str, Any] = {"task": _preview(title), "details": _preview(description, TEXT_MAX_CHARS)}
+    """The step, and the owner's own words for it beside ``role_wanted``: the mission's goal,
+    or the step text when there is none. Night 5: "writer" read literally sent 15 of 44
+    steps to the wrong agent; the owner's words say what kind of writing."""
+    state: Dict[str, Any] = {
+        "task": _preview(title),
+        "owners_words": _preview(mission_brief or description, 1500),
+        "step": _preview(description, TEXT_MAX_CHARS),
+    }
     if role:
         state["role_wanted"] = str(role)
     if required_tools:
@@ -158,17 +197,20 @@ async def shadow_assignment(
     required_tools: Sequence[str],
     candidates: Sequence[Tuple[str, str]],
     platform_ranked: Sequence[str],
+    mission_brief: Optional[str] = None,
 ) -> Dict[str, Any]:
     ranked = [str(n) for n in platform_ranked if n]
+    names = list(assignment_options(candidates))
     row: Dict[str, Any] = {
         "purpose": PURPOSE_ASSIGN,
         "workspace_id": workspace_id,
         "task_id": task_id,
         "title": _preview(title),
         "role": role,
-        "candidates": len(assignment_options(candidates)),
+        "candidates": len(names),
         "platform_top": ranked[0] if ranked else None,
         "platform_ranked": ranked[:5],
+        "has_mission_brief": bool(mission_brief),
     }
     try:
         questions = assignment_questions(candidates)
@@ -178,20 +220,22 @@ async def shadow_assignment(
         return row
 
     def finish(r: Dict[str, Any], result: DecisionResult) -> None:
-        answer = result.get("assignee")
-        if answer is None or not answer.choice:
+        picked = assignment_pick(result, names)
+        if picked is None:
             r["agree"] = None
             return
-        pick = answer.choice
-        r["jev_pick"] = pick
-        r["jev_confidence"] = round(answer.certainty, 4)
+        pick, top, fits = picked
+        r.update(jev_pick=pick, jev_confidence=round(top, 4), jev_fits=fits)
         lower = [n.lower() for n in ranked]
         r["jev_pick_platform_rank"] = (lower.index(pick.lower()) + 1) if pick.lower() in lower else None
         r["agree"] = (bool(ranked) and pick.lower() == ranked[0].lower()) if pick != NONE_OPTION else (not ranked)
 
     return await _ask_and_record(
         engine, purpose=PURPOSE_ASSIGN, row=row,
-        state=assignment_state(title=title, description=description, role=role, required_tools=required_tools),
+        state=assignment_state(
+            title=title, description=description, role=role, required_tools=required_tools,
+            mission_brief=mission_brief,
+        ),
         questions=questions, workspace_id=workspace_id, finish=finish,
     )
 
@@ -201,12 +245,19 @@ async def shadow_assignment(
 # ---------------------------------------------------------------------------
 
 
-def session_end_questions() -> Dict[str, Question]:
-    return {
-        "work_complete": Noul("The final message reports the task's work as finished."),
+def session_end_questions(*, brief_has_dates: bool = False) -> Dict[str, Question]:
+    """``work_complete`` reads the evidence (the deliverables and the files written), never
+    the agent's account alone: wrong runs reported themselves as done as confidently as
+    right ones (night 4). When the brief names dates, ``dates_match`` asks about them on
+    their own, beside the dates the state lists."""
+    questions: Dict[str, Question] = {
+        "work_complete": Noul("The deliverables and the files written hold the finished work the brief asks for."),
         "nothing_done": Noul("The final message says the work was already done before, or that no action was taken."),
         "needs_owner": Noul("The final message asks the owner for a decision or information before it can continue."),
     }
+    if brief_has_dates:
+        questions["dates_match"] = Noul("The work is for the dates the brief asks for.")
+    return questions
 
 
 def session_end_state(
@@ -216,29 +267,42 @@ def session_end_state(
     final_text: str,
     attempt: Any,
     exit_reason: Optional[str],
-    files_touched: int,
-    denials: int,
+    files: Sequence[Any] = (),
+    denials: Sequence[Any] = (),
+    deliverables: Sequence[Mapping[str, Any]] = (),
+    asked_on: Optional[str] = None,
+    finished_on: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    """The ticket's brief and dates, what the session made (deliverables with their first
+    lines, the files written, the commands refused), then its own final message."""
+    made = evidence.deliverable_lines(deliverables)
+    state: Dict[str, Any] = {
         "task": _preview(title),
         "brief": _preview(description, 1000),
+        "asked_on": asked_on or "",
+        "finished_on": finished_on or "",
+        "deliverables": made,
+        "files_written": evidence.file_names(files),
+        "commands_refused": evidence.refusals(denials),
         "final_message": _preview(final_text, TEXT_MAX_CHARS),
         "attempt": attempt,
         "ended_because": exit_reason or "",
-        "files_written": int(files_touched or 0),
-        "commands_refused": int(denials or 0),
     }
+    work = [final_text, *(d["name"] for d in made), *(d.get("first_lines", "") for d in made)]
+    state.update(evidence.date_evidence(f"{title}\n{description}", work))
+    return state
 
 
 def session_end_verdict(result: DecisionResult) -> Optional[str]:
     complete = result.get("work_complete")
     nothing = result.get("nothing_done")
     owner = result.get("needs_owner")
+    dates = result.get("dates_match")
     if owner is not None and owner.yes:
         return "needs_owner"
     if nothing is not None and nothing.yes:
         return "nothing_done"
-    if complete is not None and complete.yes:
+    if complete is not None and complete.yes and (dates is None or dates.yes):
         return "complete"
     if complete is not None:
         return "incomplete"
@@ -255,10 +319,18 @@ async def shadow_session_end(
     description: str,
     final_text: str,
     exit_reason: Optional[str],
-    files_touched: int,
-    denials: int,
+    files: Sequence[Any] = (),
+    denials: Sequence[Any] = (),
+    deliverables: Sequence[Mapping[str, Any]] = (),
+    asked_on: Optional[str] = None,
+    finished_on: Optional[str] = None,
     platform_status: str,
 ) -> Dict[str, Any]:
+    state = session_end_state(
+        title=title, description=description, final_text=final_text, attempt=attempt,
+        exit_reason=exit_reason, files=files, denials=denials, deliverables=deliverables,
+        asked_on=asked_on, finished_on=finished_on,
+    )
     row: Dict[str, Any] = {
         "purpose": PURPOSE_SESSION_END,
         "workspace_id": workspace_id,
@@ -267,21 +339,24 @@ async def shadow_session_end(
         "title": _preview(title),
         "final_preview": _preview(final_text),
         "exit_reason": exit_reason,
-        "files_touched": int(files_touched or 0),
-        "denials": int(denials or 0),
+        "files_touched": len(files),
+        "denials": len(denials),
+        "deliverables": len(deliverables),
+        "brief_dates": state.get("brief_dates", []),
+        "brief_dates_missing_from_the_work": state.get("brief_dates_missing_from_the_work", []),
         "platform_status": platform_status,
     }
 
     def finish(r: Dict[str, Any], result: DecisionResult) -> None:
         r["jev_verdict"] = session_end_verdict(result)
+        dates = result.get("dates_match")
+        if dates is not None and dates.noul is not None:
+            r["jev_dates_match"] = round(dates.noul, 4)
 
     return await _ask_and_record(
-        engine, purpose=PURPOSE_SESSION_END, row=row,
-        state=session_end_state(
-            title=title, description=description, final_text=final_text, attempt=attempt,
-            exit_reason=exit_reason, files_touched=files_touched, denials=denials,
-        ),
-        questions=session_end_questions(), workspace_id=workspace_id, finish=finish,
+        engine, purpose=PURPOSE_SESSION_END, row=row, state=state,
+        questions=session_end_questions(brief_has_dates=bool(state.get("brief_dates"))),
+        workspace_id=workspace_id, finish=finish,
     )
 
 
@@ -375,11 +450,48 @@ async def shadow_hold(
 # ---------------------------------------------------------------------------
 
 
-def report_questions() -> Dict[str, Question]:
-    return {
+def report_questions(*, has_tickets: bool = False) -> Dict[str, Question]:
+    """When the report links tickets, ``matches_the_ask`` asks on its own whether the work
+    reported is what they asked for: night 4's wrong runs mostly read as fine."""
+    questions: Dict[str, Question] = {
         "needs_attention": Noul("The owner should act on this today."),
         "severity": Choice("How should the owner treat this?", SEVERITY_CRITERIA),
     }
+    if has_tickets:
+        questions["matches_the_ask"] = Noul("The work this report describes is the work the linked tickets ask for.")
+    return questions
+
+
+def _texts(items: Sequence[Any]) -> List[str]:
+    """Action items or recommendations as one line each (their text, not the whole object)."""
+    out: List[str] = []
+    for item in list(items or [])[: evidence.LIST_MAX]:
+        if isinstance(item, Mapping):
+            text = item.get("title") or item.get("text") or item.get("description") or item.get("action") or ""
+        else:
+            text = item
+        if str(text).strip():
+            out.append(_preview(text))
+    return out
+
+
+def _attachment_names(attachments: Sequence[Any]) -> List[str]:
+    names = []
+    for item in list(attachments or [])[: evidence.LIST_MAX]:
+        name = item.get("name") or item.get("filename") or item.get("path") if isinstance(item, Mapping) else item
+        if name:
+            names.append(_preview(name, evidence.NAME_MAX_CHARS))
+    return names
+
+
+def _ticket_evidence(state: Dict[str, Any], tickets: Sequence[Mapping[str, Any]], summary: str) -> None:
+    linked = [
+        {"title": _preview(t.get("title")), "brief": _preview(t.get("brief"), 600), "asked_on": t.get("asked_on") or ""}
+        for t in list(tickets)[:5]
+    ]
+    state["linked_tickets"] = linked
+    briefs = "\n".join(f"{t['title']}\n{t['brief']}" for t in linked)
+    state.update(evidence.date_evidence(briefs, [summary, state.get("title", "")]))
 
 
 def report_state(
@@ -390,9 +502,15 @@ def report_state(
     status: Optional[str],
     agent_name: Optional[str],
     report_type: Optional[str],
-    action_items: int = 0,
-    recommendations: int = 0,
+    action_items: Any = 0,
+    recommendations: Any = 0,
+    attachments: Sequence[Any] = (),
+    linked_tickets: Sequence[Mapping[str, Any]] = (),
+    requires_approval: bool = False,
 ) -> Dict[str, Any]:
+    """The report as written, then the evidence beside it: what it asks the owner to do,
+    what it attaches, and the tickets it was written for with their briefs and dates.
+    ``action_items`` / ``recommendations`` take the lists (a count still reads as before)."""
     state: Dict[str, Any] = {
         "kind": kind,
         "from": agent_name or "",
@@ -402,11 +520,33 @@ def report_state(
     }
     if report_type:
         state["report_type"] = str(report_type)
-    if action_items:
-        state["action_items"] = int(action_items)
-    if recommendations:
-        state["recommendations"] = int(recommendations)
+    if requires_approval:
+        state["waits_for_approval"] = True
+    for key, value in (("action_items", action_items), ("recommendations", recommendations)):
+        if isinstance(value, (list, tuple)):
+            if _texts(value):
+                state[key] = _texts(value)
+        elif value:
+            state[key] = int(value)
+    if attachments:
+        state["attachments"] = _attachment_names(attachments)
+    if linked_tickets:
+        _ticket_evidence(state, linked_tickets, summary)
     return state
+
+
+def _report_finish(row: Dict[str, Any], result: DecisionResult) -> None:
+    """The report_triage answers onto its shadow row."""
+    attention = result.get("needs_attention")
+    if attention is not None and attention.noul is not None:
+        row["jev_needs_attention"] = round(attention.noul, 4)
+    severity = result.get("severity")
+    if severity is not None:
+        row["jev_severity"] = severity.choice
+        row["jev_severity_confidence"] = round(severity.certainty, 4)
+    matches = result.get("matches_the_ask")
+    if matches is not None and matches.noul is not None:
+        row["jev_matches_the_ask"] = round(matches.noul, 4)
 
 
 async def shadow_report_triage(
@@ -421,8 +561,11 @@ async def shadow_report_triage(
     agent_name: Optional[str],
     report_type: Optional[str],
     platform_action: str,
-    action_items: int = 0,
-    recommendations: int = 0,
+    action_items: Any = 0,
+    recommendations: Any = 0,
+    attachments: Sequence[Any] = (),
+    linked_tickets: Sequence[Mapping[str, Any]] = (),
+    requires_approval: bool = False,
     agent_id: Any = None,
 ) -> Dict[str, Any]:
     row: Dict[str, Any] = {
@@ -435,22 +578,16 @@ async def shadow_report_triage(
         "title": _preview(title),
         "status": status,
         "platform_action": platform_action,
+        "linked_tickets": len(linked_tickets),
     }
-
-    def finish(r: Dict[str, Any], result: DecisionResult) -> None:
-        attention = result.get("needs_attention")
-        if attention is not None and attention.noul is not None:
-            r["jev_needs_attention"] = round(attention.noul, 4)
-        severity = result.get("severity")
-        if severity is not None:
-            r["jev_severity"] = severity.choice
-            r["jev_severity_confidence"] = round(severity.certainty, 4)
 
     return await _ask_and_record(
         engine, purpose=PURPOSE_REPORT, row=row,
         state=report_state(
             kind=kind, title=title, summary=summary, status=status, agent_name=agent_name,
             report_type=report_type, action_items=action_items, recommendations=recommendations,
+            attachments=attachments, linked_tickets=linked_tickets, requires_approval=requires_approval,
         ),
-        questions=report_questions(), workspace_id=workspace_id, finish=finish,
+        questions=report_questions(has_tickets=bool(linked_tickets)), workspace_id=workspace_id,
+        finish=_report_finish,
     )

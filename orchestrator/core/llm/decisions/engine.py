@@ -46,6 +46,13 @@ MODES = (MODE_OFF, MODE_SHADOW, MODE_LIVE)
 
 PROVIDERS = (PROVIDER_OPENROUTER, PROVIDER_TYPESAFE, PROVIDER_LLM)
 
+# Stamped on every shadow row, so the rows before and after a change to the questions or
+# the state split cleanly when they are scored. Bump it with every such change. Rows
+# written before the stamp existed (the 2026-10-06 baseline) have none: read them as 1.
+# 2: 2026-10-06 tuning batch (evidence in session_end/report_triage state, the mission's
+#    goal for ticket_assign, rosters as names and roles, one Score per candidate).
+SEAM_VERSION = 2
+
 DIALS_TTL_SECONDS = 30.0
 TIMEOUT_MIN_S = 0.2
 TIMEOUT_MAX_S = 30.0
@@ -319,7 +326,8 @@ class DecisionEngine:
     # -- shadow log ---------------------------------------------------------
 
     def record_shadow(self, row: Mapping[str, Any]) -> None:
-        """Append one JSON line; a write failure is logged at debug and dropped.
+        """Append one JSON line, stamped with ``SEAM_VERSION``; a write failure is
+        logged at debug and dropped.
 
         The usage scope's ``execution_id`` rides along when one is set, so a
         PRD-247 simulation night (``sim:<campaign>:<scenario>:<run>``) can be
@@ -327,7 +335,7 @@ class DecisionEngine:
         try:
             path = Path(config.DECISION_SHADOW_LOG_PATH)
             path.parent.mkdir(parents=True, exist_ok=True)
-            full: Dict[str, Any] = {"ts": round(time.time(), 3), **dict(row)}
+            full: Dict[str, Any] = {"ts": round(time.time(), 3), "seam_version": SEAM_VERSION, **dict(row)}
             execution_id = _scope_execution_id()
             if execution_id and not full.get("execution_id"):
                 full["execution_id"] = execution_id

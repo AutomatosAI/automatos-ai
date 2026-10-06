@@ -49,6 +49,20 @@ def split_traffic(rows: List[Dict[str, Any]], only: Optional[str]) -> List[Dict[
     return rows
 
 
+def seam_version_of(row: Dict[str, Any]) -> int:
+    """The seam version that wrote a row; 1 for a row from before the stamp (the
+    2026-10-06 baseline)."""
+    try:
+        return int(row.get("seam_version") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def filter_seam(rows: List[Dict[str, Any]], version: Optional[int]) -> List[Dict[str, Any]]:
+    """Rows written by one seam version; None keeps all."""
+    return rows if version is None else [r for r in rows if seam_version_of(r) == version]
+
+
 def parse_when(value: Optional[str]) -> Optional[float]:
     """An ISO-8601 timestamp (naive = UTC, 'Z' accepted) or epoch seconds → epoch
     seconds; None stays None. The customer-night ledger cuts by the same window."""
@@ -329,9 +343,10 @@ def summary_dict(
     only: Optional[str] = None,
     since: Optional[float] = None,
     until: Optional[float] = None,
+    seam_version: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Everything the night ledger needs from the shadow log, JSON-serialisable."""
-    rows = split_traffic(rows, only)
+    rows = filter_seam(split_traffic(rows, only), seam_version)
     if since is not None or until is not None:
         rows = filter_window(rows, since, until)
     simulated = sum(1 for r in rows if is_simulated(r))
@@ -340,6 +355,7 @@ def summary_dict(
         "only": only,
         "window": {"since": since, "until": until},
         "rows": len(rows),
+        "seam_versions": {str(v): sum(1 for r in rows if seam_version_of(r) == v) for v in sorted({seam_version_of(r) for r in rows})},
         "simulated": simulated,
         "real": len(rows) - simulated,
         "classifier": classifier_summary([r for r in rows if r.get("purpose", "classifier") == "classifier"]),
@@ -417,6 +433,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--purpose", choices=["classifier", "tool_rerank", "all"], default="all")
     parser.add_argument("--since", default=None, help="ISO-8601 or epoch seconds; rows at or after this (a customer night's start)")
     parser.add_argument("--until", default=None, help="ISO-8601 or epoch seconds; rows at or before this (the night's end)")
+    parser.add_argument("--seam-version", type=int, default=None, help="rows written by this seam version only (1 = before the stamp)")
     parser.add_argument("--json", action="store_true", help="print summary_dict() as JSON and nothing else (for the night ledger)")
     return parser
 
@@ -426,9 +443,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     path = Path(args.path) if args.path else _default_path()
     since, until = parse_when(args.since), parse_when(args.until)
     if args.json:
-        print(json.dumps(summary_dict(load_rows(path), only=args.only, since=since, until=until), indent=2))
+        print(json.dumps(summary_dict(load_rows(path), only=args.only, since=since, until=until,
+                                      seam_version=args.seam_version), indent=2))
         return 0
-    rows = split_traffic(load_rows(path), args.only)
+    rows = filter_seam(split_traffic(load_rows(path), args.only), args.seam_version)
     if since is not None or until is not None:
         rows = filter_window(rows, since, until)
     simulated = sum(1 for r in rows if is_simulated(r))

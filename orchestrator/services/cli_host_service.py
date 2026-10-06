@@ -44,6 +44,7 @@ from services.board_dispatcher import RUN_ID_KEY, claim_tasks, renew_lease
 from services.board_events import notify_board_event
 from services.cli_ticket_lane import SESSION_MODE_TERMINAL
 from services.session_denials import classify_denial, forces_review
+from services.session_end_shadow import judged_after_landing
 from services.session_report import APPROVAL_NOT_ON_RECORD
 from services.ticket_numbers import ticket_label  # PRD-252 R4
 from core.session_permission_modes import (
@@ -2326,40 +2327,7 @@ def decide_session_permission(db: Session, task: BoardTask, request_id: str, app
     return {"task_id": task.id, "request_id": str(request_id), "approved": bool(approved), "pending": len(ref.get("pending_permissions") or [])}
 
 
-def _shadow_session_end(
-    task: Any, ref: Dict[str, Any], payload: Dict[str, Any], exec_result: Dict[str, Any],
-    files: Any, denials: Any,
-) -> None:
-    """PRD-248 S5 (shadow only): the decision engine reads the session's final
-    message and says whether the work is complete, whether nothing was done, and
-    whether the owner is needed — logged beside the status the board is about to
-    apply. Lazy, off by default, fail-open; the result is never touched."""
-    try:
-        from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
-
-        engine = get_decision_engine()
-        if engine.dials().session_end_mode == MODE_OFF:
-            return
-        engine.shadow(
-            judgements.shadow_session_end(
-                engine,
-                workspace_id=getattr(task, "workspace_id", None),
-                task_id=getattr(task, "id", None),
-                attempt=payload.get("attempt", ref.get("attempt")),
-                title=getattr(task, "title", "") or "",
-                description=getattr(task, "description", "") or "",
-                final_text=str(payload.get("result_text") or payload.get("error") or ""),
-                exit_reason=str(payload.get("exit_reason") or exec_result.get("status") or ""),
-                files_touched=len(files) if isinstance(files, (list, tuple)) else 0,
-                denials=len(denials) if isinstance(denials, (list, tuple)) else 0,
-                platform_status=str(exec_result.get("status") or ""),
-            ),
-            purpose=judgements.PURPOSE_SESSION_END,
-        )
-    except Exception:  # noqa: BLE001 — never into a result
-        logger.debug("[decision] session-end shadow skipped", exc_info=True)
-
-
+@judged_after_landing  # PRD-248: the session_end shadow judges the landed result
 async def apply_result(
     db: Session, host: CliHost, task_id: int, payload: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -2413,7 +2381,6 @@ async def apply_result(
         "files_touched": files,
         "permission_denials": denials,
     }
-    _shadow_session_end(task, ref, payload, exec_result, files, denials)
     ref.update(
         {
             "finished_at": _iso(_now()),

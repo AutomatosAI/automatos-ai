@@ -84,11 +84,11 @@ class _Engine:
 # --------------------------------------------------------------------------- #
 
 
-def test_assignment_questions_are_one_choice_over_the_roster_plus_none():
+def test_assignment_questions_are_one_fit_score_per_distinct_candidate():
     q = J.assignment_questions([("Jim", "Writes board packs"), ("Atlas", ""), ("jim", "dup"), ("", "skip")])
-    assert list(q) == ["assignee"]
-    assert q["assignee"].options == ["Jim", "Atlas", "none"]
-    assert q["assignee"].criteria["Jim"] == "Writes board packs" and q["assignee"].criteria["Atlas"] is None
+    assert list(q) == ["Jim", "Atlas"]
+    assert q["Jim"].to_wire()["type"] == "score" and len(q["Jim"].criteria) == len(J.FIT_LEVELS)
+    assert "Writes board packs" in q["Jim"].instructions and "role" not in q["Atlas"].instructions
     with pytest.raises(ValueError):
         J.assignment_questions([])
 
@@ -105,10 +105,10 @@ def test_session_hold_and_report_questions_have_the_documented_shapes():
 
 def test_states_carry_only_the_fields_the_question_needs():
     st = J.assignment_state(title="Draft the board pack", description="x" * 5000, role="writer", required_tools=["docs"])
-    assert st["task"] == "Draft the board pack" and len(st["details"]) == J.TEXT_MAX_CHARS
+    assert st["task"] == "Draft the board pack" and len(st["step"]) == J.TEXT_MAX_CHARS
     assert st["role_wanted"] == "writer" and st["tools_needed"] == ["docs"]
-    se = J.session_end_state(title="t", description="d", final_text="done", attempt=3, exit_reason="success", files_touched=2, denials=1)
-    assert se["attempt"] == 3 and se["files_written"] == 2 and se["commands_refused"] == 1
+    se = J.session_end_state(title="t", description="d", final_text="done", attempt=3, exit_reason="success", files=["out/a.md", "b.md"], denials=[{"tool": "bash"}])
+    assert se["attempt"] == 3 and se["files_written"] == ["out/a.md", "b.md"] and se["commands_refused"] == ["bash"]
     hs = J.hold_state(kind="question", subject_type="board_task", tool_name="bash", question_md="Allow `comm -23 a b`?", options=["allow", "deny"], reason="outside the allowlist")
     assert hs["tool"] == "bash" and hs["answers_offered"] == ["allow", "deny"] and "allowlist" in hs["why_it_was_raised"]
     rs = J.report_state(kind="report", title="Weekly", summary="all fine", status="ok", agent_name="OPS", report_type="standup", action_items=2)
@@ -167,27 +167,28 @@ def test_dials_have_no_live_mode_for_the_extra_hooks():
 
 @pytest.mark.asyncio
 async def test_assignment_row_records_agreement_and_platform_rank():
-    engine = _Engine(result=_result(assignee=_choice("Atlas", 0.8)))
+    engine = _Engine(result=_result(Jim=_score(1.0), Atlas=_score(2.4)))
     row = await J.shadow_assignment(
         engine, workspace_id=WS, task_id=41, title="Draft the board pack", description="", role="writer",
         required_tools=[], candidates=[("Jim", "Writes"), ("Atlas", "Plans")], platform_ranked=["Jim", "Atlas"],
     )
     assert row["purpose"] == "ticket_assign" and row["platform_top"] == "Jim" and row["candidates"] == 2
     assert row["jev_pick"] == "Atlas" and row["agree"] is False and row["jev_pick_platform_rank"] == 2
-    assert row["jev_confidence"] == 0.8 and row["latency_ms"] == 240 and engine.rows == [row]
-    assert engine.calls[0]["purpose"] == "ticket_assign" and set(engine.calls[0]["questions"]) == {"assignee"}
+    assert row["jev_confidence"] == 0.8 and row["jev_fits"] == {"Jim": 1.0, "Atlas": 2.4}
+    assert row["latency_ms"] == 240 and engine.rows == [row]
+    assert engine.calls[0]["purpose"] == "ticket_assign" and set(engine.calls[0]["questions"]) == {"Jim", "Atlas"}
 
     agree = await J.shadow_assignment(
-        _Engine(result=_result(assignee=_choice("jim"))), workspace_id=WS, task_id=1, title="t", description="",
+        _Engine(result=_result(Jim=_score(2.0))), workspace_id=WS, task_id=1, title="t", description="",
         role=None, required_tools=[], candidates=[("Jim", "")], platform_ranked=["Jim"],
     )
     assert agree["agree"] is True and agree["jev_pick_platform_rank"] == 1
 
     none = await J.shadow_assignment(
-        _Engine(result=_result(assignee=_choice("none"))), workspace_id=WS, task_id=1, title="t", description="",
+        _Engine(result=_result(Jim=_score(0.4))), workspace_id=WS, task_id=1, title="t", description="",
         role=None, required_tools=[], candidates=[("Jim", "")], platform_ranked=["Jim"],
     )
-    assert none["agree"] is False and none["jev_pick_platform_rank"] is None
+    assert none["jev_pick"] == "none" and none["agree"] is False and none["jev_pick_platform_rank"] is None
 
     miss = await J.shadow_assignment(
         _Engine(result=None), workspace_id=WS, task_id=1, title="t", description="", role=None,
@@ -203,10 +204,11 @@ async def test_session_end_row_derives_a_verdict():
     row = await J.shadow_session_end(
         engine, workspace_id=WS, task_id=177, attempt=110, title="Ethiopian blog post", description="...",
         final_text="110th dispatch, ticket unchanged. #177 is complete; no action taken.", exit_reason="success",
-        files_touched=0, denials=0, platform_status="success",
+        files=[], denials=[], platform_status="success",
     )
     assert row["purpose"] == "session_end" and row["jev_verdict"] == "nothing_done" and row["attempt"] == 110
     assert row["platform_status"] == "success" and row["final_preview"].startswith("110th dispatch")
+    assert row["files_touched"] == 0 and row["denials"] == 0
     assert J.session_end_verdict(_result(work_complete=_noul(0.9), nothing_done=_noul(0.1), needs_owner=_noul(0.2))) == "complete"
     assert J.session_end_verdict(_result(work_complete=_noul(0.1), nothing_done=_noul(0.1), needs_owner=_noul(0.9))) == "needs_owner"
     assert J.session_end_verdict(_result(work_complete=_noul(0.3), nothing_done=_noul(0.2), needs_owner=_noul(0.2))) == "incomplete"
@@ -320,6 +322,7 @@ def _install(monkeypatch, engine):
 
 def test_matcher_call_site_only_shadows_when_the_dial_is_on(monkeypatch):
     from modules.coordination import agent_matcher as am
+    from modules.coordination.assignment_shadow import shadow_assignment
 
     ranked = [am.MatchResult(agent_id=7, agent_name="Jim", total_score=0.9, tool_coverage=1, skill_match=1, model_fit=1, availability=1, history=0)]
     task = SimpleNamespace(id=41, title="t", description="d")
@@ -327,14 +330,14 @@ def test_matcher_call_site_only_shadows_when_the_dial_is_on(monkeypatch):
 
     off = _OffEngine()
     _install(monkeypatch, off)
-    am._shadow_assignment(task, agents, ranked, "writer", [])
+    shadow_assignment(task, agents, ranked, "writer", [])
     assert off.calls == 0
 
     on = _ShadowEngine()
     _install(monkeypatch, on)
-    am._shadow_assignment(task, agents, ranked, "writer", [])
+    shadow_assignment(task, agents, ranked, "writer", [])
     assert on.purposes == ["ticket_assign"]
-    am._shadow_assignment(task, agents, [], "writer", [])  # nothing ranked → nothing to judge
+    shadow_assignment(task, agents, [], "writer", [])  # nothing ranked → nothing to judge
     assert on.purposes == ["ticket_assign"]
 
 
@@ -360,8 +363,8 @@ def test_grant_creation_call_site_only_shadows_when_the_dial_is_on(monkeypatch):
 
 
 def test_session_end_report_and_heartbeat_call_sites_only_shadow_when_on(monkeypatch):
-    from services import cli_host_service as chs
     from services import heartbeat_service as hb
+    from services import session_end_shadow as chs
     from services import report_service as rs
 
     task = SimpleNamespace(id=177, workspace_id=WS, title="t", description="d")
@@ -370,14 +373,14 @@ def test_session_end_report_and_heartbeat_call_sites_only_shadow_when_on(monkeyp
 
     off = _OffEngine()
     _install(monkeypatch, off)
-    chs._shadow_session_end(task, {}, payload, exec_result, [], [])
-    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=False, action_items=0, recommendations=0)
+    chs.shadow_session_end(task, {}, payload, exec_result, [], [], [])
+    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=False, action_items=[], recommendations=[], attachments=[], linked_task_ids=[])
     hb._shadow_heartbeat_triage(workspace_id=WS, link_id=1, agent_id=1, agent_name="A", title="t", message="m", status="ok", source_type="agent", platform_action="report_to=workspace")
     assert off.calls == 0
 
     on = _ShadowEngine()
     _install(monkeypatch, on)
-    chs._shadow_session_end(task, {}, payload, exec_result, ["a.md"], [{"tool": "bash"}])
-    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=True, action_items=1, recommendations=0)
+    chs.shadow_session_end(task, {}, payload, exec_result, ["a.md"], [{"tool": "bash"}], [])
+    rs._shadow_report_triage(workspace_id=WS, report_id="9", agent_id=1, agent_name="A", title="t", summary="s", status="ok", report_type="standup", requires_approval=True, action_items=[{"title": "Approve"}], recommendations=[], attachments=[], linked_task_ids=[])
     hb._shadow_heartbeat_triage(workspace_id=WS, link_id=1, agent_id=1, agent_name="A", title="t", message="m", status="ok", source_type="agent", platform_action="report_to=auto")
     assert on.purposes == ["session_end", "report_triage", "report_triage"]
