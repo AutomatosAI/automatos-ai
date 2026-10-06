@@ -698,9 +698,7 @@ async def test_the_shadow_task_never_touches_the_callers_session(brain, monkeypa
     before = len(queries)
     await _drain_shadow()
     assert len(queries) == before
-    assert backend.calls[0]["state"]["agents"] == [
-        {"name": "Jim", "role": "writer", "description": "Drafts board packs"}
-    ]
+    assert backend.calls[0]["state"]["agents"] == [{"name": "Jim", "role": "writer"}]  # names and roles only
 
 
 @pytest.mark.asyncio
