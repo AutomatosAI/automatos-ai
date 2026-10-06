@@ -27,16 +27,10 @@ bypass of our gate — each preset names what that means for its binary.
 """
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
-import pty
 import queue
 import re
-import signal
-import struct
-import subprocess
-import termios
 import threading
 import time
 import uuid
@@ -57,6 +51,8 @@ from .permission_modes import MODE_EDITS, MODE_PLAN, PLAN_EVENT, PLAN_WITH_OPERA
 from .policy import PLAN_BASH_ALLOW, Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
 from .permission_request import PERMISSION_REQUEST_REJUDGE, AllowedCalls, request_of
 from .permission_request import answer as permission_answer
+from .ptyproc import KILL, TERMINATE, PtyChild
+from .ptyproc import spawn as spawn_on_pty
 from .presets import HOOK_WAIT_SECONDS, REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK, hold_seconds
 from .session_prompt import build_system_prompt, build_ticket_file
 from .session_files import CREDENTIAL_SESSION_FILES, land_session_deliverables, session_deliverables
@@ -182,7 +178,7 @@ class Session:
         self.session_started = threading.Event()
         self.ended = threading.Event()
         self.started_at = time.time()
-        self.proc: Optional[subprocess.Popen] = None
+        self.proc: Optional[PtyChild] = None
         self.pgid: Optional[int] = None
         self.effective_cwd: Optional[Path] = None
         self.session_dir: Optional[Path] = None
@@ -561,25 +557,9 @@ class Session:
             "PYTHONPATH": hook_pythonpath(),
             **prepared.env,
         })
-        master, slave = pty.openpty()
-        try:
-            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", PTY_ROWS, PTY_COLS, 0, 0))
-        except OSError:
-            pass
-
-        def _child_setup() -> None:  # runs in the child after setsid()
-            try:
-                fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-            except OSError:
-                pass
-
-        self.proc = subprocess.Popen(
-            args, stdin=slave, stdout=slave, stderr=slave, cwd=str(cwd), env=env,
-            start_new_session=True, preexec_fn=_child_setup, close_fds=True,
-        )
-        os.close(slave)
+        self.proc = spawn_on_pty(args, cwd=cwd, env=env, rows=PTY_ROWS, cols=PTY_COLS)
         self.pgid = self.proc.pid
-        threading.Thread(target=self._drain, args=(master,), daemon=True, name=f"pty-drain-{self.task_id}").start()
+        threading.Thread(target=self._drain, args=(self.proc,), daemon=True, name=f"pty-drain-{self.task_id}").start()
         log.info("task %s: %s session %s started (pid %s) in %s%s", self.task_id, preset.id, self.session_id, self.proc.pid, cwd,
                  f" worktree={worktree}" if worktree else "")
 
@@ -614,11 +594,11 @@ class Session:
         return turn_end.exit_reason(preset, returncode=self.proc.poll() if self.proc else None,
                                     session_started=self.session_started.is_set(), stopped=self.stopped.is_set())
 
-    def _drain(self, master: int) -> None:
+    def _drain(self, child: PtyChild) -> None:
         try:
             while True:
                 try:
-                    chunk = os.read(master, 65536)
+                    chunk = child.read(65536)
                 except OSError:
                     break
                 if not chunk:
@@ -627,31 +607,15 @@ class Session:
                 if self.terminal_log is not None:
                     self.terminal_log.write(chunk)
         finally:
-            try:
-                os.close(master)
-            except OSError:
-                pass
+            child.close()
             if self.terminal_log is not None:
                 self.terminal_log.close()
 
     def _terminate(self) -> None:
         if self.proc is None or self.proc.poll() is not None:
             return
-        try:
-            os.killpg(self.pgid or self.proc.pid, signal.SIGTERM)
-        except OSError:
-            pass
-        try:
-            self.proc.wait(KILL_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(self.pgid or self.proc.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            try:
-                self.proc.wait(KILL_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
-                log.error("task %s: process %s survived SIGKILL", self.task_id, self.proc.pid)
+        if not self.proc.stop(((TERMINATE, KILL_GRACE_SECONDS), (KILL, KILL_GRACE_SECONDS))):
+            log.error("task %s: process %s survived being killed", self.task_id, self.proc.pid)
 
     def request_cancel(self, host_reason: Optional[str] = None) -> None:
         """Stop the session. ``host_reason`` when the host itself is stopping
