@@ -29,7 +29,11 @@ from modules.documents import brand_kit
 from modules.documents.brand_system import DATE_STYLE_MONTH_FIRST
 from services.brand_rules import KIT_WINS_LINE, forget_cached_kits, on_brand_text, rules_for_kit
 from tests import test_prd242_brand_logo as logo_tests
-from tests.test_prd251w1_brand_kit_tools import KIT_ROUTE, _dispatch, api  # noqa: F401 — api is a fixture
+from tests import test_prd251w1_brand_kit_tools as t251
+
+api = t251.api                # the documents router and the platform tools over one workspace
+_dispatch = t251._dispatch
+KIT_ROUTE = t251.KIT_ROUTE
 
 # Every field the update tool takes, each with a value the stored kit does not have.
 EVERY_FIELD = {
