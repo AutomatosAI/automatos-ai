@@ -130,7 +130,44 @@ def test_a_cards_deliverable_carries_the_cards_tags_after_its_own():
                                               source_id=str(CARD), extra={"tags": ["invoice"], "task_id": CARD})
 
     assert out["success"] is True
-    assert _registered_extra(db) == {"tags": ["invoice", "harbourline", "session"], "task_id": CARD}
+    assert _registered_extra(db) == {"tags": ["invoice", "harbourline"], "task_id": CARD}  # 'session' is the lane's
+
+
+# The tags the platform writes on the cards it files itself, as each writer writes them.
+SYSTEM_CARD_TAGS = [
+    "session",                                              # cli_ticket_lane: a chat's Claude Code ticket
+    "Mission", "orchestration", "mission:Christmas box offer",  # orchestration_board_bridge, coordinator
+    "recipe", "cron_scheduler", "owner@example.com", "user:7",  # board_task_bridge: a Playbook card + its trigger
+    "escalation", "blocked:2099", "watch:4", "stalled:12",  # escalation_service
+    "auto-escalation", "urgency:high",                      # the notification tool's escalation card
+    "harness", "org-review", "risk-3", "rx:9",              # harness_service
+    "watch-spawned", "blueprint:5",                         # watch_actions
+]
+
+
+def test_the_platforms_own_card_tags_stay_off_its_deliverables():
+    db = _db([*SYSTEM_CARD_TAGS, "sim-night-2026-10-05", "Harbourline", "q3 launch"])
+
+    DeliverableService(db, WS).register(file_path="sessions/612/plan.png", source_type="task", source_id=str(CARD))
+
+    assert _registered_extra(db)["tags"] == ["sim-night-2026-10-05", "harbourline", "q3 launch"]
+
+
+def test_a_card_with_only_system_tags_adds_none():
+    db = _db(SYSTEM_CARD_TAGS)
+
+    DeliverableService(db, WS).register(file_path="sessions/612/plan.png", source_type="task", source_id=str(CARD))
+
+    assert "tags" not in _registered_extra(db)
+
+
+def test_the_deliverables_own_tags_are_never_dropped_as_system_tags():
+    db = _db(["session"])
+
+    DeliverableService(db, WS).register(file_path="sessions/612/plan.png", source_type="task", source_id=str(CARD),
+                                        extra={"tags": ["mission"]})
+
+    assert _registered_extra(db)["tags"] == ["mission"]
 
 
 @pytest.mark.parametrize("source_type, source_id", [("chat", None), ("mission", "m-1"), ("task", "task-1")])

@@ -11,7 +11,9 @@ once, at most :data:`MAX_TAGS` of at most :data:`MAX_TAG_CHARS` characters.
   card's own tags) leniently: what cannot be a tag is left out, the first ten kept.
 * :func:`card_tags_on_register` wraps ``DeliverableService.register``: a Deliverable a
   board card produced (``source_type='task'``, the card's id; a Claude Code session's
-  files, a document generated while working the card) carries the card's tags too.
+  files, a document generated while working the card, a file an agent wrote on a board
+  run) carries the card's tags too: the owner's and the nights' (``sim-night-…``), never
+  the tags the platform writes on its own cards (:func:`is_system_tag`).
 """
 from __future__ import annotations
 
@@ -30,6 +32,27 @@ MAX_TAG_CHARS = 40
 TAG_SEPARATOR = ","
 # The Deliverable source a board card's work is registered under, with the card's id.
 CARD_SOURCE_TYPE = "task"
+
+# The tags the platform writes on the cards it files itself, which say how a card came to
+# be, not what its work is about, so they stay off its Deliverables (7 Oct):
+# cli_ticket_lane ``session``; orchestration_board_bridge ``mission``, ``orchestration``,
+# ``mission:<goal>``; coordinator_service ``mission``; board_task_bridge ``recipe`` and the
+# Playbook run's trigger; escalation_service and the notification tool ``escalation``,
+# ``auto-escalation``, ``blocked:``/``watch:``/``stalled:``/``urgency:``; harness_service
+# ``harness``, ``org-review``, ``risk-``, ``rx:``; watch_actions ``watch-spawned``,
+# ``blueprint:``.
+SYSTEM_TAGS = frozenset({
+    "session", "mission", "orchestration", "recipe", "escalation", "auto-escalation", "harness",
+    "harness-ledger-unreadable", "org-review", "watch-spawned",
+    # A Playbook card's trigger (board_task_bridge: ``['recipe', triggered_by]``).
+    "manual", "anonymous", "cron_scheduler", "webhook", "workspace_webhook", "composio_trigger", "credit_back",
+    "platform_action", "rerun", "watch_rerun", "socials_plan_research",
+})
+SYSTEM_TAG_PREFIXES = (
+    "mission:", "blocked:", "watch:", "stalled:", "urgency:", "risk-", "rx:", "blueprint:", "user:",
+)
+# A Playbook run a person started carries their email as its trigger (api/playbook_run_start.py).
+EMAIL_MARK = "@"
 
 NOT_A_LIST = "tags must be a list of short words or phrases, for example [\"invoice\", \"q3\"]."
 NOT_TEXT = "each tag must be text; {value!r} is not."
@@ -79,6 +102,17 @@ def tags_of(raw: Any) -> List[str]:
     return _unique([tag for tag in cleaned if len(tag) <= MAX_TAG_CHARS])[:MAX_TAGS]
 
 
+def is_system_tag(tag: str) -> bool:
+    """True for a (cleaned) tag the platform wrote on a card it filed itself. Pure."""
+    return tag in SYSTEM_TAGS or tag.startswith(SYSTEM_TAG_PREFIXES) or EMAIL_MARK in tag
+
+
+def owner_card_tags(raw: Any) -> List[str]:
+    """A card's tags without the platform's own (:func:`is_system_tag`), leniently. Pure."""
+    values = raw if isinstance(raw, (list, tuple)) else []
+    return tags_of([value for value in values if isinstance(value, str) and not is_system_tag(clean_tag(value))])
+
+
 def tags_in(extra: Any) -> List[str]:
     """A Deliverable's tags, from its ``extra``. Pure."""
     return tags_of(extra.get(TAGS_KEY)) if isinstance(extra, Mapping) else []
@@ -95,8 +129,9 @@ def card_of(source_type: Any, source_id: Any) -> Optional[int]:
 
 
 def card_tags(db: Any, workspace_id: Any, card_id: int) -> List[str]:
-    """The tags on the workspace's board card ``card_id``; none when it has none or the
-    read fails (logged: the Deliverable is registered without them)."""
+    """The owner's tags on the workspace's board card ``card_id``, the platform's own left
+    out; none when it has none or the read fails (logged: the Deliverable is registered
+    without them)."""
     from core.models.core import BoardTask
 
     try:
@@ -107,7 +142,7 @@ def card_tags(db: Any, workspace_id: Any, card_id: int) -> List[str]:
         logger.exception("[Deliverables] card %s's tags could not be read: registered without them", card_id)
         db.rollback()
         return []
-    return tags_of(raw)
+    return owner_card_tags(raw)
 
 
 def with_card_tags(db: Any, workspace_id: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,5 +169,5 @@ def card_tags_on_register(register: Callable[..., Dict[str, Any]]) -> Callable[.
 
 __all__ = [
     "MAX_TAGS", "MAX_TAG_CHARS", "TAGS_KEY", "TagsRefused", "card_of", "card_tags", "card_tags_on_register",
-    "clean_tag", "tags_in", "tags_of", "validated_tags", "with_card_tags",
+    "clean_tag", "is_system_tag", "owner_card_tags", "tags_in", "tags_of", "validated_tags", "with_card_tags",
 ]
