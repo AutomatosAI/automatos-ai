@@ -106,14 +106,14 @@ Wave 2 builds, in the JSON's priority order:
 
 ## Per-iteration protocol
 
-1. Check CI on the branch tip. Red caused by this branch comes first.
-2. Pick the first story (by `priority`) with ACs not yet DONE, and re-verify its anchors.
-3. Implement it with its tests (and the foreground code review when the story needs one). Commit (signed) and push.
-4. Wait for `test.yml` on that SHA, and fix until the required jobs are green.
-5. Commit the DONE marks (signed) and push.
-6. **STOP.** One story per session. Unless that was the last story, end your reply with one line, `STORY_DONE <US-id>`. Do not start the next story.
+**Owner, 6 Oct: ONE CI run per wave.** Do NOT wait for CI on a story. **Every story commit message ends with ` [skip ci]`** (GitHub then skips test.yml on that push). Never run `gh run watch`, and never poll `test.yml` during a story.
+
+1. Pick the first story (by `priority`) with ACs not yet DONE, and re-verify its anchors.
+2. Implement it with its tests. Run `python3 -m py_compile` on the changed Python files and `ruff check` on the changed paths if ruff is on PATH. Commit (signed) and push.
+3. Mark its ACs DONE (the CI AC reads "pushed; CI runs at the end of the wave"). Commit (signed) and push.
+4. **STOP.** One story per session. Unless that was the last story, end your reply with one line, `STORY_DONE <US-id>`. Do not start the next story.
 
 ## Completion
 
-- **All ACs DONE** (the `→ OWNER:` ACs excepted; this session finished the last story): run `bash scripts/ralph/acceptance-prd255w2.sh`. If it exits 0, reply `RALPH_COMPLETE`. If it fails, fix what it names (a new signed commit, CI green) and run it again.
+- **All ACs DONE** (the `→ OWNER:` ACs excepted; this session finished the last story): make ONE signed commit WITHOUT `[skip ci]` (`chore(prd-255): Wave 2 built, run CI`), push it, then run `bash scripts/ralph/acceptance-prd255w2.sh`. If it exits 0, reply `RALPH_COMPLETE`. If it fails, fix what it names (a new signed commit) and run it again. This is the one place where you wait for CI.
 - **A story can't be built without breaking a Hard NO:** reply `RALPH_BLOCKED` with one line of why and the grep evidence.

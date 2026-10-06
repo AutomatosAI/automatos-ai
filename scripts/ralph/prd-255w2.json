@@ -25,7 +25,7 @@
         "It is seeded for every workspace, under the existing starter-refresh rule.",
         "A social version, \"Brand board\" (`social_image`, 4:5 and 9:16), built from the same data.",
         "Render test with the Automatos kit; the page fits on one A4 page.",
-        "CI green on HEAD: the required test.yml jobs pass on this story's commit (the run id is recorded in the DONE mark)."
+        "Pushed (owner, 6 Oct: no CI wait per story; CI runs once at the end of the wave)."
       ],
       "priority": 1,
       "passes": false,
@@ -39,7 +39,7 @@
         "A \"Brand board\" preview (the rendered page 1) at the top of the Brand kit tab, refreshed after each save.",
         "Download PDF and download PNG buttons.",
         "Verify in browser using dev-browser skill. → OWNER: the owner's browser check (ownerTest in this file). The loop never runs a browser, never marks this AC DONE, and never claims it.",
-        "CI green on HEAD: the required test.yml jobs pass on this story's commit (the run id is recorded in the DONE mark)."
+        "Pushed (owner, 6 Oct: no CI wait per story; CI runs once at the end of the wave)."
       ],
       "priority": 2,
       "passes": false,
@@ -52,7 +52,7 @@
       "acceptanceCriteria": [
         "A read-only session tool `render_preview(template_id | deliverable_id, page=1)` writes a PNG of the page into the session's folder (reusing F349's session copy, #970, and the page-1 thumbnail renderer from F353 / issue #947) and returns its path, so the agent can open it.",
         "It is limited to the ticket's own workspace; tested.",
-        "CI green on HEAD: the required test.yml jobs pass on this story's commit (the run id is recorded in the DONE mark)."
+        "Pushed (owner, 6 Oct: no CI wait per story; CI runs once at the end of the wave)."
       ],
       "priority": 3,
       "passes": false,
@@ -67,7 +67,7 @@
         "Created templates are tagged `made-by:<agent>` and listed in the studio like any template.",
         "They can never change or delete a starter (copy-to-customise only, as the studio does).",
         "Tests: create, edit, a refusal on a starter, and validation errors are passed back.",
-        "CI green on HEAD: the required test.yml jobs pass on this story's commit (the run id is recorded in the DONE mark)."
+        "Pushed (owner, 6 Oct: no CI wait per story; CI runs once at the end of the wave)."
       ],
       "priority": 4,
       "passes": false,
@@ -81,7 +81,7 @@
         "A \"Brand designer\" agent is seeded per workspace (seed pattern in `core/seeds/`). It runs on the subscription runtime (`runtime: cli, provider: claude`), because it must read images.",
         "Its instructions: analyse the logo (shape, colours, sector, tone, sophistication) before proposing anything; derive everything from the logo; accent used sparingly; check every output by looking at its rendered page; change the kit only through `platform_update_brand_kit`, and only after the owner approves.",
         "Hosted and local editions: the agent is created with no host; a ticket waits for a host as other session agents do.",
-        "CI green on HEAD: the required test.yml jobs pass on this story's commit (the run id is recorded in the DONE mark)."
+        "Pushed (owner, 6 Oct: no CI wait per story; CI runs once at the end of the wave)."
       ],
       "priority": 5,
       "passes": false,
@@ -96,7 +96,7 @@
         "The designer's ticket flow: (1) read the logo; (2) propose a kit (as a card the owner approves, with the brand board rendered from the proposal and not yet saved); (3) on approval, save the kit; (4) produce a sample set (invoice, letter, proposal, three social cards) as Deliverables; (5) report back with the board and the sample set.",
         "\"Less orange\", \"warmer\" or \"more space\" on the card sends it back for a revision.",
         "Test: Auto routes a brand ask to the designer (routing test); the designer's card carries the proposal and the board.",
-        "CI green on HEAD: the required test.yml jobs pass on this story's commit (the run id is recorded in the DONE mark)."
+        "Pushed (owner, 6 Oct: no CI wait per story; CI runs once at the end of the wave)."
       ],
       "priority": 6,
       "passes": false,
