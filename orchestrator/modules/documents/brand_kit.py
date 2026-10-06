@@ -527,21 +527,48 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     return kit
 
 
+class BrandKitChanged(Exception):
+    """The kit's stored ``updated_at`` is not the one the caller loaded (F372): nothing was saved."""
+
+
+def lock_brand_kit(db: Any, workspace: Any) -> Any:
+    """Take the workspace row FOR UPDATE and read it again; ``workspace`` as it is stored now.
+
+    A save reads the kit, checks it and writes it under this lock, so two saves never
+    both pass a check made on the same stored kit: the second waits for the first's
+    commit, then reads what it wrote. It is held to that commit (or the session's end),
+    so a caller takes it after its last await, never before one.
+    """
+    db.refresh(workspace, with_for_update=True)
+    return workspace
+
+
 def save_brand_kit(db: Any, workspace: Any, kit: Dict[str, Any]) -> Dict[str, Any]:
     """Store ``kit`` as the workspace's brand kit and commit: the kit's one writer.
 
     The PUT, the logo, logo mark and font uploads and deletes, and
     ``platform_update_brand_kit`` all save through here. Each save stamps
     ``updated_at`` (F372): a file uploaded again at the same path changes it too.
+    The workspace row is locked first (:func:`lock_brand_kit`; a caller that read the
+    kit under the lock already holds it), so the other settings are written as stored.
     """
     stamped = {**kit, UPDATED_AT_FIELD: datetime.now(timezone.utc).isoformat()}
+    lock_brand_kit(db, workspace)
     # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
     workspace.settings = {**(workspace.settings or {}), BRAND_KIT_SETTINGS_KEY: stamped}
     db.commit()
     return stamped
 
 
-def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str, Any]:
+def _require_stamp(settings: Optional[Dict[str, Any]], if_updated_at: Optional[str]) -> None:
+    """Raise :class:`BrandKitChanged` when ``if_updated_at`` is given and is not the stored stamp."""
+    if if_updated_at is not None and if_updated_at != get_brand_kit(settings)[UPDATED_AT_FIELD]:
+        raise BrandKitChanged()
+
+
+def update_brand_kit(
+    db: Any, workspace: Any, patch: Dict[str, Any], if_updated_at: Optional[str] = None,
+) -> Dict[str, Any]:
     """Apply ``patch`` to the workspace's stored kit and save the result.
 
     The patch is read as a :class:`BrandKitPatch` and merged by
@@ -549,11 +576,20 @@ def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str
     anything is written (:func:`brand_kit_errors` lists why). The PUT route and
     ``platform_update_brand_kit`` both call this. A patch that changes nothing (GET's
     answer sent back, F366) is not saved, so ``updated_at`` stays as it was (F372).
+
+    ``if_updated_at`` (the PUT's, F372): a stamp other than the stored one raises
+    :class:`BrandKitChanged` and nothing is saved. The check, the merge and the write
+    are made on the row :func:`lock_brand_kit` locks, so two saves loaded at the same
+    stamp never both pass it. A refusal, or a patch that changes nothing, is found
+    first on the kit as read, without the lock.
     """
+    _require_stamp(workspace.settings, if_updated_at)
     proposed = proposed_brand_kit(workspace.settings, patch)
     if proposed == get_brand_kit(workspace.settings):
         return proposed
-    return save_brand_kit(db, workspace, proposed)
+    lock_brand_kit(db, workspace)
+    _require_stamp(workspace.settings, if_updated_at)
+    return save_brand_kit(db, workspace, proposed_brand_kit(workspace.settings, patch))
 
 
 def proposed_brand_kit(settings: Optional[Dict[str, Any]], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -631,6 +667,7 @@ __all__ = [
     "BRAND_KIT_SETTINGS_KEY",
     "BrandFontFile",
     "BrandKit",
+    "BrandKitChanged",
     "BrandKitPatch",
     "BrandVoice",
     "CompanyContact",
@@ -644,6 +681,7 @@ __all__ = [
     "build_brand_suggestions",
     "get_brand_kit",
     "is_acceptable_logo_url",
+    "lock_brand_kit",
     "normalise_handle",
     "proposed_brand_kit",
     "save_brand_kit",

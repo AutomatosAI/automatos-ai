@@ -105,6 +105,11 @@ class _Db:
     def rollback(self) -> None:
         self.rollbacks += 1
 
+    def refresh(self, obj: Any, with_for_update: Any = None) -> None:
+        """The kit's writer re-reads its workspace row under a lock (brand_kit.lock_brand_kit)."""
+        if with_for_update:
+            self.locked.append("Workspace")
+
 
 class _Worker:
     written: Dict[Any, bytes] = {}

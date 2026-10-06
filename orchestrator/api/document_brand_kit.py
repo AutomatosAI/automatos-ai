@@ -57,7 +57,7 @@ from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from modules.documents.brand_board_render import BOARD_MEDIA_TYPES, BOARD_PDF, render_board_isolated
-from modules.documents.brand_kit import UPDATED_AT_FIELD, BrandKitPatch
+from modules.documents.brand_kit import BrandKitPatch
 from modules.documents.brand_system import brand_kit_view
 from modules.documents.thumbnails.render import ThumbnailError
 
@@ -78,8 +78,10 @@ class BrandKitPut(BrandKitPatch):
     """The PUT's body: a kit patch and, optionally, the kit's ``updated_at`` as the caller loaded it (F372).
 
     Sent (the Brand kit page sends it with every save), a stamp that is no longer the
-    stored one is a 409 and nothing is saved. Left out (the agent tool, the designer's
-    save, an API caller), the PUT saves as it always did. Not a kit field.
+    stored one is a 409 and nothing is saved: checked on the workspace row locked for the
+    write (``brand_kit.update_brand_kit``), so two saves loaded at one stamp never both
+    pass. Left out (the agent tool, the designer's save, an API caller), the PUT saves as
+    it always did. Not a kit field.
     """
 
     if_updated_at: Optional[str] = None
@@ -143,18 +145,20 @@ def update_brand_kit_endpoint(
     """
     from pydantic import ValidationError
 
-    from modules.documents.brand_kit import brand_kit_errors, get_brand_kit, update_brand_kit
+    from modules.documents.brand_kit import BrandKitChanged, brand_kit_errors, update_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    if body.if_updated_at is not None and body.if_updated_at != get_brand_kit(ws.settings)[UPDATED_AT_FIELD]:
-        raise HTTPException(status_code=409, detail=KIT_CHANGED_ELSEWHERE)
     patch = body.model_dump(exclude={"if_updated_at"})
     if _handles_hidden(ws):
         patch = {key: value for key, value in patch.items() if key != SOCIAL_HANDLES_FIELD}
     try:
-        return _shown(ws, brand_kit_view(update_brand_kit(db, ws, patch)))
+        kit = update_brand_kit(db, ws, patch, if_updated_at=body.if_updated_at)
+    except BrandKitChanged:
+        raise HTTPException(status_code=409, detail=KIT_CHANGED_ELSEWHERE) from None
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": brand_kit_errors(e)})
+        detail = {"message": "Invalid brand kit", "errors": brand_kit_errors(e)}
+        raise HTTPException(status_code=422, detail=detail) from None
+    return _shown(ws, brand_kit_view(kit))
 
 
 # ------------------------------------------------------------------
@@ -244,7 +248,7 @@ def _save_logo_file(workspace_id, data: bytes, path_field: str) -> str:
 
 async def _store_logo_upload(file: UploadFile, ctx: RequestContext, db: Session, path_field: str) -> Dict[str, Any]:
     """Store an uploaded logo, logo variant or logo mark and point the kit at it; the old file goes."""
-    from modules.documents.brand_kit import get_brand_kit, save_brand_kit
+    from modules.documents.brand_kit import get_brand_kit, lock_brand_kit, save_brand_kit
     from modules.documents.brand_logo import MAX_LOGO_BYTES, BrandLogoError, delete_brand_logo
 
     ws = _workspace_or_404(db, ctx.workspace_id)
@@ -254,7 +258,7 @@ async def _store_logo_upload(file: UploadFile, ctx: RequestContext, db: Session,
     except BrandLogoError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    kit = get_brand_kit(ws.settings)
+    kit = get_brand_kit(lock_brand_kit(db, ws).settings)  # after the last await: held to the save's commit
     previous = kit.get(path_field) or ""
     if previous and previous != stored_path:
         delete_brand_logo(previous)
@@ -285,11 +289,11 @@ def _stream_logo(ctx: RequestContext, db: Session, path_field: str, missing: str
 
 def _remove_logo(ctx: RequestContext, db: Session, path_field: str) -> Dict[str, Any]:
     """Remove a stored logo or logo mark and clear it from the kit."""
-    from modules.documents.brand_kit import get_brand_kit, save_brand_kit
+    from modules.documents.brand_kit import get_brand_kit, lock_brand_kit, save_brand_kit
     from modules.documents.brand_logo import delete_brand_logo
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    kit = get_brand_kit(ws.settings)
+    kit = get_brand_kit(lock_brand_kit(db, ws).settings)
     if kit.get(path_field):
         delete_brand_logo(kit[path_field])
     new_kit = {**kit, path_field: ""}
@@ -442,11 +446,11 @@ async def upload_brand_font(
 ):
     """Store a woff2 font file for the face it provides; the same face uploaded again replaces it."""
     from modules.documents.brand_fonts import MAX_FONT_BYTES, BrandFontError, add_brand_font
-    from modules.documents.brand_kit import BrandKit, get_brand_kit, save_brand_kit
+    from modules.documents.brand_kit import BrandKit, get_brand_kit, lock_brand_kit, save_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
     data = await file.read(MAX_FONT_BYTES + 1)
-    kit = get_brand_kit(ws.settings)
+    kit = get_brand_kit(lock_brand_kit(db, ws).settings)  # after the last await: held to the save's commit
     try:
         fonts = add_brand_font(
             ctx.workspace_id,
@@ -491,10 +495,10 @@ async def delete_brand_font(
 ):
     """Remove a stored font file and take it out of the kit."""
     from modules.documents.brand_fonts import remove_brand_font
-    from modules.documents.brand_kit import get_brand_kit, save_brand_kit
+    from modules.documents.brand_kit import get_brand_kit, lock_brand_kit, save_brand_kit
 
     ws = _workspace_or_404(db, ctx.workspace_id)
-    kit = get_brand_kit(ws.settings)
+    kit = get_brand_kit(lock_brand_kit(db, ws).settings)
     fonts = remove_brand_font(kit["font_files"], font_id)
     if fonts is None:
         raise HTTPException(status_code=404, detail="No such font file")
