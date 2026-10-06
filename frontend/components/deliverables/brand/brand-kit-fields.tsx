@@ -37,6 +37,11 @@ interface KitFieldsProps {
   patch: (p: Partial<BrandKit>) => void
 }
 
+interface FontFieldsProps extends KitFieldsProps {
+  /** A change the server has already stored (a font file uploaded or removed): the brand board redraws. */
+  patchStored: (p: Partial<BrandKit>) => void
+}
+
 /** The kit's four colours: every colour role the owner has not set derives from them (PRD-255). */
 export function BrandColours({ kit, patch }: KitFieldsProps) {
   return (
@@ -52,7 +57,7 @@ export function BrandColours({ kit, patch }: KitFieldsProps) {
   )
 }
 
-export function BrandFonts({ kit, patch }: KitFieldsProps) {
+export function BrandFonts({ kit, patch, patchStored }: FontFieldsProps) {
   return (
     <>
       <div className="grid grid-cols-2 gap-3">
@@ -68,7 +73,7 @@ export function BrandFonts({ kit, patch }: KitFieldsProps) {
           <Input id="brand-heading-font" value={kit.heading_font} onChange={(e) => patch({ heading_font: e.target.value })} placeholder="Same as the body font" />
         </div>
       </div>
-      <BrandKitFonts fonts={kit.font_files} onChange={(font_files) => patch({ font_files })} />
+      <BrandKitFonts fonts={kit.font_files} onChange={(font_files) => patchStored({ font_files })} />
     </>
   )
 }

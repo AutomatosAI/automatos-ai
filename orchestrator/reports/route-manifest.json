@@ -1,5 +1,5 @@
 {
-  "route_count": 908,
+  "route_count": 909,
   "routes": [
     {
       "method": "GET",
@@ -1056,6 +1056,10 @@
     {
       "method": "PUT",
       "path": "/api/documents/brand-kit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/brand-kit/board"
     },
     {
       "method": "POST",

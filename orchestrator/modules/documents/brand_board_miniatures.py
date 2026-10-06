@@ -38,12 +38,12 @@ PNG_DATA_URI = "data:image/png;base64,"
 MINIATURE_STARTERS = ((APPLICATION_INVOICE, INVOICE), (APPLICATION_LETTER, LETTER))
 
 
-def _only_data_uris(url: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-    """WeasyPrint's fetcher for a miniature: a ``data:`` URI (the inlined logo and fonts) and nothing else."""
+def only_data_uris(url: str, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    """WeasyPrint's fetcher for the board and its miniatures: a ``data:`` URI (the inlined logo and fonts), nothing else."""
     from weasyprint import default_url_fetcher
 
     if (urlparse(url).scheme or "").lower() != "data":
-        raise ValueError(f"a brand board miniature fetches nothing ({url[:80]})")
+        raise ValueError(f"a brand board fetches nothing ({url[:80]})")
     return default_url_fetcher(url, *args, **kwargs)
 
 
@@ -56,11 +56,16 @@ def starter_page(preset: Mapping[str, Any], kit: Mapping[str, Any], now: datetim
     return render_document_html(doc, values, dict(kit), title=preset["name"], data=data).html
 
 
-def page_png_uri(page: str) -> str:
-    """``page`` printed to PDF and its first page drawn, as a PNG ``data:`` URI."""
+def print_page(page: str) -> bytes:
+    """``page`` printed to PDF by WeasyPrint, fetching only ``data:`` URIs."""
     from weasyprint import HTML
 
-    pdf = HTML(string=page, url_fetcher=_only_data_uris).write_pdf()
+    return HTML(string=page, url_fetcher=only_data_uris).write_pdf()
+
+
+def page_png_uri(page: str) -> str:
+    """``page`` printed to PDF and its first page drawn, as a PNG ``data:`` URI."""
+    pdf = print_page(page)
     return PNG_DATA_URI + base64.b64encode(pdf_first_page_png(pdf)).decode("ascii")
 
 
@@ -76,4 +81,4 @@ def starter_miniatures(kit: Mapping[str, Any]) -> Dict[str, str]:
     return drawn
 
 
-__all__ = ["MINIATURE_STARTERS", "page_png_uri", "starter_miniatures", "starter_page"]
+__all__ = ["MINIATURE_STARTERS", "only_data_uris", "page_png_uri", "print_page", "starter_miniatures", "starter_page"]

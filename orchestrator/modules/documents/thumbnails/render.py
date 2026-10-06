@@ -10,7 +10,9 @@
 process (``python -m modules.documents.thumbnails.render <ext>``, the file on
 stdin, the PNG on stdout), under a time limit. A file that crashes PDFium or
 stalls the layout costs that child, never the API process, and the CPU-bound
-layout never holds the server's GIL.
+layout never holds the server's GIL. ``run_isolated`` is that child-process run,
+for any module with the same stdin-to-stdout entry (the brand board's render,
+PRD-255 US-010, is one).
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from typing import Optional, Sequence
 
 from modules.documents.thumbnails.html_sources import BODY_BUILDERS, document_html
 
@@ -52,13 +55,17 @@ def html_to_pdf(page: str) -> bytes:
     return HTML(string=page, url_fetcher=_refuse_fetch).write_pdf()
 
 
-def _crop_bottom(height_pt: float, scale: float) -> float:
-    """How much of the page's bottom to leave out so the picture stays short enough."""
-    return max(0.0, height_pt - MAX_THUMBNAIL_HEIGHT_PX / scale)
+def _crop_bottom(height_pt: float, scale: float, max_height_px: Optional[int]) -> float:
+    """How much of the page's bottom to leave out so the picture stays short enough (none without a cap)."""
+    if max_height_px is None:
+        return 0.0
+    return max(0.0, height_pt - max_height_px / scale)
 
 
-def pdf_first_page_png(pdf_bytes: bytes) -> bytes:
-    """Page 1 of a PDF as a PNG ``THUMBNAIL_WIDTH_PX`` wide."""
+def pdf_first_page_png(
+    pdf_bytes: bytes, width_px: int = THUMBNAIL_WIDTH_PX, max_height_px: Optional[int] = MAX_THUMBNAIL_HEIGHT_PX,
+) -> bytes:
+    """Page 1 of a PDF as a PNG ``width_px`` wide, cut at ``max_height_px`` (``None``: the whole page)."""
     import pypdfium2 as pdfium
 
     with _pdfium_lock:
@@ -71,8 +78,8 @@ def pdf_first_page_png(pdf_bytes: bytes) -> bytes:
                 raise ThumbnailError("the PDF has no pages")
             page = pdf[0]
             width, height = page.get_size()
-            scale = THUMBNAIL_WIDTH_PX / max(width, 1.0)
-            crop = (0, _crop_bottom(height, scale), 0, 0)
+            scale = width_px / max(width, 1.0)
+            crop = (0, _crop_bottom(height, scale, max_height_px), 0, 0)
             image = page.render(scale=scale, crop=crop).to_pil()
         finally:
             pdf.close()
@@ -97,9 +104,13 @@ def _reason(stderr: bytes) -> str:
     return (lines[-1] if lines else "no error output")[:MAX_REASON_CHARS]
 
 
-def render_png_isolated(data: bytes, ext: str, timeout_s: float = RENDER_TIMEOUT_S) -> bytes:
-    """``render_png`` in a child process; ThumbnailError (with the child's reason) when it fails."""
-    command = [sys.executable, "-m", "modules.documents.thumbnails.render", ext]
+def run_isolated(module: str, args: Sequence[str], data: bytes, timeout_s: float = RENDER_TIMEOUT_S) -> bytes:
+    """``python -m <module> <args>`` in a child process, ``data`` on its stdin; its stdout.
+
+    ThumbnailError (with the child's reason) when it fails, exits non-zero, writes
+    nothing or runs past ``timeout_s``.
+    """
+    command = [sys.executable, "-m", module, *args]
     try:
         done = subprocess.run(
             command, input=data, capture_output=True, timeout=timeout_s, cwd=ORCHESTRATOR_ROOT, check=False,
@@ -109,6 +120,11 @@ def render_png_isolated(data: bytes, ext: str, timeout_s: float = RENDER_TIMEOUT
     if done.returncode != 0 or not done.stdout:
         raise ThumbnailError(f"the render failed (exit {done.returncode}): {_reason(done.stderr)}")
     return done.stdout
+
+
+def render_png_isolated(data: bytes, ext: str, timeout_s: float = RENDER_TIMEOUT_S) -> bytes:
+    """``render_png`` in a child process; ThumbnailError (with the child's reason) when it fails."""
+    return run_isolated("modules.documents.thumbnails.render", [ext], data, timeout_s)
 
 
 def main(argv: list[str]) -> int:

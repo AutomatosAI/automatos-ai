@@ -64,7 +64,7 @@ export function BrandKitBasics({ form, canEdit }: BrandKitBasicsProps) {
           onUrl={(logo_mark_url) => patch({ logo_mark_url })}
         />
         <BrandColours kit={kit} patch={patch} />
-        <BrandFonts kit={kit} patch={patch} />
+        <BrandFonts kit={kit} patch={patch} patchStored={form.patchStored} />
         <CompanyFields company={kit.company} onChange={patchCompany} />
         <BrandKitSocial
           key={form.loads}

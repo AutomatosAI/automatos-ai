@@ -26,6 +26,16 @@ export const BRAND_FONTS_PATH = '/api/documents/brand-kit/fonts'
 // PRD-255 FR-9: the logo's variants, uploaded by the owner (never generated), stored like the logo.
 export const BRAND_LOGO_DARK_PATH = '/api/documents/brand-kit/logo-dark'
 export const BRAND_LOGO_MONO_PATH = '/api/documents/brand-kit/logo-mono'
+// PRD-255 US-010: the brand board, printed from the kit as a PDF or a PNG (its page 1).
+export const BRAND_BOARD_PATH = '/api/documents/brand-kit/board'
+export type BrandBoardFormat = 'pdf' | 'png'
+
+/** The board's path in ``format``; ``version`` changes the path so a fetch hook draws it again after a save. */
+export function brandBoardPath(format: BrandBoardFormat, version?: number): string {
+  const query = new URLSearchParams({ format })
+  if (version !== undefined) query.set('v', String(version))
+  return `${BRAND_BOARD_PATH}?${query.toString()}`
+}
 
 // The face an uploaded font file provides.
 export interface BrandFontFace {
