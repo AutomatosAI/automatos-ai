@@ -47,6 +47,7 @@ vi.mock('@/lib/api-client', () => {
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { BrandKitDesign } from '../brand-kit-design'
+import { ROLE_LABELS } from '../brand-kit-colours'
 import { headerColours } from '../brand-kit-preview'
 import { roleErrorsFrom, saveErrorMessage } from '../save-errors'
 import { useBrandKitForm } from '../use-brand-kit-form'
@@ -82,7 +83,8 @@ describe('the colour roles', () => {
   it('shows every role with its hex, its contrast badge and whether it is set or derived', async () => {
     const section = await colours()
     for (const name of ['ink', 'heading', 'paper', 'surface', 'surface_2', 'accent', 'accent_2', 'muted', 'rule']) {
-      expect(within(role(section, name)).getByDisplayValue(server.kit.palette[name])).toBeInTheDocument()
+      const label = ROLE_LABELS[name as keyof typeof ROLE_LABELS]
+      expect(within(role(section, name)).getByLabelText(`${label} hex`)).toHaveValue(server.kit.palette[name])
     }
     expect(within(role(section, 'accent')).getByText('set')).toBeInTheDocument()
     expect(within(role(section, 'ink')).getByText('derived')).toBeInTheDocument()
@@ -107,7 +109,7 @@ describe('the colour roles', () => {
     await waitFor(() => expect(within(role(section, 'accent')).getByText('derived')).toBeInTheDocument())
     expect(api.put).toHaveBeenCalledWith('/api/documents/brand-kit', { palette: { accent: '' } })
     expect(api.get.mock.calls.filter(([path]) => path === '/api/documents/brand-kit')).toHaveLength(2)
-    expect(within(role(section, 'accent')).getByDisplayValue('#c2410c')).toBeInTheDocument()
+    expect(within(role(section, 'accent')).getByLabelText('Accent (highlights) hex')).toHaveValue('#c2410c')
     expect(within(role(section, 'accent')).queryByRole('button', { name: /Reset to derived/ })).toBeNull()
   })
 

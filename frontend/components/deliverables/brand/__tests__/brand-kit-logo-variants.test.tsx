@@ -93,6 +93,6 @@ describe('the logo variants', () => {
     render(<Harness />)
     const section = await screen.findByRole('region', { name: 'Logo variants' })
     expect(await within(section).findByAltText('One-colour logo')).toHaveAttribute('src', 'blob:variant')
-    expect(fetch).toHaveBeenCalledWith('/api/documents/brand-kit/logo-mono', { headers: {} })
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/documents\/brand-kit\/logo-mono$/), { headers: {} })
   })
 })
