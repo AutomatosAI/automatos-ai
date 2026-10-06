@@ -5,7 +5,7 @@ HTML (then printed by WeasyPrint and drawn like any PDF, see ``render``):
 
 * a Word document: its headings, paragraphs and tables, in order (text only);
 * a spreadsheet (.xlsx) or CSV/TSV: the header row and the first rows, as a table;
-* markdown or plain text: the text, formatted.
+* markdown: the text as the report view shows it (F374); plain text as written.
 
 Only the opening is read (``MAX_*`` below): the picture shows page 1, never more.
 Every value is HTML-escaped; markdown goes through the sanitising renderer.
@@ -39,6 +39,35 @@ th { background: #eef2f7; font-weight: 600; }
 pre { white-space: pre-wrap; font-size: 9pt; }
 """
 
+# F374: markdown is drawn as the report view (frontend .md-view) shows it: headings at the
+# view's sizes against its 14px body, inline code a small chip inside its line, lists indented.
+MARKDOWN_CLASS = "md"
+MARKDOWN_CSS = """
+.md > * + * { margin-top: 0.9em; }
+.md > :first-child { margin-top: 0; }
+.md p, .md ul, .md ol, .md pre, .md table { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+  font-weight: 600; line-height: 1.25; margin: 1.7em 0 0;
+}
+.md h1 { font-size: 1.714em; padding-bottom: 0.3em; border-bottom: 1px solid #e5e7eb; }
+.md h2 { font-size: 1.429em; padding-bottom: 0.25em; border-bottom: 1px solid #eef0f3; }
+.md h3 { font-size: 1.214em; }
+.md h4 { font-size: 1.071em; }
+.md h5, .md h6 { font-size: 1em; color: #6b7280; }
+.md ul { list-style: disc; padding-left: 1.35em; }
+.md ol { list-style: decimal; padding-left: 1.45em; }
+.md li { margin: 0; }
+.md li + li, .md li > ul, .md li > ol { margin-top: 0.35em; }
+.md ul.task-list { list-style: none; padding-left: 0.2em; }
+.md code {
+  font-family: monospace; font-size: 0.875em; font-weight: normal;
+  padding: 0.1em 0.35em; border-radius: 3px; background: #f3f4f6; border: 1px solid #e5e7eb;
+}
+.md pre code { background: none; border: 0; padding: 0; }
+.md blockquote { border-left: 3px solid #cbd5e1; padding-left: 1em; margin-left: 0; color: #6b7280; }
+.md hr { border: 0; border-top: 1px solid #e5e7eb; }
+"""
+
 Rows = List[List[str]]
 
 
@@ -46,7 +75,7 @@ def page_html(body: str) -> str:
     """A whole A4 page around ``body``."""
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<style>{PAGE_CSS}</style></head><body>{body}</body></html>"
+        f"<style>{PAGE_CSS}{MARKDOWN_CSS}</style></head><body>{body}</body></html>"
     )
 
 
@@ -122,10 +151,11 @@ def docx_body(data: bytes) -> str:
 
 
 def markdown_body(data: bytes) -> str:
-    """Markdown, rendered and sanitised (core/utils/markdown_renderer.py)."""
-    from core.utils.markdown_renderer import render_markdown_to_html
+    """Markdown as the report view shows it, sanitised (F374: the document renderer's
+    reading of an agent's markdown, ``view_html``, not the blog's)."""
+    from modules.documents.blocks.markdown_body import view_html
 
-    return render_markdown_to_html(_text(data))
+    return f'<div class="{MARKDOWN_CLASS}">{view_html(_text(data))}</div>'
 
 
 def text_body(data: bytes) -> str:
