@@ -28,6 +28,7 @@ import {
   MoreHorizontal,
   FileText,
 } from 'lucide-react'
+import { externalHttpUrl, openExternalUrl } from '@/lib/external-url'
 import { cn } from '@/lib/utils'
 import { format, isToday, isYesterday } from 'date-fns'
 import { EmailActions } from './EmailActions'
@@ -347,11 +348,11 @@ export function EmailViewer({
 /**
  * Attachment card component
  */
-function AttachmentCard({ attachment }: { attachment: EmailAttachment }) {
+export function AttachmentCard({ attachment }: { attachment: EmailAttachment }) {
+  // The URL comes from the mail tool's result: only an http(s) link is offered or opened.
+  const downloadUrl = externalHttpUrl(attachment.downloadUrl)
   const handleDownload = () => {
-    if (attachment.downloadUrl) {
-      window.open(attachment.downloadUrl, '_blank')
-    }
+    if (downloadUrl) openExternalUrl(downloadUrl)
   }
 
   // Get file icon based on mime type
@@ -392,7 +393,7 @@ function AttachmentCard({ attachment }: { attachment: EmailAttachment }) {
         </div>
       </div>
 
-      {attachment.downloadUrl && (
+      {downloadUrl && (
         <Button
           variant="ghost"
           size="icon"
