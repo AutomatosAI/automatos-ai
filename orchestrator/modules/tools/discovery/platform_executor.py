@@ -80,12 +80,8 @@ from modules.tools.discovery.handlers_workspace import (
     list_system_settings,  # PRD-143 S11
     update_system_setting,  # PRD-143 S11
 )
-from modules.tools.discovery.handlers_members import (  # PRD-143 S11
-    list_members,
-    invite_member,
-    set_member_role,
-    remove_member,
-)
+from modules.tools.discovery.handlers_members import list_members, invite_member, set_member_role, remove_member  # PRD-143 S11
+from modules.tools.discovery.handlers_brand_proposals import propose_brand_kit, save_approved_brand_kit  # PRD-255 US-014
 from modules.tools.discovery.handlers_api_keys import list_api_keys, revoke_api_key  # PRD-143 S11
 from modules.tools.discovery.handlers_monitoring import (
     get_logs,
@@ -1353,8 +1349,9 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_render_preview": render_preview,  # PRD-255 US-012: a page into the session's folder
     "platform_create_template": create_template, "platform_update_template": update_template,  # PRD-255 US-013
     # PRD-251 US-115: the brand kit (the REST routes' functions)
-    "platform_get_brand_kit": get_brand_kit_tool,
-    "platform_update_brand_kit": update_brand_kit_tool,
+    "platform_get_brand_kit": get_brand_kit_tool, "platform_update_brand_kit": update_brand_kit_tool,
+    # PRD-255 US-014 (FR-11): the designer's proposal card, and the save of the proposal the owner approved
+    "platform_propose_brand_kit": propose_brand_kit, "platform_save_approved_brand_kit": save_approved_brand_kit,
     # PRD-251 US-116 (S4.1): Socials drafts. No tool approves, schedules or publishes.
     "platform_create_social_post": create_social_post,
     "platform_update_social_post": update_social_post,

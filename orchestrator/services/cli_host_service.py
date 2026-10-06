@@ -1527,9 +1527,9 @@ async def raise_session_ask(
     agent_id: Optional[int],
     agent_name: Optional[str],
     question: str,
-    options: Optional[Sequence[str]] = None,
+    options: Optional[Sequence[str]] = None, details: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """PRD-245 W2 — one question from a session.
+    """PRD-245 W2 — one question from a session (``details``: the card's own, e.g. PRD-255's brand proposal).
 
     Filed through PRD-225's SHARED internals (the same function
     ``platform_ask_human`` dispatches to), so it reaches the Questions tab, the
@@ -1562,7 +1562,7 @@ async def raise_session_ask(
             options=list(options or []) or None,
             asked_by_agent_id=agent_id, agent_name=agent_name,
             park=None,                                   # the turn's end parks it
-            details={SESSION_ASK_MARKER: {"task_id": int(task_id)}},
+            details={**(details or {}), SESSION_ASK_MARKER: {"task_id": int(task_id)}},
         )
     except Exception as exc:  # noqa: BLE001 — the session reads the reason and carries on
         logger.error("[cli-host] ticket #%s could not file its question", task_id, exc_info=True)

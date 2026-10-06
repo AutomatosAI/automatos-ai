@@ -16,6 +16,7 @@ from uuid import UUID
 
 from consumers.chatbot.named_template import NamedTemplate, named_in_conversation, owner_turns
 from consumers.chatbot.paperwork_to_the_team import team_note  # F337(c) (night 10)
+from consumers.chatbot.brand_to_the_designer import designer_note  # PRD-255 US-014: Auto delegates the brand
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +144,15 @@ def _schema(db: Any, workspace_id: UUID, row: Any) -> Dict[str, Any]:
 
 def read_note(db: Any, workspace_id: UUID, texts: Sequence[str]) -> Optional[str]:
     """The note for the template these owner turns name; with none named, the hand-to-the-team
-    note when the latest asks for paperwork (F337(c)); else None. Blocking: run off the loop."""
+    note when the latest asks for paperwork (F337(c)); else None. Brand work (the kit, the look,
+    the templates) goes to the Brand designer first (PRD-255 US-014). Blocking: run off the loop."""
     from modules.documents.template_service import DocumentTemplateService
 
     try:
         with db.begin_nested():
+            brand = designer_note(db, workspace_id, texts[0] if texts else "")
+            if brand:
+                return brand
             named = named_in_conversation(texts, DocumentTemplateService(db).list_templates(workspace_id))
             if named is None:   # F337(c): paperwork with no template named goes to the team
                 return team_note(texts[0] if texts else "")
@@ -176,7 +181,8 @@ async def template_note(chat: Any, latest_text: str, llm_messages: List[Dict[str
         return None
     note = await asyncio.to_thread(read_note, chat.db, workspace_id, owner_turns(llm_messages, latest_text))
     if note:
-        logger.info("[F351/F337] the turn gets a document note: a named template's fields, or paperwork to the team")
+        logger.info("[F351/F337] the turn gets a document note: a named template's fields, paperwork to the team, "
+                    "or brand work to the Brand designer")
     return note
 
 

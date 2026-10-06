@@ -289,6 +289,37 @@ actions:
     source: authored
   - text: any receipt or quote templates available?
     source: authored
+  platform_propose_brand_kit:
+  - text: propose the new brand kit to the owner
+    source: example
+  - text: send the owner the palette proposal to approve
+    source: example
+  - text: ask the owner to approve a less orange accent
+    source: example
+  - text: put the brand kit proposal on a card for approval
+    source: authored
+  - text: show the owner the proposed colours before saving
+    source: authored
+  - text: file a proposal card with the new type scale
+    source: authored
+  - text: let the owner sign off the brand changes first
+    source: authored
+  - text: propose a calmer palette drawn from the logo
+    source: authored
+  - text: get approval for the new accent colour
+    source: authored
+  - text: send the brand board from the proposal to the owner
+    source: authored
+  - text: ask them to approve the kit before i change it
+    source: authored
+  - text: propose more space between sections
+    source: authored
+  - text: draft a brand kit change for the owner to review
+    source: authored
+  - text: card the owner with the proposed fonts
+    source: authored
+  - text: propose the revised kit after their feedback
+    source: authored
   platform_read_document:
   - text: read the rest of that document
     source: example
@@ -397,6 +428,37 @@ actions:
   - text: refresh the embeddings on that file
     source: authored
   - text: reprocess document 2 from scratch
+    source: authored
+  platform_save_approved_brand_kit:
+  - text: the owner approved the brand kit proposal, save it
+    source: example
+  - text: apply the approved palette to the brand kit
+    source: example
+  - text: save the kit change the owner signed off
+    source: example
+  - text: they said approve, now save the brand kit
+    source: authored
+  - text: commit the approved proposal to the kit
+    source: authored
+  - text: the card came back approved so apply it
+    source: authored
+  - text: save the proposal from my ticket's card
+    source: authored
+  - text: store the brand changes the owner agreed to
+    source: authored
+  - text: apply the brand kit proposal now it's approved
+    source: authored
+  - text: owner approved, update the kit
+    source: authored
+  - text: write the approved colours into the brand kit
+    source: authored
+  - text: make the approved kit live
+    source: authored
+  - text: finalise the approved brand proposal
+    source: authored
+  - text: save what the owner approved on the card
+    source: authored
+  - text: the brand proposal is approved, save it to the kit
     source: authored
   platform_search_documents:
   - text: what do the docs say about our refund policy?

@@ -21,6 +21,10 @@ fields its schema declares forwarded.
 * ``create_template`` / ``update_template`` (PRD-255 US-013) build the owner's document
   templates in the studio's block format, through the studio's own checks; a starter
   is copied (``copy_of``), never changed. Two more writes.
+* ``get_brand_kit``, ``propose_brand_kit`` and ``save_approved_brand_kit`` (PRD-255
+  US-014): the Brand designer reads the kit, files a proposal card on its own ticket
+  (the board drawn from it, nothing saved) and, once the owner answers Approve, saves
+  exactly that proposal. The save takes no fields (FR-11).
 * ``run_playbook`` starts a run in the session's workspace: the second write here.
 * Missions: the read tools a mission's step agent uses. ``platform_list_missions``
   and ``platform_get_mission`` read the board's missions; ``platform_field_query``
@@ -228,6 +232,55 @@ UPDATE_TEMPLATE_SPEC: Dict[str, Any] = {
     "tags": ("documents",),
 }
 
+GET_BRAND_KIT_SPEC: Dict[str, Any] = {
+    "name": "get_brand_kit",
+    "action": "platform_get_brand_kit",
+    "description": (
+        "Read the workspace's brand kit: its name, colours and every colour role (set or derived), "
+        "accent_use, type scale, spacing, fonts, logo and its variants, logo rules, voice and handles, "
+        "with suggestions from what the workspace already knows. Read it before proposing a change."
+    ),
+    "input_schema": _schema({}),
+    "scope": forward({}),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
+PROPOSE_BRAND_KIT_SPEC: Dict[str, Any] = {
+    "name": "propose_brand_kit",
+    "action": "platform_propose_brand_kit",
+    "reads_only": False,
+    "description": (
+        "Propose a brand kit change to the owner: the kit fields to change and one line on why. It is "
+        "checked as the kit checks it, the Brand Board is drawn from it into your folder (NOT saved), and "
+        "a card goes on this ticket listing what changes and linking the board, with the options Approve "
+        "and Revise. Then end your turn: the answer resumes you. Any answer other than Approve is a revision."
+    ),
+    "input_schema": _schema({
+        "brand_kit": {"type": "object", "description": "The kit fields to change (palette, accent_use, "
+                      "type_scale, spacing_unit_pt, fonts, voice and the rest get_brand_kit shows)."},
+        "why": _string("One line on why: what the logo told you, and what this changes."),
+    }, ("brand_kit",)),
+    "scope": forward({"brand_kit": "brand_kit", "why": "why"}, ("brand_kit",),
+                     "propose_brand_kit needs brand_kit: the kit fields to change."),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
+SAVE_APPROVED_BRAND_KIT_SPEC: Dict[str, Any] = {
+    "name": "save_approved_brand_kit",
+    "action": "platform_save_approved_brand_kit",
+    "reads_only": False,
+    "description": (
+        "Save the brand kit proposal the owner approved on this ticket's card, exactly as they saw it. "
+        "It takes no fields. Refused until they answer Approve, and after a revision or a kit change since."
+    ),
+    "input_schema": _schema({}),
+    "scope": forward({}),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
 LIST_PLAYBOOKS_SPEC: Dict[str, Any] = {
     "name": "list_playbooks",
     "action": "platform_list_playbooks",
@@ -340,6 +393,7 @@ SEARCH_MISSION_FINDINGS_SPEC: Dict[str, Any] = {
 WORK_TOOL_SPECS: Tuple[Dict[str, Any], ...] = (
     GENERATE_DOCUMENT_SPEC, LIST_TEMPLATES_SPEC, GET_TEMPLATE_SCHEMA_SPEC, RENDER_PREVIEW_SPEC,
     CREATE_TEMPLATE_SPEC, UPDATE_TEMPLATE_SPEC,
+    GET_BRAND_KIT_SPEC, PROPOSE_BRAND_KIT_SPEC, SAVE_APPROVED_BRAND_KIT_SPEC,
     LIST_PLAYBOOKS_SPEC, GET_PLAYBOOK_SPEC, RUN_PLAYBOOK_SPEC,
     GET_LATEST_REPORT_SPEC,
     LIST_MISSIONS_SPEC, GET_MISSION_SPEC, SEARCH_MISSION_FINDINGS_SPEC,

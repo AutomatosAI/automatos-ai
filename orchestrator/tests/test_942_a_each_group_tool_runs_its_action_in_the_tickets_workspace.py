@@ -103,7 +103,9 @@ def test_every_platform_action_a_group_tool_names_is_registered():
 def test_the_writes_say_so_and_the_rest_only_read():
     writes = {t.name for t in st.SESSION_TOOLS[10:] if not t.reads_only}
     # PRD-255 US-013: create_template / update_template write the workspace's templates.
-    assert writes == {"generate_document", "run_playbook", "create_template", "update_template"}
+    # PRD-255 US-014: propose_brand_kit files a card; save_approved_brand_kit saves what the owner approved.
+    assert writes == {"generate_document", "run_playbook", "create_template", "update_template",
+                      "propose_brand_kit", "save_approved_brand_kit"}
 
 
 @pytest.mark.parametrize("name, arguments, words", [
@@ -136,7 +138,8 @@ def test_the_documents_group_reads_the_templates_beside_generate_document():
 
     documents = next(g for g in groups.SESSION_TOOL_GROUPS if g.id == "documents")
     assert documents.tools == ("generate_document", "list_templates", "get_template_schema", "render_preview",
-                               "create_template", "update_template")
+                               "create_template", "update_template", "get_brand_kit", "propose_brand_kit",
+                               "save_approved_brand_kit")
     assert st.get_tool("list_templates").reads_only and st.get_tool("get_template_schema").reads_only
     listed = st.get_tool("list_templates").input_schema["properties"]["format"]["enum"]
     assert tuple(listed) == DOCUMENT_TEMPLATE_FORMATS
