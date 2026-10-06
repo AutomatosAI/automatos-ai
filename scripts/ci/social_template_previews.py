@@ -608,29 +608,11 @@ def run_images(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Di
     images = social_starters(SOCIAL_IMAGE)
     print(f"\n{len(images)} seeded social image templates: {', '.join(s['name'] for s in images)}")
     for starter in SHARD.mine(images):
-        name, sizes = starter["name"], starter["blocks"]["sizes"]
+        name = starter["name"]
         entry: Dict[str, Any] = report.setdefault(starter["slug"], {"sizes": {}})
-        for size in sizes:
-            folder = out / starter["slug"] / size
-            folder.mkdir(parents=True, exist_ok=True)
-            print(f"\n== {name} ({starter['slug']}) at {size}")
+        for size in starter["blocks"]["sizes"]:
             try:
-                bundle = image_bundle_for(starter, kit, size)
-                job = renderer.render(bundle)
-                print(f"    {_check_summary(job['report'])}")
-                if (job["report"].get("check") or {}).get("errors"):
-                    raise PreviewFailure("the check passed the job with errors")
-                moments = bundle["still"]["at"]
-                if len(job["outputs"]) != len(moments):
-                    raise PreviewFailure(f"{len(job['outputs'])} PNGs for {len(moments)} stills")
-                for output in job["outputs"]:
-                    data = output.pop("data")
-                    if png_size(data) != parse_size(size) or (output.get("width"), output.get("height")) != parse_size(size):
-                        raise PreviewFailure(f"{output['name']} is {png_size(data)}, not {size}")
-                    (folder / output["name"]).write_bytes(data)
-                    print(f"    {output['name']}: {size} PNG at {output.get('at')} s, {output['bytes']} bytes")
-                print(f"    timings: {json.dumps(job['report'].get('timings'))}; {job['seconds']} s in all")
-                entry["sizes"][size] = {"check": job["report"].get("check"), "outputs": job["outputs"]}
+                entry["sizes"][size] = _render_image_size(renderer, out, kit, starter, size)
             except PreviewFailure as exc:
                 print(f"    FAIL: {exc}")
                 failures.append(f"{name} at {size}: {exc}")
@@ -642,6 +624,30 @@ def run_images(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Di
                 print(f"    FAIL: {exc}")
                 failures.append(f"{name}: {exc}")
     return failures
+
+
+def _render_image_size(renderer: Renderer, out: Path, kit: Mapping[str, Any], starter: Mapping[str, Any],
+                       size: str) -> Dict[str, Any]:
+    """One image template at one size: checked with 0 errors, one PNG per still, each the size it says."""
+    folder = out / starter["slug"] / size
+    folder.mkdir(parents=True, exist_ok=True)
+    print(f"\n== {starter['name']} ({starter['slug']}) at {size}")
+    bundle = image_bundle_for(starter, kit, size)
+    job = renderer.render(bundle)
+    print(f"    {_check_summary(job['report'])}")
+    if (job["report"].get("check") or {}).get("errors"):
+        raise PreviewFailure("the check passed the job with errors")
+    moments = bundle["still"]["at"]
+    if len(job["outputs"]) != len(moments):
+        raise PreviewFailure(f"{len(job['outputs'])} PNGs for {len(moments)} stills")
+    for output in job["outputs"]:
+        data = output.pop("data")
+        if png_size(data) != parse_size(size) or (output.get("width"), output.get("height")) != parse_size(size):
+            raise PreviewFailure(f"{output['name']} is {png_size(data)}, not {size}")
+        (folder / output["name"]).write_bytes(data)
+        print(f"    {output['name']}: {size} PNG at {output.get('at')} s, {output['bytes']} bytes")
+    print(f"    timings: {json.dumps(job['report'].get('timings'))}; {job['seconds']} s in all")
+    return {"check": job["report"].get("check"), "outputs": job["outputs"]}
 
 
 def _one_png(job: Mapping[str, Any]) -> bytes:
