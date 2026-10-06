@@ -19,6 +19,8 @@ vi.mock('@/hooks/use-board-tasks-api', () => ({ useUpdateTask: () => hooks.updat
 vi.mock('@/hooks/use-agent-api', () => ({ useAssignableAgents: () => ({ data: hooks.agents }) }))
 vi.mock('@/lib/api-client', () => ({ apiClient: { request: (...a: unknown[]) => requestMock(...a) } }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+// PRE-11: the actions row reads the caller's workspace role (Add to Knowledge); no provider here.
+vi.mock('@/components/workspace-provider', () => ({ useWorkspaceOptional: () => null }))
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 
 import { canAssign, canCancel, whoStopped } from '../ticket-actions'

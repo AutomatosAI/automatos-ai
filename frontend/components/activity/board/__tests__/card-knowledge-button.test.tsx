@@ -1,7 +1,8 @@
 /**
  * PRE-11 (Gerard, 7 Oct): an approved ticket's view offers Add to Knowledge for its
  * answer, then "Added to Knowledge" with Remove (the ticket stays). The board's answer
- * carries knowledge_document_id, which the ticket keeps.
+ * carries knowledge_document_id, which the ticket keeps. Only a workspace owner or admin
+ * sees it in SaaS (the role GET /api/workspaces/current gives); everyone locally.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
@@ -10,9 +11,13 @@ import React from 'react'
 import type { BoardTask } from '@/types/board'
 
 const request = vi.hoisted(() => vi.fn())
+const caller = vi.hoisted(() => ({ role: 'owner' as string | null }))
 
 vi.mock('@/lib/api-client', () => ({ apiClient: { request: (...args: unknown[]) => request(...args) } }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/components/workspace-provider', () => ({
+  useWorkspaceOptional: () => (caller.role ? { workspace: { role: caller.role } } : null),
+}))
 vi.mock('@/hooks/use-board-tasks-api', () => ({
   useUpdateTask: () => ({ mutate: vi.fn(), isLoading: false }),
   useCancelTask: () => ({ mutate: vi.fn(), isLoading: false }),
@@ -23,6 +28,7 @@ vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a 
 import { CardKnowledgeButton, offersKnowledge } from '../card-knowledge-button'
 import { TicketActionsBar } from '../ticket-actions-bar'
 import { useBoardTask } from '@/hooks/use-board-tasks'
+import { mayManageKnowledge } from '@/hooks/use-may-manage-knowledge'
 
 function ticket(over: Partial<BoardTask> = {}): BoardTask {
   return { id: '1139', type: 'task', name: 'Payment terms for cafés', status: 'done', priority: 'medium', tags: [],
@@ -38,6 +44,7 @@ function withClient(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  caller.role = 'owner'
   request.mockReset()
   request.mockResolvedValue({ success: true, task_id: 1139, document_id: 42, already_added: false })
 })
@@ -91,5 +98,27 @@ describe("the ticket's view", () => {
     const { result } = renderHook(() => useBoardTask('1139'), { wrapper })
 
     await waitFor(() => expect(result.current.data?.knowledge_document_id).toBe(42))
+  })
+})
+
+describe('who sees it', () => {
+  it('in SaaS an owner or admin; in the local edition everyone', () => {
+    expect(['owner', 'admin', 'editor', 'viewer', 'member', null].map((role) => mayManageKnowledge(role, false)))
+      .toEqual([true, true, false, false, false, false])
+    expect(['editor', 'viewer', 'member', null].every((role) => mayManageKnowledge(role, true))).toBe(true)
+  })
+
+  it('an admin sees it; an editor, a viewer or a member does not, nor anyone before the role is known', () => {
+    caller.role = 'admin'
+    withClient(<TicketActionsBar task={ticket()} />)
+    expect(screen.getByRole('button', { name: /Add to Knowledge/ })).toBeInTheDocument()
+
+    for (const role of ['editor', 'viewer', 'member', null]) {
+      cleanup()
+      caller.role = role
+      withClient(<TicketActionsBar task={ticket({ knowledge_document_id: 42 })} />)
+      expect(screen.queryByRole('button', { name: /Add to Knowledge/ })).toBeNull()
+      expect(screen.queryByText('Added to Knowledge')).toBeNull()
+    }
   })
 })

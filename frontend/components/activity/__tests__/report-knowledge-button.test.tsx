@@ -1,6 +1,7 @@
 /**
  * PRE-11 (Gerard, 7 Oct): a report's view offers Add to Knowledge once the report has
- * loaded, then "Added to Knowledge" with Remove (the report stays).
+ * loaded, then "Added to Knowledge" with Remove (the report stays). Only a workspace
+ * owner or admin sees it in SaaS.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -8,9 +9,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React from 'react'
 
 const request = vi.hoisted(() => vi.fn())
+const caller = vi.hoisted(() => ({ role: 'owner' as string | null }))
 
 vi.mock('@/lib/api-client', () => ({ apiClient: { request: (...args: unknown[]) => request(...args) } }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/components/workspace-provider', () => ({
+  useWorkspaceOptional: () => (caller.role ? { workspace: { role: caller.role } } : null),
+}))
 
 import type { AgentReport } from '@/hooks/use-reports-api'
 import { ReportKnowledgeButton } from '../report-knowledge-button'
@@ -28,6 +33,7 @@ function withClient(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  caller.role = 'owner'
   request.mockReset()
   request.mockResolvedValue({ success: true, report_id: REPORT.id, document_id: 9, already_added: false })
 })
@@ -61,5 +67,21 @@ describe("the report viewer's header", () => {
 
     withClient(<ReportViewerHeader onClose={() => {}} onDownload={() => {}} />)
     expect(screen.queryByRole('button', { name: /Add to Knowledge/ })).toBeNull()
+  })
+})
+
+describe('who sees it', () => {
+  it('an admin does; an editor, a viewer or a member does not', () => {
+    caller.role = 'admin'
+    withClient(<ReportKnowledgeButton report={REPORT} />)
+    expect(screen.getByRole('button', { name: /Add to Knowledge/ })).toBeInTheDocument()
+
+    for (const role of ['editor', 'viewer', 'member']) {
+      cleanup()
+      caller.role = role
+      withClient(<ReportViewerHeader report={REPORT} onClose={() => {}} onDownload={() => {}} />)
+      expect(screen.queryByRole('button', { name: /Add to Knowledge/ })).toBeNull()
+      expect(screen.getByRole('button', { name: /Download/ })).toBeInTheDocument()
+    }
   })
 })
