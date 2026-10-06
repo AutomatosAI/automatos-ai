@@ -30,6 +30,7 @@ import {
   type DeliverableType,
 } from '@/components/icons/deliverable-icon'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
+import { InKnowledgeBadge } from './in-knowledge-badge'
 import { madeBy } from './made-by'
 
 // ============= STYLE MAPS =============
@@ -152,6 +153,8 @@ function DeliverableRowImpl({ deliverable, onClick, className }: DeliverableRowP
           <span className="truncate">{madeBy(agent_name, source_type)}</span>
         </div>
       </div>
+
+      <InKnowledgeBadge deliverable={deliverable} className="shrink-0" />
 
       {/* Source */}
       <div className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
