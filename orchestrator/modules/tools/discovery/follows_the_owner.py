@@ -60,6 +60,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.brand_turns import refusal_on_a_brand_turn
 from modules.tools.discovery.card_words_said import owners_card_words, word_refs
 from modules.tools.discovery.owner_turn import (
     AGAIN, APPROVE, CANCEL, CARD_REF, GIVE, GO_AHEAD, MISSION_CARD, NEW_CARD, NEW_MISSION, NOT_YET, OTHER_VERB,
@@ -121,7 +122,9 @@ def follows_the_owner(execute: Execute) -> Execute:
     refused, before any gate or handler runs, with the call that does."""
     @functools.wraps(execute)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any = None) -> Dict[str, Any]:
-        refusal = refusal_for(self.db, self.workspace_id, action_name, params, caller_context)
+        # Gerard, 7 Oct: a turn routed to the Brand designer changes no setting and starts no mission.
+        refusal = (refusal_on_a_brand_turn(action_name)
+                   or refusal_for(self.db, self.workspace_id, action_name, params, caller_context))
         if refusal:
             logger.info("[follows_the_owner] %s refused: %s", action_name, refusal[:160])
             return {"success": False, "error": refusal}
