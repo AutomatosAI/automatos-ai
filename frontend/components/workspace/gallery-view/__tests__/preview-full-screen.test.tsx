@@ -36,7 +36,7 @@ vi.mock('@/hooks/use-deliverables-api', () => ({
   }),
   useDeleteDeliverable: () => ({ mutate: vi.fn(), isLoading: false }),
 }))
-vi.mock('../add-to-knowledge-button', () => ({ AddToKnowledgeButton: () => null }))
+vi.mock('../deliverable-knowledge-button', () => ({ DeliverableKnowledgeButton: () => null }))
 
 import { DeliverablePreview } from '../deliverable-preview'
 

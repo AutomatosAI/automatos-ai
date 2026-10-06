@@ -3,26 +3,22 @@
 import { useEffect, useCallback } from 'react'
 import { formatDistanceToNow, format } from 'date-fns'
 import {
-  X,
-  Download,
   Star,
-  Paperclip,
   ClipboardCheck,
   Search,
   AlertTriangle,
   FileText,
   Package,
   Shield,
-  ExternalLink,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useReport, useGradeReport } from '@/hooks/use-reports-api'
 import { apiClient } from '@/lib/api-client'
 import type { AgentReport } from '@/hooks/use-reports-api'
 import { ReportGradeForm } from './report-grade-form'
+import { ReportAttachments, ReportMetrics, ReportViewerHeader } from './report-viewer-parts'
 
 // ─── Config ─────────────────────────────────────────────
 
@@ -104,19 +100,7 @@ export function ReportViewer({ reportId, onClose }: ReportViewerProps) {
 
       {/* Slide-over panel */}
       <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[60%] md:w-[55%] lg:w-[50%] max-w-[800px] glass-panel border-l border-border/50 shadow-2xl overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-xl border-b border-border/50 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="w-4 h-4 mr-1" /> Close
-            </Button>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={handleDownload}>
-                <Download className="w-4 h-4 mr-1" /> Download
-              </Button>
-            </div>
-          </div>
-        </div>
+        <ReportViewerHeader report={report} onClose={onClose} onDownload={handleDownload} />
 
         {isLoading ? (
           <div className="p-6 space-y-4">
@@ -149,24 +133,7 @@ export function ReportViewer({ reportId, onClose }: ReportViewerProps) {
               </p>
             </div>
 
-            {/* Metrics bar */}
-            {report.metrics && Object.keys(report.metrics).length > 0 && (
-              <div className="flex flex-wrap gap-3">
-                {Object.entries(report.metrics).map(([key, value]) => (
-                  <div
-                    key={key}
-                    className="glass-card px-3 py-2 text-center min-w-[80px]"
-                  >
-                    <div className="text-lg font-bold leading-none">
-                      {typeof value === 'number' ? value.toLocaleString() : String(value)}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-1 capitalize">
-                      {key.replace(/_/g, ' ')}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <ReportMetrics metrics={report.metrics} />
 
             {/* Report content */}
             <div className="glass-card p-4 sm:p-6">
@@ -184,41 +151,7 @@ export function ReportViewer({ reportId, onClose }: ReportViewerProps) {
               )}
             </div>
 
-            {/* Attachments */}
-            {report.attachments && report.attachments.length > 0 && (
-              <div className="glass-card p-4">
-                <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-                  <Paperclip className="w-4 h-4" />
-                  Attachments
-                </h3>
-                <div className="space-y-2">
-                  {report.attachments.map((att, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between py-2 px-3 rounded-lg bg-secondary/20"
-                    >
-                      <div className="flex items-center gap-2 text-sm">
-                        <Paperclip className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span>{att.title}</span>
-                        <span className="text-xs text-muted-foreground">({att.file_type})</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs"
-                        disabled={!att.url && !att.file_path}
-                        onClick={() => {
-                          const href = att.url || att.file_path
-                          if (href) window.open(href, '_blank')
-                        }}
-                      >
-                        <Download className="w-3 h-3 mr-1" /> Download
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <ReportAttachments attachments={report.attachments} />
 
             {/* Grade section */}
             <div className="glass-card p-4">

@@ -14,7 +14,7 @@ import { Download, ExternalLink, Loader2, Maximize2, Trash2 } from 'lucide-react
 import { Button } from '@/components/ui/button'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { canAddToKnowledge } from '@/hooks/use-deliverable-knowledge'
-import { AddToKnowledgeButton } from './add-to-knowledge-button'
+import { DeliverableKnowledgeButton } from './deliverable-knowledge-button'
 
 export interface DeliverablePreviewActionsProps {
   deliverable: Deliverable
@@ -60,7 +60,7 @@ export function DeliverablePreviewActions({
           Full screen
         </Button>
       )}
-      {canAddToKnowledge(deliverable) && <AddToKnowledgeButton deliverable={deliverable} />}
+      {canAddToKnowledge(deliverable) && <DeliverableKnowledgeButton deliverable={deliverable} />}
       <Button
         variant="outline"
         size="sm"
