@@ -535,6 +535,20 @@ def report_state(
     return state
 
 
+def _report_finish(row: Dict[str, Any], result: DecisionResult) -> None:
+    """The report_triage answers onto its shadow row."""
+    attention = result.get("needs_attention")
+    if attention is not None and attention.noul is not None:
+        row["jev_needs_attention"] = round(attention.noul, 4)
+    severity = result.get("severity")
+    if severity is not None:
+        row["jev_severity"] = severity.choice
+        row["jev_severity_confidence"] = round(severity.certainty, 4)
+    matches = result.get("matches_the_ask")
+    if matches is not None and matches.noul is not None:
+        row["jev_matches_the_ask"] = round(matches.noul, 4)
+
+
 async def shadow_report_triage(
     engine: Any,
     *,
@@ -567,18 +581,6 @@ async def shadow_report_triage(
         "linked_tickets": len(linked_tickets),
     }
 
-    def finish(r: Dict[str, Any], result: DecisionResult) -> None:
-        attention = result.get("needs_attention")
-        if attention is not None and attention.noul is not None:
-            r["jev_needs_attention"] = round(attention.noul, 4)
-        severity = result.get("severity")
-        if severity is not None:
-            r["jev_severity"] = severity.choice
-            r["jev_severity_confidence"] = round(severity.certainty, 4)
-        matches = result.get("matches_the_ask")
-        if matches is not None and matches.noul is not None:
-            r["jev_matches_the_ask"] = round(matches.noul, 4)
-
     return await _ask_and_record(
         engine, purpose=PURPOSE_REPORT, row=row,
         state=report_state(
@@ -586,5 +588,6 @@ async def shadow_report_triage(
             report_type=report_type, action_items=action_items, recommendations=recommendations,
             attachments=attachments, linked_tickets=linked_tickets, requires_approval=requires_approval,
         ),
-        questions=report_questions(has_tickets=bool(linked_tickets)), workspace_id=workspace_id, finish=finish,
+        questions=report_questions(has_tickets=bool(linked_tickets)), workspace_id=workspace_id,
+        finish=_report_finish,
     )
