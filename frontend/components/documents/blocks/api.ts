@@ -69,7 +69,9 @@ export const templateBlocksApi = {
 
   // Brand kit (defaults merged in).
   getBrandKit: () => apiClient.get<BrandKit>('/api/documents/brand-kit'),
-  updateBrandKit: (patch: Partial<BrandKit>) => apiClient.put<BrandKit>('/api/documents/brand-kit', patch),
+  // F372: `if_updated_at`, the stamp the page loaded: a kit changed since is a 409 and nothing is saved.
+  updateBrandKit: (patch: Partial<BrandKit> & { if_updated_at?: string }) =>
+    apiClient.put<BrandKit>('/api/documents/brand-kit', patch),
   getBrandSuggestions: () =>
     apiClient.get<{ suggestions: BrandSuggestions }>('/api/documents/brand-kit/suggestions'),
 

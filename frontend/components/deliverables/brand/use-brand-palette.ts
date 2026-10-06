@@ -41,14 +41,20 @@ function without(errors: RoleErrors, role: BrandPaletteRole): RoleErrors {
   return Object.fromEntries(Object.entries(errors).filter(([key]) => key !== role))
 }
 
-export function useBrandPalette(setKit: Dispatch<SetStateAction<BrandKit | null>>, onStored: () => void) {
+export function useBrandPalette(
+  setKit: Dispatch<SetStateAction<BrandKit | null>>,
+  onStored: () => void,
+  // F372: a role changed on the page is an unsaved edit until Save.
+  onEdit: () => void,
+) {
   const [roleErrors, setRoleErrors] = useState<RoleErrors>({})
   const [resetting, setResetting] = useState<BrandPaletteRole | null>(null)
 
   const setRole = useCallback((role: BrandPaletteRole, hex: string) => {
     setKit((k) => (k ? withRole(k, role, hex) : k))
     setRoleErrors((errors) => without(errors, role))
-  }, [setKit])
+    onEdit()
+  }, [setKit, onEdit])
 
   const resetRole = async (role: BrandPaletteRole) => {
     setResetting(role)
