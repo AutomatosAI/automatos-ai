@@ -135,6 +135,16 @@ def test_a_brand_block_names_a_part_and_anything_else_is_refused_by_field():
         validate_blocks({"blocks": [{"type": "brand", "id": "b", "part": "logo", "src": "https://x"}]})
 
 
+def test_each_brand_part_appears_once_so_a_template_cannot_multiply_the_miniature_renders():
+    repeated = {"blocks": [
+        {"type": "brand", "id": "a", "part": "applications"},
+        {"type": "section", "id": "s", "children": [{"type": "brand", "id": "b", "part": "applications"}]},
+    ]}
+    with pytest.raises(BlockValidationError) as caught:
+        validate_blocks(repeated)
+    assert [error["loc"] for error in caught.value.errors] == ["blocks.1.children.0.part"]
+
+
 # ---------------------------------------------------------------------------
 # The render: one A4 page, every role's hex, the voice, the applications
 # ---------------------------------------------------------------------------

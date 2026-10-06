@@ -8,12 +8,13 @@ errors — no silent swallow".
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Sequence, Set, Tuple, Union
 
 from pydantic import ValidationError
 
 from .schema import (
     BlockDocument,
+    BrandBlock,
     DataTableBlock,
     SectionBlock,
     TableBlock,
@@ -77,9 +78,39 @@ def validate_blocks(raw: Union[Dict[str, Any], List[Any], None]) -> BlockDocumen
         )
 
     try:
-        return BlockDocument.model_validate(payload)
+        doc = BlockDocument.model_validate(payload)
     except ValidationError as exc:
         raise BlockValidationError(_format_errors(exc)) from exc
+    repeated = repeated_brand_parts(doc)
+    if repeated:
+        raise BlockValidationError(repeated)
+    return doc
+
+
+def _brand_parts(blocks: Sequence[Any], where: str) -> List[Tuple[str, str]]:
+    """``(loc, part)`` of every ``brand`` block, sections walked."""
+    found: List[Tuple[str, str]] = []
+    for index, block in enumerate(blocks):
+        if isinstance(block, BrandBlock):
+            found.append((f"{where}.{index}.part", block.part))
+        elif isinstance(block, SectionBlock):
+            found.extend(_brand_parts(block.children, f"{where}.{index}.children"))
+    return found
+
+
+def repeated_brand_parts(doc: BlockDocument) -> List[Dict[str, str]]:
+    """A field-level error for each brand board part after its first (PRD-255 US-009).
+
+    Each part is drawn from the kit, and the applications part prints two
+    starters to draw them: one of each per document keeps a render's cost bounded."""
+    seen: Set[str] = set()
+    errors: List[Dict[str, str]] = []
+    for loc, part in _brand_parts(doc.blocks, "blocks"):
+        if part in seen:
+            errors.append({"loc": loc, "msg": f"the brand board's {part} part appears once per document",
+                           "type": "value_error"})
+        seen.add(part)
+    return errors
 
 
 def collect_variable_paths(doc: BlockDocument) -> Set[str]:
