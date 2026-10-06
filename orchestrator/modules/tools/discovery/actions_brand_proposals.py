@@ -11,19 +11,23 @@ import copy
 from .action_registry import ActionDefinition, ActionRegistry
 from .actions_brand_kit_update import _PARAMETERS as KIT_FIELDS
 
+PROPOSE_DESCRIPTION = (
+    "Propose a brand kit change to the owner on a card they approve: the kit fields to change "
+    "(the ones platform_update_brand_kit takes) and one line on why. The proposal is checked as "
+    "the kit checks it, the Brand Board is drawn from it into your ticket's folder WITHOUT saving "
+    "it, and a question card goes on your ticket listing what changes, linking the board, with "
+    "the options Approve and Revise. Nothing is saved. Any answer other than Approve is a "
+    "revision: revise and propose again. Only on the ticket you are working. Every call puts a "
+    "real card in front of the owner: there is no test mode, and a why that says the card is a "
+    "probe or a test is refused (F365). A proposal the kit refuses comes back with its reasons and asks nothing."
+)
+
 
 def register_brand_proposal_actions(registry: ActionRegistry) -> None:
     """Register platform_propose_brand_kit and platform_save_approved_brand_kit."""
     registry.register(ActionDefinition(
         name="platform_propose_brand_kit",
-        description=(
-            "Propose a brand kit change to the owner on a card they approve: the kit fields to change "
-            "(the ones platform_update_brand_kit takes) and one line on why. The proposal is checked as "
-            "the kit checks it, the Brand Board is drawn from it into your ticket's folder WITHOUT saving "
-            "it, and a question card goes on your ticket listing what changes, linking the board, with "
-            "the options Approve and Revise. Nothing is saved. Any answer other than Approve is a "
-            "revision: revise and propose again. Only on the ticket you are working."
-        ),
+        description=PROPOSE_DESCRIPTION,
         category="documents",
         parameters={
             "type": "object",

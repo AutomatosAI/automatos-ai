@@ -10,6 +10,8 @@ The Brand designer changes the kit only after the owner approves a proposal card
   caller's own ticket (``kind='question'``, options Approve / Revise, free text always
   allowed) that lists what changes and links the board. The card carries the proposal
   in its ``details`` (``brand_proposal_card.PROPOSAL_MARKER``). Nothing else is written.
+  There is no test mode: a ``why`` that says the card is not real ("VALIDATION PROBE
+  ONLY", F365) files nothing.
 * **Save.** Only the newest proposal card on the caller's own ticket, only when its
   answer is a plain Approve given on the Questions tab (its route requires a workspace
   owner or admin, ``api/approval_grants.py``; a Telegram reply proves no role and never
@@ -236,6 +238,9 @@ async def propose_brand_kit(db: Session, workspace_id: UUID, params: Dict[str, A
     ticket, in_session = ticket_of(params)
     if ticket is None:
         return _failed(f"{NEEDS_A_TICKET.format(tool='propose_brand_kit', done='asked')} {_to_the_designer(db, workspace_id)}")
+    not_real = card.not_a_real_proposal(params.get(WHY_PARAM))
+    if not_real:
+        return _failed(card.NOT_A_REAL_PROPOSAL.format(words=not_real))
     task, problem = _open_ticket(db, workspace_id, ticket)
     if task is None:
         return _failed(problem or TASK_NOT_FOUND.format(ticket=ticket))
