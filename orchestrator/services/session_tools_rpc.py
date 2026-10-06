@@ -97,9 +97,11 @@ def _text_content(text: str, *, is_error: bool = False) -> Dict[str, Any]:
 def render_result(result: Dict[str, Any]) -> Dict[str, Any]:
     """One executor result as MCP tool output. A refusal or failure is content
     with ``isError``, so the model reads WHY and can choose differently."""
+    from modules.tools.formatting.tickets_by_number import by_number_only
+
     ok = bool(result.get("success"))
-    if ok:
-        payload = {k: v for k, v in result.items() if k not in ("success", "tool")}
+    if ok:  # 7 Oct: a session reads each ticket by its board number only
+        payload = by_number_only({k: v for k, v in result.items() if k not in ("success", "tool")})
         body = payload.get("result", payload) if isinstance(payload, dict) else payload
         return _text_content(json.dumps(body, indent=2, default=str) if not isinstance(body, str) else body)
     message = _safe_error(result.get("error"))

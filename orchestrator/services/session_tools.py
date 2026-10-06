@@ -467,7 +467,7 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         name="list_tasks",
         action="platform_list_tasks",
         description=(
-            "List this workspace's board tasks — number (#0042), id, title, status, priority, agent. "
+            "List this workspace's board tasks — number (#0042, how you name one), title, status, agent. "
             "Filter by status or agent name. The result's 'total_matching' says how many match "
             "in all, so raise 'limit' when you need every one."
         ),

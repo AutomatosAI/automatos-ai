@@ -12,8 +12,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from modules.tools.formatting.document_brand_note import the_documents_brand_check_is_read
-from modules.tools.formatting.generated_document_summary import summarises_generated_documents
+from modules.tools.formatting import document_brand_note, generated_document_summary, tickets_by_number
 
 logger = logging.getLogger(__name__)
 
@@ -844,8 +843,9 @@ class ToolResultFormatter:
         return digest
     
     @staticmethod
-    @the_documents_brand_check_is_read  # brand kit at generation: a document's banned words, last
-    @summarises_generated_documents
+    @document_brand_note.the_documents_brand_check_is_read  # brand kit at generation: banned words, last
+    @generated_document_summary.summarises_generated_documents
+    @tickets_by_number.names_tickets_by_number  # 7 Oct: the model reads a ticket by its board number only
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 20000) -> str:
         """
         Format tool result for LLM context (truncated summary).

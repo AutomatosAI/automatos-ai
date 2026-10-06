@@ -27,7 +27,7 @@ PLAN = "1. Add hello.txt\n2. Verify with cat"
 
 
 def _task(status="in_progress", ref=None, task_id=301):
-    return NS(id=task_id, workspace_id="ws-c1", status=status, assigned_agent_id=58,
+    return NS(id=task_id, workspace_seq=42, workspace_id="ws-c1", status=status, assigned_agent_id=58,
               runtime_ref=dict(ref or {}), blocked_at=None, blocked_reason=None,
               lease_until="soon", raw_prompt=None, description="write hello.txt",
               title="Say hi", review_feedback=None, completed_at=None)
@@ -143,7 +143,8 @@ def test_a_plan_from_the_turn_becomes_one_plan_card(staged):
     assert card["park"] is None and card["subject_type"] == "board_task" and card["subject_id"] == "301"
     assert card["details"] == {plans.PLAN_MARKER: {"task_id": 301, "version": 1, "attempt": 3}}
     assert card["options"] == ["Approve", "Reject"]
-    assert "CODER has a plan for ticket #301 — Say hi" in card["question"] and PLAN in card["question"]
+    # 7 Oct: the ticket by its board number; '#301' was its id behind a '#'
+    assert "CODER has a plan for ticket #0042 — Say hi" in card["question"] and PLAN in card["question"]
     assert "answer in your own words" in card["question"]          # a Telegram reply sees no buttons
     entry = plans.session_plans(ref)[0]
     assert entry["grant_id"] == 900 and entry["version"] == 1 and entry["plan"] == PLAN
