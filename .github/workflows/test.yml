@@ -62,7 +62,7 @@ jobs:
           # The renderer, the seeded social templates, and every orchestrator
           # module scripts/ci/social_template_previews.py imports.
           MEDIA_RENDER_PATHS: >-
-            ^services/media-render/|^orchestrator/modules/documents/templates/social/|^orchestrator/modules/documents/social_starters\.py$|^orchestrator/core/(media_render_bundle|social_templates|social_cuts|social_brand_rule|brand_palette|brand_type|chart_binding|report_tables)\.py$|^scripts/ci/(social_template_previews|social_template_kits|ci_block_font)\.py$|^docker-compose\.yml$|^\.github/workflows/test\.yml$
+            ^services/media-render/|^orchestrator/modules/documents/templates/social/|^orchestrator/modules/documents/social_starters\.py$|^orchestrator/core/(media_render_bundle|social_templates|social_cuts|social_brand_rule|brand_palette|brand_type|chart_binding|report_tables)\.py$|^scripts/ci/(social_template_previews|social_template_kits|ci_block_font|render_client|template_shards)\.py$|^docker-compose\.yml$|^\.github/workflows/test\.yml$
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests, the frontend edition literal, the worker image.
           PROD_IMAGE_PATHS: >-
@@ -783,15 +783,13 @@ jobs:
   media-render:
     name: media-render — image builds and renders the fixture
     needs: changes
-    # OFF, 6 Oct 2026, Gerard: "disable media rendering for now until it's properly
-    # fixed". The seeded-templates step alone took 47 min and was the critical path
-    # of every PR that touches the templates. `false &&` keeps the lane's own
-    # condition for when it comes back on (delete `false && `); a skipped job counts
-    # as passing for the PRD-251/255 gates (PATH_GATED_JOBS).
-    if: false && needs.changes.outputs.media_render == 'true'
+    # Off on 6 Oct 2026 (Gerard: "disable media rendering for now until it's properly
+    # fixed", #1022): its seeded-templates step took 47 min. Back on with the step split
+    # into media-render-templates (4 shards, 2 processes each), below.
+    if: needs.changes.outputs.media_render == 'true'
     runs-on: ubuntu-latest
-    # PRD-255 US-006: the night kits render every template again (about 20 minutes).
-    timeout-minutes: 70
+    # The seeded templates' renders run in media-render-templates, below.
+    timeout-minutes: 30
     env:
       IMAGE: media-render:ci
       TEST_IMAGE: media-render:test
@@ -1046,42 +1044,73 @@ jobs:
           path: ${{ runner.temp }}/music-render
           if-no-files-found: ignore
           retention-days: 7
-      # US-106 (S1.2b): the four reference videos, seeded as templates. Each one's
-      # bundle is built by the orchestrator's own seed loader and bundle builder
-      # (standard library only, the runner's python3) from its sample data (the
-      # reference's copy), a Studio Dark brand kit and a drawn logo, with every
-      # footage slot empty. media-render checks the FULL composition (`hyperframes
-      # check`: a 202 means 0 errors) and renders a preview: snapshot frames at the
-      # template's key moments, small, and a short reel. The pixel probe renders
-      # a probed moment again with the brand kit's primary colour swapped and reads
-      # the pixel back (scripts/ci/social_template_previews.py).
-      # US-107 (S1.2c): the seven image templates (the automatos-social families, a
-      # fact card and a carousel) render for real at every size they declare: the
-      # full check, then one full-size PNG per still (a carousel's slides), each
-      # read back and measured; the probe swaps the primary under the brand stripe.
-      # US-108 (S1.3): the Title card renders again with a brand kit carrying an
-      # uploaded woff2 (scripts/ci/ci_block_font.py, every glyph a solid block)
-      # named in heading_font, and an uploaded logo mark: the headline's accent
-      # words must fill their box as solid blocks do, and in the kit's own
-      # heading font they must not.
-      # US-113 (S1.7): the Infographic, whose sample chart is a fixture report's
-      # binding, renders again bound to more fixture reports by the orchestrator's
-      # own parser and binder (core/report_tables.py, core/chart_binding.py): a
-      # line, a number grid, and a stress table (labels cut, the widest figures)
-      # as a bar, a line and a grid, at every size, each with 0 check errors (the
-      # axis labels fit), every figure on the chart the report's own cell.
-      # PRD-255 US-006: every template renders again with the two night kits
-      # (scripts/ci/social_template_kits.py), 0 check errors each: Automatos as a
-      # v1 kit (its logo on a light chip on dark stages), and Harbourline as a v2
-      # kit (its stored paper and accent, a larger type scale, its dark logo), at
-      # every size; its Title card's page reads back as its stored paper.
+
+  # Gerard, 6 Oct ("why is CI taking 45 mins"): the seeded templates' renders were
+  # one step of the job above, about 180 renders in series against one container
+  # (2,638 s on run 37426385037), the critical path of every PR that touches them.
+  # They run here as 4 shards, each with its own media-render, and in each shard two
+  # processes side by side (the container lets two checks and two renders run at
+  # once, one each by default): scripts/ci/template_shards.py gives every render unit
+  # (a video, an image template at every size with its probe, an Infographic binding,
+  # the heading-font card, a night-kit render) to exactly one of the 8 slots, so the
+  # shards together run every check the single step ran.
+  # US-106 (S1.2b): the four reference videos, seeded as templates. Each one's
+  # bundle is built by the orchestrator's own seed loader and bundle builder
+  # (standard library only, the runner's python3) from its sample data (the
+  # reference's copy), a Studio Dark brand kit and a drawn logo, with every
+  # footage slot empty. media-render checks the FULL composition (`hyperframes
+  # check`: a 202 means 0 errors) and renders a preview: snapshot frames at the
+  # template's key moments, small, and a short reel. The pixel probe renders
+  # a probed moment again with the brand kit's primary colour swapped and reads
+  # the pixel back (scripts/ci/social_template_previews.py).
+  # US-107 (S1.2c): the seven image templates (the automatos-social families, a
+  # fact card and a carousel) render for real at every size they declare: the
+  # full check, then one full-size PNG per still (a carousel's slides), each
+  # read back and measured; the probe swaps the primary under the brand stripe.
+  # US-108 (S1.3): the Title card renders again with a brand kit carrying an
+  # uploaded woff2 (scripts/ci/ci_block_font.py, every glyph a solid block)
+  # named in heading_font, and an uploaded logo mark: the headline's accent
+  # words must fill their box as solid blocks do, and in the kit's own
+  # heading font they must not.
+  # US-113 (S1.7): the Infographic, whose sample chart is a fixture report's
+  # binding, renders again bound to more fixture reports by the orchestrator's
+  # own parser and binder (core/report_tables.py, core/chart_binding.py): a
+  # line, a number grid, and a stress table (labels cut, the widest figures)
+  # as a bar, a line and a grid, at every size, each with 0 check errors (the
+  # axis labels fit), every figure on the chart the report's own cell.
+  # PRD-255 US-006: every template renders again with the two night kits
+  # (scripts/ci/social_template_kits.py), 0 check errors each: Automatos as a
+  # v1 kit (its logo on a light chip on dark stages), and Harbourline as a v2
+  # kit (its stored paper and accent, a larger type scale, its dark logo), at
+  # every size; its Title card's page reads back as its stored paper.
+  media-render-templates:
+    name: media-render — the seeded templates (shard ${{ matrix.shard }} of 4)
+    needs: changes
+    if: needs.changes.outputs.media_render == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      IMAGE: media-render:ci
+      SHARDS: 4
+      PER_JOB: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (default target, as Railway builds it)
+        run: docker build -t "$IMAGE" services/media-render/
       - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit; the headline takes the uploaded heading font
         env:
           TOKEN: ci-render-token
+          SHARD: ${{ matrix.shard }}
         run: |
           out="$RUNNER_TEMP/templates"
           mkdir -p "$out"
-          docker run -d --name media-render-templates --shm-size=1g -e LOG_RELAY_ENABLED=false \
+          docker run -d --name media-render-templates --shm-size=2g -e LOG_RELAY_ENABLED=false \
+            -e MEDIA_RENDER_MAX_CONCURRENT_CHECKS="$PER_JOB" -e MEDIA_RENDER_MAX_CHECKS_PER_WORKSPACE="$PER_JOB" \
+            -e MEDIA_RENDER_MAX_CONCURRENT_RENDERS="$PER_JOB" -e MEDIA_RENDER_MAX_RENDERS_PER_WORKSPACE="$PER_JOB" \
             -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8091:8090 "$IMAGE"
           up=""
           for i in $(seq 1 30); do
@@ -1091,12 +1120,19 @@ jobs:
           if [ -z "$up" ]; then docker logs media-render-templates; echo "::error::the API never answered /health"; exit 1; fi
           python3 --version
           start=$(date +%s)
-          set +e
-          PYTHONPATH=orchestrator python3 scripts/ci/social_template_previews.py \
-            --url http://127.0.0.1:8091 --token "$TOKEN" --out "$out"
-          code=$?
-          set -e
-          echo "the seeded templates: $(( $(date +%s) - start )) s"
+          slots=$(( SHARDS * PER_JOB ))
+          pids=""
+          for p in $(seq 0 $(( PER_JOB - 1 ))); do
+            slot=$(( (SHARD - 1) * PER_JOB + p ))
+            PYTHONPATH=orchestrator python3 scripts/ci/social_template_previews.py \
+              --url http://127.0.0.1:8091 --token "$TOKEN" --out "$out/slot-$slot" --shard "$slot/$slots" \
+              > "$out/slot-$slot.log" 2>&1 &
+            pids="$pids $!"
+          done
+          code=0
+          for pid in $pids; do wait "$pid" || code=1; done
+          for log in "$out"/slot-*.log; do echo "──── $(basename "$log" .log) of $slots ────"; cat "$log"; done
+          echo "the seeded templates, shard $SHARD of $SHARDS: $(( $(date +%s) - start )) s"
           docker logs media-render-templates 2>&1 | tail -n 80
           docker rm -f media-render-templates > /dev/null
           if [ "$code" != 0 ]; then echo "::error::a seeded template failed its check, its preview or render, or the pixel probe"; fi
@@ -1105,7 +1141,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: media-render-template-previews
+          name: media-render-template-previews-${{ matrix.shard }}
           path: ${{ runner.temp }}/templates
           if-no-files-found: ignore
           retention-days: 7
