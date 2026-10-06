@@ -3,13 +3,13 @@
  * =================================================
  *
  * The action row of a Deliverable's panel: Download, Open in Explorer, Delete, and,
- * for a document, Add to Knowledge (F354). Its own component so the panel
+ * for a document, Add to Knowledge (F354); for a PDF or a web page, Full screen. Its own component so the panel
  * (deliverable-preview.tsx) stays within the 150-line component limit.
  */
 
 'use client'
 
-import { Download, ExternalLink, Loader2, Trash2 } from 'lucide-react'
+import { Download, ExternalLink, Loader2, Maximize2, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
@@ -24,6 +24,8 @@ export interface DeliverablePreviewActionsProps {
   onDownload: () => void
   onOpenInExplorer: () => void
   onDelete: () => void
+  /** Shown for a preview that fills the panel (a PDF, a web page): opens it full screen. */
+  onFullscreen?: () => void
 }
 
 export function DeliverablePreviewActions({
@@ -34,6 +36,7 @@ export function DeliverablePreviewActions({
   onDownload,
   onOpenInExplorer,
   onDelete,
+  onFullscreen,
 }: DeliverablePreviewActionsProps) {
   return (
     <div className="flex flex-wrap gap-2 pt-1">
@@ -51,6 +54,12 @@ export function DeliverablePreviewActions({
         <ExternalLink className="mr-2 h-4 w-4" />
         Open in Explorer
       </Button>
+      {onFullscreen && (
+        <Button variant="outline" size="sm" onClick={onFullscreen}>
+          <Maximize2 className="mr-2 h-4 w-4" />
+          Full screen
+        </Button>
+      )}
       {canAddToKnowledge(deliverable) && <AddToKnowledgeButton deliverable={deliverable} />}
       <Button
         variant="outline"
