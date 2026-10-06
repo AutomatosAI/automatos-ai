@@ -28,7 +28,7 @@ from . import __version__
 from .allowlist import NotAllowed, choose_default_root
 from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
-from .hook_server import HookServer
+from .hook_server import hook_server_for
 from .policy import secret_protection_summary
 from .lifecycle import install_signal_handlers, watch_restart_requests
 from .procs import pid_alive
@@ -81,7 +81,7 @@ class Host:
         self.cfg = cfg
         self.api = BackendClient(cfg.url)
         self.identity: Optional[Dict[str, Any]] = None
-        self.hooks = HookServer(cfg.socket_path)
+        self.hooks = hook_server_for(cfg.socket_path)
         self.sessions: Dict[str, Session] = {}
         self.threads: Dict[str, threading.Thread] = {}
         self.pending_results: Dict[str, Dict[str, Any]] = {}
@@ -364,6 +364,7 @@ class Host:
         task_id = str(ticket.get("task_id"))
         session = Session(ticket, self.cfg, self.allow_roots, self.cfg.socket_path, default_root=self.default_root,
                           workspace_id=str((self.identity or {}).get("workspace_id") or ""))
+        session.hook_env = self.hooks.session_env()
         self.sessions[task_id] = session
         self.hooks.register(task_id, session.handle_hook)
 
