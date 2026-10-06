@@ -5,12 +5,19 @@
 note the model reads last, in the studio's shape (``promptSnippets.ts``): the exact name and
 id, every field, each table's columns, and the rules. A name this workspace hasn't got gets
 "not here" and the closest names, never a substitute.
+
+F369 (night 10c, chat 423d83ca): "Just make it, no questions." on the Branded Invoice, and Auto
+asked for the invoice number, the terms and the due date, as the rules told it to. When the
+owner says not to ask, the rules say so: make it now, put a plain default where a number,
+a date or the terms are missing, say which in one line, and still invent no name, address,
+price or quantity.
 """
 from __future__ import annotations
 
 import asyncio
 import functools
 import logging
+import re
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
@@ -38,6 +45,20 @@ NO_FIELDS = "The template has no fill-in fields."
 RULES = ("Map the owner's words onto these fields. Before generating, ask in one short message for every field "
          "marked required, and every invoice number, address, term, price or date the document needs, that "
          "the owner didn't give; never invent one. Pass data as an object keyed by these field names.")
+# F369: the owner said not to ask. The defaults are the plain ones an owner would expect.
+DEFAULT_TERMS_DAYS = 30
+NO_QUESTIONS_RULES = (
+    "Map the owner's words onto these fields. The owner said not to ask them anything: don't ask, make the "
+    "document now. Where a value the document needs is missing, put a plain default instead: today's date for "
+    f"its date, payment terms of {DEFAULT_TERMS_DAYS} days and a due date {DEFAULT_TERMS_DAYS} days after it, "
+    "and a number made from today's date for an invoice or quote (INV-YYYYMMDD, QUO-YYYYMMDD). Never make up a "
+    "name, an address, a price or a quantity: leave that field out. Under the document, say in one line which "
+    "values you filled in, so the owner can change them. Pass data as an object keyed by these field names."
+)
+NO_QUESTIONS = re.compile(
+    r"\bno (?:more )?questions\b|\b(?:don['’]?t|do not|no need to)\s+ask\b|\bwithout (?:asking|questions)\b"
+    r"|\bjust (?:make|do|generate|create|send) it\b|\bfill in (?:the )?(?:rest|blanks|gaps)\b"
+    r"|\buse (?:your )?(?:best )?judge?ment\b", re.I)
 NOT_FOUND = ('The owner named a document template "{asked}", and this workspace has no template by that name or '
              "id. Don't make the document on another template in its place: tell the owner it isn't there and "
              "ask which one they mean.")
@@ -117,15 +138,21 @@ def _capped(names: Sequence[str], cap: int) -> str:
     return shown + (MORE.format(count=len(names) - cap) if len(names) > cap else "")
 
 
-def found_note(named: NamedTemplate, schema: Dict[str, Any]) -> str:
-    """The studio's prompt for the named template, with the rules."""
+def no_questions(texts: Sequence[str]) -> bool:
+    """Whether the owner, in this turn or the few before it, said not to ask ("Just make it, no questions")."""
+    return any(NO_QUESTIONS.search(str(text or "")) for text in texts)
+
+
+def found_note(named: NamedTemplate, schema: Dict[str, Any], told_not_to_ask: bool = False) -> str:
+    """The studio's prompt for the named template, with the rules: the no-questions ones when the owner
+    said not to ask (F369)."""
     template_id = str(named.row.id)
     head = FOUND_HEAD.format(name=named.row.name, id=template_id, when=EARLIER if named.earlier else "")
     fields = [name + (REQUIRED_MARK if required else "") for name, required in schema_fields(schema)]
     lines = [head, FIELDS_LINE.format(fields=_capped(fields, MAX_FIELDS)) if fields else NO_FIELDS]
     lines += [LIST_LINE.format(field=field, columns=_capped(columns, MAX_COLUMNS))
               for field, columns in schema_lists(schema, named.row) if columns]
-    return " ".join([*lines, RULES])
+    return " ".join([*lines, NO_QUESTIONS_RULES if told_not_to_ask else RULES])
 
 
 def not_found_note(named: NamedTemplate) -> str:
@@ -158,7 +185,7 @@ def read_note(db: Any, workspace_id: UUID, texts: Sequence[str]) -> Optional[str
                 return team_note(texts[0] if texts else "")
             if named.row is None:
                 return not_found_note(named)
-            return found_note(named, _schema(db, workspace_id, named.row))
+            return found_note(named, _schema(db, workspace_id, named.row), no_questions(texts))
     except Exception:
         logger.exception("[F351] the named template could not be read for this turn")
         return None
@@ -203,5 +230,5 @@ def fills_the_named_template(retrieval_first: Turn) -> Turn:
     return wrapped
 
 
-__all__ = ["FOUND_HEAD", "NOT_FOUND", "RULES", "fills_the_named_template", "found_note", "not_found_note",
-           "read_note", "schema_fields", "schema_lists", "template_note"]
+__all__ = ["FOUND_HEAD", "NOT_FOUND", "NO_QUESTIONS_RULES", "RULES", "fills_the_named_template", "found_note",
+           "no_questions", "not_found_note", "read_note", "schema_fields", "schema_lists", "template_note"]

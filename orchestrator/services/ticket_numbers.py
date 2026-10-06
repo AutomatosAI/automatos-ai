@@ -182,7 +182,7 @@ def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple
     ticket. A ref that is the id of one ticket and the number of another is torn: one
     call's refs are all ids or all numbers, so the reading that names more of the
     call's refs settles it. When both name as many, nothing is guessed: the refusal
-    names both tickets of each torn ref."""
+    names both tickets of each torn ref, except in Auto's chat, where the number is meant (F369)."""
     wanted = {int(str(r).strip()) for r in refs}
     if not wanted:
         return {}, None
@@ -193,10 +193,23 @@ def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple
     as_ids = {r.id: r for r in rows if r.id in wanted}
     as_numbers = {r.workspace_seq: r for r in rows if getattr(r, "workspace_seq", None) in wanted}
     torn = sorted(n for n in as_ids.keys() & as_numbers.keys() if as_ids[n].id != as_numbers[n].id)
-    if torn and len(as_ids) == len(as_numbers):
+    tied = bool(torn) and len(as_ids) == len(as_numbers)
+    if tied and not in_autos_chat():
         return {}, _both_readings(db, workspace_id, torn, as_ids, as_numbers)
-    meant, other = (as_numbers, as_ids) if len(as_numbers) > len(as_ids) else (as_ids, as_numbers)
+    by_number = tied or len(as_numbers) > len(as_ids)
+    meant, other = (as_numbers, as_ids) if by_number else (as_ids, as_numbers)
     return {**_ids(other), **_ids(meant)}, None
+
+
+def in_autos_chat() -> bool:
+    """Whether this call is made in the owner's chat with Auto (the turn books itself to the chat lane), where
+    a ticket is named by its number: bare digits that are one ticket's id and another's number are the number.
+
+    F369 (night 10c, chat 16bb619c): "tag that ticket", the one Auto had just called #0892, went as task_id
+    892, also the id of #0708; the call was refused naming both, and Auto asked the owner which they meant."""
+    from core.llm.usage_context import LANE_CHAT, current_usage_scope
+
+    return current_usage_scope().get("request_type") == LANE_CHAT
 
 
 def _ids(reading: Dict[int, Any]) -> Dict[int, int]:
