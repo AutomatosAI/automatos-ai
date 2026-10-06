@@ -783,7 +783,12 @@ jobs:
   media-render:
     name: media-render — image builds and renders the fixture
     needs: changes
-    if: needs.changes.outputs.media_render == 'true'
+    # OFF, 6 Oct 2026, Gerard: "disable media rendering for now until it's properly
+    # fixed". The seeded-templates step alone took 47 min and was the critical path
+    # of every PR that touches the templates. `false &&` keeps the lane's own
+    # condition for when it comes back on (delete `false && `); a skipped job counts
+    # as passing for the PRD-251/255 gates (PATH_GATED_JOBS).
+    if: false && needs.changes.outputs.media_render == 'true'
     runs-on: ubuntu-latest
     # PRD-255 US-006: the night kits render every template again (about 20 minutes).
     timeout-minutes: 70
