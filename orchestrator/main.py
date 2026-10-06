@@ -182,21 +182,41 @@ def _seed_social_starters_where_on() -> None:
         logger.exception("Social starters seed failed; the next boot tries again")
 
 
-def _then_social_starters(phase):
-    """``phase``, then the social starters for workspaces already on Socials. A decorator, so
-    the long core phase below stays as it is."""
+def _seed_document_starters_everywhere() -> None:
+    """#996: a starter that changed after a hosted workspace was provisioned reaches it too
+    (the seeder ran only at provisioning there). Boot leader only, like the social starters;
+    idempotent, and it never brings back a starter a person deleted or edited."""
+    from core.database.boot_lock import boot_leader_lock
+    from core.database.database import engine, get_db_session
+    from modules.documents.seed_templates import seed_starters_everywhere
+
+    try:
+        with boot_leader_lock(engine) as is_leader:
+            if not is_leader:
+                return
+            with get_db_session() as db:
+                starters = seed_starters_everywhere(db)
+            logger.info("Document starters seed: %s", starters)
+    except Exception:
+        logger.exception("Document starters seed failed; the next boot tries again")
+
+
+def _then_starters(phase):
+    """``phase``, then the document starters for every workspace and the social starters for
+    workspaces already on Socials. A decorator, so the long core phase below stays as it is."""
 
     import asyncio as _asyncio
 
     @functools.wraps(phase)
     async def run():
         await phase()
+        await _asyncio.to_thread(_seed_document_starters_everywhere)
         await _asyncio.to_thread(_seed_social_starters_where_on)
 
     return run
 
 
-@_then_social_starters
+@_then_starters
 async def _boot_phase_1_core():
     """
     Phase 1: Core infrastructure — database tables + per-deploy seeds.
