@@ -5,7 +5,7 @@
  * Visual card for a single agent deliverable in the Gallery grid.
  * Renders an image preview (for artifact_type='image'), a document's first page
  * (F353: documents, sheets and reports with a `thumbnail_url`) or the type's
- * artwork, with a source badge, title, agent/time, and size.
+ * artwork, with a source badge, an "In Knowledge" badge (F354), title, agent/time, and size.
  */
 
 import { memo } from 'react'
@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
 import { DocumentThumbnail } from './document-thumbnail'
+import { InKnowledgeBadge } from './in-knowledge-badge'
 import { madeBy } from './made-by'
 
 // ============= STYLE MAPS =============
@@ -121,6 +122,11 @@ function DeliverableCardImpl({ deliverable, onClick, className }: DeliverableCar
         ) : (
           <DocumentThumbnail type={artifact_type} thumbnailUrl={deliverable.thumbnail_url} title={title} />
         )}
+
+        <InKnowledgeBadge
+          deliverable={deliverable}
+          className="absolute left-2 top-2 bg-background/90 shadow-sm backdrop-blur-sm"
+        />
 
         {/* Source badge */}
         <div
