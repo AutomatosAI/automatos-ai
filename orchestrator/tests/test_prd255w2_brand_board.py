@@ -153,14 +153,15 @@ def test_each_brand_part_appears_once_so_a_template_cannot_multiply_the_miniatur
 PART_LABELS = {"BRAND", "COLOUR", "LOGO", "VOICE", "TYPE", "SPACING", "APPLICATIONS"}
 
 
-def _layout(document) -> list:
-    """Where each part's label sits: ``(page, label, top)``, and each page's lowest text (the failure says it)."""
+def _layout(document) -> str:
+    """Where each part's label sits, ``p<page> <label>@<top>``, and each page's lowest text: the failure says it
+    in full (a string; pytest cuts a non-string message's repr short)."""
     found = []
     for number, page in enumerate(document.pages, start=1):
         words = page.extract_words()
-        found += [(number, w["text"], round(w["top"])) for w in words if w["text"] in PART_LABELS]
-        found.append((number, "lowest text", round(max((w["bottom"] for w in words), default=0))))
-    return found
+        found += [f"p{number} {w['text']}@{round(w['top'])}" for w in words if w["text"] in PART_LABELS]
+        found.append(f"p{number} lowest@{round(max((w['bottom'] for w in words), default=0))}")
+    return "; ".join(found)
 
 
 def test_the_board_prints_the_automatos_kit_on_one_a4_page_with_every_roles_hex():

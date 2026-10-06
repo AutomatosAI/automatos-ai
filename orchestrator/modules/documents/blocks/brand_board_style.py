@@ -6,6 +6,10 @@ and the three applications. Its rows are sections (``board-row-*``) printed as
 tables, which WeasyPrint lays out without surprises. Every colour, size and gap
 is a ``design_tokens`` value (substituted by ``page_style.build_styles``); the
 board's own sizes, in millimetres, are :data:`BOARD_TOKENS`.
+
+Nothing on the board overflows its box: WeasyPrint breaks the page on a child's own
+height, clipped or not, so a miniature is cropped to its frame (``object-fit``) and
+the social card's lines fit inside theirs.
 """
 from __future__ import annotations
 
@@ -69,12 +73,13 @@ BOARD = Template("""
   .board-apps { display: table; width: 100%; table-layout: fixed; }
   .board-app { display: table-cell; padding-right: ${s3}pt; vertical-align: top; }
   .board-app:last-child { padding-right: 0; }
-  .board-app-frame { height: ${board_app_mm}mm; overflow: hidden; border: ${hairline_pt}pt solid $rule;
-    margin: 0 0 ${s1}pt 0; }
-  .board-app-frame img { display: block; width: 100%; height: auto; }
-  .board-social { position: relative; padding: ${s4}pt ${s3}pt; }
+  .board-app-frame { box-sizing: border-box; height: ${board_app_mm}mm; overflow: hidden;
+    border: ${hairline_pt}pt solid $rule; margin: 0 0 ${s1}pt 0; }
+  .board-app-frame img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+  .board-social { position: relative; padding: ${s3}pt; }
   .board-social-stripe { position: absolute; left: 0; top: 0; width: 100%; height: ${s1}pt; }
-  .board-social-headline { font-size: ${h1}pt; line-height: ${h1_line}pt; font-weight: $display_weight; margin: ${s3}pt 0; }
+  .board-social-headline { font-size: ${h3}pt; line-height: ${h3_line}pt; font-weight: $display_weight;
+    margin: ${s2}pt 0; }
   .board-social-brand { font-size: ${small}pt; line-height: ${small_line}pt; font-weight: $bold; margin: 0; }
 """)
 
