@@ -18,12 +18,9 @@ from typing import Any, Callable, Dict, Mapping
 from core.brand_palette import ROLE_DERIVED
 
 from . import brand_board as bb
-from .brand_board_style import BOARD_TOKENS
 
 # A role the owner did not set, derived from the kit's colours (FR-2), says so under its swatch.
 DERIVED_NOTE = "derived"
-# The clear-space drawing's logo height (mm); its padding is the kit's clear space times it.
-BOARD_CLEAR_LOGO_MM = BOARD_TOKENS["board_clear_logo_mm"]
 
 
 def _esc(value: Any) -> str:
@@ -95,7 +92,7 @@ def type_html(block: Any, kit: Mapping[str, Any]) -> str:
 
 
 def spacing_html(block: Any, kit: Mapping[str, Any]) -> str:
-    """The spacing grid as bars, the page margin, and the logo's clear space (drawn round the logo when there is one)."""
+    """The spacing grid as bars, the page margin, and the logo's clear space."""
     grid = bb.spacing(kit)
     bars = "".join(
         f'<div class="board-gap"><div class="board-gap-bar" style="width:{gap:g}pt"></div>'
@@ -107,12 +104,7 @@ def spacing_html(block: Any, kit: Mapping[str, Any]) -> str:
         f'<p class="board-caption">Logo clear space: {grid.clear_space:.2g} of its height '
         f'({grid.clear_mm:.3g} mm round the {grid.logo_mm:g} mm letterhead logo).</p>'
     )
-    src = bb.logo(kit)
-    drawing = ""
-    if src:
-        pad = round(grid.clear_space * float(BOARD_CLEAR_LOGO_MM), 2)
-        drawing = f'<div class="board-clear" style="padding:{pad:g}mm">{_img(src, "Logo clear space")}</div>'
-    return _part(block, "Spacing", f'<div class="board-gaps">{bars}</div>' + lines + drawing)
+    return _part(block, "Spacing", f'<div class="board-gaps">{bars}</div>' + lines)
 
 
 def voice_html(block: Any, kit: Mapping[str, Any]) -> str:

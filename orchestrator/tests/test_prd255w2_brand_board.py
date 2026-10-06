@@ -150,10 +150,23 @@ def test_each_brand_part_appears_once_so_a_template_cannot_multiply_the_miniatur
 # ---------------------------------------------------------------------------
 
 
+PART_LABELS = {"BRAND", "COLOUR", "LOGO", "VOICE", "TYPE", "SPACING", "APPLICATIONS"}
+
+
+def _layout(document) -> list:
+    """Where each part's label sits: ``(page, label, top)``, and each page's lowest text (the failure says it)."""
+    found = []
+    for number, page in enumerate(document.pages, start=1):
+        words = page.extract_words()
+        found += [(number, w["text"], round(w["top"])) for w in words if w["text"] in PART_LABELS]
+        found.append((number, "lowest text", round(max((w["bottom"] for w in words), default=0))))
+    return found
+
+
 def test_the_board_prints_the_automatos_kit_on_one_a4_page_with_every_roles_hex():
     pdf = _pdf(_board_html(AUTOMATOS))
     with pdfplumber.open(io.BytesIO(pdf)) as document:
-        assert len(document.pages) == 1
+        assert len(document.pages) == 1, _layout(document)
         page = document.pages[0]
         assert abs(page.width - A4_PT[0]) <= PAGE_TOLERANCE_PT and abs(page.height - A4_PT[1]) <= PAGE_TOLERANCE_PT
         text = "".join((page.extract_text() or "").split())

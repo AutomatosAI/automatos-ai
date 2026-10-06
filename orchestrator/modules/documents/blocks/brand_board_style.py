@@ -12,15 +12,14 @@ from __future__ import annotations
 from string import Template
 
 # The board's own sizes (mm): the logo row's logo, a variant's ground and the logo on it,
-# a swatch's chip, the clear-space drawing's logo, and an application's frame.
+# a swatch's chip, and an application's frame.
 BOARD_TOKENS = {
     "board_logo_mm": 18,
     "board_variant_mm": 16,
     "board_variant_logo_mm": 8,
     "board_chip_mm": 10,
     "board_chip_pad_mm": 1.5,
-    "board_clear_logo_mm": 7,
-    "board_app_mm": 38,
+    "board_app_mm": 34,
 }
 
 BOARD = Template("""
@@ -67,8 +66,6 @@ BOARD = Template("""
   .board-gaps { margin: 0 0 ${s1}pt 0; }
   .board-gap { display: inline-block; vertical-align: bottom; margin-right: ${s3}pt; }
   .board-gap-bar { height: ${s2}pt; background: $surface_2; border-left: ${rule_pt}pt solid $heading; }
-  .board-clear { display: inline-block; border: ${hairline_pt}pt dashed $muted; margin: ${s1}pt 0 0 0; }
-  .board-clear img { display: block; height: ${board_clear_logo_mm}mm; width: auto; outline: ${hairline_pt}pt solid $rule; }
   .board-apps { display: table; width: 100%; table-layout: fixed; }
   .board-app { display: table-cell; padding-right: ${s3}pt; vertical-align: top; }
   .board-app:last-child { padding-right: 0; }
