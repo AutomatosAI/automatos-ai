@@ -29,6 +29,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { externalHttpUrl, openExternalUrl } from '@/lib/external-url'
+import { useApiFileDownload } from '@/hooks/use-api-file-download'
 import { cn } from '@/lib/utils'
 import { format, isToday, isYesterday } from 'date-fns'
 import { EmailActions } from './EmailActions'
@@ -346,13 +347,34 @@ export function EmailViewer({
 }
 
 /**
+ * The only API route an email attachment is fetched from: the Gmail attachment route, with
+ * a Gmail message id and attachment id as its two segments. Anything else in a tool result
+ * (another API route, a "../" path) is never fetched with the user's token.
+ */
+const GMAIL_ATTACHMENT_PATH = /^\/api\/emails\/attachments\/gmail\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+(\?[^#]*)?$/
+
+export const EMAIL_ATTACHMENT_DOWNLOAD_FAILED =
+  "Couldn't download the attachment. Check that Gmail is still connected, or open it in Gmail."
+
+export function gmailAttachmentPath(path: unknown): string | null {
+  return typeof path === 'string' && GMAIL_ATTACHMENT_PATH.test(path) ? path : null
+}
+
+/**
  * Attachment card component
  */
 export function AttachmentCard({ attachment }: { attachment: EmailAttachment }) {
-  // The URL comes from the mail tool's result: only an http(s) link is offered or opened.
-  const downloadUrl = externalHttpUrl(attachment.downloadUrl)
+  // The link comes from the mail tool's result: only an http(s) link is offered or opened.
+  // A Gmail attachment has no link; it downloads from the API with auth (downloadPath).
+  const apiPath = gmailAttachmentPath(attachment.downloadPath)
+  const downloadUrl = apiPath ? null : externalHttpUrl(attachment.downloadUrl)
+  const { download, downloading } = useApiFileDownload(EMAIL_ATTACHMENT_DOWNLOAD_FAILED)
   const handleDownload = () => {
-    if (downloadUrl) openExternalUrl(downloadUrl)
+    if (apiPath) {
+      if (!downloading) void download(apiPath, attachment.filename || 'attachment')
+    } else if (downloadUrl) {
+      openExternalUrl(downloadUrl)
+    }
   }
 
   // Get file icon based on mime type
@@ -393,7 +415,7 @@ export function AttachmentCard({ attachment }: { attachment: EmailAttachment }) 
         </div>
       </div>
 
-      {downloadUrl && (
+      {(apiPath || downloadUrl) && (
         <Button
           variant="ghost"
           size="icon"
@@ -403,6 +425,7 @@ export function AttachmentCard({ attachment }: { attachment: EmailAttachment }) 
             handleDownload()
           }}
           title="Download"
+          disabled={downloading}
         >
           <Download className="h-4 w-4" />
         </Button>
