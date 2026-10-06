@@ -22,42 +22,11 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
-import ipaddress
-import socket
-from urllib.parse import urlparse
-
 import jinja2
 from jinja2.sandbox import SandboxedEnvironment
 from sqlalchemy.orm import Session
 
-
-def _safe_url_fetcher(url, *args, **kwargs):
-    """WeasyPrint URL fetcher that blocks file:// and internal/non-public network
-    targets from user-controlled templates (PRD-156 S4 — SSRF).
-
-    Inline ``data:`` URIs (embedded chart images) are allowed; ``http(s)`` is
-    allowed only to PUBLIC addresses; everything else — file://, and
-    private/loopback/link-local hosts such as 10.x / 127.x / 169.254.x (the cloud
-    metadata endpoint) — is refused.
-    """
-    parsed = urlparse(url)
-    scheme = (parsed.scheme or "").lower()
-    if scheme == "data":
-        from weasyprint import default_url_fetcher
-        return default_url_fetcher(url, *args, **kwargs)
-    if scheme not in ("http", "https"):
-        raise ValueError(f"Blocked non-http(s) URL scheme in template: {scheme!r}")
-    host = parsed.hostname or ""
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        raise ValueError(f"Cannot resolve template URL host: {host!r}")
-    for info in infos:
-        if not ipaddress.ip_address(info[4][0]).is_global:
-            raise ValueError(f"Blocked non-public address in template URL: {host!r}")
-    from weasyprint import default_url_fetcher
-    return default_url_fetcher(url, *args, **kwargs)
-
+from modules.documents.url_fetcher import _safe_url_fetcher  # PRD-156 S4: the SSRF guard
 from config import config
 from core.media_render_bundle import build_bundle
 from core.media_render_client import MediaRenderClient
@@ -90,6 +59,7 @@ from modules.documents.blocks import (
 from modules.documents.variables import VariableResolver
 from modules.documents.xlsx_render import write_xlsx
 from modules.documents.brand_signing import a_document_is_signed
+from modules.documents.currency_notice import unpriced_amounts_are_said
 from modules.documents.deliverable_extra import deliverable_extra, the_parties_are_remembered
 from modules.documents.data_coverage import template_for, unused_data_keys
 from modules.documents.legacy_guard import legacy_fields_are_required
@@ -153,6 +123,7 @@ class DocumentGenerationService:
     # ------------------------------------------------------------------
 
     @the_parties_are_remembered  # F354: who the document is for rides to its Deliverable
+    @unpriced_amounts_are_said  # F367: amounts that print with no currency sign (the kit has none) are named
     @a_document_is_signed  # brand kit at generation (night 9b): a placeholder signature takes the kit's sign-off
     async def generate(
         self,

@@ -86,3 +86,6 @@ class GeneratedDocument:
     # F354: who the document is for, from its data (``{"client_name": "Northwind"}``),
     # recorded on its Deliverable's ``extra.parties`` (modules/documents/deliverable_extra.py).
     parties: Dict[str, str] = field(default_factory=dict)
+    # F367: the amount keys that printed as bare numbers because the kit has no currency;
+    # the generate_document tool tells the agent to ask the owner once (modules/documents/currency_notice.py).
+    unpriced_keys: List[str] = field(default_factory=list)
