@@ -20,7 +20,6 @@ that card's id from the run's server-built context (``board_task_id``) as
 from __future__ import annotations
 
 import functools
-import json
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 SESSION_TICKET_PARAM = "_session_task_id"
@@ -34,14 +33,11 @@ Execute = Callable[..., Awaitable[Dict[str, Any]]]
 
 
 def _as_dict(params: Any) -> Any:
-    """``params`` as a dict when it is one or a JSON object string; else as it came (``execute`` refuses it)."""
-    if isinstance(params, str):
-        try:
-            loaded = json.loads(params)
-        except (json.JSONDecodeError, TypeError):
-            return params
-        return loaded if isinstance(loaded, dict) else params
-    return params
+    """``params`` as a dict when it is one, or text of one (JSON, or a Python dict written out: F369); else as
+    it came (``execute`` refuses it). The executor's one decoder, ``params_text.params_object``."""
+    from modules.tools.execution.params_text import params_object
+
+    return params_object(params)
 
 
 def board_card(caller_context: Any) -> Optional[int]:
