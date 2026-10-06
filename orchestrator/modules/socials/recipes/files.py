@@ -47,6 +47,10 @@ class FileOutputError(Exception):
     """The tool returned no file a recipe can use, or its file could not be fetched."""
 
 
+class FileTooLarge(FileOutputError):
+    """The tool's file is over the caller's byte limit."""
+
+
 @dataclass(frozen=True)
 class ReturnedFile:
     """Where a tool's output is: a link to fetch, or the bytes themselves."""
@@ -153,12 +157,12 @@ async def _read(response: httpx.Response, max_bytes: int) -> bytes:
         raise FileOutputError(f"the tool's file link answered {response.status_code}")
     declared = response.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > max_bytes:
-        raise FileOutputError(f"the tool's file is larger than the {max_bytes}-byte limit")
+        raise FileTooLarge(f"the tool's file is larger than the {max_bytes}-byte limit")
     chunks, size = [], 0
     async for chunk in response.aiter_bytes():
         size += len(chunk)
         if size > max_bytes:
-            raise FileOutputError(f"the tool's file is larger than the {max_bytes}-byte limit")
+            raise FileTooLarge(f"the tool's file is larger than the {max_bytes}-byte limit")
         chunks.append(chunk)
     if not size:
         raise FileOutputError("the tool's file link returned an empty file")

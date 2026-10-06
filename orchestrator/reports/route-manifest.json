@@ -1,5 +1,5 @@
 {
-  "route_count": 911,
+  "route_count": 912,
   "routes": [
     {
       "method": "GET",
@@ -1288,6 +1288,10 @@
     {
       "method": "POST",
       "path": "/api/emails"
+    },
+    {
+      "method": "GET",
+      "path": "/api/emails/attachments/gmail/{message_id}/{attachment_id}"
     },
     {
       "method": "GET",
