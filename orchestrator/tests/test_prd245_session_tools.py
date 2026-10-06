@@ -534,27 +534,29 @@ def test_list_tasks_returns_only_the_fields_it_advertises():
     projection an imagined shape and passed while the projection did nothing.
     """
     handler_keys = _list_handler_row_keys()
-    assert set(st.LIST_TASKS_FIELDS) <= handler_keys, "the projection names a key the handler never emits"
+    numbered = handler_keys | {"number"}      # by_ticket_number puts each ticket's board number on its row
+    assert set(st.LIST_TASKS_FIELDS) <= numbered, "the projection names a key the handler never emits"
     assert {"description", "error_message"} <= handler_keys       # i.e. there is something to strip
 
     raw = {
         "success": True, "total": 2,
         "tasks": [
-            {"id": 1, "title": "A", "description": "ssh deploy@10.0.0.4 — password hunter2",
+            {"id": 1, "number": "#0001", "title": "A", "description": "ssh deploy@10.0.0.4 — password hunter2",
              "status": "todo", "priority": "high", "tags": ["ops"], "assigned_agent": "OPS",
              "created_at": "2026-09-18", "started_at": None, "completed_at": None,
              "error_message": "boom at /srv/app"},
-            {"id": 2, "title": "B", "description": "internal notes", "status": "done",
+            {"id": 2, "number": "#0002", "title": "B", "description": "internal notes", "status": "done",
              "priority": "low", "tags": [], "assigned_agent": "unassigned",
              "created_at": "2026-09-18", "started_at": None, "completed_at": None,
              "error_message": None},
         ],
     }
-    assert set(raw["tasks"][0]) == handler_keys                      # this IS the handler's row
+    assert set(raw["tasks"][0]) == numbered                          # this IS the handler's row, numbered
     out = st._project_list_tasks(raw)
     tasks = out["tasks"]
     assert out["total"] == 2                                          # the envelope survives
     assert [t["id"] for t in tasks] == [1, 2]
+    assert [t["number"] for t in tasks] == ["#0001", "#0002"]         # 7 Oct: the number a session gives back
     assert [t["assigned_agent"] for t in tasks] == ["OPS", "unassigned"]
     for task in tasks:
         assert set(task) == set(st.LIST_TASKS_FIELDS)

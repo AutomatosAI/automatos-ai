@@ -87,7 +87,8 @@ def test_a_number_without_its_hash_is_the_number(shop, new_session):
         assert out["task"]["id"] == step.id, said
 
 
-def test_a_bare_number_that_is_two_tickets_is_refused_naming_both(shop, new_session):
+def test_a_bare_number_that_is_one_tickets_id_and_anothers_number_is_the_number(shop, new_session):
+    """Was refused naming both (F241); Gerard, 7 Oct: a bare number is the board's number, everywhere."""
     one = _file(new_session, shop.ws, "Price list")
     two = _file(new_session, shop.ws, "Roast schedule")
     s = new_session()
@@ -96,16 +97,14 @@ def test_a_bare_number_that_is_two_tickets_is_refused_naming_both(shop, new_sess
 
     out = _call(shop.handlers.get_board_task, new_session, shop.ws, {"task_id": one.id})
 
-    assert out["success"] is False
-    assert f"#{one.id:04d} ('Roast schedule')" in out["error"] and "#0001 ('Price list')" in out["error"]
+    assert out["success"] is True and out["task"]["id"] == two.id
     named = _call(shop.handlers.get_board_task, new_session, shop.ws, {"task_id": f"#{one.id}"})
-    assert named["task"]["id"] == two.id                 # with its '#', it is the number
+    assert named["task"]["id"] == two.id                 # with its '#', it is the number too
 
 
-def test_a_list_is_read_as_ids_or_as_numbers_whichever_names_its_tickets(shop, new_session):
+def test_each_bare_number_in_a_list_is_the_board_number_or_else_an_id(shop, new_session):
     """A ref only one reading names is that ticket. A ref that is one ticket's id and
-    another's number goes the way the rest of the call reads: one call's refs are all
-    ids or all numbers."""
+    another's number is the number, whatever the rest of the call reads (7 Oct)."""
     from services.ticket_refs import by_ticket_number
 
     @by_ticket_number
@@ -124,9 +123,9 @@ def test_a_list_is_read_as_ids_or_as_numbers_whichever_names_its_tickets(shop, n
     mixed = _call(given, new_session, shop.ws, {"task_ids": [two.id, 1]})      # an id, and a number
     tied = _call(given, new_session, shop.ws, {"task_ids": [one.id, 10 ** 9]})
 
-    assert as_ids["task_ids"] == [one.id, two.id] and as_numbers["task_ids"] == [two.id, three.id]
+    assert as_ids["task_ids"] == [three.id, two.id] and as_numbers["task_ids"] == [two.id, three.id]
     assert mixed["task_ids"] == [two.id, one.id]
-    assert tied["success"] is False and f"{one.id} is both the id of" in tied["error"]
+    assert tied["success"] is True and tied["task_ids"] == [three.id, 10 ** 9]   # no ticket 10**9: left as given
 
 
 def test_a_ticket_that_is_neither_says_its_number(shop, new_session):

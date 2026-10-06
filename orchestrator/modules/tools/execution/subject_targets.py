@@ -89,12 +89,13 @@ def resolve_targets(db: Any, workspace_id: Any, params: Any,
 
 
 def _row_id(db: Any, workspace_id: Any, table: str, raw: Any) -> Optional[int]:
-    """The row a parameter names: its id, or for a ticket its number (#0042,
-    PRD-252 R4), which Auto's ticket tools take. None when it names no row."""
-    from services.ticket_numbers import is_number_ref, resolve_ticket_ref
+    """The row a parameter names: its id, or for a ticket the ticket the ticket tools
+    will act on (#0042, "0042" and 42 are its number, PRD-252 R4 and Gerard, 7 Oct),
+    so the card names the ticket the call will change. None when it names no row."""
+    from services.ticket_refs import ticket_id_named
 
-    if table == TICKETS and is_number_ref(raw):
-        return resolve_ticket_ref(db, workspace_id, raw)
+    if table == TICKETS:
+        return ticket_id_named(db, workspace_id, raw)[0]
     try:
         return int(raw)
     except (TypeError, ValueError):

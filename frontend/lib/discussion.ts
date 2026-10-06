@@ -42,11 +42,12 @@ export function discussionOf(task: BoardTask): Discussion {
   }
 }
 
-/** What the chat's page context selects while the discussion is open. */
+/** What the chat's page context selects while the discussion is open: a ticket by its board
+ * number (#0042), the number Auto's tools take; a bare id would be read as a number. */
 export function discussionSelection(discussion: Discussion): { type: string; id: string } {
   return discussion.missionId
     ? { type: 'mission', id: discussion.missionId }
-    : { type: 'board_task', id: discussion.ticketId }
+    : { type: 'board_task', id: discussion.number ?? discussion.ticketId }
 }
 
 /** "ticket #0042", or "ticket 612" for one with no number. */

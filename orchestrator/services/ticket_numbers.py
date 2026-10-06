@@ -23,16 +23,21 @@ NUMBER_DIGITS = 4
 # "#0042", "#42", "#0051.3"; a leading '#' says it is a number, not an id. So do a
 # leading zero ("0175") and a step ("105.4"): an id has neither (F241).
 _DIGITS = re.compile(r"^(\d+)(?:\.(\d+))?$")
+# A board number searched for fits the column: no workspace has a billion tickets.
+MAX_SEARCHED_DIGITS = 9
 # F241 (night 7): Auto's tools were called with "#0175" as 175 (a number with its
-# '#' and zeros gone) as often as with an id. Bare digits are read in the workspace.
-AMBIGUOUS_REF = ("{said} is both the id of {as_ids} and the number of {as_numbers}. Nothing was done. "
-                 "Give the number with its '#', as the board shows it.")
-AMBIGUOUS_REFS = ("{said} could be ids or numbers without their '#'. As ids they are {as_ids}; as numbers, "
-                  "{as_numbers}. Nothing was done. Give each ticket's number with its '#', as the board shows it.")
+# '#' and zeros gone) as often as with an id. Gerard, 7 Oct: "same number everywhere": bare
+# digits a person or an agent gives are the board's number (``read_bare_refs``).
 # F241 (night 7b): a step's number sent as a JSON number ("task_id": 188.3).
 _FRACTION = re.compile(r"^(\d+)\.(\d+)$")
 FRACTION_DROPPED_A_ZERO = ("{said} could be {short} or {long}: sent as a number, it lost the 0 at its end. "
                            "Nothing was done. Give the step's number as text with its '#', as the board shows it.")
+
+
+class TicketId(int):
+    """A ticket's database id, as the platform's own code passes it in a structured call (the card
+    a tool already holds). It is read as the id, never as a board number: a bare number a person or
+    an agent gives is the board's number (``read_bare_refs``)."""
 
 
 def format_number(seq: Optional[int], step: Optional[int] = None) -> Optional[str]:
@@ -120,6 +125,24 @@ def ticket_label_for(db: Session, workspace_id: Any, task_id: Any, *, capital: b
     return ticket_label(task, ticket_number(db, task), capital=capital)
 
 
+def title_or_number(search: str) -> Any:
+    """The board search's filter: a ticket whose title has ``search`` in it or, when ``search`` is a
+    ticket's number ("#0892", "0892" or "892"), the ticket with that board number (Gerard, 7 Oct:
+    "same number everywhere")."""
+    titled = BoardTask.title.ilike(f"%{search}%")
+    seq = _whole_number(search)
+    return or_(titled, BoardTask.workspace_seq == seq) if seq is not None else titled
+
+
+def _whole_number(text: Any) -> Optional[int]:
+    """892 for "#0892", "0892" or "892"; None for anything else, a step's number included."""
+    said = str(text).strip()
+    match = _DIGITS.match(said[1:] if said.startswith("#") else said)
+    if not match or match.group(2) is not None or len(match.group(1)) > MAX_SEARCHED_DIGITS:
+        return None
+    return int(match.group(1))
+
+
 def _number_parts(ref: Any) -> Optional[Tuple[int, Optional[int]]]:
     """(number, step) for a ticket named by its number: "#0042", "#0051.3", "0175"
     or "105.4". None for anything else, an id ("42", 42) included."""
@@ -140,8 +163,9 @@ def is_number_ref(ref: Any) -> bool:
 
 
 def is_bare_ref(ref: Any) -> bool:
-    """True for 175 or "175": a number without its '#', or an id."""
-    if isinstance(ref, bool):
+    """True for 175 or "175": a number without its '#' (or, when no ticket has that number, an id).
+    False for a ``TicketId``: the platform's own id is never read as a number."""
+    if isinstance(ref, (bool, TicketId)):
         return False
     return isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit() and not is_number_ref(ref))
 
@@ -174,57 +198,27 @@ def _step_count(db: Session, workspace_id: Any, seq: int) -> int:
     return len(_steps_in_order(db, workspace_id, [card.id]).get(card.id, [])) if card else 0
 
 
-def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Tuple[Dict[int, int], Optional[str]]:
-    """The ticket ids that bare refs (175, "175") name in this workspace, by ref, or
-    the refusal when that can't be told. A ref that names no ticket is left out.
+def read_bare_refs(db: Session, workspace_id: Any, refs: Iterable[Any]) -> Dict[int, int]:
+    """The ticket ids that bare refs (892, "892") name in this workspace, by ref. A ref that names
+    no ticket is left out.
 
-    A ref that only one reading names (an id, or a number without its '#') is that
-    ticket. A ref that is the id of one ticket and the number of another is torn: one
-    call's refs are all ids or all numbers, so the reading that names more of the
-    call's refs settles it. When both name as many, nothing is guessed: the refusal
-    names both tickets of each torn ref, except in Auto's chat, where the number is meant (F369)."""
+    A bare number is the board's number: #0892, in Auto's chat, in the platform tools and in a
+    session alike (Gerard, 7 Oct: "same number everywhere, it has to be easy"). It is read as an id
+    only when no ticket in the workspace has that number (an id a tool's answer gave).
+
+    F369 (night 10c, chat 16bb619c): "tag that ticket", the one Auto had just called #0892, went as
+    task_id 892, also the id of #0708; the tie was refused naming both, and Auto asked the owner
+    which they meant. The number is the one meant, everywhere."""
     wanted = {int(str(r).strip()) for r in refs}
     if not wanted:
-        return {}, None
-    rows = db.query(BoardTask.id, BoardTask.workspace_seq, BoardTask.title).filter(
+        return {}
+    rows = db.query(BoardTask.id, BoardTask.workspace_seq).filter(
         BoardTask.workspace_id == workspace_id,
         or_(BoardTask.id.in_(sorted(wanted)), BoardTask.workspace_seq.in_(sorted(wanted))),
     ).all()
-    as_ids = {r.id: r for r in rows if r.id in wanted}
-    as_numbers = {r.workspace_seq: r for r in rows if getattr(r, "workspace_seq", None) in wanted}
-    torn = sorted(n for n in as_ids.keys() & as_numbers.keys() if as_ids[n].id != as_numbers[n].id)
-    tied = bool(torn) and len(as_ids) == len(as_numbers)
-    if tied and not in_autos_chat():
-        return {}, _both_readings(db, workspace_id, torn, as_ids, as_numbers)
-    by_number = tied or len(as_numbers) > len(as_ids)
-    meant, other = (as_numbers, as_ids) if by_number else (as_ids, as_numbers)
-    return {**_ids(other), **_ids(meant)}, None
-
-
-def in_autos_chat() -> bool:
-    """Whether this call is made in the owner's chat with Auto (the turn books itself to the chat lane), where
-    a ticket is named by its number: bare digits that are one ticket's id and another's number are the number.
-
-    F369 (night 10c, chat 16bb619c): "tag that ticket", the one Auto had just called #0892, went as task_id
-    892, also the id of #0708; the call was refused naming both, and Auto asked the owner which they meant."""
-    from core.llm.usage_context import LANE_CHAT, current_usage_scope
-
-    return current_usage_scope().get("request_type") == LANE_CHAT
-
-
-def _ids(reading: Dict[int, Any]) -> Dict[int, int]:
-    return {n: r.id for n, r in reading.items()}
-
-
-def _both_readings(db: Session, workspace_id: Any, said: List[int], as_ids: Dict[int, Any],
-                   as_numbers: Dict[int, Any]) -> str:
-    """The refusal for torn refs (``said``), naming the ticket each reading gives."""
-    def named(reading: Dict[int, Any]) -> str:
-        return ", ".join(f"{ticket_label_for(db, workspace_id, reading[n].id)} ('{reading[n].title}')"
-                         for n in said)
-
-    template = AMBIGUOUS_REF if len(said) == 1 else AMBIGUOUS_REFS
-    return template.format(said=", ".join(str(n) for n in said), as_ids=named(as_ids), as_numbers=named(as_numbers))
+    as_ids = {r.id: r.id for r in rows if r.id in wanted}
+    as_numbers = {r.workspace_seq: r.id for r in rows if getattr(r, "workspace_seq", None) in wanted}
+    return {**as_ids, **as_numbers}
 
 
 def resolve_ticket_ref(db: Session, workspace_id: Any, ref: Any) -> Optional[int]:

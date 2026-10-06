@@ -12,8 +12,8 @@ the board's own form, "#0201". The owner wrote "card 1879", "Card 1869" and "car
 So a card named with a card word counts too: "card 1879", "ticket 0022", "card 27.2",
 "step 27.2". A step ("27.2") or a leading zero ("0022") is the board's number
 (#0027.2, #0022). Bare digits are read as the ticket tools read them
-(``services.ticket_numbers.read_bare_refs``): the card with that id, or with that
-number, in this workspace. A number with no card word before it is never a card
+(``services.ticket_numbers.read_bare_refs``): the card with that number in this
+workspace, or the card with that id when no card has that number (Gerard, 7 Oct). A number with no card word before it is never a card
 ("10 kg", "120 boxes"), and "step 2" with no card's number is a mission's step, not one.
 
 The owner's words for a card are what follows their label: "Correction: …", "with this
@@ -58,14 +58,14 @@ def word_refs(text: str) -> List[SaidRef]:
 
 def card_said(db: Session, workspace_id: Any, digits: str) -> Tuple[Optional[int], bool]:
     """The id of the card ``digits`` names in this workspace, and whether it was named
-    by its id; (None, False) when no card, or more than one reading, fits."""
-    from services.ticket_numbers import read_bare_refs, resolve_ticket_ref
+    by its id (no card has that number); (None, False) when no card fits."""
+    from services.ticket_numbers import format_number, read_bare_refs, resolve_ticket_ref
 
     if "." in digits or (len(digits) > 1 and digits.startswith("0")):
         return resolve_ticket_ref(db, workspace_id, digits), False
-    found, refused = read_bare_refs(db, workspace_id, [digits])
-    task_id = None if refused else found.get(int(digits))
-    return task_id, task_id is not None and task_id == int(digits)
+    task_id = read_bare_refs(db, workspace_id, [digits]).get(int(digits))
+    by_id = task_id is not None and resolve_ticket_ref(db, workspace_id, format_number(int(digits))) is None
+    return task_id, by_id
 
 
 def owners_card_words(text: str) -> str:

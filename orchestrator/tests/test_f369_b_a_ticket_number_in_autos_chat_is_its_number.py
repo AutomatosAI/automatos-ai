@@ -3,8 +3,10 @@
 Auto filed "Design Brand Kit" and told the owner it was #0892 (id 2147). "Please tag that
 ticket" became platform_update_task {task_id: 892}: 892 is #0892's number and the id of #0708, a
 finished run. The call was refused naming both (F241's rule for a tie), and Auto asked the owner
-"confirm the exact task ID". In Auto's chat a ticket is named by its number (PRD-252 R4), so
-there the number is the one meant; elsewhere a tie is still refused.
+"confirm the exact task ID". The fix read the number in Auto's chat only.
+
+Gerard, 7 Oct: "same number everywhere". A bare number is the board's number in Auto's chat, on
+a board run and in a session alike; it is read as an id only when no ticket has that number.
 """
 from __future__ import annotations
 
@@ -49,26 +51,29 @@ async def _update_task(db, workspace_id, params):
 
 def test_in_autos_chat_892_is_ticket_0892():
     with usage_scope(request_type=LANE_CHAT, execution_id="chat:16bb619c"):
-        found, refused = read_bare_refs(_Db(), WS, [892])
+        found = read_bare_refs(_Db(), WS, [892])
         answer = asyncio.run(_update_task(_Db(), WS, {"task_id": 892, "tags": ["sim-night-2026-10-06"]}))
 
-    assert refused is None and found == {892: DESIGN_BRAND_KIT.id}
+    assert found == {892: DESIGN_BRAND_KIT.id}
     assert answer == {"success": True, "edited": DESIGN_BRAND_KIT.id}
 
 
-def test_outside_autos_chat_the_tie_is_still_refused_naming_both():
+def test_outside_autos_chat_892_is_ticket_0892_too():
+    """Was: the tie was refused naming both outside Auto's chat (F241). Now the number is meant everywhere."""
     with usage_scope(request_type=LANE_BOARD_TASK, execution_id="board_task:2150"):
-        found, refused = read_bare_refs(_Db(), WS, [892])
+        found = read_bare_refs(_Db(), WS, [892])
+        answer = asyncio.run(_update_task(_Db(), WS, {"task_id": "892"}))
 
-    assert found == {} and "892 is both the id of" in refused
+    assert found == {892: DESIGN_BRAND_KIT.id}
+    assert answer == {"success": True, "edited": DESIGN_BRAND_KIT.id}
 
 
-def test_a_ref_only_one_reading_names_is_unchanged_in_chat():
+def test_a_ref_no_ticket_has_as_its_number_is_its_id():
     class _OnlyAnId(_Db):
         def query(self, *columns):
             return _Query([RECIPE_RUN])
 
     with usage_scope(request_type=LANE_CHAT, execution_id="chat:16bb619c"):
-        found, refused = read_bare_refs(_OnlyAnId(), WS, [892])
+        found = read_bare_refs(_OnlyAnId(), WS, [892])
 
-    assert refused is None and found == {892: RECIPE_RUN.id}
+    assert found == {892: RECIPE_RUN.id}

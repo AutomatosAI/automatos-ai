@@ -21,7 +21,8 @@ describe('a discussion', () => {
     expect(discussHref('612')).toBe('/chat?ticket=612')
     const discussion = discussionOf(ticket())
     expect(discussion).toEqual({ ticketId: '612', number: '#0042', title: 'Welcome email', agentName: 'Words', missionId: null })
-    expect(discussionSelection(discussion)).toEqual({ type: 'board_task', id: '612' })
+    expect(discussionSelection(discussion)).toEqual({ type: 'board_task', id: '#0042' })   // the number Auto's tools take
+    expect(discussionSelection({ ...discussion, number: null })).toEqual({ type: 'board_task', id: '612' })
     expect(discussionLabel(discussion)).toBe('ticket #0042')
     expect(discussionLabel({ number: null, ticketId: '612' })).toBe('ticket 612')
   })

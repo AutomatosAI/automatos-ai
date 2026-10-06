@@ -49,7 +49,7 @@ describe('a discussion (PRD-252 R2)', () => {
     mockPath = '/chat'
     useDiscussionStore.getState().start(discussion)
     const { result } = renderHook(() => usePageContext({ selected: { type: 'repo', id: 'projects/site' } }))
-    expect(result.current.selected).toEqual({ type: 'board_task', id: '612' })
+    expect(result.current.selected).toEqual({ type: 'board_task', id: '#0042' })
     useDiscussionStore.getState().end()
   })
 
