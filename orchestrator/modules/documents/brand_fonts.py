@@ -14,7 +14,8 @@ one table. The size and count caps keep a render bundle, which carries every
 brand file inline, inside media-render's limit.
 
 At render time :func:`brand_kit_for_media_render` inlines every uploaded brand
-file as a data: URI: the logo, the logo mark (into ``logo_mark_url``) and the
+file as a data: URI: the logo, the logo mark (into ``logo_mark_url``), the logo
+for dark backgrounds (PRD-255 FR-9, into ``logo_dark_url``) and the
 fonts (``font_files`` becomes ``[{family, weight, style, data_uri}]``), the
 shapes ``core/media_render_bundle.py`` reads. A render reads only what its
 bundle carries (D9), so the fonts never have to be fetched.
@@ -53,6 +54,8 @@ WOFF2_FLAVORS = frozenset({0x00010000, 0x4F54544F})
 WOFF2_COLLECTION_FLAVOR = 0x74746366  # "ttcf"
 MAX_FONT_BYTES = 2 * 1024 * 1024  # 2 MB: a full Latin face is 20-200 KB in woff2
 MAX_FONT_FAMILY_CHARS = 64
+# The stored logo variants a social render inlines: (the field the bundle reads, the kit's stored path).
+INLINED_LOGOS = (("logo_mark_url", "logo_mark_path"), ("logo_dark_url", "logo_dark_path"))
 
 
 class BrandFontError(ValueError):
@@ -161,13 +164,13 @@ def brand_kit_for_media_render(kit: Dict[str, Any]) -> Dict[str, Any]:
     """A copy of the kit with every uploaded brand file inline, as a social render takes it.
 
     The logo as :func:`brand_kit_for_render` inlines it, an uploaded logo mark
-    in ``logo_mark_url``, and ``font_files`` as ``[{family, weight, style,
+    in ``logo_mark_url``, an uploaded logo for dark backgrounds in
+    ``logo_dark_url``, and ``font_files`` as ``[{family, weight, style,
     data_uri}]``. A stored file whose bytes are gone is left out (a font) or
-    left as the kit had it (a mark); the template's fallbacks apply.
+    left as the kit had it (a mark, a dark logo); the template's fallbacks apply.
     """
     rendered = brand_kit_for_render(kit)
-    mark_path = kit.get("logo_mark_path") or ""
-    mark = logo_data_uri(mark_path) if mark_path else None
+    inlined = {field: _inlined(kit, path_field) for field, path_field in INLINED_LOGOS}
     fonts = []
     for font in kit.get("font_files") or []:
         data = load_brand_font(font)
@@ -180,7 +183,13 @@ def brand_kit_for_media_render(kit: Dict[str, Any]) -> Dict[str, Any]:
             "style": font.get("style"),
             "data_uri": f"data:{WOFF2_MIME};base64,{base64.b64encode(data).decode('ascii')}",
         })
-    return {**rendered, **({"logo_mark_url": mark} if mark else {}), "font_files": fonts}
+    return {**rendered, **{field: uri for field, uri in inlined.items() if uri}, "font_files": fonts}
+
+
+def _inlined(kit: Dict[str, Any], path_field: str) -> Optional[str]:
+    """The stored file at ``kit[path_field]`` as a data: URI; ``None`` without one or its bytes."""
+    path = kit.get(path_field) or ""
+    return logo_data_uri(path) if path else None
 
 
 __all__ = [

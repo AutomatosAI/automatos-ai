@@ -29,6 +29,9 @@
         --mono: var(--brand-mono-font, monospace);
         /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
         --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
+        /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
+        --display-scale: var(--brand-display-scale, 1);
+        --body-scale: var(--brand-body-scale, 1);
       }
 
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -42,25 +45,25 @@
         gap: calc(28 * var(--s)); padding: calc(64 * var(--u)) calc(68 * var(--u)) calc(56 * var(--u)); }
       .page.wrap-words * { overflow-wrap: anywhere; }
       .top { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
-        font-family: var(--mono); font-size: calc(26 * var(--s)); line-height: 1.2; }
+        font-family: var(--mono); font-size: calc(26 * var(--s) * var(--body-scale)); line-height: 1.2; }
       .counter { color: var(--accent); font-weight: 700; letter-spacing: 0.04em; }
       .handle { color: var(--dim); font-weight: 500; margin-left: auto; text-align: right; }
       .main { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; gap: calc(40 * var(--s)); }
       .lead { display: flex; flex-direction: column; align-items: flex-start; gap: calc(24 * var(--s)); }
       .eyebrow { display: inline-flex; align-items: center; gap: calc(14 * var(--s)); max-width: 100%;
         background: var(--dark); color: var(--on-dark); border-radius: calc(10 * var(--s));
-        padding: calc(12 * var(--s)) calc(22 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s));
+        padding: calc(12 * var(--s)) calc(22 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s) * var(--body-scale));
         font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.2; }
       .tri { flex: none; width: 0; height: 0; border-left: calc(8 * var(--s)) solid transparent;
         border-right: calc(8 * var(--s)) solid transparent; border-bottom: calc(13 * var(--s)) solid var(--dark-accent); }
-      .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(100 * var(--s));
+      .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(100 * var(--s) * var(--display-scale));
         line-height: 0.98; letter-spacing: -0.02em; color: var(--ink); }
       .headline .line { display: block; }
       .hot { color: var(--accent-large); }
-      .subline { max-width: 100%; font-family: var(--body); font-size: calc(36 * var(--s)); line-height: 1.35; color: var(--muted); }
+      .subline { max-width: 100%; font-family: var(--body); font-size: calc(36 * var(--s) * var(--body-scale)); line-height: 1.35; color: var(--muted); }
       .foot { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
         padding-top: calc(20 * var(--s)); border-top: calc(2 * var(--u)) solid var(--card);
-        font-family: var(--mono); font-size: calc(26 * var(--s)); line-height: 1.2; }
+        font-family: var(--mono); font-size: calc(26 * var(--s) * var(--body-scale)); line-height: 1.2; }
       .brand { display: flex; align-items: center; gap: calc(14 * var(--s)); color: var(--ink); font-weight: 700; }
       .logo { flex: none; width: calc(44 * var(--s)); height: calc(44 * var(--s)); object-fit: contain; }
       .logo[src^="data:image/gif"] { display: none; }
@@ -78,13 +81,13 @@
       .bars { display: grid; grid-template-columns: minmax(0, 34%) minmax(0, 1fr); column-gap: calc(26 * var(--c));
         row-gap: calc(28 * var(--c)); align-items: center; --reserve: 0px; }
       .bar-row { display: contents; }
-      .bar-label { font-size: calc(36 * var(--c)); font-weight: 600; line-height: 1.2; color: var(--ink); overflow-wrap: break-word; }
+      .bar-label { font-size: calc(36 * var(--c) * var(--body-scale)); font-weight: 600; line-height: 1.2; color: var(--ink); overflow-wrap: break-word; }
       .bar-track { display: flex; align-items: center; gap: calc(16 * var(--c)); min-width: 0;
         min-height: calc(64 * var(--c)); border-left: calc(3 * var(--u)) solid var(--card); }
       .bar { flex: none; height: calc(52 * var(--c)); background: var(--accent-large);
         width: max(0px, calc(var(--f, 0) * (100% - var(--reserve))));
         border-radius: 0 calc(6 * var(--c)) calc(6 * var(--c)) 0; }
-      .bar-value { flex: none; white-space: nowrap; font-size: calc(42 * var(--c)); font-weight: 700; line-height: 1.1; color: var(--ink); }
+      .bar-value { flex: none; white-space: nowrap; font-size: calc(42 * var(--c) * var(--body-scale)); font-weight: 700; line-height: 1.1; color: var(--ink); }
 
       /* A line: the trace and a dot per row over a baseline; each figure and label sits under its dot. */
       .line-chart { display: flex; flex-direction: column; gap: calc(20 * var(--c)); --n: 5; }
@@ -99,8 +102,8 @@
       .axis { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
       .tick { display: flex; flex-direction: column; align-items: center; gap: calc(6 * var(--c)); min-width: 0;
         padding: 0 calc(6 * var(--c)); text-align: center; }
-      .tick-value { font-size: calc(42 * var(--c)); font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
-      .tick-label { font-size: calc(28 * var(--c)); line-height: 1.25; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
+      .tick-value { font-size: calc(42 * var(--c) * var(--body-scale)); font-weight: 700; line-height: 1.1; color: var(--ink); white-space: nowrap; }
+      .tick-label { font-size: calc(28 * var(--c) * var(--body-scale)); line-height: 1.25; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
 
       /* A number grid: each figure in its own tile, sized to fill whole rows. The figure wears ink (it
          stays readable at any size); the brand shows in the rule along each tile's top. */
@@ -109,17 +112,17 @@
         gap: calc(12 * var(--c)); min-width: 0; background: var(--card); border-radius: calc(16 * var(--c));
         border-top: calc(6 * var(--c)) solid var(--accent-large);
         padding: calc(26 * var(--c)) calc(16 * var(--c)) calc(28 * var(--c)); text-align: center; }
-      .tile-value { font-size: calc(72 * var(--c)); font-weight: 800; line-height: 1; letter-spacing: -0.01em;
+      .tile-value { font-size: calc(72 * var(--c) * var(--display-scale)); font-weight: 800; line-height: 1; letter-spacing: -0.01em;
         color: var(--ink); white-space: nowrap; }
-      .tile-label { font-size: calc(28 * var(--c)); line-height: 1.3; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
+      .tile-label { font-size: calc(28 * var(--c) * var(--body-scale)); line-height: 1.3; color: var(--muted); overflow-wrap: break-word; max-width: 100%; }
 
       /* The source chip: where every figure on the chart comes from. */
       .chip { display: inline-flex; align-self: flex-start; flex-wrap: wrap; align-items: baseline; column-gap: calc(12 * var(--s));
         row-gap: calc(4 * var(--s)); max-width: 100%; background: var(--card); border-radius: calc(10 * var(--s));
-        padding: calc(10 * var(--s)) calc(18 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s)); line-height: 1.3; }
+        padding: calc(10 * var(--s)) calc(18 * var(--s)); font-family: var(--mono); font-size: calc(24 * var(--s) * var(--body-scale)); line-height: 1.3; }
       .chip-caption { color: var(--accent); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
       .chip-text { color: var(--dim); overflow-wrap: anywhere; }
-      .note { font-family: var(--body); font-size: calc(28 * var(--s)); line-height: 1.4; color: var(--muted); }
+      .note { font-family: var(--body); font-size: calc(28 * var(--s) * var(--body-scale)); line-height: 1.4; color: var(--muted); }
 
       /* A tall story (9:16): the chart takes the room. */
       @media (max-aspect-ratio: 3/5) {

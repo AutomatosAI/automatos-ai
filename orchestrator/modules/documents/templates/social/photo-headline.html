@@ -21,6 +21,10 @@
         --mono: var(--brand-mono-font, monospace);
         /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
         --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
+        /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
+        --display-scale: var(--brand-display-scale, 1);
+        --body-scale: var(--brand-body-scale, 1);
+        --logo-chip: var(--brand-logo-chip, transparent);
       }
 
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -43,22 +47,22 @@
         margin: calc(56 * var(--u)) calc(60 * var(--u)) 0; }
       .brand, .chip { display: inline-flex; align-items: center; gap: calc(12 * var(--s)); max-width: 100%;
         background: color-mix(in srgb, var(--ink) 82%, transparent); color: var(--on-ink); border-radius: calc(999 * var(--s));
-        padding: calc(10 * var(--s)) calc(20 * var(--s)); font-size: calc(26 * var(--s)); font-weight: 600; line-height: 1.2; }
+        padding: calc(10 * var(--s)) calc(20 * var(--s)); font-size: calc(26 * var(--s) * var(--body-scale)); font-weight: 600; line-height: 1.2; }
       .chip.handle { font-family: var(--mono); font-weight: 500; margin-left: auto; }
       .logo { flex: none; width: calc(40 * var(--s)); height: calc(40 * var(--s)); object-fit: contain; }
       .logo[src^="data:image/gif"] { display: none; }
       .pill { display: inline-flex; align-self: flex-start; max-width: 100%; background: var(--accent); color: var(--ink);
         border-radius: calc(10 * var(--s)); padding: calc(10 * var(--s)) calc(20 * var(--s)); font-family: var(--mono);
-        font-size: calc(24 * var(--s)); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.2; }
+        font-size: calc(24 * var(--s) * var(--body-scale)); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.2; }
       /* Display type sets tighter than its glyphs: the padding holds their ink, so the fit never reads it as overflow. */
       .headline { width: 100%; font-family: var(--display); font-weight: 800; line-height: 0.98; letter-spacing: -0.02em; color: var(--on-ink);
         padding-bottom: 0.08em; }
       .headline .line { display: block; }
       .hot { color: var(--accent); }
-      .lede { font-size: calc(34 * var(--s)); line-height: 1.38; color: var(--on-ink); }
-      .note { font-size: calc(28 * var(--s)); line-height: 1.4; color: var(--muted); }
+      .lede { font-size: calc(34 * var(--s) * var(--body-scale)); line-height: 1.38; color: var(--on-ink); }
+      .note { font-size: calc(28 * var(--s) * var(--body-scale)); line-height: 1.4; color: var(--muted); }
       .button { display: inline-flex; align-self: flex-start; align-items: center; max-width: 100%; background: var(--accent); color: var(--ink);
-        border-radius: calc(14 * var(--s)); padding: calc(18 * var(--s)) calc(30 * var(--s)); font-size: calc(30 * var(--s));
+        border-radius: calc(14 * var(--s)); padding: calc(18 * var(--s)) calc(30 * var(--s)); font-size: calc(30 * var(--s) * var(--body-scale));
         font-weight: 700; line-height: 1.15; }
 
       /* The words' panel: the brand's ink rising from the foot of the photo, solid where the words sit. */
@@ -66,7 +70,7 @@
         padding: calc(140 * var(--s)) calc(60 * var(--u)) calc(60 * var(--u));
         background: linear-gradient(to top, color-mix(in srgb, var(--ink) 94%, transparent) 0%,
           color-mix(in srgb, var(--ink) 90%, transparent) 70%, transparent 100%); }
-      .panel .headline { font-size: calc(124 * var(--s)); }
+      .panel .headline { font-size: calc(124 * var(--s) * var(--display-scale)); }
       /* Landscape (LinkedIn 1.91:1, X 16:9): the panel takes the left, the photo the right. */
       @media (min-aspect-ratio: 3/2) {
         .page { justify-content: flex-start; }
@@ -74,8 +78,11 @@
           color-mix(in srgb, var(--ink) 90%, transparent) 46%, transparent 64%); }
         .panel { flex: 1 1 auto; justify-content: flex-end; width: 58%; background: none;
           padding: calc(40 * var(--u)) calc(40 * var(--s)) calc(60 * var(--u)) calc(60 * var(--u)); }
-        .panel .headline { font-size: calc(110 * var(--s)); }
+        .panel .headline { font-size: calc(110 * var(--s) * var(--display-scale)); }
       }
+      /* PRD-255 FR-9: on a dark stage, the kit's logo for dark backgrounds as it is; without one, the logo on a light chip. */
+      .dark-logo { background: var(--logo-chip); border-radius: calc(8 * var(--s)); padding: calc(4 * var(--s)); }
+      .dark-logo[src^="data:image/gif"] { background: none; }
     </style>
   </head>
   <body>
@@ -84,7 +91,7 @@
         <div class="backdrop"></div>
         <img class="photo" data-slot="photo" data-layout-allow-overflow src="assets/slots/photo.png" alt="" />
         <div class="page">
-          <div class="top fit"><div class="chip brand" data-optional><img class="logo" src="{{ brand.logo_mark }}" alt="" /><span class="v">{{ brand.name }}</span></div><span class="chip handle v">{{ handle }}</span></div>
+          <div class="top fit"><div class="chip brand" data-optional><img class="dark-logo logo" src="{{ brand.logo_on_dark }}" alt="" /><span class="v">{{ brand.name }}</span></div><span class="chip handle v">{{ handle }}</span></div>
           <div class="panel fit">
             <span class="pill v">{{ eyebrow }}</span>
             <h1 class="headline fit" data-dress data-accent="{{ headline_accent }}">{{ headline }}</h1>

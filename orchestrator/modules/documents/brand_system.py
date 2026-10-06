@@ -55,6 +55,7 @@ from core.brand_palette import (
     parse_hex,
     to_hex,
 )
+from core.brand_type import DEFAULT_TYPE_SCALE, REGULAR_WEIGHT
 
 PALETTE_FIELD = "palette"
 PALETTE_SOURCE_FIELD = "palette_source"
@@ -178,23 +179,12 @@ def one_line_text(value: str, what: str, max_chars: int) -> str:
 # The type scale (FR-1; Decision Q5: one default scale, no presets)
 # ---------------------------------------------------------------------------
 
-TYPE_SCALE_FIELD = "type_scale"
-TYPE_STEPS = ("display", "h1", "h2", "h3", "body", "small", "caption")
+# The default scale itself (DEFAULT_TYPE_SCALE) is core/brand_type.py's: a social render reads it too.
+TYPE_STEPS = tuple(DEFAULT_TYPE_SCALE)
 MIN_TYPE_PT, MAX_TYPE_PT = 5.0, 96.0
 # A line is at least its size, and at most this many times it.
 MAX_LINE_RATIO = 3.0
 MIN_WEIGHT, MAX_WEIGHT, WEIGHT_STEP = 100, 900, 100
-REGULAR_WEIGHT, SEMIBOLD_WEIGHT = 400, 600
-# step -> (size_pt, line_pt, weight): a professional document scale.
-DEFAULT_TYPE_SCALE = {
-    "display": (32.0, 38.0, SEMIBOLD_WEIGHT),
-    "h1": (22.0, 28.0, SEMIBOLD_WEIGHT),
-    "h2": (15.0, 20.0, SEMIBOLD_WEIGHT),
-    "h3": (12.0, 16.0, SEMIBOLD_WEIGHT),
-    "body": (10.0, 15.0, REGULAR_WEIGHT),
-    "small": (8.5, 12.0, REGULAR_WEIGHT),
-    "caption": (7.5, 10.0, REGULAR_WEIGHT),
-}
 
 
 class TypeStep(BaseModel):

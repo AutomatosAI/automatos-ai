@@ -82,7 +82,9 @@ def test_each_photo_card_passes_the_contract_and_the_brand_rule_and_shows_the_ma
     blocks = starter["blocks"]
     assert validate_social_blocks(blocks, SOCIAL_IMAGE) == blocks
     assert brand_literals(blocks["html"], blocks.get("css") or "") == []
-    assert "{{ brand.logo_mark }}" in blocks["html"] and "{{ brand.logo }}" not in blocks["html"]
+    # PRD-255 FR-9: a photo card's words sit on the brand's ink, a dark stage: it shows the
+    # kit's logo for dark backgrounds (else the mark on a light chip), never the wordmark.
+    assert "{{ brand.logo_on_dark }}" in blocks["html"] and "{{ brand.logo }}" not in blocks["html"]
 
 
 @pytest.mark.parametrize("slug", list(PHOTO_NAMES))

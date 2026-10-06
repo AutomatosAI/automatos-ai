@@ -37,6 +37,12 @@ the darker of the two surfaces, so it reads on both:
   must be (AA 3:1 for 24 px, or 19 px bold, with a margin): display words and
   big numbers.
 
+A v2 role the kit stores (PRD-255 US-006) is the token it maps onto instead,
+when it meets that token's own target: ``paper`` the paper, ``ink`` the
+on-paper text, ``muted`` its muted tone, ``accent`` the primary on paper, and
+``accent_2`` (else ``accent``) the accent on paper. So a social image is set
+in the same roles as the kit's documents.
+
 Every token is a 6-digit hex: the contrast pass reads computed ``rgb()``
 colours, so it checks each of them.
 
@@ -235,31 +241,70 @@ def stage_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
     return {name: to_hex(rgb) for name, rgb in palette.items()}
 
 
-def paper_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
-    """The paper tokens for ``kit`` (a brand kit dict); ``{}`` when it has no usable text colour.
+def _kept(stored: Optional[RGB], meets: Callable[[RGB], bool]) -> Optional[RGB]:
+    """A role the kit stores, when it meets the token's own target; ``None`` leaves the token to derivation."""
+    return stored if stored is not None and meets(stored) else None
 
-    A role whose kit colour is missing or not a hex colour is left out, and the
-    template's own ``var()`` fallback applies to it.
-    """
-    text = parse_hex(kit.get("text_color"))
-    if text is None:
-        return {}
-    paper = _least(text, WHITE, lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
-    card = _most(paper, BLACK, lambda c: contrast(c, paper) <= CARD_CONTRAST)
-    palette = {PAPER: paper, PAPER_CARD: card}
+
+def _on_card(card: RGB, target: float) -> Callable[[RGB], bool]:
+    return lambda c: contrast(c, card) >= target
+
+
+def _paper_text(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) -> Dict[str, RGB]:
+    """``on-paper`` and its quieter tones: the stored ink and muted when they read, else today's derivation."""
+    on_paper = _kept(stored.get(ROLE_INK), _on_card(card, ON_PAPER_MIN_CONTRAST))
     secondary = parse_hex(kit.get("secondary_color"))
-    if secondary is not None:
-        on_paper = _least(secondary, BLACK, lambda c: contrast(c, card) >= ON_PAPER_MIN_CONTRAST)
-        palette[ON_PAPER] = on_paper
-        palette[ON_PAPER_MUTED] = _most(on_paper, card, lambda c: contrast(c, card) >= MUTED_CONTRAST)
-        palette[ON_PAPER_DIM] = _most(on_paper, card, lambda c: contrast(c, card) >= DIM_CONTRAST)
-    primary = parse_hex(kit.get("primary_color"))
-    if primary is not None:
-        palette[PRIMARY_ON_PAPER] = _least(primary, BLACK, lambda c: contrast(c, card) >= PAPER_TEXT_MIN_CONTRAST)
-        palette[PRIMARY_ON_PAPER_LARGE] = _least(primary, BLACK, lambda c: contrast(c, card) >= LARGE_TEXT_MIN_CONTRAST)
-    accent = parse_hex(kit.get("accent_color"))
-    if accent is not None:
-        palette[ACCENT_ON_PAPER] = _least(accent, BLACK, lambda c: contrast(c, card) >= PAPER_TEXT_MIN_CONTRAST)
+    if on_paper is None and secondary is not None:
+        on_paper = _least(secondary, BLACK, _on_card(card, ON_PAPER_MIN_CONTRAST))
+    if on_paper is None:
+        return {}
+    muted = _kept(stored.get(ROLE_MUTED), _on_card(card, MUTED_CONTRAST))
+    return {
+        ON_PAPER: on_paper,
+        ON_PAPER_MUTED: muted or _most(on_paper, card, _on_card(card, MUTED_CONTRAST)),
+        ON_PAPER_DIM: _most(on_paper, card, _on_card(card, DIM_CONTRAST)),
+    }
+
+
+def _paper_brand(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) -> Dict[str, RGB]:
+    """The brand colours on the paper: the stored accent (and ``accent_2``) when they read, else today's derivation."""
+    accent = stored.get(ROLE_ACCENT)
+    targets = {
+        PRIMARY_ON_PAPER: (accent, "primary_color", PAPER_TEXT_MIN_CONTRAST),
+        PRIMARY_ON_PAPER_LARGE: (accent, "primary_color", LARGE_TEXT_MIN_CONTRAST),
+        ACCENT_ON_PAPER: (stored.get(ROLE_ACCENT_2) or accent, "accent_color", PAPER_TEXT_MIN_CONTRAST),
+    }
+    palette: Dict[str, RGB] = {}
+    for token, (role, field, target) in targets.items():
+        kit_colour = parse_hex(kit.get(field))
+        colour = _kept(role, _on_card(card, target))
+        if colour is None and kit_colour is not None:
+            colour = _least(kit_colour, BLACK, _on_card(card, target))
+        if colour is not None:
+            palette[token] = colour
+    return palette
+
+
+def paper_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
+    """The paper tokens for ``kit`` (a brand kit dict); ``{}`` when it has neither a page nor a usable text colour.
+
+    A v2 role the kit stores (``kit['palette']``, PRD-255 US-006) is the token it
+    maps onto when it meets that token's own target: ``paper`` (light enough to
+    be a page) the paper, ``ink`` the on-paper text, ``muted`` its muted tone,
+    ``accent`` the primary on paper, and ``accent_2`` (else ``accent``) the
+    accent on paper. Every other token is derived as before. A role whose kit
+    colour is missing or not a hex colour is left out, and the template's own
+    ``var()`` fallback applies to it.
+    """
+    stored = _stored_roles(kit)
+    paper = _kept(stored.get(ROLE_PAPER), lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
+    text = parse_hex(kit.get("text_color"))
+    if paper is None and text is not None:
+        paper = _least(text, WHITE, lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
+    if paper is None:
+        return {}
+    card = _most(paper, BLACK, lambda c: contrast(c, paper) <= CARD_CONTRAST)
+    palette = {PAPER: paper, PAPER_CARD: card, **_paper_text(kit, stored, card), **_paper_brand(kit, stored, card)}
     return {name: to_hex(rgb) for name, rgb in palette.items()}
 
 

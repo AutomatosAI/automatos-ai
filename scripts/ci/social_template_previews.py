@@ -1,61 +1,53 @@
 """PRD-251 US-106/US-107 (S1.2): check every seeded social template through a running media-render.
 
-The media-render CI job starts the image and runs this with the runner's own
-python3 (standard library only) and ``PYTHONPATH=orchestrator``. It uses the
-orchestrator's very code, so what it renders is what a workspace gets:
+The media-render CI job runs this with the runner's own python3 (standard library
+only) and ``PYTHONPATH=orchestrator``: the orchestrator's very code, so what it
+renders is what a workspace gets. The starters come from
+``modules.documents.social_starters`` (the rows ``seed_social_starters`` writes);
+each bundle is built by ``core.media_render_bundle.build_bundle`` from the
+starter's sample data and a brand kit, every footage slot empty, so the templates'
+own motion graphics play. A video's preview lays its reference video's own copy
+over the brand-neutral samples (``social_reference_text.json``, Goal 8).
 
-* the starters come from ``modules.documents.social_starters`` (the seed files,
-  checked against the template contract, the rows ``seed_social_starters`` writes);
-* each bundle is built by ``core.media_render_bundle.build_bundle`` from the
-  starter's sample data and a brand kit, with every footage slot empty, so the
-  templates' own motion graphics play. The seeded samples are brand-neutral
-  (``@yourbrand``, ``yourbrand.com``); a video's preview lays its reference
-  video's own copy over them (``social_reference_text.json``), so it reads as the
-  reference did for the owner's side-by-side (Goal 8).
+For each template it posts the bundle with a ``preview`` (its key moments) to
+``POST /render``. media-render stages it, speaks it with Kokoro, mixes it and runs
+``hyperframes check`` on the FULL composition: a 202 means no errors (a 422 carries
+the findings and fails this script). The job then snapshots the composition at
+those moments: small PNG frames and a short reel, kept as the job's artifact.
 
-For each template it posts the bundle with a ``preview`` (the template's key
-moments) to ``POST /render``. media-render stages it, speaks it with Kokoro,
-mixes it and runs ``hyperframes check`` on the FULL composition: a 202 means the
-check found no errors (a 422 carries the findings and fails this script). The
-job then snapshots the composition at those moments: small PNG frames and a
-short reel, kept as the job's artifact.
+Every seeded social IMAGE template (US-107) renders for real at every size it
+declares: the full check (202 = no errors), then the PNGs it returns, one per
+still (a carousel's slides), each read back and measured against the size.
 
-Every seeded social IMAGE template (US-107) is rendered for real, as the
-workspace gets it, at every size it declares: a still bundle, the full check
-(202 = no errors), and the PNGs it returns, one per still (a carousel's
-slides), each read back and measured against the size.
+The music (US-112, S1.6): a video whose audio plan names a library track is mixed
+with it. The job's report must name the track, its licence and the credit line a
+post carries, and the mix must measure -14 +/- 1 LUFS (loudnorm's measurement).
 
-The music (US-112, S1.6): a video whose audio plan names a library track is
-mixed with it for the preview. The job's report must name that track, with its
-licence and the credit line a post carries, and the mix must measure -14 +/- 1
-LUFS (loudnorm's own measurement of the mix the video plays).
-
-The pixel probe (S1.2: changing the brand kit's primary colour changes the
-render): a template whose seed names a probe (a spot the brand colour fills)
-is rendered again with the primary swapped. The pixel there must match the
-bundle's own token (``primary-on-ink`` on a video's stage, ``primary`` on an
+The pixel probe (S1.2): a template whose seed names a probe (a spot the brand
+colour fills) renders again with the primary swapped. The pixel there must match
+the bundle's own token (``primary-on-ink`` on a video's stage, ``primary`` on an
 image's brand stripe) in both renders, and the two must differ.
 
-The infographic (US-113, S1.7: a chart bound to a report). The Infographic's
-sample data is the binding of a fixture report's table (its top five rows, the
-chip naming the report), so its renders above ARE a report's table rendered;
-the driver checks that binding against the seed. Then it binds more fixture
+The infographic (US-113, S1.7: a chart bound to a report). Its sample data is the
+binding of a fixture report's table (the top five rows, the chip naming the
+report), which the driver checks against the seed. Then it binds more fixture
 reports with the orchestrator's own parser and binder (``core.report_tables``,
-``core.chart_binding``): a line of a monthly table, a number grid of a
-percentage column, a stress table whose labels are longer than the template
-holds, as a bar, a line and a grid, and a table of 20-character figures (a
-currency code and cents) as a grid and a bar.
-Each renders at every size with 0 check errors (the axis labels fit), and
-every figure the bundle puts on the chart is the report's own cell, the chip
-naming the report.
+``core.chart_binding``): a monthly line, a percentage grid, a stress table whose
+labels outrun the template, and 20-character figures (a currency and cents), as
+bars, lines and grids. Each renders at every size with 0 check errors (the axis
+labels fit), every figure on the chart the report's own cell.
 
-The heading font (US-108, S1.3: a template renders with the brand kit's heading
-font, an uploaded woff2): the Title card is rendered with a brand kit whose
-``font_files`` carry "CI Block" (``ci_block_font.py``, a woff2 whose every
-character is a solid block), named in ``heading_font``, and with an uploaded
-logo mark in place of the logo. The headline's accent words, the only text in
-``primary-on-paper-large``, must fill their bounding box as solid blocks do,
-where the same words in the kit's own heading font (a real typeface) do not.
+The heading font (US-108, S1.3): the Title card renders with a kit whose
+``font_files`` carry "CI Block" (``ci_block_font.py``, every glyph a solid block)
+named in ``heading_font``, and a logo mark. The headline's accent words (the only
+text in ``primary-on-paper-large``) must fill their box as solid blocks do, where
+the kit's own heading font (a real typeface) does not.
+
+The night kits (PRD-255 US-006, ``social_template_kits.py``): every template
+renders again, with 0 check errors, with each of :data:`NIGHT_KITS`: Automatos as
+its v1 kit has it, and Harbourline as a v2 kit (a stored paper and accent, a
+larger type scale, a logo for dark backgrounds). Its pages are its stored paper,
+and its dark stages show its dark logo.
 
     python3 scripts/ci/social_template_previews.py --url http://127.0.0.1:8090 --token "$TOKEN" --out "$RUNNER_TEMP/templates"
 """
@@ -78,22 +70,26 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from core.chart_binding import chart_values, chip_text, max_chars_of, shown_rows, spec_of
 from core.media_render_bundle import build_bundle
 from core.social_cuts import cut_moments, cut_to_length
-from core.social_templates import root_duration
 from core.report_tables import Series, first_table, parse_figure, table_series
-from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, parse_size, resolve_variables
+from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, parse_size, resolve_variables, root_duration
 from modules.documents.social_starters import social_starters
 
 # The brand kit the previews render with: the reference videos' own Studio Dark,
 # in fonts the image has installed (fonts-liberation), and a drawn logo.
+LIBERATION = {"font_family": '"Liberation Sans", sans-serif', "heading_font": '"Liberation Serif", serif'}
 KIT: Dict[str, Any] = {
-    "name": "Automatos",
-    "tagline": "An operating system for autonomous agent teams",
-    "primary_color": "#e96235",
-    "secondary_color": "#1a1714",
-    "accent_color": "#90af5a",
-    "text_color": "#f0e8db",
-    "font_family": '"Liberation Sans", sans-serif',
-    "heading_font": '"Liberation Serif", serif',
+    "name": "Automatos", "tagline": "An operating system for autonomous agent teams",
+    "primary_color": "#e96235", "secondary_color": "#1a1714", "accent_color": "#90af5a", "text_color": "#f0e8db",
+    **LIBERATION,
+}
+# PRD-255 US-006: the two night kits (the US-003 fixtures), Harbourline with its v2 rules stored.
+NIGHT_KITS: Dict[str, Dict[str, Any]] = {
+    "automatos": {"name": "Automatos", "primary_color": "#c44a1a", "secondary_color": "#1d3658",
+                  "accent_color": "#0f3460", "text_color": "#1a1a2e", **LIBERATION},
+    "harbourline": {"name": "Harbourline Coffee Roasters", "primary_color": "#1E3A5F", "secondary_color": "#C26A2E",
+                    "accent_color": "#0f3460", "text_color": "#1a1a2e", **LIBERATION, "accent_use": "sparing",
+                    "palette": {"paper": "#faf7f2", "accent": "#1e3a5f"},
+                    "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 11}}},
 }
 # The reference videos' own copy, by starter: what the seeded rows no longer carry
 # (P251W1-RVW-6), laid back over a video's sample data for its preview.
@@ -203,9 +199,9 @@ def hex_rgb(value: str) -> Tuple[int, int, int]:
     return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
 
 
-def _block_font():
-    """``scripts/ci/ci_block_font.py``, loaded by path: the tests load this driver by path too."""
-    spec = importlib.util.spec_from_file_location("ci_block_font", Path(__file__).resolve().with_name("ci_block_font.py"))
+def _sibling(name: str):
+    """``scripts/ci/<name>.py``, loaded by path: the tests load this driver by path too."""
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -217,7 +213,7 @@ def heading_font_kit(kit: Mapping[str, Any]) -> Dict[str, Any]:
     The shape ``brand_kit_for_media_render`` hands the bundle: the woff2 and the
     mark inlined as data: URIs, and no wordmark logo.
     """
-    block = _block_font()
+    block = _sibling("ci_block_font")
     woff2 = base64.b64encode(block.block_font_woff2()).decode("ascii")
     face = {"family": block.FAMILY, "weight": HEADING_FONT_WEIGHT, "style": "normal", "data_uri": f"data:font/woff2;base64,{woff2}"}
     unbranded = {key: value for key, value in kit.items() if key != "logo_url"}
@@ -610,6 +606,7 @@ def run(renderer: Renderer, out: Path) -> List[str]:
     failures = run_videos(renderer, out, kit, report) + run_images(renderer, out, kit, report)
     failures += run_infographic(renderer, out, kit, report)
     failures += run_heading_font(renderer, out, kit, report)
+    failures += _sibling("social_template_kits").run_night_kits(sys.modules[__name__], renderer, out, report)
     (out / "report.json").write_text(json.dumps(report, indent=2, default=str))
     return failures
 
