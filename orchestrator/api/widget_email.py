@@ -16,14 +16,31 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
+from api.widget_email_attachment import (
+    INVALID_LINK,
+    NOT_CONNECTED,
+    UNREADABLE,
+    AttachmentError,
+    attachment_file,
+    download_headers,
+    safe_content_type,
+    safe_filename,
+)
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.composio.entity_manager import EntityManager
+from core.composio.gmail_attachments import (
+    GET_ATTACHMENT_ACTION,
+    GMAIL_APP,
+    is_gmail_attachment_id,
+    is_gmail_message_id,
+)
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -351,6 +368,45 @@ async def list_emails(
         next_page_token=next_token,
         provider="composio",
     )
+
+
+def _gmail_connected(db: Session, workspace_id: UUID) -> bool:
+    """Whether this workspace's own Composio entity has an active Gmail connection."""
+    apps = EntityManager(db).get_connected_apps(workspace_id)
+    return GMAIL_APP in {str(app).upper().strip() for app in apps}
+
+
+@router.get("/attachments/gmail/{message_id}/{attachment_id}")
+async def download_gmail_attachment(
+    message_id: str,
+    attachment_id: str,
+    filename: Optional[str] = Query(None, max_length=1024, description="The name to save the file under"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Response:
+    """One attachment of a Gmail message in the caller's workspace, as a download.
+
+    Gmail attachments carry no URL: the bytes come from Composio's Gmail
+    get-attachment action on the workspace's own connection, through the spine
+    like every widget email call. Only Gmail-shaped ids are taken; the response
+    is always ``Content-Disposition: attachment`` with a sanitised name, a safe
+    Content-Type and the size cap (``api/widget_email_attachment.py``).
+    """
+    if not (is_gmail_message_id(message_id) and is_gmail_attachment_id(attachment_id)):
+        raise HTTPException(status_code=400, detail=INVALID_LINK)
+    name = safe_filename(filename)
+    if not await run_in_threadpool(_gmail_connected, db, ctx.workspace_id):
+        raise HTTPException(status_code=404, detail=NOT_CONNECTED)
+    params = {"message_id": message_id, "attachment_id": attachment_id, "file_name": name}
+    try:
+        result = await _execute_email_action(ctx, GET_ATTACHMENT_ACTION, params)
+        data, mimetype = await attachment_file(result)
+    except AttachmentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    except Exception:
+        logger.exception("[EmailAttachment] %s failed for workspace %s", GET_ATTACHMENT_ACTION, ctx.workspace_id)
+        raise HTTPException(status_code=502, detail=UNREADABLE) from None
+    return Response(content=data, media_type=safe_content_type(mimetype, name), headers=download_headers(name))
 
 
 @router.get("/{email_id}", response_model=EmailDetailResponse)
