@@ -29,3 +29,18 @@ def test_every_shadow_row_is_stamped_and_keeps_its_fields(monkeypatch, tmp_path)
     assert first["seam_version"] == second["seam_version"] == SEAM_VERSION == 2
     assert {"ts", "purpose", "task_id", "files_touched", "jev_verdict"} <= set(first)
     assert second["kept"] == ["a"]
+
+
+def test_the_scorer_splits_rows_by_seam_version():
+    from scripts.eval.decision_shadow import score as scorer
+
+    rows = [
+        {"purpose": "session_end", "ts": 1.0},  # the baseline, before the stamp
+        {"purpose": "session_end", "ts": 2.0, "seam_version": 2},
+        {"purpose": "session_end", "ts": 3.0, "seam_version": 2},
+    ]
+    assert [scorer.seam_version_of(r) for r in rows] == [1, 2, 2]
+    assert len(scorer.filter_seam(rows, 1)) == 1 and len(scorer.filter_seam(rows, 2)) == 2
+    assert scorer.filter_seam(rows, None) == rows
+    assert scorer.summary_dict(rows)["seam_versions"] == {"1": 1, "2": 2}
+    assert scorer.summary_dict(rows, seam_version=2)["rows"] == 2
