@@ -30,6 +30,8 @@ from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import hook_server_for
 from .policy import secret_protection_summary
+from .lifecycle import install_signal_handlers, watch_restart_requests
+from .procs import pid_alive
 from .session import Session, host_capabilities
 from .terminal_server import MAX_TERMINALS, TerminalServer
 
@@ -72,15 +74,6 @@ def check_backend(api: BackendClient) -> Dict[str, Any]:
         raise HostRefused("session mode is off on this backend — set CLI_RUNTIME_ENABLED=true in .env and restart the stack")
     return health
 
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
 
 
 class Host:
@@ -232,9 +225,11 @@ class Host:
 
     def _reap_previous_run(self) -> None:
         table = state.load_process_table(self.cfg.process_table_path)
+        if sys.platform == "win32":   # each session's job object ended with the host that started it (conpty.py)
+            table = {}
         for task_id, entry in table.items():
             pid = entry.get("pid")
-            if isinstance(pid, int) and _pid_alive(pid):
+            if isinstance(pid, int) and pid_alive(pid):
                 log.warning("killing orphan session process %s for task %s from a previous host run", pid, task_id)
                 try:
                     os.killpg(entry.get("pgid") or pid, signal.SIGTERM)
@@ -543,16 +538,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.error("backend error: %s", exc)
         return 3
 
-    def _sigterm(signum, _frame):
-        host.stopping = f"the CLI host on {socket.gethostname()} stopped ({signal.Signals(signum).name})"
-        host.stop.set()
-
-    def _sighup(_signum, _frame):
-        host.request_restart("SIGHUP (make up / --nudge)")
-
-    signal.signal(signal.SIGTERM, _sigterm)
-    signal.signal(signal.SIGINT, _sigterm)
-    signal.signal(signal.SIGHUP, _sighup)
+    install_signal_handlers(host)
+    watch_restart_requests(host, cfg.state_dir)
     return host.run_forever()
 
 

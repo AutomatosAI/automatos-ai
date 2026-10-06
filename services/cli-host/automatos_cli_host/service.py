@@ -16,13 +16,13 @@ import os
 import plistlib
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .config import HostConfig
+from .lifecycle import request_restart
 from .sandbox import DEFAULT_ALLOWED_DOMAINS, SessionSandbox
 
 LAUNCHD_LABEL = "app.automatos.cli-host"
@@ -236,15 +236,6 @@ def restart() -> bool:
 
 
 def nudge(cfg: HostConfig) -> bool:
-    """Ask a running host (service or terminal) to drain and restart: SIGHUP to
-    the pid it wrote. Used by ``make up`` after the app rebuilt."""
-    pid_path = cfg.state_dir / "host.pid"
-    try:
-        pid = int(pid_path.read_text().strip())
-    except (OSError, ValueError):
-        return False
-    try:
-        os.kill(pid, signal.SIGHUP)
-        return True
-    except OSError:
-        return False
+    """Ask a running host (service or terminal) to drain and restart (``lifecycle``).
+    Used by ``make up`` after the app rebuilt."""
+    return request_restart(cfg.state_dir / "host.pid", cfg.state_dir)

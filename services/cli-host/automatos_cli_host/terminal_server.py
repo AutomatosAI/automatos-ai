@@ -30,8 +30,10 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
 import struct
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -66,14 +68,22 @@ def _pump_output(proc: PtyChild, conn: socket.socket, closed: threading.Event) -
         closed.set()
 
 
+def default_shell() -> str:
+    """The operator's own shell: ``$SHELL`` on Unix; PowerShell, else cmd.exe, on Windows (#818)."""
+    if sys.platform == "win32":
+        return shutil.which("pwsh") or shutil.which("powershell") or os.environ.get("COMSPEC") or "cmd.exe"
+    return os.environ.get("SHELL") or "/bin/sh"
+
+
+def shell_argv(shell: str) -> List[str]:
+    """A login shell on Unix. Windows shells have no login mode."""
+    return [shell] if sys.platform == "win32" else [shell, "-l"]
+
+
 def _public(launched: Dict[str, Any]) -> Dict[str, Any]:
     """The launch facts an event carries — the usage snapshot and the agent's home stay host-side."""
     return {k: v for k, v in launched.items() if k not in ("usage_before", "config_home")}
 
-
-# How the Canvas terminal starts a CLI in the agent's own home: the variable on its
-# command line (the PTY bridge builds one environment for every launch).
-ENV_BINARY = "/usr/bin/env"
 
 log = logging.getLogger("automatos.cli_host.terminal")
 
@@ -300,7 +310,7 @@ class TerminalServer:
         self.port: Optional[int] = None
         self.grants = GrantStore()
         self._workspace_id = workspace_id
-        self._shell = shell or os.environ.get("SHELL") or "/bin/sh"
+        self._shell = shell or default_shell()
         self._max = max_terminals
         self._idle_timeout = idle_timeout
         self._server: Optional[socket.socket] = None
@@ -445,7 +455,7 @@ class TerminalServer:
         ``None`` for a plain shell."""
         launch = grant.launch
         if not launch:
-            return [self._shell, "-l"], None
+            return shell_argv(self._shell), None
         # The grant names the CLI (``kind``); its adapter spells the command (design §7).
         try:
             adapter = adapter_for(launch.get("kind"), self._cli_binaries)
@@ -479,8 +489,6 @@ class TerminalServer:
             task_id=grant.task_id,
         )
         assert_args_honour_invariant(args, preset.forbidden_args)
-        if agent_home is not None:   # the agent's own home: its session, its record — and our hooks, which stand aside here
-            args = [ENV_BINARY, f"{preset.config_home_env}={agent_home}", f"PYTHONPATH={hook_pythonpath()}", *args]
         try:
             adapter.record_trust(cwd, self._home)
         except OSError as exc:
@@ -543,9 +551,14 @@ class TerminalServer:
     def _bridge_env(self, grant: Grant, launched: Optional[Dict[str, Any]]) -> Dict[str, str]:
         # The operator's own shell inherits no CLI's credential (the union over every
         # preset); a launched session gets its CLI's own hygiene.
-        build = (lambda **kw: build_session_env(adapter_for(launched["cli"], self._cli_binaries).preset, **kw)) if launched else build_shell_env
-        return build(extra={"TERM": "xterm-256color", "AUTOMATOS_TERMINAL": "1",
-                            **({"AUTOMATOS_TASK_ID": grant.task_id} if grant.task_id else {})})
+        extra = {"TERM": "xterm-256color", "AUTOMATOS_TERMINAL": "1",
+                 **({"AUTOMATOS_TASK_ID": grant.task_id} if grant.task_id else {})}
+        if not launched:
+            return build_shell_env(extra=extra)
+        preset = adapter_for(launched["cli"], self._cli_binaries).preset
+        if launched.get("config_home"):   # the agent's own home: its session, its record — and our hooks, which stand aside here
+            extra.update({preset.config_home_env: launched["config_home"], "PYTHONPATH": hook_pythonpath()})
+        return build_session_env(preset, extra=extra)
 
     def _opened(self, proc: PtyChild, cwd: Path, grant: Grant, launched: Optional[Dict[str, Any]]) -> None:
         if launched:
