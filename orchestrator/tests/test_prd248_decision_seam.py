@@ -493,10 +493,16 @@ def _noul(p):
     return DecisionAnswer(type="noul", noul=p)
 
 
-def test_build_questions_adds_the_roster_choice_only_when_agents_exist():
-    assert "target_agent" not in auto_decisions.build_questions([])
+def _points(level):
+    return DecisionAnswer(type="score", score=level, confidence=0.8)
+
+
+def test_build_questions_adds_one_score_per_agent_only_when_agents_exist():
+    assert not [k for k in auto_decisions.build_questions([]) if k.startswith("agent:")]
     q = auto_decisions.build_questions(["Jim", "jim", "Atlas", "none", ""])
-    assert q["target_agent"].options == ["Jim", "Atlas", "none"]
+    assert [k for k in q if k.startswith("agent:")] == ["agent:Jim", "agent:Atlas"]
+    assert q["agent:Jim"].to_wire()["type"] == "score"
+    assert {k for k in q if k.startswith("domain:")} == {f"domain:{d}" for d in auto_decisions.DOMAIN_CRITERIA if d != "none"}
     assert set(q["complexity"].options) == {c.value for c in Complexity}
     # The deprecated "workflow" alias is normalised on read, never offered.
     assert set(q["action"].options) == {a.value for a in Action if a is not Action.WORKFLOW}
@@ -506,10 +512,9 @@ def test_verdict_respects_the_confidence_floor_and_maps_fields():
     result = _result(
         complexity=_choice("molecule", 0.8),
         action=_choice("assign", 0.9),
-        tool_domain=_choice("platform", 0.6),
         needs_memory=_noul(0.2),
         needs_multi_agent=_noul(0.7),
-        target_agent=_choice("Jim", 0.85),
+        **{"domain:platform": _noul(0.6), "domain:email": _noul(0.2), "agent:Jim": _points(2.8), "agent:Atlas": _points(0.4)},
     )
     verdict = auto_decisions.verdict_from_result(result, min_confidence=0.7)
     assert verdict == {
@@ -534,8 +539,9 @@ def test_compare_flags_each_field():
         "needs_memory": False, "needs_multi_agent": False, "target_agent_name": None,
     }
     result = _result(
-        complexity=_choice("molecule"), action=_choice("delegate"), tool_domain=_choice("platform"),
-        needs_memory=_noul(0.1), needs_multi_agent=_noul(0.9), target_agent=_choice("none"),
+        complexity=_choice("molecule"), action=_choice("delegate"),
+        needs_memory=_noul(0.1), needs_multi_agent=_noul(0.9),
+        **{"domain:platform": _noul(0.9), "agent:Jim": _points(0.3)},
     )
     assert auto_decisions.compare(tier, result) == {
         "complexity": True, "action": False, "needs_memory": True, "needs_multi_agent": False,
@@ -621,8 +627,9 @@ def _shadow_rows(tmp_path):
 
 
 DECIDED_ATOM = _result(
-    complexity=_choice("atom", 0.95), action=_choice("respond", 0.92), tool_domain=_choice("none", 0.8),
-    needs_memory=_noul(0.1), needs_multi_agent=_noul(0.05), target_agent=_choice("none", 0.9),
+    complexity=_choice("atom", 0.95), action=_choice("respond", 0.92),
+    needs_memory=_noul(0.1), needs_multi_agent=_noul(0.05),
+    **{"domain:platform": _noul(0.1), "agent:Jim": _points(0.1)},
 )
 
 
@@ -673,8 +680,8 @@ async def test_shadow_mode_never_changes_the_verdict_and_writes_the_comparison(b
     assert "message_preview" in row and row["message_sha"]
     # the engine saw the roster, not just the text
     state = backend.calls[0]["state"]
-    assert state["agents"] == [{"name": "Jim", "role": "writer", "description": "Drafts board packs"}]
-    assert "target_agent" in backend.calls[0]["questions"]
+    assert state["agents"] == [{"name": "Jim", "role": "writer"}]  # names and roles only
+    assert "agent:Jim" in backend.calls[0]["questions"]
 
 
 @pytest.mark.asyncio
@@ -759,8 +766,9 @@ async def test_live_mode_below_the_floor_or_without_a_result_runs_tier3(brain, m
 @pytest.mark.asyncio
 async def test_live_assign_resolves_the_named_agent_against_the_roster(brain, monkeypatch, tmp_path):
     decided = _result(
-        complexity=_choice("molecule", 0.9), action=_choice("assign", 0.9), tool_domain=_choice("platform", 0.7),
-        needs_memory=_noul(0.1), needs_multi_agent=_noul(0.1), target_agent=_choice("Jim", 0.9),
+        complexity=_choice("molecule", 0.9), action=_choice("assign", 0.9),
+        needs_memory=_noul(0.1), needs_multi_agent=_noul(0.1),
+        **{"domain:platform": _noul(0.7), "agent:Jim": _points(3.0)},
     )
     _install_engine(monkeypatch, tmp_path, MODE_LIVE, _Backend(result=decided))
     verdict = await brain.assess("Get Jim to draft the board pack, no rush", 4)

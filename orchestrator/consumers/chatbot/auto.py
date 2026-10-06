@@ -929,7 +929,7 @@ class AutoBrain:
         if entries is None:
             roster = self._active_agents()
             entries = auto_decisions.roster_entries(roster)
-        questions = auto_decisions.build_questions(e["name"] for e in entries)
+        questions = auto_decisions.build_questions(entries)
         state = auto_decisions.build_state(message, conversation_length, entries)
         result = await get_decision_engine().decide(
             state=state,

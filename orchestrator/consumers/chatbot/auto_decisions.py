@@ -1,9 +1,10 @@
 """PRD-248 — Auto's classifier as typed questions (pure).
 
-The Tier-3 rubric in ``build_assessment_prompt`` becomes five or six typed
-questions the decision engine answers in one call: complexity, routing lane,
-tool domain, two yes/no gates and, when a roster exists, the named target
-agent. The option descriptions ARE the rubric's definitions, shortened — a
+The Tier-3 rubric in ``build_assessment_prompt`` becomes typed questions the
+decision engine answers in one call: complexity, routing lane, two yes/no gates,
+one yes/no per tool domain and, when a roster exists, one Score per agent for
+the agent the user points to (PRD-248 tuning, 6 Oct: split from two big
+Choices). The option descriptions ARE the rubric's definitions, shortened — a
 System One model reads words, not intent, and wordier instructions measured
 WORSE calibration in the early-access tests, so these stay terse.
 
@@ -14,7 +15,7 @@ the field-by-field comparison the shadow log records.
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 from core.llm.decisions.questions import (
     CHOICE_MAX_OPTIONS,
@@ -22,14 +23,30 @@ from core.llm.decisions.questions import (
     DecisionResult,
     Noul,
     Question,
+    Score,
 )
 
 PURPOSE = "classifier"
 MESSAGE_MAX_CHARS = 4000
 PREVIEW_CHARS = 160
-ROSTER_DESC_CHARS = 80
 NONE_AGENT = "none"
 NO_DOMAIN = "none"
+# PRD-248 tuning (6 Oct): the roster (9 to 31 agents) and the tool domains were one big
+# Choice each; the vendor's figures are 40% right for a 12-way choice and 91% when it is
+# split. Each agent now gets its own Score and each domain its own yes/no, keyed by
+# these prefixes so they never collide with the other questions.
+AGENT_KEY = "agent:"
+DOMAIN_KEY = "domain:"
+# How the user's message points to one agent, low to high. Worded as what is there,
+# never as what is missing (the vendor lists negation and indirection as failure modes).
+TARGET_LEVELS = (
+    "The message is about other work or other people.",
+    "The message's work suits this agent's role.",
+    "The message names this agent's role.",
+    "The message names this agent.",
+)
+# Named by role or by name: at least level 2, more than "suits its role" (1).
+TARGET_PICK_FLOOR = 1.5
 
 COMPLEXITY_CRITERIA: Dict[str, str] = {
     "atom": (
@@ -99,8 +116,8 @@ NEEDS_MULTI_AGENT = Noul("Would this need several different agents working toget
 
 
 def roster_entries(agents: Iterable[Any]) -> List[Dict[str, Any]]:
-    """The active roster as the classifier sees it: name, role, a short
-    description, and whether it is a Claude Code session agent."""
+    """The active roster as the classifier sees it: each agent's name and role only. The
+    full descriptions drew the model away from the complexity and action questions."""
     entries: List[Dict[str, Any]] = []
     for agent in agents:
         name = (getattr(agent, "name", None) or getattr(agent, "slug", None) or "").strip()
@@ -110,12 +127,6 @@ def roster_entries(agents: Iterable[Any]) -> List[Dict[str, Any]]:
         role = getattr(agent, "role", None)
         if role:
             entry["role"] = str(role)
-        desc = (getattr(agent, "description", None) or "").strip()
-        if desc:
-            entry["description"] = desc[:ROSTER_DESC_CHARS]
-        cfg = getattr(agent, "configuration", None) or {}
-        if isinstance(cfg, dict) and cfg.get("runtime") == "cli":
-            entry["kind"] = "Claude Code session"
         entries.append(entry)
     return entries
 
@@ -140,28 +151,75 @@ def agent_options(names: Iterable[str]) -> List[str]:
     return list(seen.values())[: CHOICE_MAX_OPTIONS - 1]
 
 
-def build_questions(agent_names: Iterable[str]) -> Dict[str, Question]:
+RosterItem = Union[str, Mapping[str, Any]]
+
+
+def _roster_roles(roster: Iterable[RosterItem]) -> Dict[str, str]:
+    """Distinct names (as ``agent_options``) with each one's role ("" for none)."""
+    items = [{"name": item} if isinstance(item, str) else dict(item) for item in roster]
+    roles = {str(item.get("name") or "").strip(): str(item.get("role") or "") for item in items}
+    return {name: roles.get(name, "") for name in agent_options(roles)}
+
+
+def target_questions(roster: Iterable[RosterItem]) -> Dict[str, Question]:
+    """One Score per agent: how the user's message points to it."""
+    return {
+        f"{AGENT_KEY}{name}": Score(
+            f"How does the user's message point to the agent {name}?" + (f" Its role: {role}" if role else ""),
+            list(TARGET_LEVELS),
+        )
+        for name, role in _roster_roles(roster).items()
+    }
+
+
+def domain_questions() -> Dict[str, Question]:
+    """One yes/no per tool domain; answering may need more than one."""
+    return {
+        f"{DOMAIN_KEY}{domain}": Noul(f"Answering this message takes {domain} tools: {description}")
+        for domain, description in DOMAIN_CRITERIA.items()
+        if domain != NO_DOMAIN
+    }
+
+
+def build_questions(roster: Iterable[RosterItem]) -> Dict[str, Question]:
+    """``roster``: the entries ``roster_entries`` makes (or bare names)."""
     questions: Dict[str, Question] = {
         "complexity": Choice(
             "How much machinery does answering this message take?", COMPLEXITY_CRITERIA
         ),
         "action": Choice("Where should the work happen?", ACTION_CRITERIA),
-        "tool_domain": Choice(
-            "Which tool domain, if any, would answering need?", DOMAIN_CRITERIA
-        ),
         "needs_memory": NEEDS_MEMORY,
         "needs_multi_agent": NEEDS_MULTI_AGENT,
     }
-    names = agent_options(agent_names)
-    if names:
-        criteria: Dict[str, Optional[str]] = {name: None for name in names}
-        criteria[NONE_AGENT] = "The user names no particular agent or role."
-        questions["target_agent"] = Choice(
-            "Which agent does the user name, or clearly mean, to hand this work to? "
-            "Pick none unless the user's own words name that agent or its role.",
-            criteria,
-        )
+    questions.update(domain_questions())
+    questions.update(target_questions(roster))
     return questions
+
+
+def target_pick(result: DecisionResult) -> Optional[str]:
+    """The agent the message points to most, by name or by role; ``none`` when it points
+    to no agent that far; None when no agent was answered."""
+    points = {
+        key[len(AGENT_KEY):]: float(answer.score)
+        for key, answer in result.answers.items()
+        if key.startswith(AGENT_KEY) and answer.score is not None
+    }
+    if not points:
+        return None
+    best = max(points, key=lambda name: points[name])
+    return best if points[best] >= TARGET_PICK_FLOOR else NONE_AGENT
+
+
+def domain_hints(result: DecisionResult) -> Optional[List[str]]:
+    """The domains answered yes, in the catalogue's order; None when none was answered."""
+    answered = {
+        key[len(DOMAIN_KEY):]: answer.yes
+        for key, answer in result.answers.items()
+        if key.startswith(DOMAIN_KEY) and answer.yes is not None
+    }
+    if not answered:
+        return None
+    return [domain for domain in DOMAIN_CRITERIA if answered.get(domain)]
 
 
 def verdict_from_result(
@@ -180,16 +238,11 @@ def verdict_from_result(
     if confidence < float(min_confidence):
         return None
 
-    domain = result.get("tool_domain")
-    hints: List[str] = []
-    if domain is not None and domain.choice in DOMAIN_CRITERIA and domain.choice != NO_DOMAIN:
-        hints = [domain.choice]
+    hints = domain_hints(result) or []
     memory = result.get("needs_memory")
     multi = result.get("needs_multi_agent")
-    target = result.get("target_agent")
-    target_name = (
-        target.choice if target is not None and target.choice and target.choice != NONE_AGENT else None
-    )
+    pick = target_pick(result)
+    target_name = pick if pick and pick != NONE_AGENT else None
     return {
         "complexity": comp.choice,
         "action": act.choice,
@@ -217,16 +270,16 @@ def compare(verdict: Mapping[str, Any], result: DecisionResult) -> Dict[str, Opt
             if answer is not None and answer.yes is not None
             else None
         )
-    domain = result.get("tool_domain")
-    if domain is not None and domain.choice:
+    engine_hints = domain_hints(result)
+    if engine_hints is not None:
         hints = [str(h).lower() for h in (verdict.get("tool_hints") or [])]
-        out["tool_domain"] = (domain.choice in hints) if hints else (domain.choice == NO_DOMAIN)
+        out["tool_domain"] = bool(set(engine_hints) & set(hints)) if hints else not engine_hints
     else:
         out["tool_domain"] = None
-    target = result.get("target_agent")
-    if target is not None and target.choice:
+    pick = target_pick(result)
+    if pick is not None:
         name = (verdict.get("target_agent_name") or "").strip().lower()
-        out["target_agent"] = (target.choice.lower() == name) if name else (target.choice == NONE_AGENT)
+        out["target_agent"] = (pick.lower() == name) if name else (pick == NONE_AGENT)
     else:
         out["target_agent"] = None
     return out
