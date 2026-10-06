@@ -20,6 +20,8 @@ This module provides:
 import logging
 from typing import Dict, Any, Optional, List, Set, Tuple
 
+from modules.tools.formatting.email_attachments import extract_attachments
+
 logger = logging.getLogger(__name__)
 
 
@@ -447,6 +449,26 @@ class GenericDataExtractor:
         logger.info(f"[DataExtractor] Extracted {len(emails)} emails from result")
         return emails
 
+    # Gmail payload headers that fill an email field the item left empty.
+    _PAYLOAD_HEADERS = ("subject", "from", "to", "date")
+
+    @classmethod
+    def _fill_from_payload(cls, email: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+        """The email with what Gmail's raw payload adds: a header for each field
+        still empty (the first one wins), and the base64 body when it has none."""
+        filled = dict(email)
+        headers = payload.get("headers", [])
+        for header in headers if isinstance(headers, list) else []:
+            name = str(header.get("name", "")).lower() if isinstance(header, dict) else ""
+            if name in cls._PAYLOAD_HEADERS and not filled[name]:
+                filled[name] = header.get("value")
+        body_data = payload.get("body", {})
+        if not filled["body"] and isinstance(body_data, dict):
+            raw_body = body_data.get("data") or body_data.get("content")
+            if raw_body:
+                filled["body"] = cls._decode_base64_body(raw_body)
+        return filled
+
     @classmethod
     def _extract_single_email(cls, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Extract a single email from various provider formats."""
@@ -465,33 +487,12 @@ class GenericDataExtractor:
             "isRead": cls._extract_read_status(item),
             "hasAttachments": cls._extract_has_attachments(item),
             "labels": item.get("labelIds") or item.get("categories") or item.get("labels") or [],
-            "attachments": cls._extract_attachments(item),
+            "attachments": extract_attachments(item),
         }
 
         # Extract from nested payload (Gmail format)
-        if "payload" in item and isinstance(item["payload"], dict):
-            payload = item["payload"]
-            headers = payload.get("headers", [])
-            if isinstance(headers, list):
-                for header in headers:
-                    name = header.get("name", "").lower()
-                    value = header.get("value")
-                    if name == "subject" and not email["subject"]:
-                        email["subject"] = value
-                    elif name == "from" and not email["from"]:
-                        email["from"] = value
-                    elif name == "to" and not email["to"]:
-                        email["to"] = value
-                    elif name == "date" and not email["date"]:
-                        email["date"] = value
-
-            # Body from payload - Gmail uses base64 encoding
-            if not email["body"]:
-                body_data = payload.get("body", {})
-                if isinstance(body_data, dict):
-                    raw_body = body_data.get("data") or body_data.get("content")
-                    if raw_body:
-                        email["body"] = cls._decode_base64_body(raw_body)
+        if isinstance(item.get("payload"), dict):
+            email = cls._fill_from_payload(email, item["payload"])
 
         # Decode body if it looks like base64 (Gmail format)
         if email.get("body") and cls._looks_like_base64(email["body"]):
@@ -718,66 +719,3 @@ class GenericDataExtractor:
             return True
 
         return False
-
-    @classmethod
-    def _extract_attachments(cls, item: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Extract attachment details from email.
-
-        Returns list of attachments with:
-        - id: attachment ID
-        - filename: file name
-        - mimeType: MIME type
-        - size: file size in bytes
-        - downloadUrl: URL to download (if available)
-        """
-        attachments = []
-
-        # Gmail format: attachmentList
-        attachment_list = item.get("attachmentList", [])
-        if attachment_list and isinstance(attachment_list, list):
-            for att in attachment_list:
-                if isinstance(att, dict):
-                    attachments.append({
-                        "id": att.get("attachmentId") or att.get("id") or att.get("fileId"),
-                        "filename": att.get("filename") or att.get("name") or "attachment",
-                        "mimeType": att.get("mimeType") or att.get("contentType") or "application/octet-stream",
-                        "size": att.get("size") or att.get("fileSize") or 0,
-                        "downloadUrl": att.get("downloadUrl") or att.get("url"),
-                    })
-
-        # Outlook format: attachments array
-        outlook_attachments = item.get("attachments", [])
-        if outlook_attachments and isinstance(outlook_attachments, list) and not attachments:
-            for att in outlook_attachments:
-                if isinstance(att, dict):
-                    attachments.append({
-                        "id": att.get("id"),
-                        "filename": att.get("name") or att.get("filename") or "attachment",
-                        "mimeType": att.get("contentType") or att.get("mimeType") or "application/octet-stream",
-                        "size": att.get("size") or 0,
-                        "downloadUrl": att.get("contentLocation") or att.get("downloadUrl"),
-                    })
-
-        # Gmail payload.parts (for inline attachments)
-        payload = item.get("payload", {})
-        if isinstance(payload, dict) and not attachments:
-            parts = payload.get("parts", [])
-            for part in parts:
-                if isinstance(part, dict):
-                    # Skip text/html and text/plain parts (body, not attachments)
-                    mime_type = part.get("mimeType", "")
-                    if mime_type in ("text/plain", "text/html"):
-                        continue
-                    filename = part.get("filename")
-                    if filename:  # Only include parts with filenames
-                        body = part.get("body", {})
-                        attachments.append({
-                            "id": body.get("attachmentId") or part.get("partId"),
-                            "filename": filename,
-                            "mimeType": mime_type,
-                            "size": body.get("size") or 0,
-                            "downloadUrl": None,  # Gmail requires separate API call
-                        })
-
-        return attachments if attachments else None
