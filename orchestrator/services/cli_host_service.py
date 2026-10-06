@@ -36,6 +36,7 @@ from core.cli_runtime import (
 )
 from core.llm.usage_context import LANE_BOARD_TASK, LANE_SESSION
 from core.local_projects_mount import PROJECTS_FOLDER, clean_relative
+from services.host_paths import as_host_path, is_absolute_host_path, relative_to_root
 from core.models.approval_grants import SUBJECT_BOARD_TASK
 from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
@@ -2003,8 +2004,8 @@ def configured_workspace_dir() -> Optional[str]:
     that folder as the local workspace's root, so it is the second anchor for
     mapping a session's host paths onto the worker's view. A relative value (a
     plain ``docker compose up`` with the default) means nothing to this process."""
-    raw = (getattr(config, "AUTOMATOS_WORKSPACE_DIR", "") or "").strip().rstrip("/")
-    return raw if raw.startswith("/") else None
+    raw = as_host_path((getattr(config, "AUTOMATOS_WORKSPACE_DIR", "") or "").strip()).rstrip("/")
+    return raw if is_absolute_host_path(raw) else None   # C:/… too: a Windows host (#818)
 
 
 def workspace_relative_path(
@@ -2032,7 +2033,7 @@ def workspace_relative_path(
     The host's absolute path means nothing inside this container. ``None`` when
     the file is elsewhere — it then stays a reference in ``runtime_ref.files_touched``.
     """
-    path = str(host_path)
+    path = as_host_path(host_path)   # a Windows host reports C:\… (#818, services/host_paths.py)
     marker = f"/{workspace_id}/"
     idx = path.find(marker)
     if idx >= 0:
@@ -2040,13 +2041,14 @@ def workspace_relative_path(
     if workspace_dir is None:
         workspace_dir = configured_workspace_dir()
     anchors = [
-        (root.rstrip("/"), prefix)
+        (as_host_path(root).rstrip("/"), prefix)
         for root, prefix in ((workspace_dir, ""), (projects_dir, PROJECTS_PREFIX))
-        if root and root.rstrip("/")
+        if root and as_host_path(root).rstrip("/")
     ]
     for root, prefix in sorted(anchors, key=lambda a: len(a[0]), reverse=True):
-        if path == root or path.startswith(root + "/"):
-            rel = clean_relative(path[len(root):])
+        rest = relative_to_root(path, root)
+        if rest is not None:
+            rel = clean_relative(rest)
             if not rel:
                 return None
             return f"{prefix}/{rel}" if prefix else rel
