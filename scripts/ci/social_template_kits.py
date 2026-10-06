@@ -126,7 +126,7 @@ def run_night_kits(driver: Any, renderer: Any, out: Path, report: Dict[str, Any]
         kit = night_kit(driver, name)
         entry: Dict[str, Any] = report.setdefault("night_kits", {}).setdefault(name, {})
         print(f"\n{name} kit (PRD-255 US-006): every seeded template again")
-        for starter, size, bundle in night_bundles(driver, name, kit):
+        for starter, size, bundle in driver.SHARD.mine(night_bundles(driver, name, kit)):
             label = starter["name"] + (f" at {size}" if size else " (preview)")
             print(f"\n== {name} kit: {label}")
             try:

@@ -676,12 +676,20 @@ def test_the_ci_drivers_png_coder_round_trips():
 
 
 def test_the_media_render_job_checks_and_previews_every_seeded_template():
+    """6 Oct: the renders run in ``media-render-templates``, a shard matrix (template_shards.py);
+    every shard builds the image the way the media-render job does and keeps its previews."""
     import yaml
 
     workflow = yaml.safe_load((_ROOT / ".github" / "workflows" / "test.yml").read_text())
-    job = workflow["jobs"]["media-render"]
+    job = workflow["jobs"]["media-render-templates"]
+    assert job["name"].startswith("media-render — ")  # the PRD-251 W1 gate requires every media-render* job
+    assert "needs.changes.outputs.media_render == 'true'" in job["if"]
+    shards = job["strategy"]["matrix"]["shard"]
+    assert shards == list(range(1, int(job["env"]["SHARDS"]) + 1)) and job["strategy"]["fail-fast"] is False
     commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert 'docker build -t "$IMAGE" services/media-render/' in commands
     assert "PYTHONPATH=orchestrator python3 scripts/ci/social_template_previews.py" in commands
+    assert '--shard "$slot/$slots"' in commands and 'wait "$pid" || code=1' in commands
     assert "SOCIALS_RENDER_TOKEN=\"$TOKEN\"" in commands and "exit $code" in commands
     uploads = [step.get("with", {}).get("name") for step in job["steps"] if "upload-artifact" in str(step.get("uses"))]
-    assert "media-render-template-previews" in uploads
+    assert "media-render-template-previews-${{ matrix.shard }}" in uploads

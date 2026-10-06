@@ -60,9 +60,6 @@ import importlib.util
 import json
 import struct
 import sys
-import time
-import urllib.error
-import urllib.request
 import zlib
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -111,14 +108,22 @@ BLOCK_FILL = 0.8
 # blends through the accent colour) never does.
 MIN_ROW_INK = 10
 PROBE_TOKEN_TOLERANCE = 8
-POLL_SECONDS = 2.0
-JOB_WAIT_SECONDS = 900
-TOKEN_HEADER = "X-Internal-Token"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-class PreviewFailure(RuntimeError):
-    """A template that did not check, preview or render cleanly."""
+def _sibling(name: str):
+    """``scripts/ci/<name>.py``, loaded by path: the tests load this driver by path too."""
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# The render client and the CI shard (Gerard, 6 Oct: "why is CI taking 45 mins"): every
+# render unit runs in exactly one of the job's shards (``template_shards.py``).
+_CLIENT = _sibling("render_client")
+PreviewFailure, Renderer = _CLIENT.PreviewFailure, _CLIENT.Renderer
+SHARD = _sibling("template_shards").Shard()
 
 
 # ── PNG, both ways (standard library only) ──────────────────────────────────
@@ -199,14 +204,6 @@ def hex_rgb(value: str) -> Tuple[int, int, int]:
     return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
 
 
-def _sibling(name: str):
-    """``scripts/ci/<name>.py``, loaded by path: the tests load this driver by path too."""
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def heading_font_kit(kit: Mapping[str, Any]) -> Dict[str, Any]:
     """``kit`` as a workspace with an uploaded heading font and logo mark has it, render-ready.
 
@@ -261,52 +258,6 @@ def logo_png(colour: str) -> str:
 
 
 # ── media-render ────────────────────────────────────────────────────────────
-class Renderer:
-    def __init__(self, url: str, token: str) -> None:
-        self.url, self.token = url.rstrip("/"), token
-
-    def _request(self, method: str, path: str, body: Optional[bytes] = None) -> Tuple[int, bytes]:
-        request = urllib.request.Request(self.url + path, data=body, method=method)
-        request.add_header(TOKEN_HEADER, self.token)
-        if body is not None:
-            request.add_header("Content-Type", "application/json")
-        try:
-            with urllib.request.urlopen(request, timeout=JOB_WAIT_SECONDS) as response:
-                return response.status, response.read()
-        except urllib.error.HTTPError as exc:
-            return exc.code, exc.read()
-
-    def render(self, bundle: Mapping[str, Any]) -> Dict[str, Any]:
-        """Post the bundle; the finished job (outputs fetched), or PreviewFailure with the service's answer."""
-        started = time.monotonic()
-        status, body = self._request("POST", "/render", json.dumps(bundle).encode("utf-8"))
-        answer = json.loads(body or b"{}")
-        if status != 202:
-            findings = answer.get("findings") or []
-            for finding in findings[:40]:
-                partner = f" with {finding['containerSelector']}" if finding.get("containerSelector") else ""
-                print(f"    {finding.get('severity')}: {finding.get('section')}/{finding.get('code')}: {finding.get('message')} "
-                      f"{finding.get('selector') or ''}{partner} t={finding.get('time')}")
-            raise PreviewFailure(f"POST /render answered {status}: {answer.get('message') or answer}")
-        print(f"    checked in {time.monotonic() - started:.1f} s (staged, spoken, mixed, checked); job {answer['id']}")
-        job = answer
-        while job.get("status") not in ("done", "failed", "rejected"):
-            if time.monotonic() - started > JOB_WAIT_SECONDS:
-                raise PreviewFailure(f"job {answer['id']} did not finish in {JOB_WAIT_SECONDS} s")
-            time.sleep(POLL_SECONDS)
-            status, body = self._request("GET", f"/render/{answer['id']}")
-            job = json.loads(body)
-        if job["status"] != "done":
-            raise PreviewFailure(f"job {job['id']} {job['status']}: {json.dumps(job.get('error'))}")
-        for output in job["outputs"]:
-            status, data = self._request("GET", output["path"])
-            if status != 200:
-                raise PreviewFailure(f"GET {output['path']} answered {status}")
-            output["data"] = data
-        job["seconds"] = round(time.monotonic() - started, 1)
-        return job
-
-
 def _sample_values(starter: Mapping[str, Any], overlay: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
     resolved = resolve_variables(starter["blocks"]["variables_schema"], {**starter["sample_data"], **(overlay or {})})
     if resolved.missing or resolved.invalid:
@@ -572,7 +523,7 @@ def run_infographic(renderer: Renderer, out: Path, kit: Mapping[str, Any], repor
     except PreviewFailure as exc:
         print(f"    FAIL: {exc}")
         failures.append(f"{starter['name']}: {exc}")
-    for name, source, column, kind in INFOGRAPHIC_RENDERS:
+    for name, source, column, kind in SHARD.mine(INFOGRAPHIC_RENDERS):
         values, series = bind_fixture(starter, source, column, kind)
         for size in starter["blocks"]["sizes"]:
             folder = out / INFOGRAPHIC / name
@@ -615,7 +566,7 @@ def run_videos(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Di
     failures: List[str] = []
     videos = social_starters(SOCIAL_VIDEO)
     print(f"{len(videos)} seeded social video templates: {', '.join(s['name'] for s in videos)}")
-    for starter in videos:
+    for starter in SHARD.mine(videos):
         name, preview = starter["name"], starter["preview"]
         folder = out / starter["slug"]
         folder.mkdir(parents=True, exist_ok=True)
@@ -656,7 +607,7 @@ def run_images(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Di
     failures: List[str] = []
     images = social_starters(SOCIAL_IMAGE)
     print(f"\n{len(images)} seeded social image templates: {', '.join(s['name'] for s in images)}")
-    for starter in images:
+    for starter in SHARD.mine(images):
         name, sizes = starter["name"], starter["blocks"]["sizes"]
         entry: Dict[str, Any] = report.setdefault(starter["slug"], {"sizes": {}})
         for size in sizes:
@@ -703,6 +654,8 @@ def _one_png(job: Mapping[str, Any]) -> bytes:
 
 def run_heading_font(renderer: Renderer, out: Path, kit: Mapping[str, Any], report: Dict[str, Any]) -> List[str]:
     """US-108 (S1.3): the Title card renders with the brand kit's heading font, an uploaded woff2."""
+    if not SHARD.take():
+        return []
     starter = next(s for s in social_starters(SOCIAL_IMAGE) if s["slug"] == HEADING_FONT_TEMPLATE)
     size = starter["blocks"]["sizes"][0]
     folder = out / starter["slug"] / "heading-font"
@@ -815,13 +768,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--url", required=True)
     parser.add_argument("--token", required=True)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--shard", default="0/1", help="i/N: this run's share of the render units (template_shards.py)")
     args = parser.parse_args(argv)
     args.out.mkdir(parents=True, exist_ok=True)
+    SHARD.configure(args.shard)
     failures = run(Renderer(args.url, args.token), args.out)
+    print(f"\n{SHARD.label()}")
     if failures:
         print("\nFAILED:\n  " + "\n  ".join(failures))
         return 1
-    print("\nevery seeded social video template checked with 0 errors and rendered its preview,")
+    print(f"\n{SHARD.label() + ': in these units, ' if SHARD.count > 1 else ''}every seeded social video template checked with 0 errors and rendered its preview,")
     print("every seeded social image template checked with 0 errors and rendered its PNGs at every size,")
     print("the Infographic, bound to a report, showed the report's own rows and chip as a bar, a line and a grid at every size,")
     print("and the Title card rendered its headline in the brand kit's uploaded heading font: PASS")
