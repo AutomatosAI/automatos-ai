@@ -24,16 +24,12 @@ from __future__ import annotations
 
 import base64
 import binascii
-import ipaddress
 import logging
 import os
-import socket
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..bundled_fonts import families
 from ..locale_text import currency_of
@@ -63,14 +59,6 @@ KEEP_TOGETHER_IDS = frozenset({"sign-off"})
 TIGHT_IDS = frozenset({"bill-to-label", "bill-to", "bill-to-address", "to-name", "to-company", "sig-name"})
 RIGHT_ALIGNED_IDS = frozenset({"date"})  # a letter's date, set right as in the PDF
 DEFAULT_IMAGE_MM = 60
-
-
-class _NoRedirect(HTTPRedirectHandler):
-    """Refuse to follow redirects — a public URL must not 30x into a private host
-    (SSRF). Returning None makes urllib raise instead of following."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
-        return None
 
 
 @dataclass
@@ -124,9 +112,8 @@ def _safe_image_bytes(src: str) -> Optional[BytesIO]:
 
     ``data:`` URIs (the inlined brand logo, PRD-242 S3) are decoded in-process;
     local/upload paths are read only from within the document-storage root
-    (:func:`_safe_local_image`); http(s) URLs are fetched only when every resolved
-    address is public AND redirects are refused (a 30x must not pivot into a private
-    host — mirrors and tightens the PRD-156 S4 WeasyPrint SSRF posture). Any failure
+    (:func:`_safe_local_image`); http(s) URLs are fetched from the public address that
+    was checked, each redirect hop checked again (F375, ``pinned_fetch``). Any failure
     returns ``None`` (the caller falls back to alt text)."""
     if not src:
         return None
@@ -134,26 +121,12 @@ def _safe_image_bytes(src: str) -> Optional[BytesIO]:
         return _inline_image_bytes(src)
     if not src.startswith(("http://", "https://")):
         return _safe_local_image(src)
-    parsed = urlparse(src)
-    host = parsed.hostname or ""
+    from modules.documents.pinned_fetch import FetchRefused, fetch_public
+
     try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        return None
-    for info in infos:
-        if not ipaddress.ip_address(info[4][0]).is_global:
-            logger.warning("[DocxRender] refusing non-public image host %r", host)
-            return None
-    opener = build_opener(_NoRedirect)
-    try:
-        with opener.open(Request(src, headers={"User-Agent": "Automatos-DocGen"}), timeout=5) as resp:  # noqa: S310 — host validated + redirects refused
-            if getattr(resp, "status", 200) in (301, 302, 303, 307, 308):
-                return None
-            data = resp.read(_MAX_IMAGE_BYTES + 1)
-        if len(data) > _MAX_IMAGE_BYTES:
-            return None
-        return BytesIO(data)
-    except Exception:  # noqa: BLE001
+        return BytesIO(fetch_public(src, max_bytes=_MAX_IMAGE_BYTES).data)
+    except FetchRefused as refused:  # F375: checked, pinned, every redirect hop checked again
+        logger.warning("[DocxRender] image not fetched: %s", refused)
         return None
 
 

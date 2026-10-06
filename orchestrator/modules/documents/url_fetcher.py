@@ -5,12 +5,16 @@ service imports it back, so ``generation_service._safe_url_fetcher`` still names
 """
 from __future__ import annotations
 
-import ipaddress
-import socket
 from urllib.parse import urlparse
+
+from modules.documents.pinned_fetch import fetch_public
 
 ALLOWED_NETWORK_SCHEMES = ("http", "https")
 INLINE_SCHEME = "data"
+
+
+# What a template may pull into one PDF over http(s) (an image, a stylesheet, a font).
+MAX_FETCH_BYTES = 20 * 1024 * 1024
 
 
 def _safe_url_fetcher(url, *args, **kwargs):
@@ -18,9 +22,12 @@ def _safe_url_fetcher(url, *args, **kwargs):
     targets from user-controlled templates (PRD-156 S4 — SSRF).
 
     Inline ``data:`` URIs (embedded chart images, the bundled and uploaded fonts) are
-    allowed; ``http(s)`` is allowed only to PUBLIC addresses; everything else —
-    file://, and private/loopback/link-local hosts such as 10.x / 127.x / 169.254.x
-    (the cloud metadata endpoint) — is refused.
+    allowed; ``http(s)`` is fetched only from a public address, and (F375) from the
+    very address that was checked, with every redirect hop checked again
+    (``pinned_fetch``): WeasyPrint's own fetcher resolved the host again and followed
+    redirects, so a rebinding answer or a 302 to 127.0.0.1 got past the check.
+    Everything else (file://, private/loopback/link-local hosts such as 10.x / 127.x /
+    169.254.x, the cloud metadata endpoint) is refused.
     """
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").lower()
@@ -29,16 +36,8 @@ def _safe_url_fetcher(url, *args, **kwargs):
         return default_url_fetcher(url, *args, **kwargs)
     if scheme not in ALLOWED_NETWORK_SCHEMES:
         raise ValueError(f"Blocked non-http(s) URL scheme in template: {scheme!r}")
-    host = parsed.hostname or ""
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        raise ValueError(f"Cannot resolve template URL host: {host!r}") from None
-    for info in infos:
-        if not ipaddress.ip_address(info[4][0]).is_global:
-            raise ValueError(f"Blocked non-public address in template URL: {host!r}")
-    from weasyprint import default_url_fetcher
-    return default_url_fetcher(url, *args, **kwargs)
+    fetched = fetch_public(url, max_bytes=MAX_FETCH_BYTES)
+    return {"string": fetched.data, "mime_type": fetched.mime_type, "redirected_url": fetched.url}
 
 
 __all__ = ["_safe_url_fetcher"]
