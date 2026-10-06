@@ -47,7 +47,7 @@ from sqlalchemy.orm import Session
 from config import Config
 from core.models.composio_cache import AgentAppAssignment
 from core.models.core import Agent
-from core.models.orchestration import OrchestrationEvent, OrchestrationTask
+from core.models.orchestration import OrchestrationEvent, OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import BUSY_TASK_STATES, EventType, TaskState
 from modules.coordination.match_signals import (
     SemanticSignals,
@@ -288,7 +288,7 @@ class AgentMatcher:
             semantic=semantic,
             pinned_agent_id=pinned,
         )
-        _shadow_assignment(task, agents, ranked, agent_role, required_tools)
+        _shadow_assignment(task, agents, ranked, agent_role, required_tools, db=db)
         return ranked
 
     @staticmethod
@@ -392,10 +392,12 @@ def _shadow_assignment(
     ranked: Sequence[MatchResult],
     agent_role: Optional[str],
     required_tools: Sequence[str],
+    db: Any = None,
 ) -> None:
     """PRD-248 S5 (shadow only): the decision engine picks from the same roster
-    beside this ranking and logs whether it agreed. Lazy, off by default,
-    fail-open — the returned ranking is never touched."""
+    beside this ranking and logs whether it agreed. It reads the mission's goal
+    (the owner's own words) beside the step and the role the planner wrote.
+    Lazy, off by default, fail-open — the returned ranking is never touched."""
     try:
         from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
 
@@ -420,11 +422,21 @@ def _shadow_assignment(
                 required_tools=list(required_tools or []),
                 candidates=candidates,
                 platform_ranked=[r.agent_name for r in ranked],
+                mission_brief=_mission_goal(db, task),
             ),
             purpose=judgements.PURPOSE_ASSIGN,
         )
     except Exception:  # noqa: BLE001 — never into a mission
         logger.debug("[decision] assignment shadow skipped", exc_info=True)
+
+
+def _mission_goal(db: Any, task: Any) -> Optional[str]:
+    """The goal of the mission a task belongs to (the owner's words), or None."""
+    run_id = getattr(task, "run_id", None)
+    if db is None or run_id is None:
+        return None
+    goal = db.query(OrchestrationRun.goal).filter(OrchestrationRun.id == run_id).scalar()
+    return str(goal) if goal else None
 
 
 def build_match_annotation(ranked: Sequence[MatchResult]) -> Dict[str, Any]:

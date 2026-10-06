@@ -84,11 +84,11 @@ class _Engine:
 # --------------------------------------------------------------------------- #
 
 
-def test_assignment_questions_are_one_choice_over_the_roster_plus_none():
+def test_assignment_questions_are_one_fit_score_per_distinct_candidate():
     q = J.assignment_questions([("Jim", "Writes board packs"), ("Atlas", ""), ("jim", "dup"), ("", "skip")])
-    assert list(q) == ["assignee"]
-    assert q["assignee"].options == ["Jim", "Atlas", "none"]
-    assert q["assignee"].criteria["Jim"] == "Writes board packs" and q["assignee"].criteria["Atlas"] is None
+    assert list(q) == ["Jim", "Atlas"]
+    assert q["Jim"].to_wire()["type"] == "score" and len(q["Jim"].criteria) == len(J.FIT_LEVELS)
+    assert "Writes board packs" in q["Jim"].instructions and "role" not in q["Atlas"].instructions
     with pytest.raises(ValueError):
         J.assignment_questions([])
 
@@ -105,7 +105,7 @@ def test_session_hold_and_report_questions_have_the_documented_shapes():
 
 def test_states_carry_only_the_fields_the_question_needs():
     st = J.assignment_state(title="Draft the board pack", description="x" * 5000, role="writer", required_tools=["docs"])
-    assert st["task"] == "Draft the board pack" and len(st["details"]) == J.TEXT_MAX_CHARS
+    assert st["task"] == "Draft the board pack" and len(st["step"]) == J.TEXT_MAX_CHARS
     assert st["role_wanted"] == "writer" and st["tools_needed"] == ["docs"]
     se = J.session_end_state(title="t", description="d", final_text="done", attempt=3, exit_reason="success", files=["out/a.md", "b.md"], denials=[{"tool": "bash"}])
     assert se["attempt"] == 3 and se["files_written"] == ["out/a.md", "b.md"] and se["commands_refused"] == ["bash"]
@@ -167,27 +167,28 @@ def test_dials_have_no_live_mode_for_the_extra_hooks():
 
 @pytest.mark.asyncio
 async def test_assignment_row_records_agreement_and_platform_rank():
-    engine = _Engine(result=_result(assignee=_choice("Atlas", 0.8)))
+    engine = _Engine(result=_result(Jim=_score(1.0), Atlas=_score(2.4)))
     row = await J.shadow_assignment(
         engine, workspace_id=WS, task_id=41, title="Draft the board pack", description="", role="writer",
         required_tools=[], candidates=[("Jim", "Writes"), ("Atlas", "Plans")], platform_ranked=["Jim", "Atlas"],
     )
     assert row["purpose"] == "ticket_assign" and row["platform_top"] == "Jim" and row["candidates"] == 2
     assert row["jev_pick"] == "Atlas" and row["agree"] is False and row["jev_pick_platform_rank"] == 2
-    assert row["jev_confidence"] == 0.8 and row["latency_ms"] == 240 and engine.rows == [row]
-    assert engine.calls[0]["purpose"] == "ticket_assign" and set(engine.calls[0]["questions"]) == {"assignee"}
+    assert row["jev_confidence"] == 0.8 and row["jev_fits"] == {"Jim": 1.0, "Atlas": 2.4}
+    assert row["latency_ms"] == 240 and engine.rows == [row]
+    assert engine.calls[0]["purpose"] == "ticket_assign" and set(engine.calls[0]["questions"]) == {"Jim", "Atlas"}
 
     agree = await J.shadow_assignment(
-        _Engine(result=_result(assignee=_choice("jim"))), workspace_id=WS, task_id=1, title="t", description="",
+        _Engine(result=_result(Jim=_score(2.0))), workspace_id=WS, task_id=1, title="t", description="",
         role=None, required_tools=[], candidates=[("Jim", "")], platform_ranked=["Jim"],
     )
     assert agree["agree"] is True and agree["jev_pick_platform_rank"] == 1
 
     none = await J.shadow_assignment(
-        _Engine(result=_result(assignee=_choice("none"))), workspace_id=WS, task_id=1, title="t", description="",
+        _Engine(result=_result(Jim=_score(0.4))), workspace_id=WS, task_id=1, title="t", description="",
         role=None, required_tools=[], candidates=[("Jim", "")], platform_ranked=["Jim"],
     )
-    assert none["agree"] is False and none["jev_pick_platform_rank"] is None
+    assert none["jev_pick"] == "none" and none["agree"] is False and none["jev_pick_platform_rank"] is None
 
     miss = await J.shadow_assignment(
         _Engine(result=None), workspace_id=WS, task_id=1, title="t", description="", role=None,

@@ -49,6 +49,16 @@ INTENT_CRITERIA: Dict[str, str] = {
     "unclear": "The text does not say enough to tell.",
 }
 
+# A candidate's fit for a mission step, low to high (one Score per candidate).
+FIT_LEVELS: Sequence[str] = (
+    "Its role is for other kinds of work.",
+    "It could do part of this step.",
+    "Its role suits this step.",
+    "Its role is exactly the work this step needs.",
+)
+# The pick needs at least "its role suits this step" (level 2) more than "part of it" (1).
+FIT_PICK_FLOOR = 1.5
+
 SEVERITY_CRITERIA: Dict[str, str] = {
     "fyi": "Routine; nothing for the owner to do.",
     "worth_a_look": "Useful to read this week; no decision needed.",
@@ -125,22 +135,50 @@ def assignment_options(candidates: Sequence[Tuple[str, str]]) -> Dict[str, Optio
 
 
 def assignment_questions(candidates: Sequence[Tuple[str, str]]) -> Dict[str, Question]:
+    """One four-level fit Score per candidate, keyed by its name. It replaced one Choice over
+    the whole roster (9 to 30 options on the nights): the vendor's own figures are 40% right
+    for a 12-way choice and 91% when it is split into small questions."""
     options = assignment_options(candidates)
     if len(options) < 1:
         raise ValueError("an assignment needs at least one candidate")
-    options[NONE_OPTION] = "No listed agent fits this work."
     return {
-        "assignee": Choice(
-            "Which agent should do this task? Pick by the task's needs and the agent's role.",
-            options,
+        name: Score(
+            f"How well does the agent {name} fit this step?" + (f" Its role: {role}" if role else ""),
+            list(FIT_LEVELS),
         )
+        for name, role in options.items()
     }
 
 
+def assignment_pick(result: DecisionResult, names: Sequence[str]) -> Optional[Tuple[str, float, Dict[str, float]]]:
+    """``(pick, top fit 0..1, every fit)``: the best-fitting candidate (the roster's order
+    breaks a tie), or ``none`` when even the best fits below "its role suits this step".
+    None when no candidate was answered."""
+    fits = {
+        name: float(answer.score)
+        for name in names
+        if (answer := result.get(name)) is not None and answer.score is not None
+    }
+    if not fits:
+        return None
+    best = max(fits, key=lambda name: (fits[name], -list(names).index(name)))
+    top = fits[best] / (len(FIT_LEVELS) - 1)
+    pick = best if fits[best] >= FIT_PICK_FLOOR else NONE_OPTION
+    return pick, top, {name: round(fit, 4) for name, fit in fits.items()}
+
+
 def assignment_state(
-    *, title: str, description: str, role: Optional[str], required_tools: Sequence[str]
+    *, title: str, description: str, role: Optional[str], required_tools: Sequence[str],
+    mission_brief: Optional[str] = None,
 ) -> Dict[str, Any]:
-    state: Dict[str, Any] = {"task": _preview(title), "details": _preview(description, TEXT_MAX_CHARS)}
+    """The step, and the owner's own words for it beside ``role_wanted``: the mission's goal,
+    or the step text when there is none. Night 5: "writer" read literally sent 15 of 44
+    steps to the wrong agent; the owner's words say what kind of writing."""
+    state: Dict[str, Any] = {
+        "task": _preview(title),
+        "owners_words": _preview(mission_brief or description, 1500),
+        "step": _preview(description, TEXT_MAX_CHARS),
+    }
     if role:
         state["role_wanted"] = str(role)
     if required_tools:
@@ -159,17 +197,20 @@ async def shadow_assignment(
     required_tools: Sequence[str],
     candidates: Sequence[Tuple[str, str]],
     platform_ranked: Sequence[str],
+    mission_brief: Optional[str] = None,
 ) -> Dict[str, Any]:
     ranked = [str(n) for n in platform_ranked if n]
+    names = list(assignment_options(candidates))
     row: Dict[str, Any] = {
         "purpose": PURPOSE_ASSIGN,
         "workspace_id": workspace_id,
         "task_id": task_id,
         "title": _preview(title),
         "role": role,
-        "candidates": len(assignment_options(candidates)),
+        "candidates": len(names),
         "platform_top": ranked[0] if ranked else None,
         "platform_ranked": ranked[:5],
+        "has_mission_brief": bool(mission_brief),
     }
     try:
         questions = assignment_questions(candidates)
@@ -179,20 +220,22 @@ async def shadow_assignment(
         return row
 
     def finish(r: Dict[str, Any], result: DecisionResult) -> None:
-        answer = result.get("assignee")
-        if answer is None or not answer.choice:
+        picked = assignment_pick(result, names)
+        if picked is None:
             r["agree"] = None
             return
-        pick = answer.choice
-        r["jev_pick"] = pick
-        r["jev_confidence"] = round(answer.certainty, 4)
+        pick, top, fits = picked
+        r.update(jev_pick=pick, jev_confidence=round(top, 4), jev_fits=fits)
         lower = [n.lower() for n in ranked]
         r["jev_pick_platform_rank"] = (lower.index(pick.lower()) + 1) if pick.lower() in lower else None
         r["agree"] = (bool(ranked) and pick.lower() == ranked[0].lower()) if pick != NONE_OPTION else (not ranked)
 
     return await _ask_and_record(
         engine, purpose=PURPOSE_ASSIGN, row=row,
-        state=assignment_state(title=title, description=description, role=role, required_tools=required_tools),
+        state=assignment_state(
+            title=title, description=description, role=role, required_tools=required_tools,
+            mission_brief=mission_brief,
+        ),
         questions=questions, workspace_id=workspace_id, finish=finish,
     )
 
