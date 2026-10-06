@@ -27,7 +27,7 @@ from .locale_text import currency_prefix
 # The last word of a key that holds money: "unit_price", "line_total", "amount_due".
 AMOUNT_WORDS = frozenset({
     "amount", "balance", "cost", "deposit", "discount", "due", "fee", "fees",
-    "price", "shipping", "subtotal", "tax", "total", "vat",
+    "price", "revenue", "shipping", "subtotal", "tax", "total", "vat",
 })
 KEY_WORD_SEPARATORS = re.compile(r"[\s_.-]+")
 MIN_DECIMALS = 2

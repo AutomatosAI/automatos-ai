@@ -28,6 +28,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from modules.documents.blocks import (
     collect_variable_paths, legacy_render_data, render_document_docx, render_document_html, validate_blocks,
 )
+from modules.documents.blocks.design_tokens import palette
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.data_coverage import block_template_keys, legacy_template_keys
 from modules.documents.legacy_jinja import legacy_brand, with_document_filters
@@ -240,5 +241,8 @@ def test_a_branded_data_export_has_a_letterhead_zebra_rows_and_a_printed_footer(
     assert '<c r="A4"' in sheet  # the header row under the title and the company line
     assert 'ySplit="4"' in sheet and "<autoFilter" in sheet
     assert "Page &amp;P of &amp;N" in sheet and "<oddFooter>" in sheet
-    assert '<fgColor rgb="FFC44A1A"/>' in styles and styles.count("<fill>") >= 4  # header and zebra fills
+    # PRD-255 (US-005): the header is the kit's surface_2 (the primary paints no header under sparing).
+    header = palette({f"{role}_color": hex_ for role, hex_ in brand["colours"].items()}).header_fill
+    assert f'<fgColor rgb="FF{header.lstrip("#").upper()}"/>' in styles and '<fgColor rgb="FFC44A1A"/>' not in styles
+    assert styles.count("<fill>") >= 4  # header and zebra fills
     assert os.path.getsize(path) > 0

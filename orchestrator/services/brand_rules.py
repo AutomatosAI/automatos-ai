@@ -12,7 +12,7 @@ applied by the platform:
   drafts work is given (``services.brand_hooks``): the name it writes as, its tone
   words, who signs, and the words it never uses. The kit has no length rule; a
   length is the brief's.
-* :func:`brand_assets`: the logo, colours and fonts, render-ready, for a renderer
+* :func:`brand_assets`: the logo, colours, fonts and design system, render-ready, for a renderer
   that has no brand kit of its own (the spreadsheet; the PDF, Word and social renders
   already read the kit, ``DocumentGenerationService._brand_kit_for``).
 * :func:`on_brand_text`: a deterministic pass over finished text. A placeholder
@@ -61,6 +61,8 @@ RULES_LEAD = ("From the owner's brand kit. Everything you write for the owner to
 BANNED_NOTE_LEAD = "Check before using this answer: it uses words the brand kit bans"
 KIT_WINS_LINE = "- The brand kit wins over any document that says otherwise."
 COLOUR_KEYS = ("primary", "secondary", "accent", "text")
+# The kit's design fields a renderer reads as they are stored (PRD-255).
+DESIGN_KEYS = ("accent_use", "type_scale", "logo_rules")
 CONTACT_FIELDS = (("address", "Address"), ("phone", "Phone"), ("email", "Email"), ("website", "Website"))
 UPLOADED_LOGO_LINE = ("- Logo: the one uploaded to the brand kit. generate_document puts it on the document "
                       "for you; in a session, your ticket file lists its copy.")
@@ -326,8 +328,15 @@ def _first_family(stack: str) -> str:
 def brand_assets(db: Any, workspace_id: Any) -> Optional[Dict[str, Any]]:
     """The logo (an uploaded one inlined as a data: URI), the colours and the first font
     of each stack, for a renderer; None when the workspace has no kit, so the renderer
-    keeps its own look."""
+    keeps its own look.
+
+    PRD-255 (US-005): also the kit's design system, so a renderer without the kit itself
+    prints with it: ``palette`` (the effective colour roles, ``derive_palette``),
+    ``accent_use``, ``type_scale``, ``logo_rules``, ``currency`` (the ISO code, empty for
+    none) and ``date_style``."""
+    from core.brand_palette import derive_palette
     from modules.documents.brand_logo import brand_kit_for_render
+    from modules.documents.locale_text import currency_of, date_style_of
 
     stored = stored_kit(db, workspace_id)
     if stored is None:
@@ -339,6 +348,10 @@ def brand_assets(db: Any, workspace_id: Any) -> Optional[Dict[str, Any]]:
         "colours": {key: kit.get(f"{key}_color") for key in ("primary", "secondary", "accent", "text")},
         "fonts": {"body": _first_family(kit.get("font_family") or ""),
                   "heading": _first_family(kit.get("heading_font") or kit.get("font_family") or "")},
+        "palette": derive_palette(kit),
+        **{key: kit.get(key) for key in DESIGN_KEYS},
+        "currency": currency_of(kit),
+        "date_style": date_style_of(kit),
     }
 
 
