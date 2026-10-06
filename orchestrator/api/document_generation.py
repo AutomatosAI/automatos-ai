@@ -113,7 +113,7 @@ def _validate_blocks_or_422(format: str, blocks: Optional[dict]) -> Optional[dic
     try:
         return validated_blocks(format, blocks)
     except BlockValidationError as e:
-        raise HTTPException(status_code=422, detail={"message": INVALID_BLOCKS, "errors": e.errors})
+        raise HTTPException(status_code=422, detail={"message": INVALID_BLOCKS, "errors": e.errors}) from e
 
 
 # PRD-251 S1.2: what a social template's render can fail with (its save: TEMPLATE_SAVE_ERRORS).

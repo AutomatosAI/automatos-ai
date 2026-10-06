@@ -262,8 +262,9 @@ def engine():
 def local_edition(monkeypatch, engine, new_session):
     """One throwaway local workspace per test: config patched to local + a
     fresh DEFAULT_WORKSPACE_ID (NEVER the live default workspace). Teardown
-    sweeps every row the seed made for that workspace, and the operator user
-    only if this test created it."""
+    sweeps every row the seed made for that workspace, the marketplace agent rows
+    it created (PRD-255 US-011: Auto's seed makes the Brand designer's marketplace
+    row when there is none), and the operator user only if this test created it."""
     from sqlalchemy import text
 
     ws_id = uuid.uuid4()
@@ -273,6 +274,7 @@ def local_edition(monkeypatch, engine, new_session):
     operator_existed = probe.execute(
         text("SELECT 1 FROM users WHERE email = :e"), {"e": config.LOCAL_OPERATOR_EMAIL}
     ).fetchone() is not None
+    shared_before = [row[0] for row in probe.execute(text("SELECT id FROM agents WHERE workspace_id IS NULL"))]
     probe.close()
 
     yield ws_id
@@ -285,6 +287,10 @@ def local_edition(monkeypatch, engine, new_session):
             "(SELECT id FROM agents WHERE workspace_id = CAST(:w AS uuid))"
         ), params)
         sweep.execute(text("DELETE FROM agents WHERE workspace_id = CAST(:w AS uuid)"), params)
+        made = {"before": shared_before or [0]}
+        made_here = "(SELECT id FROM agents WHERE workspace_id IS NULL AND NOT (id = ANY(:before)))"
+        sweep.execute(text(f"DELETE FROM agent_skills WHERE agent_id IN {made_here}"), made)
+        sweep.execute(text(f"DELETE FROM agents WHERE id IN {made_here}"), made)
         # blog_posts + workflow_recipes cascade from the workspace
         sweep.execute(text("DELETE FROM workspaces WHERE id = CAST(:w AS uuid)"), params)
         if not operator_existed:

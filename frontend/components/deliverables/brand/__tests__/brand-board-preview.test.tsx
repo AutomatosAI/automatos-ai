@@ -57,8 +57,17 @@ function Harness() {
   )
 }
 
+// The fetch reaches the stub with jsdom's origin in front (as in brand-kit-logo-variants.test.tsx):
+// what is checked is the path and the query.
+const ORIGIN = /^https?:\/\/[^/]+/
+
 function fetchedUrls(): string[] {
-  return vi.mocked(fetch).mock.calls.map(([url]) => String(url))
+  return vi.mocked(fetch).mock.calls.map(([url]) => String(url).replace(ORIGIN, ''))
+}
+
+function endingWith(path: string) {
+  const escaped = path.replace(/[.*+?^$()|[\]\\]/g, '\\$&')
+  return expect.stringMatching(new RegExp(`${escaped}$`))
 }
 
 function boardDraws(): string[] {
@@ -91,7 +100,7 @@ describe('the brand board on the Brand kit page', () => {
     render(<Harness />)
     const section = await screen.findByRole('region', { name: 'Brand board' })
     expect(await within(section).findByAltText('Brand board, page 1')).toHaveAttribute('src', 'blob:board')
-    expect(fetch).toHaveBeenCalledWith(`${BOARD_PNG}&v=0`, { headers: { Authorization: 'Bearer t' } })
+    expect(fetch).toHaveBeenCalledWith(endingWith(`${BOARD_PNG}&v=0`), { headers: { Authorization: 'Bearer t' } })
   })
 
   it('draws the board again after each save', async () => {

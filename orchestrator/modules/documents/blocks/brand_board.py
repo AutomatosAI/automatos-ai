@@ -109,9 +109,14 @@ def _label(role: str) -> str:
 
 
 def swatches(kit: Mapping[str, Any]) -> List[Swatch]:
-    """Every colour role of the kit's effective palette, in the palette's order."""
+    """Every colour role of the kit's effective palette, in the palette's order.
+
+    A role the palette has not got (``accent_2``: only when stored, or when the
+    secondary is a second hue) is left out, never invented.
+    """
     roles, sources = effective_palette(kit)
-    return [Swatch(role, _label(role), ROLE_JOBS[role], roles[role].upper(), sources[role]) for role in PALETTE_ROLES]
+    return [Swatch(role, _label(role), ROLE_JOBS[role], roles[role].upper(), sources[role])
+            for role in PALETTE_ROLES if role in roles]
 
 
 def accent_rule(kit: Mapping[str, Any]) -> str:

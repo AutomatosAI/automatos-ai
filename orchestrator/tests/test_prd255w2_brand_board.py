@@ -191,6 +191,16 @@ def test_each_swatch_is_filled_with_its_role_and_a_derived_role_says_so():
     assert "Accent use: sparing" in colours
 
 
+def test_a_kit_with_no_second_accent_prints_the_roles_it_has_and_invents_none():
+    kit = {**get_brand_kit({"brand_kit": {"name": COMPANY}}), "logo_url": LOGO}   # the defaults: one hue
+    roles, _ = effective_palette(kit)
+    assert "accent_2" not in roles
+
+    assert [swatch.role for swatch in bb.swatches(kit)] == [role for role in PALETTE_ROLES if role != "accent_2"]
+    colours = _part(_board_html(kit), "board-colours")
+    assert colours.count('class="board-swatch"') == len(PALETTE_ROLES) - 1 and "Accent 2" not in colours
+
+
 def test_the_logo_prints_large_as_uploaded_beside_the_name_and_tagline():
     logo = _part(_board_html(AUTOMATOS), "board-logo")
     assert f'src="{LOGO}"' in logo and "Agents that do the work" in logo and COMPANY in logo
