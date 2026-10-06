@@ -500,14 +500,14 @@ def _service_command(cfg: HostConfig) -> int:
             print(f"installed {path}\nthe host now starts at login and restarts itself; log: {cfg.state_dir / 'host.log'}")
             return 0
         if action == "uninstall":
-            print("removed" if service.uninstall() else "no service was installed")
+            sys.stdout.write(("removed" if service.uninstall(cfg) else "no service was installed") + "\n")
             return 0
         if action == "status":
-            st = service.status()
+            st = service.status(cfg)
             print(f"{st['manager']}: installed={st['installed']} running={st['running']} pid={st['pid']} unit={st['unit']}")
             return 0 if st["running"] else 1
         if action == "restart":
-            ok = service.restart()
+            ok = service.restart(cfg)
             print("restarting" if ok else "no running service to restart")
             return 0 if ok else 1
         if action == "nudge":

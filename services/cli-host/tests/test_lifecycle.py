@@ -134,3 +134,14 @@ def test_on_windows_a_previous_runs_sessions_are_not_killed_by_pid(tmp_path, mon
     host._reap_previous_run()
     assert killed == []
     assert state.load_process_table(host.cfg.process_table_path) == {}
+
+
+def test_without_sighup_a_stop_request_stops_the_host(tmp_path, monkeypatch):
+    # The Windows login task's --uninstall: the host lets go of its tickets and exits 0.
+    monkeypatch.delattr(signal, "SIGHUP", raising=False)
+    host = _host()
+    lifecycle.watch_restart_requests(host, tmp_path)
+    (tmp_path / "host.pid").write_text(f"{os.getpid()}\n")
+    assert lifecycle.request_stop(tmp_path / "host.pid", tmp_path) == os.getpid()
+    assert host.stop.wait(WAIT_SECONDS), "the host never stopped"
+    assert "stop requested" in host.stopping and host.seen == []

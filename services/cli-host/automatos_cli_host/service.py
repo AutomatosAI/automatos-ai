@@ -214,25 +214,51 @@ def restart_systemd() -> bool:
 def _manager() -> str:
     if sys.platform == "darwin":
         return "launchd"
+    if sys.platform == "win32":
+        return "taskscheduler"
     if shutil.which("systemctl"):
         return "systemd"
-    raise RuntimeError("no supported service manager here (launchd on macOS, systemd --user on Linux)")
+    raise RuntimeError("no supported service manager here (launchd on macOS, systemd --user on Linux, "
+                       "Task Scheduler on Windows)")
 
 
 def install(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> Path:
-    return install_launchd(cfg, passthrough) if _manager() == "launchd" else install_systemd(cfg, passthrough)
+    manager = _manager()
+    if manager == "taskscheduler":
+        from . import winservice
+        return winservice.install(service_argv(cfg, passthrough), cfg.state_dir, _package_root())
+    return install_launchd(cfg, passthrough) if manager == "launchd" else install_systemd(cfg, passthrough)
 
 
-def uninstall() -> bool:
-    return uninstall_launchd() if _manager() == "launchd" else uninstall_systemd()
+def uninstall(cfg: Optional[HostConfig] = None) -> bool:
+    manager = _manager()
+    if manager == "taskscheduler":
+        from . import winservice
+        return winservice.uninstall(*_state(cfg))
+    return uninstall_launchd() if manager == "launchd" else uninstall_systemd()
 
 
-def status() -> Dict[str, Any]:
-    return status_launchd() if _manager() == "launchd" else status_systemd()
+def status(cfg: Optional[HostConfig] = None) -> Dict[str, Any]:
+    manager = _manager()
+    if manager == "taskscheduler":
+        from . import winservice
+        return winservice.status(*_state(cfg))
+    return status_launchd() if manager == "launchd" else status_systemd()
 
 
-def restart() -> bool:
-    return restart_launchd() if _manager() == "launchd" else restart_systemd()
+def restart(cfg: Optional[HostConfig] = None) -> bool:
+    manager = _manager()
+    if manager == "taskscheduler":
+        from . import winservice
+        return winservice.restart(*_state(cfg))
+    return restart_launchd() if manager == "launchd" else restart_systemd()
+
+
+def _state(cfg: Optional[HostConfig]):
+    """The host's pid file and state directory, for the managers that talk to the host itself."""
+    if cfg is None:
+        raise RuntimeError("the Windows login task needs the host's state directory (--dir)")
+    return cfg.state_dir / "host.pid", cfg.state_dir
 
 
 def nudge(cfg: HostConfig) -> bool:
