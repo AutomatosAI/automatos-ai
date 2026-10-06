@@ -37,7 +37,14 @@ _PARAMETERS = {
         "tagline": {"type": "string", "description": "The brand's tagline."},
         "primary_color": {"type": "string", "description": "Hex colour, such as #1a1a2e or #abc."},
         "secondary_color": {"type": "string", "description": "Hex colour."},
-        "accent_color": {"type": "string", "description": "Hex colour."},
+        "accent_color": {
+            "type": "string",
+            "description": (
+                "Hex colour: the kit's third colour, which social videos tint and mark with. NOT "
+                "the documents' accent: \"the accent\" or \"the highlight colour\" is palette.accent. "
+                "It must read at 3:1 on the page."
+            ),
+        },
         "text_color": {"type": "string", "description": "Hex colour of body text."},
         "font_family": {
             "type": "string",

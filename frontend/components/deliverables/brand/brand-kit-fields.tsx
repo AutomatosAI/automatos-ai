@@ -4,6 +4,10 @@
  * PRD-251B US-B301 — the Brand kit tab's colour, font and company fields: the kit's four
  * colours (the colour roles derive from them, PRD-255), the body and heading fonts with the uploaded font files, and the contact
  * details that fill {{company.*}}.
+ *
+ * F361 (night 10c): `accent_color` was labelled "Accent" above the role "Accent (highlights)", and
+ * the two disagreed. Documents never draw it as their accent; social videos tint and mark with it.
+ * It is "Third colour" now, so the one accent on the page is the highlight role.
  */
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,6 +17,7 @@ import type { BrandKit } from '@/components/documents/blocks/types'
 
 const HEX = /^#([0-9a-fA-F]{6})$/
 const FALLBACK_SWATCH = '#1a1a2e'
+const THIRD_COLOUR_LABEL = 'Third colour (social videos)'
 
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
@@ -48,11 +53,14 @@ export function BrandColours({ kit, patch }: KitFieldsProps) {
     <div>
       <div className="grid grid-cols-2 gap-3">
         <ColorField label="Primary (brand colour)" value={kit.primary_color} onChange={(v) => patch({ primary_color: v })} />
-        <ColorField label="Accent" value={kit.accent_color} onChange={(v) => patch({ accent_color: v })} />
         <ColorField label="Secondary" value={kit.secondary_color} onChange={(v) => patch({ secondary_color: v })} />
         <ColorField label="Body text" value={kit.text_color} onChange={(v) => patch({ text_color: v })} />
+        <ColorField label={THIRD_COLOUR_LABEL} value={kit.accent_color} onChange={(v) => patch({ accent_color: v })} />
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">The colour roles below derive from these; Save to see them follow.</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        The colour roles below derive from these; Save to see them follow. The highlight colour in
+        documents is the Accent role below; social videos also tint with the third colour.
+      </p>
     </div>
   )
 }

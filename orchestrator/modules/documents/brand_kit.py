@@ -68,6 +68,7 @@ from modules.documents.brand_system import (
     LogoRules,
     ToneWord,
     TypeScale,
+    changed_kit_colours,
     currency_code,
     one_line_text,
     require_readable_palette,
@@ -285,6 +286,9 @@ class BrandKit(BaseModel):
     logo_path: str = ""
     primary_color: str = DEFAULT_PRIMARY
     secondary_color: str = DEFAULT_SECONDARY
+    # F361: "the third colour", not the documents' accent (that is ``palette.accent``):
+    # social videos tint and mark with it, the social brand board shows it, and
+    # {{brand.accent_color}} prints it. A save that changes it is contrast-checked.
     accent_color: str = DEFAULT_ACCENT
     text_color: str = DEFAULT_TEXT
     # The body font (PRD-251 D5's body_font): every renderer reads this key.
@@ -493,7 +497,8 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     any other field in the patch replaces the stored one
     (``social_handles`` is the whole map: a network left out, or given an empty
     handle, is removed). Raises ``pydantic.ValidationError`` (surfaced as 422 by
-    the API) on bad input, and on a palette whose text does not read on its page.
+    the API) on bad input, on a palette whose text does not read on its page, and
+    on a third colour (``accent_color``) this save changes that does not (F361).
     """
     base = get_brand_kit({BRAND_KIT_SETTINGS_KEY: existing} if existing else None)
     # The stored files (logo, its variants, logo mark, fonts) are owned by the
@@ -506,7 +511,7 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
         if isinstance(patch.get(record), dict):
             merged[record] = _merged(base.get(record, {}), patch[record])
     kit = BrandKit.model_validate(merged).model_dump()
-    require_readable_palette(kit)
+    require_readable_palette(kit, changed_kit_colours(base, kit))
     return kit
 
 

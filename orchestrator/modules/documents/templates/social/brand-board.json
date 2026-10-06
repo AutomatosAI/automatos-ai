@@ -66,9 +66,9 @@
     },
     "accent_label": {
       "type": "text",
-      "label": "Accent",
-      "description": "The name of the accent colour's swatch.",
-      "default": "Accent",
+      "label": "Third colour",
+      "description": "The name of the third colour's swatch.",
+      "default": "Third colour",
       "max_chars": 24
     },
     "paper_label": {

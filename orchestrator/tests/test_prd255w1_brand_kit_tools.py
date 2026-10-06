@@ -42,7 +42,8 @@ EVERY_FIELD = {
     "logo_url": "https://harbourline.ie/logo.png",
     "primary_color": "#0b2545",
     "secondary_color": "#13315c",
-    "accent_color": "#e0a458",
+    # F361: the third colour must read at 3:1 on the page when a save changes it (#e0a458 is 2.1:1).
+    "accent_color": "#9c5a14",
     "text_color": "#1b1b1b",
     "font_family": "Source Sans 3, sans-serif",
     "company": {"phone": "+353 21 400 1234"},
