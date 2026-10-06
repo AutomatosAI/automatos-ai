@@ -140,3 +140,31 @@ def test_the_weasyprint_and_word_fetchers_refuse_a_redirect_into_the_metadata_ad
         url_fetcher._safe_url_fetcher("https://cdn.example/logo.png")
     assert _safe_image_bytes("https://cdn.example/logo.png") is None
     assert {r.url.host for r in sent} == {PUBLIC_IP}  # the metadata address was never requested
+
+
+def test_a_compressed_body_is_never_decoded_past_the_cap(dns):
+    """A gzip body could decode to far more than the cap in one chunk: only an unencoded body is read."""
+    import gzip
+
+    dns({"cdn.example": [PUBLIC_IP]})
+    bomb = gzip.compress(b"\x00" * 10_000_000)  # 10 MB of zeros, about 10 KB on the wire
+    sent: List[httpx.Request] = []
+    with pytest.raises(FetchRefused, match="encoded"):
+        fetch_public("http://cdn.example/bomb", max_bytes=1024, client_factory=_transport(
+            lambda r: httpx.Response(200, content=bomb, headers={"content-encoding": "gzip"}), sent))
+    assert sent[0].headers["accept-encoding"] == "identity"
+
+
+def test_a_declared_size_over_the_cap_is_refused_before_reading(dns):
+    dns({"cdn.example": [PUBLIC_IP]})
+    with pytest.raises(FetchRefused, match="larger"):
+        fetch_public("http://cdn.example/big", max_bytes=8, client_factory=_transport(
+            lambda r: httpx.Response(200, content=b"x" * 4, headers={"content-length": "999999999"}), []))
+
+
+def test_the_whole_fetch_has_a_deadline(dns, monkeypatch):
+    dns({"cdn.example": [PUBLIC_IP]})
+    monkeypatch.setattr(pinned_fetch, "FETCH_DEADLINE_SECONDS", -1.0)  # already past
+    with pytest.raises(FetchRefused, match="longer than"):
+        fetch_public("http://cdn.example/slow", max_bytes=1024, client_factory=_transport(
+            lambda r: httpx.Response(200, content=PNG), []))
