@@ -15,6 +15,7 @@ reaches ``accent_use`` / ``palette.accent`` and "more space" ``spacing_unit_pt``
 
 import copy
 
+from core.brand_palette import ROLE_DERIVED, ROLE_SET
 from modules.documents.brand_system import ACCENT_USES, DATE_STYLES, ROLE_JOBS, TYPE_STEPS
 
 from .action_registry import ActionDefinition, ActionRegistry
@@ -116,13 +117,25 @@ _PARAMETERS = {
             "description": (
                 "The colour roles (PRD-255), merged key by key. Each is a hex colour; a role "
                 "not set is derived from the four kit colours, and an empty string returns a "
-                "set role to derived. ink, heading and muted must read at 4.5:1 on paper and "
-                "surface_2; accent and accent_2 at 3:1. A role that does not is refused with "
-                "its ratio."
+                "set role to derived. A derived role sent at the colour it has now stays "
+                "derived. ink, heading and muted must read at 4.5:1 on paper (the page) and "
+                "surface_2 (table header fills); accent and accent_2 at 3:1. A role that does "
+                "not is refused with its ratio and what it sits on."
             ),
             "properties": {
                 role: {"type": "string", "description": f"{job[:1].upper()}{job[1:]}."} for role, job in ROLE_JOBS.items()
             },
+        },
+        "palette_source": {
+            "type": ["object", "string"],
+            "description": (
+                "Which colour roles are set and which follow the kit's colours, as "
+                "platform_get_brand_kit answers it (it may be sent back as it is). A role "
+                "\"derived\" goes back to following the kit's colours unless palette changes "
+                "its colour; \"set\" pins it at its colour. The string \"derived\" returns "
+                "every role to derived."
+            ),
+            "properties": {role: {"type": "string", "enum": [ROLE_SET, ROLE_DERIVED]} for role in ROLE_JOBS},
         },
         "accent_use": {
             "type": "string",
@@ -215,7 +228,9 @@ def register_brand_kit_update_action(registry: ActionRegistry) -> None:
             "network left out, or given an empty handle, is removed). The kit is "
             "validated first: an invalid value is refused with the reason and nothing "
             "is saved. palette, type_scale and logo_rules merge key by key too; a colour "
-            "role sent empty goes back to being derived from the kit's colours. The logo, its dark-background and one-colour versions, the logo mark "
+            "role sent empty, or marked \"derived\" in palette_source, goes back to being "
+            "derived from the kit's colours; what platform_get_brand_kit answers can be "
+            "sent back unchanged. The logo, its dark-background and one-colour versions, the logo mark "
             "and the font files are uploaded by a person in the brand kit settings; this tool sets text, colours, fonts and http(s) "
             "logo URLs only."
         ),

@@ -13,7 +13,9 @@ FR-2), so no stored kit is migrated.
 * :func:`require_readable_palette`: the contrast check on save (FR-5). Each text
   role is measured on the effective paper and surface_2 (stored, else derived):
   ink, heading and muted need 4.5:1; the accents need 3:1 (large text, rules and
-  fills; renderers print small text in an accent only at 4.5:1).
+  fills; renderers print small text in an accent only at 4.5:1). The refusal says
+  what the colour sits on in plain words beside the role key, "on the page (paper,
+  white)" (F366).
 * :func:`brand_kit_view`: the kit as GET answers it, with the effective roles and,
   per role, whether it is ``set`` or ``derived``.
 
@@ -35,13 +37,14 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Dict, List, Literal, Mapping, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_serializer, model_validator
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from core.brand_palette import (
     PALETTE_ROLES,
+    RGB,
     ROLE_ACCENT,
     ROLE_ACCENT_2,
     ROLE_HEADING,
@@ -100,6 +103,11 @@ TEXT_GROUNDS = (ROLE_PAPER, ROLE_SURFACE_2)
 # A ratio is reported rounded down, so a near miss never reads as the target.
 RATIO_DECIMALS = 1
 CONTRAST_ERROR = "palette_contrast"
+# F366: what a colour sits on, in the owner's words (the Brand kit page's labels), for the
+# save's refusal: "on the page (paper, white)", not "on paper".
+GROUND_WORDS = {ROLE_PAPER: "the page", ROLE_SURFACE_2: "table header fills"}
+GROUND_NOUNS = {ROLE_PAPER: "page", ROLE_SURFACE_2: "table header fill"}
+SHADE_WORDS = {"#ffffff": "white", "#000000": "black"}
 HEX_RULE = "must be a hex colour such as #1a1a2e or #abc"
 
 
@@ -139,13 +147,43 @@ def _rounded_down(ratio: float) -> str:
     return f"{math.floor(ratio * scale) / scale:.{RATIO_DECIMALS}f}"
 
 
-def _contrast_message(role: str, ground: str, ratio: float, derived: bool) -> str:
-    need = SAVE_ROLE_MIN_CONTRAST[role]
+def _shade(hex_colour: str) -> str:
+    return SHADE_WORDS.get(hex_colour, hex_colour)
+
+
+def _where(failures: List[Tuple[str, float]], roles: Mapping[str, str]) -> str:
+    """Each failing ground in plain words, its role key and its colour; grounds of one colour said once.
+
+    "1.2:1 on the page (paper, white) and 1.1:1 on table header fills (surface_2, #eef0f3)".
+    """
+    by_shade: Dict[str, List[Tuple[str, float]]] = {}
+    for ground, ratio in failures:
+        by_shade.setdefault(roles[ground], []).append((ground, ratio))
+    parts = []
+    for shade, grounds in by_shade.items():
+        words = " and ".join(GROUND_WORDS[ground] for ground, _ in grounds)
+        keys = " and ".join(ground for ground, _ in grounds)
+        parts.append(f"{_rounded_down(grounds[0][1])}:1 on {words} ({keys}, {_shade(shade)})")
+    return " and ".join(parts)
+
+
+def contrast_failures(colour: RGB, roles: Mapping[str, str], need: float) -> List[Tuple[str, float]]:
+    """Each text ground of ``roles`` (an effective palette) that ``colour`` reads under ``need`` on, with its ratio."""
+    measured = [(ground, contrast(colour, parse_hex(roles[ground]))) for ground in TEXT_GROUNDS]
+    return [(ground, ratio) for ground, ratio in measured if ratio < need]
+
+
+def contrast_message(name: str, failures: List[Tuple[str, float]], roles: Mapping[str, str], need: float) -> str:
+    """Why ``name`` was refused: its ratio on each ground it fails, said in plain words with the role key (F366)."""
     rule = f"text needs {SAVE_TEXT_MIN_CONTRAST:g}:1"
     if need != SAVE_TEXT_MIN_CONTRAST:
         rule = f"{rule} (large text {need:g}:1)"
-    hint = f"; {role} is derived from the kit's colours: set it, or choose a lighter {ground}" if derived else ""
-    return f"{role} on {ground} is {_rounded_down(ratio)}:1; {rule}{hint}"
+    return f"{name} is {_where(failures, roles)}; {rule}"
+
+
+def _derived_hint(role: str, failures: List[Tuple[str, float]]) -> str:
+    worst, _ratio = min(failures, key=lambda failure: failure[1])
+    return f"; {role} is derived from the kit's colours: set it, or choose a lighter {GROUND_NOUNS[worst]}"
 
 
 def palette_contrast_errors(kit: Mapping[str, Any]) -> List[InitErrorDetails]:
@@ -154,16 +192,17 @@ def palette_contrast_errors(kit: Mapping[str, Any]) -> List[InitErrorDetails]:
     errors: List[InitErrorDetails] = []
     for role, need in SAVE_ROLE_MIN_CONTRAST.items():
         colour = parse_hex(roles.get(role))
-        if colour is None:
+        failures = contrast_failures(colour, roles, need) if colour is not None else []
+        if not failures:
             continue
-        ratio, ground = min((contrast(colour, parse_hex(roles[g])), g) for g in TEXT_GROUNDS)
-        if ratio < need:
-            message = _contrast_message(role, ground, ratio, sources.get(role) != ROLE_SET)
-            errors.append(InitErrorDetails(
-                type=PydanticCustomError(CONTRAST_ERROR, message),
-                loc=(PALETTE_FIELD, role),
-                input=roles[role],
-            ))
+        message = contrast_message(role, failures, roles, need)
+        if sources.get(role) != ROLE_SET:
+            message += _derived_hint(role, failures)
+        errors.append(InitErrorDetails(
+            type=PydanticCustomError(CONTRAST_ERROR, message),
+            loc=(PALETTE_FIELD, role),
+            input=roles[role],
+        ))
     return errors
 
 
@@ -428,6 +467,8 @@ __all__ = [
     "TypeScale",
     "TypeStep",
     "brand_kit_view",
+    "contrast_failures",
+    "contrast_message",
     "currency_code",
     "default_type_step",
     "one_line_text",

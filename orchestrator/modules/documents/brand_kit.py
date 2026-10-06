@@ -46,11 +46,13 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Literal, Optional, Pattern, Tuple
+from typing import Any, Dict, List, Literal, Optional, Pattern, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
+from core.brand_palette import PALETTE_ROLES
 from core.media_render_bundle import FONT_FAMILY, FONT_STYLES, MAX_TOKEN_CHARS, TOKEN_UNSAFE
+from modules.documents.brand_palette_source import with_palette_resolved
 from modules.documents.brand_system import (
     DEFAULT_ACCENT_USE,
     DEFAULT_CURRENCY,
@@ -391,6 +393,11 @@ class BrandKitPatch(BaseModel):
     ``platform_update_brand_kit``. The stored files (:data:`SERVER_MANAGED_FIELDS`)
     are not here: only their upload routes write them. A field this model does not
     know is dropped, as the PUT always did.
+
+    GET's answer may be sent back as it is: it changes nothing (F366). A colour role
+    goes back to derived when it is sent empty (``{"palette": {"accent": null}}``) or
+    marked so (``{"palette_source": {"accent": "derived"}}``); every role at once
+    with ``{"palette_source": "derived"}``.
     """
 
     name: Optional[str] = None
@@ -409,6 +416,10 @@ class BrandKitPatch(BaseModel):
     voice: Optional[dict] = None
     # PRD-255 FR-1: roles merge key by key; an empty role goes back to derived.
     palette: Optional[dict] = None
+    # F366: GET's palette_source, sent back: a role "derived" goes back to (or stays)
+    # derived unless the body changes its colour, "set" pins it, and the string
+    # "derived" is every role (modules/documents/brand_palette_source.py). Not stored.
+    palette_source: Optional[Union[Literal["derived"], Dict[str, Literal["set", "derived"]]]] = None
     accent_use: Optional[str] = None
     # PRD-255 US-002: type_scale merges step by step (and a step field by field),
     # logo_rules key by key.
@@ -418,6 +429,14 @@ class BrandKitPatch(BaseModel):
     logo_rules: Optional[dict] = None
     currency: Optional[str] = None
     date_style: Optional[str] = None
+
+    @field_validator("palette_source")
+    @classmethod
+    def _known_roles(cls, v: Any) -> Any:
+        unknown = sorted(set(v) - set(PALETTE_ROLES)) if isinstance(v, dict) else []
+        if unknown:
+            raise ValueError(f"palette_source has no role {', '.join(unknown)}; the roles are {', '.join(PALETTE_ROLES)}")
+        return v
 
     @field_validator("logo_url", "logo_mark_url")
     @classmethod
@@ -469,6 +488,8 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
 
     ``company``, ``voice``, ``palette``, ``type_scale`` and ``logo_rules`` merge key
     by key (an empty palette role goes back to derived; a type step field by field);
+    a role sent at the colour it derives to, or that ``palette_source`` marks
+    derived, stays derived (``brand_palette_source``, F366);
     any other field in the patch replaces the stored one
     (``social_handles`` is the whole map: a network left out, or given an empty
     handle, is removed). Raises ``pydantic.ValidationError`` (surfaced as 422 by
@@ -478,6 +499,8 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     # The stored files (logo, its variants, logo mark, fonts) are owned by the
     # upload/delete routes; a client patch cannot point the kit at an arbitrary stored file.
     patch = {k: v for k, v in patch.items() if k not in SERVER_MANAGED_FIELDS}
+    # F366: a role sent back at its derived colour, or marked derived, stays derived.
+    patch = with_palette_resolved(patch, base)
     merged = {**base, **{k: v for k, v in patch.items() if v is not None}}
     for record in MERGED_RECORDS:
         if isinstance(patch.get(record), dict):

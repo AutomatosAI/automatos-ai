@@ -53,6 +53,7 @@ EVERY_FIELD = {
                        {"word": "local", "meaning": ""}],
               "banned_phrases": ["exquisite"], "sign_off": "Gerard, Harbourline"},
     "palette": {"accent": "#8a3b12", "heading": "#111111"},
+    "palette_source": {"accent": "set", "heading": "set"},
     "accent_use": "bold",
     "type_scale": {"h1": {"size_pt": 24, "line_pt": 30}},
     "spacing_unit_pt": 6,

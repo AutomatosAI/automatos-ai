@@ -299,7 +299,9 @@ def test_the_update_schema_is_the_kits_patch_fields_and_never_a_stored_file():
     # PRD-255 US-008: the v2 records, to the field: every one the kit takes, and no other.
     from modules.documents import brand_system
 
-    assert set(properties) == set(brand_kit.BrandKit.model_fields) - brand_kit.SERVER_MANAGED_FIELDS
+    # F366: palette_source is not stored; it says which roles a save sets or returns to derived.
+    kit_fields = set(brand_kit.BrandKit.model_fields) - brand_kit.SERVER_MANAGED_FIELDS
+    assert set(properties) == kit_fields | {brand_system.PALETTE_SOURCE_FIELD}
     assert set(properties["palette"]["properties"]) == set(brand_system.BrandPalette.model_fields)
     assert set(properties["type_scale"]["properties"]) == set(brand_system.TypeScale.model_fields)
     for step, schema in properties["type_scale"]["properties"].items():

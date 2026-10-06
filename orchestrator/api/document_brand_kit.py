@@ -16,7 +16,11 @@ actually brand a document:
 
 PRD-255 (Brand Kit v2) answers GET and PUT with the kit's effective colour roles
 (``palette``: stored, else derived) and ``palette_source`` (each role ``set`` or
-``derived``), and the PUT refuses a palette whose text does not read on its page.
+``derived``), and the PUT refuses a palette whose text does not read on its page,
+saying what the colour sits on ("on the page (paper, white)"). GET's answer PUT
+back unchanged changes nothing (F366): a derived role sent at its colour stays
+derived, and ``palette_source`` is read (``{"palette_source": {"accent":
+"derived"}}`` resets a role, ``{"palette_source": "derived"}`` every role).
 It adds the logo's variants, each with routes that mirror the logo's (FR-9: a
 variant is uploaded by the owner, never generated):
 
