@@ -186,7 +186,7 @@ def test_a_sessions_proposal_card_carries_the_proposal_and_the_board_and_saves_n
     assert "Brand Designer" in asked["question"] and "terracotta" in asked["question"]
     assert "`accent_color`" in asked["question"] and "`#C8553D`" in asked["question"]
     assert "accent_use" not in asked["question"]           # unchanged: not listed
-    assert path in asked["question"] and "**Approve** saves it" in asked["question"]
+    assert path in asked["question"] and "**Approve** on the Questions tab in Automatos saves it" in asked["question"]
     assert answer["changes"] == [{"field": "accent_color", "old": answer["changes"][0]["old"], "new": "`#C8553D`"}]
     assert db.workspace.settings == STORED and db.commits == 0
 
@@ -326,6 +326,7 @@ def test_an_approved_proposal_is_saved_exactly_once(ticket_param):
     (_grant(46, status="denied"), "was denied, not approved"),
     (_grant(47, base="a kit drawn over before"), "changed after you proposed"),
     (_grant(48, answered_by=None), "was granted, not approved"),
+    (_grant(49, answered_by="telegram:5551234"), "came from telegram, not from the Questions tab"),
 ])
 def test_without_a_plain_approve_on_the_unchanged_kit_nothing_is_saved(grant, words):
     db = _Db([grant])

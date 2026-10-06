@@ -112,7 +112,7 @@ ALLOW_LIST: Set[str] = {
     "platform_create_template",            # PRD-255 US-013: REST POST documents:create, editor and up; document formats only
     "platform_update_template",            # PRD-255 US-013: REST PUT documents:update, editor and up; never a starter
     "platform_propose_brand_kit",          # PRD-255 US-014: files a question card on the caller's own ticket; saves nothing
-    "platform_save_approved_brand_kit",    # PRD-255 US-014: saves only the proposal the owner approved (Questions tab: workspace admin) on the caller's own ticket
+    "platform_save_approved_brand_kit",    # PRD-255 US-014: saves only a proposal approved on the Questions tab (workspace owner/admin) on the caller's own ticket
     "platform_generate_cover_image",
     "platform_upload_document",
     "platform_scan_business_site",

@@ -11,9 +11,9 @@ The Brand designer changes the kit only after the owner approves a proposal card
   allowed) that lists what changes and links the board. The card carries the proposal
   in its ``details`` (``brand_proposal_card.PROPOSAL_MARKER``). Nothing else is written.
 * **Save.** Only the newest proposal card on the caller's own ticket, only when its
-  answer is a plain Approve (a question is answered by a workspace admin on the
-  Questions tab, ``api/approval_grants.py``, or by a reply in the workspace's own
-  Telegram chat, ``api/webhooks.py``), only once, and only while the stored kit is the one the
+  answer is a plain Approve given on the Questions tab (its route requires a workspace
+  owner or admin, ``api/approval_grants.py``; a Telegram reply proves no role and never
+  saves the kit), only once, and only while the stored kit is the one the
   proposal was drawn over. It is saved through ``platform_update_brand_kit``'s own
   handler (``update_brand_kit_tool``: the kit's validation and its one writer). The
   call carries no kit fields: what is saved is what the owner saw on the card.

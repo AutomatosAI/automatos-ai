@@ -21,6 +21,10 @@ CARD_OPTIONS = (APPROVE, REVISE)
 # ApprovalGrant.details[PROPOSAL_MARKER] = {proposal, board_path, base, saved_at?}
 PROPOSAL_MARKER = "brand_kit_proposal"
 PENDING, ANSWERED = "pending", "granted"   # a question's status: open, answered (PRD-225)
+# Who may approve a kit change: an answer from the Questions tab, whose route requires a
+# workspace owner or admin (api/approval_grants.py, require_workspace_admin) and records
+# "user:<id>". A Telegram reply ("telegram:<id>") proves no role: it never saves the kit.
+ADMIN_ANSWER_PREFIX = "user:"
 # The card shows every change in full (the owner approves what they saw, never a cut of it):
 # a proposal whose card would be longer is refused, to be split. Under Telegram's 4096.
 MAX_CARD_CHARS = 3500
@@ -31,8 +35,8 @@ CARD_HEAD = "**Brand kit proposal** from {agent} (not saved yet)"
 CHANGES_HEAD = "What changes:"
 CHANGE_LINE = "- `{field}`: {old} → {new}"
 BOARD_LINE = "The Brand Board drawn from it: `{path}`"
-CARD_FOOT = ("**Approve** saves it to the brand kit. Anything else, such as \"less orange\", \"warmer\" or "
-             "\"more space\", sends it back for a revision.")
+CARD_FOOT = ("**Approve** on the Questions tab in Automatos saves it to the brand kit. Anything else, such as "
+             "\"less orange\", \"warmer\" or \"more space\", sends it back for a revision.")
 UNSET = "(none)"
 ELLIPSIS = "…"
 
@@ -42,6 +46,9 @@ NOT_ANSWERED = "The owner has not answered your proposal card (question #{ask}) 
 REVISION = ("The owner sent your proposal back (question #{ask}): {answer!r}. Nothing was saved. Revise the "
             "proposal, look at the board again and propose again with propose_brand_kit.")
 CLOSED = "Your proposal card (question #{ask}) was {status}, not approved: nothing was saved. Propose again."
+NOT_IN_APP = ("The Approve on your proposal card (question #{ask}) came from {who}, not from the Questions tab, "
+              "where only a workspace owner or admin answers: nothing was saved. Propose again and ask the owner "
+              "to approve it in Automatos.")
 ALREADY_SAVED = "The proposal the owner approved (question #{ask}) is already saved. Propose again to change more."
 
 
@@ -128,7 +135,8 @@ def why_not_saved(grant: Any) -> Optional[str]:
         return CLOSED.format(ask=ask, status=status or "closed")
     if not is_approve(getattr(grant, "answer_text", None)):
         return REVISION.format(ask=ask, answer=str(getattr(grant, "answer_text", "") or "").strip())
-    return None
+    who = str(grant.answered_by)
+    return None if who.startswith(ADMIN_ANSWER_PREFIX) else NOT_IN_APP.format(ask=ask, who=who.split(":")[0])
 
 
 def latest_proposal(grants: Sequence[Any]) -> Optional[Any]:
