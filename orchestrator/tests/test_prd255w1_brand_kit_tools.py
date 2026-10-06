@@ -60,6 +60,7 @@ EVERY_FIELD = {
     "logo_rules": {"letterhead_mm": 20},
     "currency": "eur",
     "date_style": DATE_STYLE_MONTH_FIRST,
+    "country": "IE",
 }
 
 LOOK_KIT = {
@@ -97,7 +98,8 @@ def test_every_field_the_tool_takes_round_trips_through_the_get_tool(api):
     kit = read["brand_kit"]
     assert kit == result["brand_kit"] == api.client.get(KIT_ROUTE).json()
     for field in ("name", "tagline", "logo_url", "primary_color", "secondary_color",
-                  "text_color", "font_family", "heading_font", "logo_mark_url", "accent_use", "date_style"):
+                  "text_color", "font_family", "heading_font", "logo_mark_url", "accent_use", "date_style",
+                  "country"):
         assert kit[field] == EVERY_FIELD[field], field
     assert kit["company"]["phone"] == "+353 21 400 1234"
     assert kit["social_handles"] == {"instagram": "harbourline"}

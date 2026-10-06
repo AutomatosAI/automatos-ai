@@ -41,10 +41,11 @@ UNUSED_KEYS_LINE = (
 
 # F367: "Total due 269.00": the kit had no currency and nothing said so. Ask once, then the kit holds it.
 NO_CURRENCY_LINE = (
-    "NO CURRENCY SIGN: the brand kit has no currency, so these amounts printed as bare numbers: {keys}. "
-    "Ask the owner once which currency they bill in; save it as the brand kit's currency (platform_update_brand_kit, "
-    "currency such as GBP, or the owner sets it on the Brand kit page) and make the document again. Never add a "
-    "currency sign the owner did not give."
+    "NO CURRENCY SIGN: the brand kit has no currency and no country, so these amounts printed as bare numbers: "
+    "{keys}. Ask the owner once which country the business is in (or which currency they bill in); save it to the "
+    "brand kit (platform_update_brand_kit: country such as GB, which gives its currency, or currency such as GBP; "
+    "or the owner sets it on the Brand kit page's Locale card) and make the document again. Never add a currency "
+    "sign the owner did not give."
 )
 
 

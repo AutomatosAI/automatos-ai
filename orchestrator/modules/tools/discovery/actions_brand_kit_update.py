@@ -16,7 +16,7 @@ reaches ``accent_use`` / ``palette.accent`` and "more space" ``spacing_unit_pt``
 import copy
 
 from core.brand_palette import ROLE_DERIVED, ROLE_SET
-from modules.documents.brand_system import ACCENT_USES, DATE_STYLES, ROLE_JOBS, TYPE_STEPS
+from modules.documents.brand_system import ACCENT_USES, DATE_STYLE_FROM_COUNTRY, DATE_STYLES, ROLE_JOBS, TYPE_STEPS
 
 from .action_registry import ActionDefinition, ActionRegistry
 
@@ -173,14 +173,27 @@ _PARAMETERS = {
         "currency": {
             "type": "string",
             "description": (
-                "The brand's currency as a three-letter ISO 4217 code, such as GBP. Empty: "
-                "amounts print with no currency."
+                "The brand's currency as a three-letter ISO 4217 code, such as GBP. Empty: the "
+                "country's currency, and with no country amounts print with no currency."
             ),
         },
         "date_style": {
             "type": "string",
-            "enum": list(DATE_STYLES),
-            "description": "How dates print: d MMMM yyyy (5 October 2026, the default) or MMMM d, yyyy (October 5, 2026).",
+            "enum": [*DATE_STYLES, DATE_STYLE_FROM_COUNTRY],
+            "description": (
+                "How dates print: d MMMM yyyy (5 October 2026) or MMMM d, yyyy (October 5, 2026). "
+                "Empty: the country's style, and with no country d MMMM yyyy."
+            ),
+        },
+        "country": {
+            "type": "string",
+            "description": (
+                "Where the business is, as a two-letter ISO 3166-1 code such as GB, IE or US. "
+                "An empty currency or date_style takes the country's (GB: GBP and 5 October 2026; "
+                "IE and the other euro countries: EUR; US: USD and October 5, 2026), so set the "
+                "country when the owner says where they are or which currency they bill in. "
+                "Empty: no country."
+            ),
         },
     },
     "required": [],
@@ -199,7 +212,7 @@ def register_brand_kit_get_action(registry: ActionRegistry) -> None:
             "who signs). Also its design system: every colour role (palette) with "
             "palette_source saying whether the owner set it or it is derived from the "
             "colours, accent_use, the type scale, the spacing unit, the page margin, the "
-            "logo's rules and uploaded variants, the currency and the date style. Branded "
+            "logo's rules and uploaded variants, the country, the currency and the date style. Branded "
             "documents and Socials posts render with it. Also returns suggestions: values the "
             "workspace already knows (its business profile and name) to fill empty fields "
             "with. Read it before drafting on-brand copy or changing the kit."
@@ -239,7 +252,7 @@ def register_brand_kit_update_action(registry: ActionRegistry) -> None:
         requires_confirmation=False,
         admin_only=True,  # F151: REST PUT /brand-kit is workspace:manage
         tags=["documents", "brand", "brand kit", "colours", "fonts", "voice", "socials", "setup",
-              "accent", "spacing", "type scale", "currency"],
+              "accent", "spacing", "type scale", "currency", "country"],
         examples=[
             "set our primary brand colour to #0055aa",
             "our tone of voice is warm, plain and confident",

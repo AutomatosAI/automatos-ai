@@ -175,9 +175,12 @@ export interface BrandKit {
   logo_rules?: { letterhead_mm: number; clear_space: number; min_mm: number }
   logo_dark_path?: string
   logo_mono_path?: string
-  // An ISO 4217 code such as GBP; empty: amounts print with no currency.
+  // An ISO 4217 code such as GBP and the date style; each empty for the country's (no
+  // country: amounts print with no currency, dates day first).
   currency?: string
   date_style?: BrandDateStyle
+  // ISO 3166-1 alpha-2, such as GB; empty: none (deliverables/brand/country-locale.ts).
+  country?: string
   // F372: when the kit last changed, by any route (ISO 8601; empty: not saved since). Server-set.
   updated_at?: string
 }
@@ -188,7 +191,8 @@ export interface BrandTypeStep {
   line_pt: number
   weight: number
 }
-export type BrandDateStyle = 'd MMMM yyyy' | 'MMMM d, yyyy'
+// Empty: the kit's country's style, else day first.
+export type BrandDateStyle = '' | 'd MMMM yyyy' | 'MMMM d, yyyy'
 
 // modules/documents/brand_system.py BrandPalette (core/brand_palette.py PALETTE_ROLES).
 export type BrandPaletteRole =

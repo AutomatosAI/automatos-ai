@@ -310,5 +310,5 @@ def test_the_update_schema_is_the_kits_patch_fields_and_never_a_stored_file():
     tone = properties["voice"]["properties"]["tone"]["items"]["properties"]
     assert set(tone) == set(brand_system.ToneWord.model_fields)
     assert properties["accent_use"]["enum"] == list(brand_system.ACCENT_USES)
-    assert properties["date_style"]["enum"] == list(brand_system.DATE_STYLES)
+    assert properties["date_style"]["enum"] == [*brand_system.DATE_STYLES, brand_system.DATE_STYLE_FROM_COUNTRY]
     assert get_action_registry().get("platform_update_brand_kit").parameters["required"] == []

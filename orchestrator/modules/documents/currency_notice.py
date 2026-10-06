@@ -2,13 +2,14 @@
 
 F367 (6 Oct): with the kit's currency blank (c1's derived kit), an invoice built
 from plain numbers printed "Total due 269.00", and nothing warned anyone. A
-document never invents a currency, and the workspace has no locale or country
-setting to take one from, so the platform asks: :func:`unpriced_amounts_are_said`
-wraps ``DocumentGenerationService.generate`` and, when the workspace kit has no
+document never invents a currency. The kit's country gives one (7 Oct:
+``country_locale``), and a kit with neither a currency nor a country makes the
+platform ask: :func:`unpriced_amounts_are_said` wraps
+``DocumentGenerationService.generate`` and, when the workspace kit has no
 currency and the data sent an amount as a bare number, records those keys on the
 result (``GeneratedDocument.unpriced_keys``). The generate_document tool hands
-them to the agent with one instruction: ask the owner once which currency, save
-it to the brand kit, make the document again. Once the kit has a currency, every
+them to the agent with one instruction: ask the owner once which country (or
+currency), save it to the brand kit, make the document again. Once the kit has a currency, every
 format prints it the same way: PDF and Word through ``amounts.field_text``, the
 spreadsheet through ``xlsx_letterhead.money_format``, all from
 ``locale_text.currency_of``.

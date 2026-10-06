@@ -36,7 +36,9 @@ read time), and ``accent_use`` says how far the accent goes. The PUT refuses a
 palette whose text does not read on its page. US-002 adds the rest of one designer's
 rules: ``type_scale``, ``spacing_unit_pt``, ``page_margin_mm``, ``logo_rules``, the
 logo variants ``logo_dark_path`` / ``logo_mono_path`` (uploaded, server-managed),
-``currency``, ``date_style``, and a one-line meaning on each tone word.
+``currency``, ``date_style``, and a one-line meaning on each tone word. ``country``
+(ISO 3166-1 alpha-2) fills an empty currency and date style with the country's
+(``modules/documents/country_locale.py``).
 
 Defaults are a neutral professional palette — an unconfigured workspace renders cleanly
 (and *not* in Automatos orange).
@@ -54,6 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationIn
 from core.brand_palette import PALETTE_ROLES
 from core.media_render_bundle import FONT_FAMILY, FONT_STYLES, MAX_TOKEN_CHARS, TOKEN_UNSAFE
 from modules.documents.brand_palette_source import with_palette_resolved
+from modules.documents.country_locale import DEFAULT_COUNTRY, country_code
 from modules.documents.brand_system import (
     DEFAULT_ACCENT_USE,
     DEFAULT_CURRENCY,
@@ -316,9 +319,11 @@ class BrandKit(BaseModel):
     # like logo_path. One not set is never invented (FR-9).
     logo_dark_path: str = ""
     logo_mono_path: str = ""
-    # Locale: an ISO 4217 code (empty: no currency is printed, FR-7) and the date style.
+    # Locale: an ISO 4217 code and the date style, each empty for the country's (no
+    # country: no currency is printed, FR-7, and dates print day first), and the country.
     currency: str = DEFAULT_CURRENCY
     date_style: DateStyle = DEFAULT_DATE_STYLE
+    country: str = DEFAULT_COUNTRY
     # F372: when the kit last changed, by any route (ISO 8601, UTC), stamped by
     # :func:`save_brand_kit`; empty for a kit not saved since. The Brand kit page keys
     # its brand board on it, so a change by Auto, the designer or the API redraws it.
@@ -345,6 +350,11 @@ class BrandKit(BaseModel):
     @classmethod
     def _currency(cls, v: str) -> str:
         return currency_code(v)
+
+    @field_validator("country")
+    @classmethod
+    def _country(cls, v: str) -> str:
+        return country_code(v)
 
     @field_validator("heading_font")
     @classmethod
@@ -434,6 +444,7 @@ class BrandKitPatch(BaseModel):
     logo_rules: Optional[dict] = None
     currency: Optional[str] = None
     date_style: Optional[str] = None
+    country: Optional[str] = None
 
     @field_validator("palette_source")
     @classmethod

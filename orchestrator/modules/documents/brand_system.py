@@ -28,7 +28,9 @@ a v1 kit reads complete:
   :data:`DEFAULT_PAGE_MARGIN_MM`), and :class:`LogoRules` (the letterhead logo's
   height, its clear space and its least size).
 * Locale: :func:`currency_code` (ISO 4217 shape; empty, the default, prints no
-  currency: FR-7) and :data:`DATE_STYLES`.
+  currency: FR-7, unless the kit's country gives one) and :data:`DATE_STYLES`
+  (empty, the default, follows the kit's country, else day first:
+  ``country_locale``).
 * :class:`ToneWord`: a tone word and the one line that says what it means. A plain
   string reads as a word with no meaning; :func:`tone_words` is every reader's view.
 """
@@ -385,8 +387,10 @@ DEFAULT_CURRENCY = ""
 CURRENCY_CODE = re.compile(r"^[A-Z]{3}$")
 DATE_STYLE_DAY_FIRST, DATE_STYLE_MONTH_FIRST = "d MMMM yyyy", "MMMM d, yyyy"
 DATE_STYLES = (DATE_STYLE_DAY_FIRST, DATE_STYLE_MONTH_FIRST)
-DateStyle = Literal["d MMMM yyyy", "MMMM d, yyyy"]
-DEFAULT_DATE_STYLE = DATE_STYLE_DAY_FIRST
+# Empty: the kit's country's date style, else day first (a kit with no country prints as before).
+DATE_STYLE_FROM_COUNTRY = ""
+DateStyle = Literal["", "d MMMM yyyy", "MMMM d, yyyy"]
+DEFAULT_DATE_STYLE = DATE_STYLE_FROM_COUNTRY
 
 
 def currency_code(value: str) -> str:
@@ -452,6 +456,7 @@ __all__ = [
     "ACCENT_USE_RULES",
     "BrandPalette",
     "DATE_STYLES",
+    "DATE_STYLE_FROM_COUNTRY",
     "DEFAULT_ACCENT_USE",
     "DEFAULT_CURRENCY",
     "DEFAULT_DATE_STYLE",
