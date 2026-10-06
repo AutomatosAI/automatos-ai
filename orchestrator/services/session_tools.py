@@ -46,8 +46,8 @@ PLATFORM_DISPATCHER = "platform_execute"
 # router itself — so it is dispatched DIRECTLY under that name.
 DISPATCH_PLATFORM_ACTION = "platform_action"
 DISPATCH_TOOL_NAME = "tool_name"
-# The session tools whose result is a Deliverable saved on the ticket's card (F341).
-CARD_ATTRIBUTED_TOOLS = ("generate_document",)
+# The tools that write on the ticket: a Deliverable on its card (F341), a page in its folder (PRD-255 US-012).
+CARD_ATTRIBUTED_TOOLS = ("generate_document", "render_preview")
 
 # A session may not move its own ticket OUT of ``in_progress`` at all.
 #

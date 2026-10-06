@@ -293,6 +293,39 @@ actions:
     source: authored
   - text: continue reading the contract from page 2
     source: authored
+  platform_render_preview:
+  - text: show me page 1 of the brand board
+    source: example
+  - text: render the invoice template with the proposed colours
+    source: example
+  - text: look at page 2 of the report I just made
+    source: example
+  - text: draw the letter template so i can see it
+    source: authored
+  - text: preview the brand board as a picture
+    source: authored
+  - text: let me see how the proposal template looks
+    source: authored
+  - text: render page 3 of that pdf
+    source: authored
+  - text: what does the invoice look like with the new navy?
+    source: authored
+  - text: snapshot the first page of the quote template
+    source: authored
+  - text: check how the report deliverable came out
+    source: authored
+  - text: png of the letterhead page please
+    source: authored
+  - text: show the contract template rendered with our brand kit
+    source: authored
+  - text: try the type scale change on the report template and show me
+    source: authored
+  - text: visual preview of the document i generated
+    source: authored
+  - text: open a picture of page one of the branded letter
+    source: authored
+  - text: how would the invoice look with a warmer accent colour?
+    source: authored
   platform_reprocess_document:
   - text: reprocess document 3
     source: example

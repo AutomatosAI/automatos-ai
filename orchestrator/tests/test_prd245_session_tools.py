@@ -53,6 +53,7 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
                      "query_database", "query_graph",           # F329: the owner's database and the graph
                      "generate_document",                       # #942: the owner-chosen groups' tools,
                      "list_templates", "get_template_schema",   # brand kit at generation: the template reads
+                     "render_preview",                          # PRD-255 US-012: look at a page
                      "list_playbooks", "get_playbook", "run_playbook",   # in the groups' display order
                      "get_latest_report",
                      "list_missions", "get_mission", "search_mission_findings")

@@ -507,9 +507,18 @@ def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str
     anything is written (:func:`brand_kit_errors` lists why). The PUT route and
     ``platform_update_brand_kit`` both call this.
     """
+    return save_brand_kit(db, workspace, proposed_brand_kit(workspace.settings, patch))
+
+
+def proposed_brand_kit(settings: Optional[Dict[str, Any]], patch: Dict[str, Any]) -> Dict[str, Any]:
+    """The kit ``patch`` would make of the one stored in ``settings``, validated and NOT saved.
+
+    What :func:`update_brand_kit` saves, and what ``platform_render_preview`` draws a
+    proposal from (PRD-255 US-012): one validation for both. Raises
+    ``pydantic.ValidationError`` as :func:`update_brand_kit` does.
+    """
     fields = {k: v for k, v in BrandKitPatch.model_validate(patch).model_dump().items() if v is not None}
-    existing = (workspace.settings or {}).get(BRAND_KIT_SETTINGS_KEY)
-    return save_brand_kit(db, workspace, validate_brand_kit(fields, existing))
+    return validate_brand_kit(fields, (settings or {}).get(BRAND_KIT_SETTINGS_KEY))
 
 
 def brand_kit_errors(exc: ValidationError) -> List[Dict[str, Any]]:
@@ -589,6 +598,7 @@ __all__ = [
     "get_brand_kit",
     "is_acceptable_logo_url",
     "normalise_handle",
+    "proposed_brand_kit",
     "save_brand_kit",
     "update_brand_kit",
     "validate_brand_kit",

@@ -134,7 +134,7 @@ def test_the_documents_group_reads_the_templates_beside_generate_document():
     from services import session_tool_groups as groups
 
     documents = next(g for g in groups.SESSION_TOOL_GROUPS if g.id == "documents")
-    assert documents.tools == ("generate_document", "list_templates", "get_template_schema")
+    assert documents.tools == ("generate_document", "list_templates", "get_template_schema", "render_preview")
     assert st.get_tool("list_templates").reads_only and st.get_tool("get_template_schema").reads_only
     listed = st.get_tool("list_templates").input_schema["properties"]["format"]["enum"]
     assert tuple(listed) == DOCUMENT_TEMPLATE_FORMATS

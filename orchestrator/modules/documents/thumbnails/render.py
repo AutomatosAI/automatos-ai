@@ -1,5 +1,8 @@
 """F353 (issue #947): a document's first page, drawn as a small PNG.
 
+PRD-255 US-012: any page can be drawn (``page_number``, page 1 by default), so an
+agent's ``render_preview`` can look at page 2 of what it made.
+
 * A PDF's page 1 is drawn by pypdfium2.
 * A Word document, a sheet, a CSV or markdown is first laid out as a page
   (``html_sources``) and printed to PDF by WeasyPrint, which fetches nothing:
@@ -29,6 +32,7 @@ THUMBNAIL_WIDTH_PX = 480
 # A very tall page is cut at this height: the card shows the top of the page.
 MAX_THUMBNAIL_HEIGHT_PX = 960
 RENDER_TIMEOUT_S = 60
+FIRST_PAGE = 1
 MAX_REASON_CHARS = 300
 
 PDF_EXTENSIONS = frozenset({".pdf"})
@@ -62,10 +66,21 @@ def _crop_bottom(height_pt: float, scale: float, max_height_px: Optional[int]) -
     return max(0.0, height_pt - max_height_px / scale)
 
 
+def _page_index(count: int, page: int) -> int:
+    """``page`` (1 = the first) as an index into a PDF of ``count`` pages; ThumbnailError when it has none."""
+    if count == 0:
+        raise ThumbnailError("the PDF has no pages")
+    if page < 1 or page > count:
+        raise ThumbnailError(f"there is no page {page}: the document has {count} page{'s' if count != 1 else ''}")
+    return page - 1
+
+
 def pdf_first_page_png(
     pdf_bytes: bytes, width_px: int = THUMBNAIL_WIDTH_PX, max_height_px: Optional[int] = MAX_THUMBNAIL_HEIGHT_PX,
+    page_number: int = FIRST_PAGE,
 ) -> bytes:
-    """Page 1 of a PDF as a PNG ``width_px`` wide, cut at ``max_height_px`` (``None``: the whole page)."""
+    """Page ``page_number`` (page 1 by default) of a PDF as a PNG ``width_px`` wide, cut at
+    ``max_height_px`` (``None``: the whole page)."""
     import pypdfium2 as pdfium
 
     with _pdfium_lock:
@@ -74,9 +89,7 @@ def pdf_first_page_png(
         except pdfium.PdfiumError as e:
             raise ThumbnailError(f"not a readable PDF: {e}") from e
         try:
-            if len(pdf) == 0:
-                raise ThumbnailError("the PDF has no pages")
-            page = pdf[0]
+            page = pdf[_page_index(len(pdf), page_number)]
             width, height = page.get_size()
             scale = width_px / max(width, 1.0)
             crop = (0, _crop_bottom(height, scale, max_height_px), 0, 0)
@@ -88,15 +101,18 @@ def pdf_first_page_png(
     return out.getvalue()
 
 
-def render_png(data: bytes, ext: str) -> bytes:
-    """The first page of a file of type ``ext`` (".pdf", ".docx", …) as a PNG, in this process."""
+def render_png(data: bytes, ext: str, page_number: int = FIRST_PAGE, whole_width_px: Optional[int] = None) -> bytes:
+    """Page ``page_number`` (the first by default) of a file of type ``ext`` (".pdf", ".docx", …) as a PNG,
+    in this process: a card's thumbnail, or with ``whole_width_px`` the whole page that wide."""
     ext = ext.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise ThumbnailError(f"no preview is drawn for {ext or 'extensionless'} files")
     if not data:
         raise ThumbnailError("the file is empty")
     pdf_bytes = data if ext in PDF_EXTENSIONS else html_to_pdf(document_html(data, ext))
-    return pdf_first_page_png(pdf_bytes)
+    if whole_width_px is None:
+        return pdf_first_page_png(pdf_bytes, page_number=page_number)
+    return pdf_first_page_png(pdf_bytes, width_px=whole_width_px, max_height_px=None, page_number=page_number)
 
 
 def _reason(stderr: bytes) -> str:
@@ -122,18 +138,27 @@ def run_isolated(module: str, args: Sequence[str], data: bytes, timeout_s: float
     return done.stdout
 
 
-def render_png_isolated(data: bytes, ext: str, timeout_s: float = RENDER_TIMEOUT_S) -> bytes:
+def render_png_isolated(
+    data: bytes, ext: str, timeout_s: float = RENDER_TIMEOUT_S, page_number: int = FIRST_PAGE,
+    whole_width_px: Optional[int] = None,
+) -> bytes:
     """``render_png`` in a child process; ThumbnailError (with the child's reason) when it fails."""
-    return run_isolated("modules.documents.thumbnails.render", [ext], data, timeout_s)
+    args = [ext]
+    if page_number != FIRST_PAGE or whole_width_px is not None:
+        args.append(str(page_number))
+    if whole_width_px is not None:
+        args.append(str(whole_width_px))
+    return run_isolated("modules.documents.thumbnails.render", args, data, timeout_s)
 
 
 def main(argv: list[str]) -> int:
-    """Child-process entry: the file on stdin, its first page's PNG on stdout."""
-    if len(argv) != 1:
-        sys.stderr.write("usage: python -m modules.documents.thumbnails.render <ext>\n")
+    """Child-process entry: the file on stdin, a page's PNG on stdout (``<ext> [page [whole page width]]``)."""
+    if not 1 <= len(argv) <= 3 or not all(arg.isdigit() for arg in argv[1:]):
+        sys.stderr.write("usage: python -m modules.documents.thumbnails.render <ext> [page [width]]\n")
         return 2
+    numbers = [int(arg) for arg in argv[1:]]
     try:
-        png = render_png(sys.stdin.buffer.read(), argv[0])
+        png = render_png(sys.stdin.buffer.read(), argv[0], *numbers)
     except ThumbnailError as e:
         sys.stderr.write(f"{e}\n")
         return 1

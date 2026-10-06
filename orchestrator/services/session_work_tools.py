@@ -16,6 +16,8 @@ fields its schema declares forwarded.
   10): the read-only template tools an API agent has before ``generate_document``
   (``platform_list_templates``, ``platform_get_template_schema``), so a session fills
   the owner's branded template instead of guessing its name and its fields.
+* ``render_preview`` (PRD-255 US-012) draws a page of a template or a Deliverable into
+  the ticket's folder, so the session opens what it made and judges it.
 * ``run_playbook`` starts a run in the session's workspace: the second write here.
 * Missions: the read tools a mission's step agent uses. ``platform_list_missions``
   and ``platform_get_mission`` read the board's missions; ``platform_field_query``
@@ -150,6 +152,29 @@ GET_TEMPLATE_SCHEMA_SPEC: Dict[str, Any] = {
     "tags": ("documents",),
 }
 
+RENDER_PREVIEW_SPEC: Dict[str, Any] = {
+    "name": "render_preview",
+    "action": "platform_render_preview",
+    "description": (
+        "Draw one page of a document template, or of a Deliverable, as a PNG in your folder and get "
+        "its path: open the picture to judge the page before you report or revise. A template is "
+        "drawn with the brand kit and its sample data; brand_kit draws it from a proposed kit "
+        "instead, which is NOT saved. Document templates only (pdf, docx, xlsx)."
+    ),
+    "input_schema": _schema({
+        "template_id": _string("The template's id, from list_templates. Give this or deliverable_id."),
+        "deliverable_id": _string("A Deliverable's id (a document already made). Give this or template_id."),
+        "page": {"type": "integer", "minimum": 1, "description": "Which page to draw (default 1)."},
+        "brand_kit": {"type": "object", "description": "Templates only: a proposed brand kit change (kit fields "
+                      "such as palette, type_scale or accent_use), drawn for this picture only and never saved."},
+    }),
+    "scope": forward({k: k for k in ("template_id", "deliverable_id", "page", "brand_kit")},
+                     needs="render_preview needs what to draw: a template_id from list_templates, or a deliverable_id.",
+                     one_of=("template_id", "deliverable_id")),
+    "project": project_answer,
+    "tags": ("documents",),
+}
+
 LIST_PLAYBOOKS_SPEC: Dict[str, Any] = {
     "name": "list_playbooks",
     "action": "platform_list_playbooks",
@@ -260,7 +285,7 @@ SEARCH_MISSION_FINDINGS_SPEC: Dict[str, Any] = {
 }
 
 WORK_TOOL_SPECS: Tuple[Dict[str, Any], ...] = (
-    GENERATE_DOCUMENT_SPEC, LIST_TEMPLATES_SPEC, GET_TEMPLATE_SCHEMA_SPEC,
+    GENERATE_DOCUMENT_SPEC, LIST_TEMPLATES_SPEC, GET_TEMPLATE_SCHEMA_SPEC, RENDER_PREVIEW_SPEC,
     LIST_PLAYBOOKS_SPEC, GET_PLAYBOOK_SPEC, RUN_PLAYBOOK_SPEC,
     GET_LATEST_REPORT_SPEC,
     LIST_MISSIONS_SPEC, GET_MISSION_SPEC, SEARCH_MISSION_FINDINGS_SPEC,
