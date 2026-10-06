@@ -26,6 +26,7 @@ import pytest
 
 import modules.documents.generation_service as generation_service
 from modules.documents.blocks import collect_variable_paths, render_document_html, validate_blocks
+from modules.documents.blocks.table_cells import UNIT_NOTE
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.models import EmptyDocumentError, UnresolvedDeliverableError
 from modules.documents.presets import CONTRACT, INVOICE
@@ -260,7 +261,8 @@ def test_the_studio_card_says_what_is_required_and_what_fills_itself():
     assert card["fallback_fields"]["data.client_address"] == ""
     assert "data.payment_terms" not in card["fallback_fields"]
     assert card["tables"] == [{"field": "line_items", "columns": ["description", "quantity", "unit_price", "total"],
-                               "optional_columns": [], "required": True}]
+                               "optional_columns": [], "required": True,
+                               "also_reads": {"unit": UNIT_NOTE}}]  # F369: a row's unit prints after its quantity
 
 
 def test_a_legacy_templates_card_reads_its_schema_and_its_defaults():

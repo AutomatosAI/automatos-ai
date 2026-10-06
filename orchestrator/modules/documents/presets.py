@@ -159,9 +159,14 @@ LETTER = {
 INVOICE = {
     "category": "invoice",
     "name": "Branded Invoice",
-    "description": "Your details and the client's, invoice number and dates, a line-items table filled from data, totals and payment terms.",
+    "description": (
+        "Your details and the client's, invoice number and dates, a line-items table filled from data, totals and "
+        "payment terms. Each line item: description, quantity (how many units, e.g. 12), unit when it is sold by one "
+        "(\"kg\", \"hours\": it prints after the quantity, \"12 kg\"), unit_price (the price of one unit) and "
+        "total. Never fold a quantity into the description."
+    ),
     "format": "pdf",
-    "includes": ["Letterhead from your brand kit", "Invoice number, date, due date", "Bill-to block", "Line items from data.line_items", "Subtotal, tax, total under the Total column", "Payment terms"],
+    "includes": ["Letterhead from your brand kit", "Invoice number, date, due date", "Bill-to block", "Line items from data.line_items (quantity, unit, unit price, total)", "Subtotal, tax, total under the Total column", "Payment terms"],
     "blocks": _doc(
         *letterhead(),
         _heading("title", 1, _t("Invoice "), _v("data.invoice_number")),
@@ -194,7 +199,7 @@ INVOICE = {
             "due_date": "4 November 2026",
             "line_items": [
                 {"description": "Consulting — discovery workshop", "quantity": 1, "unit_price": "1,500.00", "total": "1,500.00"},
-                {"description": "Implementation (days)", "quantity": 4, "unit_price": "900.00", "total": "3,600.00"},
+                {"description": "Implementation", "quantity": 4, "unit": "days", "unit_price": "900.00", "total": "3,600.00"},
             ],
             "subtotal": "5,100.00",
             "tax": "1,173.00",
