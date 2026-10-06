@@ -54,7 +54,7 @@ def test_the_branded_letter_is_signed_by_the_named_signer():
     page = _letter({**QUAY, "signer": "Gerard"})
 
     assert '<p data-block="sig-name">Gerard</p>' in page
-    assert "Automatos AI" not in page.split('data-block="sig-name"')[1].split("</p>")[0]
+    assert "Automatos AI" not in page.split('<p data-block="sig-name">')[1].split("</p>")[0]
 
 
 def test_the_letter_lists_signer_as_a_field_and_never_calls_it_unused():

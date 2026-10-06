@@ -47,7 +47,7 @@ def _invoice_html() -> str:
     doc = validate_blocks(INVOICE["blocks"])
     values = resolve_paths(build_context(None, None, KIT, datetime(2026, 10, 6), LANTERN), collect_variable_paths(doc)).values
     rendered = render_document_html(doc, values, KIT, data=LANTERN)
-    assert rendered.unresolved == []
+    assert set(rendered.unresolved) <= {"brand.logo_url"}  # this kit has no logo; every data field resolved
     return rendered.html
 
 

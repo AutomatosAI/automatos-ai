@@ -43,7 +43,8 @@ def _set_roles(kit):
 
 
 def _stored_palette(api):
-    return api.workspace.settings["brand_kit"]["palette"]
+    """The palette as stored; none stored is empty (F372: a PUT that changes nothing writes nothing)."""
+    return api.workspace.settings.get("brand_kit", {}).get("palette", {})
 
 
 def test_the_get_body_put_back_unchanged_changes_nothing(api):

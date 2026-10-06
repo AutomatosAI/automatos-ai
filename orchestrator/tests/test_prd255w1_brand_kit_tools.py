@@ -138,7 +138,9 @@ def test_the_tool_never_sets_a_logo_variants_file(api):
 def test_an_unreadable_role_is_refused_with_its_ratio_and_nothing_is_saved(api):
     before = dict(api.workspace.settings["brand_kit"])
     result = _dispatch(api.db, "platform_update_brand_kit", {"palette": {"ink": "#eeeeee"}})
-    assert result["success"] is False and "ink on" in result["error"] and ":1" in result["error"]
+    # F366: the refusal names what the colour sits on in plain words, beside the role.
+    assert result["success"] is False and "ink is" in result["error"] and "on the page" in result["error"]
+    assert ":1" in result["error"]
     assert api.workspace.settings["brand_kit"] == before
 
 

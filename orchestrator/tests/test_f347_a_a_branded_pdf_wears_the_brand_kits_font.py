@@ -195,7 +195,9 @@ def test_the_headings_font_rule_and_an_unsafe_heading_font():
     assert "h1, h2, h3, h4, h5, h6 { font-family: 'DejaVu Serif', serif; }" in font_css({"heading_font": "'DejaVu Serif', serif"})
     unsafe = font_css({"heading_font": "x; } body { color: red"})
     assert "color: red" not in unsafe and f"font-family: {DEFAULT_FONT};" in unsafe
-    assert "h1" not in font_css({"heading_font": ""})  # no heading font: headings keep the body font
+    # No heading font: headings keep the body font. (The rule, not the letters: bundled faces
+    # (F360) inline base64 that may contain "h1" anywhere.)
+    assert "h1, h2, h3" not in font_css({"heading_font": ""})
 
 
 @pytest.mark.parametrize("font", [

@@ -78,7 +78,8 @@ def test_the_agent_is_told_to_ask_the_owner_once(monkeypatch):
         )
 
     monkeypatch.setattr(RecordedService, "generate", generate)
-    answer = call_tool({"title": "Invoice", "format": "pdf", "data": copy.deepcopy(INVOICE)})
+    answer = call_tool({"title": "Invoice", "format": "pdf", "template_name": "Branded Invoice",
+                        "data": copy.deepcopy(INVOICE)})
 
     assert answer["results"][0]["amounts_without_currency"] == ["total", "subtotal"]
     (line,) = [line for line in ToolResultFormatter.format_for_llm(answer, "generate_document").splitlines()
