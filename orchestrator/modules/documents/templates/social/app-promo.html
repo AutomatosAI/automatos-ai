@@ -27,6 +27,10 @@
         --ring-off: color-mix(in srgb, var(--ink) 60%, var(--accent-2));
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
+        /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
+        --display-scale: var(--brand-display-scale, 1);
+        --body-scale: var(--brand-body-scale, 1);
+        --logo-chip: var(--brand-logo-chip, transparent);
       }
 
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -62,25 +66,25 @@
       /* ---------- captions ---------- */
       .cap { z-index: 20; display: flex; justify-content: center; align-items: flex-start; padding-top: 1462px; }
       .cap-in { max-width: 930px; padding: 16px 28px; border-radius: 20px; background: color-mix(in srgb, var(--ink) 84%, transparent); border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
-        box-shadow: 0 12px 40px color-mix(in srgb, black 45%, transparent); font-size: 40px; font-weight: 500; line-height: 1.25; text-align: center; color: var(--paper); opacity: 0; }
+        box-shadow: 0 12px 40px color-mix(in srgb, black 45%, transparent); font-size: calc(40px * var(--body-scale)); font-weight: 500; line-height: 1.25; text-align: center; color: var(--paper); opacity: 0; }
       .cw { color: var(--paper); }
 
       /* ---------- S1: the hook, over the hook footage ---------- */
       #s1 { z-index: 3; }
       .s1-grad { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 55%, transparent) 0%, transparent 28%, transparent 46%, color-mix(in srgb, var(--ink) 85%, transparent) 72%, color-mix(in srgb, var(--ink) 96%, transparent) 100%); }
-      #s1head { position: absolute; left: 72px; right: 72px; top: 1090px; font-size: 104px; line-height: 1.14; }
-      #s1q { position: absolute; left: 72px; right: 72px; top: 1370px; font-size: 104px; line-height: 1.0; color: var(--accent); opacity: 0; }
+      #s1head { position: absolute; left: 72px; right: 72px; top: 1090px; font-size: calc(104px * var(--display-scale)); line-height: 1.14; }
+      #s1q { position: absolute; left: 72px; right: 72px; top: 1370px; font-size: calc(104px * var(--display-scale)); line-height: 1.0; color: var(--accent); opacity: 0; }
       #flash { position: absolute; inset: 0; background: var(--paper); opacity: 0; }
 
       /* ---------- S2: the reveal, over the app's own loop ---------- */
       #s2 { z-index: 3; }
       #s2wrap { position: absolute; inset: 0; }
       .s2-shade { position: absolute; inset: 0; background: radial-gradient(ellipse 70% 40% at 50% 46%, transparent 0%, color-mix(in srgb, var(--ink) 35%, transparent) 70%, color-mix(in srgb, var(--ink) 80%, transparent) 100%); }
-      #s2lab { position: absolute; left: 0; right: 0; top: 300px; text-align: center; font-size: 32px; color: var(--paper); opacity: 0; text-shadow: 0 2px 18px color-mix(in srgb, black 85%, transparent), 0 0 4px color-mix(in srgb, black 60%, transparent); }
-      #s2t1, #s2t2 { position: absolute; left: 0; right: 0; text-align: center; font-size: 150px; line-height: 1; opacity: 0; text-shadow: 0 8px 40px color-mix(in srgb, black 60%, transparent); }
+      #s2lab { position: absolute; left: 0; right: 0; top: 300px; text-align: center; font-size: calc(32px * var(--body-scale)); color: var(--paper); opacity: 0; text-shadow: 0 2px 18px color-mix(in srgb, black 85%, transparent), 0 0 4px color-mix(in srgb, black 60%, transparent); }
+      #s2t1, #s2t2 { position: absolute; left: 0; right: 0; text-align: center; font-size: calc(150px * var(--display-scale)); line-height: 1; opacity: 0; text-shadow: 0 8px 40px color-mix(in srgb, black 60%, transparent); }
       #s2t1 { top: 1165px; }
       #s2t2 { top: 1350px; }
-      #s2coach { position: absolute; left: 0; right: 0; top: 1520px; text-align: center; font-size: 28px; color: var(--accent-2); letter-spacing: 0.3em; opacity: 0; }
+      #s2coach { position: absolute; left: 0; right: 0; top: 1520px; text-align: center; font-size: calc(28px * var(--body-scale)); color: var(--accent-2); letter-spacing: 0.3em; opacity: 0; }
 
       /* ---------- the phone (S3 today and a question, S4 the tutor) ---------- */
       #phoneA { z-index: 3; }
@@ -88,91 +92,95 @@
       #phone { position: absolute; left: 175px; top: 290px; width: 730px; height: 1130px; border-radius: 70px; background: var(--ink); border: 3px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
         box-shadow: 0 60px 140px color-mix(in srgb, black 60%, transparent), 0 0 0 10px color-mix(in srgb, var(--ink) 60%, transparent), 0 0 120px color-mix(in srgb, var(--accent-2) 22%, transparent); overflow: hidden; opacity: 0; }
       .scr { position: absolute; inset: 0; padding: 58px 38px 0; }
-      .sbar { display: flex; justify-content: space-between; font-size: 22px; font-weight: 600; color: var(--paper); padding: 0 12px; }
+      .sbar { display: flex; justify-content: space-between; font-size: calc(22px * var(--body-scale)); font-weight: 600; color: var(--paper); padding: 0 12px; }
       .hdr { margin-top: 26px; display: flex; align-items: center; justify-content: space-between; }
-      .hdr .t { font-size: 24px; color: var(--accent-2); }
+      .hdr .t { font-size: calc(24px * var(--body-scale)); color: var(--accent-2); }
       .dock { position: absolute; left: 90px; right: 90px; bottom: 34px; height: 74px; border-radius: 999px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 25%, transparent);
-        display: flex; align-items: center; justify-content: space-around; font-size: 20px; color: var(--muted); }
+        display: flex; align-items: center; justify-content: space-around; font-size: calc(20px * var(--body-scale)); color: var(--muted); }
       .dock .on { color: var(--paper); font-weight: 600; }
       #today { margin-top: 22px; display: flex; align-items: center; gap: 22px; padding: 22px 24px; border-radius: 28px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); opacity: 0; }
       .ring { position: relative; width: 92px; height: 92px; flex: none; }
       .ring svg { position: absolute; left: 0; top: 0; }
       .ring .track { stroke: var(--ring-off); }
       .ring .arc { stroke: var(--accent); }
-      .ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
-      #today .k { font-size: 20px; color: var(--accent-text); }
-      #today .v { font-size: 25px; margin-top: 6px; line-height: 1.25; }
-      .streak { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 30px; font-weight: 700; color: var(--accent-text); }
+      .ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(24px * var(--body-scale)); font-weight: 700; }
+      #today .k { font-size: calc(20px * var(--body-scale)); color: var(--accent-text); }
+      #today .v { font-size: calc(25px * var(--body-scale)); margin-top: 6px; line-height: 1.25; }
+      .streak { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: calc(30px * var(--body-scale)); font-weight: 700; color: var(--accent-text); }
       .streak svg { fill: currentColor; }
       #qcard { margin-top: 22px; padding: 26px 26px 22px; border-radius: 28px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); opacity: 0; }
-      .chip { display: inline-block; padding: 6px 14px; border-radius: 999px; background: color-mix(in srgb, var(--accent-2) 14%, transparent); color: var(--accent-2); font-size: 18px; }
-      #qcard .ql { font-size: 18px; color: var(--accent-text); margin-top: 16px; }
-      #qcard .qt { font-size: 27px; line-height: 1.32; margin-top: 8px; }
-      .optq { position: relative; margin-top: 12px; padding: 14px 18px; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--accent-2) 25%, transparent); font-size: 23px; line-height: 1.25; color: var(--paper); opacity: 0; }
+      .chip { display: inline-block; padding: 6px 14px; border-radius: 999px; background: color-mix(in srgb, var(--accent-2) 14%, transparent); color: var(--accent-2); font-size: calc(18px * var(--body-scale)); }
+      #qcard .ql { font-size: calc(18px * var(--body-scale)); color: var(--accent-text); margin-top: 16px; }
+      #qcard .qt { font-size: calc(27px * var(--body-scale)); line-height: 1.32; margin-top: 8px; }
+      .optq { position: relative; margin-top: 12px; padding: 14px 18px; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--accent-2) 25%, transparent); font-size: calc(23px * var(--body-scale)); line-height: 1.25; color: var(--paper); opacity: 0; }
       .optq b { color: var(--accent-2); margin-right: 10px; }
       #oA .ok { position: absolute; right: 16px; top: 50%; margin-top: -15px; opacity: 0; color: var(--ok); }
       #qres { margin-top: 14px; display: flex; align-items: center; gap: 14px; opacity: 0; }
-      #qres .good { font-size: 24px; font-weight: 700; color: var(--ok); }
-      #qres .btn { margin-left: auto; padding: 10px 18px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-text); font-size: 20px; }
-      .src { margin-top: 12px; display: flex; justify-content: space-between; font-size: 17px; color: var(--muted); }
+      #qres .good { font-size: calc(24px * var(--body-scale)); font-weight: 700; color: var(--ok); }
+      #qres .btn { margin-left: auto; padding: 10px 18px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-text); font-size: calc(20px * var(--body-scale)); }
+      .src { margin-top: 12px; display: flex; justify-content: space-between; font-size: calc(17px * var(--body-scale)); color: var(--muted); }
       #tap { position: absolute; left: 300px; top: 560px; width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--accent); opacity: 0; }
       #tutor { opacity: 0; }
-      #tutor .ttl { font-size: 44px; margin-top: 6px; }
-      .about { margin-top: 18px; display: inline-block; padding: 8px 16px; border-radius: 14px; background: color-mix(in srgb, var(--accent-2) 12%, transparent); color: var(--accent-2); font-size: 20px; }
-      .ub { margin-top: 22px; margin-left: auto; width: fit-content; max-width: 520px; padding: 16px 22px; border-radius: 22px 22px 6px 22px; background: var(--bubble); font-size: 25px; opacity: 0; }
-      .tb { margin-top: 18px; padding: 20px 22px; border-radius: 22px 22px 22px 6px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); font-size: 24px; line-height: 1.38; color: var(--paper); }
+      #tutor .ttl { font-size: calc(44px * var(--body-scale)); margin-top: 6px; }
+      .about { margin-top: 18px; display: inline-block; padding: 8px 16px; border-radius: 14px; background: color-mix(in srgb, var(--accent-2) 12%, transparent); color: var(--accent-2); font-size: calc(20px * var(--body-scale)); }
+      .ub { margin-top: 22px; margin-left: auto; width: fit-content; max-width: 520px; padding: 16px 22px; border-radius: 22px 22px 6px 22px; background: var(--bubble); font-size: calc(25px * var(--body-scale)); opacity: 0; }
+      .tb { margin-top: 18px; padding: 20px 22px; border-radius: 22px 22px 22px 6px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); font-size: calc(24px * var(--body-scale)); line-height: 1.38; color: var(--paper); }
       .tb .tw { opacity: 0; }
       .cite { margin-top: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; opacity: 0; }
-      .cite span { padding: 6px 14px; border-radius: 999px; font-size: 18px; }
+      .cite span { padding: 6px 14px; border-radius: 999px; font-size: calc(18px * var(--body-scale)); }
       .cite .a { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok-text); }
       .cite .b { background: color-mix(in srgb, var(--accent-2) 14%, transparent); color: var(--accent-2); }
-      .scope { margin-top: 12px; font-size: 18px; color: var(--muted); opacity: 0; }
-      .ask { position: absolute; left: 38px; right: 38px; bottom: 130px; height: 70px; border-radius: 22px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); display: flex; align-items: center; padding: 0 12px 0 22px; gap: 10px; font-size: 22px; color: var(--muted); }
-      .ask .bt { margin-left: auto; padding: 10px 18px; border-radius: 16px; background: var(--accent-2); color: var(--ink); font-weight: 700; font-size: 20px; }
-      .ask .bt2 { padding: 10px 18px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--accent-2) 40%, transparent); color: var(--accent-2); font-size: 20px; }
+      .scope { margin-top: 12px; font-size: calc(18px * var(--body-scale)); color: var(--muted); opacity: 0; }
+      .ask { position: absolute; left: 38px; right: 38px; bottom: 130px; height: 70px; border-radius: 22px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); display: flex; align-items: center; padding: 0 12px 0 22px; gap: 10px; font-size: calc(22px * var(--body-scale)); color: var(--muted); }
+      .ask .bt { margin-left: auto; padding: 10px 18px; border-radius: 16px; background: var(--accent-2); color: var(--ink); font-weight: 700; font-size: calc(20px * var(--body-scale)); }
+      .ask .bt2 { padding: 10px 18px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--accent-2) 40%, transparent); color: var(--accent-2); font-size: calc(20px * var(--body-scale)); }
 
       /* ---------- S5: the mock and the gate, over the focus footage ---------- */
       #s5 { z-index: 3; }
       .s5-shade { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 25%, transparent) 0%, color-mix(in srgb, var(--ink) 55%, transparent) 45%, color-mix(in srgb, var(--ink) 90%, transparent) 100%); }
       #mock, #gate { position: absolute; left: 90px; right: 90px; top: 760px; padding: 36px 36px 32px; border-radius: 32px; background: color-mix(in srgb, var(--card) 94%, transparent); border: 1px solid color-mix(in srgb, var(--accent-2) 28%, transparent);
         box-shadow: 0 40px 120px color-mix(in srgb, black 60%, transparent), 0 0 80px color-mix(in srgb, var(--accent-2) 15%, transparent); opacity: 0; }
-      #mock .t { font-size: 58px; }
-      #mock .s { font-size: 30px; color: var(--accent-2); margin-top: 12px; }
-      #begin { position: relative; margin-top: 26px; height: 84px; border-radius: 22px; background: var(--paper); color: var(--ink); display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; }
+      #mock .t { font-size: calc(58px * var(--body-scale)); }
+      #mock .s { font-size: calc(30px * var(--body-scale)); color: var(--accent-2); margin-top: 12px; }
+      #begin { position: relative; margin-top: 26px; height: 84px; border-radius: 22px; background: var(--paper); color: var(--ink); display: flex; align-items: center; justify-content: center; font-size: calc(30px * var(--body-scale)); font-weight: 700; }
       #ripple { position: absolute; left: 50%; top: 50%; width: 80px; height: 80px; margin: -40px 0 0 -40px; border-radius: 50%; border: 3px solid var(--accent); opacity: 0; }
-      #gate .k { font-size: 22px; color: var(--accent-text); }
-      .grow { margin-top: 18px; display: flex; align-items: center; gap: 18px; padding: 18px 20px; border-radius: 20px; background: var(--ink); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); font-size: 28px; }
+      #gate .k { font-size: calc(22px * var(--body-scale)); color: var(--accent-text); }
+      .grow { margin-top: 18px; display: flex; align-items: center; gap: 18px; padding: 18px 20px; border-radius: 20px; background: var(--ink); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); font-size: calc(28px * var(--body-scale)); }
       .dotc { position: relative; width: 40px; height: 40px; flex: none; }
       .dotc .e { position: absolute; inset: 0; border-radius: 50%; border: 3px solid var(--ring-off); }
       .dotc .f { position: absolute; inset: 0; border-radius: 50%; background: var(--ok); color: var(--ink); display: flex; align-items: center; justify-content: center; opacity: 0; }
 
       /* ---------- S6: the grade ---------- */
       #s6 { z-index: 3; }
-      #aplus { position: absolute; left: 0; right: 0; top: 520px; text-align: center; font-size: 460px; line-height: 1; color: var(--gold); text-shadow: 0 0 80px color-mix(in srgb, var(--gold) 45%, transparent), 0 20px 60px color-mix(in srgb, black 50%, transparent); opacity: 0; }
-      #ornot { position: absolute; left: 0; right: 0; top: 1030px; text-align: center; font-size: 96px; color: var(--accent-2); opacity: 0; }
-      #passed { position: absolute; left: 0; right: 0; top: 380px; text-align: center; font-size: 30px; color: var(--paper); opacity: 0; }
+      /* PRD-255: the caveat sits under the grade, moved down as far as the grade grows with the kit's display scale. */
+      #aplus { position: absolute; left: 0; right: 0; top: 520px; text-align: center; font-size: calc(460px * var(--display-scale)); line-height: 1; color: var(--gold); text-shadow: 0 0 80px color-mix(in srgb, var(--gold) 45%, transparent), 0 20px 60px color-mix(in srgb, black 50%, transparent); opacity: 0; }
+      #ornot { position: absolute; left: 0; right: 0; top: calc(1030px + 460px * (var(--display-scale) - 1)); text-align: center; font-size: calc(96px * var(--display-scale)); color: var(--accent-2); opacity: 0; }
+      #passed { position: absolute; left: 0; right: 0; top: 380px; text-align: center; font-size: calc(30px * var(--body-scale)); color: var(--paper); opacity: 0; }
 
       /* ---------- S7: the tracks ---------- */
       #s7 { z-index: 3; }
       #tkhead { position: absolute; left: 72px; right: 72px; top: 250px; opacity: 0; }
-      #tkhead .t { font-size: 104px; line-height: 1; }
-      #tkhead .s { font-size: 30px; color: var(--accent-2); margin-top: 18px; }
+      #tkhead .t { font-size: calc(104px * var(--display-scale)); line-height: 1; }
+      #tkhead .s { font-size: calc(30px * var(--body-scale)); color: var(--accent-2); margin-top: 18px; }
       .tgrid { position: absolute; left: 72px; right: 72px; top: 520px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
       .tk { height: 150px; border-radius: 24px; background: var(--card); border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent); padding: 20px 22px; opacity: 0; }
-      .tk .cd { font-family: var(--display); font-weight: 700; font-size: 34px; color: var(--paper); }
-      .tk .nm { font-size: 22px; line-height: 1.25; color: var(--accent-2); margin-top: 8px; }
+      .tk .cd { font-family: var(--display); font-weight: 700; font-size: calc(34px * var(--body-scale)); color: var(--paper); }
+      .tk .nm { font-size: calc(22px * var(--body-scale)); line-height: 1.25; color: var(--accent-2); margin-top: 8px; }
 
       /* ---------- S8: the end card, over the end footage ---------- */
       #s8 { z-index: 3; }
       .s8-shade { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 40%, transparent) 0%, transparent 30%, color-mix(in srgb, var(--ink) 20%, transparent) 50%, color-mix(in srgb, var(--ink) 88%, transparent) 78%, color-mix(in srgb, var(--ink) 97%, transparent) 100%); opacity: 0; }
       #eicon { position: absolute; left: 420px; top: 560px; width: 240px; height: 240px; object-fit: contain; opacity: 0; filter: drop-shadow(0 10px 40px color-mix(in srgb, black 50%, transparent)); }
-      #ename { position: absolute; left: 0; right: 0; top: 1110px; text-align: center; font-size: 84px; opacity: 0; }
-      #efree { position: absolute; left: 0; right: 0; top: 1220px; text-align: center; font-size: 40px; color: var(--accent-2); opacity: 0; }
-      #eprove { position: absolute; left: 0; right: 0; top: 1290px; text-align: center; font-size: 120px; color: var(--accent); opacity: 0; text-shadow: 0 10px 50px color-mix(in srgb, black 50%, transparent); }
+      #ename { position: absolute; left: 0; right: 0; top: 1110px; text-align: center; font-size: calc(84px * var(--display-scale)); opacity: 0; }
+      #efree { position: absolute; left: 0; right: 0; top: 1220px; text-align: center; font-size: calc(40px * var(--body-scale)); color: var(--accent-2); opacity: 0; }
+      #eprove { position: absolute; left: 0; right: 0; top: 1290px; text-align: center; font-size: calc(120px * var(--display-scale)); color: var(--accent); opacity: 0; text-shadow: 0 10px 50px color-mix(in srgb, black 50%, transparent); }
       #eurl { position: absolute; left: 0; right: 0; top: 1470px; display: flex; flex-direction: column; align-items: center; gap: 14px; opacity: 0; }
-      #eurl .u { font-size: 44px; font-weight: 600; letter-spacing: 0.02em; }
+      #eurl .u { font-size: calc(44px * var(--body-scale)); font-weight: 600; letter-spacing: 0.02em; }
       #euline { width: 470px; height: 3px; background: var(--accent); transform-origin: 0 50%; }
-      #eurl .n { font-size: 20px; color: var(--muted); max-width: 840px; text-align: center; line-height: 1.35; }
+      #eurl .n { font-size: calc(20px * var(--body-scale)); color: var(--muted); max-width: 840px; text-align: center; line-height: 1.35; }
+      /* PRD-255 FR-9: on a dark stage, the kit's logo for dark backgrounds as it is; without one, the logo on a light chip. */
+      .dark-logo { background: var(--logo-chip); border-radius: 32px; padding: 20px; }
+      .dark-logo[src^="data:image/gif"] { background: none; }
     </style>
   </head>
   <body>
@@ -305,7 +313,7 @@
       <!-- ================= S8: the end card ================= -->
       <section id="s8" class="clip" data-start="29.5" data-duration="8.5" data-track-index="2">
         <div class="s8-shade" id="s8shade"></div>
-        <img id="eicon" src="{{ brand.logo_mark }}" alt="" />
+        <img class="dark-logo" id="eicon" src="{{ brand.logo_on_dark }}" alt="" />
         <div id="ename" class="disp">{{ app_name }}</div>
         <div id="efree">{{ end_line }}</div>
         <div id="eprove" class="disp">{{ end_accent }}</div>

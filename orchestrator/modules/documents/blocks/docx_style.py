@@ -5,13 +5,21 @@ F356: the owner asked for the Word files to match the PDFs. A block document's
 no letterhead, no footer and no page numbers. Now, from ``design_tokens``:
 
 * the page is A4 with the PDF's margins;
-* Normal and Heading 1-3 take the type scale, the kit's font and the colour
-  roles (title in the primary, section headings in the accent, body in the text
-  colour), with Word's theme fonts and colours cleared so the kit's win;
+* Normal, Heading 1-3 and Caption take the type scale, the kit's font and the
+  colour roles, with Word's theme fonts and colours cleared so the kit's win;
 * the letterhead (``letterhead_run``) is the first page's header: the logo on the
-  left, the company block set right, an accent rule under both;
+  left, the company block set right, a rule under both;
 * every page's footer reads the company, the title and "Page X of Y", the page
   numbers as Word fields (PAGE, NUMPAGES), so they stay right when the file is edited.
+
+PRD-255 (US-004): every value is the kit's (``design_tokens.design``): the margins
+are ``page_margin_mm``; Heading 1-3 are the kit's h1-h3 in ``heading``, Normal its
+body in ``ink``, Caption its caption in ``muted``; gaps are multiples of
+``spacing_unit_pt``. Word draws a paragraph rule the full width of the text, and
+headings carry no full-width rules (PRD-243), so the PDF's short accent mark under
+the title has no Word counterpart; the letterhead logo is
+``logo_rules.letterhead_mm`` high (``docx_renderer``). Tables take the same roles
+(``docx_tables``).
 """
 from __future__ import annotations
 
@@ -20,8 +28,10 @@ from typing import Any, Callable, Mapping, Optional
 from . import design_tokens as t
 
 PAGE_WIDTH_MM, PAGE_HEIGHT_MM = 210, 297
-MARGIN_MM = {"top_margin": 20, "right_margin": 20, "bottom_margin": 24, "left_margin": 20}
-HEADING_STYLES = {1: ("Heading 1", t.TITLE_PT), 2: ("Heading 2", t.H2_PT), 3: ("Heading 3", t.H3_PT)}
+# Word's style for each step of the kit's type scale, and its gaps before and after (spacing steps).
+STEP_STYLES = {"Heading 1": "h1", "Heading 2": "h2", "Heading 3": "h3", "Caption": "caption"}
+STEP_GAPS = {"h1": (2, 2), "h2": (5, 1), "h3": (4, 1), "caption": (1, 1)}
+MARGIN_SIDES = ("top_margin", "right_margin", "bottom_margin", "left_margin")
 THEME_FONT_ATTRS = ("w:asciiTheme", "w:hAnsiTheme", "w:eastAsiaTheme", "w:cstheme")
 RULE_EIGHTHS = 8  # a 1 pt rule, in Word's eighths of a point
 LOGO_COLUMN_MM = 30
@@ -54,35 +64,51 @@ def _clear_theme(style: Any) -> None:
             colour.attrib.pop(qn(attr), None)
 
 
-def _set_font(style: Any, font: Optional[str], size: float, colour: str, bold: bool) -> None:
+def _set_font(style: Any, font: Optional[str], step: t.Step, colour: str) -> None:
+    """``style`` in ``step``'s size, line height and weight, in ``colour`` and the kit's font."""
     from docx.shared import Pt
 
     _clear_theme(style)
     if font:
         style.font.name = font
-    style.font.size = Pt(size)
-    style.font.bold = bold
+    style.font.size = Pt(step.size_pt)
+    style.font.bold = step.bold
     style.font.color.rgb = rgb(colour)
+    style.paragraph_format.line_spacing = Pt(step.line_pt)
+
+
+def text_width(design: t.Design) -> Any:
+    """The width of the text column, as a python-docx length."""
+    from docx.shared import Mm
+
+    return Mm(PAGE_WIDTH_MM - 2 * design.page_margin_mm)
+
+
+def _page(document: Any, design: t.Design) -> None:
+    from docx.shared import Mm
+
+    for section in document.sections:
+        section.page_width, section.page_height = Mm(PAGE_WIDTH_MM), Mm(PAGE_HEIGHT_MM)
+        for side in MARGIN_SIDES:
+            setattr(section, side, Mm(design.page_margin_mm))
 
 
 def apply_styles(document: Any, kit: Mapping[str, Any], font: Optional[str]) -> None:
-    """The page size and margins, and Normal and Heading 1-3 in the design system's type and colours."""
-    from docx.shared import Mm, Pt
+    """The page size and margins, and Normal, Heading 1-3 and Caption in the kit's type and colours."""
+    from docx.shared import Pt
 
-    roles = t.palette(kit)
-    for section in document.sections:
-        section.page_width, section.page_height = Mm(PAGE_WIDTH_MM), Mm(PAGE_HEIGHT_MM)
-        for side, mm in MARGIN_MM.items():
-            setattr(section, side, Mm(mm))
+    design = t.design(kit)
+    roles = design.palette
+    _page(document, design)
     normal = document.styles["Normal"]
-    _set_font(normal, font, t.BODY_PT, roles.text, False)
-    normal.paragraph_format.space_after = Pt(t.SPACE_2)
-    normal.paragraph_format.line_spacing = t.LEADING - 0.25  # Word's single is already about 1.2x
-    for level, (name, size) in HEADING_STYLES.items():
+    _set_font(normal, font, design.type["body"], roles.ink)
+    normal.paragraph_format.space_after = Pt(design.space(2))
+    for name, step in STEP_STYLES.items():
         style = document.styles[name]
-        _set_font(style, font, size, roles.title if level == 1 else roles.heading, True)
-        style.paragraph_format.space_before = Pt(t.SPACE_2 if level == 1 else t.SPACE_4)
-        style.paragraph_format.space_after = Pt(t.SPACE_1 if level == 1 else t.SPACE_2)
+        _set_font(style, font, design.type[step], roles.muted if step == "caption" else roles.heading)
+        before, after = STEP_GAPS[step]
+        style.paragraph_format.space_before = Pt(design.space(before))
+        style.paragraph_format.space_after = Pt(design.space(after))
 
 
 EDGE_ORDER = ("top", "left", "bottom", "right")  # the order Word's schema wants them in
@@ -106,7 +132,7 @@ def cell_edges(cell: Any, edges: Mapping[str, tuple]) -> None:
     tc_pr.append(borders)
 
 
-def _field(paragraph: Any, instruction: str, colour: str) -> Any:
+def _field(paragraph: Any, instruction: str, colour: str, size_pt: float) -> Any:
     """A Word field (PAGE, NUMPAGES) as a run Word fills in when it lays the page out, in the caption's size."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -115,7 +141,7 @@ def _field(paragraph: Any, instruction: str, colour: str) -> Any:
     field.set(qn("w:instr"), instruction)
     run = OxmlElement("w:r")
     props = OxmlElement("w:rPr")
-    for tag, value in (("w:color", colour.lstrip("#")), ("w:sz", str(int(t.CAPTION_PT * 2)))):
+    for tag, value in (("w:color", colour.lstrip("#")), ("w:sz", str(int(size_pt * 2)))):
         prop = OxmlElement(tag)
         prop.set(qn("w:val"), value)
         props.append(prop)
@@ -128,73 +154,79 @@ def _field(paragraph: Any, instruction: str, colour: str) -> Any:
     return field
 
 
-def _footer_paragraph(footer: Any, company: str, title: str, muted: str) -> None:
+def _footer_paragraph(footer: Any, company: str, title: str, design: t.Design) -> None:
     from docx.enum.text import WD_TAB_ALIGNMENT
-    from docx.shared import Mm, Pt
+    from docx.shared import Pt
 
+    muted, size = design.palette.muted, design.type["caption"].size_pt
     paragraph = footer.paragraphs[0]
-    width = Mm(PAGE_WIDTH_MM - MARGIN_MM["left_margin"] - MARGIN_MM["right_margin"])
+    width = text_width(design)
     stops = paragraph.paragraph_format.tab_stops
     stops.add_tab_stop(width // 2, WD_TAB_ALIGNMENT.CENTER)
     stops.add_tab_stop(width, WD_TAB_ALIGNMENT.RIGHT)
     paragraph.add_run(f"{company}\t{title}\tPage ")
-    _field(paragraph, "PAGE", muted)
+    _field(paragraph, "PAGE", muted, size)
     paragraph.add_run(" of ")
-    _field(paragraph, "NUMPAGES", muted)
+    _field(paragraph, "NUMPAGES", muted, size)
     for run in paragraph.runs:
-        run.font.size = Pt(t.CAPTION_PT)
+        run.font.size = Pt(size)
         run.font.color.rgb = rgb(muted)
 
 
 def add_footer(document: Any, kit: Mapping[str, Any], company: str, title: str) -> None:
     """Every page's footer: the company, the title and "Page X of Y" (the first page's too)."""
-    roles = t.palette(kit)
+    design = t.design(kit)
     for section in document.sections:
         for footer in (section.footer, section.first_page_footer):
-            _footer_paragraph(footer, company, title, roles.muted)
+            _footer_paragraph(footer, company, title, design)
 
 
-def full_width(table: Any, width: Optional[int] = None) -> None:
-    """The table as wide as the text column, in twentieths of a point (not "auto", which some readers shrink)."""
+def full_width(table: Any, width: Any) -> None:
+    """The table ``width`` wide (``text_width``), in twentieths of a point (not "auto", which some readers shrink)."""
     from docx.oxml.ns import qn
-    from docx.shared import Mm
 
-    width = width or Mm(PAGE_WIDTH_MM - MARGIN_MM["left_margin"] - MARGIN_MM["right_margin"])
     tbl_w = table._tbl.tblPr.find(qn("w:tblW"))
     tbl_w.set(qn("w:type"), "dxa")
     tbl_w.set(qn("w:w"), str(int(width.pt * 20)))
 
 
-def _rule_under(paragraph: Any, colour: str) -> None:
-    """``paragraph`` as a thin line with an accent rule under it (the letterhead's rule)."""
+def _border_under(p_pr: Any, colour: str, eighths: int) -> None:
+    """A rule under the paragraph (or paragraph style) whose properties are ``p_pr``, replacing any it had."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Pt
 
-    p_pr = paragraph._p.get_or_add_pPr()
+    for old in p_pr.findall(qn("w:pBdr")):
+        p_pr.remove(old)
     borders = OxmlElement("w:pBdr")
     bottom = OxmlElement("w:bottom")
-    for key, value in (("w:val", "single"), ("w:sz", str(RULE_EIGHTHS)), ("w:space", "1"), ("w:color", colour.lstrip("#"))):
+    for key, value in (("w:val", "single"), ("w:sz", str(eighths)), ("w:space", "1"), ("w:color", colour.lstrip("#"))):
         bottom.set(qn(key), value)
     borders.append(bottom)
     p_pr.insert_element_before(borders, *PBDR_SUCCESSORS)  # Word's schema order inside a paragraph's properties
-    paragraph.paragraph_format.space_after = Pt(t.SPACE_3)
+
+
+def _rule_under(paragraph: Any, colour: str, design: t.Design) -> None:
+    """``paragraph`` as a thin line with a rule under it (the letterhead's rule)."""
+    from docx.shared import Pt
+
+    _border_under(paragraph._p.get_or_add_pPr(), colour, RULE_EIGHTHS)
+    paragraph.paragraph_format.space_after = Pt(design.space(3))
     paragraph.add_run().font.size = Pt(1)
 
 
 def add_letterhead(document: Any, kit: Mapping[str, Any], logo: Callable[[Any], None],
                    company: Callable[[Any], None]) -> None:
     """The first page's header: a two-cell row, ``logo`` writing into the left cell and
-    ``company`` into the right, an accent rule under both."""
+    ``company`` into the right, a rule under both."""
     from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Mm
 
-    roles = t.palette(kit)
+    design = t.design(kit)
     section = document.sections[0]
     section.different_first_page_header_footer = True
     header = section.first_page_header
-    width = Mm(PAGE_WIDTH_MM - MARGIN_MM["left_margin"] - MARGIN_MM["right_margin"])
+    width = text_width(design)
     table = header.add_table(rows=1, cols=2, width=width)
     table.autofit = False
     full_width(table, width)
@@ -208,7 +240,7 @@ def add_letterhead(document: Any, kit: Mapping[str, Any], logo: Callable[[Any], 
         paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     rule = header.paragraphs[0]
     rule._p.addprevious(table._tbl)  # the row first; the header's own paragraph under it carries the rule
-    _rule_under(rule, roles.rule)
+    _rule_under(rule, design.palette.rule, design)
 
 
-__all__ = ["add_footer", "add_letterhead", "apply_styles", "cell_edges", "full_width", "rgb"]
+__all__ = ["add_footer", "add_letterhead", "apply_styles", "cell_edges", "full_width", "rgb", "text_width"]

@@ -132,7 +132,9 @@ def test_the_get_tool_returns_what_the_rest_get_returns(api):
     assert kit["heading_font"] == STORED_KIT["heading_font"]
     assert kit["logo_mark_url"] == STORED_KIT["logo_mark_url"]
     assert kit["social_handles"] == STORED_KIT["social_handles"]
-    assert kit["voice"] == {**STORED_KIT["voice"], "sign_off": ""}   # the sign-off (brand kit at generation): unset
+    # The sign-off (brand kit at generation): unset. PRD-255 US-002: each tone word carries its meaning.
+    tone = [{"word": word, "meaning": ""} for word in STORED_KIT["voice"]["tone"]]
+    assert kit["voice"] == {**STORED_KIT["voice"], "tone": tone, "sign_off": ""}
     assert kit["font_files"] == [] and kit["logo_path"] == STORED_KIT["logo_path"]
 
 
@@ -234,7 +236,9 @@ def test_an_update_through_the_tool_is_what_get_returns_and_the_put_shares_its_w
     # A partial merge: company and voice merge key by key, the handles map is replaced,
     # and every field the change left out keeps its value.
     assert rest["company"] == {**brand_kit.CompanyContact().model_dump(), **STORED_KIT["company"], "phone": "+44 20 7946 0000"}
-    assert rest["voice"] == {"tone": STORED_KIT["voice"]["tone"], "banned_phrases": ["synergy"], "sign_off": ""}
+    # PRD-255 US-002: each stored tone word carries its meaning (empty for a plain word).
+    tone = [{"word": word, "meaning": ""} for word in STORED_KIT["voice"]["tone"]]
+    assert rest["voice"] == {"tone": tone, "banned_phrases": ["synergy"], "sign_off": ""}
     assert rest["social_handles"] == {"twitter": "acme_hq", "instagram": "acme.studio"}
     for field in ("name", "tagline", "primary_color", "font_family", "heading_font", "logo_mark_url", "logo_path"):
         assert rest[field] == STORED_KIT[field], field
@@ -292,4 +296,17 @@ def test_the_update_schema_is_the_kits_patch_fields_and_never_a_stored_file():
     assert not set(properties) & brand_kit.SERVER_MANAGED_FIELDS
     assert set(properties["voice"]["properties"]) == set(brand_kit.BrandVoice.model_fields)
     assert set(properties["company"]["properties"]) == set(brand_kit.CompanyContact.model_fields)
+    # PRD-255 US-008: the v2 records, to the field: every one the kit takes, and no other.
+    from modules.documents import brand_system
+
+    assert set(properties) == set(brand_kit.BrandKit.model_fields) - brand_kit.SERVER_MANAGED_FIELDS
+    assert set(properties["palette"]["properties"]) == set(brand_system.BrandPalette.model_fields)
+    assert set(properties["type_scale"]["properties"]) == set(brand_system.TypeScale.model_fields)
+    for step, schema in properties["type_scale"]["properties"].items():
+        assert set(schema["properties"]) == set(brand_system.TypeStep.model_fields), step
+    assert set(properties["logo_rules"]["properties"]) == set(brand_system.LogoRules.model_fields)
+    tone = properties["voice"]["properties"]["tone"]["items"]["properties"]
+    assert set(tone) == set(brand_system.ToneWord.model_fields)
+    assert properties["accent_use"]["enum"] == list(brand_system.ACCENT_USES)
+    assert properties["date_style"]["enum"] == list(brand_system.DATE_STYLES)
     assert get_action_registry().get("platform_update_brand_kit").parameters["required"] == []

@@ -150,7 +150,41 @@ export interface BrandKit {
   // the stored handles and answers without them, and the dialog shows no handles editor.
   social_handles?: Record<string, string>
   voice: BrandVoice
+  // PRD-255 FR-1: the colour roles. GET answers every effective role (stored, else derived
+  // from the four colours) and, per role, whether it is set or derived; a save sends only
+  // the set roles (an empty role goes back to derived). Optional: an older backend has none.
+  palette?: BrandPalette
+  palette_source?: Partial<Record<BrandPaletteRole, BrandRoleSource>>
+  // How far the accent goes: sparing (every kit's default) keeps it to highlights.
+  accent_use?: BrandAccentUse
+  // PRD-255 US-002 (modules/documents/brand_system.py): the type scale, the spacing grid,
+  // the page margin, the logo's rules, the logo's uploaded variants (server-managed,
+  // empty until uploaded) and the locale. Optional: an older backend has none.
+  type_scale?: Record<BrandTypeStepName, BrandTypeStep>
+  spacing_unit_pt?: number
+  page_margin_mm?: number
+  logo_rules?: { letterhead_mm: number; clear_space: number; min_mm: number }
+  logo_dark_path?: string
+  logo_mono_path?: string
+  // An ISO 4217 code such as GBP; empty: amounts print with no currency.
+  currency?: string
+  date_style?: BrandDateStyle
 }
+
+export type BrandTypeStepName = 'display' | 'h1' | 'h2' | 'h3' | 'body' | 'small' | 'caption'
+export interface BrandTypeStep {
+  size_pt: number
+  line_pt: number
+  weight: number
+}
+export type BrandDateStyle = 'd MMMM yyyy' | 'MMMM d, yyyy'
+
+// modules/documents/brand_system.py BrandPalette (core/brand_palette.py PALETTE_ROLES).
+export type BrandPaletteRole =
+  | 'ink' | 'heading' | 'paper' | 'surface' | 'surface_2' | 'accent' | 'accent_2' | 'muted' | 'rule'
+export type BrandPalette = Partial<Record<BrandPaletteRole, string>>
+export type BrandRoleSource = 'set' | 'derived'
+export type BrandAccentUse = 'sparing' | 'bold'
 
 // One uploaded font file and the face it provides (modules/documents/brand_kit.py BrandFontFile).
 export interface BrandFontFile {
@@ -163,9 +197,15 @@ export interface BrandFontFile {
   bytes: number
 }
 
+// One tone word and the line that says what it means for this brand (PRD-255; empty: none).
+export interface ToneWord {
+  word: string
+  meaning: string
+}
+
 // How the brand sounds: three to five tone words (or none) and the phrases it never uses.
 export interface BrandVoice {
-  tone: string[]
+  tone: ToneWord[]
   banned_phrases: string[]
   // Who signs what the agents draft; the platform fills a "[Your name]" with it.
   sign_off?: string

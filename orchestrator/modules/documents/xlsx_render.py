@@ -6,10 +6,13 @@ and it had no logo. :func:`write_xlsx` writes the same sheet (headers, rows type
 value, columns sized to their text) with the kit's look when there is one
 (``services.brand_rules.brand_assets``):
 
-* the header row filled with the primary colour, its text white or the kit's text
-  colour, whichever reads on it;
-* every cell in the kit's body font;
-* the logo above the table, when the kit has an uploaded logo or a public one;
+* PRD-255 (US-005): the header row on the kit's ``surface_2`` with ``heading``
+  text, or on the ``accent`` (its text white where white reads) only when the kit's
+  ``accent_use`` is ``bold``: no longer the primary on every sheet;
+* every cell in the kit's body font and body size (``type_scale.body``), an amount
+  column in the kit's currency (``xlsx_letterhead``);
+* the logo above the table at the kit's letterhead height, when the kit has an
+  uploaded logo or a public one;
 * F356: under the logo the title and a company line, zebra rows and hairlines,
   a frozen, filterable header, and a printed footer (``xlsx_letterhead``).
 
@@ -20,41 +23,31 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from core.brand_palette import WHITE, contrast, parse_hex
-
-from .xlsx_letterhead import body_format, branded_formats, set_print_layout, write_letterhead
+from .amounts import is_amount_key
+from .blocks.design_tokens import Design
+from .xlsx_letterhead import (
+    body_format, branded_formats, cell_font, logo_px, logo_rows, set_print_layout, sheet_design, write_letterhead,
+)
 
 DEFAULT_HEADER_FILL = "#1a1a2e"
 DEFAULT_HEADER_TEXT = "white"
-HEADER_TEXT_MIN_CONTRAST = 4.5
 SHEET_NAME_MAX_CHARS = 31  # Excel's limit
 COLUMN_PADDING = 2
 COLUMN_MAX_WIDTH = 50
 DATE_FORMAT = "yyyy-mm-dd"
-LOGO_HEIGHT_PX = 48
-LOGO_ROWS = 3  # the rows above the table that hold the logo
 LOGO_FILE_NAME = "logo"
 
 
-def header_colours(brand: Optional[Mapping[str, Any]]) -> Tuple[str, str]:
-    """(fill, text) for the header row: the kit's primary, and text that reads on it."""
-    colours = (brand or {}).get("colours") or {}
-    fill = parse_hex(colours.get("primary"))
-    if fill is None:
+def header_colours(design: Optional[Design]) -> Tuple[str, str]:
+    """(fill, text) for the header row: the kit's table header roles (``surface_2`` and
+    ``heading``, the accent only under ``bold``), or the plain sheet's without a kit."""
+    if design is None:
         return DEFAULT_HEADER_FILL, DEFAULT_HEADER_TEXT
-    text = colours.get("text")
-    if contrast(fill, WHITE) >= HEADER_TEXT_MIN_CONTRAST or parse_hex(text) is None:
-        return colours["primary"], DEFAULT_HEADER_TEXT
-    return colours["primary"], text
+    return design.palette.header_fill, design.palette.header_text
 
 
-def _font(brand: Optional[Mapping[str, Any]]) -> Dict[str, str]:
-    body = ((brand or {}).get("fonts") or {}).get("body")
-    return {"font_name": body} if body else {}
-
-
-def logo_image(brand: Optional[Mapping[str, Any]]) -> Optional[Tuple[Any, float]]:
-    """(the logo's bytes, the scale that makes it LOGO_HEIGHT_PX tall), or None."""
+def logo_image(brand: Optional[Mapping[str, Any]], design: Design) -> Optional[Tuple[Any, float]]:
+    """(the logo's bytes, the scale that makes it the kit's letterhead height), or None."""
     from modules.documents.blocks.docx_renderer import _safe_image_bytes
     from modules.documents.brand_logo import image_dimensions
 
@@ -63,7 +56,7 @@ def logo_image(brand: Optional[Mapping[str, Any]]) -> Optional[Tuple[Any, float]
     size = image_dimensions(data.getvalue()) if data is not None else None
     if not size or not size[1]:
         return None
-    return data, LOGO_HEIGHT_PX / size[1]
+    return data, logo_px(design) / size[1]
 
 
 def _write_cell(worksheet: Any, row: int, col: int, value: Any, formats: Mapping[str, Any], cell: Any = None) -> None:
@@ -85,9 +78,9 @@ def _widths(columns: Sequence[Any], rows: Sequence[Sequence[Any]]) -> List[int]:
     return widths
 
 
-def _formats(workbook: Any, brand: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    fill, text = header_colours(brand)
-    font = _font(brand)
+def _formats(workbook: Any, brand: Optional[Mapping[str, Any]], design: Optional[Design]) -> Dict[str, Any]:
+    fill, text = header_colours(design)
+    font = cell_font(brand, design) if design is not None else {}
     return {
         "header": workbook.add_format({"bold": True, "bg_color": fill, "font_color": text, "border": 1,
                                        "text_wrap": True, **font}),
@@ -96,22 +89,24 @@ def _formats(workbook: Any, brand: Optional[Mapping[str, Any]]) -> Dict[str, Any
     }
 
 
-def _place_logo(worksheet: Any, brand: Optional[Mapping[str, Any]]) -> int:
+def _place_logo(worksheet: Any, brand: Optional[Mapping[str, Any]], design: Design) -> int:
     """Put the logo above the table; the row the table starts on."""
-    logo = logo_image(brand)
+    logo = logo_image(brand, design)
     if logo is None:
         return 0
     data, scale = logo
     worksheet.insert_image(0, 0, LOGO_FILE_NAME, {"image_data": data, "x_scale": scale, "y_scale": scale})
-    return LOGO_ROWS
+    return logo_rows(design)
 
 
-def _write_rows(worksheet: Any, rows: Sequence[Sequence[Any]], width: int, top: int,
+def _write_rows(worksheet: Any, columns: Sequence[Any], rows: Sequence[Sequence[Any]], top: int,
                 formats: Mapping[str, Any], branded: Optional[Mapping[str, Any]]) -> None:
-    """The body rows under the header at ``top``; zebra and hairlines when ``branded`` formats are given."""
+    """The body rows under the header at ``top``; zebra, hairlines and amounts in the kit's
+    currency when ``branded`` formats are given."""
+    amounts = [is_amount_key(name) for name in columns]
     for number, row in enumerate(rows):
-        for col_idx, value in enumerate(row[:width]):
-            cell = body_format(branded, number, value) if branded else None
+        for col_idx, value in enumerate(row[:len(columns)]):
+            cell = body_format(branded, number, value, amounts[col_idx]) if branded else None
             _write_cell(worksheet, top + 1 + number, col_idx, value, formats, cell)
 
 
@@ -124,14 +119,15 @@ def write_xlsx(path: str, title: str, data: Mapping[str, Any], brand: Optional[M
         raise ValueError("XLSX generation requires 'columns' in data.")
     workbook = xlsxwriter.Workbook(path)
     worksheet = workbook.add_worksheet(title[:SHEET_NAME_MAX_CHARS])
-    formats = _formats(workbook, brand)
-    top = _place_logo(worksheet, brand)
-    branded = branded_formats(workbook, brand, _font(brand)) if brand else None
+    design = sheet_design(brand) if brand else None
+    formats = _formats(workbook, brand, design)
+    top, branded = 0, None
     if brand:
-        top = write_letterhead(worksheet, top, title, brand, branded)
+        branded = branded_formats(workbook, brand, design)
+        top = write_letterhead(worksheet, _place_logo(worksheet, brand, design), title, brand, branded)
     for col, name in enumerate(columns):
         worksheet.write(top, col, name, formats["header"])
-    _write_rows(worksheet, rows, len(columns), top, formats, branded)
+    _write_rows(worksheet, columns, rows, top, formats, branded)
     for col, width in enumerate(_widths(columns, rows)):
         worksheet.set_column(col, col, width)
     if brand:

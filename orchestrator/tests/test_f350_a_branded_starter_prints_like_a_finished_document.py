@@ -9,6 +9,10 @@ forced page break before a two-line appendix) and the proposal left its second
 page white; no page had a footer or a page number; the navy never showed; dates
 printed US-style. Each starter is rendered for real here (WeasyPrint) with its
 own sample data and read back (pdfplumber).
+
+PRD-255 (US-004): the one letterhead size is the kit's (``logo_rules.letterhead_mm``,
+the logo's height), and the Executive Summary's figures print in the kit's accent
+on its ``surface`` (not white on the primary).
 """
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ import pytest
 from modules.documents.blocks import collect_variable_paths, render_document_html, validate_blocks
 from modules.documents.blocks.page_style import KEEP_CLASS, build_styles, css_string
 from modules.documents.brand_kit import get_brand_kit
-from modules.documents.presets import LETTERHEAD_LOGO_MM, PRESETS, preset_for, preset_payload
+from modules.documents.presets import PRESETS, preset_for, preset_payload
 from modules.documents.variables.resolver import build_context, resolve_paths
 
 COMPANY = "Automatos AI"
@@ -88,12 +92,12 @@ def _words(page: Dict[str, Any], text: str) -> List[Dict[str, Any]]:
 
 
 def test_every_starter_prints_its_logo_at_one_letterhead_size(printed):
-    widths = set()
+    heights = set()
     for preset in PRESETS:
         (logo,) = printed(preset)[0]["images"]
-        widths.add(round(logo["width"], 1))
-    assert len(widths) == 1, widths
-    assert abs(widths.pop() - LETTERHEAD_LOGO_MM * POINTS_PER_MM) < 1
+        heights.add(round(logo["height"], 1))
+    assert len(heights) == 1, heights
+    assert abs(heights.pop() - KIT["logo_rules"]["letterhead_mm"] * POINTS_PER_MM) < 1
 
 
 @pytest.mark.parametrize("category", ["report", "proposal"])
@@ -199,5 +203,8 @@ def test_a_short_section_is_kept_on_one_page_and_a_long_one_may_break():
 
 
 def test_the_executive_summarys_figures_are_not_navy_on_orange():
-    card = next(line for line in EXEC_SUMMARY.read_text(encoding="utf-8").splitlines() if ".metric-card .value" in line)
-    assert "accent_color" not in card and "color: white" in card
+    lines = EXEC_SUMMARY.read_text(encoding="utf-8").splitlines()
+    card = next(line for line in lines if ".metric-card {" in line)
+    value = next(line for line in lines if ".metric-card .value" in line)
+    assert "primary_color" not in card and "brand.palette.surface" in card
+    assert "accent_color" not in value and "color: {{ brand.palette.accent }}" in value

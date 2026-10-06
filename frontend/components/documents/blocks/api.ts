@@ -24,6 +24,9 @@ export const BRAND_LOGO_PATH = '/api/documents/brand-kit/logo'
 // PRD-251 D5: the square logo mark and the font files, stored like the logo.
 export const BRAND_LOGO_MARK_PATH = '/api/documents/brand-kit/logo-mark'
 export const BRAND_FONTS_PATH = '/api/documents/brand-kit/fonts'
+// PRD-255 FR-9: the logo's variants, uploaded by the owner (never generated), stored like the logo.
+export const BRAND_LOGO_DARK_PATH = '/api/documents/brand-kit/logo-dark'
+export const BRAND_LOGO_MONO_PATH = '/api/documents/brand-kit/logo-mono'
 
 // The face an uploaded font file provides.
 export interface BrandFontFace {
@@ -70,6 +73,12 @@ export const templateBlocksApi = {
     return apiClient.post<BrandKit & { logo_mark_route: string }>(BRAND_LOGO_MARK_PATH, form)
   },
   deleteLogoMark: () => apiClient.delete<BrandKit>(BRAND_LOGO_MARK_PATH),
+  uploadLogoVariant: (path: typeof BRAND_LOGO_DARK_PATH | typeof BRAND_LOGO_MONO_PATH, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post<BrandKit>(path, form)
+  },
+  deleteLogoVariant: (path: typeof BRAND_LOGO_DARK_PATH | typeof BRAND_LOGO_MONO_PATH) => apiClient.delete<BrandKit>(path),
 
   // Font files (PRD-251 D5): a woff2 and the face it provides. The same face again replaces it.
   uploadFont: (file: File, face: BrandFontFace) => {

@@ -6,12 +6,15 @@
 // words, or none, the phrases the brand never uses, and who signs: the agents that
 // draft its posts, emails and documents read them, and the platform fills a
 // "[Your name]" left in a draft with the sign-off (orchestrator/services/brand_rules.py).
+// PRD-255: each tone word may carry a one-line meaning; editing the words keeps the
+// meaning of every word that stays.
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { FieldHelp } from '@/components/ui/help-tooltip'
-import type { BrandVoice } from './types'
+import { BrandKitToneMeanings } from './BrandKitToneMeanings'
+import type { BrandVoice, ToneWord } from './types'
 
 // The Socials channels, keyed by Composio toolkit.
 export const SOCIAL_HANDLE_FIELDS = [
@@ -40,8 +43,19 @@ export function parseList(text: string, separator: RegExp): string[] {
     })
 }
 
+/** Tone words as the kit keeps them: an older backend's plain strings become words with no meaning. */
+export function toneWordsFrom(tone: ReadonlyArray<ToneWord | string> | undefined): ToneWord[] {
+  return (tone ?? []).map((t) => (typeof t === 'string' ? { word: t, meaning: '' } : { word: t.word, meaning: t.meaning ?? '' }))
+}
+
+/** ``words`` as tone words, each keeping the meaning it had (the same word, in any case). */
+export function withToneWords(current: ToneWord[], words: string[]): ToneWord[] {
+  const meanings = new Map(current.map((t) => [t.word.toLowerCase(), t.meaning]))
+  return words.map((word) => ({ word, meaning: meanings.get(word.toLowerCase()) ?? '' }))
+}
+
 /** Why these tone words cannot be saved, or null: three to five of them, or none. */
-export function toneWordsProblem(tone: string[]): string | null {
+export function toneWordsProblem(tone: ReadonlyArray<unknown>): string | null {
   const count = tone.length
   if (count === 0 || (count >= MIN_TONE_WORDS && count <= MAX_TONE_WORDS)) return null
   return `Give ${MIN_TONE_WORDS} to ${MAX_TONE_WORDS} tone words, or none (${count} now).`
@@ -57,7 +71,7 @@ interface BrandKitSocialProps {
 
 export function BrandKitSocial({ handles, voice, onHandlesChange, onVoiceChange }: BrandKitSocialProps) {
   // The text as typed; the kit holds the parsed list.
-  const [toneText, setToneText] = useState(() => voice.tone.join(', '))
+  const [toneText, setToneText] = useState(() => voice.tone.map((t) => t.word).join(', '))
   const [phrasesText, setPhrasesText] = useState(() => voice.banned_phrases.join('\n'))
   const problem = toneWordsProblem(voice.tone)
   // PRD-251B US-B106: no handles (Socials off for the workspace) means no handles editor.
@@ -105,7 +119,7 @@ export function BrandKitSocial({ handles, voice, onHandlesChange, onVoiceChange 
           aria-invalid={problem ? true : undefined}
           onChange={(e) => {
             setToneText(e.target.value)
-            onVoiceChange({ ...voice, tone: parseList(e.target.value, /,/) })
+            onVoiceChange({ ...voice, tone: withToneWords(voice.tone, parseList(e.target.value, /,/)) })
           }}
         />
         {problem && (
@@ -113,6 +127,7 @@ export function BrandKitSocial({ handles, voice, onHandlesChange, onVoiceChange 
             {problem}
           </p>
         )}
+        <BrandKitToneMeanings tone={voice.tone} onChange={(tone) => onVoiceChange({ ...voice, tone })} />
         <Label htmlFor="brand-voice-banned" className="mt-3 block text-xs">
           Phrases the brand never uses (one a line)
         </Label>

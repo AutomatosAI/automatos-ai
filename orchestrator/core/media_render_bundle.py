@@ -16,7 +16,16 @@ The brand kit becomes:
   kit's colours come as they are, plus the dark stage a social video reads,
   derived from them with WCAG contrast (``core/brand_palette.py``: ``ink``,
   ``on-ink``, ``primary-on-ink`` and the rest), and the light paper a social
-  image reads (``paper``, ``on-paper``, ``primary-on-paper`` and the rest);
+  image reads (``paper``, ``on-paper``, ``primary-on-paper`` and the rest), on
+  which the kit's stored v2 roles win where they read (PRD-255 US-006);
+* ``brand.tokens`` also carries the kit's type scale (PRD-255 US-006):
+  ``display-scale`` and ``body-scale`` are the kit's display and body sizes as
+  ratios to the default scale (``core/brand_type.py``), bounded so a card's
+  layout holds, and a template multiplies its own pixel sizes by them
+  (``calc(48px * var(--brand-display-scale, 1))``: without the token it renders
+  as it always did). ``logo-chip`` is what a dark stage puts behind the logo
+  (FR-9): nothing when the kit has a logo for dark backgrounds, else a light
+  chip in the paper's colour;
 * ``files`` and ``brand.fonts``: an uploaded logo at ``assets/brand/logo.<ext>``,
   an uploaded logo mark (D5, the square mark) at ``assets/brand/logo-mark.<ext>``,
   and the kit's font files (D5 ``font_files``) under ``assets/brand/fonts/``, each
@@ -24,7 +33,10 @@ The brand kit becomes:
 * the variables ``brand.name``, ``brand.tagline``, ``brand.logo`` (the staged
   logo's path, or a transparent pixel when there is no uploaded logo),
   ``brand.logo_mark`` (the staged mark's path; without a mark, whatever
-  ``brand.logo`` is), and ``size.width`` / ``size.height`` for the size being
+  ``brand.logo`` is), ``brand.logo_on_dark`` (the uploaded logo for dark
+  backgrounds, at ``assets/brand/logo-dark.<ext>``; without one, whatever
+  ``brand.logo_mark`` is, which the template sets on its light chip: a variant
+  is never generated), and ``size.width`` / ``size.height`` for the size being
   rendered.
 
 The template becomes the composition, with two things done to it here:
@@ -66,7 +78,8 @@ import math
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from core.brand_palette import paper_palette, stage_palette
+from core.brand_palette import PAPER, paper_palette, stage_palette
+from core.brand_type import BODY_STEP, DEFAULT_TYPE_SCALE, DISPLAY_STEP, step_size_pt
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, fill_text, parse_size, still_moments, without_slots
 
 logger = logging.getLogger(__name__)
@@ -80,6 +93,19 @@ COLOUR_TOKENS = (
 )
 BODY_FONT_TOKEN = "body-font"
 HEADING_FONT_TOKEN = "heading-font"
+# PRD-255 US-006: the kit's display and body sizes as ratios to the default scale.
+# The bounds keep a card's layout: the videos are fixed geometry (absolute boxes at
+# 1080x1920), so a kit nudges their type and never triples a headline (a 96 pt
+# display). The media-render CI job renders every template at the upper bound.
+DISPLAY_SCALE_TOKEN, BODY_SCALE_TOKEN = "display-scale", "body-scale"
+SCALE_TOKENS = ((DISPLAY_SCALE_TOKEN, DISPLAY_STEP), (BODY_SCALE_TOKEN, BODY_STEP))
+MIN_SOCIAL_TYPE_SCALE, MAX_SOCIAL_TYPE_SCALE = 0.8, 1.125
+SCALE_DECIMALS = 3
+# FR-9: what a dark stage puts behind the logo. Nothing behind the kit's logo for
+# dark backgrounds; a light chip (the paper, else white) behind any other logo.
+LOGO_CHIP_TOKEN = "logo-chip"
+LOGO_CHIP_CLEAR = "transparent"
+LOGO_CHIP_LIGHT = "#ffffff"
 # media-render's rule for a token value (services/media-render/media_render/bundle.py):
 # one CSS value, nothing that ends a declaration, opens a block or fetches.
 TOKEN_UNSAFE = re.compile(r"[;{}<>\\\n\r]|/\*|url\(|@import|expression\(", re.IGNORECASE)
@@ -91,6 +117,7 @@ FONTS_DIR = "assets/brand/fonts/"
 VOICE_DIR = "assets/voice/"
 LOGO_NAME = "logo"
 LOGO_MARK_NAME = "logo-mark"
+LOGO_DARK_NAME = "logo-dark"
 LOGO_EXTENSIONS = {"image/png": "png", "image/jpeg": "jpg"}
 FONT_EXTENSIONS = {
     "font/woff2": "woff2",
@@ -111,6 +138,7 @@ VAR_BRAND_NAME = "brand.name"
 VAR_BRAND_TAGLINE = "brand.tagline"
 VAR_BRAND_LOGO = "brand.logo"
 VAR_BRAND_LOGO_MARK = "brand.logo_mark"
+VAR_BRAND_LOGO_ON_DARK = "brand.logo_on_dark"
 VAR_SIZE_WIDTH = "size.width"
 VAR_SIZE_HEIGHT = "size.height"
 
@@ -125,15 +153,29 @@ def _token(name: str, value: Any) -> Optional[str]:
     return text
 
 
+def type_scale_tokens(kit: Mapping[str, Any]) -> Dict[str, str]:
+    """``display-scale`` and ``body-scale``: the kit's step size over the default, bounded, as a CSS number."""
+    tokens = {}
+    for token, step in SCALE_TOKENS:
+        ratio = step_size_pt(kit, step) / DEFAULT_TYPE_SCALE[step][0]
+        bounded = min(max(ratio, MIN_SOCIAL_TYPE_SCALE), MAX_SOCIAL_TYPE_SCALE)
+        tokens[token] = f"{round(bounded, SCALE_DECIMALS):g}"
+    return tokens
+
+
 def brand_tokens(kit: Mapping[str, Any]) -> Dict[str, str]:
-    """The kit's colours and fonts as the ``--brand-*`` tokens a template reads, its video stage and its paper."""
+    """The kit's colours and fonts as the ``--brand-*`` tokens a template reads, its video stage and its paper,
+    its type scale, and the chip a dark stage sets the logo on."""
     body_font = kit.get("font_family")
     raw: Dict[str, Any] = {token: kit.get(field) for token, field in COLOUR_TOKENS}
     raw[BODY_FONT_TOKEN] = body_font
     # D5: the heading font is optional; without one, headings take the body font.
     raw[HEADING_FONT_TOKEN] = kit.get("heading_font") or body_font
     tokens = {name: _token(name, value) for name, value in raw.items()}
-    derived = {**stage_palette(kit), **paper_palette(kit)}
+    paper = paper_palette(kit)
+    has_dark_logo = _staged_image(kit.get("logo_dark_url"), LOGO_DARK_NAME)[1] is not None
+    chip = LOGO_CHIP_CLEAR if has_dark_logo else paper.get(PAPER, LOGO_CHIP_LIGHT)
+    derived = {**stage_palette(kit), **paper, **type_scale_tokens(kit), LOGO_CHIP_TOKEN: chip}
     return {**{name: value for name, value in tokens.items() if value is not None}, **derived}
 
 
@@ -151,12 +193,15 @@ def _staged_image(uri: Any, name: str) -> Tuple[List[Dict[str, str]], Optional[s
     return [{"path": path, "data_uri": uri}], path
 
 
-def _logos(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], str, str]:
-    """The uploaded logo and logo mark as bundle files, and what ``{{ brand.logo }}`` and ``{{ brand.logo_mark }}`` fill in."""
+def _logos(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
+    """The uploaded logo, logo mark and logo for dark backgrounds as bundle files, and the logo variables they fill."""
     logo_files, logo = _staged_image(kit.get("logo_url"), LOGO_NAME)
     mark_files, mark = _staged_image(kit.get("logo_mark_url"), LOGO_MARK_NAME)
+    dark_files, dark = _staged_image(kit.get("logo_dark_url"), LOGO_DARK_NAME)
     logo = logo or NO_LOGO
-    return logo_files + mark_files, logo, mark or logo
+    mark = mark or logo
+    variables = {VAR_BRAND_LOGO: logo, VAR_BRAND_LOGO_MARK: mark, VAR_BRAND_LOGO_ON_DARK: dark or mark}
+    return logo_files + mark_files + dark_files, variables
 
 
 def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
@@ -268,14 +313,13 @@ def build_bundle(
     kit = brand_kit or {}
     width, height = render_size(blocks, size)
     html, media = _slots(blocks, slot_media or {}, keep_slots)
-    logo_files, logo, logo_mark = _logos(kit)
+    logo_files, logo_variables = _logos(kit)
     font_files, faces = _fonts(kit)
     variables = {
         **dict(values),
         VAR_BRAND_NAME: brand_name(kit, fallback_name),
         VAR_BRAND_TAGLINE: kit.get("tagline") or "",
-        VAR_BRAND_LOGO: logo,
-        VAR_BRAND_LOGO_MARK: logo_mark,
+        **logo_variables,
         VAR_SIZE_WIDTH: width,
         VAR_SIZE_HEIGHT: height,
     }
@@ -377,6 +421,7 @@ __all__ = [
     "brand_name",
     "brand_tokens",
     "build_bundle",
+    "type_scale_tokens",
     "render_size",
     "voice_script",
     "with_slot_files",

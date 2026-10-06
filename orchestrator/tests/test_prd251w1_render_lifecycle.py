@@ -392,7 +392,7 @@ def test_rendering_a_draft_stores_the_mp4_registers_a_deliverable_and_awaits_app
         "brand.name": "ws-a1",
         "brand.tagline": "",
         "brand.logo": NO_LOGO,
-        "brand.logo_mark": NO_LOGO,
+        "brand.logo_mark": NO_LOGO, "brand.logo_on_dark": NO_LOGO,  # PRD-255 FR-9: no dark logo, the mark
         "size.width": 1080,
         "size.height": 1920,
     }

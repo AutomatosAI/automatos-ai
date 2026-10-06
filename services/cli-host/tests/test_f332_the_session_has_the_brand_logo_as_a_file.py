@@ -102,3 +102,16 @@ def test_a_replaced_logo_leaves_no_stale_copy(tmp_path):
     written = write_brand_files({"brand_files": [_file("logo.png", LOGO)]}, folder)
     assert written == [folder / "brand" / "logo.png"]
     assert sorted(p.name for p in (folder / "brand").iterdir()) == ["logo.png"]
+
+
+def test_the_logos_uploaded_variants_are_written_beside_it_and_named(tmp_path):
+    """PRD-255 (0.13.0): the logo for dark backgrounds and the one-colour logo, as the rules block names them."""
+    dark, mono = LOGO + b"-dark", MARK + b"-mono"
+    s = _session(tmp_path, {"brand_files": [_file("logo-dark.png", dark), _file("logo-mono.jpg", mono)]})
+    ticket_path, _ = s._write_session_files("Claude Code")
+    brand = _deliverables(tmp_path) / "brand"
+    assert (brand / "logo-dark.png").read_bytes() == dark and (brand / "logo-mono.jpg").read_bytes() == mono
+    ticket = ticket_path.read_text(encoding="utf-8")
+    assert str(brand / "logo-dark.png") in ticket and str(brand / "logo-mono.jpg") in ticket
+    # Only those two variants: any other suffix is not a name this host writes.
+    assert write_brand_files({"brand_files": [_file("logo-evil.png", LOGO)]}, tmp_path / "s") == []

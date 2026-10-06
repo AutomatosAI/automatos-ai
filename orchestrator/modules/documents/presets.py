@@ -36,6 +36,8 @@ from modules.documents.variables.catalog import DYNAMIC_PREFIX
 # F350: one letterhead logo size on every starter. It was 40-50 mm (the top fifth of
 # an A4 page) on the invoice, report and proposal; the owner's own copies used 22 mm.
 # F356: 14 mm, beside the company block rather than above it (blocks/letterhead_run.py).
+# PRD-255: inside the letterhead the kit's logo_rules size the logo (its height); this is
+# the logo block's own width, used where it stands alone.
 LETTERHEAD_LOGO_MM = 14
 
 # ---------------------------------------------------------------------------
@@ -126,7 +128,7 @@ LETTER = {
         "the body has no greeting or sign-off: the template adds them."
     ),
     "format": "pdf",
-    "includes": ["Letterhead from your brand kit", "Date, recipient and subject", "Greeting from data.greeting", "Body", "Sign-off with your name and email"],
+    "includes": ["Letterhead from your brand kit", "Date, recipient and subject", "Greeting from data.greeting", "Body", "Sign-off with your brand kit's sign-off (or your name) and your email"],
     "blocks": _doc(
         *letterhead(),
         _para("date", _v("date.long")),
@@ -137,7 +139,7 @@ LETTER = {
         _para("greeting", _v("data.greeting", "")),
         _para("body", _v("data.body")),
         _para("closing", _t("Kind regards,")),
-        _para("sig-name", _v("user.name")),
+        _para("sig-name", _v("brand.sign_off")),  # PRD-255: the kit's sign-off, else the person (F344)
         _para("sig-email", _v("user.email", "")),
     ),
     "sample_data": {

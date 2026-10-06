@@ -44,9 +44,11 @@ def _workspace(db: Session, workspace_id: UUID):
 
 
 async def get_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """The kit as GET /api/documents/brand-kit returns it, with the suggestions the
-    Brand Kit form prefills from (an agent is not a user, so none come from one)."""
+    """The kit as GET /api/documents/brand-kit returns it (PRD-255: every effective colour
+    role, and whether each is set or derived), with the suggestions the Brand Kit form
+    prefills from (an agent is not a user, so none come from one)."""
     from modules.documents import brand_kit
+    from modules.documents.brand_system import brand_kit_view
 
     workspace = _workspace(db, workspace_id)
     if workspace is None:
@@ -55,7 +57,7 @@ async def get_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[str, 
 
     return {
         "success": True,
-        "brand_kit": brand_kit.get_brand_kit(workspace.settings),
+        "brand_kit": brand_kit_view(brand_kit.get_brand_kit(workspace.settings)),
         "suggestions": brand_kit.brand_kit_suggestions(db, workspace),
         # PRD-251B (US-B303): the style profile read from the kit's references; every image
         # and footage prompt an agent writes follows it. Empty while there is none.
@@ -72,6 +74,7 @@ async def update_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[st
     from pydantic import ValidationError
 
     from modules.documents import brand_kit
+    from modules.documents.brand_system import brand_kit_view
 
     fields = {k: v for k, v in params.items() if not k.startswith("_")}  # "_" keys: server-injected
     refused = sorted(set(fields) - set(brand_kit.PATCH_FIELDS))
@@ -80,8 +83,9 @@ async def update_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[st
             "success": False,
             "error": (
                 f"platform_update_brand_kit cannot set {', '.join(refused)}; nothing saved. "
-                f"It sets {', '.join(brand_kit.PATCH_FIELDS)}. The logo, logo mark and font "
-                "files are uploaded by a person in the brand kit settings."
+                f"It sets {', '.join(brand_kit.PATCH_FIELDS)}. The logo, its dark-background and "
+                "one-colour versions, the logo mark and the font files are uploaded by a person "
+                "in the brand kit settings."
             ),
         }
     patch = {k: v for k, v in fields.items() if v is not None}
@@ -96,7 +100,7 @@ async def update_brand_kit_tool(db: Session, workspace_id: UUID, params: Dict[st
         errors = brand_kit.brand_kit_errors(exc)
         reasons = "; ".join(f"{'.'.join(str(part) for part in e['loc'])}: {e['msg']}" for e in errors)
         return {"success": False, "error": f"Invalid brand kit, nothing saved. {reasons}", "errors": errors}
-    return {"success": True, "brand_kit": kit, "changed": sorted(patch)}
+    return {"success": True, "brand_kit": brand_kit_view(kit), "changed": sorted(patch)}
 
 
 def _whole_number(value: Any, default: int) -> int:

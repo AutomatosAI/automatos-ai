@@ -62,7 +62,7 @@ jobs:
           # The renderer, the seeded social templates, and every orchestrator
           # module scripts/ci/social_template_previews.py imports.
           MEDIA_RENDER_PATHS: >-
-            ^services/media-render/|^orchestrator/modules/documents/templates/social/|^orchestrator/modules/documents/social_starters\.py$|^orchestrator/core/(media_render_bundle|social_templates|social_cuts|social_brand_rule|brand_palette|chart_binding|report_tables)\.py$|^scripts/ci/(social_template_previews|ci_block_font)\.py$|^docker-compose\.yml$|^\.github/workflows/test\.yml$
+            ^services/media-render/|^orchestrator/modules/documents/templates/social/|^orchestrator/modules/documents/social_starters\.py$|^orchestrator/core/(media_render_bundle|social_templates|social_cuts|social_brand_rule|brand_palette|brand_type|chart_binding|report_tables)\.py$|^scripts/ci/(social_template_previews|social_template_kits|ci_block_font)\.py$|^docker-compose\.yml$|^\.github/workflows/test\.yml$
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests, the frontend edition literal, the worker image.
           PROD_IMAGE_PATHS: >-
@@ -785,7 +785,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.media_render == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # PRD-255 US-006: the night kits render every template again (about 20 minutes).
+    timeout-minutes: 70
     env:
       IMAGE: media-render:ci
       TEST_IMAGE: media-render:test
@@ -1064,6 +1065,11 @@ jobs:
       # line, a number grid, and a stress table (labels cut, the widest figures)
       # as a bar, a line and a grid, at every size, each with 0 check errors (the
       # axis labels fit), every figure on the chart the report's own cell.
+      # PRD-255 US-006: every template renders again with the two night kits
+      # (scripts/ci/social_template_kits.py), 0 check errors each: Automatos as a
+      # v1 kit (its logo on a light chip on dark stages), and Harbourline as a v2
+      # kit (its stored paper and accent, a larger type scale, its dark logo), at
+      # every size; its Title card's page reads back as its stored paper.
       - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit; the headline takes the uploaded heading font
         env:
           TOKEN: ci-render-token

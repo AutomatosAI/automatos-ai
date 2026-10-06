@@ -79,7 +79,7 @@ from modules.documents.models import GeneratedDocument, UnresolvedDeliverableErr
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
-from modules.documents.legacy_jinja import with_document_filters
+from modules.documents.legacy_jinja import legacy_brand, with_document_filters
 from modules.documents.blocks import (
     legacy_render_data,
     collect_variable_paths,
@@ -384,7 +384,7 @@ class DocumentGenerationService:
             # PRD-167 S4: expose the brand kit to legacy templates as {{ brand.* }} so
             # they pick up workspace palette instead of hardcoded Automatos colours.
             template_lane = "legacy"
-            render_ctx = {**legacy_render_data(data), "brand": self._brand_kit_for(workspace_id)}
+            render_ctx = {**legacy_render_data(data), "brand": legacy_brand(self._brand_kit_for(workspace_id))}
             try:
                 jinja_template = self._jinja_env.from_string(template.template_content)
                 rendered_html = jinja_template.render(**render_ctx)

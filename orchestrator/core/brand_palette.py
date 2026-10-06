@@ -37,11 +37,38 @@ the darker of the two surfaces, so it reads on both:
   must be (AA 3:1 for 24 px, or 19 px bold, with a margin): display words and
   big numbers.
 
+A v2 role the kit stores (PRD-255 US-006) is the token it maps onto instead,
+when it meets that token's own target: ``paper`` the paper, ``ink`` the
+on-paper text, ``muted`` its muted tone, ``accent`` the primary on paper, and
+``accent_2`` (else ``accent``) the accent on paper. So a social image is set
+in the same roles as the kit's documents.
+
 Every token is a 6-digit hex: the contrast pass reads computed ``rgb()``
-colours, so it checks each of them. Pure: no IO, no database.
+colours, so it checks each of them.
+
+:func:`derive_palette` derives the kit's colour roles (PRD-255 FR-1..FR-3), the
+single source of colour for documents, spreadsheets and socials. A v1 kit has
+four colours and no roles; every role is derived from them at read time, so no
+stored kit is migrated, and a role the kit stores (``kit['palette']``) always
+wins. Every text role is measured against the darker of ``paper`` and
+``surface_2``, so it reads on both:
+
+* ``paper``: the kit's lightest colour when it is light enough to be a page,
+  else white; ``surface`` and ``surface_2``: the paper tinted 4% and 8% toward
+  the secondary (cards, zebra rows, table header fills);
+* ``ink``: the kit's text colour, darkened until it reads at 10:1;
+* ``heading``: the text colour moved to near-black, never the primary;
+* ``accent``: the primary, darkened only as far as AA text needs; ``accent_2``:
+  the secondary, the same way, when its hue differs from the primary's;
+* ``muted`` (secondary text) and ``rule`` (hairlines): the ink, lightened toward
+  the paper as far as each may go.
+
+:func:`effective_palette` adds which roles are ``set`` and which ``derived``.
+Pure: no IO, no database.
 """
 from __future__ import annotations
 
+import colorsys
 import re
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
@@ -82,6 +109,36 @@ PRIMARY_ON_PAPER, PRIMARY_ON_PAPER_LARGE, ACCENT_ON_PAPER = "primary-on-paper", 
 PAPER_TOKENS = (
     PAPER, PAPER_CARD, ON_PAPER, ON_PAPER_MUTED, ON_PAPER_DIM, PRIMARY_ON_PAPER, PRIMARY_ON_PAPER_LARGE, ACCENT_ON_PAPER,
 )
+
+# The kit's colour roles (PRD-255 FR-1). ``accent_2`` is optional: it is derived
+# only when the secondary is a second hue.
+ROLE_INK, ROLE_HEADING, ROLE_PAPER = "ink", "heading", "paper"
+ROLE_SURFACE, ROLE_SURFACE_2, ROLE_ACCENT, ROLE_ACCENT_2 = "surface", "surface_2", "accent", "accent_2"
+ROLE_MUTED, ROLE_RULE = "muted", "rule"
+PALETTE_ROLES = (
+    ROLE_INK, ROLE_HEADING, ROLE_PAPER, ROLE_SURFACE, ROLE_SURFACE_2, ROLE_ACCENT, ROLE_ACCENT_2, ROLE_MUTED, ROLE_RULE,
+)
+TEXT_ROLES = (ROLE_INK, ROLE_HEADING, ROLE_ACCENT, ROLE_ACCENT_2, ROLE_MUTED)
+ROLE_SET, ROLE_DERIVED = "set", "derived"
+
+# The roles' targets. The page reuses the paper's luminance floor; the surfaces
+# are the paper tinted toward the secondary. Body ink reads at 10:1, headings are
+# near-black (at most the stage ink's luminance), the accents read as AA text
+# (with the paper's margin), muted text keeps the stage's muted ratio, and a
+# hairline is the ink lightened to a faint line on the paper.
+SURFACE_TINT = 0.04
+SURFACE_2_TINT = 0.08
+INK_ON_PAPER_MIN_CONTRAST = 10.0
+HEADING_MAX_LUMINANCE = INK_MAX_LUMINANCE
+ACCENT_TEXT_MIN_CONTRAST = PAPER_TEXT_MIN_CONTRAST
+MUTED_TEXT_MIN_CONTRAST = MUTED_CONTRAST
+RULE_MIN_CONTRAST = 1.35
+# accent_2: the secondary is a second accent only when it has a hue (saturation
+# over the floor) and that hue is this far round the wheel from the primary's.
+ACCENT_2_MIN_HUE_DEGREES = 30.0
+ACCENT_2_MIN_SATURATION = 0.15
+HUE_CIRCLE_DEGREES = 360.0
+KIT_COLOUR_FIELDS = ("primary_color", "secondary_color", "accent_color", "text_color")
 
 _HEX = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -184,38 +241,185 @@ def stage_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
     return {name: to_hex(rgb) for name, rgb in palette.items()}
 
 
-def paper_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
-    """The paper tokens for ``kit`` (a brand kit dict); ``{}`` when it has no usable text colour.
+def _kept(stored: Optional[RGB], meets: Callable[[RGB], bool]) -> Optional[RGB]:
+    """A role the kit stores, when it meets the token's own target; ``None`` leaves the token to derivation."""
+    return stored if stored is not None and meets(stored) else None
 
-    A role whose kit colour is missing or not a hex colour is left out, and the
-    template's own ``var()`` fallback applies to it.
-    """
-    text = parse_hex(kit.get("text_color"))
-    if text is None:
-        return {}
-    paper = _least(text, WHITE, lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
-    card = _most(paper, BLACK, lambda c: contrast(c, paper) <= CARD_CONTRAST)
-    palette = {PAPER: paper, PAPER_CARD: card}
+
+def _on_card(card: RGB, target: float) -> Callable[[RGB], bool]:
+    return lambda c: contrast(c, card) >= target
+
+
+def _paper_text(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) -> Dict[str, RGB]:
+    """``on-paper`` and its quieter tones: the stored ink and muted when they read, else today's derivation."""
+    on_paper = _kept(stored.get(ROLE_INK), _on_card(card, ON_PAPER_MIN_CONTRAST))
     secondary = parse_hex(kit.get("secondary_color"))
-    if secondary is not None:
-        on_paper = _least(secondary, BLACK, lambda c: contrast(c, card) >= ON_PAPER_MIN_CONTRAST)
-        palette[ON_PAPER] = on_paper
-        palette[ON_PAPER_MUTED] = _most(on_paper, card, lambda c: contrast(c, card) >= MUTED_CONTRAST)
-        palette[ON_PAPER_DIM] = _most(on_paper, card, lambda c: contrast(c, card) >= DIM_CONTRAST)
-    primary = parse_hex(kit.get("primary_color"))
-    if primary is not None:
-        palette[PRIMARY_ON_PAPER] = _least(primary, BLACK, lambda c: contrast(c, card) >= PAPER_TEXT_MIN_CONTRAST)
-        palette[PRIMARY_ON_PAPER_LARGE] = _least(primary, BLACK, lambda c: contrast(c, card) >= LARGE_TEXT_MIN_CONTRAST)
-    accent = parse_hex(kit.get("accent_color"))
-    if accent is not None:
-        palette[ACCENT_ON_PAPER] = _least(accent, BLACK, lambda c: contrast(c, card) >= PAPER_TEXT_MIN_CONTRAST)
+    if on_paper is None and secondary is not None:
+        on_paper = _least(secondary, BLACK, _on_card(card, ON_PAPER_MIN_CONTRAST))
+    if on_paper is None:
+        return {}
+    muted = _kept(stored.get(ROLE_MUTED), _on_card(card, MUTED_CONTRAST))
+    return {
+        ON_PAPER: on_paper,
+        ON_PAPER_MUTED: muted or _most(on_paper, card, _on_card(card, MUTED_CONTRAST)),
+        ON_PAPER_DIM: _most(on_paper, card, _on_card(card, DIM_CONTRAST)),
+    }
+
+
+def _paper_brand(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) -> Dict[str, RGB]:
+    """The brand colours on the paper: the stored accent (and ``accent_2``) when they read, else today's derivation."""
+    accent = stored.get(ROLE_ACCENT)
+    targets = {
+        PRIMARY_ON_PAPER: (accent, "primary_color", PAPER_TEXT_MIN_CONTRAST),
+        PRIMARY_ON_PAPER_LARGE: (accent, "primary_color", LARGE_TEXT_MIN_CONTRAST),
+        ACCENT_ON_PAPER: (stored.get(ROLE_ACCENT_2) or accent, "accent_color", PAPER_TEXT_MIN_CONTRAST),
+    }
+    palette: Dict[str, RGB] = {}
+    for token, (role, field, target) in targets.items():
+        kit_colour = parse_hex(kit.get(field))
+        colour = _kept(role, _on_card(card, target))
+        if colour is None and kit_colour is not None:
+            colour = _least(kit_colour, BLACK, _on_card(card, target))
+        if colour is not None:
+            palette[token] = colour
+    return palette
+
+
+def paper_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
+    """The paper tokens for ``kit`` (a brand kit dict); ``{}`` when it has neither a page nor a usable text colour.
+
+    A v2 role the kit stores (``kit['palette']``, PRD-255 US-006) is the token it
+    maps onto when it meets that token's own target: ``paper`` (light enough to
+    be a page) the paper, ``ink`` the on-paper text, ``muted`` its muted tone,
+    ``accent`` the primary on paper, and ``accent_2`` (else ``accent``) the
+    accent on paper. Every other token is derived as before. A role whose kit
+    colour is missing or not a hex colour is left out, and the template's own
+    ``var()`` fallback applies to it.
+    """
+    stored = _stored_roles(kit)
+    paper = _kept(stored.get(ROLE_PAPER), lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
+    text = parse_hex(kit.get("text_color"))
+    if paper is None and text is not None:
+        paper = _least(text, WHITE, lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
+    if paper is None:
+        return {}
+    card = _most(paper, BLACK, lambda c: contrast(c, paper) <= CARD_CONTRAST)
+    palette = {PAPER: paper, PAPER_CARD: card, **_paper_text(kit, stored, card), **_paper_brand(kit, stored, card)}
     return {name: to_hex(rgb) for name, rgb in palette.items()}
 
 
+def _kit_colour(kit: Mapping[str, Any], *fields: str) -> Optional[RGB]:
+    """The first of ``fields`` the kit has as a hex colour; ``None`` when none is."""
+    for field in fields:
+        rgb = parse_hex(kit.get(field))
+        if rgb is not None:
+            return rgb
+    return None
+
+
+def _stored_roles(kit: Mapping[str, Any]) -> Dict[str, RGB]:
+    """The roles ``kit['palette']`` stores as valid hex colours; anything else is left to derivation."""
+    stored = kit.get("palette")
+    if not isinstance(stored, Mapping):
+        return {}
+    roles = {role: parse_hex(stored.get(role)) for role in PALETTE_ROLES}
+    return {role: rgb for role, rgb in roles.items() if rgb is not None}
+
+
+def _derived_paper(kit: Mapping[str, Any]) -> RGB:
+    """The kit's lightest colour when it is light enough to be a page; else white."""
+    colours = [rgb for rgb in (parse_hex(kit.get(field)) for field in KIT_COLOUR_FIELDS) if rgb is not None]
+    lightest = max(colours, key=luminance, default=WHITE)
+    return lightest if luminance(lightest) >= PAPER_MIN_LUMINANCE else WHITE
+
+
+def _hue_saturation(rgb: RGB) -> Tuple[float, float]:
+    hue, _lightness, saturation = colorsys.rgb_to_hls(*(channel / 255 for channel in rgb))
+    return hue * HUE_CIRCLE_DEGREES, saturation
+
+
+def _second_hue(primary: Optional[RGB], secondary: RGB) -> bool:
+    """Whether ``secondary`` is a hue of its own: chromatic, and far enough round the wheel from ``primary``."""
+    hue, saturation = _hue_saturation(secondary)
+    if saturation < ACCENT_2_MIN_SATURATION:
+        return False
+    if primary is None:
+        return True
+    primary_hue, primary_saturation = _hue_saturation(primary)
+    if primary_saturation < ACCENT_2_MIN_SATURATION:
+        return True
+    apart = abs(hue - primary_hue) % HUE_CIRCLE_DEGREES
+    return min(apart, HUE_CIRCLE_DEGREES - apart) >= ACCENT_2_MIN_HUE_DEGREES
+
+
+def _grounds(kit: Mapping[str, Any], stored: Mapping[str, RGB]) -> Dict[str, RGB]:
+    """``paper``, ``surface`` and ``surface_2``: stored ones as they are, the rest derived."""
+    paper = stored.get(ROLE_PAPER) or _derived_paper(kit)
+    tint = _kit_colour(kit, "secondary_color", "text_color") or BLACK
+    return {
+        ROLE_PAPER: paper,
+        ROLE_SURFACE: stored.get(ROLE_SURFACE) or mix(paper, tint, SURFACE_TINT),
+        ROLE_SURFACE_2: stored.get(ROLE_SURFACE_2) or mix(paper, tint, SURFACE_2_TINT),
+    }
+
+
+def _text_roles(kit: Mapping[str, Any], stored: Mapping[str, RGB], grounds: Mapping[str, RGB]) -> Dict[str, RGB]:
+    """The text roles, each reading on both ``paper`` and ``surface_2`` (a stored role as it is)."""
+    paper, surface_2 = grounds[ROLE_PAPER], grounds[ROLE_SURFACE_2]
+
+    def reads(target: float) -> Callable[[RGB], bool]:
+        return lambda c: min(contrast(c, paper), contrast(c, surface_2)) >= target
+
+    text = _kit_colour(kit, "text_color", "secondary_color") or BLACK
+    ink = stored.get(ROLE_INK) or _least(text, BLACK, reads(INK_ON_PAPER_MIN_CONTRAST))
+    heading_max = min(luminance(ink), HEADING_MAX_LUMINANCE)
+    roles = {
+        ROLE_INK: ink,
+        ROLE_HEADING: stored.get(ROLE_HEADING) or _least(text, BLACK, lambda c: luminance(c) <= heading_max),
+        ROLE_MUTED: stored.get(ROLE_MUTED) or _most(ink, paper, reads(MUTED_TEXT_MIN_CONTRAST)),
+        ROLE_RULE: stored.get(ROLE_RULE) or _most(ink, paper, lambda c: contrast(c, paper) >= RULE_MIN_CONTRAST),
+    }
+    primary = _kit_colour(kit, "primary_color", "accent_color")
+    roles[ROLE_ACCENT] = stored.get(ROLE_ACCENT) or _least(primary or ink, BLACK, reads(ACCENT_TEXT_MIN_CONTRAST))
+    secondary = _kit_colour(kit, "secondary_color")
+    if ROLE_ACCENT_2 in stored:
+        roles[ROLE_ACCENT_2] = stored[ROLE_ACCENT_2]
+    elif secondary is not None and _second_hue(primary, secondary):
+        roles[ROLE_ACCENT_2] = _least(secondary, BLACK, reads(ACCENT_TEXT_MIN_CONTRAST))
+    return roles
+
+
+def derive_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
+    """The colour roles for ``kit`` (a brand kit dict, v1 or v2), each a 6-digit hex.
+
+    A role ``kit['palette']`` stores as a hex colour is used as it is, and the
+    roles derived after it are measured against it (a stored paper moves the
+    derived ink). Every other role is derived from the kit's four colours, so a
+    v1 kit reads as a v2 kit. ``accent_2`` is present only when stored or when
+    the secondary is a second hue.
+    """
+    stored = _stored_roles(kit)
+    grounds = _grounds(kit, stored)
+    roles = {**grounds, **_text_roles(kit, stored, grounds)}
+    return {role: to_hex(roles[role]) for role in PALETTE_ROLES if role in roles}
+
+
+def effective_palette(kit: Mapping[str, Any]) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """``(roles, sources)``: :func:`derive_palette`, and each role marked ``set`` (stored) or ``derived``."""
+    roles = derive_palette(kit)
+    stored = _stored_roles(kit)
+    sources = {role: ROLE_SET if role in stored else ROLE_DERIVED for role in roles}
+    return roles, sources
+
+
 __all__ = [
+    "PALETTE_ROLES",
     "PAPER_TOKENS",
     "STAGE_TOKENS",
+    "TEXT_ROLES",
     "contrast",
+    "derive_palette",
+    "effective_palette",
     "luminance",
     "mix",
     "paper_palette",

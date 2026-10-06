@@ -2,7 +2,7 @@
 
 A session runs here, on the operator's machine, where the platform's document store
 is out of reach: night 10's agents had no logo file and guessed. The claim carries the
-ticket's workspace's uploaded logo and logo mark (``brand_files``: name, mime, base64
+ticket's workspace's uploaded logo, logo mark and logo variants (``brand_files``: name, mime, base64
 data, from ``orchestrator/services/session_brand_files.py``). They are written under
 ``brand/`` in the ticket's deliverables folder (``<root>/sessions/<ticket>``, the folder
 the ticket file tells the session to save into, which the gate grants), else, on a host
@@ -13,7 +13,8 @@ read them there, but copying one into its deliverables folder was a Bash command
 gate held for the operator, so the logo never reached the work. Where the session saves,
 it needs no copy: it links or embeds the file as it is.
 
-Only the names the backend sends are accepted (``logo.png``, ``logo-mark.jpg`` …), so a
+Only the names the backend sends are accepted (``logo.png``, ``logo-mark.jpg``,
+``logo-dark.png``, ``logo-mono.png`` …), so a
 claim can never write outside that folder, and a file is at most the upload limit.
 """
 from __future__ import annotations
@@ -28,7 +29,8 @@ from typing import Any, Dict, List, Optional, Sequence
 log = logging.getLogger("automatos.cli_host.session")
 
 BRAND_FOLDER = "brand"
-BRAND_FILE_NAME = re.compile(r"^logo(?:-mark)?\.(?:png|jpg)$")
+# 0.13.0 (PRD-255): the logo's uploaded variants too, for dark backgrounds and one colour.
+BRAND_FILE_NAME = re.compile(r"^logo(?:-mark|-dark|-mono)?\.(?:png|jpg)$")
 # The backend's own upload limit for a logo (modules/documents/brand_logo.py).
 MAX_BRAND_FILE_BYTES = 2 * 1024 * 1024
 # As the deliverables folder itself (session.py): the Deliverables explorer reads it.

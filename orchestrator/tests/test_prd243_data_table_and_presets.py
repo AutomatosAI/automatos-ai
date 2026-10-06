@@ -14,6 +14,8 @@ Pure — no DB, no WeasyPrint; the DOCX test skips if python-docx is absent.
 
 from __future__ import annotations
 
+import re
+
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -205,9 +207,13 @@ def test_starter_columns_survive_a_json_round_trip(preset):
 
 
 def test_headings_no_longer_draw_rules():
+    """PRD-255 (US-004, FR-6): the one exception is the title's short accent mark (``h1::after``),
+    a fixed-width bar, never a rule across the page; section headings draw none."""
     doc = validate_blocks({"blocks": [{"type": "heading", "id": "h", "level": 2, "content": [{"type": "text", "text": "Name"}]}]})
     html = render_document_html(doc, {}, KIT).html
     style = html[html.index("<style>") : html.index("</style>")]
     for line in style.splitlines():
-        if line.strip().startswith(("h1", "h2", "h3", "h1,")):
+        if line.strip().startswith(("h1", "h2", "h3", "h1,")) and not line.strip().startswith("h1::after"):
             assert "border" not in line, line
+    mark = style.split("h1::after {", 1)[1].split("}", 1)[0]
+    assert "width: 100%" not in mark and re.search(r"width: [\d.]+pt;", mark), mark

@@ -43,6 +43,8 @@ CATALOG: List[VariableEntry] = [
     {"path": "brand.secondary_color", "category": "brand", "label": "Secondary color", "sample": "#16213e"},
     {"path": "brand.accent_color", "category": "brand", "label": "Accent color", "sample": "#0f3460"},
     {"path": "brand.font_family", "category": "brand", "label": "Font family", "sample": "Inter"},
+    # PRD-255: who signs a letter: the brand voice's sign-off, else the person signing (user.name).
+    {"path": "brand.sign_off", "category": "brand", "label": "Sign-off name", "sample": "The Acme team"},
     # --- date.* (computed at render time) ---
     {"path": "date.today", "category": "date", "label": "Today (YYYY-MM-DD)", "sample": "2026-06-12"},
     {"path": "date.long", "category": "date", "label": "Today (long form)", "sample": "12 June 2026"},
