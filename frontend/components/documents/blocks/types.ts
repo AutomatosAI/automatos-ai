@@ -181,6 +181,8 @@ export interface BrandKit {
   // An ISO 4217 code such as GBP; empty: amounts print with no currency.
   currency?: string
   date_style?: BrandDateStyle
+  // F372: when the kit last changed, by any route (ISO 8601; empty: not saved since). Server-set.
+  updated_at?: string
 }
 
 export type BrandTypeStepName = 'display' | 'h1' | 'h2' | 'h3' | 'body' | 'small' | 'caption'

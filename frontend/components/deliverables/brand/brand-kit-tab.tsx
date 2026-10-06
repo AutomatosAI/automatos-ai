@@ -37,7 +37,7 @@ export function BrandKitTab() {
         </p>
         {!canEdit && <p className="mt-1 text-xs text-muted-foreground">{READ_ONLY_NOTE}</p>}
       </div>
-      <BrandBoardPreview version={form.boardVersion} />
+      <BrandBoardPreview changes={form.boardVersion} />
       <BrandKitBasics form={form} canEdit={canEdit} />
       <BrandKitDesign form={form} canEdit={canEdit} />
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">

@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, Pattern, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
@@ -130,9 +131,12 @@ GENERIC_HANDLE_RULE: Tuple[Pattern[str], str] = (
     "1 to 100 letters, digits, periods, hyphens or underscores",
 )
 
-# Written only by the upload and delete routes: a client patch never points the
-# kit at a stored file.
-SERVER_MANAGED_FIELDS = frozenset({"logo_path", "logo_mark_path", "logo_dark_path", "logo_mono_path", "font_files"})
+# Written only by the server: the stored files by the upload and delete routes (a client
+# patch never points the kit at a stored file), and ``updated_at`` by the kit's one writer.
+UPDATED_AT_FIELD = "updated_at"
+SERVER_MANAGED_FIELDS = frozenset(
+    {"logo_path", "logo_mark_path", "logo_dark_path", "logo_mono_path", "font_files", UPDATED_AT_FIELD}
+)
 # A patch merges into these records key by key (a type step field by field); every
 # other field it names is replaced.
 MERGED_RECORDS = ("company", "voice", "palette", "type_scale", "logo_rules")
@@ -321,6 +325,10 @@ class BrandKit(BaseModel):
     # Locale: an ISO 4217 code (empty: no currency is printed, FR-7) and the date style.
     currency: str = DEFAULT_CURRENCY
     date_style: DateStyle = DEFAULT_DATE_STYLE
+    # F372: when the kit last changed, by any route (ISO 8601, UTC), stamped by
+    # :func:`save_brand_kit`; empty for a kit not saved since. The Brand kit page keys
+    # its brand board on it, so a change by Auto, the designer or the API redraws it.
+    updated_at: str = ""
 
     @field_validator("primary_color", "secondary_color", "accent_color", "text_color")
     @classmethod
@@ -519,12 +527,14 @@ def save_brand_kit(db: Any, workspace: Any, kit: Dict[str, Any]) -> Dict[str, An
     """Store ``kit`` as the workspace's brand kit and commit: the kit's one writer.
 
     The PUT, the logo, logo mark and font uploads and deletes, and
-    ``platform_update_brand_kit`` all save through here.
+    ``platform_update_brand_kit`` all save through here. Each save stamps
+    ``updated_at`` (F372): a file uploaded again at the same path changes it too.
     """
+    stamped = {**kit, UPDATED_AT_FIELD: datetime.now(timezone.utc).isoformat()}
     # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
-    workspace.settings = {**(workspace.settings or {}), BRAND_KIT_SETTINGS_KEY: kit}
+    workspace.settings = {**(workspace.settings or {}), BRAND_KIT_SETTINGS_KEY: stamped}
     db.commit()
-    return kit
+    return stamped
 
 
 def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -533,9 +543,13 @@ def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str
     The patch is read as a :class:`BrandKitPatch` and merged by
     :func:`validate_brand_kit`; either raises ``pydantic.ValidationError`` before
     anything is written (:func:`brand_kit_errors` lists why). The PUT route and
-    ``platform_update_brand_kit`` both call this.
+    ``platform_update_brand_kit`` both call this. A patch that changes nothing (GET's
+    answer sent back, F366) is not saved, so ``updated_at`` stays as it was (F372).
     """
-    return save_brand_kit(db, workspace, proposed_brand_kit(workspace.settings, patch))
+    proposed = proposed_brand_kit(workspace.settings, patch)
+    if proposed == get_brand_kit(workspace.settings):
+        return proposed
+    return save_brand_kit(db, workspace, proposed)
 
 
 def proposed_brand_kit(settings: Optional[Dict[str, Any]], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -620,6 +634,7 @@ __all__ = [
     "MAX_FONT_FILES",
     "PATCH_FIELDS",
     "SERVER_MANAGED_FIELDS",
+    "UPDATED_AT_FIELD",
     "brand_kit_errors",
     "brand_kit_suggestions",
     "build_brand_suggestions",

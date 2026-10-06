@@ -3,8 +3,12 @@
 /**
  * PRD-255 US-010 — the brand board at the top of the Brand kit tab: page 1 of the board
  * (GET /api/documents/brand-kit/board?format=png), printed by the server from the kit alone,
- * drawn again after each change the server stores (`version`), with the PDF and the PNG to
- * download. The picture and the files are fetched with the caller's auth.
+ * with the PDF and the PNG to download. The picture and the files are fetched with the caller's auth.
+ *
+ * F372: the picture is keyed on the kit's `updated_at` (useBrandKitStamp), not on the page's own
+ * saves, so a change by Auto, the designer or the API draws it again too: the stamp is read on
+ * load, when the window regains focus, every KIT_STAMP_POLL_MS, and after each change the page
+ * stores (`changes`). The board route answers no-store, so the new path is always a fresh print.
  */
 import { useState } from 'react'
 import { Download, Loader2 } from 'lucide-react'
@@ -13,6 +17,7 @@ import { toast } from 'sonner'
 import { brandBoardPath, downloadGeneratedFile, type BrandBoardFormat } from '@/components/documents/blocks/api'
 import { Button } from '@/components/ui/button'
 import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
+import { useBrandKitStamp } from '@/hooks/use-brand-kit-stamp'
 
 export const BOARD_FILE_NAME: Record<BrandBoardFormat, string> = { pdf: 'brand-board.pdf', png: 'brand-board.png' }
 export const BOARD_UNAVAILABLE = 'The brand board could not be drawn. Try again in a moment.'
@@ -22,11 +27,13 @@ const DOWNLOADS: { format: BrandBoardFormat; label: string }[] = [
 ]
 
 interface BrandBoardPreviewProps {
-  version: number
+  /** Counts the changes the page itself stored: each one reads the kit's stamp again. */
+  changes: number
 }
 
-export function BrandBoardPreview({ version }: BrandBoardPreviewProps) {
-  const { src, error } = useAuthenticatedBlobUrl(brandBoardPath('png', version))
+export function BrandBoardPreview({ changes }: BrandBoardPreviewProps) {
+  const stamp = useBrandKitStamp(changes)
+  const { src, error } = useAuthenticatedBlobUrl(stamp === undefined ? undefined : brandBoardPath('png', stamp))
   const [downloading, setDownloading] = useState<BrandBoardFormat | null>(null)
 
   const download = async (format: BrandBoardFormat) => {
@@ -55,7 +62,7 @@ export function BrandBoardPreview({ version }: BrandBoardPreviewProps) {
       <div className="flex flex-col gap-2">
         <h3 className="text-base font-semibold text-foreground">Brand board</h3>
         <p className="text-sm text-muted-foreground">
-          Your whole brand on one page, drawn from this kit: share it with anyone who makes things for you. It is drawn again each time the kit is saved.
+          Your whole brand on one page, drawn from this kit: share it with anyone who makes things for you. It is drawn again each time the kit changes, here or by Auto.
         </p>
         <div className="flex flex-wrap gap-2">
           {DOWNLOADS.map(({ format, label }) => (

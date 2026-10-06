@@ -86,9 +86,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams('tab=brand'),
 }))
-vi.mock('@/components/workspace-provider', () => ({
-  useWorkspace: () => ({ workspace: { id: 'w1', role: server.role, socials: { available: true, enabled: server.socials } } }),
-}))
+vi.mock('@/components/workspace-provider', () => {
+  const useWorkspace = () => ({ workspace: { id: 'w1', role: server.role, socials: { available: true, enabled: server.socials } } })
+  return { useWorkspace, useWorkspaceOptional: useWorkspace }
+})
 vi.mock('@/hooks/use-authed-image', () => ({ useAuthedImage: () => null }))
 vi.mock('@/hooks/use-composio-api', () => ({ useInitiateConnection: () => ({ mutateAsync: vi.fn(), isLoading: false }) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))

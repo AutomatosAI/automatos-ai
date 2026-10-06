@@ -31,8 +31,11 @@ export const BRAND_LOGO_MONO_PATH = '/api/documents/brand-kit/logo-mono'
 export const BRAND_BOARD_PATH = '/api/documents/brand-kit/board'
 export type BrandBoardFormat = 'pdf' | 'png'
 
-/** The board's path in ``format``; ``version`` changes the path so a fetch hook draws it again after a save. */
-export function brandBoardPath(format: BrandBoardFormat, version?: number): string {
+/**
+ * The board's path in ``format``; ``version`` (the kit's `updated_at`, F372) changes the path so a
+ * fetch hook draws it again whenever the kit changed, by any route.
+ */
+export function brandBoardPath(format: BrandBoardFormat, version?: string): string {
   const query = new URLSearchParams({ format })
   if (version !== undefined) query.set('v', String(version))
   return `${BRAND_BOARD_PATH}?${query.toString()}`

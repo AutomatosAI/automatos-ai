@@ -5,8 +5,9 @@
  * the BrandKitDialog): the kit loaded from GET /api/documents/brand-kit with the D5 fields
  * filled in, the prefill suggestions, the logo, the logo mark and the logo's variants, the
  * colour roles (PRD-255), and Save (PUT /api/documents/brand-kit). `boardVersion` counts the
- * changes the server has stored (a save, an image or a font file uploaded or removed, a
- * colour role reset), so the brand board (PRD-255 US-010) is drawn again after each.
+ * changes the page has stored (a save, an image or a font file uploaded or removed, a
+ * colour role reset): after each, the brand board (PRD-255 US-010) reads the kit's stamp again
+ * (F372; changes made elsewhere reach it through the stamp alone).
  */
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
