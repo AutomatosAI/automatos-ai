@@ -139,32 +139,44 @@ def _is_separator(run) -> bool:
     return run.type == "text" and bool(_SEPARATOR.match(run.text))
 
 
-def _has_content(segs: Sequence[Seg]) -> bool:
-    return any(seg.kind != TEXT or seg.text.strip() for seg in segs)
+def _prints(run, values: Dict[str, str]) -> bool:
+    """Whether a run prints something: text that isn't blank, a chip with a value or a
+    fallback that isn't blank, or a chip with neither (it shows as missing)."""
+    if run.type == "text":
+        return bool(run.text.strip())
+    if run.type != "variable":
+        return False
+    if run.path in values:
+        return bool(str(values[run.path]).strip())
+    return run.fallback is None or bool(str(run.fallback).strip())
+
+
+def kept_runs(content: Sequence, values: Dict[str, str]) -> List:
+    """A block's runs as they print. In a block with a chip, a separator run ("  ·  ", ", ",
+    " | ", a lone space) prints only between two pieces that printed something, once:
+    "email ·  · " with no phone or website is "email". A block with no chip is kept as
+    its author typed it. Every renderer's inline text goes through this (both text
+    bodies, headings, table cells and the Word letterhead)."""
+    if not any(run.type == "variable" for run in content):
+        return list(content)
+    out: List = []
+    pending = None
+    for run in content:
+        if _is_separator(run):
+            pending = pending or run
+            continue
+        if not _prints(run, values):
+            continue
+        if out and pending is not None:
+            out.append(pending)
+        out.append(run)
+        pending = None
+    return out
 
 
 def segments(content: Sequence, values: Dict[str, str], missing: List[str]) -> List[Seg]:
-    """A block's inline runs as segments; a chip with no value is recorded in ``missing``.
-
-    In a block with a chip, a separator run ("  ·  ", ", ", " | ") prints only between two
-    pieces that printed something: "email · · " with no phone or website is "email".
-    """
-    if not any(run.type == "variable" for run in content):
-        return [seg for run in content for seg in _run_segments(run, values, missing)]
-    out: List[Seg] = []
-    pending: List[Seg] = []
-    for run in content:
-        if _is_separator(run):
-            pending = pending or _run_segments(run, values, missing)
-            continue
-        segs = _run_segments(run, values, missing)
-        if not _has_content(segs):
-            continue
-        if _has_content(out):
-            out += pending
-        out += segs
-        pending = []
-    return out
+    """A block's inline runs as segments (``kept_runs``); a chip with no value is recorded in ``missing``."""
+    return [seg for run in kept_runs(content, values) for seg in _run_segments(run, values, missing)]
 
 
 def _lines(segs: Sequence[Seg]) -> List[Tuple[Seg, ...]]:
@@ -266,5 +278,6 @@ def body_html(built: Sequence[Group], attrs: str = "") -> str:
 
 __all__ = [
     "BULLETED", "Group", "MARK_TAGS", "MISSING", "ORDERED", "PARAGRAPH", "Seg",
-    "block_groups", "body_html", "emphasis", "groups", "seg_html", "segments", "unresolved_html", "value_segments",
+    "block_groups", "body_html", "emphasis", "groups", "kept_runs", "seg_html", "segments", "unresolved_html",
+    "value_segments",
 ]

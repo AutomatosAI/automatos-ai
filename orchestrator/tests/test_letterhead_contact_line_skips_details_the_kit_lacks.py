@@ -14,7 +14,7 @@ import re
 import pytest
 
 from modules.documents.blocks import render_document_html, validate_blocks
-from modules.documents.blocks.text_body import segments
+from modules.documents.blocks.text_body import kept_runs, segments
 from modules.documents.brand_kit import get_brand_kit
 from modules.documents.presets import letterhead
 
@@ -77,12 +77,23 @@ def test_a_missing_chip_still_shows_and_keeps_its_separator():
     assert _text(runs, {"company.email": "a@b.ie"}) == ("a@b.ie  ·  data.reference", ["data.reference"])
 
 
+def test_headings_table_cells_and_the_word_header_drop_them_too():
+    """Both renderers write a heading, a table cell and the Word letterhead from the runs
+    ``kept_runs`` gives them, not through ``segments``."""
+    runs = _contact_runs()
+    kept = kept_runs(runs, {"company.email": "a@b.ie", "company.website": "b.ie"})
+    assert [r.text if r.type == "text" else r.path for r in kept] == ["company.email", "  ·  ", "company.website"]
+    assert kept_runs(runs, {}) == []
+    typed = _block({"type": "text", "text": "A"}, {"type": "text", "text": "  ·  "})
+    assert kept_runs(typed, {}) == list(typed)
+
+
 def test_the_pdf_letterhead_has_no_dangling_separator():
     kit = get_brand_kit({"brand_kit": {"name": "Harbourline", "company": {"name": "Harbourline", "email": "a@b.ie"}}})
     doc = validate_blocks({"version": 1, "blocks": letterhead()})
     values = {"company.name": "Harbourline", "company.email": "a@b.ie"}
-    html = render_document_html(doc, values, kit).html
-    contact = re.search(r'data-block="lh-contact"[^>]*>(.*?)</', html, re.S).group(1)
+    body = render_document_html(doc, values, kit).html.split("<body>", 1)[1]  # the sheet's CSS names lh-contact too
+    contact = re.search(r'<p data-block="lh-contact">(.*?)</p>', body, re.S).group(1)
     assert "a@b.ie" in contact and "·" not in contact
 
 
