@@ -227,28 +227,3 @@ def register_documents_actions(registry: ActionRegistry) -> None:
             "regenerate chunks for document 10",
         ],
     ))
-
-    # PRD-251 US-115: the brand kit every branded document and Socials post renders
-    # with. The tools call the functions the REST routes call
-    # (modules/documents/brand_kit.py). The logo, logo mark and font FILES are
-    # uploaded by a person; neither tool uploads anything.
-    registry.register(ActionDefinition(
-        name="platform_get_brand_kit",
-        description=(
-            "Read the workspace brand kit: name, tagline, hex colours, body and heading "
-            "fonts, logo and logo mark, company contact details, the brand's social handle "
-            "per network, and its voice (tone words and banned phrases). Branded documents "
-            "and Socials posts render with it. Also returns suggestions: values the "
-            "workspace already knows (its business profile and name) to fill empty fields "
-            "with. Read it before drafting on-brand copy or changing the kit."
-        ),
-        category="documents",
-        parameters={"type": "object", "properties": {}, "required": []},
-        permission_level="read",
-        tags=["documents", "brand", "brand kit", "colours", "fonts", "logo", "voice", "socials"],
-        examples=[
-            "what's our brand kit?",
-            "which colours and fonts does our brand use?",
-            "what tone of voice should our posts have?",
-        ],
-    ))

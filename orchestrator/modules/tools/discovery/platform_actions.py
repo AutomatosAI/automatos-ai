@@ -16,7 +16,10 @@ from .actions_playbooks import register_playbooks_actions
 from .actions_playbook_runs import register_playbook_run_actions  # F242: create/update/execute take wait_for_me
 from .actions_analytics import register_analytics_actions
 from .actions_documents import register_documents_actions
-from .actions_brand_kit_update import register_brand_kit_update_action  # night 9b: left actions_documents.py
+from .actions_brand_kit_update import (  # night 9b, PRD-255: left actions_documents.py
+    register_brand_kit_get_action,
+    register_brand_kit_update_action,
+)
 from .actions_workspace import register_workspace_actions_defs
 from .actions_memory_store import register_store_memory_action
 from .actions_monitoring import register_monitoring_actions
@@ -62,9 +65,10 @@ from .actions_socials import register_socials_actions  # PRD-251 US-116: Socials
 
 
 def _register_documents_actions(registry: ActionRegistry) -> None:
-    """The documents actions, and the brand kit's update tool (night 9b: it left
-    actions_documents.py to list who signs)."""
+    """The documents actions, and the brand kit's tools (night 9b and PRD-255: they left
+    actions_documents.py, whose register function is past the length rule)."""
     register_documents_actions(registry)
+    register_brand_kit_get_action(registry)
     register_brand_kit_update_action(registry)
 
 

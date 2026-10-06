@@ -374,6 +374,10 @@ actions:
     source: example
   - text: add our instagram handle to the brand kit
     source: example
+  - text: make the orange an accent only
+    source: example
+  - text: more space between sections
+    source: example
   - text: 'change the accent colour to #e4572e'
     source: authored
   - text: update the brand kit with our new tagline

@@ -296,4 +296,17 @@ def test_the_update_schema_is_the_kits_patch_fields_and_never_a_stored_file():
     assert not set(properties) & brand_kit.SERVER_MANAGED_FIELDS
     assert set(properties["voice"]["properties"]) == set(brand_kit.BrandVoice.model_fields)
     assert set(properties["company"]["properties"]) == set(brand_kit.CompanyContact.model_fields)
+    # PRD-255 US-008: the v2 records, to the field: every one the kit takes, and no other.
+    from modules.documents import brand_system
+
+    assert set(properties) == set(brand_kit.BrandKit.model_fields) - brand_kit.SERVER_MANAGED_FIELDS
+    assert set(properties["palette"]["properties"]) == set(brand_system.BrandPalette.model_fields)
+    assert set(properties["type_scale"]["properties"]) == set(brand_system.TypeScale.model_fields)
+    for step, schema in properties["type_scale"]["properties"].items():
+        assert set(schema["properties"]) == set(brand_system.TypeStep.model_fields), step
+    assert set(properties["logo_rules"]["properties"]) == set(brand_system.LogoRules.model_fields)
+    tone = properties["voice"]["properties"]["tone"]["items"]["properties"]
+    assert set(tone) == set(brand_system.ToneWord.model_fields)
+    assert properties["accent_use"]["enum"] == list(brand_system.ACCENT_USES)
+    assert properties["date_style"]["enum"] == list(brand_system.DATE_STYLES)
     assert get_action_registry().get("platform_update_brand_kit").parameters["required"] == []

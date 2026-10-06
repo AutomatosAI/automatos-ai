@@ -48,7 +48,9 @@ from core.brand_palette import (
     ROLE_INK,
     ROLE_MUTED,
     ROLE_PAPER,
+    ROLE_RULE,
     ROLE_SET,
+    ROLE_SURFACE,
     ROLE_SURFACE_2,
     contrast,
     effective_palette,
@@ -63,6 +65,24 @@ PALETTE_SOURCE_FIELD = "palette_source"
 ACCENT_SPARING, ACCENT_BOLD = "sparing", "bold"
 ACCENT_USES = (ACCENT_SPARING, ACCENT_BOLD)
 DEFAULT_ACCENT_USE = ACCENT_SPARING
+# Each role's job, in plain words: the update tool's schema and the agents' rules block say it.
+ROLE_JOBS = {
+    ROLE_INK: "body text",
+    ROLE_HEADING: "headings: near-black, not the accent",
+    ROLE_PAPER: "the page background",
+    ROLE_SURFACE: "cards and zebra rows",
+    ROLE_SURFACE_2: "table header fills",
+    ROLE_ACCENT: "highlights: the title rule, key numbers, links",
+    ROLE_ACCENT_2: "an optional second accent",
+    ROLE_MUTED: "secondary text",
+    ROLE_RULE: "hairlines",
+}
+# What each accent use lets the accent do.
+ACCENT_USE_RULES = {
+    ACCENT_SPARING: ("the accent only for highlights (the title rule, key numbers, links); "
+                     "headings and table headers never filled with it"),
+    ACCENT_BOLD: "the accent for highlights and table header fills; headings stay in the heading colour",
+}
 
 # WCAG AA, on save: text 4.5:1; large text (and rules and fills) 3:1.
 SAVE_TEXT_MIN_CONTRAST = 4.5
@@ -386,6 +406,7 @@ def tone_words(kit: Optional[Mapping[str, Any]]) -> List[Dict[str, str]]:
 
 __all__ = [
     "ACCENT_USES",
+    "ACCENT_USE_RULES",
     "BrandPalette",
     "DATE_STYLES",
     "DEFAULT_ACCENT_USE",
@@ -400,6 +421,7 @@ __all__ = [
     "MAX_TONE_WORD_CHARS",
     "PALETTE_FIELD",
     "PALETTE_SOURCE_FIELD",
+    "ROLE_JOBS",
     "SAVE_ROLE_MIN_CONTRAST",
     "TYPE_STEPS",
     "ToneWord",

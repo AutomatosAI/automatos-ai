@@ -1,13 +1,21 @@
-"""The tool that changes the workspace brand kit (night 9b: the voice says who signs).
+"""The tools that read and change the workspace brand kit (night 9b: the voice says who signs).
+
+PRD-251 US-115: both call the functions the REST routes call
+(modules/documents/brand_kit.py). The logo, its variants, the logo mark and the font
+FILES are uploaded by a person; neither tool uploads anything.
 
 It left actions_documents.py, whose one register function is past the length rule,
 when the kit's voice gained ``sign_off`` (services.brand_rules fills a placeholder
 signature with it): the schema lists every BrandVoice field, so an agent sees it.
+
+PRD-255 (US-008): the schema is every field of the v2 kit an agent may set (the stored
+logo files stay uploads), and says in plain words what each means, so "less orange"
+reaches ``accent_use`` / ``palette.accent`` and "more space" ``spacing_unit_pt``.
 """
 
 import copy
 
-from modules.documents.brand_system import DATE_STYLES, TYPE_STEPS
+from modules.documents.brand_system import ACCENT_USES, DATE_STYLES, ROLE_JOBS, TYPE_STEPS
 
 from .action_registry import ActionDefinition, ActionRegistry
 
@@ -112,23 +120,16 @@ _PARAMETERS = {
                 "its ratio."
             ),
             "properties": {
-                "ink": {"type": "string", "description": "Body text."},
-                "heading": {"type": "string", "description": "Headings: near-black, not the accent."},
-                "paper": {"type": "string", "description": "The page background."},
-                "surface": {"type": "string", "description": "Cards and zebra rows."},
-                "surface_2": {"type": "string", "description": "Table header fills."},
-                "accent": {"type": "string", "description": "Highlights: the title rule, key numbers, links."},
-                "accent_2": {"type": "string", "description": "An optional second accent."},
-                "muted": {"type": "string", "description": "Secondary text."},
-                "rule": {"type": "string", "description": "Hairlines."},
+                role: {"type": "string", "description": f"{job[:1].upper()}{job[1:]}."} for role, job in ROLE_JOBS.items()
             },
         },
         "accent_use": {
             "type": "string",
-            "enum": ["sparing", "bold"],
+            "enum": list(ACCENT_USES),
             "description": (
                 "How far the accent goes: sparing (the default) keeps it to highlights; bold "
-                "also fills table headers with it."
+                "also fills table headers with it. \"Less orange\" or \"the orange as an accent "
+                "only\" is sparing (and, to change the colour itself, palette.accent)."
             ),
         },
         "type_scale": {
@@ -139,7 +140,13 @@ _PARAMETERS = {
             ),
             "properties": {step: copy.deepcopy(_TYPE_STEP) for step in TYPE_STEPS},
         },
-        "spacing_unit_pt": {"type": "number", "description": "The spacing grid's unit in points (2 to 12; 4 by default)."},
+        "spacing_unit_pt": {
+            "type": "number",
+            "description": (
+                "The spacing grid's unit in points (2 to 12; 4 by default): every gap between "
+                "sections, paragraphs and table cells is a multiple of it. \"More space\" is a larger unit."
+            ),
+        },
         "page_margin_mm": {"type": "number", "description": "The page margin in millimetres (6 to 50; 18 by default)."},
         "logo_rules": {
             "type": "object",
@@ -167,6 +174,35 @@ _PARAMETERS = {
 }
 
 
+def register_brand_kit_get_action(registry: ActionRegistry) -> None:
+    """Register platform_get_brand_kit (PRD-251 US-115; PRD-255 moved it here from
+    actions_documents.py, whose one register function is past the length rule)."""
+    registry.register(ActionDefinition(
+        name="platform_get_brand_kit",
+        description=(
+            "Read the workspace brand kit: name, tagline, hex colours, body and heading "
+            "fonts, logo and logo mark, company contact details, the brand's social handle "
+            "per network, and its voice (tone words with their meanings, banned phrases, "
+            "who signs). Also its design system: every colour role (palette) with "
+            "palette_source saying whether the owner set it or it is derived from the "
+            "colours, accent_use, the type scale, the spacing unit, the page margin, the "
+            "logo's rules and uploaded variants, the currency and the date style. Branded "
+            "documents and Socials posts render with it. Also returns suggestions: values the "
+            "workspace already knows (its business profile and name) to fill empty fields "
+            "with. Read it before drafting on-brand copy or changing the kit."
+        ),
+        category="documents",
+        parameters={"type": "object", "properties": {}, "required": []},
+        permission_level="read",
+        tags=["documents", "brand", "brand kit", "colours", "fonts", "logo", "voice", "socials"],
+        examples=[
+            "what's our brand kit?",
+            "which colours and fonts does our brand use?",
+            "what tone of voice should our posts have?",
+        ],
+    ))
+
+
 def register_brand_kit_update_action(registry: ActionRegistry) -> None:
     """Register platform_update_brand_kit."""
     registry.register(ActionDefinition(
@@ -177,7 +213,8 @@ def register_brand_kit_update_action(registry: ActionRegistry) -> None:
             "social_handles replaces the whole map, so send every handle to keep (a "
             "network left out, or given an empty handle, is removed). The kit is "
             "validated first: an invalid value is refused with the reason and nothing "
-            "is saved. The logo, its dark-background and one-colour versions, the logo mark "
+            "is saved. palette, type_scale and logo_rules merge key by key too; a colour "
+            "role sent empty goes back to being derived from the kit's colours. The logo, its dark-background and one-colour versions, the logo mark "
             "and the font files are uploaded by a person in the brand kit settings; this tool sets text, colours, fonts and http(s) "
             "logo URLs only."
         ),
@@ -186,10 +223,13 @@ def register_brand_kit_update_action(registry: ActionRegistry) -> None:
         permission_level="write",
         requires_confirmation=False,
         admin_only=True,  # F151: REST PUT /brand-kit is workspace:manage
-        tags=["documents", "brand", "brand kit", "colours", "fonts", "voice", "socials", "setup"],
+        tags=["documents", "brand", "brand kit", "colours", "fonts", "voice", "socials", "setup",
+              "accent", "spacing", "type scale", "currency"],
         examples=[
             "set our primary brand colour to #0055aa",
             "our tone of voice is warm, plain and confident",
             "add our instagram handle to the brand kit",
+            "make the orange an accent only",
+            "more space between sections",
         ],
     ))

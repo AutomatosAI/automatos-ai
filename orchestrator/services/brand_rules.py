@@ -35,6 +35,14 @@ F337 (night 10): Auto's own chat was left out: its flyer said "Harbour Coffee Ro
 gives Auto the rules block and passes its reply through :func:`placeholders_filled` and
 :func:`banned_note_for`, the two halves of :func:`on_brand_text`.
 
+PRD-255 (US-008): a block told only the four colours paints the primary on everything.
+:func:`rules_for_kit` also carries the kit's design system (``services.brand_design_rules``):
+each colour role of ``palette`` (ink, heading, paper, surface, surface_2, accent, …) with
+its hex and whether it is set or derived, ``accent_use``, a one-line ``type_scale``
+summary, the spacing unit and page margin, the logo's size (``logo_rules``), the uploaded
+variants (``logo_dark_path``, ``logo_mono_path``) by the file name a session holds them
+under, the ``currency`` when the kit has one, and the ``date_style``.
+
 Who signs (:func:`sign_off_name`): the voice's own sign-off, else the company
 contact's name, else the brand's name. Reads are cached per workspace for
 :data:`KIT_CACHE_SECONDS`: a run reads the kit several times (prompt, answer,
@@ -280,17 +288,27 @@ def _logo_line(kit: Dict[str, Any]) -> str:
 
 
 def _look_lines(kit: Dict[str, Any]) -> List[str]:
-    """How the brand looks and who it is (F332): colours, fonts, contact details, logo."""
-    return [_colours_line(kit), _fonts_line(kit), _contact_line(kit), _logo_line(kit)]
+    """How the brand looks and who it is (F332): colours, fonts, contact details, logo; and
+    its design system (PRD-255 US-008): the colour roles, the accent's use, the type scale,
+    the spacing, the logo's size and variants, and the currency."""
+    from services import brand_design_rules as design
+
+    colours = _colours_line(kit)
+    return [colours, *design.look_system_lines(kit, brand_colours=bool(colours)), _fonts_line(kit),
+            _contact_line(kit), _logo_line(kit), design.logo_size_line(kit), design.logo_variants_line(kit),
+            design.currency_line(kit)]
 
 
 def rules_for_kit(kit: Optional[Dict[str, Any]]) -> Optional[str]:
     """The rules block for ``kit``; None when it says nothing about how to write or look.
-    Every rule is a "- " line, so a block an answer repeats reads as one block."""
+    Every rule is a "- " line, so a block an answer repeats reads as one block. A block
+    that says anything also says how dates are written (PRD-255 FR-8)."""
+    from services.brand_design_rules import date_line
+
     if not kit:
         return None
     kept = [line for line in [*_voice_lines(kit), *_look_lines(kit)] if line]
-    return "\n".join([RULES_HEADING, RULES_LEAD, *kept, KIT_WINS_LINE]) if kept else None
+    return "\n".join([RULES_HEADING, RULES_LEAD, *kept, date_line(kit), KIT_WINS_LINE]) if kept else None
 
 
 def brand_rules_block(db: Any, workspace_id: Any) -> Optional[str]:
