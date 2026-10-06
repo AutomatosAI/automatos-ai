@@ -1,5 +1,5 @@
 {
-  "route_count": 909,
+  "route_count": 911,
   "routes": [
     {
       "method": "GET",
@@ -2038,6 +2038,10 @@
       "path": "/api/reports/{report_id}"
     },
     {
+      "method": "DELETE",
+      "path": "/api/reports/{report_id}/add-to-knowledge"
+    },
+    {
       "method": "POST",
       "path": "/api/reports/{report_id}/add-to-knowledge"
     },
@@ -2924,6 +2928,10 @@
     {
       "method": "PATCH",
       "path": "/api/v1/tasks/{task_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/tasks/{task_id}/add-to-knowledge"
     },
     {
       "method": "POST",

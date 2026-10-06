@@ -16,10 +16,17 @@ from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
-from core.workspace_client import WorkspaceClient
+from services.owner_knowledge import REPORT_TAG, with_knowledge_state
 from services.report_service import ReportService
 
 logger = logging.getLogger(__name__)
+
+
+def _with_knowledge(db: Session, ctx: RequestContext, answer: dict) -> dict:
+    """PRE-11: each report says whether the owner added it to knowledge
+    (``knowledge_document_id``: the owner's document, or None)."""
+    return with_knowledge_state(db, ctx.workspace_id, answer, many="reports", one="report", template=REPORT_TAG)
+
 
 # PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
 router = APIRouter(
@@ -44,7 +51,7 @@ async def list_reports(
 ):
     """List reports for the current workspace with optional filters."""
     svc = ReportService(db, ctx.workspace_id)
-    return await svc.list_reports(
+    listed = await svc.list_reports(
         agent_id=agent_id,
         report_type=report_type,
         status=status,
@@ -53,6 +60,7 @@ async def list_reports(
         limit=limit,
         offset=offset,
     )
+    return _with_knowledge(db, ctx, listed)
 
 
 # ── Get Single Report ────────────────────────────────────────────────
@@ -80,7 +88,7 @@ async def get_report(
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("error", "Report not found"))
 
-    return result
+    return _with_knowledge(db, ctx, result)
 
 
 # ── Download Report File ─────────────────────────────────────────────
@@ -171,10 +179,11 @@ async def agent_reports(
 ):
     """Get reports for a specific agent."""
     svc = ReportService(db, ctx.workspace_id)
-    return await svc.list_reports(
+    listed = await svc.list_reports(
         agent_id=agent_id,
         report_type=report_type,
         period=period,
         limit=limit,
         offset=offset,
     )
+    return _with_knowledge(db, ctx, listed)
