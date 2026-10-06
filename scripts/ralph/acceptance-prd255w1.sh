@@ -169,11 +169,21 @@ tree = ast.parse(open(sys.argv[1], encoding="utf-8").read())
 fn = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == sys.argv[2]), None)
 if fn is None:
     print(f"   no function {sys.argv[2]} in {sys.argv[1]}"); sys.exit(1)
-called = set()
-for n in ast.walk(fn):
-    if isinstance(n, ast.Call):
-        f = n.func
-        called.add(f.id if isinstance(f, ast.Name) else getattr(f, "attr", ""))
+# Follow calls into the module's own functions: a helper that runs the search counts.
+defs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+called, todo, seen = set(), [fn], set()
+while todo:
+    cur = todo.pop()
+    if cur.name in seen:
+        continue
+    seen.add(cur.name)
+    for n in ast.walk(cur):
+        if isinstance(n, ast.Call):
+            f = n.func
+            name = f.id if isinstance(f, ast.Name) else getattr(f, "attr", "")
+            called.add(name)
+            if name in defs:
+                todo.append(defs[name])
 ok = any(name in called for name in sys.argv[3:])
 if not ok:
     print(f"   {sys.argv[2]} calls none of {sys.argv[3:]}")
@@ -354,7 +364,36 @@ n18_no_generated_logo() {
   ! added_lines_in orchestrator/modules/documents orchestrator/api/document_brand_kit.py \
     | grep -qiE 'generate_image|images\.generate|dall-?e|stable.?diffusion|higgsfield'
 }
-accent_defaults_to_sparing() { git grep -qE "accent_use[[:space:]]*:.*(=[[:space:]]*|default=)['\"]sparing['\"]" -- "$DOCS"; }
+# The accent_use field's default resolves to "sparing": a literal, or a named constant chain in $DOCS.
+accent_defaults_to_sparing() {
+  python3 - $DOCS/*.py <<'PY2'
+import ast, sys
+consts, defaults = {}, []
+for path in sys.argv[1:]:
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    for n in tree.body:
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                pairs = zip(t.elts, n.value.elts) if isinstance(t, ast.Tuple) and isinstance(n.value, ast.Tuple) else [(t, n.value)]
+                for k, v in pairs:
+                    if isinstance(k, ast.Name):
+                        consts[k.id] = v
+    for n in ast.walk(tree):
+        if isinstance(n, ast.AnnAssign) and getattr(n.target, "id", "") == "accent_use" and n.value is not None:
+            v = n.value
+            if isinstance(v, ast.Call):
+                v = next((kw.value for kw in v.keywords if kw.arg == "default"), None)
+            if v is not None:
+                defaults.append(v)
+def resolve(v, depth=0):
+    while isinstance(v, ast.Name) and v.id in consts and depth < 8:
+        v, depth = consts[v.id], depth + 1
+    return v.value if isinstance(v, ast.Constant) else None
+values = [resolve(v) for v in defaults]
+print(f"   accent_use defaults: {values}")
+sys.exit(0 if "sparing" in values and "bold" not in values else 1)
+PY2
+}
 blocks_never_read_primary() { ! git grep -nE "get\(['\"]primary_color|\[['\"]primary_color['\"]\]" -- "$BLOCKS" | grep -q .; }
 xlsx_on_tokens() {
   file_has "$XLSX" 'surface_2' && file_has "$XLSX" 'type_scale|body_size|body_pt' && file_has "$XLSX" 'currency' \
