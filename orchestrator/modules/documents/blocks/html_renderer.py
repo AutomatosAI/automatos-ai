@@ -32,7 +32,7 @@ from .page_fonts import font_css
 from .page_style import KEEP_CLASS, KEEP_TOGETHER_MAX_HTML_CHARS, build_styles
 from .schema import BlockDocument
 from .table_cells import unfilled_cells
-from .text_body import MARK_TAGS, block_groups, body_html, unresolved_html
+from .text_body import MARK_TAGS, block_groups, body_html, kept_runs, unresolved_html
 
 
 @dataclass
@@ -61,7 +61,7 @@ def _resolve_var(path: str, fallback, values: Dict[str, str], unresolved: List[s
 
 def _render_inline(content: list, values: Dict[str, str], unresolved: List[str]) -> str:
     parts: List[str] = []
-    for run in content:
+    for run in kept_runs(content, values):
         if run.type == "text":
             text = _esc(run.text)
             for mark in run.marks:

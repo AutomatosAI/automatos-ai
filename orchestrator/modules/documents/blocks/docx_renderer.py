@@ -46,7 +46,7 @@ from .optional_parts import block_is_blank, row_is_blank
 from .page_style import footer_name
 from .schema import BlockDocument
 from .table_cells import unfilled_cells
-from .text_body import BULLETED, MISSING, PARAGRAPH, Group, block_groups
+from .text_body import BULLETED, MISSING, PARAGRAPH, Group, block_groups, kept_runs
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ def _resolve_var(path: str, fallback, values: Dict[str, str], unresolved: List[s
 
 
 def _add_inline(paragraph, content: list, values: Dict[str, str], unresolved: List[str], font: Optional[str]):
-    for run_spec in content:
+    for run_spec in kept_runs(content, values):
         if run_spec.type == "text":
             run = paragraph.add_run(run_spec.text)
             # F356: an unmarked run inherits its style (a heading's bold), never forced off.
