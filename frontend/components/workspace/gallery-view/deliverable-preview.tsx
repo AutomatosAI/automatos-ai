@@ -11,10 +11,10 @@
 
 'use client'
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
-import { Download, FileWarning, Loader2 } from 'lucide-react'
+import { Download, FileWarning, Loader2, Minimize2 } from 'lucide-react'
 import {
   FilePreview,
   inferPreviewType,
@@ -34,6 +34,7 @@ import {
 } from '@/hooks/use-deliverables-api'
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
 import { DeliverablePreviewActions } from './deliverable-preview-actions'
+import { usePreviewFullscreen } from './use-preview-fullscreen'
 
 interface DeliverablePreviewProps {
   deliverableId: string | null
@@ -64,9 +65,15 @@ function getPreviewTypeForDeliverable(d: Deliverable) {
  */
 const FILL_PANEL_TYPES: ReadonlySet<string> = new Set(['pdf', 'html'])
 
-function previewBodyClass(d: Deliverable): string | undefined {
-  if (d.content_error || !FILL_PANEL_TYPES.has(getPreviewTypeForDeliverable(d))) return undefined
-  return 'flex min-h-[50vh] flex-1 flex-col'
+function fillsPanel(d: Deliverable): boolean {
+  return !d.content_error && FILL_PANEL_TYPES.has(getPreviewTypeForDeliverable(d))
+}
+
+/** The preview box: fills the panel for a PDF or page; full screen fills the screen (7 Oct). */
+function previewBodyClass(d: Deliverable, full: { isFullscreen: boolean; fallback: boolean }): string | undefined {
+  if (!fillsPanel(d)) return undefined
+  if (full.fallback) return 'fixed inset-0 z-[100] flex flex-col bg-background p-3'
+  return full.isFullscreen ? 'flex flex-col bg-background p-3' : 'flex min-h-[50vh] flex-1 flex-col'
 }
 
 // ============= FALLBACK =============
@@ -151,6 +158,8 @@ export function DeliverablePreview({
   )
   const deleteMutation = useDeleteDeliverable()
   const { download, downloading } = useApiFileDownload()
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const full = usePreviewFullscreen(bodyRef)
 
   const deliverable = data?.deliverable ?? null
 
@@ -222,11 +231,18 @@ export function DeliverablePreview({
                 onDownload={handleDownload}
                 onOpenInExplorer={handleOpenInCanvas}
                 onDelete={handleDelete}
+                onFullscreen={fillsPanel(deliverable) ? full.enter : undefined}
               />
             </SheetHeader>
 
             {/* Content body — delegated to shared FilePreview */}
-            <div data-testid="deliverable-preview-body" className={previewBodyClass(deliverable)}>
+            <div ref={bodyRef} data-testid="deliverable-preview-body" className={previewBodyClass(deliverable, full)}>
+              {full.isFullscreen && (
+                <Button variant="outline" size="sm" className="mb-2 self-end" onClick={full.exit}>
+                  <Minimize2 className="mr-2 h-4 w-4" />
+                  Exit full screen
+                </Button>
+              )}
               {deliverable.content_error ? (
                 <ContentUnavailable
                   message={`Unable to load content: ${deliverable.content_error}`}
