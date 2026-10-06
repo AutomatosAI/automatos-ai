@@ -66,6 +66,7 @@ from modules.documents.legacy_guard import legacy_fields_are_required
 from modules.documents.letterhead import fallback_blocks
 from modules.documents.template_formats import refuse_unsupported_format
 from modules.documents.pdf_writer import write_pdf
+from modules.documents.workspace_documents import copy_when_registered
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,7 @@ class DocumentGenerationService:
             is_social = result.template_lane == SOCIAL_LANE
             artifact_type = _infer_artifact_type(result.filename) if is_social else "document"
             extra = deliverable_extra(result, template_id)  # render, template, music, parties (F354)
+            copy_when_registered(ws, result.filename, result.format)  # F370: into the workspace's documents/ too
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",
                 title=title or result.filename,

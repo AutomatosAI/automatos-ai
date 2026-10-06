@@ -22,12 +22,11 @@ the tool's answer says where: "A copy is in your folder: sessions/<ticket>/<file
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Dict, Optional
 
-from core.workspace_client import BINARY_PIECE_BYTES, WorkspaceClient
+from core.workspace_client import WorkspaceClient
+from modules.documents.workspace_documents import bare_name, file_pieces, generated_file
 from modules.tools.execution.generate_document_tool import SESSION_CARD_KEY, card_of
 
 logger = logging.getLogger(__name__)
@@ -35,12 +34,9 @@ logger = logging.getLogger(__name__)
 # The ticket's folder, by the host's own rule (cli_host_service: a session with no
 # working directory runs in sessions/<ticket>).
 SESSIONS_FOLDER = "sessions"
-# Where DocumentGenerationService writes a workspace's documents, under GENERATED_DIR/<workspace>.
-GENERATED_SUBDIR = "generated"
 SESSION_COPY_KEY = "session_copy"
 SESSION_COPY_NOTE_KEY = "session_copy_note"
 COPY_NOTE = "A copy is in your folder: {path}. Open it there to check the document before you report."
-NOT_A_NAME = frozenset({"", ".", ".."})
 
 
 def session_ticket(caller_context: Any) -> Optional[int]:
@@ -52,32 +48,8 @@ def session_ticket(caller_context: Any) -> Optional[int]:
 
 def session_copy_path(ticket: int, filename: Any) -> Optional[str]:
     """``sessions/<ticket>/<filename>``, or ``None`` when ``filename`` is not a bare file name."""
-    name = filename if isinstance(filename, str) else ""
-    if name in NOT_A_NAME or "\\" in name or PurePosixPath(name).name != name:
-        return None
-    return f"{SESSIONS_FOLDER}/{ticket}/{name}"
-
-
-def generated_file(workspace_id: Any, filename: str) -> Optional[Path]:
-    """The document the platform wrote for ``workspace_id``, or ``None`` when it is not there."""
-    from modules.documents import generation_service
-
-    base = (Path(generation_service.GENERATED_DIR) / str(workspace_id) / GENERATED_SUBDIR).resolve()
-    source = (base / filename).resolve()
-    return source if source.is_relative_to(base) and source.is_file() else None
-
-
-async def _file_pieces(source: Path) -> AsyncIterator[bytes]:
-    """The file's bytes a piece at a time, each read off the event loop."""
-    handle = await asyncio.to_thread(source.open, "rb")
-    try:
-        while True:
-            piece = await asyncio.to_thread(handle.read, BINARY_PIECE_BYTES)
-            if not piece:
-                return
-            yield piece
-    finally:
-        await asyncio.to_thread(handle.close)
+    name = bare_name(filename)
+    return f"{SESSIONS_FOLDER}/{ticket}/{name}" if name else None
 
 
 async def copy_to_session(workspace_id: Any, ticket: int, filename: Any) -> Optional[str]:
@@ -89,7 +61,7 @@ async def copy_to_session(workspace_id: Any, ticket: int, filename: Any) -> Opti
                        filename, workspace_id, ticket)
         return None
     try:
-        written = await WorkspaceClient(str(workspace_id)).write_binary(target, _file_pieces(source))
+        written = await WorkspaceClient(str(workspace_id)).write_binary(target, file_pieces(source))
     except Exception:
         logger.exception("[generate_document] the copy for ticket %s could not be written to %s", ticket, target)
         return None
