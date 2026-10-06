@@ -41,6 +41,8 @@ MARK_TAGS = {
 
 _LIST_MARKER = re.compile(r"^\s*(?:[-*+•]|\d{1,9}[.)])\s+")
 _STRONG = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*|(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)")
+# A text run that only joins its neighbours: spaces, with at most one mark between them.
+_SEPARATOR = re.compile(r"^\s*[·•|/,\-–—]?\s*$")
 _EMPHASIS = re.compile(r"\*(?=[^\s*])(.+?)(?<=[^\s*])\*|(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)")
 
 
@@ -125,14 +127,43 @@ def _chip(path: str, fallback, values: Dict[str, str], missing: List[str]) -> Li
     return [Seg(path, kind=MISSING)]
 
 
+def _run_segments(run, values: Dict[str, str], missing: List[str]) -> List[Seg]:
+    if run.type == "text":
+        return _literal(run.text, tuple(run.marks))
+    if run.type == "variable":
+        return _chip(run.path, run.fallback, values, missing)
+    return []
+
+
+def _is_separator(run) -> bool:
+    return run.type == "text" and bool(_SEPARATOR.match(run.text))
+
+
+def _has_content(segs: Sequence[Seg]) -> bool:
+    return any(seg.kind != TEXT or seg.text.strip() for seg in segs)
+
+
 def segments(content: Sequence, values: Dict[str, str], missing: List[str]) -> List[Seg]:
-    """A block's inline runs as segments; a chip with no value is recorded in ``missing``."""
+    """A block's inline runs as segments; a chip with no value is recorded in ``missing``.
+
+    In a block with a chip, a separator run ("  ·  ", ", ", " | ") prints only between two
+    pieces that printed something: "email · · " with no phone or website is "email".
+    """
+    if not any(run.type == "variable" for run in content):
+        return [seg for run in content for seg in _run_segments(run, values, missing)]
     out: List[Seg] = []
+    pending: List[Seg] = []
     for run in content:
-        if run.type == "text":
-            out += _literal(run.text, tuple(run.marks))
-        elif run.type == "variable":
-            out += _chip(run.path, run.fallback, values, missing)
+        if _is_separator(run):
+            pending = pending or _run_segments(run, values, missing)
+            continue
+        segs = _run_segments(run, values, missing)
+        if not _has_content(segs):
+            continue
+        if _has_content(out):
+            out += pending
+        out += segs
+        pending = []
     return out
 
 
