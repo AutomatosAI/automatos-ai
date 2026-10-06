@@ -23,7 +23,7 @@ text starts its own block first.
 * :func:`legacy_render_data` hands a legacy template that HTML for each section.
 * :func:`blocks_from_markdown` is the same text as blocks, for the block renderer.
 * :func:`view_html` is the text as the report view shows it, for the picture of a
-  report's first page (F374).
+  report's first page (F374) and a published blog post (api/widgets/blog.py, 7 Oct).
 
 F374: a list nests two or three spaces a level at any depth, and a fenced block is
 left as written.
@@ -225,8 +225,10 @@ def markdown_html(text: str) -> Markup:
 
 def view_html(text: str) -> str:
     """The text as the report view shows it, sanitised: for the picture of a report's first
-    page (F374). The view's rules, not a print's: a single line break is a space, a fenced
-    block is code, an image stays (the page renderer fetches nothing)."""
+    page (F374) and a published blog post's HTML (7 Oct). The view's rules, not a print's:
+    a single line break is a space, a fenced block is code, an image stays (the page
+    renderer fetches nothing; a blog reader's browser loads it), links and images only
+    to http(s) or mailto, and raw HTML in the text is shown as text."""
     html = _converted(text, VIEW_EXTENSIONS)[0]
     return bleach.clean(html, tags=VIEW_TAGS, attributes=VIEW_ATTRIBUTES, strip=True)
 
