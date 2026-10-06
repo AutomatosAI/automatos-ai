@@ -1,5 +1,9 @@
 """The host's hook socket — one loopback Unix socket, one line in, one line out.
 
+On Windows the same calls arrive over a named pipe both ends authenticate
+(``hook_pipe.py``); ``hook_server_for`` picks the transport. Either way the answer
+comes from ``HookRegistry.answer_for``.
+
 Each connection carries one hook payload (from ``hook_shim``). The server looks
 up the session by ``automatos_task_id`` (set in the session's environment) and
 hands the payload to that session's handler, which returns the JSON answer
@@ -17,6 +21,7 @@ import json
 import logging
 import os
 import socket
+import sys
 import threading
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -37,17 +42,13 @@ def deny_answer(event: str, reason: str) -> dict:
                                    "permissionDecisionReason": reason}}
 
 
-class HookServer:
-    def __init__(self, sock_path: Path):
-        self.sock_path = Path(sock_path)
+class HookRegistry:
+    """The sessions that answer hook calls, by ticket — the same for every transport."""
+
+    def __init__(self) -> None:
         self._handlers: Dict[str, Handler] = {}
         self._lock = threading.Lock()
-        self._server: Optional[socket.socket] = None
-        self._thread: Optional[threading.Thread] = None
-        self._stopping = threading.Event()
-        self._inode: Optional[int] = None  # the socket file WE created (see stop)
 
-    # ── registry ────────────────────────────────────────────────────────────
     def register(self, task_id: str, handler: Handler) -> None:
         with self._lock:
             self._handlers[str(task_id)] = handler
@@ -55,6 +56,47 @@ class HookServer:
     def unregister(self, task_id: str) -> None:
         with self._lock:
             self._handlers.pop(str(task_id), None)
+
+    def session_env(self) -> Dict[str, str]:
+        """What a session's environment needs to reach this server."""
+        raise NotImplementedError
+
+    def answer_for(self, raw: bytes) -> dict:
+        """The answer to one hook payload: its session's, or, for a payload no session
+        owns, a deny on the gated events and nothing on the others."""
+        payload = json.loads(raw.decode("utf-8", "replace") or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+        event = payload.get("hook_event_name") or ""
+        task_id = str(payload.get("automatos_task_id") or "")
+        with self._lock:
+            handler = self._handlers.get(task_id)
+        if handler is None:
+            log.warning("hook %s for unknown session task=%s", event, task_id or "?")
+            return deny_answer(event, "no Automatos session owns this process") if event in _GATED_EVENTS else {}
+        return handler(payload) or {}
+
+
+def hook_server_for(sock_path: Path) -> HookRegistry:
+    """The host's hook server: a Unix socket at ``sock_path``, or on Windows a named pipe."""
+    if sys.platform == "win32":
+        from .hook_pipe import PipeHookServer
+
+        return PipeHookServer()
+    return HookServer(sock_path)
+
+
+class HookServer(HookRegistry):
+    def __init__(self, sock_path: Path):
+        super().__init__()
+        self.sock_path = Path(sock_path)
+        self._server: Optional[socket.socket] = None
+        self._thread: Optional[threading.Thread] = None
+        self._stopping = threading.Event()
+        self._inode: Optional[int] = None  # the socket file WE created (see stop)
+
+    def session_env(self) -> Dict[str, str]:
+        return {"AUTOMATOS_HOST_SOCK": str(self.sock_path)}
 
     # ── lifecycle ───────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -132,19 +174,8 @@ class HookServer:
                 if not chunk:
                     break
                 buf += chunk
-            payload = json.loads(buf.decode("utf-8", "replace") or "{}")
-            if not isinstance(payload, dict):
-                payload = {}
-            event = payload.get("hook_event_name") or ""
-            task_id = str(payload.get("automatos_task_id") or "")
-            with self._lock:
-                handler = self._handlers.get(task_id)
-            if handler is None:
-                log.warning("hook %s for unknown session task=%s", event, task_id or "?")
-                answer = deny_answer(event, "no Automatos session owns this process") if event in _GATED_EVENTS else {}
-            else:
-                conn.settimeout(None)  # a PreToolUse hold may take minutes
-                answer = handler(payload) or {}
+            conn.settimeout(None)  # a PreToolUse hold may take minutes
+            answer = self.answer_for(buf)
         except Exception:  # noqa: BLE001 — never let a hook call crash the host
             log.exception("hook handling failed")
             answer = {}
