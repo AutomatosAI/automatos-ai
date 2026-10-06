@@ -11,7 +11,9 @@ Nothing on the board overflows its box: WeasyPrint breaks the page on a child's 
 height, clipped or not, so a miniature is cropped to its frame (``object-fit``) and
 the social card's lines fit inside theirs. A type sample is one line, its label
 inline beside it and its height its own line height, so a long sample is cut, never
-wrapped.
+wrapped. Its rule outranks the base sheet's ``.doc-section p { white-space: pre-line }``
+(the type scale sits in a section row): without that, a sample wrapped at its own size
+and the clipped lines still pushed the applications onto a second page.
 """
 from __future__ import annotations
 
@@ -66,7 +68,7 @@ BOARD = Template("""
   .board-on-chip img { margin-top: 0; }
   .board-tone { margin: 0 0 ${s1}pt 0; font-size: ${small}pt; line-height: ${small_line}pt; }
   .board-tone strong { color: $heading; }
-  .board-type-sample { color: $heading; white-space: nowrap; overflow: hidden; margin: 0; }
+  .board-part p.board-type-sample { color: $heading; white-space: nowrap; overflow: hidden; margin: 0; }
   .board-type-label { display: inline-block; width: ${board_type_label_mm}mm; font-size: ${caption}pt;
     line-height: ${caption_line}pt; font-weight: $body_weight; color: $muted; vertical-align: baseline; }
   .board-gaps { margin: 0 0 ${s1}pt 0; }
