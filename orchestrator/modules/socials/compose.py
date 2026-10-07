@@ -55,6 +55,11 @@ VISUAL_PROMPTS_NOTE = (
     "or footage shows, in one or two sentences, following brand_style when it is given. No words, letters, "
     "numbers or logos in it: every word on screen is template text."
 )
+# F382 (night 11): "|" in a feature's text printed as it is. Only a display line breaks on it.
+LINE_BREAK_NOTE = (
+    'Only a variable whose description says to use | to break the line takes "|"; write every other '
+    "variable as plain text, with no |."
+)
 _FENCED = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.S)
 
 FILL_BATCH = 25  # the most variables one follow-up asks for: its answer stays inside the output budget
@@ -144,6 +149,8 @@ def _system(ctx: ComposeContext) -> str:
         )
     if ctx.format == TEXT_FORMAT:
         parts.append("This is a text-only post: no template, no variables and no image; write the copy only.")
+    if ctx.format != TEXT_FORMAT:
+        parts.append(LINE_BREAK_NOTE)
     if ctx.visual_slots:
         parts.append(VISUAL_PROMPTS_NOTE)
     if ctx.recent_openings:

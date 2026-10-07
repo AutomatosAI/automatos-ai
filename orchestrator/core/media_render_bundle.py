@@ -57,6 +57,8 @@ The template becomes the composition, with two things done to it here:
   storage;
 * the audio plan's voice lines are template text: their ``{{ name }}`` are
   filled with the variables, and a line that fills in empty is dropped;
+* a ``|`` in a field the template prints as plain text becomes a space: only its
+  display text (``data-dress``) breaks lines on it (F382, ``core/social_line_breaks.py``);
 * a ``social_image`` renders as stills (US-107): the bundle asks media-render
   for a PNG snapshot at each of the template's still moments whose ``when``
   variable has a value (``core.social_templates.still_moments``): one for a
@@ -90,6 +92,7 @@ from core.brand_palette import PAPER, paper_palette, social_accent, stage_palett
 from core.brand_type import BODY_STEP, DEFAULT_TYPE_SCALE, DISPLAY_STEP, step_size_pt
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, fill_text, parse_size, still_moments, without_slots
 from core.social_kit_tokens import kit_render_tokens
+from core.social_line_breaks import without_stray_breaks
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +348,7 @@ def build_bundle(
     logo_files, logo_variables = _logos(kit)
     font_files, faces = _fonts(kit)
     variables = {
-        **dict(values),
+        **without_stray_breaks(values, blocks.get("html") or ""),  # F382: "|" breaks only display text
         VAR_BRAND_NAME: brand_name(kit, fallback_name),
         VAR_BRAND_TAGLINE: kit.get("tagline") or "",
         **logo_variables,
