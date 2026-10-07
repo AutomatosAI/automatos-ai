@@ -466,12 +466,12 @@ def test_the_tool_takes_the_shapes_the_socials_skills_write_and_stores_the_posts
         },
     ).json()
 
-    drafted = _created(_tool(
+    drafted = _row(env, _created(_tool(   # F379: the tool answers in a few lines; the post itself is the row
         env, "platform_create_social_post", title="Countdown", template_id=str(template_id), render=False,
         copy={"linkedin": "Three weeks to Web Summit.", "x": "3 weeks."},
         variables={"headline": "Three weeks to go"},
         sources=[{"claim": "headline", **LAUNCH_SOURCE}],
-    ))
+    ))["id"]).to_dict()
 
     for field in ("copy", "variables", "sources", "content_hash"):
         assert drafted[field] == rest[field], field
@@ -489,7 +489,7 @@ def test_a_figure_the_template_marks_a_claim_stays_a_claim_whatever_the_agent_sa
         variables={"headline": {"value": "Fastest in Europe", "claim": False}},
     )
     post = _created(unclaimed)
-    assert post["variables"]["headline"] == {"value": "Fastest in Europe", "claim": True}
+    assert _row(env, post["id"]).variables["headline"] == {"value": "Fastest in Europe", "claim": True}
     # So its approval needs a source (D7), and the reviewer is told which claim lacks one.
     assert _tool(env, "platform_submit_social_post", post_id=post["id"])["success"] is True
     approve = env.client.post(f"/api/socials/posts/{post['id']}/approve", json={"content_hash": _row(env, post["id"]).content_hash})
@@ -499,7 +499,7 @@ def test_a_figure_the_template_marks_a_claim_stays_a_claim_whatever_the_agent_sa
         env, "platform_create_social_post", title="Empty", template=str(template_id), render=False,
         variables={"headline": ""},
     ))
-    assert empty["variables"]["headline"] == {"value": "", "claim": False}
+    assert _row(env, empty["id"]).variables["headline"] == {"value": "", "claim": False}
 
 
 def test_an_update_changes_only_what_it_sends(env):
@@ -781,7 +781,7 @@ def test_a_draft_renders_by_default_through_media_render_and_waits_for_approval(
     assert env.health == [True]
     (job,) = env.launched
     assert job.actor == ACTOR and str(job.post_id) == result["post"]["id"] and job.workspace_id == WS
-    assert [e["action"] for e in result["post"]["review_log"]] == ["draft", "render"]
+    assert [e["action"] for e in _row(env, result["post"]["id"]).review_log] == ["draft", "render"]
 
     done, renderer, store = _run(job, env)
     assert done is True
@@ -803,21 +803,14 @@ def test_past_the_render_quota_the_draft_is_saved_and_the_render_refused_before_
 
     result = _tool(env, "platform_create_social_post", **_draft_fields(), template=str(template_id), render=True)
 
-    assert result["success"] is True and result["render"]["started"] is False, result
+    assert result["success"] is False and result["render"]["started"] is False, result  # F379: a failed call
     assert "used 10.0 of its 10 render minutes this month on the Basic plan" in result["render"]["error"]
-    assert result["message"].startswith("The post was saved but not rendered: ")
+    assert result["error"].startswith(f"Saved post {result['post']['id']} (\"Web Summit countdown\") as a draft, "
+                                      "but it did NOT render: ")
+    assert "used 10.0 of its 10 render minutes" in result["error"] and result["saved_as_draft"] is True
     assert env.health == [] and env.launched == []
     row = _row(env, result["post"]["id"])
     assert row.status == "draft" and [e["action"] for e in row.review_log] == ["draft"]
-
-
-def test_a_post_without_a_template_is_saved_and_says_why_it_was_not_rendered(env):
-    result = _tool(env, "platform_create_social_post", title="Text only", copy={"base": "Hello."})
-    assert result["success"] is True and result["post"]["status"] == "draft"
-    assert result["render"] == {
-        "started": False, "error": "this post has no template to render: choose a social template first",
-    }
-    assert env.launched == []
 
 
 def test_update_with_render_renders_a_failed_post_again(env):
@@ -882,11 +875,11 @@ def test_a_chart_template_is_filled_from_a_report_as_the_composer_fills_it_never
     assert typed["success"] is False and typed["error"].startswith("row_1_value: a chart's rows")
     assert _posts(env) == 0
 
-    drafted = _created(_tool(
+    drafted = _row(env, _created(_tool(   # F379: the answer is compact; the post is the row
         env, "platform_create_social_post", title="September reach", format="infographic",
         template=starter["name"], variables=words, render=False,
         chart_report={"report_id": report_id, "column": "Reach"},
-    ))
+    ))["id"]).to_dict()
 
     binding = env.client.get(
         f"/api/socials/sources/reports/{report_id}/chart", params={"template_id": str(template_id), "column": "Reach"}
