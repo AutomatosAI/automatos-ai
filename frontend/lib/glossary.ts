@@ -42,7 +42,7 @@ export const GLOSSARY: Record<GlossaryTerm, GlossaryEntry> = {
   playbook: {
     label: 'Playbook',
     definition:
-      'A reusable recipe for a mission. Pick a playbook, fill in the inputs, and the platform runs the same sequence of agents and tools every time.',
+      'A reusable set of steps for a Mission. Pick a playbook, fill in the inputs, and the platform runs the same sequence of agents and tools every time.',
   },
   deliverable: {
     label: 'Deliverable',
