@@ -11,9 +11,11 @@ host to upload what its session left in the ticket's deliverables folder
 * each file is written to ``sessions/<ticket>/<path>`` through the worker's
   internal file API (``WorkspaceClient.write_binary``), the place compose would
   have put it;
-* the result names the files the backend took (``uploaded_files``), and they are
-  registered by the same ``DeliverableService.register`` as a shared folder's,
-  once this process can see them on the volume.
+* the result's ``files_touched`` names them by their host paths, as it always
+  has; one under the host's ``…/sessions/<ticket>/`` maps to the same place in
+  the workspace (``uploaded_rel``), and is registered by the same
+  ``DeliverableService.register`` as a shared folder's once this process can
+  see it on the volume, which is the proof the upload landed.
 
 Limits: only the ticket's deliverables folder, the document upload limit per file
 (``api.documents.MAX_UPLOAD_BYTES``), ``CLI_SESSION_UPLOAD_MAX_TOTAL_MB`` per run of
@@ -23,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import PurePosixPath
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional
+from typing import Any, AsyncIterator, Dict, Optional
 
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
@@ -129,6 +131,12 @@ def _reserve(db: Session, task_id: int, size: int, limit: int) -> bool:
     return row is not None
 
 
+def _release(db: Session, task_id: int, size: int) -> None:
+    """Give back what ``_reserve`` took for a file the workspace did not store: the host
+    retries a 5xx, and each try must not count the same bytes against the run again."""
+    _reserve(db, task_id, -int(size), max_total_bytes())
+
+
 async def _single(data: bytes) -> AsyncIterator[bytes]:
     yield data
 
@@ -157,28 +165,40 @@ async def store_session_file(
         raise SessionUploadRefused(
             413, f"this run's files would pass {config.CLI_SESSION_UPLOAD_MAX_TOTAL_MB} MB in all")
     target = ticket_upload_target(task.id, rel)
-    written = await WorkspaceClient(str(task.workspace_id)).write_binary(target, _single(data))
+    try:
+        written = await WorkspaceClient(str(task.workspace_id)).write_binary(target, _single(data))
+    except Exception:
+        logger.exception("[cli-host] session file %s for ticket #%s not written", target, task.id)
+        _release(db, task.id, len(data))
+        raise
     if not written.get("success"):
         logger.error("[cli-host] session file %s for ticket #%s not written: %s", target, task.id,
                      written.get("error"))
+        _release(db, task.id, len(data))
         raise SessionUploadRefused(502, "the workspace could not store the file")
     return {"path": rel, "workspace_path": target, "size": len(data)}
 
 
-def uploaded_volume_paths(task: Any, uploaded: Iterable[Any]) -> List[str]:
-    """The result's ``uploaded_files`` as paths on this process's view of the
-    volume, which ``workspace_relative_path`` maps by the workspace-id segment
-    (as the dispatcher's adoption does). A path that is not safe is dropped; a
-    file that never landed is dropped later, when its size cannot be read."""
+def uploaded_rel(task: Any, host_path: Any) -> Optional[str]:
+    """Where a result's file landed when the host uploaded it, or ``None``.
+
+    The host reports the file by its own path (``…/sessions/<ticket>/<path>``, the
+    ticket's deliverables folder, or the host's session folder holding the same
+    bytes); the upload put it at ``sessions/<ticket>/<path>`` in the workspace. Only
+    with uploads on; the caller still checks the file is on the volume."""
     if not upload_enabled():
-        return []
-    base = f"{config.WORKSPACE_VOLUME_PATH.rstrip('/')}/{task.workspace_id}"
-    safe = (safe_upload_path(raw) for raw in uploaded or [])
-    return [f"{base}/{ticket_upload_target(task.id, rel)}" for rel in safe if rel is not None]
+        return None
+    from services.host_paths import as_host_path
+
+    path = as_host_path(str(host_path or ""))     # a Windows host reports C:\… (#818)
+    marker = f"/{SESSIONS_FOLDER}/{int(task.id)}/"
+    idx = path.rfind(marker)
+    rel = safe_upload_path(path[idx + len(marker):]) if idx >= 0 else None
+    return ticket_upload_target(task.id, rel) if rel is not None else None
 
 
 __all__ = [
     "SESSIONS_FOLDER", "SessionUploadRefused", "UPLOADED_BYTES_KEY", "max_file_bytes", "max_total_bytes",
     "read_capped", "safe_upload_path", "store_session_file", "ticket_upload_target", "upload_claim_fields",
-    "upload_enabled", "uploaded_volume_paths",
+    "upload_enabled", "uploaded_rel",
 ]

@@ -153,7 +153,7 @@ def test_once_cycle_pairs_claims_runs_and_reports(short_tmp, fake_home, env_clea
 def test_a_cluster_backend_gets_the_sessions_files_before_the_result(short_tmp, fake_home, env_clean, monkeypatch):
     """#848: the backend shares no folder with this host (a cluster), so the claim asks
     for uploads. What the session left in the ticket's deliverables folder is sent
-    before the result, and the result names it; files elsewhere stay references."""
+    before the result, which names it by its path here; files elsewhere are not sent."""
     workdir = short_tmp / "ws" / "repo"
     workdir.mkdir(parents=True)
     monkeypatch.setenv("FAKE_CLAUDE_SESSION_NOTE", "1")      # note.md, landed in ws/sessions/42/
@@ -167,7 +167,8 @@ def test_a_cluster_backend_gets_the_sessions_files_before_the_result(short_tmp, 
         backend.close()
 
     assert backend.uploads == {"note.md": b"# note\nwritten in the session folder\n"}
-    assert backend.result is not None and backend.result["uploaded_files"] == ["note.md"]
+    landed = str((short_tmp / "ws" / "sessions" / "42" / "note.md").resolve())
+    assert backend.result is not None and landed in [str(Path(p).resolve()) for p in backend.result["files_touched"]]
     order = [c[1].split("?")[0].rsplit("/", 1)[-1] for c in backend.calls if c[1].startswith("/api/v1/cli-hosts/h1/tasks")]
     assert order.index("files") < order.index("result"), order
     put = next(c for c in backend.calls if c[0] == "PUT")
@@ -186,7 +187,7 @@ def test_a_backend_that_shares_the_folder_gets_no_uploads(short_tmp, fake_home, 
     finally:
         backend.close()
     assert backend.uploads == {} and not [c for c in backend.calls if c[0] == "PUT"]
-    assert backend.result["uploaded_files"] == []
+    assert backend.result is not None and backend.result["status"] == "success"
 
 
 def test_a_host_that_stops_mid_session_hands_the_ticket_back_saying_why(short_tmp, fake_home, env_clean, monkeypatch):

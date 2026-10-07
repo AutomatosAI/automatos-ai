@@ -125,11 +125,19 @@ def test_the_client_sends_raw_bytes_with_the_path_as_a_query(monkeypatch):
                     "token": "tok"}
 
 
-def test_the_result_names_the_uploaded_files():
-    from automatos_cli_host.session import SessionOutcome
+def test_a_file_that_goes_away_after_it_was_found_is_skipped(folder, monkeypatch):
+    """It was listed, then vanished or became unreadable: a warning, and the rest still go."""
+    api = FakeApi()
+    real_read = uploads.Path.read_bytes
 
-    assert SessionOutcome("success").as_result_payload(1)["uploaded_files"] == []
-    assert SessionOutcome("success", uploaded_files=["a.md"]).as_result_payload(1)["uploaded_files"] == ["a.md"]
+    def _read(path):
+        if path.name == "report.md":
+            raise PermissionError("not readable any more")
+        return real_read(path)
+
+    monkeypatch.setattr(uploads.Path, "read_bytes", _read)
+    files = [str(folder / "report.md"), str(folder / "charts" / "q3.png")]
+    assert uploads.upload_deliverables(api, "h1", _ticket(), folder, files) == ["charts/q3.png"]
 
 
 def test_the_folder_must_exist(tmp_path):

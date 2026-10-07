@@ -26,7 +26,7 @@ def test_contract_fields_are_stable_and_versioned():
     # 0.11.0: GitHub Copilot is a session CLI; the terminal launch carries ``agent_id`` (PRD-253).
     # 0.12.0: the claim carries ``brand_files``, the brand kit's logo files (F332).
     # 0.13.0: ``brand_files`` may carry the logo's variants, logo-dark and logo-mono (PRD-255).
-    # 0.14.0: the claim's ``upload``; the result's ``uploaded_files`` (#848).
+    # 0.14.0: the claim's ``upload``: the host uploads the deliverables folder (#848).
     assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.14.0"
     assert svc.contract_fields() == f
 

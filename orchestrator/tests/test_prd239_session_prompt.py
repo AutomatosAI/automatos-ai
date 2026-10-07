@@ -307,7 +307,7 @@ def test_the_sessions_real_directory_always_wins(monkeypatch):
 
 
 def test_host_contract_version_moved_with_the_claim_shape():
-    # 0.14.0 (2026-10-07, #848): the claim carries upload; the result names uploaded_files.
+    # 0.14.0 (2026-10-07, #848): the claim carries upload; the host uploads before its result.
     # 0.13.0 (2026-10-06, PRD-255): brand_files may carry the logo variants (logo-dark, logo-mono).
     # 0.12.0 (2026-10-05, F332): the claim carries brand_files, the brand kit's logo files.
     # 0.11.0 (2026-10-02, PRD-253): GitHub Copilot served; the terminal launch carries agent_id.

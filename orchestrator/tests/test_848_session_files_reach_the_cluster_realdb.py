@@ -2,7 +2,7 @@
 
 A host that shares no folder with the backend uploads its session's file; the
 worker's write is stood in for by a write onto the test's volume (the API pod
-mounts the same volume read-only in the chart). The result names the file, and
+mounts the same volume read-only in the chart). The result names the file by the host's path, and
 it is registered as the ticket's deliverable. The run's total is one key of
 ``runtime_ref`` updated in one statement, refused past the cap. Skips cleanly
 when no Postgres is reachable (CI runs it).
@@ -129,7 +129,6 @@ def test_an_uploaded_file_becomes_the_tickets_deliverable(cluster, new_session):
         "attempt": ticket["attempt"], "status": "success", "result_text": "wrote report.md",
         "usage": {"input_tokens": 1, "output_tokens": 1},
         "files_touched": [f"/Users/me/deliverables/sessions/{task_id}/report.md"],
-        "uploaded_files": ["report.md"],
     }))
     assert out["applied"] is True
     row = s.query(BoardTask).get(task_id)
@@ -156,6 +155,32 @@ def test_a_run_cannot_upload_past_its_total(cluster, new_session):
     assert err.value.status_code == 413
     s.expire_all()
     assert s.query(BoardTask).get(task_id).runtime_ref[uploads.UPLOADED_BYTES_KEY] == len(half)
+    s.close()
+
+
+def test_a_write_the_workspace_refuses_gives_its_bytes_back(cluster, new_session, monkeypatch):
+    """The host retries a 5xx; the failed try's bytes must not stay on the run's total."""
+    import core.workspace_client as wc
+
+    ws_id, agent_id = cluster
+    s = new_session()
+    host, ticket = _claimed(s, ws_id, agent_id)
+    task_id = ticket["task_id"]
+    asyncio.run(uploads.store_session_file(s, host, task_id, "kept.md", _body(b"kept")))
+
+    class FullWorkspace:
+        def __init__(self, workspace_id):
+            pass
+
+        async def write_binary(self, target, pieces):
+            return {"success": False, "error": "disk full"}
+
+    monkeypatch.setattr(wc, "WorkspaceClient", FullWorkspace)
+    with pytest.raises(uploads.SessionUploadRefused) as err:
+        asyncio.run(uploads.store_session_file(s, host, task_id, "lost.md", _body(b"x" * 1000)))
+    assert err.value.status_code == 502
+    s.expire_all()
+    assert s.query(BoardTask).get(task_id).runtime_ref[uploads.UPLOADED_BYTES_KEY] == 4
     s.close()
 
 
