@@ -272,20 +272,22 @@ export function MultimodalInput({
             {isStreaming ? (
               <Button
                 type="button"
+                aria-label="Stop generating"
                 onClick={stop}
                 size="icon"
                 className="bg-destructive hover:bg-destructive/80 h-9 w-9 rounded-xl shadow-sm"
               >
-                <StopCircle className="w-4 h-4" />
+                <StopCircle aria-hidden="true" className="w-4 h-4" />
               </Button>
             ) : (
               <Button
                 type="submit"
+                aria-label="Send message"
                 disabled={!safeInput.trim()}
                 size="icon"
                 className="h-10 w-10 rounded-2xl disabled:opacity-50 bg-primary hover:bg-primary/90 transition-colors"
               >
-                <Send className="w-4 h-4" />
+                <Send aria-hidden="true" className="w-4 h-4" />
               </Button>
             )}
           </div>
