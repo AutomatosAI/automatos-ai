@@ -134,12 +134,15 @@ def _tickets(db: Session, workspace_id: Any, refs: List[Any]) -> List[Any]:
 
 def _refusal(db: Session, task: Any, new_status: str) -> Optional[str]:
     """``move_refusal`` for this ticket: a running ticket waits or is cancelled, and a
-    finished column needs work on the card."""
+    finished column needs work on the card. PRD-256 US-005: Done needs the artifact the
+    card was for (``services.done_needs_an_artifact``, the board's Approve's rule too)."""
     from api.board_tasks import MISSION_TICKET_TYPES, _running_now
     from services.board_drag_rules import move_refusal
+    from services.done_needs_an_artifact import done_refusal
 
     return move_refusal(task, new_status, running=_running_now(db, task),
-                        mission_ticket=getattr(task, "source_type", None) in MISSION_TICKET_TYPES)
+                        mission_ticket=getattr(task, "source_type", None) in MISSION_TICKET_TYPES) \
+        or done_refusal(db, task, new_status)
 
 
 def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]) -> Dict[str, Any]:

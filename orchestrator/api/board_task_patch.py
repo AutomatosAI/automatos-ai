@@ -87,7 +87,8 @@ def refuse_the_patch(db: Session, task: BoardTask, body: Dict[str, Any], new_sta
         return
     after = as_patched(task, assigned_agent_id=agent, result=body.get("result", task.result))
     refusal = drag_refusal(after, new_status, running=bt._running_now(db, task),
-                           mission_ticket=task.source_type in bt.MISSION_TICKET_TYPES)
+                           mission_ticket=task.source_type in bt.MISSION_TICKET_TYPES) \
+        or bt.done_refusal(db, after, new_status)  # PRD-256 US-005: Done needs the card's artifact
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
 
