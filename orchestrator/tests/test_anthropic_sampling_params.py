@@ -1,6 +1,10 @@
 """Claude Opus 4.7 and later, Sonnet 5, Fable and Mythos answer temperature,
 top_p and top_k with a 400. The direct Anthropic route sent temperature on every
-call, so an agent on one of those models could not get a reply."""
+call, so an agent on one of those models could not get a reply.
+
+PRD-256 US-008: Opus and Sonnet 4.6 moved to the first list. They take sampling
+parameters, but the whole Claude 4.6+ family now goes out with one request shape
+(no temperature), so switching Auto between them is one line."""
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -13,12 +17,13 @@ from core.llm.clients.base import accepts_sampling_params
 @pytest.mark.parametrize("model", [
     "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5",
     "claude-fable-5-1", "anthropic.claude-opus-4-8", "anthropic/claude-opus-4.8",
+    "claude-sonnet-4-6", "claude-opus-4-6", "anthropic/claude-sonnet-4.6",
 ])
 def test_models_that_reject_sampling_params(model):
     assert accepts_sampling_params(model) is False
 
 
-@pytest.mark.parametrize("model", ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-6", "anthropic/claude-sonnet-4.6", None])
+@pytest.mark.parametrize("model", ["claude-haiku-4-5", "anthropic/claude-haiku-4.5", "claude-sonnet-4-5", None])
 def test_models_that_take_sampling_params(model):
     assert accepts_sampling_params(model) is True
 

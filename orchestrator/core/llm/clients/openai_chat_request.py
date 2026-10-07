@@ -10,11 +10,13 @@ client sent the same two parameters to o3 and gpt-5 and had the same fault.
 Both clients now build the request here. ``sampling`` says whether temperature,
 top_p and the penalties go out; ``completion_tokens`` says which name the output
 budget travels under. Which models refuse sampling parameters is one rule,
-``accepts_sampling_params`` in ``base.py``.
+``accepts_sampling_params`` in ``base.py``. PRD-256 US-008: the OpenRouter /
+NVIDIA / DeepSeek adapter builds its request here too, so a Claude 4.6+ id on
+OpenRouter goes out without them as it does on the Anthropic route.
 """
 from typing import Any, Dict, List, Optional
 
-from .base import request_max_tokens
+from .base import request_max_tokens, takes_one_sampling_param
 
 SAMPLING_PARAMS = ("temperature", "top_p", "frequency_penalty", "presence_penalty")
 COMPLETION_TOKENS = "max_completion_tokens"
@@ -22,10 +24,12 @@ LEGACY_MAX_TOKENS = "max_tokens"
 
 
 def _sampling_kwargs(config: Any) -> Dict[str, Any]:
-    """The config's sampling settings; temperature always, the rest when set."""
+    """The config's sampling settings; temperature always, the rest when set (a
+    Claude id never gets top_p beside temperature: ``takes_one_sampling_param``)."""
+    one_only = takes_one_sampling_param(getattr(config, "model", None))
     values = {
         "temperature": config.temperature,
-        "top_p": getattr(config, "top_p", None),
+        "top_p": None if one_only else getattr(config, "top_p", None),
         "frequency_penalty": getattr(config, "frequency_penalty", None),
         "presence_penalty": getattr(config, "presence_penalty", None),
     }

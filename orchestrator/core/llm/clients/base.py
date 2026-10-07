@@ -96,9 +96,15 @@ def request_max_tokens(config: Any) -> int:
     return current_call_budget() or config.max_tokens
 
 
-# Claude models that answer temperature/top_p/top_k with a 400: Opus 4.7 and
-# later, Sonnet 5, Fable, Mythos. Matches API, Bedrock and OpenRouter ids.
-_REJECTS_SAMPLING = re.compile(r"claude-(opus-4[.-][78]|opus-5|sonnet-5|fable|mythos)")
+# Claude 4.6 and later go out with no temperature/top_p/top_k (PRD-256 US-008):
+# Opus 4.7+, Sonnet 5+, Fable and Mythos answer them with a 400; Opus and Sonnet
+# 4.6 take them, but the model switch is one line only when the whole 4.6+ family
+# shares one request shape. Matches API, Bedrock and OpenRouter ids
+# ("claude-sonnet-5", "anthropic.claude-opus-4-7", "anthropic/claude-sonnet-4.6").
+_REJECTS_SAMPLING = re.compile(r"claude-((opus|sonnet)-4[.-][6-9]|opus-5|sonnet-5|fable|mythos)")
+# The older Claude 4 models (Haiku 4.5, Sonnet 4.5) answer temperature AND top_p
+# together with a 400: they take one of the two.
+_CLAUDE = re.compile(r"claude-")
 
 # #873: OpenAI's reasoning models refuse temperature, top_p and the penalties,
 # and take max_completion_tokens instead of max_tokens: the o-series, codex-mini
@@ -120,6 +126,12 @@ def accepts_sampling_params(model: Optional[str]) -> bool:
     """
     name = (model or "").strip().lower()
     return not (_REJECTS_SAMPLING.search(name) or _OPENAI_REASONING.search(name))
+
+
+def takes_one_sampling_param(model: Optional[str]) -> bool:
+    """Whether ``model`` takes temperature or top_p but never both (any Claude id
+    that takes sampling at all): the request keeps temperature and drops top_p."""
+    return bool(_CLAUDE.search((model or "").strip().lower()))
 
 
 _T = TypeVar("_T")
