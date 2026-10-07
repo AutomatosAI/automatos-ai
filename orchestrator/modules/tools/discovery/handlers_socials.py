@@ -22,6 +22,11 @@ it sends into what the post has, so an agent sends only what changes. A
 variable the template marks as a claim is one whenever it has a value (D7).
 Submit takes a ``note`` for the reviewer.
 
+F379 (night 11): a post is checked as its render will check it before it is saved (a template
+format sent as the post's, a template named in other words, a field the template doesn't have,
+a post to render with no template: ``social_post_checks``), and create and update answer in a
+few lines, a refused render as a failed call that says why (``social_post_results``).
+
 Nothing here approves, schedules or publishes (D6, D14). With Socials off for
 the workspace (either switch, D1), every tool refuses and reads or writes
 nothing. Each tool acts as its agent (``_agent_id`` / ``_agent_name``, minted
@@ -45,11 +50,6 @@ AGENT_ACTOR = "agent"
 CHART_REPORT_KEYS = ("report_id", "chart", "column", "part")
 SUBMIT_FIELDS = frozenset({"post_id", "note"})
 
-RENDER_STARTED = (
-    "Rendering in the background: when the render finishes the post waits for approval in the "
-    "Socials tab, or is failed with the reason in its history (platform_get_social_post)."
-)
-DRAFT_SAVED = "Saved as a draft: send it for approval with platform_submit_social_post when it is ready."
 SENT_FOR_APPROVAL = (
     "Sent for approval: a person approves it, asks for changes or rejects it in the Socials tab, "
     "and the platform publishes an approved post."
@@ -125,22 +125,20 @@ def _flag(fields: Dict[str, Any], name: str, default: bool) -> bool:
 
 
 def _template(db: Session, workspace_id: UUID, ref: Any) -> Any:
-    """The social template ``ref`` names in the workspace: its id, or its name
-    (the latest active version), as ``generate_document`` resolves one."""
+    """The social template ``ref`` names in the workspace: its id, or its name (the latest
+    active version), ignoring case and spacing (F379: ``social_post_checks.template_by_name``)."""
     from core.social_templates import is_social_format
     from modules.documents.template_service import DocumentTemplateService
+    from modules.tools.discovery.social_post_checks import NO_SUCH_TEMPLATE, template_by_name
 
-    templates = DocumentTemplateService(db)
     text = str(ref).strip()
     try:
-        template = templates.get_template(UUID(text), workspace_id)
+        template = DocumentTemplateService(db).get_template(UUID(text), workspace_id)
+        problem = NO_SUCH_TEMPLATE.format(ref=text)
     except ValueError:
-        template = templates.get_template_by_name(workspace_id, text)
+        template, problem = template_by_name(db, workspace_id, text)
     if template is None:
-        raise _Refused(
-            f"No template {text!r} in this workspace: platform_list_templates lists them "
-            "(format social_video or social_image)."
-        )
+        raise _Refused(problem)
     if not is_social_format(template.format):
         raise _Refused(
             f"{template.name!r} is a {template.format} template: a post takes a social_video or "
@@ -324,33 +322,96 @@ def _invalid(exc: Exception) -> str:
     return f"Invalid post, nothing saved. {problems}"
 
 
-async def _render(db: Session, workspace: Any, post: Any, actor: str) -> Dict[str, Any]:
-    """The US-104 render of ``post``, started now; a refusal changes nothing."""
+async def _render(db: Session, workspace: Any, post: Any, actor: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The US-104 render of ``post``, started now: the saved post and None, or None and why it
+    was refused (a refusal changes nothing)."""
     from api import socials as socials_api
     from core import media_render_quota as render_quota
     from modules.socials import service
 
     try:
-        saved = await socials_api.render_post(db, workspace, post, actor)
+        return await socials_api.render_post(db, workspace, post, actor), None
     except (service.SocialsError, render_quota.RenderQuotaExceeded) as exc:
         db.rollback()
-        return {"render": {"started": False, "error": str(exc)}}
-    return {"post": saved, "render": {"started": True}, "message": RENDER_STARTED}
+        return None, str(exc)
 
 
-def _not_rendered(result: Dict[str, Any]) -> Dict[str, Any]:
-    render = result.get("render") or {}
-    if render.get("started") is False:
-        return {**result, "message": f"The post was saved but not rendered: {render['error']}"}
-    return result
+async def _answer(db: Session, workspace: Any, post: Any, actor: str, template: Any, *, render_now: bool,
+                  message: str) -> Dict[str, Any]:
+    """F379: the compact answer for a saved post, after its render when ``render_now``. A render
+    that was refused is a failed call that says the post is a draft, why, and the call that fixes it."""
+    from modules.tools.discovery import social_post_checks as checks
+    from modules.tools.discovery import social_post_results as results
+
+    name = getattr(template, "name", None)
+    if not render_now:
+        return results.saved(post.to_dict(), name, message)
+    started, error = await _render(db, workspace, post, actor)
+    if error is None:
+        return results.rendering(started, name)
+    kind = checks.VIDEO_TEMPLATE if post.format == checks.VIDEO_POST else checks.IMAGE_TEMPLATE
+    names = checks.template_names(checks.social_templates(db, workspace.id), kind) if "template" in error.lower() else ""
+    return results.not_rendered(post.to_dict(), template, error, names)
+
+
+def _set_format(fields: Dict[str, Any]) -> None:
+    """F379: the post format ``fields`` sends, a template's format taken as the one it names."""
+    from modules.tools.discovery.social_post_checks import post_format
+
+    if "format" not in fields:
+        return
+    value, problem = post_format(fields["format"])
+    if problem:
+        raise _Refused(problem)
+    fields["format"] = value
+
+
+def _refuse_unknown_fields(template: Any, variables: Any) -> None:
+    """F379: a field the template doesn't have is refused with the template's own fields."""
+    from modules.tools.discovery.social_post_checks import unknown_fields
+
+    problem = unknown_fields(template, variables)
+    if problem:
+        raise _Refused(problem)
+
+
+async def _create_fields(db: Session, workspace_id: UUID, fields: Dict[str, Any], render_now: bool) -> Any:
+    """``fields`` as a new post keeps them, checked as its render will check them; its template.
+    A post to render with no template is refused with the templates to choose from (F379)."""
+    from modules.tools.discovery.social_post_checks import TEXT_POST, needs_a_template
+
+    chart = fields.pop("chart_report", None)
+    ref = _template_ref(fields)
+    template = _template(db, workspace_id, ref) if ref not in (None, "") else None
+    _set_format(fields)
+    if template is None and render_now and fields.get("format") != TEXT_POST:
+        raise _Refused(needs_a_template(db, workspace_id, fields.get("format")))
+    if "copy" in fields:
+        fields["copy"] = _merged_copy({}, _copy_of(fields["copy"]))
+    if "variables" in fields:
+        fields["variables"] = _merged({}, _variables_of(fields["variables"]))
+    if "sources" in fields:
+        fields["sources"] = _merged({}, _sources_of(fields["sources"]))
+    _refuse_typed_rows(template, fields.get("variables"), None)
+    _refuse_unknown_fields(template, fields.get("variables"))
+    if chart is not None:
+        fields["variables"], fields["sources"] = await _charted(
+            db, workspace_id, template, chart, fields.get("variables"), fields.get("sources")
+        )
+    if "variables" in fields:
+        fields["variables"] = _claimed(fields["variables"], _schema_claims(template))
+    return template
 
 
 async def create_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """A new draft, through ``create_post``; then its render unless ``render`` is false."""
+    """A new draft, through ``create_post``; then its render unless ``render`` is false or it is
+    a text post. The answer is compact, and a refused render is a failed call (F379)."""
     from pydantic import ValidationError
 
     from api import socials as socials_api
     from modules.socials import service
+    from modules.tools.discovery.social_post_checks import TEXT_POST
+    from modules.tools.discovery.social_post_results import DRAFT_SAVED
 
     workspace, refusal = _open(db, workspace_id)
     if refusal:
@@ -359,22 +420,7 @@ async def create_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     fields = _fields(params)
     try:
         render_now = _flag(fields, "render", True)
-        chart = fields.pop("chart_report", None)
-        ref = _template_ref(fields)
-        template = _template(db, workspace_id, ref) if ref not in (None, "") else None
-        if "copy" in fields:
-            fields["copy"] = _merged_copy({}, _copy_of(fields["copy"]))
-        if "variables" in fields:
-            fields["variables"] = _merged({}, _variables_of(fields["variables"]))
-        if "sources" in fields:
-            fields["sources"] = _merged({}, _sources_of(fields["sources"]))
-        _refuse_typed_rows(template, fields.get("variables"), None)
-        if chart is not None:
-            fields["variables"], fields["sources"] = await _charted(
-                db, workspace_id, template, chart, fields.get("variables"), fields.get("sources")
-            )
-        if "variables" in fields:
-            fields["variables"] = _claimed(fields["variables"], _schema_claims(template))
+        template = await _create_fields(db, workspace_id, fields, render_now)
         body = socials_api.CreateSocialPostRequest.model_validate(
             {**fields, "template_id": template.id if template is not None else None}
         )
@@ -388,19 +434,51 @@ async def create_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     except service.SocialsError as exc:
         db.rollback()
         return _refusal(exc)
-    result: Dict[str, Any] = {"success": True, "post": post.to_dict(), "message": DRAFT_SAVED}
-    if render_now:
-        result = _not_rendered({**result, **await _render(db, workspace, post, actor)})
-    return result
+    render_now = render_now and post.format != TEXT_POST
+    return await _answer(db, workspace, post, actor, template, render_now=render_now, message=DRAFT_SAVED)
+
+
+async def _update_fields(db: Session, workspace_id: UUID, post: Any, fields: Dict[str, Any]) -> Any:
+    """``fields`` merged into what ``post`` has, checked as its render will check them; its template."""
+    from modules.documents.template_service import DocumentTemplateService
+
+    chart = fields.pop("chart_report", None)
+    ref = _template_ref(fields)
+    if ref not in (None, ""):
+        template = _template(db, workspace_id, ref)
+        fields["template_id"] = template.id
+    elif post.template_id is not None:
+        template = DocumentTemplateService(db).get_template(post.template_id, workspace_id)
+    else:
+        template = None
+    _set_format(fields)
+    if "copy" in fields:
+        fields["copy"] = _merged_copy(post.copy, _copy_of(fields["copy"]))
+    if "variables" in fields:
+        sent = _variables_of(fields["variables"])
+        _refuse_typed_rows(template, sent, post.variables)
+        _refuse_unknown_fields(template, sent)
+        fields["variables"] = _merged(post.variables, sent)
+    if "sources" in fields:
+        fields["sources"] = _merged(post.sources, _sources_of(fields["sources"]))
+    if chart is not None:
+        fields["variables"], fields["sources"] = await _charted(
+            db, workspace_id, template, chart,
+            fields.get("variables", post.variables), fields.get("sources", post.sources),
+        )
+    if "variables" in fields or "template_id" in fields:
+        fields["variables"] = _claimed(fields.get("variables", post.variables), _schema_claims(template))
+    return template
 
 
 async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Change a post, through ``edit_post``; then render it again when ``render`` is true."""
+    """Change a post, through ``edit_post``; then render it again when ``render`` is true. The
+    answer is compact, and a refused render is a failed call (F379)."""
     from pydantic import ValidationError
 
     from api import socials as socials_api
-    from modules.documents.template_service import DocumentTemplateService
     from modules.socials import service
+    from modules.tools.discovery.social_post_results import CHANGED
 
     workspace, refusal = _open(db, workspace_id)
     if refusal:
@@ -410,36 +488,14 @@ async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     try:
         post = _post(db, workspace_id, fields.pop("post_id", None))
         render_now = _flag(fields, "render", False)
-        chart = fields.pop("chart_report", None)
-        ref = _template_ref(fields)
-        if ref not in (None, ""):
-            template = _template(db, workspace_id, ref)
-            fields["template_id"] = template.id
-        elif post.template_id is not None:
-            template = DocumentTemplateService(db).get_template(post.template_id, workspace_id)
-        else:
-            template = None
-        if "copy" in fields:
-            fields["copy"] = _merged_copy(post.copy, _copy_of(fields["copy"]))
-        if "variables" in fields:
-            sent = _variables_of(fields["variables"])
-            _refuse_typed_rows(template, sent, post.variables)
-            fields["variables"] = _merged(post.variables, sent)
-        if "sources" in fields:
-            fields["sources"] = _merged(post.sources, _sources_of(fields["sources"]))
-        if chart is not None:
-            fields["variables"], fields["sources"] = await _charted(
-                db, workspace_id, template, chart,
-                fields.get("variables", post.variables), fields.get("sources", post.sources),
-            )
-        if "variables" in fields or "template_id" in fields:
-            fields["variables"] = _claimed(fields.get("variables", post.variables), _schema_claims(template))
+        template = await _update_fields(db, workspace_id, post, fields)
         changes = socials_api.UpdateSocialPostRequest.model_validate(fields).model_dump(
             exclude_unset=True, by_alias=True
         )
         if not changes and not render_now:
             raise _Refused("Nothing to change: send the fields to change, or render true.")
-        saved = await socials_api.edit_post(db, post, actor, changes, agent=agent) if changes else post.to_dict()
+        if changes:
+            await socials_api.edit_post(db, post, actor, changes, agent=agent)
     except _Refused as exc:
         return _refused(str(exc))
     except ValidationError as exc:
@@ -447,10 +503,7 @@ async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     except service.SocialsError as exc:
         db.rollback()
         return _refusal(exc)
-    result: Dict[str, Any] = {"success": True, "post": saved}
-    if render_now:
-        result = _not_rendered({**result, **await _render(db, workspace, post, actor)})
-    return result
+    return await _answer(db, workspace, post, actor, template, render_now=render_now, message=CHANGED)
 
 
 async def submit_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

@@ -75,7 +75,15 @@ def _post_copy_fields() -> dict:
                 "channels": {"type": "object", "additionalProperties": {"type": "string"}},
             },
         },
-        "format": {"type": "string", "enum": POST_FORMATS, "description": "What the post is."},
+        "format": {
+            "type": "string",
+            "enum": POST_FORMATS,
+            "description": (
+                "What the post is: video for a video template, image for a still, or carousel, "
+                "fact_card, infographic or text. social_image and social_video are templates' formats, "
+                "never a post's."
+            ),
+        },
         "length_seconds": {
             "type": "integer",
             "description": (
@@ -92,15 +100,17 @@ def _post_template_fields() -> dict:
         "template": {
             "type": "string",
             "description": (
-                "The social template: its id or its name (platform_list_templates with format "
-                "social_video or social_image; its variables: platform_get_template_schema)."
+                "The social template: its id or its exact name, from platform_list_templates (format "
+                "social_image or social_video: the templates' formats, not the post's). Its fields are "
+                "the variables platform_get_template_schema lists; a post with a template renders as "
+                "soon as it is saved."
             ),
         },
         "variables": {
             "type": "object",
             "description": (
-                "The template's variables: {name: value}, or {name: {\"value\": ..., \"claim\": true "
-                "or false}}. A claim is a fact or a figure and needs a source in sources; one the "
+                "The template's variables, by its own field names only (a name it doesn't have is "
+                "refused): {name: value}, or {name: {\"value\": ..., \"claim\": true or false}}. A claim is a fact or a figure and needs a source in sources; one the "
                 "template marks as a claim always is. An update keeps what it does not send; null "
                 "clears one. A chart template's rows and source chip come from chart_report, never "
                 "typed here."
@@ -221,7 +231,8 @@ def _register_create_social_post(registry: ActionRegistry) -> None:
             "with its variables, the sources of its facts and figures, and files already made. "
             "By default the template is rendered at once, within the plan's render minutes: when "
             "the render finishes the post waits for approval, or is failed with the reason in its "
-            "history. With render false it stays a draft until platform_submit_social_post. A "
+            "history; a render refused at once fails the call, which says why and how to fix the "
+            "saved draft. With render false it stays a draft until platform_submit_social_post. A "
             "person approves every post in the Socials tab and the platform publishes it; this "
             "tool never approves, schedules or publishes."
         ),
