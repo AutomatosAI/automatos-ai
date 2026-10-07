@@ -38,7 +38,6 @@ SOCIAL_NOTE = (
     "get_template_schema (by id or name) says what a template needs."
 )
 NEEDS_A_TEMPLATE = "Name the template: template_id, or template_name, from platform_list_templates."
-NO_SUCH_TEMPLATE = "No template {ref!r} in this workspace: platform_list_templates lists them."
 
 
 def _text(value: Any) -> Optional[str]:
@@ -78,7 +77,9 @@ def _as_id(value: Optional[str]) -> Optional[UUID]:
 
 
 def find_template(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Tuple[Any, Optional[str]]:
-    """The template ``params`` names (by id or by name) and ``None``, or ``None`` and why not."""
+    """The template ``params`` names (by id or by name) and ``None``, or ``None`` and why not.
+    Names and ids are read as generate_document reads them (F383, ``template_lookup``)."""
+    from modules.documents.template_lookup import TemplateNotFound, named_template, template_by_id
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
@@ -86,13 +87,12 @@ def find_template(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Tu
     if ref is None:
         return None, NEEDS_A_TEMPLATE
     template_id = _as_id(ref)
-    if template_id is not None:
-        template = service.get_template(template_id, workspace_id)
-    else:
-        template = service.get_template_by_name(workspace_id, ref) or next(
-            (t for t in service.list_templates(workspace_id) if (t.name or "").casefold() == ref.casefold()), None
-        )
-    return (template, None) if template else (None, NO_SUCH_TEMPLATE.format(ref=ref))
+    try:
+        if template_id is not None:
+            return template_by_id(service, workspace_id, template_id), None
+        return named_template(service, workspace_id, ref), None
+    except TemplateNotFound as missing:
+        return None, str(missing)
 
 
 def _block_fields(blocks: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
