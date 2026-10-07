@@ -10,9 +10,12 @@
   given (D7): the model cannot invent a URL or a figure's source. An unmatched
   claim stays unsourced, and the approval UI shows it so.
 * **Copy**: every selected channel gets its own text (the base when the model
-  left one out), fitted to the channel's limits at a word boundary.
+  left one out), fitted to the channel's limits at a word boundary. Its shape is the
+  one a save takes, ``{"base", "channels"}`` (F378: one shape, no hand translation).
 * **Visual prompts** (PRD-251B US-B305): only for the slots the composer was asked
   about, each one line of at most VISUAL_PROMPT_MAX_CHARS.
+* **Facts** (F378): what the proposal says is checked last (``compose_facts.py``): no
+  placeholder left in the copy, and ``questions`` lists what Auto needs from the owner.
 """
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.models.socials import SOCIAL_POST_FORMATS
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, claim_names, resolve_variables
+from modules.socials import compose_facts
 from modules.socials.copy_limits import fit_copy, fit_title
 
 VIDEO_FORMAT = "video"
@@ -115,17 +119,17 @@ def _text(value: Any) -> str:
 def _copy(raw: Any, ctx: Any, warnings: List[str]) -> Dict[str, Any]:
     copy = raw if isinstance(raw, dict) else {}
     base = _text(copy.get("base"))
-    own = copy.get("per_channel") if isinstance(copy.get("per_channel"), dict) else {}
-    per_channel: Dict[str, str] = {}
+    own = copy.get("channels") if isinstance(copy.get("channels"), dict) else {}
+    channels: Dict[str, str] = {}
     for channel in ctx.channels:
         toolkit = str(channel["toolkit"])
         text = _text(own.get(toolkit))
         if not text:
             text = base
             warnings.append(f"{toolkit}: no text of its own was written; it starts from the base copy")
-        per_channel[toolkit], fixes = fit_copy(toolkit, text)
+        channels[toolkit], fixes = fit_copy(toolkit, text)
         warnings.extend(fixes)
-    return {"base": base, "per_channel": per_channel}
+    return {"base": base, "channels": channels}
 
 
 def _title(raw: Any, ctx: Any, warnings: List[str]) -> str:
@@ -159,7 +163,7 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         if post_format is None and template is not None:
             post_format = VIDEO_FORMAT if template.get("format") == SOCIAL_VIDEO else "image"
         variables = _variables(raw.get("variables"), template, warnings)
-    return {
+    proposal = {
         "title": _title(raw.get("title"), ctx, warnings),
         "copy": _copy(raw.get("copy"), ctx, warnings),
         "format": post_format,
@@ -173,4 +177,7 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         "length_seconds": getattr(ctx, "length_seconds", None),
         "visual_prompts": _visual_prompts(raw.get("visual_prompts"), ctx),
         "warnings": warnings,
+        # F378: what Auto needs from the owner before the post can be made ("Auto needs: …").
+        "questions": compose_facts.model_questions(raw.get("questions")),
     }
+    return compose_facts.checked(proposal, ctx)  # F378: no fact the brief does not give

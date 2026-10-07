@@ -19,6 +19,11 @@ dozens) is followed up (``_filled``): those variables are asked for by name, at 
 ``FILL_BATCH`` a call so each answer fits the output budget, and merged in. A post Auto
 writes is then one the render can make; what the model still leaves empty stays in
 the warnings ("No value yet for: ...").
+
+F378 (night 11, 7 Oct): the follow-ups go round again (``FILL_ROUNDS``, all within
+``PROPOSE_BUDGET_CALLS`` timeouts) for what is still missing, a refused value with the
+reason; the model may answer null for a fact the brief does not give, and every required
+field still empty comes back as an owner's question (``questions``), by its label.
 """
 from __future__ import annotations
 
@@ -27,10 +32,10 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from core.social_templates import resolve_variables
-from modules.socials import compose_checks
+from modules.socials import compose_checks, compose_facts
 from modules.socials.copy_limits import limits_for
 
 logger = logging.getLogger(__name__)
@@ -63,11 +68,53 @@ LINE_BREAK_NOTE = (
 _FENCED = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.S)
 
 FILL_BATCH = 25  # the most variables one follow-up asks for: its answer stays inside the output budget
+# F378 (night 11): the follow-ups go round again for what the last round left empty or got
+# refused, at most FILL_ROUNDS times, and the whole proposal (its answer, the copy's re-ask and
+# every follow-up) takes at most PROPOSE_BUDGET_CALLS model timeouts.
+FILL_ROUNDS = 3
+PROPOSE_BUDGET_CALLS = 4
 FILL_NOTE = (
     "Your answer left these variables of the template you chose without a value, and the post cannot be "
     'made without them. Answer with ONE JSON object only, shaped {"variables": {"<name>": "<value>"}}, giving '
-    "each of them a value that fits its schema below, from the brief and in the brand voice. The rules above "
-    "still hold: never invent a source, a URL or a number."
+    "each of them a value that fits its schema below, from the brief and in the brand voice. A variable marked "
+    "refused had a value that does not fit, for the reason given: give one that does. The rules above still hold: "
+    "use only the facts the brief gives. Where it does not give the fact a variable needs, answer null for it and "
+    "the owner is asked; never invent a source, a URL, a number, a name, a date, a price or a product detail."
+)
+# F378 (night 11): the composer uses the facts it is given and nothing else.
+FACTS_NOTE = (
+    "Use only the facts the brief gives. Never add a product detail, a tasting note, a price, an offer, shipping "
+    "or delivery, a handle, a growth claim, a name, a date or a source that nobody gave. Where a field the "
+    "template needs a fact the brief does not give, leave it out of variables and say what you need in questions, "
+    "in the owner's words: the owner is asked, nothing is made up."
+)
+HANDLE_NOTE = "A handle is one of brand_handles, the brand kit's own; with none there, leave every handle empty."
+# F378 (B11, B16): a retake starts from the post as it is and the guidance is a hard rule.
+RETAKE_RULES_NOTE = (
+    "This is another take of a post: current_take is the post as it is now, its copy and its fields. Start from "
+    "it and change only what the owner's guidance (the brief's 'Changes requested:' line) asks: keep every other "
+    "word, value and fact as it is, and add no fact it does not hold. The guidance is a hard rule: what it says not "
+    "to say goes and nothing like it comes back; what it says to keep stays word for word. Without guidance, write "
+    "a better take of the same facts."
+)
+# F378 (B19, B18): the template that fits the brief, by what each one is for.
+PICK_NOTE = (
+    "Pick the template whose description fits the brief. A template made for software (an app, a dashboard, "
+    "agents) suits only a brief about software. A template with photo_slots suits only a brief that has a photo or "
+    "says the owner will add one, and then name the photo in questions; never pick one whose photo slot is "
+    "required when the brief says there is no photo."
+)
+# F378 (night 11): a placeholder left in the copy is asked about once, with the reason.
+COPY_FIX_NOTE = (
+    "Your copy holds template placeholders, which a post never shows (listed below). Answer with ONE JSON "
+    'object only, shaped {"copy": {"base": "...", "channels": {"<toolkit>": "..."}}}: the same copy with each '
+    "placeholder replaced by the real words the brief gives. Where the brief does not give the fact a placeholder "
+    "stands for, rewrite the sentence without it: never make the fact up."
+)
+# F378: the skills write tool calls with {braces} where a value goes; a post never does.
+SKILLS_NOTE = (
+    "The skills below write examples with {braces} or [brackets] where a value goes. A post never carries "
+    "braces, brackets, field names or the words true, false or null as text: write the real words."
 )
 RETRY_NOTE = (
     "Your answer was not the JSON object asked for. Answer again with ONLY that "
@@ -90,7 +137,7 @@ class ComposeContext:
     brief: str
     format: Optional[str]
     channels: Sequence[Mapping[str, Any]]  # {toolkit, label}: the selected, connected channels
-    templates: Sequence[Mapping[str, Any]]  # {id, name, format, sizes, variables_schema}
+    templates: Sequence[Mapping[str, Any]]  # {id, name, description, format, sizes, variables_schema, photo_slots}
     candidates: Sequence[Mapping[str, Any]]  # sources.search() candidates
     voice: Mapping[str, Any] = field(default_factory=dict)  # the brand kit's voice
     skills: Mapping[str, str] = field(default_factory=dict)  # built-in skill name → its text
@@ -109,16 +156,21 @@ class ComposeContext:
     recent_openings: Tuple[str, ...] = ()
     # PRD-251C (C8, US-C406): copy Auto drafted and the copy the owner approved instead, newest first.
     voice_examples: Tuple[Mapping[str, str], ...] = ()
+    # F378 (night 11): the brand kit's social_handles (toolkit → handle), the only handles a post carries.
+    handles: Mapping[str, str] = field(default_factory=dict)
+    # F378: on a retake, the post as it is now ({copy, variables: {name: value}}), the take to start from.
+    current_take: Mapping[str, Any] = field(default_factory=dict)
 
 
 # ── the prompt ──────────────────────────────────────────────────────────────
 _ANSWER_SHAPE = {
     "title": "a short working title",
-    "copy": {"base": "the text every channel starts from", "per_channel": {"<toolkit>": "that channel's text"}},
+    "copy": {"base": "the text every channel starts from", "channels": {"<toolkit>": "that channel's text"}},
     "format": "one of video, image, carousel, fact_card, infographic, text",
     "template_id": "the id of ONE template listed (null for a text post)",
     "variables": {"<variable name>": "its value"},
     "sources": {"<claim variable name>": {"kind": "<candidate kind>", "ref": "<candidate ref>"}},
+    "questions": ["what you need from the owner to finish the post, in plain words"],
 }
 
 
@@ -139,6 +191,9 @@ def _system(ctx: ComposeContext) -> str:
         "and give each of its variables a value that fits its schema. A variable marked claim is a fact: "
         "bind it to one of the candidate sources by kind and ref, or leave it out of sources. Never invent "
         "a source, a URL or a number. Follow the brand voice: use its tone and never its banned phrases.",
+        FACTS_NOTE,
+        HANDLE_NOTE,
+        PICK_NOTE,
     ]
     if ctx.template_id:
         parts.append("The template is chosen: use the one template listed, and no other.")
@@ -153,10 +208,14 @@ def _system(ctx: ComposeContext) -> str:
         parts.append(LINE_BREAK_NOTE)
     if ctx.visual_slots:
         parts.append(VISUAL_PROMPTS_NOTE)
+    if ctx.current_take:
+        parts.append(RETAKE_RULES_NOTE)
     if ctx.recent_openings:
         parts.append(RECENT_OPENINGS_NOTE)
     if ctx.voice_examples:
         parts.append(VOICE_EXAMPLES_NOTE)
+    if ctx.skills:
+        parts.append(SKILLS_NOTE)
     for name, text in ctx.skills.items():
         parts.append(f"## Skill: {name}\n{text[:SKILL_MAX_CHARS]}")
     return "\n\n".join(parts)
@@ -171,6 +230,7 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         "channels": _channel_lines(ctx),
         "templates": [dict(t) for t in ctx.templates],
         "candidate_sources": _candidate_lines(ctx),
+        "brand_handles": dict(ctx.handles),  # F378: the only handles a post may carry
     }
     if ctx.template_id:
         material["template_id"] = ctx.template_id
@@ -185,6 +245,8 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         material["recent_openings"] = list(ctx.recent_openings)
     if ctx.voice_examples:
         material["voice_examples"] = [dict(example) for example in ctx.voice_examples]
+    if ctx.current_take:
+        material["current_take"] = dict(ctx.current_take)  # F378: the take a retake starts from
     return [
         {"role": "system", "content": _system(ctx)},
         {"role": "user", "content": json.dumps(material, default=str, ensure_ascii=False)},
@@ -238,48 +300,133 @@ def _missing(proposal: Mapping[str, Any]) -> List[str]:
     return resolve_variables(schema, supplied).missing if schema else []
 
 
-async def _fills(llm: Any, history: List[Dict[str, str]], schema: Mapping[str, Any], names: Sequence[str],
-                 timeout: float) -> Dict[str, Any]:
-    """The values one follow-up gives for ``names``; nothing when its answer is unusable or late."""
-    ask = FILL_NOTE + "\n" + json.dumps({name: schema[name] for name in names}, ensure_ascii=False, default=str)
+def _blank(value: Any) -> bool:
+    """A value that says "I don't know": nothing, or empty text."""
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _refused(given: Mapping[str, Any], schema: Mapping[str, Any]) -> Dict[str, str]:
+    """F378: each variable ``given`` holds a value for that does not fit, with why ("is longer
+    than 24 characters (31 given)"), so the follow-up can say it."""
+    supplied = {name: (v.get("value") if isinstance(v, dict) else v) for name, v in given.items() if name in schema}
+    problems = resolve_variables(schema, supplied).invalid  # each "<name> <why>"
+    return dict(problem.split(" ", 1) for problem in problems if " " in problem)
+
+
+async def _fills(llm: Any, history: List[Dict[str, str]], asks: Mapping[str, Any],
+                 timeout: float) -> Tuple[Dict[str, Any], Set[str]]:
+    """The values one follow-up gives for the variables ``asks`` names, and the ones it
+    answered null for (F378: the brief does not give them; the owner is asked). Nothing when
+    its answer is unusable or late."""
+    ask = FILL_NOTE + "\n" + json.dumps(dict(asks), ensure_ascii=False, default=str)
     try:
         raw = await _ask(llm, [*history, {"role": "user", "content": ask}], timeout)
     except ComposeTimedOut:
-        logger.warning("[Socials] compose follow-up for %d variables timed out", len(names))
-        return {}
+        logger.warning("[Socials] compose follow-up for %d variables timed out", len(asks))
+        return {}, set()
     values = raw.get("variables") if isinstance(raw, dict) else None
-    return {name: values[name] for name in names if name in values} if isinstance(values, dict) else {}
+    if not isinstance(values, dict):
+        return {}, set()
+    answered = {name: values[name] for name in asks if name in values}
+    return ({name: v for name, v in answered.items() if not _blank(v)},
+            {name for name, v in answered.items() if _blank(v)})
+
+
+async def _fill_round(llm: Any, history: List[Dict[str, str]], schema: Mapping[str, Any], given: Mapping[str, Any],
+                      names: Sequence[str], timeout: float, deadline: float) -> Tuple[Dict[str, Any], Set[str]]:
+    """One round of follow-ups for ``names``, ``FILL_BATCH`` a call, each within the time left;
+    a value that was refused is asked for with the reason."""
+    refused = _refused(given, schema)
+    fills: Dict[str, Any] = {}
+    declined: Set[str] = set()
+    for start in range(0, len(names), FILL_BATCH):
+        left = deadline - _now()
+        if left <= 0:
+            break
+        batch = names[start:start + FILL_BATCH]
+        asks = {name: {**schema[name], "refused": refused[name]} if name in refused else schema[name] for name in batch}
+        values, nulls = await _fills(llm, history, asks, min(timeout, left))
+        fills.update(values)
+        declined |= nulls
+    return fills, declined
 
 
 async def _filled(raw: Mapping[str, Any], proposal: Dict[str, Any], ctx: ComposeContext, llm: Any,
-                  messages: List[Dict[str, str]], timeout: float) -> Dict[str, Any]:
-    """The proposal with the required variables its answer left empty asked for by name
-    (``FILL_BATCH`` a call), merged over the answer (a value it gave that holds is never
-    replaced), and the whole checked again."""
+                  messages: List[Dict[str, str]], timeout: float, deadline: float) -> Dict[str, Any]:
+    """The proposal with the required variables its answer left empty (``_missing``) asked
+    for by name, merged over the answer (a value it gave that holds is never replaced) and
+    checked again; F378: round after round (``FILL_ROUNDS``, within ``deadline``) until none
+    is missing, a round adds nothing, or the model says the brief does not give it. What is
+    still missing becomes the owner's questions (``propose``)."""
+    if not _missing(proposal):
+        return proposal
+    schema = proposal["template"]["variables_schema"]
+    history = [*messages, {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False, default=str)}]
+    given: Dict[str, Any] = dict(raw.get("variables")) if isinstance(raw.get("variables"), dict) else {}
+    declined: Set[str] = set()
+    for _round in range(FILL_ROUNDS):
+        skipped = declined | compose_facts.unaskable(proposal, ctx)  # the owner's to give, never the model's
+        names = [name for name in _missing(proposal) if name not in skipped]
+        if not names or deadline - _now() <= 0:
+            break
+        fills, nulls = await _fill_round(llm, history, schema, given, names, timeout, deadline)
+        declined |= nulls
+        if not fills:
+            break
+        given = {**given, **fills}
+        proposal = compose_checks.checked_proposal({**raw, "template_id": proposal["template_id"], "variables": given}, ctx)
+    return proposal
+
+
+def _with_questions(proposal: Dict[str, Any]) -> Dict[str, Any]:
+    """F378: the proposal with each required variable still missing asked of the owner, by
+    its label ("Source line"), never as an incomplete proposal that says nothing."""
     missing = _missing(proposal)
     if not missing:
         return proposal
     schema = proposal["template"]["variables_schema"]
+    return compose_facts.with_notes(proposal, [], [compose_facts.field_label(name, schema.get(name)) for name in missing])
+
+
+def _now() -> float:
+    return asyncio.get_running_loop().time()
+
+
+async def _copy_fixed(raw: Dict[str, Any], proposal: Dict[str, Any], ctx: ComposeContext, llm: Any,
+                      messages: List[Dict[str, str]], timeout: float) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """F378: the answer and its proposal, with the copy asked for once more when it holds a
+    template placeholder; an unusable or late answer leaves both as they were (the placeholder
+    stays a warning and an owner's question)."""
+    found = compose_facts.copy_placeholders(proposal["copy"])
+    if not found:
+        return raw, proposal
+    listed = {"copy": proposal["copy"], "placeholders": [f"{where}: {placeholder}" for where, placeholder in found]}
     history = [*messages, {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False, default=str)}]
-    fills: Dict[str, Any] = {}
-    for start in range(0, len(missing), FILL_BATCH):
-        fills.update(await _fills(llm, history, schema, missing[start:start + FILL_BATCH], timeout))
-    if not fills:
-        return proposal
-    given = raw.get("variables") if isinstance(raw.get("variables"), dict) else {}
-    merged = {**raw, "template_id": proposal["template_id"], "variables": {**given, **fills}}
-    return compose_checks.checked_proposal(merged, ctx)
+    ask = COPY_FIX_NOTE + "\n" + json.dumps(listed, ensure_ascii=False)
+    try:
+        answer = await _ask(llm, [*history, {"role": "user", "content": ask}], timeout)
+    except ComposeTimedOut:
+        logger.warning("[Socials] compose follow-up for the copy's placeholders timed out")
+        return raw, proposal
+    copy = answer.get("copy") if isinstance(answer, dict) else None
+    if not isinstance(copy, dict):
+        return raw, proposal
+    fixed = {**raw, "copy": copy}
+    return fixed, compose_checks.checked_proposal(fixed, ctx)
 
 
 async def propose(ctx: ComposeContext, llm_factory: Callable[[], Any], timeout: float) -> Dict[str, Any]:
-    """The proposal for ``ctx``: one call, one retry when the JSON is unusable, and a
-    follow-up for the template's required variables the answer left empty."""
+    """The proposal for ``ctx``: one call, one retry when the JSON is unusable, the copy asked
+    for again when it holds a placeholder (F378), and follow-ups for the template's required
+    variables the answer left empty; what is still missing is asked of the owner (``questions``)."""
     llm = llm_factory()
     messages = build_messages(ctx)
+    deadline = _now() + timeout * PROPOSE_BUDGET_CALLS  # F378: every follow-up fits in this
     for attempt in range(ATTEMPTS):
         raw = await _ask(llm, messages, timeout)
         if raw is not None:
-            return await _filled(raw, compose_checks.checked_proposal(raw, ctx), ctx, llm, messages, timeout)
+            raw, proposal = await _copy_fixed(raw, compose_checks.checked_proposal(raw, ctx), ctx, llm, messages, timeout)
+            return _with_questions(await _filled(raw, proposal, ctx, llm, messages, timeout, deadline))
         logger.warning("[Socials] compose answer %d was not JSON", attempt + 1)
         messages = [*messages, {"role": "user", "content": RETRY_NOTE}]
     raise ComposeFailed("The model's answer could not be read as a proposal. Try again, or start from a blank draft.")

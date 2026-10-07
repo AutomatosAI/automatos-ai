@@ -32,6 +32,14 @@ export interface ComposerDraft {
   /** Channel (toolkit) → what its post kind needs (US-209: YouTube's privacy and category). */
   options: Record<string, SocialPostTargetOptions>
   warnings: string[]
+  /** F378: what Auto needs from the owner (a fact the brief does not give, a photo). */
+  questions: string[]
+}
+
+/** F378: "Auto needs: …", what the proposal asks of the owner; null when it asks nothing. */
+export function autoNeeds(questions: ReadonlyArray<string> | null | undefined): string | null {
+  const asked = (questions ?? []).map((question) => question.trim()).filter(Boolean)
+  return asked.length ? `Auto needs: ${asked.join('; ')}` : null
 }
 
 // The post kinds a post format publishes as, most fitting first.
@@ -68,7 +76,7 @@ export function draftFromProposal(
     brief,
     title: proposal.title,
     base: proposal.copy.base,
-    perChannel: { ...proposal.copy.per_channel },
+    perChannel: { ...proposal.copy.channels },
     format: proposal.format,
     templateId: proposal.template_id,
     template: proposal.template ?? null,
@@ -77,6 +85,7 @@ export function draftFromProposal(
     kinds,
     options: {},
     warnings: [...proposal.warnings],
+    questions: [...(proposal.questions ?? [])],
   }
 }
 

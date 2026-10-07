@@ -276,8 +276,9 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("GET", "/api/socials/templates"),
             ("PUT", "/api/socials/posts/{post_id}/slot"),
             ("POST", "/api/socials/posts/{post_id}/media"),
-            # PRD-251B US-B111: another take of a post in the Queue (api/socials_retake.py).
+            # PRD-251B US-B111: another take of a post in the Queue (api/socials_retake.py); F378: its undo.
             ("POST", "/api/socials/posts/{post_id}/retake"),
+            ("POST", "/api/socials/posts/{post_id}/retake/undo"),
             # PRD-251B Wave 2: plans (US-B202, US-B204, US-B208; api/socials_plans.py) and their
             # content bank (US-B203; api/socials_topics.py).
             ("GET", "/api/socials/plans"),

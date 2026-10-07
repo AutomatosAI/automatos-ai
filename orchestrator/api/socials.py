@@ -565,7 +565,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # 3 Oct 2026: a still post renders each size its channels need; a video one (render.sizes_for).
     bundle, *other_sizes = [
         render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "", size=size,
-                          footage_slots=footage_plan.shown if footage_plan is not None else ())
+                          footage_slots=footage_plan.shown if footage_plan is not None else (), require_photos=True)
         for size in render.sizes_for(post, template)
     ]
     # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.

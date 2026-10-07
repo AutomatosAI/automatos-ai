@@ -84,7 +84,7 @@ from sqlalchemy import func, or_, update
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
-from modules.socials import text_search
+from modules.socials import post_text, text_search
 from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
@@ -400,7 +400,7 @@ def _validate_copy(value: Any) -> Dict[str, Any]:
     for toolkit, text in channels.items():
         if not isinstance(text, str):
             raise InvalidPost(f"copy.channels.{toolkit} must be a string")
-    return dict(copy)
+    return post_text.without_placeholders(post_text.COPY, dict(copy), InvalidPost)  # F378: never "{name}"
 
 
 def _validate_format(value: Any) -> Optional[str]:
@@ -443,7 +443,7 @@ def _validate_variables(value: Any) -> Dict[str, Any]:
             raise InvalidPost(f"variables.{name} keys must be 'value' and 'claim', got {unknown!r}")
         if "claim" in spec and not isinstance(spec["claim"], bool):
             raise InvalidPost(f"variables.{name}.claim must be a boolean")
-    return dict(variables)
+    return post_text.without_placeholders(post_text.VARIABLES, dict(variables), InvalidPost)  # F378
 
 
 def validate_sources(value: Any) -> Dict[str, Any]:

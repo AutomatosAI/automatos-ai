@@ -96,7 +96,9 @@ from core.music_credit import MusicCredit, MusicCreditMissing, credit_for_render
 from core.social_cuts import cut_to_length, slots_cut_out
 from modules.socials.kokoro_voices import with_kokoro_voice
 from modules.socials.music import with_music
-from core.social_templates import SOCIAL_VIDEO, SocialTemplateError, is_social_format, resolve_variables, validate_social_blocks
+from core.social_templates import (
+    SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, resolve_variables, validate_social_blocks,
+)
 from modules.socials import channel_sizes, notify, service
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
@@ -115,6 +117,10 @@ DEFAULT_ASPECT = "original"
 STORY_KIND = "story"  # PRD-251C (US-C301): a target posted as an Instagram story
 # US-208: a preview's files never share a name with the post's rendered media.
 PREVIEW_FILE_PREFIX = "preview-"
+# F378 (B19): a post whose required photo is empty renders nothing, saying where it goes.
+NEEDS_PHOTO_MESSAGE = (
+    "this template needs a photo: add one to '{label}' (upload one, pick one from the Library, or let AI make one)"
+)
 
 MEDIA_PROFILE_MESSAGE = (
     "Rendering needs the media profile: start the renderer with "
@@ -188,6 +194,7 @@ def bundle_for(
     fallback_name: str = "",
     footage_slots: Sequence[str] = (),
     size: Optional[str] = None,
+    require_photos: bool = False,
 ) -> Dict[str, Any]:
     """The render bundle media-render takes (``services/media-render/media_render/bundle.py``),
     at ``size`` (one of the template's; its default when ``None``, ``channel_sizes``).
@@ -199,6 +206,9 @@ def bundle_for(
     every other slot plays the template's own motion graphics.
     :class:`NotRenderable` when the post has no social template, the template
     breaks its contract, or the post leaves a variable without a default empty.
+    F378 (B19): with ``require_photos`` (a post's own render, never a preview or a
+    thumbnail, which show the template's stand-in), also when a photo the template marks
+    required is not among ``footage_slots``: a saved post never renders without it.
     """
     blocks = composition_of(template)
     if blocks is None:
@@ -208,6 +218,9 @@ def bundle_for(
     except SocialTemplateError as exc:
         raise NotRenderable(f"this post's template cannot be rendered: {exc}") from exc
     blocks = at_chosen_length(blocks, post)
+    empty = empty_required_slots(blocks, footage_slots) if require_photos else []
+    if empty:
+        raise NotRenderable(NEEDS_PHOTO_MESSAGE.format(label=empty[0]))
     if template.format == SOCIAL_VIDEO:  # PRD-251B: the post's music and Kokoro voice, render settings
         blocks = with_kokoro_voice(with_music(blocks, getattr(post, "music", None)), getattr(post, "voice", None))
     supplied = {

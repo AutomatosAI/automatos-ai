@@ -123,7 +123,7 @@ def composer(api, monkeypatch):
 def _answer(state, **overrides):
     answer = {
         "title": "Harvest Club opens Friday",
-        "copy": {"base": "Harvest Club opens Friday.", "per_channel": {
+        "copy": {"base": "Harvest Club opens Friday.", "channels": {
             "twitter": "Harvest Club: Friday.", "linkedin": "We open Harvest Club on Friday.",
             "instagram": "Friday! #harvest",
         }},
@@ -151,13 +151,15 @@ def test_the_proposal_has_each_channels_copy_a_template_valid_variables_and_cand
     assert resp.status_code == 200, resp.text
     proposal = resp.json()
     assert proposal["channels"] == ["twitter", "linkedin", "instagram"]
-    assert set(proposal["copy"]["per_channel"]) == {"twitter", "linkedin", "instagram"}
-    assert proposal["copy"]["per_channel"]["linkedin"] == "We open Harvest Club on Friday."
+    assert set(proposal["copy"]["channels"]) == {"twitter", "linkedin", "instagram"}
+    assert proposal["copy"]["channels"]["linkedin"] == "We open Harvest Club on Friday."
     assert proposal["template_id"] == composer.template and proposal["format"] == "image"
     assert proposal["template"] == {
         "id": composer.template, "name": "Fact card", "format": "social_image", "sizes": ["1080x1350"], "variables_schema": SCHEMA,
         # PRD-251B (B5): the lengths a video declares; an image declares none.
         "durations": [],
+        # F378: what the template is for, its description and its photo spots (none here).
+        "description": None, "photo_slots": [],
     }
     assert proposal["variables"] == {
         "headline": {"value": "Opens Friday", "claim": False},
@@ -190,9 +192,9 @@ def test_a_channel_that_is_not_connected_is_left_out_with_a_warning(composer):
 
 
 def test_a_channel_the_model_forgot_starts_from_the_base_copy(composer):
-    answer = _answer(composer, copy={"base": "Harvest Club opens Friday.", "per_channel": {"twitter": "Friday."}})
+    answer = _answer(composer, copy={"base": "Harvest Club opens Friday.", "channels": {"twitter": "Friday."}})
     proposal = _compose(composer, [answer]).json()
-    assert proposal["copy"]["per_channel"]["linkedin"] == "Harvest Club opens Friday."
+    assert proposal["copy"]["channels"]["linkedin"] == "Harvest Club opens Friday."
     assert any(w.startswith("linkedin: no text of its own") for w in proposal["warnings"])
 
 
@@ -235,14 +237,14 @@ def test_variables_outside_the_schema_or_of_the_wrong_type_are_dropped(composer)
 def test_over_limit_copy_is_trimmed_at_a_word_boundary_with_a_warning(composer):
     long_tweet = ("Harvest " * 40).strip()  # 319 characters
     tags = " ".join(f"#tag{i}" for i in range(35))
-    answer = _answer(composer, copy={"base": "b", "per_channel": {
+    answer = _answer(composer, copy={"base": "b", "channels": {
         "twitter": long_tweet, "linkedin": "fine", "instagram": f"Friday. {tags}",
     }})
     proposal = _compose(composer, [answer]).json()
-    tweet = proposal["copy"]["per_channel"]["twitter"]
+    tweet = proposal["copy"]["channels"]["twitter"]
     assert len(tweet) <= 280 and tweet.endswith("Harvest") and long_tweet.startswith(tweet)
     assert "twitter: the copy was trimmed to 280 characters at a word boundary" in proposal["warnings"]
-    insta = proposal["copy"]["per_channel"]["instagram"]
+    insta = proposal["copy"]["channels"]["instagram"]
     assert insta.count("#") == 30 and "#tag29" in insta and "#tag30" not in insta
     assert "instagram: 5 hashtags over the limit of 30 were dropped" in proposal["warnings"]
 

@@ -51,7 +51,7 @@ def _ctx(template=STORY):
 
 
 def _answer(**variables):
-    return {"title": "Auto runs the night", "copy": {"base": "Meet Auto.", "per_channel": {"twitter": "Meet Auto."}},
+    return {"title": "Auto runs the night", "copy": {"base": "Meet Auto.", "channels": {"twitter": "Meet Auto."}},
             "format": "video", "template_id": "story", "variables": variables, "sources": {}}
 
 
@@ -108,7 +108,8 @@ def test_a_value_that_does_not_hold_is_asked_for_again():
     model = _Model([_answer(hook="x" * 61, beat_1="a", beat_2="b", end_url="automatos.app"),
                     {"variables": {"hook": "Your business never sleeps."}}])
     proposal = _propose(model)
-    assert _asked_for(model.asked[1]) == {"hook": SCHEMA["hook"]}
+    # F378: the follow-up says why the value was refused, so the next one fits.
+    assert _asked_for(model.asked[1]) == {"hook": {**SCHEMA["hook"], "refused": "is longer than 60 characters (61 given)"}}
     assert _values(proposal)["hook"] == "Your business never sleeps."
 
 

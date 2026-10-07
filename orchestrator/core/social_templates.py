@@ -38,7 +38,8 @@ carries a composition in ``blocks``, which media-render renders:
   its place. A generation toolkit fills a slot only when the post asks for it
   (S1.8); ``"generate": false`` marks a slot only the workspace's own file may
   fill, such as an app's real screen recording (never generated UI, D12):
-  :func:`slot_generatable`.
+  :func:`slot_generatable`. ``"required": true`` (F378) marks a slot a post renders
+  only once it is filled, a photo the card is nothing without: :func:`slot_required`.
 * **Stills.** An image renders as PNG snapshots of its composition, one per
   moment in ``stills`` (US-107): one for a card, one per slide for a carousel.
   A still with ``when`` is taken only when that variable has a value, so a
@@ -69,6 +70,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from core.chart_binding import data_errors
 from core.social_brand_rule import brand_literals
+from core.social_text_values import text_value_problem
 
 # The two formats a social template has. core/models/core.py reads them from
 # here for the document_templates format CHECK (the prd251_wave1 migration).
@@ -124,8 +126,9 @@ MAX_REPORTED_ERRORS = 50
 VIDEO_SLOT, IMAGE_SLOT = "video", "image"
 SLOT_EXTENSIONS = {VIDEO_SLOT: ("mp4", "webm", "mov"), IMAGE_SLOT: ("png", "jpg", "jpeg", "webp")}
 SLOT_TAGS = {VIDEO_SLOT: "video", IMAGE_SLOT: "img"}
-SLOT_SPEC_KEYS = ("kind", "label", "description", "path", "generate")
+SLOT_SPEC_KEYS = ("kind", "label", "description", "path", "generate", "required")
 SLOT_DIR = "assets/slots/"
+REQUIRED_SLOT_WHY = "true: a post renders only once it is filled"
 MAX_SLOTS = 12
 
 # Stills: the moments an image render snapshots, one PNG each, ten at most (a
@@ -265,7 +268,9 @@ def _value_problem(spec: Mapping[str, Any], value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return "must be text"
         limit = spec.get("max_chars", MAX_TEXT_CHARS)
-        return f"is longer than {limit} characters" if len(value) > limit else None
+        if len(value) > limit:  # F378: the length given, so a re-ask can say by how much
+            return f"is longer than {limit} characters ({len(value)} given)"
+        return text_value_problem(value)  # F378: never a placeholder or a bare "true"
     if kind == NUMBER:
         if not _is_number(value):
             return "must be a number"
@@ -428,6 +433,24 @@ def without_slots(html: str, slots: Mapping[str, Any], keep: Iterable[str] = ())
     return html
 
 
+def slot_required(spec: Mapping[str, Any]) -> bool:
+    """F378: whether a post renders only once the slot is filled (``"required": true``): a
+    photo the card is nothing without, such as Just the photo's or a before and after."""
+    return spec.get("required") is True
+
+
+def empty_required_slots(blocks: Mapping[str, Any], filled: Iterable[str]) -> List[str]:
+    """F378: the label of each slot marked required (:func:`slot_required`) that ``filled``
+    (the slots a render shows) leaves empty, in the template's order."""
+    slots = blocks.get("slots") if isinstance(blocks.get("slots"), Mapping) else {}
+    shown = set(filled)
+    return [
+        str(spec.get("label") or name)
+        for name, spec in slots.items()
+        if isinstance(spec, Mapping) and slot_required(spec) and name not in shown
+    ]
+
+
 def slot_generatable(spec: Mapping[str, Any]) -> bool:
     """Whether a generation toolkit may fill the slot (S1.8): every slot but one marked ``"generate": false``."""
     return spec.get("generate") is not False
@@ -447,8 +470,9 @@ def _slot_spec_errors(name: Any, spec: Any) -> List[Dict[str, str]]:
     for key in ("label", "description"):
         if key in spec and (not isinstance(spec[key], str) or len(spec[key]) > MAX_LABEL_CHARS):
             errors.append(_error(f"{where}.{key}", f"must be text of at most {MAX_LABEL_CHARS} characters"))
-    if "generate" in spec and not isinstance(spec["generate"], bool):
-        errors.append(_error(f"{where}.generate", "must be true or false (false: only the workspace's own file fills it)"))
+    for key, why in (("generate", "false: only the workspace's own file fills it"), ("required", REQUIRED_SLOT_WHY)):
+        if key in spec and not isinstance(spec[key], bool):
+            errors.append(_error(f"{where}.{key}", f"must be true or false ({why})"))
     kind = spec.get("kind")
     if kind not in SLOT_EXTENSIONS:
         return errors + [_error(f"{where}.kind", f"must be one of {list(SLOT_EXTENSIONS)}")]
@@ -712,6 +736,7 @@ __all__ = [
     "SocialTemplateError",
     "VIDEO_SLOT",
     "claim_names",
+    "empty_required_slots",
     "fill_text",
     "is_bundle_variable",
     "is_social_format",
@@ -721,6 +746,7 @@ __all__ = [
     "root_duration",
     "slot_generatable",
     "slot_names_in",
+    "slot_required",
     "still_moments",
     "validate_social_blocks",
     "voice_lines",

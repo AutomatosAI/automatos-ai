@@ -63,12 +63,14 @@
     "before": {
       "kind": "image",
       "path": "assets/slots/before.png",
+      "required": true,
       "label": "Before photo",
       "description": "The before shot, no words in it: the same subject and framing as the after. Upload one or pick one from the Library."
     },
     "after": {
       "kind": "image",
       "path": "assets/slots/after.png",
+      "required": true,
       "label": "After photo",
       "description": "The after shot, no words in it: the same subject and framing as the before. Upload one or pick one from the Library."
     }
