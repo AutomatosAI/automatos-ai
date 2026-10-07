@@ -1,0 +1,121 @@
+{
+  "decisions": [
+    "D2 (US-010, PRD §9 Q2): Auto always answers; a specialist never takes over the owner's chat with its own persona and tools; a message that names an agent or role files a ticket (ASSIGN) and Auto reports the number. The DELEGATE lane is removed from api/chat.py.",
+    "D3 (US-013, PRD §9 Q3): built only if the owner's four-arm run (US-009) records a median prep_ms above 2,000 ms; the loop reads the owner's note on US-009 before starting US-013 and marks US-013 `SKIPPED — prep_ms under 2 s` if the note says so, or `→ BLOCKED — no US-009 note yet` if there is no note. A SKIPPED or BLOCKED story never stops the wave: the PR opens and CI runs on the rest.",
+    "D4 (Jev, PRD §9 Q4): not in this PRD. Nothing goes live; the shadow keeps recording.",
+    "D5 (failover model, PRD §9 Q5): NONE. A provider refusal or rate limit fails the turn honestly (turn_errors), never a silent answer on another model; the config key `LLM_FAILOVER_MODEL` exists, defaults to empty, and is the only place a failover could be set.",
+    "D6 (the ATOM lane, PRD §9 Q6): kept, with the promoted tools shipped on it (Wave 1 US-006).",
+    "D9 (one PR per wave): as Wave 1: story commits end with ' [skip ci]', the draft PR is opened once by the runner when the build is COMPLETE, one CI run per wave.",
+    "D11 (stacking): until Wave 1 is on main, this branch is STACKED on feat/prd-256-w1-receipts-gates and starts as soon as Wave 1 is pushed for its CI (owner, 6 Oct: no waiting on the previous wave's CI). Never merge Wave 1 or main into this branch."
+  ],
+  "project": "PRD-256 Auto, receipts not narration — Wave 2: the model, Auto always answers, one hand-off table, the families deleted",
+  "branchName": "feat/prd-256-w2-model-lanes",
+  "baseBranch": "feat/prd-256-w1-receipts-gates",
+  "description": "Wave 2 of PRD-256 (docs/PRDS/PRD-256-AUTO-RECEIPTS-GATES-CONTRACTS.md). US-008..US-013 in priority order: the Claude-ready LLM manager (sampling params, price table, an explicit failover); the four-arm run is the owner's (US-009, OWNER); Auto always answers and named agents get tickets (the DELEGATE lane removed); one hand-off table instead of four lanes; the regex claim families deleted once the receipts rule is proven; context assembly under two seconds, only if US-009's measurement says so. Stacked on Wave 1 until Wave 1 is on main. The decisions above are binding. Diff base for every check: `bash scripts/ralph/acceptance-prd256w2.sh --print-base`.",
+  "ownerTest": [
+    "US-009 is the owner's run: the four arms (gemini-0.7, gemini-0.2, sonnet-5, haiku-4.5) on the eval set after Wave 1 is on main; the table in runs/results.md; the default model decision; write the median prep_ms per arm into the US-009 note (US-013 reads it).",
+    "US-010 in the browser: 'Give #<card> to <agent>' assigns the named card and makes no copy; an ask with no agent named is answered by Auto (agent-info says Auto).",
+    "Night 12 in c1 on a fresh build from main only once the eval passes its bars (PRD §10).",
+    "Both editions: the same checks on the local stack and, after deploy, on SaaS."
+  ],
+  "userStories": [
+    {
+      "id": "P256-W2-US-008",
+      "title": "A Claude-ready LLM manager",
+      "description": "As the operator, I want a Claude 4.6+ model to be a one-line switch for Auto, so the model test and the decision cost nothing in plumbing.",
+      "acceptanceCriteria": [
+        "Sampling parameters (temperature, top_p, top_k) are omitted for Claude 4.6+ model ids on every client path (core/llm/clients/anthropic_client.py, the OpenRouter path through openai_compatible_client.py / openai_chat_request.py), through the existing per-model check in core/llm/clients/base.py (the OpenAI-reasoning-model rule extended, one function, no copy).",
+        "core/llm/manager.py's price table gains claude-sonnet-5, claude-haiku-4-5 and claude-opus-5 at list price (input, output per 1k tokens), ordered longest-key-first as the table requires.",
+        "A config key `LLM_FAILOVER_MODEL` in orchestrator/config.py (default empty) named in reports/config-surface.json; with it empty, a rate-limited or refused provider call fails the turn honestly through turn_errors and never answers on another model; the receipts frame carries the model that answered.",
+        "Reasoning passthrough for Claude via OpenRouter is covered by a recorded-transport test (the request carries the reasoning setting the manager already uses; the response's reasoning deltas reach the existing PRD-238 stream).",
+        "Tests: `orchestrator/tests/test_prd256_llm_manager_claude5_params.py` with a recorded transport (no temperature on a Sonnet 5 request; the governor prices it; the failover comes from config and is empty by default).",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P256-W2-US-009",
+      "title": "The four-arm run and the decision (owner's run)",
+      "description": "As the owner, I want Auto's default model chosen by the same asks on four models, with the bars set before the run, so the choice is a measurement and not a guess.",
+      "acceptanceCriteria": [
+        "→ OWNER: arms A to D on the eval pack after Wave 1 is on main; one table in runs/results.md with the four rates, cost per 100 asks, p50 turn latency and median prep_ms per arm; the bars: claims backed ≥ 95%, wrong-surface ≤ 5%, first-time-right ≥ 80%, owner-only without a click = 0.",
+        "→ OWNER: the default model for the Auto agent set to the cheapest arm that passes every bar (Settings, agent 1, Model tab), and the choice written into this story's note as `DEFAULT=<model>` and `PREP_MS_MEDIAN=<ms>`.",
+        "ALREADY ON MAIN (verified 7 Oct): `core/llm/defaults.py` holds `DEFAULT_LLM_MODEL` / `DEFAULT_LLM_PROVIDER` and `get_default_model_config()`, and `core/seeds/seed_auto_agent.py::_get_default_model_config` reads it, as do config.py and api/workspaces.py. Build NOTHING there. The loop adds only the pin: `orchestrator/tests/test_prd256_default_model_pin.py` asserts the seeded Auto model_config's provider and model_id equal the constants, so the owner's decision stays a one-line change in defaults.py (and the Settings row for agent 1 in an existing workspace, which the seed never rewrites).",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The loop builds only the pin test; the first two criteria are the owner's and stay as written. The constant already exists: do not add a second one."
+    },
+    {
+      "id": "P256-W2-US-010",
+      "title": "Auto always answers; work goes to agents on tickets",
+      "description": "As an owner, I want Auto to be the one voice in my chat, so a specialist never answers me in its own persona and the work goes to the team on tickets I can see.",
+      "acceptanceCriteria": [
+        "The DELEGATE lane is removed from api/chat.py: `UniversalRouter` is no longer imported or called by the chat dispatch; no chat turn is answered by an agent other than Auto unless the owner chose that agent in the UI (request.agentId).",
+        "A message that names an agent or role resolves to the ASSIGN lane (apply_assign_bias): Auto files the ticket for that agent with the dispatch contract and reports the number; a role with no roster match asks once, as today.",
+        "The Tier-3 rubric in consumers/chatbot/auto.py drops 'delegate … (Most molecule/cell/organ work.)' and its example; `Action.DELEGATE` maps to RESPOND with the platform tools; the 24-hour verdict cache is bypassed for any verdict that would have routed away (the cache key or the store skips them).",
+        "The Jev shadow keeps recording the classifier unchanged; nothing reads its agreement as a quality signal.",
+        "Tests: `orchestrator/tests/test_prd256_auto_answers_unless_named.py` on the dispatch (an unnamed ask → Auto; 'Give #0192 to the Support Agent' → ASSIGN on the named card, no copy; a chosen agentId → that agent); the F263 and F241 tests updated with the reason in their docstrings.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P256-W2-US-011",
+      "title": "One hand-off table instead of four lanes",
+      "description": "As a maintainer, I want the 'who owns this kind of ask' rules in one table, so the next kind of work is one row and not a new module.",
+      "acceptanceCriteria": [
+        "A new module `orchestrator/consumers/chatbot/handoffs.py` holds ONE table: ask kind (brand work, customer paperwork with no template named, socials work) → the agent role that owns it → the note the ticket carries; the classifier (AutoBrain.assess) reads the table once per turn and pins the ASSIGN lane for the resolved agent.",
+        "brand_assign_lane.py, paperwork_to_the_team.py and the routing halves of brand_to_the_designer.py and named_template_note.py are deleted (not shimmed); the named-template field note (the studio's shape) stays as data in named_template_note.py.",
+        "A golden file `orchestrator/tests/fixtures/prd256_routing_golden.json` generated from the routing asks (the PRD's eval categories wrong-routing and wrong-tool, listed in the test) BEFORE the change is asserted AFTER it: the same asks route the same way.",
+        "service.py loses the imports and the decorators on _retrieval_first that the table replaces; the deleted modules' tests move to `orchestrator/tests/test_prd256_handoffs.py`.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P256-W2-US-012",
+      "title": "Delete the families",
+      "description": "As a maintainer, I want the regex claim families gone once receipts hold, so the next surface does not need a new vocabulary.",
+      "acceptanceCriteria": [
+        "Preconditions, read from the owner's US-009 note before starting: the post-wave-1 eval shows claims backed ≥ 95% on the chosen arm. If the note is missing or below the bar, do NOT build: mark every criterion of this story `→ BLOCKED — <the note's text, or 'no US-009 note yet'>` in this file, commit that alone, reply `STORY_DONE P256-W2-US-012` and the loop goes on to US-013 (RALPH_BLOCKED is for a Hard NO only; a blocked story never stops the wave's PR and CI). When the owner writes the note later, delete the BLOCKED marks and relaunch: the loop builds it then.",
+        "action_claims.py, document_claims.py, shop_and_team_claims.py, the tier 1 and tier 3 paths of claim_check.py, and the note lanes figure_disputes.py, shop_figures.py and team_corrections.py are deleted; claim_check.py keeps tier 2 and the receipts rule; needs_you_turn.py and team_findings.py keep their pre-reads (data) and lose their rule prose; the in-loop nudge in tool_loop.py uses the receipts rule.",
+        "Every claim test file (the 26 named test_f108*, test_f187*, test_f261*, test_f314*, test_f316*, test_f319*, test_f324*, test_f351*, test_f363* and test_tool_loop_narrated_actions.py) is rewritten against receipts; none is weakened, skipped or deleted without a replacement test that covers the same sentence (the gate counts deleted test functions against added ones).",
+        "`service.py` ends the wave shorter than it started (3,268 lines on main of 7 Oct); a test pins a ceiling of 3,200 lines.",
+        "Tests: `orchestrator/tests/test_prd256_families_deleted.py` (the modules are gone; the receipts rule covers the 25 sentences).",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P256-W2-US-013",
+      "title": "Context assembly under two seconds (only if US-009 says so)",
+      "description": "As an owner, I want a reply to start within a couple of seconds, so a turn is not eight seconds of assembly before the first word.",
+      "acceptanceCriteria": [
+        "Read the owner's US-009 note first: if `PREP_MS_MEDIAN` is at or under 2000, mark every criterion here `SKIPPED — prep_ms under 2 s` and finish the wave; if the note is missing, mark every criterion `→ BLOCKED — no US-009 note yet` and finish the wave (reply `STORY_DONE P256-W2-US-013`, never RALPH_BLOCKED); otherwise build.",
+        "The per-workspace sections (identity, product_facts, skills, platform_actions) are cached across turns in the ContextService with invalidation on the writes that change them (agent, skill, kit, action registry); the board and document pre-reads in _retrieval_first run concurrently.",
+        "Median prep_ms on a fixed workspace under two seconds with the same prompt text (a test with a fake clock pins the cache hit path; the real median is the owner's eval).",
+        "Tests: `orchestrator/tests/test_prd256_context_assembly.py` (cache hit, invalidation on each write, same rendered sections).",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
