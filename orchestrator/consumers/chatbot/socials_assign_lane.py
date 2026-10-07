@@ -49,7 +49,9 @@ _SOCIAL_THING = (r"(?:(?:instagram|insta|ig|linkedin|x|twitter|tiktok|facebook|s
                  r"(?:posts?|carousels?|reels?|stor(?:y|ies)|videos?|cards?|captions?|updates?)"
                  r"|carousels?|reels?|tweets?)")
 _ASKS_FOR_IT = re.compile(_MAKE + r"[^.?!\n]{0,60}?\b" + _SOCIAL_THING + r"\b", re.I)
-_QUESTION = re.compile(r"^\s*(?:what|which|who|whose|when|where|why|how|did|does|is|are|was|were|has|have)\b", re.I)
+# "Have you…?" asks; "Have our social media team…" hands the work over.
+_QUESTION = re.compile(r"^\s*(?:what|which|who|whose|when|where|why|how|did|does|is|are|was|were|"
+                       r"(?:has|have)\s+(?:you|we|i|they)\b)", re.I)
 # The posts already made: listing, reading, approving or removing them is Auto's, with its own tools.
 _ABOUT_MADE_ONES = re.compile(r"\b(?:list|show|which|how many|waiting|approv\w*|status|look at|read|check|delete|"
                               r"remove|publish\w*|schedul\w*|already)\b", re.I)
