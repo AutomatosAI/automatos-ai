@@ -53,13 +53,16 @@ def test_prompt_instructs_one_line_lane_narration():
 # ---------------------------------------------------------------------------
 
 def test_three_lane_rubric_still_intact():
+    """PRD-256 US-010 (D2) changed the first lane: Auto answers (respond), no specialist
+    takes over the chat, so "delegate" is no longer offered to the classifier."""
     p = build_assessment_prompt("do a thing", 0, "")
     assert "Routing lanes" in p
-    assert "delegate" in p and "assign" in p and "mission" in p
-    assert "answers THIS conversation" in p
+    assert "respond" in p and "assign" in p and "mission" in p
+    assert "**delegate**" not in p
+    assert "answer THIS conversation yourself" in p
     assert "off-thread" in p.lower()
     # 224's named-agent + defer signals remain
     assert "my accountant agent" in p and "role possessive" in p
     for phrase in ("queue it", "later", "when free"):
         assert phrase in p
-    assert '"action": "respond|delegate|assign|mission"' in p
+    assert '"action": "respond|assign|mission"' in p

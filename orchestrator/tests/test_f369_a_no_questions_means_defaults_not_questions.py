@@ -80,7 +80,6 @@ def branded_invoice(monkeypatch):
             return [BRANDED.row]
 
     monkeypatch.setattr(template_service, "DocumentTemplateService", _Templates)
-    monkeypatch.setattr(note_module, "designer_note", lambda *a, **k: None)
     monkeypatch.setattr(note_module, "named_in_conversation", lambda texts, rows: BRANDED)
     monkeypatch.setattr(note_module, "_schema", lambda db, workspace_id, row: SCHEMA)
 

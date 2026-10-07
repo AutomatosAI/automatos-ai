@@ -28,7 +28,7 @@ from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 from .byok_endpoint import with_key_endpoint
 
-from core.llm import output_budget, usage_status
+from core.llm import failover, output_budget, usage_status
 
 logger = logging.getLogger(__name__)
 
@@ -646,8 +646,6 @@ class LLMManager:
             return True
         return any(p.search(error_text) for p in self._DEAD_MODEL_PATTERNS)
 
-    # No fallback helpers — errors surface directly to the user.
-
     @reprompts_in_the_users_turn  # F295 (8): a re-prompt after the model's reply is the user's turn
     async def generate_response(
         self,
@@ -678,17 +676,22 @@ class LLMManager:
             self._note_cut(response, budget)
             return response
         except Exception as exc:
-            self._track_usage(None, start, status="error")
-            self._remember_refusal(exc)
-            self._note_refusal(exc, budget)
+            self._call_failed(exc, start, budget)
+            target = failover.failover_for(exc, self.config.model)  # PRD-256 US-008: none by default (D5)
+            if target is None:
+                self._raise_unavailable(exc)
+                raise
+            return await failover.answer_on_failover(self, target, messages, tools)
 
-            if self._is_retriable_model_error(exc):
-                raise ValueError(
-                    f"Model '{self.config.model}' is unavailable or has been removed. "
-                    f"Please select a different model in Settings."
-                ) from exc
+    def _call_failed(self, exc: Exception, start: float, budget: Optional[int]) -> None:
+        self._track_usage(None, start, status="error")
+        self._remember_refusal(exc)
+        self._note_refusal(exc, budget)
 
-            raise
+    def _raise_unavailable(self, exc: Exception) -> None:
+        if self._is_retriable_model_error(exc):
+            raise ValueError(f"Model '{self.config.model}' is unavailable or has been removed. "
+                             "Please select a different model in Settings.") from exc
 
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> Any:
         """Generate response using the configured provider (synchronous), with usage tracking."""
@@ -702,16 +705,8 @@ class LLMManager:
             self._note_cut(response, budget)
             return response
         except Exception as exc:
-            self._track_usage(None, start, status="error")
-            self._remember_refusal(exc)
-            self._note_refusal(exc, budget)
-
-            if self._is_retriable_model_error(exc):
-                raise ValueError(
-                    f"Model '{self.config.model}' is unavailable or has been removed. "
-                    f"Please select a different model in Settings."
-                ) from exc
-
+            self._call_failed(exc, start, budget)
+            self._raise_unavailable(exc)
             raise
 
     def _call_budget(self) -> Optional[int]:
@@ -1026,6 +1021,11 @@ _MODEL_COST_ENTRIES: Dict[str, Tuple[float, float]] = {
     "gemini-2.5-flash": (0.0003, 0.0025),
     "gemini-2.5-pro": (0.00125, 0.01),
     "gpt-5.5": (0.005, 0.03),
+    # PRD-256 US-008: the Claude arms at list price; OpenRouter writes Haiku 4.5 with a dot.
+    "claude-sonnet-5": (0.002, 0.010),
+    "claude-opus-5": (0.005, 0.025),
+    "claude-haiku-4-5": (0.001, 0.005),
+    "claude-haiku-4.5": (0.001, 0.005),
 }
 MODEL_COST_MAP: Dict[str, Tuple[float, float]] = dict(
     sorted(_MODEL_COST_ENTRIES.items(), key=lambda kv: -len(kv[0]))

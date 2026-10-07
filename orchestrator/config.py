@@ -274,6 +274,12 @@ class Config:
             )
         except Exception:
             return os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
+
+    # PRD-256 US-008 (Decision D5): the one place a failover model could be set.
+    # Empty by default: a provider that rate-limits or refuses a call fails the
+    # turn honestly (consumers/chatbot/turn_errors.py), never answering on another
+    # model. Set, a refused call is asked once more on it (core/llm/failover.py).
+    LLM_FAILOVER_MODEL: str = (os.getenv("LLM_FAILOVER_MODEL", "") or "").strip()
     
     @property
     def BLOG_COVER_MODEL(self) -> str:

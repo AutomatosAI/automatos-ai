@@ -13,7 +13,8 @@ A message that names a card by its number, asks what is on the board, or tells
 Auto to act on "the card" is Auto's to handle with its platform tools
 (AutoBrain's fast path), and its answer comes from the board, not from documents
 (no retrieval first). A hashtag ("#HarbourBlend") or an order's number ("order #1043")
-is not a card's number.
+is not a card's number. One exception since PRD-256 US-010: a card handed to a named
+agent is the ASSIGN lane on that card (consumers.chatbot.handoffs), never a copy.
 """
 from __future__ import annotations
 
