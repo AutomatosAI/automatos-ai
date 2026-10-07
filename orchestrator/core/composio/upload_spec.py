@@ -60,6 +60,14 @@ def is_publisher_call() -> bool:
     return _PUBLISHER_CALL.get()
 
 
+def composio_tool_slug(action: Any) -> str:
+    """The tool slug Composio's files API takes for ``action``: the canonical action
+    slug (``INSTAGRAM_POST_IG_USER_MEDIA``). Composio stopped accepting the
+    hyphenated form (``instagram-post-ig-user-media``) on 7 Oct 2026: 400 "Invalid
+    tool_slug" (code 4802), and every Instagram and X post with media failed."""
+    return str(action).strip().replace("-", "_").upper()
+
+
 def _file_uploadable_class():
     try:
         from composio.core.models._files import FileUploadable
@@ -76,7 +84,7 @@ def _uploaded(path: Any, param_name: str, action_upper: str, toolkit: str, http_
         uploadable = _file_uploadable_class().from_path(
             client=http_client,
             file=path,
-            tool=action_upper.lower().replace("_", "-"),
+            tool=composio_tool_slug(action_upper),
             toolkit=toolkit,
             sensitive_file_upload_protection=False,
         )
