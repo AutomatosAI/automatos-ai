@@ -19,6 +19,10 @@
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
         --mono: var(--brand-mono-font, monospace);
+        /* F382: how far a face's glyphs can reach above and below their baseline, as a share of the type
+           (Geist 1.30, Inter 1.21, DejaVu Sans 1.16). Display type set tighter than this gets the rest as
+           room below its last line, so the fit never reads the glyphs as overflow and shrinks the card. */
+        --ink-reach: 1.32em;
         /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
         --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
         /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
@@ -56,7 +60,7 @@
         font-size: calc(24 * var(--s) * var(--body-scale)); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.2; }
       /* Display type sets tighter than its glyphs: the padding holds their ink, so the fit never reads it as overflow. */
       .headline { width: 100%; font-family: var(--display); font-weight: 800; line-height: 0.98; letter-spacing: -0.02em; color: var(--on-ink);
-        padding-bottom: 0.08em; }
+        padding-bottom: calc((var(--ink-reach) - 0.98em) / 2); }
       .headline .line { display: block; }
       .hot { color: var(--accent); }
       .lede { font-size: calc(34 * var(--s) * var(--body-scale)); line-height: 1.38; color: var(--on-ink); }
@@ -96,6 +100,9 @@
       // ---------- setup: the card's own words, dressed and fitted before anything is sampled ----------
       const MIN_FIT = 0.5;
       const FIT_STEP = 0.04;
+      // F382: a line's glyphs may reach past its line box (a face's ascent and descent run to 1.3em, its
+      // lines to 1.2): that ink is not overflow, so a box may run this share of the largest type in it past its height.
+      const INK_SLACK = 0.18;
       // No photo given: the slot's element was taken out, and the backdrop shows (a template may say more).
       if (!document.querySelector("img[data-slot]")) document.getElementById("root").classList.add("no-photo");
       // Stars: a rating of 1 to 5 as filled and empty stars.
@@ -139,6 +146,10 @@
       }
       document.querySelectorAll("[data-dress]").forEach(dress);
       // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function inkSlack(el) {
+        const sizes = [el, ...el.querySelectorAll("*")].map((node) => parseFloat(getComputedStyle(node).fontSize) || 0);
+        return INK_SLACK * Math.max(...sizes);
+      }
       function overflowing(page) {
         const box = page.getBoundingClientRect();
         const style = getComputedStyle(page);
@@ -149,7 +160,7 @@
           if (rect.bottom > bottom || rect.right > right) return true;
         }
         return Array.from(page.querySelectorAll(".fit")).some(
-          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1 + inkSlack(el)
         );
       }
       function fit(page) {

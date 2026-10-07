@@ -25,6 +25,10 @@
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
         --mono: var(--brand-mono-font, monospace);
+        /* F382: how far a face's glyphs can reach above and below their baseline, as a share of the type
+           (Geist 1.30, Inter 1.21, DejaVu Sans 1.16). Display type set tighter than this gets the rest as
+           room below its last line, so the fit never reads the glyphs as overflow and shrinks the card. */
+        --ink-reach: 1.32em;
         /* F376: the brand bar's span (1 the full width, 0 the short rule), the rule's length and its inset. */
         --bar-span: var(--brand-accent-bar-span, 0);
         --bar-rule: calc(160 * var(--u));
@@ -66,7 +70,7 @@
       .tri { flex: none; width: 0; height: 0; border-left: calc(8 * var(--s)) solid transparent;
         border-right: calc(8 * var(--s)) solid transparent; border-bottom: calc(13 * var(--s)) solid var(--dark-accent); }
       .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(150 * var(--s) * var(--display-scale));
-        line-height: 0.95; letter-spacing: -0.02em; color: var(--ink); }
+        line-height: 0.95; letter-spacing: -0.02em; color: var(--ink); padding-bottom: calc((var(--ink-reach) - 0.95em) / 2); }
       .headline .line { display: block; }
       .hot { color: var(--accent-large); }
       .subline { max-width: calc(840 * var(--s)); font-family: var(--body); font-size: calc(36 * var(--s) * var(--body-scale)); line-height: 1.4; color: var(--muted); }
@@ -81,13 +85,13 @@
       .headline { font-size: calc(132 * var(--s) * var(--display-scale)); }
       .point { display: flex; flex-direction: column; gap: calc(26 * var(--s)); width: 100%; }
       .point-no { font-family: var(--display); font-weight: 900; font-size: calc(150 * var(--s) * var(--display-scale)); line-height: 0.9;
-        letter-spacing: -0.03em; color: var(--accent-large); }
+        letter-spacing: -0.03em; color: var(--accent-large); padding-bottom: calc((var(--ink-reach) - 0.9em) / 2); }
       .point-text { display: flex; flex-direction: column; gap: calc(20 * var(--s)); min-width: 0; }
       .point-title { font-family: var(--display); font-weight: 800; font-size: calc(76 * var(--s) * var(--display-scale)); line-height: 1.05;
         letter-spacing: -0.015em; color: var(--ink); }
       .point-body { font-family: var(--body); font-size: calc(34 * var(--s) * var(--body-scale)); line-height: 1.45; color: var(--muted); }
       .closing-title { font-family: var(--display); font-weight: 900; font-size: calc(110 * var(--s) * var(--display-scale)); line-height: 0.98;
-        letter-spacing: -0.02em; color: var(--ink); }
+        letter-spacing: -0.02em; color: var(--ink); padding-bottom: calc((var(--ink-reach) - 0.98em) / 2); }
       .cta-pill { display: inline-flex; max-width: 100%; background: var(--accent-fill); color: var(--on-accent-fill); border-radius: calc(12 * var(--s));
         box-shadow: inset 0 0 0 calc(3 * var(--s)) var(--accent);
         padding: calc(18 * var(--s)) calc(30 * var(--s)); font-family: var(--body); font-size: calc(32 * var(--s) * var(--body-scale)); font-weight: 700; line-height: 1.25; }
@@ -278,6 +282,9 @@
       // ---------- setup: the card's own text, dressed and fitted before anything is sampled ----------
       const MIN_FIT = 0.5;
       const FIT_STEP = 0.04;
+      // F382: a line's glyphs may reach past its line box (a face's ascent and descent run to 1.3em, its
+      // lines to 1.2): that ink is not overflow, so a box may run this share of the largest type in it past its height.
+      const INK_SLACK = 0.18;
       // A block whose every value is empty is taken out (an unused eyebrow, a third card),
       // and so is any empty value, so it leaves no gap.
       document.querySelectorAll("[data-optional]").forEach((block) => {
@@ -327,6 +334,10 @@
         if (number) number.textContent = two(i);
       });
       // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function inkSlack(el) {
+        const sizes = [el, ...el.querySelectorAll("*")].map((node) => parseFloat(getComputedStyle(node).fontSize) || 0);
+        return INK_SLACK * Math.max(...sizes);
+      }
       function overflowing(page) {
         const box = page.getBoundingClientRect();
         const style = getComputedStyle(page);
@@ -337,11 +348,26 @@
           if (rect.bottom > bottom || rect.right > right) return true;
         }
         return Array.from(page.querySelectorAll(".fit")).some(
-          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1 + inkSlack(el)
         );
       }
-      function fit(page) {
-        // A page taken out of the layout (display: none) measures nothing: it keeps the fit it had.
+      // F382: a slide the timeline is not showing is out of the layout (display: none) and measures nothing.
+      // It is laid out unseen for its fit, then put back as it was, so every slide fits when it is shot.
+      function shownFor(page, measure) {
+        const slide = page.closest(".slide");
+        if (page.getClientRects().length || !slide) return measure();
+        const style = slide.getAttribute("style");
+        slide.style.setProperty("display", "block", "important");
+        slide.style.setProperty("visibility", "hidden", "important");
+        try {
+          return measure();
+        } finally {
+          if (style === null) slide.removeAttribute("style");
+          else slide.setAttribute("style", style);
+        }
+      }
+      function fitShown(page) {
+        // Still out of the layout (a hidden ancestor): nothing to measure; it keeps the fit it had.
         if (!page.getClientRects().length) return;
         page.classList.remove("wrap-words");
         for (let step = 0; ; step += 1) {
@@ -350,6 +376,9 @@
           if (!overflowing(page) || scale === MIN_FIT) break;
         }
         if (overflowing(page)) page.classList.add("wrap-words");
+      }
+      function fit(page) {
+        shownFor(page, () => fitShown(page));
       }
       function fitAll() {
         document.querySelectorAll(".page").forEach(fit);

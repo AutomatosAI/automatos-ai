@@ -25,6 +25,10 @@
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
         --mono: var(--brand-mono-font, monospace);
+        /* F382: how far a face's glyphs can reach above and below their baseline, as a share of the type
+           (Geist 1.30, Inter 1.21, DejaVu Sans 1.16). Display type set tighter than this gets the rest as
+           room below its last line, so the fit never reads the glyphs as overflow and shrinks the card. */
+        --ink-reach: 1.32em;
         /* F376: the brand bar's span (1 the full width, 0 the short rule), the rule's length and its inset. */
         --bar-span: var(--brand-accent-bar-span, 0);
         --bar-rule: calc(160 * var(--u));
@@ -62,7 +66,7 @@
       .tri { flex: none; width: 0; height: 0; border-left: calc(8 * var(--s)) solid transparent;
         border-right: calc(8 * var(--s)) solid transparent; border-bottom: calc(13 * var(--s)) solid var(--dark-accent); }
       .headline { width: 100%; font-family: var(--display); font-weight: 900; font-size: calc(150 * var(--s) * var(--display-scale));
-        line-height: 0.95; letter-spacing: -0.02em; color: var(--ink); }
+        line-height: 0.95; letter-spacing: -0.02em; color: var(--ink); padding-bottom: calc((var(--ink-reach) - 0.95em) / 2); }
       .headline .line { display: block; }
       .hot { color: var(--accent-large); }
       .subline { max-width: calc(840 * var(--s)); font-family: var(--body); font-size: calc(36 * var(--s) * var(--body-scale)); line-height: 1.4; color: var(--muted); }
@@ -133,6 +137,9 @@
       // ---------- setup: the card's own text, dressed and fitted before anything is sampled ----------
       const MIN_FIT = 0.5;
       const FIT_STEP = 0.04;
+      // F382: a line's glyphs may reach past its line box (a face's ascent and descent run to 1.3em, its
+      // lines to 1.2): that ink is not overflow, so a box may run this share of the largest type in it past its height.
+      const INK_SLACK = 0.18;
       // A block whose every value is empty is taken out (an unused eyebrow, a third card),
       // and so is any empty value, so it leaves no gap.
       document.querySelectorAll("[data-optional]").forEach((block) => {
@@ -173,6 +180,10 @@
         row.style.setProperty("--n", String(Math.max(1, row.children.length)));
       });
       // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function inkSlack(el) {
+        const sizes = [el, ...el.querySelectorAll("*")].map((node) => parseFloat(getComputedStyle(node).fontSize) || 0);
+        return INK_SLACK * Math.max(...sizes);
+      }
       function overflowing(page) {
         const box = page.getBoundingClientRect();
         const style = getComputedStyle(page);
@@ -183,7 +194,7 @@
           if (rect.bottom > bottom || rect.right > right) return true;
         }
         return Array.from(page.querySelectorAll(".fit")).some(
-          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1 + inkSlack(el)
         );
       }
       function fit(page) {
