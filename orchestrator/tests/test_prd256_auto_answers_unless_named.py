@@ -29,7 +29,7 @@ from consumers.chatbot.auto import (
     ComplexityAssessment,
     build_assessment_prompt,
 )
-from consumers.chatbot.auto_answers import auto_always_answers, needs_no_apps
+from consumers.chatbot.handoffs import auto_always_answers, needs_no_apps
 
 ORCH = Path(__file__).resolve().parents[1]
 AUTO = 11

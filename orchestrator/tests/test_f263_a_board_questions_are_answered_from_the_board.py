@@ -64,7 +64,7 @@ def test_auto_keeps_a_board_message_with_its_platform_tools(said):
 def test_only_the_card_handed_to_a_named_agent_leaves_autos_hands():
     """PRD-256 US-010: "give #0192 to the … Agent" hands the card on (ASSIGN on #0192);
     every other board message stays Auto's, with its board tools."""
-    from consumers.chatbot.auto_answers import handed_card
+    from consumers.chatbot.handoffs import handed_card
 
     assert [said for said in ABOUT_THE_BOARD if handed_card(said)] == [
         "Please give #0192 to the Shopify Support Agent."]

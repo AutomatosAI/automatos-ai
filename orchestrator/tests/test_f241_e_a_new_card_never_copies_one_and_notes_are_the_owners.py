@@ -73,7 +73,7 @@ def test_the_create_tool_files_no_copy(shop):
 
 def test_autos_card_directive_assigns_the_card_and_makes_no_copy():
     """PRD-256 US-010: a card handed to a named agent is assigned, by its number."""
-    from consumers.chatbot.auto_answers import card_directive
+    from consumers.chatbot.handoffs import card_directive
 
     directive = card_directive("#0192", "Shopify Support Agent", deferred=False)
     assert 'platform_assign_task with task_id "#0192" and agent_name "Shopify Support Agent"' in directive

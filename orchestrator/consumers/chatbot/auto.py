@@ -34,9 +34,8 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 
 from consumers.chatbot import auto_decisions
-from consumers.chatbot.auto_answers import agents_named_in, auto_always_answers  # PRD-256 US-010 (D2)
 from consumers.chatbot.board_questions import about_the_board
-from consumers.chatbot.handoffs import hands_off, social_media_role  # PRD-256 US-011: one hand-off table
+from consumers.chatbot.handoffs import agents_named_in, auto_always_answers, hands_off, social_media_role  # PRD-256 US-010/011
 from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_engine
 
 # PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
@@ -1199,7 +1198,7 @@ class AutoBrain:
     # ------------------------------------------------------------------
 
     def _names_active_agent(self, message: str) -> bool:
-        """True when the message names an active roster agent (auto_answers.agents_named_in)."""
+        """True when the message names an active roster agent (handoffs.agents_named_in)."""
         return bool(agents_named_in(message, self._active_agents()))
 
     def _active_agents(self) -> List[Any]:

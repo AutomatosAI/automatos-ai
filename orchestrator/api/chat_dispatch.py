@@ -11,7 +11,7 @@ never another agent:
 
 The DELEGATE lane, which sent the turn to the Universal Router and let a specialist
 answer in its own persona, is gone: AutoBrain turns a DELEGATE verdict into Auto's answer
-or a named agent's ticket before it reaches here (``consumers.chatbot.auto_answers``).
+or a named agent's ticket before it reaches here (``consumers.chatbot.handoffs``).
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from consumers.chatbot.auto import Action, AutoBrain, ComplexityAssessment, apply_assign_bias
-from consumers.chatbot.auto_answers import PLATFORM_HINT, needs_no_apps, with_card_directive
+from consumers.chatbot.handoffs import PLATFORM_HINT, needs_no_apps, with_card_directive
 
 logger = logging.getLogger(__name__)
 
