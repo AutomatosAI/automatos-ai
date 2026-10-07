@@ -29,6 +29,7 @@
     "photo": {
       "kind": "image",
       "path": "assets/slots/photo.png",
+      "required": true,
       "label": "Photo",
       "description": "The photo behind the words: a person, a place or a product, with no words in it. Upload one, pick one from the Library, or let AI make one. Without it, your brand colours show."
     }

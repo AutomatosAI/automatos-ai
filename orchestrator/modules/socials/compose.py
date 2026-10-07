@@ -84,6 +84,13 @@ FACTS_NOTE = (
     "in the owner's words: the owner is asked, nothing is made up."
 )
 HANDLE_NOTE = "A handle is one of brand_handles, the brand kit's own; with none there, leave every handle empty."
+# F378 (B19, B18): the template that fits the brief, by what each one is for.
+PICK_NOTE = (
+    "Pick the template whose description fits the brief. A template made for software (an app, a dashboard, "
+    "agents) suits only a brief about software. A template with photo_slots suits only a brief that has a photo or "
+    "says the owner will add one, and then name the photo in questions; never pick one whose photo slot is "
+    "required when the brief says there is no photo."
+)
 # F378 (night 11): a placeholder left in the copy is asked about once, with the reason.
 COPY_FIX_NOTE = (
     "Your copy holds template placeholders, which a post never shows (listed below). Answer with ONE JSON "
@@ -117,7 +124,7 @@ class ComposeContext:
     brief: str
     format: Optional[str]
     channels: Sequence[Mapping[str, Any]]  # {toolkit, label}: the selected, connected channels
-    templates: Sequence[Mapping[str, Any]]  # {id, name, format, sizes, variables_schema}
+    templates: Sequence[Mapping[str, Any]]  # {id, name, description, format, sizes, variables_schema, photo_slots}
     candidates: Sequence[Mapping[str, Any]]  # sources.search() candidates
     voice: Mapping[str, Any] = field(default_factory=dict)  # the brand kit's voice
     skills: Mapping[str, str] = field(default_factory=dict)  # built-in skill name → its text
@@ -173,6 +180,7 @@ def _system(ctx: ComposeContext) -> str:
         "a source, a URL or a number. Follow the brand voice: use its tone and never its banned phrases.",
         FACTS_NOTE,
         HANDLE_NOTE,
+        PICK_NOTE,
     ]
     if ctx.template_id:
         parts.append("The template is chosen: use the one template listed, and no other.")
