@@ -44,11 +44,13 @@
 
       /* The page: every size below is design pixels times --s, and the fit script shrinks --fit until it all fits. */
       /* The page has no padding of its own: its blocks carry their spacing, so a panel runs to the card's edges. */
+      /* F382: in a story, the words keep clear of Instagram's bars (--story-top and --story-bottom, set only for
+         a 9:16 story render); the page and its backgrounds still run to the card's edges. */
       .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
         justify-content: space-between; gap: calc(28 * var(--s)); }
       .page.wrap-words * { overflow-wrap: anywhere; }
       .top { display: flex; align-items: center; justify-content: space-between; gap: calc(20 * var(--s));
-        margin: calc(56 * var(--u)) calc(60 * var(--u)) 0; }
+        margin: calc(56 * var(--u) + var(--story-top, 0px)) calc(60 * var(--u)) 0; }
       .brand, .chip { display: inline-flex; align-items: center; gap: calc(12 * var(--s)); max-width: 100%;
         background: color-mix(in srgb, var(--ink) 82%, transparent); color: var(--on-ink); border-radius: calc(999 * var(--s));
         padding: calc(10 * var(--s)) calc(20 * var(--s)); font-size: calc(26 * var(--s) * var(--body-scale)); font-weight: 600; line-height: 1.2; }
@@ -70,11 +72,11 @@
         font-weight: 700; line-height: 1.15; }
 
       .lead { display: flex; flex-direction: column; gap: calc(22 * var(--s));
-        padding: calc(56 * var(--u)) calc(60 * var(--u)) calc(110 * var(--s));
+        padding: calc(56 * var(--u) + var(--story-top, 0px)) calc(60 * var(--u)) calc(110 * var(--s));
         background: linear-gradient(to bottom, color-mix(in srgb, var(--ink) 94%, transparent) 0%,
           color-mix(in srgb, var(--ink) 90%, transparent) 68%, transparent 100%); }
       .lead .top { margin: 0 0 calc(10 * var(--s)); }
-      .side { display: flex; flex-direction: column; gap: calc(16 * var(--s)); padding: 0 calc(60 * var(--u)) calc(60 * var(--u)); }
+      .side { display: flex; flex-direction: column; gap: calc(16 * var(--s)); padding: 0 calc(60 * var(--u)) calc(60 * var(--u) + var(--story-bottom, 0px)); }
       .lead .headline { font-size: calc(110 * var(--s) * var(--display-scale)); }
       .cards { display: flex; flex-direction: column; gap: calc(16 * var(--s)); }
       .hl { display: flex; flex-direction: column; gap: calc(6 * var(--s)); border-radius: calc(22 * var(--s));

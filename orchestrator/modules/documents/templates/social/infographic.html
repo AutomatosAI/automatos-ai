@@ -57,8 +57,10 @@
         left: calc(var(--bar-inset) * (1 - var(--bar-span))); width: calc(var(--bar-rule) + (100% - var(--bar-rule)) * var(--bar-span)); }
 
       /* The page: every size below is design pixels times --s, and the fit script shrinks --fit until it all fits. */
+      /* F382: in a story, the words keep clear of Instagram's bars (--story-top and --story-bottom, set only for
+         a 9:16 story render); the page and its backgrounds still run to the card's edges. */
       .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
-        gap: calc(28 * var(--s)); padding: calc(64 * var(--u)) calc(68 * var(--u)) calc(56 * var(--u)); }
+        gap: calc(28 * var(--s)); padding: calc(64 * var(--u) + var(--story-top, 0px)) calc(68 * var(--u)) calc(56 * var(--u) + var(--story-bottom, 0px)); }
       .page.wrap-words * { overflow-wrap: anywhere; }
       .top { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
         font-family: var(--mono); font-size: max(var(--label-floor), calc(26 * var(--s) * var(--body-scale))); line-height: 1.2; }

@@ -61,11 +61,12 @@ The template becomes the composition, with two things done to it here:
   for a PNG snapshot at each of the template's still moments whose ``when``
   variable has a value (``core.social_templates.still_moments``): one for a
   card, one per slide for a carousel;
-* a 9:16 render for a story (PRD-251C US-C301, ``story_safe``) keeps the page
+* a 9:16 render for a story (PRD-251C US-C301, ``story_safe``) keeps the words
   clear of the bar Instagram draws at the top of a story and the reply box at the
-  bottom: the composition's css gains a rule that moves a template's ``.page`` box
-  inside them (every still template lays its words out in one; a video template,
-  made at 9:16 for reels, has none and renders as authored).
+  bottom: the composition's css gains the two insets (``--story-top``,
+  ``--story-bottom``) that every still template adds to its words' own spacing, so
+  its backgrounds and panels still run to the edges (F382; a video template, made
+  at 9:16 for reels, reads neither and renders as authored).
 
 Kokoro speaks the voice lines from their text inside media-render. When a post
 chooses a voice toolkit instead (US-111, ``modules/socials/recipes/voice.py``),
@@ -247,11 +248,18 @@ def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str,
 # PRD-251C (US-C301): a story's safe zone at 1080x1920, scaled to the size rendered.
 STORY_SAFE_TOP, STORY_SAFE_BOTTOM, STORY_SAFE_HEIGHT = 250, 340, 1920
 STORY_RATIO = 9 / 16
-STORY_SAFE_CSS = "\n/* PRD-251C: a story's safe zone */\n.page {{ top: {top}px !important; bottom: {bottom}px !important; }}\n"
+# F382 (night 11): the zone is two insets every still template adds to its words' own spacing
+# (``var(--story-top, 0px)``, ``var(--story-bottom, 0px)``). It moved the ``.page`` box, and a
+# photo card's dark panel, which lives in the page, ended at 80% of the story with a hard edge.
+STORY_TOP_VAR, STORY_BOTTOM_VAR = "--story-top", "--story-bottom"
+STORY_SAFE_CSS = (
+    "\n/* PRD-251C: a story's safe zone, kept by the words; the backgrounds stay full-bleed (F382) */\n"
+    ":root {{ " + STORY_TOP_VAR + ": {top}px; " + STORY_BOTTOM_VAR + ": {bottom}px; }}\n"
+)
 
 
 def story_safe_css(width: int, height: int) -> str:
-    """The rule that keeps a 9:16 story's page clear of Instagram's own bars; "" for another shape."""
+    """The insets that keep a 9:16 story's words clear of Instagram's own bars; "" for another shape."""
     if not width or not height or not math.isclose(width / height, STORY_RATIO, rel_tol=0.01):
         return ""
     scale = height / STORY_SAFE_HEIGHT
