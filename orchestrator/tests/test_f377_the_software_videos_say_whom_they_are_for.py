@@ -103,6 +103,6 @@ def test_the_gallery_the_composer_and_the_agents_see_it():
     assert [(e["made_for"], e["description"]) for e in entries] == [
         ("software", ui_story.description), (None, data_story.description),
     ]
-    assert entries[0]["fields_by_length"]["15"] and "headline" in entries[1]["fields_by_length"]["15"]
+    assert entries[0]["fields_cut_out"]["15"] and "closing_line" in entries[1]["fields_cut_out"]["15"]
     assert template_row(ui_story).endswith("| made for software only: pick it only when the brief is about software")
     assert "made for" not in template_row(data_story)

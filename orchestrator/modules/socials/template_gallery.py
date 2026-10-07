@@ -13,8 +13,8 @@ inline for the configured TTL (D9), so a link never outlives the storage policy.
 Columns are selected one by one (never the whole row), as the composer's own
 selection does: a gallery entry needs no tags. It carries the template's sample text
 (``sample_data``, what its thumbnail shows): the editor greys it into each empty field
-as an example of what goes there. F377 (night 11): each shorter cut's fields
-(``fields_by_length``), so the editor asks only for what the chosen length shows, and
+as an example of what goes there. F377 (night 11): the fields each shorter cut
+never shows (``fields_cut_out``), so the editor asks only for what the chosen length shows, and
 ``made_for`` ("software" for the videos told on a software product's screens).
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from uuid import UUID
 
 from config import config
 from core.models.core import DocumentTemplate
-from core.social_cuts import fields_by_length
+from core.social_cuts import fields_cut_out
 from core.social_templates import IMAGE_SLOT, SOCIAL_TEMPLATE_FORMATS, SOCIAL_VIDEO, made_for, root_duration, slot_generatable
 from modules.socials.compose_checks import template_kind
 from modules.socials.media_store import MediaStore
@@ -117,8 +117,8 @@ def entry(row: Any, store: MediaStore) -> Dict[str, Any]:
         "made_for": made_for(blocks),
         # The template's fields: the editor's Claims and sources card fills them (US-B109).
         "variables_schema": blocks.get("variables_schema") if isinstance(blocks.get("variables_schema"), dict) else {},
-        # F377: the fields each shorter cut shows: the editor asks for those only at that length.
-        "fields_by_length": fields_by_length(blocks),
+        # F377: the fields each shorter cut never shows: the editor leaves them out at that length.
+        "fields_cut_out": fields_cut_out(blocks),
         # The fields' examples: the sample text of the template's own fields (its thumbnail's).
         "sample_data": examples_of(row.sample_data, blocks.get("variables_schema")),
         "thumbnail_url": thumbnail_link(store, row.thumbnail_url),

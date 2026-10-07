@@ -350,7 +350,7 @@ def cut_to_length(blocks: Mapping[str, Any], seconds: int) -> Dict[str, Any]:
     if isinstance(blocks.get("audio_plan"), Mapping):
         cut["audio_plan"] = cut_audio_plan(blocks["audio_plan"], stretches)
     if isinstance(blocks.get("variables_schema"), Mapping):
-        cut["variables_schema"] = schema_at_length(blocks["variables_schema"], _shown(blocks, stretches))
+        cut["variables_schema"] = schema_at_length(blocks["variables_schema"], _left_out(blocks, _shown(blocks, stretches)))
     return cut
 
 
@@ -412,13 +412,21 @@ def shown_variables(blocks: Mapping[str, Any], seconds: int) -> Optional[List[st
     return _shown(blocks, stretches) if stretches else None
 
 
-def fields_by_length(blocks: Any) -> Dict[str, List[str]]:
-    """Each declared length that is a cut, as a string, with the variables it shows
-    (:func:`shown_variables`): what the editor and the composer ask for at that length."""
+def _left_out(blocks: Mapping[str, Any], shown: Iterable[str]) -> List[str]:
+    kept = set(shown)
+    schema = blocks.get("variables_schema")
+    return [name for name in schema if name not in kept] if isinstance(schema, Mapping) else []
+
+
+def fields_cut_out(blocks: Any) -> Dict[str, List[str]]:
+    """Each declared length that is a cut, as a string, with the declared variables it never
+    shows or speaks (:func:`shown_variables`), in the schema's order: what the editor leaves
+    out of its form and the composer never asks for at that length. The list, not the fields
+    kept, so the composer's prompt carries the shorter one."""
     durations = blocks.get("durations") if isinstance(blocks, Mapping) else None
     lengths = [d for d in durations if isinstance(d, int) and not isinstance(d, bool)] if isinstance(durations, list) else []
     shown = {str(length): shown_variables(blocks, length) for length in lengths}
-    return {length: names for length, names in shown.items() if names is not None}
+    return {length: _left_out(blocks, names) for length, names in shown.items() if names is not None}
 
 
 def neutral_value(spec: Mapping[str, Any]) -> Any:
@@ -432,16 +440,14 @@ def neutral_value(spec: Mapping[str, Any]) -> Any:
     return False if kind == BOOLEAN else ""
 
 
-def schema_at_length(schema: Mapping[str, Any], shown: Optional[Iterable[str]]) -> Dict[str, Any]:
-    """The variables a render at one length needs: ``schema`` with every variable ``shown``
-    leaves out given :func:`neutral_value` as its default when it has none. ``shown`` is
-    ``None`` for a length that plays the timeline as authored: the schema as it is."""
-    if shown is None:
-        return dict(schema)
-    kept = set(shown)
+def schema_at_length(schema: Mapping[str, Any], cut_out: Iterable[str]) -> Dict[str, Any]:
+    """The variables a render at one length needs: ``schema`` with every variable in ``cut_out``
+    (those the length never shows) given :func:`neutral_value` as its default when it has none.
+    A length that plays the timeline as authored cuts out nothing: the schema as it is."""
+    dropped = set(cut_out)
     return {
         name: {**spec, "default": neutral_value(spec)}
-        if name not in kept and isinstance(spec, Mapping) and spec.get("default") is None
+        if name in dropped and isinstance(spec, Mapping) and spec.get("default") is None
         else spec
         for name, spec in schema.items()
     }
@@ -449,10 +455,10 @@ def schema_at_length(schema: Mapping[str, Any], shown: Optional[Iterable[str]]) 
 
 def schema_for_length(template: Mapping[str, Any], seconds: Any) -> Dict[str, Any]:
     """A template entry's variables at ``seconds`` (the composer's and the gallery's entries carry
-    ``variables_schema`` and :func:`fields_by_length`): those its cut never shows need no value."""
+    ``variables_schema`` and :func:`fields_cut_out`): those its cut never shows need no value."""
     schema = template.get("variables_schema") if isinstance(template.get("variables_schema"), Mapping) else {}
-    by_length = template.get("fields_by_length") if isinstance(template.get("fields_by_length"), Mapping) else {}
-    return schema_at_length(schema, by_length.get(str(seconds)) if seconds else None)
+    by_length = template.get("fields_cut_out") if isinstance(template.get("fields_cut_out"), Mapping) else {}
+    return schema_at_length(schema, by_length.get(str(seconds), ()) if seconds else ())
 
 
 __all__ = [
@@ -463,7 +469,7 @@ __all__ = [
     "cut_html",
     "cut_moments",
     "cut_to_length",
-    "fields_by_length",
+    "fields_cut_out",
     "neutral_value",
     "place",
     "schema_at_length",

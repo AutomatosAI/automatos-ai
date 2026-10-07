@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from core.social_cuts import fields_by_length, schema_at_length
+from core.social_cuts import fields_cut_out, schema_at_length
 from core.social_templates import is_social_format
 from modules.documents.blocks import BlockValidationError, validate_blocks
 from modules.documents.blocks.schema import DataTableBlock, SectionBlock, TableBlock, VariableBlock, VariableRun
@@ -152,8 +152,8 @@ def social_requirements(blocks: Any) -> Dict[str, Any]:
     specs = {name: spec for name, spec in (schema or {}).items() if isinstance(spec, dict)}
     fallbacks = {f"{DATA}.{name}": str(spec["default"]) for name, spec in specs.items() if spec.get("default") is not None}
     by_length = {
-        length: sorted(_social_required(schema_at_length(specs, shown)))
-        for length, shown in fields_by_length(blocks).items()
+        length: sorted(_social_required(schema_at_length(specs, cut_out)))
+        for length, cut_out in fields_cut_out(blocks).items()
     }
     answer = _answer(_social_required(specs), fallbacks, [])
     return {**answer, "required_by_length": by_length} if by_length else answer

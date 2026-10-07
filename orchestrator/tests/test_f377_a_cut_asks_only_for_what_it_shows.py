@@ -8,8 +8,9 @@ Pinned (``core.social_cuts``):
 * ``shown_variables``: a variable shows at a length when its ``{{ name }}`` sits outside every
   clip the cut hides (scripts included), or in a voice line the cut keeps; the authored length
   shows them all (``None``);
-* ``schema_at_length`` gives each variable the cut leaves out a neutral default (an empty text,
-  false, 0 inside the number's bounds) and keeps every other spec as it is;
+* ``fields_cut_out`` names, per cut, the variables it never shows, and ``schema_at_length`` gives
+  each of them a neutral default (an empty text, false, 0 inside the number's bounds), keeping
+  every other spec as it is;
 * the render (``cut_to_length`` through ``render.bundle_for``) takes a 15 s post with only its
   shown fields, and the bundle still sets every ``{{ name }}`` media-render fills; the authored
   length still refuses a field left empty;
@@ -40,7 +41,7 @@ if str(_ORCH) not in sys.path:
 
 from core.social_cuts import (  # noqa: E402
     cut_to_length,
-    fields_by_length,
+    fields_cut_out,
     neutral_value,
     schema_at_length,
     schema_for_length,
@@ -89,6 +90,7 @@ BLOCKS = {
     ]}},
 }
 SHOWN_AT_15 = ["kicker", "headline", "spoken", "count", "shown_flag", "bars", "end_line"]
+CUT_OUT_AT_15 = ["stat_value", "stat_label", "stat_note", "said_late"]
 VALUES = {"headline": "A record month.", "spoken": "Here is our month.", "count": 4, "shown_flag": True, "bars": 3,
           "end_line": "See you soon."}
 
@@ -110,17 +112,17 @@ def test_a_cut_shows_the_fields_outside_its_hidden_clips_and_in_its_kept_lines()
     validate_social_blocks(BLOCKS, SOCIAL_VIDEO)
     assert shown_variables(BLOCKS, 15) == SHOWN_AT_15
     assert shown_variables(BLOCKS, 40) is None  # the authored timeline shows everything
-    assert fields_by_length(BLOCKS) == {"15": SHOWN_AT_15}
-    assert fields_by_length({"durations": [40]}) == {} and fields_by_length(None) == {}
+    assert fields_cut_out(BLOCKS) == {"15": CUT_OUT_AT_15}
+    assert fields_cut_out({"durations": [40]}) == {} and fields_cut_out(None) == {}
 
 
 def test_the_fields_a_cut_leaves_out_get_a_neutral_default_and_the_rest_stay_as_they_are():
-    at_15 = schema_at_length(SCHEMA, SHOWN_AT_15)
+    at_15 = schema_at_length(SCHEMA, CUT_OUT_AT_15)
     assert {name: spec.get("default") for name, spec in at_15.items() if name not in SHOWN_AT_15} == {
         "stat_value": "", "stat_label": "", "stat_note": "", "said_late": "",
     }
     assert all(at_15[name] == SCHEMA[name] for name in SHOWN_AT_15)
-    assert schema_at_length(SCHEMA, None) == SCHEMA
+    assert schema_at_length(SCHEMA, ()) == SCHEMA
     assert neutral_value({"type": "number", "min": 2}) == 2 and neutral_value({"type": "number", "max": -1}) == -1
     assert neutral_value({"type": "number"}) == 0 and neutral_value({"type": "boolean"}) is False
     assert "default" not in SCHEMA["stat_value"]  # the template's own schema is untouched
@@ -148,7 +150,7 @@ def test_the_full_length_still_asks_for_every_field():
 
 
 def test_cut_to_length_carries_the_schema_of_its_length():
-    assert cut_to_length(BLOCKS, 15)["variables_schema"] == schema_at_length(SCHEMA, SHOWN_AT_15)
+    assert cut_to_length(BLOCKS, 15)["variables_schema"] == schema_at_length(SCHEMA, CUT_OUT_AT_15)
     assert cut_to_length(BLOCKS, 40)["variables_schema"] == SCHEMA
 
 
@@ -156,7 +158,7 @@ def test_cut_to_length_carries_the_schema_of_its_length():
 
 
 def test_the_composer_asks_only_for_the_cuts_own_fields():
-    entry = {"variables_schema": SCHEMA, "fields_by_length": fields_by_length(BLOCKS)}
+    entry = {"variables_schema": SCHEMA, "fields_cut_out": fields_cut_out(BLOCKS)}
     supplied = {"headline": {"value": "A record month."}}
     proposal = {"template": entry, "variables": supplied, "length_seconds": 15}
     assert compose._missing(proposal) == ["spoken", "count", "shown_flag", "bars", "end_line"]

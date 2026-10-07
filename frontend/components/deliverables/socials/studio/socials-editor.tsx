@@ -146,7 +146,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
             />
           )}
           <EditorClaimsCard
-            schema={chosen ? schemaAtLength(chosen.variables_schema, chosen.fields_by_length, draft.lengthSeconds) : null}
+            schema={chosen ? schemaAtLength(chosen.variables_schema, chosen.fields_cut_out, draft.lengthSeconds) : null}
             variables={draft.variables} sources={draft.sources} examples={chosen?.sample_data}
             onChange={(variables, sources) => setDraft((d) => ({ ...d, variables, sources }))}
           />
