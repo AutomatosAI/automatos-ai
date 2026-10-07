@@ -48,6 +48,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from modules.tools.execution import document_claims as documents
 from modules.tools.execution.shop_and_team_claims import says_it_for_the_shop_and_the_team  # F316/F324
+from modules.tools.execution.social_post_claims import says_it_for_social_posts  # F379 (night 11)
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,7 @@ def id_nudge(ids: List[Tuple[str, str]]) -> str:
     return ID_NUDGE.format(ids=_listed(ids), verb="does" if len(ids) == 1 else "do")
 
 
+@says_it_for_social_posts  # F379 (night 11): a post said to be made, changed or waiting
 @says_it_for_the_shop_and_the_team  # F316/F324 (night 9b): their lines, in Auto's words
 def not_done(claim: str) -> str:
     """The owner's line for a claim of ``claim``'s family that no action backed (F314)."""

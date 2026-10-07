@@ -98,6 +98,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from .document_claims import also_checks_documents  # F351 (night 10b)
 from .shop_and_team_claims import also_checks_the_shop_and_the_team  # F316/F324 (night 9b)
+from .social_post_claims import also_checks_social_posts  # F379 (night 11)
 
 # F201: "I have also updated your subscription" (#1146's draft) is a claim too.
 # F261 (night 8): "I have now correctly initiated the playbook" too.
@@ -136,9 +137,15 @@ _ASSIGNS = ("assign_", "create_task", "create_mission", "update_mission_plan", "
 _SETS = ("update_", "set_", "configure_", "schedule_", "pause_", "create_")
 _SWITCHES_OFF = ("update_", "schedule_", "pause_", "set_", "configure_")
 _SENDS_BACK = ("send_back", "update_task_status:assigned", "reject")
-# What backs a save: F314 (night 9) adds a post's own actions (create_social_post).
+# What backs a save: F314 (night 9) adds a post's own actions (create_social_post). F379 (night 11): its
+# writes by name, since "_post" was in list_social_posts and get_social_post too, so a read backed "I've saved it".
 _SAVES = ("store_memory", "update_", "field_inject", "submit_report", "write", "upload", "save", "document",
-          "_post", "create_task")   # F363: a decision filed on the card the turn made is saved there
+          "create_social_post", "submit_social_post", "create_blog_post",
+          "create_task")   # F363: a decision filed on the card the turn made is saved there
+# F379 (night 11): what sends or posts out. "post" alone was any post call, so a draft made or a read of the
+# posts backed "I've posted it"; a channel's own post action is named here instead.
+_SENDS = ("send", "notify", "notification", "publish", "mail", "message", "create_post", "creation_of_a_post",
+          "linked_in_post", "_post_", "tweet")
 # F363 (night 10c): what puts a card on the board.
 _FILES_A_CARD = ("create_task", "assign_task", "schedule_task", "create_mission")
 # F303 (night 9): what re-checks a figure: a count, a query, or a read of the source.
@@ -229,8 +236,7 @@ _ACTION_CLAIMS: Tuple[_Family, ...] = (
     _Family("installed", re.compile(_I_HAVE + r"installed\b|\b(?:successfully installed|installed successfully)\b",
                                     re.I), ("install_",)),
     _Family("sent", re.compile(_I_HAVE + r"(?:sent|emailed|messaged|notified|texted|posted)\b", re.I),
-            ("send", "notify", "notification", "publish", "post", "mail", "message"),
-            unless=re.compile(_SENT_BACK, re.I)),
+            _SENDS, unless=re.compile(_SENT_BACK, re.I)),
     _Family("sent back", re.compile(_SENT_BACK, re.I), _SENDS_BACK),
     _Family("deleted", re.compile(_I_HAVE + r"(?:deleted|removed|cancelled|canceled|uninstalled|revoked)\b", re.I),
             _REMOVES),
@@ -381,6 +387,7 @@ def _auto_speaks() -> bool:
     return current_usage_scope().get("request_type") == LANE_CHAT
 
 
+@also_checks_social_posts  # F379 (night 11): a post said to be made, changed or waiting needs a post call
 @also_checks_documents  # F351 (night 10b): a document said to be made, kept or coming; a retry; a template
 @also_checks_the_shop_and_the_team  # F316/F324 (night 9b): a shop figure, or "the team knows"
 def claimed_action_not_done(text: str, done: Optional[set] = None, *,
