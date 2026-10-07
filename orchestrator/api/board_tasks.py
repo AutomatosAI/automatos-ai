@@ -57,6 +57,7 @@ from api.board_mission_card import (  # F291: a mission's card waiting for its p
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
+from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -1709,6 +1710,7 @@ def _kept_result(existing: Optional[str], incoming: Optional[str]) -> Optional[s
 
 
 @a_cards_answer_is_on_brand  # the kit's sign-off fills "[Your name]" before the notes below read the answer
+@a_social_card_has_its_post  # F380: a social ticket is done only when its post exists and has rendered
 async def finalize_board_task_run(
     db: Session,
     *,
