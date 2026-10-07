@@ -707,6 +707,12 @@ class Config:
     # LLM factory. Local edition ONLY: validate_auth_edition() aborts a saas boot
     # that sets this (the SaaS path stays byte-identical). Default off everywhere.
     CLI_RUNTIME_ENABLED: bool = os.getenv("CLI_RUNTIME_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    # #848: the host shares no folder with this backend (a cluster): the claim asks it to
+    # upload what its session left in the ticket's deliverables folder, and the backend writes
+    # it into the workspace volume (services/session_uploads.py). Off = compose's shared folder.
+    CLI_SESSION_FILE_UPLOAD: bool = os.getenv("CLI_SESSION_FILE_UPLOAD", "false").strip().lower() in ("true", "1", "yes", "on")
+    # …and the most one run of a ticket may upload in all (each file: the document upload limit).
+    CLI_SESSION_UPLOAD_MAX_TOTAL_MB: int = int(os.getenv("CLI_SESSION_UPLOAD_MAX_TOTAL_MB", "200"))
     # PRD-245 W1 (local edition): how many Automatos tool calls ONE ticket's
     # session may make through the loopback MCP bridge. A bound, not a budget —
     # the model is on the operator's own plan; this stops a looping session from

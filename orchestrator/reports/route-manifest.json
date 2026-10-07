@@ -1,5 +1,5 @@
 {
-  "route_count": 913,
+  "route_count": 914,
   "routes": [
     {
       "method": "GET",
@@ -2728,6 +2728,10 @@
     {
       "method": "POST",
       "path": "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/events"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/files"
     },
     {
       "method": "POST",

@@ -9,11 +9,14 @@ import http.client
 import json
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
 HOST_TOKEN_HEADER = "X-CLI-Host-Token"
 DEFAULT_TIMEOUT = 20.0
+# #848: one session file, up to the document upload limit, over the operator's uplink.
+UPLOAD_TIMEOUT = 300.0
 
 
 class BackendError(RuntimeError):
@@ -32,17 +35,19 @@ class BackendClient:
 
     # ── plumbing ────────────────────────────────────────────────────────────
     def _request(self, method: str, path: str, body: Optional[Dict[str, Any]] = None,
-                 *, auth: bool = True) -> Dict[str, Any]:
+                 *, auth: bool = True, raw: Optional[bytes] = None,
+                 timeout: Optional[float] = None) -> Dict[str, Any]:
+        """JSON ``body``, or ``raw`` bytes sent as they are (a file upload)."""
         url = f"{self.base_url}{path}"
-        data = json.dumps(body).encode("utf-8") if body is not None else None
+        data = json.dumps(body).encode("utf-8") if body is not None else raw
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("Accept", "application/json")
         if data is not None:
-            req.add_header("Content-Type", "application/json")
+            req.add_header("Content-Type", "application/json" if raw is None else "application/octet-stream")
         if auth and self.token:
             req.add_header(HOST_TOKEN_HEADER, self.token)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
                 raw = resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", "replace") if exc.fp else ""
@@ -92,3 +97,9 @@ class BackendClient:
 
     def result(self, host_id: str, task_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request("POST", f"/api/v1/cli-hosts/{host_id}/tasks/{task_id}/result", payload)
+
+    def upload_file(self, host_id: str, task_id: int, rel: str, data: bytes) -> Dict[str, Any]:
+        """#848: one file of the ticket's deliverables folder, ``rel`` being its path there."""
+        query = urllib.parse.urlencode({"path": rel})
+        return self._request("PUT", f"/api/v1/cli-hosts/{host_id}/tasks/{task_id}/files?{query}",
+                             raw=data, timeout=UPLOAD_TIMEOUT)

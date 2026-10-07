@@ -7,6 +7,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -23,6 +24,8 @@ class FakeBackend:
         self.workdir = workdir
         self.edition = edition
         self.enabled = enabled
+        self.upload = None            # #848: the claim's ``upload`` (a cluster: no shared folder)
+        self.uploads = {}
         self.calls = []
         self.claimed = False
         self.result = None
@@ -53,6 +56,10 @@ class FakeBackend:
                                             "cli_runtime_enabled": backend.enabled})
                 return self._json(404, {"detail": "nope"})
 
+            def do_PUT(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                self._json(*backend.take_upload(self.path, self.headers, self.rfile.read(n) if n else b""))
+
             def do_POST(self):
                 body = self._body()
                 backend.calls.append(("POST", self.path, body, self.headers.get("X-CLI-Host-Token")))
@@ -72,6 +79,7 @@ class FakeBackend:
                         "task_id": 42, "attempt": 1, "session_id": str(uuid.uuid4()), "agent_name": "Dwight",
                         "title": "Say hi", "prompt": "OBJECTIVE: hello", "cwd": str(backend.workdir),
                         "model": None, "allowed_tools": [], "provider": "claude", "workspace_id": "w1",
+                        **({"upload": backend.upload} if backend.upload else {}),
                     }]})
                 if self.path == "/api/v1/cli-hosts/h1/tasks/42/events":
                     backend.events.extend(body.get("events") or [])
@@ -84,6 +92,18 @@ class FakeBackend:
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def take_upload(self, path, headers, data):
+        """#848: ``PUT …/tasks/42/files?path=…`` — record the file; ``(status, body)``."""
+        self.calls.append(("PUT", path, len(data), headers.get("X-CLI-Host-Token")))
+        route, _, query = path.partition("?")
+        if headers.get("X-CLI-Host-Token") != self.token:
+            return 401, {"detail": "invalid or missing CLI host token"}
+        if route != "/api/v1/cli-hosts/h1/tasks/42/files":
+            return 404, {"detail": f"unknown {route}"}
+        rel = parse_qs(query)["path"][0]
+        self.uploads[rel] = data
+        return 200, {"path": rel, "workspace_path": f"sessions/42/{rel}", "size": len(data)}
 
     def close(self):
         self.server.shutdown()
@@ -128,6 +148,46 @@ def test_once_cycle_pairs_claims_runs_and_reports(short_tmp, fake_home, env_clea
     pair_call = next(c for c in backend.calls if c[1].endswith("/pair"))
     assert set(pair_call[2]) == {"code", "name", "capabilities"}
     assert (short_tmp / "state" / "sessions.json").read_text().strip() == "{}"  # table cleared
+
+
+def test_a_cluster_backend_gets_the_sessions_files_before_the_result(short_tmp, fake_home, env_clean, monkeypatch):
+    """#848: the backend shares no folder with this host (a cluster), so the claim asks
+    for uploads. What the session left in the ticket's deliverables folder is sent
+    before the result, which names it by its path here; files elsewhere are not sent."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SESSION_NOTE", "1")      # note.md, landed in ws/sessions/42/
+    backend = FakeBackend(workdir)
+    backend.upload = {"enabled": True, "max_file_bytes": 1024, "max_total_bytes": 4096}
+    try:
+        host = Host(_cfg(short_tmp, backend.url))
+        host.prepare()
+        assert host.run_forever() == 0
+    finally:
+        backend.close()
+
+    assert backend.uploads == {"note.md": b"# note\nwritten in the session folder\n"}
+    landed = str((short_tmp / "ws" / "sessions" / "42" / "note.md").resolve())
+    assert backend.result is not None and landed in [str(Path(p).resolve()) for p in backend.result["files_touched"]]
+    order = [c[1].split("?")[0].rsplit("/", 1)[-1] for c in backend.calls if c[1].startswith("/api/v1/cli-hosts/h1/tasks")]
+    assert order.index("files") < order.index("result"), order
+    put = next(c for c in backend.calls if c[0] == "PUT")
+    assert put[3] == backend.token
+
+
+def test_a_backend_that_shares_the_folder_gets_no_uploads(short_tmp, fake_home, env_clean, monkeypatch):
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SESSION_NOTE", "1")
+    backend = FakeBackend(workdir)                           # compose: no ``upload`` in the claim
+    try:
+        host = Host(_cfg(short_tmp, backend.url))
+        host.prepare()
+        assert host.run_forever() == 0
+    finally:
+        backend.close()
+    assert backend.uploads == {} and not [c for c in backend.calls if c[0] == "PUT"]
+    assert backend.result is not None and backend.result["status"] == "success"
 
 
 def test_a_host_that_stops_mid_session_hands_the_ticket_back_saying_why(short_tmp, fake_home, env_clean, monkeypatch):
