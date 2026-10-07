@@ -38,6 +38,10 @@ worker:
   resources:
     requests: {cpu: 50m, memory: 256Mi}
 
+# Session mode (#848): e2e.sh runs the CLI host on this machine against the cluster.
+sessionMode:
+  enabled: true
+
 # kind's local-path storage is ReadWriteOnce; a single node shares it fine.
 workspaces:
   size: 1Gi
