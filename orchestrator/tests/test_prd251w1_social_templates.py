@@ -68,6 +68,7 @@ from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import Base, get_db  # noqa: E402
 from core.brand_palette import PAPER_TOKENS, STAGE_TOKENS  # noqa: E402
 from core.media_render_bundle import NO_LOGO, build_bundle  # noqa: E402
+from core.social_kit_tokens import SOCIAL_KIT_TOKENS  # noqa: E402
 from core.media_render_client import MediaRenderClient, MediaRenderError  # noqa: E402
 from core.media_render_quota import RenderQuotaExceeded  # noqa: E402
 from core.models.core import DOCUMENT_TEMPLATE_FORMATS, SOCIAL_TEMPLATE_FORMATS, DocumentTemplate  # noqa: E402
@@ -564,8 +565,10 @@ def test_the_bundle_carries_the_brand_kit_as_tokens_inlined_files_and_variables(
         "body-font": "Inter, sans-serif", "heading-font": "Inter, sans-serif",
     }
     # US-106: and the dark stage a social video reads, derived from those colours (core/brand_palette.py);
-    # US-107: and the paper a social image reads; PRD-255 US-006: the type scale and the dark stage's logo chip.
-    assert set(tokens) - set(raw) == set(STAGE_TOKENS) | set(PAPER_TOKENS) | {"display-scale", "body-scale", "logo-chip"}
+    # US-107: and the paper a social image reads; PRD-255 US-006: the type scale and the dark stage's logo chip;
+    # F376: and what sets a still as the kit's documents are set (core/social_kit_tokens.py).
+    assert set(tokens) - set(raw) == (set(STAGE_TOKENS) | set(PAPER_TOKENS) | {"display-scale", "body-scale", "logo-chip"}
+                                      | set(SOCIAL_KIT_TOKENS))
     assert bundle["brand"]["fonts"] == [
         {"family": "Geist", "weight": "700", "style": "normal", "path": "assets/brand/fonts/font-0.woff2"}
     ]

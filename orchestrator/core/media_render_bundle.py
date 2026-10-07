@@ -27,6 +27,8 @@ The brand kit becomes:
   as it always did). ``logo-chip`` is what a dark stage puts behind the logo
   (FR-9): nothing when the kit has a logo for dark backgrounds, else a light
   chip in the paper's colour;
+* ``brand.tokens`` also carries what sets a still as the kit's documents are set
+  (F376, ``core/social_kit_tokens.py``): the small print in the body font;
 * ``files`` and ``brand.fonts``: an uploaded logo at ``assets/brand/logo.<ext>``,
   an uploaded logo mark (D5, the square mark) at ``assets/brand/logo-mark.<ext>``,
   and the kit's font files (D5 ``font_files``) under ``assets/brand/fonts/``, each
@@ -84,6 +86,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from core.brand_palette import PAPER, paper_palette, social_accent, stage_palette, to_hex
 from core.brand_type import BODY_STEP, DEFAULT_TYPE_SCALE, DISPLAY_STEP, step_size_pt
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, fill_text, parse_size, still_moments, without_slots
+from core.social_kit_tokens import kit_render_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +188,9 @@ def brand_tokens(kit: Mapping[str, Any]) -> Dict[str, str]:
     has_dark_logo = _staged_image(kit.get("logo_dark_url"), LOGO_DARK_NAME)[1] is not None
     chip = LOGO_CHIP_CLEAR if has_dark_logo else paper.get(PAPER, LOGO_CHIP_LIGHT)
     derived = {**stage_palette(kit), **paper, **type_scale_tokens(kit), LOGO_CHIP_TOKEN: chip}
-    return {**{name: value for name, value in tokens.items() if value is not None}, **derived}
+    checked = {**{name: value for name, value in tokens.items() if value is not None}, **derived}
+    # F376: and what sets a still as the kit's documents are set (core/social_kit_tokens.py).
+    return {**checked, **kit_render_tokens(kit, checked)}
 
 
 def _data_uri_type(value: Any) -> Optional[str]:
