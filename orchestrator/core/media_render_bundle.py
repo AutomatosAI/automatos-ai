@@ -31,6 +31,8 @@ The brand kit becomes:
   an uploaded logo mark (D5, the square mark) at ``assets/brand/logo-mark.<ext>``,
   and the kit's font files (D5 ``font_files``) under ``assets/brand/fonts/``, each
   with its ``@font-face``, so ``var(--brand-heading-font)`` can name an uploaded face;
+  after them the faces the code ships (Inter, Geist, Newsreader) of each family the
+  kit names and did not upload (F376 ``bundled_font_files``), as its PDFs carry them;
 * the variables ``brand.name``, ``brand.tagline``, ``brand.logo`` (the staged
   logo's path, or a transparent pixel when there is no uploaded logo),
   ``brand.logo_mark`` (the staged mark's path; without a mark, whatever
@@ -114,6 +116,10 @@ MAX_TOKEN_CHARS = 200
 
 BRAND_DIR = "assets/brand/"
 FONTS_DIR = "assets/brand/fonts/"
+# F376: the render-ready kit's bundled faces (``brand_fonts.bundled_font_files``): the
+# faces the code ships of each family the kit names and did not upload. media-render has
+# only Liberation and DejaVu installed, so without them a post prints in stand-in fonts.
+BUNDLED_FONT_FILES = "bundled_font_files"
 # A voice toolkit's lines (US-111), fetched by media-render from our storage.
 VOICE_DIR = "assets/voice/"
 LOGO_NAME = "logo"
@@ -208,10 +214,15 @@ def _logos(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], Dict[str, str]
 
 
 def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
-    """The kit's font files (D5 ``font_files``, render-ready as data: URIs): bundle files and faces."""
+    """The kit's font files (D5 ``font_files``, render-ready as data: URIs), then its bundled faces
+    (F376 ``bundled_font_files``): bundle files and faces.
+
+    A template asking for a weight no face has (800, 900) gets the nearest heavier, else the
+    heaviest lighter one by the CSS font-matching rules: the bundled 700 for both.
+    """
     files: List[Dict[str, str]] = []
     faces: List[Dict[str, str]] = []
-    for i, font in enumerate(kit.get("font_files") or []):
+    for i, font in enumerate([*(kit.get("font_files") or []), *(kit.get(BUNDLED_FONT_FILES) or [])]):
         font = font if isinstance(font, Mapping) else {}
         ext = FONT_EXTENSIONS.get(_data_uri_type(font.get("data_uri")) or "")
         family = font.get("family")
