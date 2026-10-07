@@ -61,14 +61,14 @@
       "title": "Memory takes receipts",
       "description": "As an owner, I want Auto's memory to remember what was done, not what was said, so a corrected false claim is not remembered as a fact next turn.",
       "acceptanceCriteria": [
-        "`_post_response` passes the receipts and the answer to `SmartChatIntegration.store` (consumers/chatbot/integration.py), and the distillation prompt in smart_memory.py is told which is the record of actions and which is the reply.",
-        "A turn whose receipts are empty and whose text says 'I've created the ticket' stores no fact that a ticket was created; a turn with a done receipt for platform_create_task stores the ticket's number.",
-        "Tests: `orchestrator/tests/test_prd256_memory_takes_receipts.py` on the distilled facts with a fake model.",
-        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
-        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+        "`_post_response` passes the receipts and the answer to `SmartChatIntegration.store` (consumers/chatbot/integration.py), and the distillation prompt in smart_memory.py is told which is the record of actions and which is the reply. → DONE — service._remember_the_turn (split out of _post_response) calls smart_chat.store(..., receipts=current_receipts()); integration.SmartChatIntegration.store → smart_orchestrator.store_exchange → store_conversation(receipts=); modules/memory/remembered_receipts.py: remembers_the_receipts (store_conversation) + the_record_beside_the_reply (_build_distill_prompt) put RECORD_RULE and the record of actions before the exchange and label the reply REPLY_LABEL; test_prd256_memory_takes_receipts.py::test_the_turn_passes_its_receipts_and_its_answer_to_memory, test_the_integration_and_the_orchestrator_pass_the_receipts_on, test_the_prompt_tells_the_record_from_the_reply, test_the_record_has_a_line_per_receipt_or_says_none_ran",
+        "A turn whose receipts are empty and whose text says 'I've created the ticket' stores no fact that a ticket was created; a turn with a done receipt for platform_create_task stores the ticket's number. → DONE — test_prd256_memory_takes_receipts.py::test_a_claimed_ticket_with_no_receipts_is_not_remembered, test_a_refused_create_task_is_not_remembered_as_a_ticket, test_a_done_create_task_is_remembered_by_its_number, test_without_receipts_the_distiller_reads_the_exchange_as_before",
+        "Tests: `orchestrator/tests/test_prd256_memory_takes_receipts.py` on the distilled facts with a fake model. → DONE — orchestrator/tests/test_prd256_memory_takes_receipts.py (fake model that distils as the prompt tells it; fake L3/L2; no provider, no database)",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines) → DONE — scripts/ci/check_changed_code_shape.py --base 7f1a273d2: 0 errors (_post_response 75 → under 50 code lines by the split); py_compile clean (ruff not on PATH locally; CI runs it)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story) → DONE — pushed by the runner; CI runs ONCE at the end of the wave"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
