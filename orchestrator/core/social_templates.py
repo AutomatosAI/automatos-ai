@@ -439,6 +439,18 @@ def slot_required(spec: Mapping[str, Any]) -> bool:
     return spec.get("required") is True
 
 
+def empty_required_slots(blocks: Mapping[str, Any], filled: Iterable[str]) -> List[str]:
+    """F378: the label of each slot marked required (:func:`slot_required`) that ``filled``
+    (the slots a render shows) leaves empty, in the template's order."""
+    slots = blocks.get("slots") if isinstance(blocks.get("slots"), Mapping) else {}
+    shown = set(filled)
+    return [
+        str(spec.get("label") or name)
+        for name, spec in slots.items()
+        if isinstance(spec, Mapping) and slot_required(spec) and name not in shown
+    ]
+
+
 def slot_generatable(spec: Mapping[str, Any]) -> bool:
     """Whether a generation toolkit may fill the slot (S1.8): every slot but one marked ``"generate": false``."""
     return spec.get("generate") is not False
@@ -724,6 +736,7 @@ __all__ = [
     "SocialTemplateError",
     "VIDEO_SLOT",
     "claim_names",
+    "empty_required_slots",
     "fill_text",
     "is_bundle_variable",
     "is_social_format",
