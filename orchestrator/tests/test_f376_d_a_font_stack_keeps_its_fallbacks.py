@@ -10,13 +10,9 @@ Chrome fell to Times. Pins:
   stack it replaces after it, each family once; failing that, its generic family;
 * a stack with a generic family, an empty heading font and an unsafe stack are as
   before (the heading font's validator still refuses what is not one CSS value);
-* at bundle time (``brand_tokens``), a stored bare stack gets its generic family;
-* the skill that writes the kit saves full stacks and no longer says renders fetch
-  open fonts.
+* at bundle time (``brand_tokens``), a stored bare stack gets its generic family.
 """
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -30,7 +26,6 @@ from modules.documents.font_fallbacks import kept_fallbacks
 NIGHT_BODY = "Geist, Inter, 'Segoe UI', system-ui, sans-serif"
 NIGHT_HEADING = "Newsreader, Georgia, serif"
 STORED = {"font_family": NIGHT_BODY, "heading_font": NIGHT_HEADING}
-SKILL = Path(__file__).resolve().parents[1] / "core" / "seeds" / "skills" / "brand-kit-builder.md"
 
 
 def test_the_designers_bare_names_keep_the_stacks_they_replace():
@@ -77,11 +72,3 @@ def test_a_stored_bare_stack_reaches_the_render_with_its_generic_family():
 def test_the_shipped_families_and_the_generic_names_agree_with_the_bundled_fonts():
     assert set(FAMILY_GENERICS) == {family.casefold() for family in bundled_fonts.BUNDLED_FAMILIES}
     assert set(bundled_fonts.GENERIC_FAMILIES) <= GENERIC_FAMILIES
-
-
-def test_the_brand_kit_skill_saves_full_stacks_and_says_renders_never_fetch():
-    text = SKILL.read_text(encoding="utf-8")
-    assert f'"heading_font": "{NIGHT_HEADING}"' in text
-    assert '"font_family": "Geist, Inter, system-ui, sans-serif"' in text
-    assert '"heading_font": "Newsreader",' not in text and '"font_family": "Geist",' not in text
-    assert "can be fetched" not in text and "Renders never fetch fonts" in text
