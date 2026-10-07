@@ -243,8 +243,11 @@ def brand_style_text(db: Session, workspace_id: UUID) -> str:
     return style_prompt(workspace.settings if workspace is not None else None)
 
 
-def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> compose.ComposeContext:
-    """Everything the composer is given, from the caller's workspace only."""
+def compose_context(
+    db: Session, workspace_id: UUID, body: ComposeRequest, *, current_take: Optional[Mapping[str, Any]] = None,
+) -> compose.ComposeContext:
+    """Everything the composer is given, from the caller's workspace only; a retake's
+    ``current_take`` (F378) is the post as it is, the take to start from."""
     channels, warnings = connected_channels(db, workspace_id, body.channels)
     if body.format == TEXT_FORMAT:
         channels = text_channels(channels, body.channels, warnings)
@@ -267,6 +270,7 @@ def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> co
         recent_openings=tuple(history.recent_openings(db, workspace_id)),  # PRD-251C US-C105
         voice_examples=tuple(voice_examples.for_composer(db, workspace_id)),  # PRD-251C US-C406
         handles=brand_handles(db, workspace_id),  # F378: the only handles a post carries
+        current_take=dict(current_take or {}),
     )
 
 

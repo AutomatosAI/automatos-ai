@@ -84,6 +84,14 @@ FACTS_NOTE = (
     "in the owner's words: the owner is asked, nothing is made up."
 )
 HANDLE_NOTE = "A handle is one of brand_handles, the brand kit's own; with none there, leave every handle empty."
+# F378 (B11, B16): a retake starts from the post as it is and the guidance is a hard rule.
+RETAKE_RULES_NOTE = (
+    "This is another take of a post: current_take is the post as it is now, its copy and its fields. Start from "
+    "it and change only what the owner's guidance (the brief's 'Changes requested:' line) asks: keep every other "
+    "word, value and fact as it is, and add no fact it does not hold. The guidance is a hard rule: what it says not "
+    "to say goes and nothing like it comes back; what it says to keep stays word for word. Without guidance, write "
+    "a better take of the same facts."
+)
 # F378 (B19, B18): the template that fits the brief, by what each one is for.
 PICK_NOTE = (
     "Pick the template whose description fits the brief. A template made for software (an app, a dashboard, "
@@ -193,6 +201,8 @@ def _system(ctx: ComposeContext) -> str:
         parts.append("This is a text-only post: no template, no variables and no image; write the copy only.")
     if ctx.visual_slots:
         parts.append(VISUAL_PROMPTS_NOTE)
+    if ctx.current_take:
+        parts.append(RETAKE_RULES_NOTE)
     if ctx.recent_openings:
         parts.append(RECENT_OPENINGS_NOTE)
     if ctx.voice_examples:
@@ -228,6 +238,8 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         material["recent_openings"] = list(ctx.recent_openings)
     if ctx.voice_examples:
         material["voice_examples"] = [dict(example) for example in ctx.voice_examples]
+    if ctx.current_take:
+        material["current_take"] = dict(ctx.current_take)  # F378: the take a retake starts from
     return [
         {"role": "system", "content": _system(ctx)},
         {"role": "user", "content": json.dumps(material, default=str, ensure_ascii=False)},

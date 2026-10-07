@@ -481,6 +481,9 @@ export interface SocialReviewEntry {
   by: string
   action: string
   comment: string | null
+  /** F378: a `retake` entry keeps the take it replaced; a `retake_undone` one names the retake it undid. */
+  previous?: Record<string, unknown>
+  undid?: string
 }
 
 /**
@@ -556,6 +559,8 @@ export interface SocialPost {
   /** PRD-251C: the batch a weekly or monthly plan made it in ("2026-W43", "2026-11"). */
   batch_key?: string | null
   music?: SocialPostMusic
+  /** F378: on a retake's answer, what the composer had to say (its warnings, its questions for the owner). */
+  take?: { warnings: string[]; questions: string[] }
   created_at: string
   updated_at: string
 }
@@ -2955,12 +2960,14 @@ class ApiClient {
   }
 
   // ===== PRD-251 Socials: the workspace switch and the post lifecycle =====
-  /** PRD-251B US-B111: Auto makes another take of a post in the Queue (the reviewer's guidance, if any). */
+  /** PRD-251B US-B111: Auto makes another take of a post (the reviewer's guidance, if any); F378: `take` says what it needs. */
   async retakeSocialPost(postId: string, guidance?: string): Promise<SocialPost> {
-    return this.request<SocialPost>(`/api/socials/posts/${postId}/retake`, {
-      method: 'POST',
-      body: JSON.stringify(guidance ? { guidance } : {}),
-    })
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/retake`, { method: 'POST', body: JSON.stringify(guidance ? { guidance } : {}) })
+  }
+
+  /** F378: the take before Auto's last one, restored (and rendered again, as a retake is). */
+  async undoSocialPostRetake(postId: string): Promise<SocialPost> {
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/retake/undo`, { method: 'POST' })
   }
 
   /** PRD-251B US-B109: the post's visual becomes an uploaded file (PNG, JPEG, WebP or MP4; the server sniffs it). */
@@ -2974,10 +2981,8 @@ class ApiClient {
 
   /** PRD-251B: a Library picture (an image Deliverable) fills the template's photo spot `slot`. */
   async setSocialPostPhoto(postId: string, slot: string, deliverableId: string): Promise<SocialPost> {
-    return this.request<SocialPost>(`/api/socials/posts/${postId}/photos/${encodeURIComponent(slot)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ deliverable_id: deliverableId }),
-    })
+    const body = JSON.stringify({ deliverable_id: deliverableId })
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/photos/${encodeURIComponent(slot)}`, { method: 'PUT', body })
   }
 
   /** GET /api/deliverables of one artifact type, newest first (the editor's Library, US-B109). */
@@ -3011,10 +3016,7 @@ class ApiClient {
   }
 
   async createSocialPost(input: CreateSocialPostInput): Promise<SocialPost> {
-    return this.request<SocialPost>('/api/socials/posts', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
+    return this.request<SocialPost>('/api/socials/posts', { method: 'POST', body: JSON.stringify(input) })
   }
 
   async getSocialPost(postId: string): Promise<SocialPost> {
@@ -3022,10 +3024,7 @@ class ApiClient {
   }
 
   async updateSocialPost(postId: string, changes: UpdateSocialPostInput): Promise<SocialPost> {
-    return this.request<SocialPost>(`/api/socials/posts/${postId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(changes),
-    })
+    return this.request<SocialPost>(`/api/socials/posts/${postId}`, { method: 'PATCH', body: JSON.stringify(changes) })
   }
 
   /** Delete a post that has not gone out (owner or admin); 409 while it renders or publishes. */
@@ -3056,10 +3055,7 @@ class ApiClient {
   }
 
   async requestSocialPostChanges(postId: string, comment: string): Promise<SocialPost> {
-    return this.request<SocialPost>(`/api/socials/posts/${postId}/request-changes`, {
-      method: 'POST',
-      body: JSON.stringify({ comment }),
-    })
+    return this.request<SocialPost>(`/api/socials/posts/${postId}/request-changes`, { method: 'POST', body: JSON.stringify({ comment }) })
   }
 
   async rejectSocialPost(postId: string, reason?: string): Promise<SocialPost> {

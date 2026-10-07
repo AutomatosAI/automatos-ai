@@ -37,6 +37,9 @@ export const REVIEW_ACTION_LABELS: Record<string, string> = {
   partially_published: 'Partially published',
   publish_failed: 'Publish failed',
   missed: 'Missed its slot',
+  // F378: another take by Auto (the one before it kept), and that earlier take restored.
+  retake: 'Auto made another take',
+  retake_undone: 'Earlier take restored',
 }
 
 export const SOCIAL_STATUS_LABELS: Record<SocialPostStatus, string> = {

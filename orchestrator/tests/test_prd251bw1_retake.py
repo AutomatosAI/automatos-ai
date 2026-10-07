@@ -9,7 +9,7 @@ replaced. Pinned:
   render ends the post in needs_approval;
 * the reviewer's guidance reaches the composer's brief as "Changes requested: ...";
 * a post in changes_requested with no template is sent for approval again at once;
-* outside needs_approval and changes_requested it is 409 and nothing is composed; another
+* outside draft, needs_approval, changes_requested and failed (F378) it is 409 and nothing is composed; another
   workspace's post is 404; a viewer is refused (403); a model failure is 502 and nothing
   changes;
 * the route is a plain ``def``, in the manifest with its method, and apiClient posts to it.
@@ -62,10 +62,11 @@ TAKE = {
 
 @pytest.fixture
 def retakes(env, monkeypatch):
-    state = SimpleNamespace(bodies=[], proposal=TAKE, fail=None)
+    state = SimpleNamespace(bodies=[], extras=[], proposal=TAKE, fail=None)
 
-    def context(db, workspace_id, body):
+    def context(db, workspace_id, body, **extra):
         state.bodies.append(body)
+        state.extras.append(extra)  # F378: the post's current take
         return SimpleNamespace(brief=body.brief)
 
     async def propose(context, llm_factory, timeout):
@@ -129,11 +130,15 @@ def test_a_post_without_a_template_is_sent_for_approval_again(retakes):
     assert resp.json()["status"] == "needs_approval" and retakes.launched == []
 
 
-def test_outside_the_queue_statuses_it_is_409_and_nothing_is_composed(retakes):
-    post = _renderable(retakes)  # a draft
+def test_outside_the_retake_statuses_it_is_409_and_nothing_is_composed(retakes):
+    # F378: a draft and a failed post are retaken too (test_f378_h); a rendering one is not.
+    post = _renderable(retakes)
+    assert retakes.client.post(f"/api/socials/posts/{post['id']}/render").status_code == 202
+    rendering = _post(retakes, post["id"])
+    assert rendering.status == "rendering"
     resp = _retake(retakes, post["id"])
     assert resp.status_code == 409
-    assert retakes.retakes.bodies == [] and _post(retakes, post["id"]).content_hash == post["content_hash"]
+    assert retakes.retakes.bodies == [] and _post(retakes, post["id"]).content_hash == rendering.content_hash
 
 
 def test_another_workspaces_post_is_404_and_a_viewer_is_refused(retakes):

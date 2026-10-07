@@ -33,6 +33,7 @@ vi.mock('@/lib/api-client', () => {
     approveSocialPost: vi.fn(),
     requestSocialPostChanges: vi.fn(async (id: string) => ({ id })),
     retakeSocialPost: vi.fn(async (id: string) => ({ id })),
+    undoSocialPostRetake: vi.fn(async (id: string) => ({ id })),
     rejectSocialPost: vi.fn(),
     approveSocialCampaignSeries: vi.fn(),
     approveSocialPlanBatch: vi.fn(),
@@ -48,6 +49,8 @@ import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-q
 import { queueHeading, timeLeft } from '@/components/deliverables/socials/studio/queue-model'
 import { SOCIAL_POST_REVIEW_STALE_MESSAGE } from '@/hooks/use-socials-api'
 import { NO_CHANNEL_HINT } from '@/components/deliverables/socials/socials-post-review'
+import { UNDO_TAKE } from '@/components/deliverables/socials/studio/queue-pane'
+import { RETAKE_STARTED } from '@/hooks/use-socials-queue'
 import { renderWith } from './socials-editor-harness'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -141,6 +144,24 @@ describe('the Queue', () => {
     renderQueue(TODAY)
     fireEvent.click(within(pane()).getByRole('button', { name: /Make another take/ }))
     await waitFor(() => expect(api.retakeSocialPost).toHaveBeenCalledWith('a'))
+  })
+
+  it("F378: a retake's toast says what Auto still needs from the owner", async () => {
+    api.retakeSocialPost.mockResolvedValueOnce({ id: 'a', take: { warnings: [], questions: ['Source line'] } })
+    renderQueue(TODAY)
+    fireEvent.click(within(pane()).getByRole('button', { name: /Make another take/ }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(`${RETAKE_STARTED} Auto needs: Source line`))
+  })
+
+  it('F378: a post Auto retook offers the earlier take back, until it is restored', async () => {
+    const retook = { at: '2026-10-14T07:00:00Z', by: 'owner', action: 'retake', comment: null, previous: { copy: { base: 'Old.' } } }
+    renderQueue([waiting('a', '2026-10-14T12:00:00Z', { review_log: [retook] })])
+    fireEvent.click(within(pane()).getByRole('button', { name: UNDO_TAKE }))
+    await waitFor(() => expect(api.undoSocialPostRetake).toHaveBeenCalledWith('a'))
+    cleanup()
+    const undone = { at: '2026-10-14T07:05:00Z', by: 'owner', action: 'retake_undone', comment: null, undid: retook.at }
+    renderQueue([waiting('a', '2026-10-14T12:00:00Z', { review_log: [retook, undone] })])
+    expect(within(pane()).queryByRole('button', { name: UNDO_TAKE })).toBeNull()
   })
 
   it('F256: a post with no channel cannot be approved, and says nothing would post', () => {

@@ -65,6 +65,14 @@ export function hasChannels(post: Pick<SocialPost, 'targets'>): boolean {
   return (post.targets ?? []).length > 0
 }
 
+/** F378: whether the post keeps a take from before Auto's last retake that is not restored yet
+ * (the server's `modules/socials/retakes.restoring`). */
+export function hasEarlierTake(post: Pick<SocialPost, 'review_log'>): boolean {
+  const log = post.review_log ?? []
+  const undone = new Set(log.filter((entry) => entry.action === 'retake_undone').map((entry) => entry.undid))
+  return log.some((entry) => entry.action === 'retake' && !!entry.previous && !undone.has(entry.at))
+}
+
 export function approvalWasVoided(post: Pick<SocialPost, 'review_log'>): boolean {
   const log = post.review_log ?? []
   return log.length > 0 && log[log.length - 1].action === 'approval_voided'
