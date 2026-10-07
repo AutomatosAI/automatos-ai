@@ -4,8 +4,8 @@ Eleven customer nights found Auto's worst habit: claiming work it did not do, mo
 after a call that FAILED on its arguments and was then reported as done. A reply is no
 longer the only account of its turn. After the tool loop the platform writes its own, from
 the calls that ran: the in-process ``ToolExecutionTracker`` (``outcomes``, ``skipped``)
-read with ``call_effects``, never ``tool_execution_logs`` (D8: it keeps parameter names
-only, no result and no chat).
+read with ``call_effects``, never the persisted tool-execution log (D8: it keeps parameter
+names only, no result and no chat).
 
 - One receipt per call: ``{action, kind, status, subject, effect, link, reason}``. The kind
   is read or write; the status done, refused or skipped. The subject is the thing by number
