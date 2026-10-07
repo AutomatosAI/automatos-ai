@@ -14,6 +14,8 @@
   one a save takes, ``{"base", "channels"}`` (F378: one shape, no hand translation).
 * **Visual prompts** (PRD-251B US-B305): only for the slots the composer was asked
   about, each one line of at most VISUAL_PROMPT_MAX_CHARS.
+* **Facts** (F378): what the proposal says is checked last (``compose_facts.py``): no
+  placeholder left in the copy, and ``questions`` lists what Auto needs from the owner.
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.models.socials import SOCIAL_POST_FORMATS
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, claim_names, resolve_variables
+from modules.socials import compose_facts
 from modules.socials.copy_limits import fit_copy, fit_title
 
 VIDEO_FORMAT = "video"
@@ -160,7 +163,7 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         if post_format is None and template is not None:
             post_format = VIDEO_FORMAT if template.get("format") == SOCIAL_VIDEO else "image"
         variables = _variables(raw.get("variables"), template, warnings)
-    return {
+    proposal = {
         "title": _title(raw.get("title"), ctx, warnings),
         "copy": _copy(raw.get("copy"), ctx, warnings),
         "format": post_format,
@@ -174,4 +177,7 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         "length_seconds": getattr(ctx, "length_seconds", None),
         "visual_prompts": _visual_prompts(raw.get("visual_prompts"), ctx),
         "warnings": warnings,
+        # F378: what Auto needs from the owner before the post can be made ("Auto needs: …").
+        "questions": [],
     }
+    return compose_facts.checked(proposal, ctx)  # F378: no fact the brief does not give

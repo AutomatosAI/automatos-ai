@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from core.social_templates import resolve_variables
-from modules.socials import compose_checks
+from modules.socials import compose_checks, compose_facts
 from modules.socials.copy_limits import limits_for
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,18 @@ FILL_NOTE = (
     'made without them. Answer with ONE JSON object only, shaped {"variables": {"<name>": "<value>"}}, giving '
     "each of them a value that fits its schema below, from the brief and in the brand voice. The rules above "
     "still hold: never invent a source, a URL or a number."
+)
+# F378 (night 11): a placeholder left in the copy is asked about once, with the reason.
+COPY_FIX_NOTE = (
+    "Your copy holds template placeholders, which a post never shows (listed below). Answer with ONE JSON "
+    'object only, shaped {"copy": {"base": "...", "channels": {"<toolkit>": "..."}}}: the same copy with each '
+    "placeholder replaced by the real words the brief gives. Where the brief does not give the fact a placeholder "
+    "stands for, rewrite the sentence without it: never make the fact up."
+)
+# F378: the skills write tool calls with {braces} where a value goes; a post never does.
+SKILLS_NOTE = (
+    "The skills below write examples with {braces} or [brackets] where a value goes. A post never carries "
+    "braces, brackets, field names or the words true, false or null as text: write the real words."
 )
 RETRY_NOTE = (
     "Your answer was not the JSON object asked for. Answer again with ONLY that "
@@ -150,6 +162,8 @@ def _system(ctx: ComposeContext) -> str:
         parts.append(RECENT_OPENINGS_NOTE)
     if ctx.voice_examples:
         parts.append(VOICE_EXAMPLES_NOTE)
+    if ctx.skills:
+        parts.append(SKILLS_NOTE)
     for name, text in ctx.skills.items():
         parts.append(f"## Skill: {name}\n{text[:SKILL_MAX_CHARS]}")
     return "\n\n".join(parts)
@@ -264,15 +278,40 @@ async def _filled(raw: Mapping[str, Any], proposal: Dict[str, Any], ctx: Compose
     return compose_checks.checked_proposal(merged, ctx)
 
 
+async def _copy_fixed(raw: Dict[str, Any], proposal: Dict[str, Any], ctx: ComposeContext, llm: Any,
+                      messages: List[Dict[str, str]], timeout: float) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """F378: the answer and its proposal, with the copy asked for once more when it holds a
+    template placeholder; an unusable or late answer leaves both as they were (the placeholder
+    stays a warning and an owner's question)."""
+    found = compose_facts.copy_placeholders(proposal["copy"])
+    if not found:
+        return raw, proposal
+    listed = {"copy": proposal["copy"], "placeholders": [f"{where}: {placeholder}" for where, placeholder in found]}
+    history = [*messages, {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False, default=str)}]
+    ask = COPY_FIX_NOTE + "\n" + json.dumps(listed, ensure_ascii=False)
+    try:
+        answer = await _ask(llm, [*history, {"role": "user", "content": ask}], timeout)
+    except ComposeTimedOut:
+        logger.warning("[Socials] compose follow-up for the copy's placeholders timed out")
+        return raw, proposal
+    copy = answer.get("copy") if isinstance(answer, dict) else None
+    if not isinstance(copy, dict):
+        return raw, proposal
+    fixed = {**raw, "copy": copy}
+    return fixed, compose_checks.checked_proposal(fixed, ctx)
+
+
 async def propose(ctx: ComposeContext, llm_factory: Callable[[], Any], timeout: float) -> Dict[str, Any]:
-    """The proposal for ``ctx``: one call, one retry when the JSON is unusable, and a
-    follow-up for the template's required variables the answer left empty."""
+    """The proposal for ``ctx``: one call, one retry when the JSON is unusable, the copy asked
+    for again when it holds a placeholder (F378), and a follow-up for the template's required
+    variables the answer left empty."""
     llm = llm_factory()
     messages = build_messages(ctx)
     for attempt in range(ATTEMPTS):
         raw = await _ask(llm, messages, timeout)
         if raw is not None:
-            return await _filled(raw, compose_checks.checked_proposal(raw, ctx), ctx, llm, messages, timeout)
+            raw, proposal = await _copy_fixed(raw, compose_checks.checked_proposal(raw, ctx), ctx, llm, messages, timeout)
+            return await _filled(raw, proposal, ctx, llm, messages, timeout)
         logger.warning("[Socials] compose answer %d was not JSON", attempt + 1)
         messages = [*messages, {"role": "user", "content": RETRY_NOTE}]
     raise ComposeFailed("The model's answer could not be read as a proposal. Try again, or start from a blank draft.")

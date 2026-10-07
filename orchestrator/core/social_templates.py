@@ -69,6 +69,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from core.chart_binding import data_errors
 from core.social_brand_rule import brand_literals
+from core.social_text_values import text_value_problem
 
 # The two formats a social template has. core/models/core.py reads them from
 # here for the document_templates format CHECK (the prd251_wave1 migration).
@@ -265,7 +266,9 @@ def _value_problem(spec: Mapping[str, Any], value: Any) -> Optional[str]:
         if not isinstance(value, str):
             return "must be text"
         limit = spec.get("max_chars", MAX_TEXT_CHARS)
-        return f"is longer than {limit} characters" if len(value) > limit else None
+        if len(value) > limit:  # F378: the length given, so a re-ask can say by how much
+            return f"is longer than {limit} characters ({len(value)} given)"
+        return text_value_problem(value)  # F378: never a placeholder or a bare "true"
     if kind == NUMBER:
         if not _is_number(value):
             return "must be a number"
