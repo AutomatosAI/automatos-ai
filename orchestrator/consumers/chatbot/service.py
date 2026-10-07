@@ -73,8 +73,8 @@ from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passi
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's calls did, written by the platform
-    its_reads_are_receipted, notes_the_answering_model, the_answer_takes_the_receipts, the_loop_writes_receipts,
-    writes_its_receipts,
+    current_receipts, its_reads_are_receipted, notes_the_answering_model, the_answer_takes_the_receipts,
+    the_loop_writes_receipts, writes_its_receipts,
 )
 from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
@@ -313,6 +313,13 @@ def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
 # F185 (night 6): the owner was told "encountered an issue … Please try again" after two asks. F264 (night 8):
 # a blank answer in the loop is the account of the turn (turn_account); this is the rare blank after it.
 NOTHING_SAID = "My reply didn't come through. Anything I did this turn is on your board: check there before asking again."
+
+
+def _update_runtime_metrics(agent_runtime: Any, response: Any) -> None:
+    """Count the turn on the agent runtime's in-process metrics, when it keeps any."""
+    if hasattr(agent_runtime, 'update_metrics'):
+        tokens_used = response.usage.get('total_tokens', 0) if response.usage else 0
+        agent_runtime.update_metrics(execution_time=1.0, tokens_used=tokens_used, success=True)
 
 
 def nothing_said_fallback(tool_data: Any) -> str:
@@ -1472,46 +1479,8 @@ class StreamingChatService:
         user_id: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
         """Store memory, emit memory-stored event, update metrics, fire eval."""
-        import asyncio
-
-        smart_chat = getattr(self, '_smart_chat', None)
-
-        # PRD-196 S6 (GDPR): tag the distilled chat memory with the human
-        # principal as ``user:{users.id}``. ``user_id`` is the INTERNAL integer
-        # id (already resolved upstream — never the Clerk string, the #513
-        # lesson); if it's absent we write NO subject tag rather than a wrong one.
-        # This also keeps subject-erase working on the Clerk-less `local` edition
-        # (the internal id always exists). Reserved namespaces for the other
-        # memory-writing lanes — ``shopper:{salted-hash}`` (widget customer) and
-        # ``channel:{platform}:{peer-id}`` (channel peer) — are DEFERRED to when
-        # those lanes' memory writes go live; wiring them is Gerard's call
-        # (flagged in the PRD-196 PR body, not silently dropped — CLAUDE.md §12).
-        subject_id = f"user:{user_id}" if user_id else None
-
-        # Store memory via SmartChatIntegration. F154: a widget turn is an
-        # anonymous visitor's, so it stores no memory; its transcript stays in
-        # the chat tables.
-        if latest_text and full_response and smart_chat and not self.widget_mode:
-            try:
-                _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id)
-                _mm = smart_chat.orchestrator.memory_manager
-                _facts_stored = getattr(_mm, '_last_l3_facts_stored', 0)
-                # PRD-159 S5: honest event — emit ONLY after durable facts were
-                # actually persisted to L3, with the real tier. Zero-fact turns
-                # (e.g. "user said hello") produce NO memory_stored event.
-                if _stored and _facts_stored > 0:
-                    _tier = getattr(_mm, '_last_tier', 'conversation')
-                    yield self.streaming_handler.format_aisdk_memory_stored(
-                        memory={
-                            "userMessage": latest_text[:200],
-                            "assistantResponse": full_response[:200],
-                            "chatId": chat_id,
-                        },
-                        reason=_tier if isinstance(_tier, str) else "conversation",
-                    )
-                    await asyncio.sleep(0)
-            except Exception as mem_err:
-                logger.warning(f"Failed to store memory exchange: {mem_err}")
+        async for chunk in self._remember_the_turn(latest_text, full_response, chat_id, user_id):
+            yield chunk
 
         # FutureAGI live traffic eval (fire-and-forget)
         if latest_text and full_response:
@@ -1528,14 +1497,7 @@ class StreamingChatService:
             except Exception:
                 pass
 
-        # Update agent metrics
-        if hasattr(agent_runtime, 'update_metrics'):
-            tokens_used = response.usage.get('total_tokens', 0) if response.usage else 0
-            agent_runtime.update_metrics(
-                execution_time=1.0,
-                tokens_used=tokens_used,
-                success=True
-            )
+        _update_runtime_metrics(agent_runtime, response)
 
         # Persist task counter to DB
         try:
@@ -1561,6 +1523,42 @@ class StreamingChatService:
                 self.db.rollback()
             except Exception:
                 pass
+
+    async def _remember_the_turn(
+        self, latest_text: str, full_response: str, chat_id: str, user_id: Optional[int],
+    ) -> AsyncGenerator[str, None]:
+        """Distil the turn into memory with its receipts (PRD-256 US-003: what was done, told
+        apart from what was said) and emit memory-stored when durable facts were stored."""
+        smart_chat = getattr(self, '_smart_chat', None)
+
+        # PRD-196 S6 (GDPR): tag the distilled chat memory with the human
+        # principal as ``user:{users.id}``. ``user_id`` is the INTERNAL integer
+        # id (already resolved upstream — never the Clerk string, the #513
+        # lesson); if it's absent we write NO subject tag rather than a wrong one,
+        # and subject-erase works on the Clerk-less `local` edition. Reserved
+        # namespaces for the other lanes (``shopper:``, ``channel:``)
+        # are DEFERRED to when those lanes' memory writes go live (Gerard's call).
+        subject_id = f"user:{user_id}" if user_id else None
+
+        # F154: a widget turn is an anonymous visitor's, so it stores no memory.
+        if not (latest_text and full_response and smart_chat) or self.widget_mode:
+            return
+        try:
+            _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id,
+                                             receipts=current_receipts())
+            _mm = smart_chat.orchestrator.memory_manager
+            # PRD-159 S5: honest event — emit ONLY after durable facts were
+            # actually persisted to L3, with the real tier.
+            if _stored and getattr(_mm, '_last_l3_facts_stored', 0) > 0:
+                _tier = getattr(_mm, '_last_tier', 'conversation')
+                yield self.streaming_handler.format_aisdk_memory_stored(
+                    memory={"userMessage": latest_text[:200], "assistantResponse": full_response[:200],
+                            "chatId": chat_id},
+                    reason=_tier if isinstance(_tier, str) else "conversation",
+                )
+                await asyncio.sleep(0)
+        except Exception:
+            logger.exception("Failed to store memory exchange")
 
     # ─────────────────────────────────────────────────────────────────────
     # Streaming tool loop — delegates to the converged ToolLoopExecutor

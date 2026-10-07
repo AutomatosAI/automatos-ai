@@ -404,6 +404,7 @@ class SmartChatOrchestrator:
         assistant_response: str,
         chat_id: Optional[str] = None,
         subject_id: Optional[str] = None,
+        receipts: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
         """
         Store a conversation exchange in memory.
@@ -416,6 +417,8 @@ class SmartChatOrchestrator:
             user_message: The user's message
             assistant_response: The assistant's response
             chat_id: Optional chat session ID
+            receipts: The turn's receipts (PRD-256 US-003), distilled as the
+                record of actions beside the reply; None outside a chat turn.
 
         Returns:
             True once the writes have been scheduled (not a persistence ack).
@@ -441,6 +444,7 @@ class SmartChatOrchestrator:
                 chat_id=chat_id,
                 widget_mode=self.widget_mode,
                 subject_id=subject_id,
+                receipts=receipts,
             ),
             label="store_conversation",
         )
