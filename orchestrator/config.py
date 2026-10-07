@@ -1398,6 +1398,18 @@ class Config:
     LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY")
     LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY")
     LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    # PRD-256 (#847): OpenTelemetry traces over OTLP/HTTP, beside the PRD-73 metrics, logs
+    # and correlation IDs (core/observability/otel.py). Default OFF: nothing from
+    # `opentelemetry` is imported. The collector at the endpoint chooses the backend.
+    OTEL_ENABLED: bool = os.getenv("OTEL_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "automatos-api")
+    # The collector's OTLP/HTTP base address; /v1/traces is appended.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+    # `key=value,key2=value2` (URL-encoded values), e.g. a vendor's Authorization header.
+    OTEL_EXPORTER_OTLP_HEADERS: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+    # The share of new traces kept (0.0–1.0); a request whose caller sampled it follows the caller.
+    # Kept as text and parsed when tracing starts, so a bad value can never stop a boot (otel.py).
+    OTEL_TRACES_SAMPLER_RATIO: str = os.getenv("OTEL_TRACES_SAMPLER_RATIO", "1.0")
 
     # =============================================================================
     # OBJECT STORAGE (S3 / MinIO) + AWS S3 VECTORS (PRD-42: Cloud Document Sync)
