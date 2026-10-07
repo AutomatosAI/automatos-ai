@@ -31,6 +31,8 @@ def test_a_social_post_brief_gets_the_post_actions_after_its_ranking():
 def test_socials_off_or_another_brief_keeps_its_ranking():
     assert with_socials_actions(BRIEF_2159, RANKED, ("socials",)) == RANKED
     assert with_socials_actions("How many kilos did Lantern Kitchen order in September?", RANKED, ()) == RANKED
+    # A brief that reads or plans posts makes none: its ranking is its own.
+    assert with_socials_actions("Summarise last week's Instagram posts", RANKED, ()) == RANKED
     assert with_socials_actions(BRIEF_2159, RANKED, ()) is not RANKED      # a new list
 
 

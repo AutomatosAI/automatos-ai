@@ -5,7 +5,8 @@ directly create the social post… Please use the platform_create_social_post ac
 the agent's action catalog is the top-K actions ranked against its brief
 (``PlatformActionsSection``, PRD-138), and the brief's words ranked other actions above
 the ones that make and render a post. A query that speaks of making social posts
-(``social_post_asks.mentions_social_posts``) now always shows the actions a post is
+(``social_post_asks.asks_for_a_social_post``: not a brief that reads, plans or summarises
+posts) now always shows the actions a post is
 made with, after the ranked ones, while Socials is on for the workspace. While
 it is off (PRD-251B US-B106, the hidden categories) nothing is added: off means invisible.
 """
@@ -13,7 +14,7 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Sequence
 
-from modules.tools.discovery.social_post_asks import mentions_social_posts
+from modules.tools.discovery.social_post_asks import asks_for_a_social_post
 
 # What a post is made with: pick the template, read its fields, draft, render, submit, check.
 SOCIAL_POST_ACTIONS = (
@@ -30,7 +31,7 @@ SOCIAL_POST_ACTIONS = (
 def with_socials_actions(query: str, ranked: Sequence[str], hidden: Optional[Iterable[str]]) -> List[str]:
     """``ranked`` with the Socials post actions after it when ``query`` is social-post work
     and the workspace is shown Socials; ``ranked`` as it was otherwise. A new list either way."""
-    if not mentions_social_posts(query):
+    if not asks_for_a_social_post(query, ""):
         return list(ranked)
     from modules.socials.settings import SOCIALS_ACTION_CATEGORY
 
