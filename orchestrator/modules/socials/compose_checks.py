@@ -178,6 +178,6 @@ def checked_proposal(raw: Mapping[str, Any], ctx: Any) -> Dict[str, Any]:
         "visual_prompts": _visual_prompts(raw.get("visual_prompts"), ctx),
         "warnings": warnings,
         # F378: what Auto needs from the owner before the post can be made ("Auto needs: …").
-        "questions": [],
+        "questions": compose_facts.model_questions(raw.get("questions")),
     }
     return compose_facts.checked(proposal, ctx)  # F378: no fact the brief does not give

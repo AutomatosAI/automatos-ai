@@ -61,9 +61,19 @@ FILL_BATCH = 25  # the most variables one follow-up asks for: its answer stays i
 FILL_NOTE = (
     "Your answer left these variables of the template you chose without a value, and the post cannot be "
     'made without them. Answer with ONE JSON object only, shaped {"variables": {"<name>": "<value>"}}, giving '
-    "each of them a value that fits its schema below, from the brief and in the brand voice. The rules above "
-    "still hold: never invent a source, a URL or a number."
+    "each of them a value that fits its schema below, from the brief and in the brand voice. A variable marked "
+    "refused had a value that does not fit, for the reason given: give one that does. The rules above still hold: "
+    "use only the facts the brief gives. Where it does not give the fact a variable needs, answer null for it and "
+    "the owner is asked; never invent a source, a URL, a number, a name, a date, a price or a product detail."
 )
+# F378 (night 11): the composer uses the facts it is given and nothing else.
+FACTS_NOTE = (
+    "Use only the facts the brief gives. Never add a product detail, a tasting note, a price, an offer, shipping "
+    "or delivery, a handle, a growth claim, a name, a date or a source that nobody gave. Where a field the "
+    "template needs a fact the brief does not give, leave it out of variables and say what you need in questions, "
+    "in the owner's words: the owner is asked, nothing is made up."
+)
+HANDLE_NOTE = "A handle is one of brand_handles, the brand kit's own; with none there, leave every handle empty."
 # F378 (night 11): a placeholder left in the copy is asked about once, with the reason.
 COPY_FIX_NOTE = (
     "Your copy holds template placeholders, which a post never shows (listed below). Answer with ONE JSON "
@@ -116,6 +126,10 @@ class ComposeContext:
     recent_openings: Tuple[str, ...] = ()
     # PRD-251C (C8, US-C406): copy Auto drafted and the copy the owner approved instead, newest first.
     voice_examples: Tuple[Mapping[str, str], ...] = ()
+    # F378 (night 11): the brand kit's social_handles (toolkit → handle), the only handles a post carries.
+    handles: Mapping[str, str] = field(default_factory=dict)
+    # F378: on a retake, the post as it is now ({copy, variables: {name: value}}), the take to start from.
+    current_take: Mapping[str, Any] = field(default_factory=dict)
 
 
 # ── the prompt ──────────────────────────────────────────────────────────────
@@ -126,6 +140,7 @@ _ANSWER_SHAPE = {
     "template_id": "the id of ONE template listed (null for a text post)",
     "variables": {"<variable name>": "its value"},
     "sources": {"<claim variable name>": {"kind": "<candidate kind>", "ref": "<candidate ref>"}},
+    "questions": ["what you need from the owner to finish the post, in plain words"],
 }
 
 
@@ -146,6 +161,8 @@ def _system(ctx: ComposeContext) -> str:
         "and give each of its variables a value that fits its schema. A variable marked claim is a fact: "
         "bind it to one of the candidate sources by kind and ref, or leave it out of sources. Never invent "
         "a source, a URL or a number. Follow the brand voice: use its tone and never its banned phrases.",
+        FACTS_NOTE,
+        HANDLE_NOTE,
     ]
     if ctx.template_id:
         parts.append("The template is chosen: use the one template listed, and no other.")
@@ -178,6 +195,7 @@ def build_messages(ctx: ComposeContext) -> List[Dict[str, str]]:
         "channels": _channel_lines(ctx),
         "templates": [dict(t) for t in ctx.templates],
         "candidate_sources": _candidate_lines(ctx),
+        "brand_handles": dict(ctx.handles),  # F378: the only handles a post may carry
     }
     if ctx.template_id:
         material["template_id"] = ctx.template_id

@@ -211,6 +211,12 @@ def brand_voice(db: Session, workspace_id: UUID) -> Dict[str, Any]:
     return dict(get_brand_kit(workspace.settings if workspace is not None else None).get("voice") or {})
 
 
+def brand_handles(db: Session, workspace_id: UUID) -> Dict[str, str]:
+    """F378 (night 11): the brand kit's social handles (toolkit → handle), the only ones a post carries."""
+    workspace = db.get(Workspace, workspace_id)
+    return dict(get_brand_kit(workspace.settings if workspace is not None else None).get("social_handles") or {})
+
+
 def brand_style_text(db: Session, workspace_id: UUID) -> str:
     """The brand kit's style profile as one paragraph (PRD-251B US-B303); empty without one."""
     from modules.documents.brand_style import style_prompt
@@ -240,6 +246,7 @@ def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> co
         style=brand_style_text(db, workspace_id),
         recent_openings=tuple(history.recent_openings(db, workspace_id)),  # PRD-251C US-C105
         voice_examples=tuple(voice_examples.for_composer(db, workspace_id)),  # PRD-251C US-C406
+        handles=brand_handles(db, workspace_id),  # F378: the only handles a post carries
     )
 
 

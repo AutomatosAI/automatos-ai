@@ -9,6 +9,11 @@ says rather than how it is built:
   (``compose.py``); what is still there is a warning, and an owner's question in plain
   words ("Retail bags sold").
 
+* **Numbers and handles nobody gave** (B-I5-4, ``compose_given.py``): a figure the brief,
+  the current take and the bound sources do not hold is a warning; a handle field takes the
+  brand kit's handle only.
+* **The model's own questions** (``questions`` in its answer) are kept, text only.
+
 Each check returns what it found; ``checked_proposal`` adds it to the warnings and to
 ``questions``, the list the editor shows as "Auto needs: …".
 """
@@ -17,8 +22,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Tuple
 
 from core.social_text_values import PLACEHOLDER_PATTERNS, placeholder_label
+from modules.socials import compose_given
 
 BASE = "base"
+MAX_QUESTIONS = 10
+QUESTION_MAX_CHARS = 200
 PLACEHOLDER_WARNING = "{where} holds the placeholder {found}: write the real words before saving"
 
 
@@ -64,8 +72,15 @@ def with_notes(proposal: Dict[str, Any], warnings: List[str], questions: List[st
     }
 
 
+def model_questions(raw: Any) -> List[str]:
+    """The questions the model asks the owner: text only, ``MAX_QUESTIONS`` of them at most."""
+    asked = raw if isinstance(raw, list) else []
+    return unique([" ".join(q.split())[:QUESTION_MAX_CHARS] for q in asked if isinstance(q, str)])[:MAX_QUESTIONS]
+
+
 def checked(proposal: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     """``proposal`` (``compose_checks``' checked shape) with what it says checked against
     what the composer was given (``ctx``): its warnings and the owner's questions added."""
     warnings, questions = placeholder_notes(proposal.get("copy") or {})
-    return with_notes(proposal, warnings, questions)
+    proposal, given = compose_given.given_notes(proposal, ctx)
+    return with_notes(proposal, [*warnings, *given], questions)
