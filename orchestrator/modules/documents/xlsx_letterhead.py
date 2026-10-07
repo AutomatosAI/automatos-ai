@@ -31,7 +31,7 @@ DECIMAL_FORMAT = "#,##0.00"
 HAIR_BORDER = 7  # XlsxWriter's hairline border style
 FOOTER_TEXT_PT = 8
 LETTERHEAD_ROWS = 3  # the title, the company line, a blank row
-KIT_COLOURS = ("primary", "secondary", "accent", "text")
+KIT_COLOURS = ("primary", "secondary", "text")
 # The design fields ``brand_rules.brand_assets`` carries as the kit stores them.
 KIT_DESIGN_KEYS = ("palette", "accent_use", "type_scale", "logo_rules")
 # Excel draws an image at 96 px to the inch, and a default row is 15 pt (20 px) tall.

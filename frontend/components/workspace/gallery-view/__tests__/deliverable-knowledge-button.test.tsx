@@ -14,7 +14,7 @@ vi.mock('@/lib/api-client', () => ({ apiClient: { request: (...args: unknown[]) 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 import { canAddToKnowledge } from '@/hooks/use-deliverable-knowledge'
-import { AddToKnowledgeButton } from '../add-to-knowledge-button'
+import { DeliverableKnowledgeButton } from '../deliverable-knowledge-button'
 import { DeliverablePreviewActions } from '../deliverable-preview-actions'
 
 const INVOICE = {
@@ -77,9 +77,9 @@ describe('which Deliverables can be added to Knowledge', () => {
   })
 })
 
-describe('AddToKnowledgeButton', () => {
+describe('DeliverableKnowledgeButton', () => {
   it('adds a document the owner picks', async () => {
-    renderWithClient(<AddToKnowledgeButton deliverable={INVOICE} />)
+    renderWithClient(<DeliverableKnowledgeButton deliverable={INVOICE} />)
 
     fireEvent.click(screen.getByRole('button', { name: /Add to Knowledge/ }))
 
@@ -87,7 +87,7 @@ describe('AddToKnowledgeButton', () => {
   })
 
   it('says it was added and offers to remove it', async () => {
-    renderWithClient(<AddToKnowledgeButton deliverable={{ ...INVOICE, knowledge_document_id: 42 }} />)
+    renderWithClient(<DeliverableKnowledgeButton deliverable={{ ...INVOICE, knowledge_document_id: 42 }} />)
 
     expect(screen.getByText('Added to Knowledge')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Add to Knowledge/ })).toBeNull()

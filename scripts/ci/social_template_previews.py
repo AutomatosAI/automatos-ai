@@ -76,15 +76,17 @@ from modules.documents.social_starters import social_starters
 LIBERATION = {"font_family": '"Liberation Sans", sans-serif', "heading_font": '"Liberation Serif", serif'}
 KIT: Dict[str, Any] = {
     "name": "Automatos", "tagline": "An operating system for autonomous agent teams",
-    "primary_color": "#e96235", "secondary_color": "#1a1714", "accent_color": "#90af5a", "text_color": "#f0e8db",
+    "primary_color": "#e96235", "secondary_color": "#1a1714", "text_color": "#f0e8db",
+    # The reference's green, the accent its videos mark with (--brand-accent-on-ink): a second accent.
+    "palette": {"accent_2": "#90af5a"},
     **LIBERATION,
 }
 # PRD-255 US-006: the two night kits (the US-003 fixtures), Harbourline with its v2 rules stored.
 NIGHT_KITS: Dict[str, Dict[str, Any]] = {
     "automatos": {"name": "Automatos", "primary_color": "#c44a1a", "secondary_color": "#1d3658",
-                  "accent_color": "#0f3460", "text_color": "#1a1a2e", **LIBERATION},
+                  "text_color": "#1a1a2e", **LIBERATION},
     "harbourline": {"name": "Harbourline Coffee Roasters", "primary_color": "#1E3A5F", "secondary_color": "#C26A2E",
-                    "accent_color": "#0f3460", "text_color": "#1a1a2e", **LIBERATION, "accent_use": "sparing",
+                    "text_color": "#1a1a2e", **LIBERATION, "accent_use": "sparing",
                     "palette": {"paper": "#faf7f2", "accent": "#1e3a5f"},
                     "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 12}}},
 }

@@ -67,10 +67,13 @@ def brand_work_goes_to_the_designer(assess: Assess) -> Assess:
     cache and the tiers; every other message, and any message mid-onboarding, is assessed as before."""
     @functools.wraps(assess)
     async def wrapped(brain: Any, message: str, conversation_length: int = 0) -> Any:
+        from modules.tools.discovery.brand_turns import mark_brand_turn
+
         pinned = designer_assignment(brain._db, brain._workspace_id, message, conversation_length)
-        if pinned is None or brain._onboarding_active():
-            return await assess(brain, message, conversation_length)
-        return pinned
+        brand = pinned is not None and not brain._onboarding_active()
+        # Gerard, 7 Oct: for the rest of a brand turn no setting is changed and no mission started.
+        mark_brand_turn(pinned.target_agent_name if brand else None, brand=brand)
+        return pinned if brand else await assess(brain, message, conversation_length)
     return wrapped
 
 

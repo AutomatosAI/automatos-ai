@@ -33,7 +33,7 @@ describe('tone words with meanings', () => {
   it('fills the form from a kit whose tone words are plain strings or objects', () => {
     const base = {
       name: 'Acme', tagline: '', logo_url: '', logo_path: '',
-      primary_color: '#1a1a2e', secondary_color: '#16213e', accent_color: '#0f3460', text_color: '#1a1a2e',
+      primary_color: '#1a1a2e', secondary_color: '#16213e', text_color: '#1a1a2e',
       font_family: 'Inter, sans-serif',
       company: { name: '', address: '', email: '', phone: '', website: '' },
     }

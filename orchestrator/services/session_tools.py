@@ -219,8 +219,8 @@ def _scope_list_tasks(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, 
 # the handler's dict comes back from the executor AS IS — ``tasks`` sits at the
 # top level, not under a ``result`` key. The first version of this projection
 # assumed both wrongly, and its test fed it the imagined shape: it narrowed
-# nothing and passed. A parity test now reads the handler's source.
-LIST_TASKS_FIELDS: Tuple[str, ...] = ("id", "title", "status", "priority", "assigned_agent")
+# nothing and passed. A parity test reads the handler's source (``number`` is by_ticket_number's).
+LIST_TASKS_FIELDS: Tuple[str, ...] = ("number", "id", "title", "status", "priority", "assigned_agent")
 
 
 def _project_list_tasks(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -467,7 +467,7 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         name="list_tasks",
         action="platform_list_tasks",
         description=(
-            "List this workspace's board tasks — id, title, status, priority, assigned agent. "
+            "List this workspace's board tasks — number (#0042, how you name one), title, status, agent. "
             "Filter by status or agent name. The result's 'total_matching' says how many match "
             "in all, so raise 'limit' when you need every one."
         ),

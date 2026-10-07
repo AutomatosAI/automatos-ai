@@ -53,9 +53,10 @@ Read the home page, then the about page and one product page if they exist. Extr
 ### Step 3: Choose the Palette
 - **primary**: the colour of the main call-to-action button or the logo.
 - **secondary**: the main dark or surface colour behind content.
-- **accent**: a second brand colour for highlights.
+- **accent** (the palette's highlight role, `palette.accent`): the one colour that marks key numbers, a title rule and a summary bar. Used sparingly; headings stay near-black. There is no separate accent field: the accent is a palette role.
 - **text**: the body text colour.
-- **Contrast:** body text on its background must reach 4.5:1. If the brand's accent fails on the dark surface, lighten it until it passes (for example `#E96235` becomes `#F07A50` on a near-black card) and say so in the report.
+- **Contrast:** body text on its background must reach 4.5:1, and the accent 3:1 on the page and on table header fills. The kit refuses a colour that fails and names the role and what it sits on ("accent is 2.1:1 on the page"). If the brand's accent fails, darken it on a light page (or lighten it on a dark surface) until it passes, for example `#E96235` (2.9:1 on a cream page) becomes `#C4471C` (4.2:1), and say so in the report.
+- **country** (ISO 3166-1 alpha-2, e.g. `GB`): where the business trades. It sets the documents' currency and date style unless the site states otherwise; take it from the address, the phone prefix only as a hint, and say which in the report.
 - Save colours as hex (`#1F3B2D`). The kit refuses anything else.
 
 ### Step 4: Fonts
@@ -81,14 +82,15 @@ Read the home page, then the about page and one product page if they exist. Extr
     "tagline": "{tagline}",
     "primary_color": "#1F3B2D",
     "secondary_color": "#F3EDE2",
-    "accent_color": "#C8742C",
+    "palette": { "accent": "#A9541F" },
+    "country": "GB",
     "text_color": "#1A1714",
     "heading_font": "Newsreader",
     "font_family": "Geist",
     "logo_url": "https://{site}/logo.svg",
     "logo_mark_url": "https://{site}/apple-touch-icon.png",
     "social_handles": { "linkedin": "{handle}", "instagram": "{handle}" },
-    "voice": { "tone_words": ["warm", "plain-spoken", "expert"], "banned_phrases": ["revolutionary", "game-changing"] }
+    "voice": { "tone": ["warm", "plain-spoken", "expert"], "banned_phrases": ["revolutionary", "game-changing"] }
   }
 }
 ```
@@ -121,7 +123,8 @@ Look at the snapshot frames: brand colours exact, the right fonts (not a fallbac
 BRAND KIT REPORT — {timestamp}
 ────────────────────────────
 Source:            {urls read}
-Colours:           primary {hex} · secondary {hex} · accent {hex} · text {hex}  (contrast {pass | adjusted: …})
+Colours:           primary {hex} · secondary {hex} · accent (palette.accent) {hex} · text {hex}  (contrast {pass | adjusted: …})
+Locale:            country {code} → currency {code}, date style {style}
 Fonts:             heading {family} · body {family}  ({open | needs a woff2 upload})
 Logo / mark:       {url} / {url}
 Voice:             {tone words} · {n} banned phrases · disclaimer {none | proposed: "…"}

@@ -36,7 +36,9 @@ read time), and ``accent_use`` says how far the accent goes. The PUT refuses a
 palette whose text does not read on its page. US-002 adds the rest of one designer's
 rules: ``type_scale``, ``spacing_unit_pt``, ``page_margin_mm``, ``logo_rules``, the
 logo variants ``logo_dark_path`` / ``logo_mono_path`` (uploaded, server-managed),
-``currency``, ``date_style``, and a one-line meaning on each tone word.
+``currency``, ``date_style``, and a one-line meaning on each tone word. ``country``
+(ISO 3166-1 alpha-2) fills an empty currency and date style with the country's
+(``modules/documents/country_locale.py``).
 
 Defaults are a neutral professional palette — an unconfigured workspace renders cleanly
 (and *not* in Automatos orange).
@@ -54,6 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationIn
 from core.brand_palette import PALETTE_ROLES
 from core.media_render_bundle import FONT_FAMILY, FONT_STYLES, MAX_TOKEN_CHARS, TOKEN_UNSAFE
 from modules.documents.brand_palette_source import with_palette_resolved
+from modules.documents.country_locale import DEFAULT_COUNTRY, country_code
 from modules.documents.brand_system import (
     DEFAULT_ACCENT_USE,
     DEFAULT_CURRENCY,
@@ -69,7 +72,6 @@ from modules.documents.brand_system import (
     LogoRules,
     ToneWord,
     TypeScale,
-    changed_kit_colours,
     currency_code,
     one_line_text,
     require_readable_palette,
@@ -86,7 +88,6 @@ _HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 # this PRD removes from the render paths).
 DEFAULT_PRIMARY = "#1a1a2e"
 DEFAULT_SECONDARY = "#16213e"
-DEFAULT_ACCENT = "#0f3460"
 DEFAULT_TEXT = "#1a1a2e"
 DEFAULT_FONT = "Inter, 'Segoe UI', system-ui, sans-serif"
 
@@ -290,10 +291,6 @@ class BrandKit(BaseModel):
     logo_path: str = ""
     primary_color: str = DEFAULT_PRIMARY
     secondary_color: str = DEFAULT_SECONDARY
-    # F361: "the third colour", not the documents' accent (that is ``palette.accent``):
-    # social videos tint and mark with it, the social brand board shows it, and
-    # {{brand.accent_color}} prints it. A save that changes it is contrast-checked.
-    accent_color: str = DEFAULT_ACCENT
     text_color: str = DEFAULT_TEXT
     # The body font (PRD-251 D5's body_font): every renderer reads this key.
     font_family: str = DEFAULT_FONT
@@ -322,15 +319,17 @@ class BrandKit(BaseModel):
     # like logo_path. One not set is never invented (FR-9).
     logo_dark_path: str = ""
     logo_mono_path: str = ""
-    # Locale: an ISO 4217 code (empty: no currency is printed, FR-7) and the date style.
+    # Locale: an ISO 4217 code and the date style, each empty for the country's (no
+    # country: no currency is printed, FR-7, and dates print day first), and the country.
     currency: str = DEFAULT_CURRENCY
     date_style: DateStyle = DEFAULT_DATE_STYLE
+    country: str = DEFAULT_COUNTRY
     # F372: when the kit last changed, by any route (ISO 8601, UTC), stamped by
     # :func:`save_brand_kit`; empty for a kit not saved since. The Brand kit page keys
     # its brand board on it, so a change by Auto, the designer or the API redraws it.
     updated_at: str = ""
 
-    @field_validator("primary_color", "secondary_color", "accent_color", "text_color")
+    @field_validator("primary_color", "secondary_color", "text_color")
     @classmethod
     def _validate_hex(cls, v: str) -> str:
         if v and not _HEX_RE.match(v):
@@ -351,6 +350,11 @@ class BrandKit(BaseModel):
     @classmethod
     def _currency(cls, v: str) -> str:
         return currency_code(v)
+
+    @field_validator("country")
+    @classmethod
+    def _country(cls, v: str) -> str:
+        return country_code(v)
 
     @field_validator("heading_font")
     @classmethod
@@ -417,7 +421,6 @@ class BrandKitPatch(BaseModel):
     logo_url: Optional[str] = None
     primary_color: Optional[str] = None
     secondary_color: Optional[str] = None
-    accent_color: Optional[str] = None
     text_color: Optional[str] = None
     font_family: Optional[str] = None
     company: Optional[dict] = None
@@ -441,6 +444,7 @@ class BrandKitPatch(BaseModel):
     logo_rules: Optional[dict] = None
     currency: Optional[str] = None
     date_style: Optional[str] = None
+    country: Optional[str] = None
 
     @field_validator("palette_source")
     @classmethod
@@ -467,8 +471,9 @@ def get_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     Lenient on read: a stored field that fails validation takes its default, and
     the rest of the kit is kept, so a render never crashes on a bad brand kit and
-    one bad field never costs the workspace its colours and logo. Writes go
-    through :func:`validate_brand_kit` which is strict.
+    one bad field never costs the workspace its colours and logo. A field the kit
+    no longer has (a retired one) is dropped the same way, and the next save leaves
+    it out. Writes go through :func:`validate_brand_kit` which is strict.
     """
     raw = (settings or {}).get(BRAND_KIT_SETTINGS_KEY) or {}
     try:
@@ -505,8 +510,7 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     any other field in the patch replaces the stored one
     (``social_handles`` is the whole map: a network left out, or given an empty
     handle, is removed). Raises ``pydantic.ValidationError`` (surfaced as 422 by
-    the API) on bad input, on a palette whose text does not read on its page, and
-    on a third colour (``accent_color``) this save changes that does not (F361).
+    the API) on bad input and on a palette whose text does not read on its page.
     """
     base = get_brand_kit({BRAND_KIT_SETTINGS_KEY: existing} if existing else None)
     # The stored files (logo, its variants, logo mark, fonts) are owned by the
@@ -519,8 +523,24 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
         if isinstance(patch.get(record), dict):
             merged[record] = _merged(base.get(record, {}), patch[record])
     kit = BrandKit.model_validate(merged).model_dump()
-    require_readable_palette(kit, changed_kit_colours(base, kit))
+    require_readable_palette(kit)
     return kit
+
+
+class BrandKitChanged(Exception):
+    """The kit's stored ``updated_at`` is not the one the caller loaded (F372): nothing was saved."""
+
+
+def lock_brand_kit(db: Any, workspace: Any) -> Any:
+    """Take the workspace row FOR UPDATE and read it again; ``workspace`` as it is stored now.
+
+    A save reads the kit, checks it and writes it under this lock, so two saves never
+    both pass a check made on the same stored kit: the second waits for the first's
+    commit, then reads what it wrote. It is held to that commit (or the session's end),
+    so a caller takes it after its last await, never before one.
+    """
+    db.refresh(workspace, with_for_update=True)
+    return workspace
 
 
 def save_brand_kit(db: Any, workspace: Any, kit: Dict[str, Any]) -> Dict[str, Any]:
@@ -529,15 +549,26 @@ def save_brand_kit(db: Any, workspace: Any, kit: Dict[str, Any]) -> Dict[str, An
     The PUT, the logo, logo mark and font uploads and deletes, and
     ``platform_update_brand_kit`` all save through here. Each save stamps
     ``updated_at`` (F372): a file uploaded again at the same path changes it too.
+    The workspace row is locked first (:func:`lock_brand_kit`; a caller that read the
+    kit under the lock already holds it), so the other settings are written as stored.
     """
     stamped = {**kit, UPDATED_AT_FIELD: datetime.now(timezone.utc).isoformat()}
+    lock_brand_kit(db, workspace)
     # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
     workspace.settings = {**(workspace.settings or {}), BRAND_KIT_SETTINGS_KEY: stamped}
     db.commit()
     return stamped
 
 
-def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str, Any]:
+def _require_stamp(settings: Optional[Dict[str, Any]], if_updated_at: Optional[str]) -> None:
+    """Raise :class:`BrandKitChanged` when ``if_updated_at`` is given and is not the stored stamp."""
+    if if_updated_at is not None and if_updated_at != get_brand_kit(settings)[UPDATED_AT_FIELD]:
+        raise BrandKitChanged()
+
+
+def update_brand_kit(
+    db: Any, workspace: Any, patch: Dict[str, Any], if_updated_at: Optional[str] = None,
+) -> Dict[str, Any]:
     """Apply ``patch`` to the workspace's stored kit and save the result.
 
     The patch is read as a :class:`BrandKitPatch` and merged by
@@ -545,11 +576,20 @@ def update_brand_kit(db: Any, workspace: Any, patch: Dict[str, Any]) -> Dict[str
     anything is written (:func:`brand_kit_errors` lists why). The PUT route and
     ``platform_update_brand_kit`` both call this. A patch that changes nothing (GET's
     answer sent back, F366) is not saved, so ``updated_at`` stays as it was (F372).
+
+    ``if_updated_at`` (the PUT's, F372): a stamp other than the stored one raises
+    :class:`BrandKitChanged` and nothing is saved. The check, the merge and the write
+    are made on the row :func:`lock_brand_kit` locks, so two saves loaded at the same
+    stamp never both pass it. A refusal, or a patch that changes nothing, is found
+    first on the kit as read, without the lock.
     """
+    _require_stamp(workspace.settings, if_updated_at)
     proposed = proposed_brand_kit(workspace.settings, patch)
     if proposed == get_brand_kit(workspace.settings):
         return proposed
-    return save_brand_kit(db, workspace, proposed)
+    lock_brand_kit(db, workspace)
+    _require_stamp(workspace.settings, if_updated_at)
+    return save_brand_kit(db, workspace, proposed_brand_kit(workspace.settings, patch))
 
 
 def proposed_brand_kit(settings: Optional[Dict[str, Any]], patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -627,6 +667,7 @@ __all__ = [
     "BRAND_KIT_SETTINGS_KEY",
     "BrandFontFile",
     "BrandKit",
+    "BrandKitChanged",
     "BrandKitPatch",
     "BrandVoice",
     "CompanyContact",
@@ -640,6 +681,7 @@ __all__ = [
     "build_brand_suggestions",
     "get_brand_kit",
     "is_acceptable_logo_url",
+    "lock_brand_kit",
     "normalise_handle",
     "proposed_brand_kit",
     "save_brand_kit",

@@ -59,6 +59,8 @@ export interface BoardTask {
   times_sent_back?: number
   /** F243: the draft a failed redo keeps on the card's face (the last run that had one). */
   kept_draft?: string | null
+  /** PRE-11: the owner's document its answer was added to Knowledge as, or null. */
+  knowledge_document_id?: number | null
 }
 
 export interface BoardColumn {

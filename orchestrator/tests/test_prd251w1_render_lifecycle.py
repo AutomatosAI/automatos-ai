@@ -90,7 +90,7 @@ from core.media_render_client import MediaRenderClient, MediaRenderError, MediaR
 from core.models.core import DocumentTemplate, LLMUsage  # noqa: E402
 from core.models.socials import SocialPost, SocialPostTarget  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
-from modules.documents.brand_kit import DEFAULT_ACCENT, DEFAULT_FONT, DEFAULT_PRIMARY  # noqa: E402
+from modules.documents.brand_kit import DEFAULT_FONT, DEFAULT_PRIMARY  # noqa: E402
 
 # Hex with letters, so SQLite keeps every UUID column as text.
 WS = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
@@ -397,7 +397,7 @@ def test_rendering_a_draft_stores_the_mp4_registers_a_deliverable_and_awaits_app
         "size.height": 1920,
     }
     tokens = bundle["brand"]["tokens"]
-    assert tokens["primary"] == DEFAULT_PRIMARY and tokens["accent"] == DEFAULT_ACCENT
+    assert tokens["primary"] == DEFAULT_PRIMARY and tokens["accent"] == DEFAULT_PRIMARY  # the palette's accent
     assert tokens["body-font"] == tokens["heading-font"] == DEFAULT_FONT
     assert "files" not in bundle
     assert bundle["audio"] == COMPOSITION["audio_plan"]

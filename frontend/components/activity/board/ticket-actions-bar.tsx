@@ -4,6 +4,7 @@
  * PRD-252 R7 in the ticket's viewer: Assign and Cancel under the ticket's
  * header, and, on a cancelled or closed ticket, who stopped it and when (it
  * opened to an empty viewer). R2 (D4): every ticket can be discussed with Auto.
+ * PRE-11: an approved ticket's answer can be added to Knowledge, and removed.
  */
 
 import Link from 'next/link'
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { discussHref } from '@/lib/discussion'
 import { missionHref } from '@/lib/ticket-links'
 import type { BoardTask } from '@/types/board'
+import { CardKnowledgeButton, offersKnowledge } from './card-knowledge-button'
 import { canAssign, canCancel, isMissionTicket, whoStopped } from './ticket-actions'
 import { useAgentChoices, useTicketActions } from './ticket-actions-menu'
 
@@ -29,6 +31,7 @@ export function TicketActionsBar({ task }: { task: BoardTask }) {
           </Link>
         )}
         <DiscussLink task={task} />
+        {offersKnowledge(task) && <CardKnowledgeButton task={task} />}
       </div>
     )
   }
@@ -57,6 +60,7 @@ export function TicketActionsBar({ task }: { task: BoardTask }) {
         </Button>
       )}
       <DiscussLink task={task} />
+      {offersKnowledge(task) && <CardKnowledgeButton task={task} />}
     </div>
   )
 }

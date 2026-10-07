@@ -86,7 +86,8 @@ def test_1094s_path_leaves_a_ticket_the_dispatcher_runs(board):
 
 def test_a_bulk_move_names_the_ticket_with_no_agent(board):
     ready, bare = _ticket(board, status="assigned", assigned_agent_id=board.agent), _ticket(board)
-    reply = _status_by_tool(board, task_ids=[ready.id, bare.id])
+    # 7 Oct: a tool takes tickets by their board numbers, as Auto sees them (an id may be another ticket's number).
+    reply = _status_by_tool(board, task_ids=[f"#{ready.workspace_seq:04d}", f"#{bare.workspace_seq:04d}"])
     assert reply["updated"] == [ready.id] and board.launched == [ready.id]
     # PRD-252 R4: the answer names the ticket by its number too
     assert reply["failed"] == [{"task_id": bare.id, "error": _refusal(), "number": f"#{bare.workspace_seq:04d}"}]

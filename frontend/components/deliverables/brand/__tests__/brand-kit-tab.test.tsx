@@ -34,7 +34,7 @@ const server = vi.hoisted(() => ({
 function startingKit() {
   return {
     name: 'Acme', tagline: 'Build better', logo_url: '', logo_path: '',
-    primary_color: '#1a1a2e', secondary_color: '#16213e', accent_color: '#0f3460', text_color: '#1a1a2e',
+    primary_color: '#1a1a2e', secondary_color: '#16213e', text_color: '#1a1a2e',
     font_family: 'Inter, sans-serif',
     company: { name: 'Acme Ltd', address: '', email: '', phone: '', website: 'acme.com' },
     heading_font: '"Brand Display", serif',

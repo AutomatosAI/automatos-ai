@@ -68,7 +68,7 @@ RULES_LEAD = ("From the owner's brand kit. Everything you write for the owner to
               "(an email, a letter, a post, a document) keeps to them:")
 BANNED_NOTE_LEAD = "Check before using this answer: it uses words the brand kit bans"
 KIT_WINS_LINE = "- The brand kit wins over any document that says otherwise."
-COLOUR_KEYS = ("primary", "secondary", "accent", "text")
+COLOUR_KEYS = ("primary", "secondary", "text")
 # The kit's design fields a renderer reads as they are stored (PRD-255).
 DESIGN_KEYS = ("accent_use", "type_scale", "logo_rules")
 CONTACT_FIELDS = (("address", "Address"), ("phone", "Phone"), ("email", "Email"), ("website", "Website"))
@@ -250,8 +250,7 @@ def _colours_line(kit: Dict[str, Any]) -> str:
     """The kit's colours as hex (F332); the neutral defaults are not the brand's."""
     from modules.documents import brand_kit as bk
 
-    defaults = {"primary": bk.DEFAULT_PRIMARY, "secondary": bk.DEFAULT_SECONDARY,
-                "accent": bk.DEFAULT_ACCENT, "text": bk.DEFAULT_TEXT}
+    defaults = {"primary": bk.DEFAULT_PRIMARY, "secondary": bk.DEFAULT_SECONDARY, "text": bk.DEFAULT_TEXT}
     values = {key: _set(kit.get(f"{key}_color"), defaults[key]) for key in COLOUR_KEYS}
     colours = [f"{key} {value}" for key, value in values.items() if value]
     return f"- Colours (hex): {', '.join(colours)}." if colours else ""
@@ -365,7 +364,7 @@ def brand_assets(db: Any, workspace_id: Any) -> Optional[Dict[str, Any]]:
     return {
         "name": kit.get("name") or "",
         "logo": kit.get("logo_url") or "",
-        "colours": {key: kit.get(f"{key}_color") for key in ("primary", "secondary", "accent", "text")},
+        "colours": {key: kit.get(f"{key}_color") for key in COLOUR_KEYS},
         "fonts": {"body": _first_family(kit.get("font_family") or ""),
                   "heading": _first_family(kit.get("heading_font") or kit.get("font_family") or "")},
         "palette": derive_palette(kit),

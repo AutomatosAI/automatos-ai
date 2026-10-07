@@ -56,9 +56,7 @@ def _answered_card(db: Session, workspace_id: Any, ref: Any) -> Optional[Tuple[i
 
     if ref in (None, "") or isinstance(ref, bool):
         return None
-    # An id sent as a JSON number (1859) is read as its digits: ticket_id_named reads a
-    # number equal to the id it resolves to as one that named no ticket.
-    task_id, _ = ticket_id_named(db, workspace_id, str(ref) if isinstance(ref, int) else ref)
+    task_id, _ = ticket_id_named(db, workspace_id, ref)
     task = (db.query(BoardTask).filter(BoardTask.id == task_id, BoardTask.workspace_id == workspace_id).first()
             if task_id else None)
     if task is None or task.status not in ANSWERED or takes_its_own_redo(task):

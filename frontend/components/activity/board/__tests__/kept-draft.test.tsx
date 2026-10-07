@@ -3,9 +3,12 @@
  * Night 7: #0171 and #0174 ran out of credit on their redo, and the good email
  * was only in the card's history.
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import type { BoardTask } from '@/types/board'
+
+// PRE-11: the viewer's actions row reads the caller's workspace role; no provider here.
+vi.mock('@/components/workspace-provider', () => ({ useWorkspaceOptional: () => null }))
 
 import { KeptDraft } from '../board-task-viewer'
 

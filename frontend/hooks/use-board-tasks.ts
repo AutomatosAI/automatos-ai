@@ -298,6 +298,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     number: item.number ?? null,  // PRD-252 R4
     times_sent_back: item.times_sent_back ?? 0,  // PRD-252 D3
     kept_draft: item.kept_draft ?? null,  // F243: a failed redo keeps the draft it corrected
+    knowledge_document_id: item.knowledge_document_id ?? null,  // PRE-11: its answer is in Knowledge
   }
 }
 

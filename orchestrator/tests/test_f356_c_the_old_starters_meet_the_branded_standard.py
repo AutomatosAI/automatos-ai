@@ -60,7 +60,7 @@ def _png(side: int = 8) -> bytes:
 
 KIT = {
     **get_brand_kit({"brand_kit": {
-        "name": COMPANY, "primary_color": "#c44a1a", "accent_color": "#1d3658",
+        "name": COMPANY, "primary_color": "#c44a1a",
         "company": {"name": COMPANY, "address": "14 Wapping Quay, Bristol BS1 4RW", "email": "gerard@automatos.app"},
     }}),
     "logo_url": "data:image/png;base64," + base64.b64encode(_png()).decode("ascii"),
@@ -229,7 +229,7 @@ def test_the_current_jinja_source_is_not_retired_and_earlier_ones_are(name):
 
 
 def test_a_branded_data_export_has_a_letterhead_zebra_rows_and_a_printed_footer(tmp_path):
-    brand = {"name": COMPANY, "logo": "", "colours": {"primary": "#c44a1a", "accent": "#1d3658", "text": "#1a1a2e"},
+    brand = {"name": COMPANY, "logo": "", "colours": {"primary": "#c44a1a", "text": "#1a1a2e"},
              "fonts": {"body": "", "heading": ""}}
     path = str(tmp_path / "export.xlsx")
     write_xlsx(path, "Sales Data", _sample("Data Export"), brand)

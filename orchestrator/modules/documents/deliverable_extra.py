@@ -8,14 +8,16 @@ is gone once the file is rendered. :func:`the_parties_are_remembered` wraps
 ``DocumentGenerationService.generate`` and keeps those names on the result
 (``GeneratedDocument.parties``); :func:`deliverable_extra` writes them to the
 Deliverable's ``extra.parties`` beside what it already recorded (the render quality of
-P2-09 S4, the template of PRD-242 S4, the music of PRD-251 S1.6), which moved here out
-of ``register_as_deliverable`` (generation_service.py is over 800 lines).
+P2-09 S4, the template of PRD-242 S4, the music of PRD-251 S1.6, the tags of 7 Oct),
+which moved here out of ``register_as_deliverable`` (generation_service.py is over 800 lines).
 """
 from __future__ import annotations
 
 import dataclasses
 import functools
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+
+from services.deliverable_tags import TAGS_KEY, tags_of
 
 Async = Callable[..., Awaitable[Any]]
 
@@ -50,8 +52,9 @@ def the_parties_are_remembered(generate: Async) -> Async:
     return wrapped
 
 
-def deliverable_extra(result: Any, template_id: Optional[Any] = None) -> Dict[str, Any]:
-    """The ``extra`` a generated document's Deliverable is registered with."""
+def deliverable_extra(result: Any, template_id: Optional[Any] = None, tags: Sequence[str] = ()) -> Dict[str, Any]:
+    """The ``extra`` a generated document's Deliverable is registered with; ``tags`` the
+    Deliverable's own tags (7 Oct), already validated where they came in."""
     extra: Dict[str, Any] = {
         "render": {
             "unresolved_count": len(result.unresolved),
@@ -69,6 +72,9 @@ def deliverable_extra(result: Any, template_id: Optional[Any] = None) -> Dict[st
         extra["music"] = dict(result.music)
     if getattr(result, "parties", None):
         extra["parties"] = dict(result.parties)
+    own_tags = tags_of(list(tags))
+    if own_tags:
+        extra[TAGS_KEY] = own_tags
     return extra
 
 

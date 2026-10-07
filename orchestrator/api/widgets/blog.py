@@ -29,7 +29,7 @@ from core.security.log_safe import log_safe
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
 from core.services.blog_service import BlogService
-from core.utils.markdown_renderer import render_markdown_to_html
+from modules.documents.blocks.markdown_body import view_html
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ async def get_published_post(
 
     data = post.to_dict(include_content=False)
     content = await svc.get_content(post) or ""
-    data["content"] = render_markdown_to_html(content)
+    data["content"] = view_html(content)  # 7 Oct: the reports' markdown reader, sanitised
 
     response = JSONResponse(content=data)
     response.headers["Cache-Control"] = "public, max-age=3600"

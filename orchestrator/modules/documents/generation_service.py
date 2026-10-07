@@ -19,7 +19,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 from uuid import UUID
 
 import jinja2
@@ -240,6 +240,7 @@ class DocumentGenerationService:
         agent_id: int = None,
         agent_name: str = None,
         template_id: UUID = None,
+        tags: Sequence[str] = (),
     ) -> Optional[dict]:
         """Register a generated document as a workspace deliverable (PRD-167 S6).
 
@@ -258,12 +259,11 @@ class DocumentGenerationService:
             return None
         try:
             from services.deliverable_service import DeliverableService, _infer_artifact_type
-
             # PRD-251 S1.2: a rendered social file is a video or an image
             # Deliverable (streamed, with a player), never a document.
             is_social = result.template_lane == SOCIAL_LANE
             artifact_type = _infer_artifact_type(result.filename) if is_social else "document"
-            extra = deliverable_extra(result, template_id)  # render, template, music, parties (F354)
+            extra = deliverable_extra(result, template_id, tags)  # render, template, music, parties, tags
             copy_when_registered(ws, result.filename, result.format)  # F370: into the workspace's documents/ too
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",

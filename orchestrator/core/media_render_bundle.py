@@ -13,7 +13,8 @@ The brand kit becomes:
 * ``brand.tokens``: its colours and fonts. media-render declares each as a
   ``--brand-<name>`` custom property, so a template reads ``var(--brand-primary)``
   or ``var(--brand-heading-font)`` and never names a colour or a font (D4). The
-  kit's colours come as they are, plus the dark stage a social video reads,
+  kit's colours come as they are (``accent`` is the palette's, ``social_accent``),
+  plus the dark stage a social video reads,
   derived from them with WCAG contrast (``core/brand_palette.py``: ``ink``,
   ``on-ink``, ``primary-on-ink`` and the rest), and the light paper a social
   image reads (``paper``, ``on-paper``, ``primary-on-paper`` and the rest), on
@@ -78,19 +79,19 @@ import math
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-from core.brand_palette import PAPER, paper_palette, stage_palette
+from core.brand_palette import PAPER, paper_palette, social_accent, stage_palette, to_hex
 from core.brand_type import BODY_STEP, DEFAULT_TYPE_SCALE, DISPLAY_STEP, step_size_pt
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, fill_text, parse_size, still_moments, without_slots
 
 logger = logging.getLogger(__name__)
 
-# Token name → the brand kit field it reads.
+# Token name → the brand kit field it reads. ``accent`` has no field: it is the palette's.
 COLOUR_TOKENS = (
     ("primary", "primary_color"),
     ("secondary", "secondary_color"),
-    ("accent", "accent_color"),
     ("text", "text_color"),
 )
+ACCENT_TOKEN = "accent"
 BODY_FONT_TOKEN = "body-font"
 HEADING_FONT_TOKEN = "heading-font"
 # PRD-255 US-006: the kit's display and body sizes as ratios to the default scale.
@@ -168,6 +169,8 @@ def brand_tokens(kit: Mapping[str, Any]) -> Dict[str, str]:
     its type scale, and the chip a dark stage sets the logo on."""
     body_font = kit.get("font_family")
     raw: Dict[str, Any] = {token: kit.get(field) for token, field in COLOUR_TOKENS}
+    accent = social_accent(kit)
+    raw[ACCENT_TOKEN] = to_hex(accent) if accent is not None else None
     raw[BODY_FONT_TOKEN] = body_font
     # D5: the heading font is optional; without one, headings take the body font.
     raw[HEADING_FONT_TOKEN] = kit.get("heading_font") or body_font

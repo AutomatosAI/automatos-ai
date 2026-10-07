@@ -13,8 +13,9 @@ and media-render refuses the render.
 * ``on-ink``: the kit's text colour, lightened until it reads on the ink;
 * ``on-ink-muted`` and ``on-ink-dim``: two quieter text tones between the two,
   each still readable on the ink and on the cards a template lays over it;
-* ``primary-on-ink`` and ``accent-on-ink``: the brand colours, lightened only as
-  far as they must be to read on the ink (display words, shapes, glows);
+* ``primary-on-ink`` and ``accent-on-ink``: the primary and the kit's accent
+  (:func:`social_accent`), lightened only as far as they must be to read on the
+  ink (display words, shapes, glows);
 * ``primary-light``: the primary a little lighter again, for small accent text
   on tinted pills (the reference's own fix: #E96235 became #F07A50 there).
 
@@ -31,8 +32,8 @@ the darker of the two surfaces, so it reads on both:
 * ``paper-card``: the paper a shade darker, for the cards laid on it;
 * ``on-paper``: the kit's secondary colour, darkened until it reads on the card;
 * ``on-paper-muted`` and ``on-paper-dim``: two quieter text tones;
-* ``primary-on-paper`` and ``accent-on-paper``: the brand colours, darkened only
-  as far as small text in them must be (WCAG AA 4.5:1, with a margin);
+* ``primary-on-paper`` and ``accent-on-paper``: the primary and the kit's accent,
+  darkened only as far as small text in them must be (WCAG AA 4.5:1, with a margin);
 * ``primary-on-paper-large``: the primary darkened only as far as LARGE text
   must be (AA 3:1 for 24 px, or 19 px bold, with a margin): display words and
   big numbers.
@@ -42,6 +43,10 @@ when it meets that token's own target: ``paper`` the paper, ``ink`` the
 on-paper text, ``muted`` its muted tone, ``accent`` the primary on paper, and
 ``accent_2`` (else ``accent``) the accent on paper. So a social image is set
 in the same roles as the kit's documents.
+
+:func:`social_accent` is the accent a social render marks with, read from the
+palette (the kit has no colour of its own for it): its ``accent_2`` when it has
+one, else its ``accent``.
 
 Every token is a 6-digit hex: the contrast pass reads computed ``rgb()``
 colours, so it checks each of them.
@@ -138,7 +143,8 @@ RULE_MIN_CONTRAST = 1.35
 ACCENT_2_MIN_HUE_DEGREES = 30.0
 ACCENT_2_MIN_SATURATION = 0.15
 HUE_CIRCLE_DEGREES = 360.0
-KIT_COLOUR_FIELDS = ("primary_color", "secondary_color", "accent_color", "text_color")
+# The kit's colours: every role not stored derives from them.
+KIT_COLOUR_FIELDS = ("primary_color", "secondary_color", "text_color")
 
 _HEX = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -235,7 +241,7 @@ def stage_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
     if primary is not None:
         palette[PRIMARY_ON_INK] = _least(primary, WHITE, lambda c: contrast(c, ink) >= ACCENT_MIN_CONTRAST)
         palette[PRIMARY_LIGHT] = _least(primary, WHITE, lambda c: contrast(c, ink) >= ACCENT_LIGHT_MIN_CONTRAST)
-    accent = parse_hex(kit.get("accent_color"))
+    accent = social_accent(kit)
     if accent is not None:
         palette[ACCENT_ON_INK] = _least(accent, WHITE, lambda c: contrast(c, ink) >= ACCENT_MIN_CONTRAST)
     return {name: to_hex(rgb) for name, rgb in palette.items()}
@@ -268,15 +274,14 @@ def _paper_text(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) ->
 
 def _paper_brand(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) -> Dict[str, RGB]:
     """The brand colours on the paper: the stored accent (and ``accent_2``) when they read, else today's derivation."""
-    accent = stored.get(ROLE_ACCENT)
+    accent, primary = stored.get(ROLE_ACCENT), parse_hex(kit.get("primary_color"))
     targets = {
-        PRIMARY_ON_PAPER: (accent, "primary_color", PAPER_TEXT_MIN_CONTRAST),
-        PRIMARY_ON_PAPER_LARGE: (accent, "primary_color", LARGE_TEXT_MIN_CONTRAST),
-        ACCENT_ON_PAPER: (stored.get(ROLE_ACCENT_2) or accent, "accent_color", PAPER_TEXT_MIN_CONTRAST),
+        PRIMARY_ON_PAPER: (accent, primary, PAPER_TEXT_MIN_CONTRAST),
+        PRIMARY_ON_PAPER_LARGE: (accent, primary, LARGE_TEXT_MIN_CONTRAST),
+        ACCENT_ON_PAPER: (stored.get(ROLE_ACCENT_2) or accent, social_accent(kit), PAPER_TEXT_MIN_CONTRAST),
     }
     palette: Dict[str, RGB] = {}
-    for token, (role, field, target) in targets.items():
-        kit_colour = parse_hex(kit.get(field))
+    for token, (role, kit_colour, target) in targets.items():
         colour = _kept(role, _on_card(card, target))
         if colour is None and kit_colour is not None:
             colour = _least(kit_colour, BLACK, _on_card(card, target))
@@ -379,7 +384,7 @@ def _text_roles(kit: Mapping[str, Any], stored: Mapping[str, RGB], grounds: Mapp
         ROLE_MUTED: stored.get(ROLE_MUTED) or _most(ink, paper, reads(MUTED_TEXT_MIN_CONTRAST)),
         ROLE_RULE: stored.get(ROLE_RULE) or _most(ink, paper, lambda c: contrast(c, paper) >= RULE_MIN_CONTRAST),
     }
-    primary = _kit_colour(kit, "primary_color", "accent_color")
+    primary = _kit_colour(kit, "primary_color")
     roles[ROLE_ACCENT] = stored.get(ROLE_ACCENT) or _least(primary or ink, BLACK, reads(ACCENT_TEXT_MIN_CONTRAST))
     secondary = _kit_colour(kit, "secondary_color")
     if ROLE_ACCENT_2 in stored:
@@ -387,6 +392,23 @@ def _text_roles(kit: Mapping[str, Any], stored: Mapping[str, RGB], grounds: Mapp
     elif secondary is not None and _second_hue(primary, secondary):
         roles[ROLE_ACCENT_2] = _least(secondary, BLACK, reads(ACCENT_TEXT_MIN_CONTRAST))
     return roles
+
+
+def social_accent(kit: Mapping[str, Any]) -> Optional[RGB]:
+    """The accent a social render marks with: the palette's ``accent_2`` when it has one, else its ``accent``.
+
+    Read as the colour the role comes from, before any contrast step, since each
+    token moves it as far as its own ground needs: a stored ``accent_2``; else the
+    secondary when it is a hue of its own (the derived ``accent_2``); else a stored
+    ``accent``; else the primary. ``None`` when the kit has none of them.
+    """
+    stored = _stored_roles(kit)
+    primary, secondary = parse_hex(kit.get("primary_color")), parse_hex(kit.get("secondary_color"))
+    if ROLE_ACCENT_2 in stored:
+        return stored[ROLE_ACCENT_2]
+    if secondary is not None and _second_hue(primary, secondary):
+        return secondary
+    return stored.get(ROLE_ACCENT) or primary
 
 
 def derive_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
@@ -424,6 +446,7 @@ __all__ = [
     "mix",
     "paper_palette",
     "parse_hex",
+    "social_accent",
     "stage_palette",
     "to_hex",
 ]

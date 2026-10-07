@@ -52,6 +52,7 @@ from typing import Any, Mapping, Optional, Set, Tuple
 from sqlalchemy import text
 
 from core.security.driving_user import driver_is_workspace_admin, driving_user_id
+from core.security.ticket_targets import reads_the_ticket_named
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,7 @@ class PermissionDecision:
 # ----------------------------------------------------------------- main API
 
 
+@reads_the_ticket_named(TARGET_TASK)  # 7 Oct: an agent's '#0892' / '892' is the ticket the tools change
 def can_actor_modify(
     db,
     *,

@@ -50,7 +50,7 @@ vi.mock('@/hooks/use-deliverables-api', () => ({
 }))
 
 // F354's Add to Knowledge button sits in the same action row; its own test covers it.
-vi.mock('../add-to-knowledge-button', () => ({ AddToKnowledgeButton: () => null }))
+vi.mock('../deliverable-knowledge-button', () => ({ DeliverableKnowledgeButton: () => null }))
 
 import { DeliverablePreview } from '../deliverable-preview'
 import { API_FILE_DOWNLOAD_FAILED } from '@/hooks/use-api-file-download'

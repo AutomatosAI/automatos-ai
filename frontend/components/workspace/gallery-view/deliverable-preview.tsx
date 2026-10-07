@@ -2,9 +2,9 @@
  * DeliverablePreview (PRD-129: Workspace Outputs Hub)
  * =====================================================
  *
- * Slide-over sheet that shows a single deliverable's content with Download,
- * Delete, "Open in Explorer" and, for a document, "Add to Knowledge" (F354) actions
- * (deliverable-preview-actions.tsx). Fetches full content via useDeliverable
+ * Slide-over sheet that shows a single deliverable's content, its tags as chips
+ * (7 Oct), and Download, Delete, "Open in Explorer" and, for a document, "Add to
+ * Knowledge" (F354) actions (deliverable-preview-actions.tsx). Fetches full content via useDeliverable
  * with include_content=true. All rendering is delegated to the shared
  * FilePreview component so Outputs, Chat, and Explorer stay aligned.
  */
@@ -34,6 +34,7 @@ import {
 } from '@/hooks/use-deliverables-api'
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
 import { DeliverablePreviewActions } from './deliverable-preview-actions'
+import { DeliverableTags } from './deliverable-tags'
 import { usePreviewFullscreen } from './use-preview-fullscreen'
 
 interface DeliverablePreviewProps {
@@ -223,6 +224,7 @@ export function DeliverablePreview({
                 {deliverable.title}
               </SheetTitle>
               <DeliverableMeta deliverable={deliverable} />
+              <DeliverableTags tags={deliverable.tags} />
               <DeliverablePreviewActions
                 deliverable={deliverable}
                 downloadUrl={downloadUrl}

@@ -35,7 +35,7 @@ pytest.importorskip("docx")
 from docx.enum.text import WD_ALIGN_PARAGRAPH  # noqa: E402
 from docx.oxml.ns import qn  # noqa: E402
 
-ORANGE, NAVY = "C44A1A", "1D3658"
+ORANGE = "C44A1A"
 COMPANY = "Automatos AI"
 NOW = datetime(2026, 10, 5, 9, 0, 0)
 USER = SimpleNamespace(name="Gerard Kavanagh", email="gerard@automatos.app", username="gerard")
@@ -53,7 +53,7 @@ def _png(side: int = 8) -> bytes:
 
 KIT = {
     **get_brand_kit({"brand_kit": {
-        "name": COMPANY, "primary_color": f"#{ORANGE}", "accent_color": f"#{NAVY}",
+        "name": COMPANY, "primary_color": f"#{ORANGE}",
         "company": {"name": COMPANY, "address": "14 Wapping Quay, Bristol BS1 4RW", "email": "gerard@automatos.app"},
     }}),
     "logo_url": "data:image/png;base64," + base64.b64encode(_png()).decode("ascii"),

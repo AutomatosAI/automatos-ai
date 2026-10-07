@@ -97,7 +97,6 @@ def _brand_context(brand_kit: Dict[str, Any], company_name: str, person: str, si
         "logo_url": logo_url,
         "primary_color": brand_kit.get("primary_color", ""),
         "secondary_color": brand_kit.get("secondary_color", ""),
-        "accent_color": brand_kit.get("accent_color", ""),
         "font_family": brand_kit.get("font_family", ""),
         "sign_off": _sign_off(brand_kit, person, signer),
         CURRENCY_KEY: currency_of(brand_kit),

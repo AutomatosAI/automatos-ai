@@ -125,7 +125,7 @@ KIT = {
     "tagline": "An operating system for autonomous agent teams",
     "primary_color": "#e96235",
     "secondary_color": "#1a1714",
-    "accent_color": "#90af5a",
+    "palette": {"accent_2": "#90af5a"},  # the reference's green: the accent its videos mark with
     "text_color": "#f0e8db",
     "font_family": "Geist, sans-serif",
 }
@@ -617,9 +617,9 @@ def test_the_automatos_kit_reproduces_the_reference_palette():
 @pytest.mark.parametrize(
     "kit",
     [
-        pytest.param({"primary_color": "#1a1a2e", "secondary_color": "#16213e", "accent_color": "#0f3460", "text_color": "#1a1a2e"}, id="the-document-defaults"),
-        pytest.param({"primary_color": "#ffcc00", "secondary_color": "#f3ede2", "accent_color": "#00aa88", "text_color": "#222222"}, id="a-light-kit"),
-        pytest.param({"primary_color": "#c8742c", "secondary_color": "#1f3b2d", "accent_color": "#f3ede2", "text_color": "#f3ede2"}, id="harbourline"),
+        pytest.param({"primary_color": "#1a1a2e", "secondary_color": "#16213e", "text_color": "#1a1a2e"}, id="the-document-defaults"),
+        pytest.param({"primary_color": "#ffcc00", "secondary_color": "#f3ede2", "text_color": "#222222"}, id="a-light-kit"),
+        pytest.param({"primary_color": "#c8742c", "secondary_color": "#1f3b2d", "text_color": "#f3ede2"}, id="harbourline"),
     ],
 )
 def test_any_kit_gives_a_dark_stage_with_readable_text(kit):

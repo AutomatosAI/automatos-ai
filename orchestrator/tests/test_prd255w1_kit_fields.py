@@ -14,7 +14,8 @@ brand kit routes and ``platform_update_brand_kit``):
   to the logo's rules, written by a workspace manager, never by a PUT, and empty
   (never invented) until uploaded.
 * **Locale.** ``currency`` is empty (no currency printed, FR-7) or an ISO 4217
-  code; ``date_style`` is ``d MMMM yyyy`` (default) or ``MMMM d, yyyy``.
+  code; ``date_style`` is ``d MMMM yyyy`` or ``MMMM d, yyyy``, or empty (the default:
+  the kit's country's, else day first; ``test_kit_country_gives_the_locale.py``).
 * **Tone meanings.** ``voice.tone`` is ``[{word, meaning}]``; a plain string stays
   valid and reads as a word with no meaning; the agents' rules block prints the meaning.
 * **The agent tool** takes every new writable field (the parity test pins the top
@@ -187,9 +188,9 @@ def test_currency_is_empty_by_default_and_otherwise_an_iso_4217_code():
         assert "ISO 4217" in _msg_at(_refusal({"currency": bad}), "currency"), bad
 
 
-def test_date_style_is_day_first_by_default_or_month_first():
+def test_date_style_is_day_first_or_month_first_and_empty_by_default():
     assert DATE_STYLES == ("d MMMM yyyy", "MMMM d, yyyy")
-    assert get_brand_kit(None)["date_style"] == "d MMMM yyyy"
+    assert get_brand_kit(None)["date_style"] == ""  # the country's; with none, dates print day first
     assert validate_brand_kit({"date_style": "MMMM d, yyyy"})["date_style"] == "MMMM d, yyyy"
     assert _msg_at(_refusal({"date_style": "dd/MM/yyyy"}), "date_style")
 
@@ -366,7 +367,7 @@ def test_the_tool_schema_names_the_steps_the_date_styles_and_the_tone_items():
     assert set(properties["type_scale"]["properties"]) == set(TYPE_STEPS)
     assert set(properties["type_scale"]["properties"]["h1"]["properties"]) == {"size_pt", "line_pt", "weight"}
     assert set(properties["logo_rules"]["properties"]) == set(BrandKit.model_fields["logo_rules"].annotation.model_fields)
-    assert properties["date_style"]["enum"] == list(DATE_STYLES)
+    assert properties["date_style"]["enum"] == [*DATE_STYLES, ""]
     tone = properties["voice"]["properties"]["tone"]["items"]
     assert set(tone["properties"]) == {"word", "meaning"} and tone["required"] == ["word"]
 

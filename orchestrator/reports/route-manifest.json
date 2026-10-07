@@ -1,5 +1,5 @@
 {
-  "route_count": 909,
+  "route_count": 912,
   "routes": [
     {
       "method": "GET",
@@ -1291,6 +1291,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/emails/attachments/gmail/{message_id}/{attachment_id}"
+    },
+    {
+      "method": "GET",
       "path": "/api/emails/{email_id}"
     },
     {
@@ -2036,6 +2040,10 @@
     {
       "method": "GET",
       "path": "/api/reports/{report_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/reports/{report_id}/add-to-knowledge"
     },
     {
       "method": "POST",
@@ -2924,6 +2932,10 @@
     {
       "method": "PATCH",
       "path": "/api/v1/tasks/{task_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/tasks/{task_id}/add-to-knowledge"
     },
     {
       "method": "POST",

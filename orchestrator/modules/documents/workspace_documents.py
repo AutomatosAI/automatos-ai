@@ -21,6 +21,9 @@ every document twice.
 * A copy is a convenience: it runs in the background, and a worker that cannot
   write, or a file that is not there, is logged and skipped. The generation and its
   Deliverable stand.
+* Local edition only (Gerard, 7 Oct): the folder is the owner's own deliverables folder
+  on their machine. The hosted edition has no such folder, so there the copy is skipped
+  (logged) and the document lives in object storage and the Deliverables page only.
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ import logging
 from pathlib import Path, PurePosixPath
 from typing import Any, AsyncIterator, Optional
 
+from config import config
 from core.workspace_client import BINARY_PIECE_BYTES, WorkspaceClient
 
 logger = logging.getLogger(__name__)
@@ -96,10 +100,14 @@ async def copy_document(workspace_id: Any, filename: Any) -> Optional[str]:
 
 def copy_when_registered(workspace_id: Any, filename: Any, fmt: Any) -> bool:
     """Start copying a registered document into ``documents/``; True when the copy was started.
-    Never raises: with no event loop (a sync caller) the copy is skipped and logged."""
+    Never raises: in the hosted edition, or with no event loop (a sync caller), the copy is
+    skipped and logged."""
     from core.utils.background_tasks import launch_guarded
 
     if str(fmt or "").lower() not in COPIED_FORMATS or not workspace_id or documents_path(filename) is None:
+        return False
+    if not config.IS_LOCAL_EDITION:
+        logger.info("[DocGen] hosted edition: %r is not copied to documents/ (local edition only)", filename)
         return False
     try:
         asyncio.get_running_loop()

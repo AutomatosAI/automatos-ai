@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from core.models.approval_grants import SUBJECT_BOARD_TASK
 from core.models.core import Agent, BoardTask
+from services.ticket_numbers import ticket_label
 from services.cli_host_service import (
     MAX_ASK_ANSWER_KEPT,
     PARKED_FOR_ANSWER_REASON,
@@ -216,7 +217,7 @@ def plan_question(task: Any, agent_name: Optional[str], entry: Dict[str, Any]) -
     else:
         how = ("Reply **Approve** to start the work, or **Reject** to send the ticket to review — or answer "
                "in your own words, and the agent revises the plan and presents it again.")
-    return (f"**{agent_name or 'The agent'} has a plan for ticket #{task.id}{title}** "
+    return (f"**{agent_name or 'The agent'} has a plan for {ticket_label(task)}{title}** "
             f"(round {entry['version']} of {MAX_PLAN_ROUNDS}).\n\n{plan}\n\n{how}")
 
 

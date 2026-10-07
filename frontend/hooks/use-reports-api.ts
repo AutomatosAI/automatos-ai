@@ -26,6 +26,7 @@ export interface AgentReport {
     title: string
     file_path: string
     file_type: string
+    url?: string
   }>
   content?: string | null
   content_error?: string
@@ -34,6 +35,8 @@ export interface AgentReport {
   graded_by: number | null
   graded_at: string | null
   created_at: string
+  /** PRE-11: the owner's document this report was added to Knowledge as, or null. */
+  knowledge_document_id?: number | null
 }
 
 export interface ReportListResponse {

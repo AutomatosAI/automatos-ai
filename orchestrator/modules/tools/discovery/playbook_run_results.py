@@ -29,14 +29,13 @@ UNREADABLE = "Step {order}'s log could not be read just now, so its whole output
 
 
 def _run_id_for_card(db: Session, workspace_id: Any, ref: Any) -> Optional[str]:
-    """The execution id of the run whose card is ``ref`` ("#0102" or "0102"), or None."""
+    """The execution id of the run whose card is ``ref`` ("#0102", "0102" or "102", the
+    board's number), or None: an execution id ("exec-45d8ac862a79") names no card."""
     from core.models.core import BoardTask
     from modules.tools.discovery.card_numbers import RUN_CARD
-    from services.ticket_numbers import is_number_ref, resolve_ticket_ref
+    from services.ticket_refs import ticket_id_named
 
-    if not is_number_ref(ref):
-        return None
-    card_id = resolve_ticket_ref(db, workspace_id, ref)
+    card_id, _ = ticket_id_named(db, workspace_id, ref)
     card = db.query(BoardTask).filter(BoardTask.id == card_id, BoardTask.workspace_id == workspace_id).first() \
         if card_id else None
     return card.source_id if card is not None and card.source_type == RUN_CARD else None

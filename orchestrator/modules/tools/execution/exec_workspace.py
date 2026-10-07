@@ -13,12 +13,17 @@ logger = logging.getLogger(__name__)
 
 # Keys in caller_context that indicate the source of the execution. First
 # non-None wins. Defaults to "chat" if none present.
+# 7 Oct: a board run's context names its card as ``board_task_id`` (agent_factory), so a
+# file an agent writes on a board run is that card's Deliverable (source 'task', the card's
+# id; its tags join through DeliverableService.register). Last, so a context that names a
+# mission, a Playbook or a trigger keeps the attribution it had.
 _SOURCE_TYPE_KEYS = (
     ("heartbeat_id", "heartbeat"),
     ("mission_id", "mission"),
     ("task_id", "task"),
     ("playbook_id", "playbook"),
     ("trigger_id", "trigger"),
+    ("board_task_id", "task"),
 )
 
 

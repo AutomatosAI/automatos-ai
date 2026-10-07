@@ -1,10 +1,12 @@
 """A kit's locale as a document prints it: its currency and its date style (PRD-255 FR-7, FR-8).
 
 The kit holds ``currency`` (an ISO 4217 code, or empty for none) and ``date_style``
-(``brand_system.DATE_STYLES``). Every renderer reads them through here:
+(``brand_system.DATE_STYLES``, or empty), and a ``country`` that fills either when it
+is empty (``country_locale``). Every renderer reads them through here:
 
-* :func:`currency_of`: the kit's code, read leniently (anything that is not a
-  code is no currency, so a render never invents one);
+* :func:`currency_of`: the kit's code, else its country's, read leniently
+  (anything that is not a code is no currency, so a render never invents one);
+* :func:`date_style_of`: the kit's date style, else its country's;
 * :func:`currency_prefix`: what goes before an amount: the currency's symbol
   ("£"), or its code and a space ("SEK ") for one without a symbol here;
 * :func:`long_date`: a date in the kit's style, "5 October 2026" or "October 5, 2026".
@@ -17,6 +19,7 @@ from datetime import date
 from typing import Any, Mapping, Optional
 
 from .brand_system import DATE_STYLE_MONTH_FIRST, currency_code
+from .country_locale import country_currency, country_date_style
 
 CURRENCY_FIELD = "currency"
 DATE_STYLE_FIELD = "date_style"
@@ -28,14 +31,13 @@ CURRENCY_SYMBOLS = {
 
 
 def currency_of(kit: Optional[Mapping[str, Any]]) -> str:
-    """The kit's ISO 4217 code, or empty when it has none (or holds something that is not a code)."""
+    """The kit's ISO 4217 code, else its country's; empty when it has neither (a stored non-code is none)."""
     value = (kit or {}).get(CURRENCY_FIELD) if isinstance(kit, Mapping) else None
-    if not isinstance(value, str):
-        return ""
     try:
-        return currency_code(value)
+        code = currency_code(value) if isinstance(value, str) else ""
     except ValueError:
-        return ""
+        code = ""
+    return code or country_currency(kit)
 
 
 def currency_prefix(code: str) -> str:
@@ -56,8 +58,9 @@ def long_date(day: date, style: Any = None) -> str:
 
 
 def date_style_of(kit: Optional[Mapping[str, Any]]) -> Any:
-    """The kit's date style as stored (``long_date`` reads anything unknown as the default)."""
-    return (kit or {}).get(DATE_STYLE_FIELD) if isinstance(kit, Mapping) else None
+    """The kit's date style as stored, else its country's (``long_date`` reads anything unknown as the default)."""
+    style = kit.get(DATE_STYLE_FIELD) if isinstance(kit, Mapping) else None
+    return style or country_date_style(kit)
 
 
 __all__ = ["CURRENCY_SYMBOLS", "currency_of", "currency_prefix", "date_style_of", "long_date"]

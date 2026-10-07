@@ -150,9 +150,9 @@ def _naming_the_step(db: Session, out: Dict[str, Any], step: Any) -> Dict[str, A
 async def _the_card(db: Session, workspace_id: Any, card: Any) -> Dict[str, Any]:
     """A read of a card that is no mission answers with the card."""
     from modules.tools.discovery.handlers_board_tasks import get_board_task
-    from services.ticket_numbers import ticket_number
+    from services.ticket_numbers import TicketId, ticket_number
 
-    out = await get_board_task(db, workspace_id, {"task_id": card.id})
+    out = await get_board_task(db, workspace_id, {"task_id": TicketId(card.id)})  # the card's id, never a number
     if not (isinstance(out, dict) and out.get("success")):
         return out
     label = ticket_number(db, card) or f"ticket {card.id}"

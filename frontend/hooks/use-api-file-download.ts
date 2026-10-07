@@ -16,7 +16,8 @@ import { downloadGeneratedFile } from '@/components/documents/blocks/api'
 
 export const API_FILE_DOWNLOAD_FAILED = "Couldn't download the file. Try again from Deliverables."
 
-export function useApiFileDownload(): {
+/** `failedMessage` is the toast a failed download shows; the default points to Deliverables. */
+export function useApiFileDownload(failedMessage: string = API_FILE_DOWNLOAD_FAILED): {
   download: (url: string, filename: string) => Promise<void>
   downloading: boolean
 } {
@@ -28,11 +29,11 @@ export function useApiFileDownload(): {
       await downloadGeneratedFile(url, filename)
     } catch (error) {
       console.error('[api-file-download] download failed', url, error)
-      toast.error(API_FILE_DOWNLOAD_FAILED)
+      toast.error(failedMessage)
     } finally {
       setDownloading(false)
     }
-  }, [])
+  }, [failedMessage])
 
   return { download, downloading }
 }

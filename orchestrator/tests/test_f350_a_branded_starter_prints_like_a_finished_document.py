@@ -55,7 +55,7 @@ def _png(side: int = 8) -> bytes:
 
 KIT = {
     **get_brand_kit({"brand_kit": {
-        "name": COMPANY, "primary_color": "#c44a1a", "secondary_color": "#1d3658", "accent_color": "#1d3658",
+        "name": COMPANY, "primary_color": "#c44a1a", "secondary_color": "#1d3658",
         "company": {"name": COMPANY, "address": "14 Wapping Quay, Bristol BS1 4RW", "email": "gerard@automatos.app"},
     }}),
     "logo_url": "data:image/png;base64," + base64.b64encode(_png()).decode("ascii"),
@@ -207,4 +207,4 @@ def test_the_executive_summarys_figures_are_not_navy_on_orange():
     card = next(line for line in lines if ".metric-card {" in line)
     value = next(line for line in lines if ".metric-card .value" in line)
     assert "primary_color" not in card and "brand.palette.surface" in card
-    assert "accent_color" not in value and "color: {{ brand.palette.accent }}" in value
+    assert "color: {{ brand.palette.accent }}" in value

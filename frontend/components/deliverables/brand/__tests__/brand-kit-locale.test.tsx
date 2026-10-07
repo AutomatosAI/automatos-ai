@@ -1,7 +1,7 @@
 /**
  * PRD-255 Wave 1, US-007 — the locale on the Brand kit page: the currency as an ISO code
  * (empty: amounts print with no currency, FR-7) and the date style, each shown as a
- * document prints it.
+ * document prints it. The country (7 Oct) gives an empty currency and date style.
  */
 import { useState } from 'react'
 import { describe, it, expect, afterEach } from 'vitest'
@@ -37,6 +37,23 @@ describe('the locale', () => {
     expect(screen.getByRole('option', { name: 'October 6, 2026' })).toBeInTheDocument()
     fireEvent.change(select, { target: { value: 'MMMM d, yyyy' } })
     expect(latest?.date_style).toBe('MMMM d, yyyy')
+  })
+
+  it('takes a country, whose currency and date style show until the kit sets its own', () => {
+    render(<Harness start={designKit({ date_style: '' })} />)
+    const country = screen.getByLabelText('Country')
+    expect(screen.getByRole('option', { name: 'United Kingdom' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '6 October 2026 (default)' })).toBeInTheDocument()
+    fireEvent.change(country, { target: { value: 'US' } })
+    expect(latest?.country).toBe('US')
+    expect(screen.getByLabelText(/^Currency/)).toHaveAttribute('placeholder', 'USD')
+    expect(screen.getByText("Amounts print in USD, the country's currency.")).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: "October 6, 2026 (the country's)" })).toBeInTheDocument()
+    fireEvent.change(country, { target: { value: 'IE' } })
+    expect(screen.getByLabelText(/^Currency/)).toHaveAttribute('placeholder', 'EUR')
+    expect(screen.getByRole('option', { name: "6 October 2026 (the country's)" })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/^Currency/), { target: { value: 'gbp' } })
+    expect(screen.getByText('Amounts print in GBP.')).toBeInTheDocument()  // a currency the kit sets wins
   })
 
   it('formats a date in either style', () => {

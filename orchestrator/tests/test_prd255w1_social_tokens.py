@@ -83,11 +83,10 @@ from modules.documents.social_starters import social_starters  # noqa: E402
 
 WS = UUID("6d0b5c1e-8f1a-4c2b-9d3e-0a1b2c3d4e66")
 # The US-003 fixtures: Automatos as its v1 kit has it; Harbourline with its v2 rules stored.
-AUTOMATOS = {"name": "Automatos", "primary_color": "#c44a1a", "secondary_color": "#1d3658",
-             "accent_color": "#0f3460", "text_color": "#1a1a2e"}
+AUTOMATOS = {"name": "Automatos", "primary_color": "#c44a1a", "secondary_color": "#1d3658", "text_color": "#1a1a2e"}
 HARBOURLINE_PAPER, HARBOURLINE_ACCENT = "#faf7f2", "#1e3a5f"
 HARBOURLINE = {"name": "Harbourline Coffee Roasters", "primary_color": "#1E3A5F", "secondary_color": "#C26A2E",
-               "accent_color": "#0f3460", "text_color": "#1a1a2e", "accent_use": "sparing",
+               "text_color": "#1a1a2e", "accent_use": "sparing",
                "palette": {"paper": HARBOURLINE_PAPER, "accent": HARBOURLINE_ACCENT},
                "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 12}}}
 # Every token name brand_tokens emitted on the base (PRD-251): all 18 templates read them.

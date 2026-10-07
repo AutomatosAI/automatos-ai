@@ -13,11 +13,11 @@ ticket tool's handler:
 F241 (night 7): Auto's calls carried "#0175" as 175 or "0175" as often as with
 the '#', and every one was read as an id ("Task 175 not found"; 0 of 11 cards
 found by number in a night). A leading zero or a step ("105.4") now reads as a
-number. Bare digits are read in the workspace, as ids or as numbers without
-their '#' (``read_bare_refs``): the reading that names more of a call's tickets
-is the one meant, and when both name as many, different tickets, the call is
-refused naming both. Bare digits that name no ticket reach the tool as given,
-and its "not found" says the number too.
+number. Gerard, 7 Oct: bare digits are the board's number too, wherever they are
+given (``read_bare_refs``), and an id only when no ticket has that number. The
+platform's own id in a structured call is a ``TicketId``, always read as the id.
+Bare digits that name no ticket reach the tool as given, and its "not found" says
+the number too.
 """
 from __future__ import annotations
 
@@ -80,40 +80,55 @@ def _resolve(db: Session, workspace_id: Any, refs: List[Any], *, one: bool) -> T
     that names no ticket is refused when it is the one ticket asked for; in a list
     it stays as given, and the bulk handler lists it as failed. So does a ref that
     is neither a number nor digits, and bare digits that name no ticket."""
-    from services.ticket_numbers import is_bare_ref, is_number_ref, read_bare_refs, resolve_ticket_ref, spoken_ref
+    said, ids, error = _ids_named(db, workspace_id, refs, one=one)
+    if error:
+        return refs, error
+    return [ref if found is None else found for ref, found in zip(said, ids)], None
+
+
+def _ids_named(db: Session, workspace_id: Any, refs: List[Any], *,
+               one: bool) -> Tuple[List[Any], List[Optional[int]], Optional[str]]:
+    """``refs`` as said (a step's JSON number as its number), the id each names (None
+    for none), or why the call is refused."""
+    from services.ticket_numbers import is_bare_ref, is_number_ref, read_bare_refs, spoken_ref
 
     spoken = [spoken_ref(db, workspace_id, r) for r in refs]
     error = next((why for _, why in spoken if why), None)
     if error:
-        return refs, error
-    refs = [ref for ref, _ in spoken]
-    bare, error = read_bare_refs(db, workspace_id, [r for r in refs if is_bare_ref(r)])
-    if error:
-        return refs, error
-    out: List[Any] = []
-    for ref in refs:
-        if is_number_ref(ref):
-            found = resolve_ticket_ref(db, workspace_id, ref)
-            if found is None and one:
-                return refs, NO_SUCH_NUMBER.format(ref=str(ref).strip())
-            out.append(ref if found is None else found)
-        else:
-            out.append(bare.get(int(str(ref).strip()), ref) if is_bare_ref(ref) else ref)
-    return out, None
+        return refs, [], error
+    said = [ref for ref, _ in spoken]
+    bare = read_bare_refs(db, workspace_id, [r for r in said if is_bare_ref(r)])
+    ids = [_id_of(db, workspace_id, ref, bare) for ref in said]
+    missing = next((ref for ref, found in zip(said, ids) if found is None and is_number_ref(ref)), None)
+    if missing is not None and one:
+        return said, ids, NO_SUCH_NUMBER.format(ref=str(missing).strip())
+    return said, ids, None
+
+
+def _id_of(db: Session, workspace_id: Any, ref: Any, bare: Dict[int, int]) -> Optional[int]:
+    """The id ``ref`` names: the platform's own id as it is, a number's ticket, or bare digits' (``bare``)."""
+    from services.ticket_numbers import TicketId, is_bare_ref, is_number_ref, resolve_ticket_ref
+
+    if isinstance(ref, TicketId):
+        return int(ref)
+    if is_number_ref(ref):
+        return resolve_ticket_ref(db, workspace_id, ref)
+    return bare.get(int(str(ref).strip())) if is_bare_ref(ref) else None
 
 
 def ticket_id_named(db: Session, workspace_id: Any, ref: Any) -> Tuple[Optional[int], Optional[str]]:
     """The id of the one ticket ``ref`` names in this workspace (its number, a
-    step's, or its id), read as the ticket tools read it, or why there is none."""
-    found, error = _resolve(db, workspace_id, [ref], one=True)
-    if error:
-        return None, error
-    if isinstance(found[0], int) and not isinstance(found[0], bool) and found[0] != ref:
-        return found[0], None
+    step's, or the platform's own ``TicketId``), read as the ticket tools read it,
+    or why there is none."""
     from services.ticket_numbers import format_number, is_bare_ref
 
-    if is_bare_ref(found[0]):
-        n = int(str(found[0]).strip())
+    said, ids, error = _ids_named(db, workspace_id, [ref], one=True)
+    if error:
+        return None, error
+    if ids[0] is not None:
+        return ids[0], None
+    if is_bare_ref(said[0]):
+        n = int(str(said[0]).strip())
         return None, NO_SUCH_TICKET.format(number=format_number(n), ref=n)
     return None, NO_TICKET_SAID.format(ref=ref)
 

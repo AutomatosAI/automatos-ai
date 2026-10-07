@@ -121,6 +121,7 @@ def _generate_document_parameters() -> List[ToolParameter]:
     # PRD-251 US-117: the social formats render a social template through
     # media-render; every format generate() dispatches is offered.
     from core.models.core import DOCUMENT_TEMPLATE_FORMATS
+    from services.deliverable_tag_schemas import tags_parameter
 
     return [
         ToolParameter(
@@ -169,4 +170,6 @@ def _generate_document_parameters() -> List[ToolParameter]:
             description="UUID of a specific template to fill (from platform_list_templates). Takes precedence over template_name.",
             required=False
         ),
+        # 7 Oct: the Deliverable's tags; the chat schema says the same (services/deliverable_tag_schemas.py).
+        tags_parameter(),
     ]

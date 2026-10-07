@@ -41,7 +41,7 @@ from services.brand_hooks import a_cards_answer_is_on_brand  # brand kit at gene
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
 from services.board_task_view import board_dict, enrich_with_agents
-from services.ticket_numbers import ticket_label, ticket_number  # PRD-252 R4
+from services.ticket_numbers import ticket_label, ticket_number, title_or_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 from services.board_cancel import UNCANCELLABLE
@@ -380,7 +380,7 @@ def _filtered_tasks(db: Session, workspace_id: Any, status: Optional[str], agent
     if parent_task_id is not None:
         query = query.filter(BoardTask.parent_task_id == parent_task_id)
     if search:
-        query = query.filter(BoardTask.title.ilike(f"%{search}%"))
+        query = query.filter(title_or_number(search))  # a ticket's number finds it too (7 Oct)
     # PRD-161 S5: archive — done tasks completed longer ago than the configured
     # window drop off the active board (retained in the DB, just not surfaced).
     archive_before = datetime.now(timezone.utc) - timedelta(days=config.BOARD_ARCHIVE_DONE_DAYS)
