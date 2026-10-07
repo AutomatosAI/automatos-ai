@@ -786,7 +786,9 @@ jobs:
     # Off on 6 Oct 2026 (Gerard: "disable media rendering for now until it's properly
     # fixed", #1022): its seeded-templates step took 47 min. Back on with the step split
     # into media-render-templates (4 shards, 2 processes each), below.
-    if: needs.changes.outputs.media_render == 'true'
+    # OFF (Gerard, 7 Oct 2026: "disable it fully"): every media-render lane, the fixture job
+    # and the template shards. Turn back on by deleting `false && ` here and in the other job.
+    if: false && needs.changes.outputs.media_render == 'true'
     runs-on: ubuntu-latest
     # The seeded templates' renders run in media-render-templates, below.
     timeout-minutes: 30
@@ -1086,7 +1088,9 @@ jobs:
   media-render-templates:
     name: media-render — the seeded templates (shard ${{ matrix.shard }} of 4)
     needs: changes
-    if: needs.changes.outputs.media_render == 'true'
+    # OFF (Gerard, 7 Oct 2026: "disable it fully"): every media-render lane, the fixture job
+    # and the template shards. Turn back on by deleting `false && ` here and in the other job.
+    if: false && needs.changes.outputs.media_render == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
