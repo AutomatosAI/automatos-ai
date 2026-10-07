@@ -1,0 +1,48 @@
+{{- /*
+#848: session mode's host routes on their own Ingress, so they reach the cluster
+only when sessionMode is on (the API also answers 404 to them when it is off), and
+so uploads can carry their own annotations: a session file may be 50 MB. /health
+too: the CLI host reads the edition and session mode there before it pairs, and
+the main Ingress sends that path to the web app.
+*/ -}}
+{{- if and .Values.ingress.enabled .Values.sessionMode.enabled }}
+{{- $fullname := include "automatos.fullname" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}-cli-hosts
+  labels:
+    {{- include "automatos.labels" . | nindent 4 }}
+  {{- with merge (deepCopy (.Values.sessionMode.ingressAnnotations | default dict)) (.Values.ingress.annotations | default dict) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - {{- with .Values.ingress.host }}
+      host: {{ . | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port:
+                  name: http
+          - path: /api/v1/cli-hosts
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-api
+                port:
+                  name: http
+{{- end }}

@@ -75,6 +75,7 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
 | `ingress.*` | off | |
+| `sessionMode.enabled` | off | Session mode: your own Claude Code, Codex or Copilot sessions as agents, through the CLI host on your machine. Local edition only. Each session's files are uploaded into the workspace volume; the projects folder isn't browsable on a cluster. With the ingress on, `/api/v1/cli-hosts` gets its own Ingress (`sessionMode.ingressAnnotations`, a 64 MB body limit for ingress-nginx). |
 
 ## Tests
 
