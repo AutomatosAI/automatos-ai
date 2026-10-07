@@ -274,7 +274,7 @@ export function Message({
               : 'bg-card/40 backdrop-blur-sm border border-border/30 rounded-tl-sm'
           }`}>
             {/* PRD-256: what the turn's calls did, first, above the reply (none before PRD-256) */}
-            {message.role === 'assistant' && <ReceiptsBlock receipts={receiptsOf(message)} />}
+            {message.role === 'assistant' && <ReceiptsBlock receipts={receiptsOf(message)} above={message.receiptsAbove} />}
 
             {/* PRD-238 S1: the thinking channel, above the answer */}
             {message.role === 'assistant' && reasoningText && (

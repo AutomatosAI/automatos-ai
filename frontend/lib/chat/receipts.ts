@@ -6,6 +6,10 @@
  * `d:{"type":"receipts","data":{"receipts":[…],"model":…}}`. Reloaded, the saved
  * message carries the same list as its `receipts` part. A message from before
  * PRD-256 has neither and renders as it always did.
+ *
+ * US-002: the same frame carries `above`, the lines the platform puts above the reply
+ * text (a write that was refused, work said done that was not). Saved, they are the top
+ * of the reply's text, so only the live message needs them.
  */
 import type { ChatMessage, MessagePart, Receipt } from '@/types'
 
@@ -29,6 +33,19 @@ function isReceipt(value: unknown): value is Receipt {
 export function receiptsFromFrame(data: unknown): Receipt[] | undefined {
   const list = (data as { receipts?: unknown } | null | undefined)?.receipts
   return Array.isArray(list) ? list.filter(isReceipt) : undefined
+}
+
+/** The lines above the reply a `receipts` frame carries; undefined when it has none. */
+export function aboveFromFrame(data: unknown): string[] | undefined {
+  const list = (data as { above?: unknown } | null | undefined)?.above
+  if (!Array.isArray(list)) return undefined
+  const lines = list.filter((line): line is string => typeof line === 'string' && line.trim() !== '')
+  return lines.length > 0 ? lines : undefined
+}
+
+/** What a `receipts` frame sets on the live message: its receipts and the lines above the reply. */
+export function liveReceipts(data: unknown): Pick<ChatMessage, 'receipts' | 'receiptsAbove'> {
+  return { receipts: receiptsFromFrame(data), receiptsAbove: aboveFromFrame(data) }
 }
 
 /** A message's receipts: live from the frame, else from its saved part; undefined before PRD-256. */

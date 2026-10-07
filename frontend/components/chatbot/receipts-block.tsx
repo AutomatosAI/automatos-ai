@@ -7,6 +7,9 @@
  * model): "#0422: moved to Done", "Letter: tried, refused: <reason>". A turn that ran
  * nothing says "No actions in this turn."; a turn whose calls moved nothing on the board
  * says so. A message without receipts (every message before PRD-256) renders nothing here.
+ *
+ * US-002: live, the lines the platform puts above the reply (a refused write, work said done
+ * that was not) follow the list, so they sit above the reply text as they do once saved.
  */
 import { CheckCircle2, MinusCircle, XCircle } from 'lucide-react'
 import type { Receipt } from '@/types'
@@ -21,6 +24,8 @@ import {
 export interface ReceiptsBlockProps {
   /** undefined: a message from before receipts — nothing is rendered. */
   receipts?: Receipt[]
+  /** The lines above the reply, live from the frame (a reloaded reply has them in its text). */
+  above?: string[]
 }
 
 function statusIcon(r: Receipt) {
@@ -57,15 +62,28 @@ function NoteRow({ text }: { text: string }) {
   )
 }
 
-export function ReceiptsBlock({ receipts }: ReceiptsBlockProps) {
+function AboveLines({ lines }: { lines: string[] }) {
+  return (
+    <div className="space-y-1 text-sm text-foreground" data-testid="receipts-above">
+      {lines.map((line, index) => (
+        <p key={index}>{line}</p>
+      ))}
+    </div>
+  )
+}
+
+export function ReceiptsBlock({ receipts, above }: ReceiptsBlockProps) {
   if (!receipts) return null
   return (
-    <ol className="space-y-0.5 text-xs" aria-label="What I did" data-testid="receipts-block">
-      {receipts.length === 0 && <NoteRow text={NO_ACTIONS} />}
-      {receipts.map((receipt, index) => (
-        <ReceiptRow key={`${receipt.action}-${index}`} receipt={receipt} />
-      ))}
-      {receipts.length > 0 && !movedSomethingOnTheBoard(receipts) && <NoteRow text={NOTHING_ON_THE_BOARD} />}
-    </ol>
+    <>
+      <ol className="space-y-0.5 text-xs" aria-label="What I did" data-testid="receipts-block">
+        {receipts.length === 0 && <NoteRow text={NO_ACTIONS} />}
+        {receipts.map((receipt, index) => (
+          <ReceiptRow key={`${receipt.action}-${index}`} receipt={receipt} />
+        ))}
+        {receipts.length > 0 && !movedSomethingOnTheBoard(receipts) && <NoteRow text={NOTHING_ON_THE_BOARD} />}
+      </ol>
+      {above && above.length > 0 && <AboveLines lines={above} />}
+    </>
   )
 }

@@ -13,6 +13,10 @@ retry that still claims is saved with a correction line (tier 1). An id that did
 not exist when the reply was written gets one re-prompt, then the correction
 (tier 2). A claim no action backs when tools did run is corrected too (F261,
 night 8: it used to be only logged, tier 3).
+
+PRD-256 US-002: tiers 1 and 3 no longer write the saved line. What was not done is
+said above the text from the turn's receipts; the families still drive the nudge,
+and the tier 2 id line stays.
 """
 from __future__ import annotations
 
@@ -160,7 +164,7 @@ def test_a_retry_that_still_claims_is_saved_with_the_correction(rows):
     assert "has not happened" in sent[-1]["content"]
     verdict = final["_f187"]
     assert (verdict.tools, verdict.claim) == (0, "put on the board")
-    assert verdict.correction == not_done("put on the board") == (         # F314: in Auto's own words
+    assert verdict.correction is None and not_done("put on the board") == (    # PRD-256: receipts say it
         "Just to be clear: I didn't put anything on the board in this reply. Ask me again if you want it done.")
     marks = [json.loads(f[2:]) for f in frames if f.startswith('d:{"type": "narration"')]
     assert {"type": "narration", "data": {"text": claim, "retracted": True}} in marks
@@ -172,14 +176,16 @@ def test_a_retry_that_owns_up_needs_no_correction(rows):
     assert final["_f187"].correction is None
 
 
-def test_the_saved_answer_gains_the_correction():
+def test_the_saved_answer_gains_the_id_correction_and_never_a_familys_line():
+    """PRD-256 US-002: a claim a family reads adds nothing under the text (the receipts say what
+    was not done, above it: test_prd256_honesty_rule.py); an id that does not exist still does."""
     from consumers.chatbot.service import StreamingChatService
 
     answer = _round("I've created the task on your board, as I said.")
-    assert StreamingChatService._answer_additions(Verdict(tools=0, claim="put on the board"), answer) == [
-        "\n\n" + not_done("put on the board")]
-    assert StreamingChatService._answer_additions(Verdict(tools=2, claim="started"), answer) == [
-        "\n\n" + not_done("started")]                    # F261: tools ran, the claim still corrected
+    assert StreamingChatService._answer_additions(Verdict(tools=0, claim="put on the board"), answer) == []
+    assert StreamingChatService._answer_additions(Verdict(tools=2, claim="started"), answer) == []
+    assert StreamingChatService._answer_additions(Verdict(tools=0, ids=[("task", "1100")]), answer) == [
+        "\n\nJust to be clear: task 1100 does not exist — I named it without looking it up."]
     assert StreamingChatService._answer_additions(None, answer) == []
 
 
@@ -293,12 +299,12 @@ def test_a_cancel_made_through_the_task_status_is_backed():
 def test_a_claim_no_action_backed_when_tools_ran_is_corrected(caplog):
     """F261 (night 8): "I've cancelled Mission #0365" beside a playbook run was only logged."""
     verdict = Verdict(tools=2, claim="started")
-    assert verdict.correction == not_done("started") == (                  # F314: in Auto's own words
+    assert verdict.correction is None and not_done("started") == (             # PRD-256: receipts say it
         "Just to be clear: I didn't start anything in this reply. Ask me again if you want it done.")
     with caplog.at_level(logging.WARNING, logger="consumers.chatbot.claim_check"):
         verdict.log("92c7ca7a-add4-465a-b93a-516ab7b1ba4a")
     assert [r.getMessage() for r in caplog.records] == [
-        "[F187] tier=3 family=started tools=2 reply=92c7ca7a-add4-465a-b93a-516ab7b1ba4a action=corrected"]
+        "[F187] tier=3 family=started tools=2 reply=92c7ca7a-add4-465a-b93a-516ab7b1ba4a action=logged"]
 
 
 def test_a_passive_claim_is_only_logged(caplog):

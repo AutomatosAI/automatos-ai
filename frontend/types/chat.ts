@@ -211,6 +211,9 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   error?: TurnError
   /** PRD-256: what the turn's calls did, live from the `receipts` frame (saved as a part). */
   receipts?: Receipt[]
+  /** PRD-256 US-002: the lines the platform puts above the reply (a refused write, work not done),
+   * live from the same frame; a reloaded message has them at the top of its text. */
+  receiptsAbove?: string[]
 }
 
 /**

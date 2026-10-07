@@ -99,7 +99,7 @@ def test_the_reply_is_nudged_then_corrected_if_it_still_says_so():
     (sent,) = model.sent                                                  # the loop's one nudge
     assert "something was told to the whole team" in sent[-1]["content"]
     assert final["_f187"].claim == TEAM_LABEL
-    assert final["_f187"].correction == not_done(TEAM_LABEL) == TEAM_LINE
+    assert final["_f187"].correction is None and not_done(TEAM_LABEL) == TEAM_LINE   # PRD-256: said from receipts
     assert TEAM_LINE.startswith("Just to be clear: your agents haven't been told.")
 
 

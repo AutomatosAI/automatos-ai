@@ -73,7 +73,8 @@ from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passi
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's calls did, written by the platform
-    its_reads_are_receipted, notes_the_answering_model, the_loop_writes_receipts, writes_its_receipts,
+    its_reads_are_receipted, notes_the_answering_model, the_answer_takes_the_receipts, the_loop_writes_receipts,
+    writes_its_receipts,
 )
 from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
@@ -1666,6 +1667,7 @@ class StreamingChatService:
 
     @staticmethod
     @notes_the_answering_model  # PRD-256 US-001: the receipts frame names the model that answered
+    @the_answer_takes_the_receipts  # PRD-256 US-002: what was not done is said above the text, from receipts
     @a_reply_says_its_banned_words  # F337 (night 10): the banned words a reply uses, said after it
     @never_all_clear_unread  # F307 (night 9): never "all clear" while Needs you holds something
     def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:

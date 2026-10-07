@@ -8,7 +8,7 @@ import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import { completeRunningToolCalls, upsertTaskCard, upsertToolCall } from '@/lib/chat/tool-calls'
 import { errorFromDataPayload, parseErrorFrame } from '@/lib/chat/errors'
 import { withoutNarration } from '@/lib/chat/narration'
-import { receiptsFromFrame } from '@/lib/chat/receipts'
+import { liveReceipts, receiptsFromFrame } from '@/lib/chat/receipts'
 import { toast } from 'sonner'
 
 /** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
@@ -458,8 +458,8 @@ export function useChat({
                 }
                 // PRD-256: what the turn's calls did, written by the platform — shown above the reply.
                 else if (data.type === 'receipts' && receiptsFromFrame(data.data)) {
-                  const receipts = receiptsFromFrame(data.data)
-                  setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, receipts } : m)))
+                  const live = liveReceipts(data.data)
+                  setMessages((prev) => prev.map((m) => (m.id === assistantMessageId ? { ...m, ...live } : m)))
                 }
                 // PRD-238 S3: the turn is over — nothing may keep spinning.
                 else if (data.type === 'finish') {

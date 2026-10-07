@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from consumers.chatbot.claim_check import Verdict
+from consumers.chatbot.claim_check import Verdict, not_done
 from modules.tools.execution.action_claims import claimed_action_not_done
 
 MEMORY_ONLY = {"platform_store_memory"}
@@ -32,7 +32,7 @@ def test_handing_work_on_with_no_ticket_is_corrected_on_the_board():
     claim = claimed_action_not_done(AT_17_57, MEMORY_ONLY, promises=True)
 
     assert claim == "put on the board"
-    assert Verdict(tools=1, claim=claim).correction == (
+    assert Verdict(tools=1, claim=claim).correction is None and not_done(claim) == (     # PRD-256: receipts say it
         "Just to be clear: I didn't put anything on the board in this reply. Ask me again if you want it done.")
 
 

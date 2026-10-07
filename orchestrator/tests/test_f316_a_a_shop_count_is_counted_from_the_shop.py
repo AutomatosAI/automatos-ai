@@ -144,7 +144,7 @@ def test_the_reply_is_nudged_to_count_then_corrected_if_it_still_has_not():
     (sent,) = model.sent                                                  # the loop's one nudge
     assert "something was counted from your shop system" in sent[-1]["content"]
     assert final["_f187"].claim == SHOP_LABEL
-    assert final["_f187"].correction == not_done(SHOP_LABEL) == SHOP_LINE
+    assert final["_f187"].correction is None and not_done(SHOP_LABEL) == SHOP_LINE   # PRD-256: said from receipts
     assert SHOP_LINE.startswith("Just to be clear: I didn't count this from your shop system in this reply")
 
 
@@ -174,11 +174,11 @@ def test_the_turn_s_mark_reaches_the_tool_loop_s_check(shop):
 
     with usage_scope(request_type=LANE_CHAT):
         final = asyncio.run(turn())
-    assert final["_f187"].claim == SHOP_LABEL and final["_f187"].correction == SHOP_LINE
+    assert final["_f187"].claim == SHOP_LABEL and final["_f187"].correction is None
 
 
 def test_the_chat_runs_retrieval_first_through_it():
     from consumers.chatbot.service import StreamingChatService
 
-    inner = StreamingChatService._retrieval_first.__wrapped__.__wrapped__.__wrapped__  # under F241, F307, F303
+    inner = StreamingChatService._retrieval_first.__wrapped__.__wrapped__.__wrapped__.__wrapped__  # PRD-256, F241, F307, F303
     assert inner.__code__ is counts_from_the_shop(lambda: None).__code__

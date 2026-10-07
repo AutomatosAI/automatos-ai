@@ -72,7 +72,8 @@ def test_a_framed_reprompt_is_framed_once():
 
 
 def test_the_owner_reads_plain_words_under_a_claim_no_action_backed():
-    line = Verdict(tools=2, claim="under way").correction
+    assert Verdict(tools=2, claim="under way").correction is None      # PRD-256: said from receipts
+    line = not_done("under way")
 
     assert line == not_done("under way") == (
         "Just to be clear: nothing is still running from this reply, and I won't come back to this on my own. "

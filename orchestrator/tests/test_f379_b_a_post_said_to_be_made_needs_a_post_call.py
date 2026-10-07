@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from consumers.chatbot.claim_check import Verdict
+from consumers.chatbot.claim_check import Verdict, not_done
 from modules.tools.execution import social_post_claims as posts
 from modules.tools.execution.action_claims import claimed_action_not_done
 
@@ -67,6 +67,6 @@ def test_the_rest_of_the_reply_is_still_checked_by_the_other_families():
 
 
 def test_the_owner_reads_what_did_not_happen_in_plain_words():
-    assert Verdict(tools=1, claim=posts.POST_MADE).correction == (
+    assert Verdict(tools=1, claim=posts.POST_MADE).correction is None and not_done(posts.POST_MADE) == (
         "Just to be clear: I didn't make that post in this reply, so nothing new is waiting for your approval in "
         "the Socials tab. Ask me again if you want it done.")
