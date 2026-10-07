@@ -39,19 +39,19 @@ install_ingress_controller() {
         --wait --timeout 5m
 }
 
-# The API address the host dials: the ingress controller, or the API service.
-session_api_url() {
-    if ingress_on; then
-        kubectl -n "$INGRESS_NAMESPACE" port-forward svc/ingress-nginx-controller "$INGRESS_PORT:80" >/dev/null 2>&1 &
-        FORWARDS+=("$!")
-        for _ in $(seq 1 30); do
-            curl -s -o /dev/null "http://127.0.0.1:$INGRESS_PORT/health" && break
-            sleep 1
-        done
-        echo "http://127.0.0.1:$INGRESS_PORT"
-    else
-        echo "http://127.0.0.1:$API_PORT"
-    fi
+# Sets SESSION_API_URL, the address the host dials: the ingress controller, or the API
+# service. Call it in this shell, never as $(...): the port-forward's PID must reach
+# FORWARDS here, or cleanup_forwards leaves it running into the next pass.
+start_session_api() {
+    SESSION_API_URL="http://127.0.0.1:$API_PORT"
+    ingress_on || return 0
+    kubectl -n "$INGRESS_NAMESPACE" port-forward svc/ingress-nginx-controller "$INGRESS_PORT:80" >/dev/null 2>&1 &
+    FORWARDS+=("$!")
+    for _ in $(seq 1 30); do
+        curl -s -o /dev/null "http://127.0.0.1:$INGRESS_PORT/health" && break
+        sleep 1
+    done
+    SESSION_API_URL="http://127.0.0.1:$INGRESS_PORT"
 }
 
 # The agent through the API, the way the app creates one; the ticket straight into the board.
@@ -142,7 +142,8 @@ run_session_mode_checks() {
     log "Session mode (#848)"
     local tmp url code task
     tmp="$(mktemp -d /tmp/ae2e.XXXXXX)"   # short: the host's hook socket path is capped
-    url="$(session_api_url)"
+    start_session_api
+    url="$SESSION_API_URL"
     check "the API has session mode on" body_has "http://127.0.0.1:$API_PORT/health" '"cli_runtime_enabled": *true'
     task="$(seed_session_ticket)"
     code="$(pairing_code)"
