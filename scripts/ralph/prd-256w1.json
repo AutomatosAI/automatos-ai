@@ -95,15 +95,15 @@
       "title": "Done needs an artifact (F380)",
       "description": "As an owner, I want a card to close as Done only when the thing it was for exists, so 'done' on my board means something was made.",
       "acceptanceCriteria": [
-        "`update_board_task_status` (modules/tools/discovery/handlers_board_task_done.py) and the board's approve route (api/board_tasks.py) refuse a move to Done for a card whose kind requires an artifact (a social post card: a rendered post; a document card: a Deliverable; a card chat made for a deliverable: that deliverable) when none is linked; the refusal names what is missing in plain words and leaves the card in Review.",
-        "The artifact rule lives in ONE function shared by the tool and the route (no second copy).",
-        "A card with no artifact kind (a question answered in text) moves to Done as today.",
-        "Tests: `orchestrator/tests/test_prd256_done_needs_artifact.py` with a fixture card of each kind, with and without the artifact, through the tool and through the route.",
-        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
-        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+        "`update_board_task_status` (modules/tools/discovery/handlers_board_task_done.py) and the board's approve route (api/board_tasks.py) refuse a move to Done for a card whose kind requires an artifact (a social post card: a rendered post; a document card: a Deliverable; a card chat made for a deliverable: that deliverable) when none is linked; the refusal names what is missing in plain words and leaves the card in Review. → DONE — services/done_needs_an_artifact.missing_artifact, asked by the tool (ticket_moves._refusal) and approve_task (also the drag and PATCH); orchestrator/tests/test_prd256_done_needs_artifact.py::test_the_tool_refuses_a_document_card_with_no_deliverable, ::test_the_tool_refuses_a_social_card_with_no_rendered_post_and_moves_one_with, ::test_approve_refuses_a_document_card_with_no_deliverable, ::test_approve_refuses_a_social_card_with_no_post, ::test_a_document_card_with_no_deliverable_stays_in_review_and_says_so",
+        "The artifact rule lives in ONE function shared by the tool and the route (no second copy). → DONE — one function, services/done_needs_an_artifact.missing_artifact (done_refusal wraps it for a move); orchestrator/tests/test_prd256_done_needs_artifact.py::test_a_drag_or_patch_to_done_keeps_the_same_rule, ::test_only_a_move_to_done_is_judged",
+        "A card with no artifact kind (a question answered in text) moves to Done as today. → DONE — orchestrator/tests/test_prd256_done_needs_artifact.py::test_a_card_that_asks_for_nothing_or_that_an_engine_runs_needs_nothing, ::test_a_document_card_with_its_deliverable_and_a_question_card_go_to_done, ::test_the_tool_moves_a_document_card_with_its_deliverable_and_a_question_card, ::test_approve_closes_a_card_with_its_artifact_and_a_question_card",
+        "Tests: `orchestrator/tests/test_prd256_done_needs_artifact.py` with a fixture card of each kind, with and without the artifact, through the tool and through the route. → DONE — orchestrator/tests/test_prd256_done_needs_artifact.py (social, document and chat-for-a-document cards, with and without the artifact, through the tool, the bulk tool, Approve, the drag and the PATCH; workspace isolation)",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines) → DONE — scripts/ci/check_changed_code_shape.py --base main: 0 errors; py_compile clean (ruff not on PATH locally; CI's diff-quality runs it)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story) → DONE — committed 84144069d [skip ci]; CI runs once at the end of the wave"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {
