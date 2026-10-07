@@ -14,3 +14,9 @@ so forward both and open http://localhost:3000:
 
 Local edition: there is no login. Anyone who can reach the web app is the admin.
 {{- end }}
+{{- if .Values.sessionMode.enabled }}
+
+Session mode is on. Pair the CLI host on your machine with this API's address
+(Settings → Session mode issues the code), over TLS when it crosses a network:
+  make cli-host PAIR=XXXX-XXXX CLI_HOST_ARGS="--url https://<this API's address>"
+{{- end }}

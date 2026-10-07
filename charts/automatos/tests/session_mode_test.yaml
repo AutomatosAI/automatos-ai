@@ -1,0 +1,129 @@
+suite: Session mode (#848)
+templates:
+  - templates/api-deployment.yaml
+  - templates/migrate-job.yaml
+  - templates/ingress-session-mode.yaml
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: is off by default, so the API answers 404 on every session-mode route
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLI_RUNTIME_ENABLED
+            value: "true"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLI_SESSION_FILE_UPLOAD
+            value: "true"
+  - it: turns on session mode and the hosts' uploads
+    template: templates/api-deployment.yaml
+    set:
+      sessionMode:
+        enabled: true
+        uploadMaxTotalMb: 300
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLI_RUNTIME_ENABLED
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLI_SESSION_FILE_UPLOAD
+            value: "true"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLI_SESSION_UPLOAD_MAX_TOTAL_MB
+            value: "300"
+  - it: is refused outside the local edition
+    template: templates/migrate-job.yaml
+    set:
+      edition:
+        authEdition: saas
+      sessionMode:
+        enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: sessionMode.enabled needs edition.authEdition=local
+  - it: gives the migration Job the same environment
+    template: templates/migrate-job.yaml
+    set:
+      sessionMode:
+        enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLI_RUNTIME_ENABLED
+            value: "true"
+  - it: renders no host Ingress while session mode is off
+    template: templates/ingress-session-mode.yaml
+    set:
+      ingress:
+        enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: renders no host Ingress without the ingress
+    template: templates/ingress-session-mode.yaml
+    set:
+      sessionMode:
+        enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: routes /health and /api/v1/cli-hosts to the API on its own Ingress, with room for a session file
+    template: templates/ingress-session-mode.yaml
+    release:
+      name: demo
+    set:
+      sessionMode:
+        enabled: true
+      ingress:
+        enabled: true
+        className: nginx
+        host: automatos.example.com
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt
+        tls:
+          - hosts: [automatos.example.com]
+            secretName: automatos-tls
+    asserts:
+      - equal:
+          path: metadata.name
+          value: demo-automatos-cli-hosts
+      - equal:
+          path: spec.ingressClassName
+          value: nginx
+      - equal:
+          path: spec.rules[0].host
+          value: automatos.example.com
+      - equal:
+          path: spec.rules[0].http.paths[0].path
+          value: /health
+      - equal:
+          path: spec.rules[0].http.paths[0].pathType
+          value: Exact
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: demo-automatos-api
+      - equal:
+          path: spec.rules[0].http.paths[1].path
+          value: /api/v1/cli-hosts
+      - equal:
+          path: spec.rules[0].http.paths[1].backend.service.name
+          value: demo-automatos-api
+      - equal:
+          path: spec.tls[0].secretName
+          value: automatos-tls
+      - equal:
+          path: metadata.annotations
+          value:
+            cert-manager.io/cluster-issuer: letsencrypt
+            nginx.ingress.kubernetes.io/proxy-body-size: 64m

@@ -105,6 +105,23 @@ worker:
     limits:
       memory: 2Gi
 
+# Session mode (PRD-234): agents that run as the operator's own Claude Code, Codex or
+# Copilot sessions, through the CLI host on the operator's machine
+# (`make cli-host` with `--url` set to this cluster's address). Local edition only:
+# rendering fails otherwise. The host shares no folder with the cluster, so it
+# uploads what each session leaves in the ticket's deliverables folder (#848). One
+# difference from compose: the operator's projects folder isn't browsable here.
+sessionMode:
+  enabled: false
+  # The most one run of a ticket may upload, in MB. Each file: 50 MB, as a document upload.
+  uploadMaxTotalMb: 200
+  # Annotations for the Ingress that routes /api/v1/cli-hosts, rendered only when
+  # both this and ingress.enabled are on (on top of ingress.annotations). Uploads
+  # need a request-body limit above the 50 MB file limit; ingress-nginx's default
+  # is 1 MB. Set your controller's equivalent if you use another one.
+  ingressAnnotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 64m
+
 # Agent files, shared by the worker (read-write) and the API (read-only). Pods on
 # different nodes need ReadWriteMany storage (Azure Files, EFS, NFS); a single-node
 # cluster can use ReadWriteOnce.

@@ -68,6 +68,17 @@ before any of the release's ordinary resources exist.
 {{- end }}
 - name: WORKSPACE_VOLUME_PATH
   value: /workspaces
+{{- if .Values.sessionMode.enabled }}
+{{- if ne .Values.edition.authEdition "local" }}
+{{- fail "sessionMode.enabled needs edition.authEdition=local: session mode runs the operator's own CLI sessions, and the hosted edition refuses it" }}
+{{- end }}
+- name: CLI_RUNTIME_ENABLED
+  value: "true"
+- name: CLI_SESSION_FILE_UPLOAD
+  value: "true"
+- name: CLI_SESSION_UPLOAD_MAX_TOTAL_MB
+  value: {{ .Values.sessionMode.uploadMaxTotalMb | toString | quote }}
+{{- end }}
 {{- if .Values.worker.enabled }}
 - name: WORKER_INTERNAL_URL
   value: {{ printf "http://%s-worker:8081" (include "automatos.fullname" .) | quote }}
