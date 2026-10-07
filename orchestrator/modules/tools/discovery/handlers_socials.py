@@ -568,8 +568,10 @@ def _limit(value: Any) -> int:
 
 
 async def list_social_posts(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """The workspace's posts, newest first, in the statuses asked for."""
+    """The workspace's posts, newest first, in the statuses or the queue asked for: how many match,
+    then each as a compact row saying what it still needs (F379, ``social_post_list``)."""
     from modules.socials import service
+    from modules.tools.discovery.social_post_list import listed, queue_of
 
     _, refusal = _open(db, workspace_id)
     if refusal:
@@ -577,10 +579,13 @@ async def list_social_posts(db: Session, workspace_id: UUID, params: Dict[str, A
     try:
         statuses = _statuses(params.get("status"))
         limit = _limit(params.get("limit"))
+        queued, keep, problem = queue_of(params.get("queue"))
+        if problem:
+            raise _Refused(problem)
     except _Refused as exc:
         return _refused(str(exc))
-    posts = service.list_posts(db, workspace_id, statuses=statuses, limit=limit)
-    return {"success": True, "posts": [post.to_dict() for post in posts], "count": len(posts), "limit": limit}
+    posts = service.list_posts(db, workspace_id, statuses=statuses or queued)
+    return listed([post.to_dict() for post in posts], keep, limit)
 
 
 # ---- PRD-251B (B8, US-B204): a plan's content bank, for the research playbook ----

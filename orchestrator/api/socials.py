@@ -138,6 +138,7 @@ from modules.socials.settings import require_socials_enabled
 logger = logging.getLogger(__name__)
 
 TEXT_FORMAT = "text"  # PRD-251B: a post of copy alone, no template, no media
+POSTS_MAX_LIMIT = 500  # F379 (night 11): GET /posts?limit= keeps the newest this many
 
 router = APIRouter(
     prefix="/api/socials",
@@ -614,21 +615,17 @@ def list_social_posts(
     window_from: Optional[datetime] = Query(None, alias="from"),
     window_to: Optional[datetime] = Query(None, alias="to"),
     q: Optional[str] = Query(None, max_length=text_search.QUERY_MAX_CHARS, description="Title or brief holds this"),
+    limit: Optional[int] = Query(None, ge=1, le=POSTS_MAX_LIMIT, description="Only the newest this many"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """The workspace's posts, newest first. ``from``/``to`` bound a post's date:
     its slot when scheduled, otherwise when it was created. ``q`` (global search,
-    US-205) keeps those whose title or brief holds it, case-insensitively."""
-    posts = service.list_posts(
-        db,
-        ctx.workspace_id,
-        statuses=_parse_statuses(status),
-        window_from=window_from,
-        window_to=window_to,
-        q=q,
-    )
-    return {"posts": [p.to_dict() for p in posts], "total": len(posts)}
+    US-205) keeps those whose title or brief holds it, case-insensitively. ``limit``
+    keeps the newest that many, and ``total`` counts every match (F379: it was ignored)."""
+    posts = service.list_posts(db, ctx.workspace_id, statuses=_parse_statuses(status), window_from=window_from,
+                               window_to=window_to, q=q)
+    return {"posts": [p.to_dict() for p in posts[:limit]], "total": len(posts)}
 
 
 @router.post("/posts", status_code=201, dependencies=[CAN_CREATE])

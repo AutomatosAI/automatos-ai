@@ -45,6 +45,8 @@ FACTS_MAX_PER_TOPIC = 12
 # platform_list_social_posts: how many posts one call returns.
 LIST_DEFAULT_LIMIT = 25
 LIST_MAX_LIMIT = 100
+# modules/tools/discovery/social_post_list.py QUEUES (F379): the posts by what they still need.
+POST_QUEUES = ["awaiting_approval", "not_rendered", "open"]
 # modules/socials/history.py MAX_DAYS and MAX_LIMIT: the most platform_get_social_history reads.
 HISTORY_MAX_DAYS = 365
 HISTORY_MAX_LIMIT = 200
@@ -355,9 +357,10 @@ def _register_list_social_posts(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_social_posts",
         description=(
-            "List the workspace's Socials posts, newest first, optionally only those in some "
-            "statuses: what waits for approval, what a reviewer sent back, what failed to render, "
-            "what is scheduled or published."
+            "List the workspace's Socials posts, newest first: how many match, then one row each "
+            "with its status and what it still needs (the owner's approval, a render that failed and "
+            "why, a render not made yet, a caption). Pick them by status, or by queue: what waits for "
+            "the owner's approval, what has not rendered, or every post not yet approved or out."
         ),
         category="socials",
         parameters={
@@ -367,6 +370,15 @@ def _register_list_social_posts(registry: ActionRegistry) -> None:
                     "type": "array",
                     "items": {"type": "string", "enum": POST_STATUSES},
                     "description": "Only posts in these statuses; every status when left out.",
+                },
+                "queue": {
+                    "type": "string",
+                    "enum": POST_QUEUES,
+                    "description": (
+                        "Posts by what they need: awaiting_approval (waiting for the owner), not_rendered "
+                        "(a failed render, or a draft with nothing rendered yet) or open (every post not "
+                        "yet approved or out)."
+                    ),
                 },
                 "limit": {
                     "type": "integer",
