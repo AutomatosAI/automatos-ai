@@ -1378,7 +1378,7 @@ def test_the_media_render_job_renders_the_fixture_script_with_speech_in_every_wi
     asserts speech in every script window, with the over-long first line fitted."""
     import yaml
 
-    workflow = yaml.safe_load((_ORCH.parent / ".github" / "workflows" / "test.yml").read_text())
+    workflow = yaml.safe_load((_ORCH.parent / ".github" / "workflows" / "media-render.yml").read_text())
     commands = "\n".join(step.get("run", "") for step in workflow["jobs"]["media-render"]["steps"])
     assert '"$IMAGE" fixture-bundle script' in commands
     assert "ci/render_bundle.py" in commands and "--save-as script.mp4" in commands

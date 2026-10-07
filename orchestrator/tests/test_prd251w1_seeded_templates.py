@@ -677,13 +677,15 @@ def test_the_ci_drivers_png_coder_round_trips():
 
 def test_the_media_render_job_checks_and_previews_every_seeded_template():
     """6 Oct: the renders run in ``media-render-templates``, a shard matrix (template_shards.py);
-    every shard builds the image the way the media-render job does and keeps its previews."""
+    every shard builds the image the way the media-render job does and keeps its previews.
+    7 Oct: on demand only, in media-render.yml (the Actions tab), never on a pull request."""
     import yaml
 
-    workflow = yaml.safe_load((_ROOT / ".github" / "workflows" / "test.yml").read_text())
+    workflow = yaml.safe_load((_ROOT / ".github" / "workflows" / "media-render.yml").read_text())
+    assert workflow.get("on", workflow.get(True)) == {"workflow_dispatch": None}
     job = workflow["jobs"]["media-render-templates"]
-    assert job["name"].startswith("media-render — ")  # the PRD-251 W1 gate requires every media-render* job
-    assert "needs.changes.outputs.media_render == 'true'" in job["if"]
+    assert job["name"].startswith("media-render — ")
+    assert "needs" not in job and "if" not in job
     shards = job["strategy"]["matrix"]["shard"]
     assert shards == list(range(1, int(job["env"]["SHARDS"]) + 1)) and job["strategy"]["fail-fast"] is False
     commands = "\n".join(step.get("run", "") for step in job["steps"])
