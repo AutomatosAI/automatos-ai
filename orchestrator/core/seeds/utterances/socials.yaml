@@ -181,6 +181,8 @@ actions:
     source: phrase_map
   - text: social posts awaiting approval
     source: phrase_map
+  - text: posts waiting for approval
+    source: phrase_map
   - text: what's in the Socials approval queue?
     source: authored
   - text: which social posts failed to render?

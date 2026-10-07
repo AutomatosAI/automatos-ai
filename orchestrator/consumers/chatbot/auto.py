@@ -641,8 +641,8 @@ _PLATFORM_KEYWORDS = {
         "draft a social post", "create a social post", "new social post",
         "social media post about", "draft a linkedin post",
     ],
-    "platform_list_social_posts": [
-        "list social posts", "show social posts", "social posts awaiting approval",
+    "platform_list_social_posts": [  # F379: the queue, as the owner asks for it
+        "list social posts", "show social posts", "social posts awaiting approval", "posts waiting for approval",
     ],
     # PRD-82A: Missions
     "platform_create_mission": [
