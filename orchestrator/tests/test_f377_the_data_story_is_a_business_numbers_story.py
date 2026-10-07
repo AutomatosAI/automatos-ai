@@ -143,6 +143,8 @@ def test_nothing_opts_out_of_the_overlap_check_and_an_empty_photo_draws_nothing(
     html = starter["blocks"]["html"]
     assert "data-layout-allow-overlap" not in html
     assert html.count('class="page') == 5 and "function fit(page)" in html
+    # The fit finds a page's scene by its "scene" class: a cut that drops the scene takes its "clip" class away.
+    assert html.count('class="clip scene"') == 5 and 'page.closest(".scene")' in html
     css = "".join(re.findall(r"<style>(.*?)</style>", html, re.S))
     for selector in (".photo", ".photo .push", ".photo img"):
         body = re.search(re.escape(selector) + r" \{([^{}]*)\}", css).group(1)

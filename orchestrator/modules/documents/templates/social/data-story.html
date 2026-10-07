@@ -206,7 +206,8 @@
       }
       function fit(page) {
         // A page whose scene is out of the layout right now is measured shown, then put back as it was.
-        const scene = page.closest(".clip");
+        // (Its scene, not its clip: a cut that drops the scene takes its "clip" class away.)
+        const scene = page.closest(".scene");
         const before = scene.getAttribute("style");
         const hidden = !page.getClientRects().length;
         if (hidden) scene.style.cssText += ";display:block;visibility:hidden";
