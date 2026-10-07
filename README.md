@@ -245,6 +245,14 @@ New here? Look for issues labelled [`good first issue`](https://github.com/Autom
 - **Sign off every commit** (`git commit -s`). The `Signed-off-by:` trailer is your [Developer Certificate of Origin](https://developercertificate.org) attestation and the `dco` check verifies it on each pull request. There is no CLA; contributions are Apache-2.0 and ship in every edition.
 - **Capability first, core second.** Skills, tools, MCP integrations, Playbooks and agent packages reach both editions unchanged and never conflict with core. Open an issue first for anything touching auth, storage, the tool router or a migration.
 
+### Contributors
+
+Thank you to everyone who has contributed to Automatos.
+
+<a href="https://github.com/AutomatosAI/automatos-ai/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=AutomatosAI/automatos-ai" alt="Contributors to Automatos AI" />
+</a>
+
 ---
 
 <div align="center">
