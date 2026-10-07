@@ -46,13 +46,15 @@ def record_approval(db: Session, task_id: int, *, workspace_id: Any, decided_at:
     return still_approved
 
 
-def keep_approval_note(db: Session, *, task_id: int, workspace_id: Any, note: str) -> None:
-    """An approval's note from outside the board's Approve (Auto approving in chat
-    on the owner's word, F259): the same words and the same "you" on the ticket."""
-    _keep_note(db, task_id=task_id, workspace_id=workspace_id, note=note)
+def keep_approval_note(db: Session, *, task_id: int, workspace_id: Any, note: str,
+                       by: str = OPERATOR_NOTE_BY) -> None:
+    """An approval's note from outside the board's Approve (Auto approving in chat, F259):
+    the same words on the ticket, signed by the user who clicked the approval card
+    (PRD-256 US-004)."""
+    _keep_note(db, task_id=task_id, workspace_id=workspace_id, note=note, by=by)
 
 
-def _keep_note(db: Session, *, task_id: int, workspace_id: Any, note: str) -> None:
+def _keep_note(db: Session, *, task_id: int, workspace_id: Any, note: str, by: str = OPERATOR_NOTE_BY) -> None:
     """One jsonb append in the caller's transaction (append_session_note), never a
     whole-document write over a CLI host's concurrent event flush. The note is cut
     to leave room for its prefix within the notes' own bound."""
@@ -60,4 +62,4 @@ def _keep_note(db: Session, *, task_id: int, workspace_id: Any, note: str) -> No
 
     room = MAX_ASK_QUESTION_KEPT - len(APPROVAL_NOTE_PREFIX)
     append_session_note(db, task_id=task_id, workspace_id=workspace_id,
-                        note=f"{APPROVAL_NOTE_PREFIX}{note[:room]}", by=OPERATOR_NOTE_BY)
+                        note=f"{APPROVAL_NOTE_PREFIX}{note[:room]}", by=by)

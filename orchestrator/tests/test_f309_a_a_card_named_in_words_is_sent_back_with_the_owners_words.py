@@ -41,7 +41,9 @@ def _card(ref, title, status="review", source_type="user", task_id=None, by_id=F
 
 @pytest.fixture
 def turn(monkeypatch):
-    """The owner's words this turn (and the cards they name), as owner_turn would read them."""
+    """The owner's words this turn (and the cards they name), as owner_turn would read them.
+    PRD-256 US-004: Auto's last reply is no longer patched: the guard read it only to judge a
+    "yes" as an approval, which is the owner's click now."""
     import modules.tools.discovery.follows_the_owner as guard
     from modules.tools.discovery.owner_turn import OwnerTurn
 
@@ -53,7 +55,6 @@ def turn(monkeypatch):
     monkeypatch.setattr(guard, "owner_turn", lambda db, ws, ctx: said.get("turn") if ctx else None)
     monkeypatch.setattr(guard, "_the_cards_words", lambda db, ws, params: ())
     monkeypatch.setattr(guard, "owners_recent_words", lambda db, ws, turn: said.get("recent", ()))
-    monkeypatch.setattr(guard, "autos_last_reply", lambda db, ws, turn: "")
     return _set
 
 
@@ -141,11 +142,16 @@ def test_a_paraphrase_is_refused_with_the_words_the_owner_gave_a_message_before(
     assert _refused("platform_update_task_status", task_id="0027.2", status="assigned", note=BANNED) is None
 
 
-def test_an_approval_through_the_edit_tool_needs_the_owners_approval(turn):
-    """platform_update_task with a status moves the card now, so the guard judges it."""
+def test_an_approval_through_the_edit_tool_waits_for_the_owners_click_not_their_words(turn):
+    """platform_update_task with a status moves the card now. PRD-256 US-004 changed this test:
+    the guard no longer judges an approval by the owner's words ("hasn't said to approve"); the
+    move to Done is owner-only and waits for their click on the approval card (owner_only)."""
+    from modules.tools.discovery.owner_only import is_owner_only
+
     turn("Let's talk about card 1866.", _card("#0019", "Margin on a 250 g bag of Kirinyaga AA", task_id=1866,
                                                by_id=True))
-    assert "hasn't said to approve #0019" in _refused("platform_update_task", task_id=1866, status="done")
+    assert _refused("platform_update_task", task_id=1866, status="done") is None
+    assert is_owner_only("platform_update_task", {"task_id": 1866, "status": "done"})
 
 
 # ── The turn reads cards named in words from the board ─────────────────────────────

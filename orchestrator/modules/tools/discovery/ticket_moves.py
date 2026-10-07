@@ -167,23 +167,25 @@ def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]
 def _keep_the_note(db: Session, workspace_id: Any, params: Dict[str, Any], result: Any) -> None:
     """The note a move carried, on each ticket the handler moved: an approval's note on
     one moved to Done (as the board's Approve keeps it), a plain note on any other.
-    The owner's when a person drives the call, an agent's otherwise."""
+    PRD-256 US-004: signed by the user who clicked the approval card; a move no one
+    clicked (Auto's call alone, or an agent's own run) is an agent's note."""
     from modules.tools.discovery.handlers_board_task_done import moved_to_done
+    from modules.tools.discovery.owner_only import signed_by
 
     note = str(params.get("note") or "").strip()[:MAX_NOTE_CHARS]
     moved = moved_to_done(result) if note and isinstance(result, dict) else []
     if not moved:
         return
     from services.cli_host_service import append_session_note
-    from services.ticket_verdict import OPERATOR_NOTE_BY, keep_approval_note
+    from services.ticket_verdict import keep_approval_note
 
-    owners = bool(params.get("_user_id"))
+    signer = signed_by(params)
     for task_id in moved:
-        if owners and params.get("status") == "done":
-            keep_approval_note(db, task_id=task_id, workspace_id=workspace_id, note=note)
+        if signer and params.get("status") == "done":
+            keep_approval_note(db, task_id=task_id, workspace_id=workspace_id, note=note, by=signer)
         else:
             append_session_note(db, task_id=task_id, workspace_id=workspace_id, note=note,
-                                by=OPERATOR_NOTE_BY if owners else AN_AGENTS_NOTE_BY)
+                                by=signer or AN_AGENTS_NOTE_BY)
     db.commit()
 
 

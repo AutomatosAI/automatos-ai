@@ -133,6 +133,7 @@ from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
 )
 from modules.tools.discovery.handlers_board_task_review import create_board_task  # F180: the owner's review kept
 from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
+from modules.tools.discovery.owner_only import asks_the_owner_first  # PRD-256 US-004: the owner's click
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
 from modules.tools.discovery.handlers_board_tasks import (
@@ -514,10 +515,9 @@ def _bind_ask_orchestrator_context(
     return bound
 
 
-# Params that identify WHAT an action will act on, in the order a person reads
-# them. An approval card that says only "cancel a scheduled task" gives the
-# operator nothing to decide on (night 1, 2026-09-18: the card named neither the
-# id nor the title of the schedule it would cancel).
+# Params that identify WHAT an action will act on, in the order a person reads them. An approval
+# card that says only "cancel a scheduled task" gives the operator nothing to decide on (night 1,
+# 2026-09-18: the card named neither the id nor the title of the schedule it would cancel).
 _SUBJECT_PARAMS: Tuple[str, ...] = (
     "title", "name", "task_id", "agent_id", "document_id", "mission_id",
     "report_id", "id", "app_name", "query", "playbook_name",
@@ -536,11 +536,10 @@ def _subject_line(params: Dict[str, Any]) -> str:
     return f" on {', '.join(named[:3])}" if named else ""
 
 
-# F179 (the TESTER's call, 2026-09-26; Gerard can reverse it): a floor below the
-# full-autonomy dial. These actions ask on every lane nobody is instructing (a
-# ticket, a mission, a playbook) even with the dial on, because what they do
-# cannot be taken back: a public link, once shared, stays shared. An owner's or
-# admin's own chat turn still runs them.
+# F179 (the TESTER's call, 2026-09-26; Gerard can reverse it): a floor below the full-autonomy dial.
+# These actions ask on every lane nobody is instructing (a ticket, a mission, a playbook) even with the
+# dial on, because what they do cannot be taken back: a public link, once shared, stays shared. An
+# owner's or admin's own chat turn still runs them (PRD-256 US-004's owner-only list asks there too).
 ASKS_EVEN_UNDER_FULL_AUTONOMY = frozenset({"workspace_get_public_url"})
 
 
@@ -971,6 +970,7 @@ class PlatformActionExecutor:
         give_back_unused(self.db, cleared.approved_via_grant_id, result)
         return result
 
+    @asks_the_owner_first  # PRD-256 US-004: after the role gates, an owner-only call from chat waits for a click
     async def _run_cleared(
         self,
         action_name: str,
