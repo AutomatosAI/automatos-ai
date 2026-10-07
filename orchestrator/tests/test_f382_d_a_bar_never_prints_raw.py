@@ -37,6 +37,14 @@ def test_only_display_text_attributes_and_scripts_read_the_bar():
     assert unbroken("|NEW|") == "NEW"
 
 
+def test_a_script_ends_where_a_browser_ends_it():
+    # CodeQL py/bad-tag-filter: "</script >" and "</SCRIPT foo>" end a script too, and what follows is page text.
+    page = ('<script>go("{{ one }}");</script ><p>{{ after_one }}</p>'
+            '<SCRIPT type="x">go("{{ two }}");</SCRIPT foo><p>{{ after_two }}</p>'
+            '<span data-dress>{{ head }}<br>{{ head_2 }}</span><p>{{ plain }}</p>')
+    assert line_break_fields(page) == {"one", "two", "head", "head_2"}
+
+
 def test_the_announcements_features_never_print_a_bar_and_its_headline_keeps_its_lines():
     starter = _announcement()
     html = starter["blocks"]["html"]

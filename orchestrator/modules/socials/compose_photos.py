@@ -27,12 +27,16 @@ from core.social_templates import IMAGE_SLOT, slot_required
 NEEDS_PHOTO = "This template needs a photo: add one to '{label}' (upload one, pick one from the Library, or let AI make one)"
 SHOWS_PHOTO = "This template shows a photo in '{label}': add one, or your brand's colours show there"
 PHOTO_QUESTION = "A photo for '{label}'"
+# Read on the brief with its whitespace collapsed to single spaces (:func:`brief_says_no_photo`), so
+# every gap below is one literal space: no two unbounded quantifiers ever meet (linear time).
 _NO_PHOTO = re.compile(
-    r"\b(?:no|without(?:\s+(?:a|any|the|my))?|(?:have\s*n't|haven't|don't\s+have|do\s+not\s+have|not\s+got|have\s+no)"
-    r"(?:\s+got)?(?:\s+(?:a|any|the|my|our))?)\s+(?:photos?|pictures?|images?|pics?|shots?)\b"
-    r"|\b(?:photos?|pictures?)\s+(?:later|to\s+come|(?:is|are)\s*(?:n't|\s+not)\s+ready|not\s+ready)\b",
+    r"\b(?:no|without(?: (?:a|any|the|my))?|(?:have ?n't|don't have|do not have|not got|have no)"
+    r"(?: got)?(?: (?:a|any|the|my|our))?) (?:photos?|pictures?|images?|pics?|shots?)\b"
+    r"|\b(?:photos?|pictures?) (?:later|to come|(?:is|are) ?n't ready|(?:is|are) not ready|not ready)\b",
     re.IGNORECASE,
 )
+# The longest brief compose takes (api/socials_compose.BRIEF_MAX_CHARS); a longer text is read this far.
+NO_PHOTO_MAX_CHARS = 4000
 
 
 def photo_slots(blocks: Any) -> List[Dict[str, Any]]:
@@ -47,7 +51,8 @@ def photo_slots(blocks: Any) -> List[Dict[str, Any]]:
 
 def brief_says_no_photo(brief: str) -> bool:
     """Whether the brief says there is no photo ("I haven't got the photo yet", "no picture")."""
-    return bool(_NO_PHOTO.search((brief or "").replace("’", "'")))
+    said = " ".join((brief or "")[:NO_PHOTO_MAX_CHARS].replace("\u2019", "'").split())
+    return bool(_NO_PHOTO.search(said))
 
 
 def needs_a_photo(template: Mapping[str, Any]) -> bool:

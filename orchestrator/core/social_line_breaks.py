@@ -12,33 +12,69 @@ template shows only as plain text, outside any ``data-dress`` element, has each 
 turned into a space (``"Fresh beans | roasted daily"`` prints "Fresh beans roasted
 daily"). A field the template puts in an attribute or a script (a data story's rows
 are ``|``-separated parts its script splits) is left as it is, and so is every
-``data-dress`` field. Pure.
+``data-dress`` field. The template is read with the standard library's HTML parser, the way
+a browser reads it (``</script >`` and ``</SCRIPT foo>`` end a script too), never with a
+regex over the markup. Pure.
 """
 from __future__ import annotations
 
-import re
-from typing import Any, Dict, FrozenSet, Mapping
+from html.parser import HTMLParser
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from core.social_templates import PLACEHOLDER
 
 LINE_BREAK = "|"
-# An element that carries data-dress, and what it holds (the templates' display text is one element of text).
-_DRESSED = re.compile(r"<(\w+)\b[^>]*\sdata-dress\b[^>]*>(.*?)</\1>", re.S | re.I)
-# A placeholder inside a tag (an attribute's value) or a script: that field is the template's own to parse.
-_TAG = re.compile(r"<[^>]*>", re.S)
-_SCRIPT = re.compile(r"<script\b.*?</script>", re.S | re.I)
+DRESS_ATTR = "data-dress"
+# Elements whose text the template's own code reads, not the page: a placeholder there is the template's to parse.
+RAW_TEXT_TAGS = frozenset({"script", "style"})
+# Elements with no end tag: they never hold text, so they are never on the open-element stack.
+VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source",
+                       "track", "wbr"})
 
 
 def _names(text: str) -> FrozenSet[str]:
     return frozenset(match.group(1) for match in PLACEHOLDER.finditer(text))
 
 
+class _KeptFields(HTMLParser):
+    """Collects the placeholders in attributes, in scripts and styles, and inside ``data-dress`` elements."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.kept: set = set()
+        self._open: List[Tuple[str, bool]] = []  # (tag, whether it is dressed or raw text)
+
+    def _inside(self) -> bool:
+        return any(reads for _tag, reads in self._open)
+
+    def handle_starttag(self, tag: str, attrs: Sequence[Tuple[str, Optional[str]]]) -> None:
+        for _name, value in attrs:
+            self.kept.update(_names(value or ""))
+        if tag not in VOID_TAGS:
+            reads = tag in RAW_TEXT_TAGS or any(name == DRESS_ATTR for name, _value in attrs)
+            self._open.append((tag, reads))
+
+    def handle_startendtag(self, tag: str, attrs: Sequence[Tuple[str, Optional[str]]]) -> None:
+        for _name, value in attrs:
+            self.kept.update(_names(value or ""))
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self._open) - 1, -1, -1):
+            if self._open[index][0] == tag:
+                self._open = self._open[:index]
+                return
+
+    def handle_data(self, data: str) -> None:
+        if self._inside():
+            self.kept.update(_names(data))
+
+
 def line_break_fields(html: str) -> FrozenSet[str]:
     """The fields whose ``|`` the template reads: its ``data-dress`` text, its attributes and its scripts."""
-    dressed = frozenset().union(*(_names(match.group(2)) for match in _DRESSED.finditer(html)))
-    in_tags = frozenset().union(*(_names(match.group(0)) for match in _TAG.finditer(html)))
-    in_scripts = frozenset().union(*(_names(match.group(0)) for match in _SCRIPT.finditer(html)))
-    return dressed | in_tags | in_scripts
+    parser = _KeptFields()
+    parser.feed(html or "")
+    parser.close()
+    return frozenset(parser.kept)
 
 
 def unbroken(text: str) -> str:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,6 +42,9 @@ from core.social_templates import validate_social_blocks  # noqa: E402
 from modules.documents.social_starters import social_starters  # noqa: E402
 from modules.socials import compose, compose_checks, compose_photos  # noqa: E402
 from tests.test_prd251w2_compose import WS_A, _answer, _compose  # noqa: E402
+
+# A linear read of a capped brief takes milliseconds; a polynomial one takes minutes.
+ADVERSARIAL_SECONDS = 0.5
 
 api = compose_harness.api
 composer = compose_harness.composer
@@ -99,6 +103,19 @@ def test_the_slot_contract_takes_required_as_a_switch():
 ])
 def test_a_brief_saying_there_is_no_photo_is_read_as_such(brief, none):
     assert compose_photos.brief_says_no_photo(brief) is none
+
+
+@pytest.mark.parametrize("brief", [
+    "haven't" + " " * 50_000 + "x",
+    "no " * 20_000 + "x",
+    "without \t" * 10_000 + "pictures later",
+    "have " * 30_000,
+])
+def test_a_long_adversarial_brief_is_read_fast(brief):
+    # CodeQL py/polynomial-redos: whitespace is collapsed and the brief capped before the pattern runs.
+    started = time.perf_counter()
+    compose_photos.brief_says_no_photo(brief)
+    assert time.perf_counter() - started < ADVERSARIAL_SECONDS
 
 
 def test_a_no_photo_brief_is_never_offered_a_template_whose_photo_is_required(composer):
