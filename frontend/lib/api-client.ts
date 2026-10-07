@@ -791,6 +791,8 @@ export interface SocialTemplateSummary {
   image_slot_labels?: Record<string, string>
   /** The template's fields, some of them claims (D7): the editor's Text on the image card. */
   variables_schema: Record<string, SocialTemplateVariable>
+  /** F377: each shorter cut's length (seconds, as text) with the fields it shows: all a post at that length needs. */
+  fields_by_length?: Record<string, string[]>
   /** The sample text of those fields (what the thumbnail shows): greyed in as each empty field's example. */
   sample_data?: Record<string, string | number | boolean>
 }

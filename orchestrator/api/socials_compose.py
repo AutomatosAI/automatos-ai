@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from config import config
+from core.social_cuts import fields_by_length
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
@@ -114,6 +115,8 @@ def social_templates(db: Session, workspace_id: UUID, post_format: Optional[str]
             "sizes": blocks.get("sizes") or [], "variables_schema": blocks.get("variables_schema") or {},
             # PRD-251B (B5): the lengths a video declares (US-B104), for the editor and the model.
             "durations": durations_of(blocks, row.format),
+            # F377: what each shorter cut shows, so a post at that length is asked for those only.
+            "fields_by_length": fields_by_length(blocks),
         })
     return out
 

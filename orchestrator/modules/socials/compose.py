@@ -29,6 +29,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from core.social_cuts import schema_for_length
 from core.social_templates import resolve_variables
 from modules.socials import compose_checks
 from modules.socials.copy_limits import limits_for
@@ -225,8 +226,9 @@ async def _ask(llm: Any, messages: List[Dict[str, str]], timeout: float) -> Opti
 
 
 def _missing(proposal: Mapping[str, Any]) -> List[str]:
-    """The chosen template's variables with neither a value nor a default: the render's own test."""
-    schema = (proposal.get("template") or {}).get("variables_schema") or {}
+    """The chosen template's variables with neither a value nor a default: the render's own test,
+    at the post's length (F377: a cut asks only for what it shows)."""
+    schema = schema_for_length(proposal.get("template") or {}, proposal.get("length_seconds"))
     supplied = {name: spec.get("value") for name, spec in (proposal.get("variables") or {}).items()}
     return resolve_variables(schema, supplied).missing if schema else []
 
