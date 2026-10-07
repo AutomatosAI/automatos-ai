@@ -106,12 +106,12 @@
       "title": "Context assembly under two seconds (only if US-009 says so)",
       "description": "As an owner, I want a reply to start within a couple of seconds, so a turn is not eight seconds of assembly before the first word.",
       "acceptanceCriteria": [
-        "Read the owner's US-009 note first: if `PREP_MS_MEDIAN` is at or under 2000, mark every criterion here `SKIPPED — prep_ms under 2 s` and finish the wave; if the note is missing, mark every criterion `→ BLOCKED — no US-009 note yet` and finish the wave (reply `STORY_DONE P256-W2-US-013`, never RALPH_BLOCKED); otherwise build.",
-        "The per-workspace sections (identity, product_facts, skills, platform_actions) are cached across turns in the ContextService with invalidation on the writes that change them (agent, skill, kit, action registry); the board and document pre-reads in _retrieval_first run concurrently.",
-        "Median prep_ms on a fixed workspace under two seconds with the same prompt text (a test with a fake clock pins the cache hit path; the real median is the owner's eval).",
-        "Tests: `orchestrator/tests/test_prd256_context_assembly.py` (cache hit, invalidation on each write, same rendered sections).",
-        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
-        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+        "Read the owner's US-009 note first: if `PREP_MS_MEDIAN` is at or under 2000, mark every criterion here `SKIPPED — prep_ms under 2 s` and finish the wave; if the note is missing, mark every criterion `→ BLOCKED — no US-009 note yet` and finish the wave (reply `STORY_DONE P256-W2-US-013`, never RALPH_BLOCKED); otherwise build. → BLOCKED — no US-009 note yet",
+        "The per-workspace sections (identity, product_facts, skills, platform_actions) are cached across turns in the ContextService with invalidation on the writes that change them (agent, skill, kit, action registry); the board and document pre-reads in _retrieval_first run concurrently. → BLOCKED — no US-009 note yet",
+        "Median prep_ms on a fixed workspace under two seconds with the same prompt text (a test with a fake clock pins the cache hit path; the real median is the owner's eval). → BLOCKED — no US-009 note yet",
+        "Tests: `orchestrator/tests/test_prd256_context_assembly.py` (cache hit, invalidation on each write, same rendered sections). → BLOCKED — no US-009 note yet",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines) → BLOCKED — no US-009 note yet",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story) → BLOCKED — no US-009 note yet"
       ],
       "priority": 6,
       "passes": false,
