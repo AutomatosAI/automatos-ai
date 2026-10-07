@@ -67,6 +67,7 @@ from modules.documents.letterhead import fallback_blocks
 from modules.documents.template_formats import refuse_unsupported_format
 from modules.documents.pdf_writer import write_pdf
 from modules.documents.workspace_documents import copy_when_registered
+from modules.documents.kit_dates import dates_follow_the_kit  # F383: ISO dates print in the kit's style
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,7 @@ class DocumentGenerationService:
     @the_parties_are_remembered  # F354: who the document is for rides to its Deliverable
     @unpriced_amounts_are_said  # F367: amounts that print with no currency sign (the kit has none) are named
     @a_document_is_signed  # brand kit at generation (night 9b): a placeholder signature takes the kit's sign-off
+    @dates_follow_the_kit  # F383 (night 11): a data value that is an ISO date prints in the kit's date style
     async def generate(
         self,
         title: str,

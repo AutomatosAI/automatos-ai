@@ -114,7 +114,7 @@ def test_autos_invoice_shows_its_number_customer_and_items(make):
     assert _a_line_with(lines, "Invoice number", "HL-2026-0142"), lines
     assert _a_line_with(lines, "Customer name", "Lantern Kitchen"), lines
     assert _a_line_with(lines, "Item", "Quantity", "Delivery date"), lines
-    assert _a_line_with(lines, "Harbour Blend", "12 kg", "2026-10-02"), lines
+    assert _a_line_with(lines, "Harbour Blend", "12 kg", "2 October 2026"), lines  # F383: in the kit's date style
     assert _a_line_with(lines, "12 kg of Harbour Blend delivered on Friday 2 October 2026."), lines
     assert result.template_name is None  # Basic Report has no place for them, so it did not fill the page
     assert result.unused_keys == []
