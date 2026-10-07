@@ -62,7 +62,7 @@ jobs:
           # The renderer, the seeded social templates, and every orchestrator
           # module scripts/ci/social_template_previews.py imports.
           MEDIA_RENDER_PATHS: >-
-            ^services/media-render/|^orchestrator/modules/documents/templates/social/|^orchestrator/modules/documents/social_starters\.py$|^orchestrator/core/(media_render_bundle|social_templates|social_cuts|social_brand_rule|brand_palette|brand_type|chart_binding|report_tables)\.py$|^scripts/ci/(social_template_previews|social_template_kits|ci_block_font|render_client|template_shards)\.py$|^docker-compose\.yml$|^\.github/workflows/test\.yml$
+            ^services/media-render/|^orchestrator/modules/documents/templates/social/|^orchestrator/modules/documents/social_starters\.py$|^orchestrator/core/(media_render_bundle|social_templates|social_cuts|social_brand_rule|brand_palette|brand_type|chart_binding|report_tables|social_text_values|social_kit_tokens|social_line_breaks|font_stacks)\.py$|^scripts/ci/(social_template_previews|social_template_kits|ci_block_font|render_client|template_shards)\.py$|^docker-compose\.yml$|^\.github/workflows/test\.yml$
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests, the frontend edition literal, the worker image.
           PROD_IMAGE_PATHS: >-
