@@ -100,14 +100,17 @@ def test_chrome_is_preinstalled_at_build_not_fetched_per_render():
     assert "ENV HYPERFRAMES_BROWSER_PATH=/opt/chrome/chrome-headless-shell" in DOCKERFILE
 
 
-def test_the_media_render_job_is_a_top_level_sibling_that_waits_only_on_its_path_filter():
-    """#993: it runs when its paths change, read by the small ``changes`` job; it never waits on the tests."""
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())
+def test_the_media_render_job_runs_on_demand_only():
+    """7 Oct (Gerard): the media-render lanes live in their own workflow, run from the Actions
+    tab when the Socials feature changes, never on a pull request or a push."""
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "media-render.yml").read_text())
+    assert workflow.get("on", workflow.get(True)) == {"workflow_dispatch": None}
     job = workflow["jobs"].get("media-render")
-    assert job is not None, "the media-render job is missing from test.yml"
+    assert job is not None, "the media-render job is missing from media-render.yml"
     assert job["name"] == "media-render — image builds and renders the fixture"
-    assert job.get("needs") in ("changes", ["changes"])
-    assert "needs.changes.outputs.media_render == 'true'" in job["if"]
+    assert "needs" not in job and "if" not in job
+    tests = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())
+    assert not [name for name in tests["jobs"] if name.startswith("media-render")]
     commands = "\n".join(step.get("run", "") for step in job["steps"])
     assert "docker build -t \"$IMAGE\" services/media-render/" in commands
     assert "assert_output.py" in commands and "--fps 30" in commands and "--audio-codec aac" in commands
@@ -116,7 +119,7 @@ def test_the_media_render_job_is_a_top_level_sibling_that_waits_only_on_its_path
 def test_the_media_render_job_renders_the_fixture_through_the_api():
     """US-102: the fixture bundle goes through POST /render behind the internal
     token, and the job log carries ebur128's loudness, asserted at -14 +/- 1 LUFS."""
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "media-render.yml").read_text())
     commands = "\n".join(step.get("run", "") for step in workflow["jobs"]["media-render"]["steps"])
     assert '"$IMAGE" fixture-bundle' in commands
     assert "X-Internal-Token: $TOKEN" in commands and "http://127.0.0.1:8090/render" in commands

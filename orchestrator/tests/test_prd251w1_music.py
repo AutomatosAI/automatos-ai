@@ -91,7 +91,7 @@ from modules.documents.social_starters import social_starters  # noqa: E402
 MEDIA_RENDER = _ROOT / "services" / "media-render"
 MANIFEST = MEDIA_RENDER / "music" / "manifest.json"
 DOCKERFILE = MEDIA_RENDER / "Dockerfile"
-WORKFLOW = _ROOT / ".github" / "workflows" / "test.yml"
+WORKFLOW = _ROOT / ".github" / "workflows" / "media-render.yml"
 
 # Hex with letters, so SQLite keeps every UUID column as text.
 WS = uuid.UUID("00000000-0000-0000-0000-0000000001b2")
