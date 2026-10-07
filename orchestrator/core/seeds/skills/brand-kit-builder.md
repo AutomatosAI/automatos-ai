@@ -60,8 +60,8 @@ Read the home page, then the about page and one product page if they exist. Extr
 - Save colours as hex (`#1F3B2D`). The kit refuses anything else.
 
 ### Step 4: Fonts
-- Set `heading_font` and the body font (`font_family`) to the exact family names the site uses.
-- **The renderer needs font files.** Open fonts (Google Fonts, OFL) can be fetched; a proprietary font must be uploaded as woff2 by a person in the brand kit dialog. If the site uses one, name the closest open font in the report as a stand-in until the file is uploaded.
+- Set `heading_font` and the body font (`font_family`) to the exact family names the site uses, each as a full stack that ends in a generic family: `"Newsreader, Georgia, serif"`, `"Geist, Inter, system-ui, sans-serif"`. A bare name has no fallback, so a render without that font falls to the browser's default (Times).
+- **Renders never fetch fonts.** Inter, Geist and Newsreader ship with the platform: documents and posts print in them by name. Any other font, open or proprietary, prints only once a person uploads it as woff2 in the brand kit dialog; until then the next family in the stack is used. If the site uses one, name it first, put the closest shipped font after it, and say in the report that it needs a woff2 upload.
 
 ### Step 5: Logo and Mark
 - Set `logo_url` to the wordmark's https URL and `logo_mark_url` to the square mark's.
@@ -85,8 +85,8 @@ Read the home page, then the about page and one product page if they exist. Extr
     "palette": { "accent": "#A9541F" },
     "country": "GB",
     "text_color": "#1A1714",
-    "heading_font": "Newsreader",
-    "font_family": "Geist",
+    "heading_font": "Newsreader, Georgia, serif",
+    "font_family": "Geist, Inter, system-ui, sans-serif",
     "logo_url": "https://{site}/logo.svg",
     "logo_mark_url": "https://{site}/apple-touch-icon.png",
     "social_handles": { "linkedin": "{handle}", "instagram": "{handle}" },
