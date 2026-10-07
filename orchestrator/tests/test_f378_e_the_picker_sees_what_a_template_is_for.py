@@ -73,12 +73,13 @@ def _offered(state):
 
 def test_an_entry_carries_its_description_photo_spots_and_who_it_is_made_for():
     row = SimpleNamespace(id="t-1", name="Just the photo", description="The picture itself, edge to edge.",
-                          format="social_image", blocks={**_photo_blocks(), "made_for": "any business"})
+                          format="social_image", blocks={**_photo_blocks(), "made_for": "software"})
     entry = compose_api.template_entry(row)
     assert entry["description"] == "The picture itself, edge to edge."
     assert entry["photo_slots"] == [{"slot": "photo", "label": "Photo", "required": True}]
-    assert entry["made_for"] == "any business"
-    assert "made_for" not in compose_api.template_entry(SimpleNamespace(**{**vars(row), "blocks": _photo_blocks()}))
+    assert entry["made_for"] == "software"
+    # F377: a template any business can use says so with None.
+    assert compose_api.template_entry(SimpleNamespace(**{**vars(row), "blocks": _photo_blocks()}))["made_for"] is None
 
 
 def test_the_slot_contract_takes_required_as_a_switch():
