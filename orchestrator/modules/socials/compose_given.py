@@ -56,7 +56,8 @@ def _value_text(value: Any) -> str:
 
 
 def _candidate_text(candidate: Mapping[str, Any]) -> str:
-    return " ".join(_value_text(candidate.get(key)) for key in ("title", "detail", "value"))
+    """A source's words, its day included: a source line names it (``compose_sources``)."""
+    return " ".join(_value_text(candidate.get(key)) for key in ("title", "detail", "value", "as_of"))
 
 
 def bound_candidates(proposal: Mapping[str, Any], ctx: Any) -> List[Mapping[str, Any]]:

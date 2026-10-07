@@ -91,6 +91,8 @@ def test_a_claim_bound_to_a_source_holding_its_figure_stays_and_names_the_source
     proposal = compose_checks.checked_proposal(_raw({"kind": "report", "ref": "r-week"}, label="Internal Report, 2026-10-06"), _ctx())
     assert proposal["sources"]["row_1_value"]["ref"] == "r-week"
     assert proposal["variables"]["source_label"]["value"] == chip_text("Wholesale October", RELATED["as_of"], 90)
+    # The source line's day is the bound source's own, so it is no figure nobody gave.
+    assert not any(w.startswith("Numbers nobody gave") for w in proposal["warnings"])
 
 
 def test_an_address_the_brief_quotes_is_the_owners_citation():
