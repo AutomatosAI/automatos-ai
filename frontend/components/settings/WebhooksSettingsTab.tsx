@@ -80,13 +80,13 @@ export default function WebhooksSettingsTab() {
         </CardContent>
       </Card>
 
-      {/* Recipe Webhooks Reference */}
+      {/* Playbook Webhooks Reference */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Recipe Webhooks</CardTitle>
+          <CardTitle className="text-base">Playbook Webhooks</CardTitle>
           <CardDescription>
-            Each recipe with a &quot;Triggered&quot; execution type gets its own unique webhook URL.
-            Configure triggers on individual recipes to get task-specific webhooks.
+            Each playbook with a &quot;Triggered&quot; execution type gets its own unique webhook URL.
+            Configure triggers on individual playbooks to get task-specific webhooks.
           </CardDescription>
         </CardHeader>
         <CardContent>
