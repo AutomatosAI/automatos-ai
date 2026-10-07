@@ -27,6 +27,14 @@ from modules.context.sections.base import BaseSection, SectionContext
 logger = logging.getLogger(__name__)
 
 
+def with_socials_actions(query: str, ranked: list, hidden: Optional[Iterable[str]]) -> list:
+    """F380: the ranked actions, and a social-post brief's Socials actions after them
+    (``modules.tools.discovery.socials_prior``). Imported lazily, like the registry."""
+    from modules.tools.discovery.socials_prior import with_socials_actions as _with
+
+    return _with(query, ranked, hidden)
+
+
 def _hidden_kwargs(hidden: Optional[Iterable[str]]) -> dict:
     """PRD-251B US-B106: the registry's / index's ``exclude_categories`` keyword, only while
     anything is hidden. Imported lazily, like the registry itself (the registrar cycle)."""
@@ -207,9 +215,9 @@ class PlatformActionsSection(BaseSection):
             return None
 
         # Collect unique action names from all chains (preserving rank order)
-        action_names = list(dict.fromkeys(
+        action_names = with_socials_actions(query, list(dict.fromkeys(  # F380: a post's actions, always
             name for _, _, chain in chains for name in chain
-        ))
+        )), hidden)
 
         # Build chain hints for multi-action sequences
         hints = self._build_chain_hints(chains)
@@ -410,7 +418,8 @@ class PlatformActionsSection(BaseSection):
                 )
                 return None
 
-            top_names = [name for name, _score in ranked]
+            # F380: a brief for a social post always shows the actions that make one.
+            top_names = with_socials_actions(query, [name for name, _score in ranked], hidden)
             registry = get_action_registry()
             catalog = registry.build_filtered_prompt_summary(
                 top_names,

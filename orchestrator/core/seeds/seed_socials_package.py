@@ -294,8 +294,9 @@ _RESEARCH_PROMPT_251B = f"""Research topics for the Socials plan {{input.plan_id
 
 You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
 
-# PRD-251C (C5, US-C105): research reads the history first and adds only what is new.
-_RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
+# PRD-251C (C5, US-C105): research reads the history first and adds only what is new. As seeded
+# until F383 (7 Oct), and as every copy installed before then holds it.
+_RESEARCH_PROMPT_251C = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
 
 1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list), the topics its bank already holds, and its history: what the workspace already posted, scheduled or has waiting for approval, across every plan, with each post's numbers and engagement once read. For further back, read platform_get_social_history.
 2. Research only the sources the plan switches on:
@@ -310,11 +311,30 @@ _RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({
 
 You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
 
+# PRD-251C (C5, US-C105): research reads the history first and adds only what is new. F383 (night 11):
+# each ref comes from the tools' results (search_knowledge's source lines carry the document id), a note
+# needs none, and research never asks the owner for one (task 2153 blocked twice doing so).
+_RESEARCH_PROMPT = f"""Research topics for the Socials plan {{input.plan_id}} ({{input.plan_name}}) and add them to its content bank.
+
+1. Read the plan with platform_get_social_plan: its goal and audience, the formats its cadence posts, what to research (its sources, notes and "never say" list), the topics its bank already holds, and its history: what the workspace already posted, scheduled or has waiting for approval, across every plan, with each post's numbers and engagement once read. For further back, read platform_get_social_history.
+2. Research only the sources the plan switches on:
+   - knowledge: search_knowledge for the plan's goal and audience;
+   - deliverables: platform_list_deliverables with exclude_source_types ["social_post"], for recent reports, blog posts and files: a Socials post's own images and videos are history, not new material;
+   - website: platform_web_fetch on the brand kit's website (platform_get_brand_kit names it): its product, news and about pages;
+   - github: when the workspace has GitHub connected, its README, docs, latest releases and merged pull requests, through the GitHub tools.
+3. Pick 5 to 15 topics that neither the history nor any bank covers yet, each one idea a post can be made from: a title, the angle for this audience, 1 to 4 facts, and the formats it suits (among the cadence's). A new angle on an idea already posted is still that idea. Lean towards what did best: topics of the kind the history's posts with the most engagement were on. When the goal, the notes or the knowledge name a dated event (a launch, a conference, a deadline), add dated topics pinned to days before it within the plan's dates (pinned_on), such as a countdown, and one on its day.
+4. Every fact names its source: its kind, its ref and a short label. Take each ref from what your tools returned: knowledge, the document id on the search_knowledge source line it came from ("document 717"); deliverable, the Deliverable's id from platform_list_deliverables; web and github, the page's address. A fact from the plan's own goal or notes is kind note, with no ref. Leave out a fact you cannot source, and anything on the plan's never-say list. Never ask the owner for an id, a ref or a source: the owner never sees them.
+5. Add them with platform_add_social_topics, in one call. Its answer lists what was added and what was refused, with why: a topic too close to an earlier post or topic is a repeat, so leave it out; fix and resend any other refused topic once (a fact refused for its source: take its ref from your tool results, or make it a note), or leave it out. When nothing was added, say so and why.
+6. Answer with how many topics were added, and their titles.
+
+You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
+
 # The prompts earlier seeds wrote, by Playbook and step. A marketplace row that still holds one
 # was never curated, so every boot brings it up to date (PRD-251C US-C105); a curated prompt stays.
-# Workspace copies are never touched: history reaches them through platform_get_social_plan.
+# F383 (night 11): so does each workspace's installed copy that still holds one (never edited
+# there); a copy its owner edited keeps its own prompt (core/seeds/socials_playbook_copies.py).
 SEEDED_BEFORE: Dict[str, Dict[str, Tuple[str, ...]]] = {
-    RESEARCH_PLAYBOOK_TEMPLATE_ID: {"research": (_RESEARCH_PROMPT_251B,)},
+    RESEARCH_PLAYBOOK_TEMPLATE_ID: {"research": (_RESEARCH_PROMPT_251B, _RESEARCH_PROMPT_251C)},
 }
 
 SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
@@ -657,7 +677,7 @@ def _ensure_playbook(db: Session, spec: Mapping[str, Any], agents: Mapping[str, 
     row = db.query(WorkflowTemplate).filter(WorkflowTemplate.template_id == spec["template_id"]).first()
     if row is not None:
         if row.owner_type == MARKETPLACE:
-            return _refresh(row, spec)
+            return _refresh(db, row, spec)
         logger.warning("Socials package: template_id %s is held by a %s Playbook", spec["template_id"], row.owner_type)
         return HELD_ELSEWHERE
     if not set(playbook_agents(spec)) <= set(agents):
@@ -688,7 +708,11 @@ def refreshed_steps(spec: Mapping[str, Any], steps: Any) -> Optional[List[Dict[s
     return out if out != steps else None
 
 
-def _refresh(row: WorkflowTemplate, spec: Mapping[str, Any]) -> str:
+def _refresh(db: Session, row: WorkflowTemplate, spec: Mapping[str, Any]) -> str:
+    from core.seeds.socials_playbook_copies import refresh_installed_copies
+
+    if spec["template_id"] in SEEDED_BEFORE:  # F383: the workspaces' unedited copies take it too
+        refresh_installed_copies(db, row, lambda steps: refreshed_steps(spec, steps))
     steps = refreshed_steps(spec, row.steps)
     if steps is None:
         return PRESENT

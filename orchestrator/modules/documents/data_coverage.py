@@ -9,7 +9,8 @@ Two uses:
 
 * :func:`template_for` decides whether that default may fill a call at all;
   when it would drop a key, the block fallback renders instead, which prints every
-  key (``blocks.data_details``).
+  key (``blocks.data_details``). A call that names a template gets that template or a
+  refusal, never the default (F383, ``template_lookup``).
 * :func:`unused_data_keys` is what a template the caller DID name has no place
   for. It rides the result, so the tool tells the agent which keys the page lacks.
 
@@ -97,19 +98,25 @@ def prints_everything(template: Any, data: Dict[str, Any], fmt: str) -> bool:
 
 def template_for(templates: Any, workspace_id: Any, fmt: str, data: Dict[str, Any],
                  template_id: Any = None, template_name: Optional[str] = None) -> Any:
-    """The template a call names; a PDF that names none (or none found) takes the
-    workspace's :data:`DEFAULT_PDF_TEMPLATE` only when it has a place for every key
-    ``data`` carries, else none: the block fallback renders and prints them all.
+    """The template a call names; a PDF that names none takes the workspace's
+    :data:`DEFAULT_PDF_TEMPLATE` only when it has a place for every key ``data``
+    carries, else none: the block fallback renders and prints them all.
+
+    F383 (night 11): a name is read with case and spacing aside, an id kept from before
+    an edit is the template's current version, and a named template that is not in the
+    workspace raises ``template_lookup.TemplateNotFound`` with its closest names: never
+    Basic Report or the letterhead page in its place.
 
     ``templates`` is the workspace's ``DocumentTemplateService``.
     """
-    template = None
+    from modules.documents.template_lookup import named_template, template_by_id
+
     if template_id:
-        template = templates.get_template(template_id, workspace_id)
-    elif template_name:
-        template = templates.get_template_by_name(workspace_id, template_name)
-    if template or fmt != PDF_FORMAT:
-        return template
+        return template_by_id(templates, workspace_id, template_id)
+    if template_name:
+        return named_template(templates, workspace_id, template_name)
+    if fmt != PDF_FORMAT:
+        return None
     default = templates.get_template_by_name(workspace_id, DEFAULT_PDF_TEMPLATE)
     left_out = unused_data_keys(default, data, fmt)
     if not left_out:

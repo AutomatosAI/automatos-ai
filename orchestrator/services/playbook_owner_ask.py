@@ -24,6 +24,8 @@ A step needs the owner when
       189 of c1's step logs this flags the 12 asks (at most 402 characters) and
       nothing else; a draft that ends on a question is not an ask;
   (c) it wrote a line starting ``NEEDS YOU:``.
+F380 (night 11) adds to (b): a short answer that asks for the material its work
+needs (the photos, the quote) and drafted nothing asks, on a drafting step too.
 
 The tester's rules (25 Sep): one bell (the question's), and no failure side
 effects: no playbook_failed bell, report, memory, agent failure count or
@@ -89,6 +91,24 @@ _DRAFTING_STEP = re.compile(r"\b(?:draft|drafts|drafted|compose|reply|caption|po
 _DEFERRED = re.compile(r"\b(?:once|as soon as|when) (?:I|you)\b[^.\n]{0,120}?\bI(?:'ll| will)\b"
                        r"|\bwithout (?:this|that|these|those|the|your|more|further) "
                        r"(?:information|info|details?|input|answers?|context)\b", re.IGNORECASE)
+
+# (b'') F380 (night 11): ...or, on a drafting step too, asks for the material the work
+# needs and drafts nothing. #2162 ("Before and after: the Guji re-roast") answered
+# "Please provide the two phone photos… Once I have them, I can create the Instagram
+# draft." and closed done: a post brief made every polite request read as the draft's.
+# A drafted caption that ends "Please let me know if you'd like changes" stays the work.
+_MATERIAL_REQUEST = re.compile(r"\b(?:please|could you|can you|would you|will you)\b[^?\n]{0,80}?"
+                               r"\b(?:provide|send|upload|share|attach|give)\b", re.IGNORECASE)
+_WAITS_FOR_IT = re.compile(r"\b(?:once|as soon as|when|after) (?:I|you)\b[^.\n]{0,120}?\bI(?:'ll| will| can| could)\b"
+                           r"|\bbefore I can\b|\bso (?:that )?I can\b", re.IGNORECASE)
+_NEEDED_THING = re.compile(r"\b(?:photos?|pictures?|images?|files?|logos?|footage|screenshots?|quotes?|figures"
+                           r"|numbers|details|information|info|links?)\b", re.IGNORECASE)
+# What a drafting step's answer holds when it drafted something: a hashtag, labelled
+# copy, a quoted line, or a report of the work.
+_DRAFTED_COPY = re.compile(r"(?:^|\s)#[A-Za-z]\w*|^\s*(?:\*\*)?(?:caption|headline|copy|post|tweet|text|body)"
+                           r"(?:\*\*)?\s*:|^\s*>", re.IGNORECASE | re.MULTILINE)
+_REPORTS_WORK = re.compile(r"\bI(?:'ve| have) (?:drafted|created|made|written|saved|prepared|added|rendered|generated"
+                           r"|sent|submitted|attached|uploaded|built)\b|\bhere(?:'s| is| are)\b", re.IGNORECASE)
 
 # A call's name without one of these verbs changed something; the scratchpad,
 # the ask and pre_exec belong to the run itself.
@@ -172,6 +192,8 @@ def _asks_for_what_it_needs(text: str, prompt_template: str) -> bool:
         return True
     if len(text) > config.PLAYBOOK_OWNER_ASK_MAX_CHARS:
         return False
+    if asks_for_material(text):
+        return True
     last = text.splitlines()[-1]
     # F242: "Please provide this information." asks as plainly as a question mark (#0123).
     if not (_is_question(last) or _REQUEST.search(last)):
@@ -179,6 +201,15 @@ def _asks_for_what_it_needs(text: str, prompt_template: str) -> bool:
     if _NEED.search(text):
         return True
     return bool(_REQUEST.search(text)) and not _DRAFTING_STEP.search(prompt_template or "")
+
+
+def asks_for_material(text: str) -> bool:
+    """F380: the answer asks for the material its work needs (photos, the quote, the
+    numbers) and has made nothing yet: no drafted copy and no report of work. It
+    holds on a drafting step too, where a polite request alone is the draft's."""
+    if not _MATERIAL_REQUEST.search(text) or _DRAFTED_COPY.search(text) or _REPORTS_WORK.search(text):
+        return False
+    return bool(_WAITS_FOR_IT.search(text) or _NEEDED_THING.search(text))
 
 
 def _is_question(line: str) -> bool:

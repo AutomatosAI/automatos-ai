@@ -897,64 +897,10 @@ class ToolResultFormatter:
         # Add preview of results
         results = standardized['results'][:4]  # Top 4 to fit token limits
         
-        if tool_name in ['search_knowledge', 'search_documents', 'semantic_search']:
-            summary_parts.append(
-                "Full document content for the top results is below. Synthesize an "
-                "answer using this material directly — do not just list the documents. "
-                "The UI renders source cards separately; name a file only when the "
-                "owner asks where something comes from, and then only a file named here."
-            )
-            for i, doc in enumerate(results, start=1):
-                # PRD-136: read `content` (full body) — `excerpt` is a 500-char UI preview
-                # that crippled synthesis. Fall back to excerpt if no content.
-                body = doc.get('content') or doc.get('excerpt') or ''
-                score = float(doc.get('similarity', 0) or 0) * 100.0
-                # F088 (night 3): the file's name was withheld here, so asked "which
-                # file says that?" Auto invented one — "harbourline-wholesale-sheet.md",
-                # "Q2 2026 Metrics.md" — or answered "Source 1". The real name, always.
-                name = doc.get('filename') or doc.get('source') or 'an unnamed document'
-                summary_parts.append(f"\n[Source {i}: {name}] ({score:.1f}%)")
-                summary_parts.append(body)
-        
-        elif tool_name in ['search_codebase', 'search_code']:
-            for code in results:
-                summary_parts.append(f"\n💻 {code.get('symbol_name', 'Code')} ({code.get('file_path', 'unknown')})")
-                summary_parts.append(f"```{code.get('language', 'python')}\n{code.get('code', '')[:500]}\n```")
-        
-        elif tool_name in ['query_database', 'smart_query_database']:
-            summary_parts.append(f"\n🗄️ SQL: {standardized.get('sql', '')[:300]}")
-            summary_parts.append(f"Total Rows: {standardized.get('row_count', 0)}")
-            
-            # Include ALL data (already limited at query level) - don't truncate here
-            all_data = standardized.get('data', [])
-            if all_data:
-                summary_parts.append(f"Complete data ({len(all_data)} rows):")
-                summary_parts.append(json.dumps(all_data, default=str, indent=2)[:2000])
-            
-            # Include PandasAI insight if available
-            pandas_insight = standardized.get('pandas_ai', {})
-            if pandas_insight:
-                summary_parts.append(f"\n📊 AI Analysis: {pandas_insight.get('summary', '')}")
-                if pandas_insight.get('charts'):
-                    summary_parts.append("(Chart generated - see visualization)")
+        # F383: each branch's lines live in llm_summary_parts (a search's sources carry their document id).
+        from modules.tools.formatting.llm_summary_parts import tool_lines
 
-        elif tool_name == "composio_execute" or tool_name.startswith("composio_"):
-            # Provide a compact, structured preview of external API results
-            # so the LLM can actually answer using the returned data.
-            preview = standardized["results"][:3]
-            logger.info(f"[LLM-Context] Composio results count: {len(standardized['results'])}, preview items: {len(preview)}")
-            if preview:
-                try:
-                    preview_json = json.dumps(preview, default=str, indent=2)[:1800]
-                    logger.info(f"[LLM-Context] Composio preview (first 500 chars): {preview_json[:500]}")
-                except Exception as e:
-                    preview_json = str(preview)[:1800]
-                    logger.warning(f"[LLM-Context] JSON dump failed: {e}")
-                summary_parts.append("\nAPI result preview (use this to answer):")
-                summary_parts.append(preview_json)
-            else:
-                logger.warning("[LLM-Context] Composio returned 0 items - LLM will hallucinate!")
-                summary_parts.append("\nAPI returned 0 items for this query.")
+        summary_parts.extend(tool_lines(tool_name, standardized, results))
 
         full_summary = "\n".join(summary_parts)
         

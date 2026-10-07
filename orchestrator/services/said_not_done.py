@@ -18,6 +18,13 @@ the work ("the delivery isn't done on Sundays"):
   deliverable> isn't done." and nothing more, starts "Not done", or starts "I
   couldn't make / produce / create … the …".
 
+F380 (night 11, 7 Oct): #2159 opened "I cannot directly create the social post…" and
+closed done: the adverb hid the verdict. An adverb before or after the verb ("I'm not
+able to actually post it", "I can't currently render the video") is read through now,
+and so are render, post, publish, save and upload. An opening that names the owner's
+approval as the next step ("I can't post it myself: you approve it in the Socials tab")
+is not a verdict.
+
 "The card isn't done until you approve it" names a step after the work and does not
 trip it.
 """
@@ -44,11 +51,20 @@ _WORK_NOT_DONE = re.compile(
 _OPENS_NOT_DONE = re.compile(
     rf"^(?:(?P<subject>[^.!?]{{1,{OPENING_SUBJECT_CHARS}}}) (?:isn't|is not|is still not|still isn't) {_DONE}[.!]?"
     rf"|not (?:yet )?{_DONE}{_CLAUSE_ENDS}.*)$", re.IGNORECASE)
+# F380 (night 11): an adverb may sit before or after the verb ("I cannot directly create
+# the social post", #2159; "I'm not able to actually post it"; "I can't currently render").
+_ADVERB = (r"(?:(?:directly|actually|currently|really|personally|myself|fully|properly|automatically|"
+           r"technically|yet|just|now|still) )?")
 _OPENS_COULD_NOT = re.compile(
-    r"^(?:(?:sorry|unfortunately),?\s+)?I (?:couldn't|could not|can't|cannot|wasn't able to|was not able to|"
-    r"was unable to|am unable to|haven't been able to|have not been able to|failed to) "
-    r"(?:make|produce|create|generate|build|write|draft|prepare|finish|complete|do|deliver) "
+    r"^(?:(?:sorry|unfortunately),?\s+)?(?:I'm|I am|I) (?:couldn't|could not|can't|cannot|can not|wasn't able to|"
+    r"was not able to|was unable to|am unable to|unable to|not able to|haven't been able to|"
+    r"have not been able to|failed to) "
+    rf"{_ADVERB}(?:make|produce|create|generate|build|write|draft|prepare|finish|complete|do|deliver|"
+    rf"render|post|publish|save|upload) {_ADVERB}"
     r"(?:the|a|an|your|this|that|it|these|those|any)\b", re.IGNORECASE)
+# F380: a sentence that names the owner's approval as the step after the work is not a
+# verdict on it ("I can't post it myself: you approve it in the Socials tab first").
+_AN_APPROVAL_STEP = re.compile(r"\b(?:approv\w*|until you)\b", re.IGNORECASE)
 # Someone else's words, not the agent's verdict: "You said this card isn't done, so I redid it."
 _REPORTED = re.compile(r"\b(?:said|says|say|told|wrote|writes|noted|mentioned|reported|flagged)\b", re.IGNORECASE)
 _MARKUP = re.compile(r"[*`]")
@@ -71,7 +87,7 @@ def _opening_sentence(text: str) -> str:
 def _opening_verdict(opening: str) -> bool:
     """The opening sentence is the agent's own "not done" or "I couldn't make …"."""
     if _OPENS_COULD_NOT.match(opening):
-        return True
+        return not _AN_APPROVAL_STEP.search(opening)
     found = _OPENS_NOT_DONE.match(opening)
     return bool(found) and not _REPORTED.search(found.group("subject") or "")
 

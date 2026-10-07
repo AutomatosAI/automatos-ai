@@ -44,6 +44,12 @@ logger = logging.getLogger(__name__)
 AGENT_ACTOR = "agent"
 CHART_REPORT_KEYS = ("report_id", "chart", "column", "part")
 SUBMIT_FIELDS = frozenset({"post_id", "note"})
+# F383: how a refused topic is fixed, said when none was added.
+TOPIC_FIX = (
+    "Fix and resend: take each fact's ref from your tool results (a search_knowledge source's document "
+    "id, a Deliverable's id, a page's address), or make a fact from the plan's own notes a note, which "
+    "needs no ref. Never ask the owner for an id."
+)
 
 RENDER_STARTED = (
     "Rendering in the background: when the render finishes the post waits for approval in the "
@@ -569,6 +575,12 @@ async def get_social_plan(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+def _nothing_added(refused: List[Dict[str, str]]) -> str:
+    """F383 (night 11): why no topic was added, each refusal first, then how to fix it."""
+    reasons = "; ".join(f'"{r["title"] or "topic " + r["index"]}": {r["reason"]}' for r in refused)
+    return f"Nothing was added to the bank. {reasons}. {TOPIC_FIX}"
+
+
 async def add_social_topics(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Researched topics into the plan's bank: each added, or refused with why (no source, a
     title the bank holds, a never-say phrase). Draft-only: no post is made here."""
@@ -587,6 +599,8 @@ async def add_social_topics(db: Session, workspace_id: UUID, params: Dict[str, A
         db.rollback()
         return _refused(str(exc))
     db.commit()
+    if not added:  # F383: six calls that added nothing each answered success
+        return _refused(_nothing_added(refused), added=[], refused=refused)
     return {
         "success": True,
         "added": [{"id": str(t.id), "title": t.title} for t in added],

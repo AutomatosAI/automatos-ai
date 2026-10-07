@@ -64,6 +64,9 @@ class _OneRow:
     def first(self):
         return self.row
 
+    def all(self):  # F383: the workspaces' installed copies of the row (none here)
+        return []
+
 
 def _row(prompt):
     step = {"step_id": "research", "order": 1, "agent_id": 11, "agent_name": "Social Media Director",

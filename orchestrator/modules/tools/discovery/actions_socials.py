@@ -385,10 +385,14 @@ def _topic_schema() -> dict:
                 "type": "object",
                 "properties": {
                     "kind": {"type": "string", "enum": FACT_SOURCE_KINDS},
-                    "ref": {"type": "string", "description": "The document's or Deliverable's id, or the page's address."},
-                    "label": {"type": "string", "description": "A short name for the source."},
+                    # F383 (night 11): where the id comes from, so research never asks the owner for one.
+                    "ref": {"type": "string", "description": (
+                        "Where the fact comes from, taken from your tool results: a search_knowledge source's "
+                        "document id (its 'document N'), a Deliverable's id, or the page's address. A note needs "
+                        "none. Never ask the owner for one.")},
+                    "label": {"type": "string", "description": "A short name for the source (a note's may be left out)."},
                 },
-                "required": ["kind", "ref", "label"],
+                "required": ["kind"],
             },
         },
         "required": ["text", "source"],
@@ -430,10 +434,11 @@ def _register_plan_actions(registry: ActionRegistry) -> None:
         name="platform_add_social_topics",
         description=(
             "Add researched topics to a Socials plan's content bank, each with the facts it rests on and "
-            "every fact's source (knowledge, deliverable, web, github or note; a reference and a label). "
-            "The bank refuses a fact without a source, a title it already holds, and anything on the "
-            "plan's never-say list; the answer lists what was added and what was refused, with why. It "
-            "only adds topics: posts are made from them on their day."
+            "every fact's source (knowledge, deliverable, web, github or note; a reference and a label; a "
+            "note needs no reference). The bank refuses a fact without a source, a title it already holds, "
+            "and anything on the plan's never-say list; the answer lists what was added and what was "
+            "refused, with why, and fails when nothing was added. It only adds topics: posts are made from "
+            "them on their day."
         ),
         category="socials",
         parameters={

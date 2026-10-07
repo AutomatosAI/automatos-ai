@@ -57,6 +57,9 @@ from api.board_mission_card import (  # F291: a mission's card waiting for its p
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
+from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
+from services.result_document_links import a_cards_document_links_open_in_the_app  # F380
+from services.ticket_result_keep import kept_result as _kept_result  # F013: a shorter re-run never overwrites
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
@@ -1686,29 +1689,9 @@ def ending_summary(task: Any) -> Optional[str]:
     return "; ".join(bits)[:500] or None
 
 
-# A later turn's result is only an improvement if it says more. Night 1
-# (2026-09-18) lost ticket #255's six delivered files when a re-claim wrote a
-# 488-character "I produced nothing" over the real write-up (F013).
-RESULT_KEEP_RATIO = 0.5
-
-
-def _kept_result(existing: Optional[str], incoming: Optional[str]) -> Optional[str]:
-    """Whichever of the two actually reports the work.
-
-    An incoming result replaces the old one unless it is substantially shorter —
-    then the longer account is kept and the newer one appended beneath it, so
-    nothing is lost either way and the ticket still shows what the last turn said.
-    """
-    if not incoming:
-        return existing
-    if not existing:
-        return incoming
-    if len(incoming) >= len(existing) * RESULT_KEEP_RATIO:
-        return incoming
-    return f"{existing}\n\n---\n\n_A later run reported:_ {incoming}"
-
-
 @a_cards_answer_is_on_brand  # the kit's sign-off fills "[Your name]" before the notes below read the answer
+@a_social_card_has_its_post  # F380: a social ticket is done only when its post exists and has rendered
+@a_cards_document_links_open_in_the_app  # F380: a generated file is linked by its Deliverable
 async def finalize_board_task_run(
     db: Session,
     *,
