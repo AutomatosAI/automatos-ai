@@ -51,7 +51,7 @@ def _ctx(template=STORY):
 
 
 def _answer(**variables):
-    return {"title": "Auto runs the night", "copy": {"base": "Meet Auto.", "per_channel": {"twitter": "Meet Auto."}},
+    return {"title": "Auto runs the night", "copy": {"base": "Meet Auto.", "channels": {"twitter": "Meet Auto."}},
             "format": "video", "template_id": "story", "variables": variables, "sources": {}}
 
 

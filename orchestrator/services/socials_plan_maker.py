@@ -252,10 +252,9 @@ def _propose(db: Any, plan: SocialCampaign, slot: plans.Slot, topic: SocialTopic
 
 
 def _changes(proposal: Mapping[str, Any], slot: plans.Slot) -> Dict[str, Any]:
-    copy = proposal.get("copy") or {}
     changes = {
         "title": proposal.get("title") or None,
-        "copy": {"base": copy.get("base") or "", "channels": dict(copy.get("per_channel") or {})},
+        "copy": dict(proposal.get("copy") or {}),  # the composer's shape is the one a save takes (F378)
         "variables": dict(proposal.get("variables") or {}),
         "sources": dict(proposal.get("sources") or {}),
     }

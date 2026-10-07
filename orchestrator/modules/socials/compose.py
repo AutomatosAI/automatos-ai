@@ -109,7 +109,7 @@ class ComposeContext:
 # ── the prompt ──────────────────────────────────────────────────────────────
 _ANSWER_SHAPE = {
     "title": "a short working title",
-    "copy": {"base": "the text every channel starts from", "per_channel": {"<toolkit>": "that channel's text"}},
+    "copy": {"base": "the text every channel starts from", "channels": {"<toolkit>": "that channel's text"}},
     "format": "one of video, image, carousel, fact_card, infographic, text",
     "template_id": "the id of ONE template listed (null for a text post)",
     "variables": {"<variable name>": "its value"},

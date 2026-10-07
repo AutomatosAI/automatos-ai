@@ -152,7 +152,7 @@ def test_a_text_post_has_copy_only_and_goes_to_channels_with_a_text_kind(compose
     proposal = resp.json()
     assert proposal["format"] == "text" and proposal["template_id"] is None and proposal["template"] is None
     assert proposal["variables"] == {} and proposal["sources"] == {}
-    assert set(proposal["copy"]["per_channel"]) == {"twitter", "linkedin"} and proposal["channels"] == ["twitter", "linkedin"]
+    assert set(proposal["copy"]["channels"]) == {"twitter", "linkedin"} and proposal["channels"] == ["twitter", "linkedin"]
     (messages,) = composer.model.asked
     assert json.loads(messages[1]["content"])["templates"] == [] and "text-only post" in messages[0]["content"]
 

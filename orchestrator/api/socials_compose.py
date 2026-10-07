@@ -254,8 +254,8 @@ def compose_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ) -> Dict[str, Any]:
-    """A draft proposal for ``brief`` (not saved): title, copy (base and per
-    channel), format, template, variables, sources, channels and warnings. A plain
+    """A draft proposal for ``brief`` (not saved): title, copy (``{"base", "channels"}``,
+    the shape a save takes), format, template, variables, sources, channels and warnings. A plain
     ``def``: its database reads run in the threadpool (F105), and the model call
     runs on the event loop from there. 422 for an unknown format; 502 when the
     model's answer cannot be read twice; 504 when it does not answer in time."""

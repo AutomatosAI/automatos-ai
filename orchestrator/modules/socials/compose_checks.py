@@ -10,7 +10,8 @@
   given (D7): the model cannot invent a URL or a figure's source. An unmatched
   claim stays unsourced, and the approval UI shows it so.
 * **Copy**: every selected channel gets its own text (the base when the model
-  left one out), fitted to the channel's limits at a word boundary.
+  left one out), fitted to the channel's limits at a word boundary. Its shape is the
+  one a save takes, ``{"base", "channels"}`` (F378: one shape, no hand translation).
 * **Visual prompts** (PRD-251B US-B305): only for the slots the composer was asked
   about, each one line of at most VISUAL_PROMPT_MAX_CHARS.
 """
@@ -115,17 +116,17 @@ def _text(value: Any) -> str:
 def _copy(raw: Any, ctx: Any, warnings: List[str]) -> Dict[str, Any]:
     copy = raw if isinstance(raw, dict) else {}
     base = _text(copy.get("base"))
-    own = copy.get("per_channel") if isinstance(copy.get("per_channel"), dict) else {}
-    per_channel: Dict[str, str] = {}
+    own = copy.get("channels") if isinstance(copy.get("channels"), dict) else {}
+    channels: Dict[str, str] = {}
     for channel in ctx.channels:
         toolkit = str(channel["toolkit"])
         text = _text(own.get(toolkit))
         if not text:
             text = base
             warnings.append(f"{toolkit}: no text of its own was written; it starts from the base copy")
-        per_channel[toolkit], fixes = fit_copy(toolkit, text)
+        channels[toolkit], fixes = fit_copy(toolkit, text)
         warnings.extend(fixes)
-    return {"base": base, "per_channel": per_channel}
+    return {"base": base, "channels": channels}
 
 
 def _title(raw: Any, ctx: Any, warnings: List[str]) -> str:

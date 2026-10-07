@@ -53,7 +53,7 @@ MANIFEST = _ORCH / "reports" / "route-manifest.json"
 API_CLIENT = _ORCH.parent / "frontend" / "lib" / "api-client.ts"
 TAKE = {
     "title": "A different title",
-    "copy": {"base": "Three weeks: the second take.", "per_channel": {"linkedin": "Three weeks to go, said better."}},
+    "copy": {"base": "Three weeks: the second take.", "channels": {"linkedin": "Three weeks to go, said better."}},
     "format": "video",
     "variables": {"headline": {"value": "The second take", "claim": False}},
     "sources": {},

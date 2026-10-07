@@ -68,7 +68,7 @@ export function draftFromProposal(
     brief,
     title: proposal.title,
     base: proposal.copy.base,
-    perChannel: { ...proposal.copy.per_channel },
+    perChannel: { ...proposal.copy.channels },
     format: proposal.format,
     templateId: proposal.template_id,
     template: proposal.template ?? null,

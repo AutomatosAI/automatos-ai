@@ -108,9 +108,8 @@ def _propose(db: Session, post: SocialPost, guidance: Optional[str]) -> Dict[str
 
 def take_changes(proposal: Dict[str, Any]) -> Dict[str, Any]:
     """The proposal as an edit: its copy (base and each channel's), variables and sources only."""
-    copy = proposal.get("copy") or {}
     return {
-        "copy": {"base": copy.get("base") or "", "channels": dict(copy.get("per_channel") or {})},
+        "copy": dict(proposal.get("copy") or {}),  # the composer's shape is the one a save takes (F378)
         "variables": dict(proposal.get("variables") or {}),
         "sources": dict(proposal.get("sources") or {}),
     }

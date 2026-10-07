@@ -677,7 +677,7 @@ export interface SocialComposeInput {
 /** The composer's draft proposal: checked by the server, never saved until "Save draft". */
 export interface SocialComposeProposal {
   title: string
-  copy: { base: string; per_channel: Record<string, string> }
+  copy: { base: string; channels: Record<string, string> }
   format: string | null
   template_id: string | null
   /** US-208: the chosen template's variables and sizes; null when none fits. */
