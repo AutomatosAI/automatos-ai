@@ -148,3 +148,12 @@ graphifyy[leiden]>=0.3.28
 # reinstall, set TRACING_ENABLED=true + LANGFUSE_PUBLIC_KEY/SECRET_KEY
 # (+ optional LANGFUSE_HOST, defaults to Langfuse Cloud).
 # langfuse>=3.0.0,<4.0.0
+
+# PRD-256 (#847): OpenTelemetry traces over OTLP, default OFF (OTEL_ENABLED). Installed
+# always, imported only when enabled (core/observability/otel.py). OTLP over HTTP only:
+# every collector takes it, and it needs no grpcio. Versions resolved against the
+# fastapi/starlette/uvicorn pins above (F092), which do not move for this.
+opentelemetry-api==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
+opentelemetry-instrumentation-fastapi==0.66b1
