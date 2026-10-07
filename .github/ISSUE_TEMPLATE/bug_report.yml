@@ -1,6 +1,6 @@
 name: Bug report
 description: Something in Automatos doesn't work the way the docs say it should
-labels: ["bug"]
+labels: ["bug", "needs-triage"]
 body:
   - type: markdown
     attributes:
