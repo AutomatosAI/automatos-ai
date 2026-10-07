@@ -15,6 +15,8 @@ import { WithdrawOfferCard } from './withdraw-offer-card'
 import { ReasoningBlock } from './reasoning-block'
 import { TaskCard } from './task-card'
 import { narrationLines } from '@/lib/chat/narration'
+import { receiptsOf } from '@/lib/chat/receipts'
+import { ReceiptsBlock } from './receipts-block'
 
 export interface MessageProps {
   chatId: string
@@ -271,6 +273,9 @@ export function Message({
               ? 'bg-primary/10 border border-primary/10 rounded-tr-sm'
               : 'bg-card/40 backdrop-blur-sm border border-border/30 rounded-tl-sm'
           }`}>
+            {/* PRD-256: what the turn's calls did, first, above the reply (none before PRD-256) */}
+            {message.role === 'assistant' && <ReceiptsBlock receipts={receiptsOf(message)} />}
+
             {/* PRD-238 S1: the thinking channel, above the answer */}
             {message.role === 'assistant' && reasoningText && (
               <ReasoningBlock text={reasoningText} streaming={Boolean(isLoading)} answerStarted={answerStarted} />

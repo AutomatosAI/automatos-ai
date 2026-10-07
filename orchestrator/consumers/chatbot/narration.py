@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from consumers.chatbot.receipts import saves_the_turns_receipts
+
 
 def called_tools(response: Any) -> bool:
     return bool(getattr(response, "tool_calls", None))
@@ -34,11 +36,16 @@ def split_reply(rounds: Sequence[Any], final: Optional[Any], final_text: str) ->
     return [], "\n\n".join(narration)
 
 
-def reply_parts(reasoning: str, narration: str, answer: str) -> List[Dict[str, Any]]:
-    """The saved message's parts: its reasoning (PRD-238 S1), its narration and
-    its answer, each on its own. Only the answer is ``text``; anything that
-    reads a message's text (the next turn, previews, search) sees the answer."""
+@saves_the_turns_receipts  # PRD-256 US-001: a chat turn's message carries its receipts
+def reply_parts(reasoning: str, narration: str, answer: str,
+                receipts: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """The saved message's parts: its receipts (PRD-256: what the turn's calls did,
+    built by the platform; ``[]`` when none ran), its reasoning (PRD-238 S1), its
+    narration and its answer, each on its own. Only the answer is ``text``; anything
+    that reads a message's text (the next turn, previews, search) sees the answer."""
     parts: List[Dict[str, Any]] = []
+    if receipts is not None:
+        parts.append({"type": "receipts", "receipts": list(receipts)})
     if reasoning:
         parts.append({"type": "reasoning", "reasoning": reasoning})
     if narration:

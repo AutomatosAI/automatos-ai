@@ -209,6 +209,26 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   taskCards?: TaskCardData[]
   /** PRD-239 S4: the turn failed; shown in the bubble instead of silence. */
   error?: TurnError
+  /** PRD-256: what the turn's calls did, live from the `receipts` frame (saved as a part). */
+  receipts?: Receipt[]
+}
+
+/**
+ * PRD-256: one call of a turn, as the platform recorded it from the call that ran.
+ * The model never writes it.
+ */
+export interface Receipt {
+  action: string
+  kind: 'read' | 'write'
+  status: 'done' | 'refused' | 'skipped'
+  /** The thing by number or name: "#0422", an agent, a document's title; '' when none. */
+  subject: string
+  /** What the call did, in plain words: "moved to Done", "sent back to its agent". */
+  effect: string
+  /** The page of what a done call touched (its card, its agent). */
+  link: string | null
+  /** Why a refused or skipped call did nothing, on one line. */
+  reason: string | null
 }
 
 /**
@@ -220,6 +240,8 @@ export type MessagePart =
   | { type: 'reasoning'; reasoning: string }
   /** F186: what the model said before its tool calls, stored beside the answer, shown in the activity trail. */
   | { type: 'narration'; narration: string }
+  /** PRD-256: what the turn's calls did, built by the platform, shown above the reply. */
+  | { type: 'receipts'; receipts: Receipt[] }
   /** PRD-239 S2: a ticket card persisted with the reply (a session agent's turn). */
   | { type: 'task_card'; card: TaskCardData }
   | { type: 'file'; filename: string; mediaType: string; url: string }

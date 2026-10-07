@@ -72,6 +72,9 @@ from consumers.chatbot.empty_completion import is_empty_completion, with_fallbac
 from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passive_claim
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
+from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's calls did, written by the platform
+    its_reads_are_receipted, notes_the_answering_model, the_loop_writes_receipts, writes_its_receipts,
+)
 from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
 )
@@ -1592,6 +1595,7 @@ class StreamingChatService:
             yield item
         yield {"_response": await task}
 
+    @its_reads_are_receipted  # PRD-256 US-001: the automatic reads fold into one read receipt
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
     @rechecks_disputed_figures  # F303 (night 9): a disputed figure is checked again before Auto agrees
@@ -1661,6 +1665,7 @@ class StreamingChatService:
             return False
 
     @staticmethod
+    @notes_the_answering_model  # PRD-256 US-001: the receipts frame names the model that answered
     @a_reply_says_its_banned_words  # F337 (night 10): the banned words a reply uses, said after it
     @never_all_clear_unread  # F307 (night 9): never "all clear" while Needs you holds something
     def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:
@@ -1676,6 +1681,7 @@ class StreamingChatService:
             additions.append(cut)
         return additions
 
+    @the_loop_writes_receipts  # PRD-256 US-001: the loop's receipts, from its tracker, before the answer
     async def _stream_tool_loop(
         self,
         response,
@@ -2580,6 +2586,7 @@ class StreamingChatService:
     # Main streaming methods
     # ─────────────────────────────────────────────────────────────────────
 
+    @writes_its_receipts  # PRD-256 US-001: every turn has receipts, DELEGATE turns too
     async def stream_response_with_agent(
         self,
         chat_id: str,

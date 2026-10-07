@@ -102,7 +102,7 @@ DOCUMENT_MAKES = ("generate_document", "create_pdf", "create_docx", "create_xlsx
 MAKE_REFUSED = "make_refused"
 
 
-def _answers(result: Any) -> List[Dict[str, Any]]:
+def answers_in(result: Any) -> List[Dict[str, Any]]:
     """The call's answer and the answers inside its envelopes (the chat wraps it as
     ``raw_result``, an executor as ``data``), each a dict."""
     found: List[Dict[str, Any]] = []
@@ -119,7 +119,7 @@ def result_effects(result: Any) -> Tuple[str, ...]:
     for the owner's check or running on unchecked (F308), or sent a card back (F319);
     () when it says neither."""
     effects: Tuple[str, ...] = ()
-    for answer in _answers(result):
+    for answer in answers_in(result):
         if answer.get(SENT_BACK_SAID) is True and SENT_BACK not in effects:
             effects += (SENT_BACK,)
         checks = answer.get("checks_each_step")
@@ -147,4 +147,4 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 __all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "SENT_BACK_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED",
-           "call_effects", "call_params", "refused_effects", "result_effects"]
+           "answers_in", "call_effects", "call_params", "refused_effects", "result_effects"]
