@@ -23,7 +23,9 @@ import pytest
 
 from core.services import ticket_reasons as tr
 from services import social_ticket_post as stp
-from services.social_post_asks import asks_for_a_social_post, claims_a_social_post, made_a_document_image
+from modules.tools.discovery.social_post_asks import (
+    asks_for_a_social_post, claims_a_social_post, made_a_document_image,
+)
 
 WS = "febae41b-374b-4580-a5ef-f698bdd382e4"
 AGENT = 348

@@ -8,9 +8,9 @@ tab". The posts it did save (2be9c935, 905208ce, 5b99dd4e) had no render: the ow
 rendered each one by hand.
 
 When a ticket's brief asks for a Socials post, or its answer says one was made
-(``services.social_post_asks``), the run must have saved one: a post in the workspace
-that the ticket's agent (``agent:<id>``, the actor its Socials tools write) created, or
-changed, since the run started. Then:
+(``modules.tools.discovery.social_post_asks``), the run must have saved one: a post in
+the workspace that the ticket's agent (``agent:<id>``, the actor its Socials tools
+write) created, or changed, since the run started. Then:
 
 * no such post: the ticket goes to review, saying no Socials post was saved, and that a
   generate_document image is a Deliverable, not a post, when the run made one;
@@ -41,7 +41,9 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tup
 from uuid import UUID
 
 from core.services.ticket_reasons import NOTHING_DONE_NOTE_PREFIX
-from services.social_post_asks import asks_for_a_social_post, claims_a_social_post, made_a_document_image
+from modules.tools.discovery.social_post_asks import (
+    asks_for_a_social_post, claims_a_social_post, made_a_document_image,
+)
 
 logger = logging.getLogger(__name__)
 
