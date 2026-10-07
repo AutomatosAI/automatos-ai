@@ -13,6 +13,8 @@ says rather than how it is built:
   the current take and the bound sources do not hold is a warning; a handle field takes the
   brand kit's handle only.
 * **The model's own questions** (``questions`` in its answer) are kept, text only.
+* **A required field left blank** is taken out, so it is asked for (``compose.py``'s
+  follow-ups), and what is still missing becomes the owner's question by its label.
 
 Each check returns what it found; ``checked_proposal`` adds it to the warnings and to
 ``questions``, the list the editor shows as "Auto needs: …".
@@ -72,15 +74,34 @@ def with_notes(proposal: Dict[str, Any], warnings: List[str], questions: List[st
     }
 
 
+def field_label(name: str, spec: Any) -> str:
+    """A template field in the owner's words: its label, else its name as words."""
+    label = spec.get("label") if isinstance(spec, Mapping) else None
+    return str(label).strip() if isinstance(label, str) and label.strip() else placeholder_label(name)
+
+
 def model_questions(raw: Any) -> List[str]:
     """The questions the model asks the owner: text only, ``MAX_QUESTIONS`` of them at most."""
     asked = raw if isinstance(raw, list) else []
     return unique([" ".join(q.split())[:QUESTION_MAX_CHARS] for q in asked if isinstance(q, str)])[:MAX_QUESTIONS]
 
 
+def without_blank_required(proposal: Dict[str, Any]) -> Dict[str, Any]:
+    """``proposal`` without the empty text it gave a field that has no default: a required
+    field left blank is missing, so it is asked for, never rendered empty."""
+    schema = (proposal.get("template") or {}).get("variables_schema") or {}
+    variables = proposal.get("variables") or {}
+    kept = {
+        name: spec for name, spec in variables.items()
+        if not (isinstance(schema.get(name), Mapping) and "default" not in schema[name]
+                and isinstance(spec.get("value"), str) and not spec["value"].strip())
+    }
+    return proposal if len(kept) == len(variables) else {**proposal, "variables": kept}
+
+
 def checked(proposal: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     """``proposal`` (``compose_checks``' checked shape) with what it says checked against
     what the composer was given (``ctx``): its warnings and the owner's questions added."""
     warnings, questions = placeholder_notes(proposal.get("copy") or {})
-    proposal, given = compose_given.given_notes(proposal, ctx)
+    proposal, given = compose_given.given_notes(without_blank_required(proposal), ctx)
     return with_notes(proposal, [*warnings, *given], questions)

@@ -686,6 +686,8 @@ export interface SocialComposeProposal {
   sources: Record<string, SocialClaimSource>
   channels: string[]
   warnings: string[]
+  /** F378: what Auto needs from the owner before the post can be made, in plain words. */
+  questions?: string[]
 }
 
 export interface UpdateSocialPostInput {
