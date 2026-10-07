@@ -1408,7 +1408,8 @@ class Config:
     # `key=value,key2=value2` (URL-encoded values), e.g. a vendor's Authorization header.
     OTEL_EXPORTER_OTLP_HEADERS: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
     # The share of new traces kept (0.0–1.0); a request whose caller sampled it follows the caller.
-    OTEL_TRACES_SAMPLER_RATIO: float = float(os.getenv("OTEL_TRACES_SAMPLER_RATIO", "1.0"))
+    # Kept as text and parsed when tracing starts, so a bad value can never stop a boot (otel.py).
+    OTEL_TRACES_SAMPLER_RATIO: str = os.getenv("OTEL_TRACES_SAMPLER_RATIO", "1.0")
 
     # =============================================================================
     # OBJECT STORAGE (S3 / MinIO) + AWS S3 VECTORS (PRD-42: Cloud Document Sync)

@@ -22,7 +22,8 @@ The rules, from the issue:
 * **Never fail the caller.** A tracing fault is logged; the request, or the
   boot, goes on without spans.
 * **Private by default.** Spans carry IDs and HTTP metadata, never a request or
-  response body.
+  response body, and never a query-string value (:func:`_scrub_url_attributes`):
+  an OAuth ``code`` or a ``token`` in a URL must not reach the collector.
 """
 from __future__ import annotations
 
@@ -44,6 +45,12 @@ OTLP_TRACES_PATH = "/v1/traces"
 # The IDs PRD-73 Phase 2 already carries, as span attributes.
 ATTR_REQUEST_ID = "automatos.request_id"
 ATTR_WORKSPACE_ID = "automatos.workspace_id"
+# The server span's URL attributes, under the old and the stable HTTP conventions.
+URL_ATTRIBUTES = ("http.url", "http.target", "url.full", "url.query")
+# What a query value becomes on a span: the key stays, the value never leaves.
+REDACTED = "REDACTED"
+# When OTEL_TRACES_SAMPLER_RATIO is not a number: keep every trace, and say so.
+DEFAULT_SAMPLER_RATIO = 1.0
 
 
 class _State:
@@ -70,6 +77,40 @@ def otlp_headers(raw: Optional[str]) -> Dict[str, str]:
     return headers
 
 
+def sampler_ratio(raw: Any) -> float:
+    """``OTEL_TRACES_SAMPLER_RATIO`` as a ratio in [0, 1]; a value that isn't a number
+    is logged and keeps every trace, so a typo can never stop tracing or a boot."""
+    try:
+        ratio = float(str(raw).strip())
+    except (TypeError, ValueError):
+        logger.warning("[otel] OTEL_TRACES_SAMPLER_RATIO=%r is not a number; keeping every trace", raw)
+        return DEFAULT_SAMPLER_RATIO
+    return min(max(ratio, 0.0), 1.0)
+
+
+def redact_query(url: str) -> str:
+    """``url`` with every query value replaced by ``REDACTED``; keys, path and fragment kept."""
+    head, sep, query = url.partition("?")
+    if not sep:
+        return url
+    query, hash_sep, fragment = query.partition("#")
+    pairs = [part.partition("=") for part in query.split("&") if part]
+    scrubbed = "&".join(f"{key}={REDACTED}" if eq else key for key, eq, _ in pairs)
+    return f"{head}?{scrubbed}{hash_sep}{fragment}"
+
+
+def _scrub_url_attributes(span: Any, scope: Any = None) -> None:
+    """The server span's request hook: no query value leaves on a URL attribute. The
+    ASGI layer redacts only a few signature keys, not ``code`` or ``token``."""
+    attributes = getattr(span, "attributes", None) or {}
+    for name in URL_ATTRIBUTES:
+        value = attributes.get(name)
+        if isinstance(value, str) and "?" in value:
+            span.set_attribute(name, redact_query(value))
+        elif name == "url.query" and isinstance(value, str) and value:
+            span.set_attribute(name, redact_query("?" + value)[1:])
+
+
 def _otlp_exporter() -> Any:
     """The OTLP/HTTP span exporter pointed at the configured collector."""
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -92,14 +133,16 @@ def build_provider(exporter: Any, ratio: float) -> Any:
         "deployment.environment.name": str(getattr(config, "ENVIRONMENT", "") or "unknown"),
         "automatos.edition": str(getattr(config, "AUTH_EDITION", "") or "unknown"),
     })
-    sampler = ParentBased(TraceIdRatioBased(min(max(float(ratio), 0.0), 1.0)))
+    sampler = ParentBased(TraceIdRatioBased(sampler_ratio(ratio)))
     provider = TracerProvider(resource=resource, sampler=sampler)
     provider.add_span_processor(BatchSpanProcessor(exporter))
     return provider
 
 
 def start_tracing(exporter: Any = None) -> bool:
-    """Install this process's provider as the global one; True when it did.
+    """Install this process's provider as the global one, once; True when it is in place.
+    A later lifespan in the same process reuses it: the SDK refuses a second global
+    provider, so replacing it would leave the app bound to a stopped one.
     ``exporter`` replaces the OTLP exporter (tests pass an in-memory one)."""
     if not tracing_enabled() or _State.provider is not None:
         return _State.provider is not None
@@ -108,6 +151,10 @@ def start_tracing(exporter: Any = None) -> bool:
 
         provider = build_provider(exporter or _otlp_exporter(), config.OTEL_TRACES_SAMPLER_RATIO)
         trace.set_tracer_provider(provider)
+        if trace.get_tracer_provider() is not provider:
+            logger.error("[otel] another tracer provider is already installed; serving without these traces")
+            provider.shutdown()
+            return False
     except Exception:
         logger.exception("[otel] tracing not started; serving without traces")
         return False
@@ -117,15 +164,15 @@ def start_tracing(exporter: Any = None) -> bool:
     return True
 
 
-def shutdown_tracing() -> None:
-    """Flush what is batched and stop this process's provider."""
-    provider, _State.provider = _State.provider, None
-    if provider is None:
+def flush_tracing() -> None:
+    """Send what is batched when the lifespan ends. The provider stays installed for a
+    later lifespan in this process; the SDK shuts it down itself when the process exits."""
+    if _State.provider is None:
         return
     try:
-        provider.shutdown()
+        _State.provider.force_flush()
     except Exception:
-        logger.exception("[otel] tracing did not shut down cleanly")
+        logger.exception("[otel] batched spans not flushed")
 
 
 def with_tracing(lifespan: Callable[[Any], Any]) -> Callable[[Any], Any]:
@@ -141,7 +188,7 @@ def with_tracing(lifespan: Callable[[Any], Any]) -> Callable[[Any], Any]:
             async with lifespan(app):
                 yield
         finally:
-            shutdown_tracing()
+            flush_tracing()
 
     return traced
 
@@ -156,7 +203,8 @@ def instrument_app(app: Any, tracer_provider: Any = None) -> None:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
         FastAPIInstrumentor.instrument_app(app, tracer_provider=tracer_provider, excluded_urls=EXCLUDED_URLS,
-                                           exclude_spans=EXCLUDED_ASGI_SPANS)
+                                           exclude_spans=EXCLUDED_ASGI_SPANS,
+                                           server_request_hook=_scrub_url_attributes)
     except Exception:
         logger.exception("[otel] FastAPI instrumentation failed; serving without server spans")
 
@@ -181,6 +229,7 @@ def annotate_request(request_id: str, workspace_id: str = "") -> None:
 
 
 __all__ = [
-    "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "annotate_request", "build_provider",
-    "instrument_app", "otlp_headers", "shutdown_tracing", "start_tracing", "tracing_enabled", "with_tracing",
+    "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "REDACTED", "annotate_request", "build_provider",
+    "flush_tracing", "instrument_app", "otlp_headers", "redact_query", "sampler_ratio", "start_tracing",
+    "tracing_enabled", "with_tracing",
 ]

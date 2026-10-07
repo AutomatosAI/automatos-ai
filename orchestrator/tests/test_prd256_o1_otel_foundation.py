@@ -45,7 +45,7 @@ def test_off_imports_nothing_from_opentelemetry():
         "otel.instrument_app(app)\n"
         "assert otel.start_tracing() is False\n"
         "otel.annotate_request('req-1', 'ws-1')\n"
-        "otel.shutdown_tracing()\n"
+        "otel.flush_tracing()\n"
         "loaded = sorted(m for m in sys.modules if m.startswith('opentelemetry'))\n"
         "assert not loaded, loaded\n"
     )
@@ -100,6 +100,30 @@ def test_main_wires_the_lifespan_and_the_instrumentation():
 
 
 # ── settings ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw,expected", [
+    ("0.25", 0.25), (" 1 ", 1.0), ("0", 0.0), ("5", 1.0), ("-1", 0.0), ("abc", 1.0), ("", 1.0), (None, 1.0),
+])
+def test_the_sampler_ratio_is_parsed_when_tracing_starts_and_never_raises(raw, expected):
+    assert otel.sampler_ratio(raw) == expected
+
+
+def test_a_bad_sampler_ratio_never_stops_the_config_import():
+    env = {**{k: v for k, v in os.environ.items() if k != "OTEL_ENABLED"}, "OTEL_TRACES_SAMPLER_RATIO": "ten percent"}
+    done = subprocess.run([sys.executable, "-c", "from config import config; print(config.OTEL_TRACES_SAMPLER_RATIO)"],
+                          cwd=_ORCH, env=env, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0 and done.stdout.strip().endswith("ten percent"), done.stderr[-2000:]
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://h/x?code=abc&token=t%20u&page=2", "http://h/x?code=REDACTED&token=REDACTED&page=REDACTED"),
+    ("/x?flag&code=abc#frag", "/x?flag&code=REDACTED#frag"),
+    ("/x", "/x"),
+    ("/x?", "/x?"),
+])
+def test_query_values_never_leave_on_a_url(url, expected):
+    assert otel.redact_query(url) == expected
+
 
 def test_otlp_headers_follow_the_spec_format():
     assert otel.otlp_headers("Authorization=Basic%20abc%3D,x-tenant = acme") == {
@@ -166,6 +190,16 @@ def test_a_request_is_a_server_span_carrying_its_ids(traced):
     assert spans[0].resource.attributes["service.name"] == "automatos-api-test"
 
 
+def test_a_query_value_never_reaches_the_collector(traced):
+    """An OAuth ``code`` or a ``token`` in a URL stays out of every exported attribute (review on #1040)."""
+    client, provider, exporter = traced()
+    assert client.get("/api/things/7?code=SECRET1&token=SECRET2&page=2").status_code == 200
+    spans = _server_spans(provider, exporter)
+    values = [str(v) for s in spans for v in s.attributes.values()]
+    assert spans and not [v for v in values if "SECRET" in v]
+    assert spans[0].attributes["http.url"].endswith("/api/things/7?code=REDACTED&token=REDACTED&page=REDACTED")
+
+
 def test_the_probes_are_never_traced(traced):
     client, provider, exporter = traced()
     assert client.get("/health").status_code == 200 and client.get("/health/ready").status_code == 200
@@ -213,31 +247,62 @@ def fresh_global_provider():
     trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = None, Once()
     otel._State.provider = None
     yield
-    otel.shutdown_tracing()
+    if otel._State.provider is not None:
+        otel._State.provider.shutdown()
+    otel._State.provider = None
     trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = saved
+
+
+def _lifespan_app(monkeypatch, exporter, seen):
+    monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
+    monkeypatch.setattr(otel, "_otlp_exporter", lambda: exporter)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        seen.append(otel._State.provider)
+        yield
+
+    return FastAPI(lifespan=otel.with_tracing(lifespan))
 
 
 def test_the_lifespan_starts_the_provider_and_flushes_it_at_the_end(monkeypatch, fresh_global_provider):
     from opentelemetry import trace
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-    monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
-    exporter = InMemorySpanExporter()
-    monkeypatch.setattr(otel, "_otlp_exporter", lambda: exporter)
-    seen = {}
-
-    @asynccontextmanager
-    async def lifespan(app):
-        seen["provider_during"] = otel._State.provider
-        yield
-
-    app = FastAPI(lifespan=otel.with_tracing(lifespan))
-    with TestClient(app):
-        assert trace.get_tracer_provider() is seen["provider_during"]
+    exporter, seen = InMemorySpanExporter(), []
+    with TestClient(_lifespan_app(monkeypatch, exporter, seen)):
+        assert seen[0] is not None and trace.get_tracer_provider() is seen[0]
         with trace.get_tracer("t").start_as_current_span("work"):
             pass
-    assert seen["provider_during"] is not None and otel._State.provider is None
-    assert [s.name for s in exporter.get_finished_spans()] == ["work"]   # flushed at shutdown
+    assert [s.name for s in exporter.get_finished_spans()] == ["work"]   # flushed when the lifespan ended
+
+
+def test_a_second_lifespan_in_the_process_keeps_tracing(monkeypatch, fresh_global_provider):
+    """The SDK refuses a second global provider: a later lifespan reuses the first,
+    never a stopped one (review on #1040)."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter, seen = InMemorySpanExporter(), []
+    app = _lifespan_app(monkeypatch, exporter, seen)
+    for name in ("first", "second"):
+        with TestClient(app):
+            with trace.get_tracer("t").start_as_current_span(name):
+                pass
+    assert seen[0] is seen[1] and trace.get_tracer_provider() is seen[0]
+    assert [s.name for s in exporter.get_finished_spans()] == ["first", "second"]
+
+
+def test_a_provider_installed_by_someone_else_is_reported_not_assumed(monkeypatch, fresh_global_provider):
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
+    theirs = TracerProvider()
+    trace.set_tracer_provider(theirs)
+    assert otel.start_tracing(exporter=InMemorySpanExporter()) is False
+    assert otel._State.provider is None and trace.get_tracer_provider() is theirs
 
 
 def test_a_provider_that_cannot_start_never_stops_the_boot(monkeypatch, fresh_global_provider):

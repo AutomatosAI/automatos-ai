@@ -55,6 +55,8 @@ The resource carries `service.name`, `deployment.environment.name` (`ENVIRONMENT
 - **OTLP over HTTP, not gRPC.** Every collector, Tempo, Jaeger and the hosted vendors accept OTLP/HTTP, and it needs no `grpcio`.
 - **Where it hooks in.** The FastAPI instrumentation wraps the middleware stack Starlette builds on the first ASGI call, which is the lifespan's, so `instrument_app(app)` runs right after the app is created in `main.py`. The provider starts in each process (one per uvicorn worker) from `with_tracing(lifespan)`, which wraps the existing lifespan rather than editing it, and is flushed at shutdown.
 - **Noise.** Health probes and the metrics scrape are not traced, and neither are the ASGI layer's per-message `send`/`receive` spans: one request is one span until O2 adds its children.
+- **No query value leaves.** The ASGI layer puts the full URL on the server span and redacts only a few signature keys; Automatos redacts every query value on the URL attributes (`code=REDACTED&token=REDACTED`), keeping the keys (Principle 5).
+- **One provider per process, for its whole life.** The SDK refuses a second global provider, so a later lifespan in the same process reuses the first; the end of a lifespan flushes it, and the SDK shuts it down when the process exits. `OTEL_TRACES_SAMPLER_RATIO` is parsed when tracing starts: a value that isn't a number is logged and keeps every trace, and can't stop a boot.
 
 ## 7. Non-goals
 
