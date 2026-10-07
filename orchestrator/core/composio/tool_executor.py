@@ -92,7 +92,7 @@ async def _resolve_single_file_standalone(
         uploadable = FileUploadable.from_url(
             client=http_client,
             url=value,
-            tool=action_slug,
+            tool=upload_spec.composio_tool_slug(action_slug),
             toolkit=app_slug,
         )
         logger.info("[FileUpload] Resolved %s -> s3key=%s", label, uploadable.s3key)
@@ -116,7 +116,7 @@ async def _resolve_single_file_standalone(
     uploadable = FileUploadable.from_path(
         client=http_client,
         file=tmp_path,
-        tool=action_slug,
+        tool=upload_spec.composio_tool_slug(action_slug),
         toolkit=app_slug,
         sensitive_file_upload_protection=False,
     )

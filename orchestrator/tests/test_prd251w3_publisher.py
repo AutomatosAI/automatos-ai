@@ -535,7 +535,7 @@ def test_resolve_upload_spec_takes_only_staged_files(monkeypatch, tmp_path):
 
     params = upload_spec.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {"file": staged, "note": "/etc/passwd"}, ["file"], "linkedin")
     assert params == {"file": {"s3key": "v.mp4"}, "note": "/etc/passwd"}
-    assert uploaded[0]["toolkit"] == "linkedin" and uploaded[0]["tool"] == "linkedin-upload-video"
+    assert uploaded[0]["toolkit"] == "linkedin" and uploaded[0]["tool"] == "LINKEDIN_UPLOAD_VIDEO"  # the canonical slug
     with pytest.raises(upload_spec.FileUploadFailed):  # a string never reads the local disk
         upload_spec.resolve_upload_spec("LINKEDIN_UPLOAD_VIDEO", {"file": "/etc/passwd"}, ["file"], "linkedin")
     with pytest.raises(upload_spec.FileUploadFailed):
