@@ -93,6 +93,14 @@
         .panel .headline { font-size: calc(80 * var(--s) * var(--display-scale)); }
         .label { top: calc(26 * var(--u)); }
       }
+      /* F382 (B21): a tall card (the 9:16 story) gives the brand row a band of its own above the photos, so
+         the logo and the handle never sit on the before photo; the labels sit at the top of each photo, which
+         now starts below Instagram's top bar. The band is the row's margin, its chips and a gap (--band). */
+      @media (max-aspect-ratio: 10/16) {
+        .pair { --band: calc(168 * var(--u)); top: calc(var(--story-top, 0px) + var(--band));
+          height: calc(66% - var(--story-top, 0px) - var(--band)); }
+        .label { top: calc(26 * var(--u)); }
+      }
       /* PRD-255 FR-9: on a dark stage, the kit's logo for dark backgrounds as it is; without one, the logo on a light chip. */
       .dark-logo { background: var(--logo-chip); border-radius: calc(8 * var(--s)); padding: calc(4 * var(--s)); }
       .dark-logo[src^="data:image/gif"] { background: none; }
