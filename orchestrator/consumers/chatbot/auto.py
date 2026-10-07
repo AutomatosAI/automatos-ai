@@ -34,6 +34,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 
 from consumers.chatbot import auto_decisions
+from consumers.chatbot.auto_answers import agents_named_in, auto_always_answers  # PRD-256 US-010 (D2)
 from consumers.chatbot.board_questions import about_the_board
 from consumers.chatbot.brand_assign_lane import brand_work_goes_to_the_designer  # F362 (night 10c)
 from consumers.chatbot.socials_assign_lane import social_media_role, social_work_goes_to_the_director  # F379
@@ -76,7 +77,7 @@ class Complexity(str, Enum):
 class Action(str, Enum):
     """What Auto should do with this request."""
     RESPOND = "respond"      # Auto responds directly (no delegation)
-    DELEGATE = "delegate"    # Route to a single sub-agent (answers THIS turn)
+    DELEGATE = "delegate"    # Legacy verdict: Auto answers it, or the named agent gets a ticket (PRD-256 D2)
     WORKFLOW = "workflow"    # DEPRECATED — kept for backward compat parsing
     MISSION = "mission"      # PRD-125: Complex multi-step → suggest mission to user
     ASSIGN = "assign"        # PRD-224: file a board ticket for a named single agent (off-thread)
@@ -735,7 +736,7 @@ _ASSESSMENT_RUBRIC = """## What to weigh:
 
 Three lanes decide WHERE the work happens. Pick deliberately, and state which lane and why in one line in `reasoning` (Auto narrates every routing decision):
 
-- **delegate**: a specialist agent answers THIS conversation, inline, and it's over. The user wants an answer in the chat now. (Most molecule/cell/organ work.)
+- **respond**: you (Auto) answer THIS conversation yourself, with your own tools, and it's over. Any ask that names no agent and no role is yours: no specialist takes over the chat.
 - **assign**: a named or single agent does work OFF-THREAD, on the board, to a deliverable — not an inline answer. Choose assign when there are ANY of these signals:
     - an explicit agent name or role possessive: "have Jim…", "my accountant agent…", "get the researcher to…";
     - a deliverable that outlives this turn (a report to file, invoices to chase, a task to own);
@@ -757,9 +758,8 @@ Prefer an agent that already exists. Before an **assign** or **mission** implies
 
 - "Morning Auto" → atom / respond (greeting)
 - "How are you?" → atom / respond (chitchat)
-- "Send an email to John" → molecule / delegate (email tool, inline)
+- "Send an email to John" → molecule / respond (email tool, you answer)
 - "What agents do I have?" → molecule / respond (platform query)
-- "Search my docs for the Q4 report" → molecule / delegate (search tool, inline)
 - "Have my accountant agent chase the overdue invoices" → assign (named agent, off-thread deliverable), target_agent "accountant"
 - "Can you close all the blocked tickets for VECTOR? It was a token issue" → molecule / respond (addressed to YOU — do it with your platform tools; VECTOR owns the tickets and is not an assignee. Never invent an assignee from the topic, e.g. a Jira agent because the user said "tickets")
 - "Get Jim to draft the board pack, no rush" → assign + deferred (named agent, defer phrasing), target_agent "Jim"
@@ -771,7 +771,7 @@ Prefer an agent that already exists. Before an **assign** or **mission** implies
 _ASSESSMENT_OUTPUT = """Return ONLY valid JSON:
 {
   "complexity": "atom|molecule|cell|organ|organism",
-  "action": "respond|delegate|assign|mission",
+  "action": "respond|assign|mission",
   "target_agent": "the agent name for an assign (else empty)",
   "tool_hints": [],
   "needs_memory": false,
@@ -779,7 +779,7 @@ _ASSESSMENT_OUTPUT = """Return ONLY valid JSON:
   "reasoning": "one sentence"
 }
 
-action mapping: "respond" for atom; "delegate" for inline molecule/cell/organ answers; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
+action mapping: "respond" for anything you answer in this chat, atom or tool work; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
 target_agent: for "assign", the agent name the user named (or the role, e.g. "accountant") — it MUST appear in the user's own words; a request addressed to you ("can you…", "please close…") with no named assignee is NOT assign; empty otherwise.
 tool_hints: short domain keywords like "email", "github", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
 
@@ -789,9 +789,8 @@ def build_assessment_prompt(
 ) -> str:
     """The Tier-3 classifier prompt (pure — string-presence testable).
 
-    Carries the three-lane routing rubric (PRD-224 US-004): DELEGATE answers
-    THIS turn, ASSIGN files an off-thread board ticket for a named single agent,
-    MISSION staffs a multi-agent project.
+    Carries the three-lane routing rubric (PRD-224 US-004, PRD-256 D2): RESPOND is Auto's
+    answer, ASSIGN a named agent's board ticket, MISSION a multi-agent project.
     """
     return (
         "You are a message complexity classifier for an AI platform.\n\n"
@@ -833,6 +832,7 @@ class AutoBrain:
 
     @brand_work_goes_to_the_designer  # F362: a brand ask is the Brand designer's ticket (PRD-255 US-014)
     @social_work_goes_to_the_director  # F379 (night 11): social media work is the Social Media Director's ticket
+    @auto_always_answers  # PRD-256 US-010 (D2): Auto answers; a named agent gets a ticket
     async def assess(
         self,
         message: str,
@@ -1201,23 +1201,8 @@ class AutoBrain:
     # ------------------------------------------------------------------
 
     def _names_active_agent(self, message: str) -> bool:
-        """True when the message contains an active roster agent's name as a whole
-        word (case-insensitive). Names shorter than three characters are ignored
-        so a stray "AI" or "Bo" never counts; a name inside another word
-        ("automatically" for an agent called Auto) does not match. Fail-soft False."""
-        try:
-            text = (message or "").lower()
-            if not text:
-                return False
-            for agent in self._active_agents():
-                name = (getattr(agent, "name", "") or "").strip().lower()
-                if len(name) < 3:
-                    continue
-                if re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", text):
-                    return True
-        except Exception:
-            logger.debug("[AutoBrain] roster name check failed — pin applies", exc_info=True)
-        return False
+        """True when the message names an active roster agent (auto_answers.agents_named_in)."""
+        return bool(agents_named_in(message, self._active_agents()))
 
     def _active_agents(self) -> List[Any]:
         """The whole active roster (F362) — the shared source for the Tier-3
@@ -1472,7 +1457,7 @@ class AutoBrain:
         return None
 
     def _cache_store(self, msg_lower: str, assessment: ComplexityAssessment) -> None:
-        if not self._redis:
+        if not self._redis or assessment.action == Action.DELEGATE:  # PRD-256 D2: never keep a routed-away verdict
             return
         try:
             cache_key = self._make_cache_key(msg_lower)
@@ -1511,9 +1496,8 @@ class AutoBrain:
         if platform_match:
             return platform_match.group(0)
 
-        # F263/F241 (night 7b): a card by its number, the board's state, or "update the
-        # card" is Auto's, with its board tools: never a specialist's (DELEGATE) or a new
-        # ticket's (ASSIGN), and never a turn with no tools.
+        # F263/F241 (night 7b): a card by its number, the board's state, or "update the card"
+        # is Auto's, with its board tools; a card handed to a named agent is ASSIGN on it (D2).
         if about_the_board(msg_lower):
             return BOARD_QUERY
 

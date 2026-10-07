@@ -7,6 +7,11 @@ document search put five passages from old reports in front of Auto, and it name
 and missed the five real Review cards. The same night, card actions by number
 ("Approve #0177 …", "Update #0199 …") went to the card's own agent (DELEGATE) and
 "Give #0192 to the Support Agent" down the ASSIGN lane, which filed a copy.
+
+PRD-256 US-010 (Decision D2, 7 Oct): the chat has no DELEGATE lane any more, so no card
+action goes to the card's own agent; and a card handed to a named agent is the ASSIGN
+lane ON THAT CARD (platform_assign_task, never a new card): the one board message here
+that leaves Auto's own hands, by the owner's word.
 """
 from __future__ import annotations
 
@@ -48,11 +53,22 @@ def test_an_order_number_a_hashtag_or_a_gift_card_is_not(said):
 
 @pytest.mark.parametrize("said", ABOUT_THE_BOARD)
 def test_auto_keeps_a_board_message_with_its_platform_tools(said):
-    """AutoBrain's fast path: MOLECULE + the "platform" hint, so api/chat.py never
-    delegates it or files it as a new ticket, and the turn has the board's tools."""
+    """AutoBrain's fast path: MOLECULE + the "platform" hint, so the turn has the board's
+    tools and is never a new ticket. Since PRD-256 US-010 nothing in the chat is delegated;
+    the hand-off below is the ASSIGN lane on its own card."""
     from consumers.chatbot.auto import AutoBrain
 
     assert AutoBrain._match_platform_query(said.lower()) is not None
+
+
+def test_only_the_card_handed_to_a_named_agent_leaves_autos_hands():
+    """PRD-256 US-010: "give #0192 to the … Agent" hands the card on (ASSIGN on #0192);
+    every other board message stays Auto's, with its board tools."""
+    from consumers.chatbot.auto_answers import handed_card
+
+    assert [said for said in ABOUT_THE_BOARD if handed_card(said)] == [
+        "Please give #0192 to the Shopify Support Agent."]
+    assert handed_card("Please give #0192 to the Shopify Support Agent.") == "#0192"
 
 
 def test_the_board_question_gets_the_board_tools_from_the_classifier_too():

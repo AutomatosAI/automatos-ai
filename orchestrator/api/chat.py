@@ -8,6 +8,7 @@ Secured with hybrid auth (Clerk JWT + API key).
 
 import logging
 import uuid as _uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,14 +19,11 @@ from pydantic import BaseModel
 
 from core.database.database import SessionLocal, get_db
 from consumers.chatbot import ChatService, StreamingChatService
-from consumers.chatbot.auto import Action, AutoBrain, apply_assign_bias
+from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.auth.principal import resolve_user_pk
-from core.routing.cache import get_routing_cache
-from core.routing.engine import UniversalRouter
-from core.routing.ingestors.chatbot import ChatbotIngestor
 from core.models.core import User
 from core.session_queue import get_session_queue
 from core.utils.timestamps import utc_iso
@@ -222,6 +220,198 @@ def _last_message_previews(db: Session, chat_ids: List[str]) -> dict:
     return previews
 
 
+_UNTITLED_CHAT = "New Chat"
+_TITLE_MAX_CHARS = 50
+
+
+def _message_parts(msg: ChatMessageRequest) -> List[MessagePart]:
+    """A message's parts; a ``content``-only message is one text part."""
+    if msg.parts:
+        return msg.parts
+    if msg.content:
+        return [MessagePart(type="text", text=msg.content)]
+    return []
+
+
+def _current_message(request: ChatRequest) -> ChatMessageRequest:
+    """The message this turn answers: ``message``, or the last of ``messages[]``."""
+    current = request.message or (request.messages[-1] if request.messages else None)
+    if not current:
+        raise HTTPException(status_code=400, detail="No message provided")
+    return current
+
+
+def _message_text(parts: List[MessagePart]) -> str:
+    """The text AutoBrain classifies: the first part, when it is text."""
+    return (parts[0].text or "") if parts and parts[0].type == "text" else ""
+
+
+def _unique_title(db: Session, user_id: int, parts: List[MessagePart]) -> str:
+    """A new chat's title: its first words, numbered when this user already has one."""
+    first = parts[0] if parts else None
+    base = first.text[:_TITLE_MAX_CHARS] if first and first.text else _UNTITLED_CHAT
+    title, counter = base, 1
+    while db.execute(
+        text("SELECT 1 FROM chats WHERE user_id = :user_id AND title = :title LIMIT 1"),
+        {"user_id": user_id, "title": title},
+    ).fetchone():
+        counter += 1
+        title = f"{base} ({counter})"
+    return title
+
+
+def _open_chat(db: Session, chat_service: ChatService, request: ChatRequest, ctx: RequestContext,
+               user_id: int, parts: List[MessagePart]) -> str:
+    """The turn's chat id: the request's own chat, or a new one. A stale or unknown id
+    gets a new chat, never an error; another user's chat is refused."""
+    if request.id:
+        chat = chat_service.get_chat(request.id, workspace_id=ctx.workspace_id)
+        if chat:
+            if chat.user_id != user_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+            return request.id
+    chat = chat_service.create_chat(
+        user_id=user_id,
+        title=_unique_title(db, user_id, parts),
+        visibility=request.selectedVisibilityType,
+        workspace_id=ctx.workspace_id,
+    )
+    return str(chat.id)
+
+
+def _with_attachments(history: List[Dict[str, Any]], current_msg: ChatMessageRequest) -> List[Dict[str, Any]]:
+    """PRD-127: the request's ephemeral attachment ids ride on the latest user message.
+    Attachments are request-scoped (7-day S3 TTL) and never persisted in chat history;
+    AttachmentResolver resolves them inline. The frontend sends ids both at the top
+    level and inside file parts."""
+    ids = list(current_msg.attachment_ids or [])
+    for part in current_msg.parts or []:
+        if part.attachment_id and part.attachment_id not in ids:
+            ids.append(part.attachment_id)
+    logger.info(
+        "[PRD-127] chat request attachments: top_level_ids=%s parts=%s collected=%s",
+        current_msg.attachment_ids, [p.dict(exclude_none=True) for p in current_msg.parts or []], ids,
+    )
+    if not ids:
+        return history
+    for index in range(len(history) - 1, -1, -1):
+        if history[index].get("role") == "user":
+            logger.info("[PRD-127] injected %d attachment_ids into message_history[%d]", len(ids), index)
+            return history[:index] + [{**history[index], "attachment_ids": ids}] + history[index + 1:]
+    return history
+
+
+def _turn_history(chat_service: ChatService, chat_id: str, current_msg: ChatMessageRequest,
+                  page_ctx: Any) -> List[Dict[str, Any]]:
+    """The conversation the turn reads: the chat's messages, the attachments, and the page.
+
+    PRD-221 S2 (extends PRD-220): the page context is the structured reference set
+    {page, route, tab, selected, filters, visible_ids}, or the legacy {"page": <label>};
+    one renderer serves both. It is sanitized against the allow-list (authz-looking
+    fields never survive) and injected prompt-side only: the user message is already
+    saved clean, so chat titles and reloaded history never show the hint."""
+    history = [{"role": m.role, "parts": m.parts} for m in chat_service.get_messages_by_chat_id(chat_id)]
+    return inject_page_preamble(_with_attachments(history, current_msg), page_ctx)
+
+
+def _is_super_admin(ctx: RequestContext) -> bool:
+    """PRD-143: the su surface is derived from system_role ONLY, never from workspace
+    role, is_admin or autonomy level (fail-closed boundary)."""
+    role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
+    logger.info("[PRD-67] user_role=%r, user_id=%s", role, getattr(ctx.user, "id", "?"))
+    return role == "super_admin"
+
+
+async def _turn_lane(db: Session, ctx: RequestContext, request: ChatRequest, message_text: str,
+                     history_length: int) -> TurnLane:
+    """PRD-256 US-010 (D2): the agent the owner chose answers; otherwise Auto does.
+
+    Every workspace has its own Auto agent: its model, persona and tools come from that
+    agent's config (Settings > Orchestrator), never a hardcoded agent id."""
+    if request.agentId:
+        return chosen_agent_lane(db, _explicitly_chosen_agent(db, ctx.workspace_id, request.agentId))
+    return await auto_lane(
+        db, ctx.workspace_id, auto_agent_id=get_default_agent_id(db, ctx.workspace_id),
+        message_text=message_text, history_length=history_length,
+    )
+
+
+@dataclass(frozen=True)
+class _Turn:
+    """What the detached turn needs: plain values, never the request's DB session."""
+
+    workspace_id: Any
+    chat_id: str
+    user_id: int
+    messages: List[Dict[str, Any]]
+    lane: TurnLane
+    message_text: str
+    mission_mode: bool
+    plan_mode: bool
+    is_super_admin: bool
+    page_context: Any
+
+
+async def _turn_chunks(service: StreamingChatService, task_db: Session, turn: _Turn):
+    """The turn's frames, from the agent its lane names."""
+    lane = turn.lane
+    if lane.session_agent:
+        # PRD-239 S7 v2: a session agent lives in the Runtime Canvas; the operator talks
+        # to it in the terminal, never through this lane. Say so (S4 renders `e:` frames).
+        from services.cli_ticket_lane import session_agent_terminal_message
+
+        yield service.streaming_handler.format_aisdk_error(
+            session_agent_terminal_message(task_db, lane.agent_id), code="session_agent_terminal",
+        )
+        return
+    if lane.suggest_mission:
+        # PRD-125: the mission suggestion card (the frontend renders it); Auto still answers.
+        yield service.streaming_handler.format_aisdk_data("mission-suggestion", {
+            "goal": turn.message_text, "complexity": lane.assessment.complexity.value, "agent_id": lane.agent_id,
+        })
+    async for chunk in service.stream_response_with_agent(
+        chat_id=turn.chat_id, messages=turn.messages, agent_id=lane.agent_id, user_id=turn.user_id,
+        skip_composio=lane.skip_composio, complexity_assessment=lane.assessment,
+        mission_mode=turn.mission_mode, plan_mode=turn.plan_mode, suggest_mission=lane.suggest_mission,
+        is_super_admin=turn.is_super_admin,
+        # PRD-221 S3/S4: the sanitized reference set rides into the turn's
+        # context_trace and the page-prior action exposure.
+        page_context=turn.page_context,
+    ):
+        yield chunk
+
+
+async def _produce_turn(turn: _Turn):
+    """PRD-237 S7: the turn is a producer task with its own DB session; the HTTP response
+    only consumes it (services.chat_turns). A reload or navigation that drops the
+    connection no longer kills the reply; Stop is explicit via POST /{chat_id}/cancel.
+    Concurrent requests for the same chat are serialized by the session queue."""
+    task_db = SessionLocal()
+    try:
+        service = StreamingChatService(task_db, workspace_id=turn.workspace_id)
+        async with get_session_queue().acquire(f"{turn.workspace_id}:{turn.chat_id}"):
+            async for chunk in _turn_chunks(service, task_db, turn):
+                yield chunk
+    finally:
+        task_db.close()
+
+
+def _notify_a_missed_reply(workspace_id: Any, chat_id: str, user_id: int):
+    """The turn's ``on_complete``: a client that missed the end of the turn (reload,
+    navigation) is told the reply landed, and the PRD-205 S7 lane merges it live. A
+    connected client already has the reply; notifying it would duplicate."""
+    async def _on_complete(*, completed: bool, cancelled: bool, client_gone: bool) -> None:
+        if not (completed and client_gone):
+            return
+        notify_db = SessionLocal()
+        try:
+            notify_chat_event(notify_db, workspace_id=workspace_id, chat_id=chat_id, user_id=user_id)
+            notify_db.commit()
+        finally:
+            notify_db.close()
+    return _on_complete
+
+
 # Endpoints
 @router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def stream_chat(
@@ -230,384 +420,38 @@ async def stream_chat(
     db: Session = Depends(get_db)
 ):
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
-    logger.info(f"[chat] RequestContext workspace_id={ctx.workspace_id}")
+    logger.info("[chat] RequestContext workspace_id=%s agentId=%s", ctx.workspace_id, request.agentId)
     chat_service = ChatService(db)
     # F145: an admin_only tool is an admin's when the call is made for an active
     # owner/admin of the workspace (the chat threads the driving user) or for a
     # super admin — core.security.driving_user; no "workspace has an admin" fallback.
     user_id = get_user_id(db, ctx)
-
-    def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:
-        if msg.parts:
-            return msg.parts
-        if msg.content:
-            return [MessagePart(type="text", text=msg.content)]
-        return []
-
-    # Support both {message} and {messages[]} payloads
-    current_msg: Optional[ChatMessageRequest] = request.message
-    if (not current_msg) and request.messages:
-        current_msg = request.messages[-1]
-
-    if not current_msg:
-        raise HTTPException(status_code=400, detail="No message provided")
-    
-    # Get or create chat
-    chat_id = request.id
-    if not chat_id:
-        parts = get_parts(current_msg)
-        first_part = parts[0] if parts else None
-        base_title = first_part.text[:50] if first_part and first_part.text else "New Chat"
-        
-        # Make title unique by checking existing titles first
-        title = base_title
-        counter = 1
-        while True:
-            # Check if title already exists for this user
-            existing = db.execute(
-                text("SELECT 1 FROM chats WHERE user_id = :user_id AND title = :title LIMIT 1"),
-                {"user_id": user_id, "title": title}
-            ).fetchone()
-            
-            if not existing:
-                break
-            
-            counter += 1
-            title = f"{base_title} ({counter})"
-        
-        chat = chat_service.create_chat(
-            user_id=user_id,
-            title=title,
-            visibility=request.selectedVisibilityType,
-            workspace_id=ctx.workspace_id,
-        )
-        chat_id = str(chat.id)
-    else:
-        chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-        if not chat:
-            # Be forgiving: if client sends stale/invalid chat id, create a new chat
-            parts = get_parts(current_msg)
-            first_part = parts[0] if parts else None
-            base_title = first_part.text[:50] if first_part and first_part.text else "New Chat"
-            title = base_title
-            counter = 1
-            while True:
-                existing = db.execute(
-                    text("SELECT 1 FROM chats WHERE user_id = :user_id AND title = :title LIMIT 1"),
-                    {"user_id": user_id, "title": title},
-                ).fetchone()
-                if not existing:
-                    break
-                counter += 1
-                title = f"{base_title} ({counter})"
-
-            chat = chat_service.create_chat(
-                user_id=user_id,
-                title=title,
-                visibility=request.selectedVisibilityType,
-                workspace_id=ctx.workspace_id,
-            )
-            chat_id = str(chat.id)
-        
-        if chat.user_id != user_id:
-            raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Save user message
-    parts = get_parts(current_msg)
+    current_msg = _current_message(request)
+    parts = _message_parts(current_msg)
+    chat_id = _open_chat(db, chat_service, request, ctx, user_id, parts)
     chat_service.save_message(
-        chat_id=chat_id,
-        role="user",
-        parts=[part.dict() for part in parts],
-        workspace_id=ctx.workspace_id
+        chat_id=chat_id, role="user", parts=[part.dict() for part in parts], workspace_id=ctx.workspace_id,
     )
-    
-    
-    # Get chat history
-    messages = chat_service.get_messages_by_chat_id(chat_id)
-    message_history = [{'role': msg.role, 'parts': msg.parts} for msg in messages]
-
-    # PRD-127: Attach ephemeral attachment_ids from the incoming request to the
-    # latest user message. Attachments are request-scoped (7-day S3 TTL) and not
-    # persisted in chat history — resolved inline by AttachmentResolver.
-    _incoming_attachment_ids: List[str] = []
-    if current_msg.attachment_ids:
-        _incoming_attachment_ids.extend(current_msg.attachment_ids)
-    # Also collect attachment_ids embedded inside file parts (frontend sends both)
-    for _p in (current_msg.parts or []):
-        if _p.attachment_id and _p.attachment_id not in _incoming_attachment_ids:
-            _incoming_attachment_ids.append(_p.attachment_id)
-    # PRD-127 diagnostics: log what the client actually sent
-    try:
-        _parts_debug = [
-            {k: v for k, v in (_p.dict() if hasattr(_p, "dict") else {}).items() if v is not None}
-            for _p in (current_msg.parts or [])
-        ]
-        logger.info(
-            f"[PRD-127] chat request attachments: top_level_ids={current_msg.attachment_ids} "
-            f"parts={_parts_debug} collected={_incoming_attachment_ids}"
-        )
-    except Exception:
-        pass
-    if _incoming_attachment_ids and message_history:
-        for _i in range(len(message_history) - 1, -1, -1):
-            if message_history[_i].get("role") == "user":
-                message_history[_i]["attachment_ids"] = _incoming_attachment_ids
-                logger.info(
-                    f"[PRD-127] injected {len(_incoming_attachment_ids)} attachment_ids "
-                    f"into message_history[{_i}]"
-                )
-                break
-
-    # PRD-221 S2 (extends PRD-220): request.context is the structured reference
-    # set {page, route, tab, selected, filters, visible_ids} — or the legacy
-    # {"page": <label>} form; one renderer serves both. Sanitized against the
-    # allow-list (authz-looking fields never survive; the server derives roles
-    # itself) and injected prompt-side only — the user message was already saved
-    # clean above, so chat titles and reloaded history never show the hint.
-    _page_ctx = sanitize_page_context(request.context)
-    message_history = inject_page_preamble(message_history, _page_ctx)
-
-    # DEBUG: Log incoming request
-    logger.info(f"Chat request - agentId: {request.agentId}")
-
-    # --- PRD-50: Universal Router Integration ---
-    # Extract message text for the ingestor
-    message_text = ""
-    if parts:
-        message_text = (parts[0].text or "") if parts[0].type == "text" else ""
-
-    routing_decision = None
-    routing_request_id = None
-    # PRD-137 Fix #2: when True, agent_factory uses orchestrator-tier defaults
-    # (system_settings.orchestrator_llm.*) instead of the agent's model_config.
-    use_orchestrator_llm = False
-    complexity_assessment = None
-    _suggest_mission = False     # PRD-125: True when ORGAN/ORGANISM → suggest mission
-
-    # Every workspace has its own Auto agent — the model, persona, and tools
-    # come from that agent's config (set via Settings > Orchestrator).
-    # No hardcoded agent IDs. Admins get elevated tool access on the Auto agent.
-    _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
-    _is_admin = _user_role in ("admin", "super_admin")
-    # PRD-143: the su surface is derived from system_role ONLY — never from
-    # workspace role, is_admin, or autonomy level (fail-closed boundary).
-    _is_super_admin = _user_role == "super_admin"
-    logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
-
-    _fallback_agent_id = get_default_agent_id(db, ctx.workspace_id)
-
-    _session_agent = False
-    if request.agentId:
-        # User explicitly selected an agent — skip Auto, use directly
-        effective_agent_id = _explicitly_chosen_agent(db, ctx.workspace_id, request.agentId)
-        logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
-        # PRD-239: a session agent (runtime: cli) never runs in the LLM runtime —
-        # it talks in the Runtime Canvas terminal (S7 v2).
-        from services.cli_ticket_lane import is_cli_agent
-        _session_agent = is_cli_agent(db, effective_agent_id)
-    else:
-        # --- Auto mode: the brain decides (admins included, PRD-67 CTO is fallback) ---
-        auto_brain = AutoBrain(db, str(ctx.workspace_id))
-        complexity_assessment = await auto_brain.assess(message_text, len(message_history))
-        logger.info(
-            f"[Auto] Complexity={complexity_assessment.complexity.value} "
-            f"action={complexity_assessment.action.value} "
-            f"tool_hints={complexity_assessment.tool_hints} "
-            f"reasoning={complexity_assessment.reasoning}"
-        )
-
-        # Platform management is Auto's core job — never delegate it.
-        # When tool_hints include "platform", Auto handles directly with
-        # all its platform tools (create agents, read workspace, plan, etc.)
-        _platform_hints = "platform" in (complexity_assessment.tool_hints or [])
-
-        if complexity_assessment.action == Action.ASSIGN:
-            # PRD-224 US-004: the middle lane — Auto files a board ticket for a
-            # named single agent using its platform tools, then confirms in one
-            # line. Not an inline answer, not a mission. Checked BEFORE the
-            # platform-hint reroute so a "platform" tool_hint can't collapse it
-            # into RESPOND. effective agent = Auto (it owns the filing).
-            effective_agent_id = _fallback_agent_id
-            _deferred = apply_assign_bias(complexity_assessment, message_text)
-            logger.info(
-                f"[Auto] ASSIGN lane — agent={complexity_assessment.target_agent_name!r} "
-                f"resolved={complexity_assessment.target_agent_id is not None} "
-                f"deferred={_deferred}: agent_id={effective_agent_id}"
-            )
-        elif complexity_assessment.action == Action.RESPOND or _platform_hints:
-            # Auto handles directly — no routing, no delegation.
-            # Auto uses its own agent model (not orchestrator LLM).
-            effective_agent_id = _fallback_agent_id
-            if _platform_hints:
-                # Override action so we don't fall into the DELEGATE branch below
-                complexity_assessment.action = Action.RESPOND
-                logger.info(
-                    f"[Auto] Platform hint detected — Auto handles directly "
-                    f"(complexity={complexity_assessment.complexity.value}, "
-                    f"hints={complexity_assessment.tool_hints}): "
-                    f"agent_id={effective_agent_id}"
-                )
-            else:
-                logger.info(
-                    f"[Auto] Direct response (complexity={complexity_assessment.complexity.value}): "
-                    f"agent_id={effective_agent_id}"
-                )
-        elif complexity_assessment.action == Action.MISSION:
-            # PRD-125: Complex task detected — suggest mission to user,
-            # but still delegate to a single agent for an immediate response.
-            logger.info(
-                f"[Auto] MISSION suggested (complexity={complexity_assessment.complexity.value})"
-            )
-            _suggest_mission = True
-
-        if complexity_assessment.action in (Action.DELEGATE, Action.MISSION):
-            # Universal Router picks the right specialized agent.
-            try:
-                ingestor = ChatbotIngestor()
-                envelope = ingestor.ingest(
-                    message=message_text,
-                    agent_id=None,  # no override — let router decide
-                    session_id=chat_id,
-                    request_context=ctx,
-                )
-                routing_request_id = str(envelope.id)
-                universal_router = UniversalRouter(db, cache=get_routing_cache())
-                routing_decision = await universal_router.route(envelope)
-            except Exception:
-                logger.exception("[chat] Router failed — falling back to fallback agent")
-                routing_decision = None
-
-            if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
-                effective_agent_id = routing_decision.agent_id
-                logger.info(
-                    f"[Auto] Router → agent_id={effective_agent_id} "
-                    f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
-                )
-            elif routing_decision is not None and routing_decision.route_type == "orchestrate":
-                # LLM explicitly chose Auto / orchestrate — Auto uses its own model
-                effective_agent_id = _fallback_agent_id
-                logger.info(
-                    f"[Auto] Router → orchestrate "
-                    f"(confidence={routing_decision.confidence:.2f}, "
-                    f"reasoning={routing_decision.reasoning}): "
-                    f"agent_id={effective_agent_id}"
-                )
-            else:
-                # Router couldn't decide — fall back to Auto with its own model
-                effective_agent_id = _fallback_agent_id
-                logger.info(f"[Auto] Router returned no match — fallback agent_id={effective_agent_id}")
-
-    # Build response headers (include routing metadata when available)
-    response_headers = {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-        "x-vercel-ai-data-stream": "v1",
-    }
-    if routing_decision is not None:
-        response_headers["x-routing-agent-id"] = str(routing_decision.agent_id or "")
-        response_headers["x-routing-confidence"] = f"{routing_decision.confidence:.2f}"
-        response_headers["x-routing-type"] = routing_decision.route_type
-        response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200].encode("ascii", "replace").decode("ascii")
-        if routing_request_id:
-            response_headers["x-routing-request-id"] = routing_request_id
-    if complexity_assessment is not None:
-        response_headers["x-auto-complexity"] = complexity_assessment.complexity.value
-        response_headers["x-auto-action"] = complexity_assessment.action.value
-        response_headers["x-auto-confidence"] = f"{complexity_assessment.confidence:.2f}"
-        response_headers["x-auto-needs-memory"] = str(complexity_assessment.needs_memory).lower()
-        if complexity_assessment.tool_hints:
-            response_headers["x-auto-tool-hints"] = ",".join(complexity_assessment.tool_hints)
-
-    # PRD: Unified Agent-Chat System
-    # Use agent-based streaming for all resolved agents
-    logger.info(f"Using agent-based streaming with agent_id={effective_agent_id}")
-
-    # Session-scoped queue: serialize concurrent requests for the same chat
-    session_key = f"{ctx.workspace_id}:{chat_id}"
-    session_queue = get_session_queue()
-
-    # Skip Composio tool loading for simple conversational messages (RESPOND)
-    _skip_composio = (
-        complexity_assessment is not None
-        and complexity_assessment.action == Action.RESPOND
+    page_ctx = sanitize_page_context(request.context)
+    history = _turn_history(chat_service, chat_id, current_msg, page_ctx)
+    message_text = _message_text(parts)
+    lane = await _turn_lane(db, ctx, request, message_text, len(history))
+    logger.info("[chat] agent_id=%s answers the turn", lane.agent_id)
+    # The request-scoped ``db`` is never handed to the turn: FastAPI closes it when the
+    # response ends, which may be before the turn does.
+    turn = _Turn(
+        workspace_id=ctx.workspace_id, chat_id=chat_id, user_id=user_id, messages=history, lane=lane,
+        message_text=message_text, mission_mode=bool(request.missionMode), plan_mode=bool(request.planMode),
+        is_super_admin=_is_super_admin(ctx), page_context=page_ctx,
     )
-
-    # PRD-237 S7: the turn is a producer task with its own DB session — the HTTP
-    # response only consumes it (services.chat_turns). A reload or navigation
-    # that drops the connection no longer kills the reply; Stop is explicit via
-    # POST /{chat_id}/cancel. The request-scoped ``db`` must not be touched here:
-    # FastAPI closes it when the response ends, which may be before the turn.
-    _ws_id = ctx.workspace_id
-    _mission_mode = bool(request.missionMode)
-    _plan_mode = bool(request.planMode)
-
-    async def _produce():
-        task_db = SessionLocal()
-        try:
-            task_service = StreamingChatService(task_db, workspace_id=_ws_id)
-            async with session_queue.acquire(session_key):
-                # PRD-239 S7 v2: a session agent lives in the Runtime Canvas — the
-                # operator talks to it in the terminal, never through this lane.
-                # Say so (S4 renders `e:` frames) and end the turn.
-                if _session_agent:
-                    from services.cli_ticket_lane import session_agent_terminal_message
-
-                    yield task_service.streaming_handler.format_aisdk_error(
-                        session_agent_terminal_message(task_db, effective_agent_id),
-                        code="session_agent_terminal",
-                    )
-                    return
-
-                # PRD-125: Emit mission suggestion data event (for frontend to render card)
-                if _suggest_mission:
-                    yield task_service.streaming_handler.format_aisdk_data(
-                        "mission-suggestion",
-                        {
-                            "goal": message_text,
-                            "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
-                            "agent_id": effective_agent_id,
-                        },
-                    )
-
-                # Normal agent streaming (RESPOND, DELEGATE, or MISSION fallback)
-                async for chunk in task_service.stream_response_with_agent(
-                    chat_id=chat_id,
-                    messages=message_history,
-                    agent_id=effective_agent_id,
-                    user_id=user_id,
-                    use_orchestrator_llm=use_orchestrator_llm,
-                    skip_composio=_skip_composio,
-                    complexity_assessment=complexity_assessment,
-                    mission_mode=_mission_mode,
-                    plan_mode=_plan_mode,
-                    suggest_mission=_suggest_mission,
-                    is_super_admin=_is_super_admin,
-                    # PRD-221 S3/S4: the sanitized reference set rides into the
-                    # turn's context_trace and the page-prior action exposure.
-                    page_context=_page_ctx,
-                ):
-                    yield chunk
-        finally:
-            task_db.close()
-
-    async def _on_complete(*, completed: bool, cancelled: bool, client_gone: bool) -> None:
-        # The client missed the end of the turn (reload, navigation): tell the
-        # reloaded page the reply landed — the PRD-205 S7 lane merges it live.
-        # A connected client already has the reply; notifying it would duplicate.
-        if not (completed and client_gone):
-            return
-        notify_db = SessionLocal()
-        try:
-            notify_chat_event(notify_db, workspace_id=_ws_id, chat_id=chat_id, user_id=user_id)
-            notify_db.commit()
-        finally:
-            notify_db.close()
-
     return StreamingResponse(
-        run_detached_turn(chat_id=chat_id, produce=_produce, on_complete=_on_complete),
+        run_detached_turn(
+            chat_id=chat_id,
+            produce=lambda: _produce_turn(turn),
+            on_complete=_notify_a_missed_reply(ctx.workspace_id, chat_id, user_id),
+        ),
         media_type="text/plain; charset=utf-8",
-        headers=response_headers,
+        headers=response_headers(lane.assessment),
     )
 
 

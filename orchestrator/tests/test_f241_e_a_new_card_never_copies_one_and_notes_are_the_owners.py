@@ -1,7 +1,10 @@
 """F241 and F265 (night 7b): a new card, its brief, and a note made in chat.
 
 - "Please give #0192 to the Shopify Support Agent" made a NEW card, #0194 "Handle task
-  #0192", and #0192 stayed in the Inbox.
+  #0192", and #0192 stayed in the Inbox. Since PRD-256 US-010 (D2) the turn is the ASSIGN
+  lane on #0192 itself, with a directive that assigns the card and forbids a new one
+  (test_autos_card_directive_assigns_the_card_and_makes_no_copy); the create tool's
+  refusal below stays as the backstop.
 - Auto's brief for #0182 told the Analyst "Use `platform_update_task_status` to mark the
   task as 'review' when complete". The agent's own move was refused, and its first
   answer said a table was made where there was none (F265).
@@ -66,6 +69,15 @@ def test_the_create_tool_files_no_copy(shop):
 
     assert out["success"] is False and "already on the board" in out["error"]
     assert shop.db.query(BoardTask).filter(BoardTask.workspace_id == shop.ws).count() == 1
+
+
+def test_autos_card_directive_assigns_the_card_and_makes_no_copy():
+    """PRD-256 US-010: a card handed to a named agent is assigned, by its number."""
+    from consumers.chatbot.auto_answers import card_directive
+
+    directive = card_directive("#0192", "Shopify Support Agent", deferred=False)
+    assert 'platform_assign_task with task_id "#0192" and agent_name "Shopify Support Agent"' in directive
+    assert "do NOT create a new card" in directive and "platform_create_task" not in directive
 
 
 def test_a_brief_loses_the_sentence_that_moves_its_card():

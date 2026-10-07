@@ -7,9 +7,10 @@ Pure, LLM-free coverage of the ASSIGN routing lane:
 - the Tier-3 assessment prompt carries the three-lane rubric with the named-agent
   and defer-phrasing signals + the target_agent JSON field;
 - roster name-matching resolves target_agent_id (exact, then contains);
-- api/chat.py's ASSIGN dispatch (apply_assign_bias) steers to the three ticket
-  tools and attaches the manager directive -- start-now vs queued vs ask-in-thread
-  -- and the ASSIGN branch is checked BEFORE the platform-hint reroute;
+- the chat dispatch's ASSIGN lane (apply_assign_bias, api/chat_dispatch.py since
+  PRD-256 US-010) steers to the three ticket tools and attaches the manager directive
+  -- start-now vs queued vs ask-in-thread -- and is checked BEFORE the platform-hint
+  reroute;
 - the ASSIGN directive is injected into the system prompt via the existing seam.
 
 No live model is called anywhere (the classifier LLM is never invoked here).
@@ -99,11 +100,14 @@ def test_assign_survives_cache_round_trip():
 
 
 def test_prompt_has_three_lane_rubric():
+    """PRD-256 US-010 (D2): the inline lane is Auto's own answer (respond); "delegate",
+    a specialist answering the owner's chat, is no longer offered."""
     p = build_assessment_prompt("do a thing", 0, "")
     # The three lanes are named and described.
-    assert "delegate" in p and "assign" in p and "mission" in p
+    assert "respond" in p and "assign" in p and "mission" in p
+    assert "**delegate**" not in p and "Most molecule/cell/organ work" not in p
     assert "Routing lanes" in p
-    assert "answers THIS conversation" in p
+    assert "answer THIS conversation yourself" in p
     assert "OFF-THREAD" in p or "off-thread" in p
 
 
@@ -121,7 +125,7 @@ def test_prompt_has_defer_phrasing_signals():
 
 def test_prompt_json_schema_offers_assign_and_target_agent():
     p = build_assessment_prompt("x", 0, "")
-    assert '"action": "respond|delegate|assign|mission"' in p
+    assert '"action": "respond|assign|mission"' in p  # PRD-256 D2: no delegate
     assert "target_agent" in p
 
 
@@ -332,19 +336,19 @@ def test_is_deferred_phrasing(phrase, deferred):
 # ---------------------------------------------------------------------------
 
 
-def test_chat_py_wires_assign_before_platform_reroute():
-    """api/chat.py handles ASSIGN, biases via apply_assign_bias, routes to Auto,
-    and the ASSIGN check precedes the RESPOND/_platform_hints branch so a
-    'platform' tool_hint can't collapse an ASSIGN into RESPOND."""
-    with open(os.path.join(_HERE, "api", "chat.py")) as f:
-        src = f.read()
-    assert "apply_assign_bias(complexity_assessment, message_text)" in src
-    assign_at = src.index("complexity_assessment.action == Action.ASSIGN")
-    respond_at = src.index("complexity_assessment.action == Action.RESPOND or _platform_hints")
-    assert assign_at < respond_at, "ASSIGN must be checked before the platform-hint reroute"
-    # ASSIGN is NOT routed to the Universal Router (that is DELEGATE/MISSION only).
-    router_line = src.index("complexity_assessment.action in (Action.DELEGATE, Action.MISSION)")
-    assert "Action.ASSIGN" not in src[router_line:router_line + 120]
+def test_the_dispatch_wires_assign_before_platform_reroute():
+    """The chat dispatch (api/chat_dispatch.py since PRD-256 US-010) handles ASSIGN on
+    Auto with apply_assign_bias, and checks it before the platform-hint reroute, so a
+    'platform' tool_hint can't collapse an ASSIGN into RESPOND. Behavioural now: the
+    source-order guard read api/chat.py's inline branch, which is gone."""
+    from api.chat_dispatch import lane_for
+
+    lane = lane_for(5, _assessment(target_agent_id=7, target_agent_name="Jim", tool_hints=["platform"]),
+                    "have Jim chase the invoices")
+    assert lane.agent_id == 5
+    assert lane.assessment.action == Action.ASSIGN
+    assert set(ASSIGN_TOOL_HINTS) <= set(lane.assessment.tool_hints)
+    assert "Manager directive" in lane.assessment.context_directive
 
 
 def test_service_py_injects_the_assign_directive():
