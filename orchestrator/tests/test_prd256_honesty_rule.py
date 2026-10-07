@@ -334,7 +334,7 @@ APPROVE = {"action": "platform_approve_mission", "params": {"mission_id": "m-1"}
 SAID_APPROVED = "I've approved the mission. It's now running."
 
 
-def _turn(monkeypatch, *, result=None, answer=SAID_APPROVED, with_loop=True):
+def _turn(monkeypatch, *, result=None, answer=SAID_APPROVED, with_loop=True, widget=False):
     """One chat turn: the loop (the model calls ``APPROVE``, then answers) or a first reply, then
     the answer's additions, the finish and the save, as the turn does them."""
     from consumers.chatbot.narration import reply_parts
@@ -342,6 +342,7 @@ def _turn(monkeypatch, *, result=None, answer=SAID_APPROVED, with_loop=True):
 
     monkeypatch.setattr(StreamingChatService, "_hidden_action_scope", lambda self, agent_id: nullcontext())
     svc, saved = _service(result), []
+    svc.widget_mode = widget
 
     async def loop():
         runtime = NS(llm_manager=_Model((answer, None)), agent_id=1, workspace_id=WS, metadata=NS(name="Auto"))
@@ -404,3 +405,11 @@ def test_the_answers_additions_take_the_receipts():
     assert inner.__code__.co_qualname == "the_answer_takes_the_receipts.<locals>.wrapped"
     # Outside a chat turn nothing is decided and nothing is added under the text.
     assert StreamingChatService._answer_additions(None, _round(SAID_APPROVED)) == []
+
+
+def test_a_public_widget_visitor_is_shown_no_lines_and_none_are_saved(monkeypatch):
+    """F155: a visitor sees no internals, and a refused call's reason is the platform's."""
+    chunks, (parts,) = _turn(monkeypatch, result=_refused("Mission m-1 is not waiting for approval."), widget=True)
+
+    assert not any(isinstance(c, str) and c.startswith('d:{"type": "receipts"') for c in chunks)
+    assert parts[-1] == {"type": "text", "text": SAID_APPROVED}

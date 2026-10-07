@@ -316,6 +316,7 @@ _LOOP: ContextVar[Optional[List[Receipt]]] = ContextVar("receipts_loop", default
 _MODEL: ContextVar[Optional[str]] = ContextVar("receipts_model", default=None)
 _SENT: ContextVar[bool] = ContextVar("receipts_sent", default=False)
 _ABOVE: ContextVar[Optional[List[str]]] = ContextVar("receipts_above", default=None)
+_VISITOR: ContextVar[bool] = ContextVar("receipts_visitor", default=False)
 
 Stream = Callable[..., AsyncGenerator[Any, None]]
 Additions = Callable[[Any, Any], List[str]]
@@ -331,8 +332,9 @@ def current_receipts() -> Optional[List[Receipt]]:
 
 
 def _settle_above(receipts: Sequence[Receipt], answer: str) -> List[str]:
-    """The turn's lines above its answer, decided once from its receipts and its answer."""
-    above = honesty_lines(receipts, answer)
+    """The turn's lines above its answer, decided once from its receipts and its answer. A public
+    widget visitor's turn has none (F155: a refused call's reason is the platform's, not theirs)."""
+    above = [] if _VISITOR.get() else honesty_lines(receipts, answer)
     _ABOVE.set(above)
     return above
 
@@ -356,7 +358,7 @@ def writes_its_receipts(turn: Stream) -> Stream:
     @functools.wraps(turn)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         for var, fresh in ((_IN_TURN, True), (_PREFETCHED, ()), (_LOOP, None), (_MODEL, None), (_SENT, False),
-                           (_ABOVE, None)):
+                           (_ABOVE, None), (_VISITOR, bool(getattr(chat, "widget_mode", False)))):
             var.set(fresh)
         handler = getattr(chat, "streaming_handler", None)
         finish = handler.format_aisdk_finish() if handler is not None else None
