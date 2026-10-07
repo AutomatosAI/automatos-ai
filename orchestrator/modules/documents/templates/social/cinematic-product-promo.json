@@ -84,7 +84,7 @@
       "type": "text",
       "label": "Chat: the breadcrumb",
       "max_chars": 30,
-      "default": "OPERATIONS · Conversations ›"
+      "default": "Messages ›"
     },
     "chat_title": {
       "type": "text",
@@ -131,7 +131,7 @@
       "type": "text",
       "label": "Chat: step 1",
       "max_chars": 22,
-      "default": "Checking memory"
+      "default": "Looking up"
     },
     "step_1_detail": {
       "type": "text",
@@ -149,7 +149,7 @@
       "type": "text",
       "label": "Chat: step 2",
       "max_chars": 22,
-      "default": "Searching docs"
+      "default": "Checking"
     },
     "step_2_detail": {
       "type": "text",
@@ -167,7 +167,7 @@
       "type": "text",
       "label": "Chat: step 3",
       "max_chars": 22,
-      "default": "platform create task"
+      "default": "Setting up"
     },
     "step_3_detail": {
       "type": "text",
@@ -203,43 +203,45 @@
       "type": "text",
       "label": "Board: title",
       "max_chars": 24,
-      "default": "Command Centre"
+      "default": "Today"
     },
     "board_working_label": {
       "type": "text",
-      "label": "Board: WORKING label",
+      "label": "Board: the first counter's label",
       "max_chars": 12,
-      "default": "WORKING"
+      "default": "ACTIVE"
     },
     "board_agents_label": {
       "type": "text",
-      "label": "Board: AGENTS label",
+      "label": "Board: the second counter's label",
       "max_chars": 12,
-      "default": "AGENTS"
+      "default": "TEAM"
     },
     "board_agents": {
       "type": "text",
-      "label": "Board: the number of agents",
+      "label": "Board: the second counter",
       "max_chars": 3,
-      "default": "9"
+      "default": "4",
+      "description": "A number, e.g. how many people work the board."
     },
     "board_queue_label": {
       "type": "text",
-      "label": "Board: QUEUE label",
+      "label": "Board: the third counter's label",
       "max_chars": 12,
-      "default": "QUEUE"
+      "default": "WAITING"
     },
     "board_attention_label": {
       "type": "text",
-      "label": "Board: ATTENTION label",
+      "label": "Board: the fourth counter's label",
       "max_chars": 12,
-      "default": "ATTENTION"
+      "default": "FLAGGED",
+      "description": "It counts the question the board raises."
     },
     "board_column_1": {
       "type": "text",
       "label": "Board: column 1",
       "max_chars": 14,
-      "default": "ASSIGNED"
+      "default": "TO DO"
     },
     "board_column_2": {
       "type": "text",
@@ -274,9 +276,9 @@
     },
     "task_1_agent": {
       "type": "text",
-      "label": "Board: task 1's agent",
+      "label": "Board: who takes task 1",
       "max_chars": 16,
-      "description": "The agent that takes it, in caps."
+      "description": "A name, a team or a tool."
     },
     "task_2_kind": {
       "type": "text",
@@ -299,9 +301,9 @@
     },
     "task_2_agent": {
       "type": "text",
-      "label": "Board: task 2's agent",
+      "label": "Board: who takes task 2",
       "max_chars": 16,
-      "description": "The agent that takes it, in caps."
+      "description": "A name, a team or a tool."
     },
     "task_3_kind": {
       "type": "text",
@@ -324,9 +326,9 @@
     },
     "task_3_agent": {
       "type": "text",
-      "label": "Board: task 3's agent",
+      "label": "Board: who takes task 3",
       "max_chars": 16,
-      "description": "The agent that takes it, in caps."
+      "description": "A name, a team or a tool."
     },
     "task_4_kind": {
       "type": "text",
@@ -349,9 +351,9 @@
     },
     "task_4_agent": {
       "type": "text",
-      "label": "Board: task 4's agent",
+      "label": "Board: who takes task 4",
       "max_chars": 16,
-      "description": "The agent that takes it, in caps."
+      "description": "A name, a team or a tool."
     },
     "task_unassigned": {
       "type": "text",
@@ -363,13 +365,13 @@
       "type": "text",
       "label": "Ask: who asks",
       "max_chars": 36,
-      "description": "e.g. 'Agent #274 · board_task:297'."
+      "description": "e.g. a name and a reference."
     },
     "ask_badge": {
       "type": "text",
       "label": "Ask: the badge",
       "max_chars": 12,
-      "default": "NEEDS YOU"
+      "default": "QUESTION"
     },
     "ask_question": {
       "type": "text",
@@ -414,7 +416,7 @@
       "type": "text",
       "label": "Ask: the confirmation",
       "max_chars": 40,
-      "default": "Answered — the agent is resuming"
+      "default": "Answered — back to work"
     },
     "night_date": {
       "type": "text",
@@ -488,13 +490,13 @@
       "type": "text",
       "label": "Outputs: eyebrow",
       "max_chars": 44,
-      "default": "Outputs · The work that landed"
+      "default": "Results · What came back"
     },
     "outputs_title": {
       "type": "text",
       "label": "Outputs: title",
       "max_chars": 24,
-      "default": "Deliverables"
+      "default": "Finished work"
     },
     "outputs_lead": {
       "type": "text",
@@ -519,29 +521,29 @@
       "type": "text",
       "label": "Outputs: filter 1",
       "max_chars": 12,
-      "default": "Reports"
+      "default": "All"
     },
     "outputs_pill_2": {
       "type": "text",
       "label": "Outputs: filter 2",
       "max_chars": 12,
-      "default": "Drafts"
+      "default": "New"
     },
     "outputs_pill_3": {
       "type": "text",
       "label": "Outputs: filter 3",
       "max_chars": 12,
-      "default": "Pages"
+      "default": "Shared"
     },
     "outputs_pill_4": {
       "type": "text",
       "label": "Outputs: filter 4",
       "max_chars": 12,
-      "default": "Sheets"
+      "default": "Saved"
     },
     "output_1_agent": {
       "type": "text",
-      "label": "Outputs: card 1's agent",
+      "label": "Outputs: who made card 1",
       "max_chars": 16
     },
     "output_1_kind": {
@@ -556,7 +558,7 @@
     },
     "output_2_agent": {
       "type": "text",
-      "label": "Outputs: card 2's agent",
+      "label": "Outputs: who made card 2",
       "max_chars": 16
     },
     "output_2_kind": {
@@ -571,7 +573,7 @@
     },
     "output_3_agent": {
       "type": "text",
-      "label": "Outputs: card 3's agent",
+      "label": "Outputs: who made card 3",
       "max_chars": 16
     },
     "output_3_kind": {
@@ -586,7 +588,7 @@
     },
     "output_4_agent": {
       "type": "text",
-      "label": "Outputs: card 4's agent",
+      "label": "Outputs: who made card 4",
       "max_chars": 16
     },
     "output_4_kind": {
@@ -601,39 +603,43 @@
     },
     "team_line_1": {
       "type": "text",
-      "label": "Team: line 1",
+      "label": "Team: the line about the team",
       "max_chars": 24,
-      "default": "Hire the agents."
+      "description": "What the team does with the product, e.g. One place for the team. Spoken."
     },
     "team_line_2": {
       "type": "text",
       "label": "Team: line 2",
       "max_chars": 16,
-      "default": "Equip them with"
+      "default": "",
+      "description": "Leave empty for none."
     },
     "team_line_2_accent": {
       "type": "text",
       "label": "Team: line 2's accent",
       "max_chars": 10,
-      "default": "skills."
+      "default": "",
+      "description": "In the brand colour. Leave empty for none."
     },
     "team_line_3": {
       "type": "text",
       "label": "Team: line 3",
       "max_chars": 14,
-      "default": "Let them"
+      "default": "",
+      "description": "Leave empty for none."
     },
     "team_line_3_accent": {
       "type": "text",
       "label": "Team: line 3's accent",
       "max_chars": 10,
-      "default": "work."
+      "default": "",
+      "description": "In the brand colour. Leave empty for none."
     },
     "team_roster": {
       "type": "text",
-      "label": "Team: the agents",
+      "label": "Team: the names on the board",
       "max_chars": 160,
-      "description": "Up to nine agent names in caps, separated by commas."
+      "description": "Up to nine names, separated by commas: people, teams or tools."
     },
     "team_idle": {
       "type": "text",
@@ -888,7 +894,8 @@
     "beat_4": "The books.",
     "cap_question": "When it matters, they ask you first.",
     "cap_morning": "By morning, it's done.",
-    "cap_outputs": "Every report, reply and reorder, in one place."
+    "cap_outputs": "Every report, reply and reorder, in one place.",
+    "team_line_1": "One place for the team."
   },
   "preview": {
     "at": [
