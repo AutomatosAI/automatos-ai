@@ -1,0 +1,290 @@
+{
+ "roster": [
+  "Auto",
+  "Brand Designer",
+  "Social Media Director",
+  "Jim",
+  "NEWSROOM",
+  "Support Agent"
+ ],
+ "templates": [
+  "Harbourline Invoice",
+  "Branded Invoice",
+  "Quote card"
+ ],
+ "routes": [
+  {
+   "category": "wrong-routing",
+   "said": "Help me design my brand.",
+   "opening": false,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Can you improve the kit? It looks dated.",
+   "opening": false,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Make our templates match the new logo.",
+   "opening": false,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Less orange, please.",
+   "opening": false,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Make the orange an accent only",
+   "opening": false,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "More space between sections",
+   "opening": false,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Warmer, please",
+   "opening": true,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Warmer, please",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Make our invoice template look like us.",
+   "opening": false,
+   "lane": "ASSIGN Brand Designer",
+   "note": "brand-designer-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Auto: my social media person should draft the October Harvest Club post.",
+   "opening": false,
+   "lane": "ASSIGN Social Media Director",
+   "note": "socials-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Can you get my social media director to do a 15-second video of our top three cafés?",
+   "opening": false,
+   "lane": "ASSIGN Social Media Director",
+   "note": "socials-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Draft an Instagram post for the October Harvest Club box.",
+   "opening": false,
+   "lane": "ASSIGN Social Media Director",
+   "note": "socials-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Make a carousel for the Harvest Club: two coffees, £32, on sale Monday.",
+   "opening": false,
+   "lane": "ASSIGN Social Media Director",
+   "note": "socials-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Have our social media team put together a LinkedIn post about the wholesale offer.",
+   "opening": false,
+   "lane": "ASSIGN Social Media Director",
+   "note": "socials-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Get Jim to make a carousel for the Harvest Club.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Ask NEWSROOM to draft a LinkedIn post about the wholesale offer.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Can you make me a wholesale price list for cafés, as a spreadsheet? Every coffee we sell, price per kg, minimum order, carriage and payment terms.",
+   "opening": true,
+   "lane": "tiers",
+   "note": "paperwork-team-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Write the Quay letter: to Maya Osei, moving to 30-day terms from 1 November.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "paperwork-team-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Please draft a quote for Rosa, 10 kg vs 12 kg of Harbour Blend.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "paperwork-team-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Do me a flyer for the October Harvest Club box.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "paperwork-team-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Put together an invoice for Salt Kitchen: 8 kg Harbour Blend at £22.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "paperwork-team-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Design a flyer in our brand colours for the Harvest Club.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "paperwork-team-ticket"
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Give #0192 to the Support Agent",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Ask Jim to chase the Salt Kitchen invoice.",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-routing",
+   "said": "Plan next week's roasting schedule",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Make the Lantern Kitchen invoice on my Harbourline Invoice template.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "named-template"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Make an invoice for Salt Kitchen on my Seaside Invoice template.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "template-not-found"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Can you write the Quay letter yourself? I want it now.",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Make the carousel yourself, don't bother the team.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Improve the kit, but don't bother the team.",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-tool",
+   "said": "What colour is our accent?",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Did Rosa pay the invoice from September?",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Send the invoice to Rosa.",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Which Instagram posts are waiting for approval?",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Approve the Harvest Club post.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Make a flyer for our Instagram.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "How do I give my agent two photos?",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Make a quote card post on my Quote card template.",
+   "opening": false,
+   "lane": "tiers",
+   "note": "how-socials-works"
+  },
+  {
+   "category": "wrong-tool",
+   "said": "Fix the font size in the table.",
+   "opening": false,
+   "lane": "tiers",
+   "note": null
+  }
+ ]
+}

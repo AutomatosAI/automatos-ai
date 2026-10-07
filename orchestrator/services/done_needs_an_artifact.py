@@ -14,7 +14,7 @@ A card's kind is read from its own brief, with the detectors the platform alread
   write) that has rendered, needs no render, or a person has already approved. With
   Socials off for the workspace no post can be made, so nothing is checked, as in F380;
 * a **document** card: the brief asks for customer paperwork
-  (``paperwork_to_the_team.asks_for_paperwork``), or names ``generate_document``, which is
+  (``handoffs.asks_for_paperwork``, the paperwork row's words), or names ``generate_document``, which is
   how a card Auto files from chat for a Deliverable says what to make. It needs a
   Deliverable registered on the card (``source_type='task'``, the card's id; a document
   generated while working it, a file its agent wrote, a session's files);
@@ -76,7 +76,7 @@ class ArtifactNeed:
 def artifact_need(task: Any) -> Optional[ArtifactNeed]:
     """The artifact ``task``'s brief asks for, or None for a card that asks for none. Pure."""
     # Read when called: the chatbot package's __init__ loads the chat service, which reaches the board.
-    from consumers.chatbot.paperwork_to_the_team import asks_for_paperwork
+    from consumers.chatbot.handoffs import asks_for_paperwork
 
     if getattr(task, "source_type", None) in ENGINE_CARD_SOURCES:
         return None

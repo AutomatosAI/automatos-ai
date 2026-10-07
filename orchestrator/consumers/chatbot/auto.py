@@ -36,8 +36,7 @@ from sqlalchemy.orm import Session
 from consumers.chatbot import auto_decisions
 from consumers.chatbot.auto_answers import agents_named_in, auto_always_answers  # PRD-256 US-010 (D2)
 from consumers.chatbot.board_questions import about_the_board
-from consumers.chatbot.brand_assign_lane import brand_work_goes_to_the_designer  # F362 (night 10c)
-from consumers.chatbot.socials_assign_lane import social_media_role, social_work_goes_to_the_director  # F379
+from consumers.chatbot.handoffs import hands_off, social_media_role  # PRD-256 US-011: one hand-off table
 from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_engine
 
 # PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
@@ -830,8 +829,7 @@ class AutoBrain:
     # Main entry point
     # ------------------------------------------------------------------
 
-    @brand_work_goes_to_the_designer  # F362: a brand ask is the Brand designer's ticket (PRD-255 US-014)
-    @social_work_goes_to_the_director  # F379 (night 11): social media work is the Social Media Director's ticket
+    @hands_off  # PRD-256 US-011: brand, social media and paperwork asks go to their owners on tickets
     @auto_always_answers  # PRD-256 US-010 (D2): Auto answers; a named agent gets a ticket
     async def assess(
         self,
