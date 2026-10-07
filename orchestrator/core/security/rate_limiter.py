@@ -46,6 +46,9 @@ DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # (job_title / team / description updates etc.) no longer starves
     # itself or mission tasks running in parallel.
     "platform_write":  config.rate_limit_for("platform_write", 60, 60),     # 60 write/destructive actions per minute, per subject
+    # #848: guessing a pairing code (8 characters, 10 minutes) once session mode is reachable
+    # beyond loopback, e.g. through a cluster's ingress. One bucket for the instance.
+    "cli_host_pair":   config.rate_limit_for("cli_host_pair", 10, 600),     # 10 pairing attempts per 10 minutes
 }
 
 

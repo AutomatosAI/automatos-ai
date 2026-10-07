@@ -27,13 +27,17 @@ from core.auth.dependencies import RequestContext
 from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
 from core.models.cli_hosts import CliHost, CliHostStatus
+from core.security.rate_limiter import check_rate_limit
 from services import cli_host_service as svc
+from services import session_uploads as uploads
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/cli-hosts", tags=["cli-hosts"])
 
 HOST_TOKEN_HEADER = "X-CLI-Host-Token"
+# #848: pairing attempts share one bucket per instance (``cli_host_pair`` in rate_limiter).
+PAIR_RATE_LIMIT_SCOPE = "instance"
 
 
 def _require_cli_runtime() -> None:
@@ -134,6 +138,8 @@ class ResultRequest(BaseModel):
     exit_reason: Optional[str] = None
     transcript_path: Optional[str] = None
     resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (host clock, ISO)
+    # #848: the files this run uploaded, as paths in the ticket's deliverables folder.
+    uploaded_files: List[str] = Field(default_factory=list, max_length=500)
 
 
 # ── operator surface ─────────────────────────────────────────────────────────
@@ -290,6 +296,7 @@ async def create_pairing_code(
 async def pair(body: PairRequest, db: Session = Depends(get_db)):
     """Exchange a pairing code for a host token (returned exactly once)."""
     _require_cli_runtime()
+    await check_rate_limit(PAIR_RATE_LIMIT_SCOPE, "cli_host_pair")
     paired = svc.pair_host(db, body.code, body.name, body.capabilities)
     if paired is None:
         raise HTTPException(status_code=401, detail="invalid or expired pairing code")
@@ -336,6 +343,26 @@ async def events(
         raise HTTPException(status_code=404, detail=str(exc))
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
+
+
+@router.put("/{host_id}/tasks/{task_id}/files")
+async def upload_file(
+    task_id: int,
+    request: Request,
+    path: str = Query(..., min_length=1, max_length=uploads.MAX_UPLOAD_PATH_CHARS),
+    host: CliHost = Depends(require_cli_host),
+    db: Session = Depends(get_db),
+):
+    """#848: one file the session left in the ticket's deliverables folder, as the
+    raw request body, from a host that shares no folder with this backend."""
+    try:
+        return await uploads.store_session_file(db, host, task_id, path, request.stream())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except uploads.SessionUploadRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.post("/{host_id}/tasks/{task_id}/result")

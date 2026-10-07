@@ -85,6 +85,7 @@ class SessionOutcome:
     transcript_path: Optional[str] = None
     effective_cwd: Optional[str] = None
     resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (ISO, host clock)
+    uploaded_files: List[str] = field(default_factory=list)  # #848: paths in the deliverables folder
 
     def as_result_payload(self, attempt: int) -> Dict[str, Any]:
         return {
@@ -102,6 +103,7 @@ class SessionOutcome:
             # the directory `claude --resume` and the editor links must open.
             "effective_cwd": self.effective_cwd,
             "resets_at": self.resets_at,
+            "uploaded_files": self.uploaded_files,
         }
 
 

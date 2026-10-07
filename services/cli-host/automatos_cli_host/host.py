@@ -20,12 +20,13 @@ import socket
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import state
 from . import __version__
-from .allowlist import NotAllowed, choose_default_root
+from .allowlist import NotAllowed, choose_default_root, session_deliverables_dir
 from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import hook_server_for
@@ -34,6 +35,7 @@ from .lifecycle import install_signal_handlers, watch_restart_requests
 from .procs import pid_alive
 from .session import Session, host_capabilities
 from .terminal_server import MAX_TERMINALS, TerminalServer
+from .uploads import upload_deliverables
 
 log = logging.getLogger("automatos.cli_host")
 
@@ -372,6 +374,7 @@ class Host:
             outcome = session.run()
             if outcome.status == "usage_limit":
                 self._pause_cli(session.cli, outcome.resets_at, outcome.error or f"paused: {session.cli} usage limit")
+            outcome = replace(outcome, uploaded_files=self._upload(ticket, outcome))
             self.pending_results[task_id] = outcome.as_result_payload(session.attempt)
 
         t = threading.Thread(target=_runner, name=f"session-{task_id}", daemon=True)
@@ -379,6 +382,14 @@ class Host:
         t.start()
         self._record_process(task_id, session)
         log.info("task %s claimed (agent %s, provider %s)", task_id, ticket.get("agent_name"), ticket.get("provider"))
+
+    def _upload(self, ticket: Dict[str, Any], outcome: Any) -> List[str]:
+        """#848: a backend that shares no folder with this host (a cluster) gets the
+        session's deliverables before its result; a paused or stopped run sends none."""
+        if outcome.status in ("usage_limit", "host_stopped"):
+            return []
+        folder = session_deliverables_dir(self.default_root, str(ticket.get("task_id")))
+        return upload_deliverables(self.api, self.identity["host_id"], ticket, folder, outcome.files_touched)
 
     def _record_process(self, task_id: str, session: Session) -> None:
         # The pid is known only after spawn; record a placeholder now and the pid on flush.
