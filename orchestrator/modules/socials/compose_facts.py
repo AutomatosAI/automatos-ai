@@ -13,6 +13,8 @@ says rather than how it is built:
   the current take and the bound sources do not hold is a warning; a handle field takes the
   brand kit's handle only.
 * **The model's own questions** (``questions`` in its answer) are kept, text only.
+* **Sources** (B1, ``compose_sources.py``): a claim stays bound only to a source that holds
+  its figure, and the source line names that source, words the brief gives, or nothing.
 * **A photo the template shows** (B19, ``compose_photos.py``): a required one is a warning
   and an owner's question, an optional one a warning.
 * **A required field left blank** is taken out, so it is asked for (``compose.py``'s
@@ -23,10 +25,10 @@ Each check returns what it found; ``checked_proposal`` adds it to the warnings a
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any, Dict, List, Mapping, Set, Tuple
 
 from core.social_text_values import PLACEHOLDER_PATTERNS, placeholder_label
-from modules.socials import compose_given, compose_photos
+from modules.socials import compose_given, compose_photos, compose_sources
 
 BASE = "base"
 MAX_QUESTIONS = 10
@@ -105,6 +107,12 @@ def checked(proposal: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
     """``proposal`` (``compose_checks``' checked shape) with what it says checked against
     what the composer was given (``ctx``): its warnings and the owner's questions added."""
     warnings, questions = placeholder_notes(proposal.get("copy") or {})
-    proposal, given = compose_given.given_notes(without_blank_required(proposal), ctx)
+    proposal, sourced = compose_sources.source_notes(without_blank_required(proposal), ctx)
+    proposal, given = compose_given.given_notes(proposal, ctx)
     photo_warnings, photo_questions = compose_photos.photo_notes(proposal, ctx)
-    return with_notes(proposal, [*warnings, *given, *photo_warnings], [*questions, *photo_questions])
+    return with_notes(proposal, [*warnings, *sourced, *given, *photo_warnings], [*questions, *photo_questions])
+
+
+def unaskable(proposal: Mapping[str, Any], ctx: Any) -> Set[str]:
+    """The fields the follow-ups never ask the model for: only the owner can give them."""
+    return compose_sources.unaskable(proposal, ctx)

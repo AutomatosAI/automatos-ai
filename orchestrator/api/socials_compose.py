@@ -49,7 +49,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.models.workspaces import Workspace
 from core.social_templates import SOCIAL_TEMPLATE_FORMATS
 from modules.documents.brand_kit import get_brand_kit
-from modules.socials import compose, compose_photos, history, service, voice_examples
+from modules.socials import compose, compose_photos, compose_sources, history, service, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import social_channels
 from modules.socials.compose_checks import template_kind
@@ -66,8 +66,9 @@ router = APIRouter()
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 BRIEF_MAX_CHARS = 4000
 MAX_CHANNELS = 10
-# Candidate sources: the newest of each kind, and each address the brief quotes.
-CANDIDATES_PER_KIND = 8
+# Candidate sources (F378): those matching each of the brief's words, per kind, and each address it quotes.
+CANDIDATES_PER_TERM = 3
+MAX_CANDIDATES = 24
 MAX_BRIEF_URLS = 5
 # F378: the block keys a template may declare who it is made for with (fix/n11-video adds the gate).
 MADE_FOR_KEYS = ("made_for", "fits")
@@ -198,12 +199,18 @@ def _takes_text(channel: Any) -> bool:
 
 
 def candidate_sources(db: Session, workspace_id: UUID, brief: str) -> List[Dict[str, Any]]:
-    """What a claim may be bound to: the workspace's newest of each kind, and each
-    address the brief quotes."""
-    found = post_sources.search(db, workspace_id, q="", limit=CANDIDATES_PER_KIND)
+    """What a claim may be bound to: the workspace's sources that match the brief's words
+    (F378, B1: never the newest of each kind whatever the brief says), and each address the
+    brief quotes; each once, ``MAX_CANDIDATES`` at most."""
+    found: List[Dict[str, Any]] = []
+    for term in compose_sources.brief_terms(brief):
+        found += post_sources.search(db, workspace_id, q=term, limit=CANDIDATES_PER_TERM)
     for url in _URL.findall(brief)[:MAX_BRIEF_URLS]:
         found += post_sources.search(db, workspace_id, kind="url", q=url, limit=1)
-    return found
+    unique: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for candidate in found:
+        unique.setdefault((str(candidate.get("kind")), str(candidate.get("ref"))), candidate)
+    return list(unique.values())[:MAX_CANDIDATES]
 
 
 def builtin_skills(db: Session) -> Dict[str, str]:

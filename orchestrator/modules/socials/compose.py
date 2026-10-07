@@ -346,7 +346,7 @@ async def _filled(raw: Mapping[str, Any], proposal: Dict[str, Any], ctx: Compose
     given: Dict[str, Any] = dict(raw.get("variables")) if isinstance(raw.get("variables"), dict) else {}
     declined: Set[str] = set()
     for _round in range(FILL_ROUNDS):
-        names = [name for name in _missing(proposal) if name not in declined]
+        names = [name for name in _missing(proposal) if name not in declined | compose_facts.unaskable(proposal, ctx)]
         if not names or deadline - _now() <= 0:
             break
         fills, nulls = await _fill_round(llm, history, schema, given, names, timeout, deadline)
