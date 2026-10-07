@@ -1,0 +1,144 @@
+{
+  "decisions": [
+    "D1 (owner-only list, PRD §9 Q1): OWNER_ONLY_ACTIONS = platform_update_task_status and platform_update_task when the status is done or cancelled; platform_assign_tool_to_agent; platform_unassign_tool_from_agent; platform_update_agent; platform_update_system_setting; platform_create_mission; platform_approve_mission; platform_cancel_mission; platform_publish_blog_post; platform_submit_social_post; every Composio send/publish action. The kit's reading of the PRD; the owner trims the list before launch by editing this line.",
+    "D7 (the baseline): the eval runner and set live OUTSIDE the repo (~/.automatos-analyst/auto-eval/, gold data). The loop NEVER runs it and never writes it; the baseline (arms A and C, about $6) is the owner's run. US-007 in this wave is the docs page and the CI-visible contract only.",
+    "D8 (receipts source): receipts are built from the in-process ToolExecutionTracker.outcomes at save time, never from tool_execution_logs (it stores parameter names only, no result, no chat id).",
+    "D9 (one PR per wave): story commits end with ' [skip ci]'; the runner pushes them as a backup to a branch that has NO pull request, so test.yml does not run (since #993 it runs on pull_request and push-to-main only). The runner opens the wave's draft PR once, when the build is COMPLETE, which starts the wave's single CI run; the acceptance gate reads that run.",
+    "D10 (the families): action_claims / document_claims / shop_and_team_claims are FROZEN in this wave (no new pattern; a test pins their counts) and deleted in Wave 2 US-012 only after the receipts rule is proven."
+  ],
+  "project": "PRD-256 Auto, receipts not narration — Wave 1: receipts, honesty, gates, tool contracts, the instrument",
+  "branchName": "feat/prd-256-w1-receipts-gates",
+  "baseBranch": "main",
+  "description": "Wave 1 of PRD-256 (docs/PRDS/PRD-256-AUTO-RECEIPTS-GATES-CONTRACTS.md, seeded onto the branch by the runner). US-001..US-007 in priority order: the receipts part (built from the tool tracker, shown above the text, saved, DELEGATE turns too); one honesty rule driven by receipts (the families frozen); memory takes receipts; the owner's click on owner-only actions through the existing grant card; done needs an artifact; strict first-class schemas for Auto's write actions and 'a refused write is reported refused'; the docs page for the instrument. No migration. The decisions above answer the PRD's §9 for this wave and are binding. Browser checks and every eval run are the owner's (ownerTest below); the loop never runs a browser, a server, a test suite or the eval, and never marks those DONE. Diff base for every check: `bash scripts/ralph/acceptance-prd256w1.sh --print-base`.",
+  "ownerTest": [
+    "Before or beside the launch: the baseline eval, arms A (today's Gemini) and C (Sonnet 5), on today's build: `cd ~/Development/Automatos-AI-Platform/automatos-ai && python3 ~/.automatos-analyst/auto-eval/replay.py --arm gemini-0.7 --yes` then `--arm sonnet-5 --yes` (about $6). Its two lines in runs/results.md are the 'before'.",
+    "US-001 in the browser (1440 px and 390 px) on the local stack after merge: a turn that only stored a memory shows 'No actions on the board' above the text; a turn that made a ticket shows its number and a link; reload shows the same block; a turn with no calls shows 'No actions in this turn.'",
+    "US-004 in the browser: 'Cancel #<a card in review>' from chat shows the approval card naming the card and 'cancel'; nothing moves until Approve; after Approve the card is Cancelled and the note is signed by you.",
+    "After merge: the post-wave eval, arms A and C again; the delta against the baseline on the four rates is the wave's exit criterion (PRD §10).",
+    "Both editions: the same checks on the local stack and, after deploy, on SaaS."
+  ],
+  "userStories": [
+    {
+      "id": "P256-W1-US-001",
+      "title": "The receipts part",
+      "description": "As an owner, I want every reply to start with what Auto actually did this turn, written by the platform from the calls that ran, so I never have to take the text's word for it.",
+      "acceptanceCriteria": [
+        "A new module `orchestrator/consumers/chatbot/receipts.py` builds `receipts` from `executor.tracker.outcomes` (ToolExecutionTracker.outcomes + call_effects): one entry per call `{action, kind: read|write, status: done|refused|skipped, subject, effect, link, reason}`; the subject is the thing by number or name (card #0422, agent name, document title, post title); the effect is call_effects in plain words ('moved to Done', 'sent back to its agent', 'tool added'); a refused call carries the executor's reason, trimmed to one line.",
+        "The automatic reads (retrieval first, the Needs-you read, the team-findings read; everything in `prefetched`) fold into ONE read entry ('read your documents and the board').",
+        "After the loop, `_stream_tool_loop` emits one frame `d:{\"type\":\"receipts\",\"data\":{\"receipts\":[...]}}` through StreamingHandler, before the answer's additions; the frame carries the model that answered (`response.model` when the provider reports it).",
+        "`reply_parts` (consumers/chatbot/narration.py) gains the part `{\"type\":\"receipts\",\"receipts\":[...]}`; it is saved with the message at the save in service.py; a turn with no calls saves `receipts: []`. The model never sees the part and cannot write it.",
+        "Every path through stream_response_with_agent gets receipts: the first-reply path, the tool loop, the forced-synthesis path, and DELEGATE turns answered by another agent.",
+        "Frontend: `frontend/types/chat.ts` MessagePart union gains `{type:'receipts'; receipts: Receipt[]}`; `frontend/lib/chat/hooks.ts` absorbs the frame; `frontend/components/chatbot/message.tsx` renders the block ABOVE the reply text, live from the frame and on reload from the part, reusing ActivityTrail's chip layout; empty → 'No actions in this turn.'; a refused write → 'tried, refused: <reason>'. A message with no receipts part (every message before this PRD) renders as today.",
+        "Tests: `orchestrator/tests/test_prd256_receipts_part.py` with a fake loop (store_memory-only turn → one write receipt and 'No actions on the board'; no-call turn → []; refused generate_document → status refused with the reason; update_task_status to done → subject '#0422', effect 'moved to Done'; a DELEGATE turn gets receipts); a vitest `frontend/components/chatbot/__tests__/receipts.test.tsx` (live frame, reload from the part, empty state, refused line).",
+        "service.py does not grow: the builder, the frame and the fold live in the new module; the save call changes by one argument.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Subjects come from call_params(tool_name, tool_args) and the result envelope (task_id/workspace_seq, agent name, document title/id, post id); a link is the UI route for the subject when one exists (board card, deliverable, agent)."
+    },
+    {
+      "id": "P256-W1-US-002",
+      "title": "One honesty rule from receipts",
+      "description": "As an owner, I want the 'I haven't done that' line to come from the receipts, not from a vocabulary of phrasings, so it fires when nothing ran and never when something did.",
+      "acceptanceCriteria": [
+        "`_answer_additions` takes the receipts (via the receipts module, not new code in service.py). When no write receipt has status done and the answer has a first-person completed-action sentence (ONE generic pattern: \"I've/I have <past-tense verb>\", \"it's now on your board\", \"has been <verb>\", \"you should now see\"), the line \"Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it done.\" is placed ABOVE the text. When a write receipt is done, no line fires, whatever the families say.",
+        "A refused write gets its own line above the text: \"I tried to <action in plain words> and it didn't go through: <reason>.\"",
+        "claim_check.py keeps tier 2 (ids that do not exist in the workspace) and stops using tiers 1 and 3 for the correction line; the in-loop nudge (tool_loop._recover_claimed_action) keeps using the families until Wave 2 US-012.",
+        "The families are FROZEN: a test `test_prd256_families_frozen` pins the number of `_Family(` entries in action_claims.py, document_claims.py and shop_and_team_claims.py at today's counts (no growth).",
+        "The 22-sentence replay from the review (AUTO-REVIEW-FINDINGS.md §2.1, reproduced in the test) passes 22/22 under the receipts rule; the three false denials (F319, F337, F363: a successful send-back, generate_document, create_task) fire NO line; the existing F319 'a call that did it is never denied' tests still pass.",
+        "Tests: `orchestrator/tests/test_prd256_honesty_rule.py` with the 25 cases driven by receipts.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P256-W1-US-003",
+      "title": "Memory takes receipts",
+      "description": "As an owner, I want Auto's memory to remember what was done, not what was said, so a corrected false claim is not remembered as a fact next turn.",
+      "acceptanceCriteria": [
+        "`_post_response` passes the receipts and the answer to `SmartChatIntegration.store` (consumers/chatbot/integration.py), and the distillation prompt in smart_memory.py is told which is the record of actions and which is the reply.",
+        "A turn whose receipts are empty and whose text says 'I've created the ticket' stores no fact that a ticket was created; a turn with a done receipt for platform_create_task stores the ticket's number.",
+        "Tests: `orchestrator/tests/test_prd256_memory_takes_receipts.py` on the distilled facts with a fake model.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P256-W1-US-004",
+      "title": "The owner's click on owner-only actions",
+      "description": "As an owner, I want approvals, cancellations, agent and tool changes, settings and anything that publishes or sends to wait for my click when they come from chat, so Auto's words alone can never act or sign for me.",
+      "acceptanceCriteria": [
+        "A new small module `orchestrator/modules/tools/discovery/owner_only.py` holds `OWNER_ONLY_ACTIONS` exactly as Decision D1 lists them, with the status condition for the two task actions, and `is_owner_only(action_name, params) -> bool`.",
+        "In `PlatformExecutor.execute` (modules/tools/discovery/platform_executor.py), when `caller_context.driving_user_id` is set and `is_owner_only(...)` is true, the executor returns the confirmation ask through `tool_grants.attach_ask_grant` exactly as a requires_confirmation action does today; the ask names the subject (the card by number) and the verb; the owner's click resumes the call through the existing grant path (consume_tool_grant). Agent runs, playbook steps and heartbeats (no driving user) are unchanged.",
+        "The note a card gets from a chat-driven move is written only when the owner clicked, and signed by the user who clicked (services/board_consent.actor_from_user_id); never on Auto's call alone.",
+        "follows_the_owner.py no longer imports or applies APPROVE, CANCEL or GO_AHEAD from owner_turn.py (those paths and their helpers are deleted, not shimmed); 'the card the owner named is the card acted on' (a card number never reaches a non-card write tool; no copy instead of the named card) stays with its tests.",
+        "'Cancel #0422' from chat produces an ask naming #0422 and 'cancel'; nothing moves until the click; the policy plane (AUTOMATOS_POLICY_PLANE) is NOT required for this gate; both editions.",
+        "The hierarchy gate (orchestrator/scripts/check_hierarchy_gate.py) passes: no ActionDefinition moves outside registry.register.",
+        "Tests: `orchestrator/tests/test_prd256_owner_actions_wait_for_the_click.py` (the ask, the resume on a grant, the agent-run bypass, the note's signer, a status move to in_progress is NOT owner-only); the F280-A tests updated, each change with its reason in the test's docstring.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Touches permissions and guardrails: the owner confirmed the list by launching this kit (Decision D1). Review in the FOREGROUND before the commit (the execution contract)."
+    },
+    {
+      "id": "P256-W1-US-005",
+      "title": "Done needs an artifact (F380)",
+      "description": "As an owner, I want a card to close as Done only when the thing it was for exists, so 'done' on my board means something was made.",
+      "acceptanceCriteria": [
+        "`update_board_task_status` (modules/tools/discovery/handlers_board_task_done.py) and the board's approve route (api/board_tasks.py) refuse a move to Done for a card whose kind requires an artifact (a social post card: a rendered post; a document card: a Deliverable; a card chat made for a deliverable: that deliverable) when none is linked; the refusal names what is missing in plain words and leaves the card in Review.",
+        "The artifact rule lives in ONE function shared by the tool and the route (no second copy).",
+        "A card with no artifact kind (a question answered in text) moves to Done as today.",
+        "Tests: `orchestrator/tests/test_prd256_done_needs_artifact.py` with a fixture card of each kind, with and without the artifact, through the tool and through the route.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P256-W1-US-006",
+      "title": "Tool contracts for Auto's writes",
+      "description": "As an owner, I want Auto's writes to land first time, so a failed call never has the chance to be reported as done.",
+      "acceptanceCriteria": [
+        "The write actions are PROMOTED and PINNED so `ActionRegistry.to_first_class_schemas` ships them as their own tools outside the dispatcher's enum: platform_create_task, platform_update_task, platform_update_task_status, platform_assign_task, platform_create_mission, platform_execute_playbook, platform_schedule_playbook, platform_create_social_post, platform_store_memory, platform_get_task, platform_query_data. Mechanism: the registry's promoted set plus `TOOL_ROUTING_PROMOTION_PINS` (an existing key; names added, no new key).",
+        "Each promoted schema is strict: every required field listed in `required`; `status` an enum of the board's own words; `params` typed as an object with its fields named; no free-text catch-all. platform_execute still decodes a JSON-string `params` (F181); the promoted tools never need it.",
+        "The ATOM lane ships the promoted tools beside the dispatcher (service.py's ATOM branch calls the same first-class builder; the change is a call, not new code in service.py).",
+        "After a refused write, the loop's nudge (modules/tools/execution/nudges.py) says: a reply after a refused write states the write was refused and why; it never reports it done. The Auto system prompt (modules/context/sections or services/brief_facts.AUTO_OWNER_RULES, whichever the rules block reads) carries the same one rule.",
+        "`check_hierarchy_gate.py` passes; the promoted actions keep their permission levels; the `[tool-shadow]` surface log still reports shipped versus would-be-first-class counts.",
+        "Tests: `orchestrator/tests/test_prd256_tool_contracts.py`: a schema test per promoted tool (required fields, enums, params as object); a loop test with a refused write and a fake model that claims success, asserting the nudge text; a test that the ATOM surface includes the promoted tools.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "The review's join (AUTO-REVIEW-FINDINGS.md Appendix D): the used action sat outside the ranked top-15 on 53% of dispatcher calls, led by exactly these actions."
+    },
+    {
+      "id": "P256-W1-US-007",
+      "title": "The instrument, documented; the baseline is the owner's",
+      "description": "As the owner, I want the eval instrument written down beside the other test docs, so every wave and every model is measured against the same 'before' and anyone can read the results table.",
+      "acceptanceCriteria": [
+        "A page `docs/testing/AUTO-EVAL.md`: what the eval measures (the seven rules), where the set and runner live (local, gold, never committed), how an arm is run and restored, how to read `runs/results.md`, the rule that it spends money and runs in c1 only, and the pass bars from PRD §8.",
+        "The page names the receipts frame and part as the scoring source once US-001 ships, and the claim checker inside the backend container before that.",
+        "→ OWNER: the baseline (arms A and C) on today's build, about $6, before or beside this wave; its two lines are the first in runs/results.md.",
+        "→ OWNER: the post-wave run (arms A and C) after this wave merges; the delta against the baseline is the exit criterion.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "The loop never runs the eval, never reads ~/.automatos-analyst, and never writes a results line."
+    }
+  ]
+}
