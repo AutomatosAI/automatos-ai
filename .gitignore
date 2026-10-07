@@ -10,6 +10,7 @@ envs/*.local
 # Ralph overnight-run scratch — local-only, never tracked (repeated merge landmine)
 scripts/ralph/
 .claude/ralph-loop.local.md
+.claude/scheduled_tasks.lock
 
 # Customer-night sim workspace files: the local stack writes them here through
 # the bind mount. Local only (the repo is public).

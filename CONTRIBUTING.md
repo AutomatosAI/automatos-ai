@@ -29,6 +29,15 @@ Other welcome contributions:
 
 ---
 
+## Picking up an issue
+
+1. **Find one.** [`good first issue`](https://github.com/AutomatosAI/automatos-ai/labels/good%20first%20issue) issues are small and spell out what done looks like; [`help wanted`](https://github.com/AutomatosAI/automatos-ai/labels/help%20wanted) ones are bigger. The `area:` labels (frontend, backend, docs, ci, socials) narrow the list. An issue labelled `needs-triage` hasn't been reviewed by a maintainer yet: wait for that before you start.
+2. **Claim it.** Comment that you'd like to take it, and say in a line how you'll approach it. A maintainer assigns it to you. One issue at a time until your first pull request is merged.
+3. **Open a pull request within 7 days.** A draft pull request counts. A claim with no pull request after 7 days lapses and the issue is open to anyone again; you're welcome to pick it back up if it's still free. If you need longer, say so on the issue.
+4. **Ask on the issue** if anything in it is unclear. The issue is the place for the conversation about the change; the pull request is the place for the review.
+
+---
+
 ## Development environment
 
 The compose stack **is** the development environment; there is no separate bare-metal setup.
@@ -67,7 +76,8 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 2. **Keep it focused:** one change per pull request. Add or extend the tests with the change: features and bug fixes ship with the test that proves them.
 3. **Sign off every commit:** `git commit -s -m "feat: …"`. Amend a missed one with `git commit --amend -s --no-edit`, or use `git rebase --signoff` for a range.
 4. **Open the pull request against `main`** and fill in the template: what changed and why, how you verified it, and the AI-assistance disclosure. Add screenshots for UI changes, and link the issue if there is one.
-5. **CI is the gate.** Every lane runs on the pull request; fix what it reports.
+5. **CI is the gate.** Every lane runs on the pull request; fix what it reports. Five checks are required before a pull request can merge: `orchestrator-tests`, `import-linter`, `dco`, `gitleaks` and `malware-scan`.
+6. **A maintainer merges.** Only maintainers merge into `main`; branches are deleted on merge.
 
 | Workflow · job | What it checks |
 |---|---|
@@ -78,9 +88,11 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 | `test` · `frontend-ci` | vitest, baselined `tsc`, an ESLint report, the code-shape rules and `apiClient`-only calls on changed lines, and the route contract (every backend path the frontend calls exists in the route manifest). |
 | `test` · eval lanes | Self-tests of the NL2SQL, retrieval-recall, memory-recall and graph-uplift harnesses (informational). |
 | `smoke-fresh-clone` | `docker compose up` from an empty checkout, with only the three secrets, reaches a green `/health` and `/health/ready`. |
-| `import-linter` | The module-boundary contracts (`orchestrator/.importlinter`). |
-| `dco` | A `Signed-off-by:` trailer on every commit. |
-| `gitleaks`, `CodeQL`, `malware-scan`, `check-shopify-isolation` | Secrets, static analysis, dependency hygiene, and the Shopify package's isolation. |
+| `import-linter` | The module-boundary contracts (`orchestrator/.importlinter`). **Required.** |
+| `dco` | A `Signed-off-by:` trailer on every commit. **Required.** |
+| `gitleaks` | No secret anywhere in the pull request's history. **Required.** |
+| `malware-scan` | Known malicious payloads and hidden loaders. **Required.** |
+| `CodeQL`, `check-shopify-isolation` | Static analysis, and the Shopify package's isolation. |
 
 Lanes marked non-required in their workflow file still run and still report. Treat red as red.
 
