@@ -35,7 +35,7 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping
 
 from core.brand_palette import PAPER, PRIMARY_ON_PAPER
-from core.font_stacks import with_generic
+from core.font_stacks import STACK_SEPARATOR, generic_for, has_generic, stack_parts, with_generic
 
 # The checked font tokens (``media_render_bundle.BODY_FONT_TOKEN`` and ``HEADING_FONT_TOKEN``),
 # and the tokens added here.
@@ -59,11 +59,22 @@ def font_tokens(tokens: Mapping[str, str]) -> Dict[str, str]:
     for name in (BODY_FONT_TOKEN, HEADING_FONT_TOKEN):
         stack = tokens.get(name)
         if stack:
-            ended = with_generic(stack)
-            out[name] = ended if len(ended) <= MAX_TOKEN_CHARS else stack
+            out[name] = _within_cap(stack)
     if BODY_FONT_TOKEN in out:
         out[MONO_FONT_TOKEN] = out[BODY_FONT_TOKEN]
     return out
+
+
+def _within_cap(stack: str) -> str:
+    """``stack`` ending in its generic family, within the token cap: when the whole stack and its
+    generic are too long, the last families before the generic give way, never the generic."""
+    ended = with_generic(stack)
+    if len(ended) <= MAX_TOKEN_CHARS or has_generic(stack):
+        return ended
+    parts, generic = stack_parts(stack), generic_for(stack)
+    kept = next((parts[:n] for n in range(len(parts), 0, -1)
+                 if len(STACK_SEPARATOR.join([*parts[:n], generic])) <= MAX_TOKEN_CHARS), [])
+    return STACK_SEPARATOR.join([*kept, generic])
 
 
 def accent_tokens(kit: Mapping[str, Any], tokens: Mapping[str, str]) -> Dict[str, str]:

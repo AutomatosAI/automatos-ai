@@ -69,6 +69,16 @@ def test_a_stored_bare_stack_reaches_the_render_with_its_generic_family():
     assert with_generic("") == ""
 
 
+def test_a_long_bare_stack_gives_way_at_its_end_never_its_generic_family():
+    from core.social_kit_tokens import MAX_TOKEN_CHARS, font_tokens
+
+    families = ["Geist"] + [f"Family {n:02d}" for n in range(17)]  # 192 characters, no generic family
+    stack = ", ".join(families)
+    assert len(stack) <= MAX_TOKEN_CHARS < len(with_generic(stack))
+    kept = font_tokens({"body-font": stack})["body-font"]
+    assert kept.startswith("Geist, Family 00") and kept.endswith(", sans-serif") and len(kept) <= MAX_TOKEN_CHARS
+
+
 def test_the_shipped_families_and_the_generic_names_agree_with_the_bundled_fonts():
     assert set(FAMILY_GENERICS) == {family.casefold() for family in bundled_fonts.BUNDLED_FAMILIES}
     assert set(bundled_fonts.GENERIC_FAMILIES) <= GENERIC_FAMILIES
