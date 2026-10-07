@@ -347,6 +347,33 @@ def _register_assign_task(registry: ActionRegistry) -> None:
     ))
 
 
+def _update_task_moves() -> dict:
+    """platform_update_task's two ways to move the card: a status (F309) and send_back (F241 night 7b)."""
+    return {
+        # F309 (night 9): "approve card 1866 with this note" came as {notes, status: "done"}, was
+        # refused here, and became a plain note and a bare move: the approval's note was lost.
+        "status": {
+            "type": "string",
+            "enum": _board_statuses(),  # PRD-256 US-006: the board's own words, never free text
+            "description": (
+                "Moves the card after any other edit, exactly as platform_update_task_status does, with note "
+                "kept as that move keeps it: 'done' approves it and note is the owner's approval note "
+                "('approve #0019 with this note: …'). Never with a new description on a card already worked "
+                "on: the Re-brief sends it back itself."
+            ),
+        },
+        "send_back": {
+            "type": "boolean",
+            "description": (
+                "True sends the card back to its agent the way the board's Reject does: its brief stays, "
+                "and note (the owner's words, as they wrote them) is what the redo fixes, on the same "
+                "card. For 'send #0347 back: take out …'. Never with a description: for a new brief, "
+                "send description without send_back."
+            ),
+        },
+    }
+
+
 def _update_task_parameters() -> dict:
     """platform_update_task's parameters: the fields it edits, a note, a status (F309) and send_back (F241 night 7b)."""
     return {
@@ -377,27 +404,7 @@ def _update_task_parameters() -> dict:
                 "description": ("A remark to add to the ticket, in the owner's own words. With send_back, the "
                                 "owner's words that the redo fixes."),
             },
-            # F309 (night 9): "approve card 1866 with this note" came as {notes, status: "done"}, was
-            # refused here, and became a plain note and a bare move: the approval's note was lost.
-            "status": {
-                "type": "string",
-                "enum": _board_statuses(),  # PRD-256 US-006: the board's own words, never free text
-                "description": (
-                    "Moves the card after any other edit, exactly as platform_update_task_status does, with note "
-                    "kept as that move keeps it: 'done' approves it and note is the owner's approval note "
-                    "('approve #0019 with this note: …'). Never with a new description on a card already worked "
-                    "on: the Re-brief sends it back itself."
-                ),
-            },
-            "send_back": {
-                "type": "boolean",
-                "description": (
-                    "True sends the card back to its agent the way the board's Reject does: its brief stays, "
-                    "and note (the owner's words, as they wrote them) is what the redo fixes, on the same "
-                    "card. For 'send #0347 back: take out …'. Never with a description: for a new brief, "
-                    "send description without send_back."
-                ),
-            },
+            **_update_task_moves(),
         },
         "required": ["task_id"],
     }
