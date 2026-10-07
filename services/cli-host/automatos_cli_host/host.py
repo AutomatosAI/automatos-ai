@@ -20,7 +20,6 @@ import socket
 import sys
 import threading
 import time
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -374,7 +373,7 @@ class Host:
             outcome = session.run()
             if outcome.status == "usage_limit":
                 self._pause_cli(session.cli, outcome.resets_at, outcome.error or f"paused: {session.cli} usage limit")
-            outcome = replace(outcome, uploaded_files=self._upload(ticket, outcome))
+            self._upload(ticket, outcome)   # #848: before the result, which names the files by their paths
             self.pending_results[task_id] = outcome.as_result_payload(session.attempt)
 
         t = threading.Thread(target=_runner, name=f"session-{task_id}", daemon=True)

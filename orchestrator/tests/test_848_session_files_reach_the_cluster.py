@@ -120,10 +120,13 @@ def test_the_body_is_refused_the_moment_it_passes_the_limit():
     assert asyncio.run(uploads.read_capped(_chunks(b"ab", b"cd"), 10)) == b"abcd"
 
 
-def _store(monkeypatch, task, *, reserve=True, written=None, path="out/report.md", body=b"# hi\n"):
+def _store(monkeypatch, task, *, reserve=True, written=None, path="out/report.md", body=b"# hi\n",
+           reserved=None):
+    """Store one file with the edges spied: ``reserved`` collects every change to the run's total."""
     _upload_on(monkeypatch)
     monkeypatch.setattr(svc, "_owned_task", lambda db, host, task_id: task)
-    monkeypatch.setattr(uploads, "_reserve", lambda db, task_id, size, limit: reserve)
+    ledger = reserved if reserved is not None else []
+    monkeypatch.setattr(uploads, "_reserve", lambda db, task_id, size, limit: ledger.append(size) or reserve)
     calls = []
 
     class FakeWorkspace:
@@ -133,6 +136,8 @@ def _store(monkeypatch, task, *, reserve=True, written=None, path="out/report.md
         async def write_binary(self, target, pieces):
             data = b"".join([piece async for piece in pieces])
             calls.append((self.workspace_id, target, data))
+            if isinstance(written, Exception):
+                raise written
             return written or {"success": True}
 
     import core.workspace_client as wc
@@ -158,6 +163,27 @@ def test_a_file_the_backend_cannot_take_is_refused_with_the_reason(monkeypatch, 
     assert err.value.status_code == status
 
 
+def test_a_write_the_workspace_refuses_gives_its_bytes_back(monkeypatch):
+    """The host retries a 5xx: each try must not count the same file against the run again."""
+    reserved = []
+    with pytest.raises(uploads.SessionUploadRefused):
+        _store(monkeypatch, _task(), written={"success": False, "error": "disk full"}, reserved=reserved)
+    assert reserved == [5, -5]
+
+
+def test_a_write_that_raises_gives_its_bytes_back_and_still_raises(monkeypatch):
+    reserved = []
+    with pytest.raises(ConnectionError):
+        _store(monkeypatch, _task(), written=ConnectionError("worker gone"), reserved=reserved)
+    assert reserved == [5, -5]
+
+
+def test_a_stored_file_keeps_its_bytes(monkeypatch):
+    reserved = []
+    _store(monkeypatch, _task(), reserved=reserved)
+    assert reserved == [5]
+
+
 def test_a_ticket_that_is_no_longer_running_takes_no_files(monkeypatch):
     with pytest.raises(uploads.SessionUploadRefused) as err:
         _store(monkeypatch, _task(status="done"))
@@ -173,27 +199,39 @@ def test_an_instance_that_shares_a_folder_takes_no_uploads(monkeypatch):
 
 # ── the result ───────────────────────────────────────────────────────────────
 
-def test_the_results_uploaded_files_map_onto_this_processs_view_of_the_volume(monkeypatch):
+@pytest.mark.parametrize("host_path,expected", [
+    ("/Users/me/deliverables/sessions/42/report.md", "sessions/42/report.md"),       # the deliverables folder
+    ("/Users/me/.automatos/cli-host/sessions/42/charts/q3.png", "sessions/42/charts/q3.png"),  # the host's own
+    ("C:\\Users\\me\\deliverables\\sessions\\42\\report.md", "sessions/42/report.md"),  # a Windows host
+    ("/Users/me/deliverables/sessions/420/report.md", None),                         # another ticket
+    ("/Users/me/deliverables/sessions/42/../43/x.md", None),
+    ("/Users/me/repo/app.py", None),
+])
+def test_a_result_path_under_the_tickets_sessions_folder_maps_to_where_the_upload_landed(
+        monkeypatch, host_path, expected):
     _upload_on(monkeypatch)
-    monkeypatch.setattr(uploads.config, "WORKSPACE_VOLUME_PATH", "/workspaces/", raising=False)
-    paths = uploads.uploaded_volume_paths(_task(), ["report.md", "../x", "charts/q3.png"])
-    assert paths == [f"/workspaces/{WS}/sessions/42/report.md", f"/workspaces/{WS}/sessions/42/charts/q3.png"]
-    assert [svc.workspace_relative_path(p, str(WS)) for p in paths] == [
-        "sessions/42/report.md", "sessions/42/charts/q3.png"]
+    assert uploads.uploaded_rel(_task(), host_path) == expected
+
+
+def test_nothing_maps_while_the_folder_is_shared(monkeypatch):
     _upload_on(monkeypatch, enabled=False)
-    assert uploads.uploaded_volume_paths(_task(), ["report.md"]) == []
+    assert uploads.uploaded_rel(_task(), "/Users/me/deliverables/sessions/42/report.md") is None
 
 
 def test_an_uploaded_file_on_the_volume_is_a_session_output(monkeypatch, tmp_path):
+    """The result names the file by the host's path; it registers once it is on the volume."""
     _upload_on(monkeypatch)
-    monkeypatch.setattr(uploads.config, "WORKSPACE_VOLUME_PATH", str(tmp_path), raising=False)
+    monkeypatch.setattr(svc.config, "WORKSPACE_VOLUME_PATH", str(tmp_path), raising=False)
     monkeypatch.setattr(svc.config, "AUTOMATOS_WORKSPACE_DIR", "", raising=False)
+    monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_DIR", "", raising=False)
     landed = tmp_path / str(WS) / "sessions" / "42" / "report.md"
     landed.parent.mkdir(parents=True)
     landed.write_text("# Q3\n")
-    paths = uploads.uploaded_volume_paths(_task(), ["report.md", "never-landed.md"])
-    outputs = svc._session_outputs(_task(), paths)
+    host = "/Users/me/deliverables/sessions/42"
+    outputs = svc._session_outputs(_task(), [f"{host}/report.md", f"{host}/never-landed.md", "/Users/me/x.md"])
     assert [(o.rel, o.size) for o in outputs] == [("sessions/42/report.md", 5)]
+    _upload_on(monkeypatch, enabled=False)
+    assert svc._session_outputs(_task(), [f"{host}/report.md"]) == []
 
 
 # ── the routes ───────────────────────────────────────────────────────────────
@@ -257,8 +295,3 @@ def test_pairing_is_rate_limited_for_the_instance(monkeypatch):
     assert c.post("/api/v1/cli-hosts/pair", json={"code": "ABCD-EFGH"}).status_code == 429
     assert calls == [(routes.PAIR_RATE_LIMIT_SCOPE, "cli_host_pair")]
 
-
-def test_the_result_body_takes_the_uploaded_files():
-    body = routes.ResultRequest(uploaded_files=["report.md"])
-    assert body.uploaded_files == ["report.md"]
-    assert routes.ResultRequest().uploaded_files == []

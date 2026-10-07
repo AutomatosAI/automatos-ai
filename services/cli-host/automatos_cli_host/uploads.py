@@ -4,8 +4,8 @@ With ``docker compose`` the deliverables folder (``<root>/sessions/<ticket>``) i
 bind-mounted into the backend, so its files are already where the worker serves
 them. On a cluster nothing is shared: when the claim's ``upload`` is enabled, each
 file of the session's result that sits in that folder is sent to the backend
-(``PUT …/tasks/<ticket>/files``) before the result, and the result names the
-files the backend took (``uploaded_files``), which it registers as deliverables.
+(``PUT …/tasks/<ticket>/files``) before the result. The result names them by their
+paths here, as it always has, and the backend registers the ones it holds.
 
 Limits, the claim's: ``upload.max_file_bytes`` per file and ``upload.max_total_bytes``
 for the run. Never a symlink, and never a file outside the folder. A file that
@@ -85,10 +85,19 @@ def _send(api: Any, host_id: str, task_id: str, rel: str, data: bytes) -> bool:
     return False
 
 
+def _read(path: Path, rel: str, task_id: str) -> Optional[bytes]:
+    """The file's bytes, or ``None`` when it went away or became unreadable since it was found."""
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        log.warning("deliverable %s of task %s not uploaded: %s", rel, task_id, exc)
+        return None
+
+
 def upload_deliverables(api: Any, host_id: str, ticket: Dict[str, Any], folder: Optional[Path],
                         files: Sequence[str]) -> List[str]:
     """Upload the result's files in the deliverables folder when the claim asks for it;
-    the paths (in the folder) the backend took, for the result's ``uploaded_files``."""
+    the paths (in the folder) the backend took."""
     upload = ticket.get("upload") if isinstance(ticket.get("upload"), dict) else {}
     if not upload.get("enabled") or folder is None:
         return []
@@ -105,7 +114,8 @@ def upload_deliverables(api: Any, host_id: str, ticket: Dict[str, Any], folder: 
         if size > max_file or size > budget:
             log.warning("deliverable %s of task %s not uploaded: %d bytes is past the limit", rel, task_id, size)
             continue
-        if _send(api, host_id, task_id, rel, path.read_bytes()):
+        data = _read(path, rel, task_id)
+        if data is not None and _send(api, host_id, task_id, rel, data):
             budget -= size
             taken = [*taken, rel]
     return taken

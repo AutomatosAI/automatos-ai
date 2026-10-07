@@ -138,8 +138,6 @@ class ResultRequest(BaseModel):
     exit_reason: Optional[str] = None
     transcript_path: Optional[str] = None
     resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (host clock, ISO)
-    # #848: the files this run uploaded, as paths in the ticket's deliverables folder.
-    uploaded_files: List[str] = Field(default_factory=list, max_length=500)
 
 
 # ── operator surface ─────────────────────────────────────────────────────────
