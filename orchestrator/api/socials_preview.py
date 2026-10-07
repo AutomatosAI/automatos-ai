@@ -26,7 +26,7 @@ from core.models.socials import SocialPost
 from core.models.workspaces import Workspace
 from core.utils.background_tasks import launch_guarded
 from api import socials_compose
-from modules.socials import preview, render
+from modules.socials import preview, render, spoken_fields
 
 
 def _posts_api() -> Any:
@@ -63,6 +63,7 @@ async def preview_post(db: Session, workspace: Workspace, post: SocialPost, acto
         render.RenderJob(
             post_id=post.id, workspace_id=post.workspace_id, actor=actor, content_hash=content_hash,
             title=post.title, format=post.format, bundle=bundle, reservation=reservation, preview=True,
+            spoken_fields=spoken_fields.spoken_labels(render.composition_of(template)),  # F377
         )
     )
     return saved

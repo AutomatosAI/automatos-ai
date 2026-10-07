@@ -42,7 +42,7 @@
     "hook_line": {
       "type": "text",
       "label": "Hook: the headline",
-      "max_chars": 28,
+      "max_chars": 24,
       "description": "Over the hook footage, word by word; the accent words follow it."
     },
     "hook_accent": {
@@ -505,7 +505,7 @@
     "grade_voice": {
       "type": "text",
       "label": "Voice: the result",
-      "max_chars": 40,
+      "max_chars": 36,
       "description": "The result as it is spoken, e.g. 'A-plus, or not yet.'"
     },
     "end_voice": {

@@ -16,11 +16,11 @@
     "15": [
       [
         0,
-        4.0
+        4.4
       ],
       [
         12.59,
-        18.0
+        17.6
       ],
       [
         31.85,
@@ -60,13 +60,13 @@
     "hook_line": {
       "type": "text",
       "label": "Hook: the headline",
-      "max_chars": 32,
+      "max_chars": 24,
       "description": "Spoken and shown word by word; the accent words follow it."
     },
     "hook_accent": {
       "type": "text",
       "label": "Hook: the accent words",
-      "max_chars": 12,
+      "max_chars": 6,
       "description": "Shown in the brand colour, in italics, after the headline.",
       "default": ""
     },
@@ -85,19 +85,19 @@
     "tagline_lead": {
       "type": "text",
       "label": "Reveal: the tagline before its accent",
-      "max_chars": 32,
+      "max_chars": 24,
       "description": "Under the logo and the brand name, word by word."
     },
     "tagline_accent": {
       "type": "text",
       "label": "Reveal: the tagline's accent word",
-      "max_chars": 16,
+      "max_chars": 12,
       "default": ""
     },
     "tagline_tail": {
       "type": "text",
       "label": "Reveal: the tagline after its accent",
-      "max_chars": 20,
+      "max_chars": 18,
       "default": ""
     },
     "chat_crumb": {
@@ -630,7 +630,7 @@
     "team_line_2": {
       "type": "text",
       "label": "Team: line 2",
-      "max_chars": 16,
+      "max_chars": 12,
       "default": "",
       "description": "Leave empty for none."
     },
@@ -644,7 +644,7 @@
     "team_line_3": {
       "type": "text",
       "label": "Team: line 3",
-      "max_chars": 14,
+      "max_chars": 12,
       "default": "",
       "description": "Leave empty for none."
     },
@@ -702,30 +702,30 @@
     "cap_handoff": {
       "type": "text",
       "label": "Caption and voice: the hand-off",
-      "max_chars": 48
+      "max_chars": 30
     },
     "beat_1": {
       "type": "text",
       "label": "Caption and voice: beat 1",
-      "max_chars": 16,
+      "max_chars": 12,
       "description": "Highlights as the voice says it; board task 1 moves on it."
     },
     "beat_2": {
       "type": "text",
       "label": "Caption and voice: beat 2",
-      "max_chars": 16,
+      "max_chars": 12,
       "description": "Highlights as the voice says it; board task 2 moves on it."
     },
     "beat_3": {
       "type": "text",
       "label": "Caption and voice: beat 3",
-      "max_chars": 16,
+      "max_chars": 12,
       "description": "Highlights as the voice says it; board task 3 moves on it."
     },
     "beat_4": {
       "type": "text",
       "label": "Caption and voice: beat 4",
-      "max_chars": 16,
+      "max_chars": 12,
       "description": "Highlights as the voice says it; board task 4 moves on it."
     },
     "cap_question": {
