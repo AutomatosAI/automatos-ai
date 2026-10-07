@@ -366,7 +366,7 @@ def test_a_playbook_renders_a_social_template_with_the_variables_an_earlier_step
     execution = _run_launch_video(
         monkeypatch,
         document_step={
-            "title": "Launch video: {{ step_1.variables.product_name }}",
+            "title": "Launch video: {{ step_1.variables.headline }}",  # F377: the Data story's own headline
             "format": "social_video",
             "template_id": str(TEMPLATE_ID),
             "data": "{{ step_1.variables }}",
@@ -381,7 +381,7 @@ def test_a_playbook_renders_a_social_template_with_the_variables_an_earlier_step
     (registered,) = render_env.registered
     assert (registered["artifact_type"], registered["source_type"]) == ("video", "playbook")
     assert registered["source_id"] == EXECUTION_ID
-    assert registered["title"] == f"Launch video: {sample['product_name']}"
+    assert registered["title"] == f"Launch video: {sample['headline']}"
     assert registered["extra"]["template_id"] == str(TEMPLATE_ID)
     assert json.loads(execution.output_data["final_output"])["deliverable_id"] == "d-1"
 

@@ -8,7 +8,9 @@ Pins:
   with a voice line per beat.
 * **The port keeps the reference's timing.** Every scene and caption clip of
   each reference composition (docs/PRDS/prd251-reference/) starts and lasts
-  exactly as it did, and the whole runs as long.
+  exactly as it did, and the whole runs as long. F377 (night 11): the Data story
+  is no longer a port of the trading reference; it is a numbers story for any
+  business (test_f377_the_data_story_is_a_business_numbers_story.py).
 * **Every word is a variable.** No line of a reference's copy is baked into its
   template; the starter's sample data carries the reference's own copy less its
   brand (P251W1-RVW-6: the CI previews lay that back on), and it fills every
@@ -112,12 +114,13 @@ PHOTO_STARTER_NAMES = ["Photo + headline", "Offer", "Review", "Highlights", "Bef
 BRAND_STARTER_NAMES = ["Brand board (social)"]  # F368: "Brand board" until night 10c
 ALL_STARTER_NAMES = STARTER_NAMES + IMAGE_STARTER_NAMES + BRAND_STARTER_NAMES + PHOTO_STARTER_NAMES
 REFERENCES = _ROOT / "docs" / "PRDS" / "prd251-reference"
+# The three videos still ported from a reference; F377: the Data story is a business numbers story of its own.
 REFERENCE_OF = {
     "ui-story-promo": "v1-ui-story.html",
     "cinematic-product-promo": "v2-cinematic-product.html",
     "app-promo": "academy-app-promo.html",
-    "data-story": "markets-posh.html",
 }
+DATA_STORY = "data-story"
 STORAGE = "https://storage.example-ci.test/automatos/"
 SWITCH_ROUTE = "/api/workspaces/current/socials"
 KIT = {
@@ -175,7 +178,7 @@ def music_library(tmp_path_factory):
 def test_the_four_reference_videos_are_seeded_as_social_video_starters():
     starters = social_starters("social_video")
     assert [s["name"] for s in starters] == STARTER_NAMES
-    assert [s["slug"] for s in starters] == list(SOCIAL_VIDEO_STARTER_SLUGS) == list(REFERENCE_OF)
+    assert [s["slug"] for s in starters] == list(SOCIAL_VIDEO_STARTER_SLUGS) == [*REFERENCE_OF, DATA_STORY]
     assert list(SOCIAL_STARTER_SLUGS) == (
         list(SOCIAL_VIDEO_STARTER_SLUGS) + list(SOCIAL_IMAGE_STARTER_SLUGS) + list(SOCIAL_BRAND_STARTER_SLUGS)
         + list(SOCIAL_PHOTO_STARTER_SLUGS)
@@ -253,7 +256,8 @@ def test_the_sample_data_is_the_references_own_copy_and_fills_every_variable():
         assert resolved.missing == [] and resolved.invalid == [], starter["name"]
         # Every story line has no default: a post must write it, never inherit a reference's copy.
         required = [n for n, spec in starter["blocks"]["variables_schema"].items() if "default" not in spec]
-        assert len(required) >= 50, starter["name"]
+        # F377: the Data story asks for its story alone (test_f377_the_data_story_is_a_business_numbers_story.py).
+        assert len(required) >= (10 if starter["slug"] == DATA_STORY else 50), starter["name"]
 
 
 # ---------------------------------------------------------------------------
@@ -504,7 +508,7 @@ def test_a_filled_slot_takes_the_clip_and_keeps_its_element(music_library):
         _bundle(starter, slot_media={"b_roll": url})
 
 
-@pytest.mark.parametrize("slug", list(REFERENCE_OF))
+@pytest.mark.parametrize("slug", list(SOCIAL_VIDEO_STARTER_SLUGS))
 def test_media_render_takes_every_starter_with_its_slots_empty_or_filled(slug, music_library):
     starter = _starter(slug)
     slots = starter["blocks"].get("slots") or {}
@@ -523,9 +527,8 @@ def test_media_render_takes_every_starter_with_its_slots_empty_or_filled(slug, m
 
 def test_the_image_slots_of_the_data_story_are_stills():
     slots = _starter("data-story")["blocks"]["slots"]
-    assert {name: spec["kind"] for name, spec in slots.items()} == {
-        "hook": "video", "tide": "video", "still_1": "image", "still_2": "image", "still_3": "image", "end": "video",
-    }
+    # F377: the business numbers story takes up to three photos of the business, and no footage.
+    assert {name: spec["kind"] for name, spec in slots.items()} == {"still_1": "image", "still_2": "image", "still_3": "image"}
     page = _bundle(_starter("data-story"), slot_media={"still_2": STORAGE + "still.png"})["composition"]["html"]
     assert page.count("<img data-slot=") == 1 and 'src="assets/slots/still_2.png"' in page
 
