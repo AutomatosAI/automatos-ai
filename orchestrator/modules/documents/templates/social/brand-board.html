@@ -48,7 +48,7 @@
       #stripe { position: absolute; top: 0; height: calc(14 * var(--u)); background: var(--brand);
         left: calc(var(--bar-inset) * (1 - var(--bar-span))); width: calc(var(--bar-rule) + (100% - var(--bar-rule)) * var(--bar-span)); }
 
-      /* F382: in a story, the words keep clear of Instagram's bars (--story-top and --story-bottom, set only for
+      /* F382: in a story, the words keep clear of the story app's own bars (--story-top and --story-bottom, set only for
          a 9:16 story render); the page and its backgrounds still run to the card's edges. */
       .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
         gap: calc(30 * var(--s)); padding: calc(64 * var(--u) + var(--story-top, 0px)) calc(68 * var(--u)) calc(56 * var(--u) + var(--story-bottom, 0px)); }

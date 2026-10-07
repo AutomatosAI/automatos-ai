@@ -44,7 +44,7 @@
 
       /* The page: every size below is design pixels times --s, and the fit script shrinks --fit until it all fits. */
       /* The page has no padding of its own: its blocks carry their spacing, so a panel runs to the card's edges. */
-      /* F382: in a story, the words keep clear of Instagram's bars (--story-top and --story-bottom, set only for
+      /* F382: in a story, the words keep clear of the story app's own bars (--story-top and --story-bottom, set only for
          a 9:16 story render); the page and its backgrounds still run to the card's edges. */
       .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
         justify-content: space-between; gap: calc(28 * var(--s)); }
@@ -95,7 +95,7 @@
       }
       /* F382 (B21): a tall card (the 9:16 story) gives the brand row a band of its own above the photos, so
          the logo and the handle never sit on the before photo; the labels sit at the top of each photo, which
-         now starts below Instagram's top bar. The band is the row's margin, its chips and a gap (--band). */
+         now starts below the story app's top bar. The band is the row's margin, its chips and a gap (--band). */
       @media (max-aspect-ratio: 10/16) {
         .pair { --band: calc(168 * var(--u)); top: calc(var(--story-top, 0px) + var(--band));
           height: calc(66% - var(--story-top, 0px) - var(--band)); }

@@ -268,7 +268,10 @@ def test_the_executor_carries_the_ticket_and_the_session_hands_it_over():
     from services import session_tools as st
 
     assert PLATFORM_HANDLERS["platform_render_preview"] is rp.render_preview
-    assert PlatformActionExecutor.execute.__wrapped__.__code__.co_filename.endswith("session_ticket.py")
+    layers, fn = [], PlatformActionExecutor.execute  # every decorator layer on execute (F381 adds one above)
+    while fn is not None:
+        layers, fn = [*layers, fn.__code__.co_filename], getattr(fn, "__wrapped__", None)
+    assert any(name.endswith("session_ticket.py") for name in layers)
     tool = st.get_tool("render_preview")
     ctx = st.SessionContext(task_id=TICKET, agent_id=7, agent_name="Brand Designer", workspace_id=WS)
     assert tool.action == "platform_render_preview" and tool.reads_only

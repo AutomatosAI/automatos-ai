@@ -100,7 +100,8 @@ def answers_the_question_first(execute: Execute) -> Execute:
     a connection, the board's work, the kit or a setting is refused, with the answer to give instead."""
     @functools.wraps(execute)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any = None) -> Dict[str, Any]:
-        refusal = refusal_on_a_question(self.db, self.workspace_id, action_name, caller_context)
+        db, workspace_id = getattr(self, "db", None), getattr(self, "workspace_id", None)
+        refusal = refusal_on_a_question(db, workspace_id, action_name, caller_context)
         if refusal:
             logger.info("[F381] %s refused: the owner asked a question", action_name)
             return {"success": False, "error": refusal}

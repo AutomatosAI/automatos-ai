@@ -819,9 +819,10 @@ def test_a_value_that_does_not_fit_its_variable_is_refused_naming_it(social_env)
 
 def test_a_social_format_needs_a_template_of_that_format(social_env):
     renderer = _Renderer(social_env.events)
-    for template in (None, _social_template(fmt="social_image")):
+    for template, refused in ((None, "No template with id"),  # F383: an id that names none is refused by name
+                              (_social_template(fmt="social_image"), "social_video renders a social_video template")):
         service = _service_with(template)
-        with pytest.raises(ValueError, match="social_video renders a social_video template"):
+        with pytest.raises(ValueError, match=refused):
             _generate(service, renderer, title="T", format="social_video", data={}, workspace_id=WS, template_id=TEMPLATE_ID)
     assert social_env.events == []
 
