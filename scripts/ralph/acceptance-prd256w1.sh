@@ -138,7 +138,11 @@ check "N13 the claim families did not grow (D10)" "families_not_grown"
 check "N14 no new lane module under consumers/chatbot other than receipts.py" "no_new_lane_module"
 check "N15 the hierarchy gate passes (stdlib ast)" "python3 orchestrator/scripts/check_hierarchy_gate.py >/dev/null"
 check "N16 receipts never read tool_execution_logs (D8)" "! receipts_read_logs"
-check "N17 no eval run claimed: the loop never touched the analyst folder" "! git diff $BASE..HEAD | grep -q 'automatos-analyst'"
+# N17 reads the wave's diff outside the seeded kit and spec (which name the folder, as does this line) and the
+# instrument's page (US-007's AC: it says where the set lives); no results file may enter the repo at all.
+analyst_touched() { git diff "$BASE"..HEAD -- . ':!scripts/ralph' ':!docs/PRDS' ':!docs/testing/AUTO-EVAL.md' | grep -q 'automatos-analyst'; }
+results_added()   { git diff --name-only "$BASE"..HEAD | grep -q 'results\.md$'; }
+check "N17 no eval run claimed: the loop never touched the analyst folder" "! analyst_touched && ! results_added"
 warn "N18 story commits carry [skip ci] (all but the final CI commit)" "[ -z \"\$(git log --format='%s' $BASE..HEAD^ | grep -v 'skip ci' | grep -v '^chore(prd-256): seed')\" ]"
 
 if [ "$MODE" = "full" ]; then
