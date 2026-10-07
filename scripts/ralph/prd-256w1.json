@@ -129,15 +129,15 @@
       "title": "The instrument, documented; the baseline is the owner's",
       "description": "As the owner, I want the eval instrument written down beside the other test docs, so every wave and every model is measured against the same 'before' and anyone can read the results table.",
       "acceptanceCriteria": [
-        "A page `docs/testing/AUTO-EVAL.md`: what the eval measures (the seven rules), where the set and runner live (local, gold, never committed), how an arm is run and restored, how to read `runs/results.md`, the rule that it spends money and runs in c1 only, and the pass bars from PRD §8.",
-        "The page names the receipts frame and part as the scoring source once US-001 ships, and the claim checker inside the backend container before that.",
+        "A page `docs/testing/AUTO-EVAL.md`: what the eval measures (the seven rules), where the set and runner live (local, gold, never committed), how an arm is run and restored, how to read `runs/results.md`, the rule that it spends money and runs in c1 only, and the pass bars from PRD §8. → DONE — docs/testing/AUTO-EVAL.md: 'What it measures: the seven rules', 'Where it lives' (local, gold, never committed), 'How an arm is run and restored' (snapshot, apply, preflight, restore after and on failure; a killed run's manual restore), 'How to read runs/results.md', 'Where it runs: c1 only' plus the money rule (about $6 / $8, owner-only, never CI or a loop), 'The pass bars (PRD-256 §8)'",
+        "The page names the receipts frame and part as the scoring source once US-001 ships, and the claim checker inside the backend container before that. → DONE — docs/testing/AUTO-EVAL.md 'The scoring source for \"claims backed\"': the receipts d: frame and the saved receipts part (consumers/chatbot/receipts.py, narration.reply_parts) from US-001 on; claimed_action_not_done (action_claims.py) inside automatos_backend on the turn's success set before it",
         "→ OWNER: the baseline (arms A and C) on today's build, about $6, before or beside this wave; its two lines are the first in runs/results.md.",
         "→ OWNER: the post-wave run (arms A and C) after this wave merges; the delta against the baseline is the exit criterion.",
-        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
-        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines) → DONE — the story touches docs only (docs/testing/AUTO-EVAL.md, 110 lines); no Python or TypeScript line changed, so ruff and the changed-line shape gate have nothing to check",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story) → DONE — committed signed with [skip ci]; the runner pushes; CI runs once at the end of the wave"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "The loop never runs the eval, never reads ~/.automatos-analyst, and never writes a results line."
     }
   ]
