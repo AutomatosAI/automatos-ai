@@ -139,6 +139,23 @@
       "priority": 7,
       "passes": true,
       "notes": "The loop never runs the eval, never reads ~/.automatos-analyst, and never writes a results line."
+    },
+    {
+      "id": "P256-W1-RVW-1",
+      "title": "The wave's one CI run goes green: 20 red tests and 5 code-shape errors from run 37654149748",
+      "description": "As the owner, I want Wave 1's draft PR #1036 green on test.yml, so the gate and the review can run. CI run 37654149748 (HEAD 6ffdaeb92): orchestrator-tests 20 failed / 14,312 passed; Frontend CI red on the changed-lines code-shape step (the full eslint run is report-only and red on main too). Main is green at 63455554a, so every failure below is this wave's.",
+      "acceptanceCriteria": [
+        "US-004 tests (17 failures in tests/test_prd256_owner_actions_wait_for_the_click.py): every call the executor refused with {'permission_denied': True, 'reason': 'anonymous_actor'} because the test's `board` fixture gave it no actor. The fixture drives the executor the way api/chat.py does: a caller context with the chat's user (driving_user_id and the actor the permission check reads), so the permission check passes and the gate's own assertions run: the ask carries requires_confirmation, grant_id and owner_only; the owner's click runs the call once, signed by who clicked; typed words never stand in; an agent run, a playbook step, a heartbeat and a turn with no driving user are unchanged (success True, no ask); a move to in_progress is not owner-only; a signer inside the call's params is dropped; a click given back when the call did nothing; a call refused by the other checks is never asked about; a card not on the board gets 'nothing was asked'. If any of these fails for a reason in the gate itself (owner_only.py / platform_executor.py), fix the gate, never the assertion.",
+        "Honesty rule (tests/test_prd256_honesty_rule.py::test_a_refused_write_reported_as_done_is_said_above_the_text_live_and_saved): the refused-write line carries the receipt's reason in the executor's own words ('I tried to approve the mission and it didn't go through: Mission m-1 is not waiting for approval.'), never the stand-in 'it reported a failure.'; the receipt's `reason` field is the source, as US-001 defines it.",
+        "Ranker tests (tests/test_prd232_us006_corpus_embeddings.py::test_close_blocked_tickets_ranks_update_task_status_top5 and ::test_enum_value_reaches_ranker): platform_update_task_status is now a first-class tool (US-006), outside the dispatcher's enum, so it no longer appears in the dispatcher ranking those tests read. The tests assert the new truth: a promoted action is reported first-class (`_first_class_names` / to_first_class_schemas) and the dispatcher ranking is asserted on a write action that stays in the dispatcher. The ranker and the promotion are not changed to satisfy the old assertion.",
+        "Frontend code shape (node scripts/check-changed-lines-eslint.js origin/main → 0 errors): the wave added lines inside three functions already far over the limit (`Message` 411 lines in components/chatbot/message.tsx, `useChat` 483 lines in lib/chat/hooks.ts, a 365-line async arrow) and two blocks nested 5 and 6 deep. The receipts frame and the receipts block are wired through a seam OUTSIDE those functions: an existing dispatch table or helper the big function already calls (the kit names lib/chat/narration.ts and the message-part rendering), or a new small module; any change inside the giants is a pure deletion or none. No added line nests deeper than 4. Verify with the script in frontend/ against origin/main.",
+        "The 2 pre-existing failures the full eslint step reports are NOT this story's (report-only on main too); nothing else in the frontend is touched.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Filed by the review session from CI run 37654149748 (job logs 112904867595 orchestrator-tests, 112904867797 Frontend CI). The runner re-enters the loop when scripts/ralph/state/prd256w1.status is deleted; this story is the only one not DONE, so the first session builds it, the next runs the gate --no-ci and makes the one CI commit."
     }
   ]
 }
