@@ -22,6 +22,10 @@ already checked (so nothing unsafe comes back) and from the kit:
   default, it is clear and its words are the accent, so the accent stays on the
   words (a template rings the shape in the accent). Sparing and bold were
   pixel-identical on night 11 while the invoice changed.
+* ``accent-bar-span``: the brand bar along a paper card's top edge, which the
+  documents never draw: they set one short accent rule. ``1`` under bold, where the
+  bar runs the full width as before; ``0`` under sparing, where it is the short rule
+  over the page's left margin (each template draws it from the number).
 
 A template never reads the kit itself: what differs between kits reaches it only as a
 token, so the brand rule (``core/social_brand_rule.py``) holds. Pure.
@@ -38,7 +42,10 @@ from core.font_stacks import with_generic
 BODY_FONT_TOKEN, HEADING_FONT_TOKEN = "body-font", "heading-font"
 MONO_FONT_TOKEN = "mono-font"
 ACCENT_FILL_TOKEN, ON_ACCENT_FILL_TOKEN = "accent-fill", "on-accent-fill"
-SOCIAL_KIT_TOKENS = (MONO_FONT_TOKEN, ACCENT_FILL_TOKEN, ON_ACCENT_FILL_TOKEN)
+ACCENT_BAR_SPAN_TOKEN = "accent-bar-span"
+SOCIAL_KIT_TOKENS = (MONO_FONT_TOKEN, ACCENT_FILL_TOKEN, ON_ACCENT_FILL_TOKEN, ACCENT_BAR_SPAN_TOKEN)
+# The bar's span: the full width (bold), or the short rule (sparing).
+BAR_FULL, BAR_RULE = "1", "0"
 # The kit's ``accent_use`` (``modules/documents/brand_system.ACCENT_BOLD``): anything else is sparing.
 ACCENT_USE_FIELD, ACCENT_BOLD = "accent_use", "bold"
 CLEAR = "transparent"
@@ -68,17 +75,22 @@ def accent_tokens(kit: Mapping[str, Any], tokens: Mapping[str, str]) -> Dict[str
     accent, paper = tokens.get(PRIMARY_ON_PAPER), tokens.get(PAPER)
     if not accent or not paper:
         return {}
-    if kit.get(ACCENT_USE_FIELD) == ACCENT_BOLD:
+    if _bold(kit):
         return {ACCENT_FILL_TOKEN: accent, ON_ACCENT_FILL_TOKEN: paper}
     return {ACCENT_FILL_TOKEN: CLEAR, ON_ACCENT_FILL_TOKEN: accent}
 
 
+def _bold(kit: Mapping[str, Any]) -> bool:
+    return kit.get(ACCENT_USE_FIELD) == ACCENT_BOLD
+
+
 def kit_render_tokens(kit: Mapping[str, Any], tokens: Mapping[str, str]) -> Dict[str, str]:
     """The tokens that set a still as the kit's documents are set, from ``tokens`` (already checked) and ``kit``."""
-    return {**font_tokens(tokens), **accent_tokens(kit, tokens)}
+    bar = {ACCENT_BAR_SPAN_TOKEN: BAR_FULL if _bold(kit) else BAR_RULE}
+    return {**font_tokens(tokens), **accent_tokens(kit, tokens), **bar}
 
 
 __all__ = [
-    "ACCENT_FILL_TOKEN", "MONO_FONT_TOKEN", "ON_ACCENT_FILL_TOKEN", "SOCIAL_KIT_TOKENS",
+    "ACCENT_BAR_SPAN_TOKEN", "ACCENT_FILL_TOKEN", "MONO_FONT_TOKEN", "ON_ACCENT_FILL_TOKEN", "SOCIAL_KIT_TOKENS",
     "accent_tokens", "font_tokens", "kit_render_tokens",
 ]

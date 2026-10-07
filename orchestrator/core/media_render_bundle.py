@@ -29,7 +29,8 @@ The brand kit becomes:
   chip in the paper's colour;
 * ``brand.tokens`` also carries what sets a still as the kit's documents are set
   (F376, ``core/social_kit_tokens.py``): the small print in the body font, and
-  how far the accent goes (``accent_use``) on a card's solid accent surfaces;
+  how far the accent goes (``accent_use``) on a card's solid accent surfaces and
+  its brand bar;
 * ``files`` and ``brand.fonts``: an uploaded logo at ``assets/brand/logo.<ext>``,
   an uploaded logo mark (D5, the square mark) at ``assets/brand/logo-mark.<ext>``,
   and the kit's font files (D5 ``font_files``) under ``assets/brand/fonts/``, each

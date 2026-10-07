@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, List, Mapping, Optional, Tuple
 
-from core.brand_palette import PALETTE_ROLES, effective_palette
+from core.brand_palette import PALETTE_ROLES, effective_palette, parse_hex, to_hex
 
 from ..brand_system import ACCENT_BOLD, ACCENT_SPARING, ACCENT_USES, DEFAULT_ACCENT_USE, ROLE_JOBS, TYPE_STEPS, tone_words
 from ..amounts import amount_text
@@ -261,6 +261,17 @@ def social_colours(kit: Mapping[str, Any]) -> Tuple[str, str, str]:
     return roles.paper, roles.heading, roles.accent
 
 
+def social_bar(kit: Mapping[str, Any]) -> Tuple[str, bool]:
+    """``(colour, full width)``: the brand bar a real social card draws, for the board's miniature (F376).
+
+    The kit's primary (the card's ``--brand-primary``), the full width only under
+    ``accent_use: bold``; under sparing the short rule over the page's left margin
+    (``core/social_kit_tokens``'s ``accent-bar-span``).
+    """
+    primary = parse_hex(kit.get("primary_color"))
+    return (to_hex(primary) if primary else t.palette(kit).accent), kit.get("accent_use") == ACCENT_BOLD
+
+
 def miniature(miniatures: Optional[Mapping[str, str]], key: str) -> str:
     """The rendered page-1 PNG (a data: URI) for ``key``; ``""`` when it could not be drawn."""
     return str((miniatures or {}).get(key) or "")
@@ -270,5 +281,5 @@ __all__ = [
     "ACCENT_USE_SHORT", "APPLICATIONS", "BOARD_TITLE", "APPLICATION_INVOICE", "APPLICATION_LETTER", "APPLICATION_SOCIAL", "SOCIAL_SAMPLE_HEADLINE",
     "FONT_SUBSTITUTE_NOTE", "FontLine", "LOCALE_LABEL", "LocaleLine", "NO_CURRENCY_NOTE", "Spacing", "Swatch", "TYPE_SAMPLE", "TypeSample", "Variant", "accent_rule",
     "brand_name", "fitted_sample", "font_lines", "locale_lines", "logo", "miniature", "type_column_pt",
-    "social_colours", "spacing", "swatches", "tagline", "type_samples", "variants", "voice",
+    "social_bar", "social_colours", "spacing", "swatches", "tagline", "type_samples", "variants", "voice",
 ]

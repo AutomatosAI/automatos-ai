@@ -24,6 +24,10 @@
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
         --mono: var(--brand-mono-font, monospace);
+        /* F376: the brand bar's span (1 the full width, 0 the short rule), the rule's length and its inset. */
+        --bar-span: var(--brand-accent-bar-span, 0);
+        --bar-rule: calc(160 * var(--u));
+        --bar-inset: calc(68 * var(--u));
         /* One design pixel: the 1080-wide feed post is the reference. */
         --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
         /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
@@ -35,7 +39,10 @@
       html, body { width: {{ size.width }}px; height: {{ size.height }}px; overflow: hidden; background: var(--paper); }
       #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--ink); background: var(--paper); }
       .clip { position: absolute; inset: 0; }
-      #stripe { position: absolute; left: 0; top: 0; width: 100%; height: calc(14 * var(--u)); background: var(--brand); }
+      /* F376: the brand bar. Under accent_use bold it runs the full width; under sparing (every kit's default)
+         it is the documents' one short accent rule, over the page's left margin. */
+      #stripe { position: absolute; top: 0; height: calc(14 * var(--u)); background: var(--brand);
+        left: calc(var(--bar-inset) * (1 - var(--bar-span))); width: calc(var(--bar-rule) + (100% - var(--bar-rule)) * var(--bar-span)); }
 
       .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
         gap: calc(30 * var(--s)); padding: calc(64 * var(--u)) calc(68 * var(--u)) calc(56 * var(--u)); }
