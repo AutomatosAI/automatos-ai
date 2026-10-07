@@ -25,6 +25,10 @@
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
         --mono: var(--brand-mono-font, monospace);
+        /* F376: how far the accent goes (the kit's accent_use). Bold fills a solid accent surface with it;
+           sparing leaves the surface clear, rings it in the accent and sets its words in the accent. */
+        --accent-fill: var(--brand-accent-fill, transparent);
+        --on-accent-fill: var(--brand-on-accent-fill, var(--accent));
         /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
         --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
         /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
@@ -73,14 +77,15 @@
       .status { display: inline-flex; align-items: center; gap: calc(12 * var(--s)); max-width: 100%;
         padding: calc(10 * var(--s)) calc(20 * var(--s)); border: calc(2 * var(--s)) solid var(--accent); border-radius: 999px;
         font-family: var(--mono); font-size: calc(24 * var(--s) * var(--body-scale)); font-weight: 700; letter-spacing: 0.1em;
-        text-transform: uppercase; line-height: 1.2; color: var(--ink); }
+        text-transform: uppercase; line-height: 1.2; background: var(--accent-fill); color: var(--on-accent-fill); }
       .dot { flex: none; width: calc(14 * var(--s)); height: calc(14 * var(--s)); border-radius: 50%; background: var(--brand); }
 
       .cards { display: flex; flex-direction: column; gap: calc(16 * var(--s)); width: 100%; }
       .card { display: flex; align-items: flex-start; gap: calc(22 * var(--s)); background: var(--card);
         border-radius: calc(14 * var(--s)); padding: calc(24 * var(--s)) calc(28 * var(--s)); }
       .num { flex: none; display: flex; align-items: center; justify-content: center; width: calc(52 * var(--s)); height: calc(52 * var(--s));
-        border-radius: 50%; background: var(--accent); color: var(--paper); font-family: var(--mono);
+        border-radius: 50%; background: var(--accent-fill); color: var(--on-accent-fill); font-family: var(--mono);
+        box-shadow: inset 0 0 0 calc(3 * var(--s)) var(--accent);
         font-size: calc(26 * var(--s) * var(--body-scale)); font-weight: 700; line-height: 1; }
       .card-text { display: flex; flex-direction: column; gap: calc(6 * var(--s)); min-width: 0; }
       .card-title { font-family: var(--body); font-size: calc(34 * var(--s) * var(--body-scale)); font-weight: 700; line-height: 1.2; color: var(--ink); }
