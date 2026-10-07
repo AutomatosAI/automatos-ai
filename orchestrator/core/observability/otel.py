@@ -15,6 +15,11 @@ instead of them. This first phase is the foundation:
   chooses the backend (Tempo, Jaeger, a vendor). No backend SDK lives here;
 * a parent-based ratio sampler (``OTEL_TRACES_SAMPLER_RATIO``).
 
+O2a adds the server span's children (:func:`instrument_libraries`): a client span
+for every SQL statement, Redis command, outbound HTTP call and AWS call. The HTTP
+client spans carry ``traceparent`` to whoever is called, the workspace worker
+first (whose own server span is O2b).
+
 The rules, from the issue:
 
 * **Off by default.** With ``OTEL_ENABLED=false`` nothing from ``opentelemetry``
@@ -100,8 +105,9 @@ def redact_query(url: str) -> str:
 
 
 def _scrub_url_attributes(span: Any, scope: Any = None) -> None:
-    """The server span's request hook: no query value leaves on a URL attribute. The
-    ASGI layer redacts only a few signature keys, not ``code`` or ``token``."""
+    """The request hook of the server span and of every HTTP client span: no query value
+    leaves on a URL attribute. The ASGI layer redacts only a few signature keys, not
+    ``code`` or ``token``; the HTTP client redacts none (a ``?key=`` API key would go)."""
     attributes = getattr(span, "attributes", None) or {}
     for name in URL_ATTRIBUTES:
         value = attributes.get(name)
@@ -109,6 +115,60 @@ def _scrub_url_attributes(span: Any, scope: Any = None) -> None:
             span.set_attribute(name, redact_query(value))
         elif name == "url.query" and isinstance(value, str) and value:
             span.set_attribute(name, redact_query("?" + value)[1:])
+
+
+async def _scrub_url_attributes_async(span: Any, request: Any = None) -> None:
+    """The async HTTP client's request hook: the same scrub."""
+    _scrub_url_attributes(span, request)
+
+
+def _instrument_sqlalchemy(engine: Any) -> None:
+    """A span per statement on this process's engine; the SQL text, never its bound values."""
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+    if engine is None:
+        from core.database.database import engine
+    SQLAlchemyInstrumentor().instrument(engine=engine)
+
+
+def _instrument_httpx(_: Any = None) -> None:
+    """A span per outbound request, ``traceparent`` sent with it, no query value on its URL
+    (an API key in a query string must not reach the collector)."""
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+    HTTPXClientInstrumentor().instrument(request_hook=_scrub_url_attributes,
+                                         async_request_hook=_scrub_url_attributes_async)
+
+
+def _instrument_redis(_: Any = None) -> None:
+    """A span per command, recorded as ``SET ? ?``: never a key or a value."""
+    from opentelemetry.instrumentation.redis import RedisInstrumentor
+
+    RedisInstrumentor().instrument()
+
+
+def _instrument_botocore(_: Any = None) -> None:
+    """A span per AWS call (S3, S3 Vectors, Bedrock): service and operation, no payload."""
+    from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+
+    BotocoreInstrumentor().instrument()
+
+
+_LIBRARIES = (("sqlalchemy", _instrument_sqlalchemy), ("httpx", _instrument_httpx),
+              ("redis", _instrument_redis), ("botocore", _instrument_botocore))
+
+
+def instrument_libraries(engine: Any = None) -> None:
+    """Client spans under each request: SQL, Redis, outbound HTTP, AWS. Once per process,
+    at import; ``engine`` defaults to the app's own. One library failing never stops
+    the others, or the app."""
+    if not tracing_enabled():
+        return
+    for name, instrument in _LIBRARIES:
+        try:
+            instrument(engine)
+        except Exception:
+            logger.exception("[otel] %s not instrumented; its calls carry no spans", name)
 
 
 def _otlp_exporter() -> Any:
@@ -230,6 +290,6 @@ def annotate_request(request_id: str, workspace_id: str = "") -> None:
 
 __all__ = [
     "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "REDACTED", "annotate_request", "build_provider",
-    "flush_tracing", "instrument_app", "otlp_headers", "redact_query", "sampler_ratio", "start_tracing",
-    "tracing_enabled", "with_tracing",
+    "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query", "sampler_ratio",
+    "start_tracing", "tracing_enabled", "with_tracing",
 ]

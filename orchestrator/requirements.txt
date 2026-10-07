@@ -157,3 +157,8 @@ opentelemetry-api==1.45.1
 opentelemetry-sdk==1.45.1
 opentelemetry-exporter-otlp-proto-http==1.45.1
 opentelemetry-instrumentation-fastapi==0.66b1
+# O2a: the server span's children. botocore's brings opentelemetry-propagator-aws-xray.
+opentelemetry-instrumentation-sqlalchemy==0.66b1
+opentelemetry-instrumentation-httpx==0.66b1
+opentelemetry-instrumentation-redis==0.66b1
+opentelemetry-instrumentation-botocore==0.66b1
