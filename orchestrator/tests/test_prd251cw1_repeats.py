@@ -56,7 +56,7 @@ def _idea(title):
 def _research(api, plan, *titles):
     params = {**AGENT, "plan_id": plan["id"], "topics": [_idea(title) for title in titles]}
     answer = asyncio.run(handlers_socials.add_social_topics(api.session, WS_A, params))
-    assert answer["success"] is True, answer
+    assert answer["success"] is bool(answer["added"]), answer  # F383: a call that adds nothing fails
     return [t["title"] for t in answer["added"]], {r["title"]: r["reason"] for r in answer["refused"]}
 
 
