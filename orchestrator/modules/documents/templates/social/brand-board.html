@@ -24,6 +24,14 @@
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
         --mono: var(--brand-mono-font, monospace);
+        /* F382: how far a face's glyphs can reach above and below their baseline, as a share of the type
+           (Geist 1.30, Inter 1.21, DejaVu Sans 1.16). Display type set tighter than this gets the rest as
+           room below its last line, so the fit never reads the glyphs as overflow and shrinks the card. */
+        --ink-reach: 1.32em;
+        /* F376: the brand bar's span (1 the full width, 0 the short rule), the rule's length and its inset. */
+        --bar-span: var(--brand-accent-bar-span, 0);
+        --bar-rule: calc(160 * var(--u));
+        --bar-inset: calc(68 * var(--u));
         /* One design pixel: the 1080-wide feed post is the reference. */
         --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
         /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
@@ -35,10 +43,15 @@
       html, body { width: {{ size.width }}px; height: {{ size.height }}px; overflow: hidden; background: var(--paper); }
       #root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: var(--body); color: var(--ink); background: var(--paper); }
       .clip { position: absolute; inset: 0; }
-      #stripe { position: absolute; left: 0; top: 0; width: 100%; height: calc(14 * var(--u)); background: var(--brand); }
+      /* F376: the brand bar. Under accent_use bold it runs the full width; under sparing (every kit's default)
+         it is the documents' one short accent rule, over the page's left margin. */
+      #stripe { position: absolute; top: 0; height: calc(14 * var(--u)); background: var(--brand);
+        left: calc(var(--bar-inset) * (1 - var(--bar-span))); width: calc(var(--bar-rule) + (100% - var(--bar-rule)) * var(--bar-span)); }
 
+      /* F382: in a story, the words keep clear of the story app's own bars (--story-top and --story-bottom, set only for
+         a 9:16 story render); the page and its backgrounds still run to the card's edges. */
       .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
-        gap: calc(30 * var(--s)); padding: calc(64 * var(--u)) calc(68 * var(--u)) calc(56 * var(--u)); }
+        gap: calc(30 * var(--s)); padding: calc(64 * var(--u) + var(--story-top, 0px)) calc(68 * var(--u)) calc(56 * var(--u) + var(--story-bottom, 0px)); }
       .page.wrap-words * { overflow-wrap: anywhere; }
       .top { display: flex; align-items: center; justify-content: space-between; gap: calc(24 * var(--s));
         font-family: var(--mono); font-size: calc(26 * var(--s) * var(--body-scale)); line-height: 1.2; }
@@ -136,6 +149,9 @@
       // ---------- setup: the kit's own values written in, then the card fitted before anything is sampled ----------
       const MIN_FIT = 0.5;
       const FIT_STEP = 0.04;
+      // F382: a line's glyphs may reach past its line box (a face's ascent and descent run to 1.3em, its
+      // lines to 1.2): that ink is not overflow, so a box may run this share of the largest type in it past its height.
+      const INK_SLACK = 0.18;
       const kit = getComputedStyle(document.documentElement);
       // Each swatch prints the hex of the token it shows; a token the kit does not have takes the swatch out.
       document.querySelectorAll("[data-token]").forEach((el) => {
@@ -159,6 +175,10 @@
         if (!el.textContent.trim()) el.remove();
       });
       // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function inkSlack(el) {
+        const sizes = [el, ...el.querySelectorAll("*")].map((node) => parseFloat(getComputedStyle(node).fontSize) || 0);
+        return INK_SLACK * Math.max(...sizes);
+      }
       function overflowing(page) {
         const box = page.getBoundingClientRect();
         const style = getComputedStyle(page);
@@ -169,7 +189,7 @@
           if (rect.bottom > bottom || rect.right > right) return true;
         }
         return Array.from(page.querySelectorAll(".fit")).some(
-          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1 + inkSlack(el)
         );
       }
       function fit(page) {

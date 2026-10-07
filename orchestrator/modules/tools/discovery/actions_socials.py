@@ -45,6 +45,8 @@ FACTS_MAX_PER_TOPIC = 12
 # platform_list_social_posts: how many posts one call returns.
 LIST_DEFAULT_LIMIT = 25
 LIST_MAX_LIMIT = 100
+# modules/tools/discovery/social_post_list.py QUEUES (F379): the posts by what they still need.
+POST_QUEUES = ["awaiting_approval", "not_rendered", "open"]
 # modules/socials/history.py MAX_DAYS and MAX_LIMIT: the most platform_get_social_history reads.
 HISTORY_MAX_DAYS = 365
 HISTORY_MAX_LIMIT = 200
@@ -75,7 +77,15 @@ def _post_copy_fields() -> dict:
                 "channels": {"type": "object", "additionalProperties": {"type": "string"}},
             },
         },
-        "format": {"type": "string", "enum": POST_FORMATS, "description": "What the post is."},
+        "format": {
+            "type": "string",
+            "enum": POST_FORMATS,
+            "description": (
+                "What the post is: video for a video template, image for a still, or carousel, "
+                "fact_card, infographic or text. social_image and social_video are templates' formats, "
+                "never a post's."
+            ),
+        },
         "length_seconds": {
             "type": "integer",
             "description": (
@@ -92,15 +102,17 @@ def _post_template_fields() -> dict:
         "template": {
             "type": "string",
             "description": (
-                "The social template: its id or its name (platform_list_templates with format "
-                "social_video or social_image; its variables: platform_get_template_schema)."
+                "The social template: its id or its exact name, from platform_list_templates (format "
+                "social_image or social_video: the templates' formats, not the post's). Its fields are "
+                "the variables platform_get_template_schema lists; a post with a template renders as "
+                "soon as it is saved."
             ),
         },
         "variables": {
             "type": "object",
             "description": (
-                "The template's variables: {name: value}, or {name: {\"value\": ..., \"claim\": true "
-                "or false}}. A claim is a fact or a figure and needs a source in sources; one the "
+                "The template's variables, by its own field names only (a name it doesn't have is "
+                "refused): {name: value}, or {name: {\"value\": ..., \"claim\": true or false}}. A claim is a fact or a figure and needs a source in sources; one the "
                 "template marks as a claim always is. An update keeps what it does not send; null "
                 "clears one. A chart template's rows and source chip come from chart_report, never "
                 "typed here."
@@ -221,7 +233,8 @@ def _register_create_social_post(registry: ActionRegistry) -> None:
             "with its variables, the sources of its facts and figures, and files already made. "
             "By default the template is rendered at once, within the plan's render minutes: when "
             "the render finishes the post waits for approval, or is failed with the reason in its "
-            "history. With render false it stays a draft until platform_submit_social_post. A "
+            "history; a render refused at once fails the call, which says why and how to fix the "
+            "saved draft. With render false it stays a draft until platform_submit_social_post. A "
             "person approves every post in the Socials tab and the platform publishes it; this "
             "tool never approves, schedules or publishes."
         ),
@@ -344,9 +357,10 @@ def _register_list_social_posts(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_social_posts",
         description=(
-            "List the workspace's Socials posts, newest first, optionally only those in some "
-            "statuses: what waits for approval, what a reviewer sent back, what failed to render, "
-            "what is scheduled or published."
+            "List the workspace's Socials posts, newest first: how many match, then one row each "
+            "with its status and what it still needs (the owner's approval, a render that failed and "
+            "why, a render not made yet, a caption). Pick them by status, or by queue: what waits for "
+            "the owner's approval, what has not rendered, or every post not yet approved or out."
         ),
         category="socials",
         parameters={
@@ -356,6 +370,15 @@ def _register_list_social_posts(registry: ActionRegistry) -> None:
                     "type": "array",
                     "items": {"type": "string", "enum": POST_STATUSES},
                     "description": "Only posts in these statuses; every status when left out.",
+                },
+                "queue": {
+                    "type": "string",
+                    "enum": POST_QUEUES,
+                    "description": (
+                        "Posts by what they need: awaiting_approval (waiting for the owner), not_rendered "
+                        "(a failed render, or a draft with nothing rendered yet) or open (every post not "
+                        "yet approved or out)."
+                    ),
                 },
                 "limit": {
                     "type": "integer",
@@ -385,10 +408,14 @@ def _topic_schema() -> dict:
                 "type": "object",
                 "properties": {
                     "kind": {"type": "string", "enum": FACT_SOURCE_KINDS},
-                    "ref": {"type": "string", "description": "The document's or Deliverable's id, or the page's address."},
-                    "label": {"type": "string", "description": "A short name for the source."},
+                    # F383 (night 11): where the id comes from, so research never asks the owner for one.
+                    "ref": {"type": "string", "description": (
+                        "Where the fact comes from, taken from your tool results: a search_knowledge source's "
+                        "document id (its 'document N'), a Deliverable's id, or the page's address. A note needs "
+                        "none. Never ask the owner for one.")},
+                    "label": {"type": "string", "description": "A short name for the source (a note's may be left out)."},
                 },
-                "required": ["kind", "ref", "label"],
+                "required": ["kind"],
             },
         },
         "required": ["text", "source"],
@@ -430,10 +457,11 @@ def _register_plan_actions(registry: ActionRegistry) -> None:
         name="platform_add_social_topics",
         description=(
             "Add researched topics to a Socials plan's content bank, each with the facts it rests on and "
-            "every fact's source (knowledge, deliverable, web, github or note; a reference and a label). "
-            "The bank refuses a fact without a source, a title it already holds, and anything on the "
-            "plan's never-say list; the answer lists what was added and what was refused, with why. It "
-            "only adds topics: posts are made from them on their day."
+            "every fact's source (knowledge, deliverable, web, github or note; a reference and a label; a "
+            "note needs no reference). The bank refuses a fact without a source, a title it already holds, "
+            "and anything on the plan's never-say list; the answer lists what was added and what was "
+            "refused, with why, and fails when nothing was added. It only adds topics: posts are made from "
+            "them on their day."
         ),
         category="socials",
         parameters={

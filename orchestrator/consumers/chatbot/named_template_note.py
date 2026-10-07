@@ -24,6 +24,7 @@ from uuid import UUID
 from consumers.chatbot.named_template import NamedTemplate, named_in_conversation, owner_turns
 from consumers.chatbot.paperwork_to_the_team import team_note  # F337(c) (night 10)
 from consumers.chatbot.brand_to_the_designer import designer_note  # PRD-255 US-014: Auto delegates the brand
+from consumers.chatbot.socials_turn_note import socials_note  # F379 (night 11)
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +181,11 @@ def read_note(db: Any, workspace_id: UUID, texts: Sequence[str]) -> Optional[str
             brand = designer_note(db, workspace_id, texts[0] if texts else "", opening=len(texts) == 1)  # F362
             if brand:
                 return brand
-            named = named_in_conversation(texts, DocumentTemplateService(db).list_templates(workspace_id))
+            rows = DocumentTemplateService(db).list_templates(workspace_id)
+            socials = socials_note(texts, rows)   # F379 (night 11): a turn about social posts gets how Socials works
+            if socials:
+                return socials
+            named = named_in_conversation(texts, rows)
             if named is None:   # F337(c): paperwork with no template named goes to the team
                 return team_note(texts[0] if texts else "")
             if named.row is None:

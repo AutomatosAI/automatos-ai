@@ -209,10 +209,10 @@
   },
   "preview": {
     "probe": {
-      "x": 0.5,
+      "x": 0.085,
       "y": 0.003,
       "token": "primary",
-      "what": "the brand stripe along the top edge"
+      "what": "the brand bar at the top edge, over the page's left margin (the short rule under sparing)"
     }
   }
 }

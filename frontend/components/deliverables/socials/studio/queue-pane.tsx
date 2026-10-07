@@ -5,17 +5,19 @@
  * view: the media through FilePreview, each channel's copy with its count, the claims and
  * their sources), with when it publishes, and the approver's actions: "Approve · publishes
  * HH:MM" (the approve that schedules it into its slot, US-B105), Request changes, which sends
- * it back to Auto with what should change, Make another take, and Reject. Edit post opens
+ * it back to Auto with what should change, Make another take (F378: and Restore the earlier take,
+ * once Auto made one), and Reject. Edit post opens
  * it in the editor (its channels, words and look) and an owner or admin can Delete it
  * (3 Oct 2026).
  */
-import { Loader2, Pencil, RefreshCw } from 'lucide-react'
+import { Loader2, Pencil, RefreshCw, RotateCcw } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
-import { useRetakeSocialPost, useSendBackToAuto } from '@/hooks/use-socials-queue'
+import { useRetakeSocialPost, useSendBackToAuto, useUndoRetake } from '@/hooks/use-socials-queue'
+import { hasEarlierTake } from '../socials-review'
 import { SocialsPostEvidence } from '../socials-post-evidence'
 import { SocialsPostReview } from '../socials-post-review'
 import { postTime } from './socials-calendar-model'
@@ -25,6 +27,8 @@ import { DeletePostButton } from './delete-post-button'
 
 export const EXACT_HINT = 'You approve exactly this file and this copy. Changing either afterwards sends the post back here.'
 export const SEND_BACK_HINT = 'Auto redrafts it and it comes back here.'
+/** F378: the button that restores the take before Auto's last one. */
+export const UNDO_TAKE = 'Restore the earlier take'
 
 interface QueuePaneProps {
   post: SocialPost
@@ -37,13 +41,22 @@ interface QueuePaneProps {
 
 export function QueuePane({ post, campaignName, now, role, onEdit }: QueuePaneProps) {
   const retake = useRetakeSocialPost()
+  const undo = useUndoRetake()
   const sendBack = useSendBackToAuto()
   const slot = slotOfQueued(post)
   const anotherTake = (
-    <Button size="sm" variant="outline" onClick={() => retake.mutate(post.id)} disabled={retake.isLoading}>
-      {retake.isLoading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden />}
-      Make another take
-    </Button>
+    <>
+      <Button size="sm" variant="outline" onClick={() => retake.mutate(post.id)} disabled={retake.isLoading}>
+        {retake.isLoading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="mr-1.5 h-4 w-4" aria-hidden />}
+        Make another take
+      </Button>
+      {hasEarlierTake(post) && (
+        <Button size="sm" variant="ghost" onClick={() => undo.mutate(post.id)} disabled={undo.isLoading}>
+          <RotateCcw className="mr-1.5 h-4 w-4" aria-hidden />
+          {UNDO_TAKE}
+        </Button>
+      )}
+    </>
   )
   return (
     <section aria-label="Post to approve" className={CARD}>

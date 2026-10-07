@@ -10,7 +10,7 @@
  * F254: a new post is one post: once a Save, Render or Submit has created it, every later
  * try edits it, and a try that failed after creating it opens it.
  */
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import type { Workspace } from '@/components/workspace-provider'
 import type { SocialPost } from '@/lib/api-client'
@@ -19,7 +19,8 @@ import {
   useMakeAiOptions, usePickAiOption, useRedraft, usePickLibraryMedia, useRenderEditorPreview, useSaveEditor, useSocialFootageSources,
   useSocialTemplates, useSubmitEditor, useUploadEditorMedia, type EditorSave,
 } from '@/hooks/use-socials-editor'
-import { channelsOverLimit } from '../socials-composer-model'
+import { autoNeeds, channelsOverLimit } from '../socials-composer-model'
+import { schemaAtLength } from '../socials-variables-form'
 import { EditorBriefCard } from './editor-brief-card'
 import { EditorChannelsCard } from './editor-channels-card'
 import { EditorClaimsCard } from './editor-claims-card'
@@ -71,6 +72,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
   const imageSlots = chosen?.image_slots ?? []
   const photoSpots = useMemo(() => photoSpotsOf(chosen), [chosen])
   const calls = useEditorCalls()
+  const [needs, setNeeds] = useState<string | null>(null)  // F378: what the last redraft asked of the owner
   // F254: the post a Save, Render or Submit created, kept even when a later step fails, so
   // the next try edits it instead of creating another.
   const created = useRef<string | null>(null)
@@ -96,7 +98,12 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
     const ticked = Object.keys(draft.kinds)
     calls.redraft.mutate(
       { brief: draft.brief, channels: ticked.length ? ticked : undefined, format: draft.format, template_id: draft.templateId, length_seconds: draft.lengthSeconds },
-      { onSuccess: (proposal) => setDraft((d) => withProposal(d, proposal)) },
+      {
+        onSuccess: (proposal) => {
+          setDraft((d) => withProposal(d, proposal))
+          setNeeds(autoNeeds(proposal.questions))
+        },
+      },
     )
   }
   const mediaBusy = calls.upload.isLoading || calls.pick.isLoading
@@ -118,7 +125,7 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
       {ownFile && <Hint>{ownStill ? OWN_STILL_STEPS : OWN_FILE_STEPS}</Hint>}
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="flex min-w-0 flex-col gap-4">
-          <EditorBriefCard brief={draft.brief} busy={calls.redraft.isLoading} canRedraft onChange={(brief) => setDraft((d) => ({ ...d, brief }))} onRedraft={redraft} />
+          <EditorBriefCard brief={draft.brief} busy={calls.redraft.isLoading} canRedraft needs={needs} onChange={(brief) => setDraft((d) => ({ ...d, brief }))} onRedraft={redraft} />
           <EditorFormatCard
             draft={draft} durations={chosen?.durations ?? []} footageSlots={videoSlotsOf(chosen?.footage_slots ?? [], imageSlots)}
             footage={footage.data?.kinds.video} post={post} canEdit slides={slidesOf(draft)}
@@ -145,7 +152,8 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
             />
           )}
           <EditorClaimsCard
-            schema={chosen?.variables_schema ?? null} variables={draft.variables} sources={draft.sources} examples={chosen?.sample_data}
+            schema={chosen ? schemaAtLength(chosen.variables_schema, chosen.fields_cut_out, draft.lengthSeconds) : null}
+            variables={draft.variables} sources={draft.sources} examples={chosen?.sample_data}
             onChange={(variables, sources) => setDraft((d) => ({ ...d, variables, sources }))}
           />
           <EditorWhenCard slot={draft.slot} onChange={(slot) => setDraft((d) => ({ ...d, slot }))} />

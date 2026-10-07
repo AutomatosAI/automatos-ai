@@ -6,7 +6,8 @@ and the formats it suits. Research (the seeded playbook, through
 
 * a fact without a source: every fact names where it comes from, its ``kind`` one of
   ``knowledge|deliverable|web|github|note``, with a reference and a label (D7's rule
-  for claims, carried into the bank);
+  for claims, carried into the bank). F383 (night 11): a ``note`` is its own source,
+  so it needs no reference, and its label defaults to "Note";
 * a title the plan's bank already holds (case and spacing aside);
 * anything on the plan's "never say" list (``sources.never_say``), in the title, the
   angle or a fact;
@@ -30,6 +31,8 @@ from modules.socials import repeats
 from modules.socials.service import InvalidPost, SocialsError
 
 FACT_SOURCE_KINDS = ("knowledge", "deliverable", "web", "github", "note")
+NOTE = "note"
+NOTE_LABEL = "Note"
 RESEARCH, PERSON = "research", "person"
 TITLE_MAX_CHARS = 200
 ANGLE_MAX_CHARS = 1000
@@ -71,12 +74,14 @@ def validate_fact(fact: Any, where: str) -> Dict[str, Any]:
     source = fact.get("source")
     if not isinstance(source, Mapping) or source.get("kind") not in FACT_SOURCE_KINDS:
         raise InvalidTopic(f"{where} has no source: every fact names one, its kind one of {', '.join(FACT_SOURCE_KINDS)}")
+    sourced = source["kind"] != NOTE  # F383: a note is its own source: no ref, and its label may default
+    label = _text(source.get("label"), f"{where}.source.label", LABEL_MAX_CHARS, required=sourced)
     return {
         "text": text,
         "source": {
             "kind": source["kind"],
-            "ref": _text(source.get("ref"), f"{where}.source.ref", REF_MAX_CHARS, required=True),
-            "label": _text(source.get("label"), f"{where}.source.label", LABEL_MAX_CHARS, required=True),
+            "ref": _text(source.get("ref"), f"{where}.source.ref", REF_MAX_CHARS, required=sourced),
+            "label": label or NOTE_LABEL,
         },
     }
 

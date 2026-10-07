@@ -287,7 +287,7 @@ export function withProposal(draft: EditorDraft, proposal: SocialComposeProposal
   return {
     ...draft,
     base: proposal.copy.base,
-    perChannel: { ...proposal.copy.per_channel },
+    perChannel: { ...proposal.copy.channels },
     variables: { ...proposal.variables },
     sources: { ...proposal.sources },
   }

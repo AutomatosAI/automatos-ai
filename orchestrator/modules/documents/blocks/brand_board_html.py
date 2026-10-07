@@ -24,6 +24,8 @@ from .page_fonts import BOARD_HEADING_SAMPLE
 HEADING_SAMPLE_CLASS = f" {BOARD_HEADING_SAMPLE}"
 # A role the owner did not set, derived from the kit's colours (FR-2), says so under its swatch.
 DERIVED_NOTE = "derived"
+# F376: under sparing the social card's brand bar is a short rule, as a real card draws it.
+SOCIAL_RULE_CLASS = "board-social-rule"
 
 
 def _esc(value: Any) -> str:
@@ -146,11 +148,14 @@ def voice_html(block: Any, kit: Mapping[str, Any]) -> str:
 
 
 def _social_card(kit: Mapping[str, Any]) -> str:
-    paper, ink, accent = bb.social_colours(kit)
+    """The social card as a real one is drawn (F376): the documents' paper, and its brand bar for the accent use."""
+    paper, ink, _accent = bb.social_colours(kit)
+    bar, full = bb.social_bar(kit)
     name = bb.brand_name(kit)
+    rule = "" if full else f" {SOCIAL_RULE_CLASS}"
     return (
         f'<div class="board-app-frame board-social" style="background:{_esc(paper)}">'
-        f'<div class="board-social-stripe" style="background:{_esc(accent)}"></div>'
+        f'<div class="board-social-stripe{rule}" style="background:{_esc(bar)}"></div>'
         f'<p class="board-social-headline" style="color:{_esc(ink)}">{_esc(bb.SOCIAL_SAMPLE_HEADLINE)}</p>'
         f'<p class="board-social-brand" style="color:{_esc(ink)}">{_esc(name)}</p></div>'
     )

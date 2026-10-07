@@ -399,7 +399,7 @@ def test_rendering_a_draft_stores_the_mp4_registers_a_deliverable_and_awaits_app
     tokens = bundle["brand"]["tokens"]
     assert tokens["primary"] == DEFAULT_PRIMARY and tokens["accent"] == DEFAULT_PRIMARY  # the palette's accent
     assert tokens["body-font"] == tokens["heading-font"] == DEFAULT_FONT
-    assert "files" not in bundle
+    assert [f["path"] for f in bundle["files"]] == [face["path"] for face in bundle["brand"]["fonts"] if face["family"] == "Inter"]  # F376
     assert bundle["audio"] == COMPOSITION["audio_plan"]
     assert all(token == TOKEN for _, _, token in renderer.seen)
 

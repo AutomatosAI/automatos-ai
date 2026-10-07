@@ -1,8 +1,9 @@
 {
   "name": "App promo",
-  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the app promo reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit. Also cut to 15 s (the hook, today's plan on the phone, the end card) and 30 s (without the tracks).",
+  "description": "For a phone app only: a vertical promo with the app on a phone. A hook over footage, the app's name over its own screen recording, three of its screens (today's plan, a question answered, a helper citing its source), a bigger session, the two goals to reach, the result, the list of what the app covers, and the end card. Five footage slots; one takes the app's own recording. 38 s, also cut to 15 s (the hook, today's plan, the end card) and 30 s (without the list). Pick it only for a brief about an app; for any other business, pick a photo card or the Data story. Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
+  "made_for": "software",
   "sizes": [
     "1080x1920"
   ],
@@ -41,7 +42,7 @@
     "hook_line": {
       "type": "text",
       "label": "Hook: the headline",
-      "max_chars": 28,
+      "max_chars": 24,
       "description": "Over the hook footage, word by word; the accent words follow it."
     },
     "hook_accent": {
@@ -100,83 +101,83 @@
     },
     "course_code": {
       "type": "text",
-      "label": "Phone: the course code",
+      "label": "Phone: the badge at the top",
       "max_chars": 10
     },
     "today_label": {
       "type": "text",
-      "label": "Phone: the today card's label",
+      "label": "Phone: the first card's label",
       "max_chars": 12,
       "default": "Today"
     },
     "today_detail": {
       "type": "text",
-      "label": "Phone: today's plan",
+      "label": "Phone: the first card's line",
       "max_chars": 48
     },
     "today_percent": {
       "type": "number",
-      "label": "Phone: today's progress, in percent",
+      "label": "Phone: the first card's progress, in percent",
       "min": 0,
       "max": 100,
       "description": "Fills the ring and shows as its figure."
     },
     "streak": {
       "type": "text",
-      "label": "Phone: the streak",
+      "label": "Phone: the number beside the progress",
       "max_chars": 4
     },
     "question_topic": {
       "type": "text",
-      "label": "Phone: the question's topic",
+      "label": "Phone: the second screen's topic",
       "max_chars": 44
     },
     "question_label": {
       "type": "text",
-      "label": "Phone: the question label",
+      "label": "Phone: the second screen's label",
       "max_chars": 12,
-      "default": "Question"
+      "default": "Pick one"
     },
     "question_text": {
       "type": "text",
-      "label": "Phone: the question",
+      "label": "Phone: the second screen's question",
       "max_chars": 140
     },
     "option_a": {
       "type": "text",
-      "label": "Phone: answer A (the correct one)",
+      "label": "Phone: choice A (the one picked)",
       "max_chars": 48
     },
     "option_b": {
       "type": "text",
-      "label": "Phone: answer B",
+      "label": "Phone: choice B",
       "max_chars": 48
     },
     "option_c": {
       "type": "text",
-      "label": "Phone: answer C",
+      "label": "Phone: choice C",
       "max_chars": 48
     },
     "option_d": {
       "type": "text",
-      "label": "Phone: answer D",
+      "label": "Phone: choice D",
       "max_chars": 48
     },
     "result_label": {
       "type": "text",
-      "label": "Phone: the result",
+      "label": "Phone: what the pick shows",
       "max_chars": 12,
-      "default": "Correct"
+      "default": "Got it"
     },
     "tutor_button": {
       "type": "text",
-      "label": "Phone: the tutor button",
+      "label": "Phone: the help button",
       "max_chars": 30,
-      "default": "Ask the tutor about this →"
+      "default": "Learn more →"
     },
     "source_note": {
       "type": "text",
-      "label": "Phone: the source note",
+      "label": "Phone: the line about the source",
       "max_chars": 28
     },
     "source_link": {
@@ -186,53 +187,53 @@
     },
     "tutor_header": {
       "type": "text",
-      "label": "Phone: the tutor screen's header",
+      "label": "Phone: the help screen's header",
       "max_chars": 12,
-      "default": "Tutor"
+      "default": "Help"
     },
     "tutor_title": {
       "type": "text",
-      "label": "Phone: the tutor screen's title",
+      "label": "Phone: the help screen's title",
       "max_chars": 20,
-      "default": "Ask the tutor"
+      "default": "Ask a question"
     },
     "tutor_about": {
       "type": "text",
-      "label": "Phone: what the question is about",
+      "label": "Phone: what the help is about",
       "max_chars": 44
     },
     "tutor_question": {
       "type": "text",
-      "label": "Phone: the question to the tutor",
+      "label": "Phone: the question asked",
       "max_chars": 40
     },
     "tutor_answer": {
       "type": "text",
-      "label": "Phone: the tutor's answer",
+      "label": "Phone: the answer",
       "max_chars": 240,
       "description": "Types itself out word by word."
     },
     "cite_ok": {
       "type": "text",
-      "label": "Phone: the citation chip",
+      "label": "Phone: the source chip",
       "max_chars": 30
     },
     "cite_link": {
       "type": "text",
-      "label": "Phone: the verify chip",
+      "label": "Phone: the link chip",
       "max_chars": 30
     },
     "tutor_scope": {
       "type": "text",
-      "label": "Phone: the tutor's scope note",
+      "label": "Phone: the note under the answer",
       "max_chars": 48,
       "default": ""
     },
     "ask_placeholder": {
       "type": "text",
-      "label": "Phone: the ask bar's placeholder",
+      "label": "Phone: the question bar's placeholder",
       "max_chars": 24,
-      "default": "Type your question…"
+      "default": "Type here…"
     },
     "ask_speak": {
       "type": "text",
@@ -242,27 +243,27 @@
     },
     "ask_send": {
       "type": "text",
-      "label": "Phone: the ask button",
+      "label": "Phone: the send button",
       "max_chars": 8,
-      "default": "Ask"
+      "default": "Send"
     },
     "dock_1": {
       "type": "text",
       "label": "Phone: dock item 1",
       "max_chars": 10,
-      "default": "Feed"
+      "default": "Home"
     },
     "dock_2": {
       "type": "text",
       "label": "Phone: dock item 2",
       "max_chars": 10,
-      "default": "Library"
+      "default": "Search"
     },
     "dock_3": {
       "type": "text",
       "label": "Phone: dock item 3",
       "max_chars": 10,
-      "default": "Podcast"
+      "default": "Saved"
     },
     "dock_4": {
       "type": "text",
@@ -272,160 +273,160 @@
     },
     "mock_title": {
       "type": "text",
-      "label": "Mock: the title",
+      "label": "Big moment: the title",
       "max_chars": 22
     },
     "mock_detail": {
       "type": "text",
-      "label": "Mock: the detail",
+      "label": "Big moment: the detail",
       "max_chars": 48
     },
     "mock_button": {
       "type": "text",
-      "label": "Mock: the button",
+      "label": "Big moment: the button",
       "max_chars": 24
     },
     "gate_title": {
       "type": "text",
-      "label": "Gate: the title",
+      "label": "Goals: the title",
       "max_chars": 44
     },
     "gate_1": {
       "type": "text",
-      "label": "Gate: condition 1",
+      "label": "Goals: goal 1",
       "max_chars": 40
     },
     "gate_2": {
       "type": "text",
-      "label": "Gate: condition 2",
+      "label": "Goals: goal 2",
       "max_chars": 40
     },
     "grade_note": {
       "type": "text",
-      "label": "Grade: the line above",
+      "label": "Result: the line above",
       "max_chars": 40
     },
     "grade": {
       "type": "text",
-      "label": "Grade: the grade",
+      "label": "Result: the result",
       "max_chars": 3,
       "description": "Very large, e.g. 'A+'."
     },
     "grade_caveat": {
       "type": "text",
-      "label": "Grade: the line below",
+      "label": "Result: the line below",
       "max_chars": 16
     },
     "tracks_title": {
       "type": "text",
-      "label": "Tracks: the title",
+      "label": "List: the title",
       "max_chars": 16
     },
     "tracks_detail": {
       "type": "text",
-      "label": "Tracks: the counts",
+      "label": "List: the line under it",
       "max_chars": 56,
-      "description": "e.g. lesson, lab and question counts; each needs its source.",
+      "description": "e.g. how much the app holds; each figure needs its source.",
       "claim": true
     },
     "track_1_code": {
       "type": "text",
-      "label": "Tracks: track 1's code",
+      "label": "List: item 1's short code",
       "max_chars": 8
     },
     "track_1_name": {
       "type": "text",
-      "label": "Tracks: track 1's name",
+      "label": "List: item 1's name",
       "max_chars": 44
     },
     "track_2_code": {
       "type": "text",
-      "label": "Tracks: track 2's code",
+      "label": "List: item 2's short code",
       "max_chars": 8
     },
     "track_2_name": {
       "type": "text",
-      "label": "Tracks: track 2's name",
+      "label": "List: item 2's name",
       "max_chars": 44
     },
     "track_3_code": {
       "type": "text",
-      "label": "Tracks: track 3's code",
+      "label": "List: item 3's short code",
       "max_chars": 8
     },
     "track_3_name": {
       "type": "text",
-      "label": "Tracks: track 3's name",
+      "label": "List: item 3's name",
       "max_chars": 44
     },
     "track_4_code": {
       "type": "text",
-      "label": "Tracks: track 4's code",
+      "label": "List: item 4's short code",
       "max_chars": 8
     },
     "track_4_name": {
       "type": "text",
-      "label": "Tracks: track 4's name",
+      "label": "List: item 4's name",
       "max_chars": 44
     },
     "track_5_code": {
       "type": "text",
-      "label": "Tracks: track 5's code",
+      "label": "List: item 5's short code",
       "max_chars": 8
     },
     "track_5_name": {
       "type": "text",
-      "label": "Tracks: track 5's name",
+      "label": "List: item 5's name",
       "max_chars": 44
     },
     "track_6_code": {
       "type": "text",
-      "label": "Tracks: track 6's code",
+      "label": "List: item 6's short code",
       "max_chars": 8
     },
     "track_6_name": {
       "type": "text",
-      "label": "Tracks: track 6's name",
+      "label": "List: item 6's name",
       "max_chars": 44
     },
     "track_7_code": {
       "type": "text",
-      "label": "Tracks: track 7's code",
+      "label": "List: item 7's short code",
       "max_chars": 8
     },
     "track_7_name": {
       "type": "text",
-      "label": "Tracks: track 7's name",
+      "label": "List: item 7's name",
       "max_chars": 44
     },
     "track_8_code": {
       "type": "text",
-      "label": "Tracks: track 8's code",
+      "label": "List: item 8's short code",
       "max_chars": 8
     },
     "track_8_name": {
       "type": "text",
-      "label": "Tracks: track 8's name",
+      "label": "List: item 8's name",
       "max_chars": 44
     },
     "track_9_code": {
       "type": "text",
-      "label": "Tracks: track 9's code",
+      "label": "List: item 9's short code",
       "max_chars": 8
     },
     "track_9_name": {
       "type": "text",
-      "label": "Tracks: track 9's name",
+      "label": "List: item 9's name",
       "max_chars": 44
     },
     "track_10_code": {
       "type": "text",
-      "label": "Tracks: track 10's code",
+      "label": "List: item 10's short code",
       "max_chars": 8
     },
     "track_10_name": {
       "type": "text",
-      "label": "Tracks: track 10's name",
+      "label": "List: item 10's name",
       "max_chars": 44
     },
     "end_line": {
@@ -452,48 +453,48 @@
     },
     "cap_practice": {
       "type": "text",
-      "label": "Caption and voice: the practice",
+      "label": "Caption and voice: the first screen",
       "max_chars": 60
     },
     "cap_tutor": {
       "type": "text",
-      "label": "Caption and voice: the tutor",
+      "label": "Caption and voice: the help",
       "max_chars": 60
     },
     "cap_mock": {
       "type": "text",
-      "label": "Caption and voice: the mock",
+      "label": "Caption and voice: the big moment",
       "max_chars": 60
     },
     "beat_1": {
       "type": "text",
       "label": "Caption and voice: beat 1",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
     },
     "beat_2": {
       "type": "text",
       "label": "Caption and voice: beat 2",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
     },
     "beat_3": {
       "type": "text",
       "label": "Caption and voice: beat 3",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
     },
     "beat_4": {
       "type": "text",
       "label": "Caption and voice: beat 4",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
     },
     "beat_5": {
       "type": "text",
       "label": "Caption and voice: beat 5",
       "max_chars": 18,
-      "description": "Highlights as the voice says it; beats 2-5 light tracks 1, 2, 4 and 5."
+      "description": "Highlights as the voice says it; beats 2-5 light list items 1, 2, 4 and 5."
     },
     "reveal_voice": {
       "type": "text",
@@ -503,9 +504,9 @@
     },
     "grade_voice": {
       "type": "text",
-      "label": "Voice: the grade",
-      "max_chars": 40,
-      "description": "The grade as it is spoken, e.g. 'A-plus, or not yet.'"
+      "label": "Voice: the result",
+      "max_chars": 36,
+      "description": "The result as it is spoken, e.g. 'A-plus, or not yet.'"
     },
     "end_voice": {
       "type": "text",

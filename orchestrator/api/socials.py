@@ -128,7 +128,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, text_search, upload_crops, voice_examples, workspace_copies
+from modules.socials import report_charts, spoken_fields, text_search, upload_crops, voice_examples, workspace_copies
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -138,6 +138,7 @@ from modules.socials.settings import require_socials_enabled
 logger = logging.getLogger(__name__)
 
 TEXT_FORMAT = "text"  # PRD-251B: a post of copy alone, no template, no media
+POSTS_MAX_LIMIT = 500  # F379 (night 11): GET /posts?limit= keeps the newest this many
 
 router = APIRouter(
     prefix="/api/socials",
@@ -565,7 +566,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
     # 3 Oct 2026: a still post renders each size its channels need; a video one (render.sizes_for).
     bundle, *other_sizes = [
         render.bundle_for(post, template, brand_kit, fallback_name=workspace.name or "", size=size,
-                          footage_slots=footage_plan.shown if footage_plan is not None else ())
+                          footage_slots=footage_plan.shown if footage_plan is not None else (), require_photos=True)
         for size in render.sizes_for(post, template)
     ]
     # S1.7 (D7): a chart bound to a report shows that report's rows as it has them now.
@@ -597,7 +598,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
             extra_bundles=tuple(other_sizes),
             voice=voice_plan,
             footage=footage_plan,
-            reservation=reservation,
+            reservation=reservation, spoken_fields=spoken_fields.spoken_labels(render.composition_of(template)),  # F377
         )
     )
     return saved
@@ -614,21 +615,17 @@ def list_social_posts(
     window_from: Optional[datetime] = Query(None, alias="from"),
     window_to: Optional[datetime] = Query(None, alias="to"),
     q: Optional[str] = Query(None, max_length=text_search.QUERY_MAX_CHARS, description="Title or brief holds this"),
+    limit: Optional[int] = Query(None, ge=1, le=POSTS_MAX_LIMIT, description="Only the newest this many"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
     """The workspace's posts, newest first. ``from``/``to`` bound a post's date:
     its slot when scheduled, otherwise when it was created. ``q`` (global search,
-    US-205) keeps those whose title or brief holds it, case-insensitively."""
-    posts = service.list_posts(
-        db,
-        ctx.workspace_id,
-        statuses=_parse_statuses(status),
-        window_from=window_from,
-        window_to=window_to,
-        q=q,
-    )
-    return {"posts": [p.to_dict() for p in posts], "total": len(posts)}
+    US-205) keeps those whose title or brief holds it, case-insensitively. ``limit``
+    keeps the newest that many, and ``total`` counts every match (F379: it was ignored)."""
+    posts = service.list_posts(db, ctx.workspace_id, statuses=_parse_statuses(status), window_from=window_from,
+                               window_to=window_to, q=q)
+    return {"posts": [p.to_dict() for p in posts[:limit]], "total": len(posts)}
 
 
 @router.post("/posts", status_code=201, dependencies=[CAN_CREATE])

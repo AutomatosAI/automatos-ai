@@ -250,8 +250,9 @@ def test_the_voice_prints_each_tone_word_with_its_meaning_and_the_sign_off():
 def test_the_applications_are_the_invoice_and_letter_printed_with_the_kit_and_a_social_card():
     apps = _part(_board_html(AUTOMATOS), "board-applications")
     assert apps.count(f'<img src="{PNG_URI}') == 2  # page 1 of the invoice and the letter, drawn
-    paper, ink, accent = bb.social_colours(AUTOMATOS)
-    assert f'board-social" style="background:{paper}"' in apps and f"background:{accent}" in apps
+    paper, ink, _accent = bb.social_colours(AUTOMATOS)
+    bar, _full = bb.social_bar(AUTOMATOS)  # F376: the brand bar a real social card draws
+    assert f'board-social" style="background:{paper}"' in apps and f"background:{bar}" in apps
     assert f'style="color:{ink}"' in apps
     invoice, letter = (starter_page(preset, AUTOMATOS, _now()) for preset in (INVOICE, LETTER))
     assert "INV-0042" in invoice and COMPANY in invoice and 'class="unresolved-var"' not in invoice

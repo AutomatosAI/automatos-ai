@@ -459,10 +459,14 @@ def test_an_uploaded_woff2_is_stored_served_and_inlined_into_a_render_bundle(api
     bundle = build_bundle(workspace_id=WS, reference="r", blocks=blocks, values=values, brand_kit=rendered_kit, fmt="social_image")
     font_path = "assets/brand/fonts/font-0.woff2"
     assert {"path": font_path, "data_uri": _data_uri(WOFF2_MIME, WOFF2)} in bundle["files"]
-    assert bundle["brand"]["fonts"] == [{"family": "Brand Display", "weight": "700", "style": "normal", "path": font_path}]
+    uploaded, *bundled = bundle["brand"]["fonts"]
+    assert uploaded == {"family": "Brand Display", "weight": "700", "style": "normal", "path": font_path}
+    # F376: the body font the kit names and did not upload (its default, Inter) ships bundled after it.
+    assert bundled and {face["family"] for face in bundled} == {"Inter"}
     assert bundle["brand"]["tokens"]["heading-font"] == '"Brand Display", sans-serif'
     parsed = parse_bundle(bundle, load_settings({}), {})
-    assert [(f.path, f.data) for f in parsed.files] == [(font_path, WOFF2)]
+    assert [(f.path, f.data) for f in parsed.files][0] == (font_path, WOFF2)
+    assert len(parsed.files) == 1 + len(bundled)  # the upload, then the bundled faces
     assert '@font-face{font-family:"Brand Display";src:url("assets/brand/fonts/font-0.woff2") format("woff2");font-weight:700' in parsed.composition.html
     assert '--brand-heading-font:"Brand Display", sans-serif;' in parsed.composition.html
 

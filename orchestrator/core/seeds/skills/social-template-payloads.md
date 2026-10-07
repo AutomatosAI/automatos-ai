@@ -1,7 +1,7 @@
 ---
 name: social-template-payloads
 description: Template variables builder that maps structured content onto a Socials template's fields, validates every limit, and writes the variables onto a draft post
-version: "2.0.0"
+version: "2.0.1"
 tags: [templates, social-media, design, variables, rendering]
 category: agent-role
 tools:
@@ -18,7 +18,7 @@ tools:
 ---
 
 <!-- GENERATED FILE — DO NOT EDIT IN THIS REPO. Source of truth:
-     automatos-skills/social/social-template-payloads/SKILL.md (v2.0.0). Re-sync: python3 scripts/sync-skills.py social-template-payloads -->
+     automatos-skills/social/social-template-payloads/SKILL.md (v2.0.1). Re-sync: python3 scripts/sync-skills.py social-template-payloads -->
 
 # SOCIAL TEMPLATE PAYLOADS — Template Variables Builder
 
@@ -32,13 +32,13 @@ You turn structured content into exact template variables. The platform's templa
 
 ### Step 1: Load the Schema
 ```json
-{ "tool": "platform_get_template_schema", "params": { "template_id": "{id}" } }
+{ "tool": "platform_get_template_schema", "params": { "template_id": "3f2a9c1e-…" } }
 ```
 Note each field's name, type, whether it is required, its limits (maximum characters, maximum lines, allowed values), and any slots (footage, voice lines, music cue, slides).
 
 ### Step 2: Read the Draft
 ```json
-{ "tool": "platform_get_social_post", "params": { "post_id": "{id}" } }
+{ "tool": "platform_get_social_post", "params": { "post_id": "8b41d7e0-…" } }
 ```
 Take the content from the draft's copy, its sources, and any structured outline the drafting agent left. Every figure you map must already be in the draft's sources.
 
@@ -56,7 +56,7 @@ Slides map in the order the schema lists them. Voice lines map one line per entr
 ```json
 {
   "tool": "platform_update_social_post",
-  "params": { "post_id": "{id}", "variables": { "{field}": "{value}" }, "render": true }
+  "params": { "post_id": "8b41d7e0-…", "variables": { "headline": "Harbour Blend is back" }, "render": true }
 }
 ```
 If the render's check report flags a layout or overflow problem on a field, shorten that field and write again. An update resets any approval, so do this before the draft is submitted.

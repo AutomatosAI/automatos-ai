@@ -30,7 +30,7 @@ from config import config
 from core.media_render_client import MediaRenderClient
 from core.media_render_quota import release_render
 from core.social_templates import parse_size
-from modules.socials import render, service
+from modules.socials import render, service, spoken_fields
 from modules.socials.media_store import MediaStore, media_route
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,8 @@ async def _preview(job: render.RenderJob, client: MediaRenderClient, store: Medi
             media = await asyncio.wait_for(_render_files(job, client, store, factory), timeout=budget)
         except asyncio.TimeoutError:
             raise render.RenderFailure("timed_out", f"The preview did not finish within {budget // 60} minutes.") from None
-    except render.RenderFailure as failure:
+    except render.RenderFailure as refused:
+        failure = spoken_fields.named(refused, job.spoken_fields)  # F377: the fields, not the line
         logger.warning("[Socials] preview of post %s failed: %s (%s)", job.post_id, failure.message, failure.code)
         await asyncio.to_thread(_finish, factory, job, error=failure.message)
         return False

@@ -81,7 +81,7 @@ def maker(api, monkeypatch):
 
     def propose(db, plan, slot, topic, now, visual_slots=()):
         proposals.append((slot.key, topic.title, maker_mod.fact_candidates(topic, now)))
-        return {"title": f"Post: {topic.title}", "copy": {"base": f"About {topic.title}.", "per_channel": {}}, "variables": {}, "sources": {}}
+        return {"title": f"Post: {topic.title}", "copy": {"base": f"About {topic.title}.", "channels": {}}, "variables": {}, "sources": {}}
 
     monkeypatch.setattr(maker_mod, "_propose", propose)
     api.told, api.proposals, api.factory = told, proposals, factory

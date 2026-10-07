@@ -77,6 +77,7 @@ from modules.documents.brand_system import (
     require_readable_palette,
     within,
 )
+from modules.documents.font_fallbacks import with_font_fallbacks
 
 logger = logging.getLogger(__name__)
 
@@ -518,6 +519,7 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     patch = {k: v for k, v in patch.items() if k not in SERVER_MANAGED_FIELDS}
     # F366: a role sent back at its derived colour, or marked derived, stays derived.
     patch = with_palette_resolved(patch, base)
+    patch = with_font_fallbacks(patch, base)  # F376: a font stack it sets keeps its fallbacks
     merged = {**base, **{k: v for k, v in patch.items() if v is not None}}
     for record in MERGED_RECORDS:
         if isinstance(patch.get(record), dict):

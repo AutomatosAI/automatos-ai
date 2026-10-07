@@ -6,9 +6,11 @@ the 18 seeded social templates, and the media-render CI driver):
 * **The v2 roles reach the paper.** A role the kit stores maps onto the paper token
   it plays (paper → ``paper``, ink → ``on-paper``, muted → ``on-paper-muted``,
   accent → ``primary-on-paper`` / ``-large`` / ``accent-on-paper``, accent_2 →
-  ``accent-on-paper``) when it meets that token's own target; else, and for every
-  v1 kit, today's derivation. Every token name the base emitted is still emitted,
-  and media-render's own parser accepts the bundle.
+  ``accent-on-paper``) when it meets that token's own target. F376 (night 11): the
+  page, its ink and its muted tone are the documents' roles for every kit, v1 too
+  (the documents' paper, white or the kit's lightest colour, never the text colour
+  lightened to grey), darkened only as far as the card needs. Every token name the
+  base emitted is still emitted, and media-render's own parser accepts the bundle.
 * **The type scale reaches the templates.** ``display-scale`` / ``body-scale`` are
   the kit's display and body sizes over the default (a ratio, bounded), and every
   font size in every seeded template is multiplied by one of them, with a
@@ -62,6 +64,8 @@ from core.brand_palette import (  # noqa: E402
     PRIMARY_ON_PAPER_LARGE,
     STAGE_TOKENS,
     contrast,
+    derive_palette,
+    luminance,
     paper_palette,
     parse_hex,
 )
@@ -89,6 +93,10 @@ HARBOURLINE = {"name": "Harbourline Coffee Roasters", "primary_color": "#1E3A5F"
                "text_color": "#1a1a2e", "accent_use": "sparing",
                "palette": {"paper": HARBOURLINE_PAPER, "accent": HARBOURLINE_ACCENT},
                "type_scale": {"display": {"size_pt": 36}, "body": {"size_pt": 12}}}
+# F376: the night-11 kit as the customer had it (orange, sand, navy, near-black text, no roles stored).
+NIGHT_11 = {"name": "Tide Cafe", "primary_color": "#c44a1a", "secondary_color": "#dcd2bd",
+            "text_color": "#1a1814", "palette": {}, "accent_use": "sparing",
+            "font_family": "Geist, Inter, 'Segoe UI', system-ui, sans-serif", "heading_font": "Newsreader, Georgia, serif"}
 # Every token name brand_tokens emitted on the base (PRD-251): all 18 templates read them.
 BASE_TOKENS = {"primary", "secondary", "accent", "text", "body-font", "heading-font"} | set(STAGE_TOKENS) | set(PAPER_TOKENS)
 DARK_STAGES = {"app-promo", "cinematic-product-promo", "data-story", "ui-story-promo",
@@ -139,11 +147,27 @@ def test_every_base_token_is_still_emitted_and_media_render_accepts_the_bundle()
         parse_bundle(_bundle(kit), load_settings({}), {})  # the tokens are single CSS values, within the cap
 
 
-def test_a_kit_without_stored_roles_keeps_todays_paper():
-    # Automatos is a v1 kit: its paper is derived exactly as before, and an empty palette changes nothing.
+def test_a_kit_without_stored_roles_takes_the_documents_paper():
+    # Automatos is a v1 kit: its paper is the documents' (F376), and an empty palette changes nothing.
     assert paper_palette(AUTOMATOS) == paper_palette({**AUTOMATOS, "palette": {}})
     assert paper_palette(AUTOMATOS) == paper_palette({**AUTOMATOS, "palette": {"paper": "", "accent": None}})
+    assert paper_palette(AUTOMATOS)[PAPER] == derive_palette(AUTOMATOS)["paper"] == "#ffffff"
     assert parse_hex(paper_palette(AUTOMATOS)[PAPER]) != parse_hex(HARBOURLINE_PAPER)
+
+
+def test_the_night_11_kits_social_paper_is_its_documents_paper_and_ink():
+    roles, tokens = derive_palette(NIGHT_11), brand_tokens(NIGHT_11)
+    # White, as the invoice prints; never the text colour lightened to grey (#E8E7E7 on night 11).
+    assert tokens[PAPER] == roles["paper"] == "#ffffff"
+    assert tokens[ON_PAPER] == roles["ink"] == NIGHT_11["text_color"]
+    card = parse_hex(tokens[PAPER_CARD])
+    # The documents' muted tone, darkened only as far as the card (a shade below the page) needs.
+    assert luminance(parse_hex(tokens[ON_PAPER_MUTED])) <= luminance(parse_hex(roles["muted"]))
+    assert contrast(card, parse_hex(tokens[PAPER])) <= CARD_CONTRAST
+    for token, target in ((ON_PAPER, ON_PAPER_MIN_CONTRAST), (ON_PAPER_MUTED, MUTED_CONTRAST),
+                          (PRIMARY_ON_PAPER, PAPER_TEXT_MIN_CONTRAST), (PRIMARY_ON_PAPER_LARGE, LARGE_TEXT_MIN_CONTRAST),
+                          (ACCENT_ON_PAPER, PAPER_TEXT_MIN_CONTRAST)):
+        assert contrast(parse_hex(tokens[token]), card) >= target, token
 
 
 def test_harbourlines_stored_paper_and_accent_are_its_paper_tokens():
@@ -152,8 +176,9 @@ def test_harbourlines_stored_paper_and_accent_are_its_paper_tokens():
     paper, card = parse_hex(tokens[PAPER]), parse_hex(tokens[PAPER_CARD])
     assert card != paper and contrast(card, paper) <= CARD_CONTRAST  # the card is derived from the stored paper
     assert tokens[PRIMARY_ON_PAPER] == tokens[PRIMARY_ON_PAPER_LARGE] == tokens[ACCENT_ON_PAPER] == HARBOURLINE_ACCENT
-    # No ink stored: on-paper is derived, against the stored paper's card, and reads at 10:1.
+    # No ink stored: on-paper is the documents' ink (derived against the stored paper), reading at 10:1 on the card.
     assert contrast(parse_hex(tokens[ON_PAPER]), card) >= ON_PAPER_MIN_CONTRAST
+    assert tokens[ON_PAPER] == derive_palette(HARBOURLINE)["ink"]
 
 
 def test_stored_ink_muted_and_accent_2_take_their_tokens():
@@ -163,14 +188,18 @@ def test_stored_ink_muted_and_accent_2_take_their_tokens():
     assert tokens[PRIMARY_ON_PAPER] == HARBOURLINE_ACCENT
 
 
-def test_a_stored_role_that_would_not_read_there_is_left_to_todays_derivation():
+def test_a_stored_role_that_would_not_read_there_is_moved_until_it_does():
     v1 = paper_palette(AUTOMATOS)
-    # A paper too dark to be a page, an accent too pale for text on it, a muted tone too faint.
+    # A paper too dark to be a page is not used: the page is the one the kit's colours give.
     weak = paper_palette({**AUTOMATOS, "palette": {"paper": "#808080", "accent": "#f3d9cf", "muted": "#d0d0d0"}})
-    assert weak == v1
+    assert weak[PAPER] == v1[PAPER] and weak[PAPER_CARD] == v1[PAPER_CARD]
+    card = parse_hex(v1[PAPER_CARD])
+    # An accent too pale for text there is the primary as before; a muted tone too faint is darkened until it reads.
+    assert weak[PRIMARY_ON_PAPER] == v1[PRIMARY_ON_PAPER]
+    assert contrast(parse_hex(weak[ON_PAPER_MUTED]), card) >= MUTED_CONTRAST
+    assert weak[ON_PAPER_MUTED] != "#d0d0d0"
     # Large text needs less: a mid accent is the large token and not the small one.
     mid = "#b8491f"
-    card = parse_hex(v1[PAPER_CARD])
     assert LARGE_TEXT_MIN_CONTRAST <= contrast(parse_hex(mid), card) < PAPER_TEXT_MIN_CONTRAST
     tokens = paper_palette({**AUTOMATOS, "palette": {"accent": mid}})
     assert tokens[PRIMARY_ON_PAPER_LARGE] == mid and tokens[PRIMARY_ON_PAPER] == v1[PRIMARY_ON_PAPER]

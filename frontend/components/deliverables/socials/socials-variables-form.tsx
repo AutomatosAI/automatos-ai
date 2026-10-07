@@ -30,6 +30,22 @@ export function isRequired(spec: SocialTemplateVariable): boolean {
   return spec.type !== 'boolean' && spec.default === undefined
 }
 
+/**
+ * F377 (night 11): the fields a video at `length` seconds asks for. A shorter cut never shows
+ * the fields `fieldsCutOut` lists for it (core/social_cuts.py), so they leave the form and none
+ * of them is marked needed; a length without a cut (or an image) keeps every field.
+ */
+export function schemaAtLength(
+  schema: Record<string, SocialTemplateVariable>,
+  fieldsCutOut: Record<string, string[]> | undefined,
+  length: number | null | undefined,
+): Record<string, SocialTemplateVariable> {
+  const cutOut = length == null ? undefined : fieldsCutOut?.[String(length)]
+  if (!cutOut?.length) return schema
+  const dropped = new Set(cutOut)
+  return Object.fromEntries(Object.entries(schema).filter(([name]) => !dropped.has(name)))
+}
+
 /** The grey text in an empty field: the template's sample value as an example, else its default. */
 export function exampleOf(spec: SocialTemplateVariable, example: unknown): string {
   if (typeof example === 'string' ? example.trim() : example !== undefined && example !== null) return `e.g. ${String(example)}`

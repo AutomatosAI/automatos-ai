@@ -21,6 +21,16 @@ fonts (``font_files`` becomes ``[{family, weight, style, data_uri}]``), the
 shapes ``core/media_render_bundle.py`` reads. A render reads only what its
 bundle carries (D9), so the fonts never have to be fetched.
 
+F376 (night 11, 7 Oct): media-render has only Liberation and DejaVu installed, so a
+kit that named Geist and Newsreader without uploading them printed its posts in
+stand-in fonts, while its PDFs carried the faces the code ships (F360,
+``bundled_fonts``). The render-ready kit now also carries, in
+``bundled_font_files``, every bundled face (Inter, Geist, Newsreader: 400, 400
+italic, 600, 700) of each family its body and heading stacks resolve to and it did
+not upload, in the shape ``font_files`` has. Only the media-render bundle reads that
+field; the PDF path adds the same faces itself (``blocks/page_fonts``), and keeps
+``font_files`` to what the owner uploaded.
+
 Storage settings come through ``config``; nothing here reads the environment.
 """
 
@@ -32,7 +42,7 @@ import struct
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from core.media_render_bundle import FONT_FAMILY, FONT_STYLES
+from core.media_render_bundle import BUNDLED_FONT_FILES, FONT_FAMILY, FONT_STYLES
 from modules.documents.brand_kit import FONT_WEIGHT_VALUES, MAX_FONT_FILE_NAME_CHARS, MAX_FONT_FILES, BrandFontFile
 from modules.documents.brand_logo import (
     brand_kit_for_render,
@@ -41,6 +51,7 @@ from modules.documents.brand_logo import (
     logo_data_uri,
     store_brand_file,
 )
+from modules.documents.bundled_fonts import bundled_faces, font_uses
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +182,8 @@ def brand_kit_for_media_render(kit: Dict[str, Any]) -> Dict[str, Any]:
     ``logo_dark_url``, an uploaded one-colour logo in ``logo_mono_url``, and ``font_files`` as ``[{family, weight, style,
     data_uri}]``. A stored file whose bytes are gone is left out (a font) or
     left as the kit had it (a mark, a dark logo); the template's fallbacks apply.
+    ``bundled_font_files`` (F376) holds the bundled faces of the families the kit
+    names and did not upload, for the media-render bundle.
     """
     rendered = brand_kit_for_render(kit)
     inlined = {field: _inlined(kit, path_field) for field, path_field in INLINED_LOGOS}
@@ -186,7 +199,25 @@ def brand_kit_for_media_render(kit: Dict[str, Any]) -> Dict[str, Any]:
             "style": font.get("style"),
             "data_uri": f"data:{WOFF2_MIME};base64,{base64.b64encode(data).decode('ascii')}",
         })
-    return {**rendered, **{field: uri for field, uri in inlined.items() if uri}, "font_files": fonts}
+    return {
+        **rendered,
+        **{field: uri for field, uri in inlined.items() if uri},
+        "font_files": fonts,
+        BUNDLED_FONT_FILES: bundled_font_files(kit, fonts),
+    }
+
+
+def bundled_font_files(kit: Dict[str, Any], uploaded: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The bundled faces (F376) of each family the kit's body and heading stacks resolve to that ``uploaded`` lacks.
+
+    The same ``{family, weight, style, data_uri}`` entries an uploaded face becomes. A
+    stack resolves to its first family that is uploaded, bundled, installed or generic
+    (``bundled_fonts.resolve_stack``), so a family named after a bundled one adds nothing.
+    """
+    families = {str(font.get("family") or "").casefold() for font in uploaded}
+    heading = kit.get("heading_font") or None
+    uses = font_uses(str(kit.get("font_family") or ""), heading, families)
+    return [dict(face) for face in bundled_faces(uses)]
 
 
 def _inlined(kit: Dict[str, Any], path_field: str) -> Optional[str]:
@@ -197,11 +228,13 @@ def _inlined(kit: Dict[str, Any], path_field: str) -> Optional[str]:
 
 __all__ = [
     "BRAND_FONTS_ROUTE",
+    "BUNDLED_FONT_FILES",
     "MAX_FONT_BYTES",
     "WOFF2_MIME",
     "BrandFontError",
     "add_brand_font",
     "brand_kit_for_media_render",
+    "bundled_font_files",
     "check_face",
     "check_woff2",
     "find_brand_font",

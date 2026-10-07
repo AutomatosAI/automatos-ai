@@ -1,7 +1,7 @@
 """PRD-251B Wave 3, US-B305 — AI-made visuals in the editor's Look.
 
-On the S0.3b API harness (SQLite) with the data-story starter (three still slots, video
-slots around them), the toolkit faked. Pinned:
+On the S0.3b API harness (SQLite) with the data-story starter (three still slots; F377 took its
+video slots out, so a video slot is the Cinematic promo's), the toolkit faked. Pinned:
 
 * asking for options of an image slot answers 202 at once: the slot says ``making`` and
   four shots are planned through the workspace's AI images default (fal here), each its
@@ -184,6 +184,15 @@ def test_only_an_image_slot_of_the_template_takes_options(options, slot, reason)
     resp = _ask(options, post["id"], slot=slot)
     assert resp.status_code == 422 and reason in resp.text
     assert options.made == [] and _footage(options, post["id"]) in (None, {})
+
+
+def test_a_video_slot_never_takes_image_options():
+    """F377: the Data story has no footage slot now; a template's video slot is still refused."""
+    cinematic = next(s for s in social_starters.social_starters() if s["slug"] == "cinematic-product-promo")
+    social_starters._starters.cache_clear()
+    assert cinematic["blocks"]["slots"]["hook"]["kind"] == "video"
+    with pytest.raises(ai_options.OptionsRefused, match="hook is not one of this template's image slots"):
+        ai_options.image_slot(cinematic["blocks"], "hook")
 
 
 def test_a_post_without_a_template_or_without_an_ai_image_tool_is_422(options, monkeypatch):

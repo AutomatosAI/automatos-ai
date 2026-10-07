@@ -11,8 +11,9 @@ Pinned:
 * **A story row.** ``cadence[].kind`` is ``story`` on an image or a video row and refused
   elsewhere; its slots carry the kind, and the maker gives the slot's Instagram the story
   kind and leaves out a channel that posts no stories.
-* **The safe zone.** A story's 9:16 render moves the template's page clear of Instagram's
-  bars, scaled to the size; another size, or a post with no story, renders as authored.
+* **The safe zone.** A story's 9:16 render keeps the template's words clear of Instagram's
+  bars (F382: as insets, so the backgrounds stay full-bleed), scaled to the size; another
+  size, or a post with no story, renders as authored.
 """
 from __future__ import annotations
 
@@ -197,8 +198,9 @@ def _post(starter, *kinds):
 
 
 def test_the_safe_zone_is_scaled_to_the_size_and_only_at_9_16():
-    assert story_safe_css(1080, 1920).strip().endswith(".page { top: 250px !important; bottom: 340px !important; }")
-    assert ".page { top: 125px !important; bottom: 170px !important; }" in story_safe_css(540, 960)
+    # F382: two insets the templates add to their words' spacing, not a moved page box.
+    assert story_safe_css(1080, 1920).strip().endswith(":root { --story-top: 250px; --story-bottom: 340px; }")
+    assert ":root { --story-top: 125px; --story-bottom: 170px; }" in story_safe_css(540, 960)
     assert story_safe_css(1080, 1350) == "" and story_safe_css(1080, 1080) == "" and story_safe_css(0, 0) == ""
 
 

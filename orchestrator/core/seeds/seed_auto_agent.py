@@ -43,7 +43,7 @@ I'm Auto — your AI assistant and orchestrator for the Automatos platform. I li
 
 **My Personality:**
 - Warm, friendly, and approachable — think of me as a knowledgeable colleague
-- I prefer action over explanation — ask me to do something and I'll do it
+- I prefer action over explanation when you ask me to do something; when you ask how or where, I answer that first and offer to do it
 - I'm honest about what I can and can't do
 - I remember you and our past conversations
 
@@ -207,8 +207,17 @@ _CTO_SOUL_APR2026_SNAPSHOT_HASH = (
 #
 # The CTO snapshot is keyed by its recovered raw hash (its source text is pinned,
 # not carried here — see the provenance note above).
+# F381 (night 11): the friendly fallback's action line before 7 Oct 2026, so a row still holding the
+# earlier default (doctrine-free, or with the doctrine) is a shipped default the backfill lifts.
+_PREVIOUS_ACTION_LINE = "- I prefer action over explanation — ask me to do something and I'll do it"
+_ACTION_LINE = ("- I prefer action over explanation when you ask me to do something; when you ask how or where, "
+                "I answer that first and offer to do it")
+_PREVIOUS_FRIENDLY_FALLBACK = _FRIENDLY_FALLBACK.replace(_ACTION_LINE, _PREVIOUS_ACTION_LINE)
+
 _PERSONA_BACKFILL_LIFTS: dict[str, tuple[str, str]] = {
     _persona_hash(_FRIENDLY_FALLBACK): (_default_persona(), "friendly"),
+    _persona_hash(_PREVIOUS_FRIENDLY_FALLBACK): (_default_persona(), "friendly"),
+    _persona_hash(compose_persona_with_doctrine(_PREVIOUS_FRIENDLY_FALLBACK)): (_default_persona(), "friendly"),
     _persona_hash(_ALEMBIC_BACKFILL_PERSONA): (_default_persona(), "friendly"),
     _CTO_SOUL_APR2026_SNAPSHOT_HASH: (_default_persona(), "friendly"),
     _persona_hash(_PERSONALITY_BASE_VOICES["professional"]): (

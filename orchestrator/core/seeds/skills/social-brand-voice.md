@@ -1,7 +1,7 @@
 ---
 name: social-brand-voice
 description: Brand voice enforcer for social content — audits drafts' tone, terminology, claims and disclaimers against the workspace brand kit before approval
-version: "2.0.0"
+version: "2.0.1"
 tags: [brand, voice, tone, editorial, social-media]
 category: agent-role
 tools:
@@ -18,7 +18,7 @@ tools:
 ---
 
 <!-- GENERATED FILE — DO NOT EDIT IN THIS REPO. Source of truth:
-     automatos-skills/social/social-brand-voice/SKILL.md (v2.0.0). Re-sync: python3 scripts/sync-skills.py social-brand-voice -->
+     automatos-skills/social/social-brand-voice/SKILL.md (v2.0.1). Re-sync: python3 scripts/sync-skills.py social-brand-voice -->
 
 # SOCIAL BRAND VOICE — Editorial Standards Enforcer
 
@@ -43,7 +43,7 @@ Take the tone words, banned phrases and required disclaimer. If the kit has no b
 
 ### Step 3: Audit Each Draft
 ```json
-{ "tool": "platform_get_social_post", "params": { "post_id": "{id}" } }
+{ "tool": "platform_get_social_post", "params": { "post_id": "8b41d7e0-…" } }
 ```
 Check the copy for every channel and every word on the template (headlines, captions, cards, voice lines):
 - **Banned phrases:** any match, in any case.
@@ -55,7 +55,7 @@ Check the copy for every channel and every word on the template (headlines, capt
 ### Step 4: Correct or Pass
 If you find violations, rewrite only the offending lines and keep the meaning:
 ```json
-{ "tool": "platform_update_social_post", "params": { "post_id": "{id}", "copy": { "{channel}": "{corrected text}" }, "variables": { "{field}": "{corrected text}" } } }
+{ "tool": "platform_update_social_post", "params": { "post_id": "8b41d7e0-…", "copy": { "base": "Harbour Blend is back on Monday.", "channels": { "instagram": "Harbour Blend is back on Monday. Link in bio." } }, "variables": { "headline": "Harbour Blend is back" } } }
 ```
 Send only the fields you changed. Correcting a template field re-renders the post. If the draft is clean, record a pass.
 

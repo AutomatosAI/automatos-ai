@@ -27,10 +27,16 @@ The brand kit becomes:
   as it always did). ``logo-chip`` is what a dark stage puts behind the logo
   (FR-9): nothing when the kit has a logo for dark backgrounds, else a light
   chip in the paper's colour;
+* ``brand.tokens`` also carries what sets a still as the kit's documents are set
+  (F376, ``core/social_kit_tokens.py``): the small print in the body font, and
+  how far the accent goes (``accent_use``) on a card's solid accent surfaces and
+  its brand bar;
 * ``files`` and ``brand.fonts``: an uploaded logo at ``assets/brand/logo.<ext>``,
   an uploaded logo mark (D5, the square mark) at ``assets/brand/logo-mark.<ext>``,
   and the kit's font files (D5 ``font_files``) under ``assets/brand/fonts/``, each
   with its ``@font-face``, so ``var(--brand-heading-font)`` can name an uploaded face;
+  after them the faces the code ships (Inter, Geist, Newsreader) of each family the
+  kit names and did not upload (F376 ``bundled_font_files``), as its PDFs carry them;
 * the variables ``brand.name``, ``brand.tagline``, ``brand.logo`` (the staged
   logo's path, or a transparent pixel when there is no uploaded logo),
   ``brand.logo_mark`` (the staged mark's path; without a mark, whatever
@@ -51,15 +57,18 @@ The template becomes the composition, with two things done to it here:
   storage;
 * the audio plan's voice lines are template text: their ``{{ name }}`` are
   filled with the variables, and a line that fills in empty is dropped;
+* a ``|`` in a field the template prints as plain text becomes a space: only its
+  display text (``data-dress``) breaks lines on it (F382, ``core/social_line_breaks.py``);
 * a ``social_image`` renders as stills (US-107): the bundle asks media-render
   for a PNG snapshot at each of the template's still moments whose ``when``
   variable has a value (``core.social_templates.still_moments``): one for a
   card, one per slide for a carousel;
-* a 9:16 render for a story (PRD-251C US-C301, ``story_safe``) keeps the page
+* a 9:16 render for a story (PRD-251C US-C301, ``story_safe``) keeps the words
   clear of the bar Instagram draws at the top of a story and the reply box at the
-  bottom: the composition's css gains a rule that moves a template's ``.page`` box
-  inside them (every still template lays its words out in one; a video template,
-  made at 9:16 for reels, has none and renders as authored).
+  bottom: the composition's css gains the two insets (``--story-top``,
+  ``--story-bottom``) that every still template adds to its words' own spacing, so
+  its backgrounds and panels still run to the edges (F382; a video template, made
+  at 9:16 for reels, reads neither and renders as authored).
 
 Kokoro speaks the voice lines from their text inside media-render. When a post
 chooses a voice toolkit instead (US-111, ``modules/socials/recipes/voice.py``),
@@ -82,6 +91,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from core.brand_palette import PAPER, paper_palette, social_accent, stage_palette, to_hex
 from core.brand_type import BODY_STEP, DEFAULT_TYPE_SCALE, DISPLAY_STEP, step_size_pt
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, fill_text, parse_size, still_moments, without_slots
+from core.social_kit_tokens import kit_render_tokens
+from core.social_line_breaks import without_stray_breaks
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +125,10 @@ MAX_TOKEN_CHARS = 200
 
 BRAND_DIR = "assets/brand/"
 FONTS_DIR = "assets/brand/fonts/"
+# F376: the render-ready kit's bundled faces (``brand_fonts.bundled_font_files``): the
+# faces the code ships of each family the kit names and did not upload. media-render has
+# only Liberation and DejaVu installed, so without them a post prints in stand-in fonts.
+BUNDLED_FONT_FILES = "bundled_font_files"
 # A voice toolkit's lines (US-111), fetched by media-render from our storage.
 VOICE_DIR = "assets/voice/"
 LOGO_NAME = "logo"
@@ -179,7 +194,9 @@ def brand_tokens(kit: Mapping[str, Any]) -> Dict[str, str]:
     has_dark_logo = _staged_image(kit.get("logo_dark_url"), LOGO_DARK_NAME)[1] is not None
     chip = LOGO_CHIP_CLEAR if has_dark_logo else paper.get(PAPER, LOGO_CHIP_LIGHT)
     derived = {**stage_palette(kit), **paper, **type_scale_tokens(kit), LOGO_CHIP_TOKEN: chip}
-    return {**{name: value for name, value in tokens.items() if value is not None}, **derived}
+    checked = {**{name: value for name, value in tokens.items() if value is not None}, **derived}
+    # F376: and what sets a still as the kit's documents are set (core/social_kit_tokens.py).
+    return {**checked, **kit_render_tokens(kit, checked)}
 
 
 def _data_uri_type(value: Any) -> Optional[str]:
@@ -208,10 +225,15 @@ def _logos(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], Dict[str, str]
 
 
 def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
-    """The kit's font files (D5 ``font_files``, render-ready as data: URIs): bundle files and faces."""
+    """The kit's font files (D5 ``font_files``, render-ready as data: URIs), then its bundled faces
+    (F376 ``bundled_font_files``): bundle files and faces.
+
+    A template asking for a weight no face has (800, 900) gets the nearest heavier, else the
+    heaviest lighter one by the CSS font-matching rules: the bundled 700 for both.
+    """
     files: List[Dict[str, str]] = []
     faces: List[Dict[str, str]] = []
-    for i, font in enumerate(kit.get("font_files") or []):
+    for i, font in enumerate([*(kit.get("font_files") or []), *(kit.get(BUNDLED_FONT_FILES) or [])]):
         font = font if isinstance(font, Mapping) else {}
         ext = FONT_EXTENSIONS.get(_data_uri_type(font.get("data_uri")) or "")
         family = font.get("family")
@@ -229,11 +251,18 @@ def _fonts(kit: Mapping[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str,
 # PRD-251C (US-C301): a story's safe zone at 1080x1920, scaled to the size rendered.
 STORY_SAFE_TOP, STORY_SAFE_BOTTOM, STORY_SAFE_HEIGHT = 250, 340, 1920
 STORY_RATIO = 9 / 16
-STORY_SAFE_CSS = "\n/* PRD-251C: a story's safe zone */\n.page {{ top: {top}px !important; bottom: {bottom}px !important; }}\n"
+# F382 (night 11): the zone is two insets every still template adds to its words' own spacing
+# (``var(--story-top, 0px)``, ``var(--story-bottom, 0px)``). It moved the ``.page`` box, and a
+# photo card's dark panel, which lives in the page, ended at 80% of the story with a hard edge.
+STORY_TOP_VAR, STORY_BOTTOM_VAR = "--story-top", "--story-bottom"
+STORY_SAFE_CSS = (
+    "\n/* PRD-251C: a story's safe zone, kept by the words; the backgrounds stay full-bleed (F382) */\n"
+    ":root {{ " + STORY_TOP_VAR + ": {top}px; " + STORY_BOTTOM_VAR + ": {bottom}px; }}\n"
+)
 
 
 def story_safe_css(width: int, height: int) -> str:
-    """The rule that keeps a 9:16 story's page clear of Instagram's own bars; "" for another shape."""
+    """The insets that keep a 9:16 story's words clear of Instagram's own bars; "" for another shape."""
     if not width or not height or not math.isclose(width / height, STORY_RATIO, rel_tol=0.01):
         return ""
     scale = height / STORY_SAFE_HEIGHT
@@ -319,7 +348,7 @@ def build_bundle(
     logo_files, logo_variables = _logos(kit)
     font_files, faces = _fonts(kit)
     variables = {
-        **dict(values),
+        **without_stray_breaks(values, blocks.get("html") or ""),  # F382: "|" breaks only display text
         VAR_BRAND_NAME: brand_name(kit, fallback_name),
         VAR_BRAND_TAGLINE: kit.get("tagline") or "",
         **logo_variables,

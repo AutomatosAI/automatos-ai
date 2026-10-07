@@ -564,8 +564,8 @@ def test_the_bundle_carries_the_brand_kit_as_tokens_inlined_files_and_variables(
         "body-font": "Inter, sans-serif", "heading-font": "Inter, sans-serif",
     }
     # US-106: and the dark stage a social video reads, derived from those colours (core/brand_palette.py);
-    # US-107: and the paper a social image reads; PRD-255 US-006: the type scale and the dark stage's logo chip.
-    assert set(tokens) - set(raw) == set(STAGE_TOKENS) | set(PAPER_TOKENS) | {"display-scale", "body-scale", "logo-chip"}
+    # US-107: the paper a social image reads; PRD-255 US-006: the type scale, the logo chip; F376: core/social_kit_tokens.py.
+    assert set(tokens) - set(raw) == set(STAGE_TOKENS) | set(PAPER_TOKENS) | {"display-scale", "body-scale", "logo-chip", "mono-font", "accent-fill", "on-accent-fill", "accent-bar-span"}
     assert bundle["brand"]["fonts"] == [
         {"family": "Geist", "weight": "700", "style": "normal", "path": "assets/brand/fonts/font-0.woff2"}
     ]
@@ -819,9 +819,10 @@ def test_a_value_that_does_not_fit_its_variable_is_refused_naming_it(social_env)
 
 def test_a_social_format_needs_a_template_of_that_format(social_env):
     renderer = _Renderer(social_env.events)
-    for template in (None, _social_template(fmt="social_image")):
+    for template, refused in ((None, "No template with id"),  # F383: an id that names none is refused by name
+                              (_social_template(fmt="social_image"), "social_video renders a social_video template")):
         service = _service_with(template)
-        with pytest.raises(ValueError, match="social_video renders a social_video template"):
+        with pytest.raises(ValueError, match=refused):
             _generate(service, renderer, title="T", format="social_video", data={}, workspace_id=WS, template_id=TEMPLATE_ID)
     assert social_env.events == []
 

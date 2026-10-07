@@ -19,6 +19,10 @@
         --display: var(--brand-heading-font, sans-serif);
         --body: var(--brand-body-font, sans-serif);
         --mono: var(--brand-mono-font, monospace);
+        /* F382: how far a face's glyphs can reach above and below their baseline, as a share of the type
+           (Geist 1.30, Inter 1.21, DejaVu Sans 1.16). Display type set tighter than this gets the rest as
+           room below its last line, so the fit never reads the glyphs as overflow and shrinks the card. */
+        --ink-reach: 1.32em;
         /* One design pixel: the 1080-wide feed post is the reference; a landscape card scales by its height. */
         --u: calc(min({{ size.width }}, {{ size.height }}) / 1080 * 1px);
         /* PRD-255: the kit's display and body sizes, as ratios to the default type scale (1 without a kit). */
@@ -40,11 +44,13 @@
 
       /* The page: every size below is design pixels times --s, and the fit script shrinks --fit until it all fits. */
       /* The page has no padding of its own: its blocks carry their spacing, so a panel runs to the card's edges. */
+      /* F382: in a story, the words keep clear of the story app's own bars (--story-top and --story-bottom, set only for
+         a 9:16 story render); the page and its backgrounds still run to the card's edges. */
       .page { --fit: 1; --s: calc(var(--u) * var(--fit)); position: absolute; inset: 0; display: flex; flex-direction: column;
         justify-content: space-between; gap: calc(28 * var(--s)); }
       .page.wrap-words * { overflow-wrap: anywhere; }
       .top { display: flex; align-items: center; justify-content: space-between; gap: calc(20 * var(--s));
-        margin: calc(56 * var(--u)) calc(60 * var(--u)) 0; }
+        margin: calc(56 * var(--u) + var(--story-top, 0px)) calc(60 * var(--u)) 0; }
       .brand, .chip { display: inline-flex; align-items: center; gap: calc(12 * var(--s)); max-width: 100%;
         background: color-mix(in srgb, var(--ink) 82%, transparent); color: var(--on-ink); border-radius: calc(999 * var(--s));
         padding: calc(10 * var(--s)) calc(20 * var(--s)); font-size: calc(26 * var(--s) * var(--body-scale)); font-weight: 600; line-height: 1.2; }
@@ -56,7 +62,7 @@
         font-size: calc(24 * var(--s) * var(--body-scale)); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.2; }
       /* Display type sets tighter than its glyphs: the padding holds their ink, so the fit never reads it as overflow. */
       .headline { width: 100%; font-family: var(--display); font-weight: 800; line-height: 0.98; letter-spacing: -0.02em; color: var(--on-ink);
-        padding-bottom: 0.08em; }
+        padding-bottom: calc((var(--ink-reach) - 0.98em) / 2); }
       .headline .line { display: block; }
       .hot { color: var(--accent); }
       .lede { font-size: calc(34 * var(--s) * var(--body-scale)); line-height: 1.38; color: var(--on-ink); }
@@ -73,7 +79,7 @@
       /* The labels sit at the top of each photo, under the brand row: the words' panel rises from the
          bottom and grows with its text, so a label there would end up under it on a square card. */
       .label { position: absolute; left: calc(26 * var(--u)); top: calc(132 * var(--u)); }
-      .panel { display: flex; flex-direction: column; gap: calc(18 * var(--s)); padding: calc(70 * var(--s)) calc(60 * var(--u)) calc(60 * var(--u));
+      .panel { display: flex; flex-direction: column; gap: calc(18 * var(--s)); padding: calc(70 * var(--s)) calc(60 * var(--u)) calc(60 * var(--u) + var(--story-bottom, 0px));
         background: linear-gradient(to top, color-mix(in srgb, var(--ink) 95%, transparent) 0%,
           color-mix(in srgb, var(--ink) 90%, transparent) 75%, transparent 100%); }
       .panel .headline { font-size: calc(88 * var(--s) * var(--display-scale)); }
@@ -85,6 +91,14 @@
         .top { margin: calc(56 * var(--u)) calc(60 * var(--u)) 0 calc(48 * var(--u)); }
         .panel { padding: 0 calc(60 * var(--u)) calc(60 * var(--u)) calc(48 * var(--u)); background: none; }
         .panel .headline { font-size: calc(80 * var(--s) * var(--display-scale)); }
+        .label { top: calc(26 * var(--u)); }
+      }
+      /* F382 (B21): a tall card (the 9:16 story) gives the brand row a band of its own above the photos, so
+         the logo and the handle never sit on the before photo; the labels sit at the top of each photo, which
+         now starts below the story app's top bar. The band is the row's margin, its chips and a gap (--band). */
+      @media (max-aspect-ratio: 10/16) {
+        .pair { --band: calc(168 * var(--u)); top: calc(var(--story-top, 0px) + var(--band));
+          height: calc(66% - var(--story-top, 0px) - var(--band)); }
         .label { top: calc(26 * var(--u)); }
       }
       /* PRD-255 FR-9: on a dark stage, the kit's logo for dark backgrounds as it is; without one, the logo on a light chip. */
@@ -117,6 +131,9 @@
       // ---------- setup: the card's own words, dressed and fitted before anything is sampled ----------
       const MIN_FIT = 0.5;
       const FIT_STEP = 0.04;
+      // F382: a line's glyphs may reach past its line box (a face's ascent and descent run to 1.3em, its
+      // lines to 1.2): that ink is not overflow, so a box may run this share of the largest type in it past its height.
+      const INK_SLACK = 0.18;
       // No photo given: the slot's element was taken out, and the backdrop shows (a template may say more).
       if (!document.querySelector("img[data-slot]")) document.getElementById("root").classList.add("no-photo");
       // Stars: a rating of 1 to 5 as filled and empty stars.
@@ -160,6 +177,10 @@
       }
       document.querySelectorAll("[data-dress]").forEach(dress);
       // The fit: the page's scale steps down until every block sits inside the page and every box holds its text.
+      function inkSlack(el) {
+        const sizes = [el, ...el.querySelectorAll("*")].map((node) => parseFloat(getComputedStyle(node).fontSize) || 0);
+        return INK_SLACK * Math.max(...sizes);
+      }
       function overflowing(page) {
         const box = page.getBoundingClientRect();
         const style = getComputedStyle(page);
@@ -170,7 +191,7 @@
           if (rect.bottom > bottom || rect.right > right) return true;
         }
         return Array.from(page.querySelectorAll(".fit")).some(
-          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+          (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1 + inkSlack(el)
         );
       }
       function fit(page) {

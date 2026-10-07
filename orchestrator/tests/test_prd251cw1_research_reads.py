@@ -64,11 +64,17 @@ class _OneRow:
     def first(self):
         return self.row
 
+    def all(self):  # F383: the workspaces' installed copies of the row (none here)
+        return []
+
+
+MARKETPLACE_ROW_ID = "0b0e5c1a-0000-4000-8000-000000000383"
+
 
 def _row(prompt):
     step = {"step_id": "research", "order": 1, "agent_id": 11, "agent_name": "Social Media Director",
             "error_handling": "stop", "output_key": "topics", "prompt_template": prompt}
-    return SimpleNamespace(owner_type="marketplace", steps=[step])
+    return SimpleNamespace(id=MARKETPLACE_ROW_ID, owner_type="marketplace", steps=[step])  # F383: copies key on its id
 
 
 def test_a_marketplace_row_with_the_old_prompt_takes_the_new_one_and_a_curated_one_stays():

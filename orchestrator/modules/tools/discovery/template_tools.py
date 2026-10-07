@@ -22,6 +22,15 @@ F346 (night 10b):
   what fills itself.
 * **Only an id named a template.** A name works too: ``template_name``, or a
   ``template_id`` that is not an id (matched exactly, then ignoring case).
+
+F379 (night 11): Auto named social templates that don't exist ("instagram carousel template",
+"Instagram Image"): the list without a format left the social ones out, and only a note said so.
+Now it names them in one line (``social_templates``: "image: Carousel, Quote card; video: …"),
+and a social template's schema gives the bare field names a post's variables take
+(``post_variables``), beside ``data_fields`` (``data.<name>``, generate_document's).
+
+F377 (night 11): a social template made for one kind of brief (``made_for``, the videos told
+on a software product's screens) says so at the end of its row and in its schema answer.
 """
 from __future__ import annotations
 
@@ -34,11 +43,18 @@ TEMPLATE_ROW = "{name} | {format} | {category} | makes {makes} | {id}"
 ROW_FORMAT = "name | format | category | makes (the formats generate_document may ask of it) | id"
 FORMAT_JOINER = ", "
 SOCIAL_NOTE = (
-    "Document templates only: pass format social_image or social_video for the social ones. "
-    "get_template_schema (by id or name) says what a template needs."
+    "Document templates only, one per line. The social templates (for a Socials post, "
+    "platform_create_social_post) are named in social_templates; pass format social_image or social_video "
+    "for their rows. get_template_schema (by id or name) says what a template needs."
 )
+# F379 (night 11): what a Socials post's variables are, beside generate_document's data.<name> fields.
+POST_VARIABLES_NOTE = (
+    "For a Socials post (platform_create_social_post), send these in variables by their bare names, no "
+    "\"data.\" (* needs a value); data_fields are what generate_document takes."
+)
+# F377: a social template made for one kind of brief says so at the end of its row.
+MADE_FOR_ROW = " | made for {kind} only: pick it only when the brief is about {kind}"
 NEEDS_A_TEMPLATE = "Name the template: template_id, or template_name, from platform_list_templates."
-NO_SUCH_TEMPLATE = "No template {ref!r} in this workspace: platform_list_templates lists them."
 
 
 def _text(value: Any) -> Optional[str]:
@@ -46,11 +62,15 @@ def _text(value: Any) -> Optional[str]:
 
 
 def template_row(template: Any) -> str:
-    """One template as one line of the list, with what it makes (F348's ``supported_formats``)."""
+    """One template as one line of the list, with what it makes (F348's ``supported_formats``),
+    and (F377) whom a social template is made for when it is not any business."""
+    from core.social_templates import made_for
     from modules.documents.template_formats import supported_formats
 
-    return TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category,
-                               makes=FORMAT_JOINER.join(supported_formats(template)), id=template.id)
+    row = TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category,
+                              makes=FORMAT_JOINER.join(supported_formats(template)), id=template.id)
+    kind = made_for(getattr(template, "blocks", None))
+    return f"{row}{MADE_FOR_ROW.format(kind=kind)}" if kind else row
 
 
 def list_templates_answer(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -58,16 +78,17 @@ def list_templates_answer(db: Session, workspace_id: UUID, params: Dict[str, Any
     from core.social_templates import is_social_format
     from modules.documents.template_service import DocumentTemplateService
 
+    from modules.tools.discovery.social_post_checks import social_rows, template_names
+
     fmt, name = _text(params.get("format")), _text(params.get("name"))
     rows = DocumentTemplateService(db).list_templates(workspace_id, format=fmt, category=_text(params.get("category")))
-    if not fmt:
-        rows = [t for t in rows if not is_social_format(t.format)]
     if name:
         rows = [t for t in rows if name.casefold() in (t.name or "").casefold()]
-    answer: Dict[str, Any] = {"success": True, "count": len(rows), "row_format": ROW_FORMAT}
-    if not fmt:
-        answer["note"] = SOCIAL_NOTE
-    return {**answer, "templates": [template_row(t) for t in rows]}
+    documents = rows if fmt else [t for t in rows if not is_social_format(t.format)]
+    answer: Dict[str, Any] = {"success": True, "count": len(documents), "row_format": ROW_FORMAT}
+    if not fmt:   # F379 (night 11): the social names too, in one line, so a post's template is never guessed
+        answer = {**answer, "note": SOCIAL_NOTE, "social_templates": template_names(social_rows(rows))}
+    return {**answer, "templates": [template_row(t) for t in documents]}
 
 
 def _as_id(value: Optional[str]) -> Optional[UUID]:
@@ -78,7 +99,9 @@ def _as_id(value: Optional[str]) -> Optional[UUID]:
 
 
 def find_template(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Tuple[Any, Optional[str]]:
-    """The template ``params`` names (by id or by name) and ``None``, or ``None`` and why not."""
+    """The template ``params`` names (by id or by name) and ``None``, or ``None`` and why not.
+    Names and ids are read as generate_document reads them (F383, ``template_lookup``)."""
+    from modules.documents.template_lookup import TemplateNotFound, named_template, template_by_id
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
@@ -86,13 +109,12 @@ def find_template(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Tu
     if ref is None:
         return None, NEEDS_A_TEMPLATE
     template_id = _as_id(ref)
-    if template_id is not None:
-        template = service.get_template(template_id, workspace_id)
-    else:
-        template = service.get_template_by_name(workspace_id, ref) or next(
-            (t for t in service.list_templates(workspace_id) if (t.name or "").casefold() == ref.casefold()), None
-        )
-    return (template, None) if template else (None, NO_SUCH_TEMPLATE.format(ref=ref))
+    try:
+        if template_id is not None:
+            return template_by_id(service, workspace_id, template_id), None
+        return named_template(service, workspace_id, ref), None
+    except TemplateNotFound as missing:
+        return None, str(missing)
 
 
 def _block_fields(blocks: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -141,9 +163,15 @@ def template_schema_answer(db: Session, workspace_id: UUID, params: Dict[str, An
         "sample_data": template.sample_data or {},
     }
     if social:
+        from modules.tools.discovery.social_post_checks import field_list
+        from core.social_templates import made_for
+
         blocks = template.blocks if isinstance(template.blocks, dict) else {}
+        schema["post_variables"] = field_list(template, limit=len(blocks.get("variables_schema") or {}))  # F379
+        schema["post_variables_note"] = POST_VARIABLES_NOTE
         schema["variables_schema"] = blocks.get("variables_schema") or {}
         schema["sizes"] = blocks.get("sizes") or []
+        schema["made_for"] = made_for(blocks)  # F377: "software", or None for any business
     return schema
 
 

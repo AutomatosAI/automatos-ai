@@ -2,7 +2,8 @@
  * Socials Queue hooks (PRD-251B US-B111)
  * ======================================
  *
- * Another take (POST /api/socials/posts/{id}/retake), sending a post back to Auto (request
+ * Another take (POST /api/socials/posts/{id}/retake; F378: what Auto still needs from the owner
+ * rides its toast, and POST …/retake/undo restores the take before it), sending a post back to Auto (request
  * changes with the comment, then another take with it as guidance), and approving every
  * shown post by the content hash on screen: through the series path when the shown posts
  * are one series campaign's, otherwise one approve each. Nothing is approved implicitly: a
@@ -15,18 +16,40 @@ import { toast } from 'sonner'
 
 import { apiClient, type SocialCampaign, type SocialPost } from '@/lib/api-client'
 import { useInvalidateSocials, usePostWriteErrorHandler } from '@/hooks/use-socials-api'
+import { autoNeeds } from '@/components/deliverables/socials/socials-composer-model'
 
 export const RETAKE_STARTED = 'Auto is making another take. It comes back here.'
 export const SENT_BACK = 'Sent back to Auto. The new take comes back here.'
+export const TAKE_RESTORED = 'The take before Auto\'s last one is back.'
+
+/** F378: a retake's toast, with what Auto still needs from the owner ("Auto needs: …"). */
+export function retakeToast(started: string, post: Pick<SocialPost, 'take'> | null | undefined): string {
+  const needs = autoNeeds(post?.take?.questions)
+  return needs ? `${started} ${needs}` : started
+}
 
 export function useRetakeSocialPost() {
   const invalidate = useInvalidateSocials()
   const onError = usePostWriteErrorHandler('Auto could not make another take')
   return useMutation<SocialPost, Error, string>({
     mutationFn: (postId) => apiClient.retakeSocialPost(postId),
+    onSuccess: async (post) => {
+      await invalidate()
+      toast.success(retakeToast(RETAKE_STARTED, post))
+    },
+    onError,
+  })
+}
+
+/** F378: restore the take before Auto's last one (POST /api/socials/posts/{id}/retake/undo). */
+export function useUndoRetake() {
+  const invalidate = useInvalidateSocials()
+  const onError = usePostWriteErrorHandler('Could not restore the earlier take')
+  return useMutation<SocialPost, Error, string>({
+    mutationFn: (postId) => apiClient.undoSocialPostRetake(postId),
     onSuccess: async () => {
       await invalidate()
-      toast.success(RETAKE_STARTED)
+      toast.success(TAKE_RESTORED)
     },
     onError,
   })
@@ -40,9 +63,9 @@ export function useSendBackToAuto() {
       await apiClient.requestSocialPostChanges(postId, comment)
       return apiClient.retakeSocialPost(postId, comment)
     },
-    onSuccess: async () => {
+    onSuccess: async (post) => {
       await invalidate()
-      toast.success(SENT_BACK)
+      toast.success(retakeToast(SENT_BACK, post))
     },
     onError,
   })

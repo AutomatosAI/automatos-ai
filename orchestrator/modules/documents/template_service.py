@@ -110,6 +110,14 @@ class DocumentTemplateService:
             .first()
         )
 
+    def get_template_version(self, template_id: UUID, workspace_id: UUID) -> Optional[DocumentTemplate]:
+        """F383: a template by id in its workspace, active or not: the id an agent kept from a
+        listing before the template was replaced or removed (``template_lookup`` reads it)."""
+        return self.db.query(DocumentTemplate).filter(
+            DocumentTemplate.id == template_id,
+            DocumentTemplate.workspace_id == workspace_id,
+        ).first()
+
     def list_templates(
         self,
         workspace_id: UUID,

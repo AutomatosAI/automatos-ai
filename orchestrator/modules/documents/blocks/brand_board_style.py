@@ -36,6 +36,9 @@ BOARD_TOKENS = {
     "board_type_label_mm": 32,
     # The variants' and the type scale's share of their row (the type samples are fitted to it, F368).
     "board_type_share_pct": 58,
+    # F376: the social card's short brand rule under sparing, as a share of its width
+    # (a real card's is 160 of its 1080 design pixels).
+    "board_social_rule_pct": 15,
 }
 
 BOARD = Template("""
@@ -91,6 +94,7 @@ BOARD = Template("""
   .board-app-frame img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
   .board-social { position: relative; padding: ${s3}pt; }
   .board-social-stripe { position: absolute; left: 0; top: 0; width: 100%; height: ${s1}pt; }
+  .board-social-stripe.board-social-rule { left: ${s3}pt; width: ${board_social_rule_pct}%; }
   .board-social-headline { font-size: ${h3}pt; line-height: ${h3_line}pt; font-weight: $display_weight;
     margin: ${s2}pt 0; }
   .board-social-brand { font-size: ${small}pt; line-height: ${small_line}pt; font-weight: $bold; margin: 0; }

@@ -185,7 +185,7 @@ describe('the post editor', () => {
 
   it('Redraft with Auto sends the editor choices and replaces the copy, variables and sources only', async () => {
     api.composeSocialPost.mockResolvedValue({
-      title: 'Another title', copy: { base: 'Fresh copy.', per_channel: { tiktok: 'Fresh for TikTok.' } },
+      title: 'Another title', copy: { base: 'Fresh copy.', channels: { tiktok: 'Fresh for TikTok.' } },
       format: 'video', template_id: 'tpl-vid', template: null, variables: { hook: { value: 'Look', claim: false } },
       sources: {}, channels: ['tiktok'], warnings: [],
     })
@@ -201,6 +201,19 @@ describe('the post editor', () => {
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Copy' })).toHaveValue('Fresh copy.'))
     expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Nothing posts without you')
     expect(within(card('Format')).getByRole('button', { name: '0:30' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it("F378: after a redraft, the brief says what Auto needs from the owner", async () => {
+    api.composeSocialPost.mockResolvedValue({
+      title: 'Our numbers', copy: { base: 'We sold 412 bags.', channels: {} }, format: 'image', template_id: null,
+      template: null, variables: {}, sources: {}, channels: [], warnings: [],
+      questions: ['Source line', "A photo for 'Photo'"],
+    })
+    renderEditor(post())
+    await screen.findByText('TikTok')
+    expect(within(card('Brief')).queryByRole('status')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Redraft with Auto/ }))
+    expect(await within(card('Brief')).findByRole('status')).toHaveTextContent("Auto needs: Source line; A photo for 'Photo'")
   })
 
   it('Submit for approval saves, then submits', async () => {

@@ -23,14 +23,14 @@ A kit colour that already meets its target is used exactly as it is, so the
 Automatos Studio Dark kit reproduces the reference palette.
 
 :func:`paper_palette` derives the light page the social image families read
-(US-107: automatos-social's cream paper, ink and brand-orange display words),
-again keeping each colour's hue. Every text tone is measured against the card,
-the darker of the two surfaces, so it reads on both:
+(US-107) from the documents' own colour roles (:func:`derive_palette`; F376, night
+11: it was the text colour lightened to a grey page). Every text tone is measured
+against the card, the darker of the two surfaces, so it reads on both:
 
-* ``paper``: the kit's text colour, lightened until it is a page (a light kit
-  colour, like the Studio Dark cream, is the page as it is);
+* ``paper``: the documents' paper: the kit's lightest colour when it is a page
+  (the Studio Dark cream), else white; a stored one too dark for a page is not used;
 * ``paper-card``: the paper a shade darker, for the cards laid on it;
-* ``on-paper``: the kit's secondary colour, darkened until it reads on the card;
+* ``on-paper``: the documents' ink, and its muted tone, darkened as the card needs;
 * ``on-paper-muted`` and ``on-paper-dim``: two quieter text tones;
 * ``primary-on-paper`` and ``accent-on-paper``: the primary and the kit's accent,
   darkened only as far as small text in them must be (WCAG AA 4.5:1, with a margin);
@@ -256,18 +256,12 @@ def _on_card(card: RGB, target: float) -> Callable[[RGB], bool]:
     return lambda c: contrast(c, card) >= target
 
 
-def _paper_text(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) -> Dict[str, RGB]:
-    """``on-paper`` and its quieter tones: the stored ink and muted when they read, else today's derivation."""
-    on_paper = _kept(stored.get(ROLE_INK), _on_card(card, ON_PAPER_MIN_CONTRAST))
-    secondary = parse_hex(kit.get("secondary_color"))
-    if on_paper is None and secondary is not None:
-        on_paper = _least(secondary, BLACK, _on_card(card, ON_PAPER_MIN_CONTRAST))
-    if on_paper is None:
-        return {}
-    muted = _kept(stored.get(ROLE_MUTED), _on_card(card, MUTED_CONTRAST))
+def _paper_text(roles: Mapping[str, RGB], card: RGB) -> Dict[str, RGB]:
+    """``on-paper`` and its quieter tones: the documents' ink and muted, each moved only as far as the card needs."""
+    on_paper = _least(roles[ROLE_INK], BLACK, _on_card(card, ON_PAPER_MIN_CONTRAST))
     return {
         ON_PAPER: on_paper,
-        ON_PAPER_MUTED: muted or _most(on_paper, card, _on_card(card, MUTED_CONTRAST)),
+        ON_PAPER_MUTED: _least(roles[ROLE_MUTED], BLACK, _on_card(card, MUTED_CONTRAST)),
         ON_PAPER_DIM: _most(on_paper, card, _on_card(card, DIM_CONTRAST)),
     }
 
@@ -291,26 +285,42 @@ def _paper_brand(kit: Mapping[str, Any], stored: Mapping[str, RGB], card: RGB) -
 
 
 def paper_palette(kit: Mapping[str, Any]) -> Dict[str, str]:
-    """The paper tokens for ``kit`` (a brand kit dict); ``{}`` when it has neither a page nor a usable text colour.
+    """The paper tokens for ``kit`` (a brand kit dict); ``{}`` when it has no usable colour at all.
 
-    A v2 role the kit stores (``kit['palette']``, PRD-255 US-006) is the token it
-    maps onto when it meets that token's own target: ``paper`` (light enough to
-    be a page) the paper, ``ink`` the on-paper text, ``muted`` its muted tone,
-    ``accent`` the primary on paper, and ``accent_2`` (else ``accent``) the
-    accent on paper. Every other token is derived as before. A role whose kit
-    colour is missing or not a hex colour is left out, and the template's own
-    ``var()`` fallback applies to it.
+    F376: the page and its text are the documents' roles (:func:`derive_palette`):
+    ``paper`` the paper (a stored one too dark to be a page is left out), ``on-paper``
+    the ink and ``on-paper-muted`` the muted, each darkened only as far as it must be
+    to read on the card. The brand colours are the colours the ``accent`` role comes
+    from (a stored ``accent``, and ``accent_2``, when it reads there; else the kit's
+    own), darkened to each token's target. Without a single hex colour in the kit the
+    template's own ``var()`` fallbacks apply.
     """
-    stored = _stored_roles(kit)
-    paper = _kept(stored.get(ROLE_PAPER), lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
-    text = parse_hex(kit.get("text_color"))
-    if paper is None and text is not None:
-        paper = _least(text, WHITE, lambda c: luminance(c) >= PAPER_MIN_LUMINANCE)
-    if paper is None:
+    if not _has_colour(kit):
         return {}
+    roles = _document_roles(kit)
+    paper = roles[ROLE_PAPER]
     card = _most(paper, BLACK, lambda c: contrast(c, paper) <= CARD_CONTRAST)
-    palette = {PAPER: paper, PAPER_CARD: card, **_paper_text(kit, stored, card), **_paper_brand(kit, stored, card)}
+    stored = _stored_roles(kit)
+    palette = {PAPER: paper, PAPER_CARD: card, **_paper_text(roles, card), **_paper_brand(kit, stored, card)}
     return {name: to_hex(rgb) for name, rgb in palette.items()}
+
+
+def _has_colour(kit: Mapping[str, Any]) -> bool:
+    """Whether the kit has any colour to set a page from: one of its colours, or a stored role."""
+    return any(parse_hex(kit.get(field)) is not None for field in KIT_COLOUR_FIELDS) or bool(_stored_roles(kit))
+
+
+def _document_roles(kit: Mapping[str, Any]) -> Dict[str, RGB]:
+    """The documents' colour roles (:func:`derive_palette`), on a page light enough for the paper cards.
+
+    A stored paper too dark to be a page (the paper cards set dark ink and dark pills on
+    it) is left out, and every role is derived as if it were not stored.
+    """
+    roles = derive_palette(kit)
+    if luminance(parse_hex(roles[ROLE_PAPER]) or WHITE) < PAPER_MIN_LUMINANCE:
+        kept = {role: to_hex(rgb) for role, rgb in _stored_roles(kit).items() if role != ROLE_PAPER}
+        roles = derive_palette({**kit, "palette": kept})
+    return {role: parse_hex(value) or BLACK for role, value in roles.items()}
 
 
 def _kit_colour(kit: Mapping[str, Any], *fields: str) -> Optional[RGB]:

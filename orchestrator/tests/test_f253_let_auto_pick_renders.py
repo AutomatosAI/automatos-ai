@@ -60,7 +60,7 @@ def _post_like(**over):
 
 def _proposal(template=TITLE_CARD, variables=None, sources=None):
     return {
-        "title": "Our first post", "copy": {"base": "", "per_channel": {}}, "format": "image",
+        "title": "Our first post", "copy": {"base": "", "channels": {}}, "format": "image",
         "template_id": template["id"] if template else None,
         "template": {**template, "sizes": ["1080x1350"], "variables_schema": HEADLINE} if template else None,
         "variables": {"headline": {"value": "Our first post", "claim": False}} if variables is None else variables,

@@ -40,11 +40,18 @@ _PARAMETERS = {
         "text_color": {"type": "string", "description": "Hex colour of body text."},
         "font_family": {
             "type": "string",
-            "description": "The body font as a CSS font stack, such as Inter, sans-serif.",
+            "description": (
+                "The body font as a CSS font stack ending in a generic family, such as Geist, Inter, "
+                "sans-serif. Inter, Geist and Newsreader ship with the platform; any other font prints "
+                "only once its woff2 is uploaded. A stack without a generic family keeps the one it replaces."
+            ),
         },
         "heading_font": {
             "type": "string",
-            "description": "The headings' font stack, such as \"Brand Display\", serif. Empty: the body font.",
+            "description": (
+                "The headings' font stack ending in a generic family, such as Newsreader, Georgia, serif. "
+                "Empty: the body font."
+            ),
         },
         "logo_url": {
             "type": "string",

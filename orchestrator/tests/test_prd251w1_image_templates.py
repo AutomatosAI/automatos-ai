@@ -20,7 +20,7 @@ Pins:
   past the end.
 * **The paper.** The brand kit gives a light page with readable text on it
   and on its cards (WCAG, with a margin), and the Automatos kit reproduces the
-  automatos-social cream, card and ink.
+  automatos-social cream and card, in the documents' ink (F376).
 * **The CI driver** renders every image template at every size it declares
   and probes the brand stripe on two of them.
 * **The clone is gone.** No code under orchestrator/, services/ or frontend/
@@ -58,6 +58,7 @@ from core.builtin_skills import builtin_skill_paths  # noqa: E402
 from core.brand_palette import (  # noqa: E402
     PAPER_TOKENS,
     contrast,
+    derive_palette,
     luminance,
     paper_palette,
     parse_hex,
@@ -336,8 +337,12 @@ def test_media_render_takes_as_many_stills_as_its_setting_allows():
 def test_the_automatos_kit_reproduces_the_automatos_social_paper():
     paper = paper_palette(KIT)
     assert set(paper) == set(PAPER_TOKENS)
-    # The cream is the kit's own text colour, the ink its own secondary: exactly.
-    assert (paper["paper"], paper["on-paper"]) == ("#f0e8db", "#1a1714")
+    # The cream is the kit's own text colour, its lightest: the documents' page (F376: the paper is theirs).
+    roles = derive_palette(KIT)
+    assert paper["paper"] == roles["paper"] == "#f0e8db"
+    # The ink is the documents' ink, darkened only as far as the card needs.
+    ink, on_paper = parse_hex(roles["ink"]), parse_hex(paper["on-paper"])
+    assert luminance(on_paper) <= luminance(ink) and contrast(on_paper, parse_hex(paper["paper-card"])) >= 10
     # The card sits a shade below the paper, as automatos-social's #e3d9c8 sits below #f1e9dd.
     assert contrast(parse_hex(paper["paper-card"]), parse_hex(paper["paper"])) == pytest.approx(1.16, abs=0.02)
     # The display colour is the brand orange, deepened only as far as large text needs.
@@ -361,9 +366,12 @@ def test_any_kit_gives_a_light_page_with_readable_text(kit):
     assert contrast(page, paper["primary-on-paper"]) >= 4.7
 
 
-def test_a_kit_without_a_usable_text_colour_leaves_the_template_fallbacks():
-    assert paper_palette({"text_color": "cream", "secondary_color": "#1a1714"}) == {}
-    assert set(paper_palette({"text_color": "#f0e8db"})) == {"paper", "paper-card"}
+def test_a_kit_without_a_usable_colour_leaves_the_template_fallbacks():
+    assert paper_palette({"text_color": "cream", "secondary_color": "not a colour"}) == {}
+    # F376: one usable colour is enough, since the documents' roles derive from any of them.
+    no_brand_colour = set(PAPER_TOKENS) - {"accent-on-paper", "primary-on-paper", "primary-on-paper-large"}
+    assert set(paper_palette({"text_color": "cream", "secondary_color": "#1a1714"})) == no_brand_colour
+    assert paper_palette({"text_color": "#f0e8db"})["paper"] == "#f0e8db"
 
 
 # ---------------------------------------------------------------------------

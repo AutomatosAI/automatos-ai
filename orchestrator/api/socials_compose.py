@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from config import config
+from core.social_cuts import fields_cut_out
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
@@ -47,9 +48,9 @@ from core.database.database import get_db
 from core.models.core import DocumentTemplate, Skill
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.models.workspaces import Workspace
-from core.social_templates import SOCIAL_TEMPLATE_FORMATS
+from core.social_templates import SOCIAL_TEMPLATE_FORMATS, made_for
 from modules.documents.brand_kit import get_brand_kit
-from modules.socials import compose, history, service, voice_examples
+from modules.socials import compose, compose_photos, compose_sources, history, service, voice_examples
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import social_channels
 from modules.socials.compose_checks import template_kind
@@ -66,8 +67,9 @@ router = APIRouter()
 CAN_CREATE = Depends(require_workspace_permission("documents:create"))
 BRIEF_MAX_CHARS = 4000
 MAX_CHANNELS = 10
-# Candidate sources: the newest of each kind, and each address the brief quotes.
-CANDIDATES_PER_KIND = 8
+# Candidate sources (F378): those matching each of the brief's words, per kind, and each address it quotes.
+CANDIDATES_PER_TERM = 3
+MAX_CANDIDATES = 24
 MAX_BRIEF_URLS = 5
 _URL = re.compile(r"https?://[^\s<>\"')]+")
 
@@ -98,24 +100,35 @@ class ChoiceRefused(ValueError):
 
 
 def social_templates(db: Session, workspace_id: UUID, post_format: Optional[str]) -> List[Dict[str, Any]]:
-    """The workspace's social templates (of the post's kind when a format is set)."""
+    """The workspace's active social templates (of the post's kind when a format is set), as
+    the gallery lists them (``template_gallery.gallery``: an archived one is never offered)."""
     kinds = [template_kind(post_format)] if post_format else list(SOCIAL_TEMPLATE_FORMATS)
     rows = (
-        db.query(DocumentTemplate.id, DocumentTemplate.name, DocumentTemplate.format, DocumentTemplate.blocks)
-        .filter(DocumentTemplate.workspace_id == workspace_id, DocumentTemplate.format.in_(kinds))
+        db.query(DocumentTemplate.id, DocumentTemplate.name, DocumentTemplate.description, DocumentTemplate.format,
+                 DocumentTemplate.blocks)
+        .filter(DocumentTemplate.workspace_id == workspace_id, DocumentTemplate.format.in_(kinds),
+                DocumentTemplate.is_active.isnot(False))
         .order_by(DocumentTemplate.name)
         .all()
     )
-    out = []
-    for row in rows:
-        blocks = row.blocks if isinstance(row.blocks, dict) else {}
-        out.append({
-            "id": str(row.id), "name": row.name, "format": row.format,
-            "sizes": blocks.get("sizes") or [], "variables_schema": blocks.get("variables_schema") or {},
-            # PRD-251B (B5): the lengths a video declares (US-B104), for the editor and the model.
-            "durations": durations_of(blocks, row.format),
-        })
-    return out
+    return [template_entry(row) for row in rows]
+
+
+def template_entry(row: Any) -> Dict[str, Any]:
+    """One template as the composer sees it: its fields, sizes and lengths, and (F378) what it
+    is for: its description, its photo spots and (F377) whom it is made for."""
+    blocks = row.blocks if isinstance(row.blocks, dict) else {}
+    return {
+        "id": str(row.id), "name": row.name, "description": row.description, "format": row.format,
+        "sizes": blocks.get("sizes") or [], "variables_schema": blocks.get("variables_schema") or {},
+        # PRD-251B (B5): the lengths a video declares (US-B104), for the editor and the model.
+        "durations": durations_of(blocks, row.format),
+        "photo_slots": compose_photos.photo_slots(blocks),
+        # F377: the fields each shorter cut never shows, so a post at that length is never asked
+        # for them; and whom the template is for ("software": a software brief only).
+        "fields_cut_out": fields_cut_out(blocks),
+        "made_for": made_for(blocks),
+    }
 
 
 def chosen_templates(templates: List[Dict[str, Any]], body: ComposeRequest) -> List[Dict[str, Any]]:
@@ -187,12 +200,18 @@ def _takes_text(channel: Any) -> bool:
 
 
 def candidate_sources(db: Session, workspace_id: UUID, brief: str) -> List[Dict[str, Any]]:
-    """What a claim may be bound to: the workspace's newest of each kind, and each
-    address the brief quotes."""
-    found = post_sources.search(db, workspace_id, q="", limit=CANDIDATES_PER_KIND)
+    """What a claim may be bound to: the workspace's sources that match the brief's words
+    (F378, B1: never the newest of each kind whatever the brief says), and each address the
+    brief quotes; each once, ``MAX_CANDIDATES`` at most."""
+    found: List[Dict[str, Any]] = []
+    for term in compose_sources.brief_terms(brief):
+        found += post_sources.search(db, workspace_id, q=term, limit=CANDIDATES_PER_TERM)
     for url in _URL.findall(brief)[:MAX_BRIEF_URLS]:
         found += post_sources.search(db, workspace_id, kind="url", q=url, limit=1)
-    return found
+    unique: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for candidate in found:
+        unique.setdefault((str(candidate.get("kind")), str(candidate.get("ref"))), candidate)
+    return list(unique.values())[:MAX_CANDIDATES]
 
 
 def builtin_skills(db: Session) -> Dict[str, str]:
@@ -211,6 +230,12 @@ def brand_voice(db: Session, workspace_id: UUID) -> Dict[str, Any]:
     return dict(get_brand_kit(workspace.settings if workspace is not None else None).get("voice") or {})
 
 
+def brand_handles(db: Session, workspace_id: UUID) -> Dict[str, str]:
+    """F378 (night 11): the brand kit's social handles (toolkit → handle), the only ones a post carries."""
+    workspace = db.get(Workspace, workspace_id)
+    return dict(get_brand_kit(workspace.settings if workspace is not None else None).get("social_handles") or {})
+
+
 def brand_style_text(db: Session, workspace_id: UUID) -> str:
     """The brand kit's style profile as one paragraph (PRD-251B US-B303); empty without one."""
     from modules.documents.brand_style import style_prompt
@@ -219,12 +244,17 @@ def brand_style_text(db: Session, workspace_id: UUID) -> str:
     return style_prompt(workspace.settings if workspace is not None else None)
 
 
-def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> compose.ComposeContext:
-    """Everything the composer is given, from the caller's workspace only."""
+def compose_context(
+    db: Session, workspace_id: UUID, body: ComposeRequest, *, current_take: Optional[Mapping[str, Any]] = None,
+) -> compose.ComposeContext:
+    """Everything the composer is given, from the caller's workspace only; a retake's
+    ``current_take`` (F378) is the post as it is, the take to start from."""
     channels, warnings = connected_channels(db, workspace_id, body.channels)
     if body.format == TEXT_FORMAT:
         channels = text_channels(channels, body.channels, warnings)
     templates = chosen_templates(social_templates(db, workspace_id, body.format), body)
+    if body.template_id is None and compose_photos.brief_says_no_photo(body.brief):
+        templates = compose_photos.without_required_photos(templates)  # F378 (B19): no photo, no photo-only card
     check_length(templates, body)
     return compose.ComposeContext(
         brief=body.brief.strip(),
@@ -240,6 +270,8 @@ def compose_context(db: Session, workspace_id: UUID, body: ComposeRequest) -> co
         style=brand_style_text(db, workspace_id),
         recent_openings=tuple(history.recent_openings(db, workspace_id)),  # PRD-251C US-C105
         voice_examples=tuple(voice_examples.for_composer(db, workspace_id)),  # PRD-251C US-C406
+        handles=brand_handles(db, workspace_id),  # F378: the only handles a post carries
+        current_take=dict(current_take or {}),
     )
 
 
@@ -254,8 +286,8 @@ def compose_social_post(
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ) -> Dict[str, Any]:
-    """A draft proposal for ``brief`` (not saved): title, copy (base and per
-    channel), format, template, variables, sources, channels and warnings. A plain
+    """A draft proposal for ``brief`` (not saved): title, copy (``{"base", "channels"}``,
+    the shape a save takes), format, template, variables, sources, channels and warnings. A plain
     ``def``: its database reads run in the threadpool (F105), and the model call
     runs on the event loop from there. 422 for an unknown format; 502 when the
     model's answer cannot be read twice; 504 when it does not answer in time."""
