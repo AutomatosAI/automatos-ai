@@ -86,6 +86,25 @@ def test_the_directors_turn_gets_what_its_ticket_must_say_never_how_to_make_the_
     assert "Don't make the post yourself in this reply." in note
 
 
+@pytest.mark.parametrize("said", [
+    "Get Jim to make a carousel for the Harvest Club.",
+    "Ask NEWSROOM to draft a LinkedIn post about the wholesale offer.",
+])
+def test_an_ask_that_names_another_agent_stays_with_the_owners_choice(director, monkeypatch, said):
+    monkeypatch.setattr(lane, "agent_names", lambda db, workspace_id: ["Social Media Director", "Jim", "NEWSROOM"])
+    assert lane.names_another_agent(said, ["Social Media Director", "Jim", "NEWSROOM"], "Social Media Director")
+    assert lane.director_assignment(object(), WS, said) is None
+
+
+def test_naming_the_director_auto_or_a_word_inside_another_name_is_not_another_agent(director, monkeypatch):
+    names = ["Social Media Director", "Auto", "Al", "Jim"]
+    monkeypatch.setattr(lane, "agent_names", lambda db, workspace_id: names)
+    for said in ("Auto: get the Social Media Director to draft an Instagram post.",
+                 "Draft an Instagram post about Jimmy's café, and a carousel for Al Forno."):
+        assert not lane.names_another_agent(said, names, "Social Media Director"), said
+        assert lane.director_assignment(object(), WS, said).target_agent_id == 348
+
+
 def test_no_director_leaves_the_turn_to_the_tiers(monkeypatch):
     monkeypatch.setattr(lane, "find_social_media_director", lambda db, workspace_id: None)
     assert lane.director_assignment(object(), WS, "Draft an Instagram post for Friday.") is None

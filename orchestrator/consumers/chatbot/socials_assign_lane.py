@@ -16,7 +16,9 @@ marketplace row), or the active agent called Social Media Director; a workspace 
 the tiers. The ticket's description says what done means: a Socials post that exists and has
 rendered (``SOCIALS_TICKET``): the turn is marked (``director_turn``), and its last note is that,
 never the note that tells Auto how to make the post itself. A question about the work, an ask Auto keeps for itself
-("do it yourself"), and any message mid-onboarding are assessed as before.
+("do it yourself"), an ask that names another of the workspace's agents ("get Jim to make a
+carousel": the owner chose who, ``names_another_agent``), and any message mid-onboarding are
+assessed as before.
 
 The role, said in the classifier's words ("my social media person"), resolves to the Director too
 (``social_media_role``), so the ASSIGN lane never asks which agent, nor picks another.
@@ -38,6 +40,9 @@ ACTIVE = "active"
 DIRECTOR_NAME = "social media director"
 REASONING = "F379: social media work is the Social Media Director's ticket"
 PLATFORM_HINT = "platform"
+# A name shorter than this ("Al", "X") would match ordinary words, so it never counts as named.
+MIN_NAMED_CHARS = 3
+AUTO_NAME = "auto"  # the owner talks to Auto: its name never hands the work to another agent
 
 _ROLE = (r"social(?:\s+media)?\s+(?:person|director|manager|team|lead|guy|girl|lady|agent|people|expert|"
          r"specialist|marketer|whizz|wiz|wizard|bod|folks?)")
@@ -106,12 +111,39 @@ def active_director(db: Any, workspace_id: Any) -> Optional[Any]:
         return None
 
 
+def names_another_agent(message: str, names: Sequence[str], director_name: str) -> bool:
+    """Whether ``message`` names one of ``names`` (the workspace's active agents) other than the
+    Director, as a whole word: then the owner chose who does the work, and the tiers route it. Pure."""
+    said = _ADDRESS_TO_AUTO.sub("", str(message or ""))
+    others = {str(name).strip() for name in names if name} - {str(director_name or "").strip()}
+    others = {name for name in others if name.casefold() != AUTO_NAME}
+    return any(
+        len(name) >= MIN_NAMED_CHARS and re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", said, re.I)
+        for name in others
+    )
+
+
+def agent_names(db: Any, workspace_id: Any) -> Sequence[str]:
+    """The names of the workspace's active agents; none when they can't be read (the lane then
+    goes by the words alone, as before)."""
+    from core.models.core import Agent
+
+    try:
+        rows = db.query(Agent.name).filter(Agent.workspace_id == UUID(str(workspace_id)), Agent.status == ACTIVE).all()
+    except Exception:
+        logger.exception("[F379] the agents of workspace %s could not be read; no other agent counts as named",
+                         workspace_id)
+        return []
+    return [row[0] for row in rows]
+
+
 def director_assignment(db: Any, workspace_id: Any, message: str) -> Optional[Any]:
-    """The ASSIGN-lane assessment for social media work, the workspace's Director resolved; None otherwise."""
+    """The ASSIGN-lane assessment for social media work, the workspace's Director resolved; None otherwise
+    (also when the message names another agent: the owner chose who)."""
     if not asks_for_social_work(message):
         return None
     director = active_director(db, workspace_id)
-    if director is None:
+    if director is None or names_another_agent(message, agent_names(db, workspace_id), director.name):
         return None
     from consumers.chatbot.auto import Action, Complexity, ComplexityAssessment
 
@@ -161,5 +193,6 @@ def social_media_role(target: str, agents: Sequence[Any]) -> Tuple[Optional[int]
     return agent_id, name
 
 
-__all__ = ["SOCIALS_TICKET", "SOCIAL_ROLE", "active_director", "asks_for_social_work", "director_assignment",
-           "director_turn", "find_social_media_director", "ticket_note", "social_media_role", "social_work_goes_to_the_director"]
+__all__ = ["SOCIALS_TICKET", "SOCIAL_ROLE", "active_director", "agent_names", "asks_for_social_work", "director_assignment",
+           "director_turn", "find_social_media_director", "names_another_agent", "ticket_note", "social_media_role",
+           "social_work_goes_to_the_director"]
