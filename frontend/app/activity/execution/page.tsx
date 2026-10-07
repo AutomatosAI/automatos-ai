@@ -28,7 +28,7 @@ export default function ExecutionPage() {
         <PageHeader
           title="Playbook"
           titleAccent="Execution"
-          eyebrow="Activity · live run"
+          eyebrow="Command Center · live run"
           lede="Every step, tool call, handoff, and decision streamed as it happens. Pause, replay, or branch the run from any row."
         />
         <ExecutionKitchen
