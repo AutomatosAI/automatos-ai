@@ -184,6 +184,25 @@ def _candidate_lines(ctx: ComposeContext) -> List[Dict[str, Any]]:
     return [{k: c.get(k) for k in keys if c.get(k) is not None} for c in ctx.candidates]
 
 
+def _turn_notes(ctx: ComposeContext) -> List[str]:
+    """The notes this compose's own choices call for, in the order the system prompt gives them."""
+    notes = (
+        (ctx.template_id, "The template is chosen: use the one template listed, and no other."),
+        (ctx.length_seconds,
+         f"The video is {ctx.length_seconds} seconds long: fit the spoken words into the budget given "
+         "(spoken_words_budget) and keep every on-screen line short."),
+        (ctx.format == TEXT_FORMAT,
+         "This is a text-only post: no template, no variables and no image; write the copy only."),
+        (ctx.format != TEXT_FORMAT, LINE_BREAK_NOTE),
+        (ctx.visual_slots, VISUAL_PROMPTS_NOTE),
+        (ctx.current_take, RETAKE_RULES_NOTE),
+        (ctx.recent_openings, RECENT_OPENINGS_NOTE),
+        (ctx.voice_examples, VOICE_EXAMPLES_NOTE),
+        (ctx.skills, SKILLS_NOTE),
+    )
+    return [note for wanted, note in notes if wanted]
+
+
 def _system(ctx: ComposeContext) -> str:
     parts = [
         "You draft social media posts for this workspace. Answer with ONE JSON object only, shaped:",
@@ -196,27 +215,7 @@ def _system(ctx: ComposeContext) -> str:
         HANDLE_NOTE,
         PICK_NOTE,
     ]
-    if ctx.template_id:
-        parts.append("The template is chosen: use the one template listed, and no other.")
-    if ctx.length_seconds:
-        parts.append(
-            f"The video is {ctx.length_seconds} seconds long: fit the spoken words into the budget given "
-            "(spoken_words_budget) and keep every on-screen line short."
-        )
-    if ctx.format == TEXT_FORMAT:
-        parts.append("This is a text-only post: no template, no variables and no image; write the copy only.")
-    if ctx.format != TEXT_FORMAT:
-        parts.append(LINE_BREAK_NOTE)
-    if ctx.visual_slots:
-        parts.append(VISUAL_PROMPTS_NOTE)
-    if ctx.current_take:
-        parts.append(RETAKE_RULES_NOTE)
-    if ctx.recent_openings:
-        parts.append(RECENT_OPENINGS_NOTE)
-    if ctx.voice_examples:
-        parts.append(VOICE_EXAMPLES_NOTE)
-    if ctx.skills:
-        parts.append(SKILLS_NOTE)
+    parts.extend(_turn_notes(ctx))
     for name, text in ctx.skills.items():
         parts.append(f"## Skill: {name}\n{text[:SKILL_MAX_CHARS]}")
     return "\n\n".join(parts)
@@ -427,7 +426,8 @@ async def propose(ctx: ComposeContext, llm_factory: Callable[[], Any], timeout: 
     for attempt in range(ATTEMPTS):
         raw = await _ask(llm, messages, timeout)
         if raw is not None:
-            raw, proposal = await _copy_fixed(raw, compose_checks.checked_proposal(raw, ctx), ctx, llm, messages, timeout)
+            left = min(timeout, deadline - _now())  # the copy's follow-up fits in the budget too
+            raw, proposal = await _copy_fixed(raw, compose_checks.checked_proposal(raw, ctx), ctx, llm, messages, left)
             return _with_questions(await _filled(raw, proposal, ctx, llm, messages, timeout, deadline))
         logger.warning("[Socials] compose answer %d was not JSON", attempt + 1)
         messages = [*messages, {"role": "user", "content": RETRY_NOTE}]

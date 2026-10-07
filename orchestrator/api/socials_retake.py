@@ -61,6 +61,7 @@ router = APIRouter()
 CAN_REVIEW = Depends(require_workspace_permission("socials:approve"))
 RETAKE_STATUSES = frozenset({service.DRAFT, service.NEEDS_APPROVAL, service.CHANGES_REQUESTED, service.FAILED})
 ACTION_RETAKE = "retake"
+ACTION_UNDO = "undo_the_retake_of"  # IllegalTransition reads it as "cannot undo the retake of a post that is …"
 GUIDANCE_PREFIX = "Changes requested: "
 GUIDANCE_MAX_CHARS = 2000
 RETAKE_NOTE = "Auto made another take."
@@ -181,6 +182,9 @@ def undo_social_post_retake(
     posts_api = _posts_api()
     post = posts_api._load(db, ctx, post_id)
     actor = posts_api._actor(ctx)
+    # A post a retake may change is one its undo may restore, so the restore always renders.
+    if post.status not in RETAKE_STATUSES:
+        posts_api._raise_for(service.IllegalTransition(post.status, ACTION_UNDO))
     entry = retakes.restoring(post)
     if entry is None:
         raise HTTPException(status_code=409, detail={"code": NOTHING_TO_UNDO, "message": retakes.NOTHING_TO_UNDO})

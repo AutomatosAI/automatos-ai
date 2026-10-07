@@ -35,7 +35,7 @@ import tests.test_prd251bw1_retake as retake_tests  # noqa: E402
 import tests.test_prd251w1_render_lifecycle as render_harness  # noqa: E402
 from modules.socials import compose, retakes as post_retakes  # noqa: E402
 from tests.test_prd251bw1_retake import API_CLIENT, MANIFEST, TAKE, _retake  # noqa: E402
-from tests.test_prd251w1_render_lifecycle import _create, _post, _renderable  # noqa: E402
+from tests.test_prd251w1_render_lifecycle import WS, WS_OTHER, _create, _ctx, _post, _renderable  # noqa: E402
 
 env = render_harness.env
 retakes = retake_tests.retakes
@@ -93,6 +93,32 @@ def test_the_previous_take_is_kept_and_the_undo_restores_it(retakes):
 
     again = _undo(retakes, post["id"])
     assert again.status_code == 409 and again.json()["detail"]["code"] == "nothing_to_undo"
+
+
+def test_an_undo_is_refused_where_a_retake_is_and_nothing_changes(retakes):
+    post = _text_post(retakes)
+    assert _retake(retakes, post["id"], "Shorter").status_code == 202
+    row = _post(retakes, post["id"])
+    row.status = "missed"
+    retakes.session.commit()
+
+    resp = _undo(retakes, post["id"])
+    assert resp.status_code == 409
+    row = _post(retakes, post["id"])
+    assert row.copy == TAKE["copy"]
+    assert all(e["action"] != post_retakes.ACTION_RETAKE_UNDONE for e in row.review_log)
+
+
+def test_another_workspaces_undo_is_404_and_a_viewer_is_refused(retakes):
+    post = _text_post(retakes)
+    assert _retake(retakes, post["id"], "Shorter").status_code == 202
+    retakes.role = "viewer"
+    assert _undo(retakes, post["id"]).status_code == 403
+    retakes.role = "owner"
+    retakes.ctx = _ctx(WS_OTHER)
+    assert _undo(retakes, post["id"]).status_code == 404
+    retakes.ctx = _ctx(WS)
+    assert _post(retakes, post["id"]).copy == TAKE["copy"]  # neither undo restored anything
 
 
 def test_the_composers_warnings_and_questions_come_back_with_the_post(retakes):
