@@ -307,8 +307,8 @@ def test_after_a_refused_write_the_nudge_says_it_was_refused_and_why():
     nudges = [m["content"] for m in messages
               if m["role"] == "user" and "A write in this turn was refused" in m["content"]]
     assert len(nudges) == 1
-    assert "platform_approve_mission (Missing required params for 'platform_approve_mission': ['mission_id'])" \
-        in nudges[0]
+    assert ("platform_approve_mission (the tool said: \"Missing required params for 'platform_approve_mission': "
+            "['mission_id']\")") in nudges[0]
     assert REFUSED_WRITE_RULE in nudges[0]
     assert "says something was approved" in nudges[0]          # F108's sentence, kept
     assert result.response.content.startswith("The approval didn't go through")
@@ -334,8 +334,8 @@ def test_the_refused_writes_are_named_with_what_refused_them():
                  {"success": False, "error": "A running ticket can only be cancelled.\nPress Cancel."}),
                 ("COMPOSIO_GMAIL_SEND_EMAIL", {}, {"successful": False, "message": "not connected"})]
     assert refused_writes(outcomes) == [
-        "platform_update_task_status (A running ticket can only be cancelled. Press Cancel.)",
-        "COMPOSIO_GMAIL_SEND_EMAIL (not connected)",
+        'platform_update_task_status (the tool said: "A running ticket can only be cancelled. Press Cancel.")',
+        'COMPOSIO_GMAIL_SEND_EMAIL (the tool said: "not connected")',
     ]
 
 

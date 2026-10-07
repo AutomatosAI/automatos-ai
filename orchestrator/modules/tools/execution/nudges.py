@@ -28,6 +28,7 @@ services.brief_facts when it is sent).
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -114,7 +115,7 @@ def _refusal(result: Any) -> Optional[str]:
 
 def refused_writes(outcomes: List[Any]) -> List[str]:
     """The turn's refused writes that no later call of the same action made good, each as
-    "<action> (<what refused it>)", from the tracker's outcomes; reads are left out."""
+    '<action> (the tool said: "<what refused it>")', from the tracker's outcomes; reads are left out."""
     from .turn_account import is_read
 
     done = {action for action, _params, result in outcomes if _refusal(result) is None}
@@ -122,7 +123,8 @@ def refused_writes(outcomes: List[Any]) -> List[str]:
     for action, _params, result in outcomes:
         said = _refusal(result)
         if said and action not in done and not is_read(action):
-            refused.setdefault(action, f"{action} ({said})")
+            # quoted as the tool's own words: a service's error never reads as the owner's (the nudge is a user turn)
+            refused.setdefault(action, f"{action} (the tool said: {json.dumps(said, ensure_ascii=False)})")
     return list(refused.values())[:REFUSED_SHOWN]
 
 
