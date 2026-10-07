@@ -76,13 +76,19 @@ def _latest_by_name(rows: Iterable[Any]) -> List[Any]:
     return list(seen.values())
 
 
+def social_rows(rows: Iterable[Any]) -> List[Any]:
+    """The social templates among ``rows`` (as the service lists them), one per name, image ones first."""
+    from core.social_templates import is_social_format
+
+    socials = [row for row in rows if is_social_format(getattr(row, "format", None))]
+    return sorted(_latest_by_name(socials), key=lambda row: (row.format != IMAGE_TEMPLATE, str(row.name or "")))
+
+
 def social_templates(db: Any, workspace_id: Any) -> List[Any]:
     """The workspace's social templates, one per name (the latest version), image ones first."""
-    from core.social_templates import is_social_format
     from modules.documents.template_service import DocumentTemplateService
 
-    rows = [row for row in DocumentTemplateService(db).list_templates(workspace_id) if is_social_format(row.format)]
-    return sorted(_latest_by_name(rows), key=lambda row: (row.format != IMAGE_TEMPLATE, str(row.name or "")))
+    return social_rows(DocumentTemplateService(db).list_templates(workspace_id))
 
 
 def template_names(rows: Sequence[Any], fmt: Optional[str] = None) -> str:
@@ -189,4 +195,4 @@ def missing_names(error: str) -> List[str]:
 
 __all__ = ["IMAGE_TEMPLATE", "NO_SUCH_TEMPLATE", "POST_FORMAT_ALIASES", "TEXT_POST", "VIDEO_POST", "VIDEO_TEMPLATE",
            "field_list", "missing_in_words", "missing_names", "needs_a_template",
-           "post_format", "social_templates", "template_by_name", "template_names", "unknown_fields"]
+           "post_format", "social_rows", "social_templates", "template_by_name", "template_names", "unknown_fields"]

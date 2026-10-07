@@ -22,6 +22,12 @@ F346 (night 10b):
   what fills itself.
 * **Only an id named a template.** A name works too: ``template_name``, or a
   ``template_id`` that is not an id (matched exactly, then ignoring case).
+
+F379 (night 11): Auto named social templates that don't exist ("instagram carousel template",
+"Instagram Image"): the list without a format left the social ones out, and only a note said so.
+Now it names them in one line (``social_templates``: "image: Carousel, Quote card; video: …"),
+and a social template's schema gives the bare field names a post's variables take
+(``post_variables``), beside ``data_fields`` (``data.<name>``, generate_document's).
 """
 from __future__ import annotations
 
@@ -34,8 +40,14 @@ TEMPLATE_ROW = "{name} | {format} | {category} | makes {makes} | {id}"
 ROW_FORMAT = "name | format | category | makes (the formats generate_document may ask of it) | id"
 FORMAT_JOINER = ", "
 SOCIAL_NOTE = (
-    "Document templates only: pass format social_image or social_video for the social ones. "
-    "get_template_schema (by id or name) says what a template needs."
+    "Document templates only, one per line. The social templates (for a Socials post, "
+    "platform_create_social_post) are named in social_templates; pass format social_image or social_video "
+    "for their rows. get_template_schema (by id or name) says what a template needs."
+)
+# F379 (night 11): what a Socials post's variables are, beside generate_document's data.<name> fields.
+POST_VARIABLES_NOTE = (
+    "For a Socials post (platform_create_social_post), send these in variables by their bare names, no "
+    "\"data.\" (* needs a value); data_fields are what generate_document takes."
 )
 NEEDS_A_TEMPLATE = "Name the template: template_id, or template_name, from platform_list_templates."
 NO_SUCH_TEMPLATE = "No template {ref!r} in this workspace: platform_list_templates lists them."
@@ -58,16 +70,17 @@ def list_templates_answer(db: Session, workspace_id: UUID, params: Dict[str, Any
     from core.social_templates import is_social_format
     from modules.documents.template_service import DocumentTemplateService
 
+    from modules.tools.discovery.social_post_checks import social_rows, template_names
+
     fmt, name = _text(params.get("format")), _text(params.get("name"))
     rows = DocumentTemplateService(db).list_templates(workspace_id, format=fmt, category=_text(params.get("category")))
-    if not fmt:
-        rows = [t for t in rows if not is_social_format(t.format)]
     if name:
         rows = [t for t in rows if name.casefold() in (t.name or "").casefold()]
-    answer: Dict[str, Any] = {"success": True, "count": len(rows), "row_format": ROW_FORMAT}
-    if not fmt:
-        answer["note"] = SOCIAL_NOTE
-    return {**answer, "templates": [template_row(t) for t in rows]}
+    documents = rows if fmt else [t for t in rows if not is_social_format(t.format)]
+    answer: Dict[str, Any] = {"success": True, "count": len(documents), "row_format": ROW_FORMAT}
+    if not fmt:   # F379 (night 11): the social names too, in one line, so a post's template is never guessed
+        answer = {**answer, "note": SOCIAL_NOTE, "social_templates": template_names(social_rows(rows))}
+    return {**answer, "templates": [template_row(t) for t in documents]}
 
 
 def _as_id(value: Optional[str]) -> Optional[UUID]:
@@ -141,7 +154,11 @@ def template_schema_answer(db: Session, workspace_id: UUID, params: Dict[str, An
         "sample_data": template.sample_data or {},
     }
     if social:
+        from modules.tools.discovery.social_post_checks import field_list
+
         blocks = template.blocks if isinstance(template.blocks, dict) else {}
+        schema["post_variables"] = field_list(template, limit=len(blocks.get("variables_schema") or {}))  # F379
+        schema["post_variables_note"] = POST_VARIABLES_NOTE
         schema["variables_schema"] = blocks.get("variables_schema") or {}
         schema["sizes"] = blocks.get("sizes") or []
     return schema
