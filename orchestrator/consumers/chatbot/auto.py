@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from consumers.chatbot import auto_decisions
 from consumers.chatbot.board_questions import about_the_board
 from consumers.chatbot.brand_assign_lane import brand_work_goes_to_the_designer  # F362 (night 10c)
+from consumers.chatbot.socials_assign_lane import social_media_role, social_work_goes_to_the_director  # F379
 from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_engine
 
 # PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
@@ -831,6 +832,7 @@ class AutoBrain:
     # ------------------------------------------------------------------
 
     @brand_work_goes_to_the_designer  # F362: a brand ask is the Brand designer's ticket (PRD-255 US-014)
+    @social_work_goes_to_the_director  # F379 (night 11): social media work is the Social Media Director's ticket
     async def assess(
         self,
         message: str,
@@ -1293,7 +1295,7 @@ class AutoBrain:
         if len(matches) == 1:
             (agent_id, canonical_name), = matches.items()
             return agent_id, canonical_name
-        return None, None
+        return social_media_role(target, agents)   # F379: "my social media person" is the Social Media Director
 
     @staticmethod
     def _normalize_action(raw: Optional[str]) -> "Action":
