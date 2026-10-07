@@ -1,8 +1,9 @@
 {
   "name": "App promo",
-  "description": "A 38 s vertical app promo: a hook over footage, the reveal on the drop over the app's own loop, the app itself on a phone (today's plan, a question answered, the tutor citing its source), the mock and the gate, the grade, the tracks, and the end card. Five footage slots; an empty slot falls back to the template's motion graphics. Ported from the app promo reference video (PRD-251A). Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s, as in the reference; the post's copy carries its credit. Also cut to 15 s (the hook, today's plan on the phone, the end card) and 30 s (without the tracks).",
+  "description": "For a phone app only: a vertical promo with the app on a phone. A hook over footage, the app's name over its own screen recording, three of its screens (today's plan, a question answered, a helper citing its source), a bigger session, the two goals to reach, the result, the list of what the app covers, and the end card. Five footage slots; one takes the app's own recording. 38 s, also cut to 15 s (the hook, today's plan, the end card) and 30 s (without the list). Pick it only for a brief about an app; for any other business, pick a photo card or the Data story. Its music is \"Spring of 2026\" by Sascha Ende (CC BY 4.0) from 47.9 s; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
+  "made_for": "software",
   "sizes": [
     "1080x1920"
   ],

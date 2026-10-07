@@ -22,6 +22,9 @@ F346 (night 10b):
   what fills itself.
 * **Only an id named a template.** A name works too: ``template_name``, or a
   ``template_id`` that is not an id (matched exactly, then ignoring case).
+
+F377 (night 11): a social template made for one kind of brief (``made_for``, the videos told
+on a software product's screens) says so at the end of its row and in its schema answer.
 """
 from __future__ import annotations
 
@@ -37,6 +40,8 @@ SOCIAL_NOTE = (
     "Document templates only: pass format social_image or social_video for the social ones. "
     "get_template_schema (by id or name) says what a template needs."
 )
+# F377: a social template made for one kind of brief says so at the end of its row.
+MADE_FOR_ROW = " | made for {kind} only: pick it only when the brief is about {kind}"
 NEEDS_A_TEMPLATE = "Name the template: template_id, or template_name, from platform_list_templates."
 NO_SUCH_TEMPLATE = "No template {ref!r} in this workspace: platform_list_templates lists them."
 
@@ -46,11 +51,15 @@ def _text(value: Any) -> Optional[str]:
 
 
 def template_row(template: Any) -> str:
-    """One template as one line of the list, with what it makes (F348's ``supported_formats``)."""
+    """One template as one line of the list, with what it makes (F348's ``supported_formats``),
+    and (F377) whom a social template is made for when it is not any business."""
+    from core.social_templates import made_for
     from modules.documents.template_formats import supported_formats
 
-    return TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category,
-                               makes=FORMAT_JOINER.join(supported_formats(template)), id=template.id)
+    row = TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category,
+                              makes=FORMAT_JOINER.join(supported_formats(template)), id=template.id)
+    kind = made_for(getattr(template, "blocks", None))
+    return f"{row}{MADE_FOR_ROW.format(kind=kind)}" if kind else row
 
 
 def list_templates_answer(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -141,9 +150,12 @@ def template_schema_answer(db: Session, workspace_id: UUID, params: Dict[str, An
         "sample_data": template.sample_data or {},
     }
     if social:
+        from core.social_templates import made_for
+
         blocks = template.blocks if isinstance(template.blocks, dict) else {}
         schema["variables_schema"] = blocks.get("variables_schema") or {}
         schema["sizes"] = blocks.get("sizes") or []
+        schema["made_for"] = made_for(blocks)  # F377: "software", or None for any business
     return schema
 
 

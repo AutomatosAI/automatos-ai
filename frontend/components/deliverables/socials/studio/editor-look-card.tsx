@@ -8,7 +8,8 @@
  * image and video Deliverables. AI-made (US-B305): AI images for the template's image slots
  * (editor-look-ai.tsx); AI footage for the hook and b-roll is Format's switch.
  * Each source says in one line what it does; a template that shows a picture is marked
- * Photo, and "Let Auto pick" says what Auto does with it.
+ * Photo, and "Let Auto pick" says what Auto does with it. F377: a template made for a software
+ * product says so under its name.
  */
 import { useState } from 'react'
 
@@ -37,6 +38,13 @@ export const LOOK_HINTS: Record<LookSource, string> = {
 export const AUTO_PICK = 'Let Auto pick'
 export const AUTO_PICK_NOTE = 'Auto picks a template and writes its words from your brief when you render.'
 export const PHOTO_BADGE = 'Photo'
+/** F377: under a template made for a software product (`made_for`), whom it is for. */
+export const SOFTWARE_NOTE = "For a software product: it shows the product's own screens."
+
+/** The line under a template's name: whom it is for, when it is not any business. */
+export function templateNote(template: Pick<SocialTemplateSummary, 'made_for'>): string | undefined {
+  return template.made_for === 'software' ? SOFTWARE_NOTE : undefined
+}
 
 interface TemplateCardProps {
   name: string
@@ -99,7 +107,7 @@ function TemplateGallery({ templates, loading, chosen, onPick }: TemplateGallery
       {templates.map((t) => (
         <TemplateCard
           key={t.id} name={t.name} thumbnail={t.thumbnail_url} kind={t.kind} chosen={chosen === t.id} onPick={() => onPick(t.id)}
-          photo={(t.image_slots ?? []).length > 0}
+          photo={(t.image_slots ?? []).length > 0} note={templateNote(t)}
         />
       ))}
     </ul>
