@@ -146,6 +146,8 @@ DEFAULT_STILL_AT = 0.0
 
 PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\s*\}\}")
 _LEFTOVER = re.compile(r"\{\{[^{}]*\}\}")
+# F377: a figure as the composer writes it: digits, thousands grouped by commas, a decimal part.
+NUMBER_TEXT = re.compile(r"^\s*[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*$")
 _SIZE = re.compile(r"^(\d{2,4})x(\d{2,4})$")
 _HEAD_CLOSE = re.compile(r"</head\s*>", re.IGNORECASE)
 _ROOT = re.compile(r"""data-composition-id\s*=\s*["']main["']""", re.IGNORECASE)
@@ -373,12 +375,22 @@ class ResolvedVariables:
     invalid: List[str]
 
 
+def _as_number(value: Any) -> Any:
+    """A figure written as text ("412", "1,240", "12.5") as that number; anything else as it is."""
+    if not isinstance(value, str) or not NUMBER_TEXT.match(value):
+        return value
+    number = float(value.replace(",", ""))
+    return int(number) if number.is_integer() and "." not in value else number
+
+
 def resolve_variables(schema: Mapping[str, Any], supplied: Mapping[str, Any]) -> ResolvedVariables:
     """Each declared variable's value: the one supplied, else its default.
 
     ``missing`` names the variables with neither; ``invalid`` says which values
     do not fit their variable. Undeclared names in ``supplied`` are ignored. A
-    number supplied for a text variable is taken as its text (an agent's 42).
+    number supplied for a text variable is taken as its text (an agent's 42),
+    and (F377) a figure written as text for a number variable as that number
+    (the composer's "1,240").
     """
     values: Dict[str, Any] = {}
     missing: List[str] = []
@@ -387,6 +399,8 @@ def resolve_variables(schema: Mapping[str, Any], supplied: Mapping[str, Any]) ->
         value = supplied.get(name) if isinstance(supplied, Mapping) else None
         if spec.get("type") == TEXT and _is_number(value):
             value = str(value)
+        if spec.get("type") == NUMBER:
+            value = _as_number(value)
         if value is None:
             value = spec.get("default")
         if value is None:

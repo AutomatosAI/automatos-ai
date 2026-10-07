@@ -8,7 +8,8 @@
     <style>
       /* F377 (night 11, 7 Oct): the "data story" as a business numbers story, for any business: an opener,
          one big number, a ranked list whose bars the script draws from the post's own values, a closing line
-         and the end card. Three optional photos; an empty one draws nothing, and the brand's stage shows.
+         and the end card. 40 s as authored; its 15 and 30 s cuts (blocks.cuts) keep the headline, the list
+         and the end card, and the 30 s also the big number and the closing line. Three optional photos; an empty one draws nothing, and the brand's stage shows.
          Every page is a flex column the fit script scales down until its words fit, so no text overlaps.
          Every colour and font reads the brand kit; the var() fallbacks are the platform's defaults. */
       :root {
@@ -92,8 +93,8 @@
     </style>
   </head>
   <body>
-    <div id="root" data-composition-id="main" data-start="0" data-duration="30" data-width="1080" data-height="1920">
-      <div id="bg" class="clip" data-start="0" data-duration="30" data-track-index="0">
+    <div id="root" data-composition-id="main" data-start="0" data-duration="40" data-width="1080" data-height="1920">
+      <div id="bg" class="clip" data-start="0" data-duration="40" data-track-index="0">
         <div class="bg-base"></div>
         <div id="glow"></div>
         <div class="grain"></div>
@@ -101,8 +102,8 @@
 
       <!-- ================= the photos: each optional, behind the pages it names ================= -->
       <div id="ph1" class="clip photo" data-start="0" data-duration="9.6" data-track-index="1"><div class="push" id="ph1push"><img data-slot="still_1" data-layout-allow-overflow src="assets/slots/still_1.png" alt="" /></div><div class="scrim"></div></div>
-      <div id="ph2" class="clip photo" data-start="9.6" data-duration="12.9" data-track-index="1"><div class="push" id="ph2push"><img data-slot="still_2" data-layout-allow-overflow src="assets/slots/still_2.png" alt="" /></div><div class="scrim"></div></div>
-      <div id="ph3" class="clip photo" data-start="22.5" data-duration="7.5" data-track-index="1"><div class="push" id="ph3push"><img data-slot="still_3" data-layout-allow-overflow src="assets/slots/still_3.png" alt="" /></div><div class="scrim"></div></div>
+      <div id="ph2" class="clip photo" data-start="9.6" data-duration="17.4" data-track-index="1"><div class="push" id="ph2push"><img data-slot="still_2" data-layout-allow-overflow src="assets/slots/still_2.png" alt="" /></div><div class="scrim"></div></div>
+      <div id="ph3" class="clip photo" data-start="27.0" data-duration="13.0" data-track-index="1"><div class="push" id="ph3push"><img data-slot="still_3" data-layout-allow-overflow src="assets/slots/still_3.png" alt="" /></div><div class="scrim"></div></div>
 
       <!-- ================= S1: the opener ================= -->
       <section id="s1" class="clip scene" data-start="0" data-duration="4.1" data-track-index="2">
@@ -126,7 +127,7 @@
       </section>
 
       <!-- ================= S3: the ranking ================= -->
-      <section id="s3" class="clip scene" data-start="9.6" data-duration="12.9" data-track-index="2">
+      <section id="s3" class="clip scene" data-start="9.6" data-duration="17.4" data-track-index="2">
         <div class="page middle" id="p3">
           <div class="panel" id="s3in">
             <div class="title">{{ ranking_title }}</div>
@@ -142,14 +143,14 @@
       </section>
 
       <!-- ================= S4: the closing line ================= -->
-      <section id="s4" class="clip scene" data-start="22.5" data-duration="2.9" data-track-index="2">
+      <section id="s4" class="clip scene" data-start="27.0" data-duration="4.4" data-track-index="2">
         <div class="page middle" id="p4">
           <div class="panel" id="s4in"><div class="headline">{{ closing_line }}</div></div>
         </div>
       </section>
 
       <!-- ================= S5: the end card ================= -->
-      <section id="s5" class="clip scene" data-start="25.4" data-duration="4.6" data-track-index="2">
+      <section id="s5" class="clip scene" data-start="31.4" data-duration="8.6" data-track-index="2">
         <div class="page middle end" id="p5">
           <img class="dark-logo" id="endlogo" src="{{ brand.logo_on_dark }}" alt="" />
           <div class="wordmark" id="endname">{{ brand.name }}</div>
@@ -158,7 +159,7 @@
         </div>
       </section>
 
-      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="30" data-track-index="10" data-volume="1"></audio>
+      <audio id="mix" src="assets/audio/mix.wav" data-start="0" data-duration="40" data-track-index="10" data-volume="1"></audio>
     </div>
 
     <script>
@@ -229,15 +230,17 @@
       const tl = gsap.timeline({ paused: true });
       // An optional line taken out at setup has nothing to move: its tween is never made.
       const missing = (sel) => typeof sel === "string" && !document.querySelector(sel);
+      // When the voice says each row (its voice lines l05 to l09).
+      const SAID = [12.0, 16.0, 19.4, 22.8, 24.9];
       const up = (sel, t, d = 0.45, y = 30) =>
         missing(sel) ? tl : tl.fromTo(sel, { y, opacity: 0 }, { y: 0, opacity: 1, duration: d, ease: "power3.out" }, t);
       const out = (sel, t, d = 0.25) => tl.to(sel, { opacity: 0, duration: d, ease: "power2.in" }, t);
 
       // the stage and a slow push on every photo (an empty photo's wrapper is empty)
-      tl.fromTo("#glow", { scale: 0.9 }, { scale: 1.08, duration: 30, ease: "none" }, 0);
+      tl.fromTo("#glow", { scale: 0.9 }, { scale: 1.08, duration: 40, ease: "none" }, 0);
       tl.fromTo("#ph1push", { scale: 1.02 }, { scale: 1.1, duration: 9.6, ease: "none" }, 0);
-      tl.fromTo("#ph2push", { scale: 1.08 }, { scale: 1.0, duration: 12.9, ease: "none" }, 9.6);
-      tl.fromTo("#ph3push", { scale: 1.0 }, { scale: 1.08, duration: 7.5, ease: "none" }, 22.5);
+      tl.fromTo("#ph2push", { scale: 1.08 }, { scale: 1.0, duration: 17.4, ease: "none" }, 9.6);
+      tl.fromTo("#ph3push", { scale: 1.0 }, { scale: 1.08, duration: 13.0, ease: "none" }, 27.0);
 
       // ===== S1 (0 – 4.1): the opener
       up("#s1in", 0.2, 0.55, 40);
@@ -247,25 +250,31 @@
       tl.fromTo("#s2in", { scale: 0.92, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5, ease: "expo.out" }, 4.2);
       out("#s2in", 9.35);
 
-      // ===== S3 (9.6 – 22.5): the ranking, a row at a time, each bar growing to its value
+      // ===== S3 (9.6 – 27): the ranking, a row at a time, each bar growing to its value; then each
+      // row's figure lifts as the voice says it (the 15 and 30 s cuts keep the first of them)
       up("#s3in", 9.7, 0.45, 24);
       rows.forEach((row, i) => {
         const at = 10.3 + i * 0.3;
         up(row, at, 0.35, 16);
         tl.fromTo(row.querySelector(".fill"), { scaleX: 0 }, { scaleX: 1, duration: 0.8, ease: "power2.out" }, at + 0.1);
       });
-      out("#s3in", 22.25);
+      SAID.forEach((at, i) => {
+        if (!rows[i]) return;
+        const lift = { scale: 1.12, duration: 0.25, yoyo: true, repeat: 1, ease: "sine.inOut" };
+        tl.fromTo(rows[i].querySelector(".value"), { scale: 1 }, lift, at);
+      });
+      out("#s3in", 26.75);
 
-      // ===== S4 (22.5 – 25.4): the closing line
-      up("#s4in", 22.6, 0.5, 34);
-      out("#s4in", 25.15);
+      // ===== S4 (27 – 31.4): the closing line
+      up("#s4in", 27.1, 0.5, 34);
+      out("#s4in", 31.15);
 
-      // ===== S5 (25.4 – 30): the end card
-      tl.fromTo("#endlogo", { scale: 1.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: "expo.out" }, 25.5);
-      up("#endname", 25.9, 0.5, 24);
-      up("#p5 .end-line", 26.4, 0.45, 24);
-      up("#p5 .url", 26.9, 0.4, 16);
-      tl.to("#endlogo", { y: -10, duration: 0.8, yoyo: true, repeat: 1, ease: "sine.inOut" }, 27.8);
+      // ===== S5 (31.4 – 40): the end card
+      tl.fromTo("#endlogo", { scale: 1.3, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45, ease: "expo.out" }, 31.5);
+      up("#endname", 31.9, 0.5, 24);
+      up("#p5 .end-line", 32.4, 0.45, 24);
+      up("#p5 .url", 32.9, 0.4, 16);
+      tl.to("#endlogo", { y: -10, duration: 0.8, yoyo: true, repeat: 1, ease: "sine.inOut" }, 34.0);
 
       window.__timelines["main"] = tl;
     </script>

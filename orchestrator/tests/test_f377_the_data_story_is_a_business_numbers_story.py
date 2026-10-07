@@ -12,11 +12,13 @@ Pinned (``modules/documents/templates/social/data-story.{html,json}``):
 * **Few, plain fields.** At most 20, each labelled in an owner's words with a limit; the
   values are numbers; only the story's own lines are required (11), and a default is never
   copy (an empty text or 0).
-* **15 and 30 s.** The 15 s cut keeps the headline, the list and the end card: it needs 8
-  fields, and a 15 s post that fills only those renders.
+* **15, 30 and 40 s.** 40 s as authored (it was 40 s before, so a post that chose 40 s still
+  renders); the 30 s cut keeps every scene, and the 15 s cut keeps the headline, the list and
+  the end card: it needs 8 fields, and a 15 s post that fills only those renders.
 * **Nothing overlaps, nothing pale.** No element opts out of the layout check's overlap
   rule, every page is a fitted flex column, and an empty photo leaves nothing behind.
-* **The voice.** Nine lines, each from the fields on screen as it is spoken.
+* **The voice.** Eleven lines at 40 s (nine at 30 s, four at 15 s), each from the fields on
+  screen as it is spoken.
 """
 from __future__ import annotations
 
@@ -116,21 +118,24 @@ def test_its_fields_are_few_plain_and_only_the_story_is_required():
     assert {schema[f"item_{n}_value"]["type"] for n in range(1, 6)} == {"number"}
 
 
-def test_it_offers_15_and_30_seconds_and_the_15_second_cut_needs_its_own_fields_only():
+def test_it_offers_15_30_and_40_seconds_and_the_15_second_cut_needs_its_own_fields_only():
     starter = _starter()
     blocks = starter["blocks"]
-    assert blocks["durations"] == [15, 30] and list(blocks["cuts"]) == ["15"]
+    assert blocks["durations"] == [15, 30, 40] and list(blocks["cuts"]) == ["15", "30"]
     at_15 = resolve_variables(cut_to_length(blocks, 15)["variables_schema"], {}).missing
     assert at_15 == AT_15
     assert {"stat_value", "stat_label", "closing_line"}.isdisjoint(shown_variables(blocks, 15))
     template = SimpleNamespace(id=uuid.uuid4(), format=SOCIAL_VIDEO, blocks=blocks)
     filled = {name: starter["sample_data"][name] for name in AT_15}
     bundle = render.bundle_for(_post(filled, 15), template, {})
-    assert [line["id"] for line in bundle["audio"]["voice"]["lines"]] == ["l01", "l04", "l05", "l09"]
+    assert [line["id"] for line in bundle["audio"]["voice"]["lines"]] == ["l01", "l04", "l05", "l11"]
     page = bundle["composition"]["html"]
     assert all(name in bundle["variables"] for name in placeholders(page) if not name.startswith(("brand.", "size.")))
-    full = render.bundle_for(_post(starter["sample_data"], 30), template, {})
-    assert len(full["audio"]["voice"]["lines"]) == 9
+    at_30 = render.bundle_for(_post(starter["sample_data"], 30), template, {})
+    assert [line["id"] for line in at_30["audio"]["voice"]["lines"]] == ["l01", "l02", "l03", "l04", "l05", "l06", "l07", "l10", "l11"]
+    assert resolve_variables(cut_to_length(blocks, 30)["variables_schema"], {}).missing == STORY_FIELDS
+    whole = render.bundle_for(_post(starter["sample_data"], 40), template, {})
+    assert len(whole["audio"]["voice"]["lines"]) == 11
 
 
 def test_nothing_opts_out_of_the_overlap_check_and_an_empty_photo_draws_nothing():
@@ -143,14 +148,14 @@ def test_nothing_opts_out_of_the_overlap_check_and_an_empty_photo_draws_nothing(
         body = re.search(re.escape(selector) + r" \{([^{}]*)\}", css).group(1)
         assert "background" not in body, selector  # nothing pale where a photo was not given
     template = SimpleNamespace(id=uuid.uuid4(), format=SOCIAL_VIDEO, blocks=starter["blocks"])
-    page = render.bundle_for(_post(starter["sample_data"], 30), template, {})["composition"]["html"]
+    page = render.bundle_for(_post(starter["sample_data"], 40), template, {})["composition"]["html"]
     assert "data-slot" not in page and "assets/slots/" not in page
 
 
 def test_each_voice_line_speaks_the_fields_on_screen_as_it_is_spoken():
     blocks = _starter()["blocks"]
     lines = blocks["audio_plan"]["voice"]["lines"]
-    assert [line["id"] for line in lines] == [f"l0{n}" for n in range(1, 10)]
+    assert [line["id"] for line in lines] == [f"l{n:02d}" for n in range(1, 12)]
     spoken = {name for line in lines for name in placeholders(line["text"])}
     assert spoken <= set(blocks["variables_schema"]) | {"brand.name"}
-    assert {"headline", "stat_value", "ranking_title", "item_1_name", "item_3_value", "closing_line"} <= spoken
+    assert {"headline", "stat_value", "ranking_title", "item_1_name", "item_3_value", "item_5_name", "closing_line"} <= spoken

@@ -1,6 +1,6 @@
 {
   "name": "Data story",
-  "description": "A 30 s vertical numbers story for any business: a headline, one big number, a ranked list of your top three to five items with bars drawn from their values, a closing line and an end card with your logo. Up to three photos of your own behind it; without them your brand colours show. Also cut to 15 s (the headline, the list and the end card). Its music is \"Deep House 003\" by Sascha Ende (CC BY 4.0) from 32.0 s; the post's copy carries its credit.",
+  "description": "A vertical numbers story for any business: a headline, one big number, a ranked list of your top three to five items with bars drawn from their values, a closing line and an end card with your logo. Up to three photos of your own behind it; without them your brand colours show. 40 s, also cut to 30 s and to 15 s (the headline, the list and the end card). Its music is \"Deep House 003\" by Sascha Ende (CC BY 4.0) from 32.0 s; the post's copy carries its credit.",
   "format": "social_video",
   "category": "social",
   "sizes": [
@@ -8,7 +8,8 @@
   ],
   "durations": [
     15,
-    30
+    30,
+    40
   ],
   "cuts": {
     "15": [
@@ -21,8 +22,22 @@
         15.9
       ],
       [
-        25.4,
+        31.4,
+        36.0
+      ]
+    ],
+    "30": [
+      [
+        0,
+        22.6
+      ],
+      [
+        27.0,
         30.0
+      ],
+      [
+        31.4,
+        35.8
       ]
     ]
   },
@@ -115,7 +130,7 @@
     "item_4_name": {
       "type": "text",
       "label": "Top item 4: name",
-      "description": "The item ranked 4. Leave it empty for a shorter list.",
+      "description": "The item ranked 4. Spoken in the 40 s video. Leave it empty for a shorter list.",
       "max_chars": 24,
       "default": ""
     },
@@ -130,7 +145,7 @@
     "item_5_name": {
       "type": "text",
       "label": "Top item 5: name",
-      "description": "The item ranked 5. Leave it empty for a shorter list.",
+      "description": "The item ranked 5. Spoken in the 40 s video. Leave it empty for a shorter list.",
       "max_chars": 24,
       "default": ""
     },
@@ -174,13 +189,13 @@
       "kind": "image",
       "path": "assets/slots/still_2.png",
       "label": "Photo behind the list",
-      "description": "9:16 photo with no words in it, darkened behind the ranked list, 9.6-22.5 s. Without it, your brand colours show."
+      "description": "9:16 photo with no words in it, darkened behind the ranked list, 9.6-27 s. Without it, your brand colours show."
     },
     "still_3": {
       "kind": "image",
       "path": "assets/slots/still_3.png",
       "label": "Photo behind the close",
-      "description": "9:16 photo with no words in it, behind the closing line and the end card, 22.5-30 s. Without it, your brand colours show."
+      "description": "9:16 photo with no words in it, behind the closing line and the end card, 27-40 s. Without it, your brand colours show."
     }
   },
   "audio_plan": {
@@ -226,11 +241,21 @@
         {
           "id": "l08",
           "at": 22.8,
-          "text": "{{ closing_line }}"
+          "text": "{{ item_4_name }}"
         },
         {
           "id": "l09",
-          "at": 25.7,
+          "at": 24.9,
+          "text": "{{ item_5_name }}"
+        },
+        {
+          "id": "l10",
+          "at": 27.3,
+          "text": "{{ closing_line }}"
+        },
+        {
+          "id": "l11",
+          "at": 31.7,
           "text": "{{ brand.name }}. {{ end_line }}"
         }
       ]
@@ -270,8 +295,9 @@
       6.5,
       12.6,
       18.0,
-      23.8,
-      28.2
+      24.0,
+      28.5,
+      34.5
     ]
   }
 }
