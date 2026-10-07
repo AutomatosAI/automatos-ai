@@ -77,6 +77,7 @@ def register_playbook_schedule_action(registry: ActionRegistry) -> None:
         parameters=_SCHEDULE_PARAMETERS,
         misplaced=_SCHEDULE_MISPLACED,
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["playbooks", "schedule", "cron", "automate", "recurring"],
         examples=[

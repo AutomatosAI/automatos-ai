@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .action_claims import claimed_action_not_done
-from .nudges import CLAIMED_ACTION_RECOVERY_MSG as _CLAIMED_ACTION_RECOVERY_MSG, ask_for_the_answer
+from .nudges import ask_for_the_answer, claimed_action_nudge  # PRD-256 US-006: a refused write is named
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG
 from .nudges import UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
@@ -616,7 +616,7 @@ class ToolLoopExecutor:
         if not claim:
             return None
         logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)
-        return await nudge_about(self._llm, current, messages, tools, _CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim))
+        return await nudge_about(self._llm, current, messages, tools, claimed_action_nudge(claim, self.tracker.outcomes))
 
 
 # ---------------------------------------------------------------------------

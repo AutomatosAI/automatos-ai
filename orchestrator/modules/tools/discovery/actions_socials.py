@@ -254,6 +254,7 @@ def _register_create_social_post(registry: ActionRegistry) -> None:
             "required": ["title"],
         },
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["socials", "social media", "post", "draft", "video", "image", "linkedin", "instagram", "twitter"],
         examples=[

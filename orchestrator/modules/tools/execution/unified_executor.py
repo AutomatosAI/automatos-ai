@@ -36,6 +36,7 @@ from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
 from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
 from modules.tools.execution.params_text import decodes_nested_params, params_refusal_text
+from modules.tools.execution.direct_contract import missing_on_a_direct_call  # PRD-256 US-006
 from modules.tools.discovery.owner_only import asks_before_a_send  # PRD-256 US-004
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
@@ -295,13 +296,16 @@ def map_optional_aliases(action_name: str, action_def: Any, params: Dict[str, An
 def undeclared_params_refusal(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
                               via: str = VIA_DISPATCHER) -> Optional[str]:
     """F182: the refusal for the keys in ``params`` the action does not take,
-    each logged, or None. F181/F321: a ``params`` that is no object is refused in plain words."""
+    each logged, or None. F181/F321: a ``params`` that is no object is refused in plain words.
+    PRD-256 US-006: a direct call that leaves out a required field is refused as a dispatched one is."""
     if not isinstance(params, dict):
         return params_refusal_text(action_name, params)
     unknown = undeclared_params(action_def, params)
     for key in unknown:
         logger.info(f"[F182] {via} refused param '{key}' for {action_name} (trace {trace})")
-    return unknown_params_error(action_name, action_def, unknown, params, via) if unknown else None
+    said = [missing_on_a_direct_call(action_name, action_def, params) if via == VIA_DIRECT_CALL else None,
+            unknown_params_error(action_name, action_def, unknown, params, via) if unknown else None]
+    return "\n".join(line for line in said if line) or None
 
 
 def unknown_action_error(action_name: str, registry: Any) -> str:

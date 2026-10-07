@@ -125,6 +125,7 @@ def register_query_data_action(registry: ActionRegistry) -> None:
         category="database",
         parameters=QUERY_DATA_PARAMETERS,
         permission_level="read",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["database", "query", "analytics", "metrics", "nl2sql", "data"],
         examples=[

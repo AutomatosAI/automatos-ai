@@ -68,6 +68,7 @@ def _register_create_task(registry: ActionRegistry) -> None:
             "required": ["title", "description"],
         },
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["tasks", "write", "board", "bug", "follow-up"],
         examples=[
@@ -271,6 +272,7 @@ def _register_get_task(registry: ActionRegistry) -> None:
             "required": ["task_id"],
         },
         permission_level="read",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         tags=["tasks", "read", "details"],
         examples=[
             "show me task 42",
@@ -335,6 +337,7 @@ def _register_assign_task(registry: ActionRegistry) -> None:
             "required": ["task_id", "agent_name"],
         },
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["tasks", "write", "assign", "agent"],
         examples=[
@@ -378,6 +381,7 @@ def _update_task_parameters() -> dict:
             # refused here, and became a plain note and a bare move: the approval's note was lost.
             "status": {
                 "type": "string",
+                "enum": _board_statuses(),  # PRD-256 US-006: the board's own words, never free text
                 "description": (
                     "Moves the card after any other edit, exactly as platform_update_task_status does, with note "
                     "kept as that move keeps it: 'done' approves it and note is the owner's approval note "
@@ -413,6 +417,7 @@ def _register_update_task(registry: ActionRegistry) -> None:
         category="tasks",
         parameters=_update_task_parameters(),
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["tasks", "write", "edit"],
         examples=[
@@ -442,6 +447,7 @@ def _register_update_task_status(registry: ActionRegistry) -> None:
         category="tasks",
         parameters=_status_tool_parameters(),
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["tasks", "write", "status", "trigger", "run"],
         examples=[

@@ -1188,10 +1188,12 @@ class StreamingChatService:
         """
         from modules.context.sections.product_facts import product_facts
         from modules.tools.data_routes import with_data_routes
+        from modules.tools.first_class_tools import with_first_class  # PRD-256 US-006: Auto's writes, first-class
 
         # F302 (night 9): "Have we got enough Guji?" ran in this lane with the dispatcher alone,
         # tried 10 calls over 55 s; the database and Knowledge Graph routes are held here too.
-        tools = await with_data_routes(atom_tools, self.workspace_id, self.db) if atom_tools else atom_tools
+        tools = await with_data_routes(with_first_class(atom_tools, self.workspace_id, self.db),
+                                       self.workspace_id, self.db) if atom_tools else atom_tools
         logger.info(
             "[PRD-68] ATOM path — lightweight (tools=%d, memory=%s)",
             len(tools or []),
