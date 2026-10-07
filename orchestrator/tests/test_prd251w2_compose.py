@@ -158,8 +158,9 @@ def test_the_proposal_has_each_channels_copy_a_template_valid_variables_and_cand
         "id": composer.template, "name": "Fact card", "format": "social_image", "sizes": ["1080x1350"], "variables_schema": SCHEMA,
         # PRD-251B (B5): the lengths a video declares; an image declares none.
         "durations": [],
-        # F378: what the template is for, its description and its photo spots (none here).
-        "description": None, "photo_slots": [],
+        # F378: what the template is for, its description and its photo spots (none here); F377: the
+        # fields each shorter cut leaves out (an image has no cuts) and whom it is for.
+        "description": None, "photo_slots": [], "fields_cut_out": {}, "made_for": None,
     }
     assert proposal["variables"] == {
         "headline": {"value": "Opens Friday", "claim": False},

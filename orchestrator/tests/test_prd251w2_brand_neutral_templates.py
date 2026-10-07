@@ -68,11 +68,11 @@ from modules.tools.discovery.platform_executor import PlatformActionExecutor  # 
 WS = uuid.UUID("00000000-0000-0000-0000-0000000002b6")
 SEED_FILES = sorted(STARTERS_DIR.glob("*.json"))
 REFERENCES = _ROOT / "docs" / "PRDS" / "prd251-reference"
+# F377 (night 11): the Data story is a business numbers story of its own, no longer the trading reference's port.
 REFERENCE_OF = {
     "ui-story-promo": "v1-ui-story.html",
     "cinematic-product-promo": "v2-cinematic-product.html",
     "app-promo": "academy-app-promo.html",
-    "data-story": "markets-posh.html",
 }
 # Automatos's own copy: its name, domains and handle, its assistant (Auto), founder and
 # licence, its Academy and Markets products, and its tagline.
@@ -207,8 +207,8 @@ def _driver():
 def test_a_videos_ci_preview_reads_as_its_reference_and_the_seeded_row_never_does():
     driver = _driver()
     kit = {**driver.KIT, "logo_url": driver.logo_png(driver.KIT["primary_color"])}
-    assert sorted(driver.REFERENCE_COPY) == sorted(SOCIAL_VIDEO_STARTER_SLUGS)
-    for starter in social_starters("social_video"):
+    assert sorted(driver.REFERENCE_COPY) == sorted(REFERENCE_OF) and set(REFERENCE_OF) < set(SOCIAL_VIDEO_STARTER_SLUGS)
+    for starter in (s for s in social_starters("social_video") if s["slug"] in REFERENCE_OF):
         overlay, schema = driver.REFERENCE_COPY[starter["slug"]], starter["blocks"]["variables_schema"]
         assert overlay and set(overlay) <= set(schema), starter["name"]
         bundle = driver.bundle_for(starter, kit, starter["preview"]["at"])

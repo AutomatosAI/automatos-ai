@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from config import config
+from core.social_cuts import fields_cut_out
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
@@ -47,7 +48,7 @@ from core.database.database import get_db
 from core.models.core import DocumentTemplate, Skill
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.models.workspaces import Workspace
-from core.social_templates import SOCIAL_TEMPLATE_FORMATS
+from core.social_templates import SOCIAL_TEMPLATE_FORMATS, made_for
 from modules.documents.brand_kit import get_brand_kit
 from modules.socials import compose, compose_photos, compose_sources, history, service, voice_examples
 from modules.socials import sources as post_sources
@@ -70,8 +71,6 @@ MAX_CHANNELS = 10
 CANDIDATES_PER_TERM = 3
 MAX_CANDIDATES = 24
 MAX_BRIEF_URLS = 5
-# F378: the block keys a template may declare who it is made for with (fix/n11-video adds the gate).
-MADE_FOR_KEYS = ("made_for", "fits")
 _URL = re.compile(r"https?://[^\s<>\"')]+")
 
 
@@ -117,17 +116,19 @@ def social_templates(db: Session, workspace_id: UUID, post_format: Optional[str]
 
 def template_entry(row: Any) -> Dict[str, Any]:
     """One template as the composer sees it: its fields, sizes and lengths, and (F378) what it
-    is for: its description, its photo spots and, when it declares one, who it is made for."""
+    is for: its description, its photo spots and (F377) whom it is made for."""
     blocks = row.blocks if isinstance(row.blocks, dict) else {}
-    entry = {
+    return {
         "id": str(row.id), "name": row.name, "description": row.description, "format": row.format,
         "sizes": blocks.get("sizes") or [], "variables_schema": blocks.get("variables_schema") or {},
         # PRD-251B (B5): the lengths a video declares (US-B104), for the editor and the model.
         "durations": durations_of(blocks, row.format),
         "photo_slots": compose_photos.photo_slots(blocks),
+        # F377: the fields each shorter cut never shows, so a post at that length is never asked
+        # for them; and whom the template is for ("software": a software brief only).
+        "fields_cut_out": fields_cut_out(blocks),
+        "made_for": made_for(blocks),
     }
-    # F378: the template's own gate, when it declares one (who it is made for, e.g. software only).
-    return {**entry, **{key: blocks[key] for key in MADE_FOR_KEYS if blocks.get(key) is not None}}
 
 
 def chosen_templates(templates: List[Dict[str, Any]], body: ComposeRequest) -> List[Dict[str, Any]]:

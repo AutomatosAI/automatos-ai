@@ -20,14 +20,30 @@ render and preview (``modules/socials/render.py``) and the media-render CI job.
   part-way plays from its own start.
 - Voice lines and SFX keep their place inside a kept stretch and are dropped outside one
   (:func:`cut_audio_plan`); so are snapshot moments (:func:`cut_moments`).
+
+F377 (night 11, 7 Oct): a cut asks only for what it shows. A 15 s cut of the UI story still
+demanded every field of its 40 s timeline, 38 of them in stretches it drops, and a draft
+from the composer could not render. :func:`shown_variables` names the variables a length
+shows or speaks (outside every clip it hides, or in a voice line it keeps), and
+:func:`schema_at_length` gives every other variable a neutral default (an empty text, false,
+or 0), so the render, the composer and the editor never ask for it, and media-render still
+finds a value for its ``{{ name }}``. :func:`cut_to_length` carries that schema.
 """
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from html.parser import HTMLParser
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
-from core.social_templates import with_root_attribute, with_root_duration
+from core.social_templates import (
+    BOOLEAN,
+    NUMBER,
+    placeholders,
+    voice_lines,
+    with_root_attribute,
+    with_root_duration,
+)
 
 Stretch = Tuple[float, float]
 
@@ -38,6 +54,10 @@ TIMING_ATTRIBUTES = ("data-start", "data-duration", "data-track-index")
 TIME_DECIMALS = 3
 # A clip must overlap a kept stretch by more than this to stay a clip.
 MIN_OVERLAP_SECONDS = 0.001
+# F377: elements with no end tag; they hold no text, so the walk never enters them.
+VOID_ELEMENTS = frozenset(
+    ("area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr")
+)
 
 _START_TAG = re.compile(r"<[a-zA-Z][^<>]*>")
 _RAW_TEXT = re.compile(r"<(script|style)\b[^<>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
@@ -313,7 +333,10 @@ def slots_cut_out(blocks: Mapping[str, Any], seconds: int) -> Set[str]:
 
 
 def cut_to_length(blocks: Mapping[str, Any], seconds: int) -> Dict[str, Any]:
-    """The blocks a render at ``seconds`` takes: the root's duration set, and the template's cut applied when it declares one."""
+    """The blocks a render at ``seconds`` takes: the root's duration set, and the template's cut applied when it declares one.
+
+    With a cut, its variables are :func:`schema_at_length`'s: one the cut never shows needs no value (F377).
+    """
     html = with_root_duration(blocks.get("html") or "", seconds)
     stretches = stretches_for(blocks, seconds)
     if not stretches:
@@ -326,7 +349,116 @@ def cut_to_length(blocks: Mapping[str, Any], seconds: int) -> Dict[str, Any]:
     }
     if isinstance(blocks.get("audio_plan"), Mapping):
         cut["audio_plan"] = cut_audio_plan(blocks["audio_plan"], stretches)
+    if isinstance(blocks.get("variables_schema"), Mapping):
+        cut["variables_schema"] = schema_at_length(blocks["variables_schema"], _left_out(blocks, _shown(blocks, stretches)))
     return cut
+
+
+# ── F377: what a length shows, and so asks for ──────────────────────────────
+class _ShownText(HTMLParser):
+    """The text, attribute values and comments of a cut composition outside the clips it hides.
+
+    Scripts and styles are text here too: a ``{{ name }}`` in one is always filled in.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._open: List[Tuple[str, bool]] = []
+        self.parts: List[str] = []
+
+    def _in_hidden(self) -> bool:
+        return bool(self._open) and self._open[-1][1]
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        hidden = self._in_hidden() or any(name == HIDDEN_ATTRIBUTE for name, _ in attrs)
+        if not hidden:
+            self.parts.extend(value for _, value in attrs if value)
+        if tag not in VOID_ELEMENTS:
+            self._open.append((tag, hidden))
+
+    def handle_endtag(self, tag: str) -> None:
+        for depth in range(len(self._open) - 1, -1, -1):
+            if self._open[depth][0] == tag:
+                del self._open[depth:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        if not self._in_hidden():
+            self.parts.append(data)
+
+    handle_comment = handle_data
+
+
+def _shown(blocks: Mapping[str, Any], stretches: Sequence[Stretch]) -> List[str]:
+    """The declared variables the cut ``stretches`` shows or speaks, in the schema's order."""
+    walk = _ShownText()
+    walk.feed(cut_html(blocks.get("html") or "", stretches))
+    walk.close()
+    lines = _cut_entries(voice_lines(blocks.get("audio_plan")), stretches)
+    texts = [*walk.parts, blocks.get("css") or "", *(str(line.get("text") or "") for line in lines)]
+    used = {name for text in texts for name in placeholders(text)}
+    schema = blocks.get("variables_schema")
+    return [name for name in schema if name in used] if isinstance(schema, Mapping) else []
+
+
+def shown_variables(blocks: Mapping[str, Any], seconds: int) -> Optional[List[str]]:
+    """The declared variables a render at ``seconds`` shows or speaks, in the schema's order;
+    ``None`` when that length plays the timeline as authored, which shows them all.
+
+    A variable shows when its ``{{ name }}`` sits outside every clip the cut hides (in the
+    css and the scripts too), or in a voice line the cut keeps.
+    """
+    stretches = stretches_for(blocks, seconds)
+    return _shown(blocks, stretches) if stretches else None
+
+
+def _left_out(blocks: Mapping[str, Any], shown: Iterable[str]) -> List[str]:
+    kept = set(shown)
+    schema = blocks.get("variables_schema")
+    return [name for name in schema if name not in kept] if isinstance(schema, Mapping) else []
+
+
+def fields_cut_out(blocks: Any) -> Dict[str, List[str]]:
+    """Each declared length that is a cut, as a string, with the declared variables it never
+    shows or speaks (:func:`shown_variables`), in the schema's order: what the editor leaves
+    out of its form and the composer never asks for at that length. The list, not the fields
+    kept, so the composer's prompt carries the shorter one."""
+    durations = blocks.get("durations") if isinstance(blocks, Mapping) else None
+    lengths = [d for d in durations if isinstance(d, int) and not isinstance(d, bool)] if isinstance(durations, list) else []
+    shown = {str(length): shown_variables(blocks, length) for length in lengths}
+    return {length: _left_out(blocks, names) for length, names in shown.items() if names is not None}
+
+
+def neutral_value(spec: Mapping[str, Any]) -> Any:
+    """The value of a variable a cut never shows: nothing on screen and nothing spoken. An
+    empty text, false, or 0 held inside the number's own bounds (a script may read it)."""
+    kind = spec.get("type")
+    if kind == NUMBER:
+        low, high = spec.get("min"), spec.get("max")
+        value = max(0, low) if isinstance(low, (int, float)) else 0
+        return min(value, high) if isinstance(high, (int, float)) else value
+    return False if kind == BOOLEAN else ""
+
+
+def schema_at_length(schema: Mapping[str, Any], cut_out: Iterable[str]) -> Dict[str, Any]:
+    """The variables a render at one length needs: ``schema`` with every variable in ``cut_out``
+    (those the length never shows) given :func:`neutral_value` as its default when it has none.
+    A length that plays the timeline as authored cuts out nothing: the schema as it is."""
+    dropped = set(cut_out)
+    return {
+        name: {**spec, "default": neutral_value(spec)}
+        if name in dropped and isinstance(spec, Mapping) and spec.get("default") is None
+        else spec
+        for name, spec in schema.items()
+    }
+
+
+def schema_for_length(template: Mapping[str, Any], seconds: Any) -> Dict[str, Any]:
+    """A template entry's variables at ``seconds`` (the composer's and the gallery's entries carry
+    ``variables_schema`` and :func:`fields_cut_out`): those its cut never shows need no value."""
+    schema = template.get("variables_schema") if isinstance(template.get("variables_schema"), Mapping) else {}
+    by_length = template.get("fields_cut_out") if isinstance(template.get("fields_cut_out"), Mapping) else {}
+    return schema_at_length(schema, by_length.get(str(seconds), ()) if seconds else ())
 
 
 __all__ = [
@@ -337,7 +469,12 @@ __all__ = [
     "cut_html",
     "cut_moments",
     "cut_to_length",
+    "fields_cut_out",
+    "neutral_value",
     "place",
+    "schema_at_length",
+    "schema_for_length",
+    "shown_variables",
     "slots_cut_out",
     "stretches_for",
 ]

@@ -75,8 +75,11 @@ def test_the_ai_visuals_ask_the_templates_own_slots_a_tool_may_fill():
     stills = plan_visuals.ai_slots(BLOCKS, "ai_images")
     assert [slot["slot"] for slot in stills] == ["still_1", "still_2", "still_3"]
     assert {slot["kind"] for slot in stills} == {"image"}
-    footage = [slot["slot"] for slot in plan_visuals.ai_slots(BLOCKS, "ai_footage")]
-    assert footage == ["hook", "tide", "end"]
+    # F377: the Data story takes photos only; the Cinematic promo's footage slots are the ones AI footage asks.
+    assert plan_visuals.ai_slots(BLOCKS, "ai_footage") == []
+    cinematic = next(s for s in social_starters.social_starters() if s["slug"] == "cinematic-product-promo")
+    footage = [slot["slot"] for slot in plan_visuals.ai_slots(cinematic["blocks"], "ai_footage")]
+    assert footage == ["hook", "reveal", "morning", "end"]
     assert plan_visuals.ai_slots(BLOCKS, "templates") == [] and plan_visuals.ai_slots(None, "ai_images") == []
     app = next(s for s in social_starters.social_starters() if s["slug"] == "app-promo")
     assert "app_loop" not in [slot["slot"] for slot in plan_visuals.ai_slots(app["blocks"], "ai_footage")]  # its own file

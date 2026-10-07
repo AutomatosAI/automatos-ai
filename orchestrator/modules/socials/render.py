@@ -99,7 +99,7 @@ from modules.socials.music import with_music
 from core.social_templates import (
     SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, resolve_variables, validate_social_blocks,
 )
-from modules.socials import channel_sizes, notify, service
+from modules.socials import channel_sizes, notify, service, spoken_fields
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -349,6 +349,9 @@ class RenderJob:
     # of the post's media the render keeps beside its files (that still: the next crop's source).
     slot_keys: Mapping[str, str] = field(default_factory=dict)
     keep_media: Tuple[str, ...] = ()
+    # F377: each voice line's id with the labels of the fields it speaks (``spoken_fields``), so a
+    # line the voice check refuses is named by its fields.
+    spoken_fields: Mapping[str, Tuple[str, ...]] = field(default_factory=dict)
 
 
 # ── the report ──────────────────────────────────────────────────────────────
@@ -768,7 +771,8 @@ async def _render(job: RenderJob, client: MediaRenderClient, store: MediaStore, 
             finished, music, media = await asyncio.wait_for(_render_sizes(job, client, store, factory, deadline), timeout=budget)
         except asyncio.TimeoutError:
             raise RenderFailure("timed_out", f"The render did not finish within {budget // 60} minutes.") from None
-    except RenderFailure as failure:
+    except RenderFailure as refused:
+        failure = spoken_fields.named(refused, job.spoken_fields)
         logger.warning("[Socials] render of post %s failed: %s (%s)", job.post_id, failure.message, failure.code)
         await asyncio.to_thread(_finish, factory, job, failure=failure)
         return False

@@ -13,7 +13,8 @@ and the agent say the same thing about one template.
 * A legacy template: its ``data_schema``'s required fields (inside objects and list
   rows too) and its array-of-object fields as tables; its fallbacks are the
   ``default('…')`` its Jinja source prints for a field.
-* A social template: its variables; one with a default fills itself.
+* A social template: its variables; one with a default fills itself. A video's shorter
+  cut needs only the fields it shows (F377, ``required_by_length``).
 
 Pure: no IO.
 """
@@ -22,6 +23,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
+from core.social_cuts import fields_cut_out, schema_at_length
 from core.social_templates import is_social_format
 from modules.documents.blocks import BlockValidationError, validate_blocks
 from modules.documents.blocks.schema import DataTableBlock, SectionBlock, TableBlock, VariableBlock, VariableRun
@@ -136,13 +138,25 @@ def legacy_requirements(schema: Any, source: Optional[str]) -> Dict[str, Any]:
     return _answer(set(_schema_required(schema, DATA)), fallbacks, _schema_tables(schema))
 
 
+def _social_required(specs: Dict[str, Any]) -> set:
+    return {f"{DATA}.{name}" for name, spec in specs.items() if isinstance(spec, dict) and spec.get("default") is None}
+
+
 def social_requirements(blocks: Any) -> Dict[str, Any]:
-    """A social template's variables: one without a default is required."""
+    """A social template's variables: one without a default is required.
+
+    F377: a video's shorter cut asks only for what it shows (``core.social_cuts``):
+    ``required_by_length`` names, for each length that is a cut, the fields it needs.
+    """
     schema = blocks.get("variables_schema") if isinstance(blocks, dict) else None
     specs = {name: spec for name, spec in (schema or {}).items() if isinstance(spec, dict)}
-    required = {f"{DATA}.{name}" for name, spec in specs.items() if spec.get("default") is None}
     fallbacks = {f"{DATA}.{name}": str(spec["default"]) for name, spec in specs.items() if spec.get("default") is not None}
-    return _answer(required, fallbacks, [])
+    by_length = {
+        length: sorted(_social_required(schema_at_length(specs, cut_out)))
+        for length, cut_out in fields_cut_out(blocks).items()
+    }
+    answer = _answer(_social_required(specs), fallbacks, [])
+    return {**answer, "required_by_length": by_length} if by_length else answer
 
 
 def requirements_of(template: Any) -> Dict[str, Any]:

@@ -28,6 +28,9 @@ F379 (night 11): Auto named social templates that don't exist ("instagram carous
 Now it names them in one line (``social_templates``: "image: Carousel, Quote card; video: …"),
 and a social template's schema gives the bare field names a post's variables take
 (``post_variables``), beside ``data_fields`` (``data.<name>``, generate_document's).
+
+F377 (night 11): a social template made for one kind of brief (``made_for``, the videos told
+on a software product's screens) says so at the end of its row and in its schema answer.
 """
 from __future__ import annotations
 
@@ -49,6 +52,8 @@ POST_VARIABLES_NOTE = (
     "For a Socials post (platform_create_social_post), send these in variables by their bare names, no "
     "\"data.\" (* needs a value); data_fields are what generate_document takes."
 )
+# F377: a social template made for one kind of brief says so at the end of its row.
+MADE_FOR_ROW = " | made for {kind} only: pick it only when the brief is about {kind}"
 NEEDS_A_TEMPLATE = "Name the template: template_id, or template_name, from platform_list_templates."
 
 
@@ -57,11 +62,15 @@ def _text(value: Any) -> Optional[str]:
 
 
 def template_row(template: Any) -> str:
-    """One template as one line of the list, with what it makes (F348's ``supported_formats``)."""
+    """One template as one line of the list, with what it makes (F348's ``supported_formats``),
+    and (F377) whom a social template is made for when it is not any business."""
+    from core.social_templates import made_for
     from modules.documents.template_formats import supported_formats
 
-    return TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category,
-                               makes=FORMAT_JOINER.join(supported_formats(template)), id=template.id)
+    row = TEMPLATE_ROW.format(name=template.name, format=template.format, category=template.category,
+                              makes=FORMAT_JOINER.join(supported_formats(template)), id=template.id)
+    kind = made_for(getattr(template, "blocks", None))
+    return f"{row}{MADE_FOR_ROW.format(kind=kind)}" if kind else row
 
 
 def list_templates_answer(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -155,12 +164,14 @@ def template_schema_answer(db: Session, workspace_id: UUID, params: Dict[str, An
     }
     if social:
         from modules.tools.discovery.social_post_checks import field_list
+        from core.social_templates import made_for
 
         blocks = template.blocks if isinstance(template.blocks, dict) else {}
         schema["post_variables"] = field_list(template, limit=len(blocks.get("variables_schema") or {}))  # F379
         schema["post_variables_note"] = POST_VARIABLES_NOTE
         schema["variables_schema"] = blocks.get("variables_schema") or {}
         schema["sizes"] = blocks.get("sizes") or []
+        schema["made_for"] = made_for(blocks)  # F377: "software", or None for any business
     return schema
 
 

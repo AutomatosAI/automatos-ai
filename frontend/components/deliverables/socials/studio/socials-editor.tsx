@@ -20,6 +20,7 @@ import {
   useSocialTemplates, useSubmitEditor, useUploadEditorMedia, type EditorSave,
 } from '@/hooks/use-socials-editor'
 import { autoNeeds, channelsOverLimit } from '../socials-composer-model'
+import { schemaAtLength } from '../socials-variables-form'
 import { EditorBriefCard } from './editor-brief-card'
 import { EditorChannelsCard } from './editor-channels-card'
 import { EditorClaimsCard } from './editor-claims-card'
@@ -151,7 +152,8 @@ export function SocialsEditor({ role, post, go }: SocialsEditorProps) {
             />
           )}
           <EditorClaimsCard
-            schema={chosen?.variables_schema ?? null} variables={draft.variables} sources={draft.sources} examples={chosen?.sample_data}
+            schema={chosen ? schemaAtLength(chosen.variables_schema, chosen.fields_cut_out, draft.lengthSeconds) : null}
+            variables={draft.variables} sources={draft.sources} examples={chosen?.sample_data}
             onChange={(variables, sources) => setDraft((d) => ({ ...d, variables, sources }))}
           />
           <EditorWhenCard slot={draft.slot} onChange={(slot) => setDraft((d) => ({ ...d, slot }))} />

@@ -128,7 +128,7 @@ from modules.documents.brand_kit import get_brand_kit
 from modules.documents.brand_fonts import brand_kit_for_media_render
 from modules.socials import media_caps, media_store, media_urls, notify, preview, render, schedule_jobs, service, template_gallery
 from modules.socials import credits as post_credits
-from modules.socials import report_charts, text_search, upload_crops, voice_examples, workspace_copies
+from modules.socials import report_charts, spoken_fields, text_search, upload_crops, voice_examples, workspace_copies
 from modules.socials import sources as post_sources
 from modules.socials.capabilities import media_capabilities
 from modules.socials.recipes import footage as footage_recipes
@@ -598,7 +598,7 @@ async def render_post(db: Session, workspace: Workspace, post: SocialPost, actor
             extra_bundles=tuple(other_sizes),
             voice=voice_plan,
             footage=footage_plan,
-            reservation=reservation,
+            reservation=reservation, spoken_fields=spoken_fields.spoken_labels(render.composition_of(template)),  # F377
         )
     )
     return saved

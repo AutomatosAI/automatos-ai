@@ -18,7 +18,8 @@ carries a composition in ``blocks``, which media-render renders:
         "app_loop": {"kind": "video", "path": "assets/slots/app_loop.mp4", "generate": false}
       },
       "stills": [{"at": 0.5}, {"at": 1.5, "when": "point_3"}]   social_image only: one PNG each
-      "data": {"rows": 5, "label": "row_{n}_label", "value": "row_{n}_value", "source": "source_label"}
+      "data": {"rows": 5, "label": "row_{n}_label", "value": "row_{n}_value", "source": "source_label"},
+      "made_for": "software"                 optional: the one kind of brief the template is for
     }
 
 * **Variables.** A variable is ``text``, a ``number`` or a ``boolean``, and it
@@ -48,6 +49,10 @@ carries a composition in ``blocks``, which media-render renders:
 * **Data.** A chart bound to a report (S1.7) names the variables that hold its
   rows, its source chip and its kind (``core/chart_binding.py``): the report's
   top rows fill them, and a render checks they still match the report.
+* **Made for (F377, night 11).** A template that shows one kind of business's own
+  material says so: ``"made_for": "software"`` marks the videos built on a software
+  product's screens (a chat, a task board, a phone app), which the composer and Auto
+  pick only for a software brief. Without it, a template suits any business.
 * **The brand comes from the brand kit (D4).** Colours, fonts and the logo reach
   a composition as ``--brand-*`` CSS variables, ``{{ brand.logo }}`` and (D5, the
   square mark) ``{{ brand.logo_mark }}``. ``core/social_brand_rule.py`` finds a
@@ -77,7 +82,12 @@ from core.social_text_values import text_value_problem
 SOCIAL_IMAGE, SOCIAL_VIDEO = "social_image", "social_video"
 SOCIAL_TEMPLATE_FORMATS = (SOCIAL_IMAGE, SOCIAL_VIDEO)
 
-BLOCK_KEYS = ("html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills", "data", "durations", "cuts")
+BLOCK_KEYS = (
+    "html", "css", "variables_schema", "sizes", "audio_plan", "slots", "stills", "data", "durations", "cuts", "made_for",
+)
+# F377: the kinds of brief a template may be made for; one without ``made_for`` suits any business.
+MADE_FOR_SOFTWARE = "software"
+MADE_FOR_KINDS = (MADE_FOR_SOFTWARE,)
 # PRD-251B (B5, US-B104): the lengths a video template offers, in whole seconds, each a
 # complete timeline the composition selects from the root's data-duration. An image
 # template declares none; a video without the list offers its root duration alone.
@@ -139,6 +149,8 @@ DEFAULT_STILL_AT = 0.0
 
 PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\s*\}\}")
 _LEFTOVER = re.compile(r"\{\{[^{}]*\}\}")
+# F377: a figure as the composer writes it: digits, thousands grouped by commas, a decimal part.
+NUMBER_TEXT = re.compile(r"^\s*[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*$")
 _SIZE = re.compile(r"^(\d{2,4})x(\d{2,4})$")
 _HEAD_CLOSE = re.compile(r"</head\s*>", re.IGNORECASE)
 _ROOT = re.compile(r"""data-composition-id\s*=\s*["']main["']""", re.IGNORECASE)
@@ -221,6 +233,19 @@ def _cut_errors(blocks: Mapping[str, Any], fmt: str) -> List[Dict[str, str]]:
         elif length < root - UNCUT_SHORTFALL_SECONDS:
             errors.append(_error("cuts", f"the {length} s length is shorter than the {root:g} s timeline: declare the stretches it keeps"))
     return errors
+
+
+def _made_for_errors(made_for: Any) -> List[Dict[str, str]]:
+    """``made_for`` (F377): one of :data:`MADE_FOR_KINDS`, or left out for a template any business can use."""
+    if made_for in MADE_FOR_KINDS:
+        return []
+    return [_error("made_for", f"must be one of {list(MADE_FOR_KINDS)}, or left out for any business")]
+
+
+def made_for(blocks: Any) -> Optional[str]:
+    """The kind of brief a template is made for (F377), or ``None`` when any business can use it."""
+    value = blocks.get("made_for") if isinstance(blocks, Mapping) else None
+    return value if value in MADE_FOR_KINDS else None
 
 
 def _duration_errors(durations: Any, fmt: str) -> List[Dict[str, str]]:
@@ -355,12 +380,22 @@ class ResolvedVariables:
     invalid: List[str]
 
 
+def _as_number(value: Any) -> Any:
+    """A figure written as text ("412", "1,240", "12.5") as that number; anything else as it is."""
+    if not isinstance(value, str) or not NUMBER_TEXT.match(value):
+        return value
+    number = float(value.replace(",", ""))
+    return int(number) if number.is_integer() and "." not in value else number
+
+
 def resolve_variables(schema: Mapping[str, Any], supplied: Mapping[str, Any]) -> ResolvedVariables:
     """Each declared variable's value: the one supplied, else its default.
 
     ``missing`` names the variables with neither; ``invalid`` says which values
     do not fit their variable. Undeclared names in ``supplied`` are ignored. A
-    number supplied for a text variable is taken as its text (an agent's 42).
+    number supplied for a text variable is taken as its text (an agent's 42),
+    and (F377) a figure written as text for a number variable as that number
+    (the composer's "1,240").
     """
     values: Dict[str, Any] = {}
     missing: List[str] = []
@@ -369,6 +404,8 @@ def resolve_variables(schema: Mapping[str, Any], supplied: Mapping[str, Any]) ->
         value = supplied.get(name) if isinstance(supplied, Mapping) else None
         if spec.get("type") == TEXT and _is_number(value):
             value = str(value)
+        if spec.get("type") == NUMBER:
+            value = _as_number(value)
         if value is None:
             value = spec.get("default")
         if value is None:
@@ -709,6 +746,7 @@ def validate_social_blocks(blocks: Any, fmt: str) -> Dict[str, Any]:
         errors += _size_errors(blocks["sizes"])
     if "durations" in blocks:
         errors += _duration_errors(blocks["durations"], fmt)
+    errors += _made_for_errors(blocks["made_for"]) if "made_for" in blocks else []
     errors += _audio_errors(blocks.get("audio_plan"), fmt)
     if not errors:
         schema = blocks["variables_schema"]
@@ -729,6 +767,8 @@ __all__ = [
     "BLOCK_KEYS",
     "IMAGE_SLOT",
     "InvalidVariableValues",
+    "MADE_FOR_KINDS",
+    "MADE_FOR_SOFTWARE",
     "ResolvedVariables",
     "SOCIAL_IMAGE",
     "SOCIAL_TEMPLATE_FORMATS",
@@ -740,6 +780,7 @@ __all__ = [
     "fill_text",
     "is_bundle_variable",
     "is_social_format",
+    "made_for",
     "parse_size",
     "placeholders",
     "resolve_variables",
