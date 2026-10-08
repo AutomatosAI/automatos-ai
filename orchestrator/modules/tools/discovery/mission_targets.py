@@ -8,11 +8,12 @@ not a mission"). ``subject_targets.resolve_targets`` now reads ``mission_id`` th
 tool will (``mission_refs.on_its_mission``): a mission's id, its card's number, a step's
 number or its title, in this workspace. A mission it names is named on the card by its
 title and number; anything else fails the call back to the model with the tool's own
-refusal, and nothing is asked.
+refusal, and nothing is asked. The call the card asks about names the mission by its own id
+(``bound_to_the_mission``), so the click runs on the mission the card showed.
 """
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -41,6 +42,24 @@ def mission_targets(db: Session, workspace_id: Any, params: Any,
     if is_uuid(said):
         return _by_its_id(db, workspace_id, said)
     return _by_a_card(db, workspace_id, said, str(action), does)
+
+
+def bound_to_the_mission(db: Session, workspace_id: Any, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """The call with ``mission_id`` (and, F308, the step it decides) as the mission's own id,
+    so the owner's click runs on the mission its card showed: a title or a number read
+    again at the click could name another. The call as it is when it names no mission
+    the tool would act on (its refusal comes from ``mission_targets``)."""
+    from modules.tools.discovery.mission_refs import card_named, does_of, is_uuid, on_its_mission
+
+    said = params.get(PARAM)
+    does = does_of(action) if said not in (None, "") else None
+    if does is None or is_uuid(said):
+        return params
+    card = card_named(db, workspace_id, said)[0]
+    named = on_its_mission(db, card, action, does) if card is not None else None
+    if named is None or named.run_id is None:
+        return params
+    return {**params, **named.params}
 
 
 def _by_its_id(db: Session, workspace_id: Any, said: Any) -> Tuple[List[Target], List[Target]]:
@@ -92,4 +111,4 @@ def _mission_card(db: Session, workspace_id: Any, run_id: Any) -> Optional[Any]:
                                       BoardTask.source_type == MISSION_CARD).first()
 
 
-__all__ = ["mission_targets"]
+__all__ = ["bound_to_the_mission", "mission_targets"]

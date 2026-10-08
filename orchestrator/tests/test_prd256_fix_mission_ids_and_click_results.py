@@ -149,6 +149,20 @@ def test_the_ask_on_a_missions_number_names_the_mission(board):
     assert _grants(board) == 1
 
 
+def test_the_click_runs_on_the_mission_the_card_showed(board):
+    """A title read again at the click could name another mission: the grant holds the mission's own id."""
+    from core.models.approval_grants import ApprovalGrant
+    from modules.tools.discovery.owner_only import platform_ask
+
+    reply = platform_ask(board.db, board.ws, CANCEL, {"mission_id": "spring menu"}, _owners_chat())
+    _mission(board.db, board.ws, "Spring menu")                     # now the words name this one in full
+
+    grant = board.db.query(ApprovalGrant).filter(ApprovalGrant.workspace_id == board.ws).one()
+    assert reply["params"]["mission_id"] == str(board.run.id)
+    assert grant.details["params"]["mission_id"] == str(board.run.id)
+    assert f"(mission {board.number})" in reply["act"]
+
+
 def test_a_step_cancelled_alone_is_refused_before_any_card(board):
     from modules.tools.discovery.owner_only import platform_ask
 
