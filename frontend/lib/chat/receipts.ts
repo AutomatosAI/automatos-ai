@@ -73,3 +73,25 @@ export function movedSomethingOnTheBoard(receipts: Receipt[]): boolean {
 export function safeLink(link: string | null): string | null {
   return link && link.startsWith('/') && !link.startsWith('//') ? link : null
 }
+
+/** The `tool-data` key the backend puts a `receipts` frame's data under (consumers/chatbot/receipts.py
+ * LIVE_KEY): `useChat` hands a `tool-data` frame to its data callback, never a frame type it does not know. */
+export const LIVE_KEY = 'receipts'
+
+/** What a `tool-data` part forwarded by `useChat`'s data callback sets on the live reply, when it
+ * carries a receipts frame's data; undefined for any other part. */
+export function liveReceiptsFromToolData(part: unknown): ReturnType<typeof liveReceipts> | undefined {
+  const forwarded = part as { type?: unknown; data?: Record<string, unknown> } | null | undefined
+  if (forwarded?.type !== 'tool-data') return undefined
+  const frame = forwarded.data?.[LIVE_KEY]
+  return receiptsFromFrame(frame) ? liveReceipts(frame) : undefined
+}
+
+/** `messages` with the live receipts on the reply being streamed (the last assistant message). Never mutates. */
+export function withReceiptsOnTheReply(
+  messages: ChatMessage[],
+  live: Pick<ChatMessage, 'receipts' | 'receiptsAbove'>,
+): ChatMessage[] {
+  const at = messages.findLastIndex((m) => m.role === 'assistant')
+  return at < 0 ? messages : messages.map((m, i) => (i === at ? { ...m, ...live } : m))
+}

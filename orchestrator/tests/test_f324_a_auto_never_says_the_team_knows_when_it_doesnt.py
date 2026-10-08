@@ -107,6 +107,6 @@ def test_the_chat_runs_retrieval_first_through_it():
     from consumers.chatbot.service import StreamingChatService
 
     inner = StreamingChatService._retrieval_first
-    for _ in range(5):                                                    # under F241, F307, F303, F316, F317
+    for _ in range(6):                                  # under PRD-256 US-001, F241, F307, F303, F316, F317
         inner = inner.__wrapped__
     assert inner.__code__ is tells_the_team_honestly(lambda: None).__code__

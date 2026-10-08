@@ -16,7 +16,8 @@ names only, no result and no chat).
   read, the team's findings: ``prefetched``) fold into ONE read receipt.
 
 The turn streams them as one ``receipts`` frame, with the model that answered: after the
-loop, before the answer's additions, or, for a turn that ran no loop, before its finish. It
+loop, before the answer's additions, or, for a turn that ran no loop, before its finish (the
+web chat reads the same data from the ``tool-data`` frame just before it). It
 saves them as the message's ``receipts`` part (``narration.reply_parts``; ``[]`` when nothing
 ran). They are built after the model is done: no prompt names them and no tool can set them.
 
@@ -51,7 +52,7 @@ from modules.tools.execution.turn_account import is_read, thing_of, what_it_did
 Receipt = Dict[str, Any]
 Prefetched = Sequence[Tuple[str, Dict[str, Any]]]
 
-PART = FRAME = "receipts"
+PART = FRAME = LIVE_KEY = "receipts"
 READ, WRITE = "read", "write"
 DONE, REFUSED, SKIPPED = "done", "refused", "skipped"
 REASON_CHARS = 200
@@ -217,16 +218,30 @@ def model_of(response: Any) -> Optional[str]:
     return model if isinstance(model, str) and model else None
 
 
-def receipts_frame(handler: Any, receipts: List[Receipt], model: Optional[str] = None,
-                   above: Sequence[str] = ()) -> str:
-    """The one ``receipts`` frame of a turn, with the model that answered when it is known and
-    the lines the reply carries above its text (US-002) when there are any."""
+def _frame_data(receipts: List[Receipt], model: Optional[str], above: Sequence[str]) -> Dict[str, Any]:
     data: Dict[str, Any] = {"receipts": list(receipts)}
     if model:
         data["model"] = model
     if above:
         data[ABOVE] = list(above)
-    return handler.format_aisdk_data(FRAME, data)
+    return data
+
+
+def receipts_frame(handler: Any, receipts: List[Receipt], model: Optional[str] = None,
+                   above: Sequence[str] = ()) -> str:
+    """The one ``receipts`` frame of a turn, with the model that answered when it is known and
+    the lines the reply carries above its text (US-002) when there are any."""
+    return handler.format_aisdk_data(FRAME, _frame_data(receipts, model, above))
+
+
+def receipts_frames(handler: Any, receipts: List[Receipt], model: Optional[str] = None,
+                    above: Sequence[str] = ()) -> Tuple[str, ...]:
+    """The same data on a ``tool-data`` frame (under ``LIVE_KEY``), then the frame. The web
+    chat's stream reader hands a ``tool-data`` frame to its data callback, where the live
+    message takes its receipts (frontend lib/chat/use-chat-with-receipts.ts); it passes over a
+    frame type it does not know."""
+    live = handler.format_aisdk_tool_data({LIVE_KEY: _frame_data(receipts, model, above)})
+    return live, receipts_frame(handler, receipts, model, above)
 
 
 # ── US-002: one honesty rule, from the receipts alone ──────────────────────
@@ -339,17 +354,17 @@ def _settle_above(receipts: Sequence[Receipt], answer: str) -> List[str]:
     return above
 
 
-def _frame_once(chat: Any, receipts: List[Receipt], model: Optional[str],
-                above: Sequence[str] = ()) -> Optional[str]:
+def _frames_once(chat: Any, receipts: List[Receipt], model: Optional[str],
+                 above: Sequence[str] = ()) -> Tuple[str, ...]:
     """The turn's frame, the first time it is asked for. A public widget visitor is sent none
     (F155: a visitor sees no internals); the receipts are still saved with the message."""
     handler = getattr(chat, "streaming_handler", None)
     if _SENT.get() or handler is None:
-        return None
+        return ()
     _SENT.set(True)
     if getattr(chat, "widget_mode", False):
-        return None
-    return receipts_frame(handler, receipts, model, above)
+        return ()
+    return receipts_frames(handler, receipts, model, above)
 
 
 def writes_its_receipts(turn: Stream) -> Stream:
@@ -364,9 +379,9 @@ def writes_its_receipts(turn: Stream) -> Stream:
         finish = handler.format_aisdk_finish() if handler is not None else None
         try:
             async for chunk in turn(chat, *args, **kwargs):
-                frame = (_frame_once(chat, current_receipts() or [], _MODEL.get(), _ABOVE.get() or ())
-                         if finish and chunk == finish else None)
-                if frame:
+                frames = (_frames_once(chat, current_receipts() or [], _MODEL.get(), _ABOVE.get() or ())
+                          if finish and chunk == finish else ())
+                for frame in frames:
                     yield frame
                 yield chunk
         finally:
@@ -402,9 +417,9 @@ def the_loop_writes_receipts(loop: Stream) -> Stream:
                     receipts = build_receipts(made[0] if made else None, kwargs.get("prefetched") or ())
                     _LOOP.set(receipts)
                     answer = getattr(final, "content", None)
-                    frame = _frame_once(chat, receipts, model_of(final), _settle_above(receipts, answer)) \
-                        if answer else None
-                    if frame:
+                    frames = _frames_once(chat, receipts, model_of(final), _settle_above(receipts, answer)) \
+                        if answer else ()
+                    for frame in frames:
                         yield frame
                 yield chunk
         finally:
@@ -447,8 +462,9 @@ def saves_the_turns_receipts(reply_parts: Parts) -> Parts:
     return wrapped
 
 
-__all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "NOTHING_DONE_LINE", "PART", "READ",
-           "REFUSED", "SKIPPED", "TRIED_LINE", "WRITE", "build_receipts", "claims_work_done", "current_receipts",
+__all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIVE_KEY", "NOTHING_DONE_LINE", "PART",
+           "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WRITE", "build_receipts", "claims_work_done", "current_receipts",
            "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
-           "receipt", "receipts_frame", "saves_the_turns_receipts", "skipped_receipt", "the_answer_takes_the_receipts",
-           "the_loop_writes_receipts", "turn_receipts", "with_lines_above", "writes_its_receipts"]
+           "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "skipped_receipt",
+           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "with_lines_above",
+           "writes_its_receipts"]

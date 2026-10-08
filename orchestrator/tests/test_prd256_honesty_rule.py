@@ -311,11 +311,17 @@ class _Model:
 
 
 class _Router:
+    """ToolRouter.execute_and_format's envelope: the executor's own answer rides as ``raw_result``,
+    which is where the chat's tool callback (and so the receipt's reason) reads it."""
+
     def __init__(self, result):
         self.result = result
 
     async def execute_and_format(self, tool_name, tool_args, **kwargs):
-        return self.result
+        success = bool(self.result.get("success"))
+        said = "" if success else f"Tool {tool_name} failed: {self.result.get('error')}"
+        return {"success": success, "frontend_data": {}, "llm_context": said or json.dumps(self.result),
+                "raw_result": self.result, "fatal_error": False, "error_type": None}
 
 
 def _service(result):

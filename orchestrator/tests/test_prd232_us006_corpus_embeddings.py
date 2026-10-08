@@ -175,18 +175,39 @@ def test_collect_enum_values_dedupes_and_flattens():
     assert ActionSemanticIndex._collect_enum_values(None) == []
 
 
-# ── AC: ranking — "close the blocked tickets" ranks the board-write top-5 ────
-def test_close_blocked_tickets_ranks_update_task_status_top5():
+# ── AC: ranking — "close the blocked tickets" reaches the board-write ────────
+# PRD-256 US-006 promoted Auto's board writes: platform_update_task_status is its own
+# first-class tool (a pin), so the dispatcher's ranking leaves it out by design. The
+# corpus still reaches its embedded text; the dispatcher ranking is proven on a write
+# that stays in the dispatcher (the register pairs below, and the acknowledge write).
+BOARD_WRITE = "platform_update_task_status"
+
+
+def _first_class(name):
+    """The action is promoted, pinned, and attaches as its own tool for a caller who is no admin."""
+    from modules.tools.tool_router import _promotion_pins
+
+    registry = get_action_registry()
+    pins = _promotion_pins()
+    attached = {s["function"]["name"] for s in registry.to_first_class_schemas(exclude_admin=True,
+                                                                               first_class_names=pins)}
+    return registry.get(name).promoted and name in pins and name in attached
+
+
+def _dispatcher_ranking(query):
     async def _run():
         idx = _index_with(_LexEM(), _TextCache(), get_action_registry())
-        ranked = await idx.rank_actions("close the blocked tickets", top_k=5,
-                                        exclude_admin=True, exclude_promoted=True)
+        ranked = await idx.rank_actions(query, top_k=5, exclude_admin=True, exclude_promoted=True)
         return [n for n, _ in ranked]
 
-    names = asyncio.run(_run())
-    assert "platform_update_task_status" in names, (
-        f"board-write action absent from top-5 for the VECTOR query: {names}"
-    )
+    return asyncio.run(_run())
+
+
+def test_close_blocked_tickets_reaches_the_board_write_first_class():
+    action = get_action_registry().get(BOARD_WRITE)
+    assert "close the blocked tickets" in ActionSemanticIndex._build_embedding_text(action)
+    assert _first_class(BOARD_WRITE)
+    assert BOARD_WRITE not in _dispatcher_ranking("close the blocked tickets")   # outside the enum
 
 
 def test_register_variant_pairs_rank_top5():
@@ -207,15 +228,16 @@ def test_register_variant_pairs_rank_top5():
 
 
 def test_enum_value_reaches_ranker():
-    """The task-status enum value 'done' (embedded via Options:) lets 'mark it as
-    done' reach the board-write action."""
-    async def _run():
-        idx = _index_with(_LexEM(), _TextCache(), get_action_registry())
-        ranked = await idx.rank_actions("mark it as done", top_k=5,
-                                        exclude_admin=True, exclude_promoted=True)
-        return [n for n, _ in ranked]
+    """The task-status enum value 'done' (embedded via Options:) reaches the first-class
+    board write's embedded text; in the dispatcher, 'mark it as done' ranks the write that
+    stays there (acknowledging a report: "mark report 88 as handled")."""
+    action = get_action_registry().get(BOARD_WRITE)
+    options = ActionSemanticIndex._build_embedding_text(action).split("| Options: ", 1)[1].split(" | ", 1)[0]
+    assert "done" in options.split(", ") and _first_class(BOARD_WRITE)
 
-    assert "platform_update_task_status" in asyncio.run(_run())
+    ack = get_action_registry().get("platform_acknowledge_report")
+    assert ack.permission_level == "write" and not ack.promoted
+    assert "platform_acknowledge_report" in _dispatcher_ranking("mark it as done")
 
 
 # ── AC: corpus-hash change forces re-embed — BOTH layers ─────────────────────
