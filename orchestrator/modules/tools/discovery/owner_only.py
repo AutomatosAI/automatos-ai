@@ -29,6 +29,7 @@ import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from modules.tools.discovery.agent_binding import names_the_agent_alone
 from modules.tools.discovery.send_words import LEAVES_THE_WORKSPACE, READ_WORDS
 from modules.tools.execution.card_raised import ACT
 from modules.tools.execution.params_text import params_object
@@ -157,9 +158,12 @@ def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handl
                   gate: Optional[int] = None) -> Execute:
     """``handler`` run on the owner's click on this exact call (``asked``), signed by who
     clicked; without one, the ask. ``gate``: the grant the confirmation gate claimed for
-    this call (``Cleared.approved_via_grant_id``)."""
+    this call (``Cleared.approved_via_grant_id``). A call naming its agent by name alone
+    has no click: the ask binds it (P256-FIX-RVW-9)."""
     async def on_the_click(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-        grant = _the_click(db, workspace_id, action, asked) or _claimed_at_the_gate(db, workspace_id, action, gate)
+        grant = None
+        if not names_the_agent_alone(action, asked):
+            grant = _the_click(db, workspace_id, action, asked) or _claimed_at_the_gate(db, workspace_id, action, gate)
         if grant is None:
             return platform_ask(db, workspace_id, action, asked, caller_context)
         clicker = _clicker(grant)
@@ -295,9 +299,10 @@ def _claimed_at_the_gate(db: Any, workspace_id: Any, action: str, grant_id: Opti
     """The click the confirmation gate already claimed for this exact call, or None.
 
     FX-010: a destructive action (platform_delete_agent, platform_delete_playbook) asks at
-    the gate too when an editor drives the turn, and the gate retires its single-use grant
-    when it clears (PlatformActionExecutor.clear). That claim, made in this call for these
-    params, is the owner's click: asking again would raise a card per click, for ever."""
+    the gate too when an editor drives the turn (with this module's ask, P256-FIX-RVW-9:
+    confirmation_gate), and the gate retires its single-use grant when it clears. That
+    claim, made in this call for these params, is the owner's click: asking again would
+    raise a card per click, for ever."""
     if db is None or grant_id is None:
         return None
     from core.models.approval_grants import ApprovalGrant
@@ -321,10 +326,12 @@ def after_the_click(db: Any, grant: Any, result: Any) -> Any:
     return result
 
 
-def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], caller_context: Any) -> Dict[str, Any]:
+def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], caller_context: Any, *,
+                 permission_level: str = PERMISSION_LEVEL) -> Dict[str, Any]:
     """The ask for a platform action, naming the card by its number and the verb, and
     saying what the call changes (FX-008). A card that is not on the board is never
-    asked about (F091)."""
+    asked about (F091). ``permission_level``: the grant's, the action's own when the
+    confirmation gate asks (a destructive yes stays single-use there, P256-FIX-RVW-9)."""
     from modules.tools.discovery.agent_binding import bound_to_the_agent
     from modules.tools.discovery.agent_runtime import refused_before_the_card
     from modules.tools.discovery.card_question import platform_question
@@ -343,7 +350,8 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     status = closing_status(params) if action in CARD_MOVES else None
     act = f"{CLOSING_VERBS[status] if status else VERBS.get(action, action)} {what}".strip()
     asked = platform_question(db, workspace_id, action, params, act)
-    return _ask(db, workspace_id, action, params, caller_context, act=act, what=what, asked=asked)
+    return _ask(db, workspace_id, action, params, caller_context, act=act, what=what, asked=asked,
+                level=permission_level)
 
 
 def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, caller_context: Any, *,
@@ -358,18 +366,18 @@ def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, call
 
 
 def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: Any, *, act: str,
-         what: str, asked: str) -> Dict[str, Any]:
+         what: str, asked: str, level: str = PERMISSION_LEVEL) -> Dict[str, Any]:
     from modules.tools.execution import tool_grants
 
     message = ASK.format(act=act)
     # ``act``: what the card asks, in the owner's words, for the receipt and the model (FX-004);
     # ``question_md``: what the card shows the owner, the subject and the change (FX-008).
     ask = {"success": False, "requires_confirmation": True, "owner_only": True, "action": action,
-           "permission_level": PERMISSION_LEVEL, "message": message, "params": params, ACT: act,
+           "permission_level": level, "message": message, "params": params, ACT: act,
            QUESTION: asked}
     logger.info("[owner_only] %s waits for the owner's click (%s)", action, what)
     return tool_grants.attach_ask_grant(db, workspace_id, action=action, params=params, ask=ask,
-                                        permission_level=PERMISSION_LEVEL, description=message,
+                                        permission_level=level, description=message,
                                         caller_context=caller_context, subject=f" on {what}" if what else "",
                                         question_md=asked)
 

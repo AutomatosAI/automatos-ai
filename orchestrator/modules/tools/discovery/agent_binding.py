@@ -29,9 +29,9 @@ def bound_to_the_agent(db: Any, workspace_id: Any, action: str,
                        params: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """(the call with ``agent_id`` bound to the one agent its ``agent_name`` names, the
     refusal when it names several or none). A call with an agent_id, or no name, is as it is."""
-    said = params.get(AGENT_NAME)
-    if action not in BINDS or params.get(AGENT_ID) not in (None, "") or not isinstance(said, str) or not said.strip():
+    if not names_the_agent_alone(action, params):
         return params, None
+    said = params[AGENT_NAME]
     matches = _named(db, workspace_id, said)
     if len(matches) == 1:
         return {**params, AGENT_ID: matches[0].id}, None
@@ -42,6 +42,16 @@ def bound_to_the_agent(db: Any, workspace_id: Any, action: str,
     named = ", ".join(f"{agent.id}:{agent.name}" for agent in matches[:MAX_NAMED])
     return params, {"success": False, "error": AMBIGUOUS.format(count=len(matches), said=said, named=named,
                                                                    action=action)}
+
+
+def names_the_agent_alone(action: str, params: Any) -> bool:
+    """The call names its agent by ``agent_name`` and no ``agent_id``. No grant is such a
+    call's click: its ask binds the name to an id first, and the click runs on that id
+    (P256-FIX-RVW-9)."""
+    if action not in BINDS or not isinstance(params, dict) or params.get(AGENT_ID) not in (None, ""):
+        return False
+    said = params.get(AGENT_NAME)
+    return isinstance(said, str) and bool(said.strip())
 
 
 def _named(db: Any, workspace_id: Any, said: str) -> List[Any]:
@@ -57,4 +67,4 @@ def _named(db: Any, workspace_id: Any, said: str) -> List[Any]:
     return whole or agents
 
 
-__all__ = ["BINDS", "bound_to_the_agent"]
+__all__ = ["BINDS", "bound_to_the_agent", "names_the_agent_alone"]

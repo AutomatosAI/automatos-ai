@@ -567,19 +567,20 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
 
 async def delete_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Delete an agent. Requires confirmation (handled by execute())."""
+    """Delete an agent. Requires confirmation (handled by execute()). A name is read as
+    one agent's (agent_binding: the whole name, else the one name containing it); a name
+    two agents carry, or none, deletes nothing (P256-FIX-RVW-9)."""
     from core.models import Agent
+    from modules.tools.discovery.agent_binding import bound_to_the_agent
 
+    params, refused = bound_to_the_agent(db, workspace_id, "platform_delete_agent", params)
+    if refused:
+        return refused
     agent_id = params.get("agent_id")
-    agent_name = params.get("agent_name")
-
-    query = db.query(Agent).filter(Agent.workspace_id == workspace_id)
-    if agent_id:
-        query = query.filter(Agent.id == agent_id)
-    elif agent_name:
-        query = query.filter(Agent.name.ilike(f"%{agent_name}%"))
-    else:
+    if not agent_id:
         return {"success": False, "error": "Provide agent_name or agent_id"}
+
+    query = db.query(Agent).filter(Agent.workspace_id == workspace_id, Agent.id == agent_id)
 
     agent = query.first()
     if not agent:
