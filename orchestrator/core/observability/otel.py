@@ -23,7 +23,7 @@ first (whose own server span is O2b).
 The rules, from the issue:
 
 * **Off by default.** With ``OTEL_ENABLED=false`` nothing from ``opentelemetry``
-  is imported, as ``get_tracer()`` never imports ``langfuse`` when it is off.
+  is imported, and ``get_tracer()`` is the no-op seam.
 * **Never fail the caller.** A tracing fault is logged; the request, or the
   boot, goes on without spans.
 * **Private by default.** Spans carry IDs and HTTP metadata, never a request or

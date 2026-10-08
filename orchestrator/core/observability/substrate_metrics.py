@@ -4,7 +4,7 @@
 after a search: it writes a ``substrate_metric_events`` row (the always-on
 DB sink the Command Center tile aggregates) and, when a query string is
 provided, also emits through the PRD-185 tracer plane
-(``fire_retrieval_score``, guarded, default-OFF Langfuse).
+(``fire_retrieval_score``, guarded, default-OFF OpenTelemetry).
 
 Contract with the hot path:
 - **Never raises.** A telemetry failure is logged at WARNING (not DEBUG —
