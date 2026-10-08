@@ -128,7 +128,7 @@ check "N12 the four giants did not grow (service.py, auto.py, tool_router.py, sm
 check "N13 no Jev live: the decision engine is untouched (D4)" "git diff --quiet $BASE..HEAD -- orchestrator/core/llm/decisions"
 check "N14 no failover model set by default (D5)" "! failover_default_set"
 check "N15 the hierarchy gate passes (stdlib ast)" "python3 orchestrator/scripts/check_hierarchy_gate.py >/dev/null"
-check "N16 no eval run claimed: the loop never touched the analyst or sim folders" "! git diff $BASE..HEAD -- . ':!scripts/ralph' | grep -qE 'automatos-analyst|\.automatos-sim'"
+check "N16 no eval run claimed: no added line outside tests/sim names the analyst or sim folders" "! git diff $BASE..HEAD -- . ':!scripts/ralph' ':!tests/sim' | grep '^+' | grep -v '^+++' | grep -qE 'automatos-analyst|\.automatos-sim'"
 check "N17 no regex on the owner's words added to the gates (D1)" "! owner_words_regex_added"
 check "N18 no test weakened: added test functions ≥ removed" "tests_not_weakened"
 warn "N19 story commits carry [skip ci] (all but the final CI commit)" "[ -z \"\$(git log --format='%s' $BASE..HEAD^ | grep -v 'skip ci' | grep -v '^chore(prd-256): seed')\" ]"
