@@ -110,8 +110,10 @@ def _routes():
 
 
 def build_app(worker) -> web.Application:
-    """The worker's app: the internal-token check, Prometheus metrics, every route."""
+    """The worker's app: the internal-token check, Prometheus metrics, every route, and
+    (PRD-256 O2b, when OTEL_ENABLED) a server span per request that continues the caller's trace."""
     from automatos_metrics import add_aiohttp_metrics
+    from worker_otel import attach as attach_tracing
     from worker_routes_canvas import make_canvas_event_sink
 
     app = web.Application(middlewares=[internal_auth_middleware])
@@ -120,6 +122,7 @@ def build_app(worker) -> web.Application:
                                   canvas_event_sink=make_canvas_event_sink(worker))
     # Prometheus metrics endpoint + request tracking
     add_aiohttp_metrics(app, service="workspace-worker")
+    attach_tracing(app)   # outermost, so the span covers everything below it
     for method, path, handler in _routes():
         # add_get/add_post/add_delete, as before: add_get also answers HEAD.
         getattr(app.router, f"add_{method.lower()}")(path, handler)

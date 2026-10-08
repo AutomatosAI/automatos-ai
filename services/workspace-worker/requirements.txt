@@ -17,6 +17,11 @@ psycopg2-binary>=2.9.0,<3.0.0
 
 # Observability
 prometheus_client>=0.20.0,<1.0.0
+# PRD-256 O2b (#847): traces over OTLP/HTTP, default OFF (OTEL_ENABLED); imported only
+# when enabled (worker_otel.py). The same versions as the platform's.
+opentelemetry-api==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
 
 # Headless browser rendering (workspace_html_to_png tool)
 playwright>=1.45.0,<1.53.0
