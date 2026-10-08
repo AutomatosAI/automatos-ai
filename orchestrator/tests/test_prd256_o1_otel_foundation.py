@@ -239,23 +239,36 @@ def test_an_exporter_that_fails_never_fails_the_request(traced):
 
 @pytest.fixture
 def fresh_global_provider():
-    """The SDK allows one global provider per process; give each test its own."""
+    """The SDK allows one global tracer and meter provider per process (the lifespan
+    installs both, O5); give each test its own."""
     from opentelemetry import trace
+    from opentelemetry.metrics import _internal as global_metrics
     from opentelemetry.util._once import Once
 
+    from core.observability import metrics
+
     saved = (trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE)
+    saved_meters = (global_metrics._METER_PROVIDER, global_metrics._METER_PROVIDER_SET_ONCE)
     trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = None, Once()
-    otel._State.provider = None
+    global_metrics._METER_PROVIDER, global_metrics._METER_PROVIDER_SET_ONCE = None, Once()
+    otel._State.provider = metrics._State.provider = None
     yield
-    if otel._State.provider is not None:
-        otel._State.provider.shutdown()
-    otel._State.provider = None
+    for provider in (otel._State.provider, metrics._State.provider):
+        if provider is not None:
+            provider.shutdown()
+    otel._State.provider = metrics._State.provider = None
     trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = saved
+    global_metrics._METER_PROVIDER, global_metrics._METER_PROVIDER_SET_ONCE = saved_meters
 
 
 def _lifespan_app(monkeypatch, exporter, seen):
     monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
     monkeypatch.setattr(otel, "_otlp_exporter", lambda: exporter)
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from core.observability import metrics
+
+    monkeypatch.setattr(metrics, "_otlp_reader", InMemoryMetricReader)
 
     @asynccontextmanager
     async def lifespan(app):

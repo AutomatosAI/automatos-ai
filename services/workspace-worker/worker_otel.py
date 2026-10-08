@@ -141,12 +141,38 @@ async def _traced(request: Any, handler: Any) -> Any:
         return response
 
 
+class TraceIdsFilter(logging.Filter):
+    """PRD-256 O5: the current sampled span's ``trace_id`` and ``span_id`` on every log
+    record, which log-relay ships to Loki; ``_trace_context`` is the console line's
+    `` trace=<id>``, underscored so log-relay doesn't ship it twice."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from opentelemetry import trace
+
+        context = trace.get_current_span().get_span_context()
+        sampled = context.is_valid and context.trace_flags.sampled
+        record.trace_id = format(context.trace_id, "032x") if sampled else ""
+        record.span_id = format(context.span_id, "016x") if sampled else ""
+        record._trace_context = f" trace={record.trace_id}" if sampled else ""
+        return True
+
+
+def _log_trace_ids() -> None:
+    """Put the trace IDs on every handler's records (the console and log-relay)."""
+    log_filter = TraceIdsFilter()
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(log_filter)
+
+
 def attach(app: Any) -> None:
     """With ``OTEL_ENABLED``: this process's provider, a server span per request (the
-    outermost middleware) and a flush when the app stops. Off: the app is untouched."""
+    outermost middleware), the trace IDs in the logs (O5) and a flush when the app
+    stops. Off: the app and the logs are untouched."""
     if not otel_enabled() or not start_tracing():
         return
     from aiohttp import web
+
+    _log_trace_ids()
 
     @web.middleware
     async def tracing_middleware(request, handler):
@@ -158,5 +184,5 @@ def attach(app: Any) -> None:
     app.on_cleanup.append(flush_tracing)
 
 
-__all__ = ["ATTR_WORKSPACE_ID", "UNTRACED_PATHS", "attach", "build_provider", "flush_tracing", "otlp_headers",
-           "sampler_ratio", "start_tracing"]
+__all__ = ["ATTR_WORKSPACE_ID", "UNTRACED_PATHS", "TraceIdsFilter", "attach", "build_provider", "flush_tracing",
+           "otlp_headers", "sampler_ratio", "start_tracing"]
