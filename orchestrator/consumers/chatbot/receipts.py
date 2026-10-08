@@ -43,7 +43,7 @@ import functools
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from consumers.chatbot.claim_check import NOTHING_DONE
+from consumers.chatbot.claim_check import NOTHING_DONE, READS_SAID, reads_put_in_front
 from consumers.chatbot.claims_backed import (
     COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, unbacked_claims,
 )
@@ -389,7 +389,7 @@ def writes_its_receipts(turn: Stream) -> Stream:
     @functools.wraps(turn)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         for var, fresh in ((_IN_TURN, True), (_PREFETCHED, ()), (_LOOP, None), (_MODEL, None), (_SENT, False),
-                           (_ABOVE, None), (_VISITOR, bool(getattr(chat, "widget_mode", False)))):
+                           (_ABOVE, None), (_VISITOR, bool(getattr(chat, "widget_mode", False))), (READS_SAID, "")):
             var.set(fresh)
         handler = getattr(chat, "streaming_handler", None)
         finish = handler.format_aisdk_finish() if handler is not None else None
@@ -407,13 +407,18 @@ def writes_its_receipts(turn: Stream) -> Stream:
 
 def its_reads_are_receipted(retrieval_first: Stream) -> Stream:
     """Wrap ``StreamingChatService._retrieval_first``: the turn keeps its automatic reads
-    (``prefetched``, filled by the reads under it) for the folded read receipt."""
+    (``prefetched``, filled by the reads under it) for the folded read receipt, and what the
+    notes they added say, so a number they quote is no invented id (F187, RVW-8)."""
     @functools.wraps(retrieval_first)
     async def wrapped(chat: Any, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime: Any,
                       chat_id: str, prefetched: List[Any]) -> AsyncGenerator[Any, None]:
         _PREFETCHED.set(prefetched)
-        async for frame in retrieval_first(chat, latest_text, llm_messages, agent_runtime, chat_id, prefetched):
-            yield frame
+        before = {id(message) for message in llm_messages}
+        try:
+            async for frame in retrieval_first(chat, latest_text, llm_messages, agent_runtime, chat_id, prefetched):
+                yield frame
+        finally:
+            reads_put_in_front([message for message in llm_messages if id(message) not in before])
     return wrapped
 
 

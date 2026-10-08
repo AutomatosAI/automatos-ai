@@ -47,13 +47,20 @@ PRD-256 FX-007 (D10): tiers 1 and 3 are gone with the regex claim families they 
 receipts' to answer (``claims_backed``), in the loop's nudge and above the answer. Tier 2 stays,
 and a number the turn's own tool results quote is backed (night 12, A439/A593: "task 0930 does
 not exist" under a reply that quoted ticket #0931's title, "Card #0930 Approval Request").
+
+P256-FIX-RVW-8: a number the turn's automatic reads put in front of the model is quoted too. A
+"what is waiting for me?" turn reads Needs you by prefetch, not by a tool call, so the note naming
+"#0931 'Card #0930 Approval Request'" was in no tracker's outcomes and #0930 was still corrected, on
+the first reply and in the loop. ``receipts.its_reads_are_receipted`` hands the notes the reads added
+(the needs-you note, the team's findings, the retrieval-first passages) to ``reads_put_in_front``.
 """
 from __future__ import annotations
 
 import logging
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
 
@@ -87,6 +94,8 @@ _DENIAL = re.compile(
     r"\bnot\s+(?:be\s+)?found\b|\bcould(?:n't|n’t| not) (?:find|locate)\b|\bno such\b", re.I)
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
 _MARKDOWN = re.compile(r"[*_`]")
+# RVW-8: the text this turn's automatic reads put in front of the model ('' until they ran; each turn resets it).
+READS_SAID: ContextVar[str] = ContextVar("f187_reads_said", default="")
 
 def _named_ids(text: str) -> List[Tuple[str, str]]:
     found: List[Tuple[str, str]] = []
@@ -160,12 +169,17 @@ def _strings(value: object) -> Iterator[str]:
             yield from _strings(inner)
 
 
+def reads_put_in_front(notes: Iterable[Dict[str, Any]]) -> None:
+    """Keep, for this turn, what the messages its automatic reads added say (RVW-8)."""
+    READS_SAID.set("\n".join(said for note in notes for said in _strings(note.get("content"))))
+
+
 def _quoted_this_turn() -> str:
-    """What the tool results of the loop running now say, as text: a ticket's title, a card
-    or grant number. '' outside a tool loop."""
+    """What the turn's automatic reads and the tool results of the loop running now say, as
+    text: a ticket's title, a card or grant number. Outside a tool loop, the reads alone."""
     made = TRACKERS_MADE.get() or []
-    return "\n".join(said for tracker in made for _action, _params, result in tracker.outcomes
-                     for said in _strings(result))
+    results = (said for tracker in made for _action, _params, result in tracker.outcomes for said in _strings(result))
+    return "\n".join([READS_SAID.get(), *results])
 
 
 def _named_in(value: str, text: str) -> bool:
@@ -177,8 +191,9 @@ def _named_in(value: str, text: str) -> bool:
 def invented_ids(text: str, owner_text: str, workspace_id: str) -> List[Tuple[str, str]]:
     """The ids a reply names, in the three shapes, that do not exist in the
     workspace, leaving out any the owner named this turn and any the turn's own tool
-    results quote (FX-007). Sync, and reads the database only when the reply names an
-    id: run it off the loop (``asyncio.to_thread`` keeps the turn's context)."""
+    results (FX-007) or automatic reads (RVW-8) quote. Sync, and reads the database only
+    when the reply names an id: run it off the loop (``asyncio.to_thread`` keeps the turn's
+    context)."""
     owner = _MARKDOWN.sub("", owner_text or "")
     quoted = _quoted_this_turn()
     named = [(kind, value) for kind, value in _named_ids(text)
