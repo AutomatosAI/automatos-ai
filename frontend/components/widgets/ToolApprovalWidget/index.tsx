@@ -16,31 +16,15 @@
  */
 
 import { useState } from 'react'
-import { Check, ShieldAlert, ShieldCheck, X } from 'lucide-react'
+import { Check, ShieldCheck, X } from 'lucide-react'
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
+import { OversightNote } from '../oversight-note'
 import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
 
-/**
- * Human-readable label for an oversight tier (clone of the mission card's —
- * presentation only, kept local per the no-premature-abstraction call).
- * Exported for tests.
- */
-export function oversightTierLabel(tier?: string): string {
-  switch (tier) {
-    case 'monitor':
-      return 'Monitored'
-    case 'human_on_the_loop':
-      return 'Human on the loop'
-    case 'human_in_the_loop':
-      return 'Human approval required'
-    default:
-      return 'Human approval required'
-  }
-}
 
 interface ExecutedResult {
   success?: boolean
@@ -137,24 +121,7 @@ export function ToolApprovalWidget({
 
         {/* AI-Act oversight banner — clone of the mission card's presentation. */}
         {(data.risk_tier || data.oversight_rationale) && (
-          <div
-            className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 dark:border-amber-800 dark:bg-amber-950/40"
-            role="note"
-            aria-label="Human oversight"
-          >
-            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
-                {oversightTierLabel(data.risk_tier)}
-                {data.risk_class ? ` · ${data.risk_class.replace(/_/g, ' ')}` : ''}
-              </p>
-              {data.oversight_rationale && (
-                <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-400">
-                  {data.oversight_rationale}
-                </p>
-              )}
-            </div>
-          </div>
+          <OversightNote tier={data.risk_tier} riskClass={data.risk_class} rationale={data.oversight_rationale} />
         )}
 
         {/* The exact call being approved — key/value digest, never raw JSON. */}

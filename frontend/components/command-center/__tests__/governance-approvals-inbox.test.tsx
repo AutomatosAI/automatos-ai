@@ -115,6 +115,19 @@ describe('ApprovalsInbox — PRD-196 S1', () => {
     expect(screen.getByRole('button', { name: /Deny/ })).toBeInTheDocument()
   })
 
+  it('#1045: Grant and Deny are compact, at their own width, and the note is on theme tokens', () => {
+    setGrants([grant()])
+    render(<ApprovalsInbox />)
+    for (const name of [/Grant/, /Deny/]) {
+      const button = screen.getByRole('button', { name })
+      expect(button.className).not.toContain('flex-1')
+      expect(button).toHaveClass('h-8', 'text-xs')
+    }
+    const note = screen.getByRole('note', { name: /human oversight/i })
+    expect(note).toHaveClass('bg-warning/10')
+    expect(note.className).not.toMatch(/amber-50|amber-\d00/)
+  })
+
   it('Grant and Deny call the right mutation with the grant id', () => {
     setGrants([grant({ id: 7 })])
     render(<ApprovalsInbox />)
