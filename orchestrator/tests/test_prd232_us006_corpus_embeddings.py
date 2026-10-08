@@ -212,19 +212,15 @@ def test_close_blocked_tickets_reaches_the_board_write_first_class():
 
 def test_register_variant_pairs_rank_top5():
     """Two more register-variant pairs from the corpus (no mail/inbox family
-    exists): the delete register and the cancel/kill register land their target
-    action in the top-5 semantic floor."""
-    async def _run(query):
-        idx = _index_with(_LexEM(), _TextCache(), get_action_registry())
-        ranked = await idx.rank_actions(query, top_k=5, exclude_admin=True, exclude_promoted=True)
-        return [n for n, _ in ranked]
+    exists): the delete register lands its target action in the top-5 semantic
+    floor. The cancel/kill register's target, platform_cancel_mission, is a
+    first-class pin since PRD-256 FX-009: it attaches as its own tool, outside
+    the dispatcher's enum (as the board write does)."""
+    names = _dispatcher_ranking("trash that document from the knowledge base")
+    assert "platform_delete_document" in names, f"the delete register did not rank top-5: {names}"
 
-    for query, target in [
-        ("trash that document from the knowledge base", "platform_delete_document"),
-        ("kill the mission", "platform_cancel_mission"),
-    ]:
-        names = asyncio.run(_run(query))
-        assert target in names, f"{query!r} did not rank {target} in top-5: {names}"
+    assert _first_class("platform_cancel_mission")
+    assert "platform_cancel_mission" not in _dispatcher_ranking("kill the mission")   # outside the enum
 
 
 def test_enum_value_reaches_ranker():

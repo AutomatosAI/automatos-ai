@@ -167,7 +167,8 @@ def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handl
 def asks_before_a_send(execute_tool: Execute) -> Execute:
     """Wrap UnifiedToolExecutor.execute_tool: a Composio send or publish in a person's chat,
     or by an agent on a ticket Auto wrote (FX-011, Decision D7), runs only on the owner's
-    click, through the same grant card."""
+    click, through the same grant card. The call's kind is read first: any other call runs
+    as it is, without touching the executor's session."""
     signature = inspect.signature(execute_tool)
 
     @functools.wraps(execute_tool)
@@ -179,15 +180,18 @@ def asks_before_a_send(execute_tool: Execute) -> Execute:
         tool, params, ctx = call.arguments["tool_name"], call.arguments["parameters"], call.arguments["caller_context"]
         workspace_id = call.arguments["workspace_id"]
         slug, inner, composio = self._resolve_effective_call(tool, params)
-        ticket = _whose_click(self.db, workspace_id, slug, ctx, composio)
+        if not (composio and is_composio_send(slug)):
+            return await execute_tool(*call.args, **call.kwargs)
+        db = getattr(self, "db", None)
+        ticket = _whose_click(db, workspace_id, slug, ctx, composio)
         if ticket is None:
             return await execute_tool(*call.args, **call.kwargs)
-        grant = _the_click(self.db, workspace_id, tool, params)
+        grant = _the_click(db, workspace_id, tool, params)
         if grant is None:
-            ask = send_ask(self.db, workspace_id, tool, slug, params, ctx, sent=inner)
-            return waits_on_the_card(self.db, workspace_id, ticket, ask, sent=params_object(inner),
+            ask = send_ask(db, workspace_id, tool, slug, params, ctx, sent=inner)
+            return waits_on_the_card(db, workspace_id, ticket, ask, sent=params_object(inner),
                                      agent_id=call.arguments.get("agent_id")) if ticket else ask
-        return after_the_click(self.db, grant, await execute_tool(*call.args, **call.kwargs))
+        return after_the_click(db, grant, await execute_tool(*call.args, **call.kwargs))
     return wrapped
 
 

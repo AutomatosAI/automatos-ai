@@ -277,13 +277,13 @@ def test_the_chat_mode_carries_the_section_whatever_the_intent():
 def test_a_creation_turn_in_a_new_chat_has_the_rule_in_its_prompt(durable):
     """The whole assembly: the regex intent says CREATION (no memory), so recall is skipped,
     and the prompt still carries the rule stored in another chat."""
-    from consumers.chatbot.intent_classifier import Intent, IntentClassifier
+    from consumers.chatbot.intent_classifier import Intent, SmartIntentClassifier
     from modules.context.modes import ContextMode
     from modules.context.sections.platform_actions import PlatformActionsSection
     from modules.context.sections.tools import ToolsSection
     from modules.context.service import ContextService
 
-    intent = IntentClassifier().classify(CREATION_ASK)
+    intent = SmartIntentClassifier().classify(CREATION_ASK)
     assert intent.primary_intent == Intent.CREATION and intent.requires_memory is False
     _store(_said_by(OWNER))
 

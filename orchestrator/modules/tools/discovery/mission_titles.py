@@ -26,9 +26,10 @@ LISTED = "{number} '{title}'"
 
 
 def mission_card_titled(db: Session, workspace_id: Any, said: str) -> Tuple[Optional[Any], Optional[str]]:
-    """The one mission card in this workspace titled ``said``, or why there is none."""
+    """The one mission card in this workspace titled ``said``, or why there is none. A None
+    session (a validation-only caller) reads nothing."""
     text = " ".join(str(said or "").split())
-    if not text:
+    if not text or db is None:
         return None, NO_MISSION_TITLED.format(said=said)
     cards = _titled(db, workspace_id, text, whole=True) or _titled(db, workspace_id, text, whole=False)
     if len(cards) == 1:

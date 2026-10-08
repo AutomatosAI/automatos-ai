@@ -282,3 +282,28 @@ def test_a_ticket_in_another_workspace_is_never_read(desk, seed_workspace):
 
     assert _send(desk, {"session_task_id": theirs.id})["success"] is True
     assert _Composio.sent == ["GMAIL_SEND_EMAIL"]
+
+
+class _Reader:
+    """An executor built without a session (the F088 fixture's shape): it has no ``db``."""
+
+    ran: list = []
+
+    def _resolve_effective_call(self, tool_name, parameters):
+        return tool_name, parameters, False
+
+    @asks_before_a_send
+    async def execute_tool(self, tool_name, parameters, agent_id=0, tenant_id=None, workspace_id=None,
+                           trace_id=None, caller_context=None):
+        _Reader.ran.append(tool_name)
+        return {"success": True}
+
+
+def test_a_call_that_is_not_a_send_never_reads_the_executors_session(monkeypatch):
+    monkeypatch.setattr(_Reader, "ran", [])
+    reader = _Reader.__new__(_Reader)
+
+    out = asyncio.run(reader.execute_tool("search_knowledge", {"query": "Callum"}, agent_id=1,
+                                          caller_context={"session_task_id": 1}))
+
+    assert out == {"success": True} and _Reader.ran == ["search_knowledge"]

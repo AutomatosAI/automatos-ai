@@ -125,6 +125,19 @@ def test_another_workspaces_mission_is_never_found(board, seed_workspace):
     assert by_title[0] == [] and "No mission titled" in missing_targets_error(APPROVE, by_title[1])["error"]
 
 
+def test_a_validation_only_call_with_no_session_reads_no_title():
+    """P256-FIX-RVW-1: with no session the handler's own check refuses; nothing is queried."""
+    from modules.tools.discovery.handlers_missions import resume_mission
+    from modules.tools.discovery.mission_refs import card_named
+    from modules.tools.discovery.mission_titles import mission_card_titled
+
+    res = asyncio.run(resume_mission(db=None, workspace_id="ws", params={"mission_id": "not-a-uuid"}))
+
+    assert res["success"] is False and "mission_id" in res["error"].lower()
+    assert card_named(None, "ws", "the spring menu")[0] is None
+    assert mission_card_titled(None, "ws", "the spring menu")[0] is None
+
+
 # ── The card is raised only on a resolved mission ───────────────────────────────
 
 @pytest.mark.parametrize("action", [APPROVE, CANCEL])

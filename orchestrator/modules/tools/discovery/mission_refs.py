@@ -84,8 +84,8 @@ def takes_card_numbers(does: str) -> Callable[[Handler], Handler]:
             from core.security.surface import widget_turn
 
             said = (params or {}).get("mission_id")
-            if said in (None, "") or is_uuid(said) or widget_turn():
-                return await handler(db, workspace_id, params)
+            if said in (None, "") or db is None or is_uuid(said) or widget_turn():
+                return await handler(db, workspace_id, params)  # no session: the handler's own check refuses
             card, refusal = card_named(db, workspace_id, said)
             named = on_its_mission(db, card, action, does) if card is not None else OnItsMission(None, refusal=refusal)
             if named.refusal:
@@ -165,11 +165,13 @@ def is_uuid(value: Any) -> bool:
 
 def card_named(db: Session, workspace_id: Any, said: Any) -> Tuple[Any, Optional[str]]:
     """The card ``said`` names in this workspace (its number, or FX-009 its mission's
-    title when one mission has it), or why there is none."""
+    title when one mission has it), or why there is none. A None session reads nothing."""
     from core.models.core import BoardTask
     from services.ticket_numbers import is_bare_ref, is_number_ref
     from services.ticket_refs import NO_TICKET_SAID, ticket_id_named
 
+    if db is None:
+        return None, NO_TICKET_SAID.format(ref=said)
     if isinstance(said, str) and not (is_number_ref(said) or is_bare_ref(said)):
         from modules.tools.discovery.mission_titles import mission_card_titled
 
