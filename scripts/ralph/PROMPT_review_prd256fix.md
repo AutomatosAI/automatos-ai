@@ -36,7 +36,7 @@ The base is Wave 2's tip while this branch is stacked on `feat/prd-256-w2-model-
 
 - **No CRITICAL/HIGH/MEDIUM:** a 6-line summary: (a) the gate order and the waiting status, with the test names; (b) the honesty rule's per-claim table and the families' deletion with the coverage count; (c) the agent-send gate: the four cases; (d) ids: agent_id and mission ticket numbers; (e) the lane: the 33 night-12 shapes in the golden file; (f) the owner's next step: the `ownerTest` list (TESTER's local build and eval, Gerard's browser checks, night 13).
 
-  Final line: `REVIEW_PASS`
+  Final line: `REVIEW_PASS` (the words REVIEW_PASS and REVIEW_FINDINGS appear on your last line only, never in prose)
 - **Findings:** append `P256-FIX-RVW-n` stories to `scripts/ralph/prd-256fix.json` (n from 1), each with the cause, the change and the test, commit `git commit -s -m 'chore(prd-256): fix-wave review findings → fix stories [skip ci]'`.
 
   Final line: `REVIEW_FINDINGS`

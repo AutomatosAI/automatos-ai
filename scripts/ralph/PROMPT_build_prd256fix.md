@@ -50,7 +50,7 @@ Nothing runs on the owner's machine (no pytest, npm, tsc, docker, server, browse
 1. Pick the first story (by `priority`) with ACs not yet DONE.
 2. Implement it with its tests; local checks; commit (signed, ` [skip ci]`).
 3. Mark its ACs by APPENDING plain text (outside backticks, exactly as the DONE mark) `→ DONE — <evidence>` in `scripts/ralph/prd-256fix.json` (`→ OWNER:` ACs stay). Commit that alone (signed, ` [skip ci]`).
-4. **STOP.** Unless that was the last story, end your reply with `STORY_DONE <FX-id>`.
+4. **STOP.** Unless that was the last story, end your reply with `STORY_DONE <FX-id>`. **The words RALPH_COMPLETE, RALPH_BLOCKED and STORY_DONE are sentinels the runner reads on your last line only: never write them anywhere else in a reply, not even in a sentence about them** (an FX-004 session did, and the runner ended the wave early).
 
 ## Completion
 
