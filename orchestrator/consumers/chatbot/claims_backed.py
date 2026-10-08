@@ -21,12 +21,16 @@ not-done line ("…nothing has changed").
 
 The shapes read as a report of work done: "I've <verb>", "has/have been <verb>" (a state like
 "has been based on" is not a report), "it's been <verb>", "is now <verb>", "<Subject> launched ✅",
-"you should now see", and a sentence that is only "Done." (a shape with no verb of its own: its
-verb is ""). P256-FIX-RVW-7: the first person ("I've <verb>", and what it coordinates) is the
-writer's own claim; an agent's run reads only that (``first_person``): its passives are its
-customer draft's voice. A simple-past passive ("Ticket #1110 was completed at 03:04", "the
-order was placed last week") reports history, not this turn's own work (P256-FIX-RVW-1, F186):
-it is no claim.
+"you should now see", "was/were <verb>", and a sentence that is only "Done." (a shape with no
+verb of its own: its verb is ""). P256-FIX-RVW-7: the first person ("I've <verb>", and what it
+coordinates) is the writer's own claim; an agent's run reads only that (``first_person``): its
+passives are its customer draft's voice. A simple-past passive with a past time in its sentence
+("Ticket #1110 was completed at 03:04", "were approved this morning", "the order was placed last
+week") reports history, not this turn's own work (P256-FIX-RVW-1, F186): it is no claim; without
+one ("The card was approved.") it is (P256-FIX-RVW-20), unless it denies ("Nothing was done
+yet.", "no step was added"), describes ("the coffees that were identified") or says a refusal
+("was refused"). Replied, texted and dm'd are sends; shared and invited need a share/invite
+write or a send, refunded a refund or a payment write: a mail draft or a saved memory backs none.
 What the answer quotes ("> " lines, a fenced block) is a draft in its writer's voice, never a
 claim. A plan word exempts only the claim it introduces ("Once I've sent it…"), never a claim
 further on ("I'll just confirm that the card has been approved" is a claim); the reply's own
@@ -55,9 +59,10 @@ _LOOKING = ("looked|checked|read|reviewed|found|searched|seen|noticed|pulled|gon
 # A passive that says how a thing is, not what was done to it: "was based on", "were meant to".
 _STATES = ("based|called|named|supposed|meant|designed|intended|used|related|interested|concerned|involved|"
            "expected|required|needed|caused|limited|located|pleased|surprised|worried|confused|excited|"
-           "planned|proposed|suggested|requested|recommended|allowed|linked|connected|labell?ed|titled|told|informed")
-_DONE_VERB = rf"(?!(?:{_LOOKING})\b)(?:[a-z]+ed|sent|made|set|put|given|done|written|built|run|begun|kept|told|" \
-             rf"taken|brought|chosen|paid|sold|cut|shut|drawn|thrown)\b"
+           "planned|proposed|suggested|requested|recommended|allowed|linked|connected|labell?ed|titled|told|informed|"
+           "refused|denied|failed|skipped")
+_DONE_VERB = rf"(?!(?:{_LOOKING})\b)(?:[a-z]+ed|dm['’]d|sent|made|set|put|given|done|written|built|run|begun|" \
+             rf"kept|told|taken|brought|chosen|paid|sold|cut|shut|drawn|thrown)\b"
 _PASSIVE_VERB = rf"(?!(?:{_STATES})\b){_DONE_VERB}"
 _ADVERBS = r"(?:(?:now|just|already|also|successfully|all)\s+)*"
 # The ONE completed-action pattern. A match ends on the claim's verb where the shape has one.
@@ -66,6 +71,7 @@ COMPLETED_ACTION = re.compile(
     rf"\s+)*{_DONE_VERB}"
     rf"|\b(?:has|have)\s+{_ADVERBS}been\s+{_PASSIVE_VERB}"
     rf"|\b(?:it|that|this|everything|they)(?:'s|’s|'ve|’ve)\s+{_ADVERBS}been\s+{_PASSIVE_VERB}"
+    rf"|\b(?:was|were)\s+{_ADVERBS}{_PASSIVE_VERB}"
     rf"|\b(?:it'?s|it’s|they'?re|they’re|is|are)\s+now\s+(?:(?:on|in)\s+(?:your|the)\b|running\b|live\b|"
     rf"{_DONE_VERB})"
     rf"|\b{_DONE_VERB}(?=\s*[!.]?\s*[✅✔☑])"
@@ -79,6 +85,19 @@ _PLANNED = re.compile(r"\b(?:i'?ll|i’ll|i will|i'?m going to|i am going to|onc
 # "earlier": FX-007 keeps the families' back-references; "before Friday" is no past) …
 _PAST = re.compile(r"\b(?:yesterday|ago|previously|earlier|last (?:week|month|night|time|turn)|"
                    r"before(?=\s*(?:[,.;:!?)]|$)))\b", re.I)
+# … a simple-past passive is history when its sentence has a past time (P256-FIX-RVW-1, F186:
+# "Ticket #1110 was completed at 03:04"); "The card was approved." alone is a claim (P256-FIX-RVW-20) …
+_SIMPLE_PAST = re.compile(r"(?:was|were)\b", re.I)
+# … and so is a denial ("Nothing was done yet.", "no step was added": Auto's own refusal lines) or a
+# relative clause ("the coffees that were identified" describes them).
+_DENIED = re.compile(r"\b(?:nothing(?:\s+(?:new|else|more))?|none|nobody|no\s+one|no(?:\s+[\w'’-]+){1,4}|"
+                     r"that|which|who)\s+$", re.I)
+_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+_HISTORY = re.compile(
+    rf"\b(?:at\s+\d{{1,2}}(?:[:.]\d{{2}}\s*(?:am|pm)?|\s*(?:am|pm))|this\s+(?:morning|afternoon|evening)|"
+    rf"last\s+(?:week|night)|ago|earlier|yesterday|on\s+(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|"
+    rf"(?:the\s+)?\d{{1,2}}(?:st|nd|rd|th)|\d{{1,2}}\s+(?:of\s+)?{_MONTH}|{_MONTH}\s+\d{{1,2}}|"
+    rf"\d{{4}}-\d{{2}}-\d{{2}}|\d{{1,2}}/\d{{1,2}}))\b", re.I)
 # … the reply's own content only its clause (P256-FIX-RVW-6): "Here's the update: the card has
 # been approved." is a claim after the colon; "I've drafted the email below" is none.
 _REPLY_CONTENT = re.compile(r"\b(?:below|here(?:'s|’s| is| are)|the following)\b", re.I)
@@ -95,7 +114,6 @@ _NO_WORK_AFTER = re.compile(
     r"(?:reading|reviewing|looking|checking|analy[sz]ing|processing|searching|digging|going\s+through)\b)", re.I)
 _SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
 _MARKS = re.compile(r"[*_`#>]")
-_WORD = re.compile(r"[a-z]+", re.I)
 _SENT_BACK = re.compile(r"\bsent\b.*\bback\b", re.I)
 # A shape that ends on its verb ("I've sent", "has been approved", "launched ✅"); "Done.", "is now live"
 # and "you should now see" have none (P256-FIX-RVW-7).
@@ -183,7 +201,11 @@ FAMILIES: Tuple[Tuple[FrozenSet[str], Backs], ...] = (
      _any(_starts("start_", "launch_", "execute_", "run_", "resume_", "trigger_", "approve_mission",
                   "create_mission"), _says("started"))),
     (frozenset({"sent", "emailed", "mailed", "posted", "published", "messaged", "tweeted", "forwarded",
-                "notified", "submitted"}), _any(_SENDS, _BACK)),
+                "notified", "submitted", "replied", "texted", "dm'd", "dmed"}), _any(_SENDS, _BACK)),
+    # P256-FIX-RVW-20: a share, an invite or a refund is said only by its own write (a draft backs none).
+    (frozenset({"shared"}), _any(_SENDS, _has("share", "shares", "sharing"))),
+    (frozenset({"invited"}), _any(_SENDS, _has("invite", "invites", "invitation", "invitations"))),
+    (frozenset({"refunded"}), _has("refund", "refunds", "payment", "payments")),
     # F363 (night 10c, FX-007 keeps it): a decision written onto the card the turn made is noted.
     (frozenset({"noted", "remembered", "stored", "memorised", "memorized"}),
      _any(_MEMORY, _starts("create_task", "update_task"))),
@@ -230,10 +252,10 @@ def _family(verb: str, sentence: str) -> Optional[Backs]:
 def _verb(sentence: str, said: str, end: int) -> str:
     """The claim's verb ("" for a shape with none), with its particle when a family names the
     pair ("I've set up the report" is "set up"; "kicked off" stays "kicked")."""
-    if not _ON_ITS_VERB.search(said):
+    found = _ON_ITS_VERB.search(said)
+    if not found:
         return ""
-    words = _WORD.findall(said)
-    verb = words[-1].lower() if words else ""
+    verb = found.group(0).lower().replace("’", "'")
     particle = _PARTICLE.match(sentence, end)
     phrasal = f"{verb} {particle.group(1).lower()}" if particle else ""
     return phrasal if phrasal in _PHRASAL else verb
@@ -259,10 +281,19 @@ def _coordinated(sentence: str, start: int, end: int) -> List[str]:
             if _reported(sentence, found.start(1), found.end())]
 
 
+def _history_or_denial(sentence: str, start: int) -> bool:
+    """Whether a simple-past passive at ``start`` is history ("at 03:04"), a denial ("Nothing was")
+    or a relative clause ("that were identified")."""
+    return bool(_HISTORY.search(sentence) or _DENIED.search(sentence[:start]))
+
+
 def _counts(sentence: str, match: re.Match, first_person: bool) -> bool:
     """Whether a claim shape reports this turn's work: no plan word before it, not the reply's own
-    content; with ``first_person``, only the writer's own "I've <verb>" (P256-FIX-RVW-7)."""
+    content, nor a simple-past passive's history or denial; with ``first_person``, only the writer's
+    own "I've <verb>" (P256-FIX-RVW-7)."""
     if first_person and not _FIRST_PERSON.match(match.group(0)):
+        return False
+    if _SIMPLE_PAST.match(match.group(0)) and _history_or_denial(sentence, match.start()):
         return False
     return not _PLANNED.search(sentence[: match.start()]) and _reported(sentence, match.start(), match.end())
 

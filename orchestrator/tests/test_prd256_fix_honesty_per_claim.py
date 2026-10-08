@@ -19,6 +19,12 @@ P256-FIX-RVW-6: added, paused, "set up", booked, … were in no family, so a sav
 "I've paused the heartbeat" (A697's shape); one verb was read per "I've" ("I've created the task
 and sent it to Declan" was only created); and "here's" exempted its whole sentence ("Here's the
 update: the card has been approved." was no claim).
+
+P256-FIX-RVW-20: RVW-1 had removed the whole "was/were" shape, so "The card was approved." with no
+call was no claim at all; it is again, and only a simple-past passive with a past time in its
+sentence ("at 03:04", "this morning") is history. Replied, texted, shared, invited and refunded
+were in no family, so a mail draft or a saved memory backed "I've replied to Declan." (D7's
+"reply").
 """
 from __future__ import annotations
 
@@ -114,7 +120,6 @@ def test_it_has_been_done_is_a_claim_any_write_backs():
     "You got it, Gerard! Ticket #1110 was completed at 03:04.",
     "I see ticket #1110 on your board, waiting for the Shopify Support Agent and for your review. "
     "I will check the current activity for you.",
-    "The card was approved.",
     "Your two cards were approved this morning.",
     "The order was placed last week.",
 ])
@@ -307,3 +312,93 @@ def test_rvw6_the_clause_with_the_replys_own_content_is_still_no_claim(answer):
 def test_rvw6_a_past_time_still_exempts_its_sentence():
     assert not claims_work_done("As I've noted before, the price is £12.")
     assert not claims_work_done("Earlier today: the card has been approved.")
+
+
+# ── P256-FIX-RVW-20: "was/were <verb>" is a claim again; history and denials are not ──
+
+MAIL_DRAFTED = _composio("GMAIL_CREATE_EMAIL_DRAFT")
+MAIL_SENT = _composio("GMAIL_SEND_EMAIL")
+
+
+@pytest.mark.parametrize("answer, verb", [
+    ("The card was approved.", "approved"),
+    ("The email was sent to Declan.", "sent"),
+    ("The ticket was created.", "created"),
+    ("Both cards were approved.", "approved"),
+])
+def test_rvw20_a_simple_past_passive_with_no_past_time_is_a_claim(answer, verb):
+    assert [said for said, _ in claims(answer)] == [verb]
+    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+
+
+def test_rvw20_was_approved_is_backed_by_the_move_to_done():
+    assert honesty_lines(_receipts(CARD_DONE), "The card was approved.") == []
+    assert honesty_lines(_receipts(MAIL_SENT), "The email was sent to Declan.") == []
+
+
+@pytest.mark.parametrize("answer", [
+    "Ticket #1110 was completed at 03:04.",
+    "You got it, Gerard! Ticket #1110 was completed at 03:04.",
+    "Your two cards were approved this morning.",
+    "The invoice was sent at 9am.",
+    "The order was placed on Monday.",
+    "The order was placed on 3 October.",
+    "The order was placed on the 3rd.",
+    "The post was published on 2026-10-03.",
+    "The card was approved two days ago.",
+])
+def test_rvw20_a_simple_past_passive_with_a_past_time_is_history(answer):
+    assert not claims_work_done(answer)
+    assert honesty_lines([], answer) == []
+
+
+def test_rvw20_a_number_after_on_is_no_date():
+    assert [verb for verb, _ in claims("The post was published on 2 channels.")] == ["published"]
+
+
+@pytest.mark.parametrize("answer", [
+    "Nothing was done yet. Approve the card above and I'll run it.",              # service.py's own wait line
+    "No step was added: a step with no agent can't run.",
+    "Nothing new was booked.",
+    "No Socials post was saved in this run.",
+    "That change was refused: no agent #99.",
+    "The call was skipped: the owner hasn't approved it.",
+    "Can you send me the coffees that were identified as low in stock?",
+])
+def test_rvw20_a_denial_a_refusal_or_a_relative_clause_is_no_claim(answer):
+    assert not claims_work_done(answer)
+
+
+# ── P256-FIX-RVW-20: replied, texted, shared, invited and refunded need their own write ──
+
+def test_rvw20_a_mail_draft_does_not_back_replied():
+    answer = "I've replied to Declan."
+    assert [verb for verb, _ in claims(answer)] == ["replied"]
+    assert honesty_lines(_receipts(MAIL_DRAFTED), answer) == [_named("replied")]
+    assert honesty_lines(_receipts(MAIL_SENT), answer) == []
+    assert honesty_lines(_receipts(_composio("GMAIL_REPLY_TO_THREAD")), answer) == []
+
+
+@pytest.mark.parametrize("answer, verb, own", [
+    ("I've texted Declan the pickup time.", "texted", _composio("TWILIO_SEND_SMS")),
+    ("I've DM'd Declan the pickup time.", "dm'd", _composio("SLACK_SEND_MESSAGE")),
+    ("I’ve dm’d Declan the pickup time.", "dm'd", _composio("SLACK_SEND_MESSAGE")),
+    ("I've shared the price list with Declan.", "shared", _composio("GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE")),
+    ("I've invited Declan to the board.", "invited", _platform("platform_invite_member", {"email": "d@example.com"})),
+    ("I've refunded Rosie's second payment.", "refunded", _composio("STRIPE_CREATE_REFUND")),
+])
+def test_rvw20_a_send_verb_needs_its_own_write(answer, verb, own):
+    assert [said for said, _ in claims(answer)] == [verb]
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
+    assert honesty_lines(_receipts(MAIL_DRAFTED), answer) == [_named(verb)]
+    assert honesty_lines(_receipts(own), answer) == []
+
+
+@pytest.mark.parametrize("answer", ["I've shared the price list with Declan.", "I've invited Declan to the board."])
+def test_rvw20_a_send_backs_shared_and_invited(answer):
+    assert honesty_lines(_receipts(MAIL_SENT), answer) == []
+
+
+def test_rvw20_a_send_does_not_back_refunded():
+    assert honesty_lines(_receipts(MAIL_SENT), "I've refunded Rosie.") == [_named("refunded")]
+    assert honesty_lines(_receipts(PAYMENT_MADE), "I've refunded Rosie.") == []
