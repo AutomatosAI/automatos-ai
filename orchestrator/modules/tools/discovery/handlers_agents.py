@@ -580,9 +580,7 @@ async def delete_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     if not agent_id:
         return {"success": False, "error": "Provide agent_name or agent_id"}
 
-    query = db.query(Agent).filter(Agent.workspace_id == workspace_id, Agent.id == agent_id)
-
-    agent = query.first()
+    agent = db.query(Agent).filter(Agent.workspace_id == workspace_id, Agent.id == agent_id).first()
     if not agent:
         return {"success": False, "error": "Agent not found"}
 
