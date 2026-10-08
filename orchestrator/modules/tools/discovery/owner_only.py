@@ -122,9 +122,20 @@ def is_owner_only(action_name: str, params: Any, *, composio: bool = False) -> b
 
 def is_composio_send(slug: str) -> bool:
     """A Composio action that sends, publishes or orders: GMAIL_SEND_EMAIL, gmail-send-email,
-    LINKEDIN_CREATE_LINKED_IN_POST, SHOPIFY_CREATE_ORDER."""
-    words = set(_SLUG_WORD.split(str(slug or "").upper()))
-    return bool(words & COMPOSIO_SEND_WORDS) and not words & COMPOSIO_READ_WORDS
+    LINKEDIN_CREATE_LINKED_IN_POST, SHOPIFY_CREATE_ORDER; and any action the Socials channel
+    registry classes as ``publish`` (P256-FIX-RVW-19: a video upload carries no send word)."""
+    words = [word for word in _SLUG_WORD.split(str(slug or "").upper()) if word]
+    if set(words) & COMPOSIO_SEND_WORDS and not set(words) & COMPOSIO_READ_WORDS:
+        return True
+    return _a_channel_publish("_".join(words))
+
+
+def _a_channel_publish(name: str) -> bool:
+    """Whether a seeded channel's adapter (``modules/socials/channel_adapters.py``, read by
+    the registry; its slugs live there alone) classes ``name`` as a publish step."""
+    from modules.socials.capabilities import SEEDED, publish_candidate
+
+    return bool(name) and publish_candidate(name) == SEEDED
 
 
 def closing_status(params: Dict[str, Any]) -> Optional[str]:
