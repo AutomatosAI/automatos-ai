@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 from modules.tools.registry import ToolCategory, get_tool_registry as registry_get_tool_registry
 from modules.tools.execution import UnifiedToolExecutor
 from modules.tools.execution.card_raised import the_model_reads_the_card
+from modules.tools.execution.held_context import holds_the_callers_context, the_callers_context
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
 from core.database.database import SessionLocal
@@ -1571,6 +1572,7 @@ class ToolRouter:
             frontend_data = {**frontend_data, "documents": kept}
         return frontend_data
 
+    @holds_the_callers_context   # P256-FIX-RVW-2: the validation path keeps the caller's context
     async def execute_and_format(
         self,
         tool_name: str,
@@ -2115,14 +2117,9 @@ async def execute_tool_with_validation(
                     "intent": original_intent[:100]
                 }
 
-    # Proceed with normal execution
-    return await execute_tool(
-        tool_name=tool_name,
-        tool_args=tool_args,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-        trace_id=trace_id
-    )
+    # Proceed with normal execution, in the router call's context: the owner's-click gate reads it (P256-FIX-RVW-2)
+    return await execute_tool(tool_name=tool_name, tool_args=tool_args, agent_id=agent_id, workspace_id=workspace_id,
+                              trace_id=trace_id, caller_context=the_callers_context())
 
 
 def get_capability_filter_stats(db_session=None) -> Dict[str, Any]:

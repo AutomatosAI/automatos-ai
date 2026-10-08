@@ -37,25 +37,27 @@ workspace asked for is not agent web browsing. Redirects are not followed.
 Text-only posts still go through Composio. This module only activates when
 the agent passes image file references (media_urls, images, etc.).
 
-The hooks in tool_executor.py and recipe_executor.py intercept
-LINKEDIN_CREATE_LINKED_IN_POST calls with image params and route them here.
-The function signature matches what both hooks expect.
+The hook in tool_executor.py (ComposioToolExecutor.execute) intercepts
+LINKEDIN_CREATE_LINKED_IN_POST calls with image params and routes them here; a
+playbook step reaches it through the executor too, under the owner's-click gate
+(P256-FIX-RVW-2). Its upload pass leaves those image refs alone
+(``leaves_its_images_to_the_direct_api``).
 
 REMOVAL CHECKLIST (when Composio ships a working image post action):
   1. Delete this file
-  2. Remove the hook in tool_executor.py  (search: linkedin_image_workaround)
-  3. Remove the hook in recipe_executor.py (search: linkedin_image_workaround)
-  4. Remove the smoke-test route in api/composio.py (search: linkedin_image_workaround)
-  5. Update SKILL.md to use the native Composio action
+  2. Remove the hook and the upload-pass decorator in tool_executor.py (search: linkedin_image_workaround)
+  3. Remove the smoke-test route in api/composio.py (search: linkedin_image_workaround)
+  4. Update SKILL.md to use the native Composio action
 """
 
 import asyncio
 import base64
+import functools
 import hashlib
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 from uuid import UUID
 
 import httpx
@@ -273,6 +275,33 @@ def has_image_params(params: Dict[str, Any]) -> bool:
         if isinstance(val, str) and "/" in val and not val.startswith("urn:"):
             return True
     return False
+
+
+def takes_its_own_images(action: Any, params: Any) -> bool:
+    """Whether this module posts the call itself: an image post (:data:`IMAGE_POST_ACTION`
+    with image refs), whose images it reads directly (Composio cannot upload them)."""
+    return str(action or "").strip().upper() == IMAGE_POST_ACTION and isinstance(params, dict) \
+        and has_image_params(params)
+
+
+Resolve = Callable[[str, Dict[str, Any], Any], Awaitable[Tuple[Dict[str, Any], list]]]
+
+
+def leaves_its_images_to_the_direct_api(resolve: Resolve) -> Resolve:
+    """Wrap ``tool_executor.resolve_file_uploads``: an image post this module serves
+    (:func:`takes_its_own_images`) keeps its image refs as the agent gave them. The direct
+    API reads a URL or a workspace path itself (``_download_image``); a Composio upload
+    first would hand it s3keys it cannot read.
+
+    P256-FIX-RVW-2: a playbook step's image post reaches this workaround through the
+    executor (under the owner's-click gate), after the step's own upload pass; before, the
+    step called the workaround directly, before uploading. Every other call resolves as before."""
+    @functools.wraps(resolve)
+    async def wrapped(action: str, params: Dict[str, Any], workspace_id: Any) -> Tuple[Dict[str, Any], list]:
+        if takes_its_own_images(action, params):
+            return params, []
+        return await resolve(action, params, workspace_id)
+    return wrapped
 
 
 def _normalize_path(v) -> Union[str, Path]:

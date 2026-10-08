@@ -793,11 +793,10 @@ _LINKEDIN_DIRECT = {"execute_linkedin_image_post", "_initialize_image_upload"}
 _LINKEDIN_MODULE = "core/composio/linkedin_image_workaround.py"
 
 # Sites that execute (SDK tools.execute, a Composio REST URL, the LinkedIn direct
-# API) and so call the helper themselves, before executing.
+# API) and so call the helper themselves, before executing. (A Playbook step rides the spine.)
 DIRECT = {
     ("core/composio/client.py", "ComposioClient.execute_action"),
     ("core/composio/tool_executor.py", "ComposioToolExecutor.execute"),
-    ("api/recipe_executor.py", "_execute_step"),
     ("api/composio.py", "test_linkedin_upload_init"),
     ("api/shopify.py", "_product_sync_impl"),
     ("api/shopify.py", "_orders_sync_impl"),

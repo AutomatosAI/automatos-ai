@@ -367,7 +367,6 @@ def test_no_module_level_single_credential_or_token_remains():
     "relpath, needle",
     [
         ("core/composio/tool_executor.py", r"execute_linkedin_image_post\(\s*params=params,\s*workspace_id=workspace_id,"),
-        ("api/recipe_executor.py", r"execute_linkedin_image_post\(\s*params=tool_args,\s*workspace_id=workspace_id,"),
         ("api/composio.py", r"_load_linkedin_credentials\(ctx\.workspace_id\)"),
         ("api/composio.py", r"_get_access_token\(http, ctx\.workspace_id\)"),
     ],
@@ -376,10 +375,13 @@ def test_every_caller_passes_the_workspace(relpath, needle):
     assert re.search(needle, (_ORCH / relpath).read_text(encoding="utf-8")), f"{relpath}: {needle}"
 
 
-def test_the_removal_checklist_names_all_three_callers():
+def test_the_removal_checklist_names_both_callers():
+    """P256-FIX-RVW-2: a playbook step reaches the workaround through tool_executor.py (under
+    the owner's-click gate); recipe_executor.py no longer calls it."""
     doc = lw.__doc__
-    for caller in ("tool_executor.py", "recipe_executor.py", "api/composio.py"):
+    for caller in ("tool_executor.py", "api/composio.py"):
         assert caller in doc
+    assert "execute_linkedin_image_post" not in (_ORCH / "api/recipe_executor.py").read_text(encoding="utf-8")
 
 
 def test_the_smoke_route_is_admin_gated_and_uses_the_callers_workspace(env):
