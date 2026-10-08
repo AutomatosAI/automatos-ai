@@ -47,11 +47,14 @@ def agent_lines(db: Any, workspace_id: Any, params: Dict[str, Any]) -> List[str]
     """Each field the call changes on the agent, 'field: from → to'."""
     from modules.tools.discovery.handlers_assignments import resolve_agent
 
+    from modules.tools.discovery.agent_runtime import runtime_card_lines
+
     agent, _error = resolve_agent(db, workspace_id, params)
     if agent is None:
         return []
-    return [change_line(label, read(agent), params[param])
-            for param, label, read in AGENT_FIELDS if params.get(param) is not None]
+    fields = [change_line(label, read(agent), params[param])
+              for param, label, read in AGENT_FIELDS if params.get(param) is not None]
+    return [*fields, *runtime_card_lines(agent, params)]  # FX-016: 'runtime: api → cli'
 
 
 def tool_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:

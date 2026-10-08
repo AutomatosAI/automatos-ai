@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery.agent_made_by import lists_the_team, says_who_made_it
+from modules.tools.discovery.agent_runtime import sets_the_runtime_on_create, sets_the_runtime_on_update
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +356,7 @@ def _apply_create_org_fields(db: Session, workspace_id: UUID, agent: Any, params
     return None
 
 
+@sets_the_runtime_on_create  # FX-016: runtime api | cli (a Claude Code session), else DEFAULT_AGENT_RUNTIME
 async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent
 
@@ -395,12 +397,9 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         owner_id=str(workspace_id),
     )
 
-    # System prompt -> custom_persona_prompt
-    if system_prompt:
+    if system_prompt:  # -> custom_persona_prompt
         agent.custom_persona_prompt = system_prompt
         agent.use_custom_persona = True
-
-    # Tags
     if tags:
         agent.tags = tags
 
@@ -533,6 +532,7 @@ def _apply_update_fields(agent: Any, params: Dict[str, Any], model_id: Optional[
     )
 
 
+@sets_the_runtime_on_update  # FX-016: runtime api → cli, a session's CLI and model
 async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     agent, err = _resolve_agent(db, workspace_id, params)
     if err:

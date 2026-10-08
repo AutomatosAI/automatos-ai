@@ -713,6 +713,9 @@ class Config:
     # LLM factory. Local edition ONLY: validate_auth_edition() aborts a saas boot
     # that sets this (the SaaS path stays byte-identical). Default off everywhere.
     CLI_RUNTIME_ENABLED: bool = os.getenv("CLI_RUNTIME_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    # PRD-256 FX-016: the runtime a new agent gets when platform_create_agent names none:
+    # 'api' (the platform's models) or 'cli' (a session, which needs CLI_RUNTIME_ENABLED).
+    DEFAULT_AGENT_RUNTIME: str = os.getenv("DEFAULT_AGENT_RUNTIME", "api").strip().lower()
     # PRD-245 W1 (local edition): how many Automatos tool calls ONE ticket's
     # session may make through the loopback MCP bridge. A bound, not a budget —
     # the model is on the operator's own plan; this stops a looping session from

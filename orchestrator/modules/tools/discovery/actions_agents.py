@@ -1,8 +1,10 @@
 """Agent-related ActionDefinitions (list, get, create, update, delete, heartbeat config)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .agent_runtime_schema import takes_the_runtime
 
 
+@takes_the_runtime  # PRD-256 FX-016: create and update agent take runtime, provider and model
 def register_agents_actions(registry: ActionRegistry) -> None:
     """Register all agent-related platform actions."""
     from core.llm.defaults import DEFAULT_LLM_MODEL
