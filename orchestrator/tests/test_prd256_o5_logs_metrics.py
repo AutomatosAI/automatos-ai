@@ -32,6 +32,7 @@ for _path in (_TESTS, _ORCH):
 
 from core.observability import metrics, otel  # noqa: E402
 from helpers_workspace_worker import WORKER_DIR  # noqa: E402
+from tests.helpers_otel import fresh_global_providers  # noqa: E402
 
 MODEL = "gpt-test-1"
 
@@ -91,20 +92,11 @@ def otel_on(monkeypatch):
     """Tracing on: fresh global tracer and meter providers, as the app builds them, into
     an in-memory exporter and reader. Yields ``(ratio -> tracer provider, reader)``."""
     from opentelemetry import trace
-    from opentelemetry.metrics import _internal as global_metrics
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from opentelemetry.util._once import Once
 
     monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
-    saved = (trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE,
-             global_metrics._METER_PROVIDER, global_metrics._METER_PROVIDER_SET_ONCE)
-    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = None, Once()
-    global_metrics._METER_PROVIDER, global_metrics._METER_PROVIDER_SET_ONCE = None, Once()
-    metrics._State.provider = metrics._State.instruments = None
-    reader = InMemoryMetricReader()
-    assert metrics.start_metrics(reader=reader) is True
-    providers = []
+    reader, providers = InMemoryMetricReader(), []
 
     def tracer_provider(ratio=1.0):
         provider = otel.build_provider(InMemorySpanExporter(), ratio)
@@ -112,12 +104,13 @@ def otel_on(monkeypatch):
         providers.append(provider)
         return provider
 
-    yield tracer_provider, reader
-    for provider in providers + [metrics._State.provider]:
-        provider.shutdown()
-    metrics._State.provider = metrics._State.instruments = None
-    (trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE,
-     global_metrics._METER_PROVIDER, global_metrics._METER_PROVIDER_SET_ONCE) = saved
+    with fresh_global_providers():
+        metrics._State.provider = metrics._State.instruments = None
+        assert metrics.start_metrics(reader=reader) is True
+        yield tracer_provider, reader
+        for provider in providers + [metrics._State.provider]:
+            provider.shutdown()
+        metrics._State.provider = metrics._State.instruments = None
 
 
 def test_a_log_line_in_a_sampled_span_carries_its_trace_and_span(otel_on):
@@ -236,12 +229,28 @@ def test_a_fault_reading_the_calls_attributes_never_loses_its_metrics(otel_on, m
     assert sorted(p[2] for p in points["gen_ai.client.token.usage"]) == [30, 120]
 
 
-def test_the_meter_provider_is_installed_once_and_never_over_someone_elses(otel_on):
+def test_the_meter_provider_is_installed_once(otel_on):
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
     first = metrics._State.provider
     assert metrics.start_metrics(reader=InMemoryMetricReader()) is True and metrics._State.provider is first
     metrics.flush_metrics()
+
+
+def test_a_meter_provider_installed_by_someone_else_is_reported_not_replaced(monkeypatch):
+    from opentelemetry import metrics as global_metrics
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
+    with fresh_global_providers():
+        metrics._State.provider = metrics._State.instruments = None
+        theirs = MeterProvider()
+        global_metrics.set_meter_provider(theirs)
+        assert metrics.start_metrics(reader=InMemoryMetricReader()) is False
+        assert metrics._State.provider is None and global_metrics.get_meter_provider() is theirs
+        metrics.record_llm_call({"gen_ai.operation.name": "chat"}, 1.0, 5, 5)   # nothing to record to: no fault
+        theirs.shutdown()
 
 
 def test_the_metrics_reader_targets_the_collectors_metrics_path(monkeypatch):

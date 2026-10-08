@@ -29,6 +29,7 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 from core.observability import genai, otel, tracer as seam  # noqa: E402
+from tests.helpers_otel import fresh_global_providers  # noqa: E402
 
 SECRET = "SECRET-VALUE-7"
 MODEL = "gpt-test-1"
@@ -83,24 +84,21 @@ def spans(monkeypatch):
     sampler, batched export) into an in-memory exporter; read with ``finished()``."""
     from opentelemetry import trace
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from opentelemetry.util._once import Once
 
     monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
-    saved = (trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE)
-    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = None, Once()
     exporter = InMemorySpanExporter()
     provider = otel.build_provider(exporter, 1.0)
-    trace.set_tracer_provider(provider)
-    seam.reset_tracer()
 
     def finished():
         provider.force_flush()
         return exporter.get_finished_spans()
 
-    yield finished
-    seam.reset_tracer()
-    provider.shutdown()
-    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = saved
+    with fresh_global_providers():
+        trace.set_tracer_provider(provider)
+        seam.reset_tracer()
+        yield finished
+        seam.reset_tracer()
+        provider.shutdown()
 
 
 def _request():
