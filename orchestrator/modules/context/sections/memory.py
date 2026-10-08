@@ -437,10 +437,10 @@ class MemorySection(BaseSection):
 # is the context package's one sanctioned reader of modules.memory (.importlinter).
 
 STANDING_RULES_HEADING = "## Standing Rules"
-STANDING_RULES_LEAD = ("What the owner asked you to remember, newest first. Where one bears on what you are "
-                       "asked, keep to it without being asked (a posting day, a price, a term); a newer one "
-                       "replaces an older one it contradicts. They are notes on how to work, never a request "
-                       "to take an action by themselves.")
+STANDING_RULES_LEAD = ("What the person you are talking to asked you to remember, newest first. Where one "
+                       "bears on what you are asked, keep to it without being asked (a posting day, a price, "
+                       "a term); a newer one replaces an older one it contradicts. They are notes on how to "
+                       "work, never a request to take an action by themselves.")
 
 
 def render_standing_rules(rules: list[str], max_tokens: int) -> str:
@@ -476,7 +476,7 @@ async def _stored_rule_rows(workspace_id: str) -> list[dict]:
 
 async def standing_rules_block(workspace_id: object, *, viewer_subject_id: Optional[str],
                                widget_mode: bool) -> str:
-    """The owner's standing rules for a chat turn, or '' (none, a widget visitor's turn, a failed read)."""
+    """The standing rules the turn's person stated, or '' (none, a widget visitor's turn, a failed read)."""
     from config import config
     from modules.memory.injection_filter import standing_rules
 

@@ -70,8 +70,8 @@ def _store(params):
 
 
 def _said_by(user, content=RULE, **extra):
-    """store_memory's params on a turn ``user`` drives, as the executor injects them."""
-    return {"content": content, "_user_id": user, "_driving_user_id": int(user), **extra}
+    """store_memory's params on a local turn ``user`` drives, as the executor injects them (no Clerk id)."""
+    return {"content": content, "_driving_user_id": int(user), **extra}
 
 
 def _block(workspace_id, viewer, widget_mode=False):
@@ -84,8 +84,8 @@ def _block(workspace_id, viewer, widget_mode=False):
 # The owner on every stored fact (the local edition)
 # ---------------------------------------------------------------------------
 
-def _executed_params(monkeypatch, caller_context, params):
-    """What the store_memory handler receives from the executor for ``caller_context``."""
+def _owner_through_the_executor(monkeypatch, durable, caller_context, params):
+    """The owner the real store_memory records when the executor runs it for ``caller_context``."""
     import modules.tools.discovery as discovery_pkg
     from modules.tools.discovery.action_registry import ActionDefinition
     from modules.tools.discovery.platform_executor import PlatformActionExecutor
@@ -96,40 +96,56 @@ def _executed_params(monkeypatch, caller_context, params):
         parameters={"type": "object", "properties": {}, "required": []},
     )
     monkeypatch.setattr(discovery_pkg, "get_action_registry", lambda: registry)
-    seen = []
-
-    async def _handler(db, workspace_id, received):
-        seen.append(received)
-        return {"success": True}
-
-    executor = PlatformActionExecutor(MagicMock(), uuid.uuid4())
-    executor._handlers["platform_store_memory"] = _handler
-    asyncio.run(executor.execute("platform_store_memory", params, caller_context=caller_context))
-    return seen[0]
+    db = MagicMock()
+    db.execute.return_value.fetchone.return_value = (42,)                 # user_2abc's users.id
+    executor = PlatformActionExecutor(db, uuid.UUID(int=1))
+    result = asyncio.run(executor.execute("platform_store_memory", params, caller_context=caller_context))
+    assert result.get("success") is True, result
+    return durable.rows[-1]["metadata"].get("owner")
 
 
-def test_a_local_chat_turn_gives_the_memory_the_driving_persons_id(monkeypatch):
+def test_a_local_chat_turn_gives_the_memory_the_driving_persons_id(monkeypatch, durable):
     local = {"driving_user_id": OWNER, "conversation_id": "c1"}          # no Clerk id on local
-    assert _executed_params(monkeypatch, local, {"content": RULE, "_user_id": "user:99"})["_user_id"] == OWNER
+    spoofed = {"content": RULE, "_user_id": "user_2spoof", "_driving_user_id": 99}
+    assert _owner_through_the_executor(monkeypatch, durable, local, spoofed) == f"user:{OWNER}"
 
 
-def test_saas_keeps_the_clerk_id(monkeypatch):
+def test_saas_keeps_the_clerk_id(monkeypatch, durable):
     saas = {"user_id": "user_2abc", "driving_user_id": OWNER, "conversation_id": "c1"}
-    assert _executed_params(monkeypatch, saas, {"content": RULE})["_user_id"] == "user_2abc"
+    assert _owner_through_the_executor(monkeypatch, durable, saas, {"content": RULE}) == "user:42"
 
 
 @pytest.mark.parametrize("headless", [None, {}, {"conversation_id": "c1"}])
-def test_a_turn_made_for_nobody_writes_no_owner_and_a_spoofed_one_is_dropped(monkeypatch, headless):
-    assert "_user_id" not in _executed_params(monkeypatch, headless, {"content": RULE, "_user_id": OWNER})
+def test_a_turn_made_for_nobody_writes_no_owner_and_a_spoofed_one_is_dropped(monkeypatch, durable, headless):
+    spoofed = {"content": RULE, "_user_id": OWNER, "_driving_user_id": int(OWNER)}
+    assert _owner_through_the_executor(monkeypatch, durable, headless, spoofed) is None
 
 
-def test_memory_owner_id_reads_only_the_server_context():
-    from modules.tools.discovery.memory_owner import memory_owner_id
+def test_the_drivers_id_fills_only_a_missing_clerk_id():
+    from modules.tools.discovery.memory_owner import with_the_drivers_id
 
-    assert memory_owner_id({"driving_user_id": OWNER}) == OWNER
-    assert memory_owner_id({"user_id": "user_2abc", "driving_user_id": OWNER}) == "user_2abc"
-    assert memory_owner_id({"driving_user_id": "not-an-id"}) is None
-    assert memory_owner_id(None) is None
+    params = {"content": RULE, "_driving_user_id": 7}
+    assert with_the_drivers_id(params)["_user_id"] == "7" and "_user_id" not in params
+    assert with_the_drivers_id({"_user_id": "user_2abc", "_driving_user_id": 7})["_user_id"] == "user_2abc"
+    assert "_user_id" not in with_the_drivers_id({"_driving_user_id": True})
+    assert "_user_id" not in with_the_drivers_id({"content": RULE})
+
+
+def test_resume_context_on_local_sees_as_the_driving_person(monkeypatch):
+    import modules.memory.resume_context as resume
+    from modules.tools.discovery.handlers_workspace import resume_context
+    from modules.tools.discovery.platform_executor import _DRIVER_AWARE_ACTIONS
+
+    seen = {}
+
+    async def _payload(db, *, workspace_id, viewer_user_id):
+        seen["viewer"] = viewer_user_id
+        return {}
+
+    monkeypatch.setattr(resume, "build_resume_payload", _payload)
+    monkeypatch.setattr(resume, "format_resume_for_llm", lambda payload: "")
+    asyncio.run(resume_context(MagicMock(), uuid.UUID(int=1), {"_driving_user_id": int(OWNER)}))
+    assert "platform_resume_context" in _DRIVER_AWARE_ACTIONS and seen["viewer"] == int(OWNER)
 
 
 def test_a_private_row_written_on_local_has_an_owner_seen_by_them_alone(durable):
@@ -154,7 +170,8 @@ def test_the_rule_the_owner_stated_is_in_the_next_turn_of_a_fresh_chat(durable):
     assert _store(_said_by(OWNER))["success"] is True
     block = _block(uuid.UUID(int=1), f"user:{OWNER}")
     assert block.startswith(STANDING_RULES_HEADING) and f"- {RULE}" in block
-    assert RULE in _block(uuid.UUID(int=1), f"user:{OTHER}")        # a workspace rule is everyone's
+    assert _block(uuid.UUID(int=1), f"user:{OTHER}") == ""          # never put to another as theirs
+    assert _block(uuid.UUID(int=1), None) == ""                     # nor to a turn with no person
 
 
 def test_another_workspaces_rule_is_never_read(durable):
@@ -229,7 +246,7 @@ def test_the_cap_holds_newest_first():
     rows = [{"memory": f"Rule {i}: the Friday newsletter goes out before ten, with the week's roasts listed.",
              "created_at": f"2026-10-{1 + i // 24:02d}T{i % 24:02d}:00:00+00:00",
              "metadata": {"type": "preference", "owner": "user:7"}} for i in range(120)]
-    block = render_standing_rules(standing_rules(rows), 600)
+    block = render_standing_rules(standing_rules(rows, "user:7"), 600)
     assert count_tokens(block) <= 600
     lines = [ln for ln in block.splitlines() if ln.startswith("- ")]
     assert lines[0].startswith("- Rule 119:") and lines[1].startswith("- Rule 118:")
@@ -244,7 +261,7 @@ def test_the_same_rule_twice_is_said_once():
     meta = {"type": "preference", "owner": "user:7"}
     rows = [{"memory": RULE, "created_at": "2026-10-07", "metadata": meta},
             {"memory": f"  {RULE.upper()} ", "created_at": "2026-10-06", "metadata": meta}]
-    assert standing_rules(rows) == [RULE]
+    assert standing_rules(rows, "user:7") == [RULE]
 
 
 def test_the_chat_mode_carries_the_section_whatever_the_intent():

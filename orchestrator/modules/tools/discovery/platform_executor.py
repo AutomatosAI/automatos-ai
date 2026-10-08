@@ -39,7 +39,6 @@ from modules.tools.discovery.handlers_playbooks import (
     delete_playbook,
 )
 from modules.tools.discovery.playbook_staffing import add_playbook_step, execute_playbook  # F321: an agent on each step
-from modules.tools.discovery.memory_owner import memory_owner_id  # FX-015: a memory's owner on local
 from modules.tools.discovery.handlers_analytics import (
     get_llm_usage,
     get_cost_breakdown,
@@ -354,6 +353,7 @@ _DRIVER_AWARE_ACTIONS = (
     "platform_create_playbook",
     "platform_invite_member",
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
+    "platform_resume_context",   # FX-015: on the local edition the person is the viewer (memory_owner)
 )
 
 
@@ -1273,13 +1273,16 @@ class PlatformActionExecutor:
             "platform_resume_context",
         )
         if action_name in _MEMORY_CONTEXT_ACTIONS:
-            params = {k: v for k, v in params.items() if k not in ("_user_id", "_origin_chat_id")}
+            params = {
+                k: v for k, v in params.items()
+                if k not in ("_user_id", "_origin_chat_id")
+            }
             if action_name == "platform_store_memory":
                 # F189: a memory is never filed as another agent (it recalls it as its own).
                 params = {k: v for k, v in params.items() if k != "agent_id"}
-            _mem_user = memory_owner_id(caller_context)  # FX-015: users.id on the local edition
+            _mem_user = (caller_context or {}).get("user_id")
             if _mem_user:
-                params = {**params, "_user_id": _mem_user}
+                params = {**params, "_user_id": str(_mem_user)}
             _mem_chat = (caller_context or {}).get("conversation_id")
             if _mem_chat:
                 params = {**params, "_origin_chat_id": str(_mem_chat)}

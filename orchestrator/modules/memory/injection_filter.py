@@ -118,7 +118,8 @@ def filter_injectable_memories(
 # driving the turn; the distiller, from the person whose chat it was), so an agent's note on a
 # ticket and a legacy row with no owner are never one. It is a ``preference`` (the taxonomy has
 # no ``rule`` or ``schedule`` tag), or what ``store_memory`` wrote (``source: platform_tool``)
-# on that person's turn, whatever its type.
+# on that person's turn, whatever its type. A rule rides only its own person's turns: one
+# member's note is never put to another as what they asked for (recall still finds it).
 STANDING_RULE_TYPES = ("preference",)
 SAID_IN_CHAT = "platform_tool"
 # The durable-store read: a row matching any of these is read, then ``is_standing_rule`` decides.
@@ -138,9 +139,10 @@ def is_standing_rule(mem: Any) -> bool:
 
 
 def standing_rules(memories: Iterable[Any], viewer_subject_id: Optional[str] = None) -> List[str]:
-    """The standing rules ``viewer_subject_id`` may see, newest first, each once; through the
-    same guard as recall (private rows to their owner only, no noise, no agent's document)."""
-    rules = [m for m in memories if is_standing_rule(m)]
+    """The standing rules ``viewer_subject_id`` stated, newest first, each once (none for an
+    unknown viewer); through the same guard as recall (no noise, no agent's document)."""
+    rules = [m for m in memories if is_standing_rule(m) and viewer_subject_id
+             and m["metadata"]["owner"] == viewer_subject_id]
     visible = filter_injectable_memories(rules, floor=0, viewer_subject_id=viewer_subject_id)
     newest = sorted(visible, key=lambda m: str(m.get("created_at") or ""), reverse=True)
     seen: set = set()
