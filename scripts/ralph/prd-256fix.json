@@ -601,6 +601,124 @@
       "priority": 38,
       "passes": false,
       "notes": "Filed by the review session (Fable) from CI run 37854888642 (job 113576584815) after the review-cycle-2 stories. The runner re-enters the build loop on relaunch; this is the only story not DONE."
+    },
+    {
+      "id": "P256-FIX-RVW-22",
+      "title": "HIGH · FX-004/FX-005: an owner's-click ask shows as a red '<tool> failed' line in the chat's activity trail",
+      "description": "Cause: FX-005 made the tool-end flag false for an ask (card_raised.the_results_flag, card_raised.py:113-121; pinned by test_prd256_fix_stream_truth.py::test_an_ask_streams_success_false_with_the_waiting_line), and the frontend has only two end states: frontend/lib/chat/hooks.ts:353 maps `success || skipped ? 'completed' : 'error'`, so the ask's line becomes state 'error'; activity-trail.tsx:23 draws the XCircle 'Failed' icon, :34 labels it '<tool> failed', and :45 hides the summary ('Card raised: … Nothing changes until the owner clicks.') for an error line; no `error` is sent, so the red line has no reason. Before the wave the chat callback never raised and the ask streamed success: true (a green line with the summary). 'Change Scout's heartbeat' from the owner's chat: the receipts block shows the hourglass, the activity trail above it a red failed line: C2 ('didn't go through') moved from the receipt to the trail, against FX-004's title and its AC that the frontend tool-end summary says the card's words.",
+      "acceptanceCriteria": [
+        "The tool-end frame of an ask carries a waiting marker (`waiting: true`, set where the flag is computed: card_raised.is_waiting on the result; streaming.format_aisdk_tool_end gains the field) beside `success: false`; a refusal and a done call are unchanged.",
+        "The frontend renders a waiting tool-end as waiting, never as an error: an hourglass (the receipts block's icon) and the summary ('Card raised: … Nothing changes until the owner clicks.'), no 'failed' label, no destructive colour. The ToolCall's state is read through the seam outside useChat/Message (memory: frontend-chat-giants-seam; e.g. use-chat-with-receipts.ts keeps the waiting toolCallIds from onData's tool-end and ActivityTrail takes them), or useChat's mapping is changed only if the shape gate allows it.",
+        "Tests: test_prd256_fix_stream_truth.py's ask case also asserts the frame's `waiting: true` (refusal and done carry none); a vitest for ActivityTrail with a waiting tool-end → no 'failed' text, no 'Failed' aria-label, the summary shown, the 'Waiting for you' icon.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-23",
+      "title": "HIGH · D1/D7/FX-010/FX-012: a timer Auto sets with platform_schedule_task runs its agent's sends with no card, and picks an arbitrary namesake",
+      "description": "Cause: platform_schedule_task is not owner-only (owner_only.py:42-60) though platform_schedule_playbook is (FX-010), and what it files reads as the owner's own work: handlers_scheduling.schedule_task stores created_by_user_id = the chat's _user_id (:99), so each fire's ticket (scheduled_task_steps.ticket_for, :153-166) is created_by_type 'user' with review_mode 'auto' by default (handlers_scheduling.py:80; brief_sends.reviewed_by_a_person is never applied to it), and agent_sends._on_autos_brief (agent_sends.py:155-170) treats it as a ticket a person wrote: the agent's GMAIL_SEND_EMAIL runs with no card and the ticket closes itself. A chat-delivered fire runs the agent with context {'source': 'scheduled_task'} (scheduled_task_service.py:563): no ticket key, no ask. 'Email the supplier every Monday to confirm the order' from the owner's chat is #2318 on a timer, the failure D7 was made for. The same handler resolves target_agent_name with func.lower(Agent.name) == … .first() (:63-72): no agent_id, no active filter, no clash: in c1 (10 duplicated names) 'every Wednesday have OPS …' targets whichever OPS row comes first, a switched-off one included (FX-012's A1 shape, golden row 'Set up something every Wednesday to remind CLUB DESK').",
+      "acceptanceCriteria": [
+        "platform_schedule_task joins the owner-only list (D1: an agent's timer is an agent-setting change, as the playbook's timer is): from a human-driven turn it raises the card, whose question names the agent (name and #id), the schedule (cron/interval/run-at in words), the delivery and the brief's first line; the click runs exactly that call; an agent run or a playbook step is unchanged.",
+        "A scheduled board ticket whose brief sends/orders/publishes (brief_sends.sends_or_orders on title + description) is filed review_mode human unless the schedule named one, as FX-010 does for Auto's chat tickets.",
+        "platform_schedule_task takes `agent_id` (agent_refs.agent_id_property / takes_the_agent_id, an id wins over a name) and resolves a name with resolve_active_agent: an inactive namesake is never picked, a clash lists the candidates ('call again with agent_id').",
+        "Tests (new file test_prd256_fix_rvw23_timers_wait.py): the chat's schedule_task asks, runs nothing, card names agent/schedule/brief; the click creates exactly the row asked; a scheduled brief 'Email the supplier…' is filed review_mode human; two active OPS → the candidates, then the id call schedules; an inactive OPS beside one active → the active one; an agent run's schedule_task does not ask.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-24",
+      "title": "MEDIUM · FX-017: a nudged draft is retracted twice when its retry only calls tools, and the second retraction takes the answer off the screen",
+      "description": "Cause: service.py _note_round (:1865-1881) retracts streamed_rounds[-1] whenever the round before the current one ended with no tool call; a retry that calls tools with no text is never appended to streamed_rounds (:1878 needs content), so the nudged draft D stays streamed_rounds[-1]. Trace: D 'I've approved #0231.' streams, no call → nudged; the retry calls platform_update_task_status with no text → retraction of D (1st, correct; Screen.retraction returns D.said since the latest round is not blank); the tools run; the answer A 'I've approved #0231.' streams → _note_round(A) sees D as streamed_rounds[-1] again → Screen.retraction(D) finds D in the earlier rounds and A not blank → a 2nd frame with D's text. The frontend (narration.ts:18-21) deletes the last occurrence of D's text, which is now A: the screen shows no answer (or a mangled one when A only contains D, 'Done.' inside '…moved it to Done.'). FX-017's tests cover draft → text answer (:184) but not draft → tool-only retry → answer; Screen's 'never sent twice' covers only a held round.",
+      "acceptanceCriteria": [
+        "A nudged round is retracted at most once per turn: Screen records the rounds it has retracted (sent or held-then-settled) and returns None for one already retracted, or _note_round stops treating a retracted round as the latest (whichever is smaller; no edit inside _stream_tool_loop's body beyond what the shape gate allows).",
+        "test_prd256_fix_one_answer_on_screen.py: draft (no call) → nudge → a retry with tool calls and no text → the answer equal to the draft: exactly one retraction frame, and the frontend's rule (ported in the test) leaves the answer on the screen; the same with an answer that contains the draft ('Done.' / '…moved it to Done.'); the existing cases unchanged.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-25",
+      "title": "MEDIUM · FX-006: stative and elliptical passives, first-person simple past and comma-listed claims escape the per-claim rule",
+      "description": "Cause: COMPLETED_ACTION (claims_backed.py:69-80) reads 'I've <verb>', 'has/have been', 'was/were', 'is now <verb>' and a few fixed shapes; _AND_THEN (:106) reads a second verb only after 'and'/'then'. Probed with the module's own regexes (stub imports), each returns no claim: 'The task is done.', 'The post is published.', 'The post is scheduled for 5pm.', 'The ticket is created.', 'The post got sent.', 'It went out this morning.' (history, fine) vs 'It went out.', 'Email sent.', 'Posted!', 'I sent the email to Declan.', 'I created the task.', 'I emailed the supplier and created the ticket.'; and \"I've created the ticket, emailed Sam.\" with only create_task done → no line for 'emailed'. With the families deleted (FX-007, D10) this rule is the only guard, and the hunt's 'a passive shape escapes' names exactly these.",
+      "acceptanceCriteria": [
+        "COMPLETED_ACTION gains: 'is/are <done-participle>' (published, scheduled, created, sent, approved, done, closed, cancelled, …, not a _STATES word: 'is based', 'is called'), 'got/went/gone <participle|out|live>', a sentence that is only '<Noun> <participle>.' or '<Participle>!' ('Email sent.', 'Posted!'), and the first-person simple past 'I (just|also|…) <done-verb>' (not a _LOOKING verb); each under the existing plan-word, reply-content, history (_PAST/_HISTORY) and denial exemptions.",
+        "_AND_THEN also reads a participle after ',' or ';' that continues the claim's list (\"I've created the ticket, emailed Sam.\" is created AND emailed), not one that starts a new clause with its own subject.",
+        "test_prd256_fix_honesty_per_claim.py: each sentence above over read receipts → the line naming its verb, over its own kind of write → no line; the comma case with create_task done → the line naming emailed; the FX-007 26-row table, F186's non-claims, the RVW-20 history/denial tables and every existing case pass unchanged; a sweep of the string literals in orchestrator/tests and tests/sim through old and new claims() lists every new claim, none in an answer a test asserts clean.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-26",
+      "title": "MEDIUM · FX-008/D7: a send card shows one recipient, so the click also mails the cc, bcc and extra recipients it never named",
+      "description": "Cause: card_question.send_question (card_question.py:58-67) takes the FIRST present key of each group in SEND_FIELDS (:41-45: next(...)); cc, bcc, extra_recipients and attachment are in no group, and a list under 'recipients' is shown whole only when it is the first key present. GMAIL_SEND_EMAIL {recipient_email: supplier@…, extra_recipients: […], bcc: [x@other], subject, body} reads 'to: supplier@… / subject / first line', while the grant's params hash covers the full call, so the click sends to x@other too. Under D7 the card is the only review of an agent's send on Auto's ticket, and an agent that read an inbound email writes these params.",
+      "acceptanceCriteria": [
+        "send_question lists every recipient-class field the call carries (to/recipient_email/recipients/extra_recipients/cc/bcc, each list in full, labelled 'to', 'cc', 'bcc') and names attachments ('attachment: <file name>'), one line each via said_line; a recipient field the card cannot read (a non-string, non-list value) refuses the call before any grant (as refused_before_the_card does), so no card approves a recipient it does not show.",
+        "agent_sends' 'Card raised: send <subject> to <recipient>' and the click's ticket note name every recipient the same way.",
+        "test_prd256_fix_cards_say_what_they_approve.py: a send with recipient_email + extra_recipients + cc + bcc + attachment → the card lists each address and the file; the existing send case unchanged; test_prd256_fix_agent_sends_wait_for_the_click.py: the note names them.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-27",
+      "title": "MEDIUM · D7/FX-010/RVW-19: a brief Auto writes with a lead-in word or a common outbound verb keeps review_mode auto",
+      "description": "Cause: brief_sends._verbs (brief_sends.py:60-66) reads a message verb only as a sentence's first word or after and/then, and MESSAGE_VERBS/SENDS_WORDS (:28-34) miss common outbound verbs. Each of these Auto-written briefs keeps review_mode auto: 'Please email the supplier to confirm delivery', 'Also post the menu on Instagram', 'Just message Declan the times', 'Contact the supplier to confirm the order', 'Reach out to Declan', 'Let Declan know the box is late', 'Get back to the customer', 'Respond to the review', 'Notify the team', 'Invite Sam to the call', 'Submit the form'. D7: 'Auto-created briefs that send/order/publish default to review_mode human'. The Composio card still asks at the send (FX-011), so what is lost is the ticket's review before it closes.",
+      "acceptanceCriteria": [
+        "_verbs skips leading politeness and adverbs before taking a sentence's verb ('please', 'also', 'just', 'now', 'kindly', 'then', 'first', 'remember to', 'make sure to', 'can you', 'could you'), and reads the word after 'to' in 'ask/get/have <someone> to <verb>'.",
+        "The outbound verbs join the brief's lists: contact, notify, respond, invite, submit, share (as a verb), 'reach out', 'let <x> know', 'get back to'; 'Draft a reply to Declan', 'Draft the email', 'Prepare a post for review' and 'Read the supplier's email' keep auto.",
+        "test_prd256_fix_publishes_and_message_briefs_wait.py: each brief above → review_mode human with the receipt's words; the four drafting/reading briefs → auto; the existing cases unchanged.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-28",
+      "title": "MEDIUM · FX-016/D1: Auto makes a Claude Code (cli) agent with no card, while switching an agent to cli asks",
+      "description": "Cause: FX-016 gave platform_create_agent `runtime: cli` (agent_runtime.sets_the_runtime_on_create, agent_runtime.py:149-166); platform_update_agent is owner-only, so 'switch Scout to a Claude session' raises the card showing 'runtime: api → cli', but platform_create_agent is not on the list (owner_only.py:42-60), so 'make me a Claude session agent' creates an agent that runs Claude Code on the owner's paired machine with no click. D1 (amended 8 Oct) is every agent-setting change; the same setting is gated on update and free on create.",
+      "acceptanceCriteria": [
+        "platform_create_agent is owner-only when the runtime it resolves to (the call's, else DEFAULT_AGENT_RUNTIME) is cli, read the TIMED_UPDATES way (a params-conditional entry in owner_only.is_owner_only); its card names the agent's name, 'runtime: cli', the session CLI and model, and the prompt's first line; an api create from chat is unchanged; an agent run is unchanged.",
+        "test_prd256_fix_agent_runtime.py: from the owner's chat, create with runtime cli → the card, nothing made; the click makes exactly that agent with the configuration the host reads; create with no runtime under DEFAULT_AGENT_RUNTIME=cli → the card; runtime api → made with no card.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-29",
+      "title": "MEDIUM · FX-014/RVW-16: 'Have OPS check the stock?' is no longer a hand-off",
+      "description": "Cause: addressed_agents._forbidden_or_asked (addressed_agents.py:185) treats every sentence-initial 'Have <name> …?' with no 'to <verb>' after the name as a present-perfect question, but _task_follows/_bare_verb already exclude a participle or an auxiliary after the name, so the rule only ever fires on a bare verb: 'Have OPS check the stock?', 'Have WRITER draft the About page?', 'Have RESEARCHER find the Leith cafés?' go back to the tiers. RVW-16's AC names a present perfect ('Have sales risen this week?'), which is a participle after the name, not a bare verb.",
+      "acceptanceCriteria": [
+        "The present-perfect rule applies only when the word after the name is a past participle (the _participle test, or an irregular participle list: risen, caught, hit, gone, done, seen, …); 'Have <name> <bare verb> …?' hands over like the same sentence without '?'.",
+        "test_prd256_fix_named_lane.py and the golden's task_after_the_name: the three requests above → ASSIGN to the agent; 'Have Support caught up?', 'Have sales risen this week?', 'Have OPS finished?' → no hand-off; every RVW-16 row unchanged.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them)",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR."
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": "Filed by the third fix-wave review (9 Oct 2026) from the code at 66def1273; CI run 37857815894 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
     }
   ]
 }
