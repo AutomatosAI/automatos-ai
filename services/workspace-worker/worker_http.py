@@ -13,6 +13,7 @@ handlers are plain functions in three modules:
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -64,7 +65,8 @@ async def internal_auth_middleware(request, handler):
     internal_token = request.app[WORKER_HTTP].internal_token
     if internal_token:
         req_token = request.headers.get("X-Internal-Token", "")
-        if req_token != internal_token:
+        # Constant time: a plain != stops at the first differing character (review on #1043).
+        if not hmac.compare_digest(req_token.encode(), internal_token.encode()):
             return web.json_response({"error": "Unauthorized"}, status=401)
     return await handler(request)
 
