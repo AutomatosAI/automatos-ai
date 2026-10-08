@@ -19,7 +19,7 @@ import asyncio
 import contextlib
 import functools
 import logging
-from typing import Any, Callable, Dict, Iterator
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 from core.observability.otel import ATTR_WORKSPACE_ID, tracing_enabled
 
@@ -151,3 +151,101 @@ def traced_llm_call(call: Callable[..., Any]) -> Callable[..., Any]:
             span.set_attributes(_guarded(response_attributes, manager, response))
             return response
     return traced_sync
+
+
+# ── PRD-256 O4: one span per agent run ───────────────────────────────────────
+
+AGENT_OPERATION = "invoke_agent"
+ATTR_LANE = "automatos.lane"
+ATTR_EXECUTION = "automatos.execution_id"
+
+
+def _agent_of(factory: Any, agent: Any) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """The agent's id, name and workspace: from its runtime, or (an id) the factory's active agents."""
+    runtime = agent if hasattr(agent, "agent_id") else (getattr(factory, "active_agents", None) or {}).get(agent)
+    agent_id = getattr(runtime, "agent_id", agent)
+    name = getattr(getattr(runtime, "metadata", None), "name", None)
+    workspace = getattr(runtime, "workspace_id", None)
+    return tuple(str(value) if value else None for value in (agent_id, name, workspace))
+
+
+def agent_attributes(factory: Any, agent: Any, context: Any) -> Dict[str, Any]:
+    """The run's attributes: the operation, the agent, and the lane and work it runs for."""
+    from core.llm.usage_context import execution_ref_for_context, lane_for_context
+
+    agent_id, name, workspace = _agent_of(factory, agent)
+    from_context = context.get("workspace_id") if isinstance(context, dict) else None
+    found = {
+        "gen_ai.operation.name": AGENT_OPERATION,
+        "gen_ai.agent.id": agent_id,
+        "gen_ai.agent.name": name,
+        ATTR_LANE: lane_for_context(context),
+        ATTR_EXECUTION: execution_ref_for_context(context),
+        ATTR_WORKSPACE_ID: workspace or from_context,
+    }
+    return {key: str(value) for key, value in found.items() if value}
+
+
+def _agent_failed(result: Any) -> bool:
+    return isinstance(result, dict) and (result.get("status") == "error" or result.get("success") is False)
+
+
+@contextlib.contextmanager
+def _agent_span(factory: Any, agent: Any, context: Any) -> Iterator[Any]:
+    """The run's INTERNAL span: the request's child inside one, else the root of a trace of its
+    own, linked to where the work was asked for (``work_links``)."""
+    from opentelemetry import trace
+    from opentelemetry.trace import SpanKind, Status, StatusCode
+
+    from core.observability.work_links import pending_links, span_links
+
+    attrs = _guarded(agent_attributes, factory, agent, context)
+    name = f"{AGENT_OPERATION} {attrs.get('gen_ai.agent.name') or attrs.get('gen_ai.agent.id', '')}".strip()
+    try:
+        links = span_links(pending_links())
+    except Exception:  # noqa: BLE001 — logged; the run starts unlinked
+        logger.debug("[otel] work links skipped", exc_info=True)
+        links = []
+    with trace.get_tracer(TRACER_NAME).start_as_current_span(
+            name, kind=SpanKind.INTERNAL, attributes=attrs, links=links, record_exception=False,
+            set_status_on_exception=False) as span:
+        try:
+            yield span
+        except BaseException as exc:
+            span.set_attribute("error.type", type(exc).__qualname__)
+            span.set_status(Status(StatusCode.ERROR, type(exc).__qualname__))
+            raise
+
+
+def _note_run(span: Any, factory: Any, agent: Any, result: Any) -> None:
+    """After the run: the agent's name (an id is activated by the run) and whether it failed."""
+    from opentelemetry.trace import Status, StatusCode
+
+    _, name, workspace = _agent_of(factory, agent)
+    if name:
+        span.set_attribute("gen_ai.agent.name", name)
+        span.update_name(f"{AGENT_OPERATION} {name}")
+    if workspace:
+        span.set_attribute(ATTR_WORKSPACE_ID, workspace)
+    if _agent_failed(result):
+        span.set_attribute("error.type", "agent_error")
+        span.set_status(Status(StatusCode.ERROR, "agent_error"))
+
+
+def traced_agent_run(run: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap ``AgentFactory.execute_with_prompt``: every agent run, whatever the lane
+    (chat, a board ticket, a Mission step, a heartbeat), is one ``invoke_agent`` span,
+    and the run's LLM calls, tools and queries are its children."""
+    @functools.wraps(run)
+    async def traced(factory: Any, agent: Any, prompt: Any, *args: Any, **kwargs: Any) -> Any:
+        if not tracing_enabled():
+            return await run(factory, agent, prompt, *args, **kwargs)
+        context = kwargs.get("context", args[1] if len(args) > 1 else None)  # (system_prompt, context, ...)
+        with _agent_span(factory, agent, context) as span:
+            result = await run(factory, agent, prompt, *args, **kwargs)
+            try:
+                _note_run(span, factory, agent, result)
+            except Exception:  # noqa: BLE001 — logged; the run's result is returned as it is
+                logger.debug("[otel] agent span result skipped", exc_info=True)
+            return result
+    return traced

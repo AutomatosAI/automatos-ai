@@ -154,8 +154,16 @@ def _instrument_botocore(_: Any = None) -> None:
     BotocoreInstrumentor().instrument()
 
 
+def _instrument_work_items(_: Any = None) -> None:
+    """New tickets and Missions stamped with the request that asked for them (O4)."""
+    from core.observability.work_links import register_work_links
+
+    register_work_links()
+
+
 _LIBRARIES = (("sqlalchemy", _instrument_sqlalchemy), ("httpx", _instrument_httpx),
-              ("redis", _instrument_redis), ("botocore", _instrument_botocore))
+              ("redis", _instrument_redis), ("botocore", _instrument_botocore),
+              ("work items", _instrument_work_items))
 
 
 def instrument_libraries(engine: Any = None) -> None:

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from config import COMPLEXITY_TOKEN_BUDGET, Config, config
 from core.database.database import end_open_transaction
+from core.observability.work_links import links_of, run_linked, with_link
 from core.models.core import Agent
 from core.models.system_settings import SystemSetting
 from core.models.orchestration import (
@@ -501,6 +502,7 @@ SERVER_OWNED_MISSION_CONFIG = frozenset({
     # F142 (a): resolved by create_mission/replan_mission (resolve_staffing),
     # never taken from a caller's config.
     "staffing",
+    "trace_links",  # PRD-256 O4: stamped by the server (core.observability.work_links)
 })
 
 
@@ -1983,7 +1985,7 @@ class CoordinatorService:
 
             # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
             if prepared:
-                agent_coros = [self._task_io(p) for p in prepared]
+                agent_coros = [run_linked(self._task_io(p), links_of(run.config)) for p in prepared]  # PRD-256 O4
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
 
                 # --- Phase 3: Record completions (serial on shared session) ---
@@ -3678,6 +3680,7 @@ class CoordinatorService:
         )
 
         self._queue_initial_tasks(db, run)
+        run.config = with_link(run.config)  # PRD-256 O4: its steps link to the approval too
 
         # PRD-227 US-002: narrate the start into the launching thread (run-level).
         _n = _mission_task_count(run)

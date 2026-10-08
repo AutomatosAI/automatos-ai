@@ -26,6 +26,7 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
+from core.observability.work_links import with_link
 from core.models.core import BoardTask
 from core.models import Agent
 from core.utils.exception_telemetry import record_error
@@ -1054,6 +1055,7 @@ def _redispatch_task(db: Session, task: BoardTask) -> bool:
         db.rollback()
         return False
     task.runtime_ref = {**(task.runtime_ref or {}), RUN_ID_KEY: None}
+    task.planning_data = with_link(getattr(task, "planning_data", None))  # PRD-256 O4: linked to this request too
     task.status = "assigned"
     task.lease_until = None
     task.attempts = 0
