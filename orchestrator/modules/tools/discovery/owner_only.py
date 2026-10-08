@@ -336,11 +336,13 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     from modules.tools.discovery.agent_runtime import refused_before_the_card
     from modules.tools.discovery.card_question import platform_question
     from modules.tools.discovery.mission_targets import bound_to_the_mission
+    from modules.tools.discovery.ticket_edit_moves import rebrief_that_closes
     from modules.tools.execution.subject_targets import missing_targets_error, named_subject
 
     params = bound_to_the_mission(db, workspace_id, action, params)  # FX-009: the click runs on the mission shown
     params, refused = bound_to_the_agent(db, workspace_id, action, params)  # FX-010: and on the agent shown
     refused = refused or refused_before_the_card(db, workspace_id, action, params)  # FX-016: a runtime it can't set
+    refused = refused or rebrief_that_closes(db, workspace_id, action, params)  # RVW-10: re-brief or close, not both
     if refused:
         return refused
     found, missing = _targets(db, workspace_id, action, params)

@@ -101,12 +101,29 @@ def test_a_new_brief_on_an_answered_card_drops_its_status(shop):
 
     task = _in_review(shop)
 
-    out = _edit(shop, task_id=task.id, description="Use the September sheet only.", status="done", _user_id=OWNER)
+    out = _edit(shop, task_id=task.id, description="Use the September sheet only.", status="in_progress",
+                _user_id=OWNER)
 
     shop.db.refresh(task)
     assert out["success"] is True and out["status_ignored"] is True and STATUS_IGNORED in out["message"]
-    assert (task.status, task.description) == ("assigned", "Use the September sheet only.")   # re-briefed, not Done
+    assert (task.status, task.description) == ("assigned", "Use the September sheet only.")   # re-briefed
     assert shop.filed == []                                                    # nothing was approved
+
+
+def test_a_new_brief_and_done_on_an_answered_card_is_refused_naming_both_choices(shop):
+    """P256-FIX-RVW-10: Done beside a new brief is not dropped: the click that approved closing
+    the card re-briefed it and sent it back. It is refused, the card as it was."""
+    from modules.tools.discovery.ticket_edit_moves import CLOSE_OR_REBRIEF
+
+    task = _in_review(shop)
+    before = task.description
+
+    out = _edit(shop, task_id=task.id, description="Use the September sheet only.", status="done",
+                _user_id=OWNER, _clicked_by=CLICKER)
+
+    shop.db.refresh(task)
+    assert out == {"success": False, "error": CLOSE_OR_REBRIEF}
+    assert (task.status, task.description) == ("review", before) and shop.filed == []
 
 
 def test_the_move_is_recorded_as_the_move_it_made():

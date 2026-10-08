@@ -204,7 +204,7 @@ def test_a_rebrief_with_a_status_drops_the_status_and_says_so():
         return {"success": True, "task_id": 5, "message": "#0005 has the new brief."}
 
     out = asyncio.run(rebriefed_without_its_status(edit, None, None, {"task_id": 5, "description": "Redo",
-                                                                     "status": "done", "note": "Urgent"}))
+                                                                     "status": "in_progress", "note": "Urgent"}))
     assert seen == {"task_id": 5, "description": "Redo", "note": "Urgent"}
     assert out["success"] is True and out["status_ignored"] is True and out["sent_back"] is True
     assert out["message"] == f"#0005 has the new brief. {STATUS_IGNORED}"
@@ -214,14 +214,14 @@ def test_the_receipt_says_the_status_was_ignored_and_no_move_is_recorded():
     from consumers.chatbot.receipts import receipt
     from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 
-    params = {"task_id": 5, "description": "Redo with the September sheet", "status": "done"}
+    params = {"task_id": 5, "description": "Redo with the September sheet", "status": "in_progress"}
     result = {"success": True, "task_id": 5, "sent_back": True, "status_ignored": True}
 
     effect = receipt("platform_update_task", params, result)["effect"]
-    assert "status ignored: a re-brief sends the card back by itself" in effect and "Done" not in effect
+    assert "status ignored: a re-brief sends the card back by itself" in effect and "started" not in effect
     tracker = ToolExecutionTracker()
     tracker.record_outcome("platform_update_task", params, result)
-    assert "platform_update_task_status:done" not in tracker.succeeded
+    assert "platform_update_task_status:in_progress" not in tracker.succeeded
     assert "send_back" in tracker.succeeded
 
 
