@@ -55,6 +55,7 @@ OWNERS_OWN_DECISION = "owners_own_decision"
 USER_ACTOR = "user:"
 PERMISSION_LEVEL = "write"
 MAX_CARDS_NAMED = 5
+MORE_CARDS = " and {count} more"
 
 ASK = ("Waiting for the owner's click: {act}. Nothing has been done: the approval card in the chat asks "
        "them, and their click runs it.")
@@ -194,7 +195,7 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     found, missing = _targets(db, workspace_id, action, params)
     if missing:
         return missing_targets_error(action, missing)
-    what = named_subject(found).removeprefix(" on ") or _said_subject(params)
+    what = (named_subject(found).removeprefix(" on ") or _said_subject(params)) + _cards_not_named(params)
     status = closing_status(params) if action in CARD_MOVES else None
     verb = CLOSING_VERBS[status] if status else VERBS.get(action, action)
     return _ask(db, workspace_id, action, params, caller_context, verb=verb, what=what)
@@ -228,6 +229,13 @@ def _targets(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) ->
         more_found, more_missing = resolve_targets(db, workspace_id, {"task_id": ref}, action)
         found, missing = [*found, *more_found], [*missing, *more_missing]
     return found, missing
+
+
+def _cards_not_named(params: Dict[str, Any]) -> str:
+    """" and 3 more" when a bulk move carries more cards than the card names (FX-003)."""
+    listed = params.get("task_ids") if isinstance(params.get("task_ids"), list) else []
+    extra = len(listed) - MAX_CARDS_NAMED
+    return MORE_CARDS.format(count=extra) if extra > 0 else ""
 
 
 def _said_subject(params: Dict[str, Any]) -> str:

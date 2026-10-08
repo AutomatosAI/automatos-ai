@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from modules.tools.formatting import document_brand_note, generated_document_summary, tickets_by_number
+from modules.tools.formatting.card_digest import shown_on_the_card
 
 logger = logging.getLogger(__name__)
 
@@ -838,8 +839,7 @@ class ToolResultFormatter:
             if isinstance(value, (int, float, bool)) or value is None:
                 digest[str(key)] = value
                 continue
-            text = value if isinstance(value, str) else str(value)
-            digest[str(key)] = (text[:117] + "…") if len(text) > 120 else text
+            digest[str(key)] = shown_on_the_card(value if isinstance(value, str) else str(value))
         return digest
     
     @staticmethod

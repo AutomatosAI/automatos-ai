@@ -48,6 +48,14 @@ Night 9 (F309):
 - platform_update_task with a status now moves the card (``ticket_edit_moves``), so its
   move to Done is an approval the guard judges like platform_update_task_status's.
 
+PRD-256 FX-003 (night 12, B1, F386): "Approve #0953 — looks good", "cancel #0953" and
+"delete every done card" got the signature refusal and no card: this guard ran before the
+owner's click was asked for. An owner-only call (``owner_only.is_owner_only``) in a chat a
+person drives now skips the signature rule (``_not_their_words``): it raises the approval
+card, which shows the call's note, and the click signs the move (``CLICKED_BY``). The
+rule still judges every write that is not owner-only (a note on a card it does not close),
+and a note or brief longer than the card shows whole.
+
 Outside a person's chat (a ticket, a playbook step, a heartbeat) nothing is checked.
 """
 from __future__ import annotations
@@ -62,6 +70,8 @@ from sqlalchemy.orm import Session
 
 from modules.tools.discovery.brand_turns import refusal_on_a_brand_turn
 from modules.tools.discovery.card_words_said import owners_card_words
+from modules.tools.discovery.owner_only import human_driven, is_owner_only
+from modules.tools.formatting.card_digest import fits_on_the_card
 from modules.tools.discovery.owner_turn import (
     AGAIN, GIVE, MISSION_CARD, NEW_CARD, NEW_MISSION, OTHER_VERB, RUN_CARD, SEND_BACK, SENDS_IT_BACK, STEP_CARD,
     UPDATE, NamedCard, OwnerTurn, autos_proposal, card_kind, card_words, names_card, owner_turn,
@@ -149,7 +159,7 @@ def refusal_for(db: Session, workspace_id: Any, action: str, params: Any, caller
         if turn is None:
             return None
         params = _as_dict(params)
-        for rule in RULES:
+        for rule in _rules_for(action, params, caller_context):
             refusal = rule(db, workspace_id, turn, action, params)
             if refusal:
                 return refusal
@@ -157,6 +167,22 @@ def refusal_for(db: Session, workspace_id: Any, action: str, params: Any, caller
     except Exception:
         logger.exception("[follows_the_owner] could not check %s against the owner's words", action)
         return None
+
+
+def _rules_for(action: str, params: Dict[str, Any], caller_context: Any) -> tuple:
+    """The rules a call is judged by. An owner-only call a person's turn makes waits for
+    their click on the approval card, which shows the call: the card is their words, so
+    the signature rule does not refuse it (FX-003). The card comes before that rule.
+    Words longer than the card shows whole are still judged: the click signs only what
+    the owner read."""
+    if human_driven(caller_context) and is_owner_only(action, params) and _the_card_shows_its_words(params):
+        return CARD_RULES
+    return RULES
+
+
+def _the_card_shows_its_words(params: Dict[str, Any]) -> bool:
+    """The card shows every note and brief the call would write, whole (card_digest)."""
+    return all(fits_on_the_card(str(params.get(key) or "")) for key in (*NOTE_KEYS, "description"))
 
 
 def _as_dict(params: Any) -> Dict[str, Any]:
@@ -432,5 +458,7 @@ def _quoted(text: str) -> str:
 
 RULES = (_wrong_kind, _not_a_mission, _a_question_for_a_send_back, _not_the_card, _a_copy, _not_their_words,
          _a_rerun_for_a_send_back, _a_new_brief_for_a_send_back)
+# FX-003: an owner-only call's note and brief are on the approval card the owner clicks.
+CARD_RULES = tuple(rule for rule in RULES if rule is not _not_their_words)
 
 __all__ = ["CARD_ACTIONS", "follows_the_owner", "refusal_for", "right_call", "share_of_words"]
