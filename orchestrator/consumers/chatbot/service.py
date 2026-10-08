@@ -54,9 +54,6 @@ from consumers.chatbot.tool_router import get_tool_router
 # Async-native entries: the chat hot path must never bridge the narrowing
 # embed through a helper thread (freezes the event loop for its duration).
 from modules.tools.tool_router import (
-    _rank_actions_for_dispatcher_async,
-    _semantic_routing_enabled,
-    _semantic_routing_top_k,
     get_tools_for_agent_async,
 )
 from services.page_context import (
@@ -68,6 +65,7 @@ from consumers.chatbot.empty_completion import is_empty_completion, with_fallbac
 from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
+from consumers.chatbot.on_screen import keeps_one_answer_on_screen, settles_held_retractions  # FX-017
 from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's calls did, written by the platform
     claims_work_done, current_receipts, its_reads_are_receipted, notes_the_answering_model,
     the_answer_takes_the_receipts, says_nothing_was_done, the_loop_writes_receipts, writes_its_receipts,
@@ -1516,6 +1514,7 @@ class StreamingChatService:
         return additions
 
     @the_loop_writes_receipts  # PRD-256 US-001: the loop's receipts, from its tracker, before the answer
+    @settles_held_retractions  # FX-017: a retraction held after a blank retry goes out only if replaced
     async def _stream_tool_loop(
         self,
         response,
@@ -2483,6 +2482,7 @@ class StreamingChatService:
                 logger.debug("[chat] the turn's workspace could not be resolved for its tool scope", exc_info=True)
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
+    @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,

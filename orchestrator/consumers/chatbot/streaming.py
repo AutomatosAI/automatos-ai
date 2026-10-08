@@ -13,6 +13,8 @@ import logging
 from typing import Dict, Any, AsyncGenerator, List, Optional
 import asyncio
 
+from consumers.chatbot import on_screen
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,8 +51,15 @@ class StreamingHandler:
     def format_aisdk_narration(self, text: str, retracted: bool = False) -> str:
         """F186: the text just streamed was not the answer. The round ended in
         tool calls, so it is narration and belongs with the progress lines; or,
-        ``retracted``, the loop nudged it (F108) and the retry replaces it."""
-        return self.format_aisdk_data("narration", {"text": text, **({"retracted": True} if retracted else {})})
+        ``retracted``, the loop nudged it (F108) and the retry replaces it.
+        FX-017: ``text`` is the round's answer; the frame carries what that round
+        streamed, and a retraction whose replacement is blank is held (``""``)."""
+        said = on_screen.retracted(text) if retracted else on_screen.narrated(text)
+        return "" if said is None else self.narration_frame(said, retracted)
+
+    def narration_frame(self, said: str, retracted: bool = False) -> str:
+        """The narration frame for ``said``, the exact text a round streamed."""
+        return self.format_aisdk_data("narration", {"text": said, **({"retracted": True} if retracted else {})})
 
     def format_aisdk_limit_reached(self, limit: str, value: int, message: str) -> str:
         """Format a limit_reached event so the user is told an agent stopped
