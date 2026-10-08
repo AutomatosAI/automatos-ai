@@ -55,4 +55,5 @@ Nothing runs on the owner's machine (no pytest, npm, tsc, docker, server, browse
 ## Completion
 
 - **All ACs DONE** (`→ OWNER:` excepted): run `bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, fix what is red in signed ` [skip ci]` commits, then ONE signed commit WITHOUT `[skip ci]` (`chore(prd-256): night-12 fix wave built, run CI`), and reply `RALPH_COMPLETE`.
+- **Already built and tested:** if every AC is DONE and the last commit that touches anything outside `scripts/ralph/` is the wave's CI commit (`chore(prd-256): night-12 fix wave built, run CI`), make NO commit at all (the runner reads that commit's run; a new commit would start a needless third run): reply `RALPH_COMPLETE` and nothing else.
 - **A story can't be built without breaking a Hard NO:** reply `RALPH_BLOCKED` with one line of why and the evidence (this stops the wave: no PR, no CI). Use it for a real contradiction only; a story that needs a judgement call takes the smaller change and says so in its DONE mark.
