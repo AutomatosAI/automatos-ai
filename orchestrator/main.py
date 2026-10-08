@@ -131,7 +131,7 @@ from api.dashboard_integration import (
 )
 
 # WebSocket manager removed - using AI SDK SSE streaming instead
-from core.observability.otel import annotate_request, instrument_app, with_tracing
+from core.observability.otel import annotate_request, instrument_app, instrument_libraries, with_tracing
 from core.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
@@ -977,7 +977,9 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID", "X-Request-ID"],
+    # traceparent/tracestate (PRD-256 O2a): a browser that starts a trace can continue it here.
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID", "X-Request-ID",
+                   "traceparent", "tracestate"],
     expose_headers=["X-Request-ID", "X-Routing-Agent-ID", "X-Routing-Confidence", "X-Routing-Type", "X-Routing-Reasoning", "X-Routing-Request-ID"],
 )
 
@@ -1080,6 +1082,7 @@ install_request_context_logging()
 # PRD-256 (#847): a server span per request, when OTEL_ENABLED. It wraps the whole
 # middleware stack, so it must be in place before the first ASGI call (the lifespan's).
 instrument_app(app)
+instrument_libraries()   # PRD-256 O2a: SQL, Redis, outbound HTTP and AWS spans under each request
 
 @app.middleware("http")
 async def add_request_id_middleware(request, call_next):
