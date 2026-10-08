@@ -350,10 +350,9 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 # F133 / F148: the actions whose handlers are told who the call is made for
 # (server-injected _driving_user_id / _driving_super_admin; see execute()).
 _DRIVER_AWARE_ACTIONS = (
-    "platform_create_playbook",
+    "platform_create_playbook", "platform_resume_context",   # FX-015: on local the person is the viewer
     "platform_invite_member",
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
-    "platform_resume_context",   # FX-015: on the local edition the person is the viewer (memory_owner)
 )
 
 
