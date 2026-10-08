@@ -32,6 +32,7 @@ import re
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from consumers.chatbot.claim_check import NOT_DONE, NOTHING_DONE
+from modules.tools.execution.composio_action import is_slug, slug_stems
 
 Receipt = Dict[str, Any]
 Backs = Callable[[Receipt], bool]
@@ -86,16 +87,28 @@ def _stem(r: Receipt) -> str:
     return str(r.get("action") or "").lower().removeprefix("platform_")
 
 
+def _composio(r: Receipt) -> bool:
+    return is_slug(str(r.get("action") or ""))
+
+
+def _stems(r: Receipt) -> Tuple[str, ...]:
+    """What a receipt's action is read by: a platform call's name, or each word of the Composio
+    action that ran (P256-FIX-RVW-5: HUBSPOT_CREATE_CONTACT is "create_", "contact_"; a send
+    word is "send_"), so a write backs only the claims its own verbs say."""
+    return slug_stems(str(r["action"])) if _composio(r) else (_stem(r),)
+
+
 def _effect(r: Receipt) -> str:
     return str(r.get("effect") or "").lower()
 
 
 def _starts(*prefixes: str) -> Backs:
-    return lambda r: _stem(r).startswith(prefixes)
+    return lambda r: any(stem.startswith(prefixes) for stem in _stems(r))
 
 
 def _has(*words: str) -> Backs:
-    return lambda r: any(word in _stem(r) for word in words)
+    """A word in the call's name; in a Composio slug, a whole word ("email" is no "mail")."""
+    return lambda r: any(f"{word}_" in _stems(r) if _composio(r) else word in _stem(r) for word in words)
 
 
 def _says(*effects: str) -> Backs:
@@ -107,7 +120,6 @@ def _any(*tests: Backs) -> Backs:
 
 
 _CARD_MOVES = ("update_task_status", "update_task", "send_back")
-COMPOSIO = "composio"
 
 
 _MOVE_EFFECTS = ("moved to", "sent back", "started", "marked blocked")
@@ -210,20 +222,14 @@ def claims_work_done(answer: str) -> bool:
     return bool(claims(answer))
 
 
-def _integration(r: Receipt) -> bool:
-    """A Composio write: its receipt names the dispatcher, not the app's action (GMAIL_SEND_EMAIL,
-    a HubSpot update), so it backs a claim of any family rather than deny one it may have done."""
-    return _stem(r).startswith(COMPOSIO)
-
-
 def unbacked_claims(answer: str, done_writes: Sequence[Receipt]) -> List[Tuple[str, bool]]:
     """The answer's claims no done write backs: (the verb, whether its family is known). A
-    claim of a known family needs a done write of that family (or an integration's); any
-    other needs any done write."""
+    claim of a known family needs a done write of that family (a Composio action's by the
+    words of its slug); any other needs any done write."""
     unbacked = []
     for verb, sentence in claims(answer):
         backs = _family(verb, sentence)
-        backed = any(_integration(r) or backs(r) for r in done_writes) if backs else bool(done_writes)
+        backed = any(backs(r) for r in done_writes) if backs else bool(done_writes)
         if not backed:
             unbacked.append((verb, backs is not None))
     return unbacked

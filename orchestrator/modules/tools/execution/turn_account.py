@@ -13,7 +13,7 @@ of the turn's calls, from their results: each change that went through, by card
 number and where it is now when the result says so; how many did not go through;
 and, when nothing changed, that nothing did. Refusals are the model's to read and
 are never quoted (they name calls on purpose). Agent runs keep their own
-empty-answer handling. Stdlib only.
+empty-answer handling. Stdlib only, beside the Composio slug reader (composio_action).
 """
 from __future__ import annotations
 
@@ -60,6 +60,11 @@ def _failed(result: Any) -> bool:
 
 
 def is_read(action: str) -> bool:
+    """A call that only looks; a Composio action by its slug's whole words (P256-FIX-RVW-5)."""
+    from .composio_action import is_slug, slug_reads
+
+    if is_slug(action):
+        return slug_reads(action)
     name = action.lower()
     return any(stem in name for stem in _READS)
 

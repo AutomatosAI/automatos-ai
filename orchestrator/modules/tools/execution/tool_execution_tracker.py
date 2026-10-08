@@ -144,6 +144,14 @@ class ToolExecutionTracker:
                 return f"platform_execute:{action}"
         return tool_name
 
+    def _recorded_as(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
+        """The action a call is recorded under: platform_execute's inner action, composio_execute's
+        slug (P256-FIX-RVW-5: the receipts read what ran, never the dispatcher), else the call's name.
+        Counting stays by ``_counting_key``: one cap for every composio_execute call."""
+        from .composio_action import action_that_ran
+
+        return action_that_ran(tool_name, tool_args) or self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+
     def _resolve_limit(self, counting_key: str) -> int:
         """Resolve the retry limit for a counting key, honouring prefix defaults."""
         if counting_key in self.TOOL_RETRY_LIMITS:
@@ -166,7 +174,7 @@ class ToolExecutionTracker:
 
         skip, reason = self._skip_reason(tool_name, tool_args)
         if skip:
-            action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+            action = self._recorded_as(tool_name, tool_args)
             self.skipped.append((action, call_params(tool_name, tool_args), reason))
         return skip, reason
 
@@ -238,7 +246,7 @@ class ToolExecutionTracker:
         from .call_effects import call_params, done_effects, refused_effects, what_it_said
         from .card_raised import for_the_model
 
-        action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+        action = self._recorded_as(tool_name, tool_args)
         self.outcomes.append((action, call_params(tool_name, tool_args), result))
         card = for_the_model(result, action)
         if card:
