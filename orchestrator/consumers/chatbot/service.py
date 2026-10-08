@@ -74,6 +74,7 @@ from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
 )
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
+from consumers.chatbot.same_failure import MAX_IDENTICAL_TOOL_FAILURES, same_failure_key as _same_failure_key  # F030
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.named_template_note import fills_the_named_template  # F351 (night 10b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
@@ -221,27 +222,6 @@ def atom_identity_clause(user_name: Optional[str]) -> str:
     """
     name = user_name.strip() if isinstance(user_name, str) else ""
     return f" You're talking to {name}." if name else ""
-
-
-# How many times the same tool may fail the same way in one turn before the
-# loop stops handing it back as if the next attempt might differ (F030).
-MAX_IDENTICAL_TOOL_FAILURES = 2
-
-
-def _same_failure_key(tool_name: str, result: Dict[str, Any]) -> Optional[str]:
-    """A key identifying "this tool, failing this way", or None if it succeeded.
-
-    Keyed on the first line of the error so a retry with different arguments
-    that fails for the SAME reason still counts — a missing backend does not
-    care what you asked it for.
-    """
-    if result.get("success"):
-        return None
-    error = str(result.get("error") or (result.get("raw_result") or {}).get("error") or "").strip()
-    if not error:
-        return None
-    return f"{tool_name}:{error.splitlines()[0][:120]}"
-
 
 
 def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:

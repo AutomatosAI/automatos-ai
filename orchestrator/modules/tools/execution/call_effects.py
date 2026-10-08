@@ -121,6 +121,16 @@ def answers_in(result: Any) -> List[Dict[str, Any]]:
     return found
 
 
+def what_it_said(result: Any) -> str:
+    """P256-FIX-RVW-4: what a call that failed said (its ``error``, else its ``message``), read
+    from its answer or the answer inside the chat's envelope; '' when none says."""
+    for answer in answers_in(result):
+        said = answer.get("error") or answer.get("message")
+        if said:
+            return str(said).strip()
+    return ""
+
+
 def result_effects(result: Any) -> Tuple[str, ...]:
     """What a call's answer says it did beyond its name: left a mission's steps waiting
     for the owner's check or running on unchecked (F308), sent a card back (F319), or
@@ -168,4 +178,4 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
 
 __all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "REVIEWED_BY_YOU", "SENT_BACK_SAID", "STATUS_IGNORED_SAID", "STATUS_WORDS",
            "STEPS_CHECKED", "STEPS_UNCHECKED", "answers_in", "call_effects", "call_params", "done_effects",
-           "refused_effects", "result_effects"]
+           "refused_effects", "result_effects", "what_it_said"]
