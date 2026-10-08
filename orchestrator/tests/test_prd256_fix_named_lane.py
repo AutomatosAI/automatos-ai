@@ -1,0 +1,143 @@
+"""PRD-256 FX-014 (E5): a named agent gets its ticket without the classifier, and a shared name is asked about.
+
+Night 12: ``handoffs.the_lane`` turned a named agent into a ticket only on a DELEGATE verdict, which the
+rubric no longer offers, so "Get OPS to…" and "Ask RESEARCHER…" stayed with Auto; "Give #1057 to
+CHRISTMAS BOX" was no hand-on at all (only a card numbered #0xxx was read as one); and with two
+agents called OPS, "Get OPS to…" could only fail. Here, through the dispatch (``lane_for``):
+
+- a name shared by several active agents is an ASSIGN turn that asks which, listing each as FX-012's
+  refusal does, and never files a copy; the dispatch keeps that directive over the ticket's;
+- the answer, "267, the operations one", is OPS 267's ticket, filed by its agent_id;
+- a bare number is an answer to any numbered question: it hands nothing over.
+
+No model is called and no database is opened: the roster is the test's.
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace as NS
+
+import pytest
+
+from api.chat_dispatch import lane_for
+from consumers.chatbot.addressed_agents import id_reply
+from consumers.chatbot.auto import ASSIGN_TOOL_HINTS, Action, AutoBrain, Complexity, ComplexityAssessment
+from consumers.chatbot.handoffs import the_lane
+
+AUTO = 1
+OPS, SHOP_OPS = 267, 284
+ROSTER = [
+    NS(id=AUTO, name="Auto", job_title="Workspace orchestrator", is_system_agent=True),
+    NS(id=2, name="NEWSROOM", job_title="Newsletter editor"),
+    NS(id=30, name="TRACKER", job_title="Order tracker"),
+    NS(id=57, name="RESEARCHER", job_title="Market researcher"),
+    NS(id=OPS, name="OPS", job_title="Operations Manager"),
+    NS(id=SHOP_OPS, name="OPS", job_title="Shop floor assistant"),
+    NS(id=412, name="CHRISTMAS BOX", job_title="Seasonal buyer"),
+]
+CANDIDATES = "267 · OPS · Operations Manager; 284 · OPS · Shop floor assistant"
+
+
+class _Brain:
+    _match_roster_agent = AutoBrain._match_roster_agent
+
+    def _active_agents(self):
+        return ROSTER
+
+
+def _turn(said, action=Action.RESPOND):
+    """The lane the dispatch runs for ``said`` when the tiers said ``action`` (night 12: RESPOND)."""
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=action, reasoning="tiers")
+    return lane_for(AUTO, the_lane(_Brain(), said, tiers), said)
+
+
+# ── a shared name: Auto asks which, and files nothing ─────────────────────────
+
+@pytest.mark.parametrize("action", [Action.RESPOND, Action.ASSIGN, Action.MISSION])
+def test_get_ops_to_with_two_ops_asks_which_listing_both(action):
+    lane = _turn("Get OPS to reorder the green stock under 50 kg.", action)
+    verdict = lane.assessment
+
+    assert lane.agent_id == AUTO and verdict.action == Action.ASSIGN and not lane.suggest_mission
+    assert (verdict.target_agent_id, verdict.target_agent_name) == (None, "OPS")
+    assert set(ASSIGN_TOOL_HINTS) <= set(verdict.tool_hints)
+    directive = verdict.context_directive
+    assert "ask which agent" in directive and CANDIDATES in directive
+    assert "do NOT create a new agent" in directive and "do NOT file anything yet" in directive
+    assert "platform_create_task and that agent's agent_id" in directive
+    assert "confirm the agent first" not in directive       # the ticket's own directive did not replace it
+
+
+def test_a_card_given_to_a_shared_name_asks_which_and_never_makes_a_card():
+    directive = _turn("Give #1057 to OPS").assessment.context_directive
+
+    assert CANDIDATES in directive
+    assert 'platform_assign_task with task_id "#1057"' in directive and "platform_create_task" not in directive
+
+
+# ── the answer: the id picks the agent ────────────────────────────────────────
+
+@pytest.mark.parametrize("said, agent_id", [
+    ("267, the operations one", OPS),
+    ("284 — the shop floor one, please", SHOP_OPS),
+    ("267 (ops)", OPS),
+    ("agent 284", SHOP_OPS),
+])
+def test_the_id_given_after_the_clash_is_that_agents_ticket_by_its_id(said, agent_id):
+    verdict = _turn(said).assessment
+
+    assert (verdict.action, verdict.target_agent_id, verdict.target_agent_name) == (Action.ASSIGN, agent_id, "OPS")
+    assert f'assigned_agent_name="OPS" and agent_id={agent_id}' in verdict.context_directive
+
+
+@pytest.mark.parametrize("said", [
+    "2",                                    # an answer to "option 1 or 2?"
+    "30, the big bags",                     # agent 30 is the TRACKER, not bags
+    "267, the operations one, and also please send the Kerbside invoice tonight",   # too long for an answer
+    "999, the operations one",              # nobody has that id
+    "1, the workspace one",                 # Auto never takes a ticket
+])
+def test_a_number_that_does_not_pick_an_agent_hands_nothing_over(said):
+    assert _turn(said).assessment.action == Action.RESPOND
+    assert id_reply(said, [agent for agent in ROSTER if agent.id != AUTO]) is None
+
+
+# ── names and cards ───────────────────────────────────────────────────────────
+
+def test_a_card_past_0999_is_handed_on_by_its_agent_id():
+    verdict = _turn("Give #1057 to CHRISTMAS BOX").assessment
+
+    assert (verdict.action, verdict.target_agent_id) == (Action.ASSIGN, 412)
+    assert 'task_id "#1057" and agent_name "CHRISTMAS BOX" and agent_id 412' in verdict.context_directive
+
+
+def test_a_named_agent_is_its_ticket_by_its_agent_id_whatever_the_tiers_said():
+    verdict = _turn("Ask RESEARCHER to find three cafés in Leith.", Action.MISSION).assessment
+
+    assert (verdict.action, verdict.target_agent_id) == (Action.ASSIGN, 57)
+    assert 'assigned_agent_name="RESEARCHER" and agent_id=57' in verdict.context_directive
+
+
+def test_an_orders_number_is_no_card():
+    verdict = _turn("Ask RESEARCHER to chase order #1043").assessment
+
+    assert (verdict.action, verdict.target_agent_id) == (Action.ASSIGN, 57)
+    assert "hand the card on" not in verdict.context_directive
+
+
+@pytest.mark.parametrize("said", [
+    "Approve #1057, tell RESEARCHER thanks",          # the owner's act on a card stays Auto's
+    "What did RESEARCHER say about the Leith cafés?",
+    "Delete MARKET-MANAGER and OPS",
+])
+def test_a_name_only_mentioned_or_a_card_acted_on_stays_autos(said):
+    lane = _turn(said)
+
+    assert (lane.agent_id, lane.assessment.action, lane.assessment.target_agent_id) == (AUTO, Action.RESPOND, None)
+
+
+def test_a_mission_that_names_several_agents_stays_the_mission():
+    lane = _turn("Have RESEARCHER and CHRISTMAS BOX plan the Christmas launch together", Action.MISSION)
+
+    assert lane.assessment.action == Action.MISSION and lane.suggest_mission is True
+    assert _turn("Have RESEARCHER and CHRISTMAS BOX plan the Christmas launch together").assessment.action == \
+        Action.ASSIGN                                       # the tiers said respond: the addressed one has it

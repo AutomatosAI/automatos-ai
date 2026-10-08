@@ -286,5 +286,194 @@
    "lane": "tiers",
    "note": null
   }
- ]
+ ],
+ "night12": {
+  "roster": [
+   {
+    "id": 2,
+    "name": "NEWSROOM",
+    "job_title": "Newsletter editor"
+   },
+   {
+    "id": 1,
+    "name": "Auto",
+    "job_title": "Workspace orchestrator",
+    "is_system_agent": true
+   },
+   {
+    "id": 57,
+    "name": "RESEARCHER",
+    "job_title": "Market researcher"
+   },
+   {
+    "id": 58,
+    "name": "WRITER",
+    "job_title": "Copywriter"
+   },
+   {
+    "id": 267,
+    "name": "OPS",
+    "job_title": "Operations Manager"
+   },
+   {
+    "id": 284,
+    "name": "OPS",
+    "job_title": "Shop floor assistant"
+   },
+   {
+    "id": 412,
+    "name": "CHRISTMAS BOX",
+    "job_title": "Seasonal buyer"
+   },
+   {
+    "id": 455,
+    "name": "MARKET-MANAGER",
+    "job_title": "Market stall manager"
+   },
+   {
+    "id": 501,
+    "name": "GREEN BUYER",
+    "job_title": "Green coffee buyer"
+   },
+   {
+    "id": 502,
+    "name": "CLUB DESK",
+    "job_title": "Club member desk"
+   }
+  ],
+  "routes": [
+   {
+    "said": "Get OPS to reorder the green stock under 50 kg.",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Get RESEARCHER to price the Kerbside wholesale offer against two competitors.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Get GREEN BUYER to check how much Kirinyaga we have left.",
+    "lane": "ASSIGN 501 GREEN BUYER"
+   },
+   {
+    "said": "Get WRITER to draft the club member email for the Christmas box.",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "Get CLUB DESK to answer the three member questions in the inbox, no rush.",
+    "lane": "ASSIGN 502 CLUB DESK"
+   },
+   {
+    "said": "Can you get MARKET-MANAGER to book the Saturday pitch?",
+    "lane": "ASSIGN 455 MARKET-MANAGER"
+   },
+   {
+    "said": "Ask RESEARCHER to find three cafés in Leith that don't stock us yet.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Ask RESEARCHER what the going rate for 1 kg of Harbour Blend is.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Ask OPS to confirm the Kerbside delivery for Friday.",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Ask CHRISTMAS BOX to count how many boxes are left.",
+    "lane": "ASSIGN 412 CHRISTMAS BOX"
+   },
+   {
+    "said": "Please ask GREEN BUYER to get a price from the importer.",
+    "lane": "ASSIGN 501 GREEN BUYER"
+   },
+   {
+    "said": "Have MARKET-MANAGER pull last month's stall takings.",
+    "lane": "ASSIGN 455 MARKET-MANAGER"
+   },
+   {
+    "said": "Have WRITER tidy up the About page copy.",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "Have OPS ring the roaster about the late delivery.",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Tell CLUB DESK the Christmas box ships on 1 December.",
+    "lane": "ASSIGN 502 CLUB DESK"
+   },
+   {
+    "said": "Let CHRISTMAS BOX know we have 120 orders now.",
+    "lane": "ASSIGN 412 CHRISTMAS BOX"
+   },
+   {
+    "said": "Give #1057 to CHRISTMAS BOX",
+    "lane": "ASSIGN 412 CHRISTMAS BOX"
+   },
+   {
+    "said": "Assign #1041 to GREEN BUYER, please.",
+    "lane": "ASSIGN 501 GREEN BUYER"
+   },
+   {
+    "said": "Hand #0953 over to RESEARCHER.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Give #1057 to OPS",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Reassign ticket 1062 to WRITER",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "267, the operations one",
+    "lane": "ASSIGN 267 OPS"
+   },
+   {
+    "said": "284 — the shop floor one, please",
+    "lane": "ASSIGN 284 OPS"
+   },
+   {
+    "said": "agent 267",
+    "lane": "ASSIGN 267 OPS"
+   },
+   {
+    "said": "What did RESEARCHER say about the Leith cafés?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Is OPS still working on #1041?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Delete MARKET-MANAGER",
+    "lane": "tiers"
+   },
+   {
+    "said": "Delete MARKET-MANAGER, we don't need it any more.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Change GREEN BUYER's heartbeat to every morning at 7.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Set up something every Wednesday to remind CLUB DESK to post the member update.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Set up something every Wednesday that checks the green stock.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Which agents did you create for me last night?",
+    "lane": "tiers"
+   },
+   {
+    "said": "2",
+    "lane": "tiers"
+   }
+  ]
+ }
 }

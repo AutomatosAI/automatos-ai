@@ -104,7 +104,7 @@ def is_deferred_phrasing(message_text: Optional[str]) -> bool:
 
 
 def build_assign_directive(
-    *, target_agent_name: Optional[str], resolved: bool, deferred: bool
+    *, target_agent_name: Optional[str], resolved: bool, deferred: bool, target_agent_id: Optional[int] = None
 ) -> str:
     """The ASSIGN-lane manager directive injected into Auto's system prompt.
 
@@ -135,7 +135,7 @@ def build_assign_directive(
             "description written as the 4-part dispatch contract below (the "
             "assigned agent must do the work from it alone, without reading this "
             "conversation), "
-            f"assigned_agent_name=\"{target_agent_name}\".\n"
+            f"assigned_agent_name=\"{target_agent_name}\"{f' and agent_id={target_agent_id}' if target_agent_id else ''}.\n"
             f"2. {start}\n"
             f"3. Confirm in ONE line with the task id and that it is {confirm_word}, "
             "then state its supervision status by echoing the platform_create_task "
@@ -174,7 +174,7 @@ def apply_assign_bias(assessment: "ComplexityAssessment", message_text: Optional
     assessment.context_directive = build_assign_directive(
         target_agent_name=assessment.target_agent_name,
         resolved=assessment.target_agent_id is not None,
-        deferred=deferred,
+        deferred=deferred, target_agent_id=assessment.target_agent_id,  # FX-014: a shared name is refused
     )
     return deferred
 
@@ -778,6 +778,7 @@ _ASSESSMENT_OUTPUT = """Return ONLY valid JSON:
 }
 
 action mapping: "respond" for anything you answer in this chat, atom or tool work; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
+complexity is ONLY one of atom|molecule|cell|organ|organism and action ONLY one of respond|assign|mission: a lane word never goes in complexity.
 target_agent: for "assign", the agent name the user named (or the role, e.g. "accountant") — it MUST appear in the user's own words; a request addressed to you ("can you…", "please close…") with no named assignee is NOT assign; empty otherwise.
 tool_hints: short domain keywords like "email", "github", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
 
@@ -1314,97 +1315,39 @@ class AutoBrain:
     async def _llm_classify(
         self, message: str, conversation_length: int
     ) -> ComplexityAssessment:
+        """Tier 3: a lightweight LLM gives the level, the lane, the named agent and the tool hints.
+
+        PRD-256 FX-014: the verdict is read field by field (``verdict_parser``): the action and the
+        target agent first, and a complexity that is no level defaults without losing the rest. Only a
+        failed call or a reply with no JSON object gives MOLECULE/RESPOND: tools kept, lane lost.
         """
-        Classify an incoming message's execution complexity and routing using a lightweight LLM.
-        
-        Sends a structured classification prompt to an LLM to determine complexity (atom|molecule|cell|organ|organism),
-        recommended action (respond|delegate|workflow), tool hints, memory and multi-agent needs, and a short reasoning
-        string. If LLM classification fails, returns an ATOM/RESPOND fallback assessment with reduced confidence.
-        
-        Parameters:
-            message (str): The user message to classify.
-            conversation_length (int): The current conversation turn count (used to provide context to the classifier).
-        
-        Returns:
-            ComplexityAssessment: An assessment containing complexity, action, reasoning, confidence, needs_memory,
-            tool_hints, and needs_multi_agent. On LLM failure this will be an ATOM/RESPOND assessment with lower confidence.
-        """
+        from consumers.chatbot.verdict_parser import LOST_THE_LANE, lost_the_lane, read_verdict, to_assessment
+
         logger.info("[AutoBrain] Tier 3 LLM classifying: '%s'", message[:80])
         t0 = time.monotonic()
-
-        # PRD-164 S1 (Q61): the one planning pack informs routing decisions.
-        # PRD-224 US-004: fetch the roster once — it drives BOTH the routing
-        # context block and the ASSIGN-lane name match below.
+        # PRD-224 US-004: one roster read drives the routing context AND the ASSIGN name match.
         roster = self._active_agents()
         platform_context = await self._planning_context_block(message, roster)
         prompt = build_assessment_prompt(message, conversation_length, platform_context)
-
         try:
             from core.llm import create_llm_manager
 
             llm = create_llm_manager(service_name="complexity_assessor", workspace_id=self._workspace_id, request_type="complexity_assessor")
-            response = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}]
-            )
-            content = response.content if hasattr(response, "content") else str(response)
-
-            # Extract JSON block
-            json_match = re.search(r"\{.*\}", content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-                elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
-                # PRD-125: "workflow" → MISSION (deprecated alias, back-compat).
-                action = self._normalize_action(data.get("action", "respond"))
-                # PRD-224 US-004: on the ASSIGN lane, resolve the named agent
-                # against the SAME roster shown to the classifier. An unresolved
-                # name keeps target_agent_id None → api/chat.py asks in-thread
-                # (baked decision: never reflexive matcher auto-pick).
-                target_agent_id = None
-                target_agent_name = None
-                if action == Action.ASSIGN:
-                    proposed = (data.get("target_agent") or "").strip()
-                    target_agent_id, target_agent_name = self._match_roster_agent(
-                        proposed, roster, message=message
-                    )
-                    if target_agent_name is None and proposed:
-                        target_agent_name = proposed  # keep the name for the ask
-                assessment = ComplexityAssessment(
-                    complexity=Complexity(data.get("complexity", "atom").lower()),
-                    action=action,
-                    reasoning=data.get("reasoning", "LLM classified"),
-                    confidence=0.85,
-                    target_agent_id=target_agent_id,
-                    target_agent_name=target_agent_name,
-                    needs_memory=data.get("needs_memory", False),
-                    tool_hints=data.get("tool_hints", []),
-                    needs_multi_agent=data.get("needs_multi_agent", False),
-                )
-                logger.info(
-                    "[AutoBrain] assessed",
-                    extra={
-                        "tier": 3,
-                        "complexity": assessment.complexity.value,
-                        "action": assessment.action.value,
-                        "confidence": assessment.confidence,
-                        "latency_ms": elapsed_ms,
-                        "cache_hit": False,
-                        "workspace_id": self._workspace_id,
-                    },
-                )
-                return assessment
-        except Exception:
-            logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to ATOM")
-
-        # Fallback: treat as MOLECULE / RESPOND so tools remain available.
-        # Rationale: a wrong MOLECULE only adds tool schemas to the context
-        # (model still decides via tool_choice=auto). A wrong ATOM strips
-        # tools entirely, making the agent unable to fulfil action requests.
-        return ComplexityAssessment(
-            complexity=Complexity.MOLECULE, action=Action.RESPOND,
-            reasoning="LLM classification failed — defaulting to MOLECULE (tools available)",
-            confidence=0.50, needs_memory=False, tool_hints=[],
-            needs_multi_agent=False,
+            response = await llm.generate_response(messages=[{"role": "user", "content": prompt}])
+            verdict = read_verdict(response.content if hasattr(response, "content") else str(response))
+        except Exception as exc:
+            logger.exception(LOST_THE_LANE, exc)
+            return lost_the_lane()
+        assessment = to_assessment(verdict, lambda name: self._match_roster_agent(name, roster, message=message))
+        logger.info(
+            "[AutoBrain] assessed",
+            extra={
+                "tier": 3, "complexity": assessment.complexity.value, "action": assessment.action.value,
+                "confidence": assessment.confidence, "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+                "cache_hit": False, "workspace_id": self._workspace_id,
+            },
         )
+        return assessment
 
     # ------------------------------------------------------------------
     # Redis cache (Tier 1)

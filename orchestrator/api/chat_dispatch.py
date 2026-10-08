@@ -56,9 +56,13 @@ def chosen_agent_lane(db: Session, agent_id: int) -> TurnLane:
 
 def _assign_lane(auto_agent_id: int, assessment: ComplexityAssessment, message_text: str) -> TurnLane:
     """PRD-224 US-004: Auto files the board ticket for the named agent, then confirms in
-    one line. Checked before the platform hint so a "platform" hint can't collapse it."""
+    one line. Checked before the platform hint so a "platform" hint can't collapse it. A directive
+    the lane already wrote (FX-014: several agents carry the name, so Auto asks which) is kept."""
+    asks_which = assessment.context_directive
     deferred = apply_assign_bias(assessment, message_text)
     assessment = with_card_directive(assessment, message_text, deferred=deferred)
+    if asks_which:
+        assessment = dataclasses.replace(assessment, context_directive=asks_which)
     logger.info(
         "[Auto] ASSIGN lane — agent=%r resolved=%s deferred=%s: agent_id=%s",
         assessment.target_agent_name, assessment.target_agent_id is not None, deferred, auto_agent_id,

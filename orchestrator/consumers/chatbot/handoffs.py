@@ -28,6 +28,11 @@ DELEGATE verdict is Auto's to answer (RESPOND) with its platform tools; a card h
 agent ("Give #0192 to the Support Agent") is the ASSIGN lane on that card, never a copy (F241);
 Auto itself is never the agent a ticket goes to. Only the owner's own choice of agent in the UI
 (``request.agentId``) puts another agent on the chat.
+
+FX-014 (night 12): the hand-over is read from the roster whatever the tiers said, not only on a
+DELEGATE verdict the rubric no longer offers: "Get OPS to …", "Give #1057 to CHRISTMAS BOX" and the
+id given after a clash ("267, the operations one") are that agent's ticket; a name several active
+agents carry asks which (``addressed_agents``); a mission naming several teammates stays a mission.
 """
 from __future__ import annotations
 
@@ -39,6 +44,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
+from consumers.chatbot.addressed_agents import ID_REPLY, clash_directive, id_reply, joined_with_another, shared_name
 from consumers.chatbot.board_questions import CARD_NUMBER
 
 logger = logging.getLogger(__name__)
@@ -443,9 +449,15 @@ MIN_NAME_CHARS = 3
 REASONING_ANSWERS = "PRD-256 D2: Auto answers; no specialist takes over the chat"
 REASONING_NAMED = "PRD-256 D2: the named agent gets a ticket"
 REASONING_CARD = "PRD-256 D2 / F241: the named card goes to the named agent"
+REASONING_ID = "PRD-256 FX-014: the agent the owner picked by its id gets the ticket"
+REASONING_ASK = "PRD-256 FX-014: several active agents carry the name, so Auto asks which"
 # "give #0192 to …", "assign ticket 12 to …", "hand #0192 over to …": the card sits between the
 # verb and the first "to" after it. "Move #0192 to review" is a status, so "move" is no verb.
 HANDS_ON = re.compile(r"\b(?:give|assign|reassign|hand)\b(?P<what>[^.?!\n]*?)\bto\b", re.IGNORECASE)
+# A card handed on by its number past #0999 too ("give #1057 to …"); an order's number never is one.
+HANDED_CARD = re.compile(CARD_NUMBER.pattern + r"|(?<![\w&#])(?<!order )#\d{3,6}(?:\.\d{1,3})?\b", re.IGNORECASE)
+# Work handed to someone: a cheap check before the roster is read.
+ADDRESS_VERB = re.compile(r"\b(?:ask|have|get|tell|let)\s", re.IGNORECASE)
 # The reference platform_assign_task takes: "#0192" as written, "ticket 12" as "12".
 CARD_REF = re.compile(r"#?\d+(?:\.\d+)?")
 # Who the card goes to: the words after "to", without the article, and ending where a
@@ -475,7 +487,7 @@ def _handoff(message: Optional[str]) -> Optional[Tuple[str, str]]:
     """(card, the receiver's words) when the message hands a card on, else None."""
     said = str(message or "")
     for hands_on in HANDS_ON.finditer(said):
-        card = CARD_NUMBER.search(hands_on.group("what"))
+        card = HANDED_CARD.search(hands_on.group("what"))
         if card:
             who = SENTENCE_END.split(said[hands_on.end():], maxsplit=1)[0].strip()
             who = RECEIVER_END.sub("", LEADING_ARTICLE.sub("", who)).strip()
@@ -540,48 +552,85 @@ def _teammates(brain: Any) -> List[Any]:
     return [agent for agent in brain._active_agents() if not getattr(agent, "is_system_agent", False)]
 
 
-def _card_receiver(brain: Any, message: str, who: str) -> Optional[Tuple[int, str]]:
-    """The one teammate a card is handed to, as (id, name). Named in part ("the Support
-    Agent"), AutoBrain's roster match resolves it; a pronoun or an unknown name is nobody."""
-    if len(who) < MIN_NAME_CHARS or who.lower() in NOT_A_RECEIVER:
+def _card_receiver(brain: Any, message: str, who: str, roster: List[Any]) -> Optional[Any]:
+    """The one teammate a card is handed to, as (id, name); the agents a shared name could be (FX-014);
+    or None. Named in part ("the Support Agent"), AutoBrain's roster match resolves it; an id the
+    owner gives ("267") is that agent; a pronoun or an unknown name is nobody."""
+    if who.lower() in NOT_A_RECEIVER:
         return None
-    roster = _teammates(brain)
+    by_id = id_reply(who, roster)
+    if by_id is not None:
+        return by_id.id, by_id.name
+    if len(who) < MIN_NAME_CHARS:
+        return None
     named = agents_named_in(who, roster)
     if len(named) == 1:
         return named[0].id, named[0].name
+    if shared_name(named):
+        return named
     agent_id, agent_name = brain._match_roster_agent(who, roster, message=message)
     return (agent_id, agent_name) if agent_id is not None else None
 
 
-def _addressed_agent(brain: Any, message: str) -> Optional[Tuple[int, str]]:
-    """The one teammate the message hands work to by name ("ask Jim to …"), as (id, name).
-    A name that is only mentioned ("what did Jim say?") hands nothing over."""
+def _addressed_agent(message: str, roster: List[Any]) -> Optional[Any]:
+    """The one teammate the message hands work to by name ("ask Jim to …"), as (id, name); the
+    agents a shared name could be ("Get OPS to …" with two OPS); or None. A name that is only
+    mentioned ("what did Jim say?") hands nothing over."""
     said = message.lower()
-    addressed = [agent for agent in agents_named_in(message, _teammates(brain))
+    addressed = [agent for agent in agents_named_in(message, roster)
                  if re.search(ADDRESSED_BY_NAME.format(name=re.escape(agent.name.strip().lower())), said)]
-    return (addressed[0].id, addressed[0].name) if len(addressed) == 1 else None
+    if len(addressed) == 1:
+        return addressed[0].id, addressed[0].name
+    return addressed if shared_name(addressed) else None
+
+
+def _handed_over(brain: Any, message: str, project: bool = False) -> Tuple[Optional[Any], str]:
+    """(who the message hands work to, why): a card handed on, an id given as the answer to "which
+    one?", or a teammate asked by name. A message about a card that hands it to no one (approving it,
+    moving it) stays Auto's, and so does one with nobody in it; ``project`` (the tiers said mission):
+    one that names several teammates stays the mission ("Have RESEARCHER and WRITER plan the launch")."""
+    handoff = _handoff(message)
+    if handoff:
+        return _card_receiver(brain, message, handoff[1], _teammates(brain)), REASONING_CARD
+    if HANDED_CARD.search(message) or not (ADDRESS_VERB.search(message) or ID_REPLY.match(message)):
+        return None, REASONING_NAMED
+    roster = _teammates(brain)
+    by_id = id_reply(message, roster)
+    if by_id is not None:
+        return (by_id.id, by_id.name), REASONING_ID
+    target = _addressed_agent(message, roster)
+    if project and isinstance(target, tuple) and joined_with_another(message, target[1], roster):
+        return None, REASONING_NAMED
+    return target, REASONING_NAMED
+
+
+def _ask_which(assessment: Any, agents: List[Any], message: str) -> Any:
+    """ASSIGN with no agent picked: the directive lists the namesakes and asks which (FX-012's list)."""
+    from consumers.chatbot.auto import Action
+
+    logger.info("[PRD-256 FX-014] %d active agents are called %r: Auto asks which", len(agents), agents[0].name)
+    return replace(
+        assessment, action=Action.ASSIGN, target_agent_id=None, target_agent_name=shared_name(agents),
+        context_directive=clash_directive(agents, handed_card(message)),
+        reasoning=f"{assessment.reasoning} ({REASONING_ASK})",
+    )
 
 
 def the_lane(brain: Any, message: str, assessment: Any) -> Any:
-    """The verdict Auto acts on, from the one the tiers returned (see the module doc)."""
+    """The verdict Auto acts on, from the one the tiers returned (see the module doc). FX-014: work
+    handed to a teammate by name or id is that teammate's ticket whatever the tiers said."""
     from consumers.chatbot.auto import Action
 
-    if assessment.action not in (Action.RESPOND, Action.DELEGATE):
-        return assessment
-    handoff = _handoff(message)
-    if handoff:
-        target, reasoning = _card_receiver(brain, message, handoff[1]), REASONING_CARD
-    elif assessment.action == Action.DELEGATE:
-        target, reasoning = _addressed_agent(brain, message), REASONING_NAMED
-    else:
-        return assessment
+    target, reasoning = _handed_over(brain, str(message or ""), project=assessment.action == Action.MISSION)
+    if isinstance(target, list):
+        return _ask_which(assessment, target, message)
     if target is not None:
         logger.info("[PRD-256 D2] %s: ASSIGN to agent %s", reasoning, target[0])
         return _ticket_for(assessment, target, reasoning)
     return answered_by_auto(assessment) if assessment.action == Action.DELEGATE else assessment
 
 
-def card_directive(card: str, agent_name: str, *, deferred: bool) -> str:
+def card_directive(card: str, agent_name: str, *, deferred: bool, agent_id: Optional[int] = None) -> str:
     """The ASSIGN directive for a card already on the board: assign it, never copy it."""
     start = ("Leave it where it is in the queue: the user asked to defer it." if deferred
              else f"Start it: platform_update_task_status \"{card}\" to 'in_progress'.")
@@ -589,7 +638,8 @@ def card_directive(card: str, agent_name: str, *, deferred: bool) -> str:
         "\n\n## Manager directive — hand the card on\n"
         f"The user is giving card {card} to the agent '{agent_name}'. The card is already on "
         "the board: do NOT create a new card for it. Do this now:\n"
-        f"1. platform_assign_task with task_id \"{card}\" and agent_name \"{agent_name}\".\n"
+        f"1. platform_assign_task with task_id \"{card}\" and agent_name \"{agent_name}\""
+        f"{f' and agent_id {agent_id}' if agent_id else ''}.\n"
         f"2. {start}\n"
         f"3. Confirm in ONE line with the card number {card} and who has it now.\n"
     )
@@ -602,7 +652,8 @@ def with_card_directive(assessment: Any, message: Optional[str], *, deferred: bo
     if not card or assessment.target_agent_id is None or not assessment.target_agent_name:
         return assessment
     return replace(
-        assessment, context_directive=card_directive(card, assessment.target_agent_name, deferred=deferred),
+        assessment, context_directive=card_directive(card, assessment.target_agent_name, deferred=deferred,
+                                                     agent_id=assessment.target_agent_id),
     )
 
 
