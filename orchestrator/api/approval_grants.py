@@ -719,16 +719,16 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
     same spine the original call would have taken, so telemetry, the policy
     seam, and outcome capture all fire; nothing is exempted by being approved.
 
-    The outcome summary lands on ``details.executed_result`` (returned in the
-    grant response so the S3 card swaps to its executed state). Fail LOUD but
-    contained: a failing re-dispatch surfaces as an honest failure on the
-    grant — never a fake success (tool-runtime dossier C.3), and never an
-    exception out of the grant endpoint.
+    The outcome lands on ``details.executed_result`` (the S3 card swaps to its executed state).
+    Fail LOUD but contained: an honest failure on the grant, never a fake success (dossier C.3),
+    never an exception out of the endpoint. PRD-256 FX-011: an agent's send on Auto's ticket first.
     """
     from datetime import datetime, timezone
+    from modules.tools.discovery.agent_sends import sends_on_the_click
 
+    if await sends_on_the_click(db, grant):
+        return
     details = dict(grant.details) if isinstance(grant.details, dict) else {}
-
     board_task_id = details.get("board_task_id")
     if board_task_id is not None and _requeue_blocked_task(
         db, grant.workspace_id, board_task_id
@@ -786,10 +786,10 @@ def _fail_subject(db: Session, grant: ApprovalGrant) -> None:
         fail_playbook_run_grant(db, grant)
         return
     if grant.subject_type == SUBJECT_TOOL_CALL:
-        # PRD-193 S4: a denied tool call is a no-op execution — the grant's
-        # DENIED status is the record; the S3 card renders the refusal; the
-        # model sees it via context on the next turn. (A blocked board task,
-        # if any, keeps its own board_task-subject grant lifecycle.)
+        # PRD-193 S4: a denied call is a no-op (the DENIED row is the record, the card renders it);
+        # PRD-256 FX-011: an agent's send on Auto's ticket fails that ticket with the reason.
+        from modules.tools.discovery.agent_sends import declined_send
+        declined_send(db, grant)
         return
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return

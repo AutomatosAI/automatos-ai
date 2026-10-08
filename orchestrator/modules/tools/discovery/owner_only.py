@@ -165,24 +165,43 @@ def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handl
 
 
 def asks_before_a_send(execute_tool: Execute) -> Execute:
-    """Wrap UnifiedToolExecutor.execute_tool: a Composio send or publish in a person's chat
-    runs only on their click, through the same grant card."""
+    """Wrap UnifiedToolExecutor.execute_tool: a Composio send or publish in a person's chat,
+    or by an agent on a ticket Auto wrote (FX-011, Decision D7), runs only on the owner's
+    click, through the same grant card."""
     signature = inspect.signature(execute_tool)
 
     @functools.wraps(execute_tool)
     async def wrapped(self: Any, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        from modules.tools.discovery.agent_sends import waits_on_the_card
+
         call = signature.bind(self, *args, **kwargs)
         call.apply_defaults()
         tool, params, ctx = call.arguments["tool_name"], call.arguments["parameters"], call.arguments["caller_context"]
         workspace_id = call.arguments["workspace_id"]
         slug, inner, composio = self._resolve_effective_call(tool, params)
-        if not (composio and human_driven(ctx) and is_owner_only(slug, params, composio=True)):
+        ticket = _whose_click(self.db, workspace_id, slug, ctx, composio)
+        if ticket is None:
             return await execute_tool(*call.args, **call.kwargs)
         grant = _the_click(self.db, workspace_id, tool, params)
         if grant is None:
-            return send_ask(self.db, workspace_id, tool, slug, params, ctx, sent=inner)
+            ask = send_ask(self.db, workspace_id, tool, slug, params, ctx, sent=inner)
+            return waits_on_the_card(self.db, workspace_id, ticket, ask, sent=params_object(inner),
+                                     agent_id=call.arguments.get("agent_id")) if ticket else ask
         return after_the_click(self.db, grant, await execute_tool(*call.args, **call.kwargs))
     return wrapped
+
+
+def _whose_click(db: Any, workspace_id: Any, slug: str, caller_context: Any, composio: bool) -> Optional[Dict[str, Any]]:
+    """Whose click a call waits for: None when it runs as it is (not a Composio send, or
+    an agent's send on a ticket a person wrote); ``{}`` in a person's chat; the ticket
+    (``agent_sends.autos_ticket``) when an agent sends on a ticket Auto wrote."""
+    from modules.tools.discovery.agent_sends import autos_ticket
+
+    if not (composio and is_composio_send(slug)):
+        return None
+    if human_driven(caller_context):
+        return {}
+    return autos_ticket(db, workspace_id, caller_context)
 
 
 def _the_click(db: Any, workspace_id: Any, action: str, params: Any) -> Any:
