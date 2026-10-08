@@ -180,21 +180,45 @@ def _otlp_exporter() -> Any:
                             headers=otlp_headers(config.OTEL_EXPORTER_OTLP_HEADERS))
 
 
+def request_rooted_sampler(ratio: Any) -> Any:
+    """The sampler for a new trace: kept by ratio, unless it would start at a library
+    call. A SQL statement, Redis command, HTTP or AWS call with no parent is a
+    background loop's (schedulers, the dispatcher, heartbeats poll all the time), and
+    as a trace of its own it is noise: one root trace per query, tens of thousands
+    an hour. Those are dropped; inside a request they are kept, as the request's
+    children (parent-based). Background work gets its own spans in O4."""
+    from opentelemetry.sdk.trace.sampling import Decision, ParentBased, Sampler, SamplingResult, TraceIdRatioBased
+    from opentelemetry.trace import SpanKind
+
+    class RequestRooted(Sampler):
+        def __init__(self, keep: float) -> None:
+            self._ratio = TraceIdRatioBased(keep)
+
+        def should_sample(self, parent_context, trace_id, name, kind=None, attributes=None, links=None,
+                          trace_state=None):
+            if kind == SpanKind.CLIENT:
+                return SamplingResult(Decision.DROP)
+            return self._ratio.should_sample(parent_context, trace_id, name, kind, attributes, links, trace_state)
+
+        def get_description(self) -> str:
+            return f"RequestRooted({self._ratio.get_description()})"
+
+    return ParentBased(RequestRooted(sampler_ratio(ratio)))
+
+
 def build_provider(exporter: Any, ratio: float) -> Any:
-    """A tracer provider: this service's resource, a parent-based ratio sampler,
+    """A tracer provider: this service's resource, the request-rooted ratio sampler,
     and batched export through ``exporter``. Nothing global is touched."""
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
     resource = Resource.create({
         "service.name": config.OTEL_SERVICE_NAME,
         "deployment.environment.name": str(getattr(config, "ENVIRONMENT", "") or "unknown"),
         "automatos.edition": str(getattr(config, "AUTH_EDITION", "") or "unknown"),
     })
-    sampler = ParentBased(TraceIdRatioBased(sampler_ratio(ratio)))
-    provider = TracerProvider(resource=resource, sampler=sampler)
+    provider = TracerProvider(resource=resource, sampler=request_rooted_sampler(ratio))
     provider.add_span_processor(BatchSpanProcessor(exporter))
     return provider
 
@@ -290,6 +314,6 @@ def annotate_request(request_id: str, workspace_id: str = "") -> None:
 
 __all__ = [
     "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "REDACTED", "annotate_request", "build_provider",
-    "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query", "sampler_ratio",
-    "start_tracing", "tracing_enabled", "with_tracing",
+    "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query",
+    "request_rooted_sampler", "sampler_ratio", "start_tracing", "tracing_enabled", "with_tracing",
 ]
