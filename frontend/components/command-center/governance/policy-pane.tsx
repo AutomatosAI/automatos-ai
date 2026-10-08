@@ -43,19 +43,14 @@ type OverrideValue = '' | 'auto' | 'ask'
 
 export function PolicyPane() {
   const { data: policy } = usePolicy()
-  const { data: budget } = useBudget()
   const { data: status } = useGovernanceStatus()
   const updatePolicy = useUpdatePolicy()
-  const updateBudget = useUpdateBudget()
 
   const enforcing = status?.policy_plane?.enforcing ?? null
 
   const [posture, setPosture] = useState('balanced')
   const [inherit, setInherit] = useState(false)
   const [overrides, setOverrides] = useState<Record<string, OverrideValue>>({})
-  const [maxCost, setMaxCost] = useState<string>('')
-  const [maxTokens, setMaxTokens] = useState<string>('')
-  const [budgetWindow, setBudgetWindow] = useState<string>('day')
 
   useEffect(() => {
     if (policy) {
@@ -64,14 +59,6 @@ export function PolicyPane() {
       setOverrides((policy.route_overrides as Record<string, OverrideValue>) ?? {})
     }
   }, [policy])
-
-  useEffect(() => {
-    if (budget) {
-      setMaxCost(budget.max_cost_usd != null ? String(budget.max_cost_usd) : '')
-      setMaxTokens(budget.max_total_tokens != null ? String(budget.max_total_tokens) : '')
-      setBudgetWindow(budget.window || 'day')
-    }
-  }, [budget])
 
   const savePolicy = async () => {
     const cleanOverrides: Record<string, 'auto' | 'ask'> = {}
@@ -87,20 +74,6 @@ export function PolicyPane() {
       toast.success('Policy saved')
     } catch {
       toast.error('Failed to save policy')
-    }
-  }
-
-  const saveBudget = async () => {
-    const body: { max_cost_usd?: number; max_total_tokens?: number; window?: string } = {
-      window: budgetWindow,
-    }
-    if (maxCost.trim() !== '') body.max_cost_usd = Number(maxCost)
-    if (maxTokens.trim() !== '') body.max_total_tokens = Number(maxTokens)
-    try {
-      await updateBudget.mutateAsync(body)
-      toast.success('Budget saved')
-    } catch {
-      toast.error('Failed to save budget')
     }
   }
 
@@ -180,55 +153,89 @@ export function PolicyPane() {
         </div>
       </section>
 
-      {/* Budget */}
-      <section className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Budget</h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">Spend ceiling (USD)</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={maxCost}
-              onChange={(e) => setMaxCost(e.target.value)}
-              placeholder="no ceiling"
-              className="rounded border border-border bg-background px-2 py-1"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">Token ceiling</span>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              value={maxTokens}
-              onChange={(e) => setMaxTokens(e.target.value)}
-              placeholder="no ceiling"
-              className="rounded border border-border bg-background px-2 py-1"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">Window</span>
-            <select
-              value={budgetWindow}
-              onChange={(e) => setBudgetWindow(e.target.value)}
-              className="rounded border border-border bg-background px-2 py-1"
-            >
-              {WINDOWS.map((w) => (
-                <option key={w} value={w}>
-                  {w}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div>
-          <Button size="sm" disabled={updateBudget.isLoading} onClick={saveBudget}>
-            {updateBudget.isLoading ? 'Saving…' : 'Save budget'}
-          </Button>
-        </div>
-      </section>
+      <BudgetSection />
     </div>
+  )
+}
+
+/** The spend/token budget, saved on its own (PRD-196 S4). */
+function BudgetSection() {
+  const { data: budget } = useBudget()
+  const updateBudget = useUpdateBudget()
+  const [maxCost, setMaxCost] = useState<string>('')
+  const [maxTokens, setMaxTokens] = useState<string>('')
+  const [budgetWindow, setBudgetWindow] = useState<string>('day')
+
+  useEffect(() => {
+    if (budget) {
+      setMaxCost(budget.max_cost_usd != null ? String(budget.max_cost_usd) : '')
+      setMaxTokens(budget.max_total_tokens != null ? String(budget.max_total_tokens) : '')
+      setBudgetWindow(budget.window || 'day')
+    }
+  }, [budget])
+
+  const saveBudget = async () => {
+    const body: { max_cost_usd?: number; max_total_tokens?: number; window?: string } = {
+      window: budgetWindow,
+    }
+    if (maxCost.trim() !== '') body.max_cost_usd = Number(maxCost)
+    if (maxTokens.trim() !== '') body.max_total_tokens = Number(maxTokens)
+    try {
+      await updateBudget.mutateAsync(body)
+      toast.success('Budget saved')
+    } catch {
+      toast.error('Failed to save budget')
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Budget</h3>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Spend ceiling (USD)</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={maxCost}
+            onChange={(e) => setMaxCost(e.target.value)}
+            placeholder="no ceiling"
+            className="rounded border border-border bg-background px-2 py-1"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Token ceiling</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={maxTokens}
+            onChange={(e) => setMaxTokens(e.target.value)}
+            placeholder="no ceiling"
+            className="rounded border border-border bg-background px-2 py-1"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Window</span>
+          <select
+            value={budgetWindow}
+            onChange={(e) => setBudgetWindow(e.target.value)}
+            className="rounded border border-border bg-background px-2 py-1"
+          >
+            {WINDOWS.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div>
+        <Button size="sm" disabled={updateBudget.isLoading} onClick={saveBudget}>
+          {updateBudget.isLoading ? 'Saving…' : 'Save budget'}
+        </Button>
+      </div>
+    </section>
   )
 }

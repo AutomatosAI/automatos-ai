@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { useGdprEraseSubject, useGdprEraseWorkspace } from '@/hooks/use-gdpr'
+import type { GdprSubjectErasureResult } from '@/lib/api-client'
 
 export function CompliancePane() {
   const [exporting, setExporting] = useState(false)
@@ -115,37 +116,7 @@ export function CompliancePane() {
           </Button>
         </div>
 
-        {result && (
-          <div className="mt-1 flex flex-col gap-2 rounded border border-border bg-background/50 p-3 text-xs">
-            <p className="font-medium">Erase report for {result.subject_id}</p>
-            <ul className="text-muted-foreground">
-              <li>Field memory deleted: <span className="text-foreground">{result.derived.field_memory_deleted}</span></li>
-              <li>Durable memory deleted: <span className="text-foreground">{result.derived.durable_memory_deleted}</span></li>
-              <li>SQL deleted: <span className="text-foreground">{result.sql?.deleted ?? 0}</span></li>
-            </ul>
-
-            {result.gaps?.length > 0 && (
-              <Alert variant="warning" size="compact" role="note">
-                <AlertTriangle />
-                <AlertDescription className="text-xs">
-                  <p className="font-medium">Could not delete (documented gaps)</p>
-                  {result.gaps.map((g) => (
-                    <p key={g.store} className="mt-0.5 text-muted-foreground">
-                      <strong className="text-foreground">{g.store}</strong>: {g.reason}
-                    </p>
-                  ))}
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {result.untagged_history && (
-              <div className="rounded border border-border px-2 py-1.5">
-                <p className="font-medium">Untagged history ({result.untagged_history.stores.join(', ')})</p>
-                <p className="mt-0.5 text-muted-foreground">{result.untagged_history.reason}</p>
-              </div>
-            )}
-          </div>
-        )}
+        {result && <EraseReport result={result} />}
       </section>
 
       {/* Erase workspace */}
@@ -179,6 +150,41 @@ export function CompliancePane() {
           </Button>
         </div>
       </section>
+    </div>
+  )
+}
+
+/** What an erase did and did not delete: the gaps are the point, not a footnote. */
+function EraseReport({ result }: { result: GdprSubjectErasureResult }) {
+  return (
+    <div className="mt-1 flex flex-col gap-2 rounded border border-border bg-background/50 p-3 text-xs">
+      <p className="font-medium">Erase report for {result.subject_id}</p>
+      <ul className="text-muted-foreground">
+        <li>Field memory deleted: <span className="text-foreground">{result.derived.field_memory_deleted}</span></li>
+        <li>Durable memory deleted: <span className="text-foreground">{result.derived.durable_memory_deleted}</span></li>
+        <li>SQL deleted: <span className="text-foreground">{result.sql?.deleted ?? 0}</span></li>
+      </ul>
+
+      {result.gaps?.length > 0 && (
+        <Alert variant="warning" size="compact" role="note">
+          <AlertTriangle />
+          <AlertDescription className="text-xs">
+            <p className="font-medium">Could not delete (documented gaps)</p>
+            {result.gaps.map((g) => (
+              <p key={g.store} className="mt-0.5 text-muted-foreground">
+                <strong className="text-foreground">{g.store}</strong>: {g.reason}
+              </p>
+            ))}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {result.untagged_history && (
+        <div className="rounded border border-border px-2 py-1.5">
+          <p className="font-medium">Untagged history ({result.untagged_history.stores.join(', ')})</p>
+          <p className="mt-0.5 text-muted-foreground">{result.untagged_history.reason}</p>
+        </div>
+      )}
     </div>
   )
 }
