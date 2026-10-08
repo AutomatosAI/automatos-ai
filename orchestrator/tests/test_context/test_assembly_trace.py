@@ -1,6 +1,6 @@
 """PRD-201 S1 — persist the assembly trace (answerability).
 
-Pure — no live Langfuse, no DB. Asserts the durable trace *shape* the assembler
+Pure — no live collector, no DB. Asserts the durable trace *shape* the assembler
 hands back, and that the tracer seam emits a span only when tracing is ON while
 the trace record itself is produced regardless.
 """
@@ -89,22 +89,7 @@ def test_trace_span_emitted_when_tracing_on():
 
 def test_fire_assembly_trace_swallows_tracer_faults():
     boom = MagicMock()
-    boom.trace_assembly.side_effect = RuntimeError("langfuse down")
+    boom.trace_assembly.side_effect = RuntimeError("collector down")
     with patch.object(tracer_mod, "get_tracer", return_value=boom):
         # Must not raise into the build.
         tracer_mod.fire_assembly_trace(trace={"mode": "chatbot"}, workspace_id="ws")
-
-
-def test_langfuse_tracer_builds_one_assembly_span():
-    span = MagicMock()
-    client = MagicMock()
-    client.start_as_current_span.return_value.__enter__.return_value = span
-    lf = tracer_mod.LangfuseTracer(client)
-    lf.trace_assembly(
-        trace={"mode": "chatbot", "budget_total": 100, "token_estimate": 50, "sections": [{}, {}]},
-        workspace_id="ws",
-    )
-    # Named span keyed by mode; metadata folded on; sections not dumped verbatim.
-    name = client.start_as_current_span.call_args.kwargs.get("name") or client.start_as_current_span.call_args.args[0]
-    assert name == "assembly:chatbot"
-    span.update.assert_called()

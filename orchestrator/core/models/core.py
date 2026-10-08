@@ -1258,7 +1258,7 @@ class Message(Base):
     # {name, priority, token_estimate, rendered_nonempty, trimmed}, the driving
     # model, the resolved budget ceiling, injected memory ids and prep_ms. The
     # durable answer to "what did Auto know when it said that?"; written
-    # regardless of TRACING_ENABLED. NULL for turns built before this shipped or
+    # regardless of OTEL_ENABLED. NULL for turns built before this shipped or
     # by non-chat planes. Kept off `parts` so it never reaches the AI-SDK render
     # contract (same discipline as retrieval_context).
     context_trace = Column(JSONB, nullable=True)

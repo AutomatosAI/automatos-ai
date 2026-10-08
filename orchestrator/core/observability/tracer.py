@@ -1,31 +1,32 @@
-"""PRD-185 S9 — vendor-neutral tracing seam.
+"""PRD-185 S9 — vendor-neutral tracing seam, on OpenTelemetry (PRD-256 O3).
 
-Give the platform's two chokepoints a *mouth* so "was the tool call good / was
+Give the platform's chokepoints a *mouth* so "was the tool call good / was
 retrieval grounded" becomes a **live, queryable number over real traffic**
 instead of a synthetic one (the live complement to S10's offline recall@5/MRR).
 
-Why a seam and not a Langfuse import at the call site:
-- **The hooks are backend-agnostic.** Choosing a backend (Langfuse Cloud today)
-  is a config swap, not a rewrite — the day data-residency demands self-host,
-  only this file changes. That is the whole point of S9 (see the decision brief
-  ``reports/PRD-185-S9-LANGFUSE-DECISION-BRIEF.md``).
-- **Default OFF** (``config.TRACING_ENABLED=false``): ``get_tracer()`` returns
-  :class:`NoOpTracer`, ``langfuse`` is never imported, zero overhead, zero data
-  egress. You flip it on when you want to watch.
+Why a seam and not a tracing import at the call site:
+- **The hooks are backend-agnostic.** The emit points stay put; the tracer behind
+  them is :class:`OtelTracer`, whose spans go over OTLP to whatever collector the
+  operator runs (Tempo, Jaeger, Datadog, Langfuse…). Choosing a backend is the
+  collector's config, not a change here.
+- **Default OFF** (``config.OTEL_ENABLED=false``): ``get_tracer()`` returns
+  :class:`NoOpTracer` and nothing from ``opentelemetry`` is imported.
 - **Never fails the caller.** Every emit is guarded; a tracing fault is logged
   and the tool call / retrieval returns normally. Mirrors the fire-and-forget
   telemetry posture in ``modules/tools/execution/telemetry.py``.
-- **``langfuse`` is an OPTIONAL dependency**, imported lazily only when enabled.
-  Enabled but not installed → we log once and degrade to no-op.
+- **Private by default** (PRD-256 Principle 5): no query text, tool argument,
+  error message or rendered context goes on a span, only names, counts and scores.
 
-The two emit points map 1:1 to the two chokepoints:
+The emit points map 1:1 to the chokepoints:
 - :func:`fire_tool_trace`   → tool dispatch (``unified_executor`` finally, beside telemetry)
-- :func:`fire_retrieval_score` → RAG retrieval funnel (``RAGService.retrieve``)
+- :func:`fire_retrieval_score` → RAG retrieval funnel (``RAGService.retrieve``) and the substrate searches
+- :func:`fire_assembly_trace` → context assembly (``ContextService``, PRD-201 S1)
 """
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,10 @@ STATUS_HIT = "hit"      # docs returned
 STATUS_EMPTY = "empty"  # ran clean, returned nothing (not grounded)
 STATUS_ERROR = "error"  # retrieval raised
 
-_SUPPORTED_BACKENDS = ("langfuse",)
+TRACER_NAME = "automatos.observability"
+
+ATTR_WORKSPACE_ID = "automatos.workspace_id"   # as core.observability.otel names it
+ATTR_AGENT_ID = "automatos.agent_id"
 
 
 # ── the seam ──────────────────────────────────────────────────────────────────
@@ -84,8 +88,7 @@ class Tracer:
 
         The *durable* per-turn record is written separately (JSONB on the turn
         row) so "what did Auto know?" is answerable offline even with tracing
-        OFF — this method only mirrors that record onto the live Langfuse plane
-        when it is enabled.
+        OFF — this method only mirrors its shape onto a live span when it is on.
         """
         raise NotImplementedError
 
@@ -103,20 +106,15 @@ class NoOpTracer(Tracer):
         return None
 
 
-class LangfuseTracer(Tracer):
-    """Langfuse-Cloud implementation of the seam.
+class OtelTracer(Tracer):
+    """The seam on OpenTelemetry (PRD-256 O3): each emit is one span, a child of
+    the span current where it fires (the request's, or the LLM call's).
 
-    Targets the Langfuse Python SDK **v3** surface (context-manager spans +
-    scores). Every backend call is best-effort and guarded: a wrong SDK method
-    name or a network blip degrades to a logged no-op, never a crash. Because
-    the OFF path never reaches here and CI keeps tracing disabled, the live
-    emission path is exercised only when you enable it — **smoke-test on first
-    enablement** (flip ``TRACING_ENABLED=true`` with keys set, run one tool call
-    + one retrieval, confirm the trace lands in Langfuse).
+    Only inside a trace: with no recording span around the emit (a Mission step,
+    a heartbeat) nothing is recorded; O4 gives that work a trace of its own. The
+    emits come after the work, so each span is back-dated by the duration it
+    reports and ends when it fires.
     """
-
-    def __init__(self, client: Any):
-        self._client = client
 
     def trace_tool_call(
         self,
@@ -129,20 +127,14 @@ class LangfuseTracer(Tracer):
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        md: Dict[str, Any] = {
-            "workspace_id": str(workspace_id) if workspace_id else None,
-            "agent_id": agent_id,
-            "duration_ms": duration_ms,
+        attrs = {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": tool_name,
+            "automatos.tool.success": bool(success),
+            **_context_attributes(workspace_id, agent_id, metadata),
         }
-        if error:
-            md["error"] = error[:500]
-        if metadata:
-            md.update(metadata)
-        # One span per tool call, scored 1.0 success / 0.0 failure — never carry
-        # secret param *values*, only names/outcome (keys-only privacy posture).
-        with self._client.start_as_current_span(name=f"tool:{tool_name}") as span:
-            span.update(metadata=md, level="ERROR" if not success else "DEFAULT")
-            self._score(span, "tool_success", 1.0 if success else 0.0)
+        # The error's class of failure only: its text can carry the tool's data.
+        _emit(f"execute_tool {tool_name}", attrs, duration_ms, None if success else "tool_error")
 
     def score_retrieval(
         self,
@@ -154,18 +146,16 @@ class LangfuseTracer(Tracer):
         workspace_id: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        md: Dict[str, Any] = {
-            "num_docs": num_docs,
-            "status": status,
-            "workspace_id": str(workspace_id) if workspace_id else None,
+        attrs = {
+            "automatos.retrieval.num_docs": int(num_docs or 0),
+            "automatos.retrieval.top_score": float(top_score or 0.0),
+            "automatos.retrieval.status": status,
+            "automatos.retrieval.grounded": status == STATUS_HIT,
+            **_context_attributes(workspace_id, None, metadata),
         }
-        if metadata:
-            md.update(metadata)
-        with self._client.start_as_current_span(name="rag:retrieve") as span:
-            span.update(input=(query or "")[:500], metadata=md)
-            # Two scores: the raw top similarity, and a binary "was it grounded".
-            self._score(span, "retrieval_top_score", float(top_score))
-            self._score(span, "retrieval_grounded", 1.0 if status == STATUS_HIT else 0.0)
+        # The query is the owner's words: never on the span (Principle 5).
+        _emit("rag.retrieve", attrs, (metadata or {}).get("latency_ms"),
+              "retrieval_error" if status == STATUS_ERROR else None)
 
     def trace_assembly(
         self,
@@ -174,91 +164,78 @@ class LangfuseTracer(Tracer):
         workspace_id: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        md: Dict[str, Any] = {"workspace_id": str(workspace_id) if workspace_id else None}
-        if metadata:
-            md.update(metadata)
-        # Fold the small trace shape onto the span metadata — section/token/trim
-        # detail only, never rendered content (keys-only privacy posture).
-        if isinstance(trace, dict):
-            md.update({k: v for k, v in trace.items() if k != "sections"})
-            md["section_count"] = len(trace.get("sections") or [])
-        mode = (trace or {}).get("mode") if isinstance(trace, dict) else None
-        with self._client.start_as_current_span(name=f"assembly:{mode or 'context'}") as span:
-            span.update(metadata=md)
-            # One score: budget honesty — assembled fraction of the ceiling.
-            total = (trace or {}).get("budget_total") or 0
-            est = (trace or {}).get("token_estimate") or 0
-            if total:
-                self._score(span, "assembly_budget_fraction", float(est) / float(total))
+        shape = trace if isinstance(trace, dict) else {}
+        total, estimate = shape.get("budget_total") or 0, shape.get("token_estimate") or 0
+        attrs = {
+            "automatos.context.mode": shape.get("mode"),
+            "gen_ai.request.model": shape.get("model"),
+            "automatos.context.budget_total": total,
+            "automatos.context.token_estimate": estimate,
+            "automatos.context.token_budget": shape.get("token_budget"),
+            "automatos.context.budget_fraction": float(estimate) / float(total) if total else None,
+            "automatos.context.section_count": len(shape.get("sections") or []),
+            "automatos.context.sections_included": [str(n) for n in shape.get("sections_included") or []],
+            "automatos.context.sections_trimmed": [str(n) for n in shape.get("sections_trimmed") or []],
+            "automatos.context.memory_count": len(shape.get("injected_memory_ids") or []),
+            **_context_attributes(workspace_id, None, metadata),
+        }
+        # Section names and sizes only, never the rendered content.
+        _emit(f"context.assembly {shape.get('mode') or 'context'}", attrs, shape.get("prep_ms"))
 
-    @staticmethod
-    def _score(span: Any, name: str, value: float) -> None:
-        """Best-effort score attach across Langfuse SDK method-name variants."""
-        for attr in ("score_trace", "score"):
-            fn = getattr(span, attr, None)
-            if callable(fn):
-                fn(name=name, value=value)
-                return
-        logger.debug("[tracing] no score method on span for %s", name)
+
+def _context_attributes(workspace_id: Any, agent_id: Any, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Workspace, agent and the caller's scalar metadata, as ``automatos.*`` attributes."""
+    attrs: Dict[str, Any] = {ATTR_WORKSPACE_ID: workspace_id, ATTR_AGENT_ID: agent_id}
+    for key, value in (metadata or {}).items():
+        if isinstance(value, (str, int, float, bool)):
+            attrs[f"automatos.{key}"] = value
+    return attrs
+
+
+def _span_value(value: Any) -> Any:
+    """A value OpenTelemetry takes as an attribute: scalars and string lists as they are, the rest as text."""
+    if isinstance(value, (str, bool, int, float)) or (isinstance(value, list) and all(isinstance(v, str) for v in value)):
+        return value
+    return str(value)
+
+
+def _emit(name: str, attributes: Dict[str, Any], duration_ms: Any = None, error_type: Optional[str] = None) -> None:
+    """One finished span under the current one, ``duration_ms`` long and ending now."""
+    from opentelemetry import trace
+    from opentelemetry.trace import Status, StatusCode
+
+    if not trace.get_current_span().is_recording():
+        return
+    end = time.time_ns()
+    start = end - int(max(float(duration_ms or 0), 0.0) * 1_000_000)
+    attrs = {key: _span_value(value) for key, value in attributes.items() if value is not None}
+    span = trace.get_tracer(TRACER_NAME).start_span(name, start_time=start, attributes=attrs)
+    if error_type:
+        span.set_attribute("error.type", error_type)
+        span.set_status(Status(StatusCode.ERROR))
+    span.end(end_time=end)
 
 
 # ── construction (config-gated, memoized) ─────────────────────────────────────
 
 _TRACER: Optional[Tracer] = None
 _LOCK = threading.Lock()
-_WARNED_MISSING_SDK = False
 
 
 def should_trace(cfg: Any) -> bool:
     """Pure decision: is a real (non-noop) tracer warranted?
 
-    True iff tracing is enabled, the backend is known, and credentials exist.
-    Kept pure (no imports, no side effects) so it is trivially unit-testable
-    without the ``langfuse`` package installed.
+    True iff OpenTelemetry is on (``OTEL_ENABLED``, PRD-256). Kept pure (no
+    imports, no side effects) so it is trivially unit-testable.
     """
-    if not getattr(cfg, "TRACING_ENABLED", False):
-        return False
-    backend = (getattr(cfg, "TRACING_BACKEND", "") or "").lower()
-    if backend not in _SUPPORTED_BACKENDS:
-        return False
-    return bool(getattr(cfg, "LANGFUSE_PUBLIC_KEY", None)) and bool(
-        getattr(cfg, "LANGFUSE_SECRET_KEY", None)
-    )
+    return bool(getattr(cfg, "OTEL_ENABLED", False))
 
 
 def _build_tracer() -> Tracer:
-    """Construct the tracer from config. Any failure → NoOpTracer (fail-open)."""
-    global _WARNED_MISSING_SDK
-    try:
-        from config import config as cfg  # canonical singleton (config.py:1177)
-    except Exception:  # pragma: no cover — config is always importable in-app
-        return NoOpTracer()
+    """Construct the tracer from config: :class:`OtelTracer` when tracing is on."""
+    from config import config as cfg  # canonical singleton
 
-    if not should_trace(cfg):
-        return NoOpTracer()
-
-    try:
-        from langfuse import Langfuse  # optional dep, imported only when enabled
-    except Exception:
-        if not _WARNED_MISSING_SDK:
-            logger.warning(
-                "[tracing] TRACING_ENABLED but 'langfuse' is not installed — "
-                "tracing disabled (pip install langfuse). Degrading to no-op."
-            )
-            _WARNED_MISSING_SDK = True
-        return NoOpTracer()
-
-    try:
-        client = Langfuse(
-            public_key=cfg.LANGFUSE_PUBLIC_KEY,
-            secret_key=cfg.LANGFUSE_SECRET_KEY,
-            host=getattr(cfg, "LANGFUSE_HOST", None) or "https://cloud.langfuse.com",
-        )
-        logger.info("[tracing] Langfuse tracer active (host=%s)", cfg.LANGFUSE_HOST)
-        return LangfuseTracer(client)
-    except Exception:
-        logger.warning("[tracing] Langfuse client init failed; degrading to no-op", exc_info=True)
-        return NoOpTracer()
+    return OtelTracer() if should_trace(cfg) else NoOpTracer()
 
 
 def get_tracer() -> Tracer:
@@ -337,10 +314,10 @@ def fire_assembly_trace(
 ) -> None:
     """Emit a context-assembly trace span (PRD-201 S1). Guarded — never fails a build.
 
-    This mirrors the assembled trace onto the live Langfuse plane when tracing
-    is ON. It is *not* the durable record: the answerable per-turn/run row is
-    the JSONB the assembler hands back on ``ContextResult.to_assembly_trace()``,
-    persisted by the turn writer regardless of ``TRACING_ENABLED``.
+    This mirrors the assembled trace's shape onto a live span when tracing is
+    ON. It is *not* the durable record: the answerable per-turn/run row is the
+    JSONB the assembler hands back on ``ContextResult.to_assembly_trace()``,
+    persisted by the turn writer regardless of ``OTEL_ENABLED``.
     """
     try:
         get_tracer().trace_assembly(
