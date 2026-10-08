@@ -725,6 +725,7 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
     """
     from datetime import datetime, timezone
     from modules.tools.discovery.agent_sends import sends_on_the_click
+    from modules.tools.discovery.click_resume import resumed_context
 
     if await sends_on_the_click(db, grant):
         return
@@ -746,8 +747,7 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
     action = details.get("action") or grant.tool_name
     params = details.get("params")
     params = dict(params) if isinstance(params, dict) else {}
-    caller_context = details.get("caller_context")
-    caller_context = dict(caller_context) if isinstance(caller_context, dict) else None
+    caller_context = resumed_context(details.get("caller_context"), grant.id)   # RVW-18: judged by the click
 
     if not action:
         grant.details = {**details, "executed_result": failed_summary("grant carries no stored action to resume")}

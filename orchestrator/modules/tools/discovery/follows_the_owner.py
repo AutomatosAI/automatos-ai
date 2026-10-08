@@ -70,6 +70,7 @@ from sqlalchemy.orm import Session
 
 from modules.tools.discovery.brand_turns import refusal_on_a_brand_turn
 from modules.tools.discovery.card_words_said import owners_card_words
+from modules.tools.discovery.click_resume import on_the_click
 from modules.tools.discovery.owner_only import human_driven, is_owner_only
 from modules.tools.formatting.card_digest import fits_on_the_card
 from modules.tools.discovery.owner_turn import (
@@ -155,7 +156,8 @@ def refusal_for(db: Session, workspace_id: Any, action: str, params: Any, caller
     """Why this call doesn't follow the owner's words, or None. A fault here never
     stops a call: it is logged and the call goes on as before."""
     try:
-        turn = owner_turn(db, workspace_id, caller_context)
+        turn = None if on_the_click(db, workspace_id, action, params, caller_context) else owner_turn(
+            db, workspace_id, caller_context)   # P256-FIX-RVW-18: the click is the owner's decision
         if turn is None:
             return None
         params = _as_dict(params)
