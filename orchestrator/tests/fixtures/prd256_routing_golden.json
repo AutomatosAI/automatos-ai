@@ -533,6 +533,34 @@
    {
     "said": "Have OPS and WRITER plan the Christmas window.",
     "lane": "tiers"
+   },
+   {
+    "said": "Don't ask RESEARCHER to price the Kerbside offer",
+    "lane": "tiers"
+   },
+   {
+    "said": "Did you ask RESEARCHER to find the Leith cafés?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Never have WRITER touch the About page",
+    "lane": "tiers"
+   },
+   {
+    "said": "Should I ask OPS to check the stock?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have sales risen this week?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have Support caught up?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have sales hit target?",
+    "lane": "tiers"
    }
   ]
  }

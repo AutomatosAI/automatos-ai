@@ -323,6 +323,12 @@ def test_the_golden_holds_the_names_that_hand_nothing_over_and_the_joined_rows()
         assert by_said[said] == "tiers", said
     assert by_said["Have Support check the refund queue."] == "ASSIGN 610 Support"
     assert by_said["Ask Sales: how many club boxes sold this week?"] == "ASSIGN 611 Sales"
+    # P256-FIX-RVW-16: a hand-off the owner forbids or asks about, and a present-perfect question
+    for said in ("Don't ask RESEARCHER to price the Kerbside offer", "Did you ask RESEARCHER to find the Leith cafés?",
+                 "Never have WRITER touch the About page", "Should I ask OPS to check the stock?",
+                 "Have sales risen this week?", "Have Support caught up?", "Have sales hit target?"):
+        assert by_said[said] == "tiers", said
+    assert len(TASK_AFTER_THE_NAME) == 19
 
 
 @pytest.mark.parametrize("action", TIERS_SAID)

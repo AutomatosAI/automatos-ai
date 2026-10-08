@@ -170,3 +170,42 @@ def test_a_name_with_no_task_after_it_hands_nothing_over(said, name):
 ])
 def test_a_name_with_a_task_after_it_is_handed_the_work(said, name):
     assert addressed_by_name(said, name) is True
+
+
+# ── P256-FIX-RVW-16: a hand-off the owner forbids or asks about hands nothing over ──
+
+@pytest.mark.parametrize("said, name", [
+    ("Don't ask OPS to check anything", "OPS"),
+    ("Never have WRITER touch the About page", "WRITER"),
+    ("I told you not to let OPS post", "OPS"),
+    ("No need to ask RESEARCHER to price it.", "RESEARCHER"),
+    ("Did you ask OPS to check the stock?", "OPS"),
+    ("Why didn't you get OPS to check?", "OPS"),
+    ("Should I ask OPS to check?", "OPS"),
+    ("What did you ask RESEARCHER to find?", "RESEARCHER"),
+    ("Have sales risen this week?", "Sales"),
+    ("Have Support caught up?", "Support"),
+    ("Have sales come in?", "Sales"),
+    ("Ask OPS to check the stock, or just do it yourself.", "OPS"),     # keeps_it_with_auto
+])
+def test_a_hand_off_forbidden_or_asked_about_hands_nothing_over(said, name):
+    assert addressed_by_name(said, name) is False
+
+
+@pytest.mark.parametrize("action", [Action.RESPOND, Action.ASSIGN, Action.MISSION])
+def test_dont_ask_researcher_files_no_ticket_whatever_the_tiers_said(action):
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=action, reasoning="tiers")
+
+    assert the_lane(_Brain(), "Don't ask RESEARCHER to price the Kerbside offer", tiers) is tiers
+
+
+@pytest.mark.parametrize("said, name", [
+    ("Don't forget to ask OPS to check the stock.", "OPS"),           # the negation is of forgetting
+    ("Could you get OPS to reorder the green stock?", "OPS"),         # a request, as "Can you get …?" is
+    ("Stop and ask OPS to check the stock.", "OPS"),                  # "and" opens a new clause
+    ("We're not ready, but ask OPS to check the stock.", "OPS"),
+    ("Should I order 1.5 kg? Ask OPS to check.", "OPS"),              # the question is another sentence
+    ("Have Sales to pull the Q3 figures?", "Sales"),                  # "to <verb>" after the name
+])
+def test_a_hand_off_beside_a_negation_or_a_question_is_still_handed_over(said, name):
+    assert addressed_by_name(said, name) is True

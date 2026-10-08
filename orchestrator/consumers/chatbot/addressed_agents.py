@@ -17,6 +17,10 @@ follows it ("Get OPS to…", "Have OPS check…", "Ask RESEARCHER what…", "Ask
 support tickets been answered today?", "Get sales figures for Q3" and "Get OPS's stock report" stay
 the tiers' with an agent called Support, Sales or OPS; work handed to two teammates together ("Have
 RESEARCHER and WRITER plan the launch") stays the tiers' whatever they said.
+
+P256-FIX-RVW-16: a hand-off the owner forbids ("Don't ask OPS to…", "I told you not to let OPS post") or
+asks about ("Did you ask OPS to…?", "Should I ask OPS to…?", "Have sales risen this week?") hands
+nothing over, and neither does a message that keeps the work with Auto ("do it yourself").
 """
 from __future__ import annotations
 
@@ -67,6 +71,20 @@ PARTICIPLES = frozenset({
 # Bare verbs that end in "ed" ("Have OPS feed …" ends in "eed" and is read as a verb already).
 BARE_ED = frozenset({"embed", "shed", "shred", "wed"})
 PARTICIPLE_ENDING, BARE_EED = "ed", "eed"
+# P256-FIX-RVW-16: a hand-off verb negated in its clause ("don't ask", "not to let", "never have"): the
+# negation sits at most this many words before the verb, with no clause break between them.
+NEGATED_GAP = 4
+_CLAUSE_BREAK = re.compile(r"[,;:]|\b(?:but|and|so|then|instead)\b")
+_NEGATED = re.compile(r"\b(?:don['’]?t|do not|never|not|no need to|stop)"
+                      r"(?:\s+(?!(?:forget|fail|hesitate)\b)[a-z'’-]+){0,%d}\s*$" % NEGATED_GAP)
+# A sentence ends at . ! or ? before a space or the end ("1.5 kg" is no end), or at a line break.
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)|\n")
+QUESTION_MARK = "?"
+# A question about a hand-off: "Did you ask …?", "Should I get …?", "Have you told …?". "Could you get
+# OPS to …?" asks for the work, as "Can you get …?" does, so only "could I/we" asks about it.
+_ASKS_ABOUT = re.compile(r"^\W*(?:did|didn['’]?t|why|should|has|could\s+(?:i|we)|have\s+(?:you|we|i))\b")
+_WH_WORD = re.compile(r"\b(?:what|which|who|whom|whose|when|where|why|how)\b")
+HAVE = "have"
 # A plural noun after the name makes the name its modifier ("support tickets", "sales figures"); a verb's
 # bare form ends in a single s only after s, u or a ("process", "focus", "canvas").
 _PLURAL = re.compile(r"[^sua'’]s$")
@@ -145,13 +163,40 @@ def _task_follows(verb: str, rest: str) -> bool:
     return first in ASKED_WHAT if verb == ASK else _bare_verb(first, second)
 
 
+def _to_verb(rest: str) -> bool:
+    words = _NEXT_TWO.match(rest)
+    return bool(words and words.group("first") == "to" and words.group("second"))
+
+
+def _forbidden_or_asked(said: str, found: re.Match) -> bool:
+    """Whether the hand-off ``found`` in ``said`` is negated in its clause ("Don't ask OPS to …"), or
+    sits in a question about one: "Did you ask …?", "Why didn't you get …?", a wh-word before the
+    verb, or a present perfect ("Have sales risen this week?") with no "to <verb>" after the name."""
+    ends = list(_SENTENCE_END.finditer(said, 0, found.start()))
+    head = said[ends[-1].end() if ends else 0:found.start()]
+    clause = _CLAUSE_BREAK.split(head)[-1]
+    if _NEGATED.search(clause):
+        return True
+    end = _SENTENCE_END.search(said, found.end())
+    if not end or end.group() != QUESTION_MARK:
+        return False
+    if _ASKS_ABOUT.match(head) or _WH_WORD.search(head):
+        return True
+    return found.group("verb") == HAVE and not _WORD.search(head) and not _to_verb(said[found.end():])
+
+
 def addressed_by_name(message: Optional[str], name: str) -> bool:
     """Whether ``message`` hands ``name`` work: ask, have, get, tell or let, the name, then a task
     ("Get OPS to …", "Have OPS check …", "Ask RESEARCHER what …", "Ask Sales: …"). A possessive ("Get
     OPS's stock report"), a name that modifies a noun ("Have support tickets been answered?", "Get sales
-    figures for Q3") or one followed by a past participle or an auxiliary hands nothing over."""
+    figures for Q3") or one followed by a past participle or an auxiliary hands nothing over, and so does
+    a hand-off the owner forbids or asks about, or a message that keeps the work with Auto (RVW-16)."""
+    from consumers.chatbot.handoffs import keeps_it_with_auto
+
     said, wanted = str(message or "").lower(), re.escape(name.strip().lower())
-    return any(_task_follows(found.group("verb"), said[found.end():])
+    if keeps_it_with_auto(said):
+        return False
+    return any(_task_follows(found.group("verb"), said[found.end():]) and not _forbidden_or_asked(said, found)
                for found in re.finditer(ADDRESSED_BY.format(name=wanted), said))
 
 
