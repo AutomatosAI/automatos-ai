@@ -1271,6 +1271,11 @@ class Config:
     # F130: each earlier step's answer reaches a later step whole up to this many characters.
     PLAYBOOK_STEP_ANSWER_MAX_CHARS: int = int(os.getenv("PLAYBOOK_STEP_ANSWER_MAX_CHARS", "12000"))
     MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))
+    # PRD-256 FX-015: the owner's standing rules ride every chat turn, newest first, up to this
+    # many tokens; the block reads at most STANDING_RULES_SCAN_LIMIT candidate rows to find them
+    # (a warning names a workspace that reaches it).
+    STANDING_RULES_MAX_TOKENS: int = int(os.getenv("STANDING_RULES_MAX_TOKENS", "600"))
+    STANDING_RULES_SCAN_LIMIT: int = int(os.getenv("STANDING_RULES_SCAN_LIMIT", "500"))
     COMPOSIO_SECTION_MAX_TOKENS: int = int(os.getenv("COMPOSIO_SECTION_MAX_TOKENS", "1000"))
     # TOOL_ROUTING_GRAPH (default OFF) gates the learned tool-routing GRAPH reads
     # — GraphRouter.rank_chains on BOTH surfaces: the schema path

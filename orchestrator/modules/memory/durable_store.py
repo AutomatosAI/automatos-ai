@@ -35,6 +35,7 @@ from qdrant_client.models import (
     Filter,
     FilterSelector,
     HnswConfigDiff,
+    MatchAny,
     MatchValue,
     PayloadSchemaType,
     PointStruct,
@@ -350,6 +351,18 @@ class DurableMemoryStore:
         workspace_id: Optional[str] = None,
     ) -> List[Dict]:
         """Every memory in a namespace (unscored, scroll order)."""
+        return await self._scroll(self._namespace_filter(user_id), limit)
+
+    async def get_where_any(self, user_id: str, any_of: Dict[str, List[str]], limit: int = 100) -> List[Dict]:
+        """PRD-256 FX-015: the namespace's memories whose payload matches at least one of
+        ``any_of`` (a payload key, ``metadata.type`` say, to the values it may hold);
+        unscored, scroll order, no embedding call."""
+        should = [FieldCondition(key=key, match=MatchAny(any=list(values))) for key, values in any_of.items()]
+        flt = Filter(must=self._namespace_filter(user_id).must, should=should or None)
+        return await self._scroll(flt, limit)
+
+    async def _scroll(self, flt: Filter, limit: int) -> List[Dict]:
+        """The memories ``flt`` matches, up to ``limit`` (unscored, scroll order)."""
         if not self._enabled:
             return []
         await self.ensure_collection()
@@ -359,7 +372,7 @@ class DurableMemoryStore:
         while len(out) < limit:
             points, next_offset = await self._client.scroll(
                 collection_name=self._collection,
-                scroll_filter=self._namespace_filter(user_id),
+                scroll_filter=flt,
                 limit=min(256, limit - len(out)),
                 offset=next_offset,
                 with_payload=True,

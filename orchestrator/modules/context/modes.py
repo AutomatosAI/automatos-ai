@@ -129,6 +129,7 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
             "identity", "product_facts", "onboarding", "skills", "composio", "plugins",
             "platform_actions", "documents_inventory", "memory", "business_graph",
             "datetime_context", "conversation",
+            "standing_rules",   # PRD-256 FX-015: the owner's rules, every turn whatever the intent
         ],
         tool_loading="filtered",
         personality=True,

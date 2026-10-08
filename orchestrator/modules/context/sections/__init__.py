@@ -16,7 +16,7 @@ from modules.context.sections.documents_inventory import DocumentsInventorySecti
 from modules.context.sections.field_memory import FieldMemorySection
 from modules.context.sections.graph_context import GraphSection
 from modules.context.sections.identity import IdentitySection
-from modules.context.sections.memory import MemorySection
+from modules.context.sections.memory import MemorySection, StandingRulesSection
 from modules.context.sections.mission_context import MissionContextSection
 from modules.context.sections.onboarding import OnboardingSection
 from modules.context.sections.planning_history import PlanningHistorySection
@@ -38,6 +38,7 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "plugins": PluginsSection,
     "platform_actions": PlatformActionsSection,
     "memory": MemorySection,
+    "standing_rules": StandingRulesSection,   # PRD-256 FX-015
     "mission_context": MissionContextSection,
     "onboarding": OnboardingSection,
     "planning_knowledge": PlanningKnowledgeSection,
@@ -75,6 +76,7 @@ __all__ = [
     "PlaybookContextSection",
     "ProductFactsSection",
     "SkillsSection",
+    "StandingRulesSection",
     "TaskContextSection",
     "ToolsSection",
     "SECTION_REGISTRY",
