@@ -75,6 +75,7 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 | `api.image.tag`, `frontend.image.tag`, `worker.image.tag` | the chart's `appVersion` (`edge`) | Pin a `sha-…` or version tag for repeatable installs. |
 | `workspaces.storageClass`, `workspaces.accessModes` | cluster default, `ReadWriteMany` | |
 | `ingress.*` | off | |
+| `otel.enabled`, `otel.endpoint` | off | OpenTelemetry traces from the API and the worker, and the API's GenAI metrics, over OTLP/HTTP to your collector ([`deploy/otel/`](../../deploy/otel/) has a reference config). Headers for the endpoint go in the Secret as `OTEL_EXPORTER_OTLP_HEADERS`. `otel.samplerRatio` keeps a share of new traces; `otel.resourceAttributes` adds to the pod and namespace names on every span. |
 | `sessionMode.enabled` | off | Session mode: your own Claude Code, Codex or Copilot sessions as agents, through the CLI host on your machine. Local edition only. Each session's files are uploaded into the workspace volume; the projects folder isn't browsable on a cluster. With the ingress on, `/api/v1/cli-hosts` gets its own Ingress (`sessionMode.ingressAnnotations`, a 64 MB body limit for ingress-nginx). |
 
 ## Tests
@@ -86,6 +87,8 @@ See [`values.yaml`](values.yaml). The ones you're most likely to change:
 - **End to end, on a throwaway kind cluster:** `deploy/kind/e2e.sh cycle 2`
   creates a cluster, loads the images (the API built from your checkout), installs
   with dev PostgreSQL and Redis, runs the checks, upgrades, runs them again and
-  deletes the cluster, twice. It needs Docker, kind, kubectl and helm, and several
+  deletes the cluster, twice. It also runs an OpenTelemetry Collector on the
+  reference config and checks that one request's spans from the API and the worker
+  arrive as one trace. It needs Docker, kind, kubectl and helm, and several
   GB of images, so it runs locally, not in CI. `e2e.sh up` keeps the cluster for
   poking at; `e2e.sh down` removes it.

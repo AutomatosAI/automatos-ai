@@ -15,6 +15,8 @@ fullnameOverride: ""
 #   CREDENTIAL_ENCRYPTION_KEY  a Fernet key; every pod must share it, or credentials
 #                              saved by one pod can't be read by another
 #   WORKER_INTERNAL_TOKEN      optional; shared secret between the API and the worker
+#   OTEL_EXPORTER_OTLP_HEADERS optional; headers for the OTLP endpoint (otel below),
+#                              e.g. Authorization=Basic%20<base64>, values URL-encoded
 existingSecret: ""
 
 edition:
@@ -139,6 +141,18 @@ serviceAccount:
 # Path routing on one host: /api and /ws to the API, everything else to the web
 # app. Needs a frontend that reads its API address at runtime; the published
 # image still has http://localhost:8000 fixed at build time.
+# OpenTelemetry (PRD-256): traces from the API and the worker, and the API's GenAI
+# metrics, over OTLP/HTTP. OFF by default. Point `endpoint` at an OpenTelemetry
+# Collector (deploy/otel/ has a reference config) or any OTLP/HTTP backend. Its
+# headers (a vendor's Authorization) come from the Secret, never from values.
+otel:
+  enabled: false
+  endpoint: ""          # e.g. http://otel-collector.observability:4318
+  samplerRatio: "1.0"   # the share of new traces kept; a sampled caller is always followed
+  # Extra resource attributes on every span and metric, e.g. "k8s.cluster.name=prod".
+  # The pod and namespace names are always added.
+  resourceAttributes: ""
+
 ingress:
   enabled: false
   className: ""

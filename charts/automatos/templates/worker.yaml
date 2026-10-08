@@ -56,6 +56,7 @@ spec:
                   key: {{ $key }}
                   optional: true
             {{- end }}
+            {{- include "automatos.otelEnv" (dict "ctx" $ "service" "automatos-workspace-worker") | nindent 12 }}
           ports:
             - name: http
               containerPort: 8081

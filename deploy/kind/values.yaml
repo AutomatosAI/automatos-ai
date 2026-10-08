@@ -38,6 +38,12 @@ worker:
   resources:
     requests: {cpu: 50m, memory: 256Mi}
 
+# OpenTelemetry (PRD-256): the collector e2e.sh starts from deploy/otel/collector.yaml.
+otel:
+  enabled: true
+  endpoint: http://otel-collector:4318
+  resourceAttributes: k8s.cluster.name=automatos-e2e
+
 # Session mode (#848): e2e.sh runs the CLI host on this machine against the cluster.
 sessionMode:
   enabled: true

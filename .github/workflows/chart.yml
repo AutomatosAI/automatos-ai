@@ -69,6 +69,7 @@ jobs:
         run: |
           helm template ci charts/automatos \
             --set existingSecret=ci --set ingress.enabled=true \
+            --set otel.enabled=true --set otel.endpoint=http://otel-collector:4318 \
             | kubeconform -strict -summary -kubernetes-version "${KUBERNETES_VERSION}"
 
       - name: helm-unittest

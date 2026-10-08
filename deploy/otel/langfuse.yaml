@@ -1,0 +1,35 @@
+# Langfuse as a second destination, for the GenAI spans only (PRD-256 O3: the
+# LangfuseTracer is gone; Langfuse is an OTLP destination behind the collector).
+#
+# Merged over collector.yaml, which still sends everything to your backend:
+#   otelcol-contrib --config=collector.yaml --config=langfuse.yaml
+#
+#   LANGFUSE_OTLP_ENDPOINT  https://cloud.langfuse.com/api/public/otel (EU),
+#                           https://us.cloud.langfuse.com/api/public/otel (US), or
+#                           <your host>/api/public/otel when self-hosted
+#   LANGFUSE_AUTH           base64 of "<public key>:<secret key>"
+#
+# Langfuse takes traces, not metrics. Only spans with gen_ai.operation.name go
+# there: each LLM call (chat), agent run (invoke_agent) and tool call
+# (execute_tool), with their tokens, cost, model and timing. The HTTP requests,
+# SQL and Redis around them stay in the main backend.
+
+processors:
+  filter/genai-only:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["gen_ai.operation.name"] == nil'
+
+exporters:
+  otlp_http/langfuse:
+    endpoint: ${env:LANGFUSE_OTLP_ENDPOINT}
+    headers:
+      Authorization: Basic ${env:LANGFUSE_AUTH}
+
+service:
+  pipelines:
+    traces/langfuse:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/genai-only, attributes/no-content, batch]
+      exporters: [otlp_http/langfuse]
