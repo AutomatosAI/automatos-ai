@@ -43,6 +43,8 @@ class Target:
     name: Optional[str] = None
     # PRD-252 R4: a ticket as messages name it, "ticket #0042".
     label: Optional[str] = None
+    # PRD-256 FX-009: why it names nothing the call can act on, in the tool's own words.
+    why: Optional[str] = None
 
     @property
     def called(self) -> str:
@@ -58,10 +60,11 @@ def resolve_targets(db: Any, workspace_id: Any, params: Any,
     """``(found, missing)`` for the id parameters of ``action``'s call, in this
     workspace. A lookup that errors counts as found-without-a-name: it is not a
     verdict."""
-    found: List[Target] = []
-    missing: List[Target] = []
     if not isinstance(params, dict):
-        return found, missing
+        return [], []
+    from modules.tools.discovery.mission_targets import mission_targets
+
+    found, missing = mission_targets(db, workspace_id, params, action)  # FX-009: a mission, as its tool reads it
     targets = {**_TARGETS, **_ACTION_TARGETS.get(action or "", {})}
     for param, (table, label, noun) in targets.items():
         raw = params.get(param)
@@ -117,11 +120,13 @@ def named_subject(found: List[Target]) -> str:
 
 
 def missing_targets_error(action: str, missing: List[Target]) -> Dict[str, Any]:
-    """The call's result when it names something that is not in the workspace."""
+    """The call's result when it names something that is not in the workspace (or, FX-009,
+    names something its tool would refuse: the tool's own refusal)."""
     what = ", ".join(f"no {t.called}" for t in missing)
+    told = " ".join(t.why for t in missing if t.why)
     return {
         "success": False,
-        "error": (
+        "error": told or (
             f"{what[0].upper()}{what[1:]} in this workspace — nothing was asked or done. "
             f"Look it up first (list or search), then call {action} with a real id."
         ),

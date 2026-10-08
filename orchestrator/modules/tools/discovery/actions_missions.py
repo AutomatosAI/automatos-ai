@@ -3,8 +3,8 @@
 from .action_registry import ActionDefinition, ActionRegistry
 
 # F241 (night 7b): a mission tool takes a card's number too (mission_refs.takes_card_numbers).
-MISSION_REF_TEXT = ("The mission: its id, or its card's number as the board shows it (#0188). "
-                    "A step's number (#0188.3) names its mission.")
+MISSION_REF_TEXT = ("The mission: its id, its card's number as the board shows it (#0188), or its title "
+                    "when one mission has it. A step's number (#0188.3) names its mission.")
 # PRD-163 S1: lifecycle control tools. These are how Auto drives a mission
 # through its states from chat (approve/reject the plan, pause/resume/cancel
 # a run, replan a failure). Each maps to an existing CoordinatorService method.
@@ -121,6 +121,7 @@ def _register_approve_and_reject(registry: ActionRegistry) -> None:
             "required": ["mission_id"],
         },
         permission_level="write",
+        promoted=True,  # PRD-256 FX-009: a first-class tool, pinned
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "approve"],
         examples=["approve that mission", "go ahead and run the plan", "yes, start the mission"],
@@ -172,6 +173,7 @@ def _register_pause_and_cancel(registry: ActionRegistry) -> None:
         category="missions",
         parameters={"type": "object", "properties": dict(_MISSION_ID_PARAM), "required": ["mission_id"]},
         permission_level="write",
+        promoted=True,  # PRD-256 FX-009: a first-class tool, pinned
         requires_confirmation=False,
         tags=["missions", "write", "lifecycle", "cancel"],
         examples=["cancel that mission", "stop the mission"],

@@ -1329,7 +1329,9 @@ class Config:
         # outside the dispatcher's enum — the used action sat outside the ranked top-15 on 53% of calls.
         "platform_create_task,platform_update_task,platform_update_task_status,platform_assign_task,"
         "platform_create_mission,platform_execute_playbook,platform_schedule_playbook,"
-        "platform_create_social_post,platform_get_task,platform_query_data",
+        "platform_create_social_post,platform_get_task,platform_query_data,"
+        # PRD-256 FX-009: the owner's two mission decisions, first-class (night 12 guessed their ids).
+        "platform_approve_mission,platform_cancel_mission",
     )
     # The additive ranking boost a promoted action gets in the shared cosine pass, so a
     # promoted action outranks an equal-cosine unpromoted one and is more likely to rank

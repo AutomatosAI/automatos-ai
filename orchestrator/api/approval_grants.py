@@ -34,6 +34,7 @@ from core.models.approval_grants import (
 )
 from core.models.core import BoardTask
 from modules.policy.ai_act import oversight_for_risk
+from services.click_results import executed_summary, failed_summary, said_in_the_chat
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/approval-grants", tags=["approval-grants"])
@@ -198,6 +199,7 @@ async def grant_approval(
     # (consume-then-execute against the now-committed grant).
     await _requeue_subject(db, grant)
     db.commit()
+    said_in_the_chat(db, grant)  # PRD-256 FX-009: the chat's next turn reads what the click ran
     _audit(db, ctx, "approval_grant:granted", grant)
     return {"grant": grant.to_dict()}
 
@@ -748,14 +750,7 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
     caller_context = dict(caller_context) if isinstance(caller_context, dict) else None
 
     if not action:
-        grant.details = {
-            **details,
-            "executed_result": {
-                "success": False,
-                "error": "grant carries no stored action to resume",
-                "executed_at": datetime.now(timezone.utc).isoformat(),
-            },
-        }
+        grant.details = {**details, "executed_result": failed_summary("grant carries no stored action to resume")}
         return
 
     try:
@@ -770,25 +765,13 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
             trace_id=f"grant-resume-{grant.id}",
             caller_context=caller_context,
         )
-        raw = raw if isinstance(raw, dict) else {}
-        ok = bool(raw.get("success"))
-        summary: Dict[str, Any] = {
-            "success": ok,
-            "error": (str(raw.get("error"))[:500] if (not ok and raw.get("error")) else None),
-            "requires_confirmation": bool(raw.get("requires_confirmation")),
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-        }
+        summary = executed_summary(raw)  # FX-009: with the ids and titles of what it made or changed
     except Exception as exc:
         logger.error(
             "[approval_grants.api] tool_call resume failed for grant %s",
             grant.id, exc_info=True,
         )
-        summary = {
-            "success": False,
-            "error": str(exc)[:500],
-            "requires_confirmation": False,
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-        }
+        summary = failed_summary(exc)
     grant.details = {**details, "executed_result": summary}
 
 

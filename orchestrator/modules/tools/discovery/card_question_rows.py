@@ -161,15 +161,16 @@ def _mission(db: Any, workspace_id: Any, said: Any) -> Tuple[Optional[Any], Opti
 
 
 def _run_id(db: Any, workspace_id: Any, said: Any) -> Optional[UUID]:
-    """A mission's id as said, or the mission of the card a number names (mission_refs, F241)."""
-    from modules.tools.discovery.mission_refs import mission_of_card
+    """A mission's id as said, or the mission of the card a number (mission_refs, F241) or
+    a mission's title (FX-009) names."""
+    from modules.tools.discovery.mission_refs import card_named, mission_of_card
 
     if said in (None, ""):
         return None
     try:
         return said if isinstance(said, UUID) else UUID(str(said))
     except (ValueError, TypeError, AttributeError):
-        ticket = _ticket(db, workspace_id, said)
+        ticket = card_named(db, workspace_id, said)[0]
         return mission_of_card(db, ticket) if ticket is not None else None
 
 
