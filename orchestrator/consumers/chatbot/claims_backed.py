@@ -21,9 +21,12 @@ not-done line ("…nothing has changed").
 
 The shapes read as a report of work done: "I've <verb>", "has/have been <verb>" (a state like
 "has been based on" is not a report), "it's been <verb>", "is now <verb>", "<Subject> launched ✅",
-"you should now see", and a sentence that is only "Done.". A simple-past passive ("Ticket #1110
-was completed at 03:04", "the order was placed last week") reports history, not this turn's own
-work (P256-FIX-RVW-1, F186): it is no claim.
+"you should now see", and a sentence that is only "Done." (a shape with no verb of its own: its
+verb is ""). P256-FIX-RVW-7: the first person ("I've <verb>", and what it coordinates) is the
+writer's own claim; an agent's run reads only that (``first_person``): its passives are its
+customer draft's voice. A simple-past passive ("Ticket #1110 was completed at 03:04", "the
+order was placed last week") reports history, not this turn's own work (P256-FIX-RVW-1, F186):
+it is no claim.
 What the answer quotes ("> " lines, a fenced block) is a draft in its writer's voice, never a
 claim. A plan word exempts only the claim it introduces ("Once I've sent it…"), never a claim
 further on ("I'll just confirm that the card has been approved" is a claim); the reply's own
@@ -94,6 +97,13 @@ _SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
 _MARKS = re.compile(r"[*_`#>]")
 _WORD = re.compile(r"[a-z]+", re.I)
 _SENT_BACK = re.compile(r"\bsent\b.*\bback\b", re.I)
+# A shape that ends on its verb ("I've sent", "has been approved", "launched ✅"); "Done.", "is now live"
+# and "you should now see" have none (P256-FIX-RVW-7).
+_ON_ITS_VERB = re.compile(rf"\b{_DONE_VERB}$", re.I)
+_FIRST_PERSON = re.compile(r"I(?:'ve|’ve| have)\b", re.I)
+# The claims that say only that work was done ("Done.", "it's been done", "is now live"): the nudge's
+# "done". Any other verb in no family ("I've prepared a summary") is the line's alone.
+SAYS_DONE = frozenset({"", "done"})
 
 
 def _stem(r: Receipt) -> str:
@@ -220,6 +230,8 @@ def _family(verb: str, sentence: str) -> Optional[Backs]:
 def _verb(sentence: str, said: str, end: int) -> str:
     """The claim's verb ("" for a shape with none), with its particle when a family names the
     pair ("I've set up the report" is "set up"; "kicked off" stays "kicked")."""
+    if not _ON_ITS_VERB.search(said):
+        return ""
     words = _WORD.findall(said)
     verb = words[-1].lower() if words else ""
     particle = _PARTICLE.match(sentence, end)
@@ -247,7 +259,15 @@ def _coordinated(sentence: str, start: int, end: int) -> List[str]:
             if _reported(sentence, found.start(1), found.end())]
 
 
-def _claims_in(sentence: str) -> List[str]:
+def _counts(sentence: str, match: re.Match, first_person: bool) -> bool:
+    """Whether a claim shape reports this turn's work: no plan word before it, not the reply's own
+    content; with ``first_person``, only the writer's own "I've <verb>" (P256-FIX-RVW-7)."""
+    if first_person and not _FIRST_PERSON.match(match.group(0)):
+        return False
+    return not _PLANNED.search(sentence[: match.start()]) and _reported(sentence, match.start(), match.end())
+
+
+def _claims_in(sentence: str, first_person: bool = False) -> List[str]:
     """The verbs of the sentence's reports of work done ("" for a shape with no verb)."""
     if _PAST.search(sentence):
         return []
@@ -255,7 +275,7 @@ def _claims_in(sentence: str) -> List[str]:
     ends = [found.start() for found in matches[1:]] + [len(sentence)]
     verbs = []
     for match, upto in zip(matches, ends):
-        if _PLANNED.search(sentence[: match.start()]) or not _reported(sentence, match.start(), match.end()):
+        if not _counts(sentence, match, first_person):
             continue
         verbs.append(_verb(sentence, match.group(0), match.end()))
         verbs.extend(_coordinated(sentence, match.end(), upto))
@@ -277,10 +297,12 @@ def _own_words(text: str) -> str:
     return "\n".join(kept)
 
 
-def claims(answer: str) -> List[Tuple[str, str]]:
-    """Each report of work done in Auto's own words: (its verb, its sentence)."""
+def claims(answer: str, first_person: bool = False) -> List[Tuple[str, str]]:
+    """Each report of work done in the writer's own words: (its verb, its sentence); with
+    ``first_person``, only its "I've <verb>" claims."""
     text = _MARKS.sub("", _own_words(answer or ""))
-    return [(verb, sentence) for sentence in _SENTENCES.findall(text) for verb in _claims_in(sentence)]
+    return [(verb, sentence) for sentence in _SENTENCES.findall(text)
+            for verb in _claims_in(sentence, first_person)]
 
 
 def claims_work_done(answer: str) -> bool:
@@ -288,12 +310,13 @@ def claims_work_done(answer: str) -> bool:
     return bool(claims(answer))
 
 
-def unbacked_claims(answer: str, done_writes: Sequence[Receipt]) -> List[Tuple[str, bool]]:
+def unbacked_claims(answer: str, done_writes: Sequence[Receipt],
+                    first_person: bool = False) -> List[Tuple[str, bool]]:
     """The answer's claims no done write backs: (the verb, whether its family is known). A
     claim of a known family needs a done write of that family (a Composio action's by the
     words of its slug); any other needs any done write."""
     unbacked = []
-    for verb, sentence in claims(answer):
+    for verb, sentence in claims(answer, first_person):
         backs = _family(verb, sentence)
         backed = any(backs(r) for r in done_writes) if backs else bool(done_writes)
         if not backed:
@@ -322,5 +345,5 @@ def is_not_done_line(line: str) -> bool:
     return line.startswith(NOT_DONE_PREFIX)
 
 
-__all__ = ["COMPLETED_ACTION", "FAMILIES", "NOT_DONE_PREFIX", "claims", "claims_work_done", "is_not_done_line",
-           "not_done_line", "unbacked_claims"]
+__all__ = ["COMPLETED_ACTION", "FAMILIES", "NOT_DONE_PREFIX", "SAYS_DONE", "claims", "claims_work_done",
+           "is_not_done_line", "not_done_line", "unbacked_claims"]

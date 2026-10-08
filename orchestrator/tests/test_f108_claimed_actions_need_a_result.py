@@ -26,11 +26,12 @@ from tests.helpers_receipts_rule import call, line, nudged
 EMAIL_SENT = ("composio_execute", {"action": "GMAIL_SEND_EMAIL", "params": {"to": "declan@example.com"}},
               {"successful": True})
 READS = ("platform_list_tasks", call("search_knowledge", {"query": "newsletter"}))
-# The claim's verb names it when its family is known; a verb in no family ("put") says only "done".
+# The claim's verb names it when its family is known; a verb in no family ("put") is no nudge's
+# (P256-FIX-RVW-7: the line above the answer still says it, test_prd256_fix_stream_truth).
 NIGHT_3 = [
     ("I've approved the mission. It's now running.", "approved", "platform_approve_mission"),
     ("I've noted that the Taster plan is now £14.", "noted", "platform_store_memory"),
-    ("I've put your newsletter on the board.", "done", "platform_create_task"),
+    ("I've put your newsletter on the board.", None, "platform_create_task"),
     ("Done — I've created a new agent called REPORT GENERATOR.", "created", "platform_create_agent"),
     ("I've emailed Declan the invoice.", "emailed", EMAIL_SENT),
     ("I've cancelled the Friday schedule.", "cancelled", "platform_cancel_scheduled_task"),

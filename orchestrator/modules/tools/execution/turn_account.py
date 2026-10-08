@@ -134,7 +134,7 @@ def with_account(response: Any, outcomes: Sequence[Outcome]) -> Any:
 LLMCall = Callable[[List[Dict[str, Any]], Optional[List[Dict[str, Any]]]], Awaitable[Any]]
 
 
-def _speaks(promises: Optional[bool]) -> bool:
+def auto_speaks(promises: Optional[bool]) -> bool:
     """Auto's own turn: the executor says so (``promises``), or else the turn's lane."""
     if promises is not None:
         return promises
@@ -151,10 +151,11 @@ def said_or_accounted(llm: LLMCall, outcomes: Callable[[], Sequence[Outcome]],
     it came (its run has its own handling)."""
     async def call(messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]]) -> Any:
         response = await llm(messages, tools)
-        if not is_blank(response) or not _speaks(promises):
+        if not is_blank(response) or not auto_speaks(promises):
             return response
         return with_account(response, outcomes())
     return call
 
 
-__all__ = ["account_of", "is_blank", "is_read", "said_or_accounted", "thing_of", "what_it_did", "with_account"]
+__all__ = ["account_of", "auto_speaks", "is_blank", "is_read", "said_or_accounted", "thing_of", "what_it_did",
+           "with_account"]

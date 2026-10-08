@@ -45,7 +45,7 @@ from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional
 
 from consumers.chatbot.claim_check import NOTHING_DONE
 from consumers.chatbot.claims_backed import (
-    COMPLETED_ACTION, claims_work_done, is_not_done_line, not_done_line, unbacked_claims,
+    COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, unbacked_claims,
 )
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED, STEPS_UNCHECKED,
@@ -53,7 +53,7 @@ from modules.tools.execution.call_effects import (
 )
 from modules.tools.execution.card_raised import is_waiting, receipt_effect
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
-from modules.tools.execution.turn_account import is_read, thing_of, what_it_did
+from modules.tools.execution.turn_account import auto_speaks, is_read, thing_of, what_it_did
 
 Receipt = Dict[str, Any]
 Prefetched = Sequence[Tuple[str, Dict[str, Any]]]
@@ -311,17 +311,18 @@ def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
     return [*lines, not_done] if not_done else lines
 
 
-def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]]) -> Optional[str]:
+def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]],
+                   promises: Optional[bool] = True) -> Optional[str]:
     """FX-007, F108's nudge from the receipts: the verb of the answer's first claim that no done
-    write of the calls so far backs (``outcomes``: the loop tracker's), "done" for a claim whose
-    verb is in no family ("Done.", "it's now on your board"), else None."""
+    write of the calls so far backs (``outcomes``: the loop tracker's), "done" for a claim that says
+    only that ("Done.", "it's now on your board", "it's been done"), else None. P256-FIX-RVW-7: a
+    participle in no family ("I've prepared a summary") is never nudged (the line above the answer
+    still reads it), and an agent's run (``promises`` False; None: the turn's lane decides) is held
+    only to its first-person claims: "It has been cancelled" in its customer draft is its writer's voice."""
     receipts = [receipt(action, params, result) for action, params, result in outcomes]
     done_writes = [r for r in receipts if r["kind"] == WRITE and r["status"] == DONE]
-    unbacked = unbacked_claims(answer, done_writes)
-    if not unbacked:
-        return None
-    verb, known = unbacked[0]
-    return verb if known else "done"
+    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises))
+    return next((verb or "done" for verb, known in unbacked if known or verb in SAYS_DONE), None)
 
 
 def with_lines_above(answer: str, above: Sequence[str]) -> str:

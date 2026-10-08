@@ -179,7 +179,8 @@ def test_the_in_loop_nudge_and_the_first_reply_read_the_receipts_rule():
     from consumers.chatbot.service import StreamingChatService
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
-    assert "unbacked_claim(text, self.tracker.outcomes)" in inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    nudge = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in nudge   # RVW-7: the run's voice
     assert "claims_work_done(response.content)" in inspect.getsource(
         StreamingChatService._first_reply_goes_through_the_loop)
 

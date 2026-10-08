@@ -123,10 +123,14 @@ def test_a_read_of_the_board_backs_no_change():
     assert nudged("Mission #0365 has been cancelled.", *read) == "cancelled"
 
 
-def test_an_agents_draft_is_read_like_any_reply():
-    """The lane no longer decides (FX-007): a customer draft's "It has been cancelled" is a claim
-    the agent's run must back; F201 says so before it is sent (services/draft_guides.py)."""
-    assert nudged("It has been cancelled, and you won't be charged.") == "cancelled"
+def test_an_agents_draft_is_not_held_to_auto_s_passives():
+    """P256-FIX-RVW-7 (restored against the receipts rule): a customer draft's "It has been
+    cancelled" speaks in its writer's voice, so an agent's run is not nudged to make the call
+    (F201 checks the draft before it is sent: services/draft_guides.py). In Auto's own chat turn
+    the same sentence is a claim."""
+    said = "It has been cancelled, and you won't be charged."
+    assert nudged(said, promises=False) is None
+    assert nudged(said) == "cancelled"
 
 
 def test_what_a_move_did_is_recorded_beside_its_name():

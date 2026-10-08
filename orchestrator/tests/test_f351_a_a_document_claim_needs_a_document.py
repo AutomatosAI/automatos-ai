@@ -44,17 +44,20 @@ REFUSED = ("generate_document", {"title": "Letter to Maya Osei", "data": "{\"bod
             "raw_result": {"success": False, "status": "error", "error": BAD_JSON}})
 
 # Each trace-backed reply (chats.jsonl), and what the nudge names (None: cleared, a place or a time).
+# P256-FIX-RVW-7: "drafted" is in no family, so it is the line's (DRAFTED), never the nudge's.
+DRAFTED = [
+    ("433eaf26", "Right, Gerard. I've drafted that letter to Maya Osei at Quay Coffee House for you. It's on your "
+                 "Harbourline Letter template, detailing the move to 30-day payment terms from 1 November, with "
+                 "the bank transfer details included.\n\nIt's ready to go."),
+    ("09a2afb5", "I've drafted the wholesale supply agreement for Gull & Kettle as a Word document using the Branded "
+                 "Agreement template. It includes all the details you provided."),
+    ("09a2afb5-t2", "However, I can tell you that the agreement has been drafted."),
+]
 SAID = [
     ("8ac5cf3a", LETTER, "generated"),
     ("b6db1b8a", "I've generated the Quay Coffee House letter for you in PDF format using your Harbourline Letter "
                  "template. The download link will be available in your Deliverables shortly.", "generated"),
     ("b6db1b8a-link", "The download link will be available in your Deliverables shortly.", None),
-    ("433eaf26", "Right, Gerard. I've drafted that letter to Maya Osei at Quay Coffee House for you. It's on your "
-                 "Harbourline Letter template, detailing the move to 30-day payment terms from 1 November, with "
-                 "the bank transfer details included.\n\nIt's ready to go.", "done"),
-    ("09a2afb5", "I've drafted the wholesale supply agreement for Gull & Kettle as a Word document using the Branded "
-                 "Agreement template. It includes all the details you provided.", "done"),
-    ("09a2afb5-t2", "However, I can tell you that the agreement has been drafted.", "done"),
     ("0ac95829", "I've created the **Branded Data Sheet** for our coffees.", "created"),
     ("6b33938f", 'You can find the letter in your Deliverables as "Payment Terms Update - Quay Coffee House.docx".',
      None),
@@ -79,6 +82,26 @@ def test_a_document_said_to_be_made_needs_one_made(chat, reply, claim):
     assert nudged(reply) == claim
     assert nudged(reply, *OTHER_CALLS) == claim
     assert nudged(reply, MADE) is None
+
+
+@pytest.mark.parametrize("chat, reply", DRAFTED, ids=[chat for chat, _ in DRAFTED])
+def test_a_document_said_drafted_is_the_lines_not_the_nudges(chat, reply):
+    """P256-FIX-RVW-7: a participle in no family costs no extra model call; the owner still reads
+    that nothing was made, unless a document was."""
+    assert nudged(reply) is None and nudged(reply, *OTHER_CALLS) is None
+    assert line(reply) == NOTHING_DONE_LINE and line(reply, *OTHER_CALLS) == NOTHING_DONE_LINE
+    assert line(reply, MADE) is None
+
+
+def test_an_agents_own_draft_is_not_checked():
+    """P256-FIX-RVW-7 (restored against the receipts rule): an agent's run, no write, is not nudged
+    for what its draft says in its writer's voice; its own first-person claim of a known family
+    ("I've generated the letter") still is, and Auto's chat turn is nudged for both."""
+    draft = ("The letter to Maya Osei at Quay Coffee House regarding the payment terms update has been generated "
+             "and saved to Deliverables.")
+    assert nudged(draft, promises=False) is None
+    assert nudged(draft) == "generated"
+    assert nudged(LETTER, promises=False) == "generated"
 
 
 def test_trying_again_is_no_report_of_work_done():
@@ -121,14 +144,16 @@ def test_a_question_an_offer_a_quoted_draft_or_a_plan_is_no_claim(reply):
 
 
 @pytest.mark.parametrize("reply, claim", [
-    ("I've drafted that letter to Maya Osei at Quay Coffee House for you.", "done"),     # was: a letter in the reply
-    ("I've prepared the content for your one-page PDF titled Thank you, Tide Café.", "done"),
+    ("I've drafted that letter to Maya Osei at Quay Coffee House for you.", None),       # was: a letter in the reply
+    ("I've prepared the content for your one-page PDF titled Thank you, Tide Café.", None),
     ("I've created the invoice task for the Ops Manager.", "created"),                    # no task was made either
 ])
 def test_a_report_of_work_with_no_write_is_caught_whatever_it_made(reply, claim):
     """The families read these as no document claim; the receipts rule reads a report of work
-    done with no write behind it, which the owner is told plainly."""
+    done with no write behind it, which the owner is told plainly. P256-FIX-RVW-7: the nudge
+    names only a claim of a known family; a verb in none ("drafted", "prepared") is the line's."""
     assert nudged(reply) == claim
+    assert line(reply) == NOTHING_DONE_LINE
 
 
 def test_a_card_made_to_write_the_document_backs_the_card_it_names():

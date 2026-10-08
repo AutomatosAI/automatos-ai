@@ -57,6 +57,11 @@ def test_the_reply_that_filed_the_ticket_is_not_told_nothing_was_saved():
     assert nudged(AT_17_58, *MEMORY_ONLY) == "created"
 
 
+def test_an_agents_draft_hands_nothing_on():
+    """P256-FIX-RVW-7 (restored against the receipts rule): an agent's run, its writer's voice."""
+    assert nudged(AT_17_57, *MEMORY_ONLY, promises=False) is None
+
+
 def test_a_hand_off_the_turn_filed_stands():
     said = "I'll get the Analyst to check the figures and report back on the card."
     assert nudged(said, *TICKET_FILED) is None

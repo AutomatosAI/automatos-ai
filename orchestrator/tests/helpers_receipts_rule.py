@@ -5,7 +5,8 @@ by the receipts (``consumers/chatbot/claims_backed.py``). The tests that pinned 
 sentence read it the same two ways the turn does:
 
 - ``nudged``: what the tool loop's one nudge (F108) says was claimed, from the calls so far
-  (``receipts.unbacked_claim``), or None;
+  (``receipts.unbacked_claim``), or None; in Auto's chat turn unless ``promises`` says it is an
+  agent's run (False) or leaves it to the turn's lane (None), P256-FIX-RVW-7;
 - ``line``: the not-done line above the answer (``receipts.honesty_lines``), or None.
 
 A call is ``(action, params, result)`` or an action's name alone (it went through).
@@ -35,9 +36,9 @@ def tracker_of(calls: Iterable[Call]) -> ToolExecutionTracker:
     return tracker
 
 
-def nudged(text: str, *calls: Call) -> Optional[str]:
+def nudged(text: str, *calls: Call, promises: Optional[bool] = True) -> Optional[str]:
     """What F108's nudge says the reply claimed with no done write of its kind behind it, else None."""
-    return unbacked_claim(text, tracker_of(calls).outcomes)
+    return unbacked_claim(text, tracker_of(calls).outcomes, promises=promises)
 
 
 def line(text: str, *calls: Call) -> Optional[str]:

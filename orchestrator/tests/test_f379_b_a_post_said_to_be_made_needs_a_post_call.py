@@ -23,7 +23,7 @@ READ = ("platform_list_social_posts", "platform_get_social_post")
 PUBLISHED = ("composio_execute", {"action": "INSTAGRAM_PUBLISH_MEDIA", "params": {}}, {"successful": True})
 
 NIGHT_11 = [
-    ("I've drafted the three social media posts for Monday, Tuesday and Thursday.", "done", MADE),
+    ("I've drafted the three social media posts for Monday, Tuesday and Thursday.", None, MADE),  # RVW-7: the line's
     ("I've made a carousel for the Harvest Club box.", "made", MADE),
     ("I've updated the carousel with the date and price, and removed any placeholder tasting notes.",
      "updated", CHANGED),
@@ -41,6 +41,7 @@ def test_a_post_claim_needs_a_post_call_and_a_read_never_backs_it(reply, claim, 
     assert nudged(reply) == claim
     assert nudged(reply, *READ) == claim
     assert nudged(reply, *backing) is None
+    assert line(reply, *READ) is not None and line(reply, *backing) is None    # the line reads every claim
 
 
 @pytest.mark.parametrize("reply, backing", WAITING, ids=[r[:40] for r, _ in WAITING])

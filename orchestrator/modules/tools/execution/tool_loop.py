@@ -612,7 +612,7 @@ class ToolLoopExecutor:
             return await nudge_about(self._llm, current, messages, tools, ANNOUNCED_STEP_MSG.format(step=step))
         from consumers.chatbot.receipts import unbacked_claim  # FX-007: the receipts rule, not a family
 
-        claim = unbacked_claim(text, self.tracker.outcomes)
+        claim = unbacked_claim(text, self.tracker.outcomes, promises=self.promises)  # RVW-7: an agent's own voice
         if not claim:
             return None
         logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)

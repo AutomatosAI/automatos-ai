@@ -285,7 +285,8 @@ def test_the_in_loop_nudge_reads_the_receipts_rule():
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
     source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "unbacked_claim(text, self.tracker.outcomes)" in source and "claimed_action_not_done" not in source
+    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in source   # RVW-7: the run's voice
+    assert "claimed_action_not_done" not in source
 
 
 # ── the turn: the frame carries the lines, the saved answer starts with them ─
