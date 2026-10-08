@@ -194,6 +194,11 @@ def test_a_delete_agent_card_says_it_cannot_be_undone(buyer):
 
 
 def test_a_skill_card_lists_the_agents_skills_before_and_after(buyer):
+    from core.models.core import Skill
+
+    # P256-FIX-RVW-17: a skill given is one installed here, bound before the card.
+    buyer.db.add(Skill(name="sourcing", skill_type="technical", workspace_id=buyer.ws))
+    buyer.db.flush()
     asked = _asked(buyer, "platform_assign_skill_to_agent", {"agent_id": buyer.agent.id, "skill_name": "sourcing"})
     assert "- skills: menu-writer → menu-writer, sourcing" in asked
     taken = _asked(buyer, "platform_unassign_skill_from_agent", {"agent_id": buyer.agent.id, "skill_name": "menu-writer"})

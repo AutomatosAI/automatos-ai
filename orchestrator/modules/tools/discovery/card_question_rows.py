@@ -32,6 +32,9 @@ TASK_FIELDS: Tuple[Tuple[str, str], ...] = (
     ("review_mode", "review_mode"), ("tags", "tags"), ("status", "status"),
 )
 NOTE_FIELD = "note"
+# P256-FIX-RVW-17: platform_update_task gives its card to the agent its ask bound (agent_binding).
+AGENT_FIELD = "agent"
+AGENT_NAMED = "{name} (agent #{id})"
 SEND_BACK = "send back to its agent for a redo"
 TOOLS_FIELD = "tools"
 TOOL_PARAMS = ("app_name", "tool_name")
@@ -73,15 +76,44 @@ def tool_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) 
     return [change_line(TOOLS_FIELD, now, after)]
 
 
-def task_lines(db: Any, workspace_id: Any, params: Dict[str, Any]) -> List[str]:
-    """Each field the call changes on its ticket; a bulk move, one line per ticket."""
+def task_lines(db: Any, workspace_id: Any, params: Dict[str, Any], *, gives_the_card: bool = False) -> List[str]:
+    """Each field the call changes on its ticket; a bulk move, one line per ticket.
+    ``gives_the_card``: the call gives the ticket to the agent of its ``agent_id`` too
+    (platform_update_task), 'agent: <now> → <name> (agent #id)'."""
     refs = [params["task_id"]] if params.get("task_id") not in (None, "") else []
     listed = params.get("task_ids") if isinstance(params.get("task_ids"), list) else []
     refs = [*refs, *listed][:MAX_CARDS_LISTED]
     tickets = [ticket for ticket in (_ticket(db, workspace_id, ref) for ref in refs) if ticket is not None]
+    given = _given_to(db, workspace_id, params) if gives_the_card else None
+
+    def changes(ticket: Any) -> List[str]:
+        return [*_ticket_changes(ticket, params), *_agent_change(db, workspace_id, ticket, given)]
+
     if len(tickets) == 1:
-        return _ticket_changes(tickets[0], params)
-    return [f"{_number(db, ticket)} {line}" for ticket in tickets for line in _ticket_changes(ticket, params)]
+        return changes(tickets[0])
+    return [f"{_number(db, ticket)} {line}" for ticket in tickets for line in changes(ticket)]
+
+
+def _given_to(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Optional[Any]:
+    """The active agent of this workspace the call's ``agent_id`` names, or None."""
+    from modules.tools.discovery.agent_refs import agent_by_id, agent_id_said
+
+    agent_id = agent_id_said(params.get("agent_id"))
+    return agent_by_id(db, workspace_id, agent_id)[0] if agent_id is not None else None
+
+
+def _agent_change(db: Any, workspace_id: Any, ticket: Any, given: Optional[Any]) -> List[str]:
+    """'agent: 'ROASTER' (agent #45) → OPS (agent #267)', or nothing when no agent is given."""
+    if given is None:
+        return []
+    from core.models import Agent
+
+    now = None
+    if getattr(ticket, "assigned_agent_id", None) is not None:
+        now = db.query(Agent.id, Agent.name).filter(Agent.id == ticket.assigned_agent_id,
+                                                    Agent.workspace_id == workspace_id).first()
+    held = AGENT_NAMED.format(name=now.name, id=now.id) if now is not None else None
+    return [change_line(AGENT_FIELD, held, AGENT_NAMED.format(name=given.name, id=given.id))]
 
 
 def _ticket_changes(ticket: Any, params: Dict[str, Any]) -> List[str]:

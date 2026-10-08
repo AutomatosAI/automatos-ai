@@ -52,47 +52,35 @@ def delete_agent_lines(db: Any, workspace_id: Any, action: str, params: Dict[str
 
 
 def skill_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
-    """The agent's skills before and after the call: 'skills: menu-writer → menu-writer, sourcing'."""
+    """The agent's skills before and after the call: 'skills: menu-writer → menu-writer, sourcing'.
+    The skill is the row the click acts on (``assigned_subjects.skill_of``, P256-FIX-RVW-17)."""
     from core.models.core import Skill, agent_skills
+    from modules.tools.discovery.assigned_subjects import skill_of
 
     agent = _agent(db, workspace_id, params)
-    named = _skill_named(db, workspace_id, params)
-    if agent is None or named is None:
+    skill = skill_of(db, workspace_id, action, params)[0]
+    if agent is None or skill is None:
         return []
     rows = (db.query(Skill.name).join(agent_skills, agent_skills.c.skill_id == Skill.id)
             .filter(agent_skills.c.agent_id == agent.id).all())
     return [value_line(AGENT_LINE.format(name=agent.name, id=agent.id)),
-            _before_and_after(SKILLS_FIELD, [row.name for row in rows], named, action)]
-
-
-def _skill_named(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Optional[str]:
-    """The skill the call names: its name as said, or the name of the workspace's (or a
-    marketplace) skill with that id."""
-    from core.models.core import Skill
-
-    if params.get("skill_name"):
-        return str(params["skill_name"])
-    try:
-        skill_id = int(params.get("skill_id"))
-    except (TypeError, ValueError):
-        return None
-    skill = db.query(Skill.name).filter(
-        Skill.id == skill_id, (Skill.workspace_id.is_(None)) | (Skill.workspace_id == workspace_id)).first()
-    return skill.name if skill is not None else None
+            _before_and_after(SKILLS_FIELD, [row.name for row in rows], str(skill.name), action)]
 
 
 def plugin_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
-    """The agent's plugins before and after the call."""
+    """The agent's plugins before and after the call: the plugin the click gives
+    (``assigned_subjects.plugin_of``, P256-FIX-RVW-17)."""
     from core.models.marketplace_plugins import AgentAssignedPlugin, MarketplacePlugin
+    from modules.tools.discovery.assigned_subjects import plugin_of
 
     agent = _agent(db, workspace_id, params)
-    named = params.get("plugin_slug") or params.get("plugin_id")
-    if agent is None or not named:
+    plugin = plugin_of(db, workspace_id, params)[0]
+    if agent is None or plugin is None:
         return []
     rows = (db.query(MarketplacePlugin.slug).join(AgentAssignedPlugin, AgentAssignedPlugin.plugin_id == MarketplacePlugin.id)
             .filter(AgentAssignedPlugin.agent_id == agent.id).all())
     return [value_line(AGENT_LINE.format(name=agent.name, id=agent.id)),
-            _before_and_after(PLUGINS_FIELD, [row.slug for row in rows], str(named), action)]
+            _before_and_after(PLUGINS_FIELD, [row.slug for row in rows], str(plugin.slug), action)]
 
 
 def _before_and_after(field: str, now: List[str], named: str, action: str) -> str:

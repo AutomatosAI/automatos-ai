@@ -34,6 +34,7 @@ NOT_HERE = ("Agent id {id} is not in this workspace, so nothing was done. platfo
 SWITCHED_OFF = ("Agent id {id} ({name}) is switched off ({status}), so nothing was done. Switch it on, or call "
                 "again with the agent_id of an active agent.")
 GIVEN_BEFORE_REFUSED = "{error} The card was given to {agent} before that edit was refused."
+NOT_FOUND = "Agent '{said}' not found"
 
 
 def agent_id_property(what: str) -> Dict[str, Any]:
@@ -128,6 +129,23 @@ def _bound_id(db: Any, workspace_id: Any, params: Dict[str, Any], name_key: str)
     return (agent.id if agent is not None else None), refusal
 
 
+def board_agent(db: Any, workspace_id: Any, params: Dict[str, Any],
+                name_key: str = AGENT_NAME) -> Tuple[Optional[Any], Optional[str]]:
+    """(the active agent a board write gives its card to, None), or (None, why not), read
+    as ``takes_the_agent_id`` and ``resolve_active_agent`` will read it at the click
+    (P256-FIX-RVW-17: the owner's card binds it first)."""
+    agent_id, refusal = _bound_id(db, workspace_id, params, name_key)
+    if refusal:
+        return None, refusal
+    if agent_id is not None:
+        return agent_by_id(db, workspace_id, agent_id)
+    said = params.get(name_key)
+    agent, refusal = resolve_active_agent(db, workspace_id, said)
+    if agent is None and refusal is None:
+        refusal = NOT_FOUND.format(said=said)
+    return agent, refusal
+
+
 def takes_the_agent_id(name_key: str) -> Callable[[Handler], Handler]:
     """Wrap a board write whose agent is named under ``name_key``: an ``agent_id`` (or a
     name that is only an id) is checked here and handed on as the int id the handler's
@@ -181,6 +199,6 @@ def _both(assigned: Dict[str, Any], edited: Dict[str, Any]) -> Dict[str, Any]:
     return {**out, "partial": True, "error": GIVEN_BEFORE_REFUSED.format(error=edited.get("error"), agent=agent)}
 
 
-__all__ = ["AGENT_ID", "CLASH", "NOT_AN_ID", "NOT_HERE", "SWITCHED_OFF", "active_named", "agent_by_id",
+__all__ = ["AGENT_ID", "CLASH", "NOT_AN_ID", "NOT_HERE", "SWITCHED_OFF", "active_named", "agent_by_id", "board_agent",
            "agent_id_property", "agent_id_said", "candidate", "candidates", "gives_the_card_on_update",
            "resolve_active_agent", "takes_the_agent_id"]

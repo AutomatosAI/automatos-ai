@@ -97,7 +97,7 @@ READERS: Dict[str, Lines] = {
     "platform_update_agent": lambda db, ws, action, params: rows.agent_lines(db, ws, params),
     "platform_assign_tool_to_agent": rows.tool_lines,
     "platform_unassign_tool_from_agent": rows.tool_lines,
-    "platform_update_task": lambda db, ws, action, params: rows.task_lines(db, ws, params),
+    "platform_update_task": lambda db, ws, action, params: rows.task_lines(db, ws, params, gives_the_card=True),
     "platform_update_task_status": lambda db, ws, action, params: rows.task_lines(db, ws, params),
     "platform_update_system_setting": lambda db, ws, action, params: rows.setting_lines(db, params),
     "platform_create_mission": lambda db, ws, action, params: mission_create_lines(params),

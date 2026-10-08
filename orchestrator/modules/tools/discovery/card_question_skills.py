@@ -49,7 +49,12 @@ NOUNS = {PLUGIN_ID: "plugin", SKILL_ID: "skill"}
 def bound_to_the_subject(db: Any, workspace_id: Any, action: str,
                          params: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """(the call with its plugin or skill id as the row's own, the refusal when it names
-    none the tool would act on). Any other call is as it is."""
+    none the tool would act on). Any other call is as it is; a skill or plugin given to
+    (or taken from) one agent is bound by ``assigned_subjects`` (P256-FIX-RVW-17)."""
+    from modules.tools.discovery.assigned_subjects import BINDS as ASSIGNED, bound_to_the_assigned
+
+    if action in ASSIGNED:
+        return bound_to_the_assigned(db, workspace_id, action, params)
     key = BINDS.get(action)
     if key is None:
         return params, None
