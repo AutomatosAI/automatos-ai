@@ -91,3 +91,35 @@ def worker_internal_token() -> str:
 def worker_bind_host() -> str:
     """``WORKER_BIND_HOST``, default ``0.0.0.0``."""
     return os.environ.get(BIND_HOST_ENV, DEFAULT_BIND_HOST)
+
+
+# PRD-256 O2b (#847): OpenTelemetry traces (worker_otel.py), the same names and
+# defaults as the platform's (orchestrator/config.py), and default OFF.
+DEFAULT_OTEL_SERVICE_NAME = "automatos-workspace-worker"
+DEFAULT_OTEL_ENDPOINT = "http://localhost:4318"
+DEFAULT_OTEL_SAMPLER_RATIO = "1.0"
+
+
+def otel_enabled() -> bool:
+    """``OTEL_ENABLED``: traces for this worker's HTTP requests."""
+    return os.environ.get("OTEL_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+
+
+def otel_service_name() -> str:
+    """``OTEL_SERVICE_NAME``, default ``automatos-workspace-worker``."""
+    return os.environ.get("OTEL_SERVICE_NAME", "").strip() or DEFAULT_OTEL_SERVICE_NAME
+
+
+def otel_endpoint() -> str:
+    """``OTEL_EXPORTER_OTLP_ENDPOINT``: the collector's OTLP/HTTP base address."""
+    return os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip() or DEFAULT_OTEL_ENDPOINT
+
+
+def otel_headers() -> str:
+    """``OTEL_EXPORTER_OTLP_HEADERS`` (``key=value,key2=value2``, URL-encoded values)."""
+    return os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", "")
+
+
+def otel_sampler_ratio() -> str:
+    """``OTEL_TRACES_SAMPLER_RATIO``, as text: parsed when tracing starts."""
+    return os.environ.get("OTEL_TRACES_SAMPLER_RATIO", DEFAULT_OTEL_SAMPLER_RATIO)
