@@ -57,12 +57,16 @@ def _refusal_envelope():
 
 
 def _run(answer_with, *replies):
-    """The loop, from a first response that makes the update call, over the chat-shaped result."""
+    """The loop, from a first response that makes the update call, over the chat-shaped result.
+
+    The envelope is built before the loop runs: ``_routed`` runs the router with
+    ``asyncio.run``, which cannot be called inside the executor's running loop."""
     ran = []
+    envelope = answer_with()
 
     async def tools(name, args, call_id, workspace_id):
         ran.append(args)
-        return answer_with()
+        return {**envelope}
 
     executor = ToolLoopExecutor(llm_callback=_Model(*replies), tool_callback=tools, max_iterations=5)
     messages = [{"role": "user", "content": "move Scout to Sonnet"}]
