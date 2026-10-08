@@ -74,7 +74,7 @@ from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
 from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's calls did, written by the platform
     current_receipts, its_reads_are_receipted, notes_the_answering_model, the_answer_takes_the_receipts,
-    the_loop_writes_receipts, writes_its_receipts,
+    says_nothing_was_done, the_loop_writes_receipts, writes_its_receipts,
 )
 from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
@@ -137,20 +137,15 @@ NARRATED_ACTIONS_NOTICE = (
 )
 
 
-def unexecuted_claims_notice(
-    reply: str, use_tools: Any, ran: Set[str], *, any_tool_ran: bool, done: Optional[Set[str]] = None,
-) -> Optional[str]:
+def unexecuted_claims_notice(reply: str, use_tools: Any, ran: Set[str], *, any_tool_ran: bool) -> Optional[str]:
     """What to tell the owner when a reply claims work no tool did this turn —
     a source that did not run (F099: "(Source: search_knowledge …)" repeated
-    from memory), actions told in prose with no tool call (#746), or an action
-    it says is done with no action that does it succeeding this turn (F108:
-    "I've approved the mission. It's now running" — it wasn't). ``done`` is
-    the actions that succeeded. None when the reply claims nothing it did not
-    do. Both reply paths ask this: a turn whose first reply calls no tool never
-    enters the tool loop, and that is exactly where night 3's replayed answer was.
-    F314 (night 9): a claimed action is told in Auto's own plain words (``not_done``),
-    never "This reply says something was …"."""
-    from consumers.chatbot.claim_check import not_done
+    from memory) or actions told in prose with no tool call (#746). None when
+    the reply claims nothing it did not do. Both reply paths ask this: a turn whose
+    first reply calls no tool never enters the tool loop, and that is exactly where
+    night 3's replayed answer was. PRD-256 FX-005: an action said to be done that
+    no call did is told by the receipts alone (one "Just to be clear" line, above
+    the answer), so a narration the receipts already answer gets no second notice."""
     from modules.tools.execution.tool_loop import (
         UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
     )
@@ -160,11 +155,8 @@ def unexecuted_claims_notice(
     cited = cited_tool_not_run(reply, offered_tool_names(use_tools), ran)
     if cited:
         return UNRUN_SOURCE_NOTICE.format(tool=cited)
-    if not any_tool_ran and looks_like_narrated_action(reply):
+    if not any_tool_ran and looks_like_narrated_action(reply) and not says_nothing_was_done(reply):
         return NARRATED_ACTIONS_NOTICE
-    claim = claimed_action_not_done(reply, done)
-    if claim:
-        return not_done(claim)
     return None
 
 
@@ -2242,7 +2234,6 @@ class StreamingChatService:
                 {key.split(":", 1)[-1] for key in executor.tracker.tool_counts},
                 # the automatic search (F085-A) is a source, not an action the model took
                 any_tool_ran=sum(executor.tracker.tool_counts.values()) > len(prefetched or []),
-                done=executor.tracker.succeeded,
             )
             if _notice:
                 logger.warning("[chat] reply claims work no tool did this turn — notice emitted")
@@ -3100,7 +3091,6 @@ class StreamingChatService:
                 try:
                     _notice = unexecuted_claims_notice(
                         final_text, use_tools, {name for name, _args in _prefetched}, any_tool_ran=False,
-                        done={name for name, _args in _prefetched},
                     )
                     if _notice:
                         logger.warning("[chat] first reply claims work no tool did — notice emitted")

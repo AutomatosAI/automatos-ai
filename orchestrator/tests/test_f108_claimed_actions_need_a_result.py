@@ -102,21 +102,28 @@ def test_the_loop_records_the_actions_that_succeeded():
 # ── both reply paths ask ────────────────────────────────────────────────────
 
 def test_the_chat_notice_covers_a_claimed_action():
+    """PRD-256 FX-005: the claim is the receipts' line, the one producer of it; the turn's
+    notice never says it again (test_prd256_fix_stream_truth covers both reply paths)."""
+    from consumers.chatbot.receipts import DONE, NOTHING_DONE_LINE, READ, WRITE, honesty_lines
     from consumers.chatbot.service import unexecuted_claims_notice
 
     tools = [{"type": "function", "function": {"name": "platform_execute"}}]
     reply = "I've approved the mission. It's now running."
-    assert unexecuted_claims_notice(reply, tools, {"platform_get_mission"}, any_tool_ran=True,
-                                    done={"platform_get_mission"}) == not_done("approved")
-    assert unexecuted_claims_notice(reply, tools, {"platform_approve_mission"}, any_tool_ran=True,
-                                    done={"platform_approve_mission"}) is None
-    assert unexecuted_claims_notice(reply, None, set(), any_tool_ran=False, done=set()) is None   # no tools offered
+    read = {"action": "platform_get_mission", "kind": READ, "status": DONE}
+    approved = {"action": "platform_approve_mission", "kind": WRITE, "status": DONE}
+    assert honesty_lines([read], reply) == [NOTHING_DONE_LINE]
+    assert honesty_lines([read, approved], reply) == []
+    assert unexecuted_claims_notice(reply, tools, {"platform_get_mission"}, any_tool_ran=True) is None
+    assert unexecuted_claims_notice(reply, None, set(), any_tool_ran=False) is None   # no tools offered
 
 
-def test_both_reply_paths_pass_what_succeeded():
+def test_both_reply_paths_leave_the_claim_to_the_receipts():
     from consumers.chatbot import service
 
     loop = inspect.getsource(service.StreamingChatService._stream_tool_loop)
-    assert "done=executor.tracker.succeeded" in loop
     turn = inspect.getsource(service.StreamingChatService._stream_response_with_agent_scoped)
-    assert "done={name for name, _args in _prefetched}" in turn
+    for path in (loop, turn):
+        call = path[path.index("unexecuted_claims_notice("):]
+        assert "done=" not in call[:call.index(")\n")]
+    assert service.StreamingChatService._stream_tool_loop.__code__.co_qualname == \
+        "the_loop_writes_receipts.<locals>.wrapped"

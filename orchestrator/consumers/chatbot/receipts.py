@@ -34,7 +34,8 @@ US-002, one honesty rule: the line about what was not done comes from the receip
 (``COMPLETED_ACTION``, one generic pattern), never when a write went through; a refused write
 gets its own line. ``the_answer_takes_the_receipts`` (the answer's additions) settles them
 when the loop has not; they go above the text, in the frame (``above``) and at the top of
-the saved answer, never under it.
+the saved answer, never under it. FX-005: they are the only not-done line; the turn's
+``no_tool_call`` notice never says it again (``says_nothing_was_done``).
 """
 from __future__ import annotations
 
@@ -367,6 +368,13 @@ def _settle_above(receipts: Sequence[Receipt], answer: str) -> List[str]:
     return above
 
 
+def says_nothing_was_done(answer: str) -> bool:
+    """Whether the turn's receipts put the not-done line above ``answer`` (FX-005: the one
+    producer of that line). Another notice that would say the same defers to it."""
+    receipts = current_receipts() or []
+    return not _VISITOR.get() and NOTHING_DONE_LINE in honesty_lines(receipts, answer)
+
+
 def _frames_once(chat: Any, receipts: List[Receipt], model: Optional[str],
                  above: Sequence[str] = ()) -> Tuple[str, ...]:
     """The turn's frame, the first time it is asked for. A public widget visitor is sent none
@@ -478,6 +486,6 @@ def saves_the_turns_receipts(reply_parts: Parts) -> Parts:
 __all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIVE_KEY", "NOTHING_DONE_LINE", "PART",
            "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WAITING", "WRITE", "build_receipts", "claims_work_done",
            "current_receipts", "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
-           "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "skipped_receipt",
+           "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "says_nothing_was_done", "skipped_receipt",
            "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "with_lines_above",
            "writes_its_receipts"]
