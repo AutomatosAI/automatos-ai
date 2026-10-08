@@ -16,7 +16,10 @@ are here, each against the table:
 - night 12 (FX-014): the 33 hand-off shapes the classifier's verdict lost ("Get OPS to…", "Ask
   RESEARCHER…", "Give #1057 to CHRISTMAS BOX", "267, the operations one", "Delete MARKET-MANAGER")
   route to their lane whatever the tiers said (the golden file's ``night12`` rows). Social media work's row keeps its own file
-  (test_f379_d), against the table.
+  (test_f379_d), against the table;
+- P256-FIX-RVW-12: a name is handed work only when a task follows it, so "Have support tickets been
+  answered today?", "Get sales figures for Q3" and "Get OPS's stock report" stay the tiers', and work
+  handed to two teammates together stays the tiers' whatever they said (``night12.task_after_the_name``).
 """
 from __future__ import annotations
 
@@ -302,6 +305,30 @@ def test_the_golden_holds_night_12s_33_hand_off_shapes():
 @pytest.mark.parametrize("index", range(len(NIGHT_12["routes"])))
 def test_night_12s_hand_offs_take_their_lane_whatever_the_tiers_said(night12_workspace, index, action):
     route = NIGHT_12["routes"][index]
+    assert _night12_lane(route["said"], action) == route["lane"], route["said"]
+
+
+# ── P256-FIX-RVW-12: a name is handed work only when a task follows it ──────
+
+TASK_AFTER_THE_NAME = NIGHT_12["task_after_the_name"]
+
+
+def test_the_golden_holds_the_names_that_hand_nothing_over_and_the_joined_rows():
+    by_said = {route["said"]: route["lane"] for route in TASK_AFTER_THE_NAME}
+    names = {agent["name"] for agent in NIGHT_12["roster"]}
+
+    assert {"Support", "Sales"} <= names
+    for said in ("Have support tickets been answered today?", "Get sales figures for Q3", "Get OPS's stock report",
+                 "Have Support answered the club emails?", "Have RESEARCHER and WRITER plan the launch."):
+        assert by_said[said] == "tiers", said
+    assert by_said["Have Support check the refund queue."] == "ASSIGN 610 Support"
+    assert by_said["Ask Sales: how many club boxes sold this week?"] == "ASSIGN 611 Sales"
+
+
+@pytest.mark.parametrize("action", TIERS_SAID)
+@pytest.mark.parametrize("index", range(len(TASK_AFTER_THE_NAME)))
+def test_a_name_is_handed_work_only_when_a_task_follows_it_whatever_the_tiers_said(night12_workspace, index, action):
+    route = TASK_AFTER_THE_NAME[index]
     assert _night12_lane(route["said"], action) == route["lane"], route["said"]
 
 

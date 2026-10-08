@@ -11,6 +11,12 @@ owner used that night are read here, beside the names ``handoffs`` already reads
 - a name several active agents carry ("Get OPS to…" with two called OPS): nobody is picked and no
   copy is made; Auto asks which, listing each as FX-012's refusal does ("267 · OPS · Operations
   Manager"), and the answer (the id) is the ticket's agent.
+
+P256-FIX-RVW-12: the names ``handoffs`` reads are read here too. A name is handed work only when a task
+follows it ("Get OPS to…", "Have OPS check…", "Ask RESEARCHER what…", "Ask Sales: …"), so "Have
+support tickets been answered today?", "Get sales figures for Q3" and "Get OPS's stock report" stay
+the tiers' with an agent called Support, Sales or OPS; work handed to two teammates together ("Have
+RESEARCHER and WRITER plan the launch") stays the tiers' whatever they said.
 """
 from __future__ import annotations
 
@@ -32,6 +38,38 @@ _WORD = re.compile(r"[a-z0-9']+")
 DESCRIBED_BY = ("name", "job_title", "role", "team")
 # Two teammates handed one piece of work together: "RESEARCHER and WRITER", "OPS, CLUB DESK".
 JOINED = r"(?<![a-z0-9]){first}\s*(?:,|&|\band\b)\s*(?:the\s+|my\s+|our\s+)?{second}(?![a-z0-9])"
+
+# Work handed to a teammate by name (P256-FIX-RVW-12): the verb, the name, then the task ("ask Jim to …",
+# "have the Researcher check …"). A name with no task after it is only a word of the sentence.
+ADDRESSED_BY = r"\b(?P<verb>ask|have|get|tell|let)\s+(?:the\s+|my\s+|our\s+)?{name}(?![a-z0-9])"
+_COLON = re.compile(r"^\s*:")
+_POSSESSIVE = re.compile(r"^['’]")                       # "OPS's stock report", "the Sales' figures"
+_NEXT_TWO = re.compile(r"^\s+(?P<first>[a-z][a-z'’-]*)(?:\s+(?P<second>[a-z0-9][a-z0-9'’-]*))?")
+# "Get X to …" is the only way to get someone to do something: "get sales figures" is a fetch.
+ONLY_WITH_TO = "get"
+ASK = "ask"
+# What an ask hands over after the name: "Ask RESEARCHER what…", "… whether…", "… about…", "… the price".
+ASKED_WHAT = frozenset({
+    "what", "how", "why", "when", "where", "who", "whom", "whose", "which", "whether", "if", "about", "for",
+    "the", "a", "an",
+})
+AUXILIARIES = frozenset({
+    "is", "are", "was", "were", "be", "been", "being", "has", "have", "had", "do", "does", "did", "will",
+    "would", "can", "could", "should", "shall", "may", "might", "must",
+})
+# A word after the head noun that makes the name a noun's modifier: "Have support ticket been …".
+NOUN_PHRASE_AUXILIARIES = frozenset({"been", "being"})
+PARTICIPLES = frozenset({
+    "done", "gone", "seen", "sent", "made", "taken", "given", "written", "got", "gotten", "heard", "told", "said",
+    "paid", "sold", "bought", "brought", "thought", "found", "kept", "left", "met", "spoken", "chosen", "known",
+    "shown", "drawn", "begun", "broken", "eaten", "fallen", "forgotten", "hidden", "grown", "thrown", "flown",
+})
+# Bare verbs that end in "ed" ("Have OPS feed …" ends in "eed" and is read as a verb already).
+BARE_ED = frozenset({"embed", "shed", "shred", "wed"})
+PARTICIPLE_ENDING, BARE_EED = "ed", "eed"
+# A plural noun after the name makes the name its modifier ("support tickets", "sales figures"); a verb's
+# bare form ends in a single s only after s, u or a ("process", "focus", "canvas").
+_PLURAL = re.compile(r"[^sua'’]s$")
 
 CLASH_DIRECTIVE = (
     "\n\n## Manager directive — ask which agent\n"
@@ -76,9 +114,50 @@ def id_reply(message: Optional[str], roster: Sequence[Any]) -> Optional[Any]:
     return agent
 
 
+def _participle(word: str) -> bool:
+    if word in PARTICIPLES:
+        return True
+    return word.endswith(PARTICIPLE_ENDING) and not word.endswith(BARE_EED) and word not in BARE_ED
+
+
+def _bare_verb(first: str, second: str) -> bool:
+    """Whether ``first`` can open the task after a name ("Have OPS check …", "Tell CLUB DESK the box …"):
+    not an auxiliary or a past participle ("Have Support answered …?", "Have sales been …?"), not a plural
+    noun the name modifies ("support tickets"), and not a noun with a verb of its own ("support ticket been")."""
+    if first in AUXILIARIES or _participle(first) or _PLURAL.search(first):
+        return False
+    return second not in NOUN_PHRASE_AUXILIARIES
+
+
+def _task_follows(verb: str, rest: str) -> bool:
+    """Whether the words after an addressed name (``rest``) are a task for it: a colon, "to <verb>", an
+    ask's question ("what", "whether", "about"), or, after have, let or tell, a bare verb."""
+    if _COLON.match(rest):
+        return True
+    words = None if _POSSESSIVE.match(rest) else _NEXT_TWO.match(rest)
+    if words is None:
+        return False
+    first, second = words.group("first"), words.group("second") or ""
+    if first == "to":
+        return bool(second)
+    if verb == ONLY_WITH_TO:
+        return False
+    return first in ASKED_WHAT if verb == ASK else _bare_verb(first, second)
+
+
+def addressed_by_name(message: Optional[str], name: str) -> bool:
+    """Whether ``message`` hands ``name`` work: ask, have, get, tell or let, the name, then a task
+    ("Get OPS to …", "Have OPS check …", "Ask RESEARCHER what …", "Ask Sales: …"). A possessive ("Get
+    OPS's stock report"), a name that modifies a noun ("Have support tickets been answered?", "Get sales
+    figures for Q3") or one followed by a past participle or an auxiliary hands nothing over."""
+    said, wanted = str(message or "").lower(), re.escape(name.strip().lower())
+    return any(_task_follows(found.group("verb"), said[found.end():])
+               for found in re.finditer(ADDRESSED_BY.format(name=wanted), said))
+
+
 def joined_with_another(message: Optional[str], name: str, roster: Sequence[Any]) -> bool:
     """Whether another teammate is named right beside ``name`` ("have RESEARCHER and WRITER plan …"):
-    work for several, which a mission verdict keeps."""
+    work for several, which stays the tiers' lane whatever they said (P256-FIX-RVW-12)."""
     said, first = str(message or "").lower(), re.escape(name.strip().lower())
     others = {str(getattr(agent, "name", "") or "").strip().lower() for agent in roster} - {name.strip().lower(), ""}
     return any(re.search(JOINED.format(first=first, second=re.escape(other)), said) for other in others)
@@ -106,5 +185,5 @@ def clash_directive(agents: Sequence[Any], card: Optional[str] = None) -> str:
     return f"{directive}\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
 
 
-__all__ = ["CLASH_DIRECTIVE", "ID_REPLY", "MAX_REPLY_WORDS", "clash_directive", "describes", "id_reply",
-           "joined_with_another", "shared_name"]
+__all__ = ["ADDRESSED_BY", "CLASH_DIRECTIVE", "ID_REPLY", "MAX_REPLY_WORDS", "addressed_by_name", "clash_directive",
+           "describes", "id_reply", "joined_with_another", "shared_name"]

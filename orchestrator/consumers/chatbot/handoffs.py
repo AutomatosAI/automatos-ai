@@ -32,7 +32,7 @@ Auto itself is never the agent a ticket goes to. Only the owner's own choice of 
 FX-014 (night 12): the hand-over is read from the roster whatever the tiers said, not only on a
 DELEGATE verdict the rubric no longer offers: "Get OPS to …", "Give #1057 to CHRISTMAS BOX" and the
 id given after a clash ("267, the operations one") are that agent's ticket; a name several active
-agents carry asks which (``addressed_agents``); a mission naming several teammates stays a mission.
+agents carry asks which (``addressed_agents``); work naming several teammates stays the tiers' lane.
 """
 from __future__ import annotations
 
@@ -44,7 +44,9 @@ from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
-from consumers.chatbot.addressed_agents import ID_REPLY, clash_directive, id_reply, joined_with_another, shared_name
+from consumers.chatbot.addressed_agents import (
+    ID_REPLY, addressed_by_name, clash_directive, id_reply, joined_with_another, shared_name,
+)
 from consumers.chatbot.board_questions import CARD_NUMBER
 
 logger = logging.getLogger(__name__)
@@ -466,8 +468,6 @@ SENTENCE_END = re.compile(r"[.?!,;\n]")
 LEADING_ARTICLE = re.compile(r"^(?:the|my|our)\s+", re.IGNORECASE)
 RECEIVER_END = re.compile(r"\s+(?:to|for|by|so|and|because|please|now|thanks|today|asap)\b.*$", re.IGNORECASE)
 NOT_A_RECEIVER = frozenset({"him", "her", "them", "you", "myself", "yourself", "review", "done"})
-# Work handed to an agent by name: "ask Jim to …", "have the Researcher …", "get Jim to …".
-ADDRESSED_BY_NAME = r"\b(?:ask|have|get|tell|let)\s+(?:the\s+|my\s+|our\s+)?{name}(?![a-z0-9])"
 
 
 def agents_named_in(message: Optional[str], agents: Sequence[Any]) -> List[Any]:
@@ -575,20 +575,21 @@ def _card_receiver(brain: Any, message: str, who: str, roster: List[Any]) -> Opt
 def _addressed_agent(message: str, roster: List[Any]) -> Optional[Any]:
     """The one teammate the message hands work to by name ("ask Jim to …"), as (id, name); the
     agents a shared name could be ("Get OPS to …" with two OPS); or None. A name that is only
-    mentioned ("what did Jim say?") hands nothing over."""
-    said = message.lower()
-    addressed = [agent for agent in agents_named_in(message, roster)
-                 if re.search(ADDRESSED_BY_NAME.format(name=re.escape(agent.name.strip().lower())), said)]
+    mentioned ("what did Jim say?", "Get sales figures") hands nothing over, and neither does work
+    handed to it with another teammate ("Have RESEARCHER and WRITER plan the launch")."""
+    addressed = [agent for agent in agents_named_in(message, roster) if addressed_by_name(message, agent.name)]
+    if not addressed or joined_with_another(message, addressed[0].name, roster):
+        return None
     if len(addressed) == 1:
         return addressed[0].id, addressed[0].name
     return addressed if shared_name(addressed) else None
 
 
-def _handed_over(brain: Any, message: str, project: bool = False) -> Tuple[Optional[Any], str]:
+def _handed_over(brain: Any, message: str) -> Tuple[Optional[Any], str]:
     """(who the message hands work to, why): a card handed on, an id given as the answer to "which
     one?", or a teammate asked by name. A message about a card that hands it to no one (approving it,
-    moving it) stays Auto's, and so does one with nobody in it; ``project`` (the tiers said mission):
-    one that names several teammates stays the mission ("Have RESEARCHER and WRITER plan the launch")."""
+    moving it) stays Auto's, and so does one with nobody in it, or one handing work to several teammates
+    together ("Have RESEARCHER and WRITER plan the launch"): the tiers' lane, whatever they said."""
     handoff = _handoff(message)
     if handoff:
         return _card_receiver(brain, message, handoff[1], _teammates(brain)), REASONING_CARD
@@ -598,10 +599,7 @@ def _handed_over(brain: Any, message: str, project: bool = False) -> Tuple[Optio
     by_id = id_reply(message, roster)
     if by_id is not None:
         return (by_id.id, by_id.name), REASONING_ID
-    target = _addressed_agent(message, roster)
-    if project and isinstance(target, tuple) and joined_with_another(message, target[1], roster):
-        return None, REASONING_NAMED
-    return target, REASONING_NAMED
+    return _addressed_agent(message, roster), REASONING_NAMED
 
 
 def _ask_which(assessment: Any, agents: List[Any], message: str) -> Any:
@@ -621,7 +619,7 @@ def the_lane(brain: Any, message: str, assessment: Any) -> Any:
     handed to a teammate by name or id is that teammate's ticket whatever the tiers said."""
     from consumers.chatbot.auto import Action
 
-    target, reasoning = _handed_over(brain, str(message or ""), project=assessment.action == Action.MISSION)
+    target, reasoning = _handed_over(brain, str(message or ""))
     if isinstance(target, list):
         return _ask_which(assessment, target, message)
     if target is not None:

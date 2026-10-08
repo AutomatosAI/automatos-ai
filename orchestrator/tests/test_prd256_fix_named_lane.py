@@ -19,7 +19,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from api.chat_dispatch import lane_for
-from consumers.chatbot.addressed_agents import id_reply
+from consumers.chatbot.addressed_agents import addressed_by_name, id_reply
 from consumers.chatbot.auto import ASSIGN_TOOL_HINTS, Action, AutoBrain, Complexity, ComplexityAssessment
 from consumers.chatbot.handoffs import the_lane
 
@@ -135,9 +135,38 @@ def test_a_name_only_mentioned_or_a_card_acted_on_stays_autos(said):
     assert (lane.agent_id, lane.assessment.action, lane.assessment.target_agent_id) == (AUTO, Action.RESPOND, None)
 
 
-def test_a_mission_that_names_several_agents_stays_the_mission():
-    lane = _turn("Have RESEARCHER and CHRISTMAS BOX plan the Christmas launch together", Action.MISSION)
+def test_work_for_several_agents_stays_the_tiers_lane_whatever_they_said():
+    said = "Have RESEARCHER and CHRISTMAS BOX plan the Christmas launch together"
+    lane = _turn(said, Action.MISSION)
 
     assert lane.assessment.action == Action.MISSION and lane.suggest_mission is True
-    assert _turn("Have RESEARCHER and CHRISTMAS BOX plan the Christmas launch together").assessment.action == \
-        Action.ASSIGN                                       # the tiers said respond: the addressed one has it
+    # P256-FIX-RVW-12: the tiers said respond, and nobody gets the whole job (CHRISTMAS BOX was dropped)
+    lane = _turn(said)
+    assert (lane.agent_id, lane.assessment.action, lane.assessment.target_agent_id) == (AUTO, Action.RESPOND, None)
+
+
+@pytest.mark.parametrize("said, name", [
+    ("Have support tickets been answered today?", "Support"),   # the name modifies a noun with a verb of its own
+    ("Get sales figures for Q3", "Sales"),                      # a fetch, not "get Sales to …"
+    ("Get OPS's stock report", "OPS"),                          # a possessive
+    ("Have Support answered the club emails?", "Support"),      # a past participle: a question about it
+])
+def test_a_name_with_no_task_after_it_hands_nothing_over(said, name):
+    roster = [*ROSTER, NS(id=610, name="Support", job_title="Customer support"),
+              NS(id=611, name="Sales", job_title="Wholesale sales lead")]
+    brain = _Brain()
+    brain._active_agents = lambda: roster
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=Action.RESPOND, reasoning="tiers")
+
+    assert addressed_by_name(said, name) is False
+    assert the_lane(brain, said, tiers) is tiers
+
+
+@pytest.mark.parametrize("said, name", [
+    ("Have Support check the refund queue.", "Support"),
+    ("Ask Sales: how many club boxes sold this week?", "Sales"),
+    ("Ask RESEARCHER what the going rate is.", "RESEARCHER"),
+    ("Get OPS to reorder the green stock.", "OPS"),
+])
+def test_a_name_with_a_task_after_it_is_handed_the_work(said, name):
+    assert addressed_by_name(said, name) is True
