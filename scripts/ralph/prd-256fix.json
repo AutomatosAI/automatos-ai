@@ -587,6 +587,20 @@
       "priority": 37,
       "passes": false,
       "notes": "Filed by the second fix-wave review (8 Oct 2026) from the code at 91fa22a82; CI run 37843570741 was green on it and acceptance-prd256fix.sh passed in full: this is a code finding, not a red test."
+    },
+    {
+      "id": "P256-FIX-RVW-21",
+      "title": "CI run 5 green: the one red test from run 37854888642 (job 113576584815), test-side",
+      "description": "As the owner, I want draft PR #1048 green on test.yml so the gate and review cycle 3 can run. Run 37854888642 on HEAD 280a36674: orchestrator-tests 1 failed / 15,277 passed; every other required job green. tests/test_p2w2_grant_resume.py::test_grant_resumes_tool_call asserts the resumed call's caller_context by exact equality ({'conversation_id': 'c-1', 'user_id': 'user_clerk_1'}); P256-FIX-RVW-18 now resumes with click_resume.resumed_context(...), which adds `_resumed_from_grant: <grant id>` (modules/tools/discovery/click_resume.py:24, RESUMED_GRANT) so follows_the_owner judges the click by the turn that raised the card, not by the owner's later words. The marker is the design; the test asserts the old shape.",
+      "acceptanceCriteria": [
+        "tests/test_p2w2_grant_resume.py::test_grant_resumes_tool_call asserts the resumed caller_context carries the stored context AND the click marker: {'conversation_id': 'c-1', 'user_id': 'user_clerk_1', RESUMED_GRANT: grant.id} (import RESUMED_GRANT from modules.tools.discovery.click_resume rather than spelling the key), so the test pins RVW-18's contract instead of contradicting it; every other assertion in the test is unchanged.",
+        "No change to api/approval_grants.py, click_resume.py or follows_the_owner.py for this story; RVW-18's own test (tests/test_prd256_fix_the_click_decides_not_later_words.py) keeps passing.",
+        "ruff and the changed-line code-shape gate pass on the touched lines",
+        "pushed; CI runs ONCE at the end of the wave: after this story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts run 6 on the draft PR."
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": "Filed by the review session (Fable) from CI run 37854888642 (job 113576584815) after the review-cycle-2 stories. The runner re-enters the build loop on relaunch; this is the only story not DONE."
     }
   ]
 }
