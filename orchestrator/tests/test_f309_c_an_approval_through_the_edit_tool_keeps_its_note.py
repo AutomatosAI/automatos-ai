@@ -94,17 +94,19 @@ def test_an_edit_and_a_status_in_one_call_do_both(shop):
     assert (CLICKER, f"Approved: {NOTE}") in _notes(task)
 
 
-def test_a_new_brief_on_an_answered_card_takes_no_status(shop):
-    """A Re-brief sends the card back itself: a status beside it would undo that."""
-    from modules.tools.discovery.ticket_edit_moves import REBRIEF_MOVES_IT
+def test_a_new_brief_on_an_answered_card_drops_its_status(shop):
+    """A Re-brief sends the card back itself: a status beside it would undo that, so it is
+    dropped and the answer says so (PRD-256 FX-013: night 12's A440 was refused here)."""
+    from modules.tools.discovery.ticket_edit_moves import STATUS_IGNORED
 
     task = _in_review(shop)
 
     out = _edit(shop, task_id=task.id, description="Use the September sheet only.", status="done", _user_id=OWNER)
 
     shop.db.refresh(task)
-    assert out["success"] is False and out["error"] == REBRIEF_MOVES_IT
-    assert (task.status, task.result) == ("review", MARGIN)
+    assert out["success"] is True and out["status_ignored"] is True and STATUS_IGNORED in out["message"]
+    assert (task.status, task.description) == ("assigned", "Use the September sheet only.")   # re-briefed, not Done
+    assert shop.filed == []                                                    # nothing was approved
 
 
 def test_the_move_is_recorded_as_the_move_it_made():

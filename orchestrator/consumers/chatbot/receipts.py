@@ -48,8 +48,8 @@ from consumers.chatbot.claims_backed import (
     COMPLETED_ACTION, claims_work_done, is_not_done_line, not_done_line, unbacked_claims,
 )
 from modules.tools.execution.call_effects import (
-    AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STEPS_CHECKED, STEPS_UNCHECKED, answers_in, call_effects,
-    result_effects,
+    AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED, STEPS_UNCHECKED,
+    answers_in, done_effects,
 )
 from modules.tools.execution.card_raised import is_waiting, receipt_effect
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
@@ -79,7 +79,8 @@ _MOVES = {"done": "moved to Done", "cancelled": "moved to Cancelled", "assigned"
           "blocked": "marked blocked"}
 _SAID = {SENT_BACK: "sent back to its agent", AGENT_SET: "agent set",
          STEPS_CHECKED: "each step waits for your OK", STEPS_UNCHECKED: "its steps run without your check",
-         REVIEWED_BY_YOU: "card created, reviewed by you before it closes"}  # FX-010 (D7)
+         REVIEWED_BY_YOU: "card created, reviewed by you before it closes",  # FX-010 (D7)
+         STATUS_IGNORED_SAID: "status ignored: a re-brief sends the card back by itself"}  # FX-013
 # Calls whose name reads badly as "<thing> <past verb>".
 _OWN_WORDS = {"assign_tool_to_agent": "tool added", "unassign_tool_from_agent": "tool removed"}
 DOCUMENT_MADE = "document made"   # F351: the calls that make a document the owner finds in Deliverables
@@ -131,7 +132,7 @@ def _subject(answers: Sequence[Dict[str, Any]], params: Dict[str, Any]) -> str:
 
 def _effect(action: str, params: Dict[str, Any], result: Any) -> str:
     """What a write did (or tried), in plain words."""
-    tags = [effect.rsplit(":", 1)[-1] for effect in call_effects(action, params)] + list(result_effects(result))
+    tags = [effect.rsplit(":", 1)[-1] for effect in done_effects(action, params, result)]
     words = [_SAID.get(tag) or _MOVES.get(tag) or f"moved to {tag.replace('_', ' ')}" for tag in tags]
     if words:
         return ", ".join(dict.fromkeys(words))

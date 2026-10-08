@@ -226,7 +226,7 @@ class ToolExecutionTracker:
         F261 (night 8): a call whose name does not say what it did is recorded
         with what it did too (``call_effects``: a card moved to done approves it).
         F351 (night 10b): a refused document call leaves only ``MAKE_REFUSED``."""
-        from .call_effects import call_effects, call_params, refused_effects, result_effects
+        from .call_effects import call_params, done_effects, refused_effects
 
         action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
         self.outcomes.append((action, call_params(tool_name, tool_args), result))
@@ -237,8 +237,8 @@ class ToolExecutionTracker:
             self.succeeded.update(refused_effects(action))
             return
         self.succeeded.add(action)
-        self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))
-        self.succeeded.update(result_effects(result))  # F308: whether a mission's steps wait for the owner
+        # F308: whether a mission's steps wait for the owner; FX-013: a status the answer ignored is no move.
+        self.succeeded.update(done_effects(action, call_params(tool_name, tool_args), result))
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)

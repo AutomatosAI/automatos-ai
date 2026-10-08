@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.memory_source import defaults_the_source_type
+
 logger = logging.getLogger(__name__)
 
 
@@ -163,6 +165,7 @@ async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str,
     }
 
 
+@defaults_the_source_type  # PRD-256 FX-013: source_type is optional; the turn's driver sets its default
 async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from modules.memory.write_contract import (
         MEMORY_FACT_TYPES,

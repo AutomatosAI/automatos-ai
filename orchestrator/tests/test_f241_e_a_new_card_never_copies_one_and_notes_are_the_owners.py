@@ -237,23 +237,24 @@ def test_a_plain_edit_of_the_brief_loses_its_status_order_too(shop):
     assert shop.card.status == "inbox"                                 # an edit never moves the card
 
 
-def test_a_status_sent_with_a_new_brief_is_told_the_re_brief_sends_it_back(in_review):
+def test_a_status_sent_with_a_new_brief_is_dropped_and_the_card_re_briefed(in_review, notes_in_this_session):
     """Night 7b's call {"status": "pending", "brief": …} for "Update #0199 with that brief and
     send it back". F309 (night 9): the edit tool takes a status now (it moves the card with
     its note: #1866's approval note was lost when the status was refused here), so the
-    params are not refused; a new brief on a worked card says the Re-brief sends it back
-    itself, and nothing changes."""
+    params are not refused. PRD-256 FX-013 (night 12, A440): a new brief on a worked card is
+    the board's Re-brief, which sends it back itself, so the status is dropped (it was
+    refused, while the owner's correction was urgent) and the answer says so."""
     from modules.tools.discovery import get_action_registry
-    from modules.tools.discovery.ticket_edit_moves import REBRIEF_MOVES_IT
+    from modules.tools.discovery.ticket_edit_moves import STATUS_IGNORED
     from modules.tools.execution.unified_executor import undeclared_params_refusal
 
     params = {"task_id": in_review.number, "status": "pending", "description": NEW_BRIEF}
     action = get_action_registry().get("platform_update_task")
     assert undeclared_params_refusal("platform_update_task", action, params, "t") is None
     out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, params))
-    assert out["success"] is False and out["error"] == REBRIEF_MOVES_IT
+    assert out["success"] is True and out["status_ignored"] is True and STATUS_IGNORED in out["message"]
     in_review.db.refresh(in_review.card)
-    assert (in_review.card.status, in_review.card.description) == ("review", "Write the blog intro on resting espresso.")
+    assert (in_review.card.status, in_review.card.description) == ("assigned", NEW_BRIEF)
 
 
 def _cancel_with(note_written):

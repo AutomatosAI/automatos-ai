@@ -16,6 +16,9 @@ NO_ROWS = "Query returned no rows."
 ANSWER_ROWS_SHOWN = 50
 ANSWER_CELL_CHARS = 50
 ANSWER_HEADER_CHARS = 20
+# PRD-256 FX-013: the refusal names the key it wants (night 12 sent the question as "query" 31 times).
+MISSING_QUESTION = ("Missing required parameter: question. Send the user's question in 'question' "
+                    "(or 'query'), e.g. {\"question\": \"How many active subscriptions do we have?\"}. Nothing ran.")
 
 
 def answer_table(columns: List[Any], rows: List[Dict[str, Any]], row_count: int) -> str:
@@ -172,7 +175,7 @@ async def query_data(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
     """
     question = params.get("question")
     if not question or not str(question).strip():
-        return {"success": False, "error": "question is required"}
+        return {"success": False, "error": MISSING_QUESTION}
 
     reference = params.get("database_id")
     if reference is not None and (isinstance(reference, bool) or not isinstance(reference, (int, str))):

@@ -104,6 +104,9 @@ REVIEWED_BY_YOU = "reviewed_by_you"
 DOCUMENT_MAKES = ("generate_document", "create_pdf", "create_docx", "create_xlsx", "create_pptx", "write_file",
                   "html_to_png")
 MAKE_REFUSED = "make_refused"
+# PRD-256 FX-013 (night 12, A440): a re-brief sent with a status re-briefs the card and drops the
+# status; its answer carries this key, and the move the status asked for is not recorded as made.
+STATUS_IGNORED_SAID = "status_ignored"
 
 
 def answers_in(result: Any) -> List[Dict[str, Any]]:
@@ -131,7 +134,18 @@ def result_effects(result: Any) -> Tuple[str, ...]:
             effects += (STEPS_CHECKED if checks else STEPS_UNCHECKED,)
         if answer.get(REVIEWED_BY_YOU) is True and REVIEWED_BY_YOU not in effects:
             effects += (REVIEWED_BY_YOU,)
+        if answer.get(STATUS_IGNORED_SAID) is True and STATUS_IGNORED_SAID not in effects:
+            effects += (STATUS_IGNORED_SAID,)
     return effects
+
+
+def done_effects(action: str, params: Any, result: Any) -> Tuple[str, ...]:
+    """What a call that ran did: its params' effects (less a status its answer says was
+    ignored, FX-013) and its answer's."""
+    said = result_effects(result)
+    if STATUS_IGNORED_SAID in said and isinstance(params, dict):
+        params = {key: value for key, value in params.items() if key != "status"}
+    return call_effects(action, params) + said
 
 
 def refused_effects(action: str) -> Tuple[str, ...]:
@@ -152,5 +166,6 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in tool_args.items() if k not in ("action", "name", "params")}
 
 
-__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "REVIEWED_BY_YOU", "SENT_BACK_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED",
-           "answers_in", "call_effects", "call_params", "refused_effects", "result_effects"]
+__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "REVIEWED_BY_YOU", "SENT_BACK_SAID", "STATUS_IGNORED_SAID", "STATUS_WORDS",
+           "STEPS_CHECKED", "STEPS_UNCHECKED", "answers_in", "call_effects", "call_params", "done_effects",
+           "refused_effects", "result_effects"]

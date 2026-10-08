@@ -55,7 +55,7 @@ QUERY_DATA_PARAMETERS = {
             "description": (
                 "Natural language question about business data "
                 "(e.g. 'How many active users this month?', "
-                "'Top 10 customers by revenue')."
+                "'Top 10 customers by revenue'). Sent as 'query', it is read as the question."
             ),
         },
         "database_id": {

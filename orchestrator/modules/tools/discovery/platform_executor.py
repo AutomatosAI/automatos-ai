@@ -352,7 +352,7 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 _DRIVER_AWARE_ACTIONS = (
     "platform_create_playbook",
     "platform_invite_member",
-    "platform_set_member_role",
+    "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
 )
 
 
