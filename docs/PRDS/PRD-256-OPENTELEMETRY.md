@@ -1,6 +1,6 @@
 # PRD-256: OpenTelemetry traces over OTLP
 
-**Status:** O1 merged (#1040); O2a in review · **Owner:** daarthur (issue #847; the scope and the answers to its questions are Gerard's, 5 Oct 2026) · **Written:** 7 Oct 2026
+**Status:** O1 merged (#1040); O2a (#1041) and O2b (#1043, then this) in review · **Owner:** daarthur (issue #847; the scope and the answers to its questions are Gerard's, 5 Oct 2026) · **Written:** 7 Oct 2026
 **Type:** Extension. PRD-73 built metrics, structured logs and correlation IDs and deferred distributed tracing ("OpenTelemetry — future PRD"). This is that PRD, added on top of what's there.
 
 ## 1. Introduction
@@ -32,7 +32,7 @@ Automatos has metrics (`prometheus_client`, `/metrics`), structured logs with co
 |---|---|---|
 | **O1** | Foundation: a tracer provider per process, started by the FastAPI lifespan; a server span per request (not the probes), carrying `X-Request-ID` and the workspace; OTLP/HTTP export; a parent-based ratio sampler. Tests use an in-memory exporter. | Merged (#1040) |
 | **O2a** | Library instrumentation in the API (SQLAlchemy, httpx, Redis, botocore): a client span per SQL statement, Redis command, outbound HTTP request and AWS call, under the request that made it. `traceparent` goes out with every HTTP request, the workspace worker included, and is in CORS `allow_headers`. | This PR |
-| O2b | The workspace worker's half: its routes moved out of the 615-line `_health_server` first (the code-shape rule makes any edit there fail), then a server span per worker request that continues the API's trace. One trace spans API → worker. | |
+| **O2b** | The workspace worker's half: its routes moved out of the 615-line `_health_server` first (#1043; the code-shape rule makes any edit there fail), then a server span per worker request that continues the API's trace. One trace spans API → worker. | In review |
 | O3 | GenAI spans: an OpenTelemetry tracer behind the PRD-185 `Tracer` seam, and LLM spans at the `LLMManager` chokepoint (`generate_response`, and `generate_response_sync` through the same helper or listed as a gap), per the GenAI semantic conventions. **`LangfuseTracer` is deleted in the same PR** (GUARDRAILS B2); Langfuse becomes an OTLP destination behind the collector. O3 keeps what the Langfuse path records today: tool dispatch, RAG retrieval scores and context-assembly metadata. | |
 | O4 | Asynchronous boundaries: Missions, board tickets and heartbeats joined by span links, with `traceparent` stored on the work item. | |
 | O5 | `trace_id`/`span_id` in the logs. `prometheus_client` and the PRD-73 dashboards stay; new GenAI metrics go over OTLP. | |
@@ -58,6 +58,8 @@ The resource carries `service.name`, `deployment.environment.name` (`ENVIRONMENT
 - **Noise.** Health probes and the metrics scrape are not traced, and neither are the ASGI layer's per-message `send`/`receive` spans: one request is one span until O2 adds its children.
 - **No query value leaves.** The ASGI layer puts the full URL on the server span and redacts only a few signature keys, and the HTTP client redacts none (a `?key=` API key would go); Automatos redacts every query value on the URL attributes of both (`code=REDACTED&token=REDACTED`), keeping the keys (Principle 5). Redis commands are recorded as `SET ? ?` (no key or value), SQL as its text without bound values, AWS calls as service and operation.
 - **`traceparent` goes to every HTTP callee**, external APIs included: it carries only the trace and span IDs and the sampled flag.
+- **A new trace starts at a request, not at a library call.** The background loops (schedulers, the board dispatcher, heartbeats) run SQL and Redis all the time; each statement used to be a root trace (seen live: 84,143 spans in about 7 hours, idle). The sampler drops a CLIENT span with no parent; inside a request it is the request's child. O4's spans for background work start traces of their own kind.
+- **The worker** has the same settings, defaults (service `automatos-workspace-worker`) and rules, in `services/workspace-worker/worker_otel.py`; its image can't import the platform's.
 - **One provider per process, for its whole life.** The SDK refuses a second global provider, so a later lifespan in the same process reuses the first; the end of a lifespan flushes it, and the SDK shuts it down when the process exits. `OTEL_TRACES_SAMPLER_RATIO` is parsed when tracing starts: a value that isn't a number is logged and keeps every trace, and can't stop a boot.
 
 ## 7. Non-goals
