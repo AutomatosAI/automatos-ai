@@ -32,7 +32,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from .action_claims import claimed_action_not_done
 from .nudges import ask_for_the_answer, claimed_action_nudge  # PRD-256 US-006: a refused write is named
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
-from .card_raised import is_waiting  # PRD-256 FX-005: the tool-end flag is the result's own; an ask is not a success
+from .card_raised import the_results_flag  # PRD-256 FX-005: the tool-end flag is the result's own (_emit)
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
 from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
 from .cap_answer import answers_at_the_cap  # F328
@@ -455,7 +455,7 @@ class ToolLoopExecutor:
             try:
                 result = await self._tool(name, args, call_id, workspace_id)
                 content = _result_to_llm_context(result, self.content_truncate_tokens)
-                success = not isinstance(result, dict) or (bool(result.get("success", True)) and not is_waiting(result))
+                success = True
             except Exception as exc:  # noqa: BLE001 — surface as tool error to LLM
                 logger.error("[tool-loop] %s raised: %s", name, exc, exc_info=True)
                 result = {"success": False, "error": str(exc)}
@@ -803,7 +803,7 @@ async def _emit(cb: Optional[EventCallback], event: Dict[str, Any]) -> None:
     if cb is None:
         return
     try:
-        await cb(event)
+        await cb(the_results_flag(event))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[tool-loop] event callback raised: %s", exc)
 

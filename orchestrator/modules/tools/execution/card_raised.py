@@ -97,6 +97,17 @@ def the_model_reads_the_card(backfill: Backfill) -> Backfill:
     return wrapped
 
 
+def the_results_flag(event: Dict[str, Any]) -> Dict[str, Any]:
+    """FX-005: a tool-end event's ``success`` is its result's own. The loop marks a call that did
+    not raise as a success; a refusal (``success: False``) or an ask is not one, so the screen
+    never shows a green tick on it. Any other event passes unchanged."""
+    result = event.get("result")
+    if event.get("type") != "tool-end" or not isinstance(result, dict):
+        return event
+    ok = bool(result.get("success", True)) and not is_waiting(result)
+    return {**event, "success": bool(event.get("success")) and ok}
+
+
 def receipt_effect(result: Any, action: str, subject: str = "") -> str:
     """A waiting receipt's effect: "card raised: change an agent 'Scout'"."""
     ask = the_ask(result) or {}
@@ -105,4 +116,5 @@ def receipt_effect(result: Any, action: str, subject: str = "") -> str:
 
 
 __all__ = ["ACT", "FOR_THE_MODEL", "RECEIPT_EFFECT", "TOOL_END", "act_of", "for_the_model", "has_a_card",
-           "is_waiting", "receipt_effect", "the_ask", "the_model_reads_the_card", "tool_end_summary"]
+           "is_waiting", "receipt_effect", "the_ask", "the_model_reads_the_card", "the_results_flag",
+           "tool_end_summary"]
