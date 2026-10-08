@@ -47,6 +47,24 @@ describe('ActivityTrail', () => {
     expect(lines[1]).toHaveTextContent('last tool: Bash')
   })
 
+  it('draws an ask for the owner\'s click as waiting, never as failed (P256-FIX-RVW-22)', () => {
+    const summary = "Card raised: change an agent 'Scout' (agent #12). Nothing changes until the owner clicks."
+    const calls: ToolCall[] = [
+      // as the live seam leaves it, and as useChat alone closes it (success false): both wait
+      { toolCallId: 'a', toolName: 'platform_execute', state: 'completed', waiting: true, summary },
+      { toolCallId: 'b', toolName: 'platform_execute', state: 'error', waiting: true, summary },
+    ]
+    render(<ActivityTrail toolCalls={calls} formatLabel={label} />)
+    const items = screen.getAllByRole('listitem')
+    for (const item of items) {
+      expect(item).toHaveTextContent(summary)
+      expect(item).not.toHaveTextContent('failed')
+      expect(item.querySelector('.text-destructive\\/80, .text-destructive\\/70')).toBeNull()
+    }
+    expect(screen.getAllByLabelText('Waiting for you')).toHaveLength(2)
+    expect(screen.queryByLabelText('Failed')).toBeNull()
+  })
+
   it('says when a cap ended the turn', () => {
     render(<LimitReachedNote limit={{ limit: 'max_tool_iterations', value: 10, message: 'I reached the maximum of 10 tool steps.' }} />)
     expect(screen.getByRole('status')).toHaveTextContent('maximum of 10 tool steps')

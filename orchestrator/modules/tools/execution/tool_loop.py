@@ -31,7 +31,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .nudges import ask_for_the_answer, claimed_action_nudge  # PRD-256 US-006: a refused write is named
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
-from .card_raised import the_results_flag  # PRD-256 FX-005: the tool-end flag is the result's own (_emit)
+from .card_raised import emit_flagged  # PRD-256 FX-005 / RVW-22: the result's own flag, and its wait (_emit)
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
 from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
 from .cap_answer import answers_at_the_cap  # F328
@@ -803,7 +803,7 @@ async def _emit(cb: Optional[EventCallback], event: Dict[str, Any]) -> None:
     if cb is None:
         return
     try:
-        await cb(the_results_flag(event))
+        await emit_flagged(cb, event)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[tool-loop] event callback raised: %s", exc)
 

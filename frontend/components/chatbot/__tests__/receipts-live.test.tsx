@@ -72,6 +72,18 @@ describe('the live receipts', () => {
     chatState.options.onData({ type: 'data-usage', data: { totalTokens: 3 } })
     expect(pageOnData).toHaveBeenCalledTimes(2)
   })
+
+  it('marks an ask\'s tool-end waiting on the reply, then the page gets the part (P256-FIX-RVW-22)', () => {
+    const pageOnData = vi.fn()
+    const closed = { toolCallId: 'call_1', toolName: 'platform_execute', state: 'error' as const }
+    chatState.messages = [user, { ...reply, toolCalls: [closed] }]
+    renderHook(() => useChatWithReceipts({ id: 'c1', onData: pageOnData }))
+
+    const end = { type: 'tool-end', data: { toolCallId: 'call_1', toolName: 'platform_execute', success: false, waiting: true } }
+    chatState.options.onData(end)
+    expect(chatState.messages[1].toolCalls![0]).toMatchObject({ state: 'completed', waiting: true })
+    expect(pageOnData).toHaveBeenCalledWith(end)
+  })
 })
 
 describe('MessageWithReceipts', () => {

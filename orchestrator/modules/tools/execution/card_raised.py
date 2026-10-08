@@ -17,7 +17,9 @@ document").
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, Dict, Optional
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Awaitable, Callable, Dict, Iterator, Optional
 
 from .call_effects import answers_in
 from .turn_account import thing_of
@@ -36,6 +38,11 @@ ASKED_EFFECT = "asked for your OK: {act}"
 # The blank-answer account (turn_account, F264) speaks to the owner: the card waits for them.
 ACCOUNT_LINE = "- Card raised: {act}. Nothing changes until you click."
 ASKED_ACCOUNT_LINE = "- Asked for your OK: {act}. Nothing changes until you say so."
+# P256-FIX-RVW-22: an ask's tool-end event and frame carry this beside ``success: False``, so the
+# activity trail draws it as waiting (an hourglass and the card's words), never "<tool> failed".
+WAITING = "waiting"
+# The flagged tool-end event the loop is handing to its callback, while it does (``emit_flagged``).
+_STREAMING: ContextVar[Optional[Dict[str, Any]]] = ContextVar("card_raised_streaming", default=None)
 
 Envelope = Dict[str, Any]
 Backfill = Callable[[Envelope, Dict[str, Any]], Envelope]
@@ -117,8 +124,41 @@ def the_results_flag(event: Dict[str, Any]) -> Dict[str, Any]:
     result = event.get("result")
     if event.get("type") != "tool-end" or not isinstance(result, dict):
         return event
-    ok = bool(result.get("success", True)) and not is_waiting(result)
-    return {**event, "success": bool(event.get("success")) and ok}
+    waiting = is_waiting(result)
+    ok = bool(result.get("success", True)) and not waiting
+    flagged = {**event, "success": bool(event.get("success")) and ok}
+    return {**flagged, WAITING: True} if waiting else flagged
+
+
+@contextmanager
+def _streaming(event: Dict[str, Any]) -> Iterator[None]:
+    token = _STREAMING.set(event)
+    try:
+        yield
+    finally:
+        _STREAMING.reset(token)
+
+
+async def emit_flagged(cb: Callable[[Dict[str, Any]], Awaitable[None]], event: Dict[str, Any]) -> None:
+    """The tool loop's emit (P256-FIX-RVW-22): the event goes out with its result's own flag, and
+    while the callback formats it, ``streams_the_wait`` can read whether that call is waiting."""
+    flagged = the_results_flag(event)
+    with _streaming(flagged):
+        await cb(flagged)
+
+
+def streams_the_wait(tool_end: Callable[..., str]) -> Callable[..., str]:
+    """Wrap ``StreamingHandler.format_aisdk_tool_end``: the frame of the call the loop is emitting
+    carries ``waiting`` when its event does (an ask), whichever caller formats it; the chat's
+    callback (inside ``_stream_tool_loop``, over the length limit) is not touched. Every other
+    frame (a refusal, a done call, a frame formatted outside the loop) is unchanged."""
+    @functools.wraps(tool_end)
+    def wrapped(handler: Any, *args: Any, waiting: bool = False, **kwargs: Any) -> str:
+        event = _STREAMING.get() or {}
+        call_id = kwargs.get("tool_call_id", args[0] if args else None)
+        asked = event.get(WAITING) is True and event.get("tool_call_id") == call_id
+        return tool_end(handler, *args, waiting=bool(waiting or asked), **kwargs)
+    return wrapped
 
 
 def receipt_effect(result: Any, action: str, subject: str = "") -> str:
@@ -128,6 +168,6 @@ def receipt_effect(result: Any, action: str, subject: str = "") -> str:
     return template.format(act=act_of(ask, action, "" if ask.get(ACT) else subject))
 
 
-__all__ = ["ACCOUNT_LINE", "ACT", "FOR_THE_MODEL", "RECEIPT_EFFECT", "TOOL_END", "account_line", "act_of",
-           "for_the_model", "has_a_card", "is_waiting", "receipt_effect", "the_ask", "the_model_reads_the_card", "the_results_flag",
-           "tool_end_summary"]
+__all__ = ["ACCOUNT_LINE", "ACT", "FOR_THE_MODEL", "RECEIPT_EFFECT", "TOOL_END", "WAITING", "account_line", "act_of",
+           "emit_flagged", "for_the_model", "has_a_card", "is_waiting", "receipt_effect", "streams_the_wait", "the_ask",
+           "the_model_reads_the_card", "the_results_flag", "tool_end_summary"]

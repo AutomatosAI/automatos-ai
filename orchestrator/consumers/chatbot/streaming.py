@@ -14,6 +14,7 @@ from typing import Dict, Any, AsyncGenerator, List, Optional
 import asyncio
 
 from consumers.chatbot import on_screen
+from modules.tools.execution.card_raised import WAITING, streams_the_wait
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class StreamingHandler:
             },
         )
 
+    @streams_the_wait  # P256-FIX-RVW-22: an ask's frame says it waits (the loop's event, card_raised)
     def format_aisdk_tool_end(
         self,
         tool_call_id: str,
@@ -103,12 +105,15 @@ class StreamingHandler:
         duration_ms: Optional[int] = None,
         summary: Optional[str] = None,
         skipped: bool = False,
+        waiting: bool = False,
     ) -> str:
         """Format tool-end event for AI SDK (tool lifecycle UI).
 
         PRD-238 S3: ``summary`` is the one-line result headline the activity
         trail shows; ``skipped`` marks a de-duplicated call so the client can
-        close its chip instead of spinning forever.
+        close its chip instead of spinning forever. P256-FIX-RVW-22: ``waiting``
+        marks an ask for the owner's click (``success`` stays false): the trail
+        draws it as waiting, never as a failure.
         """
         payload: Dict[str, Any] = {
             "toolCallId": tool_call_id,
@@ -123,6 +128,8 @@ class StreamingHandler:
             payload["summary"] = summary
         if skipped:
             payload["skipped"] = True
+        if waiting:
+            payload[WAITING] = True
         return self.format_aisdk_data("tool-end", payload)
 
     def format_aisdk_usage(self, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> str:

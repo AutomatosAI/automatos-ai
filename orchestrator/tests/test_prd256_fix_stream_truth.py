@@ -26,7 +26,7 @@ from consumers.chatbot.receipts import (
     ABOVE, DONE, NOTHING_DONE_LINE, READ, WRITE, honesty_lines, says_nothing_was_done,
 )
 from consumers.chatbot.tool_summary import tool_result_summary
-from modules.tools.execution.card_raised import ACT, TOOL_END
+from modules.tools.execution.card_raised import ACT, TOOL_END, WAITING, emit_flagged
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
@@ -87,19 +87,62 @@ def _tool_end(result):
 def test_a_refused_result_streams_success_false_with_its_reason():
     end = _tool_end(REFUSED)
     assert end["success"] is False
+    assert WAITING not in end
     assert tool_result_summary(end["result"]) == REFUSED["error"]
 
 
 def test_an_ask_streams_success_false_with_the_waiting_line():
+    """P256-FIX-RVW-22: beside ``success: false`` the ask carries ``waiting: true``, so the
+    activity trail draws an hourglass and the card's words, never a red "<tool> failed"."""
     end = _tool_end(ASK)
     assert end["success"] is False
+    assert end[WAITING] is True
     assert tool_result_summary(end["result"]) == TOOL_END.format(act=ASK[ACT])
 
 
 def test_a_done_result_streams_success_true():
     end = _tool_end(DONE_RESULT)
     assert end["success"] is True
+    assert WAITING not in end
     assert tool_result_summary(end["result"]) == DONE_RESULT["message"]
+
+
+def _frame_of(result, *, call_id="call_1", format_id="call_1"):
+    """The tool-end frame the chat formats for the loop's event, as its callback does."""
+    from consumers.chatbot.streaming import get_streaming_handler
+
+    handler, frames = get_streaming_handler(), []
+
+    async def on_event(event):
+        frames.append(handler.format_aisdk_tool_end(
+            tool_call_id=format_id, tool_name=event["tool_name"], success=bool(event.get("success")),
+            summary=tool_result_summary(event.get("result")),
+        ))
+
+    event = {"type": "tool-end", "tool_call_id": call_id, "tool_name": "platform_execute", "success": True,
+             "duration_ms": 3, "result": result}
+    asyncio.run(emit_flagged(on_event, event))
+    (frame,) = frames
+    return json.loads(frame[2:])["data"]
+
+
+def test_the_frame_of_an_ask_says_waiting_and_no_other_frame_does():
+    ask = _frame_of(ASK)
+    assert ask["success"] is False and ask[WAITING] is True
+    assert ask["summary"] == TOOL_END.format(act=ASK[ACT])
+    assert WAITING not in _frame_of(REFUSED)
+    assert WAITING not in _frame_of(DONE_RESULT)
+    assert WAITING not in _frame_of(ASK, format_id="call_2")            # another call's frame: unchanged
+
+
+def test_a_frame_formatted_outside_the_loop_never_waits():
+    from consumers.chatbot.streaming import get_streaming_handler
+
+    _frame_of(ASK)                                                       # the loop's wait is over
+    plain = json.loads(get_streaming_handler().format_aisdk_tool_end("call_1", "t", False)[2:])["data"]
+    assert WAITING not in plain
+    said = json.loads(get_streaming_handler().format_aisdk_tool_end("c", "t", False, waiting=True)[2:])["data"]
+    assert said[WAITING] is True
 
 
 @pytest.mark.parametrize("result, success", [
@@ -276,6 +319,7 @@ def test_the_tool_loop_reply_carries_one_just_to_be_clear(monkeypatch):
     assert said[-1] == NOTHING_DONE_LINE
     (end,) = _data(chunks, "tool-end")
     assert end["success"] is False and end["summary"]      # no green tick on the refusal
+    assert WAITING not in end                              # and no hourglass: it was refused
 
 
 def test_the_no_tool_first_reply_carries_one_just_to_be_clear(monkeypatch):
@@ -291,3 +335,13 @@ def test_a_done_write_streams_true_and_no_line(monkeypatch):
     assert _lines_said(chunks) == []
     (end,) = _data(chunks, "tool-end")
     assert end["success"] is True
+    assert WAITING not in end
+
+
+def test_an_ask_in_the_chats_loop_streams_its_frame_as_waiting(monkeypatch):
+    """P256-FIX-RVW-22: through the chat's own callback (inside ``_stream_tool_loop``, untouched)."""
+    chunks = _turn(monkeypatch, answer="Card raised: change Scout. Nothing changes until you click.", result=ASK)
+
+    (end,) = _data(chunks, "tool-end")
+    assert end["success"] is False and end[WAITING] is True
+    assert end["summary"] == TOOL_END.format(act=ASK[ACT])
