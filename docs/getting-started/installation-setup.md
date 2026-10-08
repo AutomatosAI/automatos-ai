@@ -5,26 +5,26 @@
 
 The following files were used as context for generating this wiki page:
 
-- [.env.example](.env.example)
-- [.github/workflows/test.yml](.github/workflows/test.yml)
-- [docker-compose.yml](docker-compose.yml)
-- [docker-entrypoint.sh](docker-entrypoint.sh)
-- [frontend/.dockerignore](frontend/.dockerignore)
-- [frontend/Dockerfile](frontend/Dockerfile)
-- [frontend/components/activity/board/__tests__/blocked-reason.test.ts](frontend/components/activity/board/__tests__/blocked-reason.test.ts)
-- [frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx](frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx)
-- [frontend/components/activity/board/blocked-reason.ts](frontend/components/activity/board/blocked-reason.ts)
-- [frontend/components/activity/board/task-deliverables-panel.tsx](frontend/components/activity/board/task-deliverables-panel.tsx)
-- [infrastructure/.env.example](infrastructure/.env.example)
-- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
-- [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py](orchestrator/alembic/versions/prd222_veteran_skip_backfill.py)
-- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/core/seeds/seed_local_first_run.py](orchestrator/core/seeds/seed_local_first_run.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
-- [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
-- [orchestrator/tests/test_prd222_onboarding_reset.py](orchestrator/tests/test_prd222_onboarding_reset.py)
-- [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
+- [.env.example](../../.env.example)
+- [.github/workflows/test.yml](../../.github/workflows/test.yml)
+- [docker-compose.yml](../../docker-compose.yml)
+- [orchestrator/docker-entrypoint.sh](../../orchestrator/docker-entrypoint.sh)
+- [frontend/.dockerignore](../../frontend/.dockerignore)
+- [frontend/Dockerfile](../../frontend/Dockerfile)
+- [frontend/components/activity/board/__tests__/blocked-reason.test.ts](../../frontend/components/activity/board/__tests__/blocked-reason.test.ts)
+- [frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx](../../frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx)
+- [frontend/components/activity/board/blocked-reason.ts](../../frontend/components/activity/board/blocked-reason.ts)
+- [frontend/components/activity/board/task-deliverables-panel.tsx](../../frontend/components/activity/board/task-deliverables-panel.tsx)
+- [infrastructure/.env.example](../../infrastructure/.env.example)
+- [infrastructure/railway-manifest.json](../../infrastructure/railway-manifest.json)
+- [orchestrator/Dockerfile](../../orchestrator/Dockerfile)
+- [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py](../../orchestrator/alembic/versions/prd222_veteran_skip_backfill.py)
+- [orchestrator/core/redis/client.py](../../orchestrator/core/redis/client.py)
+- [orchestrator/core/seeds/seed_local_first_run.py](../../orchestrator/core/seeds/seed_local_first_run.py)
+- [orchestrator/requirements.txt](../../orchestrator/requirements.txt)
+- [orchestrator/tests/test_dockerfile_prod_parity.py](../../orchestrator/tests/test_dockerfile_prod_parity.py)
+- [orchestrator/tests/test_prd222_onboarding_reset.py](../../orchestrator/tests/test_prd222_onboarding_reset.py)
+- [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](../../orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
 
 </details>
 
@@ -44,7 +44,7 @@ Before installing Automatos AI, ensure your host environment satisfies the follo
 - **10GB free disk space** for persistent volumes and container images
 - **Port Availability**: `3000` (frontend), `8000` (backend), `5432` (PostgreSQL), `6379` (Redis), `9000`/`9001` (MinIO)
 
-Sources: [docker-compose.yml:1-24](), [orchestrator/Dockerfile:1-8](), [frontend/Dockerfile:1-9]()
+Sources: [docker-compose.yml:1-24](../../docker-compose.yml#L1-L24), [orchestrator/Dockerfile:1-8](../../orchestrator/Dockerfile#L1-L8), [frontend/Dockerfile:1-9](../../frontend/Dockerfile#L1-L9)
 
 ---
 
@@ -62,11 +62,11 @@ Copy the template environment file to the project root:
 cp orchestrator/.env.example .env
 ```
 Ensure required variables are populated in `.env`:
-- `POSTGRES_PASSWORD`: PostgreSQL root password [docker-compose.yml:37]()
-- `REDIS_PASSWORD`: Redis authentication token [docker-compose.yml:63]()
-- `API_KEY`: Backend API access token [orchestrator/.env.example:28]()
+- `POSTGRES_PASSWORD`: PostgreSQL root password [docker-compose.yml:37](../../docker-compose.yml#L37)
+- `REDIS_PASSWORD`: Redis authentication token [docker-compose.yml:63](../../docker-compose.yml#L63)
+- `API_KEY`: Backend API access token [orchestrator/.env.example:28](../../orchestrator/.env.example#L28)
 
-Sources: [docker-compose.yml:4-16](), [.env.example:1-30]()
+Sources: [docker-compose.yml:4-16](../../docker-compose.yml#L4-L16), [.env.example:1-30](../../.env.example#L1-L30)
 
 ### 3. Start Services
 Launch the core stack using Docker Compose:
@@ -75,7 +75,7 @@ docker compose up --build -d
 ```
 Access the web frontend at `http://localhost:3000`.
 
-Sources: [docker-compose.yml:1-24]()
+Sources: [docker-compose.yml:1-24](../../docker-compose.yml#L1-L24)
 
 ---
 
@@ -109,7 +109,7 @@ graph TB
     classDef default stroke:#333,stroke-width:2px;
 ```
 
-Sources: [docker-compose.yml:26-159](), [infrastructure/railway-manifest.json:12-67]()
+Sources: [docker-compose.yml:26-159](../../docker-compose.yml#L26-L159), [infrastructure/railway-manifest.json:12-67](../../infrastructure/railway-manifest.json#L12-L67)
 
 ---
 
@@ -147,12 +147,12 @@ sequenceDiagram
 ```
 
 **Key Initialization Steps:**
-1. **Postgres Readiness**: `wait_for_postgres()` polls `pg_isready` up to 30 attempts [docker-entrypoint.sh:22-39]().
-2. **Database Migrations**: `run_migrations()` executes `alembic upgrade heads` to bring the database schema to the latest revision, failing closed if any migration fails [docker-entrypoint.sh:51-61]().
-3. **Seed Data Loader**: Invokes `python -m core.database.load_seed_data` as a module to upsert core catalogs, agent personas, credential types, and marketplace items [docker-entrypoint.sh:66-93]().
-4. **Local Workspace Provisioning**: `ensure_local_workspace()` initializes `DEFAULT_WORKSPACE_ID` with an explicit `not_started` onboarding JSON document if running in `local` edition mode [docker-entrypoint.sh:102-127]().
+1. **Postgres Readiness**: `wait_for_postgres()` polls `pg_isready` up to 30 attempts [orchestrator/docker-entrypoint.sh:76-93](../../orchestrator/docker-entrypoint.sh#L76-L93).
+2. **Database Migrations**: `run_migrations()` executes `alembic upgrade heads` to bring the database schema to the latest revision, failing closed if any migration fails [orchestrator/docker-entrypoint.sh:149-159](../../orchestrator/docker-entrypoint.sh#L149-L159).
+3. **Seed Data Loader**: Invokes `python -m core.database.load_seed_data` as a module to upsert core catalogs, agent personas, credential types, and marketplace items [orchestrator/docker-entrypoint.sh:164-190](../../orchestrator/docker-entrypoint.sh#L164-L190).
+4. **Local Workspace Provisioning**: `ensure_local_workspace()` initializes `DEFAULT_WORKSPACE_ID` with an explicit `not_started` onboarding JSON document if running in `local` edition mode [orchestrator/docker-entrypoint.sh:199-232](../../orchestrator/docker-entrypoint.sh#L199-L232).
 
-Sources: [docker-entrypoint.sh:1-127](), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-57]()
+Sources: [orchestrator/docker-entrypoint.sh:1-276](../../orchestrator/docker-entrypoint.sh#L1-L276), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-57](../../orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py#L1-L57)
 
 ---
 
@@ -162,16 +162,16 @@ Configuration values are injected via `.env` and `envs/api.defaults`.
 
 | Variable Name | Default Value | Description | Code Reference |
 |---------------|---------------|-------------|----------------|
-| `POSTGRES_DB` | `orchestrator_db` | PostgreSQL database name | [docker-compose.yml:35]() |
-| `POSTGRES_USER` | `postgres` | PostgreSQL connection user | [docker-compose.yml:36]() |
-| `POSTGRES_PASSWORD` | *Required* | PostgreSQL password secret | [docker-compose.yml:37]() |
-| `REDIS_PASSWORD` | *Required* | Redis auth password secret | [docker-compose.yml:63]() |
-| `API_KEY` | *Required* | Backend authentication key | [.env.example:28]() |
-| `S3_ENDPOINT_URL` | `http://minio:9000` | Local MinIO object store endpoint | [.env.example:81]() |
-| `AUTH_EDITION` | `saas` (`local` in compose) | Edition mode gating authentication | [.github/workflows/test.yml:70]() |
-| `DEFAULT_WORKSPACE_ID` | Workspace UUID | Default tenant ID for local sessions | [.github/workflows/test.yml:76]() |
+| `POSTGRES_DB` | `orchestrator_db` | PostgreSQL database name | [docker-compose.yml:35](../../docker-compose.yml#L35) |
+| `POSTGRES_USER` | `postgres` | PostgreSQL connection user | [docker-compose.yml:36](../../docker-compose.yml#L36) |
+| `POSTGRES_PASSWORD` | *Required* | PostgreSQL password secret | [docker-compose.yml:37](../../docker-compose.yml#L37) |
+| `REDIS_PASSWORD` | *Required* | Redis auth password secret | [docker-compose.yml:63](../../docker-compose.yml#L63) |
+| `API_KEY` | *Required* | Backend authentication key | [.env.example:28](../../.env.example#L28) |
+| `S3_ENDPOINT_URL` | `http://minio:9000` | Local MinIO object store endpoint | [.env.example:81](../../.env.example#L81) |
+| `AUTH_EDITION` | `saas` (`local` in compose) | Edition mode gating authentication | [.github/workflows/test.yml:70](../../.github/workflows/test.yml#L70) |
+| `DEFAULT_WORKSPACE_ID` | Workspace UUID | Default tenant ID for local sessions | [.github/workflows/test.yml:76](../../.github/workflows/test.yml#L76) |
 
-Sources: [docker-compose.yml:30-103](), [.env.example:1-112](), [.github/workflows/test.yml:56-76]()
+Sources: [docker-compose.yml:30-103](../../docker-compose.yml#L30-L103), [.env.example:1-112](../../.env.example#L1-L112), [.github/workflows/test.yml:56-76](../../.github/workflows/test.yml#L56-L76)
 
 ---
 
@@ -180,14 +180,14 @@ Sources: [docker-compose.yml:30-103](), [.env.example:1-112](), [.github/workflo
 Automatos AI uses multi-stage Docker builds to decouple build-time compilers and heavy development tools from lightweight production runtimes.
 
 ### Backend Multi-Stage Pipeline (`orchestrator/Dockerfile`)
-1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed to build Python wheels from `requirements.txt` into `/install`. Handles conditional graph extra compilation (`INSTALL_GRAPH_EXTRAS` build arg) [orchestrator/Dockerfile:19-58]().
-2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `ghostscript`, `libmagic1`, `libpango-1.0-0`, `libcairo2`) [orchestrator/Dockerfile:63-83]().
-3. **`development` & `production` Stages**: Installs application code, creates non-user `automatos`, and exposes port `8000` running `uvicorn` or gunicorn workers [orchestrator/Dockerfile:91-150]().
+1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed to build Python wheels from `requirements.txt` into `/install`. Handles conditional graph extra compilation (`INSTALL_GRAPH_EXTRAS` build arg) [orchestrator/Dockerfile:19-58](../../orchestrator/Dockerfile#L19-L58).
+2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `ghostscript`, `libmagic1`, `libpango-1.0-0`, `libcairo2`) [orchestrator/Dockerfile:63-83](../../orchestrator/Dockerfile#L63-L83).
+3. **`development` & `production` Stages**: Installs application code, creates non-user `automatos`, and exposes port `8000` running `uvicorn` or gunicorn workers [orchestrator/Dockerfile:91-150](../../orchestrator/Dockerfile#L91-L150).
 
 ### Frontend Container (`frontend/Dockerfile`)
-- Uses `node:20-alpine` as base, supporting Next.js standalone output mode by copying traced dependencies into `/app` to minimize final image size [frontend/Dockerfile:14-132]().
+- Uses `node:20-alpine` as base, supporting Next.js standalone output mode by copying traced dependencies into `/app` to minimize final image size [frontend/Dockerfile:14-132](../../frontend/Dockerfile#L14-L132).
 
-Sources: [orchestrator/Dockerfile:1-150](), [frontend/Dockerfile:1-132]()
+Sources: [orchestrator/Dockerfile:1-150](../../orchestrator/Dockerfile#L1-L150), [frontend/Dockerfile:1-132](../../frontend/Dockerfile#L1-L132)
 
 ---
 
@@ -196,11 +196,11 @@ Sources: [orchestrator/Dockerfile:1-150](), [frontend/Dockerfile:1-132]()
 Database schemas are managed exclusively through Alembic revision scripts.
 
 ### Migration Invariants & Veteran Backfill
-- **Alembic Heads**: Because the migration tree contains multiple unmerged paths, migrations run with `alembic upgrade heads` (plural) [docker-entrypoint.sh:55]().
-- **Veteran Backfilling**: `prd222_veteran_skip_backfill.py` marks pre-existing workspaces without onboarding stages as `skipped` while preserving new signups [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-50]().
-- **Fresh Install Boot**: Brand new local installations seed workspaces with `stage: not_started` so that the Auto-led onboarding chat triggers correctly [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-40]().
+- **Alembic Heads**: The repository requires exactly one Alembic head, as specified in [AGENTS.md](../../AGENTS.md) and guarded by [orchestrator/tests/test_prd209_alembic_single_head.py:163-174](../../orchestrator/tests/test_prd209_alembic_single_head.py#L163-L174). The entrypoint retains `alembic upgrade heads` (plural): with a single head it upgrades to that head, and is a harmless no-op when the database is already current [orchestrator/docker-entrypoint.sh:145-159](../../orchestrator/docker-entrypoint.sh#L145-L159).
+- **Veteran Backfilling**: `prd222_veteran_skip_backfill.py` marks pre-existing workspaces without onboarding stages as `skipped` while preserving new signups [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-50](../../orchestrator/alembic/versions/prd222_veteran_skip_backfill.py#L1-L50).
+- **Fresh Install Boot**: Brand new local installations seed workspaces with `stage: not_started` so that the Auto-led onboarding chat triggers correctly [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-40](../../orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py#L1-L40).
 
-Sources: [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-65](), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-57]()
+Sources: [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-65](../../orchestrator/alembic/versions/prd222_veteran_skip_backfill.py#L1-L65), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-57](../../orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py#L1-L57)
 
 ---
 
@@ -223,11 +223,11 @@ After starting containers, verify operational status:
    docker compose exec redis redis-cli -a "$REDIS_PASSWORD" ping
    ```
 4. **Run Test Suites**:
-   The test suite runs against an ephemeral PostgreSQL service configured in GitHub Actions [ [.github/workflows/test.yml:35-77]() ]:
+   The test suite runs against an ephemeral PostgreSQL service configured in GitHub Actions [.github/workflows/test.yml:35-77](../../.github/workflows/test.yml#L35-L77):
    ```bash
    pytest tests --timeout=60 -v
    ```
 
-Sources: [docker-compose.yml:43-109](), [.github/workflows/test.yml:35-134]()
+Sources: [docker-compose.yml:43-109](../../docker-compose.yml#L43-L109), [.github/workflows/test.yml:35-134](../../.github/workflows/test.yml#L35-L134)
 
 ---
