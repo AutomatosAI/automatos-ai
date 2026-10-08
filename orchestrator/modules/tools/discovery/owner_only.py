@@ -41,6 +41,12 @@ OWNER_ONLY_ACTIONS = frozenset({
     "platform_assign_tool_to_agent", "platform_unassign_tool_from_agent", "platform_update_agent",
     "platform_update_system_setting", "platform_create_mission", "platform_approve_mission",
     "platform_cancel_mission", "platform_publish_blog_post", "platform_submit_social_post",
+    # D1 amended 8 Oct (FX-010, night 12: a heartbeat changed, an agent deleted on one word,
+    # eleven skills given, playbooks made, none with a card): every agent-setting change, and
+    # a playbook made, timed or deleted. There is no tool that takes a plugin from an agent.
+    "platform_configure_agent_heartbeat", "platform_delete_agent", "platform_assign_skill_to_agent",
+    "platform_unassign_skill_from_agent", "platform_assign_plugin_to_agent", "platform_create_playbook",
+    "platform_schedule_playbook", "platform_delete_playbook",
 })
 CARD_MOVES = frozenset({"platform_update_task_status", "platform_update_task"})
 CLOSING_STATUSES = frozenset({"done", "cancelled"})
@@ -55,6 +61,7 @@ CLICKED_BY = "_clicked_by"
 OWNERS_OWN_DECISION = "owners_own_decision"
 USER_ACTOR = "user:"
 PERMISSION_LEVEL = "write"
+DESTRUCTIVE = "destructive"
 MAX_CARDS_NAMED = 5
 MORE_CARDS = " and {count} more"
 
@@ -71,6 +78,14 @@ VERBS = {
     "platform_cancel_mission": "cancel a mission",
     "platform_publish_blog_post": "publish a blog post",
     "platform_submit_social_post": "submit a social post to publish",
+    "platform_configure_agent_heartbeat": "change an agent's heartbeat",
+    "platform_delete_agent": "delete an agent",
+    "platform_assign_skill_to_agent": "give a skill to an agent",
+    "platform_unassign_skill_from_agent": "take a skill from an agent",
+    "platform_assign_plugin_to_agent": "give a plugin to an agent",
+    "platform_create_playbook": "create a playbook",
+    "platform_schedule_playbook": "set a playbook's timer",
+    "platform_delete_playbook": "delete a playbook",
 }
 SEND_VERB = "send or publish through"
 QUESTION = "question_md"
@@ -129,16 +144,18 @@ def asks_the_owner_first(run_cleared: Execute) -> Execute:
                       handler: Execute) -> Dict[str, Any]:
         params = _without_a_signer(params)
         if isinstance(params, dict) and human_driven(caller_context) and is_owner_only(action_name, params):
-            handler = _on_the_click(action_name, params, caller_context, handler)
+            handler = _on_the_click(action_name, params, caller_context, handler, _gate_claim(cleared))
         return await run_cleared(self, action_name, params, caller_context, cleared, handler)
     return wrapped
 
 
-def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handler: Execute) -> Execute:
+def _on_the_click(action: str, asked: Dict[str, Any], caller_context: Any, handler: Execute,
+                  gate: Optional[int] = None) -> Execute:
     """``handler`` run on the owner's click on this exact call (``asked``), signed by who
-    clicked; without one, the ask."""
+    clicked; without one, the ask. ``gate``: the grant the confirmation gate claimed for
+    this call (``Cleared.approved_via_grant_id``)."""
     async def on_the_click(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-        grant = _the_click(db, workspace_id, action, asked)
+        grant = _the_click(db, workspace_id, action, asked) or _claimed_at_the_gate(db, workspace_id, action, gate)
         if grant is None:
             return platform_ask(db, workspace_id, action, asked, caller_context)
         clicker = _clicker(grant)
@@ -177,6 +194,32 @@ def _the_click(db: Any, workspace_id: Any, action: str, params: Any) -> Any:
                                           permission_level=PERMISSION_LEVEL, single_use=True)
 
 
+def _gate_claim(cleared: Any) -> Optional[int]:
+    """The grant the confirmation gate claimed for this call: only a destructive action's
+    grant is single-use there; a write's stays granted for ``_the_click`` to claim."""
+    if getattr(getattr(cleared, "action_def", None), "permission_level", None) != DESTRUCTIVE:
+        return None
+    return getattr(cleared, "approved_via_grant_id", None)
+
+
+def _claimed_at_the_gate(db: Any, workspace_id: Any, action: str, grant_id: Optional[int]) -> Any:
+    """The click the confirmation gate already claimed for this exact call, or None.
+
+    FX-010: a destructive action (platform_delete_agent, platform_delete_playbook) asks at
+    the gate too when an editor drives the turn, and the gate retires its single-use grant
+    when it clears (PlatformActionExecutor.clear). That claim, made in this call for these
+    params, is the owner's click: asking again would raise a card per click, for ever."""
+    if db is None or grant_id is None:
+        return None
+    from core.models.approval_grants import ApprovalGrant
+    from modules.tools.execution.tool_grants import GRANT_CONSUMED_BY
+
+    grant = db.get(ApprovalGrant, grant_id)
+    if grant is None or str(grant.workspace_id) != str(workspace_id) or grant.tool_name != action:
+        return None
+    return grant if grant.revoked_by == GRANT_CONSUMED_BY else None
+
+
 def after_the_click(db: Any, grant: Any, result: Any) -> Any:
     """One click, one run: a call that did nothing (``success: False``) gives the click
     back for its retry (tool_grants.give_back_unused, F193). The result records which
@@ -193,11 +236,15 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     """The ask for a platform action, naming the card by its number and the verb, and
     saying what the call changes (FX-008). A card that is not on the board is never
     asked about (F091)."""
+    from modules.tools.discovery.agent_binding import bound_to_the_agent
     from modules.tools.discovery.card_question import platform_question
     from modules.tools.discovery.mission_targets import bound_to_the_mission
     from modules.tools.execution.subject_targets import missing_targets_error, named_subject
 
     params = bound_to_the_mission(db, workspace_id, action, params)  # FX-009: the click runs on the mission shown
+    params, refused = bound_to_the_agent(db, workspace_id, action, params)  # FX-010: and on the agent shown
+    if refused:
+        return refused
     found, missing = _targets(db, workspace_id, action, params)
     if missing:
         return missing_targets_error(action, missing)

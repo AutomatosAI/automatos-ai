@@ -8,7 +8,9 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
   current value read from the workspace's row, the new one from the call;
 - a new mission: its goal and the steps the owner gave;
 - approving or cancelling a mission: its title and its ticket number;
-- a Composio send: the recipient, the subject and the body's first line.
+- a Composio send: the recipient, the subject and the body's first line;
+- FX-010: a heartbeat's fields, an agent's skills or plugins before and after, a new
+  playbook's name and purpose, a playbook's timer, or what a delete takes for good.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -19,6 +21,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List
 
+from modules.tools.discovery import card_question_agents as agents
+from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
 from modules.tools.discovery.card_question_text import question, said_line, shown, value_line
 
@@ -96,6 +100,15 @@ READERS: Dict[str, Lines] = {
     "platform_create_mission": lambda db, ws, action, params: mission_create_lines(params),
     "platform_approve_mission": lambda db, ws, action, params: rows.mission_lines(db, ws, params),
     "platform_cancel_mission": lambda db, ws, action, params: rows.mission_lines(db, ws, params),
+    # FX-010: every agent-setting change, and a playbook made, timed or deleted (Decision D1, amended).
+    "platform_configure_agent_heartbeat": agents.heartbeat_lines,
+    "platform_delete_agent": agents.delete_agent_lines,
+    "platform_assign_skill_to_agent": agents.skill_lines,
+    "platform_unassign_skill_from_agent": agents.skill_lines,
+    "platform_assign_plugin_to_agent": agents.plugin_lines,
+    "platform_create_playbook": playbooks.create_lines,
+    "platform_schedule_playbook": playbooks.schedule_lines,
+    "platform_delete_playbook": playbooks.delete_lines,
 }
 
 

@@ -95,6 +95,9 @@ def _sets_an_agent(action: str, params: Dict[str, Any]) -> bool:
 STEPS_CHECKED, STEPS_UNCHECKED = "mission_steps_checked", "mission_steps_unchecked"
 # F319 (night 9b): the answer of a call that sent a card back says so.
 SENT_BACK_SAID = "sent_back"
+# FX-010 (D7): a card filed from the owner's chat whose brief sends or orders waits for their
+# review: its answer carries this key (modules/tools/discovery/brief_sends).
+REVIEWED_BY_YOU = "reviewed_by_you"
 # F351 (night 10b): the calls that make a document the owner finds in Deliverables, and what a
 # refused one leaves: "I've generated the letter" after generate_document answered DATA_BAD_JSON
 # (chat 8ac5cf3a) is told as tried and refused, never as made. No family's stem is in its name.
@@ -117,8 +120,8 @@ def answers_in(result: Any) -> List[Dict[str, Any]]:
 
 def result_effects(result: Any) -> Tuple[str, ...]:
     """What a call's answer says it did beyond its name: left a mission's steps waiting
-    for the owner's check or running on unchecked (F308), or sent a card back (F319);
-    () when it says neither."""
+    for the owner's check or running on unchecked (F308), sent a card back (F319), or
+    filed a card that waits for the owner's review (FX-010); () when it says none."""
     effects: Tuple[str, ...] = ()
     for answer in answers_in(result):
         if answer.get(SENT_BACK_SAID) is True and SENT_BACK not in effects:
@@ -126,6 +129,8 @@ def result_effects(result: Any) -> Tuple[str, ...]:
         checks = answer.get("checks_each_step")
         if isinstance(checks, bool) and not {STEPS_CHECKED, STEPS_UNCHECKED} & set(effects):
             effects += (STEPS_CHECKED if checks else STEPS_UNCHECKED,)
+        if answer.get(REVIEWED_BY_YOU) is True and REVIEWED_BY_YOU not in effects:
+            effects += (REVIEWED_BY_YOU,)
     return effects
 
 
@@ -147,5 +152,5 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in tool_args.items() if k not in ("action", "name", "params")}
 
 
-__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "SENT_BACK_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED",
+__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "REVIEWED_BY_YOU", "SENT_BACK_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED",
            "answers_in", "call_effects", "call_params", "refused_effects", "result_effects"]

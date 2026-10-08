@@ -31,7 +31,11 @@ CANCEL = "platform_update_task_status"
 D1 = {"platform_update_task_status", "platform_update_task", "platform_assign_tool_to_agent",
       "platform_unassign_tool_from_agent", "platform_update_agent", "platform_update_system_setting",
       "platform_create_mission", "platform_approve_mission", "platform_cancel_mission",
-      "platform_publish_blog_post", "platform_submit_social_post"}
+      "platform_publish_blog_post", "platform_submit_social_post",
+      # D1 amended 8 Oct (FX-010): every agent-setting change, and a playbook made, timed or deleted.
+      "platform_configure_agent_heartbeat", "platform_delete_agent", "platform_assign_skill_to_agent",
+      "platform_unassign_skill_from_agent", "platform_assign_plugin_to_agent", "platform_create_playbook",
+      "platform_schedule_playbook", "platform_delete_playbook"}
 
 
 def test_the_list_is_decision_d1():

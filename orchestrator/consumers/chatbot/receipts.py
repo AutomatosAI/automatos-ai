@@ -48,7 +48,8 @@ from consumers.chatbot.claims_backed import (
     COMPLETED_ACTION, claims_work_done, is_not_done_line, not_done_line, unbacked_claims,
 )
 from modules.tools.execution.call_effects import (
-    AGENT_SET, DOCUMENT_MAKES, SENT_BACK, STEPS_CHECKED, STEPS_UNCHECKED, answers_in, call_effects, result_effects,
+    AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STEPS_CHECKED, STEPS_UNCHECKED, answers_in, call_effects,
+    result_effects,
 )
 from modules.tools.execution.card_raised import is_waiting, receipt_effect
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
@@ -77,7 +78,8 @@ _MOVES = {"done": "moved to Done", "cancelled": "moved to Cancelled", "assigned"
           "review": "moved to Review", "in_progress": "started", "inbox": "moved to the Inbox",
           "blocked": "marked blocked"}
 _SAID = {SENT_BACK: "sent back to its agent", AGENT_SET: "agent set",
-         STEPS_CHECKED: "each step waits for your OK", STEPS_UNCHECKED: "its steps run without your check"}
+         STEPS_CHECKED: "each step waits for your OK", STEPS_UNCHECKED: "its steps run without your check",
+         REVIEWED_BY_YOU: "card created, reviewed by you before it closes"}  # FX-010 (D7)
 # Calls whose name reads badly as "<thing> <past verb>".
 _OWN_WORDS = {"assign_tool_to_agent": "tool added", "unassign_tool_from_agent": "tool removed"}
 DOCUMENT_MADE = "document made"   # F351: the calls that make a document the owner finds in Deliverables
