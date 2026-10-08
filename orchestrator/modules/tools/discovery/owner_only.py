@@ -26,8 +26,10 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
+import re
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from modules.tools.discovery.send_words import LEAVES_THE_WORKSPACE, READ_WORDS
 from modules.tools.execution.card_raised import ACT
 from modules.tools.execution.params_text import params_object
 
@@ -50,10 +52,11 @@ OWNER_ONLY_ACTIONS = frozenset({
 })
 CARD_MOVES = frozenset({"platform_update_task_status", "platform_update_task"})
 CLOSING_STATUSES = frozenset({"done", "cancelled"})
-# D1's "every Composio send/publish action": a slug with one of these words and no read word.
-COMPOSIO_SEND_WORDS = frozenset({"SEND", "SENDS", "PUBLISH", "POST", "REPLY", "FORWARD", "TWEET", "BROADCAST"})
-COMPOSIO_READ_WORDS = frozenset({"GET", "LIST", "FETCH", "SEARCH", "FIND", "RETRIEVE", "READ", "LOOKUP",
-                                 "COUNT", "DOWNLOAD"})
+# D1's "every Composio send/publish action" and D7's order (send_words, shared with brief_sends):
+# a slug with one of these words and no read word, split on any non-alphanumeric ('gmail-send-email').
+COMPOSIO_SEND_WORDS = frozenset(word.upper() for word in LEAVES_THE_WORKSPACE)
+COMPOSIO_READ_WORDS = frozenset(word.upper() for word in READ_WORDS)
+_SLUG_WORD = re.compile(r"[^A-Z0-9]+")
 
 # Server-set keys, never the model's: who clicked (stripped from every call, set after a
 # click), and a caller whose own decision is the click (the HARNESS's /approve).
@@ -87,7 +90,7 @@ VERBS = {
     "platform_schedule_playbook": "set a playbook's timer",
     "platform_delete_playbook": "delete a playbook",
 }
-SEND_VERB = "send or publish through"
+SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
 QUESTION = "question_md"
 
 
@@ -103,8 +106,9 @@ def is_owner_only(action_name: str, params: Any, *, composio: bool = False) -> b
 
 
 def is_composio_send(slug: str) -> bool:
-    """A Composio action that sends or publishes: GMAIL_SEND_EMAIL, LINKEDIN_CREATE_LINKED_IN_POST."""
-    words = set(str(slug or "").upper().split("_"))
+    """A Composio action that sends, publishes or orders: GMAIL_SEND_EMAIL, gmail-send-email,
+    LINKEDIN_CREATE_LINKED_IN_POST, SHOPIFY_CREATE_ORDER."""
+    words = set(_SLUG_WORD.split(str(slug or "").upper()))
     return bool(words & COMPOSIO_SEND_WORDS) and not words & COMPOSIO_READ_WORDS
 
 
@@ -168,31 +172,93 @@ def asks_before_a_send(execute_tool: Execute) -> Execute:
     """Wrap UnifiedToolExecutor.execute_tool: a Composio send or publish in a person's chat,
     or by an agent on a ticket Auto wrote (FX-011, Decision D7), runs only on the owner's
     click, through the same grant card. The call's kind is read first: any other call runs
-    as it is, without touching the executor's session."""
+    as it is, without touching the executor's session. A Composio call asked for under a
+    name that is not a send is watched while it runs (P256-FIX-RVW-3, ``_ResolvedSend``):
+    the executor may resolve it onto one."""
     signature = inspect.signature(execute_tool)
 
     @functools.wraps(execute_tool)
     async def wrapped(self: Any, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        from modules.tools.discovery.agent_sends import waits_on_the_card
-
         call = signature.bind(self, *args, **kwargs)
         call.apply_defaults()
         tool, params, ctx = call.arguments["tool_name"], call.arguments["parameters"], call.arguments["caller_context"]
         workspace_id = call.arguments["workspace_id"]
         slug, inner, composio = self._resolve_effective_call(tool, params)
-        if not (composio and is_composio_send(slug)):
+        if not composio:
             return await execute_tool(*call.args, **call.kwargs)
+        if not is_composio_send(slug):
+            return await _ResolvedSend(self, call.arguments, inner).runs(lambda: execute_tool(*call.args, **call.kwargs))
         db = getattr(self, "db", None)
         ticket = _whose_click(db, workspace_id, slug, ctx, composio)
         if ticket is None:
             return await execute_tool(*call.args, **call.kwargs)
         grant = _the_click(db, workspace_id, tool, params)
         if grant is None:
-            ask = send_ask(db, workspace_id, tool, slug, params, ctx, sent=inner)
-            return waits_on_the_card(db, workspace_id, ticket, ask, sent=params_object(inner),
-                                     agent_id=call.arguments.get("agent_id")) if ticket else ask
+            return _send_card(db, call.arguments, slug, ticket, inner)
         return after_the_click(db, grant, await execute_tool(*call.args, **call.kwargs))
     return wrapped
+
+
+class _ResolvedSend:
+    """P256-FIX-RVW-3: a Composio call asked for under a name that is not a send, watched
+    while it runs. Where the executor resolves that name onto another action (a slug form,
+    a display name, the auto-map of a near-miss), it checks the action that runs through
+    its post gate (core/composio/resolved_action), which asks :meth:`check`: a send there
+    waits for the owner's click exactly as one asked for by name. Without the click the card
+    is raised, the action never runs and the call's answer is the card; with it, it runs once."""
+
+    def __init__(self, executor: Any, arguments: Dict[str, Any], inner: Any) -> None:
+        self.executor, self.arguments, self.inner = executor, arguments, inner
+        self.card: Optional[Dict[str, Any]] = None
+        self.grant: Any = None
+
+    async def runs(self, run: Callable[[], Awaitable[Dict[str, Any]]]) -> Dict[str, Any]:
+        """The call's answer: the card when a resolved send raised one, else what ran."""
+        from core.composio.resolved_action import checks_the_resolved_action
+
+        with checks_the_resolved_action(self.check):
+            result = await run()
+        if self.card is not None:
+            return self.card
+        return result if self.grant is None else after_the_click(self._db(), self.grant, result)
+
+    async def check(self, action: str) -> Optional[str]:
+        """Why ``action``, the one the executor is about to run, may not run yet (the card
+        was raised), or None (not a send, a ticket a person wrote, or the owner clicked)."""
+        if self.card is not None:
+            return self._refusal(action)
+        if self.grant is not None or not is_composio_send(action):
+            return None  # a read never touches the executor's session (F088)
+        args, db = self.arguments, self._db()
+        ticket = _whose_click(db, args["workspace_id"], action, args["caller_context"], True)
+        if ticket is None:
+            return None
+        self.grant = _the_click(db, args["workspace_id"], args["tool_name"], args["parameters"])
+        if self.grant is not None:
+            return None
+        self.card = _send_card(db, args, action, ticket, self.inner)
+        return self._refusal(action)
+
+    def _refusal(self, action: str) -> str:
+        """Never empty: an empty refusal would let the executor run the action."""
+        return str((self.card or {}).get("message") or ASK.format(act=f"{SEND_VERB} {action}"))
+
+    def _db(self) -> Any:
+        return getattr(self.executor, "db", None)
+
+
+def _send_card(db: Any, arguments: Dict[str, Any], slug: str, ticket: Dict[str, Any], inner: Any) -> Dict[str, Any]:
+    """The card for a send that waits for the click: the ask in a person's chat (``ticket``
+    is ``{}``), or the agent's on a ticket Auto wrote (FX-011)."""
+    from modules.tools.discovery.agent_sends import waits_on_the_card
+
+    workspace_id = arguments["workspace_id"]
+    ask = send_ask(db, workspace_id, arguments["tool_name"], slug, arguments["parameters"],
+                   arguments["caller_context"], sent=inner)
+    if not ticket:
+        return ask
+    return waits_on_the_card(db, workspace_id, ticket, ask, sent=params_object(inner),
+                             agent_id=arguments.get("agent_id"))
 
 
 def _whose_click(db: Any, workspace_id: Any, slug: str, caller_context: Any, composio: bool) -> Optional[Dict[str, Any]]:

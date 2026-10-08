@@ -200,7 +200,7 @@ def test_a_send_card_lists_the_recipient_the_subject_and_the_first_line(monkeypa
                                            workspace_id=uuid4(), caller_context=_owners_chat()))
 
     asked = reply["question_md"]
-    assert asked.startswith("Send or publish through GMAIL_SEND_EMAIL:")
+    assert asked.startswith("Send, publish or order through GMAIL_SEND_EMAIL:")
     assert "- to: ana@harbourline.test" in asked and "- subject: Spring order" in asked
     assert "- first line: Hi Ana," in asked and "12 kilos" not in asked
     assert stored["question_md"] == asked and tools.ran == []

@@ -15,12 +15,14 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Tuple
 
+from modules.tools.discovery.send_words import ORDER_WORDS
 from modules.tools.execution.call_effects import REVIEWED_BY_YOU as REVIEW_HELD
 
-# The verbs of a brief whose work leaves the workspace: a message, an order, a post, a booking, a payment.
-SENDS_WORDS = frozenset({
-    "send", "sends", "sending", "order", "orders", "ordering", "reorder", "publish", "publishes", "publishing",
-    "book", "books", "booking", "pay", "pays", "paying", "payment",
+# The verbs of a brief whose work leaves the workspace: a message, an order, a post, a booking, a payment
+# (the order words are the owner's-click gate's, send_words.ORDER_WORDS; the rest a brief's own forms).
+SENDS_WORDS = ORDER_WORDS | frozenset({
+    "send", "sends", "sending", "ordering", "reorder", "publish", "publishes", "publishing", "books", "pays",
+    "paying",
 })
 _WORD = re.compile(r"[a-z]+")
 HUMAN = "human"

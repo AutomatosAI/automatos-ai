@@ -27,7 +27,8 @@ from sqlalchemy import func
 
 from core.composio.client import ComposioClient, get_composio_client
 from core.composio.deny_list import composio_action_denial_async, denied_result
-from core.composio.post_gate import post_action_refusal, refused_result
+from core.composio.post_gate import refused_result
+from core.composio.resolved_action import post_action_refusal  # P256-FIX-RVW-3: + the click on a resolved send
 from core.composio import upload_spec
 from core.composio.linkedin_image_workaround import leaves_its_images_to_the_direct_api
 
