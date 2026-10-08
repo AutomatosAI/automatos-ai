@@ -140,7 +140,7 @@ def _record_metrics(manager: Any, outcome: Dict[str, Any], seconds: float) -> No
         from core.llm.usage_counts import usage_counts
         from core.observability.metrics import record_llm_call
 
-        known = {**request_attributes(manager), **outcome}
+        known = {**_guarded(request_attributes, manager), **outcome}  # a fault here never loses the metric
         counts = usage_counts(outcome.get("response"))
         record_llm_call({key: known[key] for key in _METRIC_ATTRIBUTES if key in known}, seconds,
                         counts.input_tokens, counts.output_tokens)

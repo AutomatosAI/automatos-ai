@@ -221,6 +221,21 @@ def test_a_failed_call_records_its_duration_with_its_error_and_no_tokens(otel_on
     assert "gen_ai.client.token.usage" not in points
 
 
+def test_a_fault_reading_the_calls_attributes_never_loses_its_metrics(otel_on, monkeypatch):
+    from core.observability import genai
+
+    def broken(_manager):
+        raise AttributeError("config")
+
+    otel_on[0]()
+    monkeypatch.setattr(genai, "request_attributes", broken)
+    asyncio.run(_manager(_Provider()).generate_response([{"role": "user", "content": "hi"}]))
+    points = _points(otel_on[1])
+    [(attributes, count, _)] = points["gen_ai.client.operation.duration"]
+    assert count == 1 and attributes == {"gen_ai.response.model": f"{MODEL}-2026-10-01"}
+    assert sorted(p[2] for p in points["gen_ai.client.token.usage"]) == [30, 120]
+
+
 def test_the_meter_provider_is_installed_once_and_never_over_someone_elses(otel_on):
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
