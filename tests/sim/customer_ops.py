@@ -21,6 +21,24 @@ SLIM_TASK = ("id", "title", "status", "priority", "assigned_agent_id", "review_m
 SLIM_AGENT = ("id", "name", "status", "job_title", "tags")
 
 
+RECEIPT_FIELDS = ("kind", "action", "subject", "status", "reason")
+RECEIPTS_HEADER = "receipts:"
+NO_REPLY = "(no reply text)"
+
+
+def receipt_line(receipt: Mapping[str, Any]) -> str:
+    """One receipt as the persona reads it: kind · action · subject · status · reason ('-' when unsaid)."""
+    return " · ".join(str(receipt.get(key) or "-") for key in RECEIPT_FIELDS)
+
+
+def render_turn(receipts: Sequence[Mapping[str, Any]], above: Sequence[str], text: str) -> str:
+    """A chat turn laid out as the browser lays it out (PRD-256 FX-002): the receipts block,
+    then the honesty lines, then the reply."""
+    block = [RECEIPTS_HEADER, *(f"  {receipt_line(r)}" for r in receipts)] if receipts else []
+    head = "\n".join([*block, *above])
+    return f"{head}\n\n{text or NO_REPLY}" if head else text or NO_REPLY
+
+
 def render_prompt(template: str, values: Mapping[str, str]) -> str:
     """Fill ``{{NAME}}`` placeholders; a placeholder without a value is an error, not a blank."""
     wanted = {m.group(1) for m in PLACEHOLDER.finditer(template)}
