@@ -37,7 +37,7 @@ from core.workspace_client import WorkspaceClient
 logger = logging.getLogger(__name__)
 
 # PRD-170 S3: the worker publishes canvas session events to this per-workspace
-# Redis channel (mirror of services/workspace-worker/main.py CANVAS_EVENTS_CHANNEL);
+# Redis channel (mirror of services/workspace-worker/worker_routes_canvas.py CANVAS_EVENTS_CHANNEL);
 # the SSE proxy below subscribes and re-emits them to the browser.
 _CANVAS_EVENTS_CHANNEL = "workspace:ws:{workspace_id}:canvas:events"
 

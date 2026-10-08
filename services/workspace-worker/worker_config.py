@@ -74,3 +74,20 @@ def max_binary_write_bytes() -> int:
     """The cap on one binary file written in pieces (``WORKER_MAX_BINARY_WRITE_BYTES``)."""
     raw = os.environ.get(MAX_BINARY_WRITE_ENV, "").strip()
     return int(raw) if raw.isdigit() else DEFAULT_MAX_BINARY_WRITE_BYTES
+
+
+# The internal HTTP server (worker_http.py): the shared secret the platform sends in
+# ``X-Internal-Token`` (empty = not enforced), and the address it binds.
+INTERNAL_TOKEN_ENV = "WORKER_INTERNAL_TOKEN"
+BIND_HOST_ENV = "WORKER_BIND_HOST"
+DEFAULT_BIND_HOST = "0.0.0.0"
+
+
+def worker_internal_token() -> str:
+    """``WORKER_INTERNAL_TOKEN``; empty when unset."""
+    return os.environ.get(INTERNAL_TOKEN_ENV, "")
+
+
+def worker_bind_host() -> str:
+    """``WORKER_BIND_HOST``, default ``0.0.0.0``."""
+    return os.environ.get(BIND_HOST_ENV, DEFAULT_BIND_HOST)
