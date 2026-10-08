@@ -28,6 +28,7 @@ import inspect
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+from modules.tools.execution.card_raised import ACT
 from modules.tools.execution.params_text import params_object
 
 logger = logging.getLogger(__name__)
@@ -210,9 +211,11 @@ def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: A
          what: str) -> Dict[str, Any]:
     from modules.tools.execution import tool_grants
 
-    message = ASK.format(act=f"{verb} {what}".strip())
+    act = f"{verb} {what}".strip()
+    message = ASK.format(act=act)
+    # ``act``: what the card asks, in the owner's words, for the receipt and the model (FX-004).
     ask = {"success": False, "requires_confirmation": True, "owner_only": True, "action": action,
-           "permission_level": PERMISSION_LEVEL, "message": message, "params": params}
+           "permission_level": PERMISSION_LEVEL, "message": message, "params": params, ACT: act}
     logger.info("[owner_only] %s waits for the owner's click (%s)", action, what)
     return tool_grants.attach_ask_grant(db, workspace_id, action=action, params=params, ask=ask,
                                         permission_level=PERMISSION_LEVEL, description=message,

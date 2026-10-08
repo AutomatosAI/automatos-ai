@@ -223,7 +223,8 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
 export interface Receipt {
   action: string
   kind: 'read' | 'write'
-  status: 'done' | 'refused' | 'skipped'
+  /** waiting: an ask for the owner's click, its approval card raised; nothing ran, nothing was refused. */
+  status: 'done' | 'refused' | 'skipped' | 'waiting'
   /** The thing by number or name: "#0422", an agent, a document's title; '' when none. */
   subject: string
   /** What the call did, in plain words: "moved to Done", "sent back to its agent". */

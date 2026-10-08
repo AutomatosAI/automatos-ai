@@ -28,6 +28,7 @@ from uuid import UUID, uuid4
 # (modules/tools/__init__.py imports from this file)
 from modules.tools.registry import ToolCategory, get_tool_registry as registry_get_tool_registry
 from modules.tools.execution import UnifiedToolExecutor
+from modules.tools.execution.card_raised import the_model_reads_the_card
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
 from core.database.database import SessionLocal
@@ -74,9 +75,7 @@ def _summarize_args(args: Any) -> str:
     return f"{type(args).__name__}"
 
 
-# Result keys marking a deliberate STOP rather than a fault. A stop carries its
-# user-facing copy in ``message`` (not ``error``), and that copy is the whole
-# point of the stop — losing it renders the stop as "Unknown error".
+# A deliberate STOP, not a fault: its copy is in ``message``, never "Unknown error".
 STOP_MARKERS: Tuple[str, ...] = (
     "requires_confirmation",   # PRD-143 S15 — a confirmation ask
     "onboarding_restricted",   # PRD-230 D6 — one package during onboarding
@@ -1747,6 +1746,7 @@ class ToolRouter:
             return self._maybe_add_error_envelope(envelope, {"success": False, "error": error_msg})
 
     @staticmethod
+    @the_model_reads_the_card   # PRD-256 FX-004: an ask whose card is raised is not "failed"
     def _maybe_add_error_envelope(
         envelope: Dict[str, Any], raw_result: Dict[str, Any]
     ) -> Dict[str, Any]:

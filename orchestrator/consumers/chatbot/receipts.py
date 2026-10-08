@@ -8,7 +8,8 @@ read with ``call_effects``, never the persisted tool-execution log (D8: it keeps
 names only, no result and no chat).
 
 - One receipt per call: ``{action, kind, status, subject, effect, link, reason}``. The kind
-  is read or write; the status done, refused or skipped. The subject is the thing by number
+  is read or write; the status done, refused, skipped or waiting (FX-004: an ask for the
+  owner's click, ``card raised: <verb> <subject>``, is never a refusal). The subject is the thing by number
   or name (card #0422, an agent, a document's title); the effect is what the call did, in
   plain words ("moved to Done", "sent back to its agent"); a refused or skipped call says
   why, on one line. A link is the page of what a done call touched (its card, its agent).
@@ -46,6 +47,7 @@ from consumers.chatbot.claim_check import NOTHING_DONE
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, SENT_BACK, STEPS_CHECKED, STEPS_UNCHECKED, answers_in, call_effects, result_effects,
 )
+from modules.tools.execution.card_raised import is_waiting, receipt_effect
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
 from modules.tools.execution.turn_account import is_read, thing_of, what_it_did
 
@@ -54,7 +56,7 @@ Prefetched = Sequence[Tuple[str, Dict[str, Any]]]
 
 PART = FRAME = LIVE_KEY = "receipts"
 READ, WRITE = "read", "write"
-DONE, REFUSED, SKIPPED = "done", "refused", "skipped"
+DONE, REFUSED, SKIPPED, WAITING = "done", "refused", "skipped", "waiting"
 REASON_CHARS = 200
 SUBJECT_CHARS = 80
 LOOKED_UP = "looked up"
@@ -152,9 +154,12 @@ def _reason(answers: Sequence[Dict[str, Any]]) -> str:
 
 
 def receipt(action: str, params: Dict[str, Any], result: Any) -> Receipt:
-    """The receipt of one call that ran: done, or refused with its reason."""
+    """The receipt of one call that ran: done, refused with its reason, or waiting for the
+    owner's click (an ask: its card is raised, nothing is refused)."""
     params = params if isinstance(params, dict) else {}
     answers = answers_in(result)
+    if is_waiting(result):
+        return _waiting_receipt(action, _subject(answers, params), result)
     refused = _refused(result)
     reads = is_read(action)
     return {
@@ -166,6 +171,12 @@ def receipt(action: str, params: Dict[str, Any], result: Any) -> Receipt:
         "link": None if refused else _link(answers),
         "reason": _reason(answers) if refused else None,
     }
+
+
+def _waiting_receipt(action: str, subject: str, result: Any) -> Receipt:
+    """An ask: a write that waits for the owner's click, with no reason (it was not refused)."""
+    return {"action": action, "kind": WRITE, "status": WAITING, "subject": subject,
+            "effect": receipt_effect(result, action, subject), "link": None, "reason": None}
 
 
 def skipped_receipt(action: str, params: Dict[str, Any], why: str) -> Receipt:
@@ -302,7 +313,9 @@ def _tried(r: Receipt) -> str:
 
 def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
     """The lines above the answer: one per write that was refused (and not then done), and the
-    not-done line when no write went through and the answer says work is done."""
+    not-done line when no write went through and the answer says work is done. A write that
+    waits for the owner's click (FX-004) is neither: it writes no "I tried to" line, and the
+    answer that calls it done still gets the not-done line."""
     writes = [r for r in receipts if r.get("kind") == WRITE]
     done = {r["action"] for r in writes if r.get("status") == DONE}
     refused: Dict[str, Receipt] = {}
@@ -463,8 +476,8 @@ def saves_the_turns_receipts(reply_parts: Parts) -> Parts:
 
 
 __all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIVE_KEY", "NOTHING_DONE_LINE", "PART",
-           "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WRITE", "build_receipts", "claims_work_done", "current_receipts",
-           "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
+           "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WAITING", "WRITE", "build_receipts", "claims_work_done",
+           "current_receipts", "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
            "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "skipped_receipt",
            "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "with_lines_above",
            "writes_its_receipts"]
