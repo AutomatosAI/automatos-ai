@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable, Dict, Optional
+from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
 from config import config
 
@@ -214,19 +214,24 @@ def request_rooted_sampler(ratio: Any) -> Any:
     return ParentBased(RequestRooted(sampler_ratio(ratio)))
 
 
-def build_provider(exporter: Any, ratio: float) -> Any:
-    """A tracer provider: this service's resource, the request-rooted ratio sampler,
-    and batched export through ``exporter``. Nothing global is touched."""
+def resource() -> Any:
+    """This service's resource, on its traces and its metrics (O5)."""
     from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-    resource = Resource.create({
+    return Resource.create({
         "service.name": config.OTEL_SERVICE_NAME,
         "deployment.environment.name": str(getattr(config, "ENVIRONMENT", "") or "unknown"),
         "automatos.edition": str(getattr(config, "AUTH_EDITION", "") or "unknown"),
     })
-    provider = TracerProvider(resource=resource, sampler=request_rooted_sampler(ratio))
+
+
+def build_provider(exporter: Any, ratio: float) -> Any:
+    """A tracer provider: this service's resource, the request-rooted ratio sampler,
+    and batched export through ``exporter``. Nothing global is touched."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    provider = TracerProvider(resource=resource(), sampler=request_rooted_sampler(ratio))
     provider.add_span_processor(BatchSpanProcessor(exporter))
     return provider
 
@@ -268,19 +273,22 @@ def flush_tracing() -> None:
 
 
 def with_tracing(lifespan: Callable[[Any], Any]) -> Callable[[Any], Any]:
-    """The app's lifespan with this process's provider started around it.
-    Unchanged when tracing is off, so nothing is imported then."""
+    """The app's lifespan with this process's tracer and meter providers (O5) started
+    around it. Unchanged when tracing is off, so nothing is imported then."""
     if not tracing_enabled():
         return lifespan
+    from core.observability.metrics import flush_metrics, start_metrics
 
     @asynccontextmanager
     async def traced(app: Any) -> AsyncIterator[None]:
         start_tracing()
+        start_metrics()
         try:
             async with lifespan(app):
                 yield
         finally:
             flush_tracing()
+            flush_metrics()
 
     return traced
 
@@ -325,3 +333,17 @@ __all__ = [
     "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query",
     "request_rooted_sampler", "sampler_ratio", "start_tracing", "tracing_enabled", "with_tracing",
 ]
+
+
+def current_trace_ids() -> Tuple[str, str]:
+    """The current span's trace and span IDs as hex, for the log lines (O5), so a log
+    line and its trace find each other. Empty when tracing is off, no span is current,
+    or the trace isn't sampled (it would never reach the collector)."""
+    if not tracing_enabled():
+        return "", ""
+    from opentelemetry import trace
+
+    context = trace.get_current_span().get_span_context()
+    if not (context.is_valid and context.trace_flags.sampled):
+        return "", ""
+    return format(context.trace_id, "032x"), format(context.span_id, "016x")

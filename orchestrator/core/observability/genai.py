@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import time
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 from core.observability.otel import ATTR_WORKSPACE_ID, tracing_enabled
@@ -128,28 +129,66 @@ def _llm_span(manager: Any, streamed: bool) -> Iterator[Any]:
             raise
 
 
+# The span attributes the GenAI metrics carry (O5): low-cardinality only.
+_METRIC_ATTRIBUTES = ("gen_ai.operation.name", "gen_ai.provider.name", "gen_ai.request.model",
+                      "gen_ai.response.model", ATTR_REQUEST_TYPE, "error.type")
+
+
+def _record_metrics(manager: Any, outcome: Dict[str, Any], seconds: float) -> None:
+    """The call's GenAI metrics, from what its span knows (a fault is logged, never raised)."""
+    try:
+        from core.llm.usage_counts import usage_counts
+        from core.observability.metrics import record_llm_call
+
+        known = {**_guarded(request_attributes, manager), **outcome}  # a fault here never loses the metric
+        counts = usage_counts(outcome.get("response"))
+        record_llm_call({key: known[key] for key in _METRIC_ATTRIBUTES if key in known}, seconds,
+                        counts.input_tokens, counts.output_tokens)
+    except Exception:  # noqa: BLE001 — logged; the call's result stands
+        logger.debug("[otel] GenAI metrics skipped", exc_info=True)
+
+
+@contextlib.contextmanager
+def _llm_call(manager: Any, streamed: bool) -> Iterator[Tuple[Any, Dict[str, Any]]]:
+    """The call's span, and its metrics when it ends (``outcome`` gets the response)."""
+    started, outcome = time.monotonic(), {}
+    try:
+        with _llm_span(manager, streamed) as span:
+            yield span, outcome
+    except BaseException as exc:
+        outcome["error.type"] = type(exc).__qualname__
+        raise
+    finally:
+        _record_metrics(manager, outcome, time.monotonic() - started)
+
+
+def _answered(span: Any, outcome: Dict[str, Any], manager: Any, response: Any) -> Any:
+    attrs = _guarded(response_attributes, manager, response)
+    span.set_attributes(attrs)
+    outcome["response"] = response
+    if "gen_ai.response.model" in attrs:
+        outcome["gen_ai.response.model"] = attrs["gen_ai.response.model"]
+    return response
+
+
 def traced_llm_call(call: Callable[..., Any]) -> Callable[..., Any]:
-    """Wrap an ``LLMManager`` call method (async or sync) in its GenAI span."""
+    """Wrap an ``LLMManager`` call method (async or sync) in its GenAI span and metrics."""
     if asyncio.iscoroutinefunction(call):
         @functools.wraps(call)
         async def traced(manager: Any, *args: Any, **kwargs: Any) -> Any:
             if not tracing_enabled():
                 return await call(manager, *args, **kwargs)
             on_delta = kwargs.get("on_delta", args[2] if len(args) > 2 else None)  # (messages, tools, on_delta)
-            with _llm_span(manager, streamed=on_delta is not None) as span:
-                response = await call(manager, *args, **kwargs)
-                span.set_attributes(_guarded(response_attributes, manager, response))
-                return response
+            with _llm_call(manager, streamed=on_delta is not None) as (span, outcome):
+                return _answered(span, outcome, manager, await call(manager, *args, **kwargs))
         return traced
 
     @functools.wraps(call)
     def traced_sync(manager: Any, *args: Any, **kwargs: Any) -> Any:
         if not tracing_enabled():
             return call(manager, *args, **kwargs)
-        with _llm_span(manager, streamed=False) as span:
-            response = call(manager, *args, **kwargs)
-            span.set_attributes(_guarded(response_attributes, manager, response))
-            return response
+        with _llm_call(manager, streamed=False) as (span, outcome):
+            return _answered(span, outcome, manager, call(manager, *args, **kwargs))
     return traced_sync
 
 

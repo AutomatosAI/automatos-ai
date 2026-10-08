@@ -30,6 +30,7 @@ for path in (_TESTS, _ORCH):
         sys.path.insert(0, str(path))
 
 from helpers_workspace_worker import WORKER_DIR, load_worker_main, worker_server  # noqa: E402
+from tests.helpers_otel import fresh_global_providers  # noqa: E402
 
 WS = "00000000-0000-0000-0000-0000000000c1"
 CALLER = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
@@ -69,23 +70,20 @@ def traced_worker(monkeypatch, tmp_path):
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from opentelemetry.util._once import Once
 
     load_worker_main(monkeypatch, tmp_path)
     import worker_http
     import worker_otel
 
     monkeypatch.setenv("OTEL_ENABLED", "true")
-    saved = (trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE)
-    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = None, Once()
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
-    monkeypatch.setattr(worker_otel._State, "provider", provider)   # this process's, already installed
-    yield worker_http, exporter
-    provider.shutdown()
-    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = saved
+    with fresh_global_providers():
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
+        monkeypatch.setattr(worker_otel._State, "provider", provider)   # this process's, already installed
+        yield worker_http, exporter
+        provider.shutdown()
 
 
 def _server_spans(exporter):

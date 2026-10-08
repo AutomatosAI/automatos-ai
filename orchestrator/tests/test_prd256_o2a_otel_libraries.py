@@ -30,6 +30,7 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 from core.observability import otel  # noqa: E402
+from tests.helpers_otel import fresh_global_providers  # noqa: E402
 
 SECRET = "SECRET-VALUE-7"
 
@@ -72,21 +73,18 @@ def spans(monkeypatch):
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from opentelemetry.util._once import Once
 
     monkeypatch.setattr(otel.config, "OTEL_ENABLED", True, raising=False)
-    saved = (trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE)
-    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = None, Once()
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
-    engine = sqlalchemy.create_engine("sqlite://")
-    otel.instrument_libraries(engine=engine)
-    yield exporter, engine
-    _uninstrument_all()
-    provider.shutdown()
-    trace._TRACER_PROVIDER, trace._TRACER_PROVIDER_SET_ONCE = saved
+    with fresh_global_providers():
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
+        engine = sqlalchemy.create_engine("sqlite://")
+        otel.instrument_libraries(engine=engine)
+        yield exporter, engine
+        _uninstrument_all()
+        provider.shutdown()
 
 
 def _uninstrument_all():
