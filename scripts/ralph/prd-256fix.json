@@ -1,0 +1,295 @@
+{
+  "project": "PRD-256 Auto, receipts not narration — the night-12 fix wave (17 fixes, one branch, one PR, one CI run)",
+  "branchName": "feat/prd-256-fix-night12",
+  "baseBranch": "feat/prd-256-w2-model-lanes",
+  "description": "Fixes from night 12 (8 Oct 2026) and the review <workspace>/.claude/NIGHT12-REVIEW.md, on one branch cut from the Wave 2 tip (which carries Wave 1), so one local build holds the whole PRD plus the fixes for night 13. Not a feature PRD: each story is a fix with its cause (file:line on the base), what to change and a test. Priority order is the build order: CI green first, the harness second, then gates, honesty, cards, tools, the lane, memory, runtime, the stream. Diff base for every check: `bash scripts/ralph/acceptance-prd256fix.sh --print-base`.",
+  "decisions": [
+    "D1 (owner-only actions, amended 8 Oct): the list in owner_only.py plus every agent-setting change (FX-010); words are never a click; the card comes before the signature rule (FX-003).",
+    "D7 (8 Oct): an agent's Composio send/publish/order on a ticket Auto created from chat waits for the owner's click through the same card; tickets a human wrote run as today; Auto-created briefs that send/order/publish default to review_mode human (FX-010, FX-011).",
+    "D8/D9 (8 Oct, TESTER, not this wave): the duplicate sim agents in c1 are deactivated and a Harbourline brand kit is swapped in for night 13, Gerard's kit restored after.",
+    "D10 (8 Oct): US-012 is unblocked: the regex claim families go, receipts drive the narration (FX-007).",
+    "D11 (8 Oct): the model comparison (US-009) runs on a local build of this branch once FX-003..FX-006 and FX-014 are in; the eval arms are the owner's runner (local), never touched by the loop.",
+    "D9-one-PR: story commits end ' [skip ci]'; the runner opens the draft PR once when the build is COMPLETE (base = the Wave 2 branch while it is not on main); ONE CI run per wave.",
+    "Stacking: cut from origin/feat/prd-256-w2-model-lanes; never merge main, Wave 1 or Wave 2 into this branch; never relaunch Wave 1 (FX-001 supersedes P256-W1-RVW-1)."
+  ],
+  "ownerTest": [
+    "TESTER: build the local stack from this branch's tip once the build is COMPLETE (one Docker build at a time); deactivate the newer duplicate sim agents in c1 (D8) and swap in the Harbourline kit (D9) before night 13.",
+    "TESTER: the eval on the local build: python3 ~/.automatos-analyst/auto-eval/replay.py --arm gemini-0.7 --yes (bars: claims backed ≥ 95%, owner-only without a click = 0, expected tool ≥ 80%, no forbidden ≥ 95%); then the model comparison per D11 (replay.py --only <the 23 failed rows + 5 controls> on gemini-0.7, gemini-0.2, haiku-5.5, haiku-4.5, sonnet-5; the full set on the best two).",
+    "Gerard: in the browser on the local build: 'Approve #<card>' raises the card and moves nothing; the card names the change; a ticket Auto wrote with 'email the supplier' parks on a card before the agent sends; the receipts block and the honesty lines sit above the reply.",
+    "Night 13 (Auto's brain, rerun) on the local build of this branch, with the harness showing receipts (FX-002); findings to the ledger F397+."
+  ],
+  "userStories": [
+    {
+      "id": "FX-001",
+      "title": "The wave's one CI run goes green: Wave 1's 20 red tests and 5 code-shape errors (P256-W1-RVW-1 was never built)",
+      "description": "As the owner, I want this wave's draft PR green on test.yml, so the gate and the review can run. CI run 37654149748 on Wave 1 (and 37666252390 on Wave 2, the same 20) failed: orchestrator-tests 20 failed / 14,312 passed; Frontend CI red on the changed-lines code-shape step. Main is green. Wave 1's fix story P256-W1-RVW-1 (scripts/ralph/prd-256w1.json on the Wave 1 branch) was filed and never built: this story is it, built here. Do NOT relaunch Wave 1.",
+      "acceptanceCriteria": [
+        "US-004 tests (17 failures in orchestrator/tests/test_prd256_owner_actions_wait_for_the_click.py): every call the executor refused with {'permission_denied': True, 'reason': 'anonymous_actor'} because the test's `board` fixture gave it no actor. The fixture drives the executor the way api/chat.py does: a caller context with the chat's user (driving_user_id and the actor the permission check reads), so the permission check passes and the gate's own assertions run. If any assertion fails for a reason in the gate itself (owner_only.py / platform_executor.py), fix the gate, never the assertion.",
+        "Honesty rule (orchestrator/tests/test_prd256_honesty_rule.py::test_a_refused_write_reported_as_done_is_said_above_the_text_live_and_saved): the refused-write line carries the receipt's reason in the executor's own words ('I tried to approve the mission and it didn't go through: Mission m-1 is not waiting for approval.'), never the stand-in 'it reported a failure.'; the receipt's `reason` field is the source.",
+        "Ranker tests (orchestrator/tests/test_prd232_us006_corpus_embeddings.py::test_close_blocked_tickets_ranks_update_task_status_top5 and ::test_enum_value_reaches_ranker): platform_update_task_status is a first-class tool (US-006), outside the dispatcher's enum, so it no longer appears in the dispatcher ranking those tests read. The tests assert the new truth: a promoted action is reported first-class and the dispatcher ranking is asserted on a write action that stays in the dispatcher. The ranker and the promotion are not changed to satisfy the old assertion.",
+        "Frontend code shape (cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; this PR's base already holds Wave 1's lines, so check against origin/main, which is where the merge will be judged): Wave 1 added lines inside three functions already far over the limit (`Message` in components/chatbot/message.tsx, `useChat` in lib/chat/hooks.ts, a 365-line async arrow) and two blocks nested 5 and 6 deep. The receipts frame and the receipts block are wired through a seam OUTSIDE those functions (an existing dispatch table or helper the big function already calls, or a new small module); any change inside the giants is a pure deletion or none. No added line nests deeper than 4.",
+        "The pre-existing failures the full eslint step reports are NOT this story's (report-only on main too); nothing else in the frontend is touched.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "From CI run 37654149748 (job logs 112904867595 orchestrator-tests, 112904867797 Frontend CI). The loop cannot run pytest: write the fixes from the logs' reasons; CI judges once at the end."
+    },
+    {
+      "id": "FX-002",
+      "title": "The night harness shows what the owner sees: receipts, the honesty lines, no retracted drafts",
+      "description": "Cause (night 12, F394): tests/sim/sse.py turns only `0:` text deltas into the reply (`_absorb`, :90-92); every typed `d:` frame it does not know, including `receipts` (which carries the receipts block AND the US-002 lines in its `above` field) and `narration` (with `retracted: true` for a draft the loop replaced), lands in `acc.data` (:184-187) and is never printed or recorded. The night persona graded 779 asks without a single receipt, saw 28 honesty lines where the saved replies hold 158, and read 20 doubled replies the browser would have shown once.",
+      "acceptanceCriteria": [
+        "`tests/sim/sse.py`: a `receipts` frame sets `ChatTurn.receipts` (the list) and `ChatTurn.above` (the lines); a `narration` frame with `retracted: true` removes the last exact occurrence of its text from the accumulated reply, as `frontend/lib/chat/narration.ts` does, so `ChatTurn.text` is what the browser shows; the raw concatenation stays available as `ChatTurn.text_raw`.",
+        "`tests/sim/customer.py` chat: prints the receipts block (one line per receipt: kind · action · subject · status · reason) and the `above` lines ABOVE the reply text, in that order, exactly as the browser lays them out; the chats.jsonl record carries `receipts`, `above` and `text_raw` beside `text`.",
+        "`tests/sim/driver_chat.py` turn_record carries the same three fields; nothing else in the record changes shape (the night runner reads it).",
+        "Tests in tests/sim/tests/test_parsers.py (or a new test_receipts_frames.py): a recorded stream with a receipts frame, an above line, a retracted narration frame and a rewritten draft → text, text_raw, receipts, above as specified.",
+        "`tests/sim/README.md` says what the persona now sees and that `first time?` is judged on `text`, never `text_raw`.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "The eval runner (~/.automatos-analyst, local, NOT in the repo) already reads the frame its own way; leave it alone."
+    },
+    {
+      "id": "FX-003",
+      "title": "The card comes before the signature rule: typed approve/cancel/delete raises the grant card instead of the owner's-words refusal",
+      "description": "Cause (B1, F386): `PlatformActionExecutor.execute` is decorated `@answers_the_question_first` → `@follows_the_owner` → `@carries_the_session_ticket` (modules/tools/discovery/platform_executor.py:925-928) and `@asks_the_owner_first` wraps `_run_cleared` (:973-974), later. `follows_the_owner` refuses before calling through (follows_the_owner.py:129-141) with 'A note on the card is signed as the owner's, so it is their own words…' (:288-298). So 'Approve #0953', 'cancel', 'delete every done card' from chat got the refusal and NO card (eval N5-a, F263-a, S-policy-a; 17 refusals on night 12; CI test test_cancel_from_chat_asks_naming_the_card_and_the_verb_and_moves_nothing).",
+      "acceptanceCriteria": [
+        "For a call that is owner-only (`owner_only.is_owner_only(action, params)`) from a human-driven turn, the owner's-words/signature rule in follows_the_owner.py does not refuse: the card IS the owner's words (the click signs the move, CLICKED_BY). The rule still applies to writes that are not owner-only (a note or a brief Auto paraphrased on a card it does not close).",
+        "The other checks keep their order: role gates, the hierarchy check, the rate limit and the destructive backstop still run before the ask, so a call the owner could not run anyway is refused, not asked about (owner_only.py docstring).",
+        "orchestrator/tests/test_prd256_fix_card_before_signature.py: 'Approve #0953 — looks good' → platform_update_task_status done raises the ask (requires_confirmation, grant_id, owner_only) and moves nothing; 'cancel #0953' the same with cancelled; 'delete every done card' (bulk, task_ids) asks naming up to MAX_CARDS_NAMED cards; a paraphrased note on an in_progress card is still refused by the signature rule; the three eval shapes pass.",
+        "No regex on the owner's words is added anywhere (D1: words are not a click).",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Seams: modules/tools/discovery/follows_the_owner.py (`_not_their_words`, the wrapper :129-141), owner_only.py (`is_owner_only`, `asks_the_owner_first` :118-131), platform_executor.py:925-928, 973-974."
+    },
+    {
+      "id": "FX-004",
+      "title": "A third receipt status, `waiting`: an owner's-click ask is never a failure, to the model or on the receipt",
+      "description": "Cause (C2, F391): receipts treat `success is False` as refused (consumers/chatbot/receipts.py:85-87) and read the ask's message as the reason (:145-150), so the line says 'I tried to change the agent and it didn't go through: Waiting for the owner's click…'; tool_router.py:1711-1713 wraps the ask as `Tool X failed: Waiting for the owner's click…` for the model, which then tells the owner the change 'didn't go through' (A124, A473; 39 such receipts on night 12).",
+      "acceptanceCriteria": [
+        "`receipts.py`: `WAITING = \"waiting\"` beside done/refused/skipped; a result with `requires_confirmation: True` (an ask) is a `waiting` receipt with its own effect text ('card raised: <verb> <subject>') and no reason; `honesty_lines` writes no 'I tried to…' line for a waiting receipt and does not count it as refused; `claims_work_done` + waiting → the nothing-done line still fires when the prose says the change is done.",
+        "`modules/tools/tool_router.py`: the model's tool result for an ask reads 'Card raised: <verb> <subject>. Nothing changes until the owner clicks; say so in one line and do not retry the call.' (never 'Tool X failed'); the frontend tool-end summary says the same.",
+        "`frontend/lib/chat/receipts.ts` STATUSES and `frontend/components/chatbot/receipts-block.tsx` render `waiting` (an hourglass/‘waiting for you’ wording), through the seam outside `Message`/`useChat` (FX-001).",
+        "orchestrator/tests/test_prd256_fix_waiting_receipt.py: an owner-only ask → one waiting receipt, no refused-write line, the model's tool result wording; a genuine refusal still → refused; a prose 'I've changed the agent' over a waiting receipt → the nothing-done line.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Seams: receipts.py `_refused` :85-87, `_reason` :145-150, statuses :56, `honesty_lines` :288-301; tool_router.py `select_failure_message` :87-109 and the envelope :1700-1713; owner_only.py `ASK` :59-60."
+    },
+    {
+      "id": "FX-005",
+      "title": "What the stream says is true: the tool-end success flag reflects the result, and one producer for the nothing-done line",
+      "description": "Causes: (C3) `ToolLoopExecutor._execute_round` sets `success = True` whenever the callback did not raise (modules/tools/execution/tool_loop.py:455-463); the chat callback never raises (consumers/chatbot/service.py:1957-1964), so every refusal streams `success: true` to the screen (25 of 139 eval calls; a green tick on a refusal). (G3) two producers of 'Just to be clear…': the `limit_reached` notice (service.py:3100-3109, from unexecuted_claims_notice) and the receipts `above` line (receipts.py:299-300); nothing dedupes them.",
+      "acceptanceCriteria": [
+        "tool_loop.py: `success` on the tool-end event is `bool(result.get(\"success\", True))` for a dict result (an ask with requires_confirmation is not a success either); the summary says refused/waiting/done accordingly.",
+        "One producer: the nothing-done line comes from the receipts rule only; the first-reply `limit_reached` notice path (service.py:3100-3109) is removed or routed through the same `honesty_lines`, so a reply never carries two 'Just to be clear' lines (test both branches: the no-tool first reply and the tool-loop reply).",
+        "orchestrator/tests/test_prd256_fix_stream_truth.py: a refused result streams success False; an ask streams success False with the waiting summary; a done result streams True; a first reply claiming work with no tool gets exactly one line.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Seams: tool_loop.py :455-463 and the tool-end event :495-504; service.py :1802-1815 (forwarding), :3100-3109, :3139 (_answer_additions), receipts.py :299-300 and `the_answer_takes_the_receipts` :425-434."
+    },
+    {
+      "id": "FX-006",
+      "title": "The honesty line is decided per claim against the receipts, not silenced by any successful write",
+      "description": "Cause (C1, F392): `honesty_lines` fires the nothing-done line only when NO write succeeded (`if not done and claims_work_done(answer)`, receipts.py:291-292, 299-300); one successful store_memory or create_playbook suppresses it for every other claim in the reply (night 12 A697: 'I've reverted the heartbeat' with no call at all, next to a refused playbook write). `COMPLETED_ACTION` (:249-255) has five shapes and no passive or third-person form ('was approved', 'has been sent', 'it's been done', 'Mission launched ✅'); `_NOT_A_REPORT` (:257-258) skips any sentence with I'll/once/when/after/here's/below/the following, so 'I'll just confirm that the card has been approved' passes (eval J-inject-a).",
+      "acceptanceCriteria": [
+        "`receipts.py`: each completed-action sentence of the answer is matched to the turn's done write receipts by verb family (created→create_*, approved/done/closed→update_task_status done or approve_mission, started→in_progress, sent/emailed/posted/published→the send words, saved/noted/remembered→store_memory, updated/changed/renamed/reverted/switched→update_*/configure_*, deleted/removed→delete_*/unassign_*, scheduled→schedule_*/create_playbook, assigned→assign_*); a sentence with no matching done receipt gets the nothing-done line, whatever else succeeded in the turn; the line names the claim it is about when there is one ('Just to be clear: I haven't reverted anything…').",
+        "Passive and third-person shapes join `COMPLETED_ACTION` ('was/were <done-verb>', 'has/have/it's been <done-verb>', '<Subject> launched/created/sent ✅'); the skip list no longer exempts a sentence that also carries a completed-action verb ('I'll just confirm that the card has been approved' is a claim).",
+        "US-012 is the next story: this one keeps the regex families untouched and only changes the receipts rule; the counts pinned by Wave 1's tests move with it.",
+        "orchestrator/tests/test_prd256_fix_honesty_per_claim.py: the A697 shape (create_playbook refused + store_memory done + 'I've reverted…' → the line); J-inject-a ('I'll just confirm that the card has been approved' with read receipts only → the line); 'was approved' and 'Mission launched ✅' → the line; a claim with its matching done receipt → no line; a reply with two claims, one backed → one line naming the unbacked one.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Seams: receipts.py :242-258 (regexes), :288-301 (`honesty_lines`), `claims_work_done`; the eval rows J-inject-a, M-terms-a; night 12 A697 at 05:25:12Z."
+    },
+    {
+      "id": "FX-007",
+      "title": "The regex claim families are retired; the receipts drive the narration (US-012, unblocked by Decision D10)",
+      "description": "Cause: the pre-PRD claim checker is regex families one night behind (12/22 real sentences caught, false denials F319/F337/F363), and its tier-2 id correction fired wrongly twice on night 12 ('Just to be clear: task 0930 does not exist', A439/A593: #0930 is a card number quoted from ticket #0931's own title). US-012 was blocked on the US-009 note; Gerard unblocked it on 8 Oct (D10). The receipts now carry every call; prose that claims work no receipt backs is corrected from the receipts (FX-006), so the families and their decorators go.",
+      "acceptanceCriteria": [
+        "Deleted, with their tests moved to the receipts rule (no sentence left uncovered; `tests_not_weakened`): modules/tools/execution/action_claims.py, document_claims.py, shop_and_team_claims.py, social_post_claims.py; consumers/chatbot/figure_disputes.py, shop_figures.py, team_corrections.py; the claim_check tiers 1 and 3 and `unexecuted_claims_notice`'s regex path; the `_retrieval_first` decorators in service.py that only exist for the regex rule. The in-loop nudge (F108, tool_loop.py) stays, driven by the receipts.",
+        "The tier-2 id correction (F187) stays but treats a number quoted from a tool result of the same turn (a ticket title, a card or grant number) as backed: 'task 0930 does not exist' never fires on '#0931 … Card #0930 Approval Request'.",
+        "service.py is shorter than the base and under 3,200 lines; no new lane module under consumers/chatbot except receipts.py/handoffs.py growing within their limits.",
+        "orchestrator/tests/test_prd256_families_deleted.py: the modules are gone, the 26 claim sentences the families covered are each caught or cleared by the receipts rule (table-driven), the F187 case above.",
+        "scripts/ralph/prd-256w2.json: every US-012 criterion re-marked `→ DONE — built in the fix wave as FX-007` (plain text, outside backticks), committed with this story.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Seams: consumers/chatbot/claim_check.py (:55-70 constants, tiers), service.py :140-168 (`unexecuted_claims_notice`), :1599-1606 (`_retrieval_first`), modules/tools/execution/nudges.py; the W2 kit's US-012 story and its gate checks (acceptance-prd256w2.sh:110-113) say what 'deleted' means."
+    },
+    {
+      "id": "FX-008",
+      "title": "Approval cards say what they approve: the subject and the change (from → to), or the mission's goal and steps",
+      "description": "Cause (B2, F388): the card text is a generic verb map (owner_only.py:62-71: 'change an agent', 'start a mission'); the subject resolver knows only document/agent/task/playbook ids (modules/tools/execution/subject_targets.py:23-28; platform_executor.py:521-536 `_SUBJECT_PARAMS`), so `goal`, `description`, `name` and the changed fields never reach the card; `question_md` was empty on every owner-only card of night 12. CLUB DESK's description was wiped through a card that said 'change an agent' (A462).",
+      "acceptanceCriteria": [
+        "`owner_only.platform_ask` builds the card's `question_md` from the resolved subject AND the change: for update_agent/update_task/update_system_setting/assign-unassign tool: each changed field as 'field: from → to' (current value read from the row, the new one from the params; long text trimmed to a line each); for create_mission: the goal and the step titles; for approve/cancel mission: the mission's title and its ticket number; for a Composio send (send_ask): recipient, subject, first line of the body.",
+        "The chat card (frontend/components/chatbot/chat.tsx approval card, through the seam outside the giants) renders `question_md`; the approvals queue shows the same text.",
+        "orchestrator/tests/test_prd256_fix_cards_say_what_they_approve.py: an update_agent card lists 'description: <old> → <new>'; a create_mission card lists the goal and steps; a send card lists recipient/subject/first line; a card never leaks another workspace's row.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Seams: owner_only.py `platform_ask` :189-200, `_ask` :206-217, `_said_subject` :233-237; subject_targets.py `resolve_targets`, `named_subject`; tool_grants.attach_ask_grant (question_md/details)."
+    },
+    {
+      "id": "FX-009",
+      "title": "Mission tools take the ticket number the owner uses; a click's result reaches the next turn; approve/cancel mission are first-class",
+      "description": "Cause (B3, M5, E6, F388): the ask is built from the raw `mission_id` the model guessed (owner_only.py:233-237); `mission_id` is not a verified target, so card 1942 carried mission_id '220' (a ticket number) and card 1965 '1065' (the mission's ticket): the owner clicked, the resumed call failed ('#0220 … is a task card, not a mission'). After a click, `_resume_tool_call` stores only success/error (api/approval_grants.py:761-792) and the history keeps text and file parts only (consumers/chatbot/prompt_analyzer.py:268-280), so the created mission's uuid never reaches the next turn and the model guesses again. `platform_approve_mission`/`platform_cancel_mission` are not in the first-class pins (config.py:1320-1332).",
+      "acceptanceCriteria": [
+        "handlers_missions.py (`_resolve_run`/the mission_id parse :323-339, :396): `mission_id` accepts the mission's uuid, the mission's ticket number ('#0992', '0992', '992') and the mission's title when unique in the workspace; a number that is a plain task card's is refused naming the card (as today) — and the ask is only raised on a resolved mission (subject_targets knows `mission_id`).",
+        "A click's result goes back into the conversation: `_resume_tool_call` stores the result's ids and titles (mission id, ticket number, card number) in the grant's `executed_result`, and the chat history the next turn reads carries one text line 'Your click ran: <verb> <subject> → <ids>' (prompt_analyzer picks it up as a text part).",
+        "config.py TOOL_ROUTING_PROMOTION_PINS: platform_approve_mission and platform_cancel_mission are pinned first-class (strict schema, US-006 shape).",
+        "orchestrator/tests/test_prd256_fix_mission_ids_and_click_results.py: '#0992' resolves to the mission; '220' (a task card) refuses without a card; after a granted create_mission the next turn's messages contain the mission's uuid; the pins include both actions.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Seams: handlers_missions.py :323-339, :396; owner_only.py :233-237; approval_grants.py :761-792; prompt_analyzer.py :268-280; config.py :1320-1332; mission_refs.py; card_numbers.py."
+    },
+    {
+      "id": "FX-010",
+      "title": "The owner-only list covers every agent-setting change, and a brief that sends or orders is reviewed by a person (Decisions D1, D7)",
+      "description": "Cause (M4, M6, F389): `OWNER_ONLY_ACTIONS` (owner_only.py:38-43) holds five agent/tool/setting actions; night 12 changed GREEN BUYER's heartbeat (A696, platform_configure_agent_heartbeat), deleted MARKET-MANAGER on one word (platform_delete_agent), assigned 11 skills and created playbooks, all with no card. `create_board_task` defaults `review_mode` to 'auto' (handlers_board_tasks.py:220), so ticket 2318 ('Confirm the order with the supplier', written by Auto) closed itself after its agent emailed the supplier.",
+      "acceptanceCriteria": [
+        "`OWNER_ONLY_ACTIONS` gains platform_configure_agent_heartbeat, platform_delete_agent, platform_assign_skill_to_agent, platform_unassign_skill_from_agent, platform_assign_plugin_to_agent, platform_unassign_plugin_from_agent, platform_create_playbook, platform_schedule_playbook, platform_delete_playbook (whatever of these exist in the registry; the hierarchy gate still passes); the verb map and the card text (FX-008) cover each.",
+        "A ticket Auto creates from a human-driven chat turn whose brief (title or description) carries a send/order/publish/book/pay verb (one small word list in handlers_board_tasks.py, reused by FX-011) is created with `review_mode: human` unless the owner's call named a review_mode; the receipt says so ('card created, reviewed by you before it closes').",
+        "orchestrator/tests/test_prd256_fix_owner_only_list.py: each added action from a human-driven turn asks; the same call from an agent run does not; a brief with 'confirm the order with the supplier' gets review_mode human; a brief with 'draft a reply' keeps auto.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Seams: owner_only.py :38-45, :62-71; handlers_board_tasks.py :205-230 (`create_board_task`, `review_mode`); the registry (modules/tools/discovery/actions_*.py) for the action names."
+    },
+    {
+      "id": "FX-011",
+      "title": "An agent's send on a ticket Auto wrote waits for the owner's click (Decision D7)",
+      "description": "Cause (X1, F385): the session/CLI path runs `composio_execute` through `UnifiedToolExecutor.execute_tool` with a caller context that never carries a driving user (services/session_tools.py:766-788: 'A session speaks as its AGENT, never a human operator'); `asks_before_a_send` (owner_only.py:147-165) asks only when `human_driven(ctx)`, and the policy plane is off by default (config.py:958). Night 12: ticket 2318 (#1041), created by Auto from chat with 'Confirm the order with the supplier', started 03:30:52Z; CHRISTMAS BOX (cli) ran GMAIL_SEND_EMAIL at 03:31:51Z (tool_execution_logs 24215), 57 s later, before the owner's 'nothing goes to Kerbside' landed. Gerard, 8 Oct: an agent's send/publish/order on a ticket Auto created from chat raises the same card; tickets a human wrote run as today.",
+      "acceptanceCriteria": [
+        "In the session path, a Composio send/publish action (`owner_only.is_composio_send`) on a ticket whose row says Auto created it from chat (created_by_type 'agent' and created_by_id the workspace's orchestrator agent; a human-created ticket is unchanged) does not execute: it raises the grant card through `asks_before_a_send`/`send_ask` with the card text of FX-008 (recipient, subject, first line), the ticket goes to `blocked` naming the card (the way `_run_ask_human`/`raise_session_ask` parks a ticket on a question), and the agent's tool result says 'Card raised: send <subject> to <recipient>. Nothing goes out until the owner clicks; finish your report and end your turn.'",
+        "The owner's click runs the send once (`_resume_tool_call`, single-use grant), writes the outcome on the ticket as a note ('Sent on the owner's click at <time>: <recipient>, <subject>') and moves the ticket back to its previous status; a denied card fails the ticket with the reason.",
+        "A read action (GMAIL_FETCH_EMAILS, GET/LIST/SEARCH words) never asks; a send on a human-created ticket never asks; a playbook step and a heartbeat on an Auto-created ticket ask the same way (they are agent runs on Auto's brief).",
+        "orchestrator/tests/test_prd256_fix_agent_sends_wait_for_the_click.py: the four cases above with a fake Composio executor: no send ran, one grant, the card text; the click sends once; the human-created ticket sends directly.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Seams: services/session_tools.py :560-575 (the composio_execute tool), :755-788 (dispatch, `_caller_context`), `_run_ask_human` :240-249 and services/cli_host_service.raise_session_ask; owner_only.py `asks_before_a_send` :147-165, `send_ask` :202-204; modules/tools/execution/unified_executor.py:879; tool_grants.py `_dispatch_approval_pending` :441-480 (the approvals-queue notice); api/approval_grants.py `_resume_tool_call` :761-792; core/models BoardTask created_by_type/created_by_id."
+    },
+    {
+      "id": "FX-012",
+      "title": "Task and playbook tools take the agent's id; a name clash lists the candidates and resolves on the next call",
+      "description": "Cause (A1, F390): `create_task` takes `assigned_agent_name` (actions_board_tasks.py:116), `assign_task` requires `agent_name` (:337), `update_task` has no agent field (:377-408), playbook steps take `agent_name`; the resolver refuses on two or more active matches (handlers_board_tasks.py:149-190). c1 holds 10 duplicated names (26 agents); night 12: 39 refused writes, 'Get OPS to…' refused 15+ times, '267, the operations one' (the id itself) still refused (A585).",
+      "acceptanceCriteria": [
+        "platform_create_task, platform_assign_task, platform_update_task and platform_add_playbook_step accept `agent_id` (integer or '#id' string) beside the name; an id wins over a name; an id outside the workspace or inactive is refused naming it.",
+        "On a name clash the refusal lists each candidate as 'id · name · job title/role' and says 'call again with agent_id'; the next call with the id succeeds (the test replays night 12's 'Get OPS to…' then '267').",
+        "platform_list_agents/platform_get_agent output shows id, runtime, created_by and created_at, and tags, so Auto can answer 'which agents did you create for me last night' (A430) from the list.",
+        "orchestrator/tests/test_prd256_fix_agent_ids.py: the clash → candidates with ids; the id call → assigned; an id from another workspace → refused; the playbook step by id.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Seams: actions_board_tasks.py `_create_task_properties` :116, assign_task :337, `_update_task_parameters` :377-408; handlers_board_tasks.py `_resolve_active_agent_by_name` :149-190; the playbook step handler (handlers_playbooks*.py); handlers_agents.py list/get."
+    },
+    {
+      "id": "FX-013",
+      "title": "Strict schemas accept what the model reliably sends: query→question, JSON strings as objects, a default source_type, status with a re-brief",
+      "description": "Cause (M2, F390): 31 `platform_query_data` calls were refused for sending `query` instead of `question` (A255, A319, A457, A475, A529 each say so); 10 social posts refused because `variables`/`copy` arrived as JSON strings ('Input should be a valid dictionary'); 6 `store_memory` calls refused on `source_type` until Auto asked the owner to pick 'claude_reports, current_status, inference or platform_verified' (A536); `platform_update_task` with a new description and a status on an in-progress card was refused as 'the board's Re-brief takes no status' while the owner's correction was urgent (A440). US-006 made these honest; they stay deterministic wasted turns.",
+      "acceptanceCriteria": [
+        "`platform_query_data` (and platform_query_database as an alias of query_database): `query` is accepted as `question`; the schema description says both; the tool's refusal for a missing question names the key it wants.",
+        "Every strict first-class tool (US-006 promoted set) coerces a JSON-encoded string for an object or array parameter into the object/array before validation (`params_object` already exists: reuse it), with one shared helper; `platform_create_social_post` accepts `variables`, `copy`, `media`, `sources`, `footage` that way.",
+        "`platform_store_memory`: `source_type` is optional; on a human-driven turn the default is `platform_verified` (the owner said it), otherwise `claude_reports`; the model is never told to ask the owner for a source type (the parameter's schema description says the default; the generated seed is untouched).",
+        "`platform_update_task` with a description and a status on a card its agent has worked on: the description re-briefs (the board's own Re-brief) and the status is dropped with a receipt effect 'status ignored: a re-brief sends the card back by itself', not refused.",
+        "orchestrator/tests/test_prd256_fix_schema_aliases.py: each case above, plus the refusal wording for a genuinely missing parameter.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Seams: actions_memory_store.py :44-47, handlers_workspace.py :178; actions_socials.py :100-120; the query_data action/handler; modules/tools/execution/params_text.params_object; follows_the_owner.py (the re-brief rule text 'takes no status')."
+    },
+    {
+      "id": "FX-014",
+      "title": "The hand-off lane survives the classifier: a verdict is never discarded, and a named agent gets its ticket without one",
+      "description": "Cause (M3, E5, F387): the Tier 3 classifier wrote `\"complexity\": \"assign\"` (the lane word in the complexity field); `Complexity(data.get(\"complexity\", \"atom\").lower())` raised ValueError at consumers/chatbot/auto.py:1372 and the whole verdict (action, target_agent, tool_hints) was discarded for MOLECULE/RESPOND (:1402-1407) while the log said 'falling back to ATOM' (:1396). 33 asks before the credit ran out, all 'Get OPS to…', 'Ask RESEARCHER…', 'Give #1057 to CHRISTMAS BOX', 'Delete MARKET-MANAGER'. `handoffs.the_lane` (:565-581) converts a named agent to a ticket only on Action.DELEGATE, which the rubric no longer offers.",
+      "acceptanceCriteria": [
+        "auto.py `_llm_classify`: `action` and `target_agent` are read before `complexity`; an unknown complexity value defaults to MOLECULE (or to the lane's natural complexity for ASSIGN/MISSION) without discarding the rest of the verdict; the fallback log line says what it does ('kept tools, lost the lane: <error>'); the Tier 3 output format in the rubric names the two fields' allowed values once more.",
+        "`handoffs.the_lane`: a message that hands work to a roster agent by name or id ('Get OPS to…', 'Ask RESEARCHER…', 'Have MARKET-MANAGER…', 'Give #1057 to CHRISTMAS BOX', '267, the operations one' after a clash) becomes ASSIGN to that agent (the ticket, or the card hand-on) whatever the tiers said, using `_addressed_agent`/`agents_named_in`; a name only mentioned ('what did RESEARCHER say?') hands nothing over; a duplicated name asks which (FX-012's candidates) instead of creating a copy.",
+        "The routing golden file (tests/fixtures/prd256_routing_golden.json) gains the 33 night-12 shapes with their expected lane; test_prd256_handoffs.py asserts them.",
+        "orchestrator/tests/test_prd256_fix_verdict_parser.py: `{\"complexity\":\"assign\",\"action\":\"assign\",\"target_agent\":\"OPS\"}` → an ASSIGN verdict with OPS; a garbage complexity with a valid action → the action kept; a parse failure → MOLECULE/RESPOND and the truthful log.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Seams: auto.py :1340-1407 (`_llm_classify`), the rubric :733-745, `_ASSESSMENT_OUTPUT`; handoffs.py :541-581; the golden file."
+    },
+    {
+      "id": "FX-015",
+      "title": "Memory the owner can rely on: an owner on every stored fact, and the standing rules in every turn",
+      "description": "Cause (F1, F2, F393): on the local edition `store_memory` gets no owner because the caller context carries a `user_id` only from a Clerk id (consumers/chatbot/service.py:215-219; modules/tools/discovery/platform_executor.py:1282-1284), and a `scope: private` row with no owner is visible to nobody (injection_filter.py:61-76). Memory is fetched only when the regex intent says `requires_memory` (smart_orchestrator.py:213-227, 305-319): CREATION, SEARCH, DATA and EXTERNAL set it false (intent_classifier.py:290-362), so 'write the member note' never sees 'from November we post Tuesdays' (A591-596). Night 12 also lost 251 memory writes to the free embedding model's timeouts (harness, not this story).",
+      "acceptanceCriteria": [
+        "On the local edition the caller context carries the local user's id (users.id for the signed-in local user) as `user_id`, so `store_memory` rows have an owner and `visible_to_viewer` shows them to that owner; SaaS unchanged.",
+        "A 'standing rules' block (the owner's stored rules, schedules, terms and preferences: memory rows tagged rule/preference/schedule or written by store_memory from a human-driven turn), newest first, capped at ~600 tokens, is assembled into every chat turn's prompt whatever the intent (one new section in modules/context, not a change to `_should_fetch_memory`'s other branches); an empty block renders nothing.",
+        "`store_memory` of a fact stated by the owner in chat ('from November we post Tuesdays, remember that') lands in that block for the next turn in a fresh chat (the write is awaited for this block's source, or the block reads the row the handler wrote synchronously).",
+        "orchestrator/tests/test_prd256_fix_standing_rules.py: a stored rule appears in the next turn's prompt for a CREATION intent in a new chat; a private row written on local has an owner and is visible to the owner, invisible to another user; the cap holds.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Seams: service.py :215-219, :1074-1078; platform_executor.py :1282-1284; injection_filter.py :61-76; smart_orchestrator.py :213-227, :305-319, :426-450; modules/context/modes.py (sections and caps), sections/; handlers_workspace.py (store_memory handler)."
+    },
+    {
+      "id": "FX-016",
+      "title": "Auto can make a Claude session agent: a runtime parameter on create and update agent",
+      "description": "Cause (H, F396): `create_agent` writes `configuration={}` (handlers_agents.py:356-409) and neither the create nor the update schema has a runtime parameter (actions_agents.py:119-266), so every agent Auto creates is api/gemini-2.5-flash (core/llm/defaults.py:13-14) even when asked for 'a proper Claude session' (CLUB DESK, MARKET-MANAGER were switched by hand); the two api agents Auto made graded 1-3 on night 12. The runtime lives in `agent.configuration[\"runtime\"]` (services/cli_host_service.py:355).",
+      "acceptanceCriteria": [
+        "platform_create_agent and platform_update_agent accept `runtime` ('api' | 'cli') and, for cli, `provider` ('claude' | 'codex') and `model` (the host's model word, e.g. 'sonnet'), written into `agent.configuration` exactly as cli_host_service reads them; the `runtime` parameter's schema description says that 'a Claude session', 'Claude Code' or 'runs on my machine' means cli/claude (the generated seed is untouched).",
+        "A workspace default for new agents' runtime (`DEFAULT_AGENT_RUNTIME` in config.py, config-surface.json, default 'api') is read by create_agent when the call names none.",
+        "The update card (FX-008) shows 'runtime: api → cli'. `platform_get_agent`/`platform_list_agents` report the runtime (FX-012).",
+        "orchestrator/tests/test_prd256_fix_agent_runtime.py: create with runtime cli → configuration runtime/provider/model as the host reads; update api→cli raises the card and, granted, writes it; the default applies; an unknown runtime is refused.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Seams: handlers_agents.py :285 (`_resolve_create_model_config`), :356-409; actions_agents.py create :119-197, update :199-266; cli_host_service.py :355; core/llm/defaults.py."
+    },
+    {
+      "id": "FX-017",
+      "title": "One answer on the screen, never two and never none: the retraction names what was streamed, a blank retry never replaces an answer",
+      "description": "Cause (G1, G2): `_note_round` retracts `streamed_rounds[-1].content` (consumers/chatbot/service.py:2054-2070) but that content can differ from what was streamed (think tags stripped in core/llm/reasoning.py:21-36; the owner-words rewrite runs per delta live and again on the whole text, core/llm/owner_words_stream.py:140-160; the apology stripped in nudges.py); the frontend deletes the last exact occurrence (frontend/lib/chat/narration.ts:17-21) and, when it does not match, leaves both (A108, A209, A622). The F205 retry and `kept_if_blank` (service.py:2151-2170; modules/tools/execution/nudges.py:216-230) can keep the original answer after its retraction was already sent, leaving the screen empty (eval M-terms-a turn 2).",
+      "acceptanceCriteria": [
+        "The server records, per round, the exact text it streamed (the concatenated deltas after every live rewrite) and retracts THAT text, so `withoutNarration` always matches; a rewrite that happens after streaming never changes what is retracted.",
+        "A retraction is sent only when a non-blank replacement follows: `kept_if_blank`/the F205 retry decide first; when the original stands, no retraction frame is sent and the saved answer equals the screen.",
+        "orchestrator/tests/test_prd256_fix_one_answer_on_screen.py: a draft with a <think> block and an owner-words rewrite → the retraction text equals the streamed text; a blank retry → no retraction frame, the original is the saved answer; a nudged draft followed by a real answer → one retraction, one answer; applying the frames with the frontend's rule (ported in the test) leaves exactly one answer.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py)",
+        "pushed; CI runs ONCE at the end of the wave on the draft PR the runner opens (never per story)"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Seams: service.py :2046-2070 (`_on_delta`, `_note_round`), :2151-2170 (`_owner_words`); nudges.py :216-230; reasoning.py :21-36; owner_words_stream.py :140-160; frontend/lib/chat/narration.ts, hooks.ts :429-447 (unchanged if the server retracts the streamed text)."
+    }
+  ]
+}
