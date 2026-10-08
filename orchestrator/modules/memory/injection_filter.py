@@ -128,6 +128,8 @@ STANDING_RULE_FILTER: Dict[str, List[str]] = {
     "metadata.category": list(STANDING_RULE_TYPES),
     "metadata.source": [SAID_IN_CHAT],
 }
+# P256-FIX-RVW-11: the read holds only the viewer's rows (``metadata.owner`` == their subject id).
+STANDING_RULE_OWNER_KEY = "metadata.owner"
 
 
 def is_standing_rule(mem: Any) -> bool:

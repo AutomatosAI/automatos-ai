@@ -38,13 +38,14 @@ class _FakeDurable:
                           "created_at": self._clock.isoformat()})
         return {"success": True, "id": self.rows[-1]["id"]}
 
-    async def get_where_any(self, user_id, any_of, limit=100):
+    async def get_where_any(self, user_id, any_of, limit=100, where=None):
         def field(row, key):
             meta_key = key.split(".", 1)[1]
             return (row.get("metadata") or {}).get(meta_key)
 
         hits = [r for r in self.rows if r["namespace"] == user_id
-                and any(field(r, key) in values for key, values in any_of.items())]
+                and any(field(r, key) in values for key, values in any_of.items())
+                and all(field(r, key) == value for key, value in (where or {}).items())]
         return hits[:limit]
 
 
@@ -197,10 +198,11 @@ def test_the_durable_read_is_the_namespace_and_any_of_the_filter():
     store._enabled, store._bootstrap_done, store._collection = True, True, "durable_memory"
     store._client = MagicMock()
     store._client.scroll = AsyncMock(return_value=([NS(id="p1", payload={"content": RULE, "metadata": {}})], None))
-    rows = asyncio.run(store.get_where_any("mem:ws-1", STANDING_RULE_FILTER, limit=5))
+    rows = asyncio.run(store.get_where_any("mem:ws-1", STANDING_RULE_FILTER, limit=5,
+                                           where={"metadata.owner": "user:7"}))
     assert [r["memory"] for r in rows] == [RULE]
     flt = store._client.scroll.call_args.kwargs["scroll_filter"]
-    assert [(c.key, c.match.value) for c in flt.must] == [("namespace", "mem:ws-1")]
+    assert [(c.key, c.match.value) for c in flt.must] == [("namespace", "mem:ws-1"), ("metadata.owner", "user:7")]
     assert {c.key: list(c.match.any) for c in flt.should} == STANDING_RULE_FILTER
 
 
@@ -315,3 +317,104 @@ def test_the_atom_lane_carries_the_rules_too(durable):
     assert RULE in block
     assert asyncio.run(atom_memory_block(None, [{"role": "user", "content": "hi"}], workspace_id=uuid.UUID(int=1),
                                          agent_id=322, widget_mode=True, viewer_subject_id=None)) == ""
+
+
+# ---------------------------------------------------------------------------
+# P256-FIX-RVW-11: the owner's rule is found however many rows the workspace holds, and a
+# restated rule is the restating person's (the real DurableMemoryStore over an in-memory Qdrant)
+# ---------------------------------------------------------------------------
+
+def _payload_value(payload, key):
+    for part in key.split("."):
+        payload = payload.get(part) if isinstance(payload, dict) else None
+    return payload
+
+
+def _matches(payload, condition):
+    value, match = _payload_value(payload, condition.key), condition.match
+    return value in match.any if hasattr(match, "any") else value == match.value
+
+
+class _InMemoryQdrant:
+    """Qdrant's scroll (a filter's must and should, in point order, paged) and upsert."""
+
+    def __init__(self) -> None:
+        self.points: list = []
+
+    async def upsert(self, collection_name, points):
+        self.points.extend(NS(id=p.id, payload=p.payload) for p in points)
+
+    async def scroll(self, collection_name, scroll_filter, limit, offset=None, **_kwargs):
+        hits = [p for p in self.points if all(_matches(p.payload, c) for c in scroll_filter.must or [])
+                and (not scroll_filter.should or any(_matches(p.payload, c) for c in scroll_filter.should))]
+        start = offset or 0
+        page = hits[start:start + limit]
+        return page, (start + limit if start + limit < len(hits) else None)
+
+
+@pytest.fixture
+def qdrant(monkeypatch):
+    """The real DurableMemoryStore behind the service the handler writes and the section reads."""
+    import modules.memory.unified_memory_service as ums
+    from config import config
+    from modules.memory.durable_store import DurableMemoryStore
+
+    client = _InMemoryQdrant()
+    store = DurableMemoryStore.__new__(DurableMemoryStore)
+    store._enabled, store._bootstrap_done, store._collection = True, True, "durable_memory"
+    store._client = client
+    store._embedder = NS(generate_embedding=AsyncMock(return_value=[0.0]))
+    service = ums.UnifiedMemoryService.__new__(ums.UnifiedMemoryService)
+    service._durable = store
+    service._redis_client_getter = lambda: None
+    monkeypatch.setattr(ums, "get_unified_memory_service", lambda: service)
+    monkeypatch.setattr(config, "QDRANT_URL", "http://qdrant.test")
+    return client
+
+
+def _seed(client, content, metadata):
+    """A row already in the store, as an earlier write left it."""
+    import hashlib
+
+    client.points.append(NS(id=str(uuid.uuid4()), payload={
+        "namespace": f"mem:{uuid.UUID(int=1)}", "workspace_id": str(uuid.UUID(int=1)), "content": content,
+        "metadata": metadata, "created_at": "2026-10-06T21:00:00+00:00",
+        "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+    }))
+
+
+def test_the_owners_rule_is_read_past_600_other_rows(qdrant):
+    from config import config
+
+    assert config.STANDING_RULES_SCAN_LIMIT < 600
+    for i in range(300):
+        _seed(qdrant, f"Member {i} prefers the dark roast.", {"source": "platform_tool", "owner": f"user:{100 + i}"})
+        _seed(qdrant, f"Ticket #{i} shipped on time.", {"source": "platform_tool", "type": "business_fact"})
+    assert _store(_said_by(OWNER))["success"] is True                   # written after all 600
+    block = _block(uuid.UUID(int=1), f"user:{OWNER}")
+    assert f"- {RULE}" in block and "dark roast" not in block
+
+
+def test_the_owner_restating_a_rule_stored_ownerless_makes_it_theirs(qdrant):
+    _seed(qdrant, RULE, {"source": "platform_tool", "type": "business_fact"})   # night 12's ownerless row
+    assert _block(uuid.UUID(int=1), f"user:{OWNER}") == ""
+    assert _store(_said_by(OWNER))["success"] is True
+    assert len(qdrant.points) == 2                                                # a row of the owner's own
+    assert f"- {RULE}" in _block(uuid.UUID(int=1), f"user:{OWNER}")
+    assert "owner" not in qdrant.points[0].payload["metadata"]                    # the old row is left as it was
+
+
+def test_another_members_identical_rule_is_theirs_not_the_owners(qdrant):
+    assert _store(_said_by(OTHER))["success"] is True
+    assert f"- {RULE}" in _block(uuid.UUID(int=1), f"user:{OTHER}")
+    assert _block(uuid.UUID(int=1), f"user:{OWNER}") == ""
+    assert _store(_said_by(OWNER))["success"] is True                  # the owner's own row, not OTHER's
+    assert f"- {RULE}" in _block(uuid.UUID(int=1), f"user:{OWNER}")
+    owners = sorted(p.payload["metadata"]["owner"] for p in qdrant.points)
+    assert owners == [f"user:{OWNER}", f"user:{OTHER}"]
+
+
+def test_the_same_person_restating_a_rule_still_dedupes(qdrant):
+    assert _store(_said_by(OWNER))["success"] is True and _store(_said_by(OWNER))["success"] is True
+    assert len(qdrant.points) == 1
+    assert _block(uuid.UUID(int=1), f"user:{OWNER}").count(RULE) == 1

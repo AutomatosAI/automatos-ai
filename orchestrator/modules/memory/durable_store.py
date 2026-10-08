@@ -153,6 +153,8 @@ class DurableMemoryStore:
             ("subject_id", PayloadSchemaType.KEYWORD),
             ("content_hash", PayloadSchemaType.KEYWORD),
             ("created_at", PayloadSchemaType.KEYWORD),
+            # PRD-256 P256-FIX-RVW-11: the standing-rules read and the dedupe filter on the owner.
+            ("metadata.owner", PayloadSchemaType.KEYWORD),
         ]:
             try:
                 await self._client.create_payload_index(
@@ -242,7 +244,7 @@ class DurableMemoryStore:
         ws = str(workspace_id) if workspace_id else workspace_from_namespace(user_id)
         content_hash = hashlib.sha256(text.encode()).hexdigest()
 
-        existing = await self._find_by_hash(user_id, content_hash)
+        existing = await self._find_by_hash(user_id, content_hash, owner=(metadata or {}).get("owner"))
         if existing is not None:
             logger.debug("[Durable] Deduplicated add in namespace=%s", user_id)
             return {"success": True, "id": str(existing.id), "deduped": True}
@@ -353,12 +355,15 @@ class DurableMemoryStore:
         """Every memory in a namespace (unscored, scroll order)."""
         return await self._scroll(self._namespace_filter(user_id), limit)
 
-    async def get_where_any(self, user_id: str, any_of: Dict[str, List[str]], limit: int = 100) -> List[Dict]:
+    async def get_where_any(self, user_id: str, any_of: Dict[str, List[str]], limit: int = 100,
+                            where: Optional[Dict[str, str]] = None) -> List[Dict]:
         """PRD-256 FX-015: the namespace's memories whose payload matches at least one of
-        ``any_of`` (a payload key, ``metadata.type`` say, to the values it may hold);
-        unscored, scroll order, no embedding call."""
+        ``any_of`` (a payload key, ``metadata.type`` say, to the values it may hold) and every
+        ``where`` key exactly (P256-FIX-RVW-11: ``metadata.owner``, so the scan holds one
+        person's rows, never the whole workspace's); unscored, scroll order, no embedding call."""
         should = [FieldCondition(key=key, match=MatchAny(any=list(values))) for key, values in any_of.items()]
-        flt = Filter(must=self._namespace_filter(user_id).must, should=should or None)
+        exact = [FieldCondition(key=key, match=MatchValue(value=value)) for key, value in (where or {}).items()]
+        flt = Filter(must=[*self._namespace_filter(user_id).must, *exact], should=should or None)
         return await self._scroll(flt, limit)
 
     async def _scroll(self, flt: Filter, limit: int) -> List[Dict]:
@@ -528,14 +533,19 @@ class DurableMemoryStore:
 
     # ── Internals ───────────────────────────────────────────────
 
-    async def _find_by_hash(self, user_id: str, content_hash: str):
+    async def _find_by_hash(self, user_id: str, content_hash: str, owner: Optional[str] = None):
+        """The namespace's row with this content, and, for an owned write, this owner's
+        (P256-FIX-RVW-11: a person restating a fact stored ownerless, or another member's,
+        gets a row of their own, never the other row's id; the existing row is left as it is)."""
         if not self._enabled:
             return None
+        mine = [FieldCondition(key="metadata.owner", match=MatchValue(value=str(owner)))] if owner else []
         results, _ = await self._client.scroll(
             collection_name=self._collection,
             scroll_filter=Filter(must=[
                 FieldCondition(key="namespace", match=MatchValue(value=user_id)),
                 FieldCondition(key="content_hash", match=MatchValue(value=content_hash)),
+                *mine,
             ]),
             limit=1,
         )

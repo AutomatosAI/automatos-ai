@@ -457,20 +457,24 @@ def render_standing_rules(rules: list[str], max_tokens: int) -> str:
     return truncate_to_token_budget("\n".join(lines), max_tokens, suffix="")
 
 
-async def _stored_rule_rows(workspace_id: str) -> list[dict]:
-    """The workspace namespace's rows ``STANDING_RULE_FILTER`` matches (unscored)."""
+async def _stored_rule_rows(workspace_id: str, viewer_subject_id: str) -> list[dict]:
+    """The workspace namespace's rows ``STANDING_RULE_FILTER`` matches that ``viewer_subject_id``
+    owns (unscored). P256-FIX-RVW-11: the owner is a condition of the store's own read, so every
+    other member's and agent's ``store_memory`` rows never fill the scan before this person's."""
     from config import config
-    from modules.memory.injection_filter import STANDING_RULE_FILTER
+    from modules.memory.injection_filter import STANDING_RULE_FILTER, STANDING_RULE_OWNER_KEY
     from modules.memory.unified_memory_service import get_unified_memory_service
 
     service = get_unified_memory_service()
     limit = config.STANDING_RULES_SCAN_LIMIT
     # The one shared store (unified_memory_service.py is past 800 lines: no accessor added there).
     rows = await service._durable.get_where_any(service.namespace(workspace_id).resolve(None),
-                                                STANDING_RULE_FILTER, limit=limit)
+                                                STANDING_RULE_FILTER, limit=limit,
+                                                where={STANDING_RULE_OWNER_KEY: viewer_subject_id})
     if len(rows) >= limit:  # the scroll is in point order, not by time: a newer rule may be past the cap
-        logger.warning("[FX-015] standing rules: %d candidate rows read for workspace %s, the cap "
-                       "(STANDING_RULES_SCAN_LIMIT); newer rules past it are not in the block", limit, workspace_id)
+        logger.warning("[FX-015] standing rules: %d candidate rows of %s read for workspace %s, the cap "
+                       "(STANDING_RULES_SCAN_LIMIT); newer rules past it are not in the block",
+                       limit, viewer_subject_id, workspace_id)
     return rows
 
 
@@ -480,10 +484,10 @@ async def standing_rules_block(workspace_id: object, *, viewer_subject_id: Optio
     from config import config
     from modules.memory.injection_filter import standing_rules
 
-    if widget_mode or not workspace_id:
+    if widget_mode or not workspace_id or not viewer_subject_id:
         return ""
     try:
-        rows = await _stored_rule_rows(str(workspace_id))
+        rows = await _stored_rule_rows(str(workspace_id), viewer_subject_id)
     except Exception:  # noqa: BLE001 — logged; the turn goes on without the block
         logger.exception("[FX-015] standing rules not read for workspace %s", workspace_id)
         return ""
