@@ -44,7 +44,9 @@ from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from consumers.chatbot.claim_check import NOTHING_DONE
-from consumers.chatbot.claims_backed import COMPLETED_ACTION, claims_work_done, is_not_done_line, not_done_line
+from consumers.chatbot.claims_backed import (
+    COMPLETED_ACTION, claims_work_done, is_not_done_line, not_done_line, unbacked_claims,
+)
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, SENT_BACK, STEPS_CHECKED, STEPS_UNCHECKED, answers_in, call_effects, result_effects,
 )
@@ -258,7 +260,7 @@ def receipts_frames(handler: Any, receipts: List[Receipt], model: Optional[str] 
 
 # ── US-002: one honesty rule, from the receipts alone ──────────────────────
 # The line about what was not done is decided by the receipts, never by a vocabulary of
-# claims (action_claims, document_claims, shop_and_team_claims: frozen, D10). It fires for a
+# claims (the regex families are gone, FX-007). It fires for a
 # claim of the answer (one generic pattern, ``claims_backed.COMPLETED_ACTION``) that no done
 # write of its kind backs, whatever else went through (FX-006); a write of its kind is never
 # denied. A refused write gets its own line. Both sit above the text: in the frame
@@ -304,6 +306,19 @@ def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
              for r in refused.values()]
     not_done = not_done_line(answer, done_writes)
     return [*lines, not_done] if not_done else lines
+
+
+def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]]) -> Optional[str]:
+    """FX-007, F108's nudge from the receipts: the verb of the answer's first claim that no done
+    write of the calls so far backs (``outcomes``: the loop tracker's), "done" for a claim whose
+    verb is in no family ("Done.", "it's now on your board"), else None."""
+    receipts = [receipt(action, params, result) for action, params, result in outcomes]
+    done_writes = [r for r in receipts if r["kind"] == WRITE and r["status"] == DONE]
+    unbacked = unbacked_claims(answer, done_writes)
+    if not unbacked:
+        return None
+    verb, known = unbacked[0]
+    return verb if known else "done"
 
 
 def with_lines_above(answer: str, above: Sequence[str]) -> str:
@@ -463,5 +478,5 @@ __all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIV
            "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WAITING", "WRITE", "build_receipts", "claims_work_done",
            "current_receipts", "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
            "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "says_nothing_was_done", "skipped_receipt",
-           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "with_lines_above",
+           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "unbacked_claim", "with_lines_above",
            "writes_its_receipts"]

@@ -131,5 +131,5 @@ def test_a_question_nothing_on_the_board_answers_or_a_widget_turn_reads_nothing_
 def test_the_chat_runs_retrieval_first_through_it():
     from consumers.chatbot.service import StreamingChatService
 
-    inner = StreamingChatService._retrieval_first.__wrapped__.__wrapped__.__wrapped__.__wrapped__.__wrapped__
+    inner = StreamingChatService._retrieval_first.__wrapped__.__wrapped__.__wrapped__  # PRD-256, F241, F307
     assert inner.__code__ is reads_what_the_team_found(lambda: None).__code__

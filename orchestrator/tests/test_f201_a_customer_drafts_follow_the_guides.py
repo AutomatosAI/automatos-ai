@@ -110,7 +110,8 @@ def finish(monkeypatch):
 
 def test_a_draft_that_says_it_changed_the_subscription_says_check_before_sending(finish):
     task = finish(ROUND_1)
-    assert task.result.endswith("Check before sending: the draft says something was changed, but nothing in this "
+    # PRD-256 FX-007: the receipts' rule names the claim's own verb ("I have also updated …")
+    assert task.result.endswith("Check before sending: the draft says something was updated, but nothing in this "
                                 "run did that. Do it first, or change the wording to what will happen.")
 
 

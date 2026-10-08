@@ -29,7 +29,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from .action_claims import claimed_action_not_done
 from .nudges import ask_for_the_answer, claimed_action_nudge  # PRD-256 US-006: a refused write is named
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
 from .card_raised import the_results_flag  # PRD-256 FX-005: the tool-end flag is the result's own (_emit)
@@ -197,8 +196,7 @@ class ToolLoopExecutor:
         self.max_iterations = max(1, int(max_iterations))
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
         self.tracker = tracker if tracker is not None else ToolExecutionTracker()
-        # F187: work said to be under way is a claim in Auto's own chat replies
-        # (an agent's draft promises in its writer's voice). None: the turn's lane decides.
+        # Auto's own chat turn (a blank answer is told from the calls); None: the turn's lane decides.
         self.promises = promises
         self._llm = said_or_accounted(llm_callback, lambda: self.tracker.outcomes, promises)  # F264: never blank
         # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
@@ -612,7 +610,9 @@ class ToolLoopExecutor:
         if step:  # F306 (night 9): "Let me try a more specific query:" and no call made
             logger.warning("[tool-loop] reply announced a step it never took — nudging once")
             return await nudge_about(self._llm, current, messages, tools, ANNOUNCED_STEP_MSG.format(step=step))
-        claim = claimed_action_not_done(text, self.tracker.succeeded, promises=self.promises)
+        from consumers.chatbot.receipts import unbacked_claim  # FX-007: the receipts rule, not a family
+
+        claim = unbacked_claim(text, self.tracker.outcomes)
         if not claim:
             return None
         logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)

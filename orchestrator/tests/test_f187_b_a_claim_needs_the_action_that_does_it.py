@@ -17,6 +17,13 @@ own night, these went past them:
 
 The sentences are night 6's (chats.jsonl), each with the actions that succeeded
 in its turn.
+
+PRD-256 FX-007 (D10): the families are gone; each sentence is read by the receipts' rule
+(``claims_backed``: a report of work done needs a done write of its verb's kind). It keeps
+"installed" (only an install backs it). A check, a count or work said to be under way is not
+a report of work done: the receipts show what the turn read and ran, and a plan or a promise
+is cleared (no line, no nudge); the loop's other nudges (narrated actions, a step announced
+and never taken) are untouched.
 """
 from __future__ import annotations
 
@@ -28,12 +35,12 @@ import pytest
 
 from core.llm.clients.base import LLMResponse
 from core.llm.usage_context import LANE_BOARD_TASK, LANE_CHAT, usage_scope
-from modules.tools.execution.action_claims import claimed_action_not_done
 from modules.tools.execution.tool_loop import ToolLoopExecutor
+from tests.helpers_receipts_rule import line, nudged
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
 TOOLS = [{"type": "function", "function": {"name": "platform_execute"}}]
-EMPTY_COPY = {"search_knowledge", "platform_create_playbook"}            # 2 Oct 14:04:41 (B120)
+EMPTY_COPY = ("search_knowledge", "platform_create_playbook")            # 2 Oct 14:04:41 (B120)
 
 
 # ── installed: only an install backs it ─────────────────────────────────────
@@ -41,119 +48,102 @@ EMPTY_COPY = {"search_knowledge", "platform_create_playbook"}            # 2 Oct
 def test_installed_needs_an_install_not_a_create():
     for reply in ("I've installed the playbook for you.",
                   "I've installed the Weekly Social Posts playbook from the marketplace."):
-        assert claimed_action_not_done(reply, EMPTY_COPY) == "installed"      # old: the create backed it, or no claim
-        assert claimed_action_not_done(reply, {"platform_install_package"}) is None
+        assert nudged(reply, *EMPTY_COPY) == "installed"                  # old: the create backed it, or no claim
+        assert nudged(reply, "platform_install_package") is None
     # 26 Sep 02:02:56, a real install
-    assert claimed_action_not_done("I've just installed the **Shopify Support Agent** from the marketplace.",
-                                   {"platform_browse_marketplace_agents", "platform_install_marketplace_agent"}) is None
+    assert nudged("I've just installed the **Shopify Support Agent** from the marketplace.",
+                  "platform_browse_marketplace_agents", "platform_install_marketplace_agent") is None
 
 
-def test_a_promise_to_install_after_a_create_is_not_under_way():
+def test_a_promise_to_install_is_cleared_and_the_create_backs_its_created():
     reply = "I'll get that installed for you right away. I've created the 'Weekly Social Posts' playbook."
-    assert claimed_action_not_done(reply, EMPTY_COPY, promises=True) == "under way"
+    assert nudged(reply, *EMPTY_COPY) is None and line(reply, *EMPTY_COPY) is None
 
 
-def test_installed_in_the_passive_is_logged():
-    from consumers.chatbot.claim_check import passive_claim
+def test_installed_in_the_passive_is_a_claim_now():
+    """The families only logged it (tier 3); the receipts read the passive as a claim."""
+    said = "The Weekly Social Posts playbook has been installed."
+    assert nudged(said, *EMPTY_COPY) == "installed"
+    assert line(said, *EMPTY_COPY) == ("Just to be clear: I haven't installed anything in this reply. "
+                                       "Ask me again if you want it done.")
 
-    assert passive_claim("The Weekly Social Posts playbook has been installed.") is True
 
+# ── created: a create backs it ──────────────────────────────────────────────
 
-# ── created: the action makes what the claim names ──────────────────────────
-
-def test_created_needs_an_action_on_what_it_names():
-    assert claimed_action_not_done("I've created a new agent for the newsletter.", {"platform_create_playbook"}) \
-        == "created"
-    assert claimed_action_not_done("I've created a new agent for the newsletter.", {"platform_create_agent"}) is None
-    assert claimed_action_not_done("I've created the **Weekly Social Posts** playbook.", set()) == "created"
+def test_created_needs_a_create():
+    assert nudged("I've created the **Weekly Social Posts** playbook.") == "created"
+    assert nudged("I've created a new agent for the newsletter.", "platform_create_agent") is None
+    # cleared: a create of another kind backs "created" (its receipt names the playbook it made)
+    assert nudged("I've created a new agent for the newsletter.", "platform_create_playbook") is None
 
 
 def test_a_claim_that_is_the_condition_of_something_later_is_not_one():
-    assert claimed_action_not_done("Once I've created the agent, I'll assign it to the first step.", set()) is None
+    assert nudged("Once I've created the agent, I'll assign it to the first step.") is None
 
 
-# ── checked: a read of what it names ────────────────────────────────────────
+# ── checked: looking is not work done (cleared; the receipts list the reads) ──
 
 @pytest.mark.parametrize("reply, ran", [
-    ("I've checked the board for you.", {"search_knowledge"}),                                     # 05:10:25, B74
-    ("I have double-checked the board, and Task 1100 is indeed in the \"assigned\" column.", set()),  # 02:49:35
+    ("I've checked the board for you.", ("search_knowledge",)),                                    # 05:10:25, B74
+    ("I have double-checked the board, and Task 1100 is indeed in the \"assigned\" column.", ()),  # 02:49:35
     ("Upon inspecting the task details, it seems this task is assigned to an agent that does not have the "
-     "necessary tools.", set()),                                                                   # 05:20:27, B79
-    ("I have verified this directly on the board.", set()),                                        # 05:48:21
+     "necessary tools.", ()),                                                                      # 05:20:27, B79
+    ("I have verified this directly on the board.", ()),                                           # 05:48:21
+    ("I've just checked the actual board for you.", ("search_knowledge", "platform_board_summary")),  # 05:10:51
+    ("I've just checked the actual board for you.", ("search_knowledge", "platform_list_tasks")),     # 05:11:03
+    ("I've checked the schedule for you.", ("search_knowledge", "platform_get_schedule")),             # 05:49:46
+    ("I've just checked our marketplace for a pre-built package.", ("platform_search_packages",)),      # 02:00:33
+    ("I've looked into it.", ("search_knowledge",)),                                                    # 05:19:24
 ])
-def test_a_check_needs_a_read_of_what_it_names(reply, ran):
-    assert claimed_action_not_done(reply, ran) == "checked"
+def test_a_check_is_no_report_of_work_done(reply, ran):
+    assert nudged(reply, *ran) is None and line(reply, *ran) is None
 
 
-@pytest.mark.parametrize("reply, ran", [
-    ("I've just checked the actual board for you.", {"search_knowledge", "platform_board_summary"}),   # 05:10:51
-    ("I've just checked the actual board for you.", {"search_knowledge", "platform_list_tasks"}),      # 05:11:03
-    ("I've checked the schedule for you.", {"search_knowledge", "platform_get_schedule"}),              # 05:49:46
-    ("I've just checked our marketplace for a pre-built package.", {"platform_search_packages"}),       # 02:00:33
-    ("I've looked into it.", {"search_knowledge"}),                                                     # 05:19:24
-])
-def test_a_check_that_read_it_stands(reply, ran):
-    assert claimed_action_not_done(reply, ran) is None
-
-
-# ── counted exactly: code or a query ran ────────────────────────────────────
+# ── counted exactly: a figure, not work done (cleared) ──────────────────────
 
 B33 = "Looking through the entire CSV file, I can now give you the exact numbers Tom needs for Monday's club post:"
-COUNT_FAILED = {"search_knowledge", "platform_read_document", "workspace_read_file"}   # its workspace_exec calls failed
-
-
-def test_exact_numbers_need_a_count_that_ran():
-    assert claimed_action_not_done(B33, COUNT_FAILED) == "counted exactly"            # 2 Oct 14:21:22: 313 for 501
-    assert claimed_action_not_done(B33, COUNT_FAILED | {"workspace_exec"}) is None
-    assert claimed_action_not_done("Here are the exact numbers: 341, 107 and 53.", {"smart_query_database"}) is None
+COUNT_FAILED = ("search_knowledge", "platform_read_document", "workspace_read_file")   # its workspace_exec calls failed
 
 
 @pytest.mark.parametrize("reply", [
+    B33,                                                                                  # 2 Oct 14:21:22: 313 for 501
+    "Here are the exact numbers: 341, 107 and 53.",
     "Let me get you the exact numbers on your spending since Friday night.",            # 04:03:10
     "This means I still don't have the exact numbers for you.",                         # 05:02:55
     "That's exactly what we needed to do.",                                              # 02:09:00
     "Here's exactly how I would set it up as a Playbook, step-by-step.",                 # 02:29:00
     "Could you please tell me the exact names or IDs of the four jobs?",                 # 06:09:16
 ])
-def test_exactly_as_a_figure_of_speech_is_no_claim(reply):
-    assert claimed_action_not_done(reply, set(), promises=True) is None
+def test_a_figure_or_exactly_is_no_claim(reply):
+    assert nudged(reply, *COUNT_FAILED) is None and line(reply, *COUNT_FAILED) is None
 
 
-# ── under way: only work the turn started (Auto in chat) ────────────────────
+# ── under way: a promise is a plan, not a report (cleared) ──────────────────
 
 @pytest.mark.parametrize("reply, ran", [
     ("I'll get to work on drafting that blog post for you right away, focusing on the details you provided.",
-     set()),                                                                                      # 26 Sep 04:47:48
+     ()),                                                                                         # 26 Sep 04:47:48
     ("Please bear with me while I figure out the correct way to get that playbook installed for you.",
-     set()),                                                                     # 2 Oct 14:06:03 (the install failed)
+     ()),                                                                        # 2 Oct 14:06:03 (the install failed)
     ("I'll let you know as soon as the agent is installed and ready for the next steps!",
-     {"platform_update_onboarding"}),                                                             # 26 Sep 02:01:25
+     ("platform_update_onboarding",)),                                                            # 26 Sep 02:01:25
     ("I'm processing the club member export file to get you those numbers right now!",
-     {"search_knowledge"}),                                                                       # 05:12:27
-    ("Okay, Gerard, I'm on it.", set()),                                                          # 02:33:59
+     ("search_knowledge",)),                                                                      # 05:12:27
+    ("Okay, Gerard, I'm on it.", ()),                                                             # 02:33:59
+    ("I'll let you know when they're ready!", ("search_knowledge", "platform_create_task")),      # 2 Oct 11:46:27
+    ("I'll let you know once the drafts are ready for your review.", ("platform_execute_playbook",)),  # 11:47:12
+    ("I'll let you know once the installation is complete.", ("platform_install_marketplace_agent",)),  # 13:37:37
 ])
-def test_work_said_to_be_under_way_needs_work_the_turn_started(reply, ran):
-    assert claimed_action_not_done(reply, ran, promises=True) == "under way"
-    assert claimed_action_not_done(reply, ran, promises=False) is None   # an agent's draft: its writer's voice
+def test_work_said_to_be_under_way_is_a_plan_not_a_report(reply, ran):
+    assert nudged(reply, *ran) is None and line(reply, *ran) is None
 
 
-def test_a_chat_turn_counts_promises_and_an_agent_run_does_not():
-    """Every chat turn is booked to the chat lane (stream_response_with_agent)."""
-    reply = "Please bear with me while I fix this."
-    assert claimed_action_not_done(reply, set()) is None                        # outside any turn
-    with usage_scope(request_type=LANE_CHAT, execution_id="chat:7177086e"):
-        assert claimed_action_not_done(reply, set()) == "under way"
-    with usage_scope(request_type=LANE_BOARD_TASK, execution_id="board_task:1146"):
-        assert claimed_action_not_done(reply, set()) is None
-
-
-@pytest.mark.parametrize("reply, ran", [
-    ("I'll let you know when they're ready!", {"search_knowledge", "platform_create_task"}),      # 2 Oct 11:46:27
-    ("I'll let you know once the drafts are ready for your review.", {"platform_execute_playbook"}),  # 11:47:12
-    ("I'll let you know once the installation is complete.", {"platform_install_marketplace_agent"}),  # 13:37:37
-])
-def test_work_the_turn_started_is_under_way(reply, ran):
-    assert claimed_action_not_done(reply, ran, promises=True) is None
+def test_a_chat_turn_and_an_agent_run_read_a_claim_alike():
+    """The lane no longer decides: a report of work done is one in any lane, a promise in none."""
+    for lane in (LANE_CHAT, LANE_BOARD_TASK):
+        with usage_scope(request_type=lane, execution_id=f"{lane}:1"):
+            assert nudged("Please bear with me while I fix this.") is None
+            assert nudged("I've fixed it.") == "fixed"
 
 
 @pytest.mark.parametrize("reply", [
@@ -168,7 +158,7 @@ def test_work_the_turn_started_is_under_way(reply, ran):
     "Here's a draft:\n```\nHi Rosie, bear with me while we look into the two payments.\n```",
 ])
 def test_an_offer_a_question_a_condition_or_a_quoted_draft_promises_nothing(reply):
-    assert claimed_action_not_done(reply, set(), promises=True) is None
+    assert nudged(reply) is None and line(reply) is None
 
 
 def test_a_customer_draft_may_promise_in_its_writers_voice():
@@ -194,7 +184,7 @@ async def _ok(name, args, call_id, workspace_id):
 
 
 def _install_turn(lane, *texts):
-    """The loop as the chat and an agent run build it (no ``promises``): the lane decides."""
+    """The loop as the chat and an agent run build it (no ``promises``)."""
     executor = ToolLoopExecutor(llm_callback=_Model(*texts), tool_callback=_ok, max_iterations=5)
     messages = [{"role": "user", "content": "Add the Weekly social posts playbook from the marketplace."}]
     create = {"id": "call_1", "type": "function", "function": {"name": "platform_execute", "arguments": json.dumps(
@@ -202,12 +192,12 @@ def _install_turn(lane, *texts):
     with usage_scope(request_type=lane, execution_id=f"{lane}:1"):
         result = asyncio.run(executor.run(initial_response=LLMResponse(content="", tool_calls=[create]),
                                           messages=messages, tools=TOOLS, workspace_id=WS))
-    nudges = [m for m in messages if m["role"] == "user" and "says something was under way" in m["content"]]
+    nudges = [m for m in messages if m["role"] == "user" and "says something was installed" in m["content"]]
     return result, nudges
 
 
-def test_the_chat_loop_nudges_work_said_to_be_under_way_once():
-    result, nudges = _install_turn(LANE_CHAT, "I'll get that installed for you right away.",
+def test_the_chat_loop_nudges_an_install_a_create_did_not_do_once():
+    result, nudges = _install_turn(LANE_CHAT, "I've installed the playbook for you.",
                                    "I made an empty playbook instead of installing it: nothing was installed.")
     assert len(nudges) == 1 and result.response.content.startswith("I made an empty playbook")
 
@@ -217,12 +207,14 @@ def test_an_agent_run_leaves_a_drafted_promise_alone():
     assert nudges == [] and result.response.content.startswith("Hi Rosie")
 
 
-def test_a_first_reply_that_says_work_is_under_way_goes_through_the_loop():
+def test_a_first_reply_goes_through_the_loop_for_a_claim_not_a_promise():
     from consumers.chatbot.service import StreamingChatService
 
     svc = StreamingChatService.__new__(StreamingChatService)
     svc.workspace_id = WS
-    first = NS(content="Please bear with me for a moment while I execute these steps and verify their outcome.",
-               tool_calls=None)                                                                   # 26 Sep 02:34:49
+    promise = NS(content="Please bear with me for a moment while I execute these steps and verify their outcome.",
+                 tool_calls=None)                                                                 # 26 Sep 02:34:49
+    claim = NS(content="I've executed these steps and verified their outcome.", tool_calls=None)
     with usage_scope(request_type=LANE_CHAT, execution_id="chat:7177086e"):
-        assert asyncio.run(svc._first_reply_goes_through_the_loop(first, TOOLS, [], "Please do it.")) is True
+        assert asyncio.run(svc._first_reply_goes_through_the_loop(promise, TOOLS, [], "Please do it.")) is False
+        assert asyncio.run(svc._first_reply_goes_through_the_loop(claim, TOOLS, [], "Please do it.")) is True

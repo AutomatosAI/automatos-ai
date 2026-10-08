@@ -133,9 +133,10 @@ def _speaks(promises: Optional[bool]) -> bool:
     """Auto's own turn: the executor says so (``promises``), or else the turn's lane."""
     if promises is not None:
         return promises
-    from .action_claims import _auto_speaks
+    from core.llm.usage_context import LANE_CHAT, current_usage_scope
 
-    return _auto_speaks()
+    # the chat service books the whole turn to the chat lane; agent runs book theirs
+    return current_usage_scope().get("request_type") == LANE_CHAT
 
 
 def said_or_accounted(llm: LLMCall, outcomes: Callable[[], Sequence[Outcome]],

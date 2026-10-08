@@ -1,8 +1,9 @@
 """What a call did, where its name alone does not say it (F261, night 8).
 
-A reply's claim is backed by an action that succeeded this turn (F108,
-``action_claims``), matched by name. Two of the board's actions do different
-things by their arguments:
+A reply's claim is backed by an action that succeeded this turn (F108; since PRD-256
+FX-007, the receipts' rule, ``consumers/chatbot/claims_backed.py``, reads the effect
+each receipt carries from here). Two of the board's actions do different things by
+their arguments:
 
 - platform_update_task_status moves a card. To "done" it approves the card, to
   "cancelled" it cancels it, to "assigned" it sends it back to its agent, to
@@ -17,8 +18,8 @@ Night 9 (F309): platform_update_task with a status moves the card the way
 platform_update_task_status does (``ticket_edit_moves``), and is recorded as that move.
 
 So a successful call of either is recorded with what it did too, as
-``<action>:<status>`` or ``<action>:send_back``. The families back a claim with
-those (``platform_update_task_status:done`` approves a card).
+``<action>:<status>`` or ``<action>:send_back``. A claim is backed by those
+(``platform_update_task_status:done`` approves a card: its receipt says "moved to Done").
 
 Night 9b (F319), succeeded calls the families read as nothing done:
 - "I've assigned the Shopify Inventory Watchdog to both steps" (chat a0475f96) after two

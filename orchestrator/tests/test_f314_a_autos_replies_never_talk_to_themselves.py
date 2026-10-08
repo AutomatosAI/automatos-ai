@@ -7,13 +7,15 @@
   as the owner's rebuke. Now a re-prompt in the user's turn says it is the platform's
   check, not the owner, and asks for a reply that stands on its own.
 - The owner read "Correction: this reply says something was under way, but no action
-  in it did that …" (b8d9121f). The line is now Auto's, in plain words.
+  in it did that …" (b8d9121f). The line is now Auto's, in plain words (PRD-256 FX-007: the
+  receipts' line, naming the claim's verb when another write went through).
 """
 from __future__ import annotations
 
 import asyncio
 
-from consumers.chatbot.claim_check import NOT_DONE_SAID, Verdict, not_done
+from consumers.chatbot.claim_check import Verdict
+from consumers.chatbot.claims_backed import FAMILIES
 from core.llm.turn_order import (
     as_the_platforms_check, as_the_users_turn, reprompts_in_the_users_turn,
 )
@@ -72,17 +74,23 @@ def test_a_framed_reprompt_is_framed_once():
 
 
 def test_the_owner_reads_plain_words_under_a_claim_no_action_backed():
-    assert Verdict(tools=2, claim="under way").correction is None      # PRD-256: said from receipts
-    line = not_done("under way")
+    from tests.helpers_receipts_rule import line
 
-    assert line == not_done("under way") == (
-        "Just to be clear: nothing is still running from this reply, and I won't come back to this on my own. "
-        "Ask me again if you want it done.")
-    assert "Correction:" not in line and "this reply says something was" not in line
+    assert Verdict(tools=2).correction is None                          # PRD-256: said from receipts
+    plain = line("I've started the weekly report.")
+    named = line("I've started the weekly report.", "platform_store_memory")
+
+    assert plain == ("Just to be clear: I haven't done that yet, and nothing has changed. "
+                     "Ask me again if you want it done.")
+    assert named == "Just to be clear: I haven't started anything in this reply. Ask me again if you want it done."
+    for said in (plain, named):
+        assert "Correction:" not in said and "this reply says something was" not in said
 
 
 def test_every_kind_of_claim_has_its_own_plain_line():
-    from modules.tools.execution import action_claims
+    from tests.helpers_receipts_rule import line
 
-    families = action_claims._ACTION_CLAIMS + action_claims._PASSIVES + action_claims._PROMISES
-    assert {family.label for family in families} <= set(NOT_DONE_SAID)
+    for verbs, _backs in FAMILIES:
+        verb = sorted(verbs)[0]
+        assert line(f"I've {verb} it.", "platform_pin_card") == (
+            f"Just to be clear: I haven't {verb} anything in this reply. Ask me again if you want it done."), verb

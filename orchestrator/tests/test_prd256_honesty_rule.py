@@ -1,7 +1,7 @@
 """PRD-256 US-002 — one honesty rule, from the receipts.
 
 The "I haven't done that" line used to come from a vocabulary of phrasings (the claim families
-in action_claims, document_claims and shop_and_team_claims). The review replayed it on 22 real
+in action_claims, document_claims and shop_and_team_claims; deleted in FX-007). The review replayed it on 22 real
 sentences from the nights: it caught 12, and in three of the four firings the nights recorded it
 denied a write that had gone through (F319, F337, F363). Now the line is decided by the turn's
 receipts: it fires when the answer says, in one generic way, that work is done and no done write
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -270,19 +269,23 @@ def test_the_lines_go_above_the_answer_refused_first():
 
 
 def test_the_saved_correction_keeps_only_tier_2():
-    """claim_check keeps the ids that do not exist; a family's claim no longer writes the line."""
-    assert Verdict(tools=0, claim="approved").correction is None
-    assert Verdict(tools=3, claim="started", passive=True).correction is None
-    assert Verdict(tools=0, claim="approved", ids=[("task", "1100")]).correction == (
+    """claim_check keeps the ids that do not exist; a claim never writes the line (FX-007: the
+    Verdict holds only tier 2)."""
+    assert Verdict(tools=0).correction is None
+    assert Verdict(tools=3).correction is None
+    assert Verdict(tools=0, ids=[("task", "1100")]).correction == (
         "Just to be clear: task 1100 does not exist — I named it without looking it up.")
+    assert not hasattr(Verdict(tools=0), "claim") and not hasattr(Verdict(tools=0), "passive")
 
 
-def test_the_in_loop_nudge_still_reads_the_families_until_wave_2():
+def test_the_in_loop_nudge_reads_the_receipts_rule():
+    """FX-007: the families are gone; F108's nudge is the receipts' rule over the loop's calls."""
     import inspect
 
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
-    assert "claimed_action_not_done(" in inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    assert "unbacked_claim(text, self.tracker.outcomes)" in source and "claimed_action_not_done" not in source
 
 
 # ── the turn: the frame carries the lines, the saved answer starts with them ─
@@ -428,29 +431,18 @@ def test_a_public_widget_visitor_is_shown_no_lines_and_none_are_saved(monkeypatc
     assert parts[-1] == {"type": "text", "text": SAID_APPROVED}
 
 
-# ── D10: the families are frozen ───────────────────────────────────────────
-# What was not done is said from the receipts now; the regex families only drive the in-loop
-# nudge until Wave 2 US-012 deletes them, once the receipts rule is proven. Until then they may
-# not grow: no new family, no new pattern. These are the counts on 7 Oct 2026. A change that
-# needs one more pattern is a change to the receipts rule.
+# ── D10: the families are gone (FX-007) ─────────────────────────────────────
+# What was not done is said from the receipts, and the in-loop nudge reads the same rule. The
+# four family modules that were frozen here on 7 Oct 2026 are deleted, and no other may come
+# back: a change that needs one more pattern is a change to the receipts rule (claims_backed).
 EXECUTION = Path(__file__).resolve().parents[1] / "modules" / "tools" / "execution"
-# The families' entries (``_Family(``, and document_claims' ``family(`` helper) and their patterns.
-FAMILY_COUNTS = {
-    "action_claims.py": {"_Family(": 23, "family(": 0, "re.compile(": 41},
-    "document_claims.py": {"_Family(": 1, "family(": 13, "re.compile(": 16},
-    "shop_and_team_claims.py": {"_Family(": 0, "family(": 0, "re.compile(": 14},
-    "social_post_claims.py": {"_Family(": 6, "family(": 0, "re.compile(": 6},
-}
-_COUNTED = {"_Family(": re.compile(r"_Family\("), "family(": re.compile(r"(?<![\w])family\("),
-            "re.compile(": re.compile(r"re\.compile\(")}
+FAMILY_MODULES = ("action_claims.py", "document_claims.py", "shop_and_team_claims.py", "social_post_claims.py")
 
 
-@pytest.mark.parametrize("module", sorted(FAMILY_COUNTS))
-def test_prd256_families_frozen(module):
-    text = (EXECUTION / module).read_text(encoding="utf-8")
-    counted = {what: len(pattern.findall(text)) for what, pattern in _COUNTED.items()}
-    assert counted == FAMILY_COUNTS[module], f"{module} grew: the families are frozen (PRD-256 D10)"
+@pytest.mark.parametrize("module", FAMILY_MODULES)
+def test_prd256_families_deleted(module):
+    assert not (EXECUTION / module).exists(), f"{module} is back: the families are gone (PRD-256 D10, FX-007)"
 
 
 def test_no_new_claim_family_module():
-    assert sorted(path.name for path in EXECUTION.glob("*_claims.py")) == sorted(FAMILY_COUNTS)
+    assert sorted(path.name for path in EXECUTION.glob("*_claims.py")) == []

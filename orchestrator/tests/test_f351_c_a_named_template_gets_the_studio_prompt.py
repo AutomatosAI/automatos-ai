@@ -167,6 +167,6 @@ def test_the_chat_runs_retrieval_first_through_it():
     from consumers.chatbot.service import StreamingChatService
 
     inner = StreamingChatService._retrieval_first
-    for _ in range(7):                            # under PRD-256 US-001, F241, F307, F303, F316, F317, F324
+    for _ in range(4):                            # under PRD-256 US-001, F241, F307, F317 (FX-007: F303/F316/F324 gone)
         inner = inner.__wrapped__
     assert inner.__code__ is fills_the_named_template(lambda: None).__code__

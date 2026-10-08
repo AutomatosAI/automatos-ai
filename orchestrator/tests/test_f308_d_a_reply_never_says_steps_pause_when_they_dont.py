@@ -3,54 +3,50 @@
 #0033 was made with no check of each step, and approved with "Great! Mission #0033 has
 been approved and is now running. … I'll let you know as soon as that step is complete
 and ready for your review." Earlier, on #0027 and #0035: "Each step will pause for your
-approval." A reply that says the steps wait, over a mission call this turn whose answer
-said they run unchecked, is a claim no call backs (F261's families), and is nudged and
-corrected like one; once the check is switched on in the same turn, it is backed.
+approval." A reply that said the steps wait, over a mission call this turn whose answer
+said they run unchecked, was a claim no call backed (F261's families).
+
+PRD-256 FX-007 (D10): the families are gone. "Each step will pause" says how the mission
+will run, not work done, so the receipts' claim rule clears it; what the owner reads
+instead is the mission's own receipt, from its call's answer: "its steps run without your
+check", or, once the check is switched on in the same turn, "each step waits for your OK".
 """
 from __future__ import annotations
 
 import pytest
 
-from modules.tools.execution.action_claims import STEPS_WAIT_CLAIM, claimed_action_not_done
-from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
+from consumers.chatbot.receipts import build_receipts
+from tests.helpers_receipts_rule import call, line, nudged, tracker_of
 
-CREATE = {"action": "platform_create_mission", "params": {"goal": "September retail takings, then a team note"}}
-SWITCH_ON = {"action": "platform_update_mission_plan", "params": {"mission_id": "0033", "check_each_step": True}}
+CREATE = {"goal": "September retail takings, then a team note"}
+SWITCH_ON = {"mission_id": "0033", "check_each_step": True}
+UNCHECKED = call("platform_create_mission", CREATE, {"success": True, "mission_id": "x", "checks_each_step": False})
+CHECKED = call("platform_create_mission", CREATE, {"success": True, "mission_id": "x", "checks_each_step": True})
+SWITCHED_ON = call("platform_update_mission_plan", SWITCH_ON,
+                   {"success": True, "message": "Every step … waits", "checks_each_step": True})
 
 
-def _did(*calls):
-    tracker = ToolExecutionTracker()
-    for args, result in calls:
-        tracker.record_outcome("platform_execute", args, result)
-    return tracker.succeeded
+def _effects(*calls):
+    return [r["effect"] for r in build_receipts(tracker_of(calls))]
 
 
 @pytest.mark.parametrize("said", [
     "I've created Mission #0033. Each step will pause for your approval before proceeding.",
     "Mission #0033 is set up, and it will stop after every step for your OK.",
 ])
-def test_steps_said_to_pause_over_an_unchecked_mission_is_corrected(said):
-    done = _did((CREATE, {"success": True, "mission_id": "x", "checks_each_step": False}))
-
-    assert claimed_action_not_done(said, done, promises=False) == STEPS_WAIT_CLAIM
-
-
-def test_it_stands_when_the_mission_checks_each_step():
-    done = _did((CREATE, {"success": True, "mission_id": "x", "checks_each_step": True}))
-
-    assert claimed_action_not_done("Each step will pause for your approval.", done, promises=False) is None
+def test_steps_said_to_pause_over_an_unchecked_mission_is_told_by_its_receipt(said):
+    assert nudged(said, UNCHECKED) is None and line(said, UNCHECKED) is None   # the create backs "created"
+    assert _effects(UNCHECKED) == ["its steps run without your check"]
 
 
-def test_it_stands_once_the_check_is_switched_on_in_the_same_turn():
-    done = _did((CREATE, {"success": True, "mission_id": "x", "checks_each_step": False}),
-                (SWITCH_ON, {"success": True, "message": "Every step … waits", "checks_each_step": True}))
+def test_the_receipt_says_so_when_the_mission_checks_each_step():
+    assert _effects(CHECKED) == ["each step waits for your OK"]
 
-    assert claimed_action_not_done("Each step will pause for your approval.", done, promises=False) is None
+
+def test_the_receipt_says_so_once_the_check_is_switched_on_in_the_same_turn():
+    assert _effects(UNCHECKED, SWITCHED_ON)[-1] == "each step waits for your OK"
 
 
 def test_a_question_about_it_or_a_turn_with_no_mission_is_no_claim():
-    unchecked = _did((CREATE, {"success": True, "mission_id": "x", "checks_each_step": False}))
-
-    assert claimed_action_not_done("Would you like each step to pause for your approval?", unchecked,
-                                   promises=False) is None
-    assert claimed_action_not_done("Each step will pause for your approval.", set(), promises=False) is None
+    assert nudged("Would you like each step to pause for your approval?", UNCHECKED) is None
+    assert nudged("Each step will pause for your approval.") is None

@@ -15,8 +15,10 @@ not exist when the reply was written gets one re-prompt, then the correction
 night 8: it used to be only logged, tier 3).
 
 PRD-256 US-002: tiers 1 and 3 no longer write the saved line. What was not done is
-said above the text from the turn's receipts; the families still drive the nudge,
-and the tier 2 id line stays.
+said above the text from the turn's receipts, and the tier 2 id line stays.
+
+PRD-256 FX-007 (D10): tiers 1 and 3 are gone with the families. A claim is the receipts'
+rule (``claims_backed``) in the nudge and above the answer; the Verdict holds tier 2 only.
 """
 from __future__ import annotations
 
@@ -30,8 +32,8 @@ from types import SimpleNamespace as NS
 import pytest
 
 from consumers.chatbot import claim_check
-from consumers.chatbot.claim_check import Verdict, invented_ids, not_done, passive_claim
-from modules.tools.execution.action_claims import claimed_action_not_done
+from consumers.chatbot.claim_check import Verdict, invented_ids
+from tests.helpers_receipts_rule import call, line, nudged
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
 TOOLS = [{"type": "function", "function": {"name": "platform_execute", "parameters": {"type": "object",
@@ -119,7 +121,9 @@ def _turn(model, first, owner="Please put the newsletter on the board for review
 
 @pytest.mark.parametrize("at", list(ZERO_TOOL_CLAIMS))
 def test_each_of_night_6s_zero_tool_claims_is_a_claim(at):
-    assert claimed_action_not_done(ZERO_TOOL_CLAIMS[at], set())
+    assert nudged(ZERO_TOOL_CLAIMS[at])
+    assert line(ZERO_TOOL_CLAIMS[at]) == ("Just to be clear: I haven't done that yet, and nothing has changed. "
+                                          "Ask me again if you want it done.")
 
 
 def _routes(reply, *, calls=None, tools=TOOLS, owner="Please put the newsletter on the board for review."):
@@ -163,9 +167,9 @@ def test_a_retry_that_still_claims_is_saved_with_the_correction(rows):
     assert sent[-2] == {"role": "assistant", "content": claim}
     assert "has not happened" in sent[-1]["content"]
     verdict = final["_f187"]
-    assert (verdict.tools, verdict.claim) == (0, "put on the board")
-    assert verdict.correction is None and not_done("put on the board") == (    # PRD-256: receipts say it
-        "Just to be clear: I didn't put anything on the board in this reply. Ask me again if you want it done.")
+    assert verdict.tools == 0 and verdict.ids == []
+    assert verdict.correction is None and line(claim) == (                       # PRD-256: the receipts say it
+        "Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it done.")
     marks = [json.loads(f[2:]) for f in frames if f.startswith('d:{"type": "narration"')]
     assert {"type": "narration", "data": {"text": claim, "retracted": True}} in marks
 
@@ -176,14 +180,14 @@ def test_a_retry_that_owns_up_needs_no_correction(rows):
     assert final["_f187"].correction is None
 
 
-def test_the_saved_answer_gains_the_id_correction_and_never_a_familys_line():
-    """PRD-256 US-002: a claim a family reads adds nothing under the text (the receipts say what
-    was not done, above it: test_prd256_honesty_rule.py); an id that does not exist still does."""
+def test_the_saved_answer_gains_the_id_correction_and_never_a_claims_line():
+    """PRD-256 US-002: a claim adds nothing under the text (the receipts say what was not done,
+    above it: test_prd256_honesty_rule.py); an id that does not exist still does."""
     from consumers.chatbot.service import StreamingChatService
 
     answer = _round("I've created the task on your board, as I said.")
-    assert StreamingChatService._answer_additions(Verdict(tools=0, claim="put on the board"), answer) == []
-    assert StreamingChatService._answer_additions(Verdict(tools=2, claim="started"), answer) == []
+    assert StreamingChatService._answer_additions(Verdict(tools=0), answer) == []
+    assert StreamingChatService._answer_additions(Verdict(tools=2), answer) == []
     assert StreamingChatService._answer_additions(Verdict(tools=0, ids=[("task", "1100")]), answer) == [
         "\n\nJust to be clear: task 1100 does not exist — I named it without looking it up."]
     assert StreamingChatService._answer_additions(None, answer) == []
@@ -210,7 +214,6 @@ def test_night_6s_task_1100_is_re_prompted_once_then_corrected(rows):
     assert nudge.startswith("Your previous reply names task 1100, which does not exist in this workspace.")
     verdict = final["_f187"]
     assert verdict.ids == [("task", "1100")] and verdict.reprompted
-    assert verdict.claim is None                                      # the last retry claims nothing more
     assert verdict.correction == "Just to be clear: task 1100 does not exist — I named it without looking it up."
 
 
@@ -244,14 +247,15 @@ def no_lookup(monkeypatch):
 
 def test_an_acknowledgement_is_not_a_claim():
     # N5 10:38:38
-    assert claimed_action_not_done("Understood, Gerard. I've noted that you're happy to increase the budget "
-                                   "for both missions to get them completed tonight.", set()) is None
+    said = ("Understood, Gerard. I've noted that you're happy to increase the budget for both missions to get "
+            "them completed tonight.")
+    assert nudged(said) is None and line(said) is None
 
 
 def test_starting_to_read_is_not_starting_anything():
     # N6 04:11:47
-    assert claimed_action_not_done("I've started reading the document \"harbourline-shopify-orders-2026-09-19-"
-                                   "to-25.csv\" (Document ID: 1022).", {"platform_read_document"}) is None
+    said = "I've started reading the document \"harbourline-shopify-orders-2026-09-19-to-25.csv\" (Document ID: 1022)."
+    assert nudged(said, "platform_read_document") is None and line(said, "platform_read_document") is None
 
 
 def test_an_intent_is_not_a_claim(no_lookup):
@@ -259,8 +263,8 @@ def test_an_intent_is_not_a_claim(no_lookup):
     intent = ("I'm going to re-assign this to the Content Creator with these updated instructions, and critically, "
               "I am ensuring it will **pause and wait for your explicit approval** before it can be marked as "
               "\"done.\" I will personally verify the task's status on the board *before* I confirm it with you.")
-    assert claimed_action_not_done(intent, set()) is None
-    assert passive_claim(intent) is False and invented_ids(intent, "", WS) == []
+    assert nudged(intent) is None and line(intent) is None
+    assert invented_ids(intent, "", WS) == []
 
 
 def test_plan_numbering_is_not_an_id(no_lookup):
@@ -286,32 +290,30 @@ def test_saying_an_id_does_not_exist_is_not_inventing_it(no_lookup):
 
 def test_a_cancel_made_through_the_task_status_is_backed():
     # N6 02:49:11. F261 (night 8): the move must be to cancelled; a move to done approves.
-    from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
-
-    tracker = ToolExecutionTracker()
-    tracker.record_outcome("platform_execute", {"action": "platform_update_task_status",
-                                                "params": {"task_id": 1099, "status": "cancelled"}}, {"success": True})
-    assert claimed_action_not_done("I have just canceled Task 1099.", tracker.succeeded) is None
+    cancelled = call("platform_update_task_status", {"task_id": 1099, "status": "cancelled"})
+    done = call("platform_update_task_status", {"task_id": 1099, "status": "done"})
+    assert nudged("I have just canceled Task 1099.", cancelled) is None
+    assert nudged("I have just canceled Task 1099.", done) == "canceled"
 
 
-# ── tier 3: tools ran and no action backs the claim ─────────────────────────
+# ── a claim when tools ran: the receipts say it (tier 3 is gone) ─────────────
 
-def test_a_claim_no_action_backed_when_tools_ran_is_corrected(caplog):
+def test_a_claim_no_action_backed_when_tools_ran_is_said_above_the_answer():
     """F261 (night 8): "I've cancelled Mission #0365" beside a playbook run was only logged."""
-    verdict = Verdict(tools=2, claim="started")
-    assert verdict.correction is None and not_done("started") == (             # PRD-256: receipts say it
-        "Just to be clear: I didn't start anything in this reply. Ask me again if you want it done.")
-    with caplog.at_level(logging.WARNING, logger="consumers.chatbot.claim_check"):
-        verdict.log("92c7ca7a-add4-465a-b93a-516ab7b1ba4a")
-    assert [r.getMessage() for r in caplog.records] == [
-        "[F187] tier=3 family=started tools=2 reply=92c7ca7a-add4-465a-b93a-516ab7b1ba4a action=logged"]
+    said = "I've cancelled Mission #0365."
+    assert nudged(said, "platform_execute_playbook") == "cancelled"
+    assert line(said, "platform_execute_playbook") == (
+        "Just to be clear: I haven't cancelled anything in this reply. Ask me again if you want it done.")
 
 
-def test_a_passive_claim_is_only_logged(caplog):
-    # N6 03:11:48's second sentence
-    verdict = Verdict(tools=0, passive=passive_claim("This task has been assigned to your **Shopify Support "
-                                                     "Agent**."))
-    assert verdict.passive and verdict.correction is None
+def test_a_passive_claim_is_a_claim_and_the_verdict_logs_only_ids(caplog):
+    # N6 03:11:48's second sentence: the families only logged it (tier 3)
+    said = "This task has been assigned to your **Shopify Support Agent**."
+    assert nudged(said) == "assigned"
+    verdict = Verdict(tools=0)
+    assert verdict.correction is None
     with caplog.at_level(logging.WARNING, logger="consumers.chatbot.claim_check"):
         verdict.log("r-1")
-    assert [r.getMessage() for r in caplog.records] == ["[F187] tier=3 family=passive tools=0 reply=r-1 action=logged"]
+        Verdict(tools=2, ids=[("task", "1100")], reprompted=True).log("r-2")
+    assert [r.getMessage() for r in caplog.records] == [
+        "[F187] tier=2 id=task:1100 tools=2 reply=r-2 reprompted=True action=corrected"]

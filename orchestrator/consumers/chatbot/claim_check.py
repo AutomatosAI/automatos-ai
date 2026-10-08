@@ -37,57 +37,31 @@ board after." under Auto's timer reply (chat b8d9121f), a line that read like th
 system talking about Auto. Each line is now Auto's own, in plain words, and says what
 did not happen for the kind of claim it was ("I didn't approve anything in this
 reply", "nothing is still running from this reply, and I won't come back to this on
-my own"): ``not_done``.
+my own"). Since FX-007 the receipts say it (``claims_backed.not_done_line``).
 
 PRD-256 US-002: the saved correction line keeps tier 2 only (an id that does not exist). What
-was not done is said above the text from the turn's receipts (``consumers/chatbot/receipts.py``),
-never from a family: tiers 1 and 3 are logged, and the families keep driving only the in-loop
-nudge until PRD-256 Wave 2 deletes them.
+was not done is said above the text from the turn's receipts (``consumers/chatbot/receipts.py``).
+
+PRD-256 FX-007 (D10): tiers 1 and 3 are gone with the regex claim families they read
+(action_claims, document_claims, shop_and_team_claims, social_post_claims): a claim is the
+receipts' to answer (``claims_backed``), in the loop's nudge and above the answer. Tier 2 stays,
+and a number the turn's own tool results quote is backed (night 12, A439/A593: "task 0930 does
+not exist" under a reply that quoted ticket #0931's title, "Card #0930 Approval Request").
 """
 from __future__ import annotations
 
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-from modules.tools.execution import document_claims as documents
-from modules.tools.execution.shop_and_team_claims import says_it_for_the_shop_and_the_team  # F316/F324
-from modules.tools.execution.social_post_claims import says_it_for_social_posts  # F379 (night 11)
+from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
 
 logger = logging.getLogger(__name__)
 
-# F314: what the owner reads under a claim no action backed, by the claim's family
-# (modules/tools/execution/action_claims.py), in Auto's own words.
+# F314: the owner's line under a claim no action backed, in Auto's own words (claims_backed names it).
 NOT_DONE = "Just to be clear: {said}. Ask me again if you want it done."
 NOTHING_DONE = NOT_DONE.format(said="I haven't done that yet, and nothing has changed")
-NOT_DONE_SAID = {
-    "approved": "I didn't approve anything in this reply",
-    "started": "I didn't start anything in this reply",
-    "noted": "I didn't save anything in this reply",
-    "put on the board": "I didn't put anything on the board in this reply",
-    "created": "I didn't create anything in this reply",
-    "installed": "I didn't install anything in this reply",
-    "sent": "I didn't send anything in this reply",
-    "sent back": "I didn't send anything back in this reply",
-    "deleted": "I didn't cancel or remove anything in this reply",
-    "changed": "I didn't change anything in this reply",
-    "assigned": "I didn't assign anything in this reply",
-    "checked": "I didn't actually check that in this reply",
-    "counted exactly": "I didn't count those figures exactly in this reply",
-    "re-checked": "I didn't re-check that figure in this reply, so I can't yet say which one is right",
-    "under way": "nothing is still running from this reply, and I won't come back to this on my own",
-    # F351 (night 10b): a document said to be made, kept or coming, a retry, a template.
-    documents.DOCUMENT_MADE: "I didn't make that document in this reply, so there's nothing new in your Deliverables",
-    documents.DOCUMENT_REFUSED: ("I tried to make that document in this reply, but it didn't go through, so "
-                                 "there's nothing new in your Deliverables"),
-    documents.DOCUMENT_THERE: ("I didn't make or look up that document in this reply, so I can't say it's in your "
-                               "Deliverables"),
-    documents.DOCUMENT_COMING: ("I didn't make that document in this reply and nothing is making it now, so it won't "
-                                "turn up in your Deliverables on its own"),
-    documents.TRIED_AGAIN: "I didn't try it again in this reply",
-    documents.TEMPLATE_MADE: "I didn't set up a template in this reply",
-}
 NO_SUCH_ID = "Just to be clear: {ids} {verb} not exist — I named {it} without looking {it} up."
 ID_NUDGE = (
     "Your previous reply names {ids}, which {verb} not exist in this workspace. Look it up now with a tool "
@@ -113,14 +87,6 @@ _DENIAL = re.compile(
     r"\bnot\s+(?:be\s+)?found\b|\bcould(?:n't|n’t| not) (?:find|locate)\b|\bno such\b", re.I)
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
 _MARKDOWN = re.compile(r"[*_`]")
-# Tier 3, log only: a completion told in the passive voice.
-_PASSIVE = re.compile(
-    r"\b(?:has|have) been (?:created|scheduled|sent|updated|assigned|approved|added|set up|saved|filed|queued|"
-    r"started|launched|drafted|posted|installed)\b|"
-    r"\b(?:is|are) now (?:on (?:your|the) board|scheduled|running|live|set up|assigned|active|installed)\b", re.I)
-# Intent or plan, not a report: "I'm going to re-assign…", "Once the agent drafts it…".
-_INTENT = re.compile(r"\b(?:i'?m going to|i am going to|i will|i'll|i’ll|will be|once|when|after)\b", re.I)
-
 
 def _named_ids(text: str) -> List[Tuple[str, str]]:
     found: List[Tuple[str, str]] = []
@@ -181,13 +147,42 @@ def _card_numbers(db, workspace_id: str, values: List[str]) -> Set[Tuple[str, st
     return {("task", seqs[row[0]]) for row in rows}
 
 
+def _strings(value: object) -> Iterator[str]:
+    """The text a tool result says (its string values, at any depth): a count, a page or a
+    limit is a number the reply never quotes as an id."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for inner in value.values():
+            yield from _strings(inner)
+    elif isinstance(value, (list, tuple)):
+        for inner in value:
+            yield from _strings(inner)
+
+
+def _quoted_this_turn() -> str:
+    """What the tool results of the loop running now say, as text: a ticket's title, a card
+    or grant number. '' outside a tool loop."""
+    made = TRACKERS_MADE.get() or []
+    return "\n".join(said for tracker in made for _action, _params, result in tracker.outcomes
+                     for said in _strings(result))
+
+
+def _named_in(value: str, text: str) -> bool:
+    """Whether ``text`` names ``value`` as a whole number or token ("0930" in "Card #0930", "930")."""
+    shape = rf"0*{int(value)}" if value.isdigit() else re.escape(value)
+    return re.search(rf"(?<![\w-]){shape}(?![\w-])", text) is not None
+
+
 def invented_ids(text: str, owner_text: str, workspace_id: str) -> List[Tuple[str, str]]:
     """The ids a reply names, in the three shapes, that do not exist in the
-    workspace, leaving out any the owner named this turn. Sync, and reads the
-    database only when the reply names an id: run it off the loop."""
+    workspace, leaving out any the owner named this turn and any the turn's own tool
+    results quote (FX-007). Sync, and reads the database only when the reply names an
+    id: run it off the loop (``asyncio.to_thread`` keeps the turn's context)."""
     owner = _MARKDOWN.sub("", owner_text or "")
+    quoted = _quoted_this_turn()
     named = [(kind, value) for kind, value in _named_ids(text)
-             if not re.search(rf"(?<![\w-]){re.escape(value)}(?![\w-])", owner)]
+             if not _named_in(value, owner) and not _named_in(value, quoted)]
     if not named or not workspace_id:
         return []
     try:
@@ -206,46 +201,26 @@ def id_nudge(ids: List[Tuple[str, str]]) -> str:
     return ID_NUDGE.format(ids=_listed(ids), verb="does" if len(ids) == 1 else "do")
 
 
-@says_it_for_social_posts  # F379 (night 11): a post said to be made, changed or waiting
-@says_it_for_the_shop_and_the_team  # F316/F324 (night 9b): their lines, in Auto's words
-def not_done(claim: str) -> str:
-    """The owner's line for a claim of ``claim``'s family that no action backed (F314)."""
-    said = NOT_DONE_SAID.get(claim)
-    return NOT_DONE.format(said=said) if said else NOTHING_DONE
-
-
-def passive_claim(text: str) -> bool:
-    return any(_PASSIVE.search(s) and not _INTENT.search(s) for s in _SENTENCE.findall(text or ""))
-
-
 @dataclass
 class Verdict:
-    """What F187 found in a turn's answer. ``tools`` counts the model's own
-    tool calls (not the automatic retrieval-first search)."""
+    """What F187 found in a turn's answer: the ids it names that do not exist (tier 2).
+    ``tools`` counts the model's own tool calls (not the automatic retrieval-first search)."""
 
     tools: int
-    claim: Optional[str] = None
-    passive: bool = False
     ids: List[Tuple[str, str]] = field(default_factory=list)
     reprompted: bool = False
 
     @property
     def correction(self) -> Optional[str]:
         """Tier 2's line: the ids the answer names that do not exist (PRD-256 US-002: a claim
-        no family backs is the receipts' to answer, above the text)."""
+        no action backs is the receipts' to answer, above the text)."""
         if not self.ids:
             return None
         one = len(self.ids) == 1
         return NO_SUCH_ID.format(ids=_listed(self.ids), verb="does" if one else "do", it="it" if one else "them")
 
     def log(self, reply_id: object) -> None:
-        """One [F187] line per finding, for night-by-night tuning."""
-        if self.claim:
-            tier = 1 if self.tools == 0 else 3
-            logger.warning(f"[F187] tier={tier} family={self.claim} tools={self.tools} reply={reply_id} "
-                           f"action=logged")
-        if self.passive and not self.claim:
-            logger.warning(f"[F187] tier=3 family=passive tools={self.tools} reply={reply_id} action=logged")
+        """One [F187] line per id corrected, for night-by-night tuning."""
         for kind, value in self.ids:
             logger.warning(f"[F187] tier=2 id={kind}:{value} tools={self.tools} reply={reply_id} "
                            f"reprompted={self.reprompted} action=corrected")

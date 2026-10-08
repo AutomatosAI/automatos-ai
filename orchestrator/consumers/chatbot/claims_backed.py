@@ -6,7 +6,7 @@ the heartbeat" with no call at all, beside a refused playbook write and a saved 
 no line was shown. Now each completed-action claim of the answer (``COMPLETED_ACTION``) is
 read for its verb and matched to the turn's done write receipts by the verb's family
 (``FAMILIES``: created → a create, sent → a send, saved → a memory or a thing saved,
-reverted → an update, …). A claim no done write of its family backs is not done, whatever
+reverted → an update, installed → an install, …). A claim no done write of its family backs is not done, whatever
 else succeeded in the turn. A claim whose verb is in no family ("Done.", "it's now on your
 board", "I've set up…") says no more than that work happened: any done write backs it.
 
@@ -17,10 +17,12 @@ not-done line ("…nothing has changed").
 The shapes read as a report of work done: "I've <verb>", "has/have been <verb>",
 "it's been <verb>", "was/were <verb>" (a state like "was based on" is not a report), "is now
 <verb>", "<Subject> launched ✅", "you should now see", and a sentence that is only "Done.".
-A plan word exempts only the claim it introduces ("Once I've sent it…"), never a claim
+What the answer quotes ("> " lines, a fenced block) is a draft in its writer's voice, never a
+claim. A plan word exempts only the claim it introduces ("Once I've sent it…"), never a claim
 further on ("I'll just confirm that the card has been approved" is a claim); the reply's own
-content ("I've drafted the email below") and a past time ("was approved yesterday") are not
-reports of this turn's work.
+content ("I've drafted the email below") and a past time ("was approved yesterday", "as I've
+noted before") are not reports of this turn's work, nor is the owner heard ("I've noted that
+you're happy to…") or a read begun ("I've started reading…").
 """
 from __future__ import annotations
 
@@ -49,7 +51,8 @@ _PASSIVE_VERB = rf"(?!(?:{_STATES})\b){_DONE_VERB}"
 _ADVERBS = r"(?:(?:now|just|already|also|successfully|all)\s+)*"
 # The ONE completed-action pattern. A match ends on the claim's verb where the shape has one.
 COMPLETED_ACTION = re.compile(
-    rf"\bI(?:'ve|’ve| have)\s+(?:(?:now|just|already|also|successfully|gone ahead and)\s+)*{_DONE_VERB}"
+    rf"\bI(?:'ve|’ve| have)\s+(?:(?:now|just|already|also|successfully|correctly|finally|actually|gone ahead and)"
+    rf"\s+)*{_DONE_VERB}"
     rf"|\b(?:has|have)\s+{_ADVERBS}been\s+{_PASSIVE_VERB}"
     rf"|\b(?:it|that|this|everything|they)(?:'s|’s|'ve|’ve)\s+{_ADVERBS}been\s+{_PASSIVE_VERB}"
     rf"|\b(?:was|were)\s+{_ADVERBS}{_PASSIVE_VERB}"
@@ -62,9 +65,16 @@ COMPLETED_ACTION = re.compile(
 # approved"): that claim is not a report. Further on, it governs nothing.
 _PLANNED = re.compile(r"\b(?:i'?ll|i’ll|i will|i'?m going to|i am going to|once|when|after|if|until|before)"
                       r"\s+(?:[\w'’]+\s+){0,2}$", re.I)
-# Not a report of this turn's work: the reply's own content ("below"), or a past time.
-_NOT_THIS_TURN = re.compile(r"\b(?:below|here(?:'s|’s| is| are)|the following|yesterday|ago|previously|"
-                            r"last (?:week|month|night|time))\b", re.I)
+# Not a report of this turn's work: the reply's own content ("below"), or a past time ("as I've
+# noted before," / "earlier": FX-007 keeps the families' back-references; "before Friday" is no past).
+_NOT_THIS_TURN = re.compile(r"\b(?:below|here(?:'s|’s| is| are)|the following|yesterday|ago|previously|earlier|"
+                            r"last (?:week|month|night|time|turn)|before(?=\s*(?:[,.;:!?)]|$)))\b", re.I)
+# What follows the verb says it was no work (FX-007 keeps the families' two, F187 night 6): the
+# owner heard ("I've noted that you're happy to…"), or a read begun ("I've started reading…").
+_NO_WORK_AFTER = re.compile(
+    r"\s+(?:(?:that\s+)?you(?:'re|’re| are|'d|’d| would| want| wish| have|'ve|’ve|'ll|’ll| will)\b|"
+    r"to\s+(?:read|review|look|check|analy[sz]e|process|search|dig)\b|"
+    r"(?:reading|reviewing|looking|checking|analy[sz]ing|processing|searching|digging|going\s+through)\b)", re.I)
 _SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
 _MARKS = re.compile(r"[*_`#>]")
 _WORD = re.compile(r"[a-z]+", re.I)
@@ -99,9 +109,19 @@ _CARD_MOVES = ("update_task_status", "update_task", "send_back")
 COMPOSIO = "composio"
 
 
+_MOVE_EFFECTS = ("moved to", "sent back", "started", "marked blocked")
+# FX-007 (F261, night 8): "Task #0422 has been moved to 'cancelled'" after a move to done. A
+# claim that names the column needs the move there (the receipt's effect: receipts._MOVES).
+_MOVED_TO = re.compile(r"\bmoved\b.*?\bto\s+(?:the\s+)?[\"'“‘]?(done|cancell?ed|review|inbox|blocked)\b", re.I)
+_WHERE: Dict[str, Backs] = {
+    "done": _any(_starts("approve_"), _says("moved to done")), "cancelled": _says("moved to cancelled"),
+    "canceled": _says("moved to cancelled"), "review": _says("moved to review"),
+    "inbox": _says("moved to the inbox"), "blocked": _says("marked blocked")}
+
+
 def _moved(r: Receipt) -> bool:
-    """A card the board moved (any column, or sent back)."""
-    return _stem(r) in _CARD_MOVES
+    """A card the board moved (any column, or sent back): an edit that moved nothing is no move."""
+    return _stem(r) in _CARD_MOVES and any(word in _effect(r) for word in _MOVE_EFFECTS)
 
 
 _MEMORY = _has("memory", "remember", "note")
@@ -115,28 +135,38 @@ _BACK = _any(_says("sent back"), _starts("send_back", "reject"))
 FAMILIES: Tuple[Tuple[FrozenSet[str], Backs], ...] = (
     (frozenset({"created", "made", "built", "generated"}), _starts("create_", "generate_", "make_", "build_")),
     (frozenset({"approved", "closed", "completed", "finished"}), _any(_starts("approve_"), _says("moved to done"))),
-    (frozenset({"started", "launched", "kicked", "resumed"}),
+    (frozenset({"started", "launched", "kicked", "resumed", "initiated", "triggered"}),
      _any(_starts("start_", "launch_", "execute_", "run_", "resume_", "trigger_", "approve_mission",
                   "create_mission"), _says("started"))),
     (frozenset({"sent", "emailed", "mailed", "posted", "published", "messaged", "tweeted", "forwarded",
                 "notified", "submitted"}), _any(_SENDS, _BACK)),
-    (frozenset({"noted", "remembered", "stored", "memorised", "memorized"}), _MEMORY),
+    # F363 (night 10c, FX-007 keeps it): a decision written onto the card the turn made is noted.
+    (frozenset({"noted", "remembered", "stored", "memorised", "memorized"}),
+     _any(_MEMORY, _starts("create_task", "update_task"))),
     (frozenset({"saved"}), _any(_MEMORY, _starts("create_", "generate_", "update_", "upload_", "submit_", "save_"))),
     (frozenset({"updated", "changed", "renamed", "reverted", "switched", "edited", "amended", "modified",
                 "adjusted", "replaced", "fixed", "configured"}),
      _starts("update_", "configure_", "set_", "edit_", "rename_", "patch_", "revert_")),
-    (frozenset({"deleted", "removed", "cancelled", "canceled", "archived", "unassigned"}),
+    (frozenset({"deleted", "cancelled", "canceled", "archived", "unassigned"}),
      _any(_starts("delete_", "unassign_", "remove_", "cancel_", "archive_"), _says("moved to cancelled"))),
+    # F379 (FX-007 keeps it): "I've removed the tasting notes from the carousel" is an edit of the post.
+    (frozenset({"removed"}), _starts("delete_", "unassign_", "remove_", "update_", "edit_")),
     (frozenset({"scheduled"}), _starts("schedule_", "create_playbook", "create_schedule", "update_schedule")),
     (frozenset({"assigned"}), _any(_starts("assign_"), _says("agent set", "sent back to its agent"))),
+    # F222 (FX-007 keeps it): an empty copy of a marketplace playbook is a create, never an install.
+    (frozenset({"installed"}), _starts("install_")),
     (frozenset({"moved"}), _moved),
 )
 
 
 def _family(verb: str, sentence: str) -> Optional[Backs]:
-    """What backs a claim of ``verb``: "sent … back" is a card sent back, not a send."""
+    """What backs a claim of ``verb``: "sent … back" is a card sent back, not a send; "moved to
+    <column>" is the move to that column."""
     if verb == "sent" and _SENT_BACK.search(sentence):
         return _any(_BACK, _moved)
+    where = _MOVED_TO.search(sentence) if verb == "moved" else None
+    if where:
+        return _WHERE[where.group(1).lower()]
     return next((backs for verbs, backs in FAMILIES if verb in verbs), None)
 
 
@@ -146,16 +176,31 @@ def _claims_in(sentence: str) -> List[str]:
         return []
     verbs = []
     for match in COMPLETED_ACTION.finditer(sentence):
-        if _PLANNED.search(sentence[: match.start()]):
+        if _PLANNED.search(sentence[: match.start()]) or _NO_WORK_AFTER.match(sentence, match.end()):
             continue
         words = _WORD.findall(match.group(0))
         verbs.append(words[-1].lower() if words else "")
     return verbs
 
 
+def _own_words(text: str) -> str:
+    """``text`` without what it quotes ("> " lines, fenced blocks): a draft written for the owner
+    speaks in its writer's voice (FX-007 keeps the families' rule)."""
+    kept, fenced = [], False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            fenced = not fenced
+        elif not fenced and not stripped.startswith(">"):
+            kept.append(line)
+    if fenced:  # a fence never closed quotes nothing: only the "> " lines are left out
+        kept = [line for line in text.splitlines() if not line.lstrip().startswith(">")]
+    return "\n".join(kept)
+
+
 def claims(answer: str) -> List[Tuple[str, str]]:
-    """Each report of work done in the answer: (its verb, its sentence)."""
-    text = _MARKS.sub("", answer or "")
+    """Each report of work done in Auto's own words: (its verb, its sentence)."""
+    text = _MARKS.sub("", _own_words(answer or ""))
     return [(verb, sentence) for sentence in _SENTENCES.findall(text) for verb in _claims_in(sentence)]
 
 

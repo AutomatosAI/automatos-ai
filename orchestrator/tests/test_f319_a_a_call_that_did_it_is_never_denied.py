@@ -13,28 +13,23 @@
 - Chat 6d4e45fe: 'Card #0044, "Minimum wholesale order and cut-off," has been cancelled.'
   after the move to done was refused: the quoted title hid the claim, so nothing nudged
   or corrected it, and #1898 stayed in Review.
+
+PRD-256 FX-007: the families are gone; each case is read by the receipts' rule (``nudged``:
+the loop's nudge, ``line``: the line above the answer), from the same calls.
 """
 from __future__ import annotations
 
 import pytest
 
-from modules.tools.execution.action_claims import claimed_action_not_done
-from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
+from tests.helpers_receipts_rule import OK, line, nudged
 
 STEP_SENT_BACK = ("I've sent card 67.1 back to the Analyst with your instructions. It's now in progress and the "
                   "Analyst will work on providing the information you requested.")
 STEPS_ASSIGNED = ("I apologize for the confusion. I have already assigned the Shopify Inventory Watchdog (agent ID "
                   "342) to both steps of your \"Monday green stock\" playbook and triggered the playbook to run once.")
 CANCELLED = 'No problem, Gerard! Card #0044, "Minimum wholesale order and cut-off," has been cancelled.'
-OK = {"success": True}
-
-
-def _did(*calls):
-    """The turn's calls as the chat records them: (tool, its arguments, its result)."""
-    tracker = ToolExecutionTracker()
-    for tool, args, result in calls:
-        tracker.record_outcome(tool, args, result)
-    return tracker.succeeded
+SENT_BACK = ("platform_update_task_status", {"task_id": 67.1, "status": "assigned",
+                                             "note": "Tell me how much Guji and Nariño green we have."}, OK)
 
 
 def _step(agent_id, index, result=OK):
@@ -43,52 +38,46 @@ def _step(agent_id, index, result=OK):
 
 
 def test_a_step_sent_back_by_its_number_backs_the_send_back():
-    done = _did(("platform_update_task_status", {"task_id": 67.1, "status": "assigned",
-                                                 "note": "Tell me how much Guji and Nariño green we have."}, OK))
-
-    assert claimed_action_not_done(STEP_SENT_BACK, done, promises=True) is None     # night 9b: "sent"
-    assert claimed_action_not_done(STEP_SENT_BACK, set(), promises=True) == "sent back"
+    assert nudged(STEP_SENT_BACK, SENT_BACK) is None and line(STEP_SENT_BACK, SENT_BACK) is None   # night 9b
+    assert nudged(STEP_SENT_BACK) == "sent"
 
 
 def test_an_agent_written_onto_playbook_steps_backs_the_assignment():
     refused = {"success": False, "error": "Agent 12 not found in this workspace"}
-    done = _did(_step(12, 0, refused), _step(12, 1, refused), _step(342, 0), _step(342, 1),
-                ("platform_execute", {"action": "platform_execute_playbook", "params": {"playbook_id": 115}}, OK))
+    run = ("platform_execute", {"action": "platform_execute_playbook", "params": {"playbook_id": 115}}, OK)
 
-    assert claimed_action_not_done(STEPS_ASSIGNED, done, promises=True) is None     # night 9b: "assigned"
-    assert claimed_action_not_done(STEPS_ASSIGNED, _did(_step(12, 0, refused)), promises=True) == "assigned"
+    assert nudged(STEPS_ASSIGNED, _step(12, 0, refused), _step(12, 1, refused), _step(342, 0), _step(342, 1),
+                  run) is None                                                       # night 9b: "assigned"
+    assert nudged(STEPS_ASSIGNED, _step(12, 0, refused)) == "assigned"
 
 
 @pytest.mark.parametrize("word", ["send back", "rejected"])
 def test_a_send_back_said_in_the_boards_words_backs_it(word):
-    done = _did(("platform_execute", {"action": "platform_update_task_status",
-                                      "params": {"task_id": "0081", "status": word, "note": "Only September."}}, OK))
+    moved = ("platform_execute", {"action": "platform_update_task_status",
+                                  "params": {"task_id": "0081", "status": word, "note": "Only September."}}, OK)
 
-    assert claimed_action_not_done("I've sent card #0081 back to the Shopify Business Analyst.", done,
-                                   promises=True) is None
+    assert nudged("I've sent card #0081 back to the Shopify Business Analyst.", moved) is None
 
 
 def test_a_card_a_call_says_it_sent_back_backs_it_whatever_the_call():
     """The chat wraps the call's answer as raw_result; the answer says the card went back."""
-    done = _did(("platform_execute", {"action": "platform_review_mission_step", "params": {"step": "0067.1"}},
-                 {"success": True, "raw_result": {"success": True, "status": "in_progress", "sent_back": True}}))
+    review = ("platform_execute", {"action": "platform_review_mission_step", "params": {"step": "0067.1"}},
+              {"success": True, "raw_result": {"success": True, "status": "in_progress", "sent_back": True}})
 
-    assert claimed_action_not_done("I've sent #0067.1 back to the Analyst.", done, promises=True) is None
+    assert nudged("I've sent #0067.1 back to the Analyst.", review) is None
 
 
 def test_a_cancel_told_with_the_cards_title_is_checked():
     refused = {"success": False, "error": "The owner said cancel, not approve. Nothing was done."}
-    done = _did(("platform_update_task_status", {"status": "done", "task_id": "0044"}, refused))
+    move_refused = ("platform_update_task_status", {"status": "done", "task_id": "0044"}, refused)
 
-    assert claimed_action_not_done(CANCELLED, done, promises=True) == "deleted"     # night 9b: never caught
-    cancelled = _did(("platform_update_task_status", {"task_id": "0044", "status": "cancelled"}, OK))
-    assert claimed_action_not_done(CANCELLED, cancelled, promises=True) is None
+    assert nudged(CANCELLED, move_refused) == "cancelled"                           # night 9b: never caught
+    assert nudged(CANCELLED, ("platform_update_task_status", {"task_id": "0044", "status": "cancelled"}, OK)) is None
 
 
 def test_a_reply_that_did_nothing_is_still_corrected():
-    assert claimed_action_not_done("I've assigned a task to the Shopify Operations Manager.", set(),
-                                   promises=True) == "assigned"
-    assert claimed_action_not_done("I've sent card 67.1 back to the Analyst.", set(), promises=True) == "sent back"
+    assert nudged("I've assigned a task to the Shopify Operations Manager.") == "assigned"
+    assert nudged("I've sent card 67.1 back to the Analyst.") == "sent"
 
 
 # ── Chat 8578eeaf: a card named as a source is not a card to copy ─────────────────────
