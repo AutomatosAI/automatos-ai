@@ -47,3 +47,4 @@ spec:
   selector: {app: otel-collector}
   ports:
     - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: health, port: 13133, targetPort: health}

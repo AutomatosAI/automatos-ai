@@ -22,10 +22,12 @@ install_otel_collector() {
     kubectl -n "$NS" rollout status deploy/otel-collector --timeout=120s
 }
 
-# The collector's log since it started (the debug exporter's output).
+# The collector's log since it started (the debug exporter's output). Read whole,
+# then searched: `kubectl logs | grep -q` stops reading at the first match, and
+# under e2e.sh's pipefail kubectl's broken pipe would fail the check.
 collector_log() { kubectl -n "$NS" logs deploy/otel-collector --tail=-1; }
-collector_log_has() { collector_log | grep -qF "$1"; }
-collector_log_lacks() { ! collector_log | grep -qF "$1"; }
+collector_log_has() { local log; log="$(collector_log)" && grep -qF "$1" <<<"$log"; }
+collector_log_lacks() { local log; log="$(collector_log)" && ! grep -qF "$1" <<<"$log"; }
 
 # Succeeds when one trace ID in the collector's log has spans from both services,
 # and the API's resource carries the pod name the chart adds.
