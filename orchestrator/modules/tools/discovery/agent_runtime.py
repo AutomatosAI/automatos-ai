@@ -68,14 +68,26 @@ def planned_configuration(current: Mapping[str, Any], params: Mapping[str, Any],
     if runtime != RUNTIME_CLI:
         return {**base, RUNTIME: RUNTIME_API}
     was_cli = runtime_kind_of(current) == RUNTIME_CLI
-    provider = str(params.get(PROVIDER) or (current.get(PROVIDER) if was_cli else None) or PROVIDER_CLAUDE)
-    provider = provider.strip().lower()
-    if MODEL in params:
-        model = params.get(MODEL) or None
-    else:
-        model = current.get(MODEL) if was_cli and current.get(PROVIDER) == provider else None
+    provider = _session_cli(current, params, was_cli)
+    model = _session_model(current, params, was_cli and current.get(PROVIDER) == provider)
     planned = {**base, RUNTIME: RUNTIME_CLI, PROVIDER: provider}
-    return {**planned, MODEL: str(model).strip()} if model else planned
+    return {**planned, MODEL: model} if model else planned
+
+
+def _session_cli(current: Mapping[str, Any], params: Mapping[str, Any], was_cli: bool) -> str:
+    """The CLI the call names, else the one a session agent already runs, else Claude Code."""
+    said = params.get(PROVIDER)
+    if not said and was_cli:
+        said = current.get(PROVIDER)
+    return str(said or PROVIDER_CLAUDE).strip().lower()
+
+
+def _session_model(current: Mapping[str, Any], params: Mapping[str, Any], same_cli: bool) -> Optional[str]:
+    """The model the call names ('' = the CLI's default), else the one kept on the same CLI."""
+    said = params.get(MODEL) if MODEL in params else (current.get(MODEL) if same_cli else None)
+    if not said:
+        return None
+    return str(said).strip() or None
 
 
 def _errors(planned: Mapping[str, Any]) -> List[str]:
@@ -255,17 +267,23 @@ async def _update_with_runtime(db: Any, workspace_id: Any, agent: Any, params: D
     changes = [CHANGE.format(field=label, old=shown(old), new=shown(new))
                for label, old, new in runtime_changes(agent.configuration or {}, planned)]
     rest = _for_the_handler(params, planned)
-    others = [key for key in rest if key not in NAMES_THE_AGENT and key not in SESSION_KEYS and not key.startswith("_")]
-    if others or not changes:
+    if not changes:
+        return await update(db, workspace_id, rest)
+    result: Dict[str, Any] = {"success": True, "agent_id": agent.id, "changes": []}
+    if _changes_more(rest):
         result = await update(db, workspace_id, rest)
-        if not (isinstance(result, dict) and result.get("success")) or not changes:
+        if not (isinstance(result, dict) and result.get("success")):
             return result
-    else:
-        result = {"success": True, "agent_id": agent.id, "changes": []}
     _write(db, agent, planned)
     logger.info("[PlatformExecutor] Agent %s runtime: %s", agent.id, ", ".join(changes))
     logged = [*result.get("changes", []), *changes]
     return {**result, "changes": logged, "message": f"Agent '{agent.name}' updated: {', '.join(logged)}"}
+
+
+def _changes_more(rest: Mapping[str, Any]) -> bool:
+    """Whether the call changes a field besides the runtime (a key that is not the agent's
+    name or id, a session key or one the server set)."""
+    return any(key not in NAMES_THE_AGENT and key not in SESSION_KEYS and not key.startswith("_") for key in rest)
 
 
 __all__ = ["planned_configuration", "refused_before_the_card", "runtime_card_lines", "runtime_changes",
