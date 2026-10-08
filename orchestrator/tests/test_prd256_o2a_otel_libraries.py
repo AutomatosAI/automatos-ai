@@ -163,10 +163,13 @@ def test_a_sql_statement_is_a_span_without_its_bound_values(spans):
 
 def test_a_redis_command_is_a_span_with_no_key_or_value(spans):
     import redis
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
 
     exporter, _ = spans
     with pytest.raises(redis.exceptions.ConnectionError):
-        redis.Redis(port=1, socket_connect_timeout=0.2).set(f"session:{SECRET}", SECRET)
+        # No retries: the closed port fails at once (redis-py 8 retries with backoff by default).
+        redis.Redis(port=1, socket_connect_timeout=0.2, retry=Retry(NoBackoff(), 0)).set(f"session:{SECRET}", SECRET)
     command = [s for s in exporter.get_finished_spans() if s.name == "SET"]
     assert command and command[0].attributes["db.statement"] == "SET ? ?"
     assert _leaks(exporter.get_finished_spans()) == []
@@ -197,3 +200,39 @@ def test_one_library_failing_never_stops_the_others(monkeypatch, spans):
     monkeypatch.setattr(otel, "_LIBRARIES", (("sqlalchemy", broken), ("redis", lambda _: calls.append("redis"))))
     otel.instrument_libraries(engine=object())
     assert calls == ["redis"]
+
+
+def test_a_background_query_starts_no_trace_but_a_requests_query_is_its_child(monkeypatch):
+    """The provider's sampler (``request_rooted_sampler``): background loops poll SQL and
+    Redis all the time, and each statement used to be a root trace of its own (tens of
+    thousands an hour, seen live). A library call with no parent starts nothing; inside a
+    request it is the request's child; any other new trace is kept by ratio."""
+    import sqlalchemy
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.trace import SpanKind
+
+    exporter = InMemorySpanExporter()
+    provider = otel.build_provider(exporter, 1.0)
+    engine = sqlalchemy.create_engine("sqlite://")
+    SQLAlchemyInstrumentor().instrument(engine=engine, tracer_provider=provider)
+    try:
+        with engine.connect() as conn:
+            conn.execute(sqlalchemy.text("select 1"))              # a background loop's query
+        provider.force_flush()
+        assert exporter.get_finished_spans() == ()
+
+        tracer = provider.get_tracer("t")
+        with tracer.start_as_current_span("GET /api/agents/", kind=SpanKind.SERVER) as request:
+            with engine.connect() as conn:
+                conn.execute(sqlalchemy.text("select 2"))
+        with tracer.start_as_current_span("mission.run"):             # a root of its own kind (O4)
+            pass
+        provider.force_flush()
+        spans = exporter.get_finished_spans()
+        children = [s for s in spans if s.parent and s.parent.span_id == request.get_span_context().span_id]
+        assert {s.name for s in spans} >= {"GET /api/agents/", "mission.run"} and children
+        assert all(s.kind == SpanKind.CLIENT for s in children)
+    finally:
+        SQLAlchemyInstrumentor().uninstrument()
+        provider.shutdown()
