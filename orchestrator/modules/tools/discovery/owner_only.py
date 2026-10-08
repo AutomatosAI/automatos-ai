@@ -46,12 +46,19 @@ OWNER_ONLY_ACTIONS = frozenset({
     "platform_cancel_mission", "platform_publish_blog_post", "platform_submit_social_post",
     # D1 amended 8 Oct (FX-010, night 12: a heartbeat changed, an agent deleted on one word,
     # eleven skills given, playbooks made, none with a card): every agent-setting change, and
-    # a playbook made, timed or deleted. There is no tool that takes a plugin from an agent.
+    # a playbook made, timed or deleted.
     "platform_configure_agent_heartbeat", "platform_delete_agent", "platform_assign_skill_to_agent",
     "platform_unassign_skill_from_agent", "platform_assign_plugin_to_agent", "platform_create_playbook",
     "platform_schedule_playbook", "platform_delete_playbook",
+    # P256-FIX-RVW-14: a timer set through an update, and a plugin or skill taken from every
+    # agent (turned off, deleted, or forked with its agents moved onto the fork).
+    "platform_update_playbook", "platform_uninstall_plugin", "platform_delete_workspace_skill",
+    "platform_update_skill",
 })
 CARD_MOVES = frozenset({"platform_update_task_status", "platform_update_task"})
+# An update is owner-only only when it sets the playbook's timer (P256-FIX-RVW-14).
+TIMED_UPDATES = frozenset({"platform_update_playbook"})
+SCHEDULE_CONFIG = "schedule_config"
 CLOSING_STATUSES = frozenset({"done", "cancelled"})
 # D1's "every Composio send/publish action" and D7's order (send_words, shared with brief_sends):
 # a slug with one of these words and no read word, split on any non-alphanumeric ('gmail-send-email').
@@ -90,6 +97,10 @@ VERBS = {
     "platform_create_playbook": "create a playbook",
     "platform_schedule_playbook": "set a playbook's timer",
     "platform_delete_playbook": "delete a playbook",
+    "platform_update_playbook": "set a playbook's timer",
+    "platform_uninstall_plugin": "turn a plugin off and take it from every agent",
+    "platform_delete_workspace_skill": "delete a skill and take it from every agent",
+    "platform_update_skill": "edit a skill its agents use",
 }
 SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
 QUESTION = "question_md"
@@ -103,6 +114,9 @@ def is_owner_only(action_name: str, params: Any, *, composio: bool = False) -> b
     if name in CARD_MOVES:
         params = params_object(params)
         return isinstance(params, dict) and closing_status(params) is not None
+    if name in TIMED_UPDATES:
+        params = params_object(params)
+        return isinstance(params, dict) and params.get(SCHEDULE_CONFIG) is not None
     return name in OWNER_ONLY_ACTIONS
 
 
@@ -335,12 +349,15 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     from modules.tools.discovery.agent_binding import bound_to_the_agent
     from modules.tools.discovery.agent_runtime import refused_before_the_card
     from modules.tools.discovery.card_question import platform_question
+    from modules.tools.discovery.card_question_skills import bound_to_the_subject
     from modules.tools.discovery.mission_targets import bound_to_the_mission
     from modules.tools.discovery.ticket_edit_moves import rebrief_that_closes
     from modules.tools.execution.subject_targets import missing_targets_error, named_subject
 
     params = bound_to_the_mission(db, workspace_id, action, params)  # FX-009: the click runs on the mission shown
     params, refused = bound_to_the_agent(db, workspace_id, action, params)  # FX-010: and on the agent shown
+    if not refused:  # RVW-14: and on the plugin or skill shown
+        params, refused = bound_to_the_subject(db, workspace_id, action, params)
     refused = refused or refused_before_the_card(db, workspace_id, action, params)  # FX-016: a runtime it can't set
     refused = refused or rebrief_that_closes(db, workspace_id, action, params)  # RVW-10: re-brief or close, not both
     if refused:

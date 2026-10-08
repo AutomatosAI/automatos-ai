@@ -47,12 +47,16 @@ def test_every_added_action_is_registered_owner_only_with_a_verb_and_card_text()
         assert action in READERS, action                           # the card's change lines (FX-008)
 
 
-def test_there_is_no_tool_that_takes_a_plugin_from_an_agent():
-    """'whatever of these exist in the registry': nothing is listed that the registry lacks."""
+def test_a_plugin_is_taken_from_agents_only_by_the_gated_uninstall():
+    """A plugin leaves an agent only when platform_uninstall_plugin takes it from every
+    agent of the workspace, and that tool is owner-only (P256-FIX-RVW-14). There is no
+    per-agent tool, and nothing is listed that the registry lacks."""
     from modules.tools.discovery import get_action_registry
 
     assert get_action_registry().get("platform_unassign_plugin_from_agent") is None
     assert "platform_unassign_plugin_from_agent" not in owner_only.OWNER_ONLY_ACTIONS
+    assert get_action_registry().get("platform_uninstall_plugin") is not None
+    assert owner_only.is_owner_only("platform_uninstall_plugin", {"plugin_id": str(uuid4())})
 
 
 def test_the_hierarchy_gate_still_passes():

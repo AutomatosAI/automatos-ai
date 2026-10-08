@@ -35,7 +35,12 @@ D1 = {"platform_update_task_status", "platform_update_task", "platform_assign_to
       # D1 amended 8 Oct (FX-010): every agent-setting change, and a playbook made, timed or deleted.
       "platform_configure_agent_heartbeat", "platform_delete_agent", "platform_assign_skill_to_agent",
       "platform_unassign_skill_from_agent", "platform_assign_plugin_to_agent", "platform_create_playbook",
-      "platform_schedule_playbook", "platform_delete_playbook"}
+      "platform_schedule_playbook", "platform_delete_playbook",
+      # P256-FIX-RVW-14: a timer set through an update; a plugin or skill taken from every agent.
+      "platform_update_playbook", "platform_uninstall_plugin", "platform_delete_workspace_skill",
+      "platform_update_skill"}
+# Owner-only only when the call closes the card, or (an update) sets the playbook's timer.
+CONDITIONAL = {"platform_update_task_status", "platform_update_task", "platform_update_playbook"}
 
 
 def test_the_list_is_decision_d1():
@@ -52,8 +57,10 @@ def test_a_card_move_is_owner_only_when_it_closes_the_card(status, owner_only):
 
 
 def test_every_other_d1_action_is_owner_only_and_a_read_is_not():
-    for action in D1 - {"platform_update_task_status", "platform_update_task"}:
+    for action in D1 - CONDITIONAL:
         assert is_owner_only(action, {}) is True
+    assert is_owner_only("platform_update_playbook", {"playbook_id": 3, "schedule_config": {"enabled": False}})
+    assert is_owner_only("platform_update_playbook", {"playbook_id": 3, "name": "Daily Digest"}) is False
     assert is_owner_only("platform_get_task", {"task_id": 422}) is False
     assert is_owner_only("platform_create_task", {"title": "Reorder oat milk"}) is False
 

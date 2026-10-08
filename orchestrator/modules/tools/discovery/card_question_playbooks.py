@@ -3,7 +3,9 @@
 Night 12 created playbooks with no card. Creating, scheduling and deleting a playbook are
 owner-only now (Decision D1, amended 8 Oct), and the card says what the owner approves: a
 new playbook's name and what it is for; a timer's cron, zone and switch 'from → to' (read
-from the playbook's own row); or which playbook is deleted for good. A playbook is looked
+from the playbook's own row); or which playbook is deleted for good. P256-FIX-RVW-14: an
+update that carries a timer (``schedule_config``) shows the same timer lines, and any new
+name or purpose it gives with them. A playbook is looked
 up in the caller's workspace only, by its id or by the one playbook with that name.
 """
 from __future__ import annotations
@@ -17,6 +19,13 @@ DELETED_FOR_GOOD = "playbook: '{name}' (playbook #{id}) is deleted for good, wit
 # platform_schedule_playbook: param (its schedule_config key too) → what the owner calls it.
 TIMER_FIELDS = (("cron_expression", "runs at (cron)"), ("timezone", "time zone"), ("enabled", "timer on"))
 WAIT_FOR_ME = ("wait_for_me", "each run waits for your check")
+SCHEDULE_CONFIG = "schedule_config"
+# schedule_config's other keys: how it runs ('manual' | 'cron' | 'trigger') and its trigger.
+TIMER_KINDS = (("type", "runs"), ("trigger_config", "trigger"))
+# platform_update_playbook: every other param its handler applies → what the owner calls it.
+# The click runs the whole call, so the card shows all of it beside the timer.
+BESIDE_THE_TIMER = (("name", "name"), ("description", "what it is for"), ("tags", "tags"),
+                    ("execution_config", "how its steps run"), ("inputs", "what each run needs"))
 
 
 def create_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
@@ -38,6 +47,24 @@ def schedule_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, An
     if params.get(WAIT_FOR_ME[0]) is not None:
         changes.append(said_line(WAIT_FOR_ME[1], params[WAIT_FOR_ME[0]]))
     return [value_line(PLAYBOOK_LINE.format(name=playbook.name, id=playbook.id)), *changes]
+
+
+def update_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
+    """platform_update_playbook with a timer: the schedule card's lines from its
+    ``schedule_config``, how it runs and its trigger 'from → to', then every other field
+    the call changes (its name, purpose, tags, step config or inputs)."""
+    playbook = _playbook(db, workspace_id, params)
+    timer = params.get(SCHEDULE_CONFIG) if isinstance(params.get(SCHEDULE_CONFIG), dict) else {}
+    if playbook is None:
+        return []
+    # Only the timer's own fields: a schedule_config never names the playbook the card reads.
+    said = {param: timer[param] for param, _label in TIMER_FIELDS if param in timer}
+    lines = schedule_lines(db, workspace_id, action, {**params, **said})
+    now = playbook.schedule_config if isinstance(playbook.schedule_config, dict) else {}
+    lines.extend(change_line(label, now.get(key), timer[key]) for key, label in TIMER_KINDS if timer.get(key) is not None)
+    lines.extend(change_line(label, getattr(playbook, field, None), params[field])
+                 for field, label in BESIDE_THE_TIMER if params.get(field) is not None)
+    return lines
 
 
 def delete_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
@@ -62,4 +89,4 @@ def _playbook(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Optional[An
     return query.filter(WorkflowTemplate.id == named[0].id).first() if len(named) == 1 else None
 
 
-__all__ = ["create_lines", "delete_lines", "schedule_lines"]
+__all__ = ["create_lines", "delete_lines", "schedule_lines", "update_lines"]

@@ -10,7 +10,9 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
 - approving or cancelling a mission: its title and its ticket number;
 - a Composio send: the recipient, the subject and the body's first line;
 - FX-010: a heartbeat's fields, an agent's skills or plugins before and after, a new
-  playbook's name and purpose, a playbook's timer, or what a delete takes for good.
+  playbook's name and purpose, a playbook's timer, or what a delete takes for good;
+- P256-FIX-RVW-14: a timer set through a playbook update, and a plugin or skill taken
+  from (or, edited, moved for) every agent of the workspace, naming them.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -24,6 +26,7 @@ from typing import Any, Callable, Dict, List
 from modules.tools.discovery import card_question_agents as agents
 from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
+from modules.tools.discovery import card_question_skills as skills
 from modules.tools.discovery.card_question_text import question, said_line, shown, value_line
 
 logger = logging.getLogger(__name__)
@@ -109,6 +112,11 @@ READERS: Dict[str, Lines] = {
     "platform_create_playbook": playbooks.create_lines,
     "platform_schedule_playbook": playbooks.schedule_lines,
     "platform_delete_playbook": playbooks.delete_lines,
+    # P256-FIX-RVW-14: a timer through an update; a plugin or skill taken from every agent.
+    "platform_update_playbook": playbooks.update_lines,
+    "platform_uninstall_plugin": skills.uninstall_plugin_lines,
+    "platform_delete_workspace_skill": skills.delete_skill_lines,
+    "platform_update_skill": skills.update_skill_lines,
 }
 
 
