@@ -14,6 +14,11 @@ write of its kind gets the line, naming it when another write went through.
 P256-FIX-RVW-1 (F186): a simple-past passive ("Ticket #1110 was completed at 03:04", "the order
 was placed last week") reports history, not this turn's work, and is no claim; the present
 perfect ("has been approved") and a bare participle ("Mission launched ✅") still are.
+
+P256-FIX-RVW-6: added, paused, "set up", booked, … were in no family, so a saved memory backed
+"I've paused the heartbeat" (A697's shape); one verb was read per "I've" ("I've created the task
+and sent it to Declan" was only created); and "here's" exempted its whole sentence ("Here's the
+update: the card has been approved." was no claim).
 """
 from __future__ import annotations
 
@@ -166,8 +171,9 @@ def test_both_claims_backed_is_no_line():
 
 
 def test_a_claim_with_no_family_needs_only_a_write():
-    """"I've set up the template" says only that work happened: any done write backs it."""
-    answer = "I've set up the template. You should now see it in Deliverables."
+    """"I've sorted the template" says only that work happened: any done write backs it ("set
+    up" has its family since P256-FIX-RVW-6, below)."""
+    answer = "I've sorted the template. You should now see it in Deliverables."
     assert honesty_lines(_receipts(CARD_MADE), answer) == []
     assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
 
@@ -182,3 +188,122 @@ def test_every_family_has_its_verbs_once():
     assert len(verbs) == len(set(verbs))
     assert {"created", "approved", "started", "sent", "saved", "noted", "remembered", "updated", "changed",
             "renamed", "reverted", "switched", "deleted", "removed", "scheduled", "assigned"} <= set(verbs)
+
+
+# ── P256-FIX-RVW-6: the verbs that said only "work happened" have families ──
+
+def _composio(slug):
+    return ("composio_execute", {"action": slug, "params": {}}, {"successful": True})
+
+
+HEARTBEAT_SET = _platform("platform_configure_agent_heartbeat", {"agent_name": "Scout", "enabled": False})
+CONTACT_MADE = _composio("HUBSPOT_CREATE_CONTACT")
+REPORT_SCHEDULED = _platform("platform_schedule_playbook", {"playbook_name": "Weekly report"})
+BOOKING_MADE = _composio("CALCOM_CREATE_BOOKING")
+ORDER_MADE = _composio("SHOPIFY_CREATE_ORDER")
+PAYMENT_MADE = _composio("STRIPE_CREATE_PAYMENT_INTENT")
+DOCUMENT_UPLOADED = _platform("platform_upload_document", {"filename": "price-list.pdf"})
+CHANNEL_CONNECTED = _platform("platform_connect_channel", {"channel": "instagram"})
+TOOL_ADDED = _platform("platform_assign_tool_to_agent", {"agent_name": "Scout", "tool": "DROPBOX"})
+
+# (the sentence, its verb, a done write of its own kind)
+OWN_KIND = [
+    ("I've paused the heartbeat.", "paused", HEARTBEAT_SET),                         # verified at b7fcc419f
+    ("I've added the supplier to your contacts.", "added", CONTACT_MADE),             # verified
+    ("I've set up the weekly report.", "set up", REPORT_SCHEDULED),                   # verified
+    ("I've booked the courier for Friday.", "booked", BOOKING_MADE),                  # verified
+    ("I've turned off the heartbeat for Scout.", "turned off", HEARTBEAT_SET),
+    ("I've turned on the heartbeat for Scout.", "turned on", HEARTBEAT_SET),
+    ("I've disabled Scout's heartbeat.", "disabled", HEARTBEAT_SET),
+    ("I've enabled Scout's heartbeat.", "enabled", HEARTBEAT_SET),
+    ("I've activated the weekly report.", "activated", REPORT_SCHEDULED),
+    ("I've deactivated the weekly report.", "deactivated", REPORT_SCHEDULED),
+    ("I've added the Dropbox tool to Scout.", "added", TOOL_ADDED),
+    ("I've uploaded the price list.", "uploaded", DOCUMENT_UPLOADED),
+    ("I've ordered two sacks of Guji.", "ordered", ORDER_MADE),
+    ("I've purchased two sacks of Guji.", "purchased", ORDER_MADE),
+    ("I've paid the roaster's invoice.", "paid", PAYMENT_MADE),
+    ("I've connected your Instagram account.", "connected", CHANNEL_CONNECTED),
+    ("I've linked your Instagram account.", "linked", CHANNEL_CONNECTED),
+]
+
+
+@pytest.mark.parametrize("answer, verb, _own", OWN_KIND, ids=[case[1] + ":" + case[0][5:20] for case in OWN_KIND])
+def test_rvw6_a_saved_memory_does_not_back_a_verb_that_had_no_family(answer, verb, _own):
+    assert [said for said, _ in claims(answer)] == [verb]
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
+    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+
+
+@pytest.mark.parametrize("answer, verb, own", OWN_KIND, ids=[case[1] + ":" + case[0][5:20] for case in OWN_KIND])
+def test_rvw6_its_own_kind_of_write_backs_it(answer, verb, own):
+    assert honesty_lines(_receipts(own), answer) == [], verb
+
+
+@pytest.mark.parametrize("answer", ["I've booked the courier for Friday.", "I've ordered two sacks of Guji.",
+                                    "I've paid the roaster's invoice."])
+def test_rvw6_an_order_a_booking_or_a_payment_is_backed_by_a_send(answer):
+    assert honesty_lines(_receipts(EMAIL_SENT), answer) == []
+
+
+def test_rvw6_a_write_of_another_order_word_does_not_back_the_claim():
+    assert honesty_lines(_receipts(ORDER_MADE), "I've paid the roaster's invoice.") == [_named("paid")]
+    assert honesty_lines(_receipts(BOOKING_MADE), "I've ordered two sacks of Guji.") == [_named("ordered")]
+
+
+def test_rvw6_a_particle_no_family_names_stays_with_its_verb():
+    """"kicked off" is the start family's "kicked"; "turned down" is in no family."""
+    assert [verb for verb, _ in claims("I've kicked off the mission.")] == ["kicked"]
+    assert honesty_lines(_receipts(MISSION_APPROVED), "I've kicked off the mission.") == []
+    assert [verb for verb, _ in claims("I've turned down the old plan.")] == ["turned"]
+
+
+# ── P256-FIX-RVW-6: each coordinated participle is a claim ─────────────────
+
+def test_rvw6_created_and_sent_is_two_claims():
+    answer = "I've created the task and sent it to Declan."                          # verified at b7fcc419f
+    assert [verb for verb, _ in claims(answer)] == ["created", "sent"]
+    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("sent")]
+    assert honesty_lines(_receipts(CARD_MADE, EMAIL_SENT), answer) == []
+
+
+@pytest.mark.parametrize("answer, verbs", [
+    ("I've created the task and then sent it to Declan.", ["created", "sent"]),
+    ("I've created the task, and also sent it to Declan.", ["created", "sent"]),
+    ("The card has been created and sent to Declan.", ["created", "sent"]),
+    ("I've updated the agent and turned off its heartbeat.", ["updated", "turned off"]),
+    ("I've created the card and noted that you're happy with it.", ["created"]),     # the owner heard
+    ("I've created the card and checked the board.", ["created"]),                   # a read is no work
+    ("I've created the task. I've also sent it.", ["created", "sent"]),               # one claim each, no double
+])
+def test_rvw6_coordinated_participles(answer, verbs):
+    assert [verb for verb, _ in claims(answer)] == verbs
+
+
+def test_rvw6_a_plan_word_exempts_the_coordinated_participles_with_their_claim():
+    assert not claims_work_done("Once I've created it and sent it, you'll see it in the Socials tab.")
+
+
+# ── P256-FIX-RVW-6: the reply's own content exempts only its clause ────────
+
+def test_rvw6_heres_the_update_then_a_claim_is_a_claim():
+    answer = "Here's the update: the card has been approved."                         # verified at b7fcc419f
+    assert [verb for verb, _ in claims(answer)] == ["approved"]
+    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert honesty_lines(_receipts(CARD_DONE), answer) == []
+
+
+@pytest.mark.parametrize("answer", [
+    "I've drafted the email below, ready for you to copy.",
+    "Here's the card I've created for the Analyst.",
+    "Here are the posts I've drafted for Monday.",
+    "I've made the following changes to the brief.",
+    "Here's what the board says.",
+])
+def test_rvw6_the_clause_with_the_replys_own_content_is_still_no_claim(answer):
+    assert not claims_work_done(answer)
+
+
+def test_rvw6_a_past_time_still_exempts_its_sentence():
+    assert not claims_work_done("As I've noted before, the price is £12.")
+    assert not claims_work_done("Earlier today: the card has been approved.")

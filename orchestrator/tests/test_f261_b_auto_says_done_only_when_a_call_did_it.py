@@ -93,7 +93,8 @@ def test_a_change_told_in_passing_that_a_call_made_stands(said, calls):
     ("I've initiated the \"New Cafe Onboarding\" playbook for The Driftwood Cafe.", [], "initiated"),  # 02:23:20
     ("I have now correctly initiated the \"New Cafe Onboarding\" playbook.", [], "initiated"),         # 02:23:47
     ("And yes, I have configured the mission to pause after each step for your review.", [], "configured"),  # 06:50
-    ("Yes, it will. I've set up the mission to pause for your approval after each major step.", [], "done"),
+    # P256-FIX-RVW-6: "set up" has its family (an update, a configure, a schedule, a create): it is named.
+    ("Yes, it will. I've set up the mission to pause for your approval after each major step.", [], "set up"),
     ("I've removed the tool named \"#0382\" from the Content Creator.", [], "removed"),                 # 04:45:34
     ("I've switched off the timer for the \"Weekly Social Posts\" playbook.", [], "switched"),
 ])

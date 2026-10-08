@@ -8,7 +8,12 @@ read for its verb and matched to the turn's done write receipts by the verb's fa
 (``FAMILIES``: created → a create, sent → a send, saved → a memory or a thing saved,
 reverted → an update, installed → an install, …). A claim no done write of its family backs is not done, whatever
 else succeeded in the turn. A claim whose verb is in no family ("Done.", "it's now on your
-board", "I've set up…") says no more than that work happened: any done write backs it.
+board", "I've sorted it") says no more than that work happened: any done write backs it.
+P256-FIX-RVW-6: added, paused, enabled, "set up", "turned off", uploaded, booked, paid,
+connected, … have families (the deleted families asked an update for paused or "set up"), a
+participle coordinated with a claim is a claim of its own ("I've created the task and sent it
+to Declan" is created and sent), and the reply's own content exempts only its clause ("Here's
+the update: the card has been approved." is a claim).
 
 The line names what was not done when another write went through ("Just to be clear: I
 haven't reverted anything in this reply…"); when nothing went through it stays the plain
@@ -22,9 +27,9 @@ work (P256-FIX-RVW-1, F186): it is no claim.
 What the answer quotes ("> " lines, a fenced block) is a draft in its writer's voice, never a
 claim. A plan word exempts only the claim it introduces ("Once I've sent it…"), never a claim
 further on ("I'll just confirm that the card has been approved" is a claim); the reply's own
-content ("I've drafted the email below") and a past time ("was approved yesterday", "as I've
-noted before") are not reports of this turn's work, nor is the owner heard ("I've noted that
-you're happy to…") or a read begun ("I've started reading…").
+content ("I've drafted the email below", in its clause) and a past time ("was approved
+yesterday", "as I've noted before", in its sentence) are not reports of this turn's work, nor is
+the owner heard ("I've noted that you're happy to…") or a read begun ("I've started reading…").
 """
 from __future__ import annotations
 
@@ -67,10 +72,18 @@ COMPLETED_ACTION = re.compile(
 # approved"): that claim is not a report. Further on, it governs nothing.
 _PLANNED = re.compile(r"\b(?:i'?ll|i’ll|i will|i'?m going to|i am going to|once|when|after|if|until|before)"
                       r"\s+(?:[\w'’]+\s+){0,2}$", re.I)
-# Not a report of this turn's work: the reply's own content ("below"), or a past time ("as I've
-# noted before," / "earlier": FX-007 keeps the families' back-references; "before Friday" is no past).
-_NOT_THIS_TURN = re.compile(r"\b(?:below|here(?:'s|’s| is| are)|the following|yesterday|ago|previously|earlier|"
-                            r"last (?:week|month|night|time|turn)|before(?=\s*(?:[,.;:!?)]|$)))\b", re.I)
+# Not a report of this turn's work: a past time exempts its sentence ("as I've noted before," /
+# "earlier": FX-007 keeps the families' back-references; "before Friday" is no past) …
+_PAST = re.compile(r"\b(?:yesterday|ago|previously|earlier|last (?:week|month|night|time|turn)|"
+                   r"before(?=\s*(?:[,.;:!?)]|$)))\b", re.I)
+# … the reply's own content only its clause (P256-FIX-RVW-6): "Here's the update: the card has
+# been approved." is a claim after the colon; "I've drafted the email below" is none.
+_REPLY_CONTENT = re.compile(r"\b(?:below|here(?:'s|’s| is| are)|the following)\b", re.I)
+_CLAUSE_BREAK = re.compile(r"[:;—–]")
+# A participle coordinated with a claim is a claim (P256-FIX-RVW-6): "I've created the task and sent it".
+_AND_THEN = re.compile(rf"\b(?:and|then)\s+(?:(?:then|also|just|now)\s+)?({_DONE_VERB})", re.I)
+# A phrasal claim's particle: "set up" and "turned off" are read whole when a family names them.
+_PARTICLE = re.compile(r"\s+(up|off|on)\b", re.I)
 # What follows the verb says it was no work (FX-007 keeps the families' two, F187 night 6): the
 # owner heard ("I've noted that you're happy to…"), or a read begun ("I've started reading…").
 _NO_WORK_AFTER = re.compile(
@@ -142,6 +155,14 @@ _MEMORY = _has("memory", "remember", "note")
 _SENDS = _has("send", "publish", "mail", "tweet", "notify", "reply", "forward", "broadcast", "submit_social_post",
               "create_post", "linked_in_post")
 _BACK = _any(_says("sent back"), _starts("send_back", "reject"))
+# P256-FIX-RVW-6: a setting switched or set up is an update, a configure, a schedule or a create.
+_SETTING = ("update_", "configure_", "set_", "pause_", "resume_", "schedule_", "create_")
+
+
+def _placed(*words: str) -> Backs:
+    """An order, a booking or a payment: a send, or a write that names it (SHOPIFY_CREATE_ORDER)."""
+    return _any(_SENDS, _has(*words))
+
 
 # The verb families: the claim's verb → what done write backs it. A verb in none says only
 # that work happened; any done write backs it.
@@ -169,7 +190,20 @@ FAMILIES: Tuple[Tuple[FrozenSet[str], Backs], ...] = (
     # F222 (FX-007 keeps it): an empty copy of a marketplace playbook is a create, never an install.
     (frozenset({"installed"}), _starts("install_")),
     (frozenset({"moved"}), _moved),
+    # P256-FIX-RVW-6: the verbs that said only "work happened" (A697's shape) now need their own kind.
+    (frozenset({"added"}), _starts("add_", "assign_", "create_", "install_")),
+    (frozenset({"paused", "disabled", "enabled", "activated", "deactivated", "turned off", "turned on"}),
+     _starts(*_SETTING)),
+    # F337 (FX-007 keeps it): "I've set up an invoice template" over a generate_document.
+    (frozenset({"set up"}), _starts(*_SETTING, "generate_")),
+    (frozenset({"uploaded"}), _starts("upload_", "create_document", "save_")),
+    (frozenset({"booked"}), _placed("book", "booking", "bookings")),
+    (frozenset({"ordered", "purchased"}), _placed("order", "orders", "purchase", "purchases")),
+    (frozenset({"paid"}), _placed("pay", "payment", "payments", "charge", "charges")),
+    (frozenset({"connected", "linked"}), _starts("connect_", "link_", "install_", "update_")),
 )
+# The families' two-word verbs: a claim's particle is read with its verb only for these.
+_PHRASAL = frozenset(verb for verbs, _ in FAMILIES for verb in verbs if " " in verb)
 
 
 def _family(verb: str, sentence: str) -> Optional[Backs]:
@@ -183,16 +217,48 @@ def _family(verb: str, sentence: str) -> Optional[Backs]:
     return next((backs for verbs, backs in FAMILIES if verb in verbs), None)
 
 
+def _verb(sentence: str, said: str, end: int) -> str:
+    """The claim's verb ("" for a shape with none), with its particle when a family names the
+    pair ("I've set up the report" is "set up"; "kicked off" stays "kicked")."""
+    words = _WORD.findall(said)
+    verb = words[-1].lower() if words else ""
+    particle = _PARTICLE.match(sentence, end)
+    phrasal = f"{verb} {particle.group(1).lower()}" if particle else ""
+    return phrasal if phrasal in _PHRASAL else verb
+
+
+def _in_reply_content(sentence: str, start: int, end: int) -> bool:
+    """Whether the clause holding sentence[start:end] is the reply's own content ("below", "here's")."""
+    breaks = [found.end() for found in _CLAUSE_BREAK.finditer(sentence, 0, start)]
+    after = _CLAUSE_BREAK.search(sentence, end)
+    clause = sentence[(breaks[-1] if breaks else 0): (after.start() if after else len(sentence))]
+    return bool(_REPLY_CONTENT.search(clause))
+
+
+def _reported(sentence: str, start: int, end: int) -> bool:
+    """Whether the claim shape at sentence[start:end] reports work: not the reply's own content,
+    not the owner heard nor a read begun."""
+    return not (_in_reply_content(sentence, start, end) or _NO_WORK_AFTER.match(sentence, end))
+
+
+def _coordinated(sentence: str, start: int, end: int) -> List[str]:
+    """The participles coordinated with a claim, up to the next claim ("…and sent it to Declan")."""
+    return [_verb(sentence, found.group(1), found.end()) for found in _AND_THEN.finditer(sentence, start, end)
+            if _reported(sentence, found.start(1), found.end())]
+
+
 def _claims_in(sentence: str) -> List[str]:
     """The verbs of the sentence's reports of work done ("" for a shape with no verb)."""
-    if _NOT_THIS_TURN.search(sentence):
+    if _PAST.search(sentence):
         return []
+    matches = list(COMPLETED_ACTION.finditer(sentence))
+    ends = [found.start() for found in matches[1:]] + [len(sentence)]
     verbs = []
-    for match in COMPLETED_ACTION.finditer(sentence):
-        if _PLANNED.search(sentence[: match.start()]) or _NO_WORK_AFTER.match(sentence, match.end()):
+    for match, upto in zip(matches, ends):
+        if _PLANNED.search(sentence[: match.start()]) or not _reported(sentence, match.start(), match.end()):
             continue
-        words = _WORD.findall(match.group(0))
-        verbs.append(words[-1].lower() if words else "")
+        verbs.append(_verb(sentence, match.group(0), match.end()))
+        verbs.extend(_coordinated(sentence, match.end(), upto))
     return verbs
 
 
