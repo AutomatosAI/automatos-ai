@@ -62,9 +62,20 @@ PY
 }
 tests_not_weakened() { local d a; d=$(git diff "$BASE"..HEAD -- $TESTS $SIM/tests | grep -cE '^-\s*(async )?def test_'); a=$(git diff "$BASE"..HEAD -- $TESTS $SIM/tests | grep -cE '^\+\s*(async )?def test_'); echo "   test functions removed $d, added $a"; [ "$a" -ge "$d" ]; }
 service_shorter() { local b h; b=$(lines_at "$BASE" $CHAT/service.py); h=$(wc -l < $CHAT/service.py | tr -d ' '); echo "   service.py: base $b, HEAD $h"; [ "$h" -lt "$b" ]; }
+# The commit CI tested: HEAD, or, when HEAD and its parents are kit-only '[skip ci]' commits (scripts/ralph/
+# marks, gate or prompt fixes after the wave's CI commit), the nearest ancestor that is not. A kit-only commit
+# cannot change a test outcome, so that ancestor's run is the wave's run.
+ci_commit_for_head() {
+  local sha; sha=$(git rev-parse HEAD)
+  while git log -1 --format=%s "$sha" | grep -q 'skip ci' && [ -z "$(git show --format= --name-only "$sha" | grep -v '^scripts/ralph/')" ]; do
+    sha=$(git rev-parse "$sha^")
+  done
+  echo "$sha"
+}
 ci_green_on_head() {
   local br sha waited=0 run id jobs job hits
-  br=$(git rev-parse --abbrev-ref HEAD); sha=$(git rev-parse HEAD)
+  br=$(git rev-parse --abbrev-ref HEAD); sha=$(ci_commit_for_head)
+  [ "$sha" = "$(git rev-parse HEAD)" ] || echo "   HEAD is kit-only [skip ci] commits over $(git log -1 --format=%h "$sha"): reading that commit's run"
   command -v gh >/dev/null || { echo "   gh is required"; return 1; }
   [ -n "$(gh pr list --head "$br" --state open --json number --jq '.[0].number' 2>/dev/null)" ] || { echo "   no open PR for $br: test.yml runs on pull_request only (#993)"; return 1; }
   while :; do
@@ -75,8 +86,9 @@ ci_green_on_head() {
     sleep 60; waited=$((waited + 60))
   done
   jobs=$(gh run view "$id" --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"')
-  local REQUIRED=("orchestrator-tests" "Alembic from-zero" "Schema-drift check" "Frontend CI" "Prod images built" "media-render" "Code standards on changed lines")
-  local PATH_GATED=("media-render" "Prod images built")
+  # media-render left test.yml for the on-demand media-render.yml (7 Oct 2026): not a job of this run.
+  local REQUIRED=("orchestrator-tests" "Alembic from-zero" "Schema-drift check" "Frontend CI" "Prod images built" "Code standards on changed lines")
+  local PATH_GATED=("Prod images built")
   for job in "${REQUIRED[@]}"; do
     hits=$(echo "$jobs" | grep -F "$job" | cut -f1)
     [ -n "$hits" ] || { echo "   missing job: $job"; return 1; }
