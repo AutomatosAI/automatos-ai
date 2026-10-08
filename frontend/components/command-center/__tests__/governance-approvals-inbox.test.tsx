@@ -115,6 +115,16 @@ describe('ApprovalsInbox — PRD-196 S1', () => {
     expect(screen.getByRole('button', { name: /Deny/ })).toBeInTheDocument()
   })
 
+  // PRD-256 FX-008: the queue shows the same text as the chat card.
+  it("shows a grant's question — what it approves — in place of the gate's reason", () => {
+    const question_md = "Start a mission:\n- goal: Plan the spring menu\n- steps:\n  1. Price the oat milk"
+    setGrants([grant({ question_md, reason: 'Confirmation required before running platform_create_mission' })])
+    render(<ApprovalsInbox />)
+    expect(screen.getByText(/goal: Plan the spring menu/)).toBeInTheDocument()
+    expect(screen.getByText(/1\. Price the oat milk/)).toBeInTheDocument()
+    expect(screen.queryByText(/Confirmation required before running/)).not.toBeInTheDocument()
+  })
+
   it('Grant and Deny call the right mutation with the grant id', () => {
     setGrants([grant({ id: 7 })])
     render(<ApprovalsInbox />)

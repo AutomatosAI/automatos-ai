@@ -77,7 +77,7 @@ def takes_card_numbers(does: str) -> Callable[[Handler], Handler]:
             card, refusal = _card_named(db, workspace_id, said)
             if refusal:
                 return {"success": False, "error": refusal}
-            run_id = _mission_of(db, card)
+            run_id = mission_of_card(db, card)
             step = _decided_on_its_mission(db, card, run_id, handler, does)
             if step is not None:  # F308 (night 9): approving or sending back a started mission's step
                 return await handler(db, workspace_id, {**params, "mission_id": str(run_id), "step": step})
@@ -125,7 +125,7 @@ def _card_named(db: Session, workspace_id: Any, said: Any) -> Tuple[Any, Optiona
     return card, None
 
 
-def _mission_of(db: Session, card: Any) -> Optional[UUID]:
+def mission_of_card(db: Session, card: Any) -> Optional[UUID]:
     """The mission a mission's card or step belongs to; None for any other card."""
     from core.models.core import BoardTask
 
@@ -191,4 +191,4 @@ def _action_of(handler: Handler) -> str:
     return f"platform_{getattr(handler, '__name__', '')}"
 
 
-__all__ = ["DECIDES", "READS", "RUNS", "takes_card_numbers"]
+__all__ = ["DECIDES", "READS", "RUNS", "mission_of_card", "takes_card_numbers"]

@@ -51,8 +51,9 @@ def _agent_ask():
 
     params = {"agent_id": 12, "name": "Scout", "model": "claude-sonnet-5-5"}
     with patch("modules.tools.execution.tool_grants.attach_ask_grant", new=_with_a_card):
+        act = f"{owner_only.VERBS[UPDATE_AGENT]} 'Scout' (agent #12)"
         return owner_only._ask(None, "ws", UPDATE_AGENT, params, _owners_chat(),
-                               verb=owner_only.VERBS[UPDATE_AGENT], what="'Scout' (agent #12)")
+                               act=act, what="'Scout' (agent #12)", asked=f"{act}.")
 
 
 def _routed(ask, tool=UPDATE_AGENT):

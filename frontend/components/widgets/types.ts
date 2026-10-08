@@ -72,6 +72,8 @@ export interface ToolApprovalWidgetData {
   grant_id: number
   action: string
   message?: string
+  /** PRD-256 FX-008: what the owner approves, the subject and the change (from → to). */
+  question_md?: string | null
   permission_level?: string
   /** Human-readable digest of the model-provided params (server plumbing stripped). */
   params?: Record<string, unknown>

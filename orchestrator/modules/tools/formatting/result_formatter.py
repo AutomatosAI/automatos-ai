@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 from modules.tools.formatting import document_brand_note, generated_document_summary, tickets_by_number
-from modules.tools.formatting.card_digest import shown_on_the_card
+from modules.tools.formatting.card_digest import carries_the_question, shown_on_the_card
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +29,8 @@ class ToolResultFormatter:
         """Clean document filename by removing hash prefixes."""
         if not filename:
             return 'Document'
-        
         # Remove path components
         filename = filename.split('/')[-1]
-        
         # Check for hash prefix pattern (32-64 char hex string followed by underscore)
         if '_' in filename:
             parts = filename.split('_', 1)
@@ -559,6 +557,7 @@ class ToolResultFormatter:
             }
 
     @staticmethod
+    @carries_the_question  # PRD-256 FX-008: the approval card shows what it approves
     def format_for_frontend(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
         """
         Format tool result specifically for frontend artifact viewer.

@@ -139,9 +139,12 @@ def issue_tool_grant(
     description: Optional[str] = None,
     caller_context: Optional[Dict[str, Any]] = None,
     subject: str = "",
+    question_md: Optional[str] = None,
 ) -> Optional[Any]:
     """Create (or reuse) the PENDING ``tool_call`` grant for this exact call.
-    ``subject`` names what the call acts on (" on 'x.csv' (document #716)", F091).
+    ``subject`` names what the call acts on (" on 'x.csv' (document #716)", F091);
+    ``question_md`` is what its card shows the owner, the subject and the change
+    (PRD-256 FX-008), and the approvals queue shows the same text.
 
     Returns the grant, or ``None`` on any failure — the caller returns the ask
     either way (the ask is the floor). Never raises. Caller owns the txn
@@ -161,14 +164,6 @@ def issue_tool_grant(
             # is the actionable thing — no grant spam, no re-notify.
             return existing
 
-        ctx = caller_context or {}
-        agent_id: Optional[int] = None
-        raw_agent = params.get("_agent_id") if isinstance(params, dict) else None
-        try:
-            agent_id = int(raw_agent) if raw_agent is not None else None
-        except (TypeError, ValueError):
-            agent_id = None
-
         risk_class = _risk_class_for(action, permission_level)
         lane = _lane_for(caller_context)
 
@@ -179,32 +174,14 @@ def issue_tool_grant(
             subject_id=subject_id,
             tool_name=action,
             risk_tier=risk_class,
-            agent_id=agent_id,
+            agent_id=_agent_id_of(params),
             reason=(
                 f"Confirmation required before running {action}{subject}: "
                 f"{(description or 'gated platform action')[:200]}"
             ),
+            question_md=question_md,
         )
-
-        caller_snapshot = {
-            k: ctx.get(k) for k in _CALLER_SNAPSHOT_KEYS if ctx.get(k) is not None
-        }
-        details: Dict[str, Any] = {
-            "action": action,
-            "params": canonical_params(params),
-            "params_hash": params_hash(params),
-            "lane": lane,
-            "action_description": (description or "")[:300],
-        }
-        if caller_snapshot:
-            details["caller_context"] = caller_snapshot
-        if ctx.get("conversation_id"):
-            details["conversation_id"] = ctx.get("conversation_id")
-        if ctx.get("turn_id"):
-            details["turn_id"] = ctx.get("turn_id")
-        if ctx.get("board_task_id") is not None:
-            details["board_task_id"] = ctx.get("board_task_id")
-        grant.details = details
+        grant.details = _grant_details(action, params, description, caller_context or {}, lane)
 
         # PRD-193 S5: an ask that fires with nobody watching must not be
         # silent — announce the fresh pending grant on non-chat lanes (chat
@@ -219,6 +196,39 @@ def issue_tool_grant(
             action, exc_info=True,
         )
         return None
+
+
+def _agent_id_of(params: Any) -> Optional[int]:
+    """The asking agent, from the server-injected ``_agent_id``; None when there is none."""
+    raw_agent = params.get("_agent_id") if isinstance(params, dict) else None
+    try:
+        return int(raw_agent) if raw_agent is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _grant_details(action: str, params: Any, description: Optional[str], ctx: Dict[str, Any],
+                   lane: str) -> Dict[str, Any]:
+    """The grant's ``details``: the exact call, its hash, the lane and the caller
+    snapshot the S4 resume re-dispatches with."""
+    caller_snapshot = {
+        k: ctx.get(k) for k in _CALLER_SNAPSHOT_KEYS if ctx.get(k) is not None
+    }
+    details: Dict[str, Any] = {
+        "action": action,
+        "params": canonical_params(params),
+        "params_hash": params_hash(params),
+        "lane": lane,
+        "action_description": (description or "")[:300],
+    }
+    if caller_snapshot:
+        details["caller_context"] = caller_snapshot
+    for key in ("conversation_id", "turn_id"):
+        if ctx.get(key):
+            details[key] = ctx.get(key)
+    if ctx.get("board_task_id") is not None:
+        details["board_task_id"] = ctx.get("board_task_id")
+    return details
 
 
 def enrich_ask_with_grant(ask: Dict[str, Any], grant: Any, *, risk_class: str) -> Dict[str, Any]:
@@ -274,6 +284,7 @@ def attach_ask_grant(
     description: Optional[str] = None,
     caller_context: Optional[Dict[str, Any]] = None,
     subject: str = "",
+    question_md: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Issue the grant and return the enriched ask; on ANY failure return the
     ask unchanged. The single fail-safe entry the confirmation gate calls."""
@@ -287,6 +298,7 @@ def attach_ask_grant(
             description=description,
             caller_context=caller_context,
             subject=subject,
+            question_md=question_md,
         )
         # A grant without a usable integer id cannot power the card — the
         # grant/deny endpoints key on it. Degraded stores (or fakes) that

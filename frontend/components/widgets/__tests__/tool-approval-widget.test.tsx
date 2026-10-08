@@ -145,4 +145,21 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
     expect(executedOutcomeLine({ resumed_via: 'board_task_requeue' })).toMatch(/re-queued/i)
     expect(executedOutcomeLine({ requires_confirmation: true })).toMatch(/asked for confirmation again/i)
   })
+
+  // PRD-256 FX-008: night 12's cards said 'change an agent' and CLUB DESK's brief was wiped.
+  it('renders the question — the subject and each change, from → to — in place of the bare message', () => {
+    const question_md =
+      "Change an agent 'CLUB DESK' (agent #12):\n- description: Runs the club desk → (empty)"
+    render(
+      <ToolApprovalWidget
+        id="w1"
+        title="Action approval needed"
+        data={data({ action: 'platform_update_agent', message: 'Waiting for the owner', question_md })}
+        metadata={metadata}
+      />,
+    )
+    expect(screen.getByText(/description: Runs the club desk → \(empty\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Change an agent 'CLUB DESK'/)).toBeInTheDocument()
+    expect(screen.queryByText('Waiting for the owner')).not.toBeInTheDocument()
+  })
 })

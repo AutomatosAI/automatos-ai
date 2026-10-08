@@ -73,6 +73,7 @@ VERBS = {
     "platform_submit_social_post": "submit a social post to publish",
 }
 SEND_VERB = "send or publish through"
+QUESTION = "question_md"
 
 
 def is_owner_only(action_name: str, params: Any, *, composio: bool = False) -> bool:
@@ -157,12 +158,12 @@ def asks_before_a_send(execute_tool: Execute) -> Execute:
         call.apply_defaults()
         tool, params, ctx = call.arguments["tool_name"], call.arguments["parameters"], call.arguments["caller_context"]
         workspace_id = call.arguments["workspace_id"]
-        slug, _inner, composio = self._resolve_effective_call(tool, params)
+        slug, inner, composio = self._resolve_effective_call(tool, params)
         if not (composio and human_driven(ctx) and is_owner_only(slug, params, composio=True)):
             return await execute_tool(*call.args, **call.kwargs)
         grant = _the_click(self.db, workspace_id, tool, params)
         if grant is None:
-            return send_ask(self.db, workspace_id, tool, slug, params, ctx)
+            return send_ask(self.db, workspace_id, tool, slug, params, ctx, sent=inner)
         return after_the_click(self.db, grant, await execute_tool(*call.args, **call.kwargs))
     return wrapped
 
@@ -189,8 +190,10 @@ def after_the_click(db: Any, grant: Any, result: Any) -> Any:
 
 
 def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], caller_context: Any) -> Dict[str, Any]:
-    """The ask for a platform action, naming the card by its number and the verb. A card
-    that is not on the board is never asked about (F091)."""
+    """The ask for a platform action, naming the card by its number and the verb, and
+    saying what the call changes (FX-008). A card that is not on the board is never
+    asked about (F091)."""
+    from modules.tools.discovery.card_question import platform_question
     from modules.tools.execution.subject_targets import missing_targets_error, named_subject
 
     found, missing = _targets(db, workspace_id, action, params)
@@ -198,28 +201,37 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
         return missing_targets_error(action, missing)
     what = (named_subject(found).removeprefix(" on ") or _said_subject(params)) + _cards_not_named(params)
     status = closing_status(params) if action in CARD_MOVES else None
-    verb = CLOSING_VERBS[status] if status else VERBS.get(action, action)
-    return _ask(db, workspace_id, action, params, caller_context, verb=verb, what=what)
+    act = f"{CLOSING_VERBS[status] if status else VERBS.get(action, action)} {what}".strip()
+    asked = platform_question(db, workspace_id, action, params, act)
+    return _ask(db, workspace_id, action, params, caller_context, act=act, what=what, asked=asked)
 
 
-def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, caller_context: Any) -> Dict[str, Any]:
-    """The ask for a Composio send or publish, naming the action."""
-    return _ask(db, workspace_id, tool, params, caller_context, verb=SEND_VERB, what=slug)
+def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, caller_context: Any, *,
+             sent: Any = None) -> Dict[str, Any]:
+    """The ask for a Composio send or publish, naming the action, and to whom, about what
+    and its first line (``sent``: the action's own params, FX-008)."""
+    from modules.tools.discovery.card_question import send_question
+
+    act = f"{SEND_VERB} {slug}".strip()
+    asked = send_question(act, params_object(sent if sent is not None else params))
+    return _ask(db, workspace_id, tool, params, caller_context, act=act, what=slug, asked=asked)
 
 
-def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: Any, *, verb: str,
-         what: str) -> Dict[str, Any]:
+def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: Any, *, act: str,
+         what: str, asked: str) -> Dict[str, Any]:
     from modules.tools.execution import tool_grants
 
-    act = f"{verb} {what}".strip()
     message = ASK.format(act=act)
-    # ``act``: what the card asks, in the owner's words, for the receipt and the model (FX-004).
+    # ``act``: what the card asks, in the owner's words, for the receipt and the model (FX-004);
+    # ``question_md``: what the card shows the owner, the subject and the change (FX-008).
     ask = {"success": False, "requires_confirmation": True, "owner_only": True, "action": action,
-           "permission_level": PERMISSION_LEVEL, "message": message, "params": params, ACT: act}
+           "permission_level": PERMISSION_LEVEL, "message": message, "params": params, ACT: act,
+           QUESTION: asked}
     logger.info("[owner_only] %s waits for the owner's click (%s)", action, what)
     return tool_grants.attach_ask_grant(db, workspace_id, action=action, params=params, ask=ask,
                                         permission_level=PERMISSION_LEVEL, description=message,
-                                        caller_context=caller_context, subject=f" on {what}" if what else "")
+                                        caller_context=caller_context, subject=f" on {what}" if what else "",
+                                        question_md=asked)
 
 
 def _targets(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> tuple:
