@@ -30,21 +30,21 @@ DELEGATE turn), ``its_reads_are_receipted`` (retrieval first), ``the_loop_writes
 set once per turn and never mutated.
 
 US-002, one honesty rule: the line about what was not done comes from the receipts alone
-(``honesty_lines``). It fires when no write went through and the answer reports work done
-(``COMPLETED_ACTION``, one generic pattern), never when a write went through; a refused write
-gets its own line. ``the_answer_takes_the_receipts`` (the answer's additions) settles them
-when the loop has not; they go above the text, in the frame (``above``) and at the top of
+(``honesty_lines``). FX-006: it is decided per claim (``claims_backed``): a report of work done
+(``COMPLETED_ACTION``, one generic pattern) with no done write of its kind behind it gets the
+line, whatever else went through; a refused write gets its own line.
+``the_answer_takes_the_receipts`` (the answer's additions) settles them when the loop has not; they go above the text, in the frame (``above``) and at the top of
 the saved answer, never under it. FX-005: they are the only not-done line; the turn's
 ``no_tool_call`` notice never says it again (``says_nothing_was_done``).
 """
 from __future__ import annotations
 
 import functools
-import re
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from consumers.chatbot.claim_check import NOTHING_DONE
+from consumers.chatbot.claims_backed import COMPLETED_ACTION, claims_work_done, is_not_done_line, not_done_line
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, SENT_BACK, STEPS_CHECKED, STEPS_UNCHECKED, answers_in, call_effects, result_effects,
 )
@@ -258,33 +258,14 @@ def receipts_frames(handler: Any, receipts: List[Receipt], model: Optional[str] 
 
 # ── US-002: one honesty rule, from the receipts alone ──────────────────────
 # The line about what was not done is decided by the receipts, never by a vocabulary of
-# claims (action_claims, document_claims, shop_and_team_claims: frozen, D10). It fires when no
-# write went through and the answer says, in the one generic way below, that work is done;
-# it never fires when a write went through. A refused write gets its own line. Both sit above
-# the text: in the frame (``above``) live, at the top of the saved answer on reload.
+# claims (action_claims, document_claims, shop_and_team_claims: frozen, D10). It fires for a
+# claim of the answer (one generic pattern, ``claims_backed.COMPLETED_ACTION``) that no done
+# write of its kind backs, whatever else went through (FX-006); a write of its kind is never
+# denied. A refused write gets its own line. Both sit above the text: in the frame
+# (``above``) live, at the top of the saved answer on reload.
 ABOVE = "above"
 NOTHING_DONE_LINE = NOTHING_DONE   # "Just to be clear: I haven't done that yet, and nothing has changed. …"
 TRIED_LINE = "I tried to {what} and it didn't go through: {reason}."
-# Looking things up is not work done: "I've checked the board" claims no change.
-_LOOKING = ("looked|checked|read|reviewed|found|searched|seen|noticed|pulled|gone|been|had|got|heard|understood|"
-            "asked|tried|confirmed|verified|explored|listed|counted|compared|considered|included|outlined|"
-            "summari[sz]ed|explained|mentioned|attached")
-_DONE_VERB = rf"(?!(?:{_LOOKING})\b)(?:[a-z]+ed|sent|made|set|put|given|done|written|built|run|begun|kept|told|" \
-             rf"taken|brought|chosen|paid|sold|cut|shut|drawn|thrown)\b"
-# The ONE completed-action pattern: "I've/I have <past verb>", "has been <verb>", "it's now on
-# your board" / "is now <verb>", "you should now see", and a sentence that is only "Done." or "Sorted.".
-COMPLETED_ACTION = re.compile(
-    rf"\bI(?:'ve|’ve| have)\s+(?:(?:now|just|already|also|successfully|gone ahead and)\s+)*{_DONE_VERB}"
-    rf"|\b(?:has|have)\s+(?:(?:now|just|already)\s+)*been\s+{_DONE_VERB}"
-    rf"|\b(?:it'?s|it’s|they'?re|they’re|is|are)\s+now\s+(?:(?:on|in)\s+(?:your|the)\b|running\b|live\b|"
-    rf"{_DONE_VERB})"
-    rf"|\byou(?:'ll|’ll| will| should)\s+now\s+see\b|\byou should see (?:it|this|them)\b"
-    rf"|^\s*(?:all\s+)?(?:done|sorted|set)\s*[.!,]", re.I)
-# Not a report of work done: a plan ("once I've sent it"), or the reply's own content ("below").
-_NOT_A_REPORT = re.compile(r"\b(?:i'?ll|i’ll|i will|i'?m going to|i am going to|once|when|after|below|"
-                           r"here(?:'s| is| are)|the following)\b", re.I)
-_SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
-_MARKS = re.compile(r"[*_`#>]")
 # How a refused write is named in "I tried to <what>": the board's own words where a call's
 # name reads badly, else "<verb> the <thing>".
 _TRIED = {"update_task_status": "move the card", "update_task": "change the card", "send_back": "send the card back",
@@ -293,12 +274,6 @@ _TRIED = {"update_task_status": "move the card", "update_task": "change the card
           "store_memory": "save that to memory", "execute_playbook": "run the playbook"}
 _VERBS = ("create", "update", "delete", "cancel", "assign", "approve", "reject", "schedule", "run", "send", "submit",
           "install", "pause", "resume", "upload", "add", "remove", "publish", "set", "generate", "make", "move", "post")
-
-
-def claims_work_done(answer: str) -> bool:
-    """Whether the answer reports, in the first person or as an outcome, work as done."""
-    text = _MARKS.sub("", answer or "")
-    return any(COMPLETED_ACTION.search(s) and not _NOT_A_REPORT.search(s) for s in _SENTENCES.findall(text))
 
 
 def _tried(r: Receipt) -> str:
@@ -314,20 +289,21 @@ def _tried(r: Receipt) -> str:
 
 def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
     """The lines above the answer: one per write that was refused (and not then done), and the
-    not-done line when no write went through and the answer says work is done. A write that
-    waits for the owner's click (FX-004) is neither: it writes no "I tried to" line, and the
-    answer that calls it done still gets the not-done line."""
+    not-done line when a claim of the answer has no done write of its kind behind it (FX-006:
+    per claim, whatever else went through; it names the claim when another write did). A write
+    that waits for the owner's click (FX-004) is neither done nor refused: it writes no "I tried
+    to" line, and the answer that calls it done still gets the not-done line."""
     writes = [r for r in receipts if r.get("kind") == WRITE]
-    done = {r["action"] for r in writes if r.get("status") == DONE}
+    done_writes = [r for r in writes if r.get("status") == DONE]
+    done = {r["action"] for r in done_writes}
     refused: Dict[str, Receipt] = {}
     for r in writes:
         if r.get("status") == REFUSED and r["action"] not in done:
             refused.setdefault(r["action"], r)          # one line per action: its first reason
     lines = [TRIED_LINE.format(what=_tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
              for r in refused.values()]
-    if not done and claims_work_done(answer):
-        lines.append(NOTHING_DONE_LINE)
-    return lines
+    not_done = not_done_line(answer, done_writes)
+    return [*lines, not_done] if not_done else lines
 
 
 def with_lines_above(answer: str, above: Sequence[str]) -> str:
@@ -372,7 +348,7 @@ def says_nothing_was_done(answer: str) -> bool:
     """Whether the turn's receipts put the not-done line above ``answer`` (FX-005: the one
     producer of that line). Another notice that would say the same defers to it."""
     receipts = current_receipts() or []
-    return not _VISITOR.get() and NOTHING_DONE_LINE in honesty_lines(receipts, answer)
+    return not _VISITOR.get() and any(is_not_done_line(line) for line in honesty_lines(receipts, answer))
 
 
 def _frames_once(chat: Any, receipts: List[Receipt], model: Optional[str],

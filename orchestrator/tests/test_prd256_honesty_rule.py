@@ -4,15 +4,16 @@ The "I haven't done that" line used to come from a vocabulary of phrasings (the 
 in action_claims, document_claims and shop_and_team_claims). The review replayed it on 22 real
 sentences from the nights: it caught 12, and in three of the four firings the nights recorded it
 denied a write that had gone through (F319, F337, F363). Now the line is decided by the turn's
-receipts: it fires when no write went through and the answer says, in one generic way, that work
-is done, and never when a write went through. A refused write gets its own line. Both go ABOVE
+receipts: it fires when the answer says, in one generic way, that work is done and no done write
+of that kind is behind the claim (FX-006), and never when one is. A refused write gets its own line. Both go ABOVE
 the text: in the receipts frame live, at the top of the saved answer on reload.
 
 The replay (``.claude/AUTO-REVIEW-FINDINGS.md`` §2.1 and its evidence in
 ``.claude/auto-review/claims-evidence.md``) is reproduced below: each sentence with the calls that
 ran in its turn. Under the receipts rule each one passes in one of three ways:
 
-- ``NOT_DONE``: no write went through and the answer reports work done → the not-done line.
+- ``NOT_DONE``: the answer reports work no done write of its kind backs → the not-done line
+  (FX-006: per claim; it names the claim when another write went through).
 - ``TRIED``: a write was refused → its own line (and the not-done line when the answer claims).
 - ``SHOWN``: no line, and the receipts above the text say what really ran (nothing; only reads;
   only a memory note and nothing on the board; the writes that really went through).
@@ -29,6 +30,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from consumers.chatbot.claim_check import Verdict
+from consumers.chatbot.claims_backed import is_not_done_line
 from consumers.chatbot.receipts import (
     ABOVE, DONE, NOTHING_DONE_LINE, READ, WRITE, build_receipts, claims_work_done, honesty_lines, with_lines_above,
 )
@@ -133,9 +135,10 @@ CAUGHT_TODAY = [
      lambda r: [x["effect"] for x in r if x["kind"] == WRITE] == ["memory saved"] and _nothing_on_the_board(r)),
     ("F351 generated the letter", "I've generated the letter for Maya Osei and saved it to your Deliverables.",
      [LETTER_REFUSED], TRIED, None),
+    # FX-006: the memory note backs no "created a task": the claim is matched to a write of its kind.
     ("F363 you should now see this on your board", "I've now created a task on your board for the Brand Designer: "
      "Implement Brand Kit Update - Option A & Warm Sand Band. You should now see this on your board, with task "
-     "number #0891.", [STORE_MEMORY], SHOWN,
+     "number #0891.", [STORE_MEMORY], NOT_DONE,
      lambda r: [x["effect"] for x in r] == ["memory saved"] and _nothing_on_the_board(r)),
     ("F363 I'll get the Brand Designer to", "I'll get the Brand Designer to update the brand kit with Option A and "
      "the warm sand band.", [], SHOWN, lambda r: r == []),
@@ -187,7 +190,9 @@ def test_each_of_the_22_sentences_passes_under_the_receipts_rule(finding, answer
     lines = honesty_lines(receipts, answer)
 
     if passes == NOT_DONE:
-        assert lines == [NOTHING_DONE_LINE], finding
+        assert len(lines) == 1 and is_not_done_line(lines[0]), finding
+        assert lines == [NOTHING_DONE_LINE] or any(r["status"] == DONE and r["kind"] == WRITE for r in receipts)
+        assert shows is None or shows(receipts), (finding, receipts)
     elif passes == TRIED:
         *tried, last = lines
         assert len(tried) == 1 and tried[0].startswith("I tried to ") and " and it didn't go through: " in tried[0]
