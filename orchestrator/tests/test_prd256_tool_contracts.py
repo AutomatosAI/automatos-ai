@@ -121,7 +121,7 @@ def test_a_card_moves_status_is_the_boards_own_words():
 def test_required_fields_are_listed():
     registry = _registry()
     assert registry.get("platform_create_task").parameters["required"] == ["title", "description"]
-    assert registry.get("platform_assign_task").parameters["required"] == ["task_id", "agent_name"]
+    assert registry.get("platform_assign_task").parameters["required"] == ["task_id"]  # FX-012: agent_id or agent_name
     assert registry.get("platform_update_task_status").parameters["required"] == ["status"]
     assert registry.get("platform_create_mission").parameters["required"] == ["goal"]
     assert registry.get("platform_get_task").parameters["required"] == ["task_id"]
@@ -266,10 +266,10 @@ def test_a_direct_call_missing_a_field_never_reaches_the_action(monkeypatch):
     monkeypatch.setattr(unified_executor, "fire_telemetry", lambda **kwargs: None)
     executor = UnifiedToolExecutor.__new__(UnifiedToolExecutor)
     executor.composio_actions, executor.db = {}, None
-    result = asyncio.run(executor.execute_tool("platform_assign_task", {"task_id": "#0422"},
+    result = asyncio.run(executor.execute_tool("platform_assign_task", {"agent_name": "Content Creator"},
                                                agent_id=7, workspace_id="ws", trace_id="t-us006"))
     assert result["success"] is False and ran == []
-    assert "Missing required params for 'platform_assign_task': ['agent_name']" in result["error"]
+    assert "Missing required params for 'platform_assign_task': ['task_id']" in result["error"]
 
 
 # ── a refused write is reported refused ─────────────────────────────────────

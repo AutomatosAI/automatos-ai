@@ -9,6 +9,7 @@ register function is past the length rule.
 """
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .agent_refs import agent_id_property
 
 _ADD_PLAYBOOK_STEP_PARAMETERS = {
     "type": "object",
@@ -21,11 +22,8 @@ _ADD_PLAYBOOK_STEP_PARAMETERS = {
             "type": "string",
             "description": "The prompt template for this step. Supports {input.*} and {steps[N].*} variable substitution.",
         },
-        "agent_id": {
-            "type": "integer",
-            "description": ("ID of the agent that does this step (from platform_list_agents). Give it, or "
-                            "agent_name: there is no default agent, and a step with none is not added."),
-        },
+        "agent_id": agent_id_property("The agent that does this step. Give it, or agent_name: there is no "
+                                      "default agent, and a step with none is not added"),
         "agent_name": {
             "type": "string",
             "description": ("The agent's name or job title as the owner said it (e.g. 'Inventory Watchdog'), "

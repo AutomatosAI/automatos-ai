@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from services.agent_availability import says_who_can_run
+from modules.tools.discovery.agent_made_by import lists_the_team, says_who_made_it
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +20,10 @@ def _visitor_view(agent: Any) -> Dict[str, Any]:
 
 def _widget_turn() -> bool:
     from core.security.surface import widget_turn
-
     return widget_turn()
 
 
-@says_who_can_run  # F244: each agent says whether it can run now
+@lists_the_team  # F244: whether each can run now; FX-012: who made it, and when
 async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent, agent_skills
     from core.models.composio_cache import AgentAppAssignment
@@ -109,6 +108,7 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     }
 
 
+@says_who_made_it  # FX-012: who made it, when, and how it runs
 async def get_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent, Skill, agent_skills
     from core.models.composio_cache import AgentAppAssignment

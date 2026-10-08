@@ -352,10 +352,10 @@ async def _validate_agent_id(db: Session, workspace_id: UUID, agent_id) -> tuple
     if agent_id is None:
         return None, None
     from core.models import Agent
-    try:
-        aid = int(agent_id)
-    except (ValueError, TypeError):
-        return None, f"agent_id must be an integer, got: {agent_id!r}"
+    from modules.tools.discovery.agent_refs import NOT_AN_ID, agent_id_said
+    aid = agent_id_said(agent_id)  # FX-012: 267, "267" or "#267"
+    if aid is None:
+        return None, NOT_AN_ID.format(said=agent_id)
     agent = db.query(Agent).filter(Agent.id == aid, Agent.workspace_id == workspace_id).first()
     # F135 (B67, B87): a switched-off agent was accepted here and then ran the step.
     if not agent or (agent.status or "active") != "active":
