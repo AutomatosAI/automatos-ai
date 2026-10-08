@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { Download, ShieldOff, AlertTriangle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { useGdprEraseSubject, useGdprEraseWorkspace } from '@/hooks/use-gdpr'
@@ -124,22 +125,23 @@ export function CompliancePane() {
             </ul>
 
             {result.gaps?.length > 0 && (
-              <div className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 dark:border-amber-800 dark:bg-amber-950/40">
-                <p className="flex items-center gap-1 text-[11px] font-medium text-amber-800 dark:text-amber-300">
-                  <AlertTriangle className="h-3 w-3" /> Could not delete (documented gaps)
-                </p>
-                {result.gaps.map((g) => (
-                  <p key={g.store} className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-400">
-                    <strong>{g.store}</strong>: {g.reason}
-                  </p>
-                ))}
-              </div>
+              <Alert variant="warning" size="compact" role="note">
+                <AlertTriangle />
+                <AlertDescription className="text-xs">
+                  <p className="font-medium">Could not delete (documented gaps)</p>
+                  {result.gaps.map((g) => (
+                    <p key={g.store} className="mt-0.5 text-muted-foreground">
+                      <strong className="text-foreground">{g.store}</strong>: {g.reason}
+                    </p>
+                  ))}
+                </AlertDescription>
+              </Alert>
             )}
 
             {result.untagged_history && (
               <div className="rounded border border-border px-2 py-1.5">
-                <p className="text-[11px] font-medium">Untagged history ({result.untagged_history.stores.join(', ')})</p>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">{result.untagged_history.reason}</p>
+                <p className="font-medium">Untagged history ({result.untagged_history.stores.join(', ')})</p>
+                <p className="mt-0.5 text-muted-foreground">{result.untagged_history.reason}</p>
               </div>
             )}
           </div>
@@ -151,13 +153,13 @@ export function CompliancePane() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Erase this workspace
         </h3>
-        <div className="flex items-start gap-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs dark:border-red-900 dark:bg-red-950/40">
-          <ShieldOff className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
-          <span className="text-red-800 dark:text-red-300">
+        <Alert variant="destructive" size="compact" role="note" className="bg-destructive/10">
+          <ShieldOff />
+          <AlertDescription className="text-xs text-foreground">
             Irreversible. Deletes every store for this workspace. Type the workspace id
-            {currentWs ? <> (<code className="font-mono">{currentWs}</code>)</> : ''} to confirm.
-          </span>
-        </div>
+            {currentWs ? <> (<code className="font-mono text-destructive">{currentWs}</code>)</> : ''} to confirm.
+          </AlertDescription>
+        </Alert>
         <div className="flex gap-2">
           <input
             type="text"

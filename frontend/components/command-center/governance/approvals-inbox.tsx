@@ -8,15 +8,16 @@
  * decided grants below with a status filter. Grant / Deny / Revoke call the
  * ws-admin-gated API (PRD-196 S2) and optimistically refresh on decision.
  *
- * Reuses the MissionApprovalWidget oversight presentation (tier label + the
- * amber Art.14 note) rather than forking a rival card.
+ * Reuses the approval cards' oversight presentation (OversightNote: the tier
+ * label + the Art.14 note) rather than forking a rival card.
  */
 
 import { useMemo, useState } from 'react'
-import { ShieldAlert, Check, X, Ban, Clock, Pencil } from 'lucide-react'
+import { Check, X, Ban, Clock, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { oversightTierLabel } from '@/components/widgets/MissionApprovalWidget'
+import { OversightNote } from '@/components/widgets/oversight-note'
+import { CardActions, CARD_ACTION_BUTTON, CARD_ACTION_ICON } from '../card-actions'
 import {
   useApprovalGrants,
   useGrantApproval,
@@ -104,44 +105,29 @@ export function GrantCard({ grant }: { grant: ApprovalGrant }) {
         </span>
       </div>
 
-      {/* Art.14 oversight note — reused presentation from MissionApprovalWidget */}
+      {/* Art.14 oversight note — the approval cards' shared presentation */}
       {oversight && (
-        <div
-          className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 dark:border-amber-800 dark:bg-amber-950/40"
-          role="note"
-          aria-label="Human oversight"
-        >
-          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
-              {oversightTierLabel(oversight.tier)}
-              {oversight.risk_class ? ` · ${oversight.risk_class.replace(/_/g, ' ')}` : ''}
-            </p>
-            {oversight.rationale && (
-              <p className="mt-0.5 text-[10px] text-amber-700 dark:text-amber-400">{oversight.rationale}</p>
-            )}
-          </div>
-        </div>
+        <OversightNote tier={oversight.tier} riskClass={oversight.risk_class} rationale={oversight.rationale} />
       )}
 
       {grant.reason && <p className="text-xs text-muted-foreground">{grant.reason}</p>}
 
       {grant.status === PENDING && (
-        <div className="flex gap-2">
-          <Button size="sm" disabled={busy} onClick={() => act(grantMut, 'granted')} className="flex-1">
-            <Check className="h-4 w-4 mr-1" /> Grant
+        <CardActions>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(denyMut, 'denied')} className={CARD_ACTION_BUTTON}>
+            <X className={CARD_ACTION_ICON} /> Deny
           </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(denyMut, 'denied')}>
-            <X className="h-4 w-4 mr-1" /> Deny
+          <Button size="sm" disabled={busy} onClick={() => act(grantMut, 'granted')} className={CARD_ACTION_BUTTON}>
+            <Check className={CARD_ACTION_ICON} /> Grant
           </Button>
-        </div>
+        </CardActions>
       )}
       {grant.status === 'granted' && (
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(revokeMut, 'revoked')}>
-            <Ban className="h-4 w-4 mr-1" /> Revoke
+        <CardActions>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(revokeMut, 'revoked')} className={CARD_ACTION_BUTTON}>
+            <Ban className={CARD_ACTION_ICON} /> Revoke
           </Button>
-        </div>
+        </CardActions>
       )}
     </div>
   )
@@ -270,17 +256,17 @@ function MissionApprovalCard({ mission }: { mission: MissionResponse }) {
         </ol>
       )}
 
-      <div className="flex gap-2">
-        <Button size="sm" disabled={busy} onClick={handleApprove} className="flex-1">
-          <Check className="h-4 w-4 mr-1" /> Approve
+      <CardActions>
+        <Button size="sm" variant="outline" disabled={busy} onClick={handleReject} className={CARD_ACTION_BUTTON}>
+          <X className={CARD_ACTION_ICON} /> Reject
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing((v) => !v)}>
-          <Pencil className="h-4 w-4 mr-1" /> Edit
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditing((v) => !v)} className={CARD_ACTION_BUTTON}>
+          <Pencil className={CARD_ACTION_ICON} /> Edit
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={handleReject}>
-          <X className="h-4 w-4 mr-1" /> Reject
+        <Button size="sm" disabled={busy} onClick={handleApprove} className={CARD_ACTION_BUTTON}>
+          <Check className={CARD_ACTION_ICON} /> Approve
         </Button>
-      </div>
+      </CardActions>
     </div>
   )
 }

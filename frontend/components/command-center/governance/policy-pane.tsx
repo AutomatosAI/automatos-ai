@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import {
   usePolicy,
@@ -107,16 +108,13 @@ export function PolicyPane() {
     <div className="flex flex-col gap-5">
       {/* Honest banner: settings are inert until the plane is enforcing. */}
       {enforcing === false && (
-        <div
-          className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs dark:border-amber-800 dark:bg-amber-950/40"
-          role="note"
-        >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-          <span className="text-amber-800 dark:text-amber-300">
+        <Alert variant="warning" size="compact" role="note">
+          <AlertTriangle />
+          <AlertDescription className="text-xs">
             The policy plane is <strong>OFF</strong> — these settings are saved but take effect only
             when enforcement is enabled. See the “Policy plane” tile above.
-          </span>
-        </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Posture */}

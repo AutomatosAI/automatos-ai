@@ -24,11 +24,8 @@ vi.mock('@/hooks/use-approval-grants', () => ({
   useDenyApproval: () => ({ isLoading: false, mutateAsync: denyMutateAsync }),
 }))
 
-import {
-  ToolApprovalWidget,
-  executedOutcomeLine,
-  oversightTierLabel,
-} from '../ToolApprovalWidget'
+import { ToolApprovalWidget, executedOutcomeLine } from '../ToolApprovalWidget'
+import { oversightTierLabel } from '../oversight-note'
 import type { ToolApprovalWidgetData, WidgetMetadata } from '../types'
 
 const metadata: WidgetMetadata = {
