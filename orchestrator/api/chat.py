@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from core.database.database import SessionLocal, get_db
 from consumers.chatbot import ChatService, StreamingChatService
-from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers
+from api.chat_dispatch import TurnLane, auto_lane, chosen_agent_lane, response_headers, said_before
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
@@ -323,7 +323,7 @@ def _is_super_admin(ctx: RequestContext) -> bool:
 
 
 async def _turn_lane(db: Session, ctx: RequestContext, request: ChatRequest, message_text: str,
-                     history_length: int) -> TurnLane:
+                     history_length: int, before: str = "") -> TurnLane:
     """PRD-256 US-010 (D2): the agent the owner chose answers; otherwise Auto does.
 
     Every workspace has its own Auto agent: its model, persona and tools come from that
@@ -332,7 +332,7 @@ async def _turn_lane(db: Session, ctx: RequestContext, request: ChatRequest, mes
         return chosen_agent_lane(db, _explicitly_chosen_agent(db, ctx.workspace_id, request.agentId))
     return await auto_lane(
         db, ctx.workspace_id, auto_agent_id=get_default_agent_id(db, ctx.workspace_id),
-        message_text=message_text, history_length=history_length,
+        message_text=message_text, history_length=history_length, before=before,
     )
 
 
@@ -435,7 +435,7 @@ async def stream_chat(
     page_ctx = sanitize_page_context(request.context)
     history = _turn_history(chat_service, chat_id, current_msg, page_ctx)
     message_text = _message_text(parts)
-    lane = await _turn_lane(db, ctx, request, message_text, len(history))
+    lane = await _turn_lane(db, ctx, request, message_text, len(history), said_before(history))
     logger.info("[chat] agent_id=%s answers the turn", lane.agent_id)
     # The request-scoped ``db`` is never handed to the turn: FastAPI closes it when the
     # response ends, which may be before the turn does.

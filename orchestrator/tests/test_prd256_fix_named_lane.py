@@ -8,7 +8,8 @@ agents called OPS, "Get OPS to…" could only fail. Here, through the dispatch (
 - a name shared by several active agents is an ASSIGN turn that asks which, listing each as FX-012's
   refusal does, and never files a copy; the dispatch keeps that directive over the ticket's;
 - the answer, "267, the operations one", is OPS 267's ticket, filed by its agent_id;
-- a bare number is an answer to any numbered question: it hands nothing over.
+- a bare number is an answer to any numbered question: it hands nothing over;
+- P256-FIX-RVW-33: the answer after "Give #1057 to OPS" hands #1057 on to the agent picked, never a copy.
 
 No model is called and no database is opened: the roster is the test's.
 """
@@ -18,7 +19,7 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from api.chat_dispatch import lane_for
+from api.chat_dispatch import lane_for, said_before
 from consumers.chatbot.addressed_agents import addressed_by_name, id_reply
 from consumers.chatbot.auto import ASSIGN_TOOL_HINTS, Action, AutoBrain, Complexity, ComplexityAssessment
 from consumers.chatbot.handoffs import the_lane
@@ -99,6 +100,63 @@ def test_the_id_given_after_the_clash_is_that_agents_ticket_by_its_id(said, agen
 def test_a_number_that_does_not_pick_an_agent_hands_nothing_over(said):
     assert _turn(said).assessment.action == Action.RESPOND
     assert id_reply(said, [agent for agent in ROSTER if agent.id != AUTO]) is None
+
+
+# ── P256-FIX-RVW-33: the card clashed on rides to the answer ───────────────────
+
+def _two_turns(first, answer):
+    """Night 12's two turns through the dispatch: ``first`` (which asks which), then ``answer``, with the
+    history the chat route reads (the answer is saved before the lane is picked)."""
+    asked = _turn(first).assessment
+    history = [
+        {"role": "user", "parts": [{"type": "text", "text": first}]},
+        {"role": "assistant", "parts": [{"type": "text", "text": "Which OPS? 267 · OPS · Operations Manager …"}]},
+        {"role": "user", "parts": [{"type": "text", "text": answer}, {"type": "text", "text": "[page: board]"}]},
+    ]
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=Action.RESPOND, reasoning="tiers")
+    return asked, lane_for(AUTO, the_lane(_Brain(), answer, tiers), answer, said_before(history)).assessment
+
+
+@pytest.mark.parametrize("answer, agent_id", [("267, the operations one", OPS), ("agent 284", SHOP_OPS)])
+def test_the_id_given_after_a_cards_clash_hands_that_card_on(answer, agent_id):
+    asked, verdict = _two_turns("Give #1057 to OPS", answer)
+
+    assert 'platform_assign_task with task_id "#1057"' in asked.context_directive
+    assert (verdict.action, verdict.target_agent_id, verdict.target_agent_name) == (Action.ASSIGN, agent_id, "OPS")
+    directive = verdict.context_directive
+    assert f'platform_assign_task with task_id "#1057" and agent_name "OPS" and agent_id {agent_id}' in directive
+    assert "platform_create_task" not in directive and "do NOT create a new card" in directive
+
+
+def test_a_deferred_card_stays_deferred_after_the_answer():
+    _asked, verdict = _two_turns("Give #1057 to OPS, no rush", "267, the operations one")
+
+    assert 'task_id "#1057"' in verdict.context_directive and "the user asked to defer it" in verdict.context_directive
+
+
+@pytest.mark.parametrize("first", [
+    "Get OPS to reorder the green stock under 50 kg.",     # a ticket clash: no card to carry
+    "Give #1057 to CHRISTMAS BOX",                          # the card went to another name
+    "Approve #1057",                                         # a card acted on, handed to nobody
+])
+def test_the_id_given_after_no_cards_clash_still_files_the_ticket(first):
+    _asked, verdict = _two_turns(first, "267, the operations one")
+
+    assert (verdict.action, verdict.target_agent_id) == (Action.ASSIGN, OPS)
+    assert 'platform_create_task' in verdict.context_directive and "#1057" not in verdict.context_directive
+    assert 'assigned_agent_name="OPS" and agent_id=267' in verdict.context_directive
+
+
+@pytest.mark.parametrize("history, said", [
+    ([], ""),
+    ([{"role": "user", "parts": [{"type": "text", "text": "267, the operations one"}]}], ""),
+    ([{"role": "user", "parts": [{"type": "file", "url": "x"}]}, {"role": "user", "parts": []}], ""),
+    ([{"role": "user", "parts": [{"type": "text", "text": "Give #1057 to OPS"}]},
+      {"role": "assistant", "parts": [{"type": "text", "text": "Which one?"}]},
+      {"role": "user", "parts": [{"type": "text", "text": "267"}]}], "Give #1057 to OPS"),
+])
+def test_said_before_is_the_owners_message_before_the_latest(history, said):
+    assert said_before(history) == said
 
 
 # ── names and cards ───────────────────────────────────────────────────────────

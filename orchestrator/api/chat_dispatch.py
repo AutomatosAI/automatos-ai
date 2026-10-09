@@ -22,7 +22,8 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from consumers.chatbot.auto import Action, AutoBrain, ComplexityAssessment, apply_assign_bias
+from consumers.chatbot.auto import Action, AutoBrain, ComplexityAssessment, apply_assign_bias, is_deferred_phrasing
+from consumers.chatbot.clash_card import clashed_card, said_before
 from consumers.chatbot.handoffs import PLATFORM_HINT, needs_no_apps, with_card_directive
 
 logger = logging.getLogger(__name__)
@@ -54,13 +55,16 @@ def chosen_agent_lane(db: Session, agent_id: int) -> TurnLane:
     return TurnLane(agent_id=agent_id, session_agent=is_cli_agent(db, agent_id))
 
 
-def _assign_lane(auto_agent_id: int, assessment: ComplexityAssessment, message_text: str) -> TurnLane:
+def _assign_lane(auto_agent_id: int, assessment: ComplexityAssessment, message_text: str, before: str) -> TurnLane:
     """PRD-224 US-004: Auto files the board ticket for the named agent, then confirms in
     one line. Checked before the platform hint so a "platform" hint can't collapse it. A directive
-    the lane already wrote (FX-014: several agents carry the name, so Auto asks which) is kept."""
+    the lane already wrote (FX-014: several agents carry the name, so Auto asks which) is kept.
+    P256-FIX-RVW-33: the id given after a card's clash hands on the card the owner said ``before``."""
     asks_which = assessment.context_directive
     deferred = apply_assign_bias(assessment, message_text)
-    assessment = with_card_directive(assessment, message_text, deferred=deferred)
+    card = clashed_card(assessment, message_text, before)
+    deferred = deferred or bool(card and is_deferred_phrasing(before))
+    assessment = with_card_directive(assessment, message_text, deferred=deferred, card=card)
     if asks_which:
         assessment = dataclasses.replace(assessment, context_directive=asks_which)
     logger.info(
@@ -70,10 +74,11 @@ def _assign_lane(auto_agent_id: int, assessment: ComplexityAssessment, message_t
     return TurnLane(agent_id=auto_agent_id, assessment=assessment)
 
 
-def lane_for(auto_agent_id: int, assessment: ComplexityAssessment, message_text: str) -> TurnLane:
-    """The lane for AutoBrain's verdict. Auto answers on every lane."""
+def lane_for(auto_agent_id: int, assessment: ComplexityAssessment, message_text: str, before: str = "") -> TurnLane:
+    """The lane for AutoBrain's verdict. Auto answers on every lane. ``before``: the owner's
+    message before this one (an answer to "which one?" hands on the card that message named)."""
     if assessment.action == Action.ASSIGN:
-        return _assign_lane(auto_agent_id, assessment, message_text)
+        return _assign_lane(auto_agent_id, assessment, message_text, before)
     platform = PLATFORM_HINT in (assessment.tool_hints or [])
     if assessment.action == Action.MISSION and not platform:
         logger.info("[Auto] MISSION suggested (complexity=%s)", assessment.complexity.value)
@@ -90,6 +95,7 @@ def lane_for(auto_agent_id: int, assessment: ComplexityAssessment, message_text:
 
 async def auto_lane(
     db: Session, workspace_id: Any, *, auto_agent_id: int, message_text: str, history_length: int,
+    before: str = "",
 ) -> TurnLane:
     """No agent chosen: AutoBrain classifies the message and Auto answers on its lane."""
     assessment = await AutoBrain(db, str(workspace_id)).assess(message_text, history_length)
@@ -97,7 +103,7 @@ async def auto_lane(
         "[Auto] Complexity=%s action=%s tool_hints=%s reasoning=%s",
         assessment.complexity.value, assessment.action.value, assessment.tool_hints, assessment.reasoning,
     )
-    return lane_for(auto_agent_id, assessment, message_text)
+    return lane_for(auto_agent_id, assessment, message_text, before)
 
 
 def response_headers(assessment: Optional[ComplexityAssessment]) -> Dict[str, str]:
@@ -121,4 +127,4 @@ def response_headers(assessment: Optional[ComplexityAssessment]) -> Dict[str, st
     return headers
 
 
-__all__ = ["TurnLane", "auto_lane", "chosen_agent_lane", "lane_for", "response_headers"]
+__all__ = ["TurnLane", "auto_lane", "chosen_agent_lane", "lane_for", "response_headers", "said_before"]

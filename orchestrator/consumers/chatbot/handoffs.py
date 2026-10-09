@@ -643,10 +643,11 @@ def card_directive(card: str, agent_name: str, *, deferred: bool, agent_id: Opti
     )
 
 
-def with_card_directive(assessment: Any, message: Optional[str], *, deferred: bool) -> Any:
+def with_card_directive(assessment: Any, message: Optional[str], *, deferred: bool, card: Optional[str] = None) -> Any:
     """An ASSIGN turn that hands a card on to a resolved agent carries the card's
-    directive in place of the new-ticket one; any other turn is returned as it is."""
-    card = handed_card(message)
+    directive in place of the new-ticket one; any other turn is returned as it is.
+    ``card``: the card an earlier message handed on, for an answer that names none (RVW-33)."""
+    card = handed_card(message) or card
     if not card or assessment.target_agent_id is None or not assessment.target_agent_name:
         return assessment
     return replace(
