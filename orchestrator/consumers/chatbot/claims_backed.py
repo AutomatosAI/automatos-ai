@@ -56,6 +56,15 @@ it reports nothing ("Can you confirm the invoice was paid?"), unless it opens on
 claim comes before a clause break ("I've sent it to Declan, want me to chase?"). "Mission #0365 has been
 cancelled." after a read of #0365 says what the read found: a has-been or was claim about a number a
 done read of the turn names is no claim.
+P256-FIX-RVW-35: common report shapes escaped. A looking verb before the done verb ("I've reviewed and approved
+the card.", "I checked the board and approved #0931.") claims the done verb, a family's; a line that opens on
+its verb, after a bullet, a tick, "Okay," or "Just" ("Sent the email to Declan.", "Okay, sent it to Sam.") with
+an object after it ("Scheduled for Monday", "Approved by Rosa" and a label like "Completed" say a state), or on
+a numbered thing ("Card 0931 moved to Done."), is a claim; so is a bulleted "- Task created" with no full stop
+and a ticked "✅ Email sent to Sam". "Done:" or "Done —" is the bare done claim, unless a claim of its sentence
+follows ("Done — I've created the agent." is created); "went ahead and" is an adverb of the first person, an
+adverb may follow "been" ("has been successfully created"), and "<noun>'s been <verb>" is the has-been shape
+("The card's been approved.", never "Nothing's been sent" or "who's been assigned").
 """
 from __future__ import annotations
 
@@ -84,19 +93,21 @@ _DONE_VERB = rf"(?!(?:{_LOOKING})\b)(?:[a-z]+ed|dm['’]d|sent|made|set|put|give
              rf"kept|told|taken|brought|chosen|paid|sold|cut|shut|drawn|thrown)\b"
 _PASSIVE_VERB = rf"(?!(?:{_STATES})\b){_DONE_VERB}"
 _ADVERBS = r"(?:(?:now|just|already|also|successfully|all)\s+)*"
-_FIRST_ADVERBS = r"(?:(?:now|just|already|also|then|successfully|correctly|finally|actually|gone ahead and)\s+)*"
+_FIRST_ADVERBS = (r"(?:(?:now|just|already|also|then|successfully|correctly|finally|actually|gone ahead and|"
+                  r"went ahead and)\s+)*")
 # The shapes the completed-action pattern (``COMPLETED_ACTION``, below the families) reads. A match
 # ends on the claim's verb where the shape has one; a simple past is the group ``past``.
 _SHAPES = (
     rf"\bI(?:'ve|’ve| have)\s+{_FIRST_ADVERBS}{_DONE_VERB}"
-    rf"|\b(?:has|have)\s+{_ADVERBS}been\s+{_PASSIVE_VERB}"
-    rf"|\b(?:it|that|this|everything|they)(?:'s|’s|'ve|’ve)\s+{_ADVERBS}been\s+{_PASSIVE_VERB}"
+    rf"|\b(?:has|have)\s+{_ADVERBS}been\s+{_ADVERBS}{_PASSIVE_VERB}"
+    rf"|\b(?!(?:who|which|what|where|there|here|nothing|nobody|none)['’])[\w-]+(?:'s|’s|'ve|’ve)\s+{_ADVERBS}been\s+"
+    rf"{_ADVERBS}{_PASSIVE_VERB}"
     rf"|(?P<past>\b(?:was|were)\s+{_ADVERBS}{_PASSIVE_VERB})"
     rf"|\b(?:it'?s|it’s|they'?re|they’re|is|are)\s+now\s+(?:(?:on|in)\s+(?:your|the)\b|running\b|live\b|"
     rf"{_DONE_VERB})"
     rf"|\b{_DONE_VERB}(?=\s*[!.]?\s*[✅✔☑])"
     rf"|\byou(?:'ll|’ll| will| should)\s+now\s+see\b|\byou should see (?:it|this|them)\b"
-    rf"|^\s*(?:all\s+)?(?:done|sorted|set)\s*[.!,]")
+    rf"|^\s*(?:all\s+)?(?:(?:done|sorted|set)\s*[.!,]|done\s*(?::|[—–]|-\s))")
 # P256-FIX-RVW-25: what a stative passive or "got/went" says was done to a thing ("The post is
 # published.", "The post got sent."); a state of it ("is based on", "is assigned to Scout") is none.
 _OUTCOMES = (r"(?:done|sorted|fixed|published|posted|scheduled|created|sent|emailed|submitted|approved|closed|"
@@ -168,6 +179,9 @@ _ON_ITS_VERB = re.compile(rf"\b{_DONE_VERB}$", re.I)
 _FIRST_PERSON = re.compile(r"I(?:'ve|’ve| have)?\s", re.I)
 # "It went out." is a send (RVW-25); "went live", like "is now live", says only that work happened.
 _GONE_OUT = re.compile(r"\bout$", re.I)
+# P256-FIX-RVW-35: "Done —" or "Done:" before a claim of its own sentence ("Done — I've created the agent.")
+# introduces that claim; alone ("Done — email's out to Declan.") it is the bare done claim.
+_DONE_FIRST = re.compile(r"^\s*(?:all\s+)?done\b", re.I)
 # The claims that say only that work was done ("Done.", "it's been done", "is now live"): the nudge's
 # "done". Any other verb in no family ("I've prepared a summary") is the line's alone.
 SAYS_DONE = frozenset({"", "done"})
@@ -317,6 +331,20 @@ def _said_as(verb: str) -> str:
 _AUXILIARY = r"(?:is|are|was|were|be|been|being|has|have|had)\b"
 _DID = "(?:" + "|".join(sorted({_said_as(verb) for verbs, _ in FAMILIES for verb in verbs} | {_said_as(_MADE)},
                                reverse=True)) + ")"
+# P256-FIX-RVW-35: a looking verb before the done verb ("I've reviewed and approved the card.", "I've checked
+# the board and approved #0931."): the done verb, a family's, is the claim.
+_LOOKED_AND = rf"(?:{_LOOKING})\b[^:;—–]*?\b(?:and|then)\s+(?:(?:then|also|just|now)\s+)?"
+_NEGATED = r"(?!.*(?:\b(?:not|never|nothing|no|none|yet)\b|n['’]t\b))"
+# … a line that opens on its verb, after a bullet, a tick, "Okay," ("Sent the email to Declan.", "- Cancelled
+# the order", "Okay, sent it."), or on a numbered thing ("Card 0931 moved to Done."); the "#" is read off.
+_LEAD = r"^\s*(?:[-•+✅✔☑]\uFE0F?\s*)?(?:(?:okay|ok|alright|great|perfect|sure|right)\s*[,!]\s*)?"
+_NUMBERED = rf"(?P<numbered>(?:(?!{_AUXILIARY})[\w'’-]+\s+){{1,2}}[\w-]*\d{{3,}}[\w-]*\s+)"
+# A verb that opens its line takes an object ("Sent the email", "Sent Declan the invoice."): "Scheduled for
+# Monday", "Approved by Rosa", "Approved cards stay in Done" and a label ("Completed", "Renamed Operator") say a
+# state; "Approved." alone is the bare shape's.
+_OBJECT = (r"(?=(?:\s+(?:up|off|out|over|back))?(?:\s+(?:the|a|an|your|his|her|their|its|it|them|this|that|"
+           r"these|those|him|you|everything|all)\b|\s+to\s+(?:the|your|you|him|her|them|(?-i:[A-Z]))|"
+           r"\s+(?!(?:in|on|at|by|for|from|of|with|to)\b)(?-i:[A-Z])[\w'’-]*(?=\s*[.!,]|\s+\w)))")
 # The ONE completed-action pattern: the shapes above and, since RVW-25, a stative passive ("The post is
 # published."), "got/went/gone" ("The post got sent.", "It went out."), the first-person simple past
 # ("I sent the email to Declan.") and a sentence that is only "<Noun> <participle>." ("Email sent.",
@@ -325,10 +353,13 @@ COMPLETED_ACTION = re.compile(
     rf"{_SHAPES}"
     rf"|(?P<state>\b(?:is|are|(?:it|that|this|everything|they)['’](?:s|re))\s+{_ADVERBS}{_OUTCOMES})"
     rf"|(?P<said>\b(?:got|went|gone)\s+{_ADVERBS}(?:{_OUTCOMES}|out\b|live\b))"
-    rf"|(?P<mine>\bI\s+{_FIRST_ADVERBS}{_DID})"
-    rf"|(?P<bare>^\s*(?!.*(?:\b(?:not|never|nothing|no|none|yet)\b|n['’]t\b))"
+    rf"|\bI(?:'ve|’ve| have)\s+{_FIRST_ADVERBS}{_LOOKED_AND}{_DID}"
+    rf"|(?P<mine>\bI\s+{_FIRST_ADVERBS}(?:{_LOOKED_AND})?{_DID})"
+    rf"|(?P<bare>^\s*(?:(?P<bullet>[-•+])\s*)?{_NEGATED}"
     rf"(?:(?!{_AUXILIARY})[\w#'’-]+\s+){{0,3}}(?:{_DID}|done\b)"
-    rf"(?=(?:\s+(?:up|off|on))?\s*[.!]+\s*$))", re.I)
+    rf"(?=(?:\s+(?:up|off|on))?\s*(?:[.!]+\s*$|(?(bullet)$|(?!)))))"
+    rf"|(?P<ticked>^\s*[✅✔☑]\uFE0F?\s*{_NEGATED}(?:(?!{_AUXILIARY})[\w'’-]+\s+){{0,3}}{_DID})"
+    rf"|(?P<opens>{_LEAD}{_NUMBERED}?{_FIRST_ADVERBS}(?:{_LOOKED_AND})?{_DID}(?(numbered)|{_OBJECT}))", re.I)
 
 
 def _family(verb: str, sentence: str) -> Optional[Backs]:
@@ -401,7 +432,7 @@ def _history_or_denial(sentence: str, match: re.Match) -> bool:
     says what a read found ("I found that the boxes are posted"); or a simple past or a stative passive
     follows a denial ("Nothing was", "No post is") or a relative pronoun ("that were identified")."""
     before = sentence[: match.start()]
-    past = any(match.group(shape) for shape in ("past", "said", "mine", "bare"))
+    past = any(match.group(shape) for shape in ("past", "said", "mine", "bare", "ticked", "opens"))
     if past and _HISTORY.search(sentence):
         return True
     if (match.group("state") or match.group("said")) and _READ_SAYS.search(before):
@@ -411,9 +442,10 @@ def _history_or_denial(sentence: str, match: re.Match) -> bool:
 
 def _found_by_a_read(sentence: str, match: re.Match, read: FrozenSet[str]) -> bool:
     """Whether a has-been or was claim names a number a done read of the turn named (P256-FIX-RVW-34):
-    "Mission 0365 has been cancelled." after a read of #0365 is what the read found. "I've cancelled
-    0365" is the writer's own work."""
-    if not read or _FIRST_PERSON.match(match.group(0)) or not _REPORTED.search(match.group(0)):
+    "Mission 0365 has been cancelled." after a read of #0365 is what the read found, as is "Card 0931
+    moved to Done." (RVW-35). "I've cancelled 0365" is the writer's own work."""
+    said = _REPORTED.search(match.group(0)) or match.group("numbered")
+    if not read or _FIRST_PERSON.match(match.group(0)) or not said:
         return False
     return any(re.search(rf"(?<!\d){re.escape(number)}(?!\d)", sentence) for number in read)
 
@@ -444,7 +476,7 @@ def _claims_in(sentence: str, first_person: bool, read: FrozenSet[str]) -> List[
             continue
         verbs.append(_verb(sentence, match.group(0), match.end()))
         verbs.extend(_coordinated(sentence, match.end(), upto))
-    return verbs
+    return verbs[1:] if len(verbs) > 1 and not verbs[0] and _DONE_FIRST.match(sentence) else verbs
 
 
 def _own_words(text: str) -> str:

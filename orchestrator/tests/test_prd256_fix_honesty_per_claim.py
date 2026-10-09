@@ -617,3 +617,90 @@ def test_rvw34_a_status_with_no_read_of_its_number_is_still_caught():
     assert nudged(answer) == "cancelled"
     assert nudged(answer, _platform("platform_get_task", {"task_id": "#0366"})) == "cancelled"   # another card's read
     assert nudged("I've cancelled #0365.", READ_0365) == "cancelled"        # the writer's own work, not a finding
+
+
+# ── P256-FIX-RVW-35: common claim shapes still escaped ───────────────────────
+# Each was no claim at 80cd928ec (claims == [] with no write): a looking verb before the done verb,
+# list shapes, a subject-less verb, "went ahead and", an adverb after "been", "<noun>'s been".
+CARD_0931_DONE = _platform("platform_update_task_status", {"task_id": "#0931", "status": "done"})
+ORDER_CANCELLED = _composio("SHOPIFY_CANCEL_ORDER")
+READ_0931 = _platform("platform_get_task", {"task_id": "#0931"})
+# (the answer, its claims' verbs, its backing writes)
+ESCAPED_RVW35 = [
+    ("I've reviewed and approved the card.", ["approved"], [CARD_DONE]),
+    ("I've checked the board and approved #0931.", ["approved"], [CARD_0931_DONE]),
+    ("I've confirmed and sent the email.", ["sent"], [EMAIL_SENT]),
+    ("I checked the board and approved #0931.", ["approved"], [CARD_0931_DONE]),
+    ("- Task created\n- Email sent", ["created", "sent"], [CARD_MADE, EMAIL_SENT]),
+    ("✅ Task created\n✅ Email sent to Sam", ["created", "sent"], [CARD_MADE, EMAIL_SENT]),
+    ("Done:\n- Task created", ["", "created"], [CARD_MADE]),
+    ("Done — email's out to Declan and the ticket's closed.", [""], [EMAIL_SENT]),
+    ("Sent the email to Declan.", ["sent"], [EMAIL_SENT]),
+    ("Okay, sent the email to Declan.", ["sent"], [EMAIL_SENT]),
+    ("Just sent the email.", ["sent"], [EMAIL_SENT]),
+    ("- Sent Declan the invoice.", ["sent"], [EMAIL_SENT]),
+    ("Cancelled the order for you.", ["cancelled"], [ORDER_CANCELLED]),
+    ("Card #0931 moved to Done.", ["moved"], [CARD_0931_DONE]),
+    ("I went ahead and cancelled the order.", ["cancelled"], [ORDER_CANCELLED]),
+    ("Task #0931 has been successfully created.", ["created"], [CARD_MADE]),
+    ("The card's been approved.", ["approved"], [CARD_DONE]),
+]
+
+
+@pytest.mark.parametrize("answer, verbs, own", ESCAPED_RVW35, ids=[case[0] for case in ESCAPED_RVW35])
+def test_rvw35_an_escaped_shape_is_a_claim(answer, verbs, own):
+    assert [verb for verb, _ in claims(answer)] == verbs
+    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert nudged(answer) == (verbs[0] or "done")
+    assert honesty_lines(_receipts(*own), answer) == []
+    assert nudged(answer, *own) is None
+
+
+@pytest.mark.parametrize("answer, verbs, _own", [case for case in ESCAPED_RVW35 if case[1][0]],
+                         ids=[case[0] for case in ESCAPED_RVW35 if case[1][0]])
+def test_rvw35_a_saved_memory_does_not_back_the_claim(answer, verbs, _own):
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(" or ".join(dict.fromkeys(verbs)))]
+
+
+def test_rvw35_one_list_line_its_write_backs_leaves_the_other_named():
+    assert honesty_lines(_receipts(CARD_MADE), "✅ Task created\n✅ Email sent to Sam") == [_named("sent")]
+    assert honesty_lines(_receipts(EMAIL_SENT), "- Task created\n- Email sent") == [_named("created")]
+
+
+def test_rvw35_done_before_a_claim_of_its_sentence_introduces_it():
+    assert [verb for verb, _ in claims("Done — I've created the agent.")] == ["created"]
+    assert [verb for verb, _ in claims("Done, it's approved.")] == ["approved"]
+    assert nudged("Done — I've created a new agent called REPORT GENERATOR.") == "created"
+
+
+def test_rvw35_a_numbered_card_a_read_of_the_turn_named_is_what_the_read_found():
+    answer = "Card #0931 moved to Done."
+    assert honesty_lines(_receipts(READ_0931), answer) == []
+    assert nudged(answer, READ_0931) is None
+    assert nudged(answer, _platform("platform_get_task", {"task_id": "#0932"})) == "moved"   # another card's read
+
+
+@pytest.mark.parametrize("answer", [
+    "I've reviewed the card.",                                              # looking alone is no claim
+    "I've checked the board and there's nothing to approve.",
+    "Scheduled for Monday.",                                                # a verb first with no object: a state
+    "Approved by Rosa.",
+    "Approved cards stay in Done.",
+    "Completed",                                                            # a label
+    "Renamed Operator",
+    "Step 2 saved this as stock_report.",                                   # a step, no card's number
+    "- Not sent yet",                                                       # a denial
+    "Nothing's been sent yet.",
+    "Scout is the agent who's been assigned.",                              # a relative clause
+    "Done-for-you setup is ready.",
+    "Sent the invoice to Rosa yesterday.",                                  # history
+    "I checked and approved it at 9am.",
+    "Here's what I've reviewed and approved below.",                        # the reply's own content
+    "Once I've checked and approved it, I'll tell you.",                    # a plan word
+    "> Sent the email to Declan.",                                          # quoted
+    "```\n✅ Email sent to Sam\n```",                                        # fenced
+    "Can you confirm you sent the email to Declan?",                        # a question
+])
+def test_rvw35_an_exempt_sentence_of_the_new_shapes_is_no_claim(answer):
+    assert claims(answer) == []
+    assert honesty_lines([], answer) == []
