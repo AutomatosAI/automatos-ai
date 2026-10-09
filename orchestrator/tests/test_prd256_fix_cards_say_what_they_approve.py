@@ -263,6 +263,13 @@ def test_an_attachment_is_named_by_the_file_it_attaches():
     assert "- attachment: menu.pdf (from ws/7/menu.pdf)" in asked             # its source, always
 
 
+def test_a_long_attachment_path_is_shown_whole_never_cut():
+    deep = "/".join(["workspace-files"] * 12) + "/payroll-2026.xlsx"
+    asked = send_question("send through GMAIL_SEND_EMAIL", {"to": SUPPLIER, "attachment": {"name": "menu.pdf", "s3key": deep}})
+
+    assert len(deep) > 120 and f"- attachment: menu.pdf (from {deep})" in asked.splitlines()
+
+
 def test_every_other_field_the_send_carries_is_on_the_card():
     """Fail closed: a recipient under a name the card does not know is still shown."""
     hidden = [f"member{n:02d}@club-members.example" for n in range(8)]

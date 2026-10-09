@@ -16,6 +16,7 @@ read (an object, a flag, a list holding one) refuses the call before any grant
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from modules.tools.discovery.card_question_text import said_line, shown, value_line
@@ -117,18 +118,23 @@ def _readable(item: Any) -> bool:
 
 
 def _file_name(item: Any) -> str:
-    """The file an attachment attaches: a path whole; a file object's name with every source it
+    """The file an attachment attaches, uncut: a path whole; a file object's name with every source it
     names ("invoice.pdf (from ws/7/payroll.xlsx)"), its sources alone, or the object as it is."""
     if not isinstance(item, dict):
-        return shown(item)
+        return _whole(item)
     name, sources = _first_text(item, FILE_NAME_KEYS), NAMED_JOIN.join(_texts(item, FILE_SOURCE_KEYS))
     if name and sources:
-        return shown(NAMED_FROM.format(name=name, source=sources))
-    return shown(name or sources or item)
+        return NAMED_FROM.format(name=name, source=sources)
+    return name or sources or _whole(json.dumps(item, ensure_ascii=False, sort_keys=True, default=str))
+
+
+def _whole(value: Any) -> str:
+    """``value`` on one line, never cut: the file a click attaches is shown in full."""
+    return " ".join(str(value).split())
 
 
 def _texts(item: Dict[str, Any], keys: Tuple[str, ...]) -> List[str]:
-    return [" ".join(str(item[key]).split()) for key in keys if str(item.get(key) or "").strip()]
+    return [_whole(item[key]) for key in keys if str(item.get(key) or "").strip()]
 
 
 def _first_text(item: Dict[str, Any], keys: Tuple[str, ...]) -> str:
