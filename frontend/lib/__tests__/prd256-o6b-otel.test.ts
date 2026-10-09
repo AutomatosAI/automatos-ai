@@ -75,11 +75,16 @@ describe('the provider', () => {
   })
 
   it('exports no query value, and the span still answers for its context', async () => {
+    // As Next.js names its request span (seen live): the full target, query and all.
     const [span] = await exported({}, (tracer) =>
-      tracer.startSpan('GET /chat', { attributes: { 'http.target': '/chat?id=SECRET&page=2', 'next.route': '/chat' } }))
-    expect(span.attributes['http.target']).toBe('/chat?id=REDACTED&page=REDACTED')
-    expect(span.attributes['next.route']).toBe('/chat')
-    expect(span.name).toBe('GET /chat')
+      tracer.startSpan('POST /api/chat?id=SECRET&page=2', { attributes: {
+        'next.span_name': 'POST /api/chat?id=SECRET&page=2', 'http.target': '/api/chat?id=SECRET&page=2',
+        'next.route': '/api/chat',
+      } }))
+    expect(span.name).toBe('POST /api/chat?id=REDACTED&page=REDACTED')
+    expect(span.attributes['next.span_name']).toBe('POST /api/chat?id=REDACTED&page=REDACTED')
+    expect(span.attributes['http.target']).toBe('/api/chat?id=REDACTED&page=REDACTED')
+    expect(span.attributes['next.route']).toBe('/api/chat')
     expect(span.spanContext().traceId).toMatch(/^[0-9a-f]{32}$/)
     expect(JSON.stringify(span.attributes)).not.toContain('SECRET')
   })

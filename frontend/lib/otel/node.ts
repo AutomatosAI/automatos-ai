@@ -20,16 +20,19 @@ import {
   type SpanExporter,
 } from '@opentelemetry/sdk-trace-node'
 
-import { DEFAULT_SERVICE_NAME, redactedAttributes, samplerRatio } from './settings'
+import { DEFAULT_SERVICE_NAME, redactQuery, redactedAttributes, samplerRatio } from './settings'
 
-/** Wraps an exporter: each span goes out with its URL attributes' query values redacted. */
+/** Wraps an exporter: each span goes out with the query values in its name and URL attributes redacted. */
 export class RedactingExporter implements SpanExporter {
   constructor(private readonly inner: SpanExporter) {}
 
   export(spans: ReadableSpan[], done: Parameters<SpanExporter['export']>[1]): void {
     // The span itself stays the prototype, so spanContext() and the rest still answer.
     const redacted = spans.map((span) =>
-      Object.create(span, { attributes: { value: redactedAttributes({ ...span.attributes }), enumerable: true } }),
+      Object.create(span, {
+        name: { value: redactQuery(span.name), enumerable: true },
+        attributes: { value: redactedAttributes({ ...span.attributes }), enumerable: true },
+      }),
     )
     this.inner.export(redacted, done)
   }

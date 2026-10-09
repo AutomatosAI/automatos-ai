@@ -8,8 +8,10 @@ export const DEFAULT_SERVICE_NAME = 'automatos-web'
 export const DEFAULT_SAMPLER_RATIO = 1.0
 export const REDACTED = 'REDACTED'
 
-/** URL-shaped span attributes whose query values never leave (Principle 5). */
-export const URL_ATTRIBUTES = ['http.url', 'http.target', 'url.full', 'url.query'] as const
+/** URL-shaped span attributes whose query values never leave (Principle 5). Next.js
+ * also names its request span after the full target ("POST /api/chat?x=1"), and puts
+ * that name in `next.span_name`, so the name and that attribute are redacted too. */
+export const URL_ATTRIBUTES = ['http.url', 'http.target', 'url.full', 'url.query', 'next.span_name'] as const
 
 const ON = new Set(['true', '1', 'yes', 'on'])
 
