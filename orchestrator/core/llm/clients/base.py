@@ -97,11 +97,12 @@ def request_max_tokens(config: Any) -> int:
 
 
 # Claude 4.6 and later go out with no temperature/top_p/top_k (PRD-256 US-008):
-# Opus 4.7+, Sonnet 5+, Fable and Mythos answer them with a 400; Opus and Sonnet
-# 4.6 take them, but the model switch is one line only when the whole 4.6+ family
-# shares one request shape. Matches API, Bedrock and OpenRouter ids
+# Opus 4.7+, Sonnet 5+, Haiku 5+, Fable and Mythos answer them with a 400; Opus and
+# Sonnet 4.6 take them, but the model switch is one line only when the whole 4.6+
+# family shares one request shape. Matches API, Bedrock and OpenRouter ids
 # ("claude-sonnet-5", "anthropic.claude-opus-4-7", "anthropic/claude-sonnet-4.6").
-_REJECTS_SAMPLING = re.compile(r"claude-((opus|sonnet)-4[.-][6-9]|opus-5|sonnet-5|fable|mythos)")
+# Haiku 5.5 sent temperature and got "`temperature` is deprecated for this model" (9 Oct).
+_REJECTS_SAMPLING = re.compile(r"claude-((opus|sonnet)-4[.-][6-9]|(opus|sonnet|haiku)-[5-9]|fable|mythos)")
 # The older Claude 4 models (Haiku 4.5, Sonnet 4.5) answer temperature AND top_p
 # together with a 400: they take one of the two.
 _CLAUDE = re.compile(r"claude-")
