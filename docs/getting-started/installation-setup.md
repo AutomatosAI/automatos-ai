@@ -44,7 +44,7 @@ Before installing Automatos AI, ensure your host environment satisfies the follo
 - **10GB free disk space** for persistent volumes and container images
 - **Port Availability**: `3000` (frontend), `8000` (backend), `5432` (PostgreSQL), `6379` (Redis), `9000`/`9001` (MinIO)
 
-Sources: [docker-compose.yml:1-24](../../docker-compose.yml#L1-L24), [orchestrator/Dockerfile:1-8](../../orchestrator/Dockerfile#L1-L8), [frontend/Dockerfile:1-9](../../frontend/Dockerfile#L1-L9)
+Sources for service ports: [docker-compose.yml:41-129](../../docker-compose.yml#L41-L129), [docker-compose.yml:293-370](../../docker-compose.yml#L293-L370)
 
 ---
 
@@ -59,12 +59,12 @@ cd automatos-ai
 ### 2. Configure Environment Variables
 Copy the template environment file to the project root:
 ```bash
-cp orchestrator/.env.example .env
+cp .env.example .env
 ```
 Ensure required variables are populated in `.env`:
-- `POSTGRES_PASSWORD`: PostgreSQL root password [docker-compose.yml:37](../../docker-compose.yml#L37)
-- `REDIS_PASSWORD`: Redis authentication token [docker-compose.yml:63](../../docker-compose.yml#L63)
-- `API_KEY`: Backend API access token [orchestrator/.env.example:28](../../orchestrator/.env.example#L28)
+- `POSTGRES_PASSWORD`: PostgreSQL root password [docker-compose.yml:48](../../docker-compose.yml#L48)
+- `REDIS_PASSWORD`: Redis authentication token [docker-compose.yml:74](../../docker-compose.yml#L74)
+- `API_KEY`: Backend API access token [.env.example:28](../../.env.example#L28)
 
 Sources: [docker-compose.yml:4-16](../../docker-compose.yml#L4-L16), [.env.example:1-30](../../.env.example#L1-L30)
 
@@ -75,7 +75,7 @@ docker compose up --build -d
 ```
 Access the web frontend at `http://localhost:3000`.
 
-Sources: [docker-compose.yml:1-24](../../docker-compose.yml#L1-L24)
+Sources: [docker-compose.yml:4-16](../../docker-compose.yml#L4-L16), [docker-compose.yml:329-370](../../docker-compose.yml#L329-L370)
 
 ---
 
@@ -90,7 +90,7 @@ graph TB
     subgraph "Data Persistence"
         pg["postgres<br/>(\"pgvector/pgvector:pg16\")"]
         rd["redis<br/>(\"redis:7-alpine\")"]
-        mi["minio<br/>(\"minio/minio\")"]
+        mi["minio<br/>(\"cgr.dev/chainguard/minio:latest\")"]
     end
     
     subgraph "Application Services"
@@ -109,7 +109,7 @@ graph TB
     classDef default stroke:#333,stroke-width:2px;
 ```
 
-Sources: [docker-compose.yml:26-159](../../docker-compose.yml#L26-L159), [infrastructure/railway-manifest.json:12-67](../../infrastructure/railway-manifest.json#L12-L67)
+Sources: [docker-compose.yml:41-459](../../docker-compose.yml#L41-L459), [infrastructure/railway-manifest.json:12-67](../../infrastructure/railway-manifest.json#L12-L67)
 
 ---
 
@@ -162,16 +162,16 @@ Configuration values are injected via `.env` and `envs/api.defaults`.
 
 | Variable Name | Default Value | Description | Code Reference |
 |---------------|---------------|-------------|----------------|
-| `POSTGRES_DB` | `orchestrator_db` | PostgreSQL database name | [docker-compose.yml:35](../../docker-compose.yml#L35) |
-| `POSTGRES_USER` | `postgres` | PostgreSQL connection user | [docker-compose.yml:36](../../docker-compose.yml#L36) |
-| `POSTGRES_PASSWORD` | *Required* | PostgreSQL password secret | [docker-compose.yml:37](../../docker-compose.yml#L37) |
-| `REDIS_PASSWORD` | *Required* | Redis auth password secret | [docker-compose.yml:63](../../docker-compose.yml#L63) |
+| `POSTGRES_DB` | `orchestrator_db` | PostgreSQL database name | [docker-compose.yml:46](../../docker-compose.yml#L46) |
+| `POSTGRES_USER` | `postgres` | PostgreSQL connection user | [docker-compose.yml:47](../../docker-compose.yml#L47) |
+| `POSTGRES_PASSWORD` | *Required* | PostgreSQL password secret | [docker-compose.yml:48](../../docker-compose.yml#L48) |
+| `REDIS_PASSWORD` | *Required* | Redis auth password secret | [docker-compose.yml:74](../../docker-compose.yml#L74) |
 | `API_KEY` | *Required* | Backend authentication key | [.env.example:28](../../.env.example#L28) |
-| `S3_ENDPOINT_URL` | `http://minio:9000` | Local MinIO object store endpoint | [.env.example:81](../../.env.example#L81) |
-| `AUTH_EDITION` | `saas` (`local` in compose) | Edition mode gating authentication | [.github/workflows/test.yml:70](../../.github/workflows/test.yml#L70) |
-| `DEFAULT_WORKSPACE_ID` | Workspace UUID | Default tenant ID for local sessions | [.github/workflows/test.yml:76](../../.github/workflows/test.yml#L76) |
+| `S3_ENDPOINT_URL` | `http://minio:9000` | Local MinIO object store endpoint; the `.env.example` override is commented out | [docker-compose.yml:263](../../docker-compose.yml#L263), [.env.example:109](../../.env.example#L109) |
+| `AUTH_EDITION` | `saas` (`local` in compose) | Edition mode gating authentication | [test.yml: `orchestrator-tests-shard` job](../../.github/workflows/test.yml) |
+| `DEFAULT_WORKSPACE_ID` | Workspace UUID | Default tenant ID for local sessions | [test.yml: `orchestrator-tests-shard` job](../../.github/workflows/test.yml) |
 
-Sources: [docker-compose.yml:30-103](../../docker-compose.yml#L30-L103), [.env.example:1-112](../../.env.example#L1-L112), [.github/workflows/test.yml:56-76](../../.github/workflows/test.yml#L56-L76)
+Sources: [docker-compose.yml:41-321](../../docker-compose.yml#L41-L321), [.env.example:1-112](../../.env.example#L1-L112), [test.yml: `orchestrator-tests-shard` job](../../.github/workflows/test.yml)
 
 ---
 
@@ -180,14 +180,14 @@ Sources: [docker-compose.yml:30-103](../../docker-compose.yml#L30-L103), [.env.e
 Automatos AI uses multi-stage Docker builds to decouple build-time compilers and heavy development tools from lightweight production runtimes.
 
 ### Backend Multi-Stage Pipeline (`orchestrator/Dockerfile`)
-1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed to build Python wheels from `requirements.txt` into `/install`. Handles conditional graph extra compilation (`INSTALL_GRAPH_EXTRAS` build arg) [orchestrator/Dockerfile:19-58](../../orchestrator/Dockerfile#L19-L58).
-2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `ghostscript`, `libmagic1`, `libpango-1.0-0`, `libcairo2`) [orchestrator/Dockerfile:63-83](../../orchestrator/Dockerfile#L63-L83).
-3. **`development` & `production` Stages**: Installs application code, creates non-user `automatos`, and exposes port `8000` running `uvicorn` or gunicorn workers [orchestrator/Dockerfile:91-150](../../orchestrator/Dockerfile#L91-L150).
+1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed to build Python wheels from `requirements.txt` into `/install`. Handles conditional graph extra compilation (`INSTALL_GRAPH_EXTRAS` build arg) [orchestrator/Dockerfile:20-59](../../orchestrator/Dockerfile#L20-L59).
+2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `ghostscript`, `libmagic1`, `libpango-1.0-0`, `libcairo2`) [orchestrator/Dockerfile:64-87](../../orchestrator/Dockerfile#L64-L87).
+3. **`development` & `production` Stages**: Installs application code, creates non-root user `automatos`, and exposes port `8000` running Uvicorn with reload in development or multiple workers in production [orchestrator/Dockerfile:95-189](../../orchestrator/Dockerfile#L95-L189).
 
 ### Frontend Container (`frontend/Dockerfile`)
 - Uses `node:20-alpine` as base, supporting Next.js standalone output mode by copying traced dependencies into `/app` to minimize final image size [frontend/Dockerfile:14-132](../../frontend/Dockerfile#L14-L132).
 
-Sources: [orchestrator/Dockerfile:1-150](../../orchestrator/Dockerfile#L1-L150), [frontend/Dockerfile:1-132](../../frontend/Dockerfile#L1-L132)
+Sources: [orchestrator/Dockerfile:1-189](../../orchestrator/Dockerfile#L1-L189), [frontend/Dockerfile:1-136](../../frontend/Dockerfile#L1-L136)
 
 ---
 
@@ -196,7 +196,7 @@ Sources: [orchestrator/Dockerfile:1-150](../../orchestrator/Dockerfile#L1-L150),
 Database schemas are managed exclusively through Alembic revision scripts.
 
 ### Migration Invariants & Veteran Backfill
-- **Alembic Heads**: The repository requires exactly one Alembic head, as specified in [AGENTS.md](../../AGENTS.md) and guarded by [orchestrator/tests/test_prd209_alembic_single_head.py:163-174](../../orchestrator/tests/test_prd209_alembic_single_head.py#L163-L174). The entrypoint retains `alembic upgrade heads` (plural): with a single head it upgrades to that head, and is a harmless no-op when the database is already current [orchestrator/docker-entrypoint.sh:145-159](../../orchestrator/docker-entrypoint.sh#L145-L159).
+- **Alembic Heads**: The repository requires exactly one Alembic head, as specified in [AGENTS.md](../../AGENTS.md) and guarded by [`test_prd209_exactly_one_head`](../../orchestrator/tests/test_prd209_alembic_single_head.py). The entrypoint retains `alembic upgrade heads` (plural): with a single head it upgrades to that head, and is a harmless no-op when the database is already current [orchestrator/docker-entrypoint.sh:145-159](../../orchestrator/docker-entrypoint.sh#L145-L159).
 - **Veteran Backfilling**: `prd222_veteran_skip_backfill.py` marks pre-existing workspaces without onboarding stages as `skipped` while preserving new signups [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-50](../../orchestrator/alembic/versions/prd222_veteran_skip_backfill.py#L1-L50).
 - **Fresh Install Boot**: Brand new local installations seed workspaces with `stage: not_started` so that the Auto-led onboarding chat triggers correctly [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-40](../../orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py#L1-L40).
 
@@ -223,11 +223,11 @@ After starting containers, verify operational status:
    docker compose exec redis redis-cli -a "$REDIS_PASSWORD" ping
    ```
 4. **Run Test Suites**:
-   The test suite runs against an ephemeral PostgreSQL service configured in GitHub Actions [.github/workflows/test.yml:35-77](../../.github/workflows/test.yml#L35-L77):
+   The test suite runs against an ephemeral PostgreSQL service configured in the GitHub Actions [`orchestrator-tests-shard` job](../../.github/workflows/test.yml):
    ```bash
    pytest tests --timeout=60 -v
    ```
 
-Sources: [docker-compose.yml:43-109](../../docker-compose.yml#L43-L109), [.github/workflows/test.yml:35-134](../../.github/workflows/test.yml#L35-L134)
+Sources: [docker-compose.yml:41-91](../../docker-compose.yml#L41-L91), [docker-compose.yml:293-321](../../docker-compose.yml#L293-L321), [test.yml: `orchestrator-tests-shard` job](../../.github/workflows/test.yml)
 
 ---
