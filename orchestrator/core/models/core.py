@@ -162,6 +162,11 @@ class UserApiKey(Base):
     display_name = Column(String(255))
     # #873: the key's own endpoint (Azure's resource URL); NULL for providers with a fixed one
     base_url = Column(Text, nullable=True)
+    # 9 Oct 2026: the Anthropic workspace (wrkspc_…) an organization-level key bills,
+    # sent as anthropic-workspace-id; NULL for a key scoped to its workspace already
+    provider_workspace_id = Column(String(64), nullable=True)
+    # the key's SHA-256 (hex), set with provider_workspace_id: the client finds the workspace by it
+    key_fingerprint = Column(String(64), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime)
     usage_count = Column(Integer, default=0)

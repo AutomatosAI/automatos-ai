@@ -45,6 +45,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from core.llm.anthropic_ids import DATE_SUFFIX, openrouter_twin_ids
+from core.llm.anthropic_workspace import workspace_for_key, workspace_headers
 from core.models.core import LLMModel
 from core.models.openrouter_cache import OpenRouterModelCache, OpenRouterSyncJob
 
@@ -206,7 +207,8 @@ def _record_failure(db: Session, job: OpenRouterSyncJob, exc: Exception) -> None
 
 def fetch_anthropic_models(api_key: str) -> List[Dict[str, Any]]:
     """Every model the key can see, across all pages, in the API's order."""
-    headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
+    headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION,
+               **workspace_headers(workspace_for_key(api_key))}
     models: List[Dict[str, Any]] = []
     after_id: Optional[str] = None
     with httpx.Client(timeout=ANTHROPIC_FETCH_TIMEOUT_S) as client:

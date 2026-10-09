@@ -22,6 +22,9 @@ from core.models.core import UserApiKey
 from core.credentials.encryption import get_encryption_service
 from core.llm import providers as provider_registry
 from core.llm.byok_endpoint import EndpointRefused, clean_endpoint, endpoint_required
+from core.llm.anthropic_workspace import (
+    WORKSPACE_ID_MAX_LENGTH, WorkspaceIdRefused, clean_workspace_id, clear_cache, key_fingerprint, workspace_headers,
+)
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,10 @@ class ApiKeyCreate(BaseModel):
     display_name: Optional[str] = Field(None, description="Friendly label")
     base_url: Optional[str] = Field(
         None, max_length=2048, description="The key's own endpoint (Azure: https://<resource>.openai.azure.com)"
+    )
+    workspace_id: Optional[str] = Field(
+        None, max_length=WORKSPACE_ID_MAX_LENGTH,
+        description="Anthropic only: the workspace an organization-level key bills (wrkspc_…)",
     )
 
 
@@ -134,26 +141,37 @@ def _key_endpoint(provider: str, raw: Optional[str]) -> Optional[str]:
     return endpoint
 
 
-def _check_openai(_provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+def _key_workspace(provider: str, raw: Optional[str]) -> Optional[str]:
+    """The Anthropic workspace to save with a key, or a 400 the dialog can show."""
+    try:
+        return clean_workspace_id(provider, raw)
+    except WorkspaceIdRefused as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _check_openai(_provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None) -> str:
     from openai import OpenAI
     OpenAI(api_key=raw_key).models.list()
     return KEY_VALID
 
 
-def _check_anthropic(_provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+def _check_anthropic(_provider: str, raw_key: str, _base_url: Optional[str], workspace_id: Optional[str] = None) -> str:
+    """A models-list call, naming the workspace for an organization-level key (9 Oct 2026)."""
     import anthropic
-    anthropic.Anthropic(api_key=raw_key).models.list()
+    anthropic.Anthropic(api_key=raw_key, default_headers=workspace_headers(workspace_id)).models.list()
     return KEY_VALID
 
 
-def _check_google(_provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+def _check_google(_provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None) -> str:
     import google.generativeai as genai
     genai.configure(api_key=raw_key)
     genai.list_models()
     return KEY_VALID
 
 
-def _check_openai_compatible(provider: str, raw_key: str, _base_url: Optional[str]) -> str:
+def _check_openai_compatible(
+    provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None,
+) -> str:
     """OpenRouter, NVIDIA, DeepSeek: a models-list call against the provider's own base URL (PRD-236 S0.3)."""
     from openai import OpenAI
     spec = provider_registry.get_spec(provider)
@@ -165,7 +183,7 @@ def _check_openai_compatible(provider: str, raw_key: str, _base_url: Optional[st
     return KEY_VALID
 
 
-def _check_azure(_provider: str, raw_key: str, base_url: Optional[str]) -> str:
+def _check_azure(_provider: str, raw_key: str, base_url: Optional[str], _workspace_id: Optional[str] = None) -> str:
     """A models-list call on the key's own v1 endpoint, pinned on saas (#873).
 
     An endpoint that answers 404 to the list has accepted the key and simply has no
@@ -202,7 +220,9 @@ def _live_check_for(provider: str):
     return _check_openai_compatible if _openai_compatible_models_list(provider) else None
 
 
-async def _validate_provider_key(provider: str, raw_key: str, base_url: Optional[str] = None) -> ApiKeyValidation:
+async def _validate_provider_key(
+    provider: str, raw_key: str, base_url: Optional[str] = None, workspace_id: Optional[str] = None,
+) -> ApiKeyValidation:
     """Make a real, minimal provider call to prove a BYOK key works (PRD-222 US-006).
 
     Shared by ``add_api_key`` (validate-on-save — the fix for the 2026-07-29
@@ -211,7 +231,8 @@ async def _validate_provider_key(provider: str, raw_key: str, base_url: Optional
     no live check for returns ``valid=True`` with an honest "not available"
     message — we never CLAIM a validation we did not run. Never raises: a failed
     call becomes ``valid=False`` carrying the provider's own error text.
-    ``base_url`` is the key's own endpoint, for a provider that takes one (#873).
+    ``base_url`` is the key's own endpoint, for a provider that takes one (#873);
+    ``workspace_id`` the Anthropic workspace an organization-level key bills.
     """
     provider = (provider or "").lower()
     tested_at = datetime.utcnow()
@@ -223,7 +244,7 @@ async def _validate_provider_key(provider: str, raw_key: str, base_url: Optional
             tested_at=tested_at,
         )
     try:
-        message = check(provider, raw_key, base_url)
+        message = check(provider, raw_key, base_url, workspace_id)
     except Exception as e:
         return ApiKeyValidation(valid=False, message=f"Invalid key: {str(e)[:200]}", tested_at=tested_at)
     return ApiKeyValidation(valid=True, message=message, tested_at=tested_at)
@@ -246,6 +267,7 @@ async def add_api_key(
         raise HTTPException(400, f"Unsupported provider. Supported: {SUPPORTED_PROVIDERS}")
 
     endpoint = _key_endpoint(provider, body.base_url)
+    workspace_id = _key_workspace(provider, body.workspace_id)
     encryption = get_encryption_service()
     encrypted = encryption.encrypt(body.api_key)
 
@@ -255,13 +277,15 @@ async def add_api_key(
     # persisted where _resolve_api_key filters (is_active) and where the frontend
     # BYOK badge reads (is_active); tested_at rides on last_used_at. A dead key is
     # stored is_active=False → it never resolves and never wears a "BYOK" badge.
-    validation = await _validate_provider_key(provider, body.api_key, endpoint)
+    validation = await _validate_provider_key(provider, body.api_key, endpoint, workspace_id=workspace_id)
 
     row = UserApiKey(
         workspace_id=ctx.workspace_id,
         provider=provider,
         encrypted_key=encrypted,
         base_url=endpoint,
+        provider_workspace_id=workspace_id,
+        key_fingerprint=key_fingerprint(body.api_key) if workspace_id else None,
         display_name=body.display_name or f"My {body.provider.title()} Key",
         is_active=validation.valid,
         usage_count=0,
@@ -292,6 +316,7 @@ async def add_api_key(
 
     db.commit()
     db.refresh(row)
+    clear_cache()
 
     logger.info(
         f"API key saved for provider={provider} workspace={ctx.workspace_id} "
@@ -336,6 +361,7 @@ async def delete_api_key(
 
     db.delete(row)
     db.commit()
+    clear_cache()
     logger.info(f"API key {key_id} deleted for workspace={ctx.workspace_id}")
 
 
@@ -359,7 +385,10 @@ async def test_api_key(
 
     # Reuse the single validate-on-save path (PRD-222 US-006) so the manual test
     # and the save-time check can never diverge.
-    result = await _validate_provider_key(row.provider, raw_key, getattr(row, "base_url", None))
+    result = await _validate_provider_key(
+        row.provider, raw_key, getattr(row, "base_url", None),
+        workspace_id=getattr(row, "provider_workspace_id", None),
+    )
     if result.valid:
         row.last_used_at = result.tested_at or datetime.utcnow()
         db.commit()

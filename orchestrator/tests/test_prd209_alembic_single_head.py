@@ -97,7 +97,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # so ix_workflows_tags_gin can actually be built (Postgres has no GIN opclass for json).
 # 2026-10-05 (#873): user_api_keys_base_url chains onto that — a workspace key carries
 # its own endpoint (Azure's resource URL).
-EXPECTED_HEAD = "user_api_keys_base_url"
+# 2026-10-09: user_api_keys_provider_workspace_id chains onto that — an organization-level
+# Anthropic key carries the workspace it bills.
+EXPECTED_HEAD = "user_api_keys_provider_workspace_id"
 
 
 def _literal(node: ast.AST):
