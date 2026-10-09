@@ -250,6 +250,31 @@ async def _validate_provider_key(
     return ApiKeyValidation(valid=True, message=message, tested_at=tested_at)
 
 
+def _enable_proven_key(db: Session, workspace_id: Any, provider: str) -> None:
+    """A key that passed its check switches BYOK on for its provider and converts the trial.
+
+    Only a proven key auto-enables BYOK for this provider, and only a proven key
+    converts the trial (US-006 hook into the US-005 ledger; a no-op for a converted
+    or never-granted workspace).
+    """
+    from core.models.workspaces import Workspace
+    from sqlalchemy.orm.attributes import flag_modified
+
+    workspace = db.query(Workspace).get(workspace_id)
+    if workspace:
+        settings = dict(workspace.settings or {})
+        overrides = dict(settings.get("byok_overrides", {}))
+        overrides[provider] = True
+        settings["byok_overrides"] = overrides
+        workspace.settings = settings
+        flag_modified(workspace, "settings")
+
+    from services.trial_ledger import mark_trial_converted
+
+    if mark_trial_converted(db, workspace_id):
+        logger.info(f"Trial converted on validated key save workspace={workspace_id}")
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.post("", response_model=ApiKeyOut, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
@@ -294,25 +319,7 @@ async def add_api_key(
     db.add(row)
 
     if validation.valid:
-        # Only a proven key auto-enables BYOK for this provider …
-        from core.models.workspaces import Workspace
-        from sqlalchemy.orm.attributes import flag_modified
-
-        workspace = db.query(Workspace).get(ctx.workspace_id)
-        if workspace:
-            settings = dict(workspace.settings or {})
-            overrides = dict(settings.get("byok_overrides", {}))
-            overrides[provider] = True
-            settings["byok_overrides"] = overrides
-            workspace.settings = settings
-            flag_modified(workspace, "settings")
-
-        # … and only a proven key converts the trial (US-006 hook into the
-        # US-005 ledger). No-op for a converted / never-granted workspace.
-        from services.trial_ledger import mark_trial_converted
-
-        if mark_trial_converted(db, ctx.workspace_id):
-            logger.info(f"Trial converted on validated key save workspace={ctx.workspace_id}")
+        _enable_proven_key(db, ctx.workspace_id, provider)
 
     db.commit()
     db.refresh(row)
