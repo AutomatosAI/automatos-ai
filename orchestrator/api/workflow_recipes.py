@@ -694,12 +694,11 @@ async def delete_workflow_recipe(
             all_mems = await memory_service.get_all_memories_scoped(
                 user_id=recipe_scope, limit=200
             )
-            deleted_count = 0
-            for mem in all_mems:
-                mem_id = mem.get("id") if isinstance(mem, dict) else None
-                if mem_id:
-                    await memory_service.delete_memory(mem_id)
-                    deleted_count += 1
+            mem_ids = [str(m["id"]) for m in all_mems if isinstance(m, dict) and m.get("id")]
+            deleted = mem_ids and await memory_service.delete_memories_scoped(
+                mem_ids, recipe_scope, str(ctx.workspace_id)
+            )
+            deleted_count = len(mem_ids) if deleted else 0
             if deleted_count:
                 logger.info(f"[delete_recipe] Cleaned up {deleted_count} memories for scope {recipe_scope}")
         except Exception as e:
