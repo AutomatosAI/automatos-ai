@@ -110,7 +110,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
     e.stopPropagation()
     setApprovingId(agentId)
     try {
-      await apiClient.post(`/api/marketplace/items/${agentId}/approve`)
+      await apiClient.post(`/api/marketplace/items/${agentId}/approve?type=agent`)
       toast.success('Agent approved and published to marketplace!')
       refetch()
     } catch (error: any) {
@@ -129,7 +129,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
     }
     setDeletingId(agentId)
     try {
-      await apiClient.delete(`/api/marketplace/items/${agentId}`)
+      await apiClient.delete(`/api/marketplace/items/${agentId}?type=agent`)
       toast.success('Agent removed from marketplace')
       refetch()
     } catch (error: any) {

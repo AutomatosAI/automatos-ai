@@ -33,6 +33,7 @@ import { useSystemRole } from '@/contexts/role-context'
 import { MarketplaceItemModal } from './marketplace-item-modal'
 import { AdminWorkspaceSwitcher } from '@/components/analytics/admin-workspace-switcher'
 import { FeaturedShowcaseCard } from './featured-showcase-card'
+import { marketplaceItemKey, type MarketplaceItemRef } from './marketplace-item-ref'
 
 export interface MarketplaceItem {
   id: number
@@ -50,6 +51,8 @@ export interface MarketplaceItem {
   created_at: string
   updated_at: string
 }
+
+const DEEP_LINK_TYPES = new Set(['agent', 'recipe'])
 
 function CapabilitiesTab({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
   const [subTab, setSubTab] = useState('plugins')
@@ -76,7 +79,7 @@ function CapabilitiesTab({ searchQuery, workspaceId }: { searchQuery: string; wo
 
 // ── Featured Banner ─────────────────────────────────────────────────
 
-function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceItem[]; isAdmin: boolean; onItemClick: (id: number) => void }) {
+function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceItem[]; isAdmin: boolean; onItemClick: (item: MarketplaceItemRef) => void }) {
   const toggleFeatured = useToggleFeatured()
 
   if (!items || items.length === 0) return null
@@ -108,7 +111,7 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
             item={hero}
             isAdmin={isAdmin}
             onItemClick={onItemClick}
-            onToggleFeatured={() => toggleFeatured.mutate(hero.id)}
+            onToggleFeatured={() => toggleFeatured.mutate({ id: hero.id, type: hero.type })}
             toggleDisabled={toggleFeatured.isLoading}
           />
         </div>
@@ -116,7 +119,7 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
         {/* Side rail */}
         <div className="flex flex-col gap-3">
           {rail.map((item) => (
-            <Card key={item.id} className="border-border/40 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors cursor-pointer" onClick={() => onItemClick(item.id)}>
+            <Card key={marketplaceItemKey(item)} className="border-border/40 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors cursor-pointer" onClick={() => onItemClick(item)}>
               <CardContent className="p-3 flex items-center gap-3">
                 {item.icon && <span className="text-2xl shrink-0">{item.icon}</span>}
                 <div className="flex-1 min-w-0">
@@ -129,7 +132,7 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-primary/60 hover:text-primary"
-                      onClick={(e) => { e.stopPropagation(); toggleFeatured.mutate(item.id) }}
+                      onClick={(e) => { e.stopPropagation(); toggleFeatured.mutate({ id: item.id, type: item.type }) }}
                       disabled={toggleFeatured.isLoading}
                     >
                       <Star className="h-3 w-3 fill-current" />
@@ -153,7 +156,7 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
 
 // ── Recommendations Rail ────────────────────────────────────────────
 
-function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[]; onItemClick: (id: number) => void }) {
+function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[]; onItemClick: (item: MarketplaceItemRef) => void }) {
   if (!items || items.length === 0) return null
 
   const formatInstalls = (n: number) => {
@@ -175,9 +178,9 @@ function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[];
       <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
         {items.map((item) => (
           <Card
-            key={item.id}
+            key={marketplaceItemKey(item)}
             className="min-w-[200px] max-w-[220px] shrink-0 border-border/40 bg-card/50 backdrop-blur-sm hover:border-primary/20 transition-colors cursor-pointer"
-            onClick={() => onItemClick(item.id)}
+            onClick={() => onItemClick(item)}
           >
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-2">
@@ -255,20 +258,21 @@ export function MarketplaceHomepage() {
 
   const searchParams = useSearchParams()
   const router = useRouter()
-  const [selectedItemId, setSelectedItemId] = useState<number | null>(null)
+  const [selectedItem, setSelectedItem] = useState<MarketplaceItemRef | null>(null)
 
-  // Deep-link: ?id=N opens the item modal (used by Recommended strip on /assignments)
+  // Deep-link: ?id=N&type=agent|recipe opens the item modal (used by Recommended strip on /assignments)
   useEffect(() => {
     const idParam = searchParams?.get('id')
-    if (!idParam) return
+    const typeParam = searchParams?.get('type')
+    if (!idParam || !typeParam || !DEEP_LINK_TYPES.has(typeParam)) return
     const parsed = parseInt(idParam, 10)
-    if (!Number.isNaN(parsed)) setSelectedItemId(parsed)
+    if (!Number.isNaN(parsed)) setSelectedItem({ id: parsed, type: typeParam })
   }, [searchParams])
 
   const handleCloseModal = useCallback(() => {
-    setSelectedItemId(null)
+    setSelectedItem(null)
     if (searchParams?.get('id')) {
-      // Strip ?id= so refresh doesn't re-open
+      // Strip ?id=&type= so refresh doesn't re-open
       router.replace('/marketplace')
     }
   }, [router, searchParams])
@@ -277,9 +281,9 @@ export function MarketplaceHomepage() {
   useEffect(() => {
     apiClient.get('/api/marketplace/items?limit=20')
       .then((items: MarketplaceItem[]) => {
-        const featuredIds = new Set(((featuredItems as MarketplaceItem[] | undefined) || []).map((f: MarketplaceItem) => f.id))
+        const featuredKeys = new Set(((featuredItems as MarketplaceItem[] | undefined) || []).map(marketplaceItemKey))
         const recs = items
-          .filter((i: MarketplaceItem) => !featuredIds.has(i.id))
+          .filter((i: MarketplaceItem) => !featuredKeys.has(marketplaceItemKey(i)))
           .sort((a: MarketplaceItem, b: MarketplaceItem) => b.install_count - a.install_count)
           .slice(0, 6)
         setRecItems(recs)
@@ -323,11 +327,11 @@ export function MarketplaceHomepage() {
 
       {/* ── Featured Banner ─────────────────────────────────── */}
       {!featuredLoading && (featuredItems as MarketplaceItem[] | undefined)?.length ? (
-        <FeaturedBanner items={featuredItems as MarketplaceItem[]} isAdmin={isAdmin} onItemClick={setSelectedItemId} />
+        <FeaturedBanner items={featuredItems as MarketplaceItem[]} isAdmin={isAdmin} onItemClick={setSelectedItem} />
       ) : null}
 
       {/* ── Recommendations Rail ────────────────────────────── */}
-      <RecommendationsRail items={recItems} onItemClick={setSelectedItemId} />
+      <RecommendationsRail items={recItems} onItemClick={setSelectedItem} />
 
       {/* ── Category Tabs ───────────────────────────────────── */}
       <motion.div
@@ -382,9 +386,10 @@ export function MarketplaceHomepage() {
       </motion.div>
 
       {/* Item detail modal for featured/recommended clicks */}
-      {selectedItemId !== null && (
+      {selectedItem !== null && (
         <MarketplaceItemModal
-          itemId={selectedItemId}
+          itemId={selectedItem.id}
+          itemType={selectedItem.type}
           onClose={handleCloseModal}
         />
       )}

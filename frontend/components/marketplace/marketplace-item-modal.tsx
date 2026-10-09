@@ -17,16 +17,23 @@ import { apiClient } from '@/lib/api-client'
 import { toast as sonnerToast } from 'sonner'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { useAvailableApps } from '@/hooks/use-composio-api'
+import { useInstallPlaybookFromMarketplace } from '@/hooks/use-playbook-api'
 
 interface MarketplaceItemModalProps {
   itemId: number
+  /** 'agent' or 'recipe' (a playbook): agents and playbooks share id values. */
+  itemType: string
   onClose: () => void
 }
 
 export function MarketplaceItemModal({
   itemId,
+  itemType,
   onClose
 }: MarketplaceItemModalProps) {
+  const isPlaybook = itemType === 'recipe'
+  const itemNoun = isPlaybook ? 'Playbook' : 'Agent'
+  const installPlaybook = useInstallPlaybookFromMarketplace()
   const [item, setItem] = useState<MarketplaceItem | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -37,12 +44,12 @@ export function MarketplaceItemModal({
 
   useEffect(() => {
     fetchItem()
-  }, [itemId])
+  }, [itemId, itemType])
 
   async function fetchItem() {
     setError(null)
     try {
-      const data = await apiClient.get(`/api/marketplace/items/${itemId}`)
+      const data = await apiClient.get(`/api/marketplace/items/${itemId}?type=${encodeURIComponent(itemType)}`)
       setItem(data)
     } catch (err: any) {
       const message = err?.message || 'Failed to load item details'
@@ -59,15 +66,17 @@ export function MarketplaceItemModal({
 
     setInstalling(true)
     try {
-      const result = await apiClient.post(`/api/marketplace/items/${item.id}/install`)
-      sonnerToast.success('Agent added to workspace!', {
+      const result: any = isPlaybook
+        ? await installPlaybook.mutateAsync(item.id)
+        : await apiClient.post(`/api/marketplace/items/${item.id}/install`)
+      sonnerToast.success(`${itemNoun} added to workspace!`, {
         description: result.message || `${item.name} has been added to your workspace.`
       })
       onClose()
     } catch (error: any) {
       console.error('Failed to install item:', error)
       sonnerToast.error('Failed to add to workspace', {
-        description: error?.message || 'Failed to add agent to workspace. Please try again.'
+        description: error?.message || `Failed to add ${itemNoun.toLowerCase()} to workspace. Please try again.`
       })
     } finally {
       setInstalling(false)

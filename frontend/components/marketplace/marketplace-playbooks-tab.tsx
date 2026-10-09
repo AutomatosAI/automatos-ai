@@ -49,7 +49,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
     e.stopPropagation()
     setApprovingId(recipeId)
     try {
-      await apiClient.post(`/api/marketplace/items/${recipeId}/approve`)
+      await apiClient.post(`/api/marketplace/items/${recipeId}/approve?type=recipe`)
       toast('Playbook approved and published to marketplace!')
       queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
@@ -64,7 +64,7 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
     if (!confirm('Are you sure you want to delete this marketplace recipe?')) return
     setDeletingId(recipeId)
     try {
-      await apiClient.delete(`/api/marketplace/items/${recipeId}`)
+      await apiClient.delete(`/api/marketplace/items/${recipeId}?type=recipe`)
       toast('Playbook removed from marketplace')
       queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
     } catch (error: any) {
