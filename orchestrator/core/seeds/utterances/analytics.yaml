@@ -611,3 +611,36 @@ actions:
     source: authored
   - text: one-glance summary of platform usage
     source: authored
+  platform_get_workspace_errors:
+  - text: "why did so many cards fail yesterday?"
+    source: example
+  - text: "what's going wrong in my workspace?"
+    source: example
+  - text: "group the failures by cause"
+    source: example
+  - text: "why are my tasks failing?"
+    source: authored
+  - text: "what broke overnight?"
+    source: authored
+  - text: "show me the errors grouped by cause"
+    source: authored
+  - text: "why did 79 cards fail?"
+    source: authored
+  - text: "is anything failing because we ran out of credit?"
+    source: authored
+  - text: "which agents keep timing out?"
+    source: authored
+  - text: "what are the top error causes this week?"
+    source: authored
+  - text: "give me a failure breakdown for the last 3 days"
+    source: authored
+  - text: "are tool calls failing?"
+    source: authored
+  - text: "why did the LLM calls error out?"
+    source: authored
+  - text: "what's the most common reason things fail?"
+    source: authored
+  - text: "any rate limit or capacity errors today?"
+    source: authored
+  - text: "summarise the failures by reason"
+    source: authored
