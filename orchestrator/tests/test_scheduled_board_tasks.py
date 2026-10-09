@@ -267,8 +267,9 @@ def test_tool_handler_files_an_unassigned_board_task_with_the_driving_human(monk
     assert captured["deliver_as"] == DELIVER_BOARD_TASK
     assert captured["target_agent_id"] is None  # no name given → Inbox, never self
     assert captured["created_by_agent_id"] == 5 and captured["created_by_user_id"] == "user_1"
+    # P256-FIX-RVW-23 (FX-010, D7): a brief that sends, scheduled from a person's chat, waits for their review.
     assert captured["payload"] == {"title": "Send the weekly report", "priority": "high",
-                                   "review_mode": "auto", "tags": ["reports"]}
+                                   "review_mode": "human", "tags": ["reports"]}
 
 
 def test_tool_handler_chat_delivery_defaults_to_self(monkeypatch):

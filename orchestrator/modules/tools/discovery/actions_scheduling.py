@@ -1,6 +1,7 @@
 """Scheduling ActionDefinitions (schedule task, list, cancel)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .agent_refs import agent_id_property
 
 
 def register_scheduling_actions(registry: ActionRegistry) -> None:
@@ -64,6 +65,8 @@ def _schedule_task_properties() -> dict:
             "type": "string",
             "description": "Name of the agent to run the task (defaults to yourself).",
         },
+        # P256-FIX-RVW-23: several agents share a name in a workspace; an id names one.
+        "agent_id": agent_id_property("The agent to run the task, by id instead of target_agent_name"),
         "max_runs": {
             "type": "integer",
             "description": "For recurring: max number of executions before auto-cancel. Omit for unlimited.",
@@ -86,7 +89,8 @@ def _schedule_task_properties() -> dict:
             "type": "string",
             # PRD-252 D7: no 'llm' until a model reviewer exists; it behaved as 'human'.
             "enum": ["auto", "human"],
-            "description": "board_task only: the ticket's review gate (default auto).",
+            "description": ("board_task only: the ticket's review gate (default auto; human when a person's "
+                            "chat schedules a brief that sends, orders or publishes)."),
         },
         "tags": {
             "type": "array",

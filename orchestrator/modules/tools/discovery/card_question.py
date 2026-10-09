@@ -12,7 +12,8 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
 - FX-010: a heartbeat's fields, an agent's skills or plugins before and after, a new
   playbook's name and purpose, a playbook's timer, or what a delete takes for good;
 - P256-FIX-RVW-14: a timer set through a playbook update, and a plugin or skill taken
-  from (or, edited, moved for) every agent of the workspace, naming them.
+  from (or, edited, moved for) every agent of the workspace, naming them;
+- P256-FIX-RVW-23: an agent's timer: the agent, when it runs, its delivery and its brief.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -27,6 +28,7 @@ from modules.tools.discovery import card_question_agents as agents
 from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
 from modules.tools.discovery import card_question_skills as skills
+from modules.tools.discovery import card_question_timers as timers
 from modules.tools.discovery.card_question_text import question, said_line, shown, value_line
 
 logger = logging.getLogger(__name__)
@@ -117,6 +119,8 @@ READERS: Dict[str, Lines] = {
     "platform_uninstall_plugin": skills.uninstall_plugin_lines,
     "platform_delete_workspace_skill": skills.delete_skill_lines,
     "platform_update_skill": skills.update_skill_lines,
+    # P256-FIX-RVW-23: an agent's timer: the agent, when, how it is delivered, the brief.
+    "platform_schedule_task": timers.schedule_task_lines,
 }
 
 

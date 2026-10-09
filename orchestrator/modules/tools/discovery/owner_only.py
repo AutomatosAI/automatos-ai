@@ -54,6 +54,8 @@ OWNER_ONLY_ACTIONS = frozenset({
     # agent (turned off, deleted, or forked with its agents moved onto the fork).
     "platform_update_playbook", "platform_uninstall_plugin", "platform_delete_workspace_skill",
     "platform_update_skill",
+    # P256-FIX-RVW-23: an agent's timer is an agent-setting change, as a playbook's timer is.
+    "platform_schedule_task",
 })
 CARD_MOVES = frozenset({"platform_update_task_status", "platform_update_task"})
 # An update is owner-only only when it sets the playbook's timer (P256-FIX-RVW-14).
@@ -101,6 +103,7 @@ VERBS = {
     "platform_uninstall_plugin": "turn a plugin off and take it from every agent",
     "platform_delete_workspace_skill": "delete a skill and take it from every agent",
     "platform_update_skill": "edit a skill its agents use",
+    "platform_schedule_task": "set an agent's timer",
 }
 SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
 QUESTION = "question_md"

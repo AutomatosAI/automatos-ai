@@ -22,8 +22,12 @@ BINDS = frozenset({
 # P256-FIX-RVW-17: an update that closes a card and gives it to an agent
 # (agent_refs.gives_the_card_on_update), read the board's way: an active agent, by id or whole name.
 GIVES_THE_CARD = frozenset({"platform_update_task"})
-NAMES_AN_AGENT = BINDS | GIVES_THE_CARD
+# P256-FIX-RVW-23: a timer for an agent, read the board's way too; it names the agent under its own key.
+SCHEDULES_AN_AGENT = frozenset({"platform_schedule_task"})
+READ_THE_BOARDS_WAY = GIVES_THE_CARD | SCHEDULES_AN_AGENT
+NAMES_AN_AGENT = BINDS | READ_THE_BOARDS_WAY
 AGENT_ID, AGENT_NAME = "agent_id", "agent_name"
+NAME_KEYS = {"platform_schedule_task": "target_agent_name"}
 MAX_NAMED = 10
 AMBIGUOUS = ("{count} agents match agent_name '{said}' in this workspace: {named}. Nothing was asked or done: "
              "call {action} again with the agent_id of the one meant.")
@@ -34,8 +38,8 @@ def bound_to_the_agent(db: Any, workspace_id: Any, action: str,
     """(the call with ``agent_id`` bound to the one agent its ``agent_name`` names, the
     refusal when it names several or none). A call with an agent_id, or no name, is as it is;
     a card given to an agent is bound by the board's resolver (``_bound_on_the_card``)."""
-    if action in GIVES_THE_CARD:
-        return _bound_on_the_card(db, workspace_id, params)
+    if action in READ_THE_BOARDS_WAY:
+        return _bound_on_the_card(db, workspace_id, params, name_key(action))
     if not names_the_agent_alone(action, params):
         return params, None
     said = params[AGENT_NAME]
@@ -57,23 +61,28 @@ def names_the_agent_alone(action: str, params: Any) -> bool:
     (P256-FIX-RVW-9)."""
     if action not in NAMES_AN_AGENT or not isinstance(params, dict) or params.get(AGENT_ID) not in (None, ""):
         return False
-    said = params.get(AGENT_NAME)
+    said = params.get(name_key(action))
     return isinstance(said, str) and bool(said.strip())
 
 
-def _bound_on_the_card(db: Any, workspace_id: Any,
-                       params: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
-    """(the update with the agent it gives the card to as its ``agent_id`` alone, the
-    refusal when it names no active agent, or several): the card names that agent and the
-    click gives the card to it, never to a name read again at the click."""
-    if all(params.get(key) in (None, "") for key in (AGENT_ID, AGENT_NAME)):
+def name_key(action: str) -> str:
+    """The key ``action`` names its agent under: ``agent_name``, or a timer's ``target_agent_name``."""
+    return NAME_KEYS.get(action, AGENT_NAME)
+
+
+def _bound_on_the_card(db: Any, workspace_id: Any, params: Dict[str, Any],
+                       said_key: str = AGENT_NAME) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """(the call with the agent it gives the card to, or times, as its ``agent_id`` alone,
+    the refusal when it names no active agent, or several): the card names that agent and
+    the click runs on it, never on a name read again at the click."""
+    if all(params.get(key) in (None, "") for key in (AGENT_ID, said_key)):
         return params, None
     from modules.tools.discovery.agent_refs import board_agent
 
-    agent, refusal = board_agent(db, workspace_id, params)
+    agent, refusal = board_agent(db, workspace_id, params, said_key)
     if agent is None:
         return params, {"success": False, "error": refusal}
-    rest = {key: value for key, value in params.items() if key != AGENT_NAME}
+    rest = {key: value for key, value in params.items() if key != said_key}
     return {**rest, AGENT_ID: agent.id}, None
 
 
@@ -90,4 +99,4 @@ def _named(db: Any, workspace_id: Any, said: str) -> List[Any]:
     return whole or agents
 
 
-__all__ = ["BINDS", "GIVES_THE_CARD", "bound_to_the_agent", "names_the_agent_alone"]
+__all__ = ["BINDS", "GIVES_THE_CARD", "SCHEDULES_AN_AGENT", "bound_to_the_agent", "name_key", "names_the_agent_alone"]

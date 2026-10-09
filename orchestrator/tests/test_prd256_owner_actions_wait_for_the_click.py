@@ -38,7 +38,9 @@ D1 = {"platform_update_task_status", "platform_update_task", "platform_assign_to
       "platform_schedule_playbook", "platform_delete_playbook",
       # P256-FIX-RVW-14: a timer set through an update; a plugin or skill taken from every agent.
       "platform_update_playbook", "platform_uninstall_plugin", "platform_delete_workspace_skill",
-      "platform_update_skill"}
+      "platform_update_skill",
+      # P256-FIX-RVW-23: an agent's timer, as a playbook's timer.
+      "platform_schedule_task"}
 # Owner-only only when the call closes the card, or (an update) sets the playbook's timer.
 CONDITIONAL = {"platform_update_task_status", "platform_update_task", "platform_update_playbook"}
 

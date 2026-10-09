@@ -1,11 +1,14 @@
 """Scheduling handlers for PlatformActionExecutor (PRD-77) + NL2SQL query_data (PRD-79)."""
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+from modules.tools.discovery.agent_refs import resolve_active_agent, takes_the_agent_id
+from modules.tools.discovery.brief_sends import REVIEW_MODE, reviewed_by_a_person, says_it_is_reviewed
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,13 @@ ANSWER_HEADER_CHARS = 20
 # PRD-256 FX-013: the refusal names the key it wants (night 12 sent the question as "query" 31 times).
 MISSING_QUESTION = ("Missing required parameter: question. Send the user's question in 'question' "
                     "(or 'query'), e.g. {\"question\": \"How many active subscriptions do we have?\"}. Nothing ran.")
+# platform_schedule_task: the target's key, and the board ticket's defaults.
+TARGET_NAME = "target_agent_name"
+NOT_IN_WORKSPACE = "Agent '{said}' not found in workspace"
+DEFAULT_TITLE = "Scheduled task"
+TITLE_CHARS = 255
+DEFAULT_PRIORITY = "medium"
+DEFAULT_REVIEW = "auto"
 
 
 def answer_table(columns: List[Any], rows: List[Dict[str, Any]], row_count: int) -> str:
@@ -36,9 +46,14 @@ def answer_table(columns: List[Any], rows: List[Dict[str, Any]], row_count: int)
     return table_text
 
 
+@takes_the_agent_id(TARGET_NAME)  # P256-FIX-RVW-23: agent_id beside the name; an id wins
 async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Schedule a follow-up task for self or another agent."""
-    from services.scheduled_task_service import ScheduledTaskService
+    """Schedule a follow-up task for self or another agent.
+
+    P256-FIX-RVW-23: the target is an ACTIVE agent, by id or by a name one active agent
+    carries (a clash lists the candidates); a board ticket whose brief sends or orders,
+    scheduled from a person's chat, is filed for their review (FX-010, Decision D7)."""
+    from services.scheduled_task_service import DELIVER_BOARD_TASK, DELIVER_CHAT, ScheduledTaskService
 
     task_type = params.get("task_type")
     description = params.get("description")
@@ -52,36 +67,25 @@ async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not created_by_agent_id:
         return {"success": False, "error": "Could not determine calling agent"}
 
-    from services.scheduled_task_service import DELIVER_BOARD_TASK, DELIVER_CHAT
     deliver_as = params.get("deliver_as") or DELIVER_CHAT
     if deliver_as not in (DELIVER_CHAT, DELIVER_BOARD_TASK):
         return {"success": False, "error": f"deliver_as must be '{DELIVER_CHAT}' or '{DELIVER_BOARD_TASK}'"}
 
-    # Resolve target agent. Chat delivery defaults to self; a board ticket with
-    # no named agent is filed unassigned (Inbox), never silently self-assigned.
-    target_agent_id = created_by_agent_id if deliver_as == DELIVER_CHAT else None
-    target_name = params.get("target_agent_name")
-    if target_name:
-        from core.models import Agent
-        target = db.query(Agent).filter(
-            Agent.workspace_id == workspace_id,
-            func.lower(Agent.name) == target_name.lower(),
-        ).first()
-        if not target:
-            return {"success": False, "error": f"Agent '{target_name}' not found in workspace"}
-        target_agent_id = target.id
+    # Chat delivery defaults to self; a board ticket with no named agent is filed
+    # unassigned (Inbox), never silently self-assigned.
+    target_agent_id, refusal = _target_agent(
+        db, workspace_id, params, created_by_agent_id if deliver_as == DELIVER_CHAT else None)
+    if refusal:
+        return {"success": False, "error": refusal}
 
+    held = False
     payload = None
     if deliver_as == DELIVER_BOARD_TASK:
-        payload = {
-            "title": (params.get("title") or (str(description).strip().splitlines() or ["Scheduled task"])[0])[:255],
-            "priority": params.get("priority") or "medium",
-            "review_mode": params.get("review_mode") or "auto",
-            "tags": [str(t) for t in (params.get("tags") or []) if t],
-        }
+        params, held = reviewed_by_a_person(params)  # FX-010 (D7): a brief that sends or orders
+        payload = _ticket(params, description)
 
     svc = ScheduledTaskService(db, workspace_id)
-    return await svc.create_task(
+    result = await svc.create_task(
         created_by_agent_id=created_by_agent_id,
         target_agent_id=target_agent_id,
         task_type=task_type,
@@ -98,6 +102,39 @@ async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any])
         # filed and assigned at fire time. Autonomous runs thread none.
         created_by_user_id=params.get("_user_id"),
     )
+    return _said_reviewed(result, payload, held)
+
+
+def _target_agent(db: Session, workspace_id: UUID, params: Dict[str, Any],
+                  default: Any) -> Tuple[Any, Optional[str]]:
+    """(the agent the task runs as, None) or (None, why not): the id ``takes_the_agent_id``
+    bound, or the one ACTIVE agent carrying the name (P256-FIX-RVW-23: never a switched-off
+    namesake, never the first of several); ``default`` when none is named."""
+    said = params.get(TARGET_NAME)
+    if said in (None, ""):
+        return default, None
+    agent, refusal = resolve_active_agent(db, workspace_id, said)
+    if agent is None:
+        return None, refusal or NOT_IN_WORKSPACE.format(said=said)
+    return agent.id, None
+
+
+def _ticket(params: Dict[str, Any], description: Any) -> Dict[str, Any]:
+    """The board ticket a ``board_task`` row files when it fires."""
+    title = params.get("title") or (str(description).strip().splitlines() or [DEFAULT_TITLE])[0]
+    return {
+        "title": title[:TITLE_CHARS],
+        "priority": params.get("priority") or DEFAULT_PRIORITY,
+        REVIEW_MODE: params.get(REVIEW_MODE) or DEFAULT_REVIEW,
+        "tags": [str(t) for t in (params.get("tags") or []) if t],
+    }
+
+
+def _said_reviewed(result: Any, payload: Optional[Dict[str, Any]], held: bool) -> Any:
+    """The answer, saying the ticket waits for the owner's review when ``reviewed_by_a_person`` held it."""
+    if not held or not isinstance(result, dict) or not result.get("success"):
+        return result
+    return says_it_is_reviewed({**result, REVIEW_MODE: (payload or {}).get(REVIEW_MODE)}, held)
 
 
 async def list_scheduled_tasks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
