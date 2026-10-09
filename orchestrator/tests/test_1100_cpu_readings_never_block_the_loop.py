@@ -1,15 +1,16 @@
 """#1100 — the system/dashboard API routes must never block the event loop.
 
 ``psutil.cpu_percent(interval=1)`` sleeps for a full second. Inside the
-``async def`` handlers of ``api/system.py``, ``api/statistics.py`` and
-``api/analytics_real.py`` that held the loop hostage on every dashboard poll,
-stalling chat streams, SSE and every other request on the worker.
+``async def`` handlers of ``api/system.py``, ``api/statistics.py``,
+``api/analytics_real.py`` and ``core/services/analytics_engine.py`` that held
+the loop hostage on every dashboard poll, stalling chat streams, SSE and
+every other request on the worker.
 
 Pinned statically (importing the routers builds the whole app): every
-``cpu_percent`` call in those three modules must pass ``interval=None`` —
-the use since the previous call, primed once at startup in ``main.lifespan``
-— and GET ``/api/system/metrics`` must no longer write metric rows to the
-database from the request handler.
+``cpu_percent`` call in those four modules must pass ``interval=None`` —
+psutil 5.9.6 records a starting reading on module import, so no startup
+priming is needed — and GET ``/api/system/metrics`` must no longer write
+metric rows to the database from the request handler.
 """
 from __future__ import annotations
 
@@ -17,7 +18,12 @@ import ast
 from pathlib import Path
 
 ORCHESTRATOR = Path(__file__).resolve().parents[1]
-MODULES = ["api/system.py", "api/statistics.py", "api/analytics_real.py"]
+MODULES = [
+    "api/system.py",
+    "api/statistics.py",
+    "api/analytics_real.py",
+    "core/services/analytics_engine.py",
+]
 
 
 def _parse(rel: str) -> ast.Module:
@@ -62,16 +68,3 @@ def test_system_metrics_get_no_longer_writes_rows():
         "GET /api/system/metrics must not write metric rows to the database (#1100)"
     )
 
-
-def test_lifespan_primes_the_cpu_reading():
-    tree = _parse("main.py")
-    lifespans = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "lifespan"
-    ]
-    assert len(lifespans) == 1, f"one lifespan in main.py, found {len(lifespans)}"
-    assert _cpu_percent_calls(lifespans[0]), (
-        "main.lifespan must prime psutil once at startup so the first "
-        "interval=None reading is not 0.0 (#1100)"
-    )

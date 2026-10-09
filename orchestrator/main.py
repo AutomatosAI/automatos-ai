@@ -651,14 +651,6 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Automatos AI API Server...")
     app.state.ready = False
 
-    # #1100: prime psutil's CPU accounting once per process. The request
-    # handlers read the CPU with ``psutil.cpu_percent(interval=None)`` (never
-    # blocks the event loop); without this priming call the first request
-    # after boot would measure against process import and report 0.0.
-    import psutil
-
-    psutil.cpu_percent(interval=None)
-
     # PRD-172 F005 + PRD-186 S3: fail-closed on vector-plane config integrity
     # BEFORE any traffic is served. Raises RuntimeError (aborting boot) if
     # S3 Vectors is enabled without a bucket or with an incoherent dimension.
