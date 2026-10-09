@@ -40,6 +40,8 @@ def _failure(message, *, source="card", ref="#1", minutes_ago=0, agent_id=None):
     ("Error code: 401 - invalid x-api-key", fc.CAUSE_AUTH),
     ("Unknown tool: platform_get_trace", fc.CAUSE_TOOL_MISSING),
     ("Gmail is not connected for this workspace", fc.CAUSE_TOOL_MISSING),
+    ("The tool GMAIL_SEND_EMAIL is not available to this agent", fc.CAUSE_TOOL_MISSING),
+    ("This feature is not available on your plan", fc.CAUSE_OTHER),   # a plan gate is not a missing tool
     ("The model declined to write this", fc.CAUSE_REFUSED),
     ("Document 1547 does not exist", fc.CAUSE_NOT_FOUND),
     ("KeyError: 'title'", fc.CAUSE_OTHER),
@@ -184,12 +186,16 @@ def test_every_tool_autos_skill_names_is_registered_and_handled():
     from modules.tools.discovery.platform_actions import register_all_actions
     from modules.tools.discovery.platform_executor import PLATFORM_HANDLERS
 
+    from consumers.chatbot.smart_tool_router import SmartToolRouter
+
     registry = ActionRegistry()
     register_all_actions(registry)
     frontmatter = SEED.read_text(encoding="utf-8").split("---", 2)[1]
     named = re.findall(r"^  - name: (\S+)", frontmatter, re.M)
     assert "platform_get_workspace_errors" in named
-    missing = [name for name in named if name not in registry._actions]
+    # The chat's core tools (composio_execute) are dispatched by the chat service, not the registry.
+    missing = [name for name in named
+               if name not in registry._actions and name not in SmartToolRouter.CORE_TOOLS]
     assert missing == [], f"Auto's skill names tools the platform does not register: {missing}"
     unhandled = [name for name in named if name.startswith("platform_") and name not in PLATFORM_HANDLERS]
     assert unhandled == [], f"registered but with no handler: {unhandled}"

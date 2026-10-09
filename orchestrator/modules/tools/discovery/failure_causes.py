@@ -36,7 +36,7 @@ _RULES: Tuple[Tuple[str, "re.Pattern[str]"], ...] = (
     (CAUSE_AUTH, re.compile(r"\b401\b|\b403\b|unauthori[sz]ed|forbidden|invalid (api )?key|"
                             r"not scoped to a workspace|authentication", re.I)),
     (CAUSE_TOOL_MISSING, re.compile(r"unknown tool|no tool (by|named|called)|tool not found|"
-                                    r"is not available|not connected", re.I)),
+                                    r"tool\b.{0,60}\bnot available|not connected", re.I)),
     (CAUSE_REFUSED, re.compile(r"\brefus|\bdeclin|stop_reason.{0,4}refusal|can(no|')t (help|assist) with", re.I)),
     (CAUSE_NOT_FOUND, re.compile(r"\b404\b|not found|does not exist|no such", re.I)),
 )
