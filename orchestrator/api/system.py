@@ -368,7 +368,10 @@ async def get_system_health(ctx: RequestContext = Depends(get_request_context_hy
     """Get system health status"""
     try:
         # Get system metrics
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # #1100: interval=None is non-blocking — it reports the CPU use since
+        # the previous call (primed once at startup in main.lifespan). Any
+        # other interval sleeps on the event loop inside this async handler.
+        cpu_percent = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
         
@@ -577,46 +580,6 @@ async def get_system_health(ctx: RequestContext = Depends(get_request_context_hy
         logger.error(f"Error getting system health: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-def _store_current_metrics(db: Session):
-    """Store current system metrics to database"""
-    try:
-        from sqlalchemy import text
-        
-        # Collect current metrics
-        cpu_avg = sum(psutil.cpu_percent(interval=0.1, percpu=True)) / psutil.cpu_count()
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        disk_io = psutil.disk_io_counters()
-        network = psutil.net_io_counters()
-        
-        # Store each metric
-        metrics = [
-            ("cpu_usage", cpu_avg, "percent"),
-            ("memory_usage", memory.percent, "percent"),
-            ("memory_available", memory.available, "bytes"),
-            ("disk_usage", disk.percent, "percent"),
-            ("disk_read_bytes", disk_io.read_bytes if disk_io else 0, "bytes"),
-            ("disk_write_bytes", disk_io.write_bytes if disk_io else 0, "bytes"),
-            ("network_sent", network.bytes_sent, "bytes"),
-            ("network_recv", network.bytes_recv, "bytes"),
-        ]
-        
-        for metric_name, metric_value, metric_unit in metrics:
-            db.execute(
-                text("""
-                    INSERT INTO system_metrics (metric_name, metric_value, metric_unit, recorded_at)
-                    VALUES (:name, :value, :unit, NOW())
-                """),
-                {"name": metric_name, "value": metric_value, "unit": metric_unit}
-            )
-        
-        db.commit()
-        logger.debug(f"Stored {len(metrics)} system metrics to database")
-        
-    except Exception as e:
-        logger.error(f"Failed to store metrics: {e}")
-        db.rollback()
-
 
 @router.get("/metrics")
 async def get_system_metrics(
@@ -627,18 +590,28 @@ async def get_system_metrics(
     """
     Get detailed system metrics with optional time-series history from DATABASE.
     
-    - No timeRange: Returns current snapshot only + stores to DB
-    - With timeRange (24h): Returns current snapshot + REAL 24h time-series from DB
+    - No timeRange: Returns current snapshot only
+    - With timeRange (24h): Returns current snapshot + time-series from DB
+      (falls back to the current snapshot when no rows were recorded yet)
     
-    Metrics stored: CPU, Memory, Disk, Network
+    Metrics reported: CPU, Memory, Disk, Network
+
+    #1100: this GET never writes to the database and never blocks the event
+    loop — the CPU reading uses ``psutil.cpu_percent(interval=None)`` (primed
+    once at startup in ``main.lifespan``). The historical ``system_metrics``
+    rows are left for a background collector to fill in; nothing writes them
+    from a request handler anymore.
     """
     try:
         from sqlalchemy import text
         from datetime import timedelta
         
         # Collect current metrics
+        # #1100: interval=None is non-blocking — the use since the previous
+        # call (primed once at startup in main.lifespan). interval=1 slept a
+        # full second on the event loop on every dashboard poll.
         cpu_count = psutil.cpu_count()
-        cpu_percent = psutil.cpu_percent(interval=1, percpu=True)
+        cpu_percent = psutil.cpu_percent(interval=None, percpu=True)
         cpu_avg = sum(cpu_percent) / len(cpu_percent)
         
         memory = psutil.virtual_memory()
@@ -646,9 +619,6 @@ async def get_system_metrics(
         disk = psutil.disk_usage('/')
         disk_io = psutil.disk_io_counters()
         network = psutil.net_io_counters()
-        
-        # Store current metrics to database (async - don't wait)
-        _store_current_metrics(db)
         
         # Get analytics data
         try:

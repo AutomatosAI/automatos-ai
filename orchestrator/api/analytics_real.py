@@ -822,7 +822,9 @@ async def get_system_load_trend(ctx: RequestContext = Depends(get_request_contex
     """Get system load trend for 24h with color coding"""
     try:
         # Get system metrics
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # #1100: interval=None never blocks the event loop (use since the
+        # previous call, primed once at startup in main.lifespan).
+        cpu_percent = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
         
         # Determine load level and color
@@ -1023,7 +1025,9 @@ async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context
     try:
         # Calculate composite efficiency score
         # CPU efficiency (inverse of idle time)
-        cpu_usage = psutil.cpu_percent(interval=1)
+        # #1100: interval=None never blocks the event loop (use since the
+        # previous call, primed once at startup in main.lifespan).
+        cpu_usage = psutil.cpu_percent(interval=None)
         cpu_efficiency = min(100, cpu_usage * 1.2)  # Normalize to favor moderate usage
         
         # Memory efficiency
@@ -1214,7 +1218,9 @@ async def get_bottleneck_detection(ctx: RequestContext = Depends(get_request_con
         bottlenecks = []
         
         # Check CPU bottleneck
-        cpu_usage = psutil.cpu_percent(interval=1)
+        # #1100: interval=None never blocks the event loop (use since the
+        # previous call, primed once at startup in main.lifespan).
+        cpu_usage = psutil.cpu_percent(interval=None)
         if cpu_usage > 80:
             bottlenecks.append({
                 "type": "cpu",
