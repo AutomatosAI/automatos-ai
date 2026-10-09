@@ -165,7 +165,7 @@ class UserApiKey(Base):
     # 9 Oct 2026: the Anthropic workspace (wrkspc_…) an organization-level key bills,
     # sent as anthropic-workspace-id; NULL for a key scoped to its workspace already
     provider_workspace_id = Column(String(64), nullable=True)
-    # the key's SHA-256 (hex), set with provider_workspace_id: the client finds the workspace by it
+    # the key's fingerprint (PBKDF2, hex), set with provider_workspace_id: the client finds the workspace by it
     key_fingerprint = Column(String(64), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime)

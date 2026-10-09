@@ -4,7 +4,7 @@ An Anthropic key created at organization level is not scoped to a workspace: eve
 request must name one in the ``anthropic-workspace-id`` header, or the API answers
 400. The Add API Key dialog had nowhere to put it, so such a key failed validation
 and could never be used. The workspace ID (``wrkspc_…``) is now saved with the key
-(``core.llm.anthropic_workspace``), beside the key's SHA-256 fingerprint
+(``core.llm.anthropic_workspace``), beside the key's fingerprint (PBKDF2)
 (``key_fingerprint``, indexed): the client finds a key's workspace by it, so no
 stored key is decrypted to find one.
 

@@ -8,7 +8,7 @@ anthropic-workspace-id header" (Gerard, 9 Oct 2026: such a key failed validation
 Settings → API Keys and could never be used).
 
 The workspace ID (``wrkspc_…``) is now saved with the key (``user_api_keys.
-provider_workspace_id``), beside the key's SHA-256 fingerprint (``key_fingerprint``).
+provider_workspace_id``), beside the key's fingerprint (``key_fingerprint``, PBKDF2).
 Keys reach the Anthropic client as plain strings by many paths (BYOK, the operator
 workspace's key, the agent factory, missions, chat), so the header is added where
 every path ends: ``workspace_for_key`` looks the workspace up by the key's
@@ -33,6 +33,11 @@ PROVIDER = "anthropic"
 WORKSPACE_HEADER = "anthropic-workspace-id"
 WORKSPACE_ID_MAX_LENGTH = 64
 _WORKSPACE_ID = re.compile(r"^wrkspc_[A-Za-z0-9]{6,57}$")
+# The key's fingerprint: PBKDF2-HMAC-SHA256 with a fixed, purpose-bound salt, so the same key
+# always gives the same fingerprint (it is looked up by it) and a stored one is slow to test guesses
+# against. A provider key is high-entropy; the cost (tens of ms) is paid once per key per cache window.
+FINGERPRINT_SALT = b"automatos/anthropic-key-workspace/v1"
+FINGERPRINT_ITERATIONS = 100_000
 # A key's workspace rarely changes; a short, bounded cache keeps client construction off the database.
 CACHE_SECONDS = 300.0
 CACHE_MAX_KEYS = 256
@@ -73,8 +78,9 @@ def workspace_headers(workspace_id: Optional[str]) -> Dict[str, str]:
 
 
 def key_fingerprint(api_key: str) -> str:
-    """The key's SHA-256, hex: a provider key is high-entropy, so this names it without revealing it."""
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    """The key's fingerprint, hex (64 characters): names the key without revealing it."""
+    digest = hashlib.pbkdf2_hmac("sha256", api_key.encode("utf-8"), FINGERPRINT_SALT, FINGERPRINT_ITERATIONS)
+    return digest.hex()
 
 
 def workspace_for_key(api_key: Optional[str]) -> Optional[str]:
