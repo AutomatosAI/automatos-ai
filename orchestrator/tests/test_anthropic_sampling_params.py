@@ -18,6 +18,7 @@ from core.llm.clients.base import accepts_sampling_params
     "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5",
     "claude-fable-5-1", "anthropic.claude-opus-4-8", "anthropic/claude-opus-4.8",
     "claude-sonnet-4-6", "claude-opus-4-6", "anthropic/claude-sonnet-4.6",
+    "claude-haiku-5-5", "claude-sonnet-5-5", "anthropic/claude-haiku-5.5",
 ])
 def test_models_that_reject_sampling_params(model):
     assert accepts_sampling_params(model) is False
