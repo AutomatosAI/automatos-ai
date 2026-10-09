@@ -8,9 +8,10 @@ between Automatos and your backend decides where the data goes.
 | File | |
 |---|---|
 | [`collector.yaml`](collector.yaml) | The reference config. OTLP/HTTP in on `:4318`; a memory limit, batching, and a processor that strips the GenAI content attributes (in case a library ever adds them); OTLP/HTTP out to one backend. Health check on `:13133`. |
+| [`backend-auth.yaml`](backend-auth.yaml) | An addition for a backend that wants an `Authorization` header. Kept apart so a backend that needs none never gets an empty one. |
 | [`langfuse.yaml`](langfuse.yaml) | An addition: the GenAI spans only (LLM calls, agent runs, tool calls) to Langfuse as well. |
 
-Both are checked with `otelcol-contrib validate` against
+All three are checked with `otelcol-contrib validate` against
 `otel/opentelemetry-collector-contrib:0.161.0`, and the kind end-to-end test
 ([`deploy/kind/otel.sh`](../kind/otel.sh)) runs `collector.yaml` in the cluster.
 
@@ -35,12 +36,12 @@ The collector reads these from its environment:
 | Variable | |
 |---|---|
 | `OTLP_BACKEND_ENDPOINT` | The backend's OTLP/HTTP base URL; `/v1/traces` and `/v1/metrics` are appended. |
-| `OTLP_BACKEND_AUTHORIZATION` | The `Authorization` header the backend wants, if any (e.g. `Basic <base64>`, `Bearer <token>`). |
+| `OTLP_BACKEND_AUTHORIZATION` | With `backend-auth.yaml` only: the `Authorization` header the backend wants (e.g. `Basic <base64>`, `Bearer <token>`). |
 | `LANGFUSE_OTLP_ENDPOINT`, `LANGFUSE_AUTH` | With `langfuse.yaml` only: `https://cloud.langfuse.com/api/public/otel` (EU), `https://us.cloud.langfuse.com/api/public/otel` (US) or your own host's `/api/public/otel`; and base64 of `<public key>:<secret key>`. |
 
 Some backends' OTLP/HTTP intake:
 
-| Backend | `OTLP_BACKEND_ENDPOINT` | `OTLP_BACKEND_AUTHORIZATION` |
+| Backend | `OTLP_BACKEND_ENDPOINT` | `OTLP_BACKEND_AUTHORIZATION` (with `backend-auth.yaml`) |
 |---|---|---|
 | Grafana Tempo + Mimir (self-hosted) | their OTLP/HTTP receiver, e.g. `http://tempo:4318` (traces) | none |
 | Grafana Cloud | the stack's OTLP endpoint (`https://otlp-gateway-<zone>.grafana.net/otlp`) | `Basic <base64 of instance-id:token>` |
@@ -91,5 +92,5 @@ docker run --rm -v "$PWD/deploy/otel:/cfg:ro" -e OTLP_BACKEND_ENDPOINT=http://x:
 ```
 
 Extra config files merge over this one (`--config=collector.yaml --config=yours.yaml`):
-maps merge, lists are replaced. That is how `langfuse.yaml` adds a pipeline and the
+maps merge, lists are replaced. That is how `backend-auth.yaml` adds a header, `langfuse.yaml` adds a pipeline and the
 kind test swaps the exporter.

@@ -138,9 +138,6 @@ serviceAccount:
   name: ""
   annotations: {}
 
-# Path routing on one host: /api and /ws to the API, everything else to the web
-# app. Needs a frontend that reads its API address at runtime; the published
-# image still has http://localhost:8000 fixed at build time.
 # OpenTelemetry (PRD-256): traces from the API and the worker, and the API's GenAI
 # metrics, over OTLP/HTTP. OFF by default. Point `endpoint` at an OpenTelemetry
 # Collector (deploy/otel/ has a reference config) or any OTLP/HTTP backend. Its
@@ -153,6 +150,9 @@ otel:
   # The pod and namespace names are always added.
   resourceAttributes: ""
 
+# Path routing on one host: /api and /ws to the API, everything else to the web
+# app. Needs a frontend that reads its API address at runtime; the published
+# image still has http://localhost:8000 fixed at build time.
 ingress:
   enabled: false
   className: ""

@@ -9,10 +9,10 @@
 #
 #   OTLP_BACKEND_ENDPOINT       base URL of the backend's OTLP/HTTP intake;
 #                               /v1/traces and /v1/metrics are appended
-#   OTLP_BACKEND_AUTHORIZATION  the Authorization header it wants, e.g.
-#                               "Basic <base64 of id:token>" (empty: none sent)
 #
-# Langfuse as well (GenAI spans only): add `--config langfuse.yaml` (that file).
+# A backend that wants an Authorization header: add `--config backend-auth.yaml`
+# (that file; OTLP_BACKEND_AUTHORIZATION). Langfuse as well (GenAI spans only):
+# add `--config langfuse.yaml`.
 # Written for otel/opentelemetry-collector-contrib 0.161.0; check a change with
 #   docker run --rm -v "$PWD/deploy/otel:/cfg" otel/opentelemetry-collector-contrib:0.161.0 \
 #     validate --config=/cfg/collector.yaml
@@ -47,8 +47,6 @@ processors:
 exporters:
   otlp_http/backend:
     endpoint: ${env:OTLP_BACKEND_ENDPOINT}
-    headers:
-      Authorization: ${env:OTLP_BACKEND_AUTHORIZATION:-}
 
 extensions:
   # GET :13133/ answers 200 while the collector is up (Kubernetes probes).

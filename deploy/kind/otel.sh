@@ -30,22 +30,23 @@ collector_log_has() { local log; log="$(collector_log)" && grep -qF "$1" <<<"$lo
 collector_log_lacks() { local log; log="$(collector_log)" && ! grep -qF "$1" <<<"$log"; }
 
 # Succeeds when one trace ID in the collector's log has spans from both services,
-# and the API's resource carries the pod name the chart adds.
+# and both services' resources carry the pod name the chart adds.
 one_trace_across_api_and_worker() {
     collector_log | python3 -c '
 import re, sys
-traces, service, pod_named = {}, None, False
+services = {"automatos-api", "automatos-workspace-worker"}
+traces, service, pod_named = {}, None, set()
 for line in sys.stdin:
     found = re.search(r"service\.name: Str\(([^)]+)\)", line)
     if found:
         service = found.group(1)
-    if service == "automatos-api" and "k8s.pod.name: Str(" in line:
-        pod_named = True
+    if service in services and "k8s.pod.name: Str(" in line:
+        pod_named.add(service)
     found = re.search(r"Trace ID\s*:\s*([0-9a-f]{32})", line)
     if found and service:
         traces.setdefault(service, set()).add(found.group(1))
 shared = traces.get("automatos-api", set()) & traces.get("automatos-workspace-worker", set())
-sys.exit(0 if shared and pod_named else 1)
+sys.exit(0 if shared and pod_named == services else 1)
 '
 }
 
@@ -54,7 +55,12 @@ run_otel_checks() {
     # Lists the workspace's files: the API calls the worker, which continues the trace.
     curl -s -o /dev/null -H "X-Request-ID: $OTEL_REQUEST_ID" \
         "http://127.0.0.1:$API_PORT/api/workspaces/$WORKSPACE_ID/files?path=.&probe=SECRET-QUERY-VALUE" || true
-    sleep 8   # the SDK's batch delay (5 s), then the collector's batch
+    # Both services export in batches (the SDK's 5 s, then the collector's): wait
+    # for the whole trace and the request's ID, not a fixed time (review on #1053).
+    for _ in $(seq 1 60); do
+        one_trace_across_api_and_worker && collector_log_has "automatos.request_id: Str($OTEL_REQUEST_ID)" && break
+        sleep 1
+    done
     check "the collector is up (its health check answers in the cluster)" \
         kubectl -n "$NS" exec deploy/"$RELEASE"-worker -- curl -sf http://otel-collector:13133/
     check "the API's spans reach the collector" collector_log_has "service.name: Str(automatos-api)"
