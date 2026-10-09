@@ -132,6 +132,34 @@ async def execute_composio_tool(
     )
 
 
+def _attach_schemas(executor, result: Dict[str, Any], action: str) -> None:
+    """Attach the cached response/parameters schema for the action (or the one it was remapped
+    to): generic widget detection without hardcoding provider names. A failed lookup is logged."""
+    try:
+        from core.models.composio_cache import ComposioActionCache
+        from sqlalchemy import or_
+
+        executed_action = result.get("action", action)  # May have been remapped
+        action_cache = executor.db.query(ComposioActionCache).filter(
+            or_(
+                ComposioActionCache.action_name == action,
+                ComposioActionCache.action_name == executed_action,
+                ComposioActionCache.action_slug == action.lower().replace("_", "-"),
+            )
+        ).first()
+
+        if action_cache:
+            if action_cache.response_schema:
+                result["response_schema"] = action_cache.response_schema
+                logger.info(f"[Composio] Attached response_schema for {action_cache.action_name}")
+            if action_cache.parameters:
+                result["parameters_schema"] = action_cache.parameters
+        else:
+            logger.warning(f"[Composio] No cache entry found for action={action} or executed={executed_action}")
+    except Exception:  # noqa: BLE001 — a failed schema lookup never fails the action that ran
+        logger.warning(f"[Composio] Could not look up the schema for action={action}", exc_info=True)
+
+
 async def execute_composio_execute(
     executor,
     tool_name: str,
@@ -192,33 +220,7 @@ async def execute_composio_execute(
     # PRD-139: Telemetry write removed — unified hook in execute_tool handles this.
     # See modules/tools/execution/telemetry.py
 
-    # Schema-driven enhancement: Look up response_schema from cache
-    # This enables generic widget detection without hardcoding provider names
-    # Try both the original action and the actually-executed action (may differ due to auto-mapping)
-    try:
-        from core.models.composio_cache import ComposioActionCache
-        from sqlalchemy import or_
-
-        executed_action = result.get("action", action)  # May have been remapped
-        action_cache = executor.db.query(ComposioActionCache).filter(
-            or_(
-                ComposioActionCache.action_name == action,
-                ComposioActionCache.action_name == executed_action,
-                ComposioActionCache.action_slug == action.lower().replace("_", "-"),
-            )
-        ).first()
-
-        if action_cache:
-            if action_cache.response_schema:
-                result["response_schema"] = action_cache.response_schema
-                logger.info(f"[Composio] Attached response_schema for {action_cache.action_name}")
-            if action_cache.parameters:
-                result["parameters_schema"] = action_cache.parameters
-        else:
-            logger.warning(f"[Composio] No cache entry found for action={action} or executed={executed_action}")
-    except Exception as e:
-        logger.warning(f"[Composio] Could not lookup schema: {e}")
-
+    _attach_schemas(executor, result, action)
     return result
 
 
