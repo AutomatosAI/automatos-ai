@@ -8,15 +8,14 @@ inbound email writes these params.
 
 Now every recipient-class field is listed, each address on its own line labelled 'to', 'cc'
 or 'bcc' and never cut (a list in full), and each attachment is named with the file it
-attaches (a path whole; an object's name, and its source when that is another file). Every
-other field the call carries is listed too (:func:`other_lines`): a recipient under a name
-the card does not know is still on it. A recipient the card cannot read (an object, a flag,
-a list holding one) refuses the call before any grant (:func:`refused_before_the_send_card`):
-no card approves a recipient it does not show.
+attaches (a path whole; an object's name and every source it names). Every other field the
+call carries is listed too (:func:`other_lines`): a recipient under a name the card does not
+know is still on it, a list of plain values item by item, uncut. A recipient the card cannot
+read (an object, a flag, a list holding one) refuses the call before any grant
+(:func:`refused_before_the_send_card`): no card approves a recipient it does not show.
 """
 from __future__ import annotations
 
-from pathlib import PurePosixPath
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from modules.tools.discovery.card_question_text import said_line, shown, value_line
@@ -71,11 +70,18 @@ def attachment_lines(params: Any) -> List[str]:
 
 def other_lines(params: Any, used: Any) -> List[str]:
     """A card line for each field the call carries besides those already shown (``used``):
-    fail closed, so a recipient under a name the card does not know is still on it."""
+    fail closed, so a recipient under a name the card does not know is still on it. A list
+    of plain values is listed item by item, uncut; the field's name is one line, as a value is."""
     if not isinstance(params, dict):
         return []
-    return [said_line(str(key), value) for key, value in params.items()
-            if key not in used and value not in (None, "", [], {})]
+    return [line for key, value in params.items() if key not in used and value not in (None, "", [], {})
+            for line in _field_lines(shown(key), value)]
+
+
+def _field_lines(field: str, value: Any) -> List[str]:
+    if isinstance(value, (list, tuple)) and all(_readable(item) for item in value):
+        return [value_line(RECIPIENT_LINE.format(label=field, address=item)) for item in _addresses(value)]
+    return [said_line(field, value)]
 
 
 def refused_before_the_send_card(params: Any) -> Optional[Dict[str, Any]]:
@@ -111,18 +117,22 @@ def _readable(item: Any) -> bool:
 
 
 def _file_name(item: Any) -> str:
-    """The file an attachment attaches: a path whole; a file object's name, with its source
-    when that names another file ("invoice.pdf (from ws/7/payroll.xlsx)"), or its source alone."""
+    """The file an attachment attaches: a path whole; a file object's name with every source it
+    names ("invoice.pdf (from ws/7/payroll.xlsx)"), its sources alone, or the object as it is."""
     if not isinstance(item, dict):
         return shown(item)
-    name, source = _first_text(item, FILE_NAME_KEYS), _first_text(item, FILE_SOURCE_KEYS)
-    if name and source and PurePosixPath(source).name != name:
-        return shown(NAMED_FROM.format(name=name, source=source))
-    return shown(name or source or item)
+    name, sources = _first_text(item, FILE_NAME_KEYS), NAMED_JOIN.join(_texts(item, FILE_SOURCE_KEYS))
+    if name and sources:
+        return shown(NAMED_FROM.format(name=name, source=sources))
+    return shown(name or sources or item)
+
+
+def _texts(item: Dict[str, Any], keys: Tuple[str, ...]) -> List[str]:
+    return [" ".join(str(item[key]).split()) for key in keys if str(item.get(key) or "").strip()]
 
 
 def _first_text(item: Dict[str, Any], keys: Tuple[str, ...]) -> str:
-    return next((" ".join(str(item[key]).split()) for key in keys if str(item.get(key) or "").strip()), "")
+    return next(iter(_texts(item, keys)), "")
 
 
 def _listed(value: Any) -> List[Any]:

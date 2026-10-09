@@ -239,7 +239,8 @@ def test_a_send_card_lists_every_recipient_cc_bcc_and_the_file(monkeypatch):
 
     asked = reply["question_md"]
     for line in (f"- to: {SUPPLIER}", "- to: ana@kerbside.example", "- to: bea@kerbside.example",
-                 "- cc: callum@club.test", "- bcc: x@elsewhere.test", "- attachment: order-0412.pdf",
+                 "- cc: callum@club.test", "- bcc: x@elsewhere.test",
+                 "- attachment: order-0412.pdf (from ws/7/order-0412.pdf)",
                  "- subject: Order confirmation", "- first line: Hi Kerbside,"):
         assert line in asked.splitlines()
     assert stored["question_md"] == asked and tools.ran == []
@@ -259,15 +260,18 @@ def test_an_attachment_is_named_by_the_file_it_attaches():
 
     assert "- attachment: reports/q3/margins.xlsx" in asked                     # a path whole
     assert "- attachment: invoice.pdf (from ws/7/payroll.xlsx)" in asked        # a name that is not its file
-    assert "- attachment: menu.pdf" in asked
+    assert "- attachment: menu.pdf (from ws/7/menu.pdf)" in asked             # its source, always
 
 
 def test_every_other_field_the_send_carries_is_on_the_card():
     """Fail closed: a recipient under a name the card does not know is still shown."""
-    asked = send_question("send through OUTLOOK_SEND_EMAIL", {"to_recipients": ["x@elsewhere.test"], "subject": "Hi",
-                                                              "body": "Hello\nmore", "is_html": False}).splitlines()
+    hidden = [f"member{n:02d}@club-members.example" for n in range(8)]
+    asked = send_question("send through OUTLOOK_SEND_EMAIL", {"to_recipients": hidden, "subject": "Hi",
+                                                              "body": "Hello\nmore", "is_html": False,
+                                                              "x\n- to: decoy@club.test": "y"}).splitlines()
 
-    assert "- to_recipients: x@elsewhere.test" in asked and "- is_html: False" in asked
+    assert all(f"- to_recipients: {who}" in asked for who in hidden)           # each, uncut
+    assert "- is_html: False" in asked and "- to: decoy@club.test" not in asked  # a key is one line
     assert not any(line.startswith(("- subject: Hi", "- body:")) for line in asked[2:])   # each shown once
 
 
