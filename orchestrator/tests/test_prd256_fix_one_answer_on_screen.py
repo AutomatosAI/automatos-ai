@@ -222,6 +222,35 @@ def test_a_held_retraction_goes_out_when_the_answer_replaced_the_draft():
     assert _screen_after(frames) == ""
 
 
+# ── P256-FIX-RVW-24: a draft is retracted once, whatever its retry did ───────
+
+DONE = "Done."
+MOVED = "I've moved #0231 to Done."
+
+
+def test_a_draft_whose_retry_only_calls_tools_is_retracted_once_and_the_answer_stays():
+    """The retry made the call with no text, so it never became the latest streamed round:
+    the answer after it (the draft's own words) must not retract the draft a second time,
+    or the frontend's rule takes the answer off the screen."""
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([CLAIM], None),
+                         ([], [_call("platform_update_task_status")]), ([CLAIM], None))
+    frames, final = _turn(provider, chat_lane=True)
+
+    assert _retractions(frames) == [CLAIM]
+    assert final.content == CLAIM
+    assert _screen_after(frames) == CLAIM
+
+
+def test_an_answer_that_contains_the_draft_stays_whole_after_a_tool_only_retry():
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([DONE], None),
+                         ([], [_call("platform_update_task_status")]), ([MOVED], None))
+    frames, final = _turn(provider, chat_lane=True, owner="Move ticket 231 to Done.")
+
+    assert _retractions(frames) == [DONE]
+    assert final.content == MOVED
+    assert _screen_after(frames) == MOVED
+
+
 # ── the screen on its own ───────────────────────────────────────────────────
 
 def _response(content, calls=None):
@@ -271,3 +300,27 @@ def test_the_turn_and_its_calls_are_wired_to_the_screen():
     assert StreamingChatService._stream_tool_loop.__wrapped__.__code__.co_qualname == \
         "settles_held_retractions.<locals>.wrapped"
     assert in_owner_words.__code__.co_qualname == "watched.<locals>.wrapped"
+
+
+def test_the_screen_retracts_a_round_once_after_a_tool_only_retry():
+    from consumers.chatbot.on_screen import Screen
+
+    screen = Screen()
+    screen.ended(_response(CLAIM), CLAIM)
+    screen.ended(_response("", [_call("platform_update_task_status")]), "")
+    assert screen.retraction(CLAIM) == CLAIM                                 # the retry replaced it
+    screen.ended(_response(CLAIM), CLAIM)
+    assert screen.retraction(CLAIM) is None                                  # the answer: never again
+    assert screen.settled(_response(CLAIM)) == []
+
+
+def test_a_held_round_settled_is_never_retracted_again():
+    from consumers.chatbot.on_screen import Screen
+
+    screen = Screen()
+    screen.ended(_response(CLAIM), CLAIM)
+    screen.ended(_response(""), "")
+    assert screen.retraction(CLAIM) is None
+    assert screen.settled(_response(ANSWER)) == [CLAIM]
+    screen.ended(_response(ANSWER), ANSWER)
+    assert screen.retraction(CLAIM) is None

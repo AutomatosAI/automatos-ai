@@ -19,6 +19,11 @@ out when a reply with something in it took the round's place. After a blank repl
 held until the loop's answer is known: dropped when the original is that answer (the
 saved answer is then what the screen shows), sent when anything else is. The
 frontend's rule is unchanged.
+
+P256-FIX-RVW-24: a round is retracted at most once per turn. A retry that only calls
+tools never becomes the latest streamed round, so the answer after it would retract the
+nudged draft again; when that answer repeats the draft (or contains it), the frontend's
+rule takes the answer off the screen instead. The Screen records what it has retracted.
 """
 from __future__ import annotations
 
@@ -50,6 +55,7 @@ class Screen:
     def __init__(self) -> None:
         self._rounds: Tuple[Round, ...] = ()
         self._held: Tuple[Round, ...] = ()
+        self._gone: Tuple[Round, ...] = ()  # RVW-24: retracted (sent or settled), never again
 
     def ended(self, response: Any, said: str) -> None:
         """A streamed call returned ``response`` after putting ``said`` on the screen."""
@@ -70,20 +76,33 @@ class Screen:
         *earlier, latest = self._rounds
         match = _latest(earlier, content)
         if match is None:  # its replacement did not stream through here (a failover answer)
-            return self.narration(content)
+            match = _latest(self._rounds, content)
+            return content if match is None else self._retract(match)
+        if self._retracted(match):
+            return None
         if latest.blank:
             self._held = (*(r for r in self._held if r is not match), match)
             return None
         self._held = tuple(r for r in self._held if r is not match)
-        return match.said
+        return self._retract(match)
 
     def settled(self, answer: Any) -> List[str]:
         """The held rounds the loop's ``answer`` replaced, to retract now. A held round
         whose text is the answer stands: nothing is retracted for it."""
         content = getattr(answer, "content", None) or ""
-        replaced = [r.said for r in self._held if r.content != content]
+        replaced = [r for r in self._held if r.content != content]
         self._held = ()
-        return replaced
+        return [said for said in (self._retract(r) for r in replaced) if said is not None]
+
+    def _retracted(self, match: Round) -> bool:
+        return any(r is match for r in self._gone)
+
+    def _retract(self, match: Round) -> Optional[str]:
+        """``match``'s streamed text, the first time it is retracted; None after that."""
+        if self._retracted(match):
+            return None
+        self._gone = (*self._gone, match)
+        return match.said
 
 
 def _screen() -> Optional[Screen]:
