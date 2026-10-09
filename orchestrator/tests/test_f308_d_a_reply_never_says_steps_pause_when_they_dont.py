@@ -10,11 +10,16 @@ PRD-256 FX-007 (D10): the families are gone. "Each step will pause" says how the
 will run, not work done, so the receipts' claim rule clears it; what the owner reads
 instead is the mission's own receipt, from its call's answer: "its steps run without your
 check", or, once the check is switched on in the same turn, "each step waits for your OK".
+
+P256-FIX-RVW-37: a step the owner thinks waits for them is a wrong statement they act on. A claim
+that each step pauses needs a receipt that says each step waits for the owner's OK
+(``claims_by_kind``): over an unchecked mission, or none, it is nudged and gets the line.
 """
 from __future__ import annotations
 
 import pytest
 
+from consumers.chatbot.claims_by_kind import STEPS_LABEL
 from consumers.chatbot.receipts import build_receipts
 from tests.helpers_receipts_rule import call, line, nudged, tracker_of
 
@@ -34,9 +39,13 @@ def _effects(*calls):
     "I've created Mission #0033. Each step will pause for your approval before proceeding.",
     "Mission #0033 is set up, and it will stop after every step for your OK.",
 ])
-def test_steps_said_to_pause_over_an_unchecked_mission_is_told_by_its_receipt(said):
-    assert nudged(said, UNCHECKED) is None and line(said, UNCHECKED) is None   # the create backs "created"
+def test_steps_said_to_pause_over_an_unchecked_mission_is_caught(said):
+    assert nudged(said, UNCHECKED) == STEPS_LABEL                              # the create backs "created" only
+    assert line(said, UNCHECKED) == ("Just to be clear: nothing in this reply set the mission's steps to wait for "
+                                     "your OK. Ask me again if you want it done.")
     assert _effects(UNCHECKED) == ["its steps run without your check"]
+    assert nudged(said, CHECKED) is None and line(said, CHECKED) is None
+    assert nudged(said, UNCHECKED, SWITCHED_ON) is None and line(said, UNCHECKED, SWITCHED_ON) is None
 
 
 def test_the_receipt_says_so_when_the_mission_checks_each_step():
@@ -47,6 +56,7 @@ def test_the_receipt_says_so_once_the_check_is_switched_on_in_the_same_turn():
     assert _effects(UNCHECKED, SWITCHED_ON)[-1] == "each step waits for your OK"
 
 
-def test_a_question_about_it_or_a_turn_with_no_mission_is_no_claim():
+def test_a_question_or_a_denial_is_no_claim_and_a_turn_with_no_mission_backs_none():
     assert nudged("Would you like each step to pause for your approval?", UNCHECKED) is None
-    assert nudged("Each step will pause for your approval.") is None
+    assert nudged("Each step will not pause for your approval: they run on their own.", UNCHECKED) is None
+    assert nudged("Each step will pause for your approval.") == STEPS_LABEL      # no receipt says so

@@ -10,6 +10,11 @@ that served only them are gone. The in-loop nudge (F108) reads the receipts' rul
 Each family's sentence is read by the receipts' rule: CAUGHT (the nudge names the claim's verb)
 or CLEARED (no claim: a plan, a figure, a place, or a write of its kind went through; the
 receipts above the answer show what ran).
+
+P256-FIX-RVW-37: FX-007 had inverted four rows the families caught. They are caught again by the
+receipts rule (``claims_by_kind``), each cleared by its own backing call: "Each step will pause"
+over an unchecked mission (F308), a reply ending "I will now send …" with nothing sent (F261), "all
+agents know" over a saved memory (F324), and a letter said made over a card made (F351).
 """
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from consumers.chatbot import claim_check
+from consumers.chatbot.claims_by_kind import STEPS_LABEL, TEAM_LABEL
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE, ToolExecutionTracker
 from tests.helpers_receipts_rule import call, line, nudged
 
@@ -60,7 +66,7 @@ SENTENCES = [
     ("F187 checked: a read, no work", "I've checked the board for you.", ["search_knowledge"], None),
     ("F187 exact numbers: a figure", B33, ["platform_read_document"], None),
     ("F187 under way: a promise", "Please bear with me while I fix this.", [], None),
-    ("F261 a promise to send", "I will now send this updated brief to the agent.", [], None),
+    ("F261 a promise to send", "I will now send this updated brief to the agent.", [], "sent"),
     ("F261 moved to cancelled over a move to done", "Task #0422 has been moved to 'cancelled'.",
      [_moved(422, "done")], "moved"),
     ("F261 sent back over an edit", "I've sent it back to the agent to redo.",
@@ -69,19 +75,20 @@ SENTENCES = [
      "initiated"),
     ("F261 approved by the move to done", "Alright, I've approved ticket #0231 and marked it as done.",
      [_moved(231, "done")], None),
-    ("F308 steps said to pause", "Each step will pause for your approval.", [UNCHECKED_MISSION], None),
+    ("F308 steps said to pause", "Each step will pause for your approval.", [UNCHECKED_MISSION], STEPS_LABEL),
     ("F314 saved in passing, nothing saved", "This draft has now been saved as a social post.", [], "saved"),
     ("F314 saved, the post was made", "This draft has now been saved as a social post.",
      ["platform_create_social_post"], None),
     ("F303 a figure said right", GAVE_WAY, [], None),
     ("F316 a shop figure", "There are 87 subscribers on the Harvest Club.", ["search_knowledge"], None),
     ("F324 stored for the team", "I've stored it in my memory so that all agents know.",
-     ["platform_store_memory"], None),
+     ["platform_store_memory"], TEAM_LABEL),
     ("F319 sent back by its number", "I've sent card 67.1 back to the Analyst.", [_moved(67.1, "assigned")], None),
     ("F319 cancelled behind a quoted title", 'Card #0044, "Minimum wholesale order and cut-off," has been cancelled.',
      [_moved("0044", "done", REFUSED)], "cancelled"),
-    ("F351 a letter over a refused document", "I've generated the letter to Maya Osei and saved it to Deliverables.",
-     [LETTER_REFUSED], "generated"),
+    ("F351 a letter over a refused document and a card",
+     "I've generated the letter to Maya Osei and saved it to Deliverables.", [LETTER_REFUSED, "platform_create_task"],
+     "generated"),
     ("F351 where a document is", 'You can find the letter in your Deliverables as "Payment Terms Update.docx".', [],
      None),
     ("F363 noted on the card the turn made", AT_17_58, ["platform_list_tasks", "platform_create_task"], None),
@@ -105,6 +112,56 @@ def test_the_table_is_the_families_26_sentences():
 def test_each_sentence_is_caught_or_cleared_by_the_receipts_rule(family, said, calls, claim):
     assert nudged(said, *calls) == claim, family
     assert (line(said, *calls) is None) is (claim is None), family     # caught: the line above the answer too
+
+
+# ── P256-FIX-RVW-37: the four rows FX-007 inverted, each cleared by its backing call ──
+
+CHECKED_MISSION = call("platform_create_mission", {"goal": "September takings"},
+                       {"success": True, "mission_id": "x", "checks_each_step": True})
+LETTER_AND_SAVED = "I've created the letter to Maya and saved it to your Deliverables."
+BACKED = [
+    ("F308 steps said to pause over a mission that checks each step", "Each step will pause for your approval.",
+     [CHECKED_MISSION]),
+    ("F261 a promise to send, the email sent", "I will now send this updated brief to the agent.", [EMAIL_SENT]),
+    ("F324 stored for the team, a note in the documents", "I've stored it in my memory so that all agents know.",
+     ["platform_store_memory", "platform_upload_document"]),
+    ("F351 a letter made", LETTER_AND_SAVED, ["generate_document"]),
+    ("F351 a letter uploaded", LETTER_AND_SAVED, ["platform_create_task", "platform_upload_document"]),
+]
+
+
+@pytest.mark.parametrize("family, said, calls", BACKED, ids=[case[0] for case in BACKED])
+def test_each_inverted_row_is_cleared_by_its_backing_call(family, said, calls):
+    assert nudged(said, *calls) is None and line(said, *calls) is None, family
+
+
+def test_a_letter_said_made_and_saved_over_a_card_is_caught():
+    """F351: create_task backs no letter "created" and no letter "saved to your Deliverables"."""
+    assert nudged(LETTER_AND_SAVED, "platform_create_task") == "created"
+    assert line(LETTER_AND_SAVED, "platform_create_task") == (
+        "Just to be clear: I haven't created or saved anything in this reply. Ask me again if you want it done.")
+    assert nudged(LETTER_AND_SAVED, "platform_create_task", "generate_document") is None
+
+
+def test_the_steps_and_the_team_are_said_in_their_own_words():
+    assert line("Each step will pause for your approval.", UNCHECKED_MISSION) == (
+        "Just to be clear: nothing in this reply set the mission's steps to wait for your OK. Ask me again if you "
+        "want it done.")
+    assert line("I've stored it in my memory so that all agents know.", "platform_store_memory").startswith(
+        "Just to be clear: your agents haven't been told: I only keep this in my own memory")
+
+
+def test_a_promise_ending_the_reply_gets_the_announced_step_nudge():
+    from modules.tools.execution.nudges import announced_step
+    from modules.tools.execution.tool_loop import ToolLoopExecutor
+    from tests.helpers_receipts_rule import tracker_of
+
+    said = "I will now send this updated brief to the agent."
+    assert announced_step(said, tracker_of([]).outcomes) == said
+    assert announced_step(said, tracker_of([EMAIL_SENT]).outcomes) is None
+    assert announced_step(said) is None                                     # outside a loop: the cap and the card
+    assert announced_step("I will now send it. Is there anything else?", tracker_of([]).outcomes) is None
+    assert "announced_step(text, self.tracker.outcomes)" in inspect.getsource(ToolLoopExecutor._recover_claimed_action)
 
 
 # ── F187 tier 2 stays: a number the turn's own tool results quote is backed ──

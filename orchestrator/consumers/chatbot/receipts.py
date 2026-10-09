@@ -45,8 +45,9 @@ from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional
 
 from consumers.chatbot.claim_check import NOTHING_DONE, READS_SAID, reads_put_in_front
 from consumers.chatbot.claims_backed import (
-    COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, unbacked_claims,
+    COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, promised_unbacked, unbacked_claims,
 )
+from consumers.chatbot.claims_by_kind import EACH_STEP_WAITS
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED, STEPS_UNCHECKED,
     answers_in, done_effects,
@@ -78,7 +79,7 @@ _MOVES = {"done": "moved to Done", "cancelled": "moved to Cancelled", "assigned"
           "review": "moved to Review", "in_progress": "started", "inbox": "moved to the Inbox",
           "blocked": "marked blocked"}
 _SAID = {SENT_BACK: "sent back to its agent", AGENT_SET: "agent set",
-         STEPS_CHECKED: "each step waits for your OK", STEPS_UNCHECKED: "its steps run without your check",
+         STEPS_CHECKED: EACH_STEP_WAITS, STEPS_UNCHECKED: "its steps run without your check",
          REVIEWED_BY_YOU: "card created, reviewed by you before it closes",  # FX-010 (D7)
          STATUS_IGNORED_SAID: "status ignored: a re-brief sends the card back by itself"}  # FX-013
 # Calls whose name reads badly as "<thing> <past verb>".
@@ -340,6 +341,13 @@ def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], An
     return next((verb or "done" for verb, known in unbacked if known or verb in SAYS_DONE), None)
 
 
+def unbacked_promise(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]]) -> Optional[str]:
+    """P256-FIX-RVW-37 (F261-A): the family verb the answer's last sentence announces now ("I will now send
+    …") that no done write of the calls so far backs, else None: the tool loop's announced-step nudge."""
+    writes = [r for r in (receipt(action, params, result) for action, params, result in outcomes) if r["kind"] == WRITE]
+    return promised_unbacked(answer, [r for r in writes if r["status"] == DONE], waiting=_asks(writes))
+
+
 def with_lines_above(answer: str, above: Sequence[str]) -> str:
     """The saved answer: the honesty lines first, then the text."""
     return "\n\n".join([*above, answer]) if above else answer
@@ -502,5 +510,6 @@ __all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIV
            "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WAITING", "WRITE", "build_receipts", "claims_work_done",
            "current_receipts", "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
            "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "says_nothing_was_done", "skipped_receipt",
-           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "unbacked_claim", "with_lines_above",
+           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "unbacked_claim", "unbacked_promise",
+           "with_lines_above",
            "writes_its_receipts"]

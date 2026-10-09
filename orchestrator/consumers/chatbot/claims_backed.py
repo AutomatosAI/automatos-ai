@@ -69,12 +69,17 @@ and a ticked "✅ Email sent to Sam". "Done:" or "Done —" is the bare done cla
 follows ("Done — I've created the agent." is created); "went ahead and" is an adverb of the first person, an
 adverb may follow "been" ("has been successfully created"), and "<noun>'s been <verb>" is the has-been shape
 ("The card's been approved.", never "Nothing's been sent" or "who's been assigned").
+P256-FIX-RVW-37: four claims a verb's family alone cannot read come back through this rule (``claims_by_kind``): a
+document said created, generated or saved needs a write that makes one (F351), "each step will pause" a mission whose
+receipt says each step waits (F308), "all agents know" a write other than memory (F324), and a reply ending "I will now
+send …" a write of that family (F261-A).
 """
 from __future__ import annotations
 
 import re
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
+from consumers.chatbot import claims_by_kind as kinds
 from consumers.chatbot.claim_check import NOT_DONE, NOTHING_DONE
 from modules.tools.execution.composio_action import is_slug, slug_stems
 
@@ -377,7 +382,7 @@ def _family(verb: str, sentence: str) -> Optional[Backs]:
     if verb == _MADE:
         said = next((family for pattern, family in _MADE_AS if pattern.search(sentence)), None)
         return _of(said) if said else None
-    return _of(verb)
+    return kinds.document_backs(verb, sentence) or _of(verb)       # RVW-37 (F351): a document needs one made
 
 
 def _of(verb: str) -> Optional[Backs]:
@@ -512,18 +517,41 @@ def numbers_read(reads: Sequence[Receipt]) -> FrozenSet[str]:
 
 
 def claims_work_done(answer: str) -> bool:
-    """Whether the answer reports, in the first person or as an outcome, work as done."""
-    return bool(claims(answer))
+    """Whether the answer reports, in the first person or as an outcome, work as done (or, RVW-37, says
+    each step waits, the team knows, or ends announcing work now)."""
+    return bool(claims(answer) or _said(answer, first_person=False))
+
+
+def _said(answer: str, first_person: bool, waiting: bool = False) -> List[Tuple[str, Backs]]:
+    """P256-FIX-RVW-37: the answer's claims no verb's family reads, each with what backs it: that each step
+    waits (F308) or the team knows (F324), Auto's own (not an agent's run, ``first_person``), and the work
+    its last sentence announces now (F261-A: "I will now send …" is "sent", a send's family), unless a write
+    of the turn waits for the owner's click (``waiting``: the send waits on its card, RVW-30)."""
+    text = _MARKS.sub("", _own_words(answer or ""))
+    sentences = [found for found in _SENTENCES.findall(text) if found.strip() and not _PAST.search(found)]
+    said = [] if first_person else [claim for sentence in sentences for claim in kinds.said_in(sentence)]
+    last = sentences[-1] if sentences else ""
+    verb = next((verb for verb in kinds.promised_now(last) if _of(verb)), None)
+    return [*said, (verb, _family(verb, last))] if verb and not waiting else said
+
+
+def promised_unbacked(answer: str, done_writes: Sequence[Receipt], waiting: bool = False) -> Optional[str]:
+    """F261-A: the family verb the answer's last sentence announces now ("I will now send …": "sent") when
+    no done write of that family backs it and no write waits for the owner's click, else None."""
+    promised = [(verb, backs) for verb, backs in _said(answer, True, waiting) if verb not in kinds.OWN_SAID]
+    return next((verb for verb, backs in promised if not any(backs(r) for r in done_writes)), None)
 
 
 def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: bool = False,
-                    waiting: bool = False, reads: Sequence[Receipt] = ()) -> List[Tuple[str, bool]]:
+                    waiting: bool = False, reads: Sequence[Receipt] = (),
+                    kinds_too: bool = True) -> List[Tuple[str, bool]]:
     """The answer's claims no done write backs: (the verb, whether its family is known). A
     claim of a known family needs a done write of that family (a Composio action's by the
     words of its slug); any other one its stem names, or any done write for a claim that says
     only that work happened (P256-FIX-RVW-36). With ``waiting`` (the turn raised a card
     for the owner's click), a claim that reports that ask is backed by it (P256-FIX-RVW-30); a
-    has-been or was claim about a number one of the turn's done ``reads`` names is none (RVW-34)."""
+    has-been or was claim about a number one of the turn's done ``reads`` names is none (RVW-34). RVW-37
+    (``kinds_too``): the steps, the team and a promise of work now, too (a customer draft's are its writer's)."""
     unbacked = []
     for verb, sentence in claims(answer, first_person, numbers_read(reads)):
         if waiting and _asked(verb, sentence):
@@ -532,7 +560,8 @@ def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: b
         backed = any((backs or _unfamiliar(verb))(r) for r in done_writes)
         if not backed:
             unbacked.append((verb, backs is not None))
-    return unbacked
+    said = _said(answer, first_person, waiting) if kinds_too else []
+    return [*unbacked, *((label, True) for label, backs in said if not any(backs(r) for r in done_writes))]
 
 
 # P256-FIX-RVW-36: a verb in no family is backed by a done write a word of whose name starts with the
@@ -574,6 +603,13 @@ def _listed(verbs: Sequence[str]) -> str:
     return verbs[0] if len(verbs) == 1 else f"{', '.join(verbs[:-1])} or {verbs[-1]}"
 
 
+def _not_said(named: Sequence[str]) -> str:
+    """What the line says was not done: the verbs named, then each RVW-37 claim in its own words."""
+    verbs = [verb for verb in named if verb not in kinds.OWN_SAID]
+    own = [kinds.OWN_SAID[verb] for verb in named if verb in kinds.OWN_SAID]
+    return "; ".join([NAMED_SAID.format(verbs=_listed(verbs))] + own if verbs else own)
+
+
 def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = False,
                   reads: Sequence[Receipt] = ()) -> Optional[str]:
     """The one not-done line for the answer, or None when every claim is backed (``waiting``: by
@@ -586,7 +622,7 @@ def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = F
     named = list(dict.fromkeys(verb for verb, _known in unbacked if verb not in SAYS_DONE))
     if not done_writes or not named:
         return NOTHING_DONE
-    return NOT_DONE.format(said=NAMED_SAID.format(verbs=_listed(named)))
+    return NOT_DONE.format(said=_not_said(named))
 
 
 def is_not_done_line(line: str) -> bool:
@@ -595,4 +631,4 @@ def is_not_done_line(line: str) -> bool:
 
 
 __all__ = ["COMPLETED_ACTION", "FAMILIES", "NOT_DONE_PREFIX", "SAYS_DONE", "claims", "claims_work_done",
-           "is_not_done_line", "not_done_line", "numbers_read", "unbacked_claims"]
+           "is_not_done_line", "not_done_line", "numbers_read", "promised_unbacked", "unbacked_claims"]

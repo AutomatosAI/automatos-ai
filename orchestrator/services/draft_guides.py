@@ -210,7 +210,7 @@ def check_before_sending(brief: object, draft: object, ran: Iterable[str]) -> Op
     # the run lists the actions that went through: each write is a done one, its name its receipt (no
     # effect is known here, so a claim backed only by an effect, "moved to Done", is never backed)
     done_writes = [{"action": action} for action in (ran or ()) if not is_read(action)]
-    unbacked = unbacked_claims(str(draft or ""), done_writes)
+    unbacked = unbacked_claims(str(draft or ""), done_writes, kinds_too=False)    # RVW-37: Auto's own claims
     if not unbacked:
         return None
     verb, known = unbacked[0]

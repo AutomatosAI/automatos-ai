@@ -163,10 +163,11 @@ def claimed_action_nudge(claim: str, outcomes: List[Any]) -> str:
     return f"{said} {REFUSED_WRITE_NOTE.format(refused='; '.join(refused), rule=REFUSED_WRITE_RULE)}"
 
 
-def announced_step(text: str) -> Optional[str]:
+def announced_step(text: str, outcomes: Optional[List[Any]] = None) -> Optional[str]:
     """The step a reply's last line announces and never took, else None. The line has
     a cue ("let me", "now let me", "I'll") and either ends on a colon or stops
-    mid-sentence; "let me know" is never a step."""
+    mid-sentence; "let me know" is never a step. P256-FIX-RVW-37 (F261-A): with the loop's
+    ``outcomes``, a reply ending "I will now send …" with no done write of that family is one too."""
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     if not lines:
         return None
@@ -175,7 +176,13 @@ def announced_step(text: str) -> Optional[str]:
         return None
     if last.endswith(":") or not last.endswith(_SENTENCE_END):
         return last[:STEP_SHOWN_CHARS]
-    return None
+    return last[:STEP_SHOWN_CHARS] if outcomes is not None and _promised(text, outcomes) else None
+
+
+def _promised(text: str, outcomes: List[Any]) -> bool:
+    from consumers.chatbot.receipts import unbacked_promise  # the receipts' rule, read when a reply ends
+
+    return unbacked_promise(text, outcomes) is not None
 
 
 # Night 9b (6586c8bf, 8578eeaf): a nudge in the user's turn was read as the owner

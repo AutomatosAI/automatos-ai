@@ -130,7 +130,7 @@ CAUGHT_TODAY = [
      lambda r: [(x["status"], x["subject"]) for x in r] == [(DONE, "Harbour Log Intro - October Box")]),
     ("F324 all agents are aware", "I've stored the information that Quay Coffee House moves to 30-day payment terms "
      "from November in my memory. This will ensure that all agents, including the Support Agent, are aware of this "
-     "change going forward.", [SEARCHED, MEMORY_STORED], SHOWN,
+     "change going forward.", [SEARCHED, MEMORY_STORED], NOT_DONE,       # P256-FIX-RVW-37: memory tells no agent
      lambda r: [x["effect"] for x in r if x["kind"] == WRITE] == ["memory saved"] and _nothing_on_the_board(r)),
     ("F351 generated the letter", "I've generated the letter for Maya Osei and saved it to your Deliverables.",
      [LETTER_REFUSED], TRIED, None),

@@ -606,7 +606,7 @@ class ToolLoopExecutor:
         text = getattr(current, "content", "") or ""
         if not text.strip():  # F297: nothing in it straight after a round of tool calls
             return await ask_for_the_answer(self._llm, messages, tools)
-        step = announced_step(text)
+        step = announced_step(text, self.tracker.outcomes)  # RVW-37: or "I will now send …", nothing sent
         if step:  # F306 (night 9): "Let me try a more specific query:" and no call made
             logger.warning("[tool-loop] reply announced a step it never took — nudging once")
             return await nudge_about(self._llm, current, messages, tools, ANNOUNCED_STEP_MSG.format(step=step))
