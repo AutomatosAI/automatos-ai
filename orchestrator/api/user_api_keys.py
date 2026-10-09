@@ -325,13 +325,15 @@ async def add_api_key(
     db.refresh(row)
     clear_cache()
 
-    # Nothing derived from the key or its check is logged (CodeQL py/clear-text-logging-sensitive-data):
-    # the outcome is the branch taken, not a value.
+    # Nothing from the request body is logged (CodeQL py/clear-text-logging-sensitive-data: the body
+    # carries the key): the provider is the registry's own slug, the outcome the branch taken.
+    spec = provider_registry.get_spec(provider)
+    slug = spec.slug if spec else "unknown"
     if validation.valid:
-        logger.info("API key saved for provider=%s workspace=%s (valid, BYOK enabled)", provider, ctx.workspace_id)
+        logger.info("API key saved for provider=%s workspace=%s (valid, BYOK enabled)", slug, ctx.workspace_id)
     else:
         logger.info("API key saved for provider=%s workspace=%s (failed validation, BYOK NOT enabled)",
-                    provider, ctx.workspace_id)
+                    slug, ctx.workspace_id)
     return _row_to_out(row, encryption, validation=validation)
 
 
