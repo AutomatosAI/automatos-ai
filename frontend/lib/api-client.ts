@@ -1343,10 +1343,6 @@ class ApiClient {
     return this.request(`/api/marketplace/items${queryString ? `?${queryString}` : ''}`)
   }
 
-  async getMarketplaceItem(itemId: number) {
-    return this.request(`/api/marketplace/items/${itemId}`)
-  }
-
   async getFeaturedMarketplaceItems(limit: number = 8) {
     return this.request(`/api/marketplace/featured?limit=${limit}`)
   }
@@ -1375,8 +1371,8 @@ class ApiClient {
     return this.request('/api/marketplace/updates')
   }
 
-  async toggleMarketplaceFeatured(itemId: number) {
-    return this.request(`/api/marketplace/items/${itemId}/toggle-featured`, {
+  async toggleMarketplaceFeatured(itemId: number, itemType: string) {
+    return this.request(`/api/marketplace/items/${itemId}/toggle-featured?type=${encodeURIComponent(itemType)}`, {
       method: 'POST'
     })
   }

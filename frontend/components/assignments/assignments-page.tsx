@@ -297,7 +297,7 @@ function RecommendedGrid() {
   const handleClick = useCallback(
     (item: RecommendedItem) => {
       if (item.source === 'marketplace') {
-        router.push(`/marketplace?id=${item.id}`)
+        router.push(`/marketplace?id=${item.id}&type=recipe`)  // marketplace recommendations are playbooks
       } else if (item.type === 'mission') {
         router.push(`/assignments?tab=missions&id=${item.id}`)
       } else {

@@ -12,7 +12,6 @@ import { apiClient } from '@/lib/api-client'
 // Query keys for React Query
 export const marketplaceQueryKeys = {
   items: (filters?: any) => ['marketplace', 'items', filters] as const,
-  item: (id: number) => ['marketplace', 'items', id] as const,
   featured: ['marketplace', 'featured'] as const,
   updates: ['marketplace', 'updates'] as const,
 }
@@ -110,18 +109,6 @@ export function useMarketplaceItems(filters?: {
 }
 
 /**
- * Hook to get a single marketplace item
- */
-export function useMarketplaceItem(itemId: number | null) {
-  return useQuery({
-    queryKey: marketplaceQueryKeys.item(itemId!),
-    queryFn: () => apiClient.getMarketplaceItem(itemId!),
-    enabled: itemId !== null,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  })
-}
-
-/**
  * Hook to get featured marketplace items
  */
 export function useFeaturedItems(limit: number = 8) {
@@ -169,8 +156,8 @@ export function useToggleFeatured() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (itemId: number) => {
-      return await apiClient.toggleMarketplaceFeatured(itemId)
+    mutationFn: async (item: { id: number; type: string }) => {
+      return await apiClient.toggleMarketplaceFeatured(item.id, item.type)
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: marketplaceQueryKeys.items() })
