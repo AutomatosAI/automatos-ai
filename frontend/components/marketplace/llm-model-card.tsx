@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
+import { PRICE_UNKNOWN } from '@/lib/model-price'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
@@ -33,6 +34,8 @@ export interface LLMModel {
   serving_provider_label?: string
   route_label?: string
   is_free?: boolean
+  /** False: the catalogue has no price for this route. It is not free. */
+  price_known?: boolean
   price_tier?: string
   key_available?: boolean
   sourcing?: string | null
@@ -221,7 +224,7 @@ export function LLMModelCard({
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                 <span>{formatTokenCount(model.context_window)} ctx</span>
                 <span>&middot;</span>
-                <span>{model.is_free ? 'Free' : `In: ${formatCostPer1M(model.input_cost_per_1k)}/1M`}</span>
+                <span>{model.is_free ? 'Free' : model.price_known === false ? PRICE_UNKNOWN : `In: ${formatCostPer1M(model.input_cost_per_1k)}/1M`}</span>
                 {model.key_available === false && (
                   <span className="text-[10px] text-warning">· add a {routeBadges(model).route} key</span>
                 )}
@@ -361,6 +364,10 @@ export function LLMModelCard({
           {model.is_free ? (
             <span className="text-lime-400 font-medium" title={model.terms_note || undefined}>
               Free{model.rate_limit_note ? ' · rate-limited' : ''}
+            </span>
+          ) : model.price_known === false ? (
+            <span className="text-muted-foreground" title="No published price yet. Calls still cost money on your key.">
+              {PRICE_UNKNOWN}
             </span>
           ) : (
             <div className="flex items-center gap-2">
