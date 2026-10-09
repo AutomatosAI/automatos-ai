@@ -33,6 +33,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
 from core.auth.workspace_admin import require_workspace_admin
+from api.dashboard_efficiency import agent_utilisation, completion_rate, efficiency_report
 
 logger = logging.getLogger(__name__)
 # PRD-143 S6: observability tier — router-wide super-admin lock (fail-closed).
@@ -822,7 +823,9 @@ async def get_system_load_trend(ctx: RequestContext = Depends(get_request_contex
     """Get system load trend for 24h with color coding"""
     try:
         # Get system metrics
-        cpu_percent = psutil.cpu_percent(interval=1)
+        # #1100: interval=None never blocks the event loop (use since the
+        # previous call, primed once at startup in main.lifespan).
+        cpu_percent = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
         
         # Determine load level and color
@@ -1019,76 +1022,19 @@ async def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybr
 
 @router.get("/dashboard/efficiency-score")
 async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """Get resource utilization efficiency score (0-100)"""
+    """Get resource utilization efficiency score (0-100). Computed in ``api.dashboard_efficiency``."""
     try:
-        # Calculate composite efficiency score
-        # CPU efficiency (inverse of idle time)
-        cpu_usage = psutil.cpu_percent(interval=1)
-        cpu_efficiency = min(100, cpu_usage * 1.2)  # Normalize to favor moderate usage
-        
-        # Memory efficiency
-        memory = psutil.virtual_memory()
-        memory_efficiency = min(100, memory.percent * 1.1)
-        
-        # Agent utilization
-        total_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).count()
-        active_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').count()
-        agent_efficiency = (active_agents / total_agents * 100) if total_agents > 0 else 0
-
-        # Execution completion efficiency (UNION: workflows + missions)
+        # #1100: interval=None never blocks the event loop (the use since the previous call).
+        cpu_usage = psutil.cpu_percent(interval=None)
         ws = ctx.workspace_id
-        day_ago = datetime.now() - timedelta(hours=24)
-        wf_recent = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workspace_id == ws, WorkflowExecution.started_at >= day_ago
-        ).count()
-        wf_completed = db.query(WorkflowExecution).filter(and_(
-            WorkflowExecution.workspace_id == ws, WorkflowExecution.status == 'completed',
-            WorkflowExecution.started_at >= day_ago
-        )).count()
-        m_recent = db.query(OrchestrationRun).filter(
-            OrchestrationRun.workspace_id == ws, OrchestrationRun.created_at >= day_ago
-        ).count()
-        m_completed = db.query(OrchestrationRun).filter(and_(
-            OrchestrationRun.workspace_id == ws,
-            OrchestrationRun.state == RunState.COMPLETED.value,
-            OrchestrationRun.created_at >= day_ago
-        )).count()
-        recent_executions = wf_recent + m_recent
-        completed = wf_completed + m_completed
-        workflow_efficiency = (completed / recent_executions * 100) if recent_executions > 0 else 0
-        
-        # Composite score
-        efficiency_score = round((cpu_efficiency * 0.3 + memory_efficiency * 0.25 + 
-                                agent_efficiency * 0.25 + workflow_efficiency * 0.2), 0)
-        
-        # Determine grade
-        if efficiency_score >= 90:
-            grade = "A"
-            color = "green"
-        elif efficiency_score >= 80:
-            grade = "B"
-            color = "blue"
-        elif efficiency_score >= 70:
-            grade = "C"
-            color = "yellow"
-        else:
-            grade = "D"
-            color = "red"
-        
-        return {
-            "score": int(efficiency_score),
-            "grade": grade,
-            "color": color,
-            "breakdown": {
-                "cpu_efficiency": round(cpu_efficiency, 1),
-                "memory_efficiency": round(memory_efficiency, 1),
-                "agent_efficiency": round(agent_efficiency, 1),
-                "workflow_efficiency": round(workflow_efficiency, 1)
-            }
-        }
-        
+        return efficiency_report(
+            cpu_usage,
+            psutil.virtual_memory().percent,
+            agent_utilisation(db, ws),
+            completion_rate(db, ws, datetime.now() - timedelta(hours=24)),
+        )
     except Exception as e:
-        logger.error(f"Error calculating efficiency score: {e}")
+        logger.exception("Error calculating efficiency score")
         return {
             "score": 0,
             "grade": "N/A",
@@ -1214,7 +1160,9 @@ async def get_bottleneck_detection(ctx: RequestContext = Depends(get_request_con
         bottlenecks = []
         
         # Check CPU bottleneck
-        cpu_usage = psutil.cpu_percent(interval=1)
+        # #1100: interval=None never blocks the event loop (use since the
+        # previous call, primed once at startup in main.lifespan).
+        cpu_usage = psutil.cpu_percent(interval=None)
         if cpu_usage > 80:
             bottlenecks.append({
                 "type": "cpu",
