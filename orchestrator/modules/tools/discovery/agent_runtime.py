@@ -9,7 +9,9 @@ default). They are written into ``Agent.configuration`` under the keys the CLI h
 (``core.cli_runtime``) and checked by the rule the agents API uses
 (``validate_runtime_configuration``): a cli agent needs session mode on this server.
 A create that names no runtime takes ``DEFAULT_AGENT_RUNTIME`` ('api' unless set).
-An update is owner-only already (Decision D1): its card says 'runtime: api → cli'.
+An update is owner-only already (Decision D1): its card says 'runtime: api → cli'. A create
+that makes a cli agent waits for the owner's click too (P256-FIX-RVW-28, ``creates_a_session_agent``):
+its card names the agent, 'runtime: cli', the session CLI and model and the prompt's first line.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from core.cli_runtime import (
     CLI_PRESETS, CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_RUNTIME_KEY, PROVIDER_CLAUDE, RUNTIME_API,
     RUNTIME_CLI, RUNTIME_KINDS, runtime_kind_of, validate_runtime_configuration,
 )
-from modules.tools.discovery.card_question_text import change_line, shown
+from modules.tools.discovery.card_question_text import change_line, said_line, shown
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,9 @@ RUNS_AS = " It runs as a {label} session on the paired machine ({model})."
 CLI_DEFAULT_MODEL = "the CLI's default model"
 CREATED, CHANGED = "created", "changed"
 UPDATE_AGENT = "platform_update_agent"
+CREATE_AGENT = "platform_create_agent"
+NAME, DESCRIPTION, PROMPT = "name", "description", "system_prompt"
+PROMPT_LABEL = "prompt's first line"
 CHANGE = "{field}: {old} → {new}"
 
 
@@ -146,21 +151,53 @@ def _create_runtime(params: Mapping[str, Any]) -> Tuple[str, Optional[Dict[str, 
     return runtime, None
 
 
+def _create_plan(params: Mapping[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """(a cli agent's session configuration, else None for an api agent; the refusal of a
+    runtime that is unknown or can't run on this server)."""
+    runtime, refusal = _create_runtime(params)
+    if refusal or runtime == RUNTIME_API:
+        return None, refusal
+    planned = planned_configuration({}, params, RUNTIME_CLI)
+    errors = _errors(planned)
+    if errors:
+        return None, _refusal(REFUSED.format(runtime=RUNTIME_CLI, errors="; ".join(errors), done=CREATED))
+    return planned, None
+
+
+def creates_a_session_agent(params: Mapping[str, Any]) -> bool:
+    """Whether a create makes a cli agent, one that runs Claude Code (or Codex) on the owner's
+    paired machine: the runtime it names, else DEFAULT_AGENT_RUNTIME (P256-FIX-RVW-28)."""
+    return (_said_runtime(params) or _default_runtime()) == RUNTIME_CLI
+
+
+def create_card_lines(params: Mapping[str, Any]) -> List[str]:
+    """The create card's lines (P256-FIX-RVW-28): the agent's name, its runtime, a session's
+    CLI and model, its description and the prompt's first line."""
+    planned = _create_plan(params)[0] or {RUNTIME: _said_runtime(params) or _default_runtime()}
+    labels = dict(CARD_LABELS)
+    lines = [said_line(NAME, params.get(NAME)), said_line(labels[RUNTIME], planned[RUNTIME])]
+    if planned[RUNTIME] == RUNTIME_CLI:
+        lines += [said_line(labels[PROVIDER], planned.get(PROVIDER)),
+                  said_line(labels[MODEL], planned.get(MODEL) or CLI_DEFAULT_MODEL)]
+    if params.get(DESCRIPTION):
+        lines.append(said_line(DESCRIPTION, params[DESCRIPTION]))
+    prompt = str(params.get(PROMPT) or "").strip()
+    if prompt:
+        lines.append(said_line(PROMPT_LABEL, prompt.splitlines()[0]))
+    return lines
+
+
 def sets_the_runtime_on_create(create: Handler) -> Handler:
     """Wrap handlers_agents.create_agent: a cli agent is checked before anything is made, made
     with the session's provider and model kept off the API model's resolution, then given its
     session configuration. An api agent is made as before."""
     @functools.wraps(create)
     async def wrapped(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
-        runtime, refusal = _create_runtime(params)
+        planned, refusal = _create_plan(params)
         if refusal:
             return refusal
-        if runtime == RUNTIME_API:
+        if planned is None:
             return await create(db, workspace_id, params)  # its provider and model are the API model's, as before
-        planned = planned_configuration({}, params, RUNTIME_CLI)
-        errors = _errors(planned)
-        if errors:
-            return _refusal(REFUSED.format(runtime=RUNTIME_CLI, errors="; ".join(errors), done=CREATED))
         result = await create(db, workspace_id, _without_session_keys(params))
         if not (isinstance(result, dict) and result.get("success")):
             return result
@@ -231,8 +268,10 @@ def _update_checked(db: Any, workspace_id: Any,
 
 def refused_before_the_card(db: Any, workspace_id: Any, action: str,
                             params: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """An agent update whose runtime is unknown or can't run on this server is refused before
-    the owner is asked: nothing is asked that the click could not do (F091)."""
+    """An agent update or a create whose runtime is unknown or can't run on this server is
+    refused before the owner is asked: nothing is asked that the click could not do (F091)."""
+    if action == CREATE_AGENT:
+        return _create_plan(params)[1]
     if action != UPDATE_AGENT:
         return None
     return _update_checked(db, workspace_id, params)[2]
@@ -286,5 +325,5 @@ def _changes_more(rest: Mapping[str, Any]) -> bool:
     return any(key not in NAMES_THE_AGENT and key not in SESSION_KEYS and not key.startswith("_") for key in rest)
 
 
-__all__ = ["planned_configuration", "refused_before_the_card", "runtime_card_lines", "runtime_changes",
+__all__ = ["create_card_lines", "creates_a_session_agent", "planned_configuration", "refused_before_the_card", "runtime_card_lines", "runtime_changes",
            "sets_the_runtime_on_create", "sets_the_runtime_on_update", "update_plan"]

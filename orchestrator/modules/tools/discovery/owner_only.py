@@ -60,6 +60,9 @@ OWNER_ONLY_ACTIONS = frozenset({
 CARD_MOVES = frozenset({"platform_update_task_status", "platform_update_task"})
 # An update is owner-only only when it sets the playbook's timer (P256-FIX-RVW-14).
 TIMED_UPDATES = frozenset({"platform_update_playbook"})
+# A create is owner-only only when it makes a cli agent, one that runs a CLI session on the
+# owner's paired machine, as switching an agent to cli is (P256-FIX-RVW-28).
+SESSION_CREATES = frozenset({"platform_create_agent"})
 SCHEDULE_CONFIG = "schedule_config"
 CLOSING_STATUSES = frozenset({"done", "cancelled"})
 # D1's "every Composio send/publish action" and D7's order (send_words, shared with brief_sends):
@@ -104,6 +107,7 @@ VERBS = {
     "platform_delete_workspace_skill": "delete a skill and take it from every agent",
     "platform_update_skill": "edit a skill its agents use",
     "platform_schedule_task": "set an agent's timer",
+    "platform_create_agent": "create an agent that runs as a session on the paired machine",
 }
 SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
 QUESTION = "question_md"
@@ -120,6 +124,11 @@ def is_owner_only(action_name: str, params: Any, *, composio: bool = False) -> b
     if name in TIMED_UPDATES:
         params = params_object(params)
         return isinstance(params, dict) and params.get(SCHEDULE_CONFIG) is not None
+    if name in SESSION_CREATES:
+        from modules.tools.discovery.agent_runtime import creates_a_session_agent
+
+        params = params_object(params)
+        return isinstance(params, dict) and creates_a_session_agent(params)
     return name in OWNER_ONLY_ACTIONS
 
 

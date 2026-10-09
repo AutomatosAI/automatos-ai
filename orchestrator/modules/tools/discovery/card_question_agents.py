@@ -34,6 +34,14 @@ def _agent(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Optional[Any]:
     return resolve_agent(db, workspace_id, params)[0]
 
 
+def create_agent_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
+    """A cli agent's create (P256-FIX-RVW-28): its name, 'runtime: cli', the session's CLI and
+    model, its description and the prompt's first line."""
+    from modules.tools.discovery.agent_runtime import create_card_lines
+
+    return create_card_lines(params)
+
+
 def heartbeat_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
     """The agent, then each heartbeat field the call changes, 'field: from → to'."""
     agent = _agent(db, workspace_id, params)

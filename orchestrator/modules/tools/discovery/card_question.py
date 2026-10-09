@@ -14,7 +14,9 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
   playbook's name and purpose, a playbook's timer, or what a delete takes for good;
 - P256-FIX-RVW-14: a timer set through a playbook update, and a plugin or skill taken
   from (or, edited, moved for) every agent of the workspace, naming them;
-- P256-FIX-RVW-23: an agent's timer: the agent, when it runs, its delivery and its brief.
+- P256-FIX-RVW-23: an agent's timer: the agent, when it runs, its delivery and its brief;
+- P256-FIX-RVW-28: a cli agent made: its name, 'runtime: cli', the session's CLI and model,
+  its description and its prompt's first line.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -129,6 +131,8 @@ READERS: Dict[str, Lines] = {
     "platform_update_skill": skills.update_skill_lines,
     # P256-FIX-RVW-23: an agent's timer: the agent, when, how it is delivered, the brief.
     "platform_schedule_task": timers.schedule_task_lines,
+    # P256-FIX-RVW-28: a cli agent made: its name, 'runtime: cli', the session's CLI and model, its prompt.
+    "platform_create_agent": agents.create_agent_lines,
 }
 
 

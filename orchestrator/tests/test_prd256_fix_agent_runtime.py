@@ -162,10 +162,11 @@ class _Executor:
         return await handler(self.db, self.ws, params)
 
 
-def _from_the_chat(db, ws, params):
+def _from_the_chat(db, ws, params, action=UPDATE, caller_context=None):
     from modules.tools.discovery.platform_executor import PLATFORM_HANDLERS
 
-    run = _Executor(db, ws)._run_cleared(UPDATE, dict(params), _owners_chat(), None, PLATFORM_HANDLERS[UPDATE])
+    ctx = _owners_chat() if caller_context is None else caller_context
+    run = _Executor(db, ws)._run_cleared(action, dict(params), ctx, None, PLATFORM_HANDLERS[action])
     return asyncio.run(run)
 
 
@@ -207,6 +208,93 @@ def test_an_update_the_click_could_not_do_is_refused_before_the_card(db_session,
     assert not unknown.get("requires_confirmation") and not hosted.get("requires_confirmation")
     assert db_session.query(ApprovalGrant).filter(ApprovalGrant.workspace_id == ws).count() == 0
     assert desk.configuration == {}
+
+
+# ── P256-FIX-RVW-28: a cli agent made from the chat waits for the click, as a switch does ──
+
+def _grants(db, ws):
+    from core.models.approval_grants import ApprovalGrant
+
+    return db.query(ApprovalGrant).filter(ApprovalGrant.workspace_id == ws).count()
+
+
+def test_a_cli_create_from_the_chat_raises_the_card_and_the_click_makes_that_agent(db_session, ws, session_mode):
+    from core.models.approval_grants import ApprovalGrant
+    from core.services.approval_grants import grant_grant
+
+    params = {**SESSION_ASK, "system_prompt": "You run the club desk.\nAnswer members in one line."}
+
+    ask = _from_the_chat(db_session, ws, params, CREATE)
+
+    assert ask["requires_confirmation"] is True and ask["owner_only"] is True, ask
+    asked = ask["question_md"]
+    assert "- name: CLUB DESK" in asked and "- runtime: cli" in asked
+    assert "- session CLI: claude" in asked and "- session model: sonnet" in asked
+    assert "- prompt's first line: You run the club desk." in asked and "one line" not in asked
+    assert "- description: Runs the club desk." in asked
+    assert _row(db_session, ws, "CLUB DESK") == []                           # nothing made yet
+
+    grant_grant(db_session.get(ApprovalGrant, ask["grant_id"]), granted_by="user:7")
+    db_session.flush()
+    made = _from_the_chat(db_session, ws, params, CREATE)
+
+    assert made["success"] is True and made["approved_via_grant_id"] == ask["grant_id"], made
+    (agent,) = _row(db_session, ws, "CLUB DESK")
+    assert agent.configuration == {CONFIG_RUNTIME_KEY: RUNTIME_CLI, CONFIG_PROVIDER_KEY: "claude",
+                                   CONFIG_MODEL_KEY: "sonnet"}
+    assert agent.custom_persona_prompt == params["system_prompt"]
+
+
+def test_a_create_under_a_cli_default_raises_the_card(db_session, ws, session_mode):
+    session_mode.DEFAULT_AGENT_RUNTIME = "cli"
+
+    ask = _from_the_chat(db_session, ws, {"name": "SESSION DESK"}, CREATE)
+
+    assert ask["requires_confirmation"] is True and ask["owner_only"] is True, ask
+    assert "- runtime: cli" in ask["question_md"] and "- session model: the CLI's default model" in ask["question_md"]
+    assert _row(db_session, ws, "SESSION DESK") == []
+
+
+def test_an_api_create_from_the_chat_is_made_with_no_card(db_session, ws, session_mode):
+    named = _from_the_chat(db_session, ws, {"name": "API DESK", "runtime": "api"}, CREATE)
+    by_default = _from_the_chat(db_session, ws, {"name": "PLAIN DESK"}, CREATE)
+
+    assert named["success"] is True and not named.get("requires_confirmation"), named
+    assert by_default["success"] is True and not by_default.get("requires_confirmation"), by_default
+    assert len(_row(db_session, ws, "API DESK")) == 1 and len(_row(db_session, ws, "PLAIN DESK")) == 1
+    assert _grants(db_session, ws) == 0
+
+
+def test_an_agents_own_run_makes_a_cli_agent_as_before(db_session, ws, session_mode):
+    reply = _from_the_chat(db_session, ws, dict(SESSION_ASK), CREATE, caller_context={"agent_id": 3})
+
+    assert reply["success"] is True and not reply.get("requires_confirmation"), reply
+    assert _row(db_session, ws, "CLUB DESK")[0].configuration[CONFIG_RUNTIME_KEY] == RUNTIME_CLI
+    assert _grants(db_session, ws) == 0
+
+
+def test_a_cli_create_the_click_could_not_make_is_refused_before_the_card(db_session, ws, session_mode):
+    session_mode.CLI_RUNTIME_ENABLED = False
+
+    reply = _from_the_chat(db_session, ws, dict(SESSION_ASK), CREATE)
+
+    assert reply["success"] is False and "CLI_RUNTIME_ENABLED" in reply["error"], reply
+    assert not reply.get("requires_confirmation") and _grants(db_session, ws) == 0
+    assert _row(db_session, ws, "CLUB DESK") == []
+
+
+def test_a_create_is_owner_only_when_it_resolves_to_cli(session_mode):
+    from modules.tools.discovery.card_question import READERS
+
+    assert owner_only.is_owner_only(CREATE, {"name": "X", "runtime": "cli"})
+    assert owner_only.is_owner_only(CREATE, '{"name": "X", "runtime": "CLI"}')
+    assert not owner_only.is_owner_only(CREATE, {"name": "X", "runtime": "api"})
+    assert not owner_only.is_owner_only(CREATE, {"name": "X"})
+    session_mode.DEFAULT_AGENT_RUNTIME = "cli"
+    assert owner_only.is_owner_only(CREATE, {"name": "X"})
+    assert not owner_only.is_owner_only(CREATE, {"name": "X", "runtime": "api"})
+    assert CREATE not in owner_only.OWNER_ONLY_ACTIONS                       # params-conditional, as TIMED_UPDATES
+    assert owner_only.VERBS.get(CREATE) and CREATE in READERS
 
 
 def test_back_to_api_drops_the_session_keys_and_keeps_the_rest(db_session, ws, session_mode):
