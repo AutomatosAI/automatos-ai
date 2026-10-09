@@ -8,7 +8,8 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
   current value read from the workspace's row, the new one from the call;
 - a new mission: its goal and the steps the owner gave;
 - approving or cancelling a mission: its title and its ticket number;
-- a Composio send: the recipient, the subject and the body's first line;
+- a Composio send: every recipient (to, cc, bcc), the subject, the body's first line and
+  each attachment (P256-FIX-RVW-26, ``card_question_sends``);
 - FX-010: a heartbeat's fields, an agent's skills or plugins before and after, a new
   playbook's name and purpose, a playbook's timer, or what a delete takes for good;
 - P256-FIX-RVW-14: a timer set through a playbook update, and a plugin or skill taken
@@ -27,6 +28,7 @@ from typing import Any, Callable, Dict, List
 from modules.tools.discovery import card_question_agents as agents
 from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
+from modules.tools.discovery import card_question_sends as sends
 from modules.tools.discovery import card_question_skills as skills
 from modules.tools.discovery import card_question_timers as timers
 from modules.tools.discovery.card_question_text import question, said_line, shown, value_line
@@ -39,12 +41,10 @@ STEPS = "steps:"
 STEP = "  {n}. {step}"
 NO_STEPS = "steps: none given; the mission's planner drafts them"
 STAFFED = "{agent} does: {does}"
-# A Composio send's fields, by the names its actions use, in the order the card reads them.
-RECIPIENT_KEYS = ("recipient_email", "to", "to_email", "recipient", "recipients", "channel", "channel_id",
-                  "chat_id", "phone_number", "email")
+# A Composio send's subject and body, by the names its actions use (its recipients: card_question_sends).
 SUBJECT_KEYS = ("subject", "title")
 BODY_KEYS = ("body", "message", "text", "content", "commentary", "markdown_text", "caption")
-SEND_FIELDS = (("to", RECIPIENT_KEYS), ("subject", SUBJECT_KEYS), ("first line", BODY_KEYS))
+SEND_FIELDS = (("subject", SUBJECT_KEYS), ("first line", BODY_KEYS))
 
 
 def platform_question(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], act: str) -> str:
@@ -60,15 +60,20 @@ def platform_question(db: Any, workspace_id: Any, action: str, params: Dict[str,
 
 
 def send_question(act: str, params: Any) -> str:
-    """The card's question for a Composio send: ``act``, then to whom, about what, and
-    the body's first line."""
+    """The card's question for a Composio send: ``act``, then everyone it goes to (each
+    address, uncut), about what, the body's first line and the files it carries."""
     params = params if isinstance(params, dict) else {}
-    lines = []
+    lines = sends.recipient_lines(params)
     for label, keys in SEND_FIELDS:
-        said = next((params[key] for key in keys if params.get(key) not in (None, "", [])), None)
+        said = first_said(params, keys)
         if said is not None:
             lines.append(said_line(label, _first_line(said) if label == "first line" else said))
-    return question(act, lines)
+    return question(act, [*lines, *sends.attachment_lines(params)])
+
+
+def first_said(params: Dict[str, Any], keys: tuple) -> Any:
+    """The first of ``keys`` the call fills, or None."""
+    return next((params[key] for key in keys if params.get(key) not in (None, "", [])), None)
 
 
 def mission_create_lines(params: Dict[str, Any]) -> List[str]:
@@ -124,4 +129,4 @@ READERS: Dict[str, Lines] = {
 }
 
 
-__all__ = ["READERS", "mission_create_lines", "platform_question", "send_question"]
+__all__ = ["BODY_KEYS", "READERS", "SUBJECT_KEYS", "first_said", "mission_create_lines", "platform_question", "send_question"]

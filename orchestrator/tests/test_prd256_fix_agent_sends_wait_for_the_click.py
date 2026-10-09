@@ -178,6 +178,53 @@ def test_a_declined_card_fails_the_ticket_with_the_reason(desk):
     assert desk.ticket.error_message == f"The owner declined the send: {SUBJECT} to {SUPPLIER}"
 
 
+# ── P256-FIX-RVW-26: the card, 'Card raised' and the click's note name every recipient ──
+
+WIDE = {"action": "GMAIL_SEND_EMAIL",
+        "params": {**SEND["params"], "extra_recipients": ["ana@kerbside.example"], "cc": ["callum@club.test"],
+                   "bcc": ["x@elsewhere.test"]}}
+EVERYONE = f"{SUPPLIER}, ana@kerbside.example, cc callum@club.test, bcc x@elsewhere.test"
+
+
+def test_the_card_raised_line_and_the_clicks_note_name_every_recipient(desk):
+    from core.models.approval_grants import ApprovalGrant
+
+    reply = _send(desk, _session(desk), WIDE)
+
+    assert reply["message"] == CARD_RAISED.format(subject=SUBJECT, recipient=EVERYONE)
+    card = _grants(desk)[0].question_md.splitlines()
+    assert "- to: ana@kerbside.example" in card and "- cc: callum@club.test" in card
+    assert "- bcc: x@elsewhere.test" in card
+    _park(desk)
+    _click(desk, desk.db.get(ApprovalGrant, reply["grant_id"]))
+    desk.db.refresh(desk.ticket)
+    notes = [entry["note"] for entry in desk.ticket.runtime_ref.get("session_notes", [])]
+    assert any(note.endswith(f": {EVERYONE}, {SUBJECT}") for note in notes)
+
+
+def test_a_declined_card_names_every_recipient(desk):
+    from api.approval_grants import _fail_subject
+    from core.models.approval_grants import ApprovalGrant
+    from core.services.approval_grants import deny_grant
+
+    reply = _send(desk, _session(desk), WIDE)
+    grant = desk.db.get(ApprovalGrant, reply["grant_id"])
+    deny_grant(grant, revoked_by=OWNER)
+    _fail_subject(desk.db, grant)
+
+    assert desk.ticket.error_message == f"The owner declined the send: {SUBJECT} to {EVERYONE}"
+
+
+def test_an_agents_send_to_a_recipient_the_card_cannot_show_is_refused_with_no_card(desk):
+    unreadable = {"action": "GMAIL_SEND_EMAIL", "params": {**SEND["params"], "bcc": [{"address": "x@elsewhere.test"}]}}
+    reply = _send(desk, _session(desk), unreadable)
+
+    assert _Composio.sent == [] and _grants(desk) == []
+    assert reply["success"] is False and "cannot show the recipient in 'bcc'" in reply["error"]
+    desk.db.refresh(desk.ticket)
+    assert not (desk.ticket.runtime_ref or {}).get("session_asks")
+
+
 # ── What never asks, and the other lanes on Auto's brief ──────────────────────────────
 
 def test_a_read_never_asks(desk):

@@ -211,6 +211,63 @@ def test_a_send_with_nothing_to_name_still_says_the_action():
         "Send or publish through SLACK_SENDS_A_MESSAGE.")
 
 
+# ── P256-FIX-RVW-26: every recipient the click mails, and the files it carries ─────────
+
+SUPPLIER = "orders@kerbside.example"
+WIDE_SEND = {"recipient_email": SUPPLIER, "extra_recipients": ["ana@kerbside.example", "bea@kerbside.example"],
+             "cc": ["callum@club.test"], "bcc": ["x@elsewhere.test"], "subject": "Order confirmation",
+             "body": "Hi Kerbside,\nPlease confirm.",
+             "attachment": {"name": "order-0412.pdf", "mimetype": "application/pdf", "s3key": "ws/7/order-0412.pdf"}}
+
+
+def _ask_for(monkeypatch, sent):
+    """The reply to a GMAIL_SEND_EMAIL in the owner's chat, and what reached the grant (``stored``)."""
+    import modules.tools.execution.tool_grants as tool_grants
+
+    stored = {}
+    monkeypatch.setattr(owner_only, "_the_click", lambda db, ws, action, params: None)
+    monkeypatch.setattr(tool_grants, "attach_ask_grant",
+                        lambda db, ws, **kw: stored.update(kw) or {**kw["ask"], "grant_id": 32})
+    tools = _Tools()
+    reply = asyncio.run(tools.execute_tool("composio_execute", {"action": "GMAIL_SEND_EMAIL", "params": sent},
+                                           workspace_id=uuid4(), caller_context=_owners_chat()))
+    return reply, stored, tools
+
+
+def test_a_send_card_lists_every_recipient_cc_bcc_and_the_file(monkeypatch):
+    reply, stored, tools = _ask_for(monkeypatch, WIDE_SEND)
+
+    asked = reply["question_md"]
+    for line in (f"- to: {SUPPLIER}", "- to: ana@kerbside.example", "- to: bea@kerbside.example",
+                 "- cc: callum@club.test", "- bcc: x@elsewhere.test", "- attachment: order-0412.pdf",
+                 "- subject: Order confirmation", "- first line: Hi Kerbside,"):
+        assert line in asked.splitlines()
+    assert stored["question_md"] == asked and tools.ran == []
+
+
+def test_a_long_recipient_list_is_listed_in_full_never_cut():
+    everyone = [f"member{n:02d}@club-members.example" for n in range(12)]
+    asked = send_question("send, publish or order through GMAIL_SEND_EMAIL", {"bcc": everyone})
+
+    assert [line for line in asked.splitlines() if line.startswith("- bcc: ")] == [f"- bcc: {who}" for who in everyone]
+
+
+def test_a_file_path_attachment_is_named_by_its_file():
+    asked = send_question("send through GMAIL_SEND_EMAIL", {"to": SUPPLIER, "attachments": ["reports/q3/margins.xlsx"]})
+
+    assert "- attachment: margins.xlsx" in asked.splitlines()
+
+
+@pytest.mark.parametrize("field, value", [("recipient_email", {"email": SUPPLIER}), ("bcc", ["a@b.test", {"x": 1}]),
+                                          ("cc", True)])
+def test_a_recipient_the_card_cannot_show_is_refused_before_any_grant(monkeypatch, field, value):
+    reply, stored, tools = _ask_for(monkeypatch, {**WIDE_SEND, field: value})
+
+    assert reply["success"] is False and not reply.get("requires_confirmation")
+    assert f"cannot show the recipient in '{field}'" in reply["error"]
+    assert stored == {} and tools.ran == []          # no grant asked for, nothing sent
+
+
 # ── Tenancy: a card never reads another workspace's row ─────────────────────────────
 
 def test_a_card_never_leaks_another_workspaces_row(desk):

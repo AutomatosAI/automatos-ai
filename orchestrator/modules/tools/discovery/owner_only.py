@@ -273,7 +273,8 @@ class _ResolvedSend:
 
     def _refusal(self, action: str) -> str:
         """Never empty: an empty refusal would let the executor run the action."""
-        return str((self.card or {}).get("message") or ASK.format(act=f"{SEND_VERB} {action}"))
+        card = self.card or {}
+        return str(card.get("message") or card.get("error") or ASK.format(act=f"{SEND_VERB} {action}"))
 
     def _db(self) -> Any:
         return getattr(self.executor, "db", None)
@@ -287,7 +288,7 @@ def _send_card(db: Any, arguments: Dict[str, Any], slug: str, ticket: Dict[str, 
     workspace_id = arguments["workspace_id"]
     ask = send_ask(db, workspace_id, arguments["tool_name"], slug, arguments["parameters"],
                    arguments["caller_context"], sent=inner)
-    if not ticket:
+    if not ticket or not ask.get("requires_confirmation"):  # a refusal raised no card (P256-FIX-RVW-26)
         return ask
     return waits_on_the_card(db, workspace_id, ticket, ask, sent=params_object(inner),
                              agent_id=arguments.get("agent_id"))
@@ -390,11 +391,16 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
 def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, caller_context: Any, *,
              sent: Any = None) -> Dict[str, Any]:
     """The ask for a Composio send or publish, naming the action, and to whom, about what
-    and its first line (``sent``: the action's own params, FX-008)."""
+    and its first line (``sent``: the action's own params, FX-008). A recipient the card
+    cannot show is refused before any grant (P256-FIX-RVW-26)."""
     from modules.tools.discovery.card_question import send_question
+    from modules.tools.discovery.card_question_sends import refused_before_the_send_card
 
-    act = f"{SEND_VERB} {slug}".strip()
-    asked = send_question(act, params_object(sent if sent is not None else params))
+    act, shown_params = f"{SEND_VERB} {slug}".strip(), params_object(sent if sent is not None else params)
+    refused = refused_before_the_send_card(shown_params)
+    if refused:
+        return refused
+    asked = send_question(act, shown_params)
     return _ask(db, workspace_id, tool, params, caller_context, act=act, what=slug, asked=asked)
 
 
