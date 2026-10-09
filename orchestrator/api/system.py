@@ -25,6 +25,8 @@ import logging
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
+from api.system_health_checks import component_health, host_metrics, overall_status
+from api.system_metrics_report import analytics_sections, history, host_snapshot
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -365,220 +367,30 @@ async def test_rag_config(
 # System Health endpoints
 @router.get("/health", response_model=SystemHealthResponse)
 async def get_system_health(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
-    """Get system health status"""
+    """Get system health status. The component checks live in ``api.system_health_checks``."""
     try:
-        # Get system metrics
         # #1100: interval=None is non-blocking — it reports the CPU use since
-        # the previous call (primed once at startup in main.lifespan). Any
-        # other interval sleeps on the event loop inside this async handler.
+        # the previous call. Any other interval sleeps on the event loop.
         cpu_percent = psutil.cpu_percent(interval=None)
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        
-        # Check database connection
-        db_status = "healthy"
-        db_metrics = {}
-        try:
-            db.execute("SELECT 1")
-            db_metrics = {"connection": "active"}
-        except Exception as e:
-            db_status = "unhealthy"
-            db_metrics = {"connection": "failed", "error": "Service check failed"}
-        
-        # Check Redis connection
-        redis_status = "healthy"
-        redis_metrics = {}
-        redis_check_time = datetime.now()
-        try:
-            from core.redis.client import get_redis_client
-            import time
-            
-            start = time.time()
-            redis_client = get_redis_client()
-            
-            # Perform PING via test_connection (RedisClient wraps raw redis)
-            if redis_client.test_connection():
-                latency_ms = (time.time() - start) * 1000
-                redis_metrics = {
-                    "ping": "success",
-                    "latency_ms": round(latency_ms, 2),
-                    "connection": "active"
-                }
-            else:
-                redis_status = "unhealthy"
-                redis_metrics = {"ping": "failed", "error": "PING returned false"}
-        except Exception as e:
-            redis_status = "unhealthy"
-            redis_metrics = {"ping": "failed", "error": "Service check failed", "connection": "failed"}
-        
-        # Check API health (internal readiness)
-        api_status = "healthy"
-        api_metrics = {}
-        api_check_time = datetime.now()
-        try:
-            # Simple internal readiness check - verify critical services
-            import time
-            start = time.time()
-            
-            # Check if we can query the database (already done above)
-            # Check if we can load core modules
-            from core.llm.manager import get_llm_manager
-            from modules.rag import get_rag_service
-            
-            llm_manager = get_llm_manager()
-            rag_service = get_rag_service()
-            
-            latency_ms = (time.time() - start) * 1000
-            api_metrics = {
-                "readiness": "ready",
-                "latency_ms": round(latency_ms, 2),
-                "core_modules": "loaded"
-            }
-        except Exception as e:
-            api_status = "unhealthy"
-            api_metrics = {
-                "readiness": "not_ready",
-                "error": "Service check failed",
-                "core_modules": "failed"
-            }
-        
-        # Check document processor health
-        doc_processor_status = "healthy"
-        doc_processor_metrics = {}
-        doc_processor_check_time = datetime.now()
-        try:
-            import time
-            start = time.time()
-            
-            # Verify document processing queue/worker health
-            # Check if we can access document processing functions
-            from consumers.document_processor import process_document
-            from modules.rag import get_rag_service
-            
-            # Check if RAG service (used by doc processor) is accessible
-            rag_service = get_rag_service()
-            
-            # Verify we can query documents table
-            from core.models import Document
-            doc_count = db.query(Document).count()
-            
-            latency_ms = (time.time() - start) * 1000
-            doc_processor_metrics = {
-                "status": "operational",
-                "latency_ms": round(latency_ms, 2),
-                "documents_in_db": doc_count,
-                "worker": "accessible"
-            }
-        except Exception as e:
-            doc_processor_status = "unhealthy"
-            doc_processor_metrics = {
-                "status": "error",
-                "error": "Service check failed",
-                "worker": "unavailable"
-            }
-        
-        # Check RAG system health
-        rag_status = "healthy"
-        rag_metrics = {}
-        rag_check_time = datetime.now()
-        try:
-            import time
-            start = time.time()
-            
-            # Verify RAG service and its database connectivity
-            from modules.rag import get_rag_service
-            rag_service = get_rag_service()
-            
-            # Verify we can access RAG configurations
-            from core.models import RAGConfiguration
-            rag_config_count = db.query(RAGConfiguration).count()
-            
-            # Verify we can access document chunks (if table exists)
-            try:
-                chunk_count = db.execute("SELECT COUNT(*) FROM document_chunks").scalar()
-            except Exception:
-                chunk_count = 0
-            
-            latency_ms = (time.time() - start) * 1000
-            rag_metrics = {
-                "status": "operational",
-                "latency_ms": round(latency_ms, 2),
-                "rag_configs": rag_config_count,
-                "document_chunks": chunk_count,
-                "service": "accessible"
-            }
-        except Exception as e:
-            rag_status = "unhealthy"
-            rag_metrics = {
-                "status": "error",
-                "error": "Service check failed",
-                "service": "unavailable"
-            }
-        
-        # Check services status - convert to ComponentHealth format
-        from core.models import ComponentHealth
-        components = [
-            ComponentHealth(
-                name="database",
-                status=db_status,
-                last_check=datetime.now(),
-                metrics=db_metrics
-            ),
-            ComponentHealth(
-                name="redis",
-                status=redis_status,
-                last_check=redis_check_time,
-                metrics=redis_metrics
-            ),
-            ComponentHealth(
-                name="api",
-                status=api_status,
-                last_check=api_check_time,
-                metrics=api_metrics
-            ),
-            ComponentHealth(
-                name="document_processor",
-                status=doc_processor_status,
-                last_check=doc_processor_check_time,
-                metrics=doc_processor_metrics
-            ),
-            ComponentHealth(
-                name="rag_system",
-                status=rag_status,
-                last_check=rag_check_time,
-                metrics=rag_metrics
-            )
-        ]
-        
-        # Overall system status
-        overall_status = "healthy" if all(c.status == "healthy" for c in components) else "degraded"
-        
-        system_metrics = {
-            "cpu_usage": f"{cpu_percent}%",
-            "memory_usage": f"{memory.percent}%",
-            "memory_available": f"{memory.available / (1024**3):.1f}GB",
-            "disk_usage": f"{disk.percent}%",
-            "disk_free": f"{disk.free / (1024**3):.1f}GB"
-        }
-        
+        components = component_health(db)
+
         # PRD-222 US-007 — booleans-only capability report (honest-degrade signal),
         # workspace-scoped for the llm_key_valid check. No secret values surfaced.
         from services.capability_report import onboarding_capabilities
         capabilities = onboarding_capabilities(db, workspace_id=ctx.workspace_id)
 
         return SystemHealthResponse(
-            overall_status=overall_status,
+            overall_status=overall_status(components),
             components=components,
-            system_metrics=system_metrics,
+            system_metrics=host_metrics(cpu_percent),
             uptime="N/A",  # TODO: Track actual uptime
             version="1.0.0",  # TODO: Get from actual version
             timestamp=datetime.now(),
             capabilities=capabilities,
         )
-        
     except Exception as e:
-        logger.error(f"Error getting system health: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception("Error getting system health")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/metrics")
@@ -589,204 +401,32 @@ async def get_system_metrics(
 ):
     """
     Get detailed system metrics with optional time-series history from DATABASE.
-    
+
     - No timeRange: Returns current snapshot only
     - With timeRange (24h): Returns current snapshot + time-series from DB
       (falls back to the current snapshot when no rows were recorded yet)
-    
-    Metrics reported: CPU, Memory, Disk, Network
+
+    Metrics reported: CPU, Memory, Disk, Network. Built in ``api.system_metrics_report``.
 
     #1100: this GET never writes to the database and never blocks the event
-    loop — the CPU reading uses ``psutil.cpu_percent(interval=None)`` (primed
-    once at startup in ``main.lifespan``). The historical ``system_metrics``
-    rows are left for a background collector to fill in; nothing writes them
-    from a request handler anymore.
+    loop — the CPU reading uses ``psutil.cpu_percent(interval=None)``. The
+    historical ``system_metrics`` rows are left for a background collector to
+    fill in; nothing writes them from a request handler anymore.
     """
     try:
-        from sqlalchemy import text
-        from datetime import timedelta
-        
-        # Collect current metrics
         # #1100: interval=None is non-blocking — the use since the previous
-        # call (primed once at startup in main.lifespan). interval=1 slept a
-        # full second on the event loop on every dashboard poll.
-        cpu_count = psutil.cpu_count()
-        cpu_percent = psutil.cpu_percent(interval=None, percpu=True)
-        cpu_avg = sum(cpu_percent) / len(cpu_percent)
-        
-        memory = psutil.virtual_memory()
-        swap = psutil.swap_memory()
-        disk = psutil.disk_usage('/')
-        disk_io = psutil.disk_io_counters()
-        network = psutil.net_io_counters()
-        
-        # Get analytics data
-        try:
-            from core.services.analytics_engine import AnalyticsEngine
-            analytics_engine = AnalyticsEngine(db)
-            
-            context_metrics = await analytics_engine._get_context_metrics()
-            context_optimization = {
-                "tokens_saved": context_metrics.get("tokensSaved", 0),
-                "compression_ratio": context_metrics.get("avgCompressionRatio", 1.0),
-                "total_optimizations": context_metrics.get("totalOptimizations", 0),
-                "efficiency": context_metrics.get("efficiency", 0.0)
-            }
-            
-            learning_metrics = await analytics_engine._get_learning_metrics()
-            learning = {
-                "total_memories": learning_metrics.get("totalMemoryItems", 0),
-                "recent_memories": learning_metrics.get("recentMemoryItems", 0),
-                "knowledge_nodes": learning_metrics.get("knowledgeNodes", 0),
-                "active_collaborations": learning_metrics.get("activeCollaborations", 0),
-                "total_collaborations": learning_metrics.get("totalCollaborations", 0),
-                "knowledge_growth": learning_metrics.get("knowledgeGrowth", 0),
-                "memory_consolidations": learning_metrics.get("memoryConsolidations", 0),
-                "avg_improvement": learning_metrics.get("avgImprovement", 0.0)
-            }
-        except Exception as e:
-            logger.error(f"Failed to get analytics data: {e}")
-            context_optimization = {
-                "tokens_saved": 0, "compression_ratio": 1.0,
-                "total_optimizations": 0, "efficiency": 0.0
-            }
-            learning = {
-                "total_memories": 0, "recent_memories": 0, "knowledge_nodes": 0,
-                "active_collaborations": 0, "total_collaborations": 0,
-                "knowledge_growth": 0, "memory_consolidations": 0, "avg_improvement": 0.0
-            }
-        
-        # Base response with current metrics
-        response = {
-            "timestamp": datetime.now().isoformat(),
-            "cpu": {
-                "count": cpu_count,
-                "usage_percent": cpu_percent,
-                "average_usage": cpu_avg
-            },
-            "memory": {
-                "total": memory.total,
-                "available": memory.available,
-                "used": memory.used,
-                "percent": memory.percent
-            },
-            "swap": {"total": swap.total, "used": swap.used, "percent": swap.percent},
-            "disk": {
-                "total": disk.total, "used": disk.used, "free": disk.free,
-                "percent": disk.percent, "usage_percent": disk.percent,
-                "read_bytes": disk_io.read_bytes if disk_io else 0,
-                "write_bytes": disk_io.write_bytes if disk_io else 0
-            },
-            "network": {
-                "bytes_sent": network.bytes_sent, "bytes_recv": network.bytes_recv,
-                "packets_sent": network.packets_sent, "packets_recv": network.packets_recv
-            },
-            "context_optimization": context_optimization,
-            "learning": learning
-        }
-        
-        # Add REAL time-series data from database if requested
+        # call. interval=1 slept a full second on the event loop on every poll.
+        snapshot = host_snapshot(psutil.cpu_percent(interval=None, percpu=True))
+        context_optimization, learning = await analytics_sections(db)
+        response = {**snapshot, "context_optimization": context_optimization, "learning": learning}
         if timeRange:
-            hours_map = {"1h": 1, "24h": 24, "7d": 168, "30d": 720}
-            hours = hours_map.get(timeRange, 24)
-            
-            # Query REAL historical data from database
-            cutoff = datetime.utcnow() - timedelta(hours=hours)
-            
-            cpu_data = db.execute(
-                text("""
-                    SELECT recorded_at, metric_value 
-                    FROM system_metrics 
-                    WHERE metric_name = 'cpu_usage' AND recorded_at >= :cutoff
-                    ORDER BY recorded_at ASC
-                """),
-                {"cutoff": cutoff}
-            ).fetchall()
-            
-            memory_data = db.execute(
-                text("""
-                    SELECT recorded_at, metric_value 
-                    FROM system_metrics 
-                    WHERE metric_name = 'memory_usage' AND recorded_at >= :cutoff
-                    ORDER BY recorded_at ASC
-                """),
-                {"cutoff": cutoff}
-            ).fetchall()
-            
-            disk_data = db.execute(
-                text("""
-                    SELECT recorded_at, metric_value 
-                    FROM system_metrics 
-                    WHERE metric_name = 'disk_usage' AND recorded_at >= :cutoff
-                    ORDER BY recorded_at ASC
-                """),
-                {"cutoff": cutoff}
-            ).fetchall()
-            
-            # Convert to chart format
-            cpu_usage = [{"time": row[0].isoformat(), "value": round(row[1], 2)} for row in cpu_data]
-            memory_usage = [{"time": row[0].isoformat(), "value": round(row[1], 2)} for row in memory_data]
-            disk_usage = [{"time": row[0].isoformat(), "value": round(row[1], 2)} for row in disk_data]
-            
-            # Add current values if no historical data exists
-            if not cpu_usage:
-                cpu_usage = [{"time": datetime.utcnow().isoformat(), "value": round(cpu_avg, 2)}]
-            if not memory_usage:
-                memory_usage = [{"time": datetime.utcnow().isoformat(), "value": round(memory.percent, 2)}]
-            if not disk_usage:
-                disk_usage = [{"time": datetime.utcnow().isoformat(), "value": round(disk.percent, 2)}]
-            
-            # Get API call count from tracking middleware
-            try:
-                import main
-                total_api_calls = sum(stats["call_count"] for stats in main.api_call_stats.values())
-                avg_response_time = sum(stats["avg_time"] for stats in main.api_call_stats.values()) / len(main.api_call_stats) if main.api_call_stats else 0
-                
-                # Generate time-series for API calls (distribute evenly across time range)
-                # In production, you'd store these in the database with timestamps
-                api_calls_series = []
-                response_time_series = []
-                
-                # Create data points at regular intervals
-                num_points = min(len(cpu_usage), 24)  # Match CPU data points
-                for i in range(num_points):
-                    time_point = datetime.utcnow() - timedelta(hours=hours - (i * hours / num_points))
-                    # Estimate calls per hour (simple distribution)
-                    calls_per_point = total_api_calls / num_points if total_api_calls > 0 else 0
-                    api_calls_series.append({
-                        "time": time_point.isoformat(),
-                        "value": round(calls_per_point, 0)
-                    })
-                    response_time_series.append({
-                        "time": time_point.isoformat(),
-                        "value": round(avg_response_time, 2)
-                    })
-            except Exception as e:
-                logger.error(f"Failed to get API call stats: {e}")
-                total_api_calls = 0
-                avg_response_time = 0
-                api_calls_series = []
-                response_time_series = []
-            
-            # Add time-series to response
-            response["cpu_usage"] = cpu_usage
-            response["memory_usage"] = memory_usage
-            response["disk_usage"] = disk_usage
-            response["api_calls"] = api_calls_series
-            response["response_time"] = response_time_series
-            response["aggregated"] = {
-                "cpu_average": round(sum(d["value"] for d in cpu_usage) / len(cpu_usage), 2) if cpu_usage else cpu_avg,
-                "memory_average": round(sum(d["value"] for d in memory_usage) / len(memory_usage), 2) if memory_usage else memory.percent,
-                "disk_average": round(sum(d["value"] for d in disk_usage) / len(disk_usage), 2) if disk_usage else disk.percent,
-                "api_calls_total": total_api_calls,
-                "response_time_average": round(avg_response_time, 2)
-            }
-        
+            response = {**response, **history(db, timeRange, snapshot)}
         return response
-        
     except Exception as e:
-        logger.error(f"Error getting system metrics: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception("Error getting system metrics")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
 @router.get("/test-route")
 async def test_route(ctx: RequestContext = Depends(get_request_context_hybrid)):
     return {"message": "Test route works"}
