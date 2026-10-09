@@ -108,8 +108,11 @@ def test_a_write_does_not_back_another_verb(call, answer, verb):
     assert honesty_lines(_receipts(call), answer) == [_named(verb)]
 
 
-def test_a_claim_with_no_family_needs_only_the_composio_write():
-    assert honesty_lines(_receipts(MAIL_SENT), "I've set it up for you.") == []
+def test_a_claim_with_no_family_needs_the_composio_write_its_stem_names():
+    """P256-FIX-RVW-36: a send backed "set" (no family) until any write stopped backing such a verb;
+    a write whose slug says SET does."""
+    assert honesty_lines(_receipts(MAIL_SENT), "I've set it up for you.") == [_named("set")]
+    assert honesty_lines(_receipts(_composio("SLACK_SET_USER_PRESENCE")), "I've set it up for you.") == []
     assert honesty_lines(_receipts(MAIL_FETCHED), "I've set it up for you.") == [NOTHING_DONE_LINE]
 
 

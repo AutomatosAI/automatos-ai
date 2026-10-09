@@ -7,8 +7,12 @@ no line was shown. Now each completed-action claim of the answer (``COMPLETED_AC
 read for its verb and matched to the turn's done write receipts by the verb's family
 (``FAMILIES``: created → a create, sent → a send, saved → a memory or a thing saved,
 reverted → an update, installed → an install, …). A claim no done write of its family backs is not done, whatever
-else succeeded in the turn. A claim whose verb is in no family ("Done.", "it's now on your
-board", "I've sorted it") says no more than that work happened: any done write backs it.
+else succeeded in the turn. A claim with no verb of its own ("Done.", "it's now on your board",
+"you should now see it", "I've made the changes") says no more than that work happened: any done
+write backs it. P256-FIX-RVW-36: any other verb in no family ("I've rejected the card.", "I've
+stopped the mission.") needs a done write whose name shares its stem (reject_mission, stop_…) or
+goes by its other words ("put it on your board" is a create, "marked it as done" an approval):
+a saved memory backs no rejection.
 P256-FIX-RVW-6: added, paused, enabled, "set up", "turned off", uploaded, booked, paid,
 connected, … have families (the deleted families asked an update for paused or "set up"), a
 participle coordinated with a claim is a claim of its own ("I've created the task and sent it
@@ -264,8 +268,8 @@ def _placed(*words: str) -> Backs:
     return _any(_SENDS, _has(*words))
 
 
-# The verb families: the claim's verb → what done write backs it. A verb in none says only
-# that work happened; any done write backs it.
+# The verb families: the claim's verb → what done write backs it. A verb in none is backed by its
+# stem (``_unfamiliar``, P256-FIX-RVW-36).
 FAMILIES: Tuple[Tuple[FrozenSet[str], Backs], ...] = (
     (frozenset({"created", "built", "generated"}), _starts("create_", "generate_", "make_", "build_")),
     (frozenset({"approved", "closed", "completed", "finished"}), _any(_starts("approve_"), _says("moved to done"))),
@@ -516,7 +520,8 @@ def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: b
                     waiting: bool = False, reads: Sequence[Receipt] = ()) -> List[Tuple[str, bool]]:
     """The answer's claims no done write backs: (the verb, whether its family is known). A
     claim of a known family needs a done write of that family (a Composio action's by the
-    words of its slug); any other needs any done write. With ``waiting`` (the turn raised a card
+    words of its slug); any other one its stem names, or any done write for a claim that says
+    only that work happened (P256-FIX-RVW-36). With ``waiting`` (the turn raised a card
     for the owner's click), a claim that reports that ask is backed by it (P256-FIX-RVW-30); a
     has-been or was claim about a number one of the turn's done ``reads`` names is none (RVW-34)."""
     unbacked = []
@@ -524,10 +529,45 @@ def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: b
         if waiting and _asked(verb, sentence):
             continue
         backs = _family(verb, sentence)
-        backed = any(backs(r) for r in done_writes) if backs else bool(done_writes)
+        backed = any((backs or _unfamiliar(verb))(r) for r in done_writes)
         if not backed:
             unbacked.append((verb, backs is not None))
     return unbacked
+
+
+# P256-FIX-RVW-36: a verb in no family is backed by a done write a word of whose name starts with the
+# verb's stem ("rejected" by reject_mission, "stopped" by stop_…, "escalated" by escalate_…) or with one of
+# the words its write goes by here; a claim that says only that work happened by any done write.
+_GOES_BY: Dict[str, Tuple[str, ...]] = {
+    "reassign": ("assign",), "charg": ("pay",), "turn": ("reject", "decline"),
+    "put": ("create", "add", "assign", "move", "update"), "mark": ("approve", "update", "move"),
+    "draft": ("create", "generate", "write", "save"), "fil": ("create",),
+    "kept": ("memory", "remember", "note", "store", "save")}
+_DOUBLED = re.compile(r"([bdgmnprt])\1$")       # "stopped" is stop, "planned" plan
+_STEM_CHARS = 3
+
+
+def _verb_stems(verb: str) -> Tuple[str, ...]:
+    """What a write's name begins with when it backs ``verb``: its stem ("revoked" is "revok") and the
+    words its write goes by (``_GOES_BY``); none for a stem too short to tell ("used")."""
+    word = verb.lower()
+    stem = _DOUBLED.sub(r"\1", word[:-3] if word.endswith("ied") else word[:-2] if word.endswith("ed") else word)
+    return (stem, *_GOES_BY.get(stem, ())) if len(stem) >= _STEM_CHARS else _GOES_BY.get(stem, ())
+
+
+def _name_words(r: Receipt) -> List[str]:
+    """The words of the call's name (a Composio slug's after its toolkit): reject_mission is reject, mission."""
+    words = str(r.get("action") or "").lower().removeprefix("platform_").split("_")
+    return words[1:] if _composio(r) else words
+
+
+def _unfamiliar(verb: str) -> Backs:
+    """What backs a claim of ``verb``, a verb in no family: any done write when it says only that work
+    happened ("Done.", "is now live", "I've made the changes"), else one its stem names (RVW-36)."""
+    if verb in SAYS_DONE or verb == _MADE:
+        return lambda r: True
+    stems = _verb_stems(verb)
+    return lambda r: any(word.startswith(stems) for word in _name_words(r) if word)
 
 
 def _listed(verbs: Sequence[str]) -> str:
@@ -538,11 +578,12 @@ def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = F
                   reads: Sequence[Receipt] = ()) -> Optional[str]:
     """The one not-done line for the answer, or None when every claim is backed (``waiting``: by
     the card the turn raised, too; ``reads``: the turn's done reads). It names what was not done
-    when another write went through; else it is the plain not-done line."""
+    when another write went through (a verb in no family too, RVW-36: "I haven't rejected anything");
+    else it is the plain not-done line."""
     unbacked = unbacked_claims(answer, done_writes, waiting=waiting, reads=reads)
     if not unbacked:
         return None
-    named = list(dict.fromkeys(verb for verb, known in unbacked if known))
+    named = list(dict.fromkeys(verb for verb, _known in unbacked if verb not in SAYS_DONE))
     if not done_writes or not named:
         return NOTHING_DONE
     return NOT_DONE.format(said=NAMED_SAID.format(verbs=_listed(named)))

@@ -14,7 +14,9 @@ number and where it is now when the result says so; each card that waits for the
 owner's click (an ask is neither a change nor a failure, P256-FIX-RVW-15); how many
 did not go through; and, when nothing changed, that nothing did. Refusals are the model's to read and
 are never quoted (they name calls on purpose). Agent runs keep their own
-empty-answer handling. Stdlib only, beside the Composio slug reader (composio_action).
+empty-answer handling. Stdlib only, beside the Composio slug reader (composio_action) and
+the action registry (P256-FIX-RVW-36: a registered action's permission_level says whether it
+only reads, so platform_load_skill is never a change).
 """
 from __future__ import annotations
 
@@ -32,7 +34,9 @@ WHY_ONLY_READS = "I only looked things up."
 WHY_ALL_FAILED = "what I tried didn't go through."
 # Only asks for the owner's click (card_raised): nothing changed yet, and asking again would not help.
 WAITING_FOR_YOU = "My reply didn't come through, and nothing has changed yet: {they} for your click."
-# Calls that only look: they change nothing the owner would want told.
+# Calls that only look: they change nothing the owner would want told. A registered action's
+# permission_level says so first; these stems read a call the registry does not hold.
+READ_LEVEL = "read"
 _READS = ("_list", "_get_", "search", "browse", "board_", "read", "grep", "query", "summary",
           "snapshot", "history", "fetch", "find", "_view", "recommend", "check_", "wait_for")
 _WHERE = {"done": "Done", "cancelled": "Cancelled", "assigned": "with its agent", "review": "in Review",
@@ -62,12 +66,25 @@ def _failed(result: Any) -> bool:
     return isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False)
 
 
+def _registered_level(action: str) -> Optional[str]:
+    """The registered action's permission_level ("read", "write", "destructive"), None when unregistered."""
+    from modules.tools.discovery.action_registry import get_action_registry
+
+    definition = get_action_registry().get(action)
+    return getattr(definition, "permission_level", None) if definition is not None else None
+
+
 def is_read(action: str) -> bool:
-    """A call that only looks; a Composio action by its slug's whole words (P256-FIX-RVW-5)."""
+    """A call that only looks; a Composio action by its slug's whole words (P256-FIX-RVW-5); a
+    registered action by its permission_level (P256-FIX-RVW-36: platform_load_skill and
+    platform_fleet_status read, platform_checkpoint_thread writes); any other by its name's stems."""
     from .composio_action import is_slug, slug_reads
 
     if is_slug(action):
         return slug_reads(action)
+    level = _registered_level(action)
+    if level is not None:
+        return level == READ_LEVEL
     name = action.lower()
     return any(stem in name for stem in _READS)
 

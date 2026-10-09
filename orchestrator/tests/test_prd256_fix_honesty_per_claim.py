@@ -26,6 +26,10 @@ sentence ("at 03:04", "this morning") is history. Replied, texted, shared, invit
 were in no family, so a mail draft or a saved memory backed "I've replied to Declan." (D7's
 "reply").
 
+P256-FIX-RVW-36: platform_load_skill (a registered read: its permission_level says so, though no read
+stem is in its name) was a done write and backed "Your post is now live on LinkedIn."; and any done
+write backed a verb in no family, so a saved memory backed "I've rejected the card.".
+
 P256-FIX-RVW-25: with the families deleted (FX-007, D10) this rule is the only guard, and "The task
 is done.", "The post is published.", "The post got sent.", "It went out.", "Email sent.", "Posted!",
 "I sent the email to Declan." and "I emailed the supplier and created the ticket." were no claim;
@@ -36,7 +40,7 @@ from __future__ import annotations
 import pytest
 
 from consumers.chatbot.claims_backed import FAMILIES, claims, claims_work_done, is_not_done_line
-from consumers.chatbot.receipts import DONE, NOTHING_DONE_LINE, REFUSED, WRITE, build_receipts, honesty_lines
+from consumers.chatbot.receipts import DONE, NOTHING_DONE_LINE, READ, REFUSED, WRITE, build_receipts, honesty_lines
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 from tests.helpers_receipts_rule import nudged
 
@@ -181,11 +185,13 @@ def test_both_claims_backed_is_no_line():
     assert honesty_lines(_receipts(CARD_MADE, AGENT_UPDATED), answer) == []
 
 
-def test_a_claim_with_no_family_needs_only_a_write():
-    """"I've sorted the template" says only that work happened: any done write backs it ("set
-    up" has its family since P256-FIX-RVW-6, below)."""
+def test_a_claim_with_no_family_needs_a_write_its_stem_names():
+    """"I've sorted the template" is in no family: a card made backed it until P256-FIX-RVW-36, now
+    only a write named for sorting would; "You should now see it" says only that work happened, and
+    any done write backs it ("set up" has its family since P256-FIX-RVW-6, below)."""
     answer = "I've sorted the template. You should now see it in Deliverables."
-    assert honesty_lines(_receipts(CARD_MADE), answer) == []
+    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("sorted")]
+    assert honesty_lines(_receipts(CARD_MADE), "You should now see it in Deliverables.") == []
     assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
 
 
@@ -704,3 +710,52 @@ def test_rvw35_a_numbered_card_a_read_of_the_turn_named_is_what_the_read_found()
 def test_rvw35_an_exempt_sentence_of_the_new_shapes_is_no_claim(answer):
     assert claims(answer) == []
     assert honesty_lines([], answer) == []
+
+
+# ── P256-FIX-RVW-36: a registered read is a read; a verb in no family needs a write its stem names ──
+
+SKILL_LOADED = _platform("platform_load_skill", {"skill_name": "linkedin-posts"})
+REGISTERED_READS = ["platform_load_skill", "platform_fleet_status", "platform_harness_status", "platform_graph_stats",
+                    "platform_codegraph_call_graph"]
+# (the sentence, the write that backs it): each was backed by a saved memory at 80cd928ec.
+NO_FAMILY_RVW36 = [
+    ("I've rejected the card.", _platform("platform_reject_mission", {"mission_id": "m-1"})),
+    ("I've stopped the channel.", _platform("platform_stop_channel", {"channel": "slack"})),
+    ("I've revoked the key.", _platform("platform_revoke_api_key", {"key_id": 7})),
+    ("I've reassigned the card to OPS.", _platform("platform_assign_task", {"task_id": "#0931", "agent_name": "OPS"})),
+    ("I've charged the customer.", ("composio_execute", {"action": "STRIPE_CREATE_CHARGE", "params": {}}, OK)),
+    ("I've turned down the old plan.", _platform("platform_reject_mission", {"mission_id": "m-1"})),
+]
+ONLY_WORK_HAPPENED = ["Done.", "The new page is now live.", "You should now see it on your board."]
+
+
+@pytest.mark.parametrize("action", REGISTERED_READS)
+def test_rvw36_a_registered_read_is_a_read_receipt(action):
+    assert [(r["kind"], r["status"]) for r in _receipts(_platform(action))] == [(READ, DONE)]
+
+
+def test_rvw36_a_loaded_skill_backs_no_post_said_live():
+    answer = "Your post is now live on LinkedIn."
+    (loaded,) = _receipts(SKILL_LOADED)
+    assert loaded["kind"] == READ
+    assert honesty_lines([loaded], answer) == [NOTHING_DONE_LINE]
+    assert nudged(answer, SKILL_LOADED) == "done"
+
+
+@pytest.mark.parametrize("answer, backing", NO_FAMILY_RVW36, ids=[answer for answer, _ in NO_FAMILY_RVW36])
+def test_rvw36_a_verb_in_no_family_needs_a_write_its_stem_names(answer, backing):
+    (verb, _sentence), = claims(answer)
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
+    assert honesty_lines(_receipts(backing), answer) == []
+    assert nudged(answer, MEMORY_STORED) is None                       # no family: the line's, never the nudge's
+
+
+def test_rvw36_a_saved_memory_backs_no_rejection_and_the_reject_write_does():
+    assert honesty_lines(_receipts(MEMORY_STORED), "I've rejected the card.") == [_named("rejected")]
+    assert honesty_lines(_receipts(NO_FAMILY_RVW36[0][1]), "I've rejected the card.") == []
+
+
+@pytest.mark.parametrize("answer", ONLY_WORK_HAPPENED)
+def test_rvw36_a_claim_that_says_only_work_happened_takes_any_done_write(answer):
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == []
+    assert honesty_lines(_receipts(SKILL_LOADED), answer) == [NOTHING_DONE_LINE]
