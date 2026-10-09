@@ -499,6 +499,41 @@ class UnifiedMemoryService:
             )
             return False
 
+    async def delete_memories_scoped(
+        self,
+        memory_ids: List[str],
+        user_id: str,
+        workspace_id: str,
+    ) -> bool:
+        """
+        Delete memories from L3 under a pre-built namespace user_id.
+
+        For callers that hold items from several scopes (workspace, agent,
+        daily) — each item carries its ``namespace``. The namespace must
+        belong to ``workspace_id``; anything else is refused.
+
+        Returns:
+            True if the store deleted them, False on refusal or failure.
+        """
+        ws_ns = self.namespace(workspace_id).workspace()
+        if user_id != ws_ns and not user_id.startswith(f"{ws_ns}:"):
+            logger.warning(
+                "[UnifiedMemoryService] delete_memories_scoped refused namespace=%s for ws=%s",
+                user_id, workspace_id,
+            )
+            return False
+        try:
+            return await self._durable.delete(
+                memory_ids=list(memory_ids), user_id=user_id, workspace_id=workspace_id
+            )
+        except Exception:
+            logger.error(
+                "[UnifiedMemoryService] delete_memories_scoped failed for namespace=%s",
+                user_id,
+                exc_info=True,
+            )
+            return False
+
     # ------------------------------------------------------------------
     # GDPR erasure / export (PRD-181 S3/S4)
     # ------------------------------------------------------------------
