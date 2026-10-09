@@ -106,7 +106,7 @@ if [ "$MODE" != "negative" ]; then
   check "FX-002 sim tests cover the frames" "grep -rlq 'receipts' $SIM/tests/"
   check "FX-003 the signature rule yields to the owner-only gate" "grep -q 'is_owner_only' $DISC/follows_the_owner.py && test -f $TESTS/test_prd256_fix_card_before_signature.py"
   check "FX-004 the waiting status exists on both sides" "grep -q '\"waiting\"' $CHAT/receipts.py && grep -q 'waiting' frontend/lib/chat/receipts.ts && test -f $TESTS/test_prd256_fix_waiting_receipt.py"
-  check "FX-005 the tool-end flag reads the result; one producer for the nothing-done line" "grep -q 'the_results_flag(event)' $EXEC/tool_loop.py && grep -q 'result.get(\"success\"' $EXEC/card_raised.py && test -f $TESTS/test_prd256_fix_stream_truth.py"
+  check "FX-005 the tool-end flag reads the result; one producer for the nothing-done line" "grep -q 'await emit_flagged(cb, event)' $EXEC/tool_loop.py && grep -q 'flagged = the_results_flag(event)' $EXEC/card_raised.py && grep -q 'result.get(\"success\"' $EXEC/card_raised.py && test -f $TESTS/test_prd256_fix_stream_truth.py"
   check "FX-006 honesty per claim tests" "test -f $TESTS/test_prd256_fix_honesty_per_claim.py"
   check "FX-007 the families are deleted" "! test -f $EXEC/action_claims.py && ! test -f $EXEC/document_claims.py && ! test -f $EXEC/shop_and_team_claims.py && ! test -f $EXEC/social_post_claims.py && ! test -f $CHAT/figure_disputes.py && ! test -f $CHAT/shop_figures.py && ! test -f $CHAT/team_corrections.py"
   check "FX-007 service.py is shorter than the base and under 3200 lines" "service_shorter && [ \$(wc -l < $CHAT/service.py | tr -d ' ') -le 3200 ]"
