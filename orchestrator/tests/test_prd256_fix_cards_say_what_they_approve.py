@@ -20,6 +20,7 @@ import pytest
 from modules.tools.discovery import owner_only
 from modules.tools.discovery.card_question import platform_question, send_question
 from modules.tools.discovery.card_question_text import EMPTY, question, shown
+from modules.tools.execution.unified_executor import UnifiedToolExecutor
 
 UPDATE_AGENT = "platform_update_agent"
 CREATE_MISSION = "platform_create_mission"
@@ -176,8 +177,7 @@ class _Tools:
     def __init__(self):
         self.ran = []
 
-    def _resolve_effective_call(self, tool_name, parameters):
-        return parameters["action"], parameters["params"], True
+    _resolve_effective_call = UnifiedToolExecutor._resolve_effective_call   # the executor's own reading
 
     @owner_only.asks_before_a_send
     async def execute_tool(self, tool_name, parameters, agent_id=0, tenant_id=None, workspace_id=None,
@@ -220,8 +220,9 @@ WIDE_SEND = {"recipient_email": SUPPLIER, "extra_recipients": ["ana@kerbside.exa
              "attachment": {"name": "order-0412.pdf", "mimetype": "application/pdf", "s3key": "ws/7/order-0412.pdf"}}
 
 
-def _ask_for(monkeypatch, sent):
-    """The reply to a GMAIL_SEND_EMAIL in the owner's chat, and what reached the grant (``stored``)."""
+def _ask_for(monkeypatch, sent, call=None):
+    """The reply to a GMAIL_SEND_EMAIL in the owner's chat, and what reached the grant (``stored``);
+    ``call``: the whole composio_execute call, when it is not ``{action, params: sent}``."""
     import modules.tools.execution.tool_grants as tool_grants
 
     stored = {}
@@ -229,7 +230,7 @@ def _ask_for(monkeypatch, sent):
     monkeypatch.setattr(tool_grants, "attach_ask_grant",
                         lambda db, ws, **kw: stored.update(kw) or {**kw["ask"], "grant_id": 32})
     tools = _Tools()
-    reply = asyncio.run(tools.execute_tool("composio_execute", {"action": "GMAIL_SEND_EMAIL", "params": sent},
+    reply = asyncio.run(tools.execute_tool("composio_execute", call or {"action": "GMAIL_SEND_EMAIL", "params": sent},
                                            workspace_id=uuid4(), caller_context=_owners_chat()))
     return reply, stored, tools
 
@@ -290,6 +291,37 @@ def test_a_recipient_the_card_cannot_show_is_refused_before_any_grant(monkeypatc
     assert reply["success"] is False and not reply.get("requires_confirmation")
     assert f"cannot show the recipient in '{field}'" in reply["error"]
     assert stored == {} and tools.ran == []          # no grant asked for, nothing sent
+
+
+# ── P256-FIX-RVW-31: the card is read from what the send carries, not params alone ─────
+
+BCC = "x@other.test"
+
+
+@pytest.mark.parametrize("call", [
+    {"action": "GMAIL_SEND_EMAIL", "params": {"recipient_email": SUPPLIER, "subject": "Hi"}, "bcc": BCC},
+    {"action": "GMAIL_SEND_EMAIL", "parameters": {"recipient_email": SUPPLIER, "subject": "Hi", "bcc": BCC}},
+], ids=["bcc-beside-params", "under-parameters"])
+def test_a_send_card_lists_a_recipient_passed_beside_params_or_under_parameters(monkeypatch, call):
+    from modules.tools.execution.composio_params import sent_params
+
+    reply, stored, tools = _ask_for(monkeypatch, None, call)
+
+    asked = reply["question_md"].splitlines()
+    assert f"- to: {SUPPLIER}" in asked and f"- bcc: {BCC}" in asked
+    assert not any(line.startswith("- parameters:") for line in asked)
+    assert stored["question_md"] == reply["question_md"] and tools.ran == []    # nothing sent before the click
+    assert stored["params"] == call                                              # the click runs this call...
+    assert sent_params(call) == {"recipient_email": SUPPLIER, "subject": "Hi", "bcc": BCC}   # ...sending what it shows
+
+
+def test_an_unreadable_recipient_beside_params_is_refused_before_any_grant(monkeypatch):
+    call = {"action": "GMAIL_SEND_EMAIL", "params": {"recipient_email": SUPPLIER}, "bcc": {"email": BCC}}
+
+    reply, stored, tools = _ask_for(monkeypatch, None, call)
+
+    assert reply["success"] is False and "cannot show the recipient in 'bcc'" in reply["error"]
+    assert stored == {} and tools.ran == []
 
 
 # ── Tenancy: a card never reads another workspace's row ─────────────────────────────

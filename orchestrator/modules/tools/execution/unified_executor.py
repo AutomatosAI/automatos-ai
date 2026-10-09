@@ -31,6 +31,7 @@ from modules.tools.execution import exec_research
 from modules.tools.execution import exec_file_ops
 from modules.tools.execution import exec_shell
 from modules.tools.execution import exec_composio
+from modules.tools.execution import composio_params
 from modules.tools.execution import exec_document
 from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
@@ -629,9 +630,8 @@ class UnifiedToolExecutor:
                 effective_name = (
                     str(raw_action).upper().strip() if raw_action else tool_name
                 )
-                inner = parameters.get("params")
-                effective_params = inner if isinstance(inner, dict) else params
-                return effective_name, effective_params, True
+                # What the action is sent with, strays too: the card shows it (P256-FIX-RVW-31).
+                return effective_name, composio_params.sent_params(parameters), True
 
             return tool_name, params, self._tool_is_composio(tool_name)
         except Exception:

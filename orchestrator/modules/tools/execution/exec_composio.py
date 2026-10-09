@@ -9,6 +9,7 @@ import pathlib
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from modules.tools.execution.composio_params import sent_params, stray_params
 from modules.tools.registry.tool_registry import ToolSpec
 
 logger = logging.getLogger(__name__)
@@ -156,25 +157,13 @@ async def execute_composio_execute(
         return {"success": False, "error": "Invalid parameters (expected object)", "tool": tool_name}
 
     raw_action = parameters.get("action") or parameters.get("action_name")
-    # Accept both `params` (preferred) and `parameters` (some models emit this).
-    params = None
-    if isinstance(parameters.get("params"), dict):
-        params = parameters.get("params")
-    elif isinstance(parameters.get("parameters"), dict):
-        params = parameters.get("parameters")
-    else:
-        params = {}
+    # `params` or `parameters`, with the top-level keys a model left beside them: the
+    # params the owner's-click card shows are these (P256-FIX-RVW-31).
+    params = sent_params(parameters)
     app_name = parameters.get("app_name") or parameters.get("app")
-
-    # Defensive: LLMs frequently put action-specific params at the top level
-    # instead of nesting inside `params`. Remap any unknown keys into params.
-    _KNOWN_KEYS = {"action", "action_name", "params", "parameters", "app_name", "app"}
-    stray_params = {k: v for k, v in parameters.items() if k not in _KNOWN_KEYS}
-    if stray_params:
-        params = {**stray_params, **params}  # explicit params take precedence
-        logger.info(
-            f"[composio_execute] Remapped top-level keys into params: {list(stray_params.keys())}"
-        )
+    strays = stray_params(parameters)
+    if strays:
+        logger.info(f"[composio_execute] Remapped top-level keys into params: {list(strays)}")
 
     if not raw_action:
         return {"success": False, "error": "Missing required field: action", "tool": tool_name}

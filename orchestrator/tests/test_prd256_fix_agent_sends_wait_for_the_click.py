@@ -17,6 +17,8 @@ import pytest
 
 from modules.tools.discovery.agent_sends import AGENT_SEND, CARD_RAISED
 from modules.tools.discovery.owner_only import asks_before_a_send
+from modules.tools.execution.composio_params import sent_params
+from modules.tools.execution.unified_executor import UnifiedToolExecutor
 
 SUPPLIER = "orders@kerbside.example"
 SUBJECT = "Order confirmation: 40 Christmas boxes"
@@ -29,17 +31,18 @@ class _Composio:
     """UnifiedToolExecutor's shape over a fake Composio: it records every action that ran."""
 
     sent: list = []
+    carried: list = []   # the params each send went out with, as exec_composio sends them
 
     def __init__(self, db):
         self.db = db
 
-    def _resolve_effective_call(self, tool_name, parameters):
-        return parameters.get("action"), parameters.get("params"), True
+    _resolve_effective_call = UnifiedToolExecutor._resolve_effective_call   # the executor's own reading
 
     @asks_before_a_send
     async def execute_tool(self, tool_name, parameters, agent_id=0, tenant_id=None, workspace_id=None,
                            trace_id=None, caller_context=None):
         _Composio.sent.append(parameters.get("action"))
+        _Composio.carried.append(sent_params(parameters))
         return {"success": True, "data": {"id": "msg-1"}}
 
 
@@ -55,6 +58,7 @@ def desk(db_session, seed_workspace, monkeypatch):
     monkeypatch.setattr(host, "publish_note_line", lambda ws, task_id, note: None)
     monkeypatch.setattr(unified_executor, "UnifiedToolExecutor", _Composio)
     monkeypatch.setattr(_Composio, "sent", [])
+    monkeypatch.setattr(_Composio, "carried", [])
     ws = UUID(seed_workspace())
     common = dict(description="", status="active", configuration={}, workspace_id=ws, created_by="test",
                   owner_type="workspace", owner_id=str(ws))
@@ -329,6 +333,40 @@ def test_a_ticket_in_another_workspace_is_never_read(desk, seed_workspace):
 
     assert _send(desk, {"session_task_id": theirs.id})["success"] is True
     assert _Composio.sent == ["GMAIL_SEND_EMAIL"]
+
+
+# ── P256-FIX-RVW-31: a bcc beside params, or the params under 'parameters', is on the card ──
+
+BESIDE = {"action": "GMAIL_SEND_EMAIL", "params": dict(SEND["params"]), "bcc": "x@other.test"}
+UNDER_PARAMETERS = {"action": "GMAIL_SEND_EMAIL", "parameters": {**SEND["params"], "bcc": "x@other.test"}}
+CHAT = {"driving_user_id": "7", "user_id": "user_owner", "conversation_id": str(uuid4()), "turn_id": "t-1"}
+
+
+@pytest.mark.parametrize("send", [BESIDE, UNDER_PARAMETERS], ids=["bcc-beside-params", "under-parameters"])
+@pytest.mark.parametrize("where", ["autos-ticket", "owners-chat"])
+def test_the_card_shows_every_recipient_the_click_sends_to(desk, send, where):
+    from core.models.approval_grants import ApprovalGrant
+
+    reply = _send(desk, _session(desk) if where == "autos-ticket" else CHAT, send)
+
+    assert _Composio.sent == [] and reply["requires_confirmation"] is True     # nothing before the click
+    card = _grants(desk)[0].question_md.splitlines()
+    assert f"- to: {SUPPLIER}" in card and "- bcc: x@other.test" in card
+    assert not any(line.startswith("- parameters:") for line in card)
+    _click(desk, desk.db.get(ApprovalGrant, reply["grant_id"]))
+    assert _Composio.sent == ["GMAIL_SEND_EMAIL"]
+    assert _Composio.carried == [{**SEND["params"], "bcc": "x@other.test"}]   # the call the card showed
+
+
+def test_an_explicit_param_wins_over_the_one_beside_it_on_the_card_and_the_send(desk):
+    send = {"action": "GMAIL_SEND_EMAIL", "params": dict(SEND["params"]), "recipient_email": "decoy@other.test"}
+
+    reply = _send(desk, _session(desk), send)
+
+    card = _grants(desk)[0].question_md.splitlines()
+    assert f"- to: {SUPPLIER}" in card and not any("decoy@other.test" in line for line in card)
+    assert reply["message"] == CARD_RAISED.format(subject=SUBJECT, recipient=SUPPLIER)
+    assert sent_params(send) == SEND["params"]
 
 
 class _Reader:
