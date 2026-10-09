@@ -140,6 +140,42 @@ def test_the_same_number_with_no_tool_result_behind_it_is_still_corrected(board)
     assert claim_check.invented_ids(NAMES_0930, "", WS) == [("task", "0930")]       # outside a loop
 
 
+def _looked_up(text, *outcomes):
+    tracker = ToolExecutionTracker.__new__(ToolExecutionTracker)
+    tracker.outcomes = list(outcomes)
+    token = TRACKERS_MADE.set([tracker])
+    try:
+        return claim_check.invented_ids(text, "What is waiting for me?", WS)
+    finally:
+        TRACKERS_MADE.reset(token)
+
+
+def test_a_failed_lookup_that_repeats_the_id_quotes_nothing(board):
+    """RVW-32: ID_NUDGE's lookup answers 'Task #1100 not found'; that echo never backs #1100."""
+    not_found = ("platform_get_task", {"task_id": "#1100"}, {"success": False, "error": "Task #1100 not found"})
+    assert _looked_up("Task #1100 is in Review.", not_found) == [("task", "1100")]
+    errored = ("platform_get_task", {"task_id": "#1100"}, {"error": "Task #1100 not found"})
+    assert _looked_up("Task #1100 is in Review.", errored) == [("task", "1100")]
+    refused = ("composio_execute", {}, {"successful": False, "data": {"message": "ticket 1100 unknown"}})
+    assert _looked_up("Task #1100 is in Review.", refused) == [("task", "1100")]
+
+
+def test_a_succeeded_result_never_quotes_its_own_params(board):
+    """RVW-32: a search that echoes the asked number back has not found it."""
+    echoed = ("platform_list_tasks", {"search": "#1100"}, {"success": True, "query": "#1100", "tasks": []})
+    assert _looked_up("Task #1100 is in Review.", echoed) == [("task", "1100")]
+    by_number = ("platform_get_task", {"task_id": 1100}, {"success": True, "note": "task 1100 has no card"})
+    assert _looked_up("Task #1100 is in Review.", by_number) == [("task", "1100")]
+
+
+def test_the_quoted_card_number_still_clears_beside_a_failed_call(board):
+    """The '#0931 … Card #0930 Approval Request' case keeps clearing #0930 next to a refused lookup."""
+    listed = ("platform_list_tasks", {}, TICKET_0931)
+    missing = ("platform_get_task", {"task_id": "#0930"}, {"success": False, "error": "Task #0930 not found"})
+    assert _looked_up(NAMES_0930, missing, listed) == []
+    assert _looked_up(NAMES_0930, missing) == [("task", "0930")]
+
+
 def test_a_number_inside_a_longer_one_or_a_count_is_not_quoted(board):
     assert _in_a_loop({"success": True, "title": "Order 109300 shipped"}) == [("task", "0930")]
     assert _in_a_loop({"success": True, "count": 930, "limit": 930}) == [("task", "0930")]   # numbers, not text

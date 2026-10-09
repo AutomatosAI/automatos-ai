@@ -53,9 +53,15 @@ P256-FIX-RVW-8: a number the turn's automatic reads put in front of the model is
 "#0931 'Card #0930 Approval Request'" was in no tracker's outcomes and #0930 was still corrected, on
 the first reply and in the loop. ``receipts.its_reads_are_receipted`` hands the notes the reads added
 (the needs-you note, the team's findings, the retrieval-first passages) to ``reads_put_in_front``.
+
+P256-FIX-RVW-32: a failed call quotes nothing. ID_NUDGE sent the model to look #1100 up, the board
+answered "Task #1100 not found", and that echo cleared the id, so "Task #1100 is in Review" reached
+the owner uncorrected. Only a result that succeeded backs a number, and never one its call's own
+params carried.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from contextvars import ContextVar
@@ -174,12 +180,28 @@ def reads_put_in_front(notes: Iterable[Dict[str, Any]]) -> None:
     READS_SAID.set("\n".join(said for note in notes for said in _strings(note.get("content"))))
 
 
-def _quoted_this_turn() -> str:
-    """What the turn's automatic reads and the tool results of the loop running now say, as
-    text: a ticket's title, a card or grant number. Outside a tool loop, the reads alone."""
-    made = TRACKERS_MADE.get() or []
-    results = (said for tracker in made for _action, _params, result in tracker.outcomes for said in _strings(result))
-    return "\n".join([READS_SAID.get(), *results])
+def _failed(result: object) -> bool:
+    """A result that says it failed quotes nothing: 'Task #1100 not found' repeats the asked id (RVW-32)."""
+    return isinstance(result, dict) and (
+        result.get("success") is False or result.get("successful") is False or bool(result.get("error")))
+
+
+def _quoted_by_a_result(value: str) -> bool:
+    """Whether a tool result of the loop running now that succeeded names ``value`` (a ticket's
+    title, a card or grant number), and the call's own params did not carry it (RVW-32)."""
+    for tracker in TRACKERS_MADE.get() or []:
+        for _action, params, result in tracker.outcomes:
+            if _failed(result) or _named_in(value, json.dumps(params, default=str)):
+                continue
+            if any(_named_in(value, said) for said in _strings(result)):
+                return True
+    return False
+
+
+def _quoted_this_turn(value: str) -> bool:
+    """Whether the turn's automatic reads or its succeeded tool results quote ``value``.
+    Outside a tool loop, the reads alone."""
+    return _named_in(value, READS_SAID.get()) or _quoted_by_a_result(value)
 
 
 def _named_in(value: str, text: str) -> bool:
@@ -190,14 +212,14 @@ def _named_in(value: str, text: str) -> bool:
 
 def invented_ids(text: str, owner_text: str, workspace_id: str) -> List[Tuple[str, str]]:
     """The ids a reply names, in the three shapes, that do not exist in the
-    workspace, leaving out any the owner named this turn and any the turn's own tool
-    results (FX-007) or automatic reads (RVW-8) quote. Sync, and reads the database only
+    workspace, leaving out any the owner named this turn and any the turn's own succeeded
+    tool results (FX-007; not one a failed call or the call's own params repeat, RVW-32) or
+    automatic reads (RVW-8) quote. Sync, and reads the database only
     when the reply names an id: run it off the loop (``asyncio.to_thread`` keeps the turn's
     context)."""
     owner = _MARKDOWN.sub("", owner_text or "")
-    quoted = _quoted_this_turn()
     named = [(kind, value) for kind, value in _named_ids(text)
-             if not _named_in(value, owner) and not _named_in(value, quoted)]
+             if not _named_in(value, owner) and not _quoted_this_turn(value)]
     if not named or not workspace_id:
         return []
     try:
