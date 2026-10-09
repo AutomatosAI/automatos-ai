@@ -780,9 +780,10 @@ two together.
 missing or empty. `.env` must sit next to `docker-compose.yml`; a value of
 nothing counts as unset.
 
-**Logs.** `docker compose logs -f backend` (boot steps, migrations, seeds),
-`docker compose logs -f workspace-worker`, `docker compose logs -f frontend`.
-`docker compose ps` shows health.
+**Logs.** `make logs` follows the whole stack (`make logs s=backend` for one
+service). The same with plain compose: `docker compose logs -f backend` (boot
+steps, migrations, seeds), `docker compose logs -f workspace-worker`,
+`docker compose logs -f frontend`. `docker compose ps` shows health.
 
 **Windows: `exec ...entrypoint.sh: no such file or directory`.** The script
 may have CRLF line endings, making Linux read the shebang as `/bin/bash\r`.
