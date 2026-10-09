@@ -10,7 +10,8 @@
 # carrying the pod name the chart adds, and never a query value from the URL.
 # =============================================================================
 
-OTEL_REQUEST_ID=e2e-otel-probe
+OTEL_REQUEST_ID=""   # a fresh one each round (run_otel_checks): the log keeps earlier rounds
+OTEL_PROBE_STATUS=""
 
 install_otel_collector() {
     log "Starting the OpenTelemetry Collector (the reference config, debug exporter)"
@@ -29,43 +30,52 @@ collector_log() { kubectl -n "$NS" logs deploy/otel-collector --tail=-1; }
 collector_log_has() { local log; log="$(collector_log)" && grep -qF "$1" <<<"$log"; }
 collector_log_lacks() { local log; log="$(collector_log)" && ! grep -qF "$1" <<<"$log"; }
 
-# Succeeds when one trace ID in the collector's log has spans from both services,
-# and both services' resources carry the pod name the chart adds.
-one_trace_across_api_and_worker() {
+# Succeeds when the span carrying the probe's request ID ($1) is in a trace that
+# has spans from both services, each from a resource carrying the pod name the
+# chart adds. Tied to this probe, so an earlier round's trace never passes it.
+probe_is_one_trace_across_api_and_worker() {
     collector_log | python3 -c '
 import re, sys
-services = {"automatos-api", "automatos-workspace-worker"}
-traces, service, pod_named = {}, None, set()
+probe, services = sys.argv[1], {"automatos-api", "automatos-workspace-worker"}
+spans, probe_traces = set(), set()   # (service, trace ID, resource named by pod)
+service, pod_named, trace = None, False, None
 for line in sys.stdin:
+    if line.lstrip().startswith("ResourceSpans #"):
+        service, pod_named = None, False
     found = re.search(r"service\.name: Str\(([^)]+)\)", line)
     if found:
         service = found.group(1)
-    if service in services and "k8s.pod.name: Str(" in line:
-        pod_named.add(service)
+    if "k8s.pod.name: Str(" in line:
+        pod_named = True
     found = re.search(r"Trace ID\s*:\s*([0-9a-f]{32})", line)
-    if found and service:
-        traces.setdefault(service, set()).add(found.group(1))
-shared = traces.get("automatos-api", set()) & traces.get("automatos-workspace-worker", set())
-sys.exit(0 if shared and pod_named == services else 1)
-'
+    if found:
+        trace = found.group(1)
+        spans.add((service, trace, pod_named))
+    if trace and f"automatos.request_id: Str({probe})" in line:
+        probe_traces.add(trace)
+named = {(svc, trace) for svc, trace, pod in spans if pod}
+sys.exit(0 if any(all((svc, trace) in named for svc in services) for trace in probe_traces) else 1)
+' "$1"
 }
 
 run_otel_checks() {
     log "OpenTelemetry checks"
+    OTEL_REQUEST_ID="e2e-otel-$(openssl rand -hex 4)"
     # Lists the workspace's files: the API calls the worker, which continues the trace.
-    curl -s -o /dev/null -H "X-Request-ID: $OTEL_REQUEST_ID" \
-        "http://127.0.0.1:$API_PORT/api/workspaces/$WORKSPACE_ID/files?path=.&probe=SECRET-QUERY-VALUE" || true
+    OTEL_PROBE_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -H "X-Request-ID: $OTEL_REQUEST_ID" \
+        "http://127.0.0.1:$API_PORT/api/workspaces/$WORKSPACE_ID/files?path=.&probe=SECRET-QUERY-VALUE" || true)"
     # Both services export in batches (the SDK's 5 s, then the collector's): wait
-    # for the whole trace and the request's ID, not a fixed time (review on #1053).
+    # for this request's whole trace, not a fixed time (review on #1053).
     for _ in $(seq 1 60); do
-        one_trace_across_api_and_worker && collector_log_has "automatos.request_id: Str($OTEL_REQUEST_ID)" && break
+        probe_is_one_trace_across_api_and_worker "$OTEL_REQUEST_ID" && break
         sleep 1
     done
+    check "the probe request (API -> worker) is answered" test "$OTEL_PROBE_STATUS" = 200
     check "the collector is up (its health check answers in the cluster)" \
         kubectl -n "$NS" exec deploy/"$RELEASE"-worker -- curl -sf http://otel-collector:13133/
     check "the API's spans reach the collector" collector_log_has "service.name: Str(automatos-api)"
     check "the worker's spans reach the collector" collector_log_has "service.name: Str(automatos-workspace-worker)"
-    check "one request is one trace across the API and the worker, named by pod" one_trace_across_api_and_worker
-    check "the request's own ID is on its span" collector_log_has "automatos.request_id: Str($OTEL_REQUEST_ID)"
+    check "the probe is one trace across the API and the worker, named by pod" \
+        probe_is_one_trace_across_api_and_worker "$OTEL_REQUEST_ID"
     check "a query value never reaches the collector" collector_log_lacks "SECRET-QUERY-VALUE"
 }
