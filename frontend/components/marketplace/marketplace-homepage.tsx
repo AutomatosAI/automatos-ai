@@ -110,7 +110,7 @@ function FeaturedBanner({ items, isAdmin, onItemClick }: { items: MarketplaceIte
           <FeaturedShowcaseCard
             item={hero}
             isAdmin={isAdmin}
-            onItemClick={onItemClick}
+            onItemClick={() => onItemClick(hero)}
             onToggleFeatured={() => toggleFeatured.mutate({ id: hero.id, type: hero.type })}
             toggleDisabled={toggleFeatured.isLoading}
           />

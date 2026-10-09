@@ -17,12 +17,11 @@ import { Star, Download } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import type { MarketplaceItem } from './marketplace-homepage'
-import type { MarketplaceItemRef } from './marketplace-item-ref'
 
 interface FeaturedShowcaseCardProps {
   item: MarketplaceItem
   isAdmin: boolean
-  onItemClick: (item: MarketplaceItemRef) => void
+  onItemClick: (id: number) => void
   onToggleFeatured: () => void
   toggleDisabled?: boolean
 }
@@ -68,7 +67,7 @@ export function FeaturedShowcaseCard({
 
   const handleInstall = (e: React.MouseEvent) => {
     e.stopPropagation()
-    onItemClick(item)
+    onItemClick(item.id)
   }
 
   return (
@@ -81,11 +80,11 @@ export function FeaturedShowcaseCard({
       <Card
         role="button"
         tabIndex={0}
-        onClick={() => onItemClick(item)}
+        onClick={() => onItemClick(item.id)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
-            onItemClick(item)
+            onItemClick(item.id)
           }
         }}
         className="relative overflow-hidden cursor-pointer border-primary/20 bg-gradient-to-br from-[#14110f] via-[#0e0d12] to-[#0a0a0e] min-h-[260px] hover:border-primary/40 transition-colors group focus:outline-none focus:ring-2 focus:ring-primary/40 card-glow"

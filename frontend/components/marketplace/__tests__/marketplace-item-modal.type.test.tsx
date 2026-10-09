@@ -21,10 +21,6 @@ vi.mock('@/hooks/use-playbook-api', () => ({
   useInstallPlaybookFromMarketplace: () => ({ mutateAsync: (...args: any[]) => installPlaybook(...args) }),
 }))
 
-vi.mock('@/hooks/use-composio-api', () => ({
-  useAvailableApps: () => ({ data: [] }),
-}))
-
 vi.mock('sonner', () => {
   const toast: any = vi.fn()
   toast.success = vi.fn()
