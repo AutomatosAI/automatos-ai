@@ -1,4 +1,4 @@
-
+`
 'use client'
 
 import { motion } from 'framer-motion'
@@ -123,7 +123,7 @@ const dashboardFeatures = [
   },
   {
     icon: Eye,
-    title: 'Live Command Centre',
+    title: 'Live Command Center',
     description: 'See every agent, every task, every mission in real-time. Know what needs your attention.',
     color: 'text-green-400'
   },
@@ -356,7 +356,7 @@ export function LandingPage() {
       >
         <motion.div variants={itemVariants} className="text-center space-y-4">
           <h2 className="text-4xl md:text-5xl font-bold">
-            Your <span className="gradient-text">Command Centre</span>
+            Your <span className="gradient-text">Command Center</span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             See every agent, every task, every mission in real-time. Know what needs your attention.
@@ -395,7 +395,7 @@ export function LandingPage() {
           <Link href="/analytics">
             <Button size="lg" variant="outline" className="px-8">
               <BarChart3 className="w-5 h-5 mr-2" />
-              Open Command Centre
+              Open Command Center
               <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
           </Link>
