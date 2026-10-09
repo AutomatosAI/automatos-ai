@@ -54,6 +54,7 @@
     "@hookform/resolvers": "3.3.1",
     "@monaco-editor/react": "^4.7.0",
     "@opentelemetry/exporter-trace-otlp-http": "~0.222.0",
+    "@opentelemetry/instrumentation-undici": "~0.32.0",
     "@opentelemetry/resources": "~2.11.0",
     "@opentelemetry/sdk-trace-node": "~2.11.0",
     "@prisma/client": "5.3.1",

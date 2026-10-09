@@ -55,7 +55,7 @@ describe('settings, read as the API reads them', () => {
 })
 
 describe('the provider', () => {
-  async function exported(env: NodeJS.ProcessEnv, start: (tracer: ReturnType<typeof trace.getTracer>) => Span) {
+  async function exported(env: Record<string, string>, start: (tracer: ReturnType<typeof trace.getTracer>) => Span) {
     const memory = new InMemorySpanExporter()
     const provider = buildProvider(env, memory)
     start(provider.getTracer('t')).end()

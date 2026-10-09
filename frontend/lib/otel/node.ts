@@ -1,8 +1,11 @@
 /**
  * PRD-256 O6b (#847): the web app's tracer provider, Node runtime only (imported by
  * `instrumentation.ts` when OTEL_ENABLED is on). Next.js then records its own server
- * spans (each request, render and route handler, and each `fetch` the server makes)
- * into it, and they go over OTLP/HTTP to the same collector as the API's.
+ * spans (each request, server render and Node-runtime route handler) into it, and they
+ * go over OTLP/HTTP to the same collector as the API's. Node's `fetch` (undici) is
+ * instrumented so a request to the API carries `traceparent` and joins the API's
+ * trace: Next's own fetch span doesn't send it. The Edge-runtime routes (the chat and
+ * workflow-stream proxies) run where this SDK can't: #1094.
  *
  * Upstream OpenTelemetry packages only (vendor-neutral, decided on #847). The OTLP
  * exporter reads OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_EXPORTER_OTLP_HEADERS itself;
@@ -10,6 +13,7 @@
  * Principle 5: every query value on a URL attribute is redacted before export.
  */
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
+import { UndiciInstrumentation } from '@opentelemetry/instrumentation-undici'
 import { detectResources, envDetector, resourceFromAttributes } from '@opentelemetry/resources'
 import {
   BatchSpanProcessor,
@@ -21,6 +25,9 @@ import {
 } from '@opentelemetry/sdk-trace-node'
 
 import { DEFAULT_SERVICE_NAME, redactQuery, redactedAttributes, samplerRatio } from './settings'
+
+/** The environment the settings are read from (process.env, or a test's own). */
+type Env = Record<string, string | undefined>
 
 /** Wraps an exporter: each span goes out with the query values in its name and URL attributes redacted. */
 export class RedactingExporter implements SpanExporter {
@@ -48,7 +55,7 @@ export class RedactingExporter implements SpanExporter {
 
 /** This process's provider: the web app's resource, a parent-based ratio sampler, and
  * batched export through `exporter` (the OTLP one unless a test passes its own). */
-export function buildProvider(env: NodeJS.ProcessEnv, exporter?: SpanExporter): NodeTracerProvider {
+export function buildProvider(env: Env, exporter?: SpanExporter): NodeTracerProvider {
   const resource = resourceFromAttributes({
     'service.name': env.OTEL_SERVICE_NAME?.trim() || DEFAULT_SERVICE_NAME,
     'automatos.edition': env.NEXT_PUBLIC_AUTH_EDITION || 'unknown',
@@ -58,14 +65,27 @@ export function buildProvider(env: NodeJS.ProcessEnv, exporter?: SpanExporter): 
   return new NodeTracerProvider({ resource, sampler, spanProcessors: [processor] })
 }
 
-/** Installs the provider globally (with W3C trace context), once. Never stops the boot. */
-export function startTracing(env: NodeJS.ProcessEnv = process.env): boolean {
+const installed: { provider?: NodeTracerProvider; fetch?: UndiciInstrumentation } = {}
+
+/** Installs the provider globally (with W3C trace context), and traces Node's `fetch`,
+ * once. Never stops the boot. `exporter` replaces the OTLP one (tests). */
+export function startTracing(env: Env = process.env, exporter?: SpanExporter): boolean {
+  if (installed.provider) return true
   try {
-    buildProvider(env).register()
+    installed.provider = buildProvider(env, exporter)
+    installed.provider.register()
+    installed.fetch = new UndiciInstrumentation()   // enabled on construction
     console.info(`[otel] tracing the web app to ${env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318'}`)
     return true
   } catch (error) {
     console.error('[otel] tracing not started; serving without traces', error)
     return false
   }
+}
+
+/** Undoes startTracing: flushes and stops the provider, and unpatches `fetch` (tests). */
+export async function stopTracing(): Promise<void> {
+  installed.fetch?.disable()
+  await installed.provider?.shutdown()
+  installed.fetch = installed.provider = undefined
 }
