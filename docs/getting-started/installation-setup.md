@@ -168,7 +168,7 @@ Configuration values are injected via `.env` and `envs/api.defaults`.
 | `REDIS_PASSWORD` | *Required* | Redis auth password secret | [docker-compose.yml:74](../../docker-compose.yml#L74) |
 | `API_KEY` | *Required* | Backend authentication key | [.env.example:28](../../.env.example#L28) |
 | `S3_ENDPOINT_URL` | `http://minio:9000` | Local MinIO object store endpoint; the `.env.example` override is commented out | [docker-compose.yml:263](../../docker-compose.yml#L263), [.env.example:109](../../.env.example#L109) |
-| `AUTH_EDITION` | `saas` (`local` in compose) | Edition mode gating authentication | [test.yml: `orchestrator-tests-shard` job](../../.github/workflows/test.yml) |
+| `AUTH_EDITION` | `saas` (`local` in compose) | Edition mode gating authentication | [orchestrator/config.py:201-202](../../orchestrator/config.py#L201-L202), [envs/api.defaults:52](../../envs/api.defaults#L52) |
 | `DEFAULT_WORKSPACE_ID` | Workspace UUID | Default tenant ID for local sessions | [test.yml: `orchestrator-tests-shard` job](../../.github/workflows/test.yml) |
 
 Sources: [docker-compose.yml:41-321](../../docker-compose.yml#L41-L321), [.env.example:1-112](../../.env.example#L1-L112), [test.yml: `orchestrator-tests-shard` job](../../.github/workflows/test.yml)
