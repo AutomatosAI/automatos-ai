@@ -75,6 +75,12 @@ def _register_documents_actions(registry: ActionRegistry) -> None:
     register_brand_proposal_actions(registry)
 
 
+def _register_observability_actions(registry: ActionRegistry) -> None:
+    """The monitoring actions, and the workspace's errors grouped by cause (9 Oct)."""
+    register_monitoring_actions(registry)
+    register_diagnostics_actions(registry)
+
+
 def register_all_actions(registry: ActionRegistry) -> None:
     """Register all platform actions with the registry."""
     register_agents_actions(registry)
@@ -84,8 +90,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_documents_actions(registry)
     register_workspace_actions_defs(registry)
     register_store_memory_action(registry)
-    register_monitoring_actions(registry)
-    register_diagnostics_actions(registry)
+    _register_observability_actions(registry)
     register_search_actions(registry)
     register_tools_llms_actions(registry)
     register_marketplace_actions(registry)
