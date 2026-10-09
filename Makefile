@@ -13,6 +13,7 @@
 #   make clean   reclaim dangling images + unused build cache (never your data)
 #   make reset   DESTRUCTIVE — stop and delete all data volumes
 #   make status  what is running, and what it costs on disk
+#   make logs    follow the logs (make logs s=backend for one service)
 #
 # Nothing here is required: plain `docker compose up` still works.
 # =============================================================================
@@ -107,6 +108,10 @@ status:
 	@$(COMPOSE) ps --format '{{.Service}}\t{{.Status}}'
 	@echo ""
 	@docker system df
+
+# Follow the stack's logs. `make logs s=backend` limits it to one service.
+logs:
+	@$(COMPOSE) logs -f --tail=200 $(s)
 
 # PRD-234 Session mode — run tickets as YOUR OWN Claude Code sessions on this
 # machine (local edition only; CLI_RUNTIME_ENABLED=true in .env).
