@@ -138,10 +138,11 @@ serviceAccount:
   name: ""
   annotations: {}
 
-# OpenTelemetry (PRD-256): traces from the API and the worker, and the API's GenAI
-# metrics, over OTLP/HTTP. OFF by default. Point `endpoint` at an OpenTelemetry
-# Collector (deploy/otel/ has a reference config) or any OTLP/HTTP backend. Its
-# headers (a vendor's Authorization) come from the Secret, never from values.
+# OpenTelemetry (PRD-256): traces from the API, the worker and the web app's
+# server side, and the API's GenAI metrics, over OTLP/HTTP. OFF by default. Point
+# `endpoint` at an OpenTelemetry Collector (deploy/otel/ has a reference config) or
+# any OTLP/HTTP backend. Its headers (a vendor's Authorization) come from the
+# Secret, never from values.
 otel:
   enabled: false
   endpoint: ""          # e.g. http://otel-collector.observability:4318
