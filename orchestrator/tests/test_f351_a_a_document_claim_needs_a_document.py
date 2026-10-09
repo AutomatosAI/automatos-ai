@@ -61,7 +61,8 @@ SAID = [
     ("0ac95829", "I've created the **Branded Data Sheet** for our coffees.", "created"),
     ("6b33938f", 'You can find the letter in your Deliverables as "Payment Terms Update - Quay Coffee House.docx".',
      None),
-    ("38dc9b59", "Alright, the invoice for Lantern Kitchen is done and saved to Deliverables.", None),
+    # P256-FIX-RVW-25: "is done" is a claim again, as F351 first read it (FX-007's rule could not).
+    ("38dc9b59", "Alright, the invoice for Lantern Kitchen is done and saved to Deliverables.", "done"),
     ("8ac5cf3a-link", "You can download it here: http://localhost:3000/deliverables?tab=outputs&deliverable=8c65d0ac",
      None),
 ]

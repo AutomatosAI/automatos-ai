@@ -25,6 +25,11 @@ call was no claim at all; it is again, and only a simple-past passive with a pas
 sentence ("at 03:04", "this morning") is history. Replied, texted, shared, invited and refunded
 were in no family, so a mail draft or a saved memory backed "I've replied to Declan." (D7's
 "reply").
+
+P256-FIX-RVW-25: with the families deleted (FX-007, D10) this rule is the only guard, and "The task
+is done.", "The post is published.", "The post got sent.", "It went out.", "Email sent.", "Posted!",
+"I sent the email to Declan." and "I emailed the supplier and created the ticket." were no claim;
+"I've created the ticket, emailed Sam." was only created.
 """
 from __future__ import annotations
 
@@ -402,3 +407,144 @@ def test_rvw20_a_send_backs_shared_and_invited(answer):
 def test_rvw20_a_send_does_not_back_refunded():
     assert honesty_lines(_receipts(MAIL_SENT), "I've refunded Rosie.") == [_named("refunded")]
     assert honesty_lines(_receipts(PAYMENT_MADE), "I've refunded Rosie.") == []
+
+
+# ── P256-FIX-RVW-25: stative and elliptical passives, the first person's past, a comma list ──
+
+SOCIAL_POSTED = POST_SUBMITTED
+# (the sentence, its verb, a done write of its own kind)
+ESCAPED = [
+    ("The post is published.", "published", SOCIAL_POSTED),
+    ("The post is scheduled for 5pm.", "scheduled", REPORT_SCHEDULED),
+    ("The ticket is created.", "created", CARD_MADE),
+    ("The post got sent.", "sent", SOCIAL_POSTED),
+    ("It went out.", "sent", EMAIL_SENT),
+    ("Email sent.", "sent", EMAIL_SENT),
+    ("Posted!", "posted", SOCIAL_POSTED),
+    ("I sent the email to Declan.", "sent", EMAIL_SENT),
+    ("I created the task.", "created", CARD_MADE),
+    ("I just paused the heartbeat.", "paused", HEARTBEAT_SET),
+    ("I turned off the heartbeat for Scout.", "turned off", HEARTBEAT_SET),
+    ("Heartbeat turned off.", "turned off", HEARTBEAT_SET),
+    ("Your weekly report is set up.", "set up", REPORT_SCHEDULED),
+    ("That's cancelled for you.", "cancelled", _platform("platform_cancel_mission", {"mission_id": "m-1"})),
+    ("I dm’d Declan the pickup time.", "dm'd", _composio("SLACK_SEND_MESSAGE")),
+]
+
+
+@pytest.mark.parametrize("answer, verb, own", ESCAPED, ids=[case[0] for case in ESCAPED])
+def test_rvw25_an_escaped_shape_is_a_claim_of_its_verb(answer, verb, own):
+    assert [said for said, _ in claims(answer)] == [verb]
+    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
+    assert honesty_lines(_receipts(own), answer) == []
+
+
+@pytest.mark.parametrize("answer", ["The task is done.", "That's done.", "Everything done."])
+def test_rvw25_a_stative_done_says_only_that_work_happened(answer):
+    assert [said for said, _ in claims(answer)] == ["done"]
+    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert honesty_lines(_receipts(CARD_DONE), answer) == []
+
+
+def test_rvw25_the_first_persons_past_coordinates_its_participles():
+    answer = "I emailed the supplier and created the ticket."
+    assert [verb for verb, _ in claims(answer)] == ["emailed", "created"]
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named("emailed or created")]
+    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("emailed")]
+    assert honesty_lines(_receipts(CARD_MADE, EMAIL_SENT), answer) == []
+
+
+@pytest.mark.parametrize("answer, verbs", [
+    ("I've created the ticket, emailed Sam.", ["created", "emailed"]),
+    ("I've created the ticket; then emailed Sam.", ["created", "emailed"]),
+    ("I've created the ticket, and also emailed Sam.", ["created", "emailed"]),
+    ("I've created the ticket, Sam emailed.", ["created"]),                    # a new clause, its own subject
+    ("I've created the card, called 'Wholesale reply'.", ["created"]),          # a state, not a claim
+])
+def test_rvw25_a_participle_continuing_the_list_after_a_comma_is_a_claim(answer, verbs):
+    assert [verb for verb, _ in claims(answer)] == verbs
+
+
+def test_rvw25_the_comma_claim_no_write_backs_is_named():
+    answer = "I've created the ticket, emailed Sam."
+    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("emailed")]
+    assert honesty_lines(_receipts(CARD_MADE, EMAIL_SENT), answer) == []
+
+
+@pytest.mark.parametrize("answer", [
+    "It went out this morning.",                                           # history
+    "I sent the invoice at 9am.",
+    "Once the post is published, you'll see it in the Socials tab.",       # a plan word
+    "I'll let you know as soon as the agent is installed and ready for the next steps!",
+    "Here are the posts that are scheduled for Monday.",                   # the reply's own content
+    "The email that I sent to Declan bounced.",                            # a relative clause
+    "Nothing is scheduled for Monday.",                                    # a denial
+    "No post is published yet.",
+    "Nothing got sent.",
+    "Not sent yet.",
+    "Invoice HL-2026-0142 isn’t done.",
+    "The playbook is based on your notes.",                                # a state
+    "The heartbeat is set to every 30 minutes.",
+    "Scout's heartbeat is paused.",
+    "Workspace is disabled.",
+    "Rosa has ordered.",                                                   # hers, not the writer's
+    "I found that the Harvest Club boxes are posted on Monday, October 5th.",   # what a read found (F316)
+    "The board shows the post is published.",
+    "I made a mistake in the update task status call.",                    # a slip owned
+    "I wanted to check with you first.",                                   # no family: no simple past claim
+])
+def test_rvw25_an_exempt_sentence_of_the_new_shapes_is_no_claim(answer):
+    assert not claims_work_done(answer)
+    assert honesty_lines([], answer) == []
+
+
+def test_rvw25_an_agents_run_reads_only_its_first_person():
+    assert claims("The post is published. Email sent.", first_person=True) == []
+    assert [verb for verb, _ in claims("I sent the email to Declan.", first_person=True)] == ["sent"]
+
+
+# The sweep: every string literal of orchestrator/tests and tests/sim (docstrings aside) through the
+# claims() before RVW-25 and after lists these new claims, each (its sentence, its verb); none is an
+# answer a test asserts clean. Most are no answer at all (a card's brief, a tool's result, a board
+# note, an owner's question); the one cleared answer, F351's 38dc9b59 ("…is done and saved to
+# Deliverables."), FX-007 had lost and F351 first caught: it is a claim again. No claim was lost.
+SWEPT = [
+    ("started.", "started"), ("COMPLETED.", "completed"), ("I edited notes.", "edited"), ("Saved.", "saved"),
+    ("It never ran, so it is closed as cancelled.", "closed"), ("Sent.", "sent"),
+    ("The offer overview is saved as deliverables/sessions/980/christmas-box-cafe-offer-overview.", "saved"),
+    ("Approved.", "approved"), ("steps: a playbook is created with no steps", "created"), ("All paid.", "paid"),
+    ("Task ID 1099 is done, and so is 1093.", "done"),
+    ("I made an empty playbook instead of installing it: nothing was installed.", "made"),
+    ("I made an empty playbook", "made"), ("If they ask whether setup is done: \"Your team is built", "done"),
+    ("Ticket 0001 ('Christmas gift box labels - 40 of them') is closed", "closed"),
+    ("The task is done when all three coffees are worked out.", "done"), ("Supplier replied.", "replied"),
+    ("Ticket 0059 started.", "started"), ("It is fixed now.", "fixed"), ("The mission completed.", "completed"),
+    ("Run my saved playbook called New Cafe Onboarding, the one I set up.", "set up"),
+    ("is cancelled now", "cancelled"), ("The file is saved as workspace/decafcolombiamargin.", "saved"),
+    ("How many Harvest Club boxes went out in September 2026?", "sent"),
+    ("How many Harvest Club boxes are scheduled to go out on Monday, October 5th, 2026?", "scheduled"),
+    ("Mission 0033 is set up, and it will stop after every step for your OK.", "set up"),
+    ("How many club boxes went out late in September?", "sent"),
+    ("The PDF I generated is still not checked, and it doesn't use your layout or logo.", "generated"),
+    ("I generated a PDF, but I couldn't open it, and it has no logo.", "generated"),
+    ("I generated the quote PDF, but I haven't opened it, and it probably isn't on your brand kit yet.", "generated"),
+    ("Thanks Rosa, the 12 kg is booked for Friday.", "booked"),
+    ("Alright, the invoice for Lantern Kitchen is done and saved to Deliverables.", "done"),
+    ("Alright, the invoice for Lantern Kitchen is done and saved to Deliverables.", "saved"),
+    ("Document generated.", "generated"), ("It checks which version of PIL is installed, and prints it.", "installed"),
+    ("Noted.", "noted"), ("only the two 365-day rows are deleted", "deleted"),
+    ("WIDGETORIGINALLOWLIST is deleted — a merchant origin belongs on the merchant's key", "deleted"),
+    ("Your workspace is set up: Atlas Research Agent is configured on gpt-4o.", "set up"),
+    ("Say done.", "done"), ("the handler is closed", "closed"), ("Went out", "sent"),
+    ("Countdown to Lisbon: 4 posts went out this week", "sent"), (") is deleted for good", "deleted"),
+    ("approved.", "approved"), ("The roastery is closed on", "closed"),
+    ("0001 is approved and moved to Done.", "approved"), ("0001 is approved and moved to Done.", "moved"),
+    ("Stored.", "stored"), ("Done, it's approved.", "approved"), ("I moved card 0422 to Done.", "moved"),
+    ("Noted!", "noted"), ("Created.", "created"),
+]
+
+
+@pytest.mark.parametrize("sentence, verb", SWEPT)
+def test_rvw25_the_sweeps_new_claims_are_claims(sentence, verb):
+    assert verb in [said for said, _ in claims(sentence)]
