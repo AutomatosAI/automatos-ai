@@ -35,7 +35,6 @@ import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { useWorkspaceModels } from '@/hooks/use-model-api'
 import { chatProviders, hostsVendorModels, useProviderRegistry } from '@/hooks/use-provider-registry'
 import { apiClient } from '@/lib/api-client'
-import { priceNote } from '@/lib/model-price'
 
 interface SystemLLMSettingsTabProps {
   settings?: SystemSetting[]
@@ -481,9 +480,9 @@ export default function SystemLLMSettingsTab({
                     </SelectTrigger>
                     <SelectContent>
                       {availableModels.length > 0 ? (
-                        availableModels.map((model: { id?: number; model_id: string; display_name: string; context_window: number; is_free?: boolean; price_known?: boolean }) => (
+                        availableModels.map((model: { id?: number; model_id: string; display_name: string; context_window: number; is_free?: boolean }) => (
                           <SelectItem key={model.id ?? model.model_id} value={model.model_id}>
-                            {model.display_name}{priceNote(model)}
+                            {model.display_name}{model.is_free ? ' · free' : ''}
                             {model.context_window >= 100000 && ` (${(model.context_window / 1000).toFixed(0)}K context)`}
                           </SelectItem>
                         ))
