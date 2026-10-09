@@ -124,8 +124,8 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Default command — apply pending alembic migrations before starting,
 # so the deployed code and the live schema can never drift. ``heads``
-# (plural) is required because the migration tree currently has
-# multiple unmerged heads; ``head`` (singular) errors out. If any
+# (plural) upgrades the repository's single migration head. The
+# single-head invariant is enforced by the migration guard tests. If any
 # migration fails the container fails to boot — loud is better than
 # silent UndefinedColumn errors at request time.
 # --timeout-graceful-shutdown (dev stage only; prod runs --workers below): a
@@ -180,9 +180,9 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Production command — apply pending alembic migrations before starting,
 # so deploys can't ship a model change ahead of the schema. ``heads``
-# (plural) is required because the migration tree currently has multiple
-# unmerged heads; ``head`` (singular) errors with "Multiple head
-# revisions are present". ``&&`` ensures uvicorn never starts if a
+# (plural) upgrades the repository's single migration head. The
+# single-head invariant is enforced by the migration guard tests.
+# ``&&`` ensures uvicorn never starts if a
 # migration fails (visible deploy failure beats silent UndefinedColumn
 # errors at request time). Concurrent replicas serialise via alembic's
 # row lock — second runner sees no pending migrations and continues.
