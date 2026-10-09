@@ -21,6 +21,9 @@ RESEARCHER and WRITER plan the launch") stays the tiers' whatever they said.
 P256-FIX-RVW-16: a hand-off the owner forbids ("Don't ask OPS to…", "I told you not to let OPS post") or
 asks about ("Did you ask OPS to…?", "Should I ask OPS to…?", "Have sales risen this week?") hands
 nothing over, and neither does a message that keeps the work with Auto ("do it yourself").
+
+P256-FIX-RVW-29: the present perfect is a participle after the name, so "Have OPS check the stock?"
+hands the work over as the same words without "?" do.
 """
 from __future__ import annotations
 
@@ -67,6 +70,15 @@ PARTICIPLES = frozenset({
     "done", "gone", "seen", "sent", "made", "taken", "given", "written", "got", "gotten", "heard", "told", "said",
     "paid", "sold", "bought", "brought", "thought", "found", "kept", "left", "met", "spoken", "chosen", "known",
     "shown", "drawn", "begun", "broken", "eaten", "fallen", "forgotten", "hidden", "grown", "thrown", "flown",
+})
+# P256-FIX-RVW-29: irregular past participles the present-perfect question reads after the name ("Have
+# sales risen …?", "Have Support caught up?"); the last row is spelt as the bare verb ("Have sales hit
+# target?") and reads as the perfect only in a "Have <name> …?" question, so "Have OPS check …?" still asks.
+PERFECT_PARTICIPLES = frozenset({
+    "risen", "arisen", "caught", "taught", "fought", "sought", "won", "lost", "held", "felt", "built", "spent",
+    "lent", "meant", "dealt", "led", "fed", "fled", "stood", "understood", "slept", "struck", "stuck", "hung",
+    "dug", "sat", "driven", "ridden", "woken", "worn", "torn", "beaten", "bitten", "frozen", "shaken", "stolen",
+    "hit", "put", "set", "cut", "read", "run", "come", "become", "hurt", "shut", "quit",
 })
 # Bare verbs that end in "ed" ("Have OPS feed …" ends in "eed" and is read as a verb already).
 BARE_ED = frozenset({"embed", "shed", "shred", "wed"})
@@ -163,15 +175,18 @@ def _task_follows(verb: str, rest: str) -> bool:
     return first in ASKED_WHAT if verb == ASK else _bare_verb(first, second)
 
 
-def _to_verb(rest: str) -> bool:
-    words = _NEXT_TWO.match(rest)
-    return bool(words and words.group("first") == "to" and words.group("second"))
+def _perfect_after(rest: str) -> bool:
+    """Whether the word after the name is a past participle ("risen", "caught", "finished"): a "Have
+    <name> …?" question about it, not "Have OPS check …?", which hands the work over (P256-FIX-RVW-29)."""
+    words = None if _POSSESSIVE.match(rest) else _NEXT_TWO.match(rest)
+    first = words.group("first") if words else ""
+    return _participle(first) or first in PERFECT_PARTICIPLES
 
 
 def _forbidden_or_asked(said: str, found: re.Match) -> bool:
     """Whether the hand-off ``found`` in ``said`` is negated in its clause ("Don't ask OPS to …"), or
     sits in a question about one: "Did you ask …?", "Why didn't you get …?", a wh-word before the
-    verb, or a present perfect ("Have sales risen this week?") with no "to <verb>" after the name."""
+    verb, or a present perfect: a past participle after the name ("Have sales risen this week?")."""
     ends = list(_SENTENCE_END.finditer(said, 0, found.start()))
     head = said[ends[-1].end() if ends else 0:found.start()]
     clause = _CLAUSE_BREAK.split(head)[-1]
@@ -182,7 +197,7 @@ def _forbidden_or_asked(said: str, found: re.Match) -> bool:
         return False
     if _ASKS_ABOUT.match(head) or _WH_WORD.search(head):
         return True
-    return found.group("verb") == HAVE and not _WORD.search(head) and not _to_verb(said[found.end():])
+    return found.group("verb") == HAVE and not _WORD.search(head) and _perfect_after(said[found.end():])
 
 
 def addressed_by_name(message: Optional[str], name: str) -> bool:

@@ -328,7 +328,10 @@ def test_the_golden_holds_the_names_that_hand_nothing_over_and_the_joined_rows()
                  "Never have WRITER touch the About page", "Should I ask OPS to check the stock?",
                  "Have sales risen this week?", "Have Support caught up?", "Have sales hit target?"):
         assert by_said[said] == "tiers", said
-    assert len(TASK_AFTER_THE_NAME) == 19
+    # P256-FIX-RVW-29: a bare verb after the name is a request, "?" or not (two agents are called OPS)
+    assert [by_said[f"Have {said}?"] for said in ("OPS check the stock", "WRITER draft the About page", "OPS finished")] \
+        == ["ASK OPS (267, 284)", "ASSIGN 58 WRITER", "tiers"]
+    assert len(TASK_AFTER_THE_NAME) == 23
 
 
 @pytest.mark.parametrize("action", TIERS_SAID)

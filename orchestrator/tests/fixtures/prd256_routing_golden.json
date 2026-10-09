@@ -561,6 +561,22 @@
    {
     "said": "Have sales hit target?",
     "lane": "tiers"
+   },
+   {
+    "said": "Have OPS check the stock?",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Have WRITER draft the About page?",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "Have RESEARCHER find the Leith cafés?",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Have OPS finished?",
+    "lane": "tiers"
    }
   ]
  }

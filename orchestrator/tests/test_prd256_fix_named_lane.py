@@ -186,10 +186,47 @@ def test_a_name_with_a_task_after_it_is_handed_the_work(said, name):
     ("Have sales risen this week?", "Sales"),
     ("Have Support caught up?", "Support"),
     ("Have sales come in?", "Sales"),
+    ("Have OPS finished?", "OPS"),                                     # P256-FIX-RVW-29: a participle after the name
     ("Ask OPS to check the stock, or just do it yourself.", "OPS"),     # keeps_it_with_auto
 ])
 def test_a_hand_off_forbidden_or_asked_about_hands_nothing_over(said, name):
     assert addressed_by_name(said, name) is False
+
+
+# ── P256-FIX-RVW-29: "Have <name> <bare verb> …?" is a request, not a present perfect ──
+
+ONE_OPS = [*(agent for agent in ROSTER if agent.id != SHOP_OPS), NS(id=58, name="WRITER", job_title="Copywriter")]
+
+
+class _OneOpsBrain(_Brain):
+    def _active_agents(self):
+        return ONE_OPS
+
+
+@pytest.mark.parametrize("said, name, agent_id", [
+    ("Have OPS check the stock?", "OPS", OPS),
+    ("Have WRITER draft the About page?", "WRITER", 58),
+    ("Have RESEARCHER find the Leith cafés?", "RESEARCHER", 57),
+])
+@pytest.mark.parametrize("action", [Action.RESPOND, Action.ASSIGN, Action.MISSION])
+def test_have_a_name_and_a_bare_verb_with_a_question_mark_hands_the_work_over(said, name, agent_id, action):
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=action, reasoning="tiers")
+    verdict = the_lane(_OneOpsBrain(), said, tiers)
+
+    assert addressed_by_name(said, name) is True
+    assert addressed_by_name(said.rstrip("?"), name) is True        # as the same words without "?"
+    assert (verdict.action, verdict.target_agent_id, verdict.target_agent_name) == (Action.ASSIGN, agent_id, name)
+
+
+@pytest.mark.parametrize("said", ["Have Support caught up?", "Have sales risen this week?", "Have OPS finished?"])
+def test_have_a_name_and_a_past_participle_with_a_question_mark_hands_nothing_over(said):
+    roster = [*ONE_OPS, NS(id=610, name="Support", job_title="Customer support"),
+              NS(id=611, name="Sales", job_title="Wholesale sales lead")]
+    brain = _OneOpsBrain()
+    brain._active_agents = lambda: roster
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=Action.RESPOND, reasoning="tiers")
+
+    assert the_lane(brain, said, tiers) is tiers
 
 
 @pytest.mark.parametrize("action", [Action.RESPOND, Action.ASSIGN, Action.MISSION])
