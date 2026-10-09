@@ -61,19 +61,52 @@ async def get_llm_usage(db: Session, workspace_id: UUID, params: Dict[str, Any])
     }
 
 
+# 9 Oct (Auto's wishlist): a call on a subscription plan (a Claude Code session) is booked at
+# $0 because the plan pays for it. Auto read the $0 as "free"; each row now says how it was billed.
+BILLING_PLAN = "plan"
+BILLING_METERED = "metered"
+BILLING_MIXED = "plan and metered"
+PLAN_NOTE = ("billing 'plan' means the calls ran on a subscription (such as a Claude Code session): "
+             "the plan pays, so there is no dollar figure. Never call them free.")
+
+
+def _cost_group_column(group_by: str):
+    from core.models.core import LLMUsage
+
+    if group_by == "agent":
+        return LLMUsage.agent_id
+    if group_by == "day":
+        return func.date(LLMUsage.created_at)
+    return LLMUsage.model_id
+
+
+def _billing(requests: int, plan_requests: int) -> str:
+    if plan_requests <= 0:
+        return BILLING_METERED
+    return BILLING_PLAN if plan_requests >= requests else BILLING_MIXED
+
+
+def _breakdown_row(row: Any, group_by: str) -> Dict[str, Any]:
+    plan_requests = int(row.plan_requests or 0)
+    return {
+        group_by: str(row.group_key) if row.group_key is not None else "unknown",
+        "total_cost": round(float(row.total_cost or 0), 6),
+        "input_cost": round(float(row.input_cost or 0), 6),
+        "output_cost": round(float(row.output_cost or 0), 6),
+        "requests": row.request_count,
+        "plan_requests": plan_requests,
+        "billing": _billing(row.request_count, plan_requests),
+    }
+
+
 async def get_cost_breakdown(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    from core.llm.usage_tracker import TIER_SUBSCRIPTION
     from core.models.core import LLMUsage
 
     days = params.get("days", 30)
     group_by = params.get("group_by", "model")
     since = datetime.now(timezone.utc) - timedelta(days=days)
-
-    if group_by == "agent":
-        group_col = LLMUsage.agent_id
-    elif group_by == "day":
-        group_col = func.date(LLMUsage.created_at)
-    else:
-        group_col = LLMUsage.model_id
+    group_col = _cost_group_column(group_by)
 
     rows = (
         db.query(
@@ -82,6 +115,7 @@ async def get_cost_breakdown(db: Session, workspace_id: UUID, params: Dict[str, 
             func.sum(LLMUsage.input_cost).label("input_cost"),
             func.sum(LLMUsage.output_cost).label("output_cost"),
             func.count(LLMUsage.id).label("request_count"),
+            func.count(LLMUsage.id).filter(LLMUsage.tier == TIER_SUBSCRIPTION).label("plan_requests"),
         )
         .filter(
             LLMUsage.workspace_id == workspace_id,
@@ -92,27 +126,16 @@ async def get_cost_breakdown(db: Session, workspace_id: UUID, params: Dict[str, 
         .all()
     )
 
-    breakdown = []
-    total_cost = 0.0
-    for row in rows:
-        key = str(row.group_key) if row.group_key is not None else "unknown"
-        cost = float(row.total_cost or 0)
-        breakdown.append({
-            group_by: key,
-            "total_cost": round(cost, 6),
-            "input_cost": round(float(row.input_cost or 0), 6),
-            "output_cost": round(float(row.output_cost or 0), 6),
-            "requests": row.request_count,
-        })
-        total_cost += cost
-
-    return {
+    breakdown = [_breakdown_row(row, group_by) for row in rows]
+    result = {
         "success": True,
         "period_days": days,
         "group_by": group_by,
-        "total_cost": round(total_cost, 6),
+        "total_cost": round(sum(float(row.total_cost or 0) for row in rows), 6),
+        "plan_requests": sum(r["plan_requests"] for r in breakdown),
         "breakdown": breakdown,
     }
+    return {**result, "note": PLAN_NOTE} if result["plan_requests"] else result
 
 
 async def workspace_stats(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

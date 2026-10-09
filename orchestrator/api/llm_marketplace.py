@@ -59,7 +59,8 @@ class LLMModelOut(BaseModel):
     input_cost_per_1k: float
     output_cost_per_1k: float
     is_free: bool = False
-    price_tier: str = "premium"        # free | budget | mid | premium (from price)
+    price_known: bool = True           # False: the catalogue has no price for this route (not free)
+    price_tier: str = "premium"        # free | budget | mid | premium (from price) | unknown
     capabilities: Dict[str, Any] = Field(default_factory=dict)
     recommended_for: List[str] = Field(default_factory=list)
     supports_functions: bool
@@ -105,6 +106,9 @@ class InstallResult(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+PRICE_TIER_UNKNOWN = "unknown"
+
+
 def price_tier_for(input_cost_per_1k: float) -> str:
     cost = float(input_cost_per_1k or 0)
     if cost <= 0:
@@ -129,7 +133,10 @@ def _model_to_out(
     label = spec.label if spec else (m.serving_provider or "").title()
     in_cost = float(m.input_cost_per_1k_tokens or 0)
     out_cost = float(m.output_cost_per_1k_tokens or 0)
-    is_free = in_cost <= 0 and out_cost <= 0 and bool(spec and spec.free) or (in_cost <= 0 and out_cost <= 0)
+    # 9 Oct: a route with NO price (a model the Anthropic sync listed unpriced) is not free;
+    # it costs money on the owner's key. Only an explicit 0, or a provider that bills nothing, is free.
+    price_known = m.input_cost_per_1k_tokens is not None or m.output_cost_per_1k_tokens is not None
+    is_free = bool(spec and spec.free) or (price_known and in_cost <= 0 and out_cost <= 0)
     return LLMModelOut(
         id=m.id,
         provider=m.provider,
@@ -146,7 +153,8 @@ def _model_to_out(
         input_cost_per_1k=in_cost,
         output_cost_per_1k=out_cost,
         is_free=is_free,
-        price_tier=price_tier_for(in_cost),
+        price_known=price_known,
+        price_tier=price_tier_for(in_cost) if price_known else PRICE_TIER_UNKNOWN,
         capabilities=m.capabilities or {},
         recommended_for=m.recommended_for or [],
         supports_functions=m.supports_functions or False,

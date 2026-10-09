@@ -23,7 +23,9 @@ id, served by Anthropic:
   tags and flags. A new row borrows price, description and tool support from the
   OpenRouter cache row for the same model (``anthropic/claude-opus-4.8`` for
   ``claude-opus-4-8``, ``core.llm.anthropic_ids``), as the NVIDIA sync borrows its metadata; with no such row
-  it starts unpriced;
+  it takes the list price the platform's price map names for that exact model
+  (``core.llm.manager.MODEL_COST_MAP``), else it starts unpriced. An existing row with
+  no price at all gets that list price on the next sync;
 - ids Anthropic no longer lists are marked ``deprecated`` (installs keep their
   row), as the OpenRouter and NVIDIA syncs do. An empty answer retires nothing.
   An alias Anthropic still answers but does not list is kept: the API lists
@@ -39,7 +41,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from sqlalchemy.orm import Session
@@ -131,6 +133,7 @@ def _sync_listed(catalog: Any, api_key: str) -> Dict[str, Any]:
             PROVIDER, model_id, synced_values(model),
             insert_only=new_row_defaults(model, openrouter_twin(catalog.db, model_id)),
         )
+        price_unpriced_row(catalog.db, model_id)
         kept.append(model_id)
     deprecated = _deprecate_unlisted(catalog.db, kept)
     return {
@@ -287,7 +290,8 @@ def new_row_defaults(model: Dict[str, Any], twin: Optional[OpenRouterModelCache]
         recommended_for=[],
     )
     if twin is None:
-        return defaults
+        listed = list_price(model["id"])
+        return defaults if listed is None else dict(defaults, **_price_values(listed))
     return dict(
         defaults,
         description=twin.description or defaults["description"],
@@ -301,6 +305,31 @@ def new_row_defaults(model: Dict[str, Any], twin: Optional[OpenRouterModelCache]
         tags=sorted(set(list(twin.tags or []) + [ANTHROPIC_TAG])),
         pricing_updated_at=datetime.utcnow(),
     )
+
+
+def list_price(model_id: str) -> Optional[Tuple[float, float]]:
+    """(input, output) per 1k tokens for a model OpenRouter has no twin for, when the
+    platform's price map names this exact model (``claude-opus-5-5``); never a near match."""
+    from core.llm.manager import MODEL_COST_MAP
+
+    return MODEL_COST_MAP.get(DATE_SUFFIX.sub("", model_id))
+
+
+def _price_values(price: Tuple[float, float]) -> Dict[str, Any]:
+    return dict(input_cost_per_1k_tokens=price[0], output_cost_per_1k_tokens=price[1],
+                pricing_updated_at=datetime.utcnow())
+
+
+def price_unpriced_row(db: Session, model_id: str) -> int:
+    """An existing route with NO price gets the model's list price (9 Oct: the 5.5 models were
+    added unpriced and showed as free). A row with any price, an explicit 0 included, keeps it."""
+    listed = list_price(model_id)
+    if listed is None:
+        return 0
+    return (db.query(LLMModel)
+            .filter(LLMModel.serving_provider == PROVIDER, LLMModel.model_id == model_id,
+                    LLMModel.input_cost_per_1k_tokens.is_(None), LLMModel.output_cost_per_1k_tokens.is_(None))
+            .update(_price_values(listed), synchronize_session=False))
 
 
 def openrouter_twin(db: Session, model_id: str) -> Optional[OpenRouterModelCache]:
@@ -331,6 +360,7 @@ def _supported(capabilities: Any, name: str) -> Optional[bool]:
 
 
 __all__ = [
-    "AnthropicCatalogError", "fetch_anthropic_models", "is_alias_of_listed", "new_row_defaults", "openrouter_twin",
+    "AnthropicCatalogError", "fetch_anthropic_models", "is_alias_of_listed", "list_price", "new_row_defaults",
+    "openrouter_twin", "price_unpriced_row",
     "run_anthropic_sync", "synced_values", "workspace_key",
 ]

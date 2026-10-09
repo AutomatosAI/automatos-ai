@@ -1025,6 +1025,9 @@ _MODEL_COST_ENTRIES: Dict[str, Tuple[float, float]] = {
     "gemini-2.5-flash": (0.0003, 0.0025),
     "gemini-2.5-pro": (0.00125, 0.01),
     "gpt-5.5": (0.005, 0.03),
+    # Anthropic's list price (9 Oct 2026). OpenRouter has no twin for it yet, so without this
+    # entry its catalogue row stayed unpriced and the Anthropic sync had no price to give it.
+    "claude-opus-5-5": (0.004, 0.020),
 }
 MODEL_COST_MAP: Dict[str, Tuple[float, float]] = dict(
     sorted(_MODEL_COST_ENTRIES.items(), key=lambda kv: -len(kv[0]))
