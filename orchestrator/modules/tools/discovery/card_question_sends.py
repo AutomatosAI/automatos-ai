@@ -7,16 +7,19 @@ card is the only review of an agent's send on Auto's ticket, and an agent that r
 inbound email writes these params.
 
 Now every recipient-class field is listed, each address on its own line labelled 'to', 'cc'
-or 'bcc' and never cut (a list in full), and each attachment is named. A recipient the card
-cannot read (an object, a flag, a list holding one) refuses the call before any grant
-(:func:`refused_before_the_send_card`): no card approves a recipient it does not show.
+or 'bcc' and never cut (a list in full), and each attachment is named with the file it
+attaches (a path whole; an object's name, and its source when that is another file). Every
+other field the call carries is listed too (:func:`other_lines`): a recipient under a name
+the card does not know is still on it. A recipient the card cannot read (an object, a flag,
+a list holding one) refuses the call before any grant (:func:`refused_before_the_send_card`):
+no card approves a recipient it does not show.
 """
 from __future__ import annotations
 
 from pathlib import PurePosixPath
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from modules.tools.discovery.card_question_text import shown, value_line
+from modules.tools.discovery.card_question_text import said_line, shown, value_line
 
 TO, CC, BCC = "to", "cc", "bcc"
 # A Composio send's recipient fields, by the names its actions use, in the order the card reads them.
@@ -26,8 +29,11 @@ CC_KEYS = ("cc", "cc_email", "cc_emails")
 BCC_KEYS = ("bcc", "bcc_email", "bcc_emails")
 RECIPIENT_GROUPS = ((TO, TO_KEYS), (CC, CC_KEYS), (BCC, BCC_KEYS))
 ATTACHMENT_KEYS = ("attachment", "attachments")
-FILE_NAME_KEYS = ("name", "file_name", "filename", "file_path", "path", "s3key")
+FILE_NAME_KEYS = ("name", "file_name", "filename")
+FILE_SOURCE_KEYS = ("s3key", "file_path", "path", "url")
+SHOWN_KEYS = frozenset((*TO_KEYS, *CC_KEYS, *BCC_KEYS, *ATTACHMENT_KEYS))
 ATTACHMENT = "attachment"
+NAMED_FROM = "{name} (from {source})"
 RECIPIENT_LINE = "{label}: {address}"
 NAMED_JOIN = ", "
 OTHER_LABEL = "{label} {address}"
@@ -63,6 +69,15 @@ def attachment_lines(params: Any) -> List[str]:
     return [value_line(RECIPIENT_LINE.format(label=ATTACHMENT, address=name)) for name in named]
 
 
+def other_lines(params: Any, used: Any) -> List[str]:
+    """A card line for each field the call carries besides those already shown (``used``):
+    fail closed, so a recipient under a name the card does not know is still on it."""
+    if not isinstance(params, dict):
+        return []
+    return [said_line(str(key), value) for key, value in params.items()
+            if key not in used and value not in (None, "", [], {})]
+
+
 def refused_before_the_send_card(params: Any) -> Optional[Dict[str, Any]]:
     """The refusal for a send whose recipient the card cannot read, before any grant; else None."""
     for _, key, value in _recipient_fields(params):
@@ -96,12 +111,18 @@ def _readable(item: Any) -> bool:
 
 
 def _file_name(item: Any) -> str:
-    """An attachment's file name: a file object's name (or its path's last part), a path's last part."""
-    if isinstance(item, dict):
-        named = next((item[key] for key in FILE_NAME_KEYS if str(item.get(key) or "").strip()), None)
-        return _file_name(named) if named is not None else shown(item)
-    text = " ".join(str(item).split())
-    return shown(PurePosixPath(text).name or text) if text else shown(None)
+    """The file an attachment attaches: a path whole; a file object's name, with its source
+    when that names another file ("invoice.pdf (from ws/7/payroll.xlsx)"), or its source alone."""
+    if not isinstance(item, dict):
+        return shown(item)
+    name, source = _first_text(item, FILE_NAME_KEYS), _first_text(item, FILE_SOURCE_KEYS)
+    if name and source and PurePosixPath(source).name != name:
+        return shown(NAMED_FROM.format(name=name, source=source))
+    return shown(name or source or item)
+
+
+def _first_text(item: Dict[str, Any], keys: Tuple[str, ...]) -> str:
+    return next((" ".join(str(item[key]).split()) for key in keys if str(item.get(key) or "").strip()), "")
 
 
 def _listed(value: Any) -> List[Any]:
@@ -110,5 +131,5 @@ def _listed(value: Any) -> List[Any]:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
-__all__ = ["BCC_KEYS", "CC_KEYS", "RECIPIENT_GROUPS", "TO_KEYS", "UNREAD_RECIPIENT", "attachment_lines",
-           "recipient_lines", "recipients", "recipients_said", "refused_before_the_send_card"]
+__all__ = ["BCC_KEYS", "CC_KEYS", "RECIPIENT_GROUPS", "SHOWN_KEYS", "TO_KEYS", "UNREAD_RECIPIENT", "attachment_lines",
+           "other_lines", "recipient_lines", "recipients", "recipients_said", "refused_before_the_send_card"]

@@ -99,13 +99,13 @@ def waits_on_the_card(db: Any, workspace_id: Any, ticket: Dict[str, Any], ask: D
 def addressed(sent: Any) -> Tuple[str, str]:
     """(recipients, subject) of a send, as its card shows them: every address, cc and bcc
     named (P256-FIX-RVW-26), so 'Card raised' and the click's note name who it goes to."""
-    from modules.tools.discovery.card_question import SUBJECT_KEYS, first_said
+    from modules.tools.discovery.card_question import SUBJECT_KEYS, first_key
     from modules.tools.discovery.card_question_sends import recipients_said
     from modules.tools.discovery.card_question_text import shown
 
     params = sent if isinstance(sent, dict) else {}
-    subject = first_said(params, SUBJECT_KEYS)
-    return recipients_said(params) or NO_RECIPIENT, shown(subject) if subject is not None else NO_SUBJECT
+    key = first_key(params, SUBJECT_KEYS)
+    return recipients_said(params) or NO_RECIPIENT, shown(params[key]) if key is not None else NO_SUBJECT
 
 
 def send_marker(grant: Any) -> Optional[Dict[str, Any]]:

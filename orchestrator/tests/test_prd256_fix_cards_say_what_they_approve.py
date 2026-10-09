@@ -252,10 +252,23 @@ def test_a_long_recipient_list_is_listed_in_full_never_cut():
     assert [line for line in asked.splitlines() if line.startswith("- bcc: ")] == [f"- bcc: {who}" for who in everyone]
 
 
-def test_a_file_path_attachment_is_named_by_its_file():
-    asked = send_question("send through GMAIL_SEND_EMAIL", {"to": SUPPLIER, "attachments": ["reports/q3/margins.xlsx"]})
+def test_an_attachment_is_named_by_the_file_it_attaches():
+    files = ["reports/q3/margins.xlsx", {"name": "invoice.pdf", "s3key": "ws/7/payroll.xlsx"},
+             {"name": "menu.pdf", "s3key": "ws/7/menu.pdf"}]
+    asked = send_question("send through GMAIL_SEND_EMAIL", {"to": SUPPLIER, "attachments": files}).splitlines()
 
-    assert "- attachment: margins.xlsx" in asked.splitlines()
+    assert "- attachment: reports/q3/margins.xlsx" in asked                     # a path whole
+    assert "- attachment: invoice.pdf (from ws/7/payroll.xlsx)" in asked        # a name that is not its file
+    assert "- attachment: menu.pdf" in asked
+
+
+def test_every_other_field_the_send_carries_is_on_the_card():
+    """Fail closed: a recipient under a name the card does not know is still shown."""
+    asked = send_question("send through OUTLOOK_SEND_EMAIL", {"to_recipients": ["x@elsewhere.test"], "subject": "Hi",
+                                                              "body": "Hello\nmore", "is_html": False}).splitlines()
+
+    assert "- to_recipients: x@elsewhere.test" in asked and "- is_html: False" in asked
+    assert not any(line.startswith(("- subject: Hi", "- body:")) for line in asked[2:])   # each shown once
 
 
 @pytest.mark.parametrize("field, value", [("recipient_email", {"email": SUPPLIER}), ("bcc", ["a@b.test", {"x": 1}]),

@@ -8,8 +8,8 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
   current value read from the workspace's row, the new one from the call;
 - a new mission: its goal and the steps the owner gave;
 - approving or cancelling a mission: its title and its ticket number;
-- a Composio send: every recipient (to, cc, bcc), the subject, the body's first line and
-  each attachment (P256-FIX-RVW-26, ``card_question_sends``);
+- a Composio send: every recipient (to, cc, bcc), the subject, the body's first line, each
+  attachment and every other field it carries (P256-FIX-RVW-26, ``card_question_sends``);
 - FX-010: a heartbeat's fields, an agent's skills or plugins before and after, a new
   playbook's name and purpose, a playbook's timer, or what a delete takes for good;
 - P256-FIX-RVW-14: a timer set through a playbook update, and a plugin or skill taken
@@ -61,19 +61,22 @@ def platform_question(db: Any, workspace_id: Any, action: str, params: Dict[str,
 
 def send_question(act: str, params: Any) -> str:
     """The card's question for a Composio send: ``act``, then everyone it goes to (each
-    address, uncut), about what, the body's first line and the files it carries."""
+    address, uncut), about what, the body's first line, the files it carries and every
+    other field of the call (P256-FIX-RVW-26)."""
     params = params if isinstance(params, dict) else {}
-    lines = sends.recipient_lines(params)
+    lines, used = sends.recipient_lines(params), set(sends.SHOWN_KEYS)
     for label, keys in SEND_FIELDS:
-        said = first_said(params, keys)
-        if said is not None:
+        key = first_key(params, keys)
+        if key is not None:
+            used.add(key)
+            said = params[key]
             lines.append(said_line(label, _first_line(said) if label == "first line" else said))
-    return question(act, [*lines, *sends.attachment_lines(params)])
+    return question(act, [*lines, *sends.attachment_lines(params), *sends.other_lines(params, used)])
 
 
-def first_said(params: Dict[str, Any], keys: tuple) -> Any:
+def first_key(params: Dict[str, Any], keys: tuple) -> Any:
     """The first of ``keys`` the call fills, or None."""
-    return next((params[key] for key in keys if params.get(key) not in (None, "", [])), None)
+    return next((key for key in keys if params.get(key) not in (None, "", [])), None)
 
 
 def mission_create_lines(params: Dict[str, Any]) -> List[str]:
@@ -129,4 +132,4 @@ READERS: Dict[str, Lines] = {
 }
 
 
-__all__ = ["BODY_KEYS", "READERS", "SUBJECT_KEYS", "first_said", "mission_create_lines", "platform_question", "send_question"]
+__all__ = ["BODY_KEYS", "READERS", "SUBJECT_KEYS", "first_key", "mission_create_lines", "platform_question", "send_question"]
