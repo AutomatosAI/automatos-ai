@@ -11,7 +11,7 @@
 [![Discussions](https://img.shields.io/github/discussions/AutomatosAI/automatos-ai?logo=github)](https://github.com/AutomatosAI/automatos-ai/discussions)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/AutomatosAI/automatos-ai)
 
-[Quick start](#quick-start-local-edition) · [Self-hosting guide](docs/getting-started/self-hosting.md) · [Docs](docs/README.md) · [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) · [Hosted edition](https://automatos.app)
+[Quick start](#quick-start-local-edition) · [Self-hosting guide](docs/getting-started/self-hosting.md) · [Docs](docs/README.md) · [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) · [Hosted beta](https://studio.automatos.app)
 
 </div>
 
@@ -39,14 +39,14 @@ Most agent frameworks give you a library. Automatos gives you the whole machine:
 | A task manager | **Command Center** — the board, the calendar, live agent status and reports |
 | A file system | **Deliverables** and **Knowledge** — RAG over your documents plus a Knowledge Graph |
 | Drivers | **1,000+ tool integrations** through Composio and **400+ models** through one provider registry |
-| An app store | **Marketplace** — 100+ agents, 150+ skills and one-click workspace templates |
+| An app store | **Marketplace** — ready-made agents, a library of 140 skills and one-click workspace templates |
 
 ## One codebase, two editions
 
 | Edition | What it is |
 |---|---|
 | **Local edition** | Clone the repo, set three secrets, `docker compose up`. No login, one workspace, one operator; Postgres + pgvector, Redis and MinIO in the stack; agents can act on files on your own machine through the workspace-worker, and your own Claude Code sessions can be agents. Bring your own keys — paid (OpenRouter, OpenAI, Anthropic, DeepSeek, …), free (NVIDIA's hosted open models) — and, optionally, your own Composio key. [QUICKSTART.md](QUICKSTART.md) · [self-hosting guide](docs/getting-started/self-hosting.md) |
-| **Hosted edition** | The same code run as a service at [automatos.app](https://automatos.app): accounts, workspaces, teams and plans on top of it. |
+| **Hosted edition** | Automatos Studio — the same code run as a service, opening as a beta in November 2026 ([join the waitlist](https://studio.automatos.app/#waitlist)): accounts, workspaces, teams and plans on top of it. |
 
 The edition is a runtime flag (`AUTH_EDITION=local|saas`). Product capability is not gated: every agent, tool, Playbook, Mission and Deliverable feature in the code runs in the local edition. Session mode (your own Claude Code as an agent runtime) is local-only by design.
 
@@ -68,7 +68,7 @@ One chat, routed to the right agent. The conversation stays where you left it ac
 
 ## Manage your AI workforce
 
-100+ agents in the community marketplace — install what you need, when you need it. Code Reviewer, QA Engineer, Sentinel, Scribe, researcher and marketer roles, Shopify specialists, and more. Each agent has its own model route, capabilities, persona, and performance metrics. An agent is either an **API agent** (a model route you installed) or a **session agent** (your own Claude Code on your machine, below); you mix them freely on the same board.
+Ready-made agents in the built-in marketplace — install what you need, when you need it. Code Reviewer, QA Engineer, Sentinel, Scribe, researcher and marketer roles, Shopify specialists, and more. Each agent has its own model route, capabilities, persona, and performance metrics. An agent is either an **API agent** (a model route you installed) or a **session agent** (your own Claude Code, Codex or GitHub Copilot CLI on your machine, below); you mix them freely on the same board.
 
 <p align="center">
   <img src="docs/assets/02-Agents.png" alt="Agent Management" width="800">
@@ -113,9 +113,9 @@ An agent with a hundred and eighty platform actions cannot be handed all of them
 
 Packaged bundles install a full operations team in a single step — agents, skills, playbooks, and dashboard widgets pre-wired together. Example: the **Shopify package** ships with 12 specialised agents, 32 Shopify skills, and a widget set for store ops, inventory, merchandising, SEO, campaigns, and customer support. Install it once, and your workspace goes from empty to a running e-commerce back office.
 
-## 150+ reusable skills
+## Reusable skills
 
-Skills are portable, versioned capability packs — a system prompt, a set of tools, and an output contract. Drop *Sentinel* onto a security agent, *Scout* onto a research agent, or write your own. One skill, any agent, instantly productive. For a session agent the same skills are rendered into its Claude Code session.
+Skills are portable, versioned capability packs — a system prompt, a set of tools, and an output contract. The open [automatos-skills](https://github.com/AutomatosAI/automatos-skills) library holds 140 of them. Drop *Sentinel* onto a security agent, *Scout* onto a research agent, or write your own. One skill, any agent, instantly productive. For a session agent the same skills are rendered into its Claude Code session.
 
 ## Paid, free, or on your subscription — one router
 
@@ -188,7 +188,7 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 
 ## Quick start (local edition)
 
-> **New to Docker, or on Windows?** [SETUP.md](SETUP.md) walks through every step for macOS, Linux and Windows (WSL2), and an AI coding agent can follow it for you: *"Install Automatos by following SETUP.md"*. Prefer nothing to install? Use the hosted edition at [automatos.app](https://automatos.app).
+> **New to Docker, or on Windows?** [SETUP.md](SETUP.md) walks through every step for macOS, Linux and Windows (WSL2), and an AI coding agent can follow it for you: *"Install Automatos by following SETUP.md"*. Prefer nothing to install? The hosted edition opens as a beta in November — [join the waitlist](https://studio.automatos.app/#waitlist).
 
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
