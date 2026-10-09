@@ -2,6 +2,7 @@ suite: OpenTelemetry (PRD-256)
 templates:
   - templates/api-deployment.yaml
   - templates/worker.yaml
+  - templates/frontend.yaml
   - templates/migrate-job.yaml
 set:
   existingSecret: automatos-secrets
@@ -59,6 +60,30 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content: {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: http://otel-collector.observability:4318}
+  - it: points the web app's server side at the same collector under its own service name
+    template: templates/frontend.yaml
+    documentIndex: 0
+    set:
+      otel:
+        enabled: true
+        endpoint: http://otel-collector.observability:4318
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_SERVICE_NAME, value: automatos-web}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: http://otel-collector.observability:4318}
+  - it: sends nothing from the web app when otel is off
+    template: templates/frontend.yaml
+    documentIndex: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_ENABLED
+            value: "true"
+          any: true
   - it: takes the endpoint's headers from the Secret, never from values
     template: templates/api-deployment.yaml
     set:
