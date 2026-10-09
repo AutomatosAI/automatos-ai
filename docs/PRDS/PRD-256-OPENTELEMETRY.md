@@ -1,6 +1,6 @@
 # PRD-256: OpenTelemetry traces over OTLP
 
-**Status:** O1 (#1040), O2a (#1041), O2b (#1043, #1044), O3 (#1047), O4 (#1049), O5 (#1050) and O6a (#1053) merged; O6b in review · **Owner:** daarthur (issue #847; the scope and the answers to its questions are Gerard's, 5 Oct 2026) · **Written:** 7 Oct 2026
+**Status:** Complete, 9 Oct 2026. O1 (#1040), O2a (#1041), O2b (#1043, #1044), O3 (#1047), O4 (#1049), O5 (#1050), O6a (#1053) and O6b (#1095) merged; follow-ups in §10 · **Owner:** daarthur (issue #847; the scope and the answers to its questions are Gerard's, 5 Oct 2026) · **Written:** 7 Oct 2026
 **Type:** Extension. PRD-73 built metrics, structured logs and correlation IDs and deferred distributed tracing ("OpenTelemetry — future PRD"). This is that PRD, added on top of what's there.
 
 ## 1. Introduction
@@ -36,7 +36,7 @@ Automatos has metrics (`prometheus_client`, `/metrics`), structured logs with co
 | O3 | GenAI spans: an OpenTelemetry tracer behind the PRD-185 `Tracer` seam, and LLM spans at the `LLMManager` chokepoint (`generate_response`, and `generate_response_sync` through the same helper or listed as a gap), per the GenAI semantic conventions. **`LangfuseTracer` is deleted in the same PR** (GUARDRAILS B2); Langfuse becomes an OTLP destination behind the collector. O3 keeps what the Langfuse path records today: tool dispatch, RAG retrieval scores and context-assembly metadata. | Merged (#1047) |
 | O4 | Asynchronous boundaries: Missions, board tickets and heartbeats joined by span links, with `traceparent` stored on the work item. | Merged (#1049) |
 | O5 | `trace_id`/`span_id` in the logs. `prometheus_client` and the PRD-73 dashboards stay; new GenAI metrics go over OTLP. | Merged (#1050) |
-| O6 | A reference collector config in `deploy/otel/`, the Helm chart's OTel values, and server-side spans for the web app. | O6a merged (#1053): the collector config, chart values and kind check. O6b (the web app) in review |
+| O6 | A reference collector config in `deploy/otel/`, the Helm chart's OTel values, and server-side spans for the web app. | Merged (#1053: the collector config, chart values and kind check; #1095: the web app) |
 
 ## 5. Settings (O1)
 
@@ -88,6 +88,21 @@ The PRD-185 seam's own settings (`TRACING_ENABLED`, `TRACING_BACKEND`, `LANGFUSE
 ## 9. Testing
 
 Each phase ships tests with an in-memory exporter. O1 was also checked against a real collector: the local stack with `grafana/otel-lgtm` (an OpenTelemetry Collector, Tempo, Prometheus, Loki and Grafana in one container) receiving the API's spans over OTLP/HTTP. O6 adds the reference collector config and a check through the Helm chart.
+
+## 10. Follow-ups
+
+Gaps and decisions found while building it, each an issue for triage:
+
+| Issue | |
+|---|---|
+| #1051 | `httpx2` request lines (the openai 3.x SDK) bypass the httpx log guard. |
+| #1094 | The web app's Edge-runtime proxies (chat, workflow stream) aren't traced, so a chat turn's trace starts at the API. |
+| #1107 | API traces: query values can leave in exception messages and the span status. |
+| #1110 | LLM calls that bypass `LLMManager`, and embeddings, get no GenAI span. |
+| #1111 | The coordinator's own model calls on the tick (verifier, joiner, async planner) aren't traced. |
+| #1112 | OpenAI-compatible model calls get no HTTP client span (`httpx2`). |
+| #1113 | Whether `traceparent` should go to third-party APIs or internal hosts only. |
+| #1114 | Two PRDs are numbered 256. |
 
 ## Related
 
