@@ -318,10 +318,13 @@ async def add_api_key(
     db.refresh(row)
     clear_cache()
 
-    logger.info(
-        f"API key saved for provider={provider} workspace={ctx.workspace_id} "
-        f"(valid={validation.valid}, BYOK {'enabled' if validation.valid else 'NOT enabled — failed validation'})"
-    )
+    # Nothing derived from the key or its check is logged (CodeQL py/clear-text-logging-sensitive-data):
+    # the outcome is the branch taken, not a value.
+    if validation.valid:
+        logger.info("API key saved for provider=%s workspace=%s (valid, BYOK enabled)", provider, ctx.workspace_id)
+    else:
+        logger.info("API key saved for provider=%s workspace=%s (failed validation, BYOK NOT enabled)",
+                    provider, ctx.workspace_id)
     return _row_to_out(row, encryption, validation=validation)
 
 
