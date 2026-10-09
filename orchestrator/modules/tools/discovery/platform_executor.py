@@ -39,6 +39,7 @@ from modules.tools.discovery.handlers_playbooks import (
     delete_playbook,
 )
 from modules.tools.discovery.playbook_staffing import add_playbook_step, execute_playbook  # F321: an agent on each step
+from modules.tools.discovery.handlers_diagnostics import get_workspace_errors
 from modules.tools.discovery.handlers_analytics import (
     get_llm_usage,
     get_cost_breakdown,
@@ -1342,6 +1343,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_get_playbook": get_playbook,
     "platform_get_llm_usage": get_llm_usage,
     "platform_get_cost_breakdown": get_cost_breakdown,
+    "platform_get_workspace_errors": get_workspace_errors,  # 9 Oct: errors grouped by cause
     "platform_list_documents": says_who_wrote_each(list_documents),  # F269 (night 9): an agent's writing
     "platform_read_document": says_an_agent_wrote_it(read_document),  # is never the owner's source
     "platform_grep_documents": owners_passages_only("matches")(grep_documents),

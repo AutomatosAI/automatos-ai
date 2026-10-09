@@ -24,6 +24,7 @@ from .actions_brand_proposals import register_brand_proposal_actions  # PRD-255 
 from .actions_workspace import register_workspace_actions_defs
 from .actions_memory_store import register_store_memory_action
 from .actions_monitoring import register_monitoring_actions
+from .actions_diagnostics import register_diagnostics_actions  # 9 Oct: errors grouped by cause
 from .actions_search import register_search_actions
 from .actions_tools_llms import register_tools_llms_actions
 from .actions_marketplace import register_marketplace_actions
@@ -84,6 +85,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_workspace_actions_defs(registry)
     register_store_memory_action(registry)
     register_monitoring_actions(registry)
+    register_diagnostics_actions(registry)
     register_search_actions(registry)
     register_tools_llms_actions(registry)
     register_marketplace_actions(registry)
