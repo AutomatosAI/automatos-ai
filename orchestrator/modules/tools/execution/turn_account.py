@@ -59,16 +59,21 @@ def _failed(result: Any) -> bool:
     return isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False)
 
 
-def _is_read(action: str) -> bool:
+def is_read(action: str) -> bool:
     name = action.lower()
     return any(stem in name for stem in _READS)
 
 
-def _generic(action: str) -> str:
-    """"Mission made", "Playbook scheduled": what a call did, from its name, in plain words."""
+def thing_of(action: str) -> str:
+    """"card", "mission steps": what a call's name says it is about, in plain words."""
     words = action.lower().removeprefix("platform_").split("_")
-    verb, nouns = words[0], [_NOUNS.get(w, w) for w in words[1:]] or ["change"]
-    return f"{' '.join(nouns).capitalize()} {_PAST.get(verb, 'done')}"
+    return " ".join(_NOUNS.get(w, w) for w in words[1:]) or "change"
+
+
+def what_it_did(action: str) -> str:
+    """"Mission made", "Playbook scheduled": what a call did, from its name, in plain words."""
+    verb = action.lower().removeprefix("platform_").split("_")[0]
+    return f"{thing_of(action).capitalize()} {_PAST.get(verb, 'done')}"
 
 
 def _line(action: str, payload: Dict[str, Any]) -> str:
@@ -85,14 +90,14 @@ def _line(action: str, payload: Dict[str, Any]) -> str:
     message = payload.get("message")
     if isinstance(message, str) and message.strip() and not _INTERNAL.search(message):
         return f"- {message.strip()[:_MESSAGE_CHARS]}"
-    return f"- {_generic(action)}" + (f": {number}" if number else "")
+    return f"- {what_it_did(action)}" + (f": {number}" if number else "")
 
 
 def account_of(outcomes: Sequence[Outcome]) -> str:
     """What the owner is told when the answer came back empty: the changes the
     turn's calls made, or plainly that nothing changed."""
     changes = [_line(action, _payload(result)) for action, _params, result in outcomes
-               if not _failed(result) and not _is_read(action)]
+               if not _failed(result) and not is_read(action)]
     failed = sum(1 for _action, _params, result in outcomes if _failed(result))
     if not changes:
         why = WHY_ALL_FAILED if failed else (WHY_ONLY_READS if outcomes else WHY_NO_CALL)
@@ -146,4 +151,4 @@ def said_or_accounted(llm: LLMCall, outcomes: Callable[[], Sequence[Outcome]],
     return call
 
 
-__all__ = ["account_of", "is_blank", "said_or_accounted", "with_account"]
+__all__ = ["account_of", "is_blank", "is_read", "said_or_accounted", "thing_of", "what_it_did", "with_account"]

@@ -131,7 +131,8 @@ def _fc_names(schemas):
 
 def test_pins_live_in_config_and_keep_find_tools():
     assert "platform_find_tools" in PINS, "the when-required discovery seam MUST stay pinned"
-    assert 10 <= len(PINS) <= 16, f"pin set should be ~10-14, got {len(PINS)}"
+    # PRD-256 US-006 pinned Auto's writes and the two reads they lean on: 14 + 10 = 24.
+    assert 10 <= len(PINS) <= 24, f"pin set should be ~14 plus PRD-256's 10, got {len(PINS)}"
     # Traceable to PRD-122's original promoted list (a representative spread).
     for name in (
         "platform_list_agents", "platform_get_agent", "platform_install_skill",

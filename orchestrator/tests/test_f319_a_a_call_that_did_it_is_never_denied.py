@@ -100,7 +100,9 @@ REORDER = ("My Business Analyst just worked out we're about 97 kg short of Kirin
 
 @pytest.fixture
 def turn(monkeypatch):
-    """The owner's words this turn and the card they name, as owner_turn would read them."""
+    """The owner's words this turn and the card they name, as owner_turn would read them.
+    PRD-256 US-004: Auto's last reply is no longer patched: the guard read it only to judge a
+    "yes" as an approval, which is the owner's click now."""
     from types import SimpleNamespace as NS
 
     import modules.tools.discovery.follows_the_owner as guard
@@ -114,7 +116,6 @@ def turn(monkeypatch):
                                                                                cards=(card,)))
 
     monkeypatch.setattr(guard, "owners_recent_words", lambda db, ws, turn: ())
-    monkeypatch.setattr(guard, "autos_last_reply", lambda db, ws, turn: "")
     return _set
 
 

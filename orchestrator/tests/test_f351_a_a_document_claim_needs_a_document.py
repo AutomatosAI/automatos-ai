@@ -157,7 +157,7 @@ def test_every_document_claim_has_its_own_plain_line():
     assert set(LABELS) <= set(NOT_DONE_SAID)
     assert not_done(DOCUMENT_MADE) == ("Just to be clear: I didn't make that document in this reply, so there's "
                                        "nothing new in your Deliverables. Ask me again if you want it done.")
-    assert Verdict(tools=1, claim=DOCUMENT_REFUSED).correction == (
+    assert Verdict(tools=1, claim=DOCUMENT_REFUSED).correction is None and not_done(DOCUMENT_REFUSED) == (
         "Just to be clear: I tried to make that document in this reply, but it didn't go through, so there's "
         "nothing new in your Deliverables. Ask me again if you want it done.")
 
@@ -231,7 +231,7 @@ def test_a_letter_said_made_after_a_refused_call_is_nudged_then_corrected():
 
     assert "something was made into a document when the call to make it failed" in model.sent[-1][-1]["content"]
     assert final["_f187"].claim == DOCUMENT_REFUSED
-    assert final["_f187"].correction == not_done(DOCUMENT_REFUSED)
+    assert final["_f187"].correction is None                 # PRD-256: said above the text, from receipts
 
 
 def test_a_letter_that_was_made_is_left_as_it_is():
@@ -248,4 +248,4 @@ def test_a_retry_said_with_no_call_is_nudged_then_corrected():
     (sent,) = model.sent                                                  # the loop's one nudge
     assert "something was tried again" in sent[-1]["content"]
     assert final["_f187"].claim == TRIED_AGAIN
-    assert final["_f187"].correction == not_done(TRIED_AGAIN)
+    assert final["_f187"].correction is None

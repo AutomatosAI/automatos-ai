@@ -36,14 +36,15 @@ from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
 from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
 from modules.tools.execution.params_text import decodes_nested_params, params_refusal_text
+from modules.tools.execution.direct_contract import missing_on_a_direct_call  # PRD-256 US-006
+from modules.tools.discovery.owner_only import asks_before_a_send  # PRD-256 US-004
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
 from core.database.session_health import rollback_if_aborted
 
-# F088 (night 3): names a model reaches for that are not tools. Auto called
-# `search_documents` four times and got "Unknown tool" each time — the registry
-# check ran before the old alias entry could — and told the owner the product's
-# document search was broken. Resolved before anything gates or routes the call.
+# F088 (night 3): names a model reaches for that are not tools. Auto called `search_documents` four times
+# and got "Unknown tool" each time (the registry check ran before the old alias entry could) and told the
+# owner the product's document search was broken. Resolved before anything gates or routes the call.
 TOOL_ALIASES: Dict[str, str] = {
     "search_documents": "platform_search_documents",   # searches the uploads and names the file
     "search_code": "search_codebase",
@@ -96,8 +97,7 @@ _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "schedule_config": ("schedule",),  # F290 (night 8): update_playbook's {"schedule": {"enabled": false}}
 }
 
-# A single dict argument named after the thing itself ({"report": {...}}) is a
-# wrapper the model added, not a parameter.
+# A single dict argument named after the thing itself ({"report": {...}}) is a wrapper the model added, not a parameter.
 _WRAPPER_KEYS: Tuple[str, ...] = ("report", "task", "document", "payload", "params", "input", "data")
 
 
@@ -296,13 +296,16 @@ def map_optional_aliases(action_name: str, action_def: Any, params: Dict[str, An
 def undeclared_params_refusal(action_name: str, action_def: Any, params: Dict[str, Any], trace: str,
                               via: str = VIA_DISPATCHER) -> Optional[str]:
     """F182: the refusal for the keys in ``params`` the action does not take,
-    each logged, or None. F181/F321: a ``params`` that is no object is refused in plain words."""
+    each logged, or None. F181/F321: a ``params`` that is no object is refused in plain words.
+    PRD-256 US-006: a direct call that leaves out a required field is refused as a dispatched one is."""
     if not isinstance(params, dict):
         return params_refusal_text(action_name, params)
     unknown = undeclared_params(action_def, params)
     for key in unknown:
         logger.info(f"[F182] {via} refused param '{key}' for {action_name} (trace {trace})")
-    return unknown_params_error(action_name, action_def, unknown, params, via) if unknown else None
+    said = [missing_on_a_direct_call(action_name, action_def, params) if via == VIA_DIRECT_CALL else None,
+            unknown_params_error(action_name, action_def, unknown, params, via) if unknown else None]
+    return "\n".join(line for line in said if line) or None
 
 
 def unknown_action_error(action_name: str, registry: Any) -> str:
@@ -873,6 +876,7 @@ class UnifiedToolExecutor:
     # ------------------------------------------------------------------
 
     @decodes_nested_params  # F321 (night 9b): params sent as JSON text run as the object they hold
+    @asks_before_a_send  # PRD-256 US-004: a Composio send from a person's chat waits for their click
     async def execute_tool(
         self,
         tool_name: str,

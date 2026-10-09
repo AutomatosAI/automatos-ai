@@ -1327,7 +1327,12 @@ class Config:
         "platform_browse_marketplace_agents,platform_browse_marketplace_skills,"
         "platform_browse_marketplace_plugins,platform_install_skill,platform_install_plugin,"
         "platform_get_system_health,platform_get_activity_feed,"
-        "platform_search_memory,platform_store_memory",
+        "platform_search_memory,platform_store_memory,"
+        # PRD-256 US-006: Auto's writes (and the two reads they lean on) as their own tools, strict schemas,
+        # outside the dispatcher's enum — the used action sat outside the ranked top-15 on 53% of calls.
+        "platform_create_task,platform_update_task,platform_update_task_status,platform_assign_task,"
+        "platform_create_mission,platform_execute_playbook,platform_schedule_playbook,"
+        "platform_create_social_post,platform_get_task,platform_query_data",
     )
     # The additive ranking boost a promoted action gets in the shared cosine pass, so a
     # promoted action outranks an equal-cosine unpromoted one and is more likely to rank

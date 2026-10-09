@@ -35,6 +35,7 @@ from modules.memory.write_contract import (  # noqa: F401  (re-export)
     violates_exclusions,
 )
 from modules.context.remembered_figures import leaves_counted_figures_out  # F316 (night 9b)
+from modules.memory.remembered_receipts import remembers_the_receipts, the_record_beside_the_reply  # PRD-256 US-003
 
 
 @dataclass
@@ -413,6 +414,7 @@ class SmartMemoryManager:
 
         return "\n".join(lines)
 
+    @remembers_the_receipts  # PRD-256 US-003: the turn's receipts, read by the distiller as the record of actions
     async def store_conversation(
         self,
         workspace_id: str,
@@ -672,6 +674,7 @@ class SmartMemoryManager:
         return self._parse_distilled_facts(content)
 
     @staticmethod
+    @the_record_beside_the_reply  # PRD-256 US-003: the record of actions, told apart from the reply
     @leaves_counted_figures_out  # F316 (night 9b): a counted figure is not a durable fact
     def _build_distill_prompt(user_message: str, assistant_response: str) -> str:
         """Prompt for typed operational memory (PRD-159 S1).

@@ -189,7 +189,9 @@ def test_handle_approve_command(monkeypatch, harness_ledger):
 
 def test_an_admins_approval_applies_as_that_admin(monkeypatch, harness_ledger):
     """F151: the change is made for the approving admin, so an admin_only action
-    (the power mode) applies as them; the executor re-reads their membership."""
+    (the power mode) applies as them; the executor re-reads their membership.
+    PRD-256 US-004 changed the context: it now also says the /approve is the admin's
+    own decision, so an owner-only change it applies is not asked about again."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
     task = _harness_task(change_type="power_mode_upgrade", current={"power_mode": "standard"},
                          proposed={"power_mode": "max"}, task_id=7)
@@ -200,7 +202,7 @@ def test_an_admins_approval_applies_as_that_admin(monkeypatch, harness_ledger):
                                                    _RX_ID, _ADMIN))
 
     assert result["success"] is True
-    assert ("platform_set_power_mode", {"driving_user_id": "5"}) in ex.contexts
+    assert ("platform_set_power_mode", {"driving_user_id": "5", "owners_own_decision": True}) in ex.contexts
 
 
 def test_handle_reject_command(monkeypatch):

@@ -38,6 +38,11 @@ system talking about Auto. Each line is now Auto's own, in plain words, and says
 did not happen for the kind of claim it was ("I didn't approve anything in this
 reply", "nothing is still running from this reply, and I won't come back to this on
 my own"): ``not_done``.
+
+PRD-256 US-002: the saved correction line keeps tier 2 only (an id that does not exist). What
+was not done is said above the text from the turn's receipts (``consumers/chatbot/receipts.py``),
+never from a family: tiers 1 and 3 are logged, and the families keep driving only the in-loop
+nudge until PRD-256 Wave 2 deletes them.
 """
 from __future__ import annotations
 
@@ -226,21 +231,19 @@ class Verdict:
 
     @property
     def correction(self) -> Optional[str]:
-        lines = []
-        if self.claim:
-            lines.append(not_done(self.claim))
-        if self.ids:
-            one = len(self.ids) == 1
-            lines.append(NO_SUCH_ID.format(ids=_listed(self.ids), verb="does" if one else "do",
-                                           it="it" if one else "them"))
-        return "\n\n".join(lines) or None
+        """Tier 2's line: the ids the answer names that do not exist (PRD-256 US-002: a claim
+        no family backs is the receipts' to answer, above the text)."""
+        if not self.ids:
+            return None
+        one = len(self.ids) == 1
+        return NO_SUCH_ID.format(ids=_listed(self.ids), verb="does" if one else "do", it="it" if one else "them")
 
     def log(self, reply_id: object) -> None:
         """One [F187] line per finding, for night-by-night tuning."""
         if self.claim:
-            tier, action = (1, "corrected") if self.tools == 0 else (3, "corrected")
+            tier = 1 if self.tools == 0 else 3
             logger.warning(f"[F187] tier={tier} family={self.claim} tools={self.tools} reply={reply_id} "
-                           f"action={action}")
+                           f"action=logged")
         if self.passive and not self.claim:
             logger.warning(f"[F187] tier=3 family=passive tools={self.tools} reply={reply_id} action=logged")
         for kind, value in self.ids:

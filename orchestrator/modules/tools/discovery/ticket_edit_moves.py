@@ -25,6 +25,8 @@ from typing import Any, Awaitable, Callable, Dict
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.owner_only import CLICKED_BY
+
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
 STATUS = "status"
@@ -70,7 +72,7 @@ def _the_move(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[st
             STATUS: params[STATUS].strip()}
     note = str(params.get(NOTE) or "").strip()
     extra = {NOTE: note} if note else {}
-    driver = {"_user_id": params["_user_id"]} if params.get("_user_id") else {}
+    driver = {key: params[key] for key in ("_user_id", CLICKED_BY) if params.get(key)}
     return {**move, **extra, **driver}
 
 

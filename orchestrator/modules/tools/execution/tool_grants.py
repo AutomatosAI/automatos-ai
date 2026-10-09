@@ -312,6 +312,7 @@ def consume_tool_grant(
     action: str,
     params: Any,
     permission_level: Optional[str] = None,
+    single_use: bool = False,
 ) -> Optional[Any]:
     """Return the authorising grant for this exact call, or ``None``.
 
@@ -347,7 +348,8 @@ def consume_tool_grant(
             return None
 
         stored_risk = grant.risk_tier or _risk_class_for(action, permission_level)
-        if stored_risk == RISK_DESTRUCTIVE or action in SINGLE_USE_ACTIONS:
+        # PRD-256 US-004: an owner-only call is single-use too (``single_use``): one click, one run.
+        if single_use or stored_risk == RISK_DESTRUCTIVE or action in SINGLE_USE_ACTIONS:
             # Single-use: the yes covered exactly one execution. Review HIGH: two
             # calls both read it GRANTED and both ran. The row is now claimed:
             # locked for this transaction, and a concurrent call skips it and

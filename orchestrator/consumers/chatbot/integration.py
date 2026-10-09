@@ -113,6 +113,7 @@ class SmartChatIntegration:
         assistant_response: str,
         chat_id: Optional[str] = None,
         subject_id: Optional[str] = None,
+        receipts: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
         """
         Store a conversation exchange in memory.
@@ -125,6 +126,8 @@ class SmartChatIntegration:
             chat_id: Optional chat session ID
             subject_id: Optional GDPR data-subject tag (PRD-196 S6) — the human
                 principal as ``user:{users.id}`` (internal id, never Clerk string).
+            receipts: The turn's receipts (PRD-256 US-003): the record of what its
+                calls did, which memory distils apart from the reply.
 
         Returns:
             Success status
@@ -134,6 +137,7 @@ class SmartChatIntegration:
             assistant_response=assistant_response,
             chat_id=chat_id,
             subject_id=subject_id,
+            receipts=receipts,
         )
 
     def get_user_name(self) -> Optional[str]:

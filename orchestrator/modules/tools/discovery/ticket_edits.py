@@ -41,6 +41,8 @@ from typing import Any, Awaitable, Callable, Dict
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.owner_only import CLICKED_BY
+
 logger = logging.getLogger(__name__)
 
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
@@ -139,8 +141,7 @@ async def _sent_back(handler: Handler, db: Session, workspace_id: Any, params: D
     if out and out.get("success") is not True:
         return out
     move = {"task_id": ticket_number(db, task) or task.id, "status": SEND_BACK_STATUS, NOTE: note or brief}
-    if params.get("_user_id"):
-        move["_user_id"] = params["_user_id"]
+    move.update({key: params[key] for key in ("_user_id", CLICKED_BY) if params.get(key)})
     return await update_board_task_status(db, workspace_id, move)
 
 

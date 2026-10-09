@@ -78,7 +78,7 @@ def test_the_reply_is_nudged_to_check_then_corrected_if_it_still_gives_way():
     (sent,) = model.sent                                                  # the loop's one nudge
     assert "something was re-checked" in sent[-1]["content"]
     assert final["_f187"].claim == "re-checked"
-    assert final["_f187"].correction == not_done("re-checked") == (
+    assert final["_f187"].correction is None and not_done("re-checked") == (      # PRD-256: said from receipts
         "Just to be clear: I didn't re-check that figure in this reply, so I can't yet say which one is right. "
         "Ask me again if you want it done.")
 
@@ -86,5 +86,5 @@ def test_the_reply_is_nudged_to_check_then_corrected_if_it_still_gives_way():
 def test_the_chat_runs_retrieval_first_through_it():
     from consumers.chatbot.service import StreamingChatService
 
-    inner = StreamingChatService._retrieval_first.__wrapped__.__wrapped__  # under F241's note and F307's read
+    inner = StreamingChatService._retrieval_first.__wrapped__.__wrapped__.__wrapped__  # under PRD-256, F241, F307
     assert inner.__code__ is rechecks_disputed_figures(lambda: None).__code__

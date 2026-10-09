@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from contextvars import ContextVar
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -26,6 +27,10 @@ REFUSED_AGAIN = ("Skipped: this exact call already failed in this reply: {error}
 RAN_ONCE = ("Tool '{tool}' was already executed with identical parameters in this reply and did its work: its "
             "result is above. It was not run a second time.")
 REFUSAL_CHARS = 400
+# PRD-256 US-001: the trackers made while a chat turn's tool loop runs, oldest first, so the
+# turn's receipts read the calls its own loop made (consumers/chatbot/receipts.py). None
+# outside one: an agent run's tracker is kept by nobody.
+TRACKERS_MADE: ContextVar[Optional[List["ToolExecutionTracker"]]] = ContextVar("trackers_made", default=None)
 
 
 def _normalize_query(query: str) -> str:
@@ -103,9 +108,14 @@ class ToolExecutionTracker:
         self.outcomes: List[Tuple[str, Dict[str, Any], Any]] = []
         # F309: each identical call that failed this turn, with what it was told.
         self.refused: Dict[Tuple[str, str], str] = {}
+        # PRD-256 US-001: each call not run this turn (a repeat, a cap), with why: a receipt.
+        self.skipped: List[Tuple[str, Dict[str, Any], str]] = []
         # F120: how many queries per search tool came from EARLIER model responses;
         # None until a caller marks rounds (then every earlier query counts).
         self._round_start: Optional[Dict[str, int]] = None
+        made = TRACKERS_MADE.get()
+        if made is not None:
+            made.append(self)
 
     def begin_round(self) -> None:
         """F120: the calls of one model response are one batch — similar-looking
@@ -145,7 +155,17 @@ class ToolExecutionTracker:
         tool_name: str,
         tool_args: Dict[str, Any],
     ) -> Tuple[bool, str]:
-        """Decide whether to skip this tool call. Returns (should_skip, reason)."""
+        """Decide whether to skip this tool call. Returns (should_skip, reason).
+        A skipped call is kept in ``skipped`` (PRD-256: the turn's receipts say it did not run)."""
+        from .call_effects import call_params
+
+        skip, reason = self._skip_reason(tool_name, tool_args)
+        if skip:
+            action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+            self.skipped.append((action, call_params(tool_name, tool_args), reason))
+        return skip, reason
+
+    def _skip_reason(self, tool_name: str, tool_args: Dict[str, Any]) -> Tuple[bool, str]:
         key = self._counting_key(tool_name, tool_args)
         current_count = self.tool_counts.get(key, 0)
         limit = self._resolve_limit(key)
@@ -225,6 +245,7 @@ class ToolExecutionTracker:
 
 
 __all__ = [
+    "TRACKERS_MADE",
     "ToolExecutionTracker",
     "_normalize_query",
     "_queries_are_similar",

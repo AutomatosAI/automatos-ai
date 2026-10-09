@@ -144,7 +144,7 @@ class ToolsSection(BaseSection):
         actions. Falls back to the full enum on any error. Ranking is
         awaited on this loop — never bridged through a helper thread.
         """
-        from modules.tools.discovery.action_registry import get_action_registry
+        from modules.tools.discovery.action_registry import get_action_registry, hidden_scope
         from modules.tools.tool_router import (
             _apply_dispatcher_always_include,
             _narrow_dispatcher_actions_async,
@@ -175,7 +175,11 @@ class ToolsSection(BaseSection):
             allow_promoted_in_allowlist=from_pins,
             **exclude_kwargs(hidden),
         )
-        return [schema], "auto"
+        # PRD-256 US-006: the pinned writes left the enum; they ride beside it, first-class.
+        from modules.tools.first_class_tools import with_first_class
+
+        with hidden_scope(hidden):
+            return with_first_class([schema], workspace_id, db_session), "auto"
 
     async def _load_full(
         self,

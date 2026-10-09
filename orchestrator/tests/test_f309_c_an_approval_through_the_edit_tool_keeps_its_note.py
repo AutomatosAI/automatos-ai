@@ -6,6 +6,10 @@ I'll use. Ignore the June review from now on." Auto's first call was platform_up
 was refused before it ran. Auto split it into a plain note and a bare move to Done, and
 the approval's note ("Approved: …") was never written. #1879 in iteration 2 kept it: one
 call, platform_update_task_status {status: "done", note}.
+
+PRD-256 US-004 changed who signs it: a move to Done from a person's chat runs only on their
+click (owner_only), and its note is signed by the user who clicked (``_clicked_by``, the
+executor's), not "you" on Auto's call alone.
 """
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ from tests import test_1094_a_ticket_with_no_agent_is_never_in_progress as f1094
 
 board = f1094.board        # a workspace, its Content Creator, Auto's real tools
 OWNER = "owner@cafe.test"
+CLICKER = "user:owner@cafe.test"   # the approval card's click, as the executor signs it (owner_only)
 NOTE = "Good, this is the figure I'll use. Ignore the June review from now on."
 MARGIN = "Kirinyaga AA 250g retail bag margin: £8.68 (66.8%), from margin-sheet-sep-2026.csv."
 
@@ -70,22 +75,23 @@ def _notes(task):
 def test_approve_with_notes_and_a_status_on_the_edit_tool_is_the_approval(shop):
     task = _in_review(shop)
 
-    out = _edit(shop, task_id=task.id, notes=NOTE, status="done", _user_id=OWNER)
+    out = _edit(shop, task_id=task.id, notes=NOTE, status="done", _user_id=OWNER, _clicked_by=CLICKER)
 
     shop.db.refresh(task)
     assert out["success"] is True and task.status == "done"                    # night 9: "Nothing to change"
-    assert ("you", f"Approved: {NOTE}") in _notes(task)                        # the approval's own note
+    assert (CLICKER, f"Approved: {NOTE}") in _notes(task)                      # the approval's own note, the clicker's
     assert shop.filed == [task.id]                                            # Done files the card, as ever
 
 
 def test_an_edit_and_a_status_in_one_call_do_both(shop):
     task = _in_review(shop)
 
-    out = _edit(shop, task_id=task.id, priority="high", status="approved", note=NOTE, _user_id=OWNER)
+    out = _edit(shop, task_id=task.id, priority="high", status="approved", note=NOTE, _user_id=OWNER,
+                _clicked_by=CLICKER)
 
     shop.db.refresh(task)
     assert out["success"] is True and (task.priority, task.status) == ("high", "done")
-    assert ("you", f"Approved: {NOTE}") in _notes(task)
+    assert (CLICKER, f"Approved: {NOTE}") in _notes(task)
 
 
 def test_a_new_brief_on_an_answered_card_takes_no_status(shop):

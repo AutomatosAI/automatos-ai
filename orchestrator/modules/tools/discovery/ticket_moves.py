@@ -134,12 +134,15 @@ def _tickets(db: Session, workspace_id: Any, refs: List[Any]) -> List[Any]:
 
 def _refusal(db: Session, task: Any, new_status: str) -> Optional[str]:
     """``move_refusal`` for this ticket: a running ticket waits or is cancelled, and a
-    finished column needs work on the card."""
+    finished column needs work on the card. PRD-256 US-005: Done needs the artifact the
+    card was for (``services.done_needs_an_artifact``, the board's Approve's rule too)."""
     from api.board_tasks import MISSION_TICKET_TYPES, _running_now
     from services.board_drag_rules import move_refusal
+    from services.done_needs_an_artifact import done_refusal
 
     return move_refusal(task, new_status, running=_running_now(db, task),
-                        mission_ticket=getattr(task, "source_type", None) in MISSION_TICKET_TYPES)
+                        mission_ticket=getattr(task, "source_type", None) in MISSION_TICKET_TYPES) \
+        or done_refusal(db, task, new_status)
 
 
 def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -167,23 +170,25 @@ def _send_back(db: Session, workspace_id: Any, task: Any, params: Dict[str, Any]
 def _keep_the_note(db: Session, workspace_id: Any, params: Dict[str, Any], result: Any) -> None:
     """The note a move carried, on each ticket the handler moved: an approval's note on
     one moved to Done (as the board's Approve keeps it), a plain note on any other.
-    The owner's when a person drives the call, an agent's otherwise."""
+    PRD-256 US-004: signed by the user who clicked the approval card; a move no one
+    clicked (Auto's call alone, or an agent's own run) is an agent's note."""
     from modules.tools.discovery.handlers_board_task_done import moved_to_done
+    from modules.tools.discovery.owner_only import signed_by
 
     note = str(params.get("note") or "").strip()[:MAX_NOTE_CHARS]
     moved = moved_to_done(result) if note and isinstance(result, dict) else []
     if not moved:
         return
     from services.cli_host_service import append_session_note
-    from services.ticket_verdict import OPERATOR_NOTE_BY, keep_approval_note
+    from services.ticket_verdict import keep_approval_note
 
-    owners = bool(params.get("_user_id"))
+    signer = signed_by(params)
     for task_id in moved:
-        if owners and params.get("status") == "done":
-            keep_approval_note(db, task_id=task_id, workspace_id=workspace_id, note=note)
+        if signer and params.get("status") == "done":
+            keep_approval_note(db, task_id=task_id, workspace_id=workspace_id, note=note, by=signer)
         else:
             append_session_note(db, task_id=task_id, workspace_id=workspace_id, note=note,
-                                by=OPERATOR_NOTE_BY if owners else AN_AGENTS_NOTE_BY)
+                                by=signer or AN_AGENTS_NOTE_BY)
     db.commit()
 
 

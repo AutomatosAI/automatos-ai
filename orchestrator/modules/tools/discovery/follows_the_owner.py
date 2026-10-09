@@ -12,10 +12,10 @@ before it runs, and refused, saying the call that does what they asked, when:
   description for "Update #0296 …", a social post draft for "Send #0425 back";
 - it makes a copy instead of acting: a new ticket #0287 for "Give #0285 to …", #0432 for
   "Update #0431 …", a second mission #0268 for "change #0267";
-- it decides for the owner: an approval of #0329 when the owner only named it, an
-  approval of #0422 when they said cancel. An approval needs the owner's approving
-  words now, or in the message before when this one only says which card; a bare
-  "yes" or "ok" counts only as the answer to Auto's own question about approving;
+- it decided for the owner: an approval of #0329 when the owner only named it, an
+  approval of #0422 when they said cancel. PRD-256 US-004: that is no longer read from
+  their words here. An approval, a cancel and the rest of Decision D1 wait for the
+  owner's click on the approval card (``owner_only``);
 - it writes words as the owner's that they never wrote: notes signed "you", and briefs
   ("The description now reflects exactly what you wrote" over Auto's own checklist);
 - it moves a card to In progress for a send-back, which re-runs the old brief without
@@ -33,7 +33,7 @@ Night 9b (F319): "My Business Analyst just worked out we're about 97 kg short �
 the new card was refused as a copy of #1970, a card the owner named only as where the
 figure came from, and Auto said it had assigned the work. A new card is a copy only when
 the owner asked for something done to the card they named (give, send back, update,
-cancel, approve, run again).
+run again).
 
 Night 9 (F309):
 - "Card 1869 needs to go back. Correction: …" became a question to the owner
@@ -61,11 +61,11 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery.brand_turns import refusal_on_a_brand_turn
-from modules.tools.discovery.card_words_said import owners_card_words, word_refs
+from modules.tools.discovery.card_words_said import owners_card_words
 from modules.tools.discovery.owner_turn import (
-    AGAIN, APPROVE, CANCEL, CARD_REF, GIVE, GO_AHEAD, MISSION_CARD, NEW_CARD, NEW_MISSION, NOT_YET, OTHER_VERB,
-    RUN_CARD, SEND_BACK, SENDS_IT_BACK, STEP_CARD, UPDATE, NamedCard, OwnerTurn, autos_last_reply, autos_proposal,
-    card_kind, card_words, names_card, owner_turn, owners_recent_words, says, values_in,
+    AGAIN, GIVE, MISSION_CARD, NEW_CARD, NEW_MISSION, OTHER_VERB, RUN_CARD, SEND_BACK, SENDS_IT_BACK, STEP_CARD,
+    UPDATE, NamedCard, OwnerTurn, autos_proposal, card_kind, card_words, names_card, owner_turn,
+    owners_recent_words, says, values_in,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,6 +115,15 @@ NEW_BRIEF = re.compile(r"\bbrief\b|\bdescription\b", re.I)
 # How much of the owner's words a refusal or a card's call quotes for the call to carry.
 WORDS_QUOTED = 1000
 OTHER_ASK = (" If the owner also asked for {kind}, ask them to confirm that in their next message.")
+# A card's calls when the owner's words name no give, send-back or new brief: the model reads
+# their words, and an approval or a cancel waits for their click (PRD-256 US-004).
+CARD_CALLS_SAID = ("To approve it: platform_update_task_status {{task_id: \"{ref}\", status: \"done\", note: {note}}}; "
+                   "to cancel it: platform_update_task_status {{task_id: \"{ref}\", status: \"cancelled\"}}. Either "
+                   "waits for the owner's click on the approval card. To read it: platform_get_task "
+                   "{{task_id: \"{ref}\"}}.")
+MISSION_CALLS_SAID = ("To approve its plan: platform_approve_mission {{mission_id: \"{ref}\"}}; to cancel it: "
+                      "platform_cancel_mission {{mission_id: \"{ref}\"}}. Either waits for the owner's click on the "
+                      "approval card. To read it: platform_get_mission {{mission_id: \"{ref}\"}}.")
 
 
 def follows_the_owner(execute: Execute) -> Execute:
@@ -257,7 +266,7 @@ def _a_copy(db: Session, workspace_id: Any, turn: OwnerTurn, action: str, params
 def _acts_on_it(turn: OwnerTurn) -> bool:
     """The owner's latest message asks for something done to the card it names: a new card
     for it would be a copy. A card named as a source ("(card 1970)") is not acted on (F319)."""
-    return says(OTHER_VERB, (turn.latest,)) or says(APPROVE, (turn.latest,)) or says(AGAIN, (turn.latest,))
+    return says(OTHER_VERB, (turn.latest,)) or says(AGAIN, (turn.latest,))
 
 
 def _mission_goal(db: Session, card: NamedCard) -> str:
@@ -266,67 +275,6 @@ def _mission_goal(db: Session, card: NamedCard) -> str:
     run_id = getattr(card.task, "orchestration_run_id", None)
     run = db.get(OrchestrationRun, run_id) if run_id else None
     return str(getattr(run, "goal", "") or "").strip()
-
-
-def _not_what_they_said(db: Session, workspace_id: Any, turn: OwnerTurn, action: str,
-                        params: Dict[str, Any]) -> Optional[str]:
-    """An approval or a cancel the owner didn't ask for."""
-    decided = _decision(action, params)
-    if decided == "approve" and says(CANCEL, (turn.latest,)):
-        return f"The owner said cancel, not approve.{NOTHING_DONE} {_cancel_call(action, turn)}"
-    if decided == "approve" and says(NOT_YET, (turn.latest,)):
-        return (f"The owner hasn't approved {_which(turn)} yet: answer what they asked first.{NOTHING_DONE}")
-    if decided == "approve" and not _owner_approved(db, workspace_id, turn):
-        return (f"The owner hasn't said to approve {_which(turn)}.{NOTHING_DONE} Ask them what they want done "
-                "with it, in their words.")
-    if decided == "cancel" and not says(CANCEL, turn.said):
-        return f"The owner hasn't said to cancel {_which(turn)}.{NOTHING_DONE} Ask them first."
-    return None
-
-
-def _owner_approved(db: Session, workspace_id: Any, turn: OwnerTurn) -> bool:
-    """The owner's go-ahead to approve: their approving words now; or in the message
-    before, when this one only says which card it meant; or a yes to Auto's own question
-    about approving. An "ok" in an earlier message about something else is none of these:
-    #0329 was approved when the owner had only said which card they meant."""
-    if says(APPROVE, (turn.latest,)):
-        return True
-    if says(APPROVE, (turn.earlier,)) and not says(OTHER_VERB, (turn.latest,)) and _same_cards(turn):
-        return True
-    return says(GO_AHEAD, (turn.latest,)) and bool(APPROVE.search(autos_last_reply(db, workspace_id, turn)))
-
-
-def _same_cards(turn: OwnerTurn) -> bool:
-    """The cards the earlier message named, if any, are the ones the latest names."""
-    earlier = _numbers(turn.earlier)
-    return not earlier or earlier <= _numbers(turn.latest)
-
-
-def _numbers(text: str) -> set:
-    """The cards ``text`` names, as (number, step): "#329" and "#0329" are one card; a
-    card named in words ("card 1879") by its digits."""
-    return ({(int(match.group(1)), match.group(2)) for match in CARD_REF.finditer(text or "")}
-            | {said.digits for said in word_refs(text)})
-
-
-def _decision(action: str, params: Dict[str, Any]) -> Optional[str]:
-    if action in ("platform_approve_mission", "platform_cancel_mission"):
-        return "approve" if action == "platform_approve_mission" else "cancel"
-    if action not in STATUS_CALLS:
-        return None
-    return {"done": "approve", "cancelled": "cancel"}.get(_status_of(params))
-
-
-def _which(turn: OwnerTurn) -> str:
-    found = turn.found()
-    return found[0].ref if found else "it"
-
-
-def _cancel_call(action: str, turn: OwnerTurn) -> str:
-    ref = _which(turn)
-    if action == "platform_approve_mission":
-        return f"To cancel it: platform_cancel_mission {{mission_id: \"{ref}\"}}."
-    return f"To cancel it: platform_update_task_status {{task_id: \"{ref}\", status: \"cancelled\"}}."
 
 
 def _not_their_words(db: Session, workspace_id: Any, turn: OwnerTurn, action: str,
@@ -429,19 +377,17 @@ def _their_words_for(db: Session, workspace_id: Any, turn: OwnerTurn, note: str)
 
 
 def right_call(turn: OwnerTurn, card: NamedCard) -> str:
-    """The call that does what the owner asked with this card, by their verb. The
-    owner's words for it, when they labelled them ("Correction: …"), go in the call."""
-    ref = card.ref
+    """The call that does what the owner asked with this card: by their verb for a give, a
+    send-back or a new brief; otherwise the card's calls, approving and cancelling waiting
+    for the owner's click (PRD-256 US-004). The owner's words for it, when they labelled
+    them ("Correction: …"), go in the call."""
     if card_kind(card) == MISSION_CARD:
-        if says(CANCEL, (turn.latest,)):
-            return f"To cancel it: platform_cancel_mission {{mission_id: \"{ref}\"}}."
-        if says(APPROVE, (turn.latest,)):
-            return f"To approve its plan: platform_approve_mission {{mission_id: \"{ref}\"}}."
-        return f"To read it: platform_get_mission {{mission_id: \"{ref}\"}}."
+        return MISSION_CALLS_SAID.format(ref=card.ref)
+    note = _owners_note(_words_for_card(turn))
     for pattern, call in _CARD_CALLS:
         if pattern.search(turn.latest):
-            return call.format(ref=ref, note=_owners_note(_words_for_card(turn)))
-    return f"To read it: platform_get_task {{task_id: \"{ref}\"}}."
+            return call.format(ref=card.ref, note=note)
+    return CARD_CALLS_SAID.format(ref=card.ref, note=note)
 
 
 def _owners_note(words: str) -> str:
@@ -457,9 +403,6 @@ def _send_back_call(ref: str, words: str = "") -> str:
 # F309 (night 9): giving comes before sending back, so "Give card 1859 to the Analyst
 # instead" is a reassign, not a send-back ("instead").
 _CARD_CALLS = (
-    (CANCEL, "To cancel it: platform_update_task_status {{task_id: \"{ref}\", status: \"cancelled\"}}."),
-    (APPROVE, "To approve it: platform_update_task_status {{task_id: \"{ref}\", status: \"done\", "
-              "note: {note}}}."),
     (GIVE, "To give it to an agent: platform_assign_task {{task_id: \"{ref}\", agent_name: …}}: a card its agent "
            "already answered goes to the new agent and runs again."),
     (SEND_BACK, "To send it back: platform_update_task_status {{task_id: \"{ref}\", status: \"assigned\", "
@@ -487,7 +430,7 @@ def _quoted(text: str) -> str:
     return json.dumps(" ".join((text or "").split())[:WORDS_QUOTED], ensure_ascii=False)
 
 
-RULES = (_wrong_kind, _not_a_mission, _a_question_for_a_send_back, _not_the_card, _a_copy, _not_what_they_said,
-         _not_their_words, _a_rerun_for_a_send_back, _a_new_brief_for_a_send_back)
+RULES = (_wrong_kind, _not_a_mission, _a_question_for_a_send_back, _not_the_card, _a_copy, _not_their_words,
+         _a_rerun_for_a_send_back, _a_new_brief_for_a_send_back)
 
 __all__ = ["CARD_ACTIONS", "follows_the_owner", "refusal_for", "right_call", "share_of_words"]

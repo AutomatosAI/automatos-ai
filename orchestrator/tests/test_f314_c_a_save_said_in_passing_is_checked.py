@@ -5,7 +5,7 @@ was never checked, and a post made by create_social_post backed no "I've saved".
 """
 from __future__ import annotations
 
-from consumers.chatbot.claim_check import Verdict
+from consumers.chatbot.claim_check import Verdict, not_done
 from modules.tools.execution.action_claims import claimed_action_not_done
 
 SAID_IN_PASSING = "This draft has now been saved as a social post. Let me know if you'd like any changes!"
@@ -25,5 +25,5 @@ def test_a_post_that_was_made_backs_the_save():
 
 
 def test_the_owner_is_told_plainly_that_nothing_was_saved():
-    assert Verdict(tools=1, claim="noted").correction == (
+    assert Verdict(tools=1, claim="noted").correction is None and not_done("noted") == (
         "Just to be clear: I didn't save anything in this reply. Ask me again if you want it done.")

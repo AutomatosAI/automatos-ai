@@ -22,11 +22,13 @@ tool results, which became the card's answer ("Based on the tool results:
 **workspace_write_file**: {…}" on #0234; #0408.3's step wrote its notes into the
 mission field, then answered with 2 tokens).
 
-Stdlib only, like the loop.
+Stdlib only at import, like the loop (the refused-write nudge reads Auto's rule from
+services.brief_facts when it is sent).
 """
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -60,6 +62,15 @@ CLAIMED_ACTION_RECOVERY_MSG = (
     "plainly that it has not been done and what you need. Never report an action "
     "as done without a tool result."
 )
+# PRD-256 US-006 (F108, night 10b): the claim came after a write that was REFUSED — "Missing
+# required params: mission_id", then "I've approved the mission". The nudge names the refusal
+# and carries Auto's rule (services.brief_facts.REFUSED_WRITE_RULE, the same words as its prompt).
+REFUSED_WRITE_NOTE = (
+    "A write in this turn was refused: {refused}. {rule} Make the call again as the refusal says, in this "
+    "response, or tell the owner plainly that it was refused and why."
+)
+REFUSAL_SHOWN_CHARS = 200
+REFUSED_SHOWN = 3
 # finish_reason "length" mid tool call: the arguments' JSON was cut (moved here from
 # tool_loop.py, which is over its size limit, for F328's decorator).
 LENGTH_RECOVERY_MSG = (
@@ -89,6 +100,44 @@ _STEP_CUE = re.compile(r"\b(?:let me|let's|i'?ll|i will|i'?m going to|i am going
 _NOT_A_STEP = re.compile(r"\blet me know\b", re.IGNORECASE)
 _SENTENCE_END = (".", "!", "?", ")", "\"", "'", "`", "*", "”", "’")
 STEP_SHOWN_CHARS = 160
+
+
+def _refusal(result: Any) -> Optional[str]:
+    """What refused a call (its result's error, on one line), or None when it did not fail. A call
+    held for the owner's click (PRD-256 US-004's ask) is waiting, not refused."""
+    if not isinstance(result, dict) or (result.get("success") is not False and result.get("successful") is not False):
+        return None
+    if result.get("requires_confirmation") or result.get("owner_only"):
+        return None
+    said = str(result.get("error") or result.get("message") or "it reported a failure").strip()
+    return " ".join(said.split())[:REFUSAL_SHOWN_CHARS]
+
+
+def refused_writes(outcomes: List[Any]) -> List[str]:
+    """The turn's refused writes that no later call of the same action made good, each as
+    '<action> (the tool said: "<what refused it>")', from the tracker's outcomes; reads are left out."""
+    from .turn_account import is_read
+
+    done = {action for action, _params, result in outcomes if _refusal(result) is None}
+    refused: Dict[str, str] = {}
+    for action, _params, result in outcomes:
+        said = _refusal(result)
+        if said and action not in done and not is_read(action):
+            # quoted as the tool's own words: a service's error never reads as the owner's (the nudge is a user turn)
+            refused.setdefault(action, f"{action} (the tool said: {json.dumps(said, ensure_ascii=False)})")
+    return list(refused.values())[:REFUSED_SHOWN]
+
+
+def claimed_action_nudge(claim: str, outcomes: List[Any]) -> str:
+    """F108's nudge for a reply that says something was ``claim`` with no action behind it;
+    PRD-256 US-006: after a refused write, the nudge names the refusal and the rule."""
+    said = CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim)
+    refused = refused_writes(outcomes)
+    if not refused:
+        return said
+    from services.brief_facts import REFUSED_WRITE_RULE
+
+    return f"{said} {REFUSED_WRITE_NOTE.format(refused='; '.join(refused), rule=REFUSED_WRITE_RULE)}"
 
 
 def announced_step(text: str) -> Optional[str]:
