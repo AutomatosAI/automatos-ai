@@ -9,18 +9,23 @@ seeded channel's publish step asks too (the slugs stay in ``modules/socials/chan
 And a ticket filed from a person's chat whose brief sends is reviewed by a person
 (``brief_sends``); "Email the supplier", "Post the spring menu" and "Reply to Declan" kept
 ``review_mode`` auto. A message verb now counts in the brief's verb position, while a brief
-that only drafts the message keeps auto.
+that only drafts the message keeps auto. P256-FIX-RVW-27: the verb is read past a lead-in
+("Please email", "Also post", "Can you"), after "ask/get/have <someone> to", and the
+outbound verbs and phrases (contact, notify, reach out, let <x> know, get back to, …) count.
 
 The gate's chain is the RVW-3 test's: the real owner's-click gate over the real
 ComposioToolExecutor.execute; the SDK call is recorded and must not happen.
 """
 from __future__ import annotations
 
+import asyncio
+from uuid import uuid4
+
 import pytest
 
 from modules.socials.capabilities import SEEDED_CHANNELS
 from modules.tools.discovery.agent_sends import AGENT_SEND
-from modules.tools.discovery.brief_sends import reviewed_by_a_person
+from modules.tools.discovery.brief_sends import REVIEW_HELD, reviewed_by_a_person
 from modules.tools.discovery.owner_only import is_composio_send
 from tests import test_prd256_fix_orders_and_resolved_sends_wait_for_the_click as sends
 
@@ -101,3 +106,70 @@ def test_a_brief_that_only_drafts_the_message_is_unchanged(title, description):
     brief = _brief(title, description)
     params, held = reviewed_by_a_person(brief)
     assert held is False and params == brief
+
+
+# ── P256-FIX-RVW-27: a lead-in word or a common outbound verb still sends ─────────────
+
+LEAD_IN_AND_OUTBOUND = [
+    "Please email the supplier to confirm delivery", "Also post the menu on Instagram",
+    "Just message Declan the times", "Contact the supplier to confirm the order", "Reach out to Declan",
+    "Let Declan know the box is late", "Get back to the customer", "Respond to the review", "Notify the team",
+    "Invite Sam to the call", "Submit the form",
+]
+ONLY_DRAFTS_OR_READS = ["Draft a reply to Declan", "Draft the email", "Prepare a post for review",
+                        "Read the supplier's email"]
+
+
+def _filed(monkeypatch, title):
+    """The params ``platform_create_task`` files for ``title`` from the owner's chat, and its receipt."""
+    from consumers.chatbot.receipts import receipt
+    from modules.tools.discovery import handlers_board_task_review, handlers_board_tasks
+
+    filed = {}
+
+    async def create(db, workspace_id, params):
+        filed.update(params)
+        return {"success": True, "task_id": 2318, "status": "assigned", "title": params["title"],
+                "review_mode": params.get("review_mode", "auto")}
+
+    monkeypatch.setattr(handlers_board_tasks, "create_board_task", create)
+    params = _brief(title)
+    result = asyncio.run(handlers_board_task_review.create_board_task(None, uuid4(), params))
+    return filed, result, receipt("platform_create_task", params, result)["effect"]
+
+
+@pytest.mark.parametrize("title", LEAD_IN_AND_OUTBOUND)
+def test_a_brief_with_a_lead_in_or_an_outbound_verb_is_reviewed_and_its_receipt_says_so(monkeypatch, title):
+    filed, result, effect = _filed(monkeypatch, title)
+
+    assert filed["review_mode"] == "human" and result[REVIEW_HELD] is True
+    assert effect == "card created, reviewed by you before it closes"
+
+
+@pytest.mark.parametrize("title", ONLY_DRAFTS_OR_READS)
+def test_a_brief_that_drafts_or_reads_still_closes_by_itself(monkeypatch, title):
+    filed, result, effect = _filed(monkeypatch, title)
+
+    assert filed.get("review_mode", "auto") == "auto" and REVIEW_HELD not in result
+    assert "reviewed by you" not in effect
+
+
+@pytest.mark.parametrize("title, description", [
+    ("Can you email Declan the times", ""), ("Could you please text Sam", ""),
+    ("Remember to reply to Declan", ""), ("Make sure to forward the invoice to Kerbside", ""),
+    ("Kindly notify the team", ""), ("First, share the menu with Kerbside", ""),
+    ("Ask Sam to email the supplier", ""), ("Get the team to reach out to Kerbside", ""),
+    ("Have Declan to let the supplier know", ""),
+    ("Check the stock", "Count the boxes and then let the team know."),
+])
+def test_the_verb_is_read_past_a_lead_in_and_after_an_ask(title, description):
+    assert reviewed_by_a_person(_brief(title, description))[1] is True
+
+
+@pytest.mark.parametrize("title", [
+    "Update the contact list", "Draft the invite for Sam", "Ask Sam about the menu", "Get the van to the depot",
+    "Draft a response to the review",
+])
+def test_a_noun_or_an_ask_with_no_message_verb_keeps_auto(title):
+    brief = _brief(title)
+    assert reviewed_by_a_person(brief) == (brief, False)
