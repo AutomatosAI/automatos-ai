@@ -181,7 +181,7 @@ export function CommandCenterShell() {
       <div className="cc-headrow">
         <div className="cc-head">
           <p className="cc-eyebrow">{dateline ? `Operations · ${dateline}` : 'Operations'}</p>
-          <h1 className="cc-h1">Command Centre</h1>
+          <h1 className="cc-h1">Command Center</h1>
           <p className="cc-sub">{lede}</p>
         </div>
         <div className="cc-actions">
@@ -210,7 +210,7 @@ export function CommandCenterShell() {
       <SetupChecklistCard className="my-3" />
 
       <div className={`cc-work${FILL_TABS.has(activeTab) ? ' fill' : ''}`}>
-        <nav className="cc-tabs" aria-label="Command Centre sections" ref={tabStrip}>
+        <nav className="cc-tabs" aria-label="Command Center sections" ref={tabStrip}>
           {TABS.map((t) => {
             const isActive = t.key === activeTab
             const count = tabCounts[t.key]
