@@ -44,6 +44,11 @@ Declan.") and a sentence that is only "<Noun> <participle>." ("Email sent.", "Po
 under the same plan-word, reply-content, history and denial exemptions, and a stative one that
 says what a read found ("I found that the boxes are posted on Monday") is none; a participle that
 continues the claim's list after a comma is a claim of its own ("I've created the ticket, emailed Sam.").
+P256-FIX-RVW-30: a turn that raised a card for the owner's click (a waiting receipt) says so in the
+first person ("I've raised a card to change Scout's model", "I've sent you an approval card"): a
+claim of raising, requesting, sending, submitting, putting or queuing whose clause names the ask (a
+card, an approval, a click, an OK, a sign-off) is the ask, backed by it (``waiting``). A claim of the
+change itself ("I've changed Scout's model.") never is, nor a numbered card sent or a card sent back.
 """
 from __future__ import annotations
 
@@ -137,6 +142,10 @@ _NO_WORK_AFTER = re.compile(
 _SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
 _MARKS = re.compile(r"[*_`#>]")
 _SENT_BACK = re.compile(r"\bsent\b.*\bback\b", re.I)
+# P256-FIX-RVW-30: the verbs that say an ask was raised, and the words that name the ask in their clause
+# ("Approve", "an approval card", "your OK"); "card #0422" (its "#" read off) is a card, never the ask's.
+_ASKED = frozenset({"raised", "requested", "sent", "submitted", "put", "queued"})
+_THE_ASK = re.compile(r"\b(?:approv(?:al|e)\b|click(?:s|ing)?\b|(?-i:OK)\b|sign[- ]?off\b|cards?\b(?!\s*#?\d))", re.I)
 # A shape that ends on its verb ("I've sent", "has been approved", "launched ✅"); "Done.", "is now live"
 # and "you should now see" have none (P256-FIX-RVW-7).
 _ON_ITS_VERB = re.compile(rf"\b{_DONE_VERB}$", re.I)
@@ -310,12 +319,25 @@ def _verb(sentence: str, said: str, end: int) -> str:
     return phrasal if phrasal in _PHRASAL else verb
 
 
-def _in_reply_content(sentence: str, start: int, end: int) -> bool:
-    """Whether the clause holding sentence[start:end] is the reply's own content ("below", "here's")."""
+def _clause(sentence: str, start: int, end: int) -> str:
+    """The clause of the sentence that holds sentence[start:end] (between ":", ";" or a dash)."""
     breaks = [found.end() for found in _CLAUSE_BREAK.finditer(sentence, 0, start)]
     after = _CLAUSE_BREAK.search(sentence, end)
-    clause = sentence[(breaks[-1] if breaks else 0): (after.start() if after else len(sentence))]
-    return bool(_REPLY_CONTENT.search(clause))
+    return sentence[(breaks[-1] if breaks else 0): (after.start() if after else len(sentence))]
+
+
+def _in_reply_content(sentence: str, start: int, end: int) -> bool:
+    """Whether the clause holding sentence[start:end] is the reply's own content ("below", "here's")."""
+    return bool(_REPLY_CONTENT.search(_clause(sentence, start, end)))
+
+
+def _asked(verb: str, sentence: str) -> bool:
+    """Whether a claim of ``verb`` reports the ask for the owner's click (P256-FIX-RVW-30): a card
+    raised, an approval requested, an approval card sent; never a card sent back."""
+    if verb not in _ASKED or (verb == "sent" and _SENT_BACK.search(sentence)):
+        return False
+    found = re.search(rf"\b{verb}\b", sentence, re.I)
+    return bool(found and _THE_ASK.search(_clause(sentence, found.start(), found.end())))
 
 
 def _reported(sentence: str, start: int, end: int) -> bool:
@@ -398,13 +420,16 @@ def claims_work_done(answer: str) -> bool:
     return bool(claims(answer))
 
 
-def unbacked_claims(answer: str, done_writes: Sequence[Receipt],
-                    first_person: bool = False) -> List[Tuple[str, bool]]:
+def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: bool = False,
+                    waiting: bool = False) -> List[Tuple[str, bool]]:
     """The answer's claims no done write backs: (the verb, whether its family is known). A
     claim of a known family needs a done write of that family (a Composio action's by the
-    words of its slug); any other needs any done write."""
+    words of its slug); any other needs any done write. With ``waiting`` (the turn raised a card
+    for the owner's click), a claim that reports that ask is backed by it (P256-FIX-RVW-30)."""
     unbacked = []
     for verb, sentence in claims(answer, first_person):
+        if waiting and _asked(verb, sentence):
+            continue
         backs = _family(verb, sentence)
         backed = any(backs(r) for r in done_writes) if backs else bool(done_writes)
         if not backed:
@@ -416,10 +441,11 @@ def _listed(verbs: Sequence[str]) -> str:
     return verbs[0] if len(verbs) == 1 else f"{', '.join(verbs[:-1])} or {verbs[-1]}"
 
 
-def not_done_line(answer: str, done_writes: Sequence[Receipt]) -> Optional[str]:
-    """The one not-done line for the answer, or None when every claim is backed. It names what
-    was not done when another write went through; else it is the plain not-done line."""
-    unbacked = unbacked_claims(answer, done_writes)
+def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = False) -> Optional[str]:
+    """The one not-done line for the answer, or None when every claim is backed (``waiting``: by
+    the card the turn raised, too). It names what was not done when another write went through;
+    else it is the plain not-done line."""
+    unbacked = unbacked_claims(answer, done_writes, waiting=waiting)
     if not unbacked:
         return None
     named = list(dict.fromkeys(verb for verb, known in unbacked if known))

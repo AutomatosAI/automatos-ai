@@ -297,7 +297,8 @@ def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
     not-done line when a claim of the answer has no done write of its kind behind it (FX-006:
     per claim, whatever else went through; it names the claim when another write did). A write
     that waits for the owner's click (FX-004) is neither done nor refused: it writes no "I tried
-    to" line, and the answer that calls it done still gets the not-done line."""
+    to" line, and the answer that calls it done still gets the not-done line; the answer that says
+    its card was raised ("I've raised a card…", P256-FIX-RVW-30) does not."""
     writes = [r for r in receipts if r.get("kind") == WRITE]
     done_writes = [r for r in writes if r.get("status") == DONE]
     done = {r["action"] for r in done_writes}
@@ -307,8 +308,13 @@ def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
             refused.setdefault(r["action"], r)          # one line per action: its first reason
     lines = [TRIED_LINE.format(what=_tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
              for r in refused.values()]
-    not_done = not_done_line(answer, done_writes)
+    not_done = not_done_line(answer, done_writes, waiting=_asks(writes))
     return [*lines, not_done] if not_done else lines
+
+
+def _asks(writes: Iterable[Receipt]) -> bool:
+    """Whether a write of the turn waits for the owner's click (its card raised)."""
+    return any(r.get("status") == WAITING for r in writes)
 
 
 def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]],
@@ -318,10 +324,12 @@ def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], An
     only that ("Done.", "it's now on your board", "it's been done"), else None. P256-FIX-RVW-7: a
     participle in no family ("I've prepared a summary") is never nudged (the line above the answer
     still reads it), and an agent's run (``promises`` False; None: the turn's lane decides) is held
-    only to its first-person claims: "It has been cancelled" in its customer draft is its writer's voice."""
-    receipts = [receipt(action, params, result) for action, params, result in outcomes]
-    done_writes = [r for r in receipts if r["kind"] == WRITE and r["status"] == DONE]
-    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises))
+    only to its first-person claims: "It has been cancelled" in its customer draft is its writer's voice.
+    P256-FIX-RVW-30: "I've raised a card…" after an ask for the owner's click is backed by it."""
+    writes = [r for r in (receipt(action, params, result) for action, params, result in outcomes)
+              if r["kind"] == WRITE]
+    done_writes = [r for r in writes if r["status"] == DONE]
+    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes))
     return next((verb or "done" for verb, known in unbacked if known or verb in SAYS_DONE), None)
 
 

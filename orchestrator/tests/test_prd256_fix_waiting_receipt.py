@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from consumers.chatbot.receipts import (
-    NOTHING_DONE_LINE, REFUSED, WAITING, WRITE, build_receipts, honesty_lines,
+    NOTHING_DONE_LINE, REFUSED, WAITING, WRITE, build_receipts, honesty_lines, unbacked_claim,
 )
 from consumers.chatbot.tool_summary import tool_result_summary
 from modules.tools.execution.card_raised import ACT, FOR_THE_MODEL, TOOL_END
@@ -71,11 +71,15 @@ def _chats(envelope):
             "raw_result": envelope["raw_result"], "frontend_data": envelope["frontend_data"]}
 
 
-def _receipts(*calls):
+def _tracker(*calls):
     tracker = ToolExecutionTracker()
     for action, params, result in calls:
         tracker.record_outcome("platform_execute", {"action": action, "params": params}, result)
-    return build_receipts(tracker)
+    return tracker
+
+
+def _receipts(*calls):
+    return build_receipts(_tracker(*calls))
 
 
 # ── The ask: one waiting receipt, no refused-write line ─────────────────────────────
@@ -145,6 +149,57 @@ def test_saying_the_waiting_change_is_done_gets_the_nothing_done_line():
     receipts = _receipts((UPDATE_AGENT, {"agent_id": 12}, _chats(_routed(_agent_ask()))))
 
     assert honesty_lines(receipts, SAID_DONE) == [NOTHING_DONE_LINE]
+
+
+# ── P256-FIX-RVW-30: the honest first-person account of the ask is no claim of the change ──
+# card_raised.FOR_THE_MODEL asks for one line; the natural one is "I've raised a card…".
+
+SAID_ASKED = (
+    "I've raised a card to change Scout's model. Nothing changes until you click Approve.",
+    "I've sent you an approval card for Scout's model change.",
+    "I've requested your approval to cancel #0953.",
+    "I've put it up for your approval.",
+    "An approval card has been sent to you.",
+)
+SAID_CHANGED = "I've changed Scout's model."
+
+
+def _waiting_agent_change():
+    return (UPDATE_AGENT, {"agent_id": 12}, _chats(_routed(_agent_ask())))
+
+
+@pytest.mark.parametrize("answer", SAID_ASKED)
+def test_saying_the_card_was_raised_gets_no_line(answer):
+    assert honesty_lines(_receipts(_waiting_agent_change()), answer) == []
+
+
+@pytest.mark.parametrize("answer", SAID_ASKED)
+def test_the_nudge_lets_the_ask_be_said(answer):
+    assert unbacked_claim(answer, _tracker(_waiting_agent_change()).outcomes) is None
+
+
+def test_a_claim_of_the_change_itself_still_gets_the_line_and_the_nudge():
+    calls = _waiting_agent_change()
+    assert honesty_lines(_receipts(calls), SAID_CHANGED) == [NOTHING_DONE_LINE]
+    assert unbacked_claim(SAID_CHANGED, _tracker(calls).outcomes) == "changed"
+
+
+@pytest.mark.parametrize("answer", (
+    "I've sent the email to Declan — just click Approve.",   # the send's clause names no ask
+    "I've sent card #0422 to Scout.",                          # a numbered card is a card, not the ask
+    "I've sent card #0422 back to Scout for approval.",        # a card sent back is no ask
+))
+def test_a_send_beside_the_ask_is_still_a_claim(answer):
+    calls = _waiting_agent_change()
+    assert honesty_lines(_receipts(calls), answer) == [NOTHING_DONE_LINE]
+    assert unbacked_claim(answer, _tracker(calls).outcomes) == "sent"
+
+
+def test_without_a_waiting_receipt_the_ask_words_back_nothing():
+    """No card was raised this turn: 'I've sent you an approval card' is an unbacked send."""
+    answer = SAID_ASKED[1]
+    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
+    assert unbacked_claim(answer, ()) == "sent"
 
 
 # ── End to end through the executor: a closing move from the owner's chat ───────────
