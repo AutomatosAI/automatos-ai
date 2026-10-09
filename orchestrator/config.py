@@ -233,6 +233,9 @@ class Config:
     # =============================================================================
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
+    # The workspace an organization-level ANTHROPIC_API_KEY bills (wrkspc_…), sent as
+    # anthropic-workspace-id. Unset for a key created inside a workspace (9 Oct 2026).
+    ANTHROPIC_WORKSPACE_ID: str = os.getenv("ANTHROPIC_WORKSPACE_ID")
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY")
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY")

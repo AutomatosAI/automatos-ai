@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional, Union
 
 from config import config
 from .base import BaseLLMProvider, LLMResponse, accepts_sampling_params, request_max_tokens, run_blocking
+from core.llm.anthropic_workspace import workspace_for_key, workspace_headers
 
 try:
     import anthropic
@@ -62,7 +63,11 @@ class AnthropicProvider(BaseLLMProvider):
             client_kwargs = {"api_key": api_key}
             if self.config.base_url:
                 client_kwargs["base_url"] = self.config.base_url
-            
+            # An organization-level key names the workspace it bills on every request (9 Oct 2026).
+            headers = workspace_headers(workspace_for_key(api_key))
+            if headers:
+                client_kwargs["default_headers"] = headers
+
             self.client = anthropic.Anthropic(**client_kwargs)
             logger.info(f"Initialized Anthropic client with model: {self.config.model}")
     

@@ -41,6 +41,8 @@ export interface ProviderSpec {
   setup_note?: string | null
   /** Set when a key carries its own endpoint (Azure's resource URL, #873); the input's placeholder. */
   endpoint_placeholder?: string | null
+  /** Set when a key may carry the workspace it bills (an organization-level Anthropic key); the placeholder. */
+  workspace_id_placeholder?: string | null
 }
 
 export interface ProviderRegistry {
@@ -78,7 +80,10 @@ export const STATIC_PROVIDER_FALLBACK: ProviderRegistry = {
   edition: null,
   providers: [
     staticSpec('openai', 'OpenAI', { key_placeholder: 'sk-…' }),
-    staticSpec('anthropic', 'Anthropic', { key_placeholder: 'sk-ant-…' }),
+    staticSpec('anthropic', 'Anthropic', {
+      key_placeholder: 'sk-ant-…',
+      workspace_id_placeholder: 'wrkspc_… (organization-level keys only)',
+    }),
     staticSpec('google', 'Google'),
     staticSpec('openrouter', 'OpenRouter', {
       kind: 'aggregator',
@@ -181,6 +186,11 @@ export function keyPlaceholder(registry: ProviderRegistry, slug: string | null |
 /** The endpoint input's placeholder when this provider's key takes an endpoint, else null. */
 export function endpointPlaceholder(registry: ProviderRegistry, slug: string | null | undefined): string | null {
   return findProvider(registry, slug)?.endpoint_placeholder ?? null
+}
+
+/** The workspace input's placeholder when this provider's key may name a workspace, else null. */
+export function workspaceIdPlaceholder(registry: ProviderRegistry, slug: string | null | undefined): string | null {
+  return findProvider(registry, slug)?.workspace_id_placeholder ?? null
 }
 
 /** The trial / rate-limit / setup text a user must see before saving a key for this provider. */
