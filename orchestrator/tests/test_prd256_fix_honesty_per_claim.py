@@ -38,6 +38,7 @@ import pytest
 from consumers.chatbot.claims_backed import FAMILIES, claims, claims_work_done, is_not_done_line
 from consumers.chatbot.receipts import DONE, NOTHING_DONE_LINE, REFUSED, WRITE, build_receipts, honesty_lines
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
+from tests.helpers_receipts_rule import nudged
 
 OK = {"success": True}
 
@@ -522,10 +523,7 @@ SWEPT = [
     ("Ticket 0059 started.", "started"), ("It is fixed now.", "fixed"), ("The mission completed.", "completed"),
     ("Run my saved playbook called New Cafe Onboarding, the one I set up.", "set up"),
     ("is cancelled now", "cancelled"), ("The file is saved as workspace/decafcolombiamargin.", "saved"),
-    ("How many Harvest Club boxes went out in September 2026?", "sent"),
-    ("How many Harvest Club boxes are scheduled to go out on Monday, October 5th, 2026?", "scheduled"),
     ("Mission 0033 is set up, and it will stop after every step for your OK.", "set up"),
-    ("How many club boxes went out late in September?", "sent"),
     ("The PDF I generated is still not checked, and it doesn't use your layout or logo.", "generated"),
     ("I generated a PDF, but I couldn't open it, and it has no logo.", "generated"),
     ("I generated the quote PDF, but I haven't opened it, and it probably isn't on your brand kit yet.", "generated"),
@@ -548,3 +546,74 @@ SWEPT = [
 @pytest.mark.parametrize("sentence, verb", SWEPT)
 def test_rvw25_the_sweeps_new_claims_are_claims(sentence, verb):
     assert verb in [said for said, _ in claims(sentence)]
+
+
+# ── P256-FIX-RVW-34: backed claims are no longer denied ─────────────────────
+# RVW-25's sweep listed three owner's questions as claims; a question reports nothing, so they are none.
+SWEPT_QUESTIONS = [
+    "How many Harvest Club boxes went out in September 2026?",
+    "How many Harvest Club boxes are scheduled to go out on Monday, October 5th, 2026?",
+    "How many club boxes went out late in September?",
+]
+
+READ_0365 = _platform("platform_get_task", {"task_id": "#0365"})
+CALENDAR_EVENT = _composio("GOOGLECALENDAR_CREATE_EVENT")
+# (the sentence, the turn's calls): each was denied at 80cd928ec, each is backed now.
+BACKED_RVW34 = [
+    ("I've made a note of that.", [_platform("platform_store_memory", {"content": "Declan prefers Fridays."})]),
+    ("I've made Scout the owner of #0931.", [_platform("platform_assign_task", {"task_id": "#0931", "agent_id": 12})]),
+    ("I've made the changes you asked for.", [_platform("platform_update_task", {"task_id": 451, "title": "Reply"})]),
+    ("I've scheduled the call with Declan for Friday.", [CALENDAR_EVENT]),
+    ("I've booked the call with Declan for Friday.", [CALENDAR_EVENT]),
+    ("Can you confirm the invoice was paid?", []),
+    ("Should I tell Declan it's been sent?", []),
+    ("Mission #0365 has been cancelled.", [READ_0365]),
+    ("Mission #0365 was cancelled.", [READ_0365]),
+]
+
+
+@pytest.mark.parametrize("answer, calls", BACKED_RVW34, ids=[answer for answer, _ in BACKED_RVW34])
+def test_rvw34_a_backed_claim_gets_no_line_and_no_nudge(answer, calls):
+    assert honesty_lines(_receipts(*calls), answer) == []
+    assert nudged(answer, *calls) is None
+
+
+@pytest.mark.parametrize("question", SWEPT_QUESTIONS)
+def test_rvw34_a_question_is_no_claim(question):
+    assert claims(question) == []
+
+
+def test_rvw34_made_says_its_family_by_what_follows_it():
+    store, assign = BACKED_RVW34[0][1], BACKED_RVW34[1][1]
+    assert honesty_lines(_receipts(*assign), "I've made a note of that.") == [_named("made")]   # a note is noted
+    assert honesty_lines(_receipts(*store), "I've made Scout the owner of #0931.") == [_named("made")]
+    assert nudged("I've made the changes you asked for.") is None           # no family: the line's alone
+    assert honesty_lines([], "I've made the changes you asked for.") == [NOTHING_DONE_LINE]
+
+
+def test_rvw34_made_a_new_playbook_with_no_create_is_still_caught():
+    answer = "I've made a new playbook."
+    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
+    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named("made")]
+    assert nudged(answer) == nudged(answer, MEMORY_STORED) == "made"
+    assert honesty_lines(_receipts(_platform("platform_create_playbook", {"name": "Weekly"})), answer) == []
+
+
+def test_rvw34_a_calendar_write_backs_only_scheduled_and_booked():
+    assert honesty_lines(_receipts(CALENDAR_EVENT), "I've emailed Declan the invite.") == [_named("emailed")]
+    assert honesty_lines(_receipts(MEMORY_STORED), "I've scheduled the call with Declan for Friday.") == [
+        _named("scheduled")]
+
+
+def test_rvw34_a_claim_before_a_clause_break_is_still_a_claim_in_a_question():
+    answer = "I've sent it to Declan, want me to chase him?"
+    assert [verb for verb, _ in claims(answer)] == ["sent"]
+    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
+
+
+def test_rvw34_a_status_with_no_read_of_its_number_is_still_caught():
+    answer = "Mission #0365 has been cancelled."
+    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
+    assert nudged(answer) == "cancelled"
+    assert nudged(answer, _platform("platform_get_task", {"task_id": "#0366"})) == "cancelled"   # another card's read
+    assert nudged("I've cancelled #0365.", READ_0365) == "cancelled"        # the writer's own work, not a finding

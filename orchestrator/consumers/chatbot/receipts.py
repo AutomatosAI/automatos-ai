@@ -308,13 +308,18 @@ def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
             refused.setdefault(r["action"], r)          # one line per action: its first reason
     lines = [TRIED_LINE.format(what=_tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
              for r in refused.values()]
-    not_done = not_done_line(answer, done_writes, waiting=_asks(writes))
+    not_done = not_done_line(answer, done_writes, waiting=_asks(writes), reads=_done_reads(receipts))
     return [*lines, not_done] if not_done else lines
 
 
 def _asks(writes: Iterable[Receipt]) -> bool:
     """Whether a write of the turn waits for the owner's click (its card raised)."""
     return any(r.get("status") == WAITING for r in writes)
+
+
+def _done_reads(receipts: Iterable[Receipt]) -> List[Receipt]:
+    """The turn's reads that went through: what they name was found, not done (P256-FIX-RVW-34)."""
+    return [r for r in receipts if r.get("kind") == READ and r.get("status") == DONE]
 
 
 def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]],
@@ -325,11 +330,13 @@ def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], An
     participle in no family ("I've prepared a summary") is never nudged (the line above the answer
     still reads it), and an agent's run (``promises`` False; None: the turn's lane decides) is held
     only to its first-person claims: "It has been cancelled" in its customer draft is its writer's voice.
-    P256-FIX-RVW-30: "I've raised a card…" after an ask for the owner's click is backed by it."""
-    writes = [r for r in (receipt(action, params, result) for action, params, result in outcomes)
-              if r["kind"] == WRITE]
+    P256-FIX-RVW-30: "I've raised a card…" after an ask for the owner's click is backed by it; RVW-34:
+    "#0365 has been cancelled" after a read of #0365 is what the read found."""
+    ran = [receipt(action, params, result) for action, params, result in outcomes]
+    writes = [r for r in ran if r["kind"] == WRITE]
     done_writes = [r for r in writes if r["status"] == DONE]
-    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes))
+    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
+                               reads=_done_reads(ran))
     return next((verb or "done" for verb, known in unbacked if known or verb in SAYS_DONE), None)
 
 

@@ -14,8 +14,9 @@ The sentences are night 8's (chats.jsonl), each with the calls of its turn.
 PRD-256 FX-007 (D10): the families are gone; each sentence is read by the receipts' rule
 (``nudged``: what the loop's nudge names, the claim's own verb). A move is read by where it
 went ("moved to 'cancelled'" needs the move to Cancelled), and an edit that moved nothing is
-no send-back. A read of the board backs no change: "Mission #0365 has been cancelled" after a
-read is caught (the line says this reply did not do it).
+no send-back. A read of the board backs no change of this reply's own ("I've cancelled #0365"),
+but P256-FIX-RVW-34 restores the base's rule: "Mission #0365 has been cancelled" after a read of
+#0365 is what the read found; night 8's, after a playbook run and no read, is still caught.
 """
 from __future__ import annotations
 
@@ -116,11 +117,14 @@ def test_a_refused_call_backs_nothing():
     assert nudged("#0422 has been cancelled.", *refused) == "cancelled"
 
 
-def test_a_read_of_the_board_backs_no_change():
-    """The families let a read back a change someone else made; the receipts say this reply did
-    not do it, and the read receipt shows what was looked up."""
+def test_a_read_of_the_board_may_report_a_change_someone_else_made():
+    """P256-FIX-RVW-34 (the base's test, restored against the receipts rule): a has-been claim about
+    the card the turn read is what the read found; with no read of it, it is this reply's claim, and
+    a read never backs the writer's own "I've cancelled"."""
     read = _did(("platform_get_task", {"task_id": "#0365"}))
-    assert nudged("Mission #0365 has been cancelled.", *read) == "cancelled"
+    assert nudged("Mission #0365 has been cancelled.", *read) is None
+    assert nudged("Mission #0365 has been cancelled.") == "cancelled"
+    assert nudged("I've cancelled #0365.", *read) == "cancelled"
 
 
 def test_an_agents_draft_is_not_held_to_auto_s_passives():

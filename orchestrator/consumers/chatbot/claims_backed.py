@@ -49,6 +49,13 @@ first person ("I've raised a card to change Scout's model", "I've sent you an ap
 claim of raising, requesting, sending, submitting, putting or queuing whose clause names the ask (a
 card, an approval, a click, an OK, a sign-off) is the ask, backed by it (``waiting``). A claim of the
 change itself ("I've changed Scout's model.") never is, nor a numbered card sent or a card sent back.
+P256-FIX-RVW-34: "made" is in no family of its own: "I've made a note of that." is noted, "I've made Scout
+the owner of #0931." assigned, "I've made a carousel" a create, "I've made the changes" only that work
+happened. A calendar write (GOOGLECALENDAR_CREATE_EVENT) backs "scheduled" and "booked". A question asks,
+it reports nothing ("Can you confirm the invoice was paid?"), unless it opens on no question word and its
+claim comes before a clause break ("I've sent it to Declan, want me to chase?"). "Mission #0365 has been
+cancelled." after a read of #0365 says what the read found: a has-been or was claim about a number a
+done read of the turn names is no claim.
 """
 from __future__ import annotations
 
@@ -146,6 +153,15 @@ _SENT_BACK = re.compile(r"\bsent\b.*\bback\b", re.I)
 # ("Approve", "an approval card", "your OK"); "card #0422" (its "#" read off) is a card, never the ask's.
 _ASKED = frozenset({"raised", "requested", "sent", "submitted", "put", "queued"})
 _THE_ASK = re.compile(r"\b(?:approv(?:al|e)\b|click(?:s|ing)?\b|(?-i:OK)\b|sign[- ]?off\b|cards?\b(?!\s*#?\d))", re.I)
+# P256-FIX-RVW-34: a question reports nothing: one that opens on its question word ("Should I tell
+# Declan it's been sent?", "How many boxes went out on Monday, October 5th?"), or a claim with no clause
+# break before its "?" ("…the invoice was paid?"); "I've sent it to Declan, want me to chase?" is a claim.
+_QUESTION = re.compile(r"^\s*(?:can|could|would|should|shall|will|do|does|did|is|are|was|were|has|have|had|how|"
+                       r"what|when|where|why|who|which|may|might)\b[^?]*\?\s*$", re.I)
+_ASKS = re.compile(r"[^:;—–,]*\?\s*$")
+# … nor a has-been or was claim about a number a read of the turn named ("#0365 has been cancelled").
+_REPORTED = re.compile(r"\b(?:been|was|were)\b", re.I)
+_CARD_NUMBER = re.compile(r"#\s?(\d+)")
 # A shape that ends on its verb ("I've sent", "has been approved", "launched ✅"); "Done.", "is now live"
 # and "you should now see" have none (P256-FIX-RVW-7).
 _ON_ITS_VERB = re.compile(rf"\b{_DONE_VERB}$", re.I)
@@ -220,6 +236,15 @@ _BACK = _any(_says("sent back"), _starts("send_back", "reject"))
 _SETTING = ("update_", "configure_", "set_", "pause_", "resume_", "schedule_", "create_")
 
 
+def _named(*words: str) -> Backs:
+    """A word anywhere in the call's name or its slug's words (GOOGLECALENDAR is a calendar)."""
+    return lambda r: any(word in stem for stem in _stems(r) for word in words)
+
+
+# P256-FIX-RVW-34: a write whose slug or name says event, meeting, calendar or booking schedules or books.
+_CALENDAR = _named("event", "meeting", "calendar", "booking")
+
+
 def _placed(*words: str) -> Backs:
     """An order, a booking or a payment: a send, or a write that names it (SHOPIFY_CREATE_ORDER)."""
     return _any(_SENDS, _has(*words))
@@ -228,7 +253,7 @@ def _placed(*words: str) -> Backs:
 # The verb families: the claim's verb → what done write backs it. A verb in none says only
 # that work happened; any done write backs it.
 FAMILIES: Tuple[Tuple[FrozenSet[str], Backs], ...] = (
-    (frozenset({"created", "made", "built", "generated"}), _starts("create_", "generate_", "make_", "build_")),
+    (frozenset({"created", "built", "generated"}), _starts("create_", "generate_", "make_", "build_")),
     (frozenset({"approved", "closed", "completed", "finished"}), _any(_starts("approve_"), _says("moved to done"))),
     (frozenset({"started", "launched", "kicked", "resumed", "initiated", "triggered"}),
      _any(_starts("start_", "launch_", "execute_", "run_", "resume_", "trigger_", "approve_mission",
@@ -250,7 +275,8 @@ FAMILIES: Tuple[Tuple[FrozenSet[str], Backs], ...] = (
      _any(_starts("delete_", "unassign_", "remove_", "cancel_", "archive_"), _says("moved to cancelled"))),
     # F379 (FX-007 keeps it): "I've removed the tasting notes from the carousel" is an edit of the post.
     (frozenset({"removed"}), _starts("delete_", "unassign_", "remove_", "update_", "edit_")),
-    (frozenset({"scheduled"}), _starts("schedule_", "create_playbook", "create_schedule", "update_schedule")),
+    (frozenset({"scheduled"}),
+     _any(_starts("schedule_", "create_playbook", "create_schedule", "update_schedule"), _CALENDAR)),
     (frozenset({"assigned"}), _any(_starts("assign_"), _says("agent set", "sent back to its agent"))),
     # F222 (FX-007 keeps it): an empty copy of a marketplace playbook is a create, never an install.
     (frozenset({"installed"}), _starts("install_")),
@@ -262,13 +288,21 @@ FAMILIES: Tuple[Tuple[FrozenSet[str], Backs], ...] = (
     # F337 (FX-007 keeps it): "I've set up an invoice template" over a generate_document.
     (frozenset({"set up"}), _starts(*_SETTING, "generate_")),
     (frozenset({"uploaded"}), _starts("upload_", "create_document", "save_")),
-    (frozenset({"booked"}), _placed("book", "booking", "bookings")),
+    (frozenset({"booked"}), _any(_placed("book", "booking", "bookings"), _CALENDAR)),
     (frozenset({"ordered", "purchased"}), _placed("order", "orders", "purchase", "purchases")),
     (frozenset({"paid"}), _placed("pay", "payment", "payments", "charge", "charges")),
     (frozenset({"connected", "linked"}), _starts("connect_", "link_", "install_", "update_")),
 )
 # The families' two-word verbs: a claim's particle is read with its verb only for these.
 _PHRASAL = frozenset(verb for verbs, _ in FAMILIES for verb in verbs if " " in verb)
+# P256-FIX-RVW-34: "made" says what it made by what follows it; the family it takes ("made the changes": none).
+_MADE = "made"
+_MADE_AS = (
+    (re.compile(r"\bmade\s+a\s+note\b", re.I), "noted"),
+    (re.compile(r"\bmade\s+(?:[\w'’-]+\s+){1,3}(?:the\s+)?(?:owner|assignee)\b", re.I), "assigned"),
+    (re.compile(r"\bmade\s+an?\s+(?!(?:change|edit|update|tweak|fix|correction|adjustment|start|decision)s?\b)\w",
+                re.I), "created"),
+)
 
 
 def _said_as(verb: str) -> str:
@@ -281,7 +315,8 @@ def _said_as(verb: str) -> str:
 # P256-FIX-RVW-25: the families' verbs, for the shapes that read no other ("I sent the email."); a
 # "<Noun> <participle>." has no auxiliary ("Rosa has ordered." is hers, "is paused" a state).
 _AUXILIARY = r"(?:is|are|was|were|be|been|being|has|have|had)\b"
-_DID = "(?:" + "|".join(sorted({_said_as(verb) for verbs, _ in FAMILIES for verb in verbs}, reverse=True)) + ")"
+_DID = "(?:" + "|".join(sorted({_said_as(verb) for verbs, _ in FAMILIES for verb in verbs} | {_said_as(_MADE)},
+                               reverse=True)) + ")"
 # The ONE completed-action pattern: the shapes above and, since RVW-25, a stative passive ("The post is
 # published."), "got/went/gone" ("The post got sent.", "It went out."), the first-person simple past
 # ("I sent the email to Declan.") and a sentence that is only "<Noun> <participle>." ("Email sent.",
@@ -304,6 +339,14 @@ def _family(verb: str, sentence: str) -> Optional[Backs]:
     where = _MOVED_TO.search(sentence) if verb == "moved" else None
     if where:
         return _WHERE[where.group(1).lower()]
+    if verb == _MADE:
+        said = next((family for pattern, family in _MADE_AS if pattern.search(sentence)), None)
+        return _of(said) if said else None
+    return _of(verb)
+
+
+def _of(verb: str) -> Optional[Backs]:
+    """The family of ``verb``: what done write backs it, None when it is in none."""
     return next((backs for verbs, backs in FAMILIES if verb in verbs), None)
 
 
@@ -366,18 +409,30 @@ def _history_or_denial(sentence: str, match: re.Match) -> bool:
     return bool((past or match.group("state")) and _DENIED.search(before))
 
 
-def _counts(sentence: str, match: re.Match, first_person: bool) -> bool:
+def _found_by_a_read(sentence: str, match: re.Match, read: FrozenSet[str]) -> bool:
+    """Whether a has-been or was claim names a number a done read of the turn named (P256-FIX-RVW-34):
+    "Mission 0365 has been cancelled." after a read of #0365 is what the read found. "I've cancelled
+    0365" is the writer's own work."""
+    if not read or _FIRST_PERSON.match(match.group(0)) or not _REPORTED.search(match.group(0)):
+        return False
+    return any(re.search(rf"(?<!\d){re.escape(number)}(?!\d)", sentence) for number in read)
+
+
+def _counts(sentence: str, match: re.Match, first_person: bool, read: FrozenSet[str]) -> bool:
     """Whether a claim shape reports this turn's work: no plan word before it, not the reply's own
-    content, nor a simple past's history, a read's finding or a denial; with ``first_person``, only
-    the writer's own "I've <verb>" (P256-FIX-RVW-7) or "I <verb>" (RVW-25)."""
+    content, nor a simple past's history, a read's finding or a denial, nor a question or what a read
+    of the turn found (RVW-34); with ``first_person``, only the writer's own "I've <verb>"
+    (P256-FIX-RVW-7) or "I <verb>" (RVW-25)."""
     if first_person and not _FIRST_PERSON.match(match.group(0)):
         return False
-    if _history_or_denial(sentence, match):
+    if _history_or_denial(sentence, match) or _QUESTION.match(sentence) or _ASKS.match(sentence, match.end()):
+        return False
+    if _found_by_a_read(sentence, match, read):
         return False
     return not _PLANNED.search(sentence[: match.start()]) and _reported(sentence, match.start(), match.end())
 
 
-def _claims_in(sentence: str, first_person: bool = False) -> List[str]:
+def _claims_in(sentence: str, first_person: bool, read: FrozenSet[str]) -> List[str]:
     """The verbs of the sentence's reports of work done ("" for a shape with no verb)."""
     if _PAST.search(sentence):
         return []
@@ -385,7 +440,7 @@ def _claims_in(sentence: str, first_person: bool = False) -> List[str]:
     ends = [found.start() for found in matches[1:]] + [len(sentence)]
     verbs = []
     for match, upto in zip(matches, ends):
-        if not _counts(sentence, match, first_person):
+        if not _counts(sentence, match, first_person, read):
             continue
         verbs.append(_verb(sentence, match.group(0), match.end()))
         verbs.extend(_coordinated(sentence, match.end(), upto))
@@ -407,12 +462,17 @@ def _own_words(text: str) -> str:
     return "\n".join(kept)
 
 
-def claims(answer: str, first_person: bool = False) -> List[Tuple[str, str]]:
+def claims(answer: str, first_person: bool = False, read: FrozenSet[str] = frozenset()) -> List[Tuple[str, str]]:
     """Each report of work done in the writer's own words: (its verb, its sentence); with
-    ``first_person``, only its "I've <verb>" claims."""
+    ``first_person``, only its "I've <verb>" claims; ``read``: the numbers the turn's reads named."""
     text = _MARKS.sub("", _own_words(answer or ""))
     return [(verb, sentence) for sentence in _SENTENCES.findall(text)
-            for verb in _claims_in(sentence, first_person)]
+            for verb in _claims_in(sentence, first_person, read)]
+
+
+def numbers_read(reads: Sequence[Receipt]) -> FrozenSet[str]:
+    """The numbers the done reads' subjects name ("#0365" is "0365"), P256-FIX-RVW-34."""
+    return frozenset(number for r in reads for number in _CARD_NUMBER.findall(str(r.get("subject") or "")))
 
 
 def claims_work_done(answer: str) -> bool:
@@ -421,13 +481,14 @@ def claims_work_done(answer: str) -> bool:
 
 
 def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: bool = False,
-                    waiting: bool = False) -> List[Tuple[str, bool]]:
+                    waiting: bool = False, reads: Sequence[Receipt] = ()) -> List[Tuple[str, bool]]:
     """The answer's claims no done write backs: (the verb, whether its family is known). A
     claim of a known family needs a done write of that family (a Composio action's by the
     words of its slug); any other needs any done write. With ``waiting`` (the turn raised a card
-    for the owner's click), a claim that reports that ask is backed by it (P256-FIX-RVW-30)."""
+    for the owner's click), a claim that reports that ask is backed by it (P256-FIX-RVW-30); a
+    has-been or was claim about a number one of the turn's done ``reads`` names is none (RVW-34)."""
     unbacked = []
-    for verb, sentence in claims(answer, first_person):
+    for verb, sentence in claims(answer, first_person, numbers_read(reads)):
         if waiting and _asked(verb, sentence):
             continue
         backs = _family(verb, sentence)
@@ -441,11 +502,12 @@ def _listed(verbs: Sequence[str]) -> str:
     return verbs[0] if len(verbs) == 1 else f"{', '.join(verbs[:-1])} or {verbs[-1]}"
 
 
-def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = False) -> Optional[str]:
+def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = False,
+                  reads: Sequence[Receipt] = ()) -> Optional[str]:
     """The one not-done line for the answer, or None when every claim is backed (``waiting``: by
-    the card the turn raised, too). It names what was not done when another write went through;
-    else it is the plain not-done line."""
-    unbacked = unbacked_claims(answer, done_writes, waiting=waiting)
+    the card the turn raised, too; ``reads``: the turn's done reads). It names what was not done
+    when another write went through; else it is the plain not-done line."""
+    unbacked = unbacked_claims(answer, done_writes, waiting=waiting, reads=reads)
     if not unbacked:
         return None
     named = list(dict.fromkeys(verb for verb, known in unbacked if known))
@@ -460,4 +522,4 @@ def is_not_done_line(line: str) -> bool:
 
 
 __all__ = ["COMPLETED_ACTION", "FAMILIES", "NOT_DONE_PREFIX", "SAYS_DONE", "claims", "claims_work_done",
-           "is_not_done_line", "not_done_line", "unbacked_claims"]
+           "is_not_done_line", "not_done_line", "numbers_read", "unbacked_claims"]
