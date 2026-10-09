@@ -1,0 +1,56 @@
+# kind e2e (deploy/kind/otel.sh): an OpenTelemetry Collector running the reference
+# config, deploy/otel/collector.yaml, with deploy/kind/otel-debug.yaml over it. The
+# ConfigMap is created by the script from those two files. The chart points the API
+# and the worker here (deploy/kind/values.yaml: otel.endpoint).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  labels: {app: otel-collector}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: otel-collector}
+  template:
+    metadata:
+      labels: {app: otel-collector}
+    spec:
+      containers:
+        - name: collector
+          image: otel/opentelemetry-collector-contrib:0.161.0
+          imagePullPolicy: IfNotPresent
+          args: ["--config=/conf/collector.yaml", "--config=/conf/otel-debug.yaml"]
+          env:
+            # Unused here (the debug overlay replaces the exporter), but the
+            # reference config names it.
+            - {name: OTLP_BACKEND_ENDPOINT, value: "http://127.0.0.1:1"}
+          ports:
+            - {name: otlp-http, containerPort: 4318}
+            - {name: health, containerPort: 13133}
+          readinessProbe:
+            httpGet: {path: /, port: health}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - {name: conf, mountPath: /conf, readOnly: true}
+      volumes:
+        - name: conf
+          configMap: {name: otel-collector}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+spec:
+  selector: {app: otel-collector}
+  ports:
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: health, port: 13133, targetPort: health}

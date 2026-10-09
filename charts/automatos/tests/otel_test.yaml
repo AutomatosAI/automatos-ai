@@ -1,0 +1,115 @@
+suite: OpenTelemetry (PRD-256)
+templates:
+  - templates/api-deployment.yaml
+  - templates/worker.yaml
+  - templates/migrate-job.yaml
+set:
+  existingSecret: automatos-secrets
+tests:
+  - it: sends nothing when otel is off (the default)
+    template: templates/api-deployment.yaml
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_ENABLED
+            value: "true"
+          any: true
+  - it: sends nothing from the worker when otel is off
+    template: templates/worker.yaml
+    documentIndex: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_ENABLED
+            value: "true"
+          any: true
+  - it: points the API at the collector under its own service name
+    template: templates/api-deployment.yaml
+    set:
+      otel:
+        enabled: true
+        endpoint: http://otel-collector.observability:4318
+        samplerRatio: "0.25"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_ENABLED, value: "true"}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_SERVICE_NAME, value: automatos-api}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: http://otel-collector.observability:4318}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_TRACES_SAMPLER_RATIO, value: "0.25"}
+  - it: points the worker at the same collector under its own service name
+    template: templates/worker.yaml
+    documentIndex: 0
+    set:
+      otel:
+        enabled: true
+        endpoint: http://otel-collector.observability:4318
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_SERVICE_NAME, value: automatos-workspace-worker}
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: http://otel-collector.observability:4318}
+  - it: takes the endpoint's headers from the Secret, never from values
+    template: templates/api-deployment.yaml
+    set:
+      otel:
+        enabled: true
+        endpoint: http://collector:4318
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_EXPORTER_OTLP_HEADERS
+            valueFrom:
+              secretKeyRef:
+                name: automatos-secrets
+                key: OTEL_EXPORTER_OTLP_HEADERS
+                optional: true
+  - it: names the pod and namespace on every span, with any extra attributes
+    template: templates/api-deployment.yaml
+    set:
+      otel:
+        enabled: true
+        endpoint: http://collector:4318
+        resourceAttributes: k8s.cluster.name=prod
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_RESOURCE_ATTRIBUTES
+            value: k8s.pod.name=$(OTEL_POD_NAME),k8s.namespace.name=$(OTEL_POD_NAMESPACE),k8s.cluster.name=prod
+  - it: refuses to render with otel on and no endpoint
+    template: templates/worker.yaml   # the first template the render fails in
+    set:
+      otel:
+        enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: otel.endpoint is required when otel.enabled is true
+  - it: leaves the migration Job untraced (it serves no requests)
+    template: templates/migrate-job.yaml
+    set:
+      otel:
+        enabled: true
+        endpoint: http://collector:4318
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content: {name: OTEL_ENABLED, value: "true"}

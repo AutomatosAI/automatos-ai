@@ -1,0 +1,66 @@
+# Reference OpenTelemetry Collector config for Automatos (PRD-256 O6, #847).
+#
+# The API and the workspace worker send traces, and the API sends its GenAI
+# metrics, over OTLP/HTTP to this collector (OTEL_EXPORTER_OTLP_ENDPOINT, port
+# 4318). The collector forwards both to ONE backend that speaks OTLP/HTTP:
+# Grafana Tempo/Mimir or Grafana Cloud, Jaeger, Honeycomb, Datadog's OTLP intake,
+# Azure Monitor through its OTLP endpoint, and so on. The backend is the
+# operator's choice; Automatos ships no vendor SDK.
+#
+#   OTLP_BACKEND_ENDPOINT       base URL of the backend's OTLP/HTTP intake;
+#                               /v1/traces and /v1/metrics are appended
+#
+# A backend that wants an Authorization header: add `--config backend-auth.yaml`
+# (that file; OTLP_BACKEND_AUTHORIZATION). Langfuse as well (GenAI spans only):
+# add `--config langfuse.yaml`.
+# Written for otel/opentelemetry-collector-contrib 0.161.0; check a change with
+#   docker run --rm -v "$PWD/deploy/otel:/cfg" otel/opentelemetry-collector-contrib:0.161.0 \
+#     validate --config=/cfg/collector.yaml
+# See README.md here for running it in Docker or on Kubernetes.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Refuse data before the collector runs out of memory, rather than crash.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  # Belt and braces for PRD-256 Principle 5: Automatos never records prompt or
+  # completion content on a span. Should any library ever add the GenAI content
+  # attributes, they stop here and never reach the backend.
+  attributes/no-content:
+    actions:
+      - {key: gen_ai.input.messages, action: delete}
+      - {key: gen_ai.output.messages, action: delete}
+      - {key: gen_ai.system_instructions, action: delete}
+      - {key: gen_ai.tool.call.arguments, action: delete}
+      - {key: gen_ai.tool.call.result, action: delete}
+      - {key: gen_ai.prompt, action: delete}
+      - {key: gen_ai.completion, action: delete}
+  batch: {}
+
+exporters:
+  otlp_http/backend:
+    endpoint: ${env:OTLP_BACKEND_ENDPOINT}
+
+extensions:
+  # GET :13133/ answers 200 while the collector is up (Kubernetes probes).
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/no-content, batch]
+      exporters: [otlp_http/backend]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_http/backend]

@@ -38,6 +38,7 @@ spec:
             - {{ .Values.api.uvicornWorkers | quote }}
           env:
             {{- include "automatos.apiEnv" . | nindent 12 }}
+            {{- include "automatos.otelEnv" (dict "ctx" . "service" "automatos-api") | nindent 12 }}
           ports:
             - name: http
               containerPort: 8000

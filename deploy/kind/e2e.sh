@@ -18,6 +18,8 @@
 #        E2E_IMAGE_TAG     published frontend/worker tag (default: edge)
 #        E2E_INGRESS=1     install ingress-nginx and send the session-mode checks
 #                          through the chart's Ingress (session-mode.sh)
+# OpenTelemetry (otel.sh): a collector on the reference config receives the API's
+# and the worker's spans; the checks read them from its log.
 # Not for CI merge gates: it needs Docker and several GB of images.
 # =============================================================================
 set -euo pipefail
@@ -32,7 +34,7 @@ TAG="${E2E_IMAGE_TAG:-edge}"
 API_IMAGE=automatos-api:e2e
 FRONTEND_IMAGE="ghcr.io/automatosai/automatos-frontend:$TAG"
 WORKER_IMAGE="ghcr.io/automatosai/automatos-workspace-worker:$TAG"
-DATASTORE_IMAGES=(pgvector/pgvector:pg16 redis:7-alpine)
+DATASTORE_IMAGES=(pgvector/pgvector:pg16 redis:7-alpine otel/opentelemetry-collector-contrib:0.161.0)
 WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 API_PORT=18000
 FRONTEND_PORT=13000
@@ -43,6 +45,8 @@ log() { printf '\n==> %s\n' "$*"; }
 
 # shellcheck source=deploy/kind/session-mode.sh
 . "$ROOT/deploy/kind/session-mode.sh"
+# shellcheck source=deploy/kind/otel.sh
+. "$ROOT/deploy/kind/otel.sh"
 
 cleanup_forwards() {
     for pid in "${FORWARDS[@]:-}"; do
@@ -120,6 +124,7 @@ create_secrets() {
     kubectl -n "$NS" apply -f "$ROOT/deploy/kind/datastores.yaml" >/dev/null
     kubectl -n "$NS" rollout status deploy/postgres --timeout=180s
     kubectl -n "$NS" rollout status deploy/redis --timeout=120s
+    install_otel_collector
 }
 
 helm_release() {
@@ -187,6 +192,7 @@ run_checks() {
     check "API pods did not run migrations" sh -c \
         "! kubectl -n $NS logs deploy/$RELEASE-api | grep -q 'alembic.runtime.migration'"
     run_session_mode_checks
+    run_otel_checks
     cleanup_forwards
 }
 
