@@ -9,9 +9,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InMemorySpanExporter } from '@opentelemetry/sdk-trace-node'
-import { context, trace, TraceFlags, type Span } from '@opentelemetry/api'
+import { context, SpanStatusCode, trace, TraceFlags, type Span } from '@opentelemetry/api'
 
-import { otelEnabled, redactQuery, redactedAttributes, samplerRatio } from '../otel/settings'
+import { otelEnabled, redactQuery, redactQueryValuesIn, redactedAttributes, samplerRatio } from '../otel/settings'
 import { buildProvider } from '../otel/node'
 
 const { startTracing } = vi.hoisted(() => ({ startTracing: vi.fn() }))
@@ -43,6 +43,13 @@ describe('settings, read as the API reads them', () => {
     ['/x?', '/x?'],
   ])('a query value never leaves on a URL: %s', (url, expected) => {
     expect(redactQuery(url)).toBe(expected)
+  })
+
+  it('redacts the query values in free text and keeps the words around them', () => {
+    expect(redactQueryValuesIn('fetch failed: http://backend:8000/x?token=SECRET&page=2 (ECONNREFUSED)'))
+      .toBe('fetch failed: http://backend:8000/x?token=REDACTED&page=REDACTED (ECONNREFUSED)')
+    expect(redactQueryValuesIn('at GET "/api/chat?id=SECRET"')).toBe('at GET "/api/chat?id=REDACTED"')
+    expect(redactQueryValuesIn('No query here. Why? Because.')).toBe('No query here. Why? Because.')
   })
 
   it('redacts every URL attribute and leaves the rest', () => {
@@ -87,6 +94,25 @@ describe('the provider', () => {
     expect(span.attributes['next.route']).toBe('/api/chat')
     expect(span.spanContext().traceId).toMatch(/^[0-9a-f]{32}$/)
     expect(JSON.stringify(span.attributes)).not.toContain('SECRET')
+  })
+
+  it('exports no query value from a failure: status message, exception message or stack', async () => {
+    // As Next.js records a failed request (recordException, then an ERROR status).
+    const failure = new Error('fetch failed: http://backend:8000/api/chat?token=SECRET&page=2')
+    const [span] = await exported({}, (tracer) => {
+      const failing = tracer.startSpan('POST /api/chat')
+      failing.recordException(failure)
+      failing.setStatus({ code: SpanStatusCode.ERROR, message: failure.message })
+      return failing
+    })
+    expect(span.status).toEqual({
+      code: SpanStatusCode.ERROR, message: 'fetch failed: http://backend:8000/api/chat?token=REDACTED&page=REDACTED',
+    })
+    const [exception] = span.events
+    expect(exception.name).toBe('exception')
+    expect(exception.attributes?.['exception.message']).toBe(span.status.message)
+    expect(String(exception.attributes?.['exception.stacktrace'])).toContain('token=REDACTED')
+    expect(JSON.stringify([span.status, span.events])).not.toContain('SECRET')
   })
 
   it('keeps no new trace at ratio 0, but follows a sampled caller', async () => {

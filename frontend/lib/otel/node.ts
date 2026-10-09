@@ -24,24 +24,37 @@ import {
   type SpanExporter,
 } from '@opentelemetry/sdk-trace-node'
 
-import { DEFAULT_SERVICE_NAME, redactQuery, redactedAttributes, samplerRatio } from './settings'
+import { DEFAULT_SERVICE_NAME, redactQuery, redactQueryValuesIn, redactedAttributes, samplerRatio } from './settings'
 
 /** The environment the settings are read from (process.env, or a test's own). */
 type Env = Record<string, string | undefined>
 
-/** Wraps an exporter: each span goes out with the query values in its name and URL attributes redacted. */
+/** An event's string attributes with their query values redacted: Next.js records a
+ * failure as an `exception` event whose message and stack trace can hold a URL. */
+function redactedEvent(event: ReadableSpan['events'][number]): ReadableSpan['events'][number] {
+  const attributes = Object.fromEntries(Object.entries(event.attributes ?? {}).map(([key, value]) =>
+    [key, typeof value === 'string' ? redactQueryValuesIn(value) : value]))
+  return { ...event, attributes }
+}
+
+/** The span as exported: no query value in its name, URL attributes, status message or
+ * events. The span itself stays the prototype, so spanContext() and the rest still answer. */
+function redactedSpan(span: ReadableSpan): ReadableSpan {
+  const status = span.status.message ? { ...span.status, message: redactQueryValuesIn(span.status.message) } : span.status
+  return Object.create(span, {
+    name: { value: redactQuery(span.name), enumerable: true },
+    attributes: { value: redactedAttributes({ ...span.attributes }), enumerable: true },
+    status: { value: status, enumerable: true },
+    events: { value: span.events.map(redactedEvent), enumerable: true },
+  })
+}
+
+/** Wraps an exporter: each span goes out with its query values redacted (redactedSpan). */
 export class RedactingExporter implements SpanExporter {
   constructor(private readonly inner: SpanExporter) {}
 
   export(spans: ReadableSpan[], done: Parameters<SpanExporter['export']>[1]): void {
-    // The span itself stays the prototype, so spanContext() and the rest still answer.
-    const redacted = spans.map((span) =>
-      Object.create(span, {
-        name: { value: redactQuery(span.name), enumerable: true },
-        attributes: { value: redactedAttributes({ ...span.attributes }), enumerable: true },
-      }),
-    )
-    this.inner.export(redacted, done)
+    this.inner.export(spans.map(redactedSpan), done)
   }
 
   shutdown(): Promise<void> {
