@@ -29,6 +29,13 @@ from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
 from core.best_effort import off_loop
+from core.llm.list_prices import (
+    CACHE_WRITE_MULTIPLIER,
+    DEFAULT_CACHE_READ_MULTIPLIER,
+    cache_read_multiplier,
+    list_rates,
+    prompt_tier_factors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +47,15 @@ STATUS_ERROR = "error"
 STATUS_CANCELLED = "cancelled"
 
 # Vendor pricing facts for prompt-cache tokens, as a multiple of the input
-# price: Anthropic bills cache reads at 10% and cache writes at 125% of input;
+# price: Anthropic bills cache reads at 10% (less on some models: the model's
+# own multiplier in core.llm.list_prices wins) and cache writes at 125% of input;
 # OpenAI bills cached prompt tokens at 50%. A provider not listed keeps the
 # full input price (conservative — never under-reports).
-CACHE_READ_PRICE_MULTIPLIER: Dict[str, float] = {"anthropic": 0.10, "bedrock": 0.10, "openai": 0.50, "azure": 0.50}
-CACHE_WRITE_PRICE_MULTIPLIER: Dict[str, float] = {"anthropic": 1.25, "bedrock": 1.25}
+CACHE_READ_PRICE_MULTIPLIER: Dict[str, float] = {
+    "anthropic": DEFAULT_CACHE_READ_MULTIPLIER, "bedrock": DEFAULT_CACHE_READ_MULTIPLIER,
+    "openai": 0.50, "azure": 0.50,
+}
+CACHE_WRITE_PRICE_MULTIPLIER: Dict[str, float] = {"anthropic": CACHE_WRITE_MULTIPLIER, "bedrock": CACHE_WRITE_MULTIPLIER}
 
 
 def resolve_workspace_id(workspace_id: Any = None) -> Optional[Any]:
@@ -79,8 +90,12 @@ def _as_uuid(value: Any) -> Optional[UUID]:
 
 
 def _rate_from_static_map(model_id: str) -> Optional[Tuple[float, float]]:
-    """The manager's estimate map, only when a key actually matches the model
-    (its flat default would price an embedding like a chat model)."""
+    """The Claude list price (``list_prices``), else the manager's estimate map, only
+    when a key actually matches the model (its flat default would price an embedding
+    like a chat model). The base price: ``price_call`` applies a prompt-length tier."""
+    listed = list_rates(model_id)
+    if listed is not None:
+        return listed
     try:
         from core.llm.manager import MODEL_COST_MAP
     except Exception:
@@ -126,6 +141,12 @@ def _cache_row(db, cache_model: Any, model_id: str) -> Any:
 
 
 def resolve_price(db, model_id: str, provider: Optional[str]) -> Dict[str, Any]:
+    """``_route_price`` plus the ``model_id`` it priced, which ``price_call`` reads
+    for the model's cache-read multiplier and prompt-length tier (P256-FIX-T2)."""
+    return {**_route_price(db, model_id, provider), "model_id": model_id}
+
+
+def _route_price(db, model_id: str, provider: Optional[str]) -> Dict[str, Any]:
     """``{input_per_1k, output_per_1k, tier, source, multiplier}`` for the route
     that served ``model_id``. ``source`` names where the price came from so a
     test (or a curious operator) can tell an estimate from a catalogue price.
@@ -190,17 +211,22 @@ def price_call(
     cache_write_tokens: int = 0,
 ) -> Tuple[float, float]:
     """(input_cost, output_cost) in USD. ``input_tokens`` is the full prompt; the
-    cached and written parts are re-priced at the vendor's cache multipliers."""
+    cached and written parts are re-priced at the vendor's cache multipliers, a
+    cache read at the model's own multiplier where ``list_prices`` holds one, and
+    the whole call at the model's prompt-length tier (Haiku 5.5 over 100k)."""
     from core.llm.providers import normalize_slug
 
     slug = normalize_slug(provider) or ""
-    read_mult = CACHE_READ_PRICE_MULTIPLIER.get(slug, 1.0)
+    model_id = price.get("model_id")
+    read_mult = CACHE_READ_PRICE_MULTIPLIER.get(slug)
+    read_mult = 1.0 if read_mult is None else cache_read_multiplier(model_id, read_mult)
     write_mult = CACHE_WRITE_PRICE_MULTIPLIER.get(slug, 1.0)
     cache_read = max(0, min(int(cache_read_tokens or 0), int(input_tokens or 0)))
     cache_write = max(0, min(int(cache_write_tokens or 0), int(input_tokens or 0) - cache_read))
     fresh = max(0, int(input_tokens or 0) - cache_read - cache_write)
-    per_1k_in = float(price.get("input_per_1k") or 0) * float(price.get("multiplier", 1.0))
-    per_1k_out = float(price.get("output_per_1k") or 0) * float(price.get("multiplier", 1.0))
+    tier_in, tier_out = prompt_tier_factors(model_id, int(input_tokens or 0))
+    per_1k_in = float(price.get("input_per_1k") or 0) * float(price.get("multiplier", 1.0)) * tier_in
+    per_1k_out = float(price.get("output_per_1k") or 0) * float(price.get("multiplier", 1.0)) * tier_out
     input_cost = (fresh + cache_read * read_mult + cache_write * write_mult) / 1000.0 * per_1k_in
     output_cost = int(output_tokens or 0) / 1000.0 * per_1k_out
     return input_cost, output_cost
