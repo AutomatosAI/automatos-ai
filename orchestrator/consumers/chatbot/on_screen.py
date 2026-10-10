@@ -24,25 +24,53 @@ P256-FIX-RVW-24: a round is retracted at most once per turn. A retry that only c
 tools never becomes the latest streamed round, so the answer after it would retract the
 nudged draft again; when that answer repeats the draft (or contains it), the frontend's
 rule takes the answer off the screen instead. The Screen records what it has retracted.
+
+P256-FIX-RVW-43: a held round is settled by where the answer came from, not by equal
+text. A nudged reply that opens with an apology is saved without it (a copy,
+``nudges.without_the_apology``), so its text no longer equals the round's; when the F205
+re-prompt after it came back blank, the round was retracted and the saved copy, already
+streamed, sent no tail: the screen was empty. A held round now stands when the answer is
+its response or a streamed copy whose words end the round's. A reply to a re-prompt
+goes through the apology gate (core/llm/turn_order.py) after it streamed through here:
+the gate reports what it let through and the copy it saved (``restated``), so the round
+is that copy and its frames carry the text the owner saw.
 """
 from __future__ import annotations
 
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, List, Optional, Sequence, Tuple
 
 from core.llm.screen_watch import WATCHER
 
 Stream = Callable[..., AsyncGenerator[Any, None]]
+_SENTENCE_ENDS = (". ", "! ", "? ")  # RVW-43: where a copy without its opening sentences starts
 
 
 @dataclass(frozen=True)
 class Round:
-    """One streamed call: its answer's text, what it streamed, and whether it said nothing."""
+    """One streamed call: its answer's text, what it streamed, whether it said nothing,
+    and the response it returned."""
 
     content: str
     said: str
     blank: bool
+    response: Any = field(compare=False)
+
+
+def _words(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def _stands(answer: Any, held: Round) -> bool:
+    """RVW-43: ``answer`` is ``held``'s own response, or a copy of it: streamed, and its
+    words (whitespace normalised) are the round's last sentences or all of them."""
+    if answer is held.response:
+        return True
+    words, whole = _words(getattr(answer, "content", None) or ""), _words(held.content)
+    before = whole[: len(whole) - len(words)]
+    copied = whole.endswith(words) and (not before or before.endswith(_SENTENCE_ENDS))
+    return bool(words) and bool(getattr(answer, "streamed", False)) and copied
 
 
 def _latest(rounds: Sequence[Round], content: str) -> Optional[Round]:
@@ -61,7 +89,14 @@ class Screen:
         """A streamed call returned ``response`` after putting ``said`` on the screen."""
         content = getattr(response, "content", None) or ""
         blank = not getattr(response, "tool_calls", None) and not content.strip()
-        self._rounds = (*self._rounds, Round(content, said, blank))
+        self._rounds = (*self._rounds, Round(content, said, blank, response))
+
+    def restated(self, response: Any, copy: Any, said: str) -> None:
+        """RVW-43: the round that returned ``response`` put ``said`` on the screen (the
+        apology gate held back its opening) and is saved as ``copy``."""
+        content = getattr(copy, "content", None) or ""
+        self._rounds = tuple(Round(content, said, r.blank, copy) if r.response is response else r
+                             for r in self._rounds)
 
     def narration(self, content: str) -> str:
         """What streamed for the latest round that answered ``content``."""
@@ -88,9 +123,8 @@ class Screen:
 
     def settled(self, answer: Any) -> List[str]:
         """The held rounds the loop's ``answer`` replaced, to retract now. A held round
-        whose text is the answer stands: nothing is retracted for it."""
-        content = getattr(answer, "content", None) or ""
-        replaced = [r for r in self._held if r.content != content]
+        the answer is (its response, or a copy of it) stands: nothing is retracted for it."""
+        replaced = [r for r in self._held if not _stands(answer, r)]
         self._held = ()
         return [said for said in (self._retract(r) for r in replaced) if said is not None]
 

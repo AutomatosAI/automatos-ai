@@ -261,10 +261,11 @@ def test_the_screen_holds_a_retraction_until_the_answer_is_known():
     from consumers.chatbot.on_screen import Screen
 
     screen = Screen()
-    screen.ended(_response(CLAIM), "<think>x</think>" + CLAIM)
+    original = _response(CLAIM)
+    screen.ended(original, "<think>x</think>" + CLAIM)
     screen.ended(_response(""), "")
     assert screen.retraction(CLAIM) is None                                  # held: its retry is blank
-    assert screen.settled(_response(CLAIM)) == []                            # the original stands
+    assert screen.settled(original) == []                                    # the original stands
 
     screen.ended(_response(""), "")
     assert screen.retraction(CLAIM) is None
@@ -324,3 +325,107 @@ def test_a_held_round_settled_is_never_retracted_again():
     assert screen.settled(_response(ANSWER)) == [CLAIM]
     screen.ended(_response(ANSWER), ANSWER)
     assert screen.retraction(CLAIM) is None
+
+
+# ── P256-FIX-RVW-43: a held round is settled by where the answer came from ──
+
+UPDATED = "I've updated the agent and switched its model."
+APOLOGY_R = ("My apologies. platform_update_agent was refused: it needs a value I don't have. "
+             "Which model should the agent use?")
+WITHOUT_APOLOGY_R = APOLOGY_R.removeprefix("My apologies. ")
+
+
+def test_a_blank_owner_words_retry_after_an_apology_stripped_answer_leaves_it_on_screen():
+    """The write is refused, the claim is nudged, the retry opens with an apology and names
+    the action; the answer saved is the retry without its apology (a copy), and the F205
+    re-prompt comes back blank. The retry's text stays on the screen: never none."""
+    provider = _Provider(([LOOKING], [_call("platform_update_agent")]), ([UPDATED], None),
+                         ([APOLOGY_R], None), ([], None))
+    frames, final = _turn(provider, success=False, owner="Switch OPS to a cheaper model.")
+
+    assert provider.tools[-1] is None                       # the F205 re-prompt ran, with no tools
+    assert final.content == WITHOUT_APOLOGY_R and final.streamed
+    assert _retractions(frames) == [UPDATED]                 # the nudged claim, and only it
+    assert _screen_after(frames) == APOLOGY_R
+
+
+def _gated(*rounds):
+    """The provider behind LLMManager's re-prompt wrapper (core/llm/turn_order.py): a reply
+    to a nudge streams through the apology gate, which drops the apology from the stream."""
+    from core.llm.turn_order import reprompts_in_the_users_turn
+
+    class _Gated(_Provider):
+        generate_response = reprompts_in_the_users_turn(_Provider.generate_response)
+    return _Gated(*rounds)
+
+
+def test_a_gated_apology_never_streamed_and_the_blank_retry_leaves_the_answer_on_screen():
+    """Through LLMManager the apology never reaches the screen: the screen's round is the
+    copy the gate saved, holding what the gate let through, so the blank F205 re-prompt
+    holds it and the answer, that copy, stands."""
+    provider = _gated(([LOOKING], [_call("platform_update_agent")]), ([UPDATED], None),
+                      ([APOLOGY_R], None), ([], None))
+    frames, final = _turn(provider, success=False, owner="Switch OPS to a cheaper model.")
+
+    assert provider.tools[-1] is None
+    assert final.content == WITHOUT_APOLOGY_R
+    assert _retractions(frames) == [UPDATED]
+    assert _screen_after(frames) == WITHOUT_APOLOGY_R
+
+
+def test_the_gate_reports_what_it_let_through_to_the_screen():
+    from consumers.chatbot.on_screen import Screen
+    from core.llm.reprompt_reply import gated
+
+    shown = []
+
+    async def on_delta(kind, text):
+        shown.append(text)
+
+    async def run():
+        gate = gated(on_delta)
+        for delta in ("My apologies. platform_update_agent ", "was refused."):
+            await gate("text", delta)
+        await gate.close()
+        return gate.passed
+    assert asyncio.run(run()) == "".join(shown) == "platform_update_agent was refused."
+
+    screen, full = Screen(), _llm(APOLOGY_R)
+    screen.ended(full, APOLOGY_R)
+    copy = _llm(WITHOUT_APOLOGY_R)
+    screen.restated(full, copy, WITHOUT_APOLOGY_R)
+    assert screen.narration(WITHOUT_APOLOGY_R) == WITHOUT_APOLOGY_R
+    screen.ended(_llm(""), "")
+    assert screen.retraction(WITHOUT_APOLOGY_R) is None                      # held, as the copy
+    assert screen.settled(copy) == []
+
+
+def _llm(content, streamed=True):
+    from core.llm.clients.base import LLMResponse
+
+    return LLMResponse(content=content, streamed=streamed, finish_reason="stop")
+
+
+def test_a_held_round_stands_for_its_own_response_or_a_streamed_copy_of_it():
+    from consumers.chatbot.on_screen import Screen
+    from modules.tools.execution.nudges import without_the_apology
+
+    for answer_of in (lambda r: r, without_the_apology):
+        screen, retry = Screen(), _llm(APOLOGY_R.replace(". ", ".\n\n", 1))
+        screen.ended(retry, retry.content)
+        screen.ended(_llm(""), "")
+        assert screen.retraction(retry.content) is None                      # held: the re-prompt is blank
+        assert screen.settled(answer_of(retry)) == []                        # it is the answer: it stands
+
+
+def test_a_held_round_is_retracted_when_the_answer_only_reads_like_it():
+    """Equal text is not where an answer came from: an account the turn writes (not
+    streamed), or a streamed answer that is not the round's own last words, replaces it."""
+    from consumers.chatbot.on_screen import Screen
+
+    for answer in (_llm(CLAIM, streamed=False), _llm("now running."), _llm("   ")):
+        screen = Screen()
+        screen.ended(_llm(CLAIM), CLAIM)
+        screen.ended(_llm(""), "")
+        assert screen.retraction(CLAIM) is None
+        assert screen.settled(answer) == [CLAIM]
