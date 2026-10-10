@@ -64,7 +64,8 @@ TIMED_UPDATES = frozenset({"platform_update_playbook"})
 # owner's paired machine, as switching an agent to cli is (P256-FIX-RVW-28).
 SESSION_CREATES = frozenset({"platform_create_agent"})
 SCHEDULE_CONFIG = "schedule_config"
-CLOSING_STATUSES = frozenset({"done", "cancelled"})
+# P256-FIX-RVW-40: "closed" is the board's close too (the status tool is the one for "close all …").
+CLOSING_STATUSES = frozenset({"done", "cancelled", "closed"})
 # D1's "every Composio send/publish action" and D7's order (send_words, shared with brief_sends):
 # a slug with one of these words and no read word, split on any non-alphanumeric ('gmail-send-email').
 COMPOSIO_SEND_WORDS = frozenset(word.upper() for word in LEAVES_THE_WORKSPACE)
@@ -84,7 +85,7 @@ MORE_CARDS = " and {count} more"
 
 ASK = ("Waiting for the owner's click: {act}. Nothing has been done: the approval card in the chat asks "
        "them, and their click runs it.")
-CLOSING_VERBS = {"done": "approve (move to Done)", "cancelled": "cancel"}
+CLOSING_VERBS = {"done": "approve (move to Done)", "cancelled": "cancel", "closed": "close"}
 VERBS = {
     "platform_assign_tool_to_agent": "give a tool to an agent",
     "platform_unassign_tool_from_agent": "take a tool from an agent",
@@ -167,7 +168,7 @@ def _a_channel_publish(name: str) -> bool:
 
 
 def closing_status(params: Dict[str, Any]) -> Optional[str]:
-    """"done" or "cancelled" when the call closes the card, read the board's way ("approved" is Done)."""
+    """"done", "cancelled" or "closed" when the call closes the card, read the board's way ("approved" is Done)."""
     from modules.tools.execution.call_effects import STATUS_WORDS
 
     status = str(params.get("status") or "").strip().lower()

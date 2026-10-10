@@ -50,7 +50,7 @@ def test_the_list_is_decision_d1():
 
 
 @pytest.mark.parametrize("status, owner_only", [
-    ("done", True), ("cancelled", True), ("approved", True), ("in_progress", False), ("assigned", False),
+    ("done", True), ("cancelled", True), ("closed", True), ("approved", True), ("in_progress", False), ("assigned", False),
     ("blocked", False), ("send back", False), (None, False),
 ])
 def test_a_card_move_is_owner_only_when_it_closes_the_card(status, owner_only):
