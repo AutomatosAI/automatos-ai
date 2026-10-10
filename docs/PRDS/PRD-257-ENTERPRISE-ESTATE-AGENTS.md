@@ -9,7 +9,8 @@
 
 | | Decision |
 |---|---|
-| D1 Where agents run | **In the cluster is enough.** The existing Helm chart is deployed into the bank's k8s and agents run in the orchestrator. The dashboard groups agents by the part of the estate they *watch*. No one-pod-per-agent runner. |
+| D1 Where agents run | **Registered estate runners** (revised 10 Oct 2026; was "in the cluster is enough"). The core runs from the existing Helm chart. Agents' tools run in **estate runners**: a pod per namespace or a service per VM, registered in Studio, holding scoped permissions, revocable, and authenticated by OIDC workload identity. Owner: "agents are registered on the platform via the Studio so we can control access and permissions, OIDC etc." |
+| D5 Identity | **OIDC.** Runners authenticate with the bank's workload identity (a k8s service-account token or the bank's OIDC issuer), checked against a configured JWKS. People sign in through the bank's OIDC provider. |
 | D2 Reaching bank systems | **Per-workspace monitoring endpoints.** The existing Loki/Prometheus tools stop being super-admin-only and global, and new read tools (Kong admin, k8s) use the 3-file pattern. This is a sanctioned exception to "integrations go through Composio", because Composio can't reach an internal bank network. The Composio deny list is untouched. |
 | D3 Autonomy | **Act with approval.** Agents observe, write to the brain, search it, raise tickets and propose remediation. Any change to a bank system runs only after a human grants it, through the existing `approval_grants` (PRD-224–229). |
 | D4 Model | **Bank-hosted.** Completions *and embeddings* stay inside the bank's network. No call to OpenRouter or a vendor API from the PoC install. |
@@ -30,11 +31,13 @@ Each system the bank runs (Kong, Finacle, the databases, the network, the k8s cl
 | Semantic search of a shared brain | `platform_field_query` falls back to workspace scope without a Mission (`handlers_field.py:74-79`); `query_workspace` filters on `workspace_id` (`modules/context/adapters/vector_field.py:416`); score = similarity × stability × recency | **Reuse.** |
 | Writing to the shared brain | `platform_field_inject` refuses outside a Mission (`handlers_field.py:135-139`) and passes no provenance, so points carry no `workspace_id` (`:147`) | **Extend (W1).** |
 | Approval before acting | `approval_grants` (`subject_type=tool_call`, `risk_tier`, `agent_id`), the policy gate (`modules/policy/gate.py`), Command Center governance | **Reuse.** Remediation tools declare a risk tier that requires a grant. |
-| Reading logs and metrics | `platform_query_loki_logs`, `platform_query_prometheus`, `platform_get_alerts` (`actions_monitoring.py`): `super_admin_only=True`, one global `LOKI_URL`/`PROMETHEUS_URL` (`config.py:850-857`) | **Extend (W2).** |
-| Kong, k8s, Finacle | Nothing. `workspace_exec` blocks `kubectl` on purpose; `ssh_execute` uses `AutoAddPolicy`, which a bank won't accept | **Build (W2).** |
+| Reading logs and metrics | `platform_query_loki_logs`, `platform_query_prometheus`, `platform_get_alerts` (`actions_monitoring.py`): `super_admin_only=True`, one global `LOKI_URL`/`PROMETHEUS_URL` (`config.py:850-857`) | **Extend (W2b).** |
+| Kong, k8s, Finacle | Nothing. `workspace_exec` blocks `kubectl` on purpose; `ssh_execute` uses `AutoAddPolicy`, which a bank won't accept | **Build (W2b).** |
 | Where an agent sits in the estate | Fleet state (`services/fleet_state.py`) has runtime, current work, queue, cost; no cluster, VM or system | **Extend (W3).** |
 | Chat with one agent | `/chat` agent picker; backend honours `agent_id` (`api/chat.py:139`); no `?agent=` deep link (`app/chat/page.tsx:68-76`) | **Extend (W4).** |
 | Visualisation | `react-force-graph-2d/3d`, `reactflow`, three; `mission-field-viz.tsx`; `org-chart-canvas.tsx` | **Reuse libraries; build the estate view (W4).** |
+| Registering a machine with scoped, revocable access | Three patterns, none complete. **CLI host pairing** (`core/models/cli_hosts.py`, `api/cli_hosts.py`): pairing code → one-time token → heartbeat → claim → result, per-ticket tokens (`mint_session_token`); but no scopes, `revoke_host` has no route or UI, and it is local-edition only (`config.py:2206`). **SDK API keys** (`core/models/sdk_api_keys.py`, widgets): scopes, allowed IPs/domains, expiry, revoke in Studio (`ApiKeyManager.tsx`); but exchanged JWTs outlive a revoked key (`api/widgets/auth.py:138-171`). **Shopify**: one shared secret from an external app server, no per-install credential | **Extend (W2a).** CLI host lifecycle plus SDK-key scopes. |
+| OIDC / SSO | None. Users sign in with Clerk JWTs on the hosted edition (`core/auth/clerk.py`, JWKS); the local edition has no accounts. No OIDC, SAML or workload identity anywhere | **Build (W2a, W5).** |
 | Running in k8s | Helm chart `charts/automatos/` (api, worker, frontend, migrate); `QDRANT_URL` is a value, Qdrant itself isn't shipped | **Extend (W5).** |
 | Traces | PRD-256 OTel, complete; GenAI spans carry `agent_id`; collector config in `deploy/otel/` | **Reuse.** Exported to the bank's collector. |
 | Bank-hosted model | Provider registry (`core/llm/providers.py`) has fixed OpenAI-compatible specs (openrouter, nvidia, deepseek); embeddings go via OpenRouter | **Extend (W5).** |
@@ -58,7 +61,19 @@ Each system the bank runs (Kong, Finacle, the databases, the network, the k8s cl
 - Read-only REST for the dashboard: `GET /api/estate/brain?query=&agent_id=&since=` (workspace-scoped, authenticated, in the route manifest).
 - **Proof:** a heartbeat-mode agent injects a finding with no Mission; a second agent's query returns it with its provenance; a different workspace's query does not.
 
-### W2: Reaching the bank's systems
+### W2a: Estate runners, registered in Studio
+
+- **One registry, not a second one.** `cli_hosts` generalises into a runner registry with a `kind` (`cli` for today's session hosts, `estate` for the new runners); a rename to `runners` happens in the same PR if the name gets in the way, with no compatibility alias. The CLI host keeps working unchanged.
+- **Register in Studio** (Settings → Runners, extending today's Session mode pairing UI): name the runner, choose its zone, the agents it may run, its tools and its scopes, then get a pairing code. The runner exchanges the code once for its credential.
+- **Scopes:** a `runner:*` vocabulary in `core/auth/scopes.py` (`runner:heartbeat`, `runner:claim`, `runner:brain.write`, `runner:tickets.create`, `runner:tools.<tool>`), plus `allowed_agent_ids`, `allowed_ips` and `expires_at` from the SDK-key model. Every runner route checks scope, not only identity.
+- **OIDC workload identity:** a runner may skip the pairing secret and present its k8s service-account token, or a token from the bank's OIDC issuer. The token is verified against a configured JWKS (the `PyJWKClient` pattern in `core/auth/clerk.py`) and mapped to the registered runner by issuer and subject. Pairing codes stay for VMs without a workload identity.
+- **Short-lived job tokens:** each claimed job gets a token scoped to that job (the `mint_session_token` model). A revoked runner's jobs stop at once, avoiding the widget-JWT problem.
+- **Revoke, rotate, audit:** routes and Studio buttons for revoke and rotate (today's `revoke_host` is never called); pair, revoke, rotate and scope changes are audited.
+- **The runner:** a small process packaged as a container image and a systemd unit. It heartbeats (the fleet and dashboard health), claims its agents' tool calls and heartbeat jobs, runs the W2b tools locally against its zone's systems, and sends results back. It never holds an LLM key: reasoning stays in the core, tools run at the edge.
+- **Editions:** the estate runner is allowed in both editions behind `ESTATE_ENABLED`; session-mode CLI runtime stays local-only as today.
+- **Proof:** pair by code and by OIDC token (a test JWKS); a call outside the runner's scopes is refused; revoking kills an in-flight job token; a runner can't claim another workspace's work.
+
+### W2b: Reaching the bank's systems
 
 - **Per-workspace monitoring endpoints.** A workspace configures named endpoints (kind: `loki | prometheus | kong_admin | k8s_api | http_health`, base URL, an auth reference into the credential store, TLS CA bundle). Storage reuses an existing table if one fits (the credential store's own table is the first candidate); a new table only if none does, with the reason in the PR.
 - `platform_query_loki_logs`, `platform_query_prometheus`, `platform_get_alerts`: they lose `super_admin_only` and read the workspace's endpoint. The global `LOKI_URL`/`PROMETHEUS_URL`/Grafana settings that served the platform's own infra are **deleted** along with their callers' fallback, or kept only as the platform workspace's endpoint, with no second code path.
@@ -99,17 +114,19 @@ Each system the bank runs (Kong, Finacle, the databases, the network, the k8s cl
 | `ESTATE_ENABLED` | `false` | Turns on the estate routes, tools and dashboard. |
 | `SELF_HOSTED_LLM_BASE_URL` / `SELF_HOSTED_LLM_API_KEY` | empty | The bank's OpenAI-compatible model server. |
 | `SELF_HOSTED_EMBEDDING_BASE_URL` / `SELF_HOSTED_EMBEDDING_MODEL` | empty | Embeddings for the field and routing, inside the bank. |
+| `ESTATE_RUNNER_OIDC_ISSUERS` | empty | Trusted issuers and their JWKS URLs for runner workload identity. |
 | `OUTBOUND_LOCKDOWN` | `false` | Refuses every outbound integration that isn't a configured endpoint. |
 
 ## 6. Open questions for Gerard
 
 1. **What is enterprise.automatos.app, in code?** I recommend a route group (`/enterprise`) in the existing frontend, behind `ESTATE_ENABLED`, served on that host by ingress. One codebase, no third app. The alternative is a separate Next.js app.
-2. **How does the bank expose Finacle?** REST/SOAP APIs, logs only, its database, or JMX/health endpoints? That decides the Finacle tool in W2.
+2. **How does the bank expose Finacle?** REST/SOAP APIs, logs only, its database, or JMX/health endpoints? That decides the Finacle tool in W2b.
 3. **Which remediations are allowed in the PoC?** I've proposed two (restart a workload, toggle a Kong upstream target). The bank's change-management rules decide the final list.
-4. **Which edition runs at the bank?** The local edition has no accounts; the hosted edition uses our hosted auth. A bank will want its own SSO. For the PoC, local edition behind the bank's ingress auth may be enough, but that's a tenancy and auth decision (AGENTS.md: ask before changing auth).
+4. **User sign-in at the bank (D5):** OIDC login is new auth work. Is it a third sign-in path beside Clerk, in the edition the bank runs, or do we replace Clerk with generic OIDC on the hosted edition too (Clerk itself speaks OIDC)? AGENTS.md asks for an issue before auth changes; this PRD is that record once you decide.
+7. **Copilot identity at the bank:** a named engineer's GitHub account or a bank service account, and GitHub Enterprise Server or Cloud?
 5. **New dependency for k8s:** the official `kubernetes` Python client, or plain `httpx` against the k8s API with the service-account token. I recommend `httpx` (no new dependency); the client is the alternative if you'd rather.
 6. **"Enterprise" as a plan:** `plan_tiers.py` already has a coming-soon `enterprise` tier. Should the estate feature key off that tier on the hosted edition, or stay a deployment flag only?
 
-## 7. Out of scope only by decision
+## 7. Granularity of runners
 
-One pod per agent (D1). Revisit if the bank asks for process isolation per agent; the missing `KubernetesTaskRunner` in `core/task_runner/factory.py` is where it would go.
+A runner serves a zone (a namespace or a VM) and may host several agents' tools. One runner per agent is a registration choice, not new code.
