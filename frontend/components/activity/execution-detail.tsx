@@ -506,7 +506,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
               className="text-xs min-h-[44px] sm:min-h-0 justify-center"
             >
               <Pencil className="w-3.5 h-3.5 mr-1.5" />
-              {item.type === 'recipe' ? 'Edit Recipe' : 'Edit Routine'}
+              {item.type === 'recipe' ? 'Edit Playbook' : 'Edit Routine'}
             </Button>
           )}
           {item.type === 'routine' && item.agent?.id && (
