@@ -1,5 +1,8 @@
 """PRD-256 P256-FIX-RVW-2: a playbook step's LinkedIn image post waits for the owner's click.
 
+P256-FIX-RVW-39: a watch's rerun of a run Auto started (a new run, triggered_by
+'watch_rerun', ``retry_of`` the first) is on Auto's brief too: its step's send asks.
+
 The step ran LINKEDIN_CREATE_LINKED_IN_POST with images through the LinkedIn direct API
 itself (api/recipe_executor ``_execute_step``) and never reached
 ``owner_only.asks_before_a_send``, so a step of a run Auto started (FX-011 AC3) posted
@@ -23,7 +26,7 @@ import ast
 import asyncio
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -182,6 +185,77 @@ def test_the_models_own_composio_execute_in_a_step_a_person_started_posts(desk):
 
     desk.linkedin.assert_called_once()
     assert _grants(desk) == []
+
+
+# ── A watch's rerun of a run is on the brief of the run it reruns (P256-FIX-RVW-39) ────
+
+def _rerun(desk, of):
+    """The watch's corrective rerun (services/watch_rerun ``create_rerun_execution``): a NEW
+    run, triggered_by 'watch_rerun', whose ``retry_of`` names the run it reruns."""
+    from core.models.core import RecipeExecution
+    from services.watch_rerun import TRIGGERED_BY_WATCH
+
+    original = desk.db.query(RecipeExecution).filter(RecipeExecution.execution_id == of).one()
+    run = f"rerun-{uuid4().hex[:12]}"
+    desk.db.add(RecipeExecution(execution_id=run, recipe_id=original.recipe_id, workspace_id=desk.ws,
+                                status="running", input_data={}, attempt_count=(original.attempt_count or 1) + 1,
+                                triggered_by=TRIGGERED_BY_WATCH, retry_of=of))
+    desk.db.flush()
+    return run
+
+
+def test_a_watchs_rerun_of_an_auto_started_run_raises_the_card_and_posts_nothing(desk):
+    rerun = _rerun(desk, _auto_run(desk))
+    call = _run_step(desk, rerun)
+
+    desk.linkedin.assert_not_called()
+    assert call["result"].startswith("Card raised: ") and call["success"] is False
+    (grant,) = _grants(desk)
+    assert grant.details[AGENT_SEND]["context"] == {"playbook_execution_id": rerun}
+
+
+def test_a_rerun_of_a_rerun_of_an_auto_started_run_asks_too(desk):
+    call = _run_step(desk, _rerun(desk, _rerun(desk, _auto_run(desk))))
+
+    desk.linkedin.assert_not_called()
+    assert call["result"].startswith("Card raised: ")
+    assert len(_grants(desk)) == 1
+
+
+def test_a_watchs_rerun_of_a_run_a_person_started_posts(desk):
+    call = _run_step(desk, _rerun(desk, _auto_run(desk, triggered_by="user@example.com")))
+
+    desk.linkedin.assert_called_once()
+    assert call["success"] is True
+    assert _grants(desk) == []
+
+
+def test_the_rerun_chain_is_read_in_the_runs_own_workspace_only(desk, seed_workspace):
+    """A run whose retry_of names another workspace's Auto-started run is not on this Auto's brief."""
+    from modules.tools.discovery.agent_sends import _launched_by_auto
+
+    elsewhere = UUID(seed_workspace())
+    theirs = _auto_run(NS(db=desk.db, ws=elsewhere))
+    ours = _rerun(desk, theirs)
+
+    assert _launched_by_auto(desk.db, elsewhere, theirs) is True
+    assert _launched_by_auto(desk.db, desk.ws, ours) is False
+
+
+def test_the_rerun_chain_is_bounded(desk):
+    """A chain deeper than RERUN_CHAIN_DEPTH (or a loop) stops reading and does not ask."""
+    from core.models.core import RecipeExecution
+    from modules.tools.discovery import agent_sends
+
+    first = _auto_run(desk)
+    run = first
+    for _ in range(agent_sends.RERUN_CHAIN_DEPTH):
+        run = _rerun(desk, run)
+    assert agent_sends._launched_by_auto(desk.db, desk.ws, run) is False
+    looped = desk.db.query(RecipeExecution).filter(RecipeExecution.execution_id == first).one()
+    looped.triggered_by, looped.retry_of = "user@example.com", _rerun(desk, first)
+    desk.db.flush()
+    assert agent_sends._launched_by_auto(desk.db, desk.ws, first) is False
 
 
 def test_a_chats_composio_send_checked_against_the_intent_asks_the_owner(desk, monkeypatch):
