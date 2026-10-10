@@ -344,6 +344,11 @@ class _InMemoryQdrant:
     async def upsert(self, collection_name, points):
         self.points.extend(NS(id=p.id, payload=p.payload) for p in points)
 
+    async def set_payload(self, collection_name, payload, points):
+        for point in self.points:
+            if point.id in points:
+                point.payload = {**point.payload, **payload}
+
     async def scroll(self, collection_name, scroll_filter, limit, offset=None, **_kwargs):
         hits = [p for p in self.points if all(_matches(p.payload, c) for c in scroll_filter.must or [])
                 and (not scroll_filter.should or any(_matches(p.payload, c) for c in scroll_filter.should))]
@@ -418,3 +423,65 @@ def test_the_same_person_restating_a_rule_still_dedupes(qdrant):
     assert _store(_said_by(OWNER))["success"] is True and _store(_said_by(OWNER))["success"] is True
     assert len(qdrant.points) == 1
     assert _block(uuid.UUID(int=1), f"user:{OWNER}").count(RULE) == 1
+
+
+# ---------------------------------------------------------------------------
+# P256-FIX-RVW-41: a restated rule is the owner's newest (it leads the block, and beats the
+# rule it replaced), however old its first statement
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def clock(monkeypatch):
+    """The store's clock, a minute on at every read, so each write is dated after the last."""
+    import modules.memory.durable_store as durable_store
+
+    ticks = iter(range(10_000))
+    start = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return start + timedelta(minutes=next(ticks))
+
+    monkeypatch.setattr(durable_store, "datetime", _Clock)
+
+
+def _rule_lines(viewer=f"user:{OWNER}"):
+    return [ln[2:] for ln in _block(uuid.UUID(int=1), viewer).splitlines() if ln.startswith("- ")]
+
+
+def test_a_rule_restated_after_routine_saves_is_back_in_the_block_and_first(qdrant, clock):
+    assert _store(_said_by(OWNER))["success"] is True
+    for i in range(30):
+        routine = f"Order #{1000 + i} for the Harvest Club went out with two bags of the Ethiopian " \
+                  f"natural and a tasting card; the customer asked for a grinder recommendation."
+        assert 130 <= len(routine) <= 170
+        assert _store(_said_by(OWNER, routine))["success"] is True
+    assert RULE not in _rule_lines()                                  # pushed out by the routine saves
+    assert _store(_said_by(OWNER))["success"] is True                 # said again, in the same words
+    assert len(qdrant.points) == 31                                   # the same row, re-dated
+    assert _rule_lines()[0] == RULE
+
+
+def test_tuesdays_thursdays_tuesdays_leaves_tuesdays_newest(qdrant, clock):
+    tuesdays, thursdays = "We post the newsletter on Tuesdays.", "We post the newsletter on Thursdays."
+    for said in (tuesdays, thursdays, tuesdays):
+        assert _store(_said_by(OWNER, said))["success"] is True
+    assert len(qdrant.points) == 2
+    lines = _rule_lines()
+    assert lines.index(tuesdays) < lines.index(thursdays)
+
+
+def test_an_ownerless_dedupe_keeps_its_date(qdrant, clock):
+    _seed(qdrant, RULE, {"source": "claude_reports"})
+    assert _store({"content": RULE, "source_type": "claude_reports"})["success"] is True
+    assert len(qdrant.points) == 1 and qdrant.points[0].payload["created_at"] == "2026-10-06T21:00:00+00:00"
+
+
+def test_a_re_date_that_times_out_keeps_the_row_and_says_so(qdrant, clock, monkeypatch, caplog):
+    import httpx
+
+    assert _store(_said_by(OWNER))["success"] is True
+    monkeypatch.setattr(qdrant, "set_payload", AsyncMock(side_effect=httpx.ReadTimeout("slow")))
+    assert _store(_said_by(OWNER))["success"] is True                 # the rule is stored, once
+    assert len(qdrant.points) == 1 and "restated but not re-dated" in caplog.text
