@@ -128,6 +128,22 @@ def test_a_ticket_that_is_not_a_customer_draft_is_not_checked(finish):
     assert finish(said, title="Tom's Monday checklist", description="Add the count check.").result == said
 
 
+
+# ── the writer's voice (P256-FIX-RVW-44) ─────────────────────────────────────
+
+@pytest.mark.parametrize("draft", ["Your order has been cancelled.", "Your refund has been processed."])
+def test_a_third_person_line_in_a_customer_draft_is_not_checked(draft):
+    from services.draft_guides import check_before_sending
+
+    assert check_before_sending(BRIEF_1146, draft, ["platform_load_skill"]) is None
+
+
+def test_a_first_person_claim_no_action_did_is_checked():
+    from services.draft_guides import CHECK_BEFORE_SENDING, check_before_sending
+
+    said = check_before_sending(BRIEF_1146, "I've cancelled your order.", ["platform_load_skill"])
+    assert said == CHECK_BEFORE_SENDING.format(claim="cancelled")
+
 # ── any wording (TESTER, after the F100 read) ──────────────────────────────
 
 @pytest.mark.parametrize("brief", [

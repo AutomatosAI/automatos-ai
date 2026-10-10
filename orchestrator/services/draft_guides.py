@@ -200,8 +200,10 @@ def _agents_documents(db: Any, ids: Iterable[Any], workspace_id: Any = None) -> 
 
 
 def check_before_sending(brief: object, draft: object, ran: Iterable[str]) -> Optional[str]:
-    """The owner's line for a customer draft that says an action was done that
-    no action in its run did, else None."""
+    """The owner's line for a customer draft that says, in its writer's voice ("I've
+    cancelled your order"), an action was done that no action in its run did, else None.
+    A third-person line ("Your order has been cancelled.") is the customer's news, not a
+    claim of the run's work (P256-FIX-RVW-44, as RVW-7 holds an agent's run)."""
     if not is_customer_draft(brief):
         return None
     from consumers.chatbot.claims_backed import unbacked_claims
@@ -210,7 +212,8 @@ def check_before_sending(brief: object, draft: object, ran: Iterable[str]) -> Op
     # the run lists the actions that went through: each write is a done one, its name its receipt (no
     # effect is known here, so a claim backed only by an effect, "moved to Done", is never backed)
     done_writes = [{"action": action} for action in (ran or ()) if not is_read(action)]
-    unbacked = unbacked_claims(str(draft or ""), done_writes, kinds_too=False)    # RVW-37: Auto's own claims
+    unbacked = unbacked_claims(str(draft or ""), done_writes, first_person=True,
+                               kinds_too=False)    # RVW-37: Auto's own claims
     if not unbacked:
         return None
     verb, known = unbacked[0]

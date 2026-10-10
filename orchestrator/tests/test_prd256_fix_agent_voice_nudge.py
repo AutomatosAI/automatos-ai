@@ -15,7 +15,8 @@ Now:
 - Auto's chat turn (``promises`` True, or the chat lane) is nudged for a passive too;
 - a participle in no family is never nudged; "Done.", "is now live" and "it's been done" still are
   (as "done"). The line above the answer is unchanged: it still reads every claim.
-- F201's customer-draft check (services/draft_guides.py) is unchanged.
+- F201's customer-draft check (services/draft_guides.py) reads the draft the same way: only its
+  first-person claims (P256-FIX-RVW-44).
 """
 from __future__ import annotations
 
@@ -151,12 +152,14 @@ def test_the_nudge_passes_the_runs_voice():
 
 # ── F201 is unchanged ───────────────────────────────────────────────────────
 
-def test_the_customer_draft_check_still_reads_the_draft():
-    """services/draft_guides.check_before_sending is not this story's: it still reads a passive
-    and a verb in no family in the draft before it is sent."""
+def test_the_customer_draft_check_reads_the_writers_own_claims():
+    """services/draft_guides.check_before_sending holds a customer draft to its first-person
+    claims as the nudge holds an agent's run (P256-FIX-RVW-44): a passive is the customer's
+    news; "I've cancelled your subscription" with no cancel in the run is checked."""
     from services.draft_guides import check_before_sending
 
     brief = "Email from Rosie Tanner, club member: she was charged twice. Please draft a reply."
-    assert "says something was cancelled" in check_before_sending(brief, CANCELLED, ["platform_load_skill"])
-    assert "says something was done" in check_before_sending(brief, PROCESSED, [])
-    assert check_before_sending(brief, CANCELLED, ["platform_cancel_subscription"]) is None
+    assert check_before_sending(brief, CANCELLED, ["platform_load_skill"]) is None
+    assert check_before_sending(brief, PROCESSED, []) is None
+    assert "says something was cancelled" in check_before_sending(brief, OWN_CLAIM, ["platform_load_skill"])
+    assert check_before_sending(brief, OWN_CLAIM, ["platform_cancel_subscription"]) is None
