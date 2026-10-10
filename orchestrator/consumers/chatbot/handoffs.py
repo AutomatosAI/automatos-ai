@@ -462,6 +462,7 @@ HANDED_CARD = re.compile(CARD_NUMBER.pattern + r"|(?<![\w&#])(?<!order )#\d{3,6}
 ADDRESS_VERB = re.compile(r"\b(?:ask|have|get|tell|let)\s", re.IGNORECASE)
 # The reference platform_assign_task takes: "#0192" as written, "ticket 12" as "12".
 CARD_REF = re.compile(r"#?\d+(?:\.\d+)?")
+CARD_SIGN = "#"
 # Who the card goes to: the words after "to", without the article, and ending where a
 # purpose, a reason or a courtesy starts ("to Jim to handle by Friday, please" is Jim).
 SENTENCE_END = re.compile(r"[.?!,;\n]")
@@ -585,13 +586,22 @@ def _addressed_agent(message: str, roster: List[Any]) -> Optional[Any]:
     return addressed if shared_name(addressed) else None
 
 
+def _on_the_board(brain: Any, card: str) -> bool:
+    """Whether a card handed on by its '#' number is one of this workspace's cards (P256-FIX-RVW-42): "Hand
+    #1043 over to Support - the customer wants a refund" names an order, not a card. "ticket 12" says so."""
+    from services.ticket_numbers import resolve_ticket_ref
+
+    return not card.startswith(CARD_SIGN) or resolve_ticket_ref(brain._db, brain._workspace_id, card) is not None
+
+
 def _handed_over(brain: Any, message: str) -> Tuple[Optional[Any], str]:
     """(who the message hands work to, why): a card handed on, an id given as the answer to "which
     one?", or a teammate asked by name. A message about a card that hands it to no one (approving it,
-    moving it) stays Auto's, and so does one with nobody in it, or one handing work to several teammates
-    together ("Have RESEARCHER and WRITER plan the launch"): the tiers' lane, whatever they said."""
+    moving it) stays Auto's, and so does a '#' number that is no card of the workspace's (an order's),
+    one with nobody in it, or one handing work to several teammates together ("Have RESEARCHER and
+    WRITER plan the launch"): the tiers' lane, whatever they said."""
     handoff = _handoff(message)
-    if handoff:
+    if handoff and _on_the_board(brain, handoff[0]):
         return _card_receiver(brain, message, handoff[1], _teammates(brain)), REASONING_CARD
     if HANDED_CARD.search(message) or not (ADDRESS_VERB.search(message) or ID_REPLY.match(message)):
         return None, REASONING_NAMED

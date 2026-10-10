@@ -43,6 +43,18 @@ ROSTER = [
 ]
 
 
+# The workspace's board: a '#' number is handed on only when it is one of its cards (P256-FIX-RVW-42).
+BOARD = {("ws-1", "#0192"): 9192}
+
+
+@pytest.fixture(autouse=True)
+def board(monkeypatch):
+    import services.ticket_numbers as ticket_numbers
+
+    monkeypatch.setattr(ticket_numbers, "resolve_ticket_ref",
+                        lambda db, workspace_id, ref: BOARD.get((workspace_id, ref)))
+
+
 def _verdict(action, *, complexity=Complexity.MOLECULE, hints=(), **over):
     return ComplexityAssessment(complexity=complexity, action=action, reasoning="tiers",
                                 tool_hints=list(hints), **over)
