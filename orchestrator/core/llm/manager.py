@@ -28,6 +28,7 @@ from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 from .byok_endpoint import with_key_endpoint
 from .vendor_fit import fitted
+from .list_prices import list_rates
 
 from core.llm import failover, output_budget, usage_status
 
@@ -1020,11 +1021,7 @@ _MODEL_COST_ENTRIES: Dict[str, Tuple[float, float]] = {
     "gemini-2.5-flash": (0.0003, 0.0025),
     "gemini-2.5-pro": (0.00125, 0.01),
     "gpt-5.5": (0.005, 0.03),
-    # PRD-256 US-008: the Claude arms at list price; OpenRouter writes Haiku 4.5 with a dot.
-    "claude-sonnet-5": (0.002, 0.010),
-    "claude-opus-5": (0.005, 0.025),
-    "claude-haiku-4-5": (0.001, 0.005),
-    "claude-haiku-4.5": (0.001, 0.005),
+    # The Claude 5-era arms are priced by core/llm/list_prices (P256-FIX-T2), tried first.
 }
 MODEL_COST_MAP: Dict[str, Tuple[float, float]] = dict(
     sorted(_MODEL_COST_ENTRIES.items(), key=lambda kv: -len(kv[0]))
@@ -1033,6 +1030,9 @@ MODEL_COST_MAP: Dict[str, Tuple[float, float]] = dict(
 
 def estimate_cost_usd(model: Optional[str], input_tokens: int, output_tokens: int) -> float:
     """Rough USD estimate for one LLM call; conservative default for unknown models."""
+    listed = list_rates(model, input_tokens)
+    if listed is not None:
+        return (input_tokens / 1000 * listed[0]) + (output_tokens / 1000 * listed[1])
     model_lower = (model or "").lower()
     for key, (inp_rate, out_rate) in MODEL_COST_MAP.items():
         if key in model_lower:
