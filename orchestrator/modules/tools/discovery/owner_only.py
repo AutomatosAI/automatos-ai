@@ -30,7 +30,7 @@ import re
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from modules.tools.discovery.agent_binding import names_the_agent_alone
-from modules.tools.discovery.send_words import LEAVES_THE_WORKSPACE, READ_WORDS
+from modules.tools.discovery.send_words import LEAVES_THE_WORKSPACE, READ_WORDS, makes_or_times_a_message, slug_words
 from modules.tools.execution.card_raised import ACT
 from modules.tools.execution.params_text import params_object
 
@@ -70,6 +70,7 @@ CLOSING_STATUSES = frozenset({"done", "cancelled"})
 COMPOSIO_SEND_WORDS = frozenset(word.upper() for word in LEAVES_THE_WORKSPACE)
 COMPOSIO_READ_WORDS = frozenset(word.upper() for word in READ_WORDS)
 _SLUG_WORD = re.compile(r"[^A-Z0-9]+")
+MESSAGE_SEND = "message.send"  # the capability classifier's class for a message sent (P256-FIX-RVW-38)
 
 # Server-set keys, never the model's: who clicked (stripped from every call, set after a
 # click), and a caller whose own decision is the click (the HARNESS's /approve).
@@ -134,12 +135,27 @@ def is_owner_only(action_name: str, params: Any, *, composio: bool = False) -> b
 
 def is_composio_send(slug: str) -> bool:
     """A Composio action that sends, publishes or orders: GMAIL_SEND_EMAIL, gmail-send-email,
-    LINKEDIN_CREATE_LINKED_IN_POST, SHOPIFY_CREATE_ORDER; and any action the Socials channel
-    registry classes as ``publish`` (P256-FIX-RVW-19: a video upload carries no send word)."""
+    LINKEDIN_CREATE_LINKED_IN_POST, SHOPIFY_CREATE_ORDER; a message made or timed and money paid
+    out (P256-FIX-RVW-38: SLACK_SCHEDULE_MESSAGE, STRIPE_CREATE_REFUND), or a name the capability
+    classifier reads as ``message.send``; and any action the Socials channel registry classes as
+    ``publish`` (P256-FIX-RVW-19: a video upload carries no send word)."""
     words = [word for word in _SLUG_WORD.split(str(slug or "").upper()) if word]
     if set(words) & COMPOSIO_SEND_WORDS and not set(words) & COMPOSIO_READ_WORDS:
         return True
+    if makes_or_times_a_message(slug_words(slug)) or _a_message_send("_".join(words).lower()):
+        return True
     return _a_channel_publish("_".join(words))
+
+
+def _a_message_send(name: str) -> bool:
+    """Whether the capability classifier's ``message.send`` name patterns read the slug (its
+    words in order, joined by '_') as a send (a notify, a direct message), and it carries no read word."""
+    from modules.tools.capabilities.classifier import ActionClassifier
+
+    if not name or slug_words(name) & READ_WORDS:
+        return False
+    patterns = ActionClassifier.CAPABILITY_HEURISTICS[MESSAGE_SEND]["name_patterns"]
+    return any(re.search(pattern, name, re.IGNORECASE) for pattern in patterns)
 
 
 def _a_channel_publish(name: str) -> bool:
@@ -401,12 +417,13 @@ def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, call
              sent: Any = None) -> Dict[str, Any]:
     """The ask for a Composio send or publish, naming the action, and to whom, about what
     and its first line (``sent``: the action's own params, FX-008). A recipient the card
-    cannot show is refused before any grant (P256-FIX-RVW-26)."""
+    cannot show is refused before any grant (P256-FIX-RVW-26), as is a draft or a campaign
+    sent by reference, whose contents the card cannot show (P256-FIX-RVW-38)."""
     from modules.tools.discovery.card_question import send_question
-    from modules.tools.discovery.card_question_sends import refused_before_the_send_card
+    from modules.tools.discovery.card_question_sends import refused_as_sent_by_reference, refused_before_the_send_card
 
     act, shown_params = f"{SEND_VERB} {slug}".strip(), params_object(sent if sent is not None else params)
-    refused = refused_before_the_send_card(shown_params)
+    refused = refused_as_sent_by_reference(slug, shown_params) or refused_before_the_send_card(shown_params)
     if refused:
         return refused
     asked = send_question(act, shown_params)
