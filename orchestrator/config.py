@@ -331,17 +331,15 @@ class Config:
     def MEMORY_DISTILL_MODEL(self) -> str:
         """Cheap-tier model for L3 memory distillation (PRD-159 D11/Q16).
 
-        The distiller runs ~1×/chat turn, so it is deliberately pinned to a cheap
-        model rather than the conversation tier. Resolves system_settings
-        (memory.distill_model) → env MEMORY_DISTILL_MODEL → DEFAULT_LLM_MODEL
-        (already a fast/cheap flash tier)."""
+        Resolves system_settings (memory.distill_model) → env MEMORY_DISTILL_MODEL →
+        the System LLM's own model, the tier the distiller runs on (P256-FIX-T1: the
+        Gemini default 404'd on an Anthropic System LLM) → DEFAULT_LLM_MODEL."""
         from core.llm.defaults import DEFAULT_LLM_MODEL
         try:
             from core.llm.manager import get_system_setting
-            return get_system_setting(
-                "memory", "distill_model",
-                os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL),
-            )
+            return (get_system_setting("memory", "distill_model")
+                    or os.getenv("MEMORY_DISTILL_MODEL")
+                    or get_system_setting("system_llm", "model", DEFAULT_LLM_MODEL))
         except Exception:
             return os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL)
 
@@ -1058,29 +1056,30 @@ class Config:
     # Cross-model verification: reads from system_settings → env fallback
     @property
     def COORDINATOR_VERIFIER_MODEL_MAPPING(self) -> str:
+        """setting → env → the System LLM vendor's default (core/llm/vendor_fit.py)."""
         try:
             from core.llm.manager import get_system_setting
+            from core.llm.vendor_fit import default_verifier_mapping
             return get_system_setting(
                 "coordination", "verifier_model_mapping",
-                os.getenv(
-                    "COORDINATOR_VERIFIER_MODEL_MAPPING",
-                    "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,"
-                    "google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini",
-                ),
+                os.getenv("COORDINATOR_VERIFIER_MODEL_MAPPING", default_verifier_mapping()),
             )
         except Exception:
             return os.getenv("COORDINATOR_VERIFIER_MODEL_MAPPING", "")
 
     @property
     def COORDINATOR_VERIFIER_FALLBACK_MODEL(self) -> str:
+        """setting → env → the System LLM vendor's default (core/llm/vendor_fit.py)."""
+        from core.llm.defaults import VERIFIER_FALLBACK_MODEL
         try:
             from core.llm.manager import get_system_setting
+            from core.llm.vendor_fit import default_verifier_fallback
             return get_system_setting(
                 "coordination", "verifier_fallback_model",
-                os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini"),
+                os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", default_verifier_fallback()),
             )
         except Exception:
-            return os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini")
+            return os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", VERIFIER_FALLBACK_MODEL)
     # History-based agent scoring (PRD-82B US-003)
     COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
     COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))

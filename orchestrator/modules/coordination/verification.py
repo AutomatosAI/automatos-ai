@@ -100,46 +100,44 @@ def _parse_verifier_model_mapping() -> Dict[str, str]:
     return mapping
 
 
+# Executor family → the keywords that name it in a model id. A mapping key that is
+# none of these families is a tier (``sonnet=…``), matched before the family.
+_FAMILY_KEYWORDS = {
+    "anthropic": ("claude", "anthropic"),
+    "openai": ("gpt", "openai", "o1", "o3", "o4"),
+    "google": ("gemini", "google", "palm"),
+    "deepseek": ("deepseek",),
+    "meta": ("llama", "meta"),
+}
+
+
 def _select_verifier_model(executor_model: Optional[str]) -> str:
     """
-    Select a verifier model from a different family than the executor.
+    Select a verifier model other than the executor's: from a different family, or,
+    with the System LLM's own vendor (P256-FIX-T1), a different tier of it.
 
-    Detection: look for family keywords in the executor model string.
+    Detection: a tier key, then family keywords, in the executor model string.
     Falls back to COORDINATOR_VERIFIER_FALLBACK_MODEL.
     """
     fallback = Config().COORDINATOR_VERIFIER_FALLBACK_MODEL
     if not executor_model:
         return fallback
-
     model_lower = executor_model.lower()
     mapping = _parse_verifier_model_mapping()
-
-    # Match executor model to a family
-    family_keywords = {
-        "anthropic": ["claude", "anthropic"],
-        "openai": ["gpt", "openai", "o1", "o3", "o4"],
-        "google": ["gemini", "google", "palm"],
-        "deepseek": ["deepseek"],
-        "meta": ["llama", "meta"],
-    }
-
-    executor_family = None
-    for family, keywords in family_keywords.items():
-        if any(kw in model_lower for kw in keywords):
-            executor_family = family
-            verifier = mapping.get(family)
-            if verifier:
-                return verifier
-            break
-
+    families = {family: model for family, model in mapping.items() if family in _FAMILY_KEYWORDS}
+    tier = next((model for key, model in mapping.items() if key not in _FAMILY_KEYWORDS and key in model_lower), None)
+    if tier:
+        return tier
+    executor_family = next(
+        (family for family, keywords in _FAMILY_KEYWORDS.items() if any(kw in model_lower for kw in keywords)),
+        None,
+    )
+    if families.get(executor_family):
+        return families[executor_family]
     # Executor family has no dedicated mapping — pick any OTHER family's model
     # to preserve the cross-model guarantee
-    if executor_family:
-        for family, model in mapping.items():
-            if family != executor_family:
-                return model
-
-    return fallback
+    others = [model for family, model in families.items() if model and family != executor_family]
+    return others[0] if executor_family and others else fallback
 
 
 # ---------------------------------------------------------------------------

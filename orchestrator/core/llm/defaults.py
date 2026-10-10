@@ -38,3 +38,17 @@ def get_default_model_config() -> dict:
         "presence_penalty": 0.0,
         "fallback_model_id": None,
     }
+
+
+# The cross-model verifier's defaults (executor family → verifier model), used when
+# neither coordination.verifier_model_mapping nor its env names one. Read through
+# core/llm/vendor_fit.py, which picks the pair for the System LLM's vendor.
+VERIFIER_MODEL_MAPPING = (
+    "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,"
+    "google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini"
+)
+VERIFIER_FALLBACK_MODEL = "openai/gpt-4o-mini"
+# P256-FIX-T1: with Anthropic as the System LLM the verifier is a Claude model other
+# than the executor's (a tier key, ``sonnet=``, is tried before the family).
+ANTHROPIC_VERIFIER_MODEL_MAPPING = "sonnet=claude-haiku-5-5,anthropic=claude-sonnet-5-5"
+ANTHROPIC_VERIFIER_FALLBACK_MODEL = "claude-sonnet-5-5"
