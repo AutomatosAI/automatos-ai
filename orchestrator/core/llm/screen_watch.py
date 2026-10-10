@@ -6,6 +6,11 @@ out of it once the stream ends (core/llm/reasoning.py), and the owner-words rewr
 text the owner saw sets ``WATCHER``; every streamed call through ``in_owner_words``
 then reports, once it returns, its response and the text it streamed (the deltas after
 every live rewrite, joined). Nothing is reported when no watcher is set.
+
+P256-FIX-RVW-43: a reply to a re-prompt passes through the apology gate after this
+(core/llm/turn_order.py), which drops the apology it opens with from the stream and
+saves a copy without it. ``restated`` tells the watcher what of that call reached the
+screen and which copy answers for it.
 """
 from __future__ import annotations
 
@@ -20,6 +25,9 @@ class Watcher(Protocol):
     """Told about each streamed call once it has returned."""
 
     def ended(self, response: Any, said: str) -> None:
+        ...
+
+    def restated(self, response: Any, copy: Any, said: str) -> None:
         ...
 
 
@@ -47,4 +55,11 @@ def watched(call: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]
     return wrapped
 
 
-__all__ = ["WATCHER", "Watcher", "watched"]
+def restated(response: Any, copy: Any, said: str) -> None:
+    """The call that returned ``response`` put ``said`` on the screen and is saved as ``copy``."""
+    watcher = WATCHER.get()
+    if watcher is not None:
+        watcher.restated(response, copy, said)
+
+
+__all__ = ["WATCHER", "Watcher", "restated", "watched"]
