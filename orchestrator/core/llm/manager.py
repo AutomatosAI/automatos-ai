@@ -27,6 +27,7 @@ from .clients.grok_client import GrokProvider
 from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 from .byok_endpoint import with_key_endpoint
+from .vendor_fit import fitted
 
 from core.llm import failover, output_budget, usage_status
 
@@ -959,17 +960,13 @@ def create_llm_manager(
 
     If workspace_id is not provided, falls back to the request-scoped
     ContextVar set by auth middleware so that usage is always tracked.
+    A model given without a provider is checked against the service's settings
+    provider first (``vendor_fit.fitted``, P256-FIX-T1): never another vendor's id.
 
     Args:
         service_name: Service name for per-service settings
-        provider: Optional provider override
-        model: Optional model override
-        workspace_id: Workspace ID for usage tracking
-        agent_id: Agent ID for usage tracking
-        request_type: Request type label for usage tracking
-
-    Returns:
-        LLMManager instance
+        provider / model: Optional overrides
+        workspace_id / agent_id / request_type: Usage tracking
     """
     if not workspace_id:
         try:
@@ -977,6 +974,8 @@ def create_llm_manager(
             workspace_id = workspace_id_var.get() or None
         except Exception:
             pass
+    if model and not provider:
+        provider, model = fitted(service_name, model)
 
     return LLMManager(
         service_name=service_name,
