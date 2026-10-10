@@ -45,9 +45,17 @@ class ApologyGate:
         self._on_delta = on_delta
         self._held = ""
         self._open = False
+        self._passed = ""
+
+    @property
+    def passed(self) -> str:
+        """The text this gate has passed on: what of the reply reached the screen (RVW-43)."""
+        return self._passed
 
     async def __call__(self, kind: str, text: str) -> None:
         if kind != TEXT or self._open:
+            if kind == TEXT:
+                self._passed += text
             await self._on_delta(kind, text)
             return
         self._held += text
@@ -67,6 +75,7 @@ class ApologyGate:
         self._open = True
         kept, self._held = without_an_opening_apology(self._held), ""
         if kept:
+            self._passed += kept
             await self._on_delta(TEXT, kept)
 
     async def close(self) -> None:

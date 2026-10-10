@@ -97,9 +97,11 @@ def test_the_call_reaches_the_executor_under_its_own_tool_name(monkeypatch):
     # the tool NAME, with the action's own parameters — not the platform dispatcher
     assert seen["tool_name"] == "composio_execute"
     assert seen["parameters"] == {"action": "GOOGLECALENDAR_FIND_EVENT", "params": {"calendar_id": "primary"}}
-    # …as the ticket's agent, in the ticket's workspace, with no user context
+    # …as the ticket's agent, in the ticket's workspace, with no user context: only its ticket,
+    # so a send on a ticket Auto wrote waits for the owner's click (PRD-256 FX-011)
     assert seen["agent_id"] == 267 and seen["workspace_id"] == "ws-c1"
-    assert seen["caller_context"] is None
+    assert seen["caller_context"] == {"session_task_id": 118}
+    assert "driving_user_id" not in seen["caller_context"] and "user_id" not in seen["caller_context"]
     assert seen["trace_id"] == "session:118:composio_execute"
 
 

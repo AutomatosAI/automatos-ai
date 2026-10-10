@@ -13,7 +13,9 @@ waits in Review for them, whatever review mode the model passed. The result then
 says in plain words whether the owner reviews it, beside the ``review_mode`` that
 was kept. The conversation is the server-injected ``_origin_chat_id``, never a
 model argument; with none (a session, a heartbeat, a playbook step) nothing
-changes.
+changes. FX-010 (Decision D7): a brief that sends, orders, publishes, books or pays,
+filed from a person's chat with no review_mode named, waits for them too
+(``brief_sends``).
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery import handlers_board_tasks
+from modules.tools.discovery.brief_sends import reviewed_by_a_person, says_it_is_reviewed
 from modules.tools.discovery.handlers_watches import _origin_chat_id
 from services.owner_review import owner_asked_to_review
 
@@ -78,8 +81,9 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     kept_for_owner = asked and params.get("review_mode") != REVIEW_BY_OWNER
     if asked:
         params = {**params, "review_mode": REVIEW_BY_OWNER}
+    params, held = reviewed_by_a_person(params)  # FX-010 (D7): a brief that sends or orders
     result = await handlers_board_tasks.create_board_task(db, workspace_id, params)
-    return _with_review_meaning(result, kept_for_owner)
+    return says_it_is_reviewed(_with_review_meaning(result, kept_for_owner), held)
 
 
 __all__ = ["CLOSES_BY_ITSELF", "OWNER_ASKED", "WAITS_FOR_OWNER", "create_board_task", "owner_words"]

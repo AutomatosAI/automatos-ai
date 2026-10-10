@@ -8,7 +8,9 @@ read the first 22 agents by id and never the newest, the designer among them.
 
 So a listing that would be cut is made to fit before it reaches the model: every agent with
 what routing needs (its id, name, job title, team, status, runtime and whether it can run
-now), and, should even that be too long, one short line per agent. It says it was shortened and
+now) with who made it, when, and its tags (FX-012, A430: "which agents did you create for me
+last night"); should that be too long, what routing needs with who made it and the day, in a
+word; and should even that be too long, one short line per agent. It says it was shortened and
 where an agent's full setup is (platform_get_agent). A listing that fits is left as it is.
 """
 from __future__ import annotations
@@ -16,7 +18,10 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-ESSENTIALS = ("id", "name", "job_title", "team", "status", "runtime", "provider", "can_run", "why")
+ROUTING = ("id", "name", "job_title", "team", "status", "runtime", "provider", "can_run", "why")
+ESSENTIALS = ROUTING + ("created_by", "created_at", "tags")
+MADE = "made"
+DATE_CHARS = 10  # created_at's date: "2026-10-06"
 # The formatter's "Tool: <name>\nStatus: success\n\n" header, with room to spare.
 HEADER_ALLOWANCE = 120
 SHORTENED = ("All {count} agents are listed, each with what routing needs; the full listing was too long to "
@@ -45,16 +50,32 @@ def _essentials(agent: Any) -> Any:
     return {key: agent[key] for key in ESSENTIALS if agent.get(key) not in (None, "", [])}
 
 
+def _made(agent: Dict[str, Any]) -> str:
+    """Who made an agent and the day, in a word: "platform 2026-10-06" (FX-012)."""
+    return " ".join(part for part in (str(agent.get("created_by") or "").split(":")[0],
+                                      str(agent.get("created_at") or "")[:DATE_CHARS]) if part)
+
+
+def _routing(agent: Any) -> Any:
+    """What routing needs, with who made the agent and the day in a word."""
+    if not isinstance(agent, dict):
+        return agent
+    kept = {key: agent[key] for key in ROUTING if agent.get(key) not in (None, "", [])}
+    made = _made(agent)
+    return {**kept, MADE: made} if made else kept
+
+
 def _line(agent: Any) -> Any:
-    """One agent on one line: "Brand Designer (id 347) | Brand Designer | Socials | active | cli | can run".
-    Why one can't run is left to platform_get_agent, so the lines stay short. Never "#347": a '#' names a
-    ticket (PRD-252)."""
+    """One agent on one line: "Brand Designer (id 347) | Brand Designer | Socials | active | cli | can run |
+    platform 2026-10-06". Why one can't run is left to platform_get_agent, so the lines stay short. Never
+    "#347": a '#' names a ticket (PRD-252)."""
     if not isinstance(agent, dict):
         return agent
     head = f"{agent.get('name')} (id {agent.get('id')})"
     parts = [str(agent[key]) for key in ("job_title", "team", "status", "runtime") if agent.get(key)]
     can = CAN_RUN if agent.get("can_run", True) else CANNOT_RUN
-    return LINE_SEP.join([head, *parts, can])
+    made = _made(agent)
+    return LINE_SEP.join([head, *parts, can, *([made] if made else [])])
 
 
 def every_agent_fits(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -65,9 +86,10 @@ def every_agent_fits(result: Dict[str, Any]) -> Dict[str, Any]:
     if not agents or _shown_chars(result) <= budget:
         return result
     note = SHORTENED.format(count=len(agents))
-    trimmed = {**result, "note": note, "agents": [_essentials(a) for a in agents]}
-    if _shown_chars(trimmed) <= budget:
-        return trimmed
+    for shorten in (_essentials, _routing):
+        trimmed = {**result, "note": note, "agents": [shorten(a) for a in agents]}
+        if _shown_chars(trimmed) <= budget:
+            return trimmed
     return {**result, "note": note, "agents": [_line(a) for a in agents]}
 
 

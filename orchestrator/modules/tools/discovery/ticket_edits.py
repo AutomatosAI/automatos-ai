@@ -27,7 +27,8 @@ board's Reject keeps the brief and adds the owner's words. So now, as on the boa
 
 Night 9 (F309): a status on this call is the card's move (``ticket_edit_moves``), its
 note kept as platform_update_task_status keeps one: #1866's approval note was lost when
-the edit tool refused ``status`` and Auto split the call in two.
+the edit tool refused ``status`` and Auto split the call in two. Beside a Re-brief the
+status is dropped and the answer says so (PRD-256 FX-013).
 
 ``_user_id`` is the server-injected driver (platform executor, OPERATOR_CONSENT_ACTIONS),
 never a model argument.

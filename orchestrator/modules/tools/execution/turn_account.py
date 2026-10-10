@@ -10,10 +10,13 @@ failure to retry, which would have done it twice.
 
 Now a blank answer (no text, no call) in Auto's own turn becomes a plain account
 of the turn's calls, from their results: each change that went through, by card
-number and where it is now when the result says so; how many did not go through;
-and, when nothing changed, that nothing did. Refusals are the model's to read and
+number and where it is now when the result says so; each card that waits for the
+owner's click (an ask is neither a change nor a failure, P256-FIX-RVW-15); how many
+did not go through; and, when nothing changed, that nothing did. Refusals are the model's to read and
 are never quoted (they name calls on purpose). Agent runs keep their own
-empty-answer handling. Stdlib only.
+empty-answer handling. Stdlib only, beside the Composio slug reader (composio_action) and
+the action registry (P256-FIX-RVW-36: a registered action's permission_level says whether it
+only reads, so platform_load_skill is never a change).
 """
 from __future__ import annotations
 
@@ -29,7 +32,11 @@ NOTHING_CHANGED = "My reply didn't come through, and nothing was changed: {why} 
 WHY_NO_CALL = "no action ran this turn."
 WHY_ONLY_READS = "I only looked things up."
 WHY_ALL_FAILED = "what I tried didn't go through."
-# Calls that only look: they change nothing the owner would want told.
+# Only asks for the owner's click (card_raised): nothing changed yet, and asking again would not help.
+WAITING_FOR_YOU = "My reply didn't come through, and nothing has changed yet: {they} for your click."
+# Calls that only look: they change nothing the owner would want told. A registered action's
+# permission_level says so first; these stems read a call the registry does not hold.
+READ_LEVEL = "read"
 _READS = ("_list", "_get_", "search", "browse", "board_", "read", "grep", "query", "summary",
           "snapshot", "history", "fetch", "find", "_view", "recommend", "check_", "wait_for")
 _WHERE = {"done": "Done", "cancelled": "Cancelled", "assigned": "with its agent", "review": "in Review",
@@ -59,7 +66,25 @@ def _failed(result: Any) -> bool:
     return isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False)
 
 
+def _registered_level(action: str) -> Optional[str]:
+    """The registered action's permission_level ("read", "write", "destructive"), None when unregistered."""
+    from modules.tools.discovery.action_registry import get_action_registry
+
+    definition = get_action_registry().get(action)
+    return getattr(definition, "permission_level", None) if definition is not None else None
+
+
 def is_read(action: str) -> bool:
+    """A call that only looks; a Composio action by its slug's whole words (P256-FIX-RVW-5); a
+    registered action by its permission_level (P256-FIX-RVW-36: platform_load_skill and
+    platform_fleet_status read, platform_checkpoint_thread writes); any other by its name's stems."""
+    from .composio_action import is_slug, slug_reads
+
+    if is_slug(action):
+        return slug_reads(action)
+    level = _registered_level(action)
+    if level is not None:
+        return level == READ_LEVEL
     name = action.lower()
     return any(stem in name for stem in _READS)
 
@@ -93,20 +118,36 @@ def _line(action: str, payload: Dict[str, Any]) -> str:
     return f"- {what_it_did(action)}" + (f": {number}" if number else "")
 
 
+def _not_through(failed: int) -> str:
+    return NOT_THROUGH.format(count=failed, s="" if failed == 1 else "s", they="it" if failed == 1 else "they")
+
+
+def _waiting(asks: Sequence[str], failed: int) -> str:
+    """Nothing changed, and the turn's asks wait for the owner's click: never "Please ask again"."""
+    cards = list(dict.fromkeys(asks))
+    lines = [WAITING_FOR_YOU.format(they="it waits" if len(cards) == 1 else "they wait"), *cards]
+    return "\n".join([*lines, _not_through(failed)] if failed else lines)
+
+
 def account_of(outcomes: Sequence[Outcome]) -> str:
     """What the owner is told when the answer came back empty: the changes the
-    turn's calls made, or plainly that nothing changed."""
-    changes = [_line(action, _payload(result)) for action, _params, result in outcomes
+    turn's calls made and the cards that wait for the owner's click, or plainly
+    that nothing changed."""
+    from .card_raised import account_line
+
+    asked = [account_line(result, action) for action, _params, result in outcomes]
+    asks = [line for line in asked if line]
+    settled = [outcome for outcome, line in zip(outcomes, asked) if line is None]
+    changes = [_line(action, _payload(result)) for action, _params, result in settled
                if not _failed(result) and not is_read(action)]
-    failed = sum(1 for _action, _params, result in outcomes if _failed(result))
+    failed = sum(1 for _action, _params, result in settled if _failed(result))
+    if not changes and asks:
+        return _waiting(asks, failed)
     if not changes:
         why = WHY_ALL_FAILED if failed else (WHY_ONLY_READS if outcomes else WHY_NO_CALL)
         return NOTHING_CHANGED.format(why=why)
-    lines = [ACCOUNT_HEADER, *dict.fromkeys(changes)]
-    if failed:
-        lines.append(NOT_THROUGH.format(count=failed, s="" if failed == 1 else "s",
-                                        they="it" if failed == 1 else "they"))
-    return "\n".join(lines)
+    lines = [ACCOUNT_HEADER, *dict.fromkeys(changes), *dict.fromkeys(asks)]
+    return "\n".join([*lines, _not_through(failed)] if failed else lines)
 
 
 def is_blank(response: Any) -> bool:
@@ -129,13 +170,14 @@ def with_account(response: Any, outcomes: Sequence[Outcome]) -> Any:
 LLMCall = Callable[[List[Dict[str, Any]], Optional[List[Dict[str, Any]]]], Awaitable[Any]]
 
 
-def _speaks(promises: Optional[bool]) -> bool:
+def auto_speaks(promises: Optional[bool]) -> bool:
     """Auto's own turn: the executor says so (``promises``), or else the turn's lane."""
     if promises is not None:
         return promises
-    from .action_claims import _auto_speaks
+    from core.llm.usage_context import LANE_CHAT, current_usage_scope
 
-    return _auto_speaks()
+    # the chat service books the whole turn to the chat lane; agent runs book theirs
+    return current_usage_scope().get("request_type") == LANE_CHAT
 
 
 def said_or_accounted(llm: LLMCall, outcomes: Callable[[], Sequence[Outcome]],
@@ -145,10 +187,11 @@ def said_or_accounted(llm: LLMCall, outcomes: Callable[[], Sequence[Outcome]],
     it came (its run has its own handling)."""
     async def call(messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]]) -> Any:
         response = await llm(messages, tools)
-        if not is_blank(response) or not _speaks(promises):
+        if not is_blank(response) or not auto_speaks(promises):
             return response
         return with_account(response, outcomes())
     return call
 
 
-__all__ = ["account_of", "is_blank", "is_read", "said_or_accounted", "thing_of", "what_it_did", "with_account"]
+__all__ = ["account_of", "auto_speaks", "is_blank", "is_read", "said_or_accounted", "thing_of", "what_it_did",
+           "with_account"]

@@ -1,6 +1,6 @@
 # PRD-256: Auto, receipts not narration: receipts, gates, tool contracts and the model test
 
-**Status:** Decided (§9 answered 7 Oct), awaiting build · **Owner:** Gerard · **Written:** 7 Oct 2026 (the Auto review session, from `.claude/AUTO-REVIEW-FINDINGS.md` and TESTER's review of it)
+**Status:** Decided (§9 answered 7 Oct; D7–D11 added 8 Oct after night 12), both waves built locally, fixes pending · **Owner:** Gerard · **Written:** 7 Oct 2026 (the Auto review session, from `.claude/AUTO-REVIEW-FINDINGS.md` and TESTER's review of it)
 **Type:** Extension plus consolidation. Receipts, gates and contracts extend seams that exist (the tool tracker, the grant card, the first-class tool surface, the sim harness); the regex claim families and four routing lanes are consolidated and deleted once the receipts rule holds.
 
 ## 1. Introduction
@@ -238,6 +238,14 @@ All six answered on 7 Oct, each as the kit's default (Decisions D1–D6 in `scri
 4. **Jev:** go live on ticket assignment with its two rules as a separate small change, now or after wave 2?
 5. **The failover model (US-008):** none (fail the turn honestly), or a named cheap model?
 6. **The ATOM lane:** keep it once the promoted tools ship on it, or fold every owner turn onto the full path and measure the cost?
+
+### Decided by Gerard, 8 Oct 2026, after night 12 (review: `<workspace>/.claude/NIGHT12-REVIEW.md`)
+
+- **D7 Agent sends under the click.** Supersedes US-004's "agent runs, playbook steps and heartbeats are unchanged" for one case: an agent's Composio send, publish or order on a ticket Auto created from chat raises the same grant card (recipient, subject, first line). Tickets a human wrote run as today. Auto-created tickets whose brief says send, order or publish default to `review_mode: human`. (Night 12: ticket 2318 emailed a supplier 57 s after Auto started it; no gate exists on the session path.)
+- **D8** The duplicate sim agents in c1 are deactivated before night 13 (the lowest id of each name stays).
+- **D9** Persona nights swap in a persona brand kit and restore Gerard's after.
+- **D10** US-012 is unblocked now: the regex claim families go, receipts-driven narration replaces them, on the Wave 2 branch. US-013 stays on D3's condition.
+- **D11** The US-009 comparison runs once the gate order, the waiting status, the success flag, the per-claim honesty line and the verdict parser are on a local build: 28 rows on five arms, then the full set on the best two.
 
 ## 10. Testing plan (nights and the eval)
 

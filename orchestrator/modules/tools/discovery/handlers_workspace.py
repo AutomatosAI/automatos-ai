@@ -8,6 +8,9 @@ from uuid import UUID
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.memory_owner import owned_by_the_driver
+from modules.tools.discovery.memory_source import defaults_the_source_type
+
 logger = logging.getLogger(__name__)
 
 
@@ -163,6 +166,8 @@ async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str,
     }
 
 
+@defaults_the_source_type  # PRD-256 FX-013: source_type is optional; the turn's driver sets its default
+@owned_by_the_driver  # PRD-256 FX-015: no Clerk id (the local edition), the driving person owns it
 async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from modules.memory.write_contract import (
         MEMORY_FACT_TYPES,
@@ -283,6 +288,7 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         return {"success": False, "error": f"Memory NOT saved — memory service error: {e}. Tell the owner it was not stored."}
 
 
+@owned_by_the_driver  # PRD-256 FX-015: on the local edition the driving person is the viewer
 async def resume_context(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-206 S3: 'where did we leave off?' from ANY chat.
 

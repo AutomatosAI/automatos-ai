@@ -72,7 +72,7 @@ def _store(monkeypatch, *outcomes):
     store._enabled, store._bootstrap_done, store._collection = True, True, "durable_memory"
     store._client, store._embedder = _Client(*outcomes), _Embedder()
 
-    async def no_duplicate(user_id, content_hash):
+    async def no_duplicate(user_id, content_hash, owner=None):
         return None
 
     store._find_by_hash = no_duplicate

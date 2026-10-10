@@ -31,7 +31,18 @@ CANCEL = "platform_update_task_status"
 D1 = {"platform_update_task_status", "platform_update_task", "platform_assign_tool_to_agent",
       "platform_unassign_tool_from_agent", "platform_update_agent", "platform_update_system_setting",
       "platform_create_mission", "platform_approve_mission", "platform_cancel_mission",
-      "platform_publish_blog_post", "platform_submit_social_post"}
+      "platform_publish_blog_post", "platform_submit_social_post",
+      # D1 amended 8 Oct (FX-010): every agent-setting change, and a playbook made, timed or deleted.
+      "platform_configure_agent_heartbeat", "platform_delete_agent", "platform_assign_skill_to_agent",
+      "platform_unassign_skill_from_agent", "platform_assign_plugin_to_agent", "platform_create_playbook",
+      "platform_schedule_playbook", "platform_delete_playbook",
+      # P256-FIX-RVW-14: a timer set through an update; a plugin or skill taken from every agent.
+      "platform_update_playbook", "platform_uninstall_plugin", "platform_delete_workspace_skill",
+      "platform_update_skill",
+      # P256-FIX-RVW-23: an agent's timer, as a playbook's timer.
+      "platform_schedule_task"}
+# Owner-only only when the call closes the card, or (an update) sets the playbook's timer.
+CONDITIONAL = {"platform_update_task_status", "platform_update_task", "platform_update_playbook"}
 
 
 def test_the_list_is_decision_d1():
@@ -39,7 +50,7 @@ def test_the_list_is_decision_d1():
 
 
 @pytest.mark.parametrize("status, owner_only", [
-    ("done", True), ("cancelled", True), ("approved", True), ("in_progress", False), ("assigned", False),
+    ("done", True), ("cancelled", True), ("closed", True), ("approved", True), ("in_progress", False), ("assigned", False),
     ("blocked", False), ("send back", False), (None, False),
 ])
 def test_a_card_move_is_owner_only_when_it_closes_the_card(status, owner_only):
@@ -48,8 +59,10 @@ def test_a_card_move_is_owner_only_when_it_closes_the_card(status, owner_only):
 
 
 def test_every_other_d1_action_is_owner_only_and_a_read_is_not():
-    for action in D1 - {"platform_update_task_status", "platform_update_task"}:
+    for action in D1 - CONDITIONAL:
         assert is_owner_only(action, {}) is True
+    assert is_owner_only("platform_update_playbook", {"playbook_id": 3, "schedule_config": {"enabled": False}})
+    assert is_owner_only("platform_update_playbook", {"playbook_id": 3, "name": "Daily Digest"}) is False
     assert is_owner_only("platform_get_task", {"task_id": 422}) is False
     assert is_owner_only("platform_create_task", {"title": "Reorder oat milk"}) is False
 
@@ -68,29 +81,39 @@ def test_every_composio_send_or_publish_is_owner_only(slug, sends):
 
 @pytest.fixture
 def board(db_session, seed_workspace):
-    """A workspace with one card in Review, and Auto's executor whose handlers are recorded."""
-    from core.models.core import BoardTask
+    """A workspace with one card in Review, and Auto's executor whose handlers are recorded.
+    Auto is the actor the hierarchy check reads, as in the chat (exec_platform injects the
+    running agent's ``_agent_id``), so the gate's own assertions run."""
+    from core.models.core import Agent, BoardTask
     from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
     ws = UUID(seed_workspace())
+    auto = Agent(name="Auto", agent_type="system", description="", status="active", configuration={},
+                 workspace_id=ws, created_by="test", owner_type="workspace", owner_id=str(ws),
+                 is_system_agent=True)
     card = BoardTask(workspace_id=ws, title="Chalkboard line for the Guji", status="review", source_type="user")
-    db_session.add(card)
+    db_session.add_all([auto, card])
     db_session.flush()
     executor = PlatformActionExecutor(db_session, ws)
     executor._full_autonomy = lambda: True   # the dial on: an owner-only action still asks
     handler = AsyncMock(return_value={"success": True, "task_id": card.id, "status": "cancelled"})
     executor._handlers[CANCEL] = handler
     return NS(db=db_session, ws=ws, card=card, number=f"#{card.workspace_seq:04d}", executor=executor,
-              handler=handler)
+              handler=handler, auto=auto.id)
 
 
 def _owners_chat():
     return {"driving_user_id": "7", "user_id": "user_owner", "conversation_id": str(uuid4()), "turn_id": "t-1"}
 
 
+def _as_auto(board, params):
+    """The call as the chat makes it: exec_platform injects the running agent (Auto) as ``_agent_id``."""
+    return {**params, "_agent_id": board.auto}
+
+
 def _call(board, params, caller_context):
     with patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
-        return asyncio.run(board.executor.execute(CANCEL, params, caller_context))
+        return asyncio.run(board.executor.execute(CANCEL, _as_auto(board, params), caller_context))
 
 
 def _grant(board, grant_id):
@@ -191,8 +214,8 @@ def test_a_call_refused_by_the_other_checks_is_never_asked_about(board):
 
     limited = AsyncMock(side_effect=HTTPException(status_code=429, detail="slow down"))
     with patch("core.security.rate_limiter.check_rate_limit", new=limited):
-        reply = asyncio.run(board.executor.execute(CANCEL, {"task_id": board.number, "status": "cancelled"},
-                                                   _owners_chat()))
+        reply = asyncio.run(board.executor.execute(
+            CANCEL, _as_auto(board, {"task_id": board.number, "status": "cancelled"}), _owners_chat()))
     assert reply.get("rate_limited") is True and "requires_confirmation" not in reply
     assert board.db.query(ApprovalGrant).filter(ApprovalGrant.workspace_id == board.ws).count() == 0
     board.handler.assert_not_called()

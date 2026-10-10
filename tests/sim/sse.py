@@ -13,6 +13,12 @@ Automatos bends two of them: ``d:`` carries its typed events (``chat-id``
 first, then tool-start/tool-end/usage/finish), and a failed turn ends with
 ``e:{"message", "code"}`` — the platform's turn error, not an SDK finish step.
 
+Two typed events change what the owner sees (PRD-256 FX-002): ``receipts``
+carries the receipts block and the honesty lines that sit above the reply
+(``above``), and ``narration`` with ``retracted: true`` takes a nudged draft
+back out of the reply. ``ChatTurn.text`` is the reply as the browser shows it;
+``ChatTurn.text_raw`` is every text delta, concatenated.
+
 ``tests/api/helpers.parse_sse_response`` reads ``0:``/``2:``/``d:``/``e:`` only;
 this parser keeps every frame so a scenario can assert on effects (which tools
 ran, with which arguments) and on how the turn ended.
@@ -36,6 +42,9 @@ CHAT_ID_KEYS = ("chatId", "chat_id", "sessionId", "session_id")
 class ChatTurn:
     text: str
     chat_id: str | None
+    text_raw: str = ""
+    receipts: tuple[dict[str, Any], ...] = ()
+    above: tuple[str, ...] = ()
     tool_calls: tuple[dict[str, Any], ...] = ()
     tool_results: tuple[dict[str, Any], ...] = ()
     errors: tuple[str, ...] = ()
@@ -57,6 +66,9 @@ class ChatTurn:
 @dataclass
 class _Acc:
     text: list[str] = field(default_factory=list)
+    shown: list[str] = field(default_factory=list)
+    receipts: list[dict[str, Any]] = field(default_factory=list)
+    above: list[str] = field(default_factory=list)
     reasoning: list[str] = field(default_factory=list)
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)
@@ -90,6 +102,7 @@ def find_chat_id(payload: Any) -> str | None:
 def _absorb(acc: _Acc, prefix: str, payload: Any) -> None:
     if prefix == TEXT and isinstance(payload, str):
         acc.text.append(payload)
+        acc.shown.append(payload)
     elif prefix == REASONING and isinstance(payload, str):
         acc.reasoning.append(payload)
     elif prefix == ERROR:
@@ -99,6 +112,7 @@ def _absorb(acc: _Acc, prefix: str, payload: Any) -> None:
     elif prefix == TOOL_RESULT and isinstance(payload, dict):
         acc.tool_results.append(payload)
     elif prefix == FINISH_MESSAGE and isinstance(payload, dict):
+        _absorb_owner_view(acc, payload)
         _absorb_finish_frame(acc, payload)
     elif prefix == FINISH_STEP and isinstance(payload, dict) and _is_turn_error(payload):
         acc.errors.append(_turn_error_text(payload))
@@ -126,6 +140,33 @@ _D_TOOL_END = "tool-end"
 _D_USAGE = "usage"
 _D_FINISH = "finish"
 _D_ERROR = "error"
+_D_RECEIPTS = "receipts"     # consumers/chatbot/receipts.py FRAME
+_D_NARRATION = "narration"   # consumers/chatbot/streaming.py format_aisdk_narration
+ABOVE = "above"              # consumers/chatbot/receipts.py ABOVE
+
+
+def without_narration(content: str, text: str) -> str:
+    """``content`` without the last occurrence of ``text``, as frontend/lib/chat/narration.ts does."""
+    at = content.rfind(text) if text else -1
+    return content if at < 0 else content[:at] + content[at + len(text):]
+
+
+def _absorb_owner_view(acc: _Acc, payload: dict[str, Any]) -> None:
+    """The ``d:`` frames that change what the owner sees (FX-002, F394). Night 12's persona
+    graded 779 asks without a receipt and read retracted drafts as doubled replies.
+
+    ``receipts`` sets the receipts block and the lines above the reply (the turn sends it
+    once). A ``narration`` frame marked ``retracted`` drops the draft the loop replaced from
+    the reply. The frame still goes on to ``data`` as before.
+    """
+    data = payload.get("data")
+    data = data if isinstance(data, dict) else {}
+    kind = payload.get("type")
+    if kind == _D_RECEIPTS:
+        acc.receipts = [r for r in data.get("receipts") or [] if isinstance(r, dict)]
+        acc.above = [str(line) for line in data.get(ABOVE) or []]
+    elif kind == _D_NARRATION and data.get("retracted") is True and isinstance(data.get("text"), str):
+        acc.shown = [without_narration("".join(acc.shown), data["text"])]
 
 
 def _absorb_finish_frame(acc: _Acc, payload: dict[str, Any]) -> None:
@@ -230,7 +271,8 @@ def parse_data_stream(body: str, header_chat_id: str | None = None) -> ChatTurn:
         acc.frames += 1
         _absorb(acc, prefix, payload)
     return ChatTurn(
-        text="".join(acc.text), chat_id=acc.chat_id, tool_calls=tuple(acc.tool_calls),
+        text="".join(acc.shown), chat_id=acc.chat_id, text_raw="".join(acc.text),
+        receipts=tuple(acc.receipts), above=tuple(acc.above), tool_calls=tuple(acc.tool_calls),
         tool_results=tuple(acc.tool_results), errors=tuple(acc.errors), finish=acc.finish,
         reasoning="".join(acc.reasoning), data=tuple(acc.data), frames=acc.frames, unparsed=acc.unparsed,
     )

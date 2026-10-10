@@ -17,6 +17,7 @@ from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
 from modules.tools.discovery.ticket_run_now import redo_keeps_the_correction
 from modules.tools.discovery.ticket_moves import keeps_the_board_rules
 from modules.tools.discovery.auto_approve_scope import auto_approves_only_what_it_runs
+from modules.tools.discovery.agent_refs import gives_the_card_on_update, resolve_active_agent, takes_the_agent_id
 
 # list_board_tasks: the page size the model may ask for. "Close all the blocked
 # tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
@@ -146,47 +147,9 @@ def _cannot_take_tasks(db: Session, agent: Any) -> Optional[str]:
             "or give the task to another agent.")
 
 
-def _resolve_active_agent_by_name(db: Session, workspace_id: UUID, agent_name: str):
-    """Resolve an agent NAME to a single ACTIVE agent for a board write.
-
-    P224-RVW-4: the write layer must honor the same contract AutoBrain's ASSIGN
-    classifier does — resolve only against ACTIVE agents (the same source
-    ``AutoBrain._active_agents`` uses) and NEVER silently ``.first()`` on an
-    ambiguous name. ``Agent.name`` has no unique constraint (only
-    ``(workspace_id, slug)``) and the create/clone guards compare
-    case-SENSITIVELY, so 'Atlas' and 'atlas' can coexist and collide under this
-    case-insensitive match. Fetch the active roster and match the name in Python
-    (same active-only source + case-insensitive comparison the classifier uses),
-    dedup by agent id. Returns ``(agent, error)``:
-
-    * exactly one active match   -> ``(agent, None)``
-    * no active match            -> ``(None, None)`` — caller decides unassigned vs 'not found'
-    * two-or-more active matches  -> ``(None, "<ambiguity message>")`` — caller refuses
-
-    So a same-named pair never yields a row-order-dependent dispatch, and an
-    active-vs-inactive pair resolves to the ACTIVE one (the inactive is never in
-    the active roster the match runs over).
-    """
-    from core.models import Agent
-
-    active = (
-        db.query(Agent)
-        .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
-        .all()
-    )
-    target = agent_name.strip().lower()
-    matches = {
-        a.id: a for a in active if (getattr(a, "name", "") or "").lower() == target
-    }
-    if len(matches) == 1:
-        return next(iter(matches.values())), None
-    if len(matches) >= 2:
-        return None, (
-            f"Multiple active agents named '{agent_name}' — I can't tell which one "
-            "you mean. Rename or deactivate the duplicate, then try again."
-        )
-    return None, None
-
+# P224-RVW-4 with FX-012: the agent of a board write, ACTIVE only: the int id takes_the_agent_id
+# bound, or a whole name; a name several active agents carry is refused listing them (agent_refs).
+_resolve_active_agent_by_name = resolve_active_agent
 
 
 def _parse_deadline(value: Any):
@@ -204,6 +167,7 @@ def _parse_deadline(value: Any):
 @checks_the_new_card  # F241/F265 (7b): never a copy of a card; no status orders in its brief
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 @auto_approves_only_what_it_runs  # auto_approve runs only publish_blog; others wait for the owner
+@takes_the_agent_id("assigned_agent_name")  # FX-012: agent_id beside the name; an id wins
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
@@ -612,14 +576,15 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 @guarded_and_recorded(ASSIGN)  # F241: never a closed ticket; each change noted on its ticket
+@takes_the_agent_id("agent_name")  # FX-012: agent_id beside the name; an id wins
 async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Assign a board task to an agent by name."""
+    """Assign a board task to an agent, by its id (FX-012) or its name."""
     from core.models.core import BoardTask
 
     task_id = params.get("task_id")
     agent_name = params.get("agent_name")
     if not task_id or not agent_name:
-        return {"success": False, "error": "task_id and agent_name are required"}
+        return {"success": False, "error": "task_id and the agent (agent_id or agent_name) are required"}
 
     task = db.query(BoardTask).filter(
         BoardTask.id == int(task_id),
@@ -714,6 +679,7 @@ async def _update_many_board_task_statuses(
     }
 
 
+@gives_the_card_on_update  # FX-012: agent_id/agent_name give the card as platform_assign_task does
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 @briefs_like_the_board  # F241 (7b), F279 (8): send_back is the board's Reject, a new brief its Re-brief
 @notes_say_who_asked  # F241 (7b): a note in a chat a person drives is theirs

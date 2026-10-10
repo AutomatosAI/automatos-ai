@@ -50,6 +50,8 @@ export interface ToolCall {
   summary?: string
   /** PRD-238 S3: the loop de-duplicated this call — it never ran. */
   skipped?: boolean
+  /** P256-FIX-RVW-22: an ask for the owner's click — it waits on its card, it did not fail. */
+  waiting?: boolean
 }
 
 /** PRD-238 S6: the compact, live-updatable card for a board ticket in the chat. */
@@ -223,7 +225,8 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
 export interface Receipt {
   action: string
   kind: 'read' | 'write'
-  status: 'done' | 'refused' | 'skipped'
+  /** waiting: an ask for the owner's click, its approval card raised; nothing ran, nothing was refused. */
+  status: 'done' | 'refused' | 'skipped' | 'waiting'
   /** The thing by number or name: "#0422", an agent, a document's title; '' when none. */
   subject: string
   /** What the call did, in plain words: "moved to Done", "sent back to its agent". */

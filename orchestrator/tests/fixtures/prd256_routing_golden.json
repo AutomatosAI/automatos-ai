@@ -286,5 +286,371 @@
    "lane": "tiers",
    "note": null
   }
- ]
+ ],
+ "night12": {
+  "roster": [
+   {
+    "id": 2,
+    "name": "NEWSROOM",
+    "job_title": "Newsletter editor"
+   },
+   {
+    "id": 1,
+    "name": "Auto",
+    "job_title": "Workspace orchestrator",
+    "is_system_agent": true
+   },
+   {
+    "id": 57,
+    "name": "RESEARCHER",
+    "job_title": "Market researcher"
+   },
+   {
+    "id": 58,
+    "name": "WRITER",
+    "job_title": "Copywriter"
+   },
+   {
+    "id": 267,
+    "name": "OPS",
+    "job_title": "Operations Manager"
+   },
+   {
+    "id": 284,
+    "name": "OPS",
+    "job_title": "Shop floor assistant"
+   },
+   {
+    "id": 412,
+    "name": "CHRISTMAS BOX",
+    "job_title": "Seasonal buyer"
+   },
+   {
+    "id": 455,
+    "name": "MARKET-MANAGER",
+    "job_title": "Market stall manager"
+   },
+   {
+    "id": 501,
+    "name": "GREEN BUYER",
+    "job_title": "Green coffee buyer"
+   },
+   {
+    "id": 502,
+    "name": "CLUB DESK",
+    "job_title": "Club member desk"
+   },
+   {
+    "id": 610,
+    "name": "Support",
+    "job_title": "Customer support"
+   },
+   {
+    "id": 611,
+    "name": "Sales",
+    "job_title": "Wholesale sales lead"
+   }
+  ],
+  "board": {
+   "#0953": 9953,
+   "#1041": 9041,
+   "#1057": 9057
+  },
+  "routes": [
+   {
+    "said": "Get OPS to reorder the green stock under 50 kg.",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Get RESEARCHER to price the Kerbside wholesale offer against two competitors.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Get GREEN BUYER to check how much Kirinyaga we have left.",
+    "lane": "ASSIGN 501 GREEN BUYER"
+   },
+   {
+    "said": "Get WRITER to draft the club member email for the Christmas box.",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "Get CLUB DESK to answer the three member questions in the inbox, no rush.",
+    "lane": "ASSIGN 502 CLUB DESK"
+   },
+   {
+    "said": "Can you get MARKET-MANAGER to book the Saturday pitch?",
+    "lane": "ASSIGN 455 MARKET-MANAGER"
+   },
+   {
+    "said": "Ask RESEARCHER to find three cafés in Leith that don't stock us yet.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Ask RESEARCHER what the going rate for 1 kg of Harbour Blend is.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Ask OPS to confirm the Kerbside delivery for Friday.",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Ask CHRISTMAS BOX to count how many boxes are left.",
+    "lane": "ASSIGN 412 CHRISTMAS BOX"
+   },
+   {
+    "said": "Please ask GREEN BUYER to get a price from the importer.",
+    "lane": "ASSIGN 501 GREEN BUYER"
+   },
+   {
+    "said": "Have MARKET-MANAGER pull last month's stall takings.",
+    "lane": "ASSIGN 455 MARKET-MANAGER"
+   },
+   {
+    "said": "Have WRITER tidy up the About page copy.",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "Have OPS ring the roaster about the late delivery.",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Tell CLUB DESK the Christmas box ships on 1 December.",
+    "lane": "ASSIGN 502 CLUB DESK"
+   },
+   {
+    "said": "Let CHRISTMAS BOX know we have 120 orders now.",
+    "lane": "ASSIGN 412 CHRISTMAS BOX"
+   },
+   {
+    "said": "Give #1057 to CHRISTMAS BOX",
+    "lane": "ASSIGN 412 CHRISTMAS BOX"
+   },
+   {
+    "said": "Assign #1041 to GREEN BUYER, please.",
+    "lane": "ASSIGN 501 GREEN BUYER"
+   },
+   {
+    "said": "Hand #0953 over to RESEARCHER.",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Give #1057 to OPS",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Reassign ticket 1062 to WRITER",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "267, the operations one",
+    "lane": "ASSIGN 267 OPS"
+   },
+   {
+    "said": "284 — the shop floor one, please",
+    "lane": "ASSIGN 284 OPS"
+   },
+   {
+    "said": "agent 267",
+    "lane": "ASSIGN 267 OPS"
+   },
+   {
+    "said": "What did RESEARCHER say about the Leith cafés?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Is OPS still working on #1041?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Delete MARKET-MANAGER",
+    "lane": "tiers"
+   },
+   {
+    "said": "Delete MARKET-MANAGER, we don't need it any more.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Change GREEN BUYER's heartbeat to every morning at 7.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Set up something every Wednesday to remind CLUB DESK to post the member update.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Set up something every Wednesday that checks the green stock.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Which agents did you create for me last night?",
+    "lane": "tiers"
+   },
+   {
+    "said": "2",
+    "lane": "tiers"
+   }
+  ],
+  "task_after_the_name": [
+   {
+    "said": "Have support tickets been answered today?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Get sales figures for Q3",
+    "lane": "tiers"
+   },
+   {
+    "said": "Get OPS's stock report",
+    "lane": "tiers"
+   },
+   {
+    "said": "Get WRITER's draft of the About page.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have Support answered the club emails?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have sales been good this month?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have Support check the refund queue.",
+    "lane": "ASSIGN 610 Support"
+   },
+   {
+    "said": "Ask Support whether the Kerbside refund went out.",
+    "lane": "ASSIGN 610 Support"
+   },
+   {
+    "said": "Ask Sales: how many club boxes sold this week?",
+    "lane": "ASSIGN 611 Sales"
+   },
+   {
+    "said": "Get Sales to pull the Q3 figures.",
+    "lane": "ASSIGN 611 Sales"
+   },
+   {
+    "said": "Have RESEARCHER and WRITER plan the launch.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have OPS and WRITER plan the Christmas window.",
+    "lane": "tiers"
+   },
+   {
+    "said": "Don't ask RESEARCHER to price the Kerbside offer",
+    "lane": "tiers"
+   },
+   {
+    "said": "Did you ask RESEARCHER to find the Leith cafés?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Never have WRITER touch the About page",
+    "lane": "tiers"
+   },
+   {
+    "said": "Should I ask OPS to check the stock?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have sales risen this week?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have Support caught up?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have sales hit target?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Have OPS check the stock?",
+    "lane": "ASK OPS (267, 284)"
+   },
+   {
+    "said": "Have WRITER draft the About page?",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "Have RESEARCHER find the Leith cafés?",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Have OPS finished?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Remind me to ask WRITER to redo the About page on Friday",
+    "lane": "tiers"
+   },
+   {
+    "said": "I'll get WRITER to redo it tomorrow",
+    "lane": "tiers"
+   },
+   {
+    "said": "Let me tell WRITER the news myself",
+    "lane": "tiers"
+   },
+   {
+    "said": "I'm going to ask RESEARCHER to look at it",
+    "lane": "tiers"
+   },
+   {
+    "said": "Note to self: ask WRITER to redo the About page",
+    "lane": "tiers"
+   },
+   {
+    "said": "Shall I ask OPS to check the stock?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Shouldn't we ask RESEARCHER to look?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Do you think I should ask RESEARCHER to look?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Do you want me to ask WRITER to redo the About page?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Get sales to 10k this month",
+    "lane": "tiers"
+   },
+   {
+    "said": "Help me get Support to inbox zero",
+    "lane": "tiers"
+   },
+   {
+    "said": "agent 267, what does it do?",
+    "lane": "tiers"
+   },
+   {
+    "said": "30, the tracker - is it broken?",
+    "lane": "tiers"
+   },
+   {
+    "said": "Hand #1043 over to Support - the customer wants a refund",
+    "lane": "tiers"
+   },
+   {
+    "said": "I need you to ask WRITER to redo the About page.",
+    "lane": "ASSIGN 58 WRITER"
+   },
+   {
+    "said": "Can you ask RESEARCHER to look at it?",
+    "lane": "ASSIGN 57 RESEARCHER"
+   },
+   {
+    "said": "Get OPS to order 50 bags of Harbour Blend.",
+    "lane": "ASK OPS (267, 284)"
+   }
+  ]
+ }
 }

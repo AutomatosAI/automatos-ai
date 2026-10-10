@@ -12,8 +12,13 @@ are here, each against the table:
   four lanes before they were deleted): the lane AutoBrain pins and the note the turn reads last;
 - the table: one row per kind, the lane modules gone, the classifier's reading is the note's;
 - brand work (test_prd255w2_brand_routing, test_f362_a, test_f362_b), customer paperwork
-  (test_f337_c), each as it was asserted before. Social media work's row keeps its own file
-  (test_f379_d), against the table.
+  (test_f337_c), each as it was asserted before;
+- night 12 (FX-014): the 33 hand-off shapes the classifier's verdict lost ("Get OPS to…", "Ask
+  RESEARCHER…", "Give #1057 to CHRISTMAS BOX", "267, the operations one", "Delete MARKET-MANAGER")
+  route to their lane whatever the tiers said (the golden file's ``night12`` rows). Social media work's row keeps its own file
+  (test_f379_d), against the table;
+- P256-FIX-RVW-12, RVW-42: a name is handed work only when a task the owner asks for follows it: "Get sales figures",
+  "I'll get WRITER to …", an order's "#1043" and work for two teammates stay the tiers' (``night12.task_after_the_name``).
 """
 from __future__ import annotations
 
@@ -30,10 +35,10 @@ import pytest
 
 from consumers.chatbot import brand_to_the_designer, handoffs
 from consumers.chatbot import named_template_note as note_module
-from consumers.chatbot.auto import Action, AutoBrain, Complexity, apply_assign_bias
+from consumers.chatbot.auto import Action, AutoBrain, Complexity, ComplexityAssessment, apply_assign_bias
 from consumers.chatbot.handoffs import (
     BRAND, HANDOFFS, PAPERWORK, REMOVED_NOTE, SOCIALS, UNAVAILABLE_NOTE, Turn, asks_for_brand_work,
-    asks_for_paperwork, hands_off, read_the_table, the_turn, turn_note,
+    asks_for_paperwork, auto_always_answers, hands_off, read_the_table, the_turn, turn_note,
 )
 from consumers.chatbot.named_template_note import fills_the_named_template, read_note
 from modules.coordination.dispatch_contract import DISPATCH_CONTRACT_FRAGMENT
@@ -241,6 +246,99 @@ def test_the_golden_lists_the_routing_asks_of_this_test(golden_workspace):
 def test_the_routing_asks_route_as_they_did_before_the_table(golden_workspace, index):
     before = golden_workspace["routes"][index]
     assert _routed(before["said"], before["opening"]) == (before["lane"], before["note"]), before["said"]
+
+
+# ── night 12 (FX-014): a named agent gets its ticket whatever the tiers said ──
+
+NIGHT_12 = json.loads(GOLDEN.read_text())["night12"]
+TIERS_SAID = [Action.RESPOND, Action.DELEGATE, Action.MISSION, Action.ASSIGN]
+
+
+class _Night12Brain:
+    """What the table and the lane read of AutoBrain: c1's roster, AutoBrain's own roster match."""
+
+    _db, _workspace_id = object(), str(WS)
+    _match_roster_agent = AutoBrain._match_roster_agent
+
+    def _onboarding_active(self):
+        return False
+
+    def _active_agents(self):
+        return [NS(**{"is_system_agent": False, "status": "active", **agent}) for agent in NIGHT_12["roster"]]
+
+
+@pytest.fixture
+def night12_workspace(monkeypatch, designer):
+    monkeypatch.setattr(handoffs, "find_social_media_director", lambda db, workspace_id: DIRECTOR)
+    monkeypatch.setattr(handoffs, "agent_names", lambda db, workspace_id: [a["name"] for a in NIGHT_12["roster"]])
+    monkeypatch.setattr("services.ticket_numbers.resolve_ticket_ref", lambda db, ws, ref: NIGHT_12["board"].get(ref))
+
+
+def _night12_lane(said, action):
+    """The lane AutoBrain's two wrappers give a turn whose tiers said ``action`` (night 12: RESPOND)."""
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=action, reasoning=TIERS)
+
+    async def classifier(brain, message, conversation_length=0):
+        return tiers
+
+    verdict = asyncio.run(hands_off(auto_always_answers(classifier))(_Night12Brain(), said, 3))
+    if verdict is tiers or verdict.action != Action.ASSIGN:
+        return "tiers"
+    if verdict.target_agent_id is None:
+        ids = sorted(a["id"] for a in NIGHT_12["roster"] if a["name"] == verdict.target_agent_name)
+        return f"ASK {verdict.target_agent_name} ({', '.join(map(str, ids))})"
+    return f"ASSIGN {verdict.target_agent_id} {verdict.target_agent_name}"
+
+
+def test_the_golden_holds_night_12s_33_hand_off_shapes():
+    said = " | ".join(route["said"] for route in NIGHT_12["routes"]).lower()
+    lanes = [route["lane"] for route in NIGHT_12["routes"]]
+
+    assert len(lanes) == 33
+    for shape in ("get ops to", "ask researcher", "have market-manager", "give #1057 to christmas box",
+                  "267, the operations one", "delete market-manager", "set up something every wednesday"):
+        assert shape in said
+    assert "ASK OPS (267, 284)" in lanes and "ASSIGN 267 OPS" in lanes and "tiers" in lanes
+
+
+@pytest.mark.parametrize("action", TIERS_SAID)
+@pytest.mark.parametrize("index", range(len(NIGHT_12["routes"])))
+def test_night_12s_hand_offs_take_their_lane_whatever_the_tiers_said(night12_workspace, index, action):
+    route = NIGHT_12["routes"][index]
+    assert _night12_lane(route["said"], action) == route["lane"], route["said"]
+
+
+# ── P256-FIX-RVW-12: a name is handed work only when a task follows it ──────
+
+TASK_AFTER_THE_NAME = NIGHT_12["task_after_the_name"]
+
+
+def test_the_golden_holds_the_names_that_hand_nothing_over_and_the_joined_rows():
+    by_said = {route["said"]: route["lane"] for route in TASK_AFTER_THE_NAME}
+    names = {agent["name"] for agent in NIGHT_12["roster"]}
+
+    assert {"Support", "Sales"} <= names
+    for said in ("Have support tickets been answered today?", "Get sales figures for Q3", "Get OPS's stock report",
+                 "Have Support answered the club emails?", "Have RESEARCHER and WRITER plan the launch."):
+        assert by_said[said] == "tiers", said
+    assert by_said["Have Support check the refund queue."] == "ASSIGN 610 Support"
+    assert by_said["Ask Sales: how many club boxes sold this week?"] == "ASSIGN 611 Sales"
+    # P256-FIX-RVW-16: a hand-off the owner forbids or asks about, and a present-perfect question
+    for said in ("Don't ask RESEARCHER to price the Kerbside offer", "Did you ask RESEARCHER to find the Leith cafés?",
+                 "Never have WRITER touch the About page", "Should I ask OPS to check the stock?",
+                 "Have sales risen this week?", "Have Support caught up?", "Have sales hit target?"):
+        assert by_said[said] == "tiers", said
+    # P256-FIX-RVW-29: a bare verb after the name is a request, "?" or not (two agents are called OPS)
+    assert [by_said[f"Have {said}?"] for said in ("OPS check the stock", "WRITER draft the About page", "OPS finished")] \
+        == ["ASK OPS (267, 284)", "ASSIGN 58 WRITER", "tiers"]
+    assert len(TASK_AFTER_THE_NAME) == 40
+
+
+@pytest.mark.parametrize("action", TIERS_SAID)
+@pytest.mark.parametrize("index", range(len(TASK_AFTER_THE_NAME)))
+def test_a_name_is_handed_work_only_when_a_task_follows_it_whatever_the_tiers_said(night12_workspace, index, action):
+    route = TASK_AFTER_THE_NAME[index]
+    assert _night12_lane(route["said"], action) == route["lane"], route["said"]
 
 
 # ── the table ──────────────────────────────────────────────────────────────

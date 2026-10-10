@@ -23,7 +23,7 @@ Playbook step's spine mocked:
   list is checked first and always wins;
 * the way through: only ``PLATFORM_PUBLISHER`` passes, nothing passes it yet, and
   the deny list still applies to it;
-* the gate follows the deny list at both agent sites, before anything executes,
+* the gate follows the deny list at the agent site and in a Playbook step, before anything executes,
   and every other Composio execution site is classified as no agent posting path.
 """
 from __future__ import annotations
@@ -517,14 +517,15 @@ async def test_a_socials_off_workspace_posts_exactly_as_before(env, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_a_socials_off_playbook_step_reaches_the_linkedin_workaround(env, monkeypatch):
-    step = _Step(monkeypatch, LINKEDIN_POST, IMAGES)
-    step.linkedin.return_value = {"success": True, "data": {"id": "urn:li:share:1"}, "error": None}
+    step = _Step(monkeypatch, LINKEDIN_POST, IMAGES)  # P256-FIX-RVW-2: through the spine, whose executor runs it
+    step.resolve_uploads.side_effect = lambda action, params, workspace_id: (params, [])
+    step.spine.execute_and_format.return_value = {"success": True, "raw_result": {"data": {"id": "urn:li:share:1"}}}
 
     result = await step.run(WS_OFF)
 
     (call,) = result["execution"]["tool_calls"]
-    assert "urn:li:share:1" in call["result"]
-    step.linkedin.assert_called_once()
+    assert "urn:li:share:1" in call["result"] and step.linkedin.call_count == 0
+    assert step.spine.execute_and_format.call_args.kwargs["tool_args"] == {"action": LINKEDIN_POST, "params": IMAGES}
 
 
 @pytest.mark.asyncio
@@ -708,12 +709,11 @@ def test_only_the_platform_publisher_passes_the_way_through():
 
 
 # ---------------------------------------------------------------------------
-# Structure: after the deny list, before anything executes, at both agent sites
+# Structure: after the deny list, before anything executes, at the agent site and in a step
 # ---------------------------------------------------------------------------
 
-GATE_SITES = [
+GATE_SITES = [  # a Playbook step rides the spine (its order: test_prd256_fix_playbook_sends_wait_for_the_click)
     ("core/composio/tool_executor.py", "ComposioToolExecutor.execute"),
-    ("api/recipe_executor.py", "_execute_step"),
 ]
 # Every other Composio execution site the Wave 0 inventory finds, and why an agent
 # never posts through it. A new site fails the test below until it is classified:

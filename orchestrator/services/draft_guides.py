@@ -12,9 +12,10 @@ right.
 - Retrieval first: a draft ticket's brief is searched against the workspace's
   documents before the agent's first model call. The passages that clear the
   relevance floor go into its prompt (F085-A's prefetch).
-- Done-claims: the finished draft goes through F187's claim check against its
-  run's actions. The loop has already nudged it once (F108). A claim still
-  standing gets a line for the owner: check before sending.
+- Done-claims: the finished draft goes through the receipts' claim rule
+  (consumers/chatbot/claims_backed.py, PRD-256 FX-007) against its run's actions.
+  The loop has already nudged it once (F108). A claim still standing gets a line
+  for the owner: check before sending.
 - The owner's own (F269, night 7b; F269 and F287, night 8): what an agent wrote is
   never handed over as the owner's facts. ``owners_own`` drops its passages from a
   draft's guides and from Auto's retrieval-first passages, ``owners_own_chunks`` from
@@ -199,11 +200,21 @@ def _agents_documents(db: Any, ids: Iterable[Any], workspace_id: Any = None) -> 
 
 
 def check_before_sending(brief: object, draft: object, ran: Iterable[str]) -> Optional[str]:
-    """The owner's line for a customer draft that says an action was done that
-    no action in its run did, else None."""
+    """The owner's line for a customer draft that says, in its writer's voice ("I've
+    cancelled your order"), an action was done that no action in its run did, else None.
+    A third-person line ("Your order has been cancelled.") is the customer's news, not a
+    claim of the run's work (P256-FIX-RVW-44, as RVW-7 holds an agent's run)."""
     if not is_customer_draft(brief):
         return None
-    from modules.tools.execution.action_claims import claimed_action_not_done
+    from consumers.chatbot.claims_backed import unbacked_claims
+    from modules.tools.execution.turn_account import is_read
 
-    claim = claimed_action_not_done(str(draft or ""), set(ran or ()), promises=False)   # the writer's voice
-    return CHECK_BEFORE_SENDING.format(claim=claim) if claim else None
+    # the run lists the actions that went through: each write is a done one, its name its receipt (no
+    # effect is known here, so a claim backed only by an effect, "moved to Done", is never backed)
+    done_writes = [{"action": action} for action in (ran or ()) if not is_read(action)]
+    unbacked = unbacked_claims(str(draft or ""), done_writes, first_person=True,
+                               kinds_too=False)    # RVW-37: Auto's own claims
+    if not unbacked:
+        return None
+    verb, known = unbacked[0]
+    return CHECK_BEFORE_SENDING.format(claim=verb if known else "done")

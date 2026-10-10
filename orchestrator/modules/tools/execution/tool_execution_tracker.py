@@ -27,6 +27,9 @@ REFUSED_AGAIN = ("Skipped: this exact call already failed in this reply: {error}
 RAN_ONCE = ("Tool '{tool}' was already executed with identical parameters in this reply and did its work: its "
             "result is above. It was not run a second time.")
 REFUSAL_CHARS = 400
+# PRD-256 P256-FIX-RVW-4: an identical repeat of a call that asked for the owner's click is
+# skipped with the card's words (card_raised), never as a refusal (REFUSED_AGAIN) or as done (RAN_ONCE).
+WAITING_AGAIN = "this exact call already waits for the owner in this reply and was not asked again. {card}"
 # PRD-256 US-001: the trackers made while a chat turn's tool loop runs, oldest first, so the
 # turn's receipts read the calls its own loop made (consumers/chatbot/receipts.py). None
 # outside one: an agent run's tracker is kept by nobody.
@@ -108,6 +111,8 @@ class ToolExecutionTracker:
         self.outcomes: List[Tuple[str, Dict[str, Any], Any]] = []
         # F309: each identical call that failed this turn, with what it was told.
         self.refused: Dict[Tuple[str, str], str] = {}
+        # P256-FIX-RVW-4: each identical call that asked for the owner's click, with its card's words.
+        self.waiting: Dict[Tuple[str, str], str] = {}
         # PRD-256 US-001: each call not run this turn (a repeat, a cap), with why: a receipt.
         self.skipped: List[Tuple[str, Dict[str, Any], str]] = []
         # F120: how many queries per search tool came from EARLIER model responses;
@@ -139,6 +144,14 @@ class ToolExecutionTracker:
                 return f"platform_execute:{action}"
         return tool_name
 
+    def _recorded_as(self, tool_name: str, tool_args: Dict[str, Any]) -> str:
+        """The action a call is recorded under: platform_execute's inner action, composio_execute's
+        slug (P256-FIX-RVW-5: the receipts read what ran, never the dispatcher), else the call's name.
+        Counting stays by ``_counting_key``: one cap for every composio_execute call."""
+        from .composio_action import action_that_ran
+
+        return action_that_ran(tool_name, tool_args) or self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+
     def _resolve_limit(self, counting_key: str) -> int:
         """Resolve the retry limit for a counting key, honouring prefix defaults."""
         if counting_key in self.TOOL_RETRY_LIMITS:
@@ -161,7 +174,7 @@ class ToolExecutionTracker:
 
         skip, reason = self._skip_reason(tool_name, tool_args)
         if skip:
-            action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+            action = self._recorded_as(tool_name, tool_args)
             self.skipped.append((action, call_params(tool_name, tool_args), reason))
         return skip, reason
 
@@ -204,6 +217,8 @@ class ToolExecutionTracker:
 
     def _repeat_reason(self, tool_name: str, exec_key: Tuple[str, str]) -> str:
         """F309: why an identical call is skipped: the refusal it met, or that it ran once."""
+        if exec_key in self.waiting:
+            return WAITING_AGAIN.format(card=self.waiting[exec_key])
         if exec_key in self.refused:
             return REFUSED_AGAIN.format(error=self.refused[exec_key])
         return RAN_ONCE.format(tool=tool_name)
@@ -225,20 +240,27 @@ class ToolExecutionTracker:
         (``success: False``, Composio's ``successful: False``) is not recorded.
         F261 (night 8): a call whose name does not say what it did is recorded
         with what it did too (``call_effects``: a card moved to done approves it).
-        F351 (night 10b): a refused document call leaves only ``MAKE_REFUSED``."""
-        from .call_effects import call_effects, call_params, refused_effects, result_effects
+        F351 (night 10b): a refused document call leaves only ``MAKE_REFUSED``.
+        P256-FIX-RVW-4: an ask for the owner's click (the executor's own, or inside the chat's
+        envelope) is waiting: neither failed, refused nor succeeded."""
+        from .call_effects import call_params, done_effects, refused_effects, what_it_said
+        from .card_raised import for_the_model
 
-        action = self._counting_key(tool_name, tool_args).split(":", 1)[-1]
+        action = self._recorded_as(tool_name, tool_args)
         self.outcomes.append((action, call_params(tool_name, tool_args), result))
+        card = for_the_model(result, action)
+        if card:
+            self.waiting[(tool_name, self._hash_args(tool_args))] = card
+            return
         if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
             self.failed.add(action)
-            said = str(result.get("error") or result.get("message") or "it reported a failure").strip()
+            said = what_it_said(result) or "it reported a failure"
             self.refused[(tool_name, self._hash_args(tool_args))] = said[:REFUSAL_CHARS]
             self.succeeded.update(refused_effects(action))
             return
         self.succeeded.add(action)
-        self.succeeded.update(call_effects(action, call_params(tool_name, tool_args)))
-        self.succeeded.update(result_effects(result))  # F308: whether a mission's steps wait for the owner
+        # F308: whether a mission's steps wait for the owner; FX-013: a status the answer ignored is no move.
+        self.succeeded.update(done_effects(action, call_params(tool_name, tool_args), result))
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)

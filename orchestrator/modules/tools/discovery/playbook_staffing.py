@@ -33,6 +33,7 @@ import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from modules.tools.discovery import handlers_playbooks as _steps
+from modules.tools.discovery.agent_refs import candidates
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def _agent_for(db: Any, workspace_id: Any, said: str) -> Tuple[Optional[int], Op
     matches = answering_to(staff, said)
     if len(matches) == 1:
         return matches[0].id, None
-    why = SEVERAL_DO.format(agents=", ".join(f"{a.id}={a.name}" for a in matches)) if matches else NONE_DOES
+    why = SEVERAL_DO.format(agents=candidates(matches)) if matches else NONE_DOES  # FX-012: id · name · job title
     return None, NO_SINGLE_AGENT.format(name=said, why=why, roster=_roster(staff))
 
 

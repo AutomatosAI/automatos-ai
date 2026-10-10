@@ -35,6 +35,7 @@ from qdrant_client.models import (
     Filter,
     FilterSelector,
     HnswConfigDiff,
+    MatchAny,
     MatchValue,
     PayloadSchemaType,
     PointStruct,
@@ -152,6 +153,8 @@ class DurableMemoryStore:
             ("subject_id", PayloadSchemaType.KEYWORD),
             ("content_hash", PayloadSchemaType.KEYWORD),
             ("created_at", PayloadSchemaType.KEYWORD),
+            # PRD-256 P256-FIX-RVW-11: the standing-rules read and the dedupe filter on the owner.
+            ("metadata.owner", PayloadSchemaType.KEYWORD),
         ]:
             try:
                 await self._client.create_payload_index(
@@ -241,10 +244,9 @@ class DurableMemoryStore:
         ws = str(workspace_id) if workspace_id else workspace_from_namespace(user_id)
         content_hash = hashlib.sha256(text.encode()).hexdigest()
 
-        existing = await self._find_by_hash(user_id, content_hash)
-        if existing is not None:
-            logger.debug("[Durable] Deduplicated add in namespace=%s", user_id)
-            return {"success": True, "id": str(existing.id), "deduped": True}
+        deduped = await self._deduped(user_id, content_hash, (metadata or {}).get("owner"))
+        if deduped is not None:
+            return deduped
 
         embedding = await self._embedder.generate_embedding(text)
         point_id = str(uuid.uuid4())
@@ -350,6 +352,21 @@ class DurableMemoryStore:
         workspace_id: Optional[str] = None,
     ) -> List[Dict]:
         """Every memory in a namespace (unscored, scroll order)."""
+        return await self._scroll(self._namespace_filter(user_id), limit)
+
+    async def get_where_any(self, user_id: str, any_of: Dict[str, List[str]], limit: int = 100,
+                            where: Optional[Dict[str, str]] = None) -> List[Dict]:
+        """PRD-256 FX-015: the namespace's memories whose payload matches at least one of
+        ``any_of`` (a payload key, ``metadata.type`` say, to the values it may hold) and every
+        ``where`` key exactly (P256-FIX-RVW-11: ``metadata.owner``, so the scan holds one
+        person's rows, never the whole workspace's); unscored, scroll order, no embedding call."""
+        should = [FieldCondition(key=key, match=MatchAny(any=list(values))) for key, values in any_of.items()]
+        exact = [FieldCondition(key=key, match=MatchValue(value=value)) for key, value in (where or {}).items()]
+        flt = Filter(must=[*self._namespace_filter(user_id).must, *exact], should=should or None)
+        return await self._scroll(flt, limit)
+
+    async def _scroll(self, flt: Filter, limit: int) -> List[Dict]:
+        """The memories ``flt`` matches, up to ``limit`` (unscored, scroll order)."""
         if not self._enabled:
             return []
         await self.ensure_collection()
@@ -359,7 +376,7 @@ class DurableMemoryStore:
         while len(out) < limit:
             points, next_offset = await self._client.scroll(
                 collection_name=self._collection,
-                scroll_filter=self._namespace_filter(user_id),
+                scroll_filter=flt,
                 limit=min(256, limit - len(out)),
                 offset=next_offset,
                 with_payload=True,
@@ -515,14 +532,45 @@ class DurableMemoryStore:
 
     # ── Internals ───────────────────────────────────────────────
 
-    async def _find_by_hash(self, user_id: str, content_hash: str):
+    async def _deduped(self, user_id: str, content_hash: str, owner: Optional[str]) -> Optional[Dict]:
+        """The add's answer when this content is already stored (for an owned write, this
+        owner's row, dated now: P256-FIX-RVW-41); None when it is new and must be stored."""
+        existing = await self._find_by_hash(user_id, content_hash, owner=owner)
+        if existing is None:
+            return None
+        logger.debug("[Durable] Deduplicated add in namespace=%s", user_id)
+        if owner:
+            await self._restated_now(user_id, existing.id)
+        return {"success": True, "id": str(existing.id), "deduped": True}
+
+    async def _restated_now(self, user_id: str, point_id: Any) -> None:
+        """P256-FIX-RVW-41: an owner restating their own row dates it now, so the restated
+        rule is their newest (it leads the standing rules and beats the rule it replaced).
+        Only ``created_at`` changes; a timeout keeps the old date and says so in the log."""
+        try:
+            await self._client.set_payload(
+                collection_name=self._collection,
+                payload={"created_at": datetime.now(timezone.utc).isoformat()},
+                points=[point_id],
+            )
+        except Exception as exc:
+            if not is_timeout(exc):
+                raise
+            logger.warning("memory restated but not re-dated: %s, point %s (%r)", user_id, point_id, exc)
+
+    async def _find_by_hash(self, user_id: str, content_hash: str, owner: Optional[str] = None):
+        """The namespace's row with this content, and, for an owned write, this owner's
+        (P256-FIX-RVW-11: a person restating a fact stored ownerless, or another member's,
+        gets a row of their own, never the other row's id; the existing row is left as it is)."""
         if not self._enabled:
             return None
+        mine = [FieldCondition(key="metadata.owner", match=MatchValue(value=str(owner)))] if owner else []
         results, _ = await self._client.scroll(
             collection_name=self._collection,
             scroll_filter=Filter(must=[
                 FieldCondition(key="namespace", match=MatchValue(value=user_id)),
                 FieldCondition(key="content_hash", match=MatchValue(value=content_hash)),
+                *mine,
             ]),
             limit=1,
         )

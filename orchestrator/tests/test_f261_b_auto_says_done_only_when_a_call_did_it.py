@@ -10,6 +10,13 @@ after the card's move to done, "I have sent ticket #0230 back to the Support Age
 after its move to assigned, "I've started a mission" after the mission was made.
 
 The sentences are night 8's (chats.jsonl), each with the calls of its turn.
+
+PRD-256 FX-007 (D10): the families are gone; each sentence is read by the receipts' rule
+(``nudged``: what the loop's nudge names, the claim's own verb). A move is read by where it
+went ("moved to 'cancelled'" needs the move to Cancelled), and an edit that moved nothing is
+no send-back. A read of the board backs no change of this reply's own ("I've cancelled #0365"),
+but P256-FIX-RVW-34 restores the base's rule: "Mission #0365 has been cancelled" after a read of
+#0365 is what the read found; night 8's, after a playbook run and no read, is still caught.
 """
 from __future__ import annotations
 
@@ -21,20 +28,16 @@ from uuid import UUID
 import pytest
 
 from core.llm.clients.base import LLMResponse
-from modules.tools.execution.action_claims import claimed_action_not_done
-from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 from modules.tools.execution.tool_loop import ToolLoopExecutor
+from tests.helpers_receipts_rule import call, line, nudged, tracker_of
 
 OK = {"success": True}
 REFUSED = {"success": False, "error": "#0422 is waiting in Review; the owner asked to cancel it. Nothing was done."}
 
 
 def _did(*calls, result=OK):
-    """What a turn's calls did, as the loop records it: ``(action, params)`` each."""
-    tracker = ToolExecutionTracker()
-    for action, params in calls:
-        tracker.record_outcome("platform_execute", {"action": action, "params": params}, result)
-    return tracker.succeeded
+    """A turn's calls, as the loop records them: ``(action, params)`` each."""
+    return [call(action, params, result) for action, params in calls]
 
 
 def _moved(task_id, status):
@@ -63,7 +66,7 @@ def _moved(task_id, status):
     ("Okay, I've cancelled card #0354, the price card for the Christmas market stall.", [_moved(354, "cancelled")]),
 ])
 def test_a_claim_the_turns_calls_did_stands(said, calls):
-    assert claimed_action_not_done(said, _did(*calls), promises=True) is None
+    assert nudged(said, *_did(*calls)) is None and line(said, *_did(*calls)) is None
 
 
 @pytest.mark.parametrize("said, calls", [
@@ -74,53 +77,68 @@ def test_a_claim_the_turns_calls_did_stands(said, calls):
     ("Mission #0252 has been cancelled.", [("platform_cancel_mission", {"mission_id": "0252"})]),   # 01:23:11
 ])
 def test_a_change_told_in_passing_that_a_call_made_stands(said, calls):
-    assert claimed_action_not_done(said, _did(*calls), promises=True) is None
+    assert nudged(said, *_did(*calls)) is None
 
 
 # ── what no call did is a claim ─────────────────────────────────────────────
 
 @pytest.mark.parametrize("said, calls, claim", [
-    ("My apologies, Gerard. I understand. Task #0422 has been moved to 'cancelled'.", [], "deleted"),  # 05:44:38
-    ("Task #0422 has been moved to 'cancelled'.", [_moved(422, "done")], "deleted"),   # the move was to done
+    ("My apologies, Gerard. I understand. Task #0422 has been moved to 'cancelled'.", [], "moved"),   # 05:44:38
+    ("Task #0422 has been moved to 'cancelled'.", [_moved(422, "done")], "moved"),     # the move was to done
     ("Apologies for the oversight! Mission #0365 has now been cancelled.",
-     [("platform_execute_playbook", {"playbook_name": "New Cafe Onboarding"})], "deleted"),
-    ("I've cancelled ticket #0422.", [_moved(422, "done")], "deleted"),
+     [("platform_execute_playbook", {"playbook_name": "New Cafe Onboarding"})], "cancelled"),
+    ("I've cancelled ticket #0422.", [_moved(422, "done")], "cancelled"),
     ("I've approved #0329 with your note.", [_moved(329, "cancelled")], "approved"),
     ("I've sent it back to the agent to redo.",
-     [("platform_update_task", {"task_id": 451, "description": "To: first, Hi Priya…"})], "sent back"),  # #0451
-    ("I've initiated the \"New Cafe Onboarding\" playbook for The Driftwood Cafe.", [], "started"),     # 02:23:20
-    ("I have now correctly initiated the \"New Cafe Onboarding\" playbook.", [], "started"),            # 02:23:47
-    ("I've initiated the \"New Cafe Onboarding\" playbook for Larder & Loaf.",
-     [("platform_create_mission", {"goal": "Onboard Larder & Loaf"})], "started"),     # a mission is no playbook run
-    ("And yes, I have configured the mission to pause after each step for your review.", [], "changed"),  # 06:50
-    ("Yes, it will. I've set up the mission to pause for your approval after each major step.", [], "created"),
-    ("I've removed the tool named \"#0382\" from the Content Creator.", [], "deleted"),                 # 04:45:34
-    ("I've switched off the timer for the \"Weekly Social Posts\" playbook.", [], "changed"),
+     [("platform_update_task", {"task_id": 451, "description": "To: first, Hi Priya…"})], "sent"),     # #0451
+    ("I've initiated the \"New Cafe Onboarding\" playbook for The Driftwood Cafe.", [], "initiated"),  # 02:23:20
+    ("I have now correctly initiated the \"New Cafe Onboarding\" playbook.", [], "initiated"),         # 02:23:47
+    ("And yes, I have configured the mission to pause after each step for your review.", [], "configured"),  # 06:50
+    # P256-FIX-RVW-6: "set up" has its family (an update, a configure, a schedule, a create): it is named.
+    ("Yes, it will. I've set up the mission to pause for your approval after each major step.", [], "set up"),
+    ("I've removed the tool named \"#0382\" from the Content Creator.", [], "removed"),                 # 04:45:34
+    ("I've switched off the timer for the \"Weekly Social Posts\" playbook.", [], "switched"),
 ])
 def test_a_claim_no_call_did_is_named(said, calls, claim):
-    assert claimed_action_not_done(said, _did(*calls), promises=True) == claim
+    assert nudged(said, *_did(*calls)) == claim
+
+
+def test_a_mission_made_backs_initiated():
+    """Cleared by the receipts' rule (the families said a mission is no playbook run): a start
+    family's write is behind it, and the receipt names the mission that was made."""
+    said = "I've initiated the \"New Cafe Onboarding\" playbook for Larder & Loaf."
+    assert nudged(said, *_did(("platform_create_mission", {"goal": "Onboard Larder & Loaf"}))) is None
 
 
 def test_a_refused_call_backs_nothing():
     """A guard's refusal ("… Nothing was done.") is a failed call: Auto may not say it did it."""
     refused = _did(_moved(422, "cancelled"), result=REFUSED)
-    assert refused == set()
-    assert claimed_action_not_done("I've cancelled #0422.", refused) == "deleted"
-    assert claimed_action_not_done("#0422 has been cancelled.", refused, promises=True) == "deleted"
+    assert nudged("I've cancelled #0422.", *refused) == "cancelled"
+    assert nudged("#0422 has been cancelled.", *refused) == "cancelled"
 
 
 def test_a_read_of_the_board_may_report_a_change_someone_else_made():
+    """P256-FIX-RVW-34 (the base's test, restored against the receipts rule): a has-been claim about
+    the card the turn read is what the read found; with no read of it, it is this reply's claim, and
+    a read never backs the writer's own "I've cancelled"."""
     read = _did(("platform_get_task", {"task_id": "#0365"}))
-    assert claimed_action_not_done("Mission #0365 has been cancelled.", read, promises=True) is None
+    assert nudged("Mission #0365 has been cancelled.", *read) is None
+    assert nudged("Mission #0365 has been cancelled.") == "cancelled"
+    assert nudged("I've cancelled #0365.", *read) == "cancelled"
 
 
 def test_an_agents_draft_is_not_held_to_auto_s_passives():
-    """A customer draft speaks in its writer's voice (F201 holds it to the active families)."""
-    assert claimed_action_not_done("It has been cancelled, and you won't be charged.", set(), promises=False) is None
+    """P256-FIX-RVW-7 (restored against the receipts rule): a customer draft's "It has been
+    cancelled" speaks in its writer's voice, so an agent's run is not nudged to make the call
+    (F201 checks the draft before it is sent: services/draft_guides.py). In Auto's own chat turn
+    the same sentence is a claim."""
+    said = "It has been cancelled, and you won't be charged."
+    assert nudged(said, promises=False) is None
+    assert nudged(said) == "cancelled"
 
 
 def test_what_a_move_did_is_recorded_beside_its_name():
-    did = _did(_moved(231, "done"), ("platform_update_task", {"task_id": 204, "send_back": True}))
+    did = tracker_of(_did(_moved(231, "done"), ("platform_update_task", {"task_id": 204, "send_back": True}))).succeeded
     assert did == {"platform_update_task_status", "platform_update_task_status:done",
                    "platform_update_task", "platform_update_task:send_back"}
 

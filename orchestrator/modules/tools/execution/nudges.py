@@ -69,6 +69,12 @@ REFUSED_WRITE_NOTE = (
     "A write in this turn was refused: {refused}. {rule} Make the call again as the refusal says, in this "
     "response, or tell the owner plainly that it was refused and why."
 )
+# P256-FIX-RVW-4: the claim came after an ask for the owner's click: the write waits on its card;
+# it is neither done nor refused, and a retry raises no second card.
+WAITING_WRITE_NOTE = (
+    "A write in this turn is waiting for the owner's click: {cards} Tell the owner so in one line: it has "
+    "not happened yet and nothing went wrong. Do not call it again."
+)
 REFUSAL_SHOWN_CHARS = 200
 REFUSED_SHOWN = 3
 # finish_reason "length" mid tool call: the arguments' JSON was cut (moved here from
@@ -104,12 +110,16 @@ STEP_SHOWN_CHARS = 160
 
 def _refusal(result: Any) -> Optional[str]:
     """What refused a call (its result's error, on one line), or None when it did not fail. A call
-    held for the owner's click (PRD-256 US-004's ask) is waiting, not refused."""
+    held for the owner's click (PRD-256 US-004's ask, the executor's own or inside the chat's
+    envelope: P256-FIX-RVW-4) is waiting, not refused."""
+    from .call_effects import what_it_said
+    from .card_raised import is_waiting
+
     if not isinstance(result, dict) or (result.get("success") is not False and result.get("successful") is not False):
         return None
-    if result.get("requires_confirmation") or result.get("owner_only"):
+    if is_waiting(result) or result.get("owner_only"):
         return None
-    said = str(result.get("error") or result.get("message") or "it reported a failure").strip()
+    said = what_it_said(result) or "it reported a failure"
     return " ".join(said.split())[:REFUSAL_SHOWN_CHARS]
 
 
@@ -128,10 +138,23 @@ def refused_writes(outcomes: List[Any]) -> List[str]:
     return list(refused.values())[:REFUSED_SHOWN]
 
 
+def waiting_writes(outcomes: List[Any]) -> List[str]:
+    """P256-FIX-RVW-4: the turn's asks for the owner's click, each in its card's words
+    ("Card raised: change an agent 'Scout'."), once each."""
+    from .card_raised import tool_end_summary
+
+    cards = [tool_end_summary(result) for _action, _params, result in outcomes]
+    return list(dict.fromkeys(card for card in cards if card))[:REFUSED_SHOWN]
+
+
 def claimed_action_nudge(claim: str, outcomes: List[Any]) -> str:
     """F108's nudge for a reply that says something was ``claim`` with no action behind it;
-    PRD-256 US-006: after a refused write, the nudge names the refusal and the rule."""
+    PRD-256 US-006: after a refused write, the nudge names the refusal and the rule;
+    P256-FIX-RVW-4: after an ask, it names the card that waits, never a refusal."""
     said = CLAIMED_ACTION_RECOVERY_MSG.format(claim=claim)
+    waiting = waiting_writes(outcomes)
+    if waiting:
+        said = f"{said} {WAITING_WRITE_NOTE.format(cards=' '.join(waiting))}"
     refused = refused_writes(outcomes)
     if not refused:
         return said
@@ -140,10 +163,11 @@ def claimed_action_nudge(claim: str, outcomes: List[Any]) -> str:
     return f"{said} {REFUSED_WRITE_NOTE.format(refused='; '.join(refused), rule=REFUSED_WRITE_RULE)}"
 
 
-def announced_step(text: str) -> Optional[str]:
+def announced_step(text: str, outcomes: Optional[List[Any]] = None) -> Optional[str]:
     """The step a reply's last line announces and never took, else None. The line has
     a cue ("let me", "now let me", "I'll") and either ends on a colon or stops
-    mid-sentence; "let me know" is never a step."""
+    mid-sentence; "let me know" is never a step. P256-FIX-RVW-37 (F261-A): with the loop's
+    ``outcomes``, a reply ending "I will now send …" with no done write of that family is one too."""
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     if not lines:
         return None
@@ -152,7 +176,13 @@ def announced_step(text: str) -> Optional[str]:
         return None
     if last.endswith(":") or not last.endswith(_SENTENCE_END):
         return last[:STEP_SHOWN_CHARS]
-    return None
+    return last[:STEP_SHOWN_CHARS] if outcomes is not None and _promised(text, outcomes) else None
+
+
+def _promised(text: str, outcomes: List[Any]) -> bool:
+    from consumers.chatbot.receipts import unbacked_promise  # the receipts' rule, read when a reply ends
+
+    return unbacked_promise(text, outcomes) is not None
 
 
 # Night 9b (6586c8bf, 8578eeaf): a nudge in the user's turn was read as the owner

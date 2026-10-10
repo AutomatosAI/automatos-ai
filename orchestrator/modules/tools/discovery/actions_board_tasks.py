@@ -3,6 +3,7 @@
 from typing import Any, Dict
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .agent_refs import agent_id_property
 
 
 def _board_statuses() -> list:
@@ -117,6 +118,7 @@ def _create_task_properties() -> dict:
             "type": "string",
             "description": "Name of agent to assign (default: unassigned)",
         },
+        "agent_id": agent_id_property("The agent to assign, by id instead of assigned_agent_name"),
         "tags": {
             "type": "array",
             "items": {"type": "string"},
@@ -320,7 +322,8 @@ def _register_assign_task(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_assign_task",
         description=(
-            "Assign a board task to an agent by name. A task still in the inbox moves to "
+            "Assign a board task to an agent, by agent_id or by name (when several agents share the "
+            "name, the refusal lists their ids: call again with agent_id). A task still in the inbox moves to "
             "'assigned' so the agent picks it up on its next heartbeat; a task past the "
             "inbox keeps its status and changes owner."
         ),
@@ -331,10 +334,11 @@ def _register_assign_task(registry: ActionRegistry) -> None:
                 "task_id": _ticket_ref("The ticket to assign"),
                 "agent_name": {
                     "type": "string",
-                    "description": "Name of the agent to assign",
+                    "description": "Name of the agent to assign, when agent_id isn't given",
                 },
+                "agent_id": agent_id_property("The agent to assign"),
             },
-            "required": ["task_id", "agent_name"],
+            "required": ["task_id"],
         },
         permission_level="write",
         promoted=True,  # PRD-256 US-006: a first-class tool, pinned
@@ -405,6 +409,9 @@ def _update_task_parameters() -> dict:
                                 "owner's words that the redo fixes."),
             },
             **_update_task_moves(),
+            "agent_id": agent_id_property("Gives the card to this agent, as platform_assign_task does"),
+            "agent_name": {"type": "string", "description": "Gives the card to the agent of this name, when agent_id "
+                                                            "isn't given, as platform_assign_task does."},
         },
         "required": ["task_id"],
     }
@@ -419,7 +426,8 @@ def _register_update_task(registry: ActionRegistry) -> None:
             "correct or refine a ticket. It moves a card only as the board does: status "
             "moves it as platform_update_task_status does, its note kept with the move; "
             "send_back is the board's Reject (the owner's words in note, the brief kept); "
-            "and a new description on a card already worked on is its Re-brief."
+            "a new description on a card already worked on is its Re-brief; and agent_id "
+            "(or agent_name) gives the card to that agent as platform_assign_task does."
         ),
         category="tasks",
         parameters=_update_task_parameters(),

@@ -147,6 +147,18 @@ def _seed_models() -> None:
         logger.exception("Error loading LLM models")
 
 
+def _seed_claude_list_prices() -> None:
+    """The Claude 5.5 routes' list prices: insert if absent, price if NULL (P256-FIX-T2)."""
+    try:
+        from core.database.database import get_db_session
+        from core.seeds.seed_claude_list_prices import seed_claude_list_prices
+
+        with get_db_session() as db:
+            seed_claude_list_prices(db)
+    except Exception:
+        logger.exception("Error seeding Claude list prices")
+
+
 def _seed_skills_and_patterns() -> None:
     """Skills and patterns."""
     try:
@@ -257,6 +269,7 @@ def _load_platform_defaults() -> None:
     """Every platform-default section, in order; each one handles its own failure."""
     _seed_system_settings()
     _seed_models()
+    _seed_claude_list_prices()
     _seed_skills_and_patterns()
     _seed_personas()
     _seed_marketplace_agents()

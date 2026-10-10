@@ -102,11 +102,15 @@ def test_no_query_main_database_call_in_chat_surface(rel):
 
 
 def test_nl2sql_tools_present_in_chat_registry():
-    """PRD-160 S1: NL2SQL is back on the chat surface (workspace-scoped)."""
-    svc = (ORCH / "consumers/chatbot/service.py").read_text()
-    block = re.search(r"SEARCH_TOOLS\s*=\s*\{(.*?)\}", svc, re.S).group(1)
+    """PRD-160 S1: NL2SQL is back on the chat surface (workspace-scoped). The chat's
+    ToolExecutionTracker (and its SEARCH_TOOLS) lives in its own module since PRD-256 FX-007."""
+    tracker = (ORCH / "modules/tools/execution/tool_execution_tracker.py").read_text()
+    block = re.search(r"SEARCH_TOOLS\s*:\s*Set\[str\]\s*=\s*\{(.*?)\}", tracker, re.S).group(1)
     code = "\n".join(l for l in block.splitlines() if not l.strip().startswith("#"))
-    assert "'smart_query_database'" in code  # re-enabled
+    assert set(re.findall(r"[\"']([a-z_]+)[\"']", code)) == {
+        "search_knowledge", "semantic_search", "search_codebase", "search_tables", "search_images",
+        "search_formulas", "search_multimodal", "smart_query_database", "query_database",
+    }  # smart_query_database re-enabled
 
     ic = (ORCH / "consumers/chatbot/intent_classifier.py").read_text()
     data_branch = ic.split("Check for data/analytics queries")[1][:500]

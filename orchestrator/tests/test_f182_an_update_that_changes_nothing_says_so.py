@@ -56,7 +56,8 @@ AGENT = dict(id=325, name="Analyst", workspace_id="ws-c1", configuration={}, mod
     (handlers_playbooks.update_playbook_step, {"playbook_id": 102, "step_index": 0}, PLAYBOOK,
      "prompt_template, find, replace, agent_id, order, error_handling, output_key"),
     (handlers_agents.update_agent, {"agent_id": 325}, AGENT,
-     "new_name, description, status, model_id, system_prompt, temperature, tags, team, job_title, reports_to_id"),
+     "new_name, description, status, model_id, system_prompt, temperature, tags, team, job_title, reports_to_id, "
+     "runtime, provider, model"),  # PRD-256 FX-016: the runtime is a change too
     (handlers_assignments.configure_agent_heartbeat, {"agent_id": 325}, AGENT,
      "enabled, interval_minutes, prompt, auto_act, active_hours_start, active_hours_end, proactive_level, "
      "notification_channel, checklist"),

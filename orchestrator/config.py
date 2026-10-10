@@ -331,17 +331,15 @@ class Config:
     def MEMORY_DISTILL_MODEL(self) -> str:
         """Cheap-tier model for L3 memory distillation (PRD-159 D11/Q16).
 
-        The distiller runs ~1×/chat turn, so it is deliberately pinned to a cheap
-        model rather than the conversation tier. Resolves system_settings
-        (memory.distill_model) → env MEMORY_DISTILL_MODEL → DEFAULT_LLM_MODEL
-        (already a fast/cheap flash tier)."""
+        Resolves system_settings (memory.distill_model) → env MEMORY_DISTILL_MODEL →
+        the System LLM's own model, the tier the distiller runs on (P256-FIX-T1: the
+        Gemini default 404'd on an Anthropic System LLM) → DEFAULT_LLM_MODEL."""
         from core.llm.defaults import DEFAULT_LLM_MODEL
         try:
             from core.llm.manager import get_system_setting
-            return get_system_setting(
-                "memory", "distill_model",
-                os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL),
-            )
+            return (get_system_setting("memory", "distill_model")
+                    or os.getenv("MEMORY_DISTILL_MODEL")
+                    or get_system_setting("system_llm", "model", DEFAULT_LLM_MODEL))
         except Exception:
             return os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL)
 
@@ -713,6 +711,9 @@ class Config:
     # LLM factory. Local edition ONLY: validate_auth_edition() aborts a saas boot
     # that sets this (the SaaS path stays byte-identical). Default off everywhere.
     CLI_RUNTIME_ENABLED: bool = os.getenv("CLI_RUNTIME_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    # PRD-256 FX-016: the runtime a new agent gets when platform_create_agent names none:
+    # 'api' (the platform's models) or 'cli' (a session, which needs CLI_RUNTIME_ENABLED).
+    DEFAULT_AGENT_RUNTIME: str = os.getenv("DEFAULT_AGENT_RUNTIME", "api").strip().lower()
     # PRD-245 W1 (local edition): how many Automatos tool calls ONE ticket's
     # session may make through the loopback MCP bridge. A bound, not a budget —
     # the model is on the operator's own plan; this stops a looping session from
@@ -1055,29 +1056,30 @@ class Config:
     # Cross-model verification: reads from system_settings → env fallback
     @property
     def COORDINATOR_VERIFIER_MODEL_MAPPING(self) -> str:
+        """setting → env → the System LLM vendor's default (core/llm/vendor_fit.py)."""
         try:
             from core.llm.manager import get_system_setting
+            from core.llm.vendor_fit import default_verifier_mapping
             return get_system_setting(
                 "coordination", "verifier_model_mapping",
-                os.getenv(
-                    "COORDINATOR_VERIFIER_MODEL_MAPPING",
-                    "anthropic=openai/gpt-4o-mini,openai=anthropic/claude-haiku-4-5,"
-                    "google=openai/gpt-4o-mini,deepseek=openai/gpt-4o-mini,meta=openai/gpt-4o-mini",
-                ),
+                os.getenv("COORDINATOR_VERIFIER_MODEL_MAPPING", default_verifier_mapping()),
             )
         except Exception:
             return os.getenv("COORDINATOR_VERIFIER_MODEL_MAPPING", "")
 
     @property
     def COORDINATOR_VERIFIER_FALLBACK_MODEL(self) -> str:
+        """setting → env → the System LLM vendor's default (core/llm/vendor_fit.py)."""
+        from core.llm.defaults import VERIFIER_FALLBACK_MODEL
         try:
             from core.llm.manager import get_system_setting
+            from core.llm.vendor_fit import default_verifier_fallback
             return get_system_setting(
                 "coordination", "verifier_fallback_model",
-                os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini"),
+                os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", default_verifier_fallback()),
             )
         except Exception:
-            return os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", "openai/gpt-4o-mini")
+            return os.getenv("COORDINATOR_VERIFIER_FALLBACK_MODEL", VERIFIER_FALLBACK_MODEL)
     # History-based agent scoring (PRD-82B US-003)
     COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
     COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))
@@ -1271,6 +1273,11 @@ class Config:
     # F130: each earlier step's answer reaches a later step whole up to this many characters.
     PLAYBOOK_STEP_ANSWER_MAX_CHARS: int = int(os.getenv("PLAYBOOK_STEP_ANSWER_MAX_CHARS", "12000"))
     MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))
+    # PRD-256 FX-015: the owner's standing rules ride every chat turn, newest first, up to this
+    # many tokens; the block reads at most STANDING_RULES_SCAN_LIMIT candidate rows to find them
+    # (a warning names a workspace that reaches it).
+    STANDING_RULES_MAX_TOKENS: int = int(os.getenv("STANDING_RULES_MAX_TOKENS", "600"))
+    STANDING_RULES_SCAN_LIMIT: int = int(os.getenv("STANDING_RULES_SCAN_LIMIT", "500"))
     COMPOSIO_SECTION_MAX_TOKENS: int = int(os.getenv("COMPOSIO_SECTION_MAX_TOKENS", "1000"))
     # TOOL_ROUTING_GRAPH (default OFF) gates the learned tool-routing GRAPH reads
     # — GraphRouter.rank_chains on BOTH surfaces: the schema path
@@ -1329,7 +1336,9 @@ class Config:
         # outside the dispatcher's enum — the used action sat outside the ranked top-15 on 53% of calls.
         "platform_create_task,platform_update_task,platform_update_task_status,platform_assign_task,"
         "platform_create_mission,platform_execute_playbook,platform_schedule_playbook,"
-        "platform_create_social_post,platform_get_task,platform_query_data",
+        "platform_create_social_post,platform_get_task,platform_query_data,"
+        # PRD-256 FX-009: the owner's two mission decisions, first-class (night 12 guessed their ids).
+        "platform_approve_mission,platform_cancel_mission",
     )
     # The additive ranking boost a promoted action gets in the shared cosine pass, so a
     # promoted action outranks an equal-cosine unpromoted one and is more likely to rank

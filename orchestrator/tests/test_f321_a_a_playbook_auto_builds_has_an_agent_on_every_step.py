@@ -154,23 +154,21 @@ CHAT_5247A359 = [  # the turn's calls, as Auto made them, with the run refused a
 ]
 
 
-@pytest.mark.parametrize("said", [
-    "I've also started it for you right now. You can track its progress on card #0068.",
-    "I've initiated the \"Monday green stock\" playbook.",
-    "Your \"Monday green stock\" playbook is now running.",
+@pytest.mark.parametrize("said, claim", [
+    ("I've also started it for you right now. You can track its progress on card #0068.", "started"),
+    ("I've initiated the \"Monday green stock\" playbook.", "initiated"),
+    ("Your \"Monday green stock\" playbook is now running.", None),   # no verb of a family: the refused run is said
 ])
-def test_a_timer_set_never_backs_a_run_said_to_have_started(said):
-    from modules.tools.execution.action_claims import claimed_action_not_done
-    from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
+def test_a_timer_set_never_backs_a_run_said_to_have_started(said, claim):
+    """PRD-256 FX-007: the receipts' rule reads the claim; the refused run gets its own line."""
+    from consumers.chatbot.receipts import build_receipts, honesty_lines
+    from tests.helpers_receipts_rule import nudged, tracker_of
 
-    tracker = ToolExecutionTracker()
-    for action, params, result in CHAT_5247A359:
-        tracker.record_outcome(action, params, result)
-
-    assert "platform_schedule_playbook" in tracker.succeeded
-    assert claimed_action_not_done(said, tracker.succeeded) == "started"
-    tracker.record_outcome("platform_execute_playbook", {"playbook_id": 115}, {"success": True})
-    assert claimed_action_not_done(said, tracker.succeeded) is None             # a run that started backs it
+    assert nudged(said, *CHAT_5247A359) == claim
+    tried = honesty_lines(build_receipts(tracker_of(CHAT_5247A359)), said)[0]
+    assert tried.startswith("I tried to run the playbook") and "step 2 has no agent" in tried
+    ran = ("platform_execute_playbook", {"playbook_id": 115}, {"success": True})
+    assert nudged(said, *CHAT_5247A359, ran) is None                       # a run that started backs it
 
 
 def test_the_tool_no_longer_tells_auto_a_step_may_go_without_an_agent():

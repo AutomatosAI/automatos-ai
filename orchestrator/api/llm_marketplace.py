@@ -16,7 +16,7 @@ their seeded rows.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -31,6 +31,7 @@ from core.database.database import get_db
 from core.models.core import LLMModel, WorkspaceModel
 from core.models.openrouter_cache import OpenRouterModelCache
 from core.llm import providers as registry
+from core.llm.list_prices import list_rates
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/marketplace/llm", tags=["LLM Marketplace"])
@@ -116,6 +117,19 @@ def price_tier_for(input_cost_per_1k: float) -> str:
     return "premium"
 
 
+def route_price(m: LLMModel) -> Tuple[float, float, bool]:
+    """(input, output) per 1K and whether the route is free. A row with no input and
+    no output price (a model the Anthropic sync listed without one) shows the model's
+    list price where ``list_prices`` holds it (P256-FIX-T2), and is never "free":
+    only an explicit 0 is (#829's rule for the usage tracker)."""
+    if m.input_cost_per_1k_tokens is None and m.output_cost_per_1k_tokens is None:
+        in_cost, out_cost = list_rates(m.model_id) or (0.0, 0.0)
+        return in_cost, out_cost, False
+    in_cost = float(m.input_cost_per_1k_tokens or 0)
+    out_cost = float(m.output_cost_per_1k_tokens or 0)
+    return in_cost, out_cost, in_cost <= 0 and out_cost <= 0
+
+
 def route_key(serving_provider: str, model_id: str) -> str:
     return f"{serving_provider}:{model_id}"
 
@@ -127,9 +141,7 @@ def _model_to_out(
 ) -> LLMModelOut:
     spec = registry.get_spec(m.serving_provider)
     label = spec.label if spec else (m.serving_provider or "").title()
-    in_cost = float(m.input_cost_per_1k_tokens or 0)
-    out_cost = float(m.output_cost_per_1k_tokens or 0)
-    is_free = in_cost <= 0 and out_cost <= 0 and bool(spec and spec.free) or (in_cost <= 0 and out_cost <= 0)
+    in_cost, out_cost, is_free = route_price(m)
     return LLMModelOut(
         id=m.id,
         provider=m.provider,

@@ -43,9 +43,11 @@ _STORE_MEMORY_PARAMETERS = {
             "type": "string",
             "enum": ["platform_verified", "claude_reports", "current_status", "inference"],
             "description": (
-                "Provenance: platform_verified (queried + confirmed via tools), "
-                "claude_reports (the assistant's claim, unverified), current_status "
-                "(transient state read from a live source), inference (pattern-based)."
+                "Optional provenance: platform_verified (queried + confirmed via tools, or "
+                "said by the user), claude_reports (the assistant's claim, unverified), "
+                "current_status (transient state read from a live source), inference "
+                "(pattern-based). Leave it out and it is set for you: platform_verified when "
+                "a person drives this chat, claude_reports otherwise. Never ask the user for it."
             ),
         },
         "confidence": {
@@ -72,8 +74,8 @@ def register_store_memory_action(registry: ActionRegistry) -> None:
             "secrets, credentials, passwords, API keys, card or bank numbers (such content "
             "is refused by the exclusion policy). "
             "Keep under 200 chars. For searching stored memories, use platform_search_memory.\n\n"
-            "Set `source_type` honestly so future readers can tell platform_verified facts "
-            "from claude_reports / current_status / inference; when unsure it is 'inference'.\n\n"
+            "`source_type` is optional and set for you when left out (platform_verified when a "
+            "person drives this chat, claude_reports otherwise); never ask the user for it.\n\n"
             "Set `type` from the taxonomy (decision / open_loop / preference / "
             "user_fact / business_fact / procedure / ...). Sharing defaults split by type: "
             "user_fact and preference are private to the current user; everything else is "

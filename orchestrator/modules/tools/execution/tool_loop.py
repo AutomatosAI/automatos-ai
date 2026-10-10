@@ -29,10 +29,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from .action_claims import claimed_action_not_done
 from .nudges import ask_for_the_answer, claimed_action_nudge  # PRD-256 US-006: a refused write is named
-from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG
-from .nudges import UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
+from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
+from .card_raised import emit_flagged  # PRD-256 FX-005 / RVW-22: the result's own flag, and its wait (_emit)
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
 from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
 from .cap_answer import answers_at_the_cap  # F328
@@ -197,8 +196,7 @@ class ToolLoopExecutor:
         self.max_iterations = max(1, int(max_iterations))
         self.content_truncate_tokens = max(0, int(content_truncate_tokens))
         self.tracker = tracker if tracker is not None else ToolExecutionTracker()
-        # F187: work said to be under way is a claim in Auto's own chat replies
-        # (an agent's draft promises in its writer's voice). None: the turn's lane decides.
+        # Auto's own chat turn (a blank answer is told from the calls); None: the turn's lane decides.
         self.promises = promises
         self._llm = said_or_accounted(llm_callback, lambda: self.tracker.outcomes, promises)  # F264: never blank
         # PRD-161 S4: per-run same-action-loop breaker (OpenHands-style).
@@ -608,11 +606,13 @@ class ToolLoopExecutor:
         text = getattr(current, "content", "") or ""
         if not text.strip():  # F297: nothing in it straight after a round of tool calls
             return await ask_for_the_answer(self._llm, messages, tools)
-        step = announced_step(text)
+        step = announced_step(text, self.tracker.outcomes)  # RVW-37: or "I will now send …", nothing sent
         if step:  # F306 (night 9): "Let me try a more specific query:" and no call made
             logger.warning("[tool-loop] reply announced a step it never took — nudging once")
             return await nudge_about(self._llm, current, messages, tools, ANNOUNCED_STEP_MSG.format(step=step))
-        claim = claimed_action_not_done(text, self.tracker.succeeded, promises=self.promises)
+        from consumers.chatbot.receipts import unbacked_claim  # FX-007: the receipts rule, not a family
+
+        claim = unbacked_claim(text, self.tracker.outcomes, promises=self.promises)  # RVW-7: an agent's own voice
         if not claim:
             return None
         logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)
@@ -803,7 +803,7 @@ async def _emit(cb: Optional[EventCallback], event: Dict[str, Any]) -> None:
     if cb is None:
         return
     try:
-        await cb(event)
+        await emit_flagged(cb, event)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[tool-loop] event callback raised: %s", exc)
 

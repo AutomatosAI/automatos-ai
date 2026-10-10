@@ -193,15 +193,28 @@ def test_the_executor_passes_the_server_context_and_the_edit_runs(cafe):
 
 @pytest.mark.parametrize("caller_context, recorded", [("owner", "owner"), (None, None)])
 def test_create_playbook_records_the_person_it_is_made_for(cafe, caller_context, recorded):
-    """The executor strips a model-supplied _driving_user_id and injects the server's."""
+    """The executor strips a model-supplied _driving_user_id and injects the server's.
+    PRD-256 FX-010: from a person's chat a new playbook waits for their click, and the
+    click runs the same call."""
+    from core.models.approval_grants import ApprovalGrant
+    from core.services.approval_grants import grant_grant
     from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
     context = _for(cafe.owner) if caller_context else None
     params = {"name": "Friday café check-in", "description": "Chase quiet cafés.", "_agent_id": cafe.worker,
               "_driving_user_id": cafe.member}
-    with patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
-        reply = asyncio.run(PlatformActionExecutor(cafe.db, cafe.ws).execute(
-            "platform_create_playbook", params, context))
+
+    def create():
+        with patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
+            return asyncio.run(PlatformActionExecutor(cafe.db, cafe.ws).execute(
+                "platform_create_playbook", params, context))
+
+    reply = create()
+    if caller_context:
+        assert reply["requires_confirmation"] is True and reply["owner_only"] is True
+        grant_grant(cafe.db.get(ApprovalGrant, reply["grant_id"]), granted_by=f"user:{cafe.owner}")
+        cafe.db.flush()
+        reply = create()
     assert reply["success"] is True
     created = cafe.db.execute(text("SELECT created_by_user_id FROM workflow_recipes WHERE id = :id"),
                               {"id": reply["playbook"]["id"]}).scalar()

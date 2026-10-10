@@ -1,8 +1,9 @@
 """What a call did, where its name alone does not say it (F261, night 8).
 
-A reply's claim is backed by an action that succeeded this turn (F108,
-``action_claims``), matched by name. Two of the board's actions do different
-things by their arguments:
+A reply's claim is backed by an action that succeeded this turn (F108; since PRD-256
+FX-007, the receipts' rule, ``consumers/chatbot/claims_backed.py``, reads the effect
+each receipt carries from here). Two of the board's actions do different things by
+their arguments:
 
 - platform_update_task_status moves a card. To "done" it approves the card, to
   "cancelled" it cancels it, to "assigned" it sends it back to its agent, to
@@ -17,8 +18,8 @@ Night 9 (F309): platform_update_task with a status moves the card the way
 platform_update_task_status does (``ticket_edit_moves``), and is recorded as that move.
 
 So a successful call of either is recorded with what it did too, as
-``<action>:<status>`` or ``<action>:send_back``. The families back a claim with
-those (``platform_update_task_status:done`` approves a card).
+``<action>:<status>`` or ``<action>:send_back``. A claim is backed by those
+(``platform_update_task_status:done`` approves a card: its receipt says "moved to Done").
 
 Night 9b (F319), succeeded calls the families read as nothing done:
 - "I've assigned the Shopify Inventory Watchdog to both steps" (chat a0475f96) after two
@@ -94,12 +95,18 @@ def _sets_an_agent(action: str, params: Dict[str, Any]) -> bool:
 STEPS_CHECKED, STEPS_UNCHECKED = "mission_steps_checked", "mission_steps_unchecked"
 # F319 (night 9b): the answer of a call that sent a card back says so.
 SENT_BACK_SAID = "sent_back"
+# FX-010 (D7): a card filed from the owner's chat whose brief sends or orders waits for their
+# review: its answer carries this key (modules/tools/discovery/brief_sends).
+REVIEWED_BY_YOU = "reviewed_by_you"
 # F351 (night 10b): the calls that make a document the owner finds in Deliverables, and what a
 # refused one leaves: "I've generated the letter" after generate_document answered DATA_BAD_JSON
 # (chat 8ac5cf3a) is told as tried and refused, never as made. No family's stem is in its name.
 DOCUMENT_MAKES = ("generate_document", "create_pdf", "create_docx", "create_xlsx", "create_pptx", "write_file",
                   "html_to_png")
 MAKE_REFUSED = "make_refused"
+# PRD-256 FX-013 (night 12, A440): a re-brief sent with a status re-briefs the card and drops the
+# status; its answer carries this key, and the move the status asked for is not recorded as made.
+STATUS_IGNORED_SAID = "status_ignored"
 
 
 def answers_in(result: Any) -> List[Dict[str, Any]]:
@@ -114,10 +121,20 @@ def answers_in(result: Any) -> List[Dict[str, Any]]:
     return found
 
 
+def what_it_said(result: Any) -> str:
+    """P256-FIX-RVW-4: what a call that failed said (its ``error``, else its ``message``), read
+    from its answer or the answer inside the chat's envelope; '' when none says."""
+    for answer in answers_in(result):
+        said = answer.get("error") or answer.get("message")
+        if said:
+            return str(said).strip()
+    return ""
+
+
 def result_effects(result: Any) -> Tuple[str, ...]:
     """What a call's answer says it did beyond its name: left a mission's steps waiting
-    for the owner's check or running on unchecked (F308), or sent a card back (F319);
-    () when it says neither."""
+    for the owner's check or running on unchecked (F308), sent a card back (F319), or
+    filed a card that waits for the owner's review (FX-010); () when it says none."""
     effects: Tuple[str, ...] = ()
     for answer in answers_in(result):
         if answer.get(SENT_BACK_SAID) is True and SENT_BACK not in effects:
@@ -125,7 +142,20 @@ def result_effects(result: Any) -> Tuple[str, ...]:
         checks = answer.get("checks_each_step")
         if isinstance(checks, bool) and not {STEPS_CHECKED, STEPS_UNCHECKED} & set(effects):
             effects += (STEPS_CHECKED if checks else STEPS_UNCHECKED,)
+        if answer.get(REVIEWED_BY_YOU) is True and REVIEWED_BY_YOU not in effects:
+            effects += (REVIEWED_BY_YOU,)
+        if answer.get(STATUS_IGNORED_SAID) is True and STATUS_IGNORED_SAID not in effects:
+            effects += (STATUS_IGNORED_SAID,)
     return effects
+
+
+def done_effects(action: str, params: Any, result: Any) -> Tuple[str, ...]:
+    """What a call that ran did: its params' effects (less a status its answer says was
+    ignored, FX-013) and its answer's."""
+    said = result_effects(result)
+    if STATUS_IGNORED_SAID in said and isinstance(params, dict):
+        params = {key: value for key, value in params.items() if key != "status"}
+    return call_effects(action, params) + said
 
 
 def refused_effects(action: str) -> Tuple[str, ...]:
@@ -146,5 +176,6 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in tool_args.items() if k not in ("action", "name", "params")}
 
 
-__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "SENT_BACK_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED",
-           "answers_in", "call_effects", "call_params", "refused_effects", "result_effects"]
+__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "REVIEWED_BY_YOU", "SENT_BACK_SAID", "STATUS_IGNORED_SAID", "STATUS_WORDS",
+           "STEPS_CHECKED", "STEPS_UNCHECKED", "answers_in", "call_effects", "call_params", "done_effects",
+           "refused_effects", "result_effects", "what_it_said"]

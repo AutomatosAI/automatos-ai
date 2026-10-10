@@ -134,6 +134,7 @@ from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
 from modules.tools.discovery.handlers_board_task_review import create_board_task  # F180: the owner's review kept
 from modules.tools.discovery.follows_the_owner import follows_the_owner  # F241/F280 (8): the owner's words
 from modules.tools.discovery.owner_only import asks_the_owner_first  # PRD-256 US-004: the owner's click
+from modules.tools.discovery.confirmation_gate import asks_at_the_confirmation_gate  # P256-FIX-RVW-9
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
 from modules.tools.discovery.handlers_board_tasks import (
@@ -350,9 +351,9 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 # F133 / F148: the actions whose handlers are told who the call is made for
 # (server-injected _driving_user_id / _driving_super_admin; see execute()).
 _DRIVER_AWARE_ACTIONS = (
-    "platform_create_playbook",
+    "platform_create_playbook", "platform_resume_context",   # FX-015: on local the person is the viewer
     "platform_invite_member",
-    "platform_set_member_role",
+    "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
 )
 
 
@@ -713,6 +714,7 @@ class PlatformActionExecutor:
             )
             return False
 
+    @asks_at_the_confirmation_gate  # PRD-193 S1/S2, last: a grant on this exact call, or the ask
     def clear(
         self,
         action_name: str,
@@ -816,73 +818,6 @@ class PlatformActionExecutor:
                     "workspace admin's request is the approval (workspace=%s)",
                     action_name, self.workspace_id,
                 )
-
-            if (
-                action_def
-                and action_def.requires_confirmation
-                and not dial_skips_the_card
-                and not human_directed
-            ):
-                # PRD-193 S1/S2 (P2-12): the ask is no longer a dead end.
-                # S2 — consult FIRST: an authorising grant on this exact
-                # subject key (GRANTED + unexpired + params-hash equality)
-                # opens the gate; destructive grants are retired on use
-                # (single-use). Anything else — pending, expired, revoked,
-                # denied, params drift, or ANY error in the consult — falls
-                # through to the ask (fail closed; the ask is the floor).
-                # S1 — otherwise issue (or reuse) a PENDING tool_call
-                # ApprovalGrant and return the ask WITH the grant attached,
-                # so a human finally has something to say yes to.
-                from modules.tools.execution import tool_grants
-
-                _grant = tool_grants.consume_tool_grant(
-                    self.db,
-                    self.workspace_id,
-                    action=action_name,
-                    params=params,
-                    permission_level=action_def.permission_level,
-                )
-                if _grant is not None:
-                    approved_via_grant_id = getattr(_grant, "id", None)
-                    logger.info(
-                        "[PlatformExecutor] '%s' authorised by approval grant %s "
-                        "— proceeding (workspace=%s)",
-                        action_name, approved_via_grant_id, self.workspace_id,
-                    )
-                else:
-                    # F091 (night 3): never ask about something that is not
-                    # there, and name what is on the card.
-                    from modules.tools.execution.subject_targets import (
-                        missing_targets_error, named_subject, resolve_targets,
-                    )
-
-                    found, missing = resolve_targets(self.db, self.workspace_id, params, action_name)
-                    if missing:
-                        return missing_targets_error(action_name, missing)
-                    subject = card_subject or named_subject(found) or _subject_line(params)
-                    ask = {
-                        "success": False,
-                        "requires_confirmation": True,
-                        "action": action_name,
-                        "permission_level": action_def.permission_level,
-                        "message": (
-                            f"This action ({action_def.permission_level}) requires confirmation. "
-                            f"Action: {action_name}{subject} — "
-                            f"{action_def.description[:100]}"
-                        ),
-                        "params": params,
-                    }
-                    return tool_grants.attach_ask_grant(
-                        self.db,
-                        self.workspace_id,
-                        action=action_name,
-                        params=params,
-                        ask=ask,
-                        permission_level=action_def.permission_level,
-                        description=action_def.description,
-                        caller_context=caller_context,
-                        subject=subject,
-                    )
         except Exception as e:
             # Fail-closed: if we can't verify permissions, require confirmation
             logger.warning(

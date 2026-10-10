@@ -74,6 +74,20 @@ def params_object(raw: Any) -> Any:
     return value if isinstance(value, dict) else raw
 
 
+def json_container(raw: Any) -> Any:
+    """PRD-256 FX-013: ``raw`` as the object or array its JSON text holds (or, for an object, the
+    Python text of one, as ``params_object`` reads it), else ``raw`` as it came."""
+    value = params_object(raw)
+    for _ in range(MAX_DECODE_LAYERS):
+        if not isinstance(value, str):
+            break
+        try:
+            value = json.loads(value, strict=False)
+        except json.JSONDecodeError:
+            break
+    return value if isinstance(value, (dict, list)) else raw
+
+
 def nested_params_decoded(name: str, args: Any) -> Any:
     """``args`` with a dispatcher's ``params`` decoded when it is JSON text of an
     object; any other ``args`` unchanged. A new dict, never the caller's."""
@@ -116,7 +130,10 @@ def _composio_refusal(parameters: Dict[str, Any]) -> Optional[str]:
 def decodes_nested_params(execute: Callable[..., Awaitable[Dict[str, Any]]]) -> Callable[..., Awaitable[Dict[str, Any]]]:
     """Wrap ``UnifiedToolExecutor.execute_tool``: a dispatcher's ``params`` sent as
     JSON text of an object runs as that object (logged, to be counted); a
-    composio_execute ``params`` that is text of anything else is refused."""
+    composio_execute ``params`` that is text of anything else is refused. PRD-256 FX-013: then the
+    call is read as its action's schema takes it (``schema_reads``)."""
+    from modules.tools.execution.schema_reads import as_the_schema_reads
+
     @functools.wraps(execute)
     async def wrapped(self: Any, tool_name: str, parameters: Dict[str, Any], *args: Any, **kwargs: Any) -> Dict[str, Any]:
         decoded = nested_params_decoded(tool_name, parameters)
@@ -127,13 +144,14 @@ def decodes_nested_params(execute: Callable[..., Awaitable[Dict[str, Any]]]) -> 
             refused = _composio_refusal(parameters)
             if refused:
                 return {"success": False, "error": refused, "tool": tool_name}
-        return await execute(self, tool_name, decoded, *args, **kwargs)
+        return await execute(self, *as_the_schema_reads(tool_name, decoded), *args, **kwargs)
     return wrapped
 
 
 __all__ = [
     "NESTED_PARAMS_TOOLS",
     "decodes_nested_params",
+    "json_container",
     "nested_params_decoded",
     "params_object",
     "params_refusal_text",

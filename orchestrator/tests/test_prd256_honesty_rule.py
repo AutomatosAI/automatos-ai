@@ -1,18 +1,19 @@
 """PRD-256 US-002 — one honesty rule, from the receipts.
 
 The "I haven't done that" line used to come from a vocabulary of phrasings (the claim families
-in action_claims, document_claims and shop_and_team_claims). The review replayed it on 22 real
+in action_claims, document_claims and shop_and_team_claims; deleted in FX-007). The review replayed it on 22 real
 sentences from the nights: it caught 12, and in three of the four firings the nights recorded it
 denied a write that had gone through (F319, F337, F363). Now the line is decided by the turn's
-receipts: it fires when no write went through and the answer says, in one generic way, that work
-is done, and never when a write went through. A refused write gets its own line. Both go ABOVE
+receipts: it fires when the answer says, in one generic way, that work is done and no done write
+of that kind is behind the claim (FX-006), and never when one is. A refused write gets its own line. Both go ABOVE
 the text: in the receipts frame live, at the top of the saved answer on reload.
 
 The replay (``.claude/AUTO-REVIEW-FINDINGS.md`` §2.1 and its evidence in
 ``.claude/auto-review/claims-evidence.md``) is reproduced below: each sentence with the calls that
 ran in its turn. Under the receipts rule each one passes in one of three ways:
 
-- ``NOT_DONE``: no write went through and the answer reports work done → the not-done line.
+- ``NOT_DONE``: the answer reports work no done write of its kind backs → the not-done line
+  (FX-006: per claim; it names the claim when another write went through).
 - ``TRIED``: a write was refused → its own line (and the not-done line when the answer claims).
 - ``SHOWN``: no line, and the receipts above the text say what really ran (nothing; only reads;
   only a memory note and nothing on the board; the writes that really went through).
@@ -21,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -29,6 +29,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from consumers.chatbot.claim_check import Verdict
+from consumers.chatbot.claims_backed import is_not_done_line
 from consumers.chatbot.receipts import (
     ABOVE, DONE, NOTHING_DONE_LINE, READ, WRITE, build_receipts, claims_work_done, honesty_lines, with_lines_above,
 )
@@ -129,13 +130,14 @@ CAUGHT_TODAY = [
      lambda r: [(x["status"], x["subject"]) for x in r] == [(DONE, "Harbour Log Intro - October Box")]),
     ("F324 all agents are aware", "I've stored the information that Quay Coffee House moves to 30-day payment terms "
      "from November in my memory. This will ensure that all agents, including the Support Agent, are aware of this "
-     "change going forward.", [SEARCHED, MEMORY_STORED], SHOWN,
+     "change going forward.", [SEARCHED, MEMORY_STORED], NOT_DONE,       # P256-FIX-RVW-37: memory tells no agent
      lambda r: [x["effect"] for x in r if x["kind"] == WRITE] == ["memory saved"] and _nothing_on_the_board(r)),
     ("F351 generated the letter", "I've generated the letter for Maya Osei and saved it to your Deliverables.",
      [LETTER_REFUSED], TRIED, None),
+    # FX-006: the memory note backs no "created a task": the claim is matched to a write of its kind.
     ("F363 you should now see this on your board", "I've now created a task on your board for the Brand Designer: "
      "Implement Brand Kit Update - Option A & Warm Sand Band. You should now see this on your board, with task "
-     "number #0891.", [STORE_MEMORY], SHOWN,
+     "number #0891.", [STORE_MEMORY], NOT_DONE,
      lambda r: [x["effect"] for x in r] == ["memory saved"] and _nothing_on_the_board(r)),
     ("F363 I'll get the Brand Designer to", "I'll get the Brand Designer to update the brand kit with Option A and "
      "the warm sand band.", [], SHOWN, lambda r: r == []),
@@ -187,7 +189,9 @@ def test_each_of_the_22_sentences_passes_under_the_receipts_rule(finding, answer
     lines = honesty_lines(receipts, answer)
 
     if passes == NOT_DONE:
-        assert lines == [NOTHING_DONE_LINE], finding
+        assert len(lines) == 1 and is_not_done_line(lines[0]), finding
+        assert lines == [NOTHING_DONE_LINE] or any(r["status"] == DONE and r["kind"] == WRITE for r in receipts)
+        assert shows is None or shows(receipts), (finding, receipts)
     elif passes == TRIED:
         *tried, last = lines
         assert len(tried) == 1 and tried[0].startswith("I tried to ") and " and it didn't go through: " in tried[0]
@@ -265,19 +269,24 @@ def test_the_lines_go_above_the_answer_refused_first():
 
 
 def test_the_saved_correction_keeps_only_tier_2():
-    """claim_check keeps the ids that do not exist; a family's claim no longer writes the line."""
-    assert Verdict(tools=0, claim="approved").correction is None
-    assert Verdict(tools=3, claim="started", passive=True).correction is None
-    assert Verdict(tools=0, claim="approved", ids=[("task", "1100")]).correction == (
+    """claim_check keeps the ids that do not exist; a claim never writes the line (FX-007: the
+    Verdict holds only tier 2)."""
+    assert Verdict(tools=0).correction is None
+    assert Verdict(tools=3).correction is None
+    assert Verdict(tools=0, ids=[("task", "1100")]).correction == (
         "Just to be clear: task 1100 does not exist — I named it without looking it up.")
+    assert not hasattr(Verdict(tools=0), "claim") and not hasattr(Verdict(tools=0), "passive")
 
 
-def test_the_in_loop_nudge_still_reads_the_families_until_wave_2():
+def test_the_in_loop_nudge_reads_the_receipts_rule():
+    """FX-007: the families are gone; F108's nudge is the receipts' rule over the loop's calls."""
     import inspect
 
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
-    assert "claimed_action_not_done(" in inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in source   # RVW-7: the run's voice
+    assert "claimed_action_not_done" not in source
 
 
 # ── the turn: the frame carries the lines, the saved answer starts with them ─
@@ -311,11 +320,17 @@ class _Model:
 
 
 class _Router:
+    """ToolRouter.execute_and_format's envelope: the executor's own answer rides as ``raw_result``,
+    which is where the chat's tool callback (and so the receipt's reason) reads it."""
+
     def __init__(self, result):
         self.result = result
 
     async def execute_and_format(self, tool_name, tool_args, **kwargs):
-        return self.result
+        success = bool(self.result.get("success"))
+        said = "" if success else f"Tool {tool_name} failed: {self.result.get('error')}"
+        return {"success": success, "frontend_data": {}, "llm_context": said or json.dumps(self.result),
+                "raw_result": self.result, "fatal_error": False, "error_type": None}
 
 
 def _service(result):
@@ -417,29 +432,18 @@ def test_a_public_widget_visitor_is_shown_no_lines_and_none_are_saved(monkeypatc
     assert parts[-1] == {"type": "text", "text": SAID_APPROVED}
 
 
-# ── D10: the families are frozen ───────────────────────────────────────────
-# What was not done is said from the receipts now; the regex families only drive the in-loop
-# nudge until Wave 2 US-012 deletes them, once the receipts rule is proven. Until then they may
-# not grow: no new family, no new pattern. These are the counts on 7 Oct 2026. A change that
-# needs one more pattern is a change to the receipts rule.
+# ── D10: the families are gone (FX-007) ─────────────────────────────────────
+# What was not done is said from the receipts, and the in-loop nudge reads the same rule. The
+# four family modules that were frozen here on 7 Oct 2026 are deleted, and no other may come
+# back: a change that needs one more pattern is a change to the receipts rule (claims_backed).
 EXECUTION = Path(__file__).resolve().parents[1] / "modules" / "tools" / "execution"
-# The families' entries (``_Family(``, and document_claims' ``family(`` helper) and their patterns.
-FAMILY_COUNTS = {
-    "action_claims.py": {"_Family(": 23, "family(": 0, "re.compile(": 41},
-    "document_claims.py": {"_Family(": 1, "family(": 13, "re.compile(": 16},
-    "shop_and_team_claims.py": {"_Family(": 0, "family(": 0, "re.compile(": 14},
-    "social_post_claims.py": {"_Family(": 6, "family(": 0, "re.compile(": 6},
-}
-_COUNTED = {"_Family(": re.compile(r"_Family\("), "family(": re.compile(r"(?<![\w])family\("),
-            "re.compile(": re.compile(r"re\.compile\(")}
+FAMILY_MODULES = ("action_claims.py", "document_claims.py", "shop_and_team_claims.py", "social_post_claims.py")
 
 
-@pytest.mark.parametrize("module", sorted(FAMILY_COUNTS))
-def test_prd256_families_frozen(module):
-    text = (EXECUTION / module).read_text(encoding="utf-8")
-    counted = {what: len(pattern.findall(text)) for what, pattern in _COUNTED.items()}
-    assert counted == FAMILY_COUNTS[module], f"{module} grew: the families are frozen (PRD-256 D10)"
+@pytest.mark.parametrize("module", FAMILY_MODULES)
+def test_prd256_families_deleted(module):
+    assert not (EXECUTION / module).exists(), f"{module} is back: the families are gone (PRD-256 D10, FX-007)"
 
 
 def test_no_new_claim_family_module():
-    assert sorted(path.name for path in EXECUTION.glob("*_claims.py")) == sorted(FAMILY_COUNTS)
+    assert sorted(path.name for path in EXECUTION.glob("*_claims.py")) == []

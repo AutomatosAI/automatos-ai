@@ -123,15 +123,19 @@ async def _answered_without_an_apology(generate: Callable[..., Awaitable[Any]], 
     """The model's reply to a re-prompt, with the apology it opens with taken off what
     streams and what is saved (F295, night 9b)."""
     from core.llm.reprompt_reply import gated
+    from core.llm.screen_watch import restated
     from modules.tools.execution.nudges import without_the_apology
 
     gate = gated(kwargs.get("on_delta"))
     if gate is not None:
         kwargs = {**kwargs, "on_delta": gate}
     response = await generate(manager, sent, *args, **kwargs)
-    if gate is not None:
-        await gate.close()
-    return without_the_apology(response)
+    if gate is None:
+        return without_the_apology(response)
+    await gate.close()
+    saved = without_the_apology(response)
+    restated(response, saved, gate.passed)  # RVW-43: the screen holds what the gate let through
+    return saved
 
 
 __all__ = ["as_the_platforms_check", "as_the_users_turn", "is_a_reprompt", "reprompts_in_the_users_turn",

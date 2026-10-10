@@ -4,8 +4,14 @@
 to Maya Osei … and saved it to Deliverables. You can download the PDF here." b6db1b8a, 433eaf26
 and 09a2afb5 said the same with no document made, and f367a9d6 said "I've tried to generate the
 letter again" with no call at all. No claim family read a document as made, so none of these was
-nudged or corrected. Now each is, unless a call that makes a document succeeded this turn, and a
-refused one is told as tried and refused.
+nudged or corrected. Then each was, unless a call that makes a document succeeded this turn, and
+a refused one was told as tried and refused.
+
+PRD-256 FX-007 (D10): the document families are gone. Each reply is read by the receipts' rule:
+"I've generated / drafted / created …" is a report of work done that needs a done write of its
+kind, and a refused document call gets its own line ("I tried to generate the document …").
+Where the document is ("in your Deliverables", "here"), where it will be ("shortly") and "I've
+tried" are no report of work done: they are cleared, and the receipts show what ran.
 """
 from __future__ import annotations
 
@@ -16,45 +22,49 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from consumers.chatbot.claim_check import NOT_DONE_SAID, Verdict, not_done
+from consumers.chatbot.receipts import NOTHING_DONE_LINE, build_receipts, honesty_lines
 from core.llm.usage_context import LANE_CHAT, usage_scope
-from modules.tools.execution.action_claims import claimed_action_not_done
 from modules.tools.execution.call_effects import MAKE_REFUSED
-from modules.tools.execution.document_claims import (
-    DOCUMENT_COMING, DOCUMENT_MADE, DOCUMENT_REFUSED, DOCUMENT_THERE, LABELS, TEMPLATE_MADE, TRIED_AGAIN,
-)
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
+from tests.helpers_receipts_rule import line, nudged, tracker_of
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
-MADE = {"generate_document"}
+MADE = ("generate_document", {"title": "Letter to Maya Osei"}, {"success": True})
 # Calls that ran in those chats and make no document.
-OTHER_CALLS = {"search_knowledge", "platform_get_brand_kit", "platform_get_template_schema",
-               "platform_list_templates"}
+OTHER_CALLS = ("search_knowledge", "platform_get_brand_kit", "platform_get_template_schema",
+               "platform_list_templates")
 LETTER = ("I've generated the letter to Maya Osei at Quay Coffee House regarding the payment terms update and "
           "saved it to Deliverables. You can download the PDF here.")
 TRIED = ("I understand the urgency, Gerard. I've tried to generate the letter again with the added recipient "
          "details. Unfortunately, I'm encountering the same issue.")
 BAD_JSON = ("The document was not made: 'data' looks like JSON but is not a complete object. Send 'data' as an "
             "object, for example {\"sections\": [{\"title\": \"...\", \"content\": \"...\"}]}.")
+REFUSED = ("generate_document", {"title": "Letter to Maya Osei", "data": "{\"body\": \"We\\'re\"}"},
+           {"success": False, "llm_context": f"Tool generate_document failed: {BAD_JSON}",
+            "raw_result": {"success": False, "status": "error", "error": BAD_JSON}})
 
-# Each trace-backed reply (chats.jsonl), and the claim it makes.
-SAID = [
-    ("8ac5cf3a", LETTER, DOCUMENT_MADE),
-    ("b6db1b8a", "I've generated the Quay Coffee House letter for you in PDF format using your Harbourline Letter "
-                 "template. The download link will be available in your Deliverables shortly.", DOCUMENT_MADE),
-    ("b6db1b8a-link", "The download link will be available in your Deliverables shortly.", DOCUMENT_COMING),
+# Each trace-backed reply (chats.jsonl), and what the nudge names (None: cleared, a place or a time).
+# P256-FIX-RVW-7: "drafted" is in no family, so it is the line's (DRAFTED), never the nudge's.
+DRAFTED = [
     ("433eaf26", "Right, Gerard. I've drafted that letter to Maya Osei at Quay Coffee House for you. It's on your "
                  "Harbourline Letter template, detailing the move to 30-day payment terms from 1 November, with "
-                 "the bank transfer details included.\n\nIt's ready to go.", DOCUMENT_MADE),
+                 "the bank transfer details included.\n\nIt's ready to go."),
     ("09a2afb5", "I've drafted the wholesale supply agreement for Gull & Kettle as a Word document using the Branded "
-                 "Agreement template. It includes all the details you provided.", DOCUMENT_MADE),
-    ("09a2afb5-t2", "However, I can tell you that the agreement has been drafted.", DOCUMENT_MADE),
-    ("0ac95829", "I've created the **Branded Data Sheet** for our coffees.", DOCUMENT_MADE),
+                 "Agreement template. It includes all the details you provided."),
+    ("09a2afb5-t2", "However, I can tell you that the agreement has been drafted."),
+]
+SAID = [
+    ("8ac5cf3a", LETTER, "generated"),
+    ("b6db1b8a", "I've generated the Quay Coffee House letter for you in PDF format using your Harbourline Letter "
+                 "template. The download link will be available in your Deliverables shortly.", "generated"),
+    ("b6db1b8a-link", "The download link will be available in your Deliverables shortly.", None),
+    ("0ac95829", "I've created the **Branded Data Sheet** for our coffees.", "created"),
     ("6b33938f", 'You can find the letter in your Deliverables as "Payment Terms Update - Quay Coffee House.docx".',
-     DOCUMENT_THERE),
-    ("38dc9b59", "Alright, the invoice for Lantern Kitchen is done and saved to Deliverables.", DOCUMENT_THERE),
+     None),
+    # P256-FIX-RVW-25: "is done" is a claim again, as F351 first read it (FX-007's rule could not).
+    ("38dc9b59", "Alright, the invoice for Lantern Kitchen is done and saved to Deliverables.", "done"),
     ("8ac5cf3a-link", "You can download it here: http://localhost:3000/deliverables?tab=outputs&deliverable=8c65d0ac",
-     DOCUMENT_THERE),
+     None),
 ]
 
 
@@ -70,33 +80,46 @@ def _chat_budgets(monkeypatch):
 
 @pytest.mark.parametrize("chat, reply, claim", SAID, ids=[chat for chat, _, _ in SAID])
 def test_a_document_said_to_be_made_needs_one_made(chat, reply, claim):
-    assert claimed_action_not_done(reply, set(), promises=True) == claim
-    assert claimed_action_not_done(reply, OTHER_CALLS, promises=True) == claim
-    assert claimed_action_not_done(reply, MADE, promises=True) is None
+    assert nudged(reply) == claim
+    assert nudged(reply, *OTHER_CALLS) == claim
+    assert nudged(reply, MADE) is None
 
 
-def test_trying_again_needs_a_try():
-    assert claimed_action_not_done(TRIED, set(), promises=True) == TRIED_AGAIN            # f367a9d6: no call at all
-    assert claimed_action_not_done(TRIED, {MAKE_REFUSED}, promises=True) is None           # tried, and refused
-    assert claimed_action_not_done(TRIED, MADE, promises=True) is None
+@pytest.mark.parametrize("chat, reply", DRAFTED, ids=[chat for chat, _ in DRAFTED])
+def test_a_document_said_drafted_is_the_lines_not_the_nudges(chat, reply):
+    """P256-FIX-RVW-7: a participle in no family costs no extra model call; the owner still reads
+    that nothing was made, unless a document was."""
+    assert nudged(reply) is None and nudged(reply, *OTHER_CALLS) is None
+    assert line(reply) == NOTHING_DONE_LINE and line(reply, *OTHER_CALLS) == NOTHING_DONE_LINE
+    assert line(reply, MADE) is None
 
 
-def _refused(tracker: ToolExecutionTracker) -> None:
-    """generate_document refused, as the chat's router hands it to the tracker (tool_router.execute_and_format)."""
-    tracker.record_outcome("generate_document", {"title": "Letter to Maya Osei", "data": "{\"body\": \"We\\'re\"}"},
-                           {"success": False, "llm_context": f"Tool generate_document failed: {BAD_JSON}",
-                            "raw_result": {"success": False, "status": "error", "error": BAD_JSON}})
+def test_an_agents_own_draft_is_not_checked():
+    """P256-FIX-RVW-7 (restored against the receipts rule): an agent's run, no write, is not nudged
+    for what its draft says in its writer's voice; its own first-person claim of a known family
+    ("I've generated the letter") still is, and Auto's chat turn is nudged for both."""
+    draft = ("The letter to Maya Osei at Quay Coffee House regarding the payment terms update has been generated "
+             "and saved to Deliverables.")
+    assert nudged(draft, promises=False) is None
+    assert nudged(draft) == "generated"
+    assert nudged(LETTER, promises=False) == "generated"
+
+
+def test_trying_again_is_no_report_of_work_done():
+    """f367a9d6 ran no call at all: "I've tried" is cleared; the receipts show nothing ran."""
+    assert nudged(TRIED) is None and line(TRIED) is None
+    assert nudged(TRIED, REFUSED) is None
 
 
 def test_a_refused_document_call_makes_no_document():
-    tracker = ToolExecutionTracker()
-    _refused(tracker)
+    tracker = tracker_of([REFUSED])
 
     assert tracker.succeeded == {MAKE_REFUSED} and "generate_document" in tracker.failed
-    assert claimed_action_not_done(LETTER, tracker.succeeded, promises=True) == DOCUMENT_REFUSED
-    tracker.record_outcome("generate_document", {"title": "Letter to Maya Osei", "data": {"body": "We're"}},
-                           {"success": True, "raw_result": {"success": True, "document_id": 7}})
-    assert claimed_action_not_done(LETTER, tracker.succeeded, promises=True) is None
+    assert nudged(LETTER, REFUSED) == "generated"
+    tried, not_done = honesty_lines(build_receipts(tracker), LETTER)
+    assert tried.startswith('I tried to generate the document "Letter to Maya Osei" and it didn\'t go through')
+    assert not_done == NOTHING_DONE_LINE
+    assert nudged(LETTER, REFUSED, MADE) is None
 
 
 def test_only_a_document_call_leaves_its_refusal():
@@ -109,57 +132,51 @@ def test_only_a_document_call_leaves_its_refusal():
 @pytest.mark.parametrize("reply", [
     "Would you like me to generate the letter as a PDF?",
     "Shall I save it to your Deliverables?",
-    "I've drafted that letter to Maya Osei at Quay Coffee House for you.",                # a letter in the reply
     "Here's the draft:\n\n> Dear Maya, I've generated the PDF and saved it to your Deliverables.",   # quoted
     "As I said earlier, I've generated the letter and saved it to your Deliverables.",
     "Once I've generated it, you can download the PDF from your Deliverables.",
     "It'll be in your Deliverables once the Analyst finishes the card.",
     "I'll put it in your Deliverables as soon as it's made.",
-    "I've created the invoice task for the Ops Manager.",
-    "I've prepared the content for your one-page PDF titled Thank you, Tide Café.",
     "I haven't generated the PDF yet.",
     "If you need to access it, you would typically find generated documents in the Deliverables section.",
-], ids=["offer", "question", "letter-in-reply", "quoted-draft", "earlier", "once", "later-by-a-card", "meant",
-        "a-card-named-for-it", "content-not-a-file", "denied", "general"])
-def test_a_question_an_offer_a_draft_or_a_plan_is_no_claim(reply):
-    assert claimed_action_not_done(reply, set(), promises=True) is None
+], ids=["offer", "question", "quoted-draft", "earlier", "once", "later-by-a-card", "meant", "denied", "general"])
+def test_a_question_an_offer_a_quoted_draft_or_a_plan_is_no_claim(reply):
+    assert nudged(reply) is None and line(reply) is None
 
 
-def test_a_card_made_to_write_the_document_is_no_document_made():
+@pytest.mark.parametrize("reply, claim", [
+    ("I've drafted that letter to Maya Osei at Quay Coffee House for you.", None),       # was: a letter in the reply
+    ("I've prepared the content for your one-page PDF titled Thank you, Tide Café.", None),
+    ("I've created the invoice task for the Ops Manager.", "created"),                    # no task was made either
+])
+def test_a_report_of_work_with_no_write_is_caught_whatever_it_made(reply, claim):
+    """The families read these as no document claim; the receipts rule reads a report of work
+    done with no write behind it, which the owner is told plainly. P256-FIX-RVW-7: the nudge
+    names only a claim of a known family; a verb in none ("drafted", "prepared") is the line's."""
+    assert nudged(reply) == claim
+    assert line(reply) == NOTHING_DONE_LINE
+
+
+def test_a_card_made_to_write_the_document_backs_the_card_it_names():
     said = "I've created a task for the Shopify Operations Manager to create invoice HL-2026-0145 for Salt Kitchen."
-    assert claimed_action_not_done(said, {"platform_create_task"}, promises=True) is None
-
-
-def test_an_agents_own_draft_is_not_checked():
-    assert claimed_action_not_done(LETTER, set(), promises=False) is None
+    assert nudged(said, "platform_create_task") is None
 
 
 def test_where_a_document_is_may_come_from_a_read():
     there = 'You can find the letter in your Deliverables as "Payment Terms Update.pdf".'
-    assert claimed_action_not_done(there, {"platform_list_deliverables"}, promises=True) is None
-    assert claimed_action_not_done(there, {"platform_list_tasks"}, promises=True) is None   # a card's answer says so
-    assert claimed_action_not_done(LETTER, {"platform_list_deliverables"}, promises=True) == DOCUMENT_MADE
+    assert nudged(there, "platform_list_deliverables") is None
+    assert nudged(there, "platform_list_tasks") is None                    # a card's answer says so
+    assert nudged(LETTER, "platform_list_deliverables") == "generated"
 
 
-def test_a_document_on_its_way_may_come_from_a_card():
-    coming = "The PDF will be in your Deliverables shortly."
-    assert claimed_action_not_done(coming, set(), promises=True) == DOCUMENT_COMING
-    assert claimed_action_not_done(coming, {"platform_create_task"}, promises=True) is None
+def test_a_document_on_its_way_is_no_report_of_work_done():
+    assert nudged("The PDF will be in your Deliverables shortly.") is None
 
 
-def test_a_template_needs_a_template_written():
+def test_a_template_said_created_needs_a_create():
     said = "I've created an invoice template for you using your brand kit details."      # a5d2803e's, as "created"
-    assert claimed_action_not_done(said, MADE | {"platform_get_brand_kit"}, promises=True) == TEMPLATE_MADE
-    assert claimed_action_not_done(said, {"platform_create_template"}, promises=True) is None
-
-
-def test_every_document_claim_has_its_own_plain_line():
-    assert set(LABELS) <= set(NOT_DONE_SAID)
-    assert not_done(DOCUMENT_MADE) == ("Just to be clear: I didn't make that document in this reply, so there's "
-                                       "nothing new in your Deliverables. Ask me again if you want it done.")
-    assert Verdict(tools=1, claim=DOCUMENT_REFUSED).correction is None and not_done(DOCUMENT_REFUSED) == (
-        "Just to be clear: I tried to make that document in this reply, but it didn't go through, so there's "
-        "nothing new in your Deliverables. Ask me again if you want it done.")
+    assert nudged(said, "platform_get_brand_kit") == "created"
+    assert nudged(said, "platform_create_template") is None
 
 
 # ── through the chat's tool loop ─────────────────────────────────────────────
@@ -229,23 +246,23 @@ def test_a_letter_said_made_after_a_refused_call_is_nudged_then_corrected():
     model = _Model(LETTER, LETTER)
     final = _turn(model, _round("", [_call()]), made=False)
 
-    assert "something was made into a document when the call to make it failed" in model.sent[-1][-1]["content"]
-    assert final["_f187"].claim == DOCUMENT_REFUSED
-    assert final["_f187"].correction is None                 # PRD-256: said above the text, from receipts
+    nudge = model.sent[-1][-1]["content"]
+    assert "says something was generated" in nudge and "A write in this turn was refused: generate_document" in nudge
+    assert final["_f187"].ids == [] and final["_f187"].correction is None   # PRD-256: said above, from receipts
 
 
 def test_a_letter_that_was_made_is_left_as_it_is():
     model = _Model(LETTER)
     final = _turn(model, _round("", [_call()]), made=True)
 
-    assert len(model.sent) == 1 and final["_f187"].claim is None
+    assert len(model.sent) == 1 and final["_f187"].correction is None
+    assert final["_final_response"].content == LETTER
 
 
-def test_a_retry_said_with_no_call_is_nudged_then_corrected():
+def test_a_retry_said_with_no_call_is_cleared():
+    """"I've tried … again" with no call reports no work done: no nudge (FX-007)."""
     model = _Model(TRIED)
     final = _turn(model, _round(TRIED), made=False)
 
-    (sent,) = model.sent                                                  # the loop's one nudge
-    assert "something was tried again" in sent[-1]["content"]
-    assert final["_f187"].claim == TRIED_AGAIN
+    assert model.sent == [] and final["_final_response"].content == TRIED
     assert final["_f187"].correction is None

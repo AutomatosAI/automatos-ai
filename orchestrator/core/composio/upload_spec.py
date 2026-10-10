@@ -137,7 +137,7 @@ async def execute_with_uploads(
     connection, with no global UPLOAD_ACTIONS conversion and sent once (no SDK
     re-send). A refused call uploads nothing. The LinkedIn image workaround reads the staged files itself (Composio
     cannot upload LinkedIn images), so a call it takes keeps them."""
-    from core.composio.linkedin_image_workaround import IMAGE_POST_ACTION, has_image_params
+    from core.composio.linkedin_image_workaround import takes_its_own_images
 
     start_time = time.time()
     action_upper = str(action or "").strip().upper()
@@ -147,7 +147,7 @@ async def execute_with_uploads(
     refusal = await post_action_refusal(action_upper, workspace_id, way_through=way_through)
     if refusal:
         return _result(refused_result(refusal), action_upper, start_time)
-    workaround = action_upper == IMAGE_POST_ACTION and has_image_params(params)
+    workaround = takes_its_own_images(action_upper, params)
     if upload_params and not workaround:
         try:
             params = await asyncio.to_thread(resolve_upload_spec, action_upper, params, upload_params, app_name.lower())

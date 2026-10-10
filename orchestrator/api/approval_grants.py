@@ -34,6 +34,7 @@ from core.models.approval_grants import (
 )
 from core.models.core import BoardTask
 from modules.policy.ai_act import oversight_for_risk
+from services.click_results import executed_summary, failed_summary, said_in_the_chat
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/approval-grants", tags=["approval-grants"])
@@ -198,6 +199,7 @@ async def grant_approval(
     # (consume-then-execute against the now-committed grant).
     await _requeue_subject(db, grant)
     db.commit()
+    said_in_the_chat(db, grant)  # PRD-256 FX-009: the chat's next turn reads what the click ran
     _audit(db, ctx, "approval_grant:granted", grant)
     return {"grant": grant.to_dict()}
 
@@ -717,16 +719,17 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
     same spine the original call would have taken, so telemetry, the policy
     seam, and outcome capture all fire; nothing is exempted by being approved.
 
-    The outcome summary lands on ``details.executed_result`` (returned in the
-    grant response so the S3 card swaps to its executed state). Fail LOUD but
-    contained: a failing re-dispatch surfaces as an honest failure on the
-    grant — never a fake success (tool-runtime dossier C.3), and never an
-    exception out of the grant endpoint.
+    The outcome lands on ``details.executed_result`` (the S3 card swaps to its executed state).
+    Fail LOUD but contained: an honest failure on the grant, never a fake success (dossier C.3),
+    never an exception out of the endpoint. PRD-256 FX-011: an agent's send on Auto's ticket first.
     """
     from datetime import datetime, timezone
+    from modules.tools.discovery.agent_sends import sends_on_the_click
+    from modules.tools.discovery.click_resume import resumed_context
 
+    if await sends_on_the_click(db, grant):
+        return
     details = dict(grant.details) if isinstance(grant.details, dict) else {}
-
     board_task_id = details.get("board_task_id")
     if board_task_id is not None and _requeue_blocked_task(
         db, grant.workspace_id, board_task_id
@@ -744,18 +747,10 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
     action = details.get("action") or grant.tool_name
     params = details.get("params")
     params = dict(params) if isinstance(params, dict) else {}
-    caller_context = details.get("caller_context")
-    caller_context = dict(caller_context) if isinstance(caller_context, dict) else None
+    caller_context = resumed_context(details.get("caller_context"), grant.id)   # RVW-18: judged by the click
 
     if not action:
-        grant.details = {
-            **details,
-            "executed_result": {
-                "success": False,
-                "error": "grant carries no stored action to resume",
-                "executed_at": datetime.now(timezone.utc).isoformat(),
-            },
-        }
+        grant.details = {**details, "executed_result": failed_summary("grant carries no stored action to resume")}
         return
 
     try:
@@ -770,25 +765,13 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
             trace_id=f"grant-resume-{grant.id}",
             caller_context=caller_context,
         )
-        raw = raw if isinstance(raw, dict) else {}
-        ok = bool(raw.get("success"))
-        summary: Dict[str, Any] = {
-            "success": ok,
-            "error": (str(raw.get("error"))[:500] if (not ok and raw.get("error")) else None),
-            "requires_confirmation": bool(raw.get("requires_confirmation")),
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-        }
+        summary = executed_summary(raw)  # FX-009: with the ids and titles of what it made or changed
     except Exception as exc:
         logger.error(
             "[approval_grants.api] tool_call resume failed for grant %s",
             grant.id, exc_info=True,
         )
-        summary = {
-            "success": False,
-            "error": str(exc)[:500],
-            "requires_confirmation": False,
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-        }
+        summary = failed_summary(exc)
     grant.details = {**details, "executed_result": summary}
 
 
@@ -803,10 +786,10 @@ def _fail_subject(db: Session, grant: ApprovalGrant) -> None:
         fail_playbook_run_grant(db, grant)
         return
     if grant.subject_type == SUBJECT_TOOL_CALL:
-        # PRD-193 S4: a denied tool call is a no-op execution — the grant's
-        # DENIED status is the record; the S3 card renders the refusal; the
-        # model sees it via context on the next turn. (A blocked board task,
-        # if any, keeps its own board_task-subject grant lifecycle.)
+        # PRD-193 S4: a denied call is a no-op (the DENIED row is the record, the card renders it);
+        # PRD-256 FX-011: an agent's send on Auto's ticket fails that ticket with the reason.
+        from modules.tools.discovery.agent_sends import declined_send
+        declined_send(db, grant)
         return
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return

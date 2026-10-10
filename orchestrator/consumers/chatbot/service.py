@@ -13,11 +13,9 @@ Components:
 """
 
 import asyncio
-import json
 import logging
 import uuid
 import re
-import hashlib
 import time
 from types import SimpleNamespace
 from typing import List, Optional, Dict, Any, AsyncGenerator, Set, Tuple
@@ -25,7 +23,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, or_
-from difflib import SequenceMatcher
 
 # Converged tool-loop spine — chat + agent share this (PRD-142 W3-S4 / G6)
 from modules.tools.execution.tool_loop import (
@@ -34,7 +31,6 @@ from modules.tools.execution.tool_loop import (
     ToolLoopResult,
     ToolPostResult,
 )
-from modules.tools.execution.action_claims import claimed_action_not_done
 from modules.tools.execution.nudges import is_nudge  # F295: the loop's nudges are the user's turn
 from modules.tools.execution.telemetry import resolve_action_name
 
@@ -58,9 +54,6 @@ from consumers.chatbot.tool_router import get_tool_router
 # Async-native entries: the chat hot path must never bridge the narrowing
 # embed through a helper thread (freezes the event loop for its duration).
 from modules.tools.tool_router import (
-    _rank_actions_for_dispatcher_async,
-    _semantic_routing_enabled,
-    _semantic_routing_top_k,
     get_tools_for_agent_async,
 )
 from services.page_context import (
@@ -69,23 +62,22 @@ from services.page_context import (
 )
 
 from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
-from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids, passive_claim
+from consumers.chatbot.claim_check import Verdict, id_nudge, invented_ids
 from core.llm.output_budget import cut_note_for
 from consumers.chatbot.narration import called_tools, reply_parts, split_reply
+from consumers.chatbot.on_screen import keeps_one_answer_on_screen, settles_held_retractions  # FX-017
 from consumers.chatbot.receipts import (  # PRD-256 US-001: what the turn's calls did, written by the platform
-    current_receipts, its_reads_are_receipted, notes_the_answering_model, the_answer_takes_the_receipts,
-    the_loop_writes_receipts, writes_its_receipts,
+    claims_work_done, current_receipts, its_reads_are_receipted, notes_the_answering_model,
+    the_answer_takes_the_receipts, says_nothing_was_done, the_loop_writes_receipts, writes_its_receipts,
 )
 from consumers.chatbot.brand_turn import (  # F337 (night 10): Auto's chat keeps to the brand kit
     a_reply_says_its_banned_words, a_saved_reply_is_on_brand, autos_prompt_carries_the_brand_kit,
 )
 from consumers.chatbot.owner_words import internal_names, internal_vocabulary, owner_words_nudge
+from consumers.chatbot.same_failure import MAX_IDENTICAL_TOOL_FAILURES, same_failure_key as _same_failure_key  # F030
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
-from consumers.chatbot.figure_disputes import rechecks_disputed_figures  # F303 (night 9)
 from consumers.chatbot.named_template_note import fills_the_named_template  # F351 (night 10b)
-from consumers.chatbot.shop_figures import counts_from_the_shop  # F316 (night 9b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
-from consumers.chatbot.team_corrections import tells_the_team_honestly  # F324 (night 9b)
 from consumers.chatbot.document_conversation import (  # F351 (night 10b)
     about_a_document, full_path_for_documents, with_document_actions,
 )
@@ -97,60 +89,21 @@ logger = logging.getLogger(__name__)
 _TOOL_RESULT_TOKEN_BUDGET = 2000
 
 
-# =============================================================================
-# TOOL LOOP PREVENTION UTILITIES
-# =============================================================================
-
-def _normalize_query(query: str) -> str:
-    """Normalize a search query for deduplication comparison."""
-    if not query:
-        return ""
-    normalized = re.sub(r'[^\w\s]', '', query.lower())
-    normalized = ' '.join(normalized.split())
-    return normalized
-
-
-def _queries_are_similar(query1: str, query2: str, threshold: float = 0.75) -> bool:
-    """Check if two queries are semantically similar using string similarity."""
-    norm1 = _normalize_query(query1)
-    norm2 = _normalize_query(query2)
-    if not norm1 or not norm2:
-        return False
-    if norm1 == norm2:
-        return True
-    ratio = SequenceMatcher(None, norm1, norm2).ratio()
-    return ratio >= threshold
-
-
-def _extract_query_from_args(tool_name: str, tool_args: Dict[str, Any]) -> Optional[str]:
-    """Extract the search/query parameter from tool arguments."""
-    query_keys = ['query', 'search_query', 'q', 'text', 'question', 'prompt']
-    for key in query_keys:
-        if key in tool_args and isinstance(tool_args[key], str):
-            return tool_args[key]
-    return None
-
-
 NARRATED_ACTIONS_NOTICE = (
     "No tools ran in this reply, so nothing it describes was "
     "executed. Tell me to do it and I will make the calls."
 )
 
 
-def unexecuted_claims_notice(
-    reply: str, use_tools: Any, ran: Set[str], *, any_tool_ran: bool, done: Optional[Set[str]] = None,
-) -> Optional[str]:
+def unexecuted_claims_notice(reply: str, use_tools: Any, ran: Set[str], *, any_tool_ran: bool) -> Optional[str]:
     """What to tell the owner when a reply claims work no tool did this turn —
     a source that did not run (F099: "(Source: search_knowledge …)" repeated
-    from memory), actions told in prose with no tool call (#746), or an action
-    it says is done with no action that does it succeeding this turn (F108:
-    "I've approved the mission. It's now running" — it wasn't). ``done`` is
-    the actions that succeeded. None when the reply claims nothing it did not
-    do. Both reply paths ask this: a turn whose first reply calls no tool never
-    enters the tool loop, and that is exactly where night 3's replayed answer was.
-    F314 (night 9): a claimed action is told in Auto's own plain words (``not_done``),
-    never "This reply says something was …"."""
-    from consumers.chatbot.claim_check import not_done
+    from memory) or actions told in prose with no tool call (#746). None when
+    the reply claims nothing it did not do. Both reply paths ask this: a turn whose
+    first reply calls no tool never enters the tool loop, and that is exactly where
+    night 3's replayed answer was. PRD-256 FX-005: an action said to be done that
+    no call did is told by the receipts alone (one "Just to be clear" line, above
+    the answer), so a narration the receipts already answer gets no second notice."""
     from modules.tools.execution.tool_loop import (
         UNRUN_SOURCE_NOTICE, cited_tool_not_run, looks_like_narrated_action, offered_tool_names,
     )
@@ -160,11 +113,8 @@ def unexecuted_claims_notice(
     cited = cited_tool_not_run(reply, offered_tool_names(use_tools), ran)
     if cited:
         return UNRUN_SOURCE_NOTICE.format(tool=cited)
-    if not any_tool_ran and looks_like_narrated_action(reply):
+    if not any_tool_ran and looks_like_narrated_action(reply) and not says_nothing_was_done(reply):
         return NARRATED_ACTIONS_NOTICE
-    claim = claimed_action_not_done(reply, done)
-    if claim:
-        return not_done(claim)
     return None
 
 
@@ -274,27 +224,6 @@ def atom_identity_clause(user_name: Optional[str]) -> str:
     return f" You're talking to {name}." if name else ""
 
 
-# How many times the same tool may fail the same way in one turn before the
-# loop stops handing it back as if the next attempt might differ (F030).
-MAX_IDENTICAL_TOOL_FAILURES = 2
-
-
-def _same_failure_key(tool_name: str, result: Dict[str, Any]) -> Optional[str]:
-    """A key identifying "this tool, failing this way", or None if it succeeded.
-
-    Keyed on the first line of the error so a retry with different arguments
-    that fails for the SAME reason still counts — a missing backend does not
-    care what you asked it for.
-    """
-    if result.get("success"):
-        return None
-    error = str(result.get("error") or (result.get("raw_result") or {}).get("error") or "").strip()
-    if not error:
-        return None
-    return f"{tool_name}:{error.splitlines()[0][:120]}"
-
-
-
 def _session_agent_mismatch(db: Any, agent_id: Any) -> Optional[Exception]:
     """``RuntimeMismatchError`` when ``agent_id`` is a ``runtime: cli`` agent,
     else ``None``. Fail-soft: an unreadable row falls back to the generic error."""
@@ -329,124 +258,6 @@ def nothing_said_fallback(tool_data: Any) -> str:
     if isinstance(ask, dict) and ask.get("message"):
         return f"Nothing was done yet. {ask['message']} It waits for your approval on the card above."
     return NOTHING_SAID
-
-
-class ToolExecutionTracker:
-    """
-    Tracks tool executions within a conversation turn to prevent looping.
-    Implements:
-    - Exact deduplication (same tool + same args)
-    - Semantic deduplication for search tools (similar queries)
-    - Per-tool retry limits
-    """
-
-    SEARCH_TOOLS = {
-        'search_knowledge', 'semantic_search', 'search_codebase',
-        'search_tables', 'search_images', 'search_formulas',
-        'search_multimodal',
-        # PRD-160 S1: NL2SQL re-enabled workspace-scoped & in-process. Treated as
-        # a search tool so semantically-similar repeat questions are deduped.
-        'smart_query_database', 'query_database',
-    }
-
-    TOOL_RETRY_LIMITS = {
-        'composio_execute': 5,
-        'search_knowledge': 5,
-        'semantic_search': 5,
-        'search_codebase': 5,
-        'list_directory': 5,
-        'read_file': 8,
-        'write_file': 5,
-        # PRD-160 S1: NL2SQL is expensive and self-corrects internally
-        # (max_retries=2); cap turn-level reuse low to match the 2-attempt
-        # contract advertised in the tool description.
-        'smart_query_database': 2,
-        'query_database': 2,
-        'platform_default': 25,
-        'workspace_default': 8,
-        'default': 5,
-    }
-
-    def __init__(self):
-        self.exact_executions: Set[Tuple[str, str]] = set()
-        self.search_queries: Dict[str, List[str]] = {}
-        self.tool_counts: Dict[str, int] = {}
-
-    def _hash_args(self, tool_args: Dict[str, Any]) -> str:
-        return hashlib.md5(json.dumps(tool_args, sort_keys=True).encode()).hexdigest()
-
-    @staticmethod
-    def _counting_key(tool_name: str, tool_args: Dict[str, Any]) -> str:
-        """Return the key used for per-tool call counting.
-
-        For the ``platform_execute`` dispatcher, count by inner action so
-        that ``list_agents → get_settings → update_agent`` is three
-        distinct actions, not three calls to the same tool.
-        """
-        if tool_name == "platform_execute":
-            action = tool_args.get("action") or tool_args.get("name")
-            if action:
-                return f"platform_execute:{action}"
-        return tool_name
-
-    def _resolve_limit(self, counting_key: str) -> int:
-        """Resolve the retry limit for a counting key, honouring prefix-based defaults.
-
-        Handles dispatched actions like ``platform_execute:workspace_read_file``
-        — the inner action name determines the prefix, not the dispatcher.
-        """
-        if counting_key in self.TOOL_RETRY_LIMITS:
-            return self.TOOL_RETRY_LIMITS[counting_key]
-        effective_key = counting_key.split(":", 1)[-1] if ":" in counting_key else counting_key
-        if effective_key.startswith('workspace_'):
-            return self.TOOL_RETRY_LIMITS.get('workspace_default', self.TOOL_RETRY_LIMITS['default'])
-        if effective_key.startswith('platform_') or counting_key.startswith('platform_'):
-            return self.TOOL_RETRY_LIMITS.get('platform_default', self.TOOL_RETRY_LIMITS['default'])
-        return self.TOOL_RETRY_LIMITS['default']
-
-    def should_skip_execution(
-        self,
-        tool_name: str,
-        tool_args: Dict[str, Any]
-    ) -> Tuple[bool, str]:
-        """Check if a tool execution should be skipped. Returns (should_skip, reason)."""
-        key = self._counting_key(tool_name, tool_args)
-        current_count = self.tool_counts.get(key, 0)
-        limit = self._resolve_limit(key)
-
-        if current_count >= limit:
-            return True, f"Tool '{key}' has reached its execution limit ({limit}) for this turn"
-
-        args_hash = self._hash_args(tool_args)
-        exec_key = (tool_name, args_hash)
-        if exec_key in self.exact_executions:
-            return True, f"Tool '{tool_name}' was already executed with identical parameters"
-
-        if tool_name in self.SEARCH_TOOLS:
-            query = _extract_query_from_args(tool_name, tool_args)
-            if query:
-                previous_queries = self.search_queries.get(tool_name, [])
-                for prev_query in previous_queries:
-                    if _queries_are_similar(query, prev_query):
-                        return True, f"Tool '{tool_name}' was already executed with a similar query"
-
-        return False, ""
-
-    def record_execution(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
-        """Record that a tool was executed."""
-        args_hash = self._hash_args(tool_args)
-        self.exact_executions.add((tool_name, args_hash))
-        key = self._counting_key(tool_name, tool_args)
-        self.tool_counts[key] = self.tool_counts.get(key, 0) + 1
-        if tool_name in self.SEARCH_TOOLS:
-            query = _extract_query_from_args(tool_name, tool_args)
-            if query:
-                if tool_name not in self.search_queries:
-                    self.search_queries[tool_name] = []
-                self.search_queries[tool_name].append(query)
-
-    def get_execution_count(self, tool_name: str) -> int:
-        return self.tool_counts.get(tool_name, 0)
 
 
 # =============================================================================
@@ -1599,10 +1410,7 @@ class StreamingChatService:
     @its_reads_are_receipted  # PRD-256 US-001: the automatic reads fold into one read receipt
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
-    @rechecks_disputed_figures  # F303 (night 9): a disputed figure is checked again before Auto agrees
-    @counts_from_the_shop  # F316 (night 9b): a shop figure is counted from the shop, this turn
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
-    @tells_the_team_honestly  # F324 (night 9b): memory is Auto's own; the owner's documents reach the team
     @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,
                                chat_id: str, prefetched: List[Tuple[str, Dict[str, Any]]]) -> AsyncGenerator[str, None]:
@@ -1651,14 +1459,16 @@ class StreamingChatService:
         prefetched: List[Tuple[str, Dict[str, Any]]], latest_text: str,
     ) -> bool:
         """F187 (night 6): a first reply that ran no tool but says an action was
-        done (tier 1) or names an id that does not exist (tier 2) goes through
-        the tool loop, which nudges the claim once (F108) and re-prompts the id
-        once. The check never breaks a turn."""
+        done or names an id that does not exist (tier 2) goes through the tool
+        loop, which nudges the claim once (F108) and re-prompts the id once.
+        FX-007: the claim is the receipts' (the first reply made no write, and the
+        automatic reads in ``prefetched`` back none, so any report of work done is
+        unbacked). The check never breaks a turn."""
         if not use_tools or getattr(response, "tool_calls", None) or not getattr(response, "content", None):
             return False
         try:
             return bool(
-                claimed_action_not_done(response.content, {name for name, _args in prefetched})
+                claims_work_done(response.content)
                 or await asyncio.to_thread(invented_ids, response.content, latest_text, self.workspace_id)
             )
         except Exception:
@@ -1684,6 +1494,7 @@ class StreamingChatService:
         return additions
 
     @the_loop_writes_receipts  # PRD-256 US-001: the loop's receipts, from its tracker, before the answer
+    @settles_held_retractions  # FX-017: a retraction held after a blank retry goes out only if replaced
     async def _stream_tool_loop(
         self,
         response,
@@ -2242,7 +2053,6 @@ class StreamingChatService:
                 {key.split(":", 1)[-1] for key in executor.tracker.tool_counts},
                 # the automatic search (F085-A) is a source, not an action the model took
                 any_tool_ran=sum(executor.tracker.tool_counts.values()) > len(prefetched or []),
-                done=executor.tracker.succeeded,
             )
             if _notice:
                 logger.warning("[chat] reply claims work no tool did this turn — notice emitted")
@@ -2271,15 +2081,11 @@ class StreamingChatService:
             yield {"_final_response": final}
             return
 
-        # F187: what the answer still claims or names, for its correction line
-        # (tiers 1-2) and the [F187] log (tier 3). ``tools`` is the model's own calls.
         verdict = None
         try:
             answer = getattr(result.response, "content", "") or ""
             verdict = Verdict(
                 tools=sum(executor.tracker.tool_counts.values()) - len(prefetched or []),
-                claim=claimed_action_not_done(answer, executor.tracker.succeeded),
-                passive=passive_claim(answer),
                 ids=(await asyncio.to_thread(invented_ids, answer, owner_text, self.workspace_id)
                      if f187["reprompted"] else []),
                 reprompted=f187["reprompted"],
@@ -2656,6 +2462,7 @@ class StreamingChatService:
                 logger.debug("[chat] the turn's workspace could not be resolved for its tool scope", exc_info=True)
         return hidden_scope(hidden_categories_for_workspace(getattr(self, "workspace_id", None), getattr(self, "db", None)))
 
+    @keeps_one_answer_on_screen  # FX-017: the turn records what each streamed call put on the screen
     async def _stream_response_with_agent_scoped(
         self,
         chat_id: str,
@@ -3094,13 +2901,11 @@ class StreamingChatService:
                 final_text = response.content or ""
                 final_streamed = bool(getattr(response, "streamed", False))
                 final_round = response
-                f187_verdict = Verdict(tools=0, passive=passive_claim(final_text)) if use_tools else None
                 # F099 (night 3): the replayed answer was a first reply with no
                 # tool call — it never entered the tool loop, so check it here.
                 try:
                     _notice = unexecuted_claims_notice(
                         final_text, use_tools, {name for name, _args in _prefetched}, any_tool_ran=False,
-                        done={name for name, _args in _prefetched},
                     )
                     if _notice:
                         logger.warning("[chat] first reply claims work no tool did — notice emitted")

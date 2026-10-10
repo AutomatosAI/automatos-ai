@@ -6,8 +6,10 @@
  * Replaces the running/error-only chips: completed calls stay visible with
  * their one-line result and duration, a skipped call closes its line, and
  * a cap that ended the turn is said out loud. Click a line for its input.
+ * P256-FIX-RVW-22: an ask for the owner's click waits (the receipts block's hourglass and the
+ * card's words); it is never drawn as failed.
  */
-import { CheckCircle2, ChevronRight, Loader2, MinusCircle, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronRight, Hourglass, Loader2, MinusCircle, XCircle } from 'lucide-react'
 import type { LimitReached, ToolCall } from '@/types'
 import { formatDuration } from '@/lib/chat/tool-calls'
 
@@ -18,9 +20,15 @@ export interface ActivityTrailProps {
   progress?: string[]
 }
 
+/** A line drawn as failed: an error that is not an ask waiting for the owner's click. */
+function failed(tc: ToolCall): boolean {
+  return tc.state === 'error' && !tc.waiting
+}
+
 function stateIcon(tc: ToolCall) {
   if (tc.state === 'running') return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[hsl(var(--info))]" aria-label="Running" />
-  if (tc.state === 'error') return <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive/80" aria-label="Failed" />
+  if (tc.waiting) return <Hourglass className="h-3.5 w-3.5 shrink-0 text-warning/80" aria-label="Waiting for you" />
+  if (failed(tc)) return <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive/80" aria-label="Failed" />
   if (tc.skipped) return <MinusCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-label="Skipped" />
   return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success/80" aria-label="Done" />
 }
@@ -31,7 +39,7 @@ export function ActivityTrail({ toolCalls, formatLabel, progress = [] }: Activit
     <ol className="space-y-0.5 text-xs" aria-label="Activity">
       {toolCalls.map((tc) => {
         const label = formatLabel(tc)
-        const text = tc.state === 'error' ? `${label} failed` : label
+        const text = failed(tc) ? `${label} failed` : label
         const hasInput = tc.input && typeof tc.input === 'object' && Object.keys(tc.input).length > 0
         return (
           <li key={tc.toolCallId}>
@@ -42,10 +50,10 @@ export function ActivityTrail({ toolCalls, formatLabel, progress = [] }: Activit
               >
                 {stateIcon(tc)}
                 <span className={tc.state === 'running' ? 'text-foreground' : ''}>{text}</span>
-                {tc.summary && tc.state !== 'error' && (
+                {tc.summary && !failed(tc) && (
                   <span className="min-w-0 truncate text-muted-foreground/80">· {tc.summary}</span>
                 )}
-                {tc.state === 'error' && tc.error && (
+                {failed(tc) && tc.error && (
                   <span className="min-w-0 truncate text-destructive/70">· {tc.error}</span>
                 )}
                 {tc.durationMs !== undefined && tc.state !== 'running' && (

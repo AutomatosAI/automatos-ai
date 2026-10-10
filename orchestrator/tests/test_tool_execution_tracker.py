@@ -1,77 +1,11 @@
 """PRD-137 Fix #7: ToolExecutionTracker prefix-based limits and dispatcher awareness.
 
-Extracts ToolExecutionTracker and its helpers from service.py using
-targeted line ranges to avoid the full import chain (pgvector etc.).
+PRD-256 FX-007: these tests read the live tracker (modules/tools/execution/
+tool_execution_tracker.py, the one ToolLoopExecutor uses since PRD-142 W3-S4). The copy
+that stayed in consumers/chatbot/service.py, which they used to extract, ran nowhere and
+was deleted with it.
 """
-import hashlib
-import json
-import pathlib
-import re
-from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Set, Tuple
-
-
-# ---------------------------------------------------------------------------
-# Re-implement the standalone helpers (no external deps)
-# ---------------------------------------------------------------------------
-
-def _normalize_query(query: str) -> str:
-    if not query:
-        return ""
-    normalized = re.sub(r'[^\w\s]', '', query.lower())
-    return ' '.join(normalized.split())
-
-
-def _queries_are_similar(query1: str, query2: str, threshold: float = 0.75) -> bool:
-    norm1 = _normalize_query(query1)
-    norm2 = _normalize_query(query2)
-    if not norm1 or not norm2:
-        return False
-    if norm1 == norm2:
-        return True
-    return SequenceMatcher(None, norm1, norm2).ratio() >= threshold
-
-
-def _extract_query_from_args(tool_name: str, tool_args: Dict[str, Any]) -> Optional[str]:
-    for key in ['query', 'search_query', 'q', 'text', 'question', 'prompt']:
-        if key in tool_args and isinstance(tool_args[key], str):
-            return tool_args[key]
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Extract ToolExecutionTracker source from service.py, load in isolation
-# ---------------------------------------------------------------------------
-
-_SERVICE_PATH = pathlib.Path(__file__).resolve().parents[1] / "consumers" / "chatbot" / "service.py"
-_source = _SERVICE_PATH.read_text()
-
-_class_start = _source.index("\nclass ToolExecutionTracker:")
-_class_end = _source.index("\n\nclass ", _class_start + 1)
-_class_source = _source[_class_start:_class_end]
-
-_ns: dict = {
-    "hashlib": hashlib,
-    "json": json,
-    "Dict": Dict,
-    "Any": Any,
-    "Set": Set,
-    "Tuple": Tuple,
-    "List": List,
-    "Optional": Optional,
-    "_queries_are_similar": _queries_are_similar,
-    "_extract_query_from_args": _extract_query_from_args,
-}
-# Load the class definition without importing the full module
-_code = compile(_class_source, str(_SERVICE_PATH), "exec")
-# Safe: source is our own service.py, not user input
-globals_copy = dict(_ns)
-locals_copy: dict = {}
-# Using __builtins__ to restrict the namespace is unnecessary since this
-# is test code running our own source. We just need to execute the class def.
-_fn = type((lambda: None))(_code, globals_copy)
-_fn()
-ToolExecutionTracker = globals_copy["ToolExecutionTracker"]
+from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 
 
 # ── Direct tool limits ──────────────────────────────────────────────

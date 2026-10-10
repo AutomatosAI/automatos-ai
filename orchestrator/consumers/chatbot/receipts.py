@@ -8,7 +8,8 @@ read with ``call_effects``, never the persisted tool-execution log (D8: it keeps
 names only, no result and no chat).
 
 - One receipt per call: ``{action, kind, status, subject, effect, link, reason}``. The kind
-  is read or write; the status done, refused or skipped. The subject is the thing by number
+  is read or write; the status done, refused, skipped or waiting (FX-004: an ask for the
+  owner's click, ``card raised: <verb> <subject>``, is never a refusal). The subject is the thing by number
   or name (card #0422, an agent, a document's title); the effect is what the call did, in
   plain words ("moved to Done", "sent back to its agent"); a refused or skipped call says
   why, on one line. A link is the page of what a done call touched (its card, its agent).
@@ -16,7 +17,8 @@ names only, no result and no chat).
   read, the team's findings: ``prefetched``) fold into ONE read receipt.
 
 The turn streams them as one ``receipts`` frame, with the model that answered: after the
-loop, before the answer's additions, or, for a turn that ran no loop, before its finish. It
+loop, before the answer's additions, or, for a turn that ran no loop, before its finish (the
+web chat reads the same data from the ``tool-data`` frame just before it). It
 saves them as the message's ``receipts`` part (``narration.reply_parts``; ``[]`` when nothing
 ran). They are built after the model is done: no prompt names them and no tool can set them.
 
@@ -28,32 +30,38 @@ DELEGATE turn), ``its_reads_are_receipted`` (retrieval first), ``the_loop_writes
 set once per turn and never mutated.
 
 US-002, one honesty rule: the line about what was not done comes from the receipts alone
-(``honesty_lines``). It fires when no write went through and the answer reports work done
-(``COMPLETED_ACTION``, one generic pattern), never when a write went through; a refused write
-gets its own line. ``the_answer_takes_the_receipts`` (the answer's additions) settles them
-when the loop has not; they go above the text, in the frame (``above``) and at the top of
-the saved answer, never under it.
+(``honesty_lines``). FX-006: it is decided per claim (``claims_backed``): a report of work done
+(``COMPLETED_ACTION``, one generic pattern) with no done write of its kind behind it gets the
+line, whatever else went through; a refused write gets its own line.
+``the_answer_takes_the_receipts`` (the answer's additions) settles them when the loop has not; they go above the text, in the frame (``above``) and at the top of
+the saved answer, never under it. FX-005: they are the only not-done line; the turn's
+``no_tool_call`` notice never says it again (``says_nothing_was_done``).
 """
 from __future__ import annotations
 
 import functools
-import re
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from consumers.chatbot.claim_check import NOTHING_DONE
-from modules.tools.execution.call_effects import (
-    AGENT_SET, DOCUMENT_MAKES, SENT_BACK, STEPS_CHECKED, STEPS_UNCHECKED, answers_in, call_effects, result_effects,
+from consumers.chatbot.claim_check import NOTHING_DONE, READS_SAID, reads_put_in_front
+from consumers.chatbot.claims_backed import (
+    COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, promised_unbacked, unbacked_claims,
 )
+from consumers.chatbot.claims_by_kind import EACH_STEP_WAITS
+from modules.tools.execution.call_effects import (
+    AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED, STEPS_UNCHECKED,
+    answers_in, done_effects,
+)
+from modules.tools.execution.card_raised import is_waiting, receipt_effect
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
-from modules.tools.execution.turn_account import is_read, thing_of, what_it_did
+from modules.tools.execution.turn_account import auto_speaks, is_read, thing_of, what_it_did
 
 Receipt = Dict[str, Any]
 Prefetched = Sequence[Tuple[str, Dict[str, Any]]]
 
-PART = FRAME = "receipts"
+PART = FRAME = LIVE_KEY = "receipts"
 READ, WRITE = "read", "write"
-DONE, REFUSED, SKIPPED = "done", "refused", "skipped"
+DONE, REFUSED, SKIPPED, WAITING = "done", "refused", "skipped", "waiting"
 REASON_CHARS = 200
 SUBJECT_CHARS = 80
 LOOKED_UP = "looked up"
@@ -71,7 +79,9 @@ _MOVES = {"done": "moved to Done", "cancelled": "moved to Cancelled", "assigned"
           "review": "moved to Review", "in_progress": "started", "inbox": "moved to the Inbox",
           "blocked": "marked blocked"}
 _SAID = {SENT_BACK: "sent back to its agent", AGENT_SET: "agent set",
-         STEPS_CHECKED: "each step waits for your OK", STEPS_UNCHECKED: "its steps run without your check"}
+         STEPS_CHECKED: EACH_STEP_WAITS, STEPS_UNCHECKED: "its steps run without your check",
+         REVIEWED_BY_YOU: "card created, reviewed by you before it closes",  # FX-010 (D7)
+         STATUS_IGNORED_SAID: "status ignored: a re-brief sends the card back by itself"}  # FX-013
 # Calls whose name reads badly as "<thing> <past verb>".
 _OWN_WORDS = {"assign_tool_to_agent": "tool added", "unassign_tool_from_agent": "tool removed"}
 DOCUMENT_MADE = "document made"   # F351: the calls that make a document the owner finds in Deliverables
@@ -123,7 +133,7 @@ def _subject(answers: Sequence[Dict[str, Any]], params: Dict[str, Any]) -> str:
 
 def _effect(action: str, params: Dict[str, Any], result: Any) -> str:
     """What a write did (or tried), in plain words."""
-    tags = [effect.rsplit(":", 1)[-1] for effect in call_effects(action, params)] + list(result_effects(result))
+    tags = [effect.rsplit(":", 1)[-1] for effect in done_effects(action, params, result)]
     words = [_SAID.get(tag) or _MOVES.get(tag) or f"moved to {tag.replace('_', ' ')}" for tag in tags]
     if words:
         return ", ".join(dict.fromkeys(words))
@@ -151,9 +161,12 @@ def _reason(answers: Sequence[Dict[str, Any]]) -> str:
 
 
 def receipt(action: str, params: Dict[str, Any], result: Any) -> Receipt:
-    """The receipt of one call that ran: done, or refused with its reason."""
+    """The receipt of one call that ran: done, refused with its reason, or waiting for the
+    owner's click (an ask: its card is raised, nothing is refused)."""
     params = params if isinstance(params, dict) else {}
     answers = answers_in(result)
+    if is_waiting(result):
+        return _waiting_receipt(action, _subject(answers, params), result)
     refused = _refused(result)
     reads = is_read(action)
     return {
@@ -165,6 +178,12 @@ def receipt(action: str, params: Dict[str, Any], result: Any) -> Receipt:
         "link": None if refused else _link(answers),
         "reason": _reason(answers) if refused else None,
     }
+
+
+def _waiting_receipt(action: str, subject: str, result: Any) -> Receipt:
+    """An ask: a write that waits for the owner's click, with no reason (it was not refused)."""
+    return {"action": action, "kind": WRITE, "status": WAITING, "subject": subject,
+            "effect": receipt_effect(result, action, subject), "link": None, "reason": None}
 
 
 def skipped_receipt(action: str, params: Dict[str, Any], why: str) -> Receipt:
@@ -217,47 +236,42 @@ def model_of(response: Any) -> Optional[str]:
     return model if isinstance(model, str) and model else None
 
 
-def receipts_frame(handler: Any, receipts: List[Receipt], model: Optional[str] = None,
-                   above: Sequence[str] = ()) -> str:
-    """The one ``receipts`` frame of a turn, with the model that answered when it is known and
-    the lines the reply carries above its text (US-002) when there are any."""
+def _frame_data(receipts: List[Receipt], model: Optional[str], above: Sequence[str]) -> Dict[str, Any]:
     data: Dict[str, Any] = {"receipts": list(receipts)}
     if model:
         data["model"] = model
     if above:
         data[ABOVE] = list(above)
-    return handler.format_aisdk_data(FRAME, data)
+    return data
+
+
+def receipts_frame(handler: Any, receipts: List[Receipt], model: Optional[str] = None,
+                   above: Sequence[str] = ()) -> str:
+    """The one ``receipts`` frame of a turn, with the model that answered when it is known and
+    the lines the reply carries above its text (US-002) when there are any."""
+    return handler.format_aisdk_data(FRAME, _frame_data(receipts, model, above))
+
+
+def receipts_frames(handler: Any, receipts: List[Receipt], model: Optional[str] = None,
+                    above: Sequence[str] = ()) -> Tuple[str, ...]:
+    """The same data on a ``tool-data`` frame (under ``LIVE_KEY``), then the frame. The web
+    chat's stream reader hands a ``tool-data`` frame to its data callback, where the live
+    message takes its receipts (frontend lib/chat/use-chat-with-receipts.ts); it passes over a
+    frame type it does not know."""
+    live = handler.format_aisdk_tool_data({LIVE_KEY: _frame_data(receipts, model, above)})
+    return live, receipts_frame(handler, receipts, model, above)
 
 
 # ── US-002: one honesty rule, from the receipts alone ──────────────────────
 # The line about what was not done is decided by the receipts, never by a vocabulary of
-# claims (action_claims, document_claims, shop_and_team_claims: frozen, D10). It fires when no
-# write went through and the answer says, in the one generic way below, that work is done;
-# it never fires when a write went through. A refused write gets its own line. Both sit above
-# the text: in the frame (``above``) live, at the top of the saved answer on reload.
+# claims (the regex families are gone, FX-007). It fires for a
+# claim of the answer (one generic pattern, ``claims_backed.COMPLETED_ACTION``) that no done
+# write of its kind backs, whatever else went through (FX-006); a write of its kind is never
+# denied. A refused write gets its own line. Both sit above the text: in the frame
+# (``above``) live, at the top of the saved answer on reload.
 ABOVE = "above"
 NOTHING_DONE_LINE = NOTHING_DONE   # "Just to be clear: I haven't done that yet, and nothing has changed. …"
 TRIED_LINE = "I tried to {what} and it didn't go through: {reason}."
-# Looking things up is not work done: "I've checked the board" claims no change.
-_LOOKING = ("looked|checked|read|reviewed|found|searched|seen|noticed|pulled|gone|been|had|got|heard|understood|"
-            "asked|tried|confirmed|verified|explored|listed|counted|compared|considered|included|outlined|"
-            "summari[sz]ed|explained|mentioned|attached")
-_DONE_VERB = rf"(?!(?:{_LOOKING})\b)(?:[a-z]+ed|sent|made|set|put|given|done|written|built|run|begun|kept|told|" \
-             rf"taken|brought|chosen|paid|sold|cut|shut|drawn|thrown)\b"
-# The ONE completed-action pattern: "I've/I have <past verb>", "has been <verb>", "it's now on
-# your board" / "is now <verb>", "you should now see", and a sentence that is only "Done." or "Sorted.".
-COMPLETED_ACTION = re.compile(
-    rf"\bI(?:'ve|’ve| have)\s+(?:(?:now|just|already|also|successfully|gone ahead and)\s+)*{_DONE_VERB}"
-    rf"|\b(?:has|have)\s+(?:(?:now|just|already)\s+)*been\s+{_DONE_VERB}"
-    rf"|\b(?:it'?s|it’s|they'?re|they’re|is|are)\s+now\s+(?:(?:on|in)\s+(?:your|the)\b|running\b|live\b|"
-    rf"{_DONE_VERB})"
-    rf"|\byou(?:'ll|’ll| will| should)\s+now\s+see\b|\byou should see (?:it|this|them)\b"
-    rf"|^\s*(?:all\s+)?(?:done|sorted|set)\s*[.!,]", re.I)
-# Not a report of work done: a plan ("once I've sent it"), or the reply's own content ("below").
-_NOT_A_REPORT = re.compile(r"\b(?:i'?ll|i’ll|i will|i'?m going to|i am going to|once|when|after|below|"
-                           r"here(?:'s| is| are)|the following)\b", re.I)
-_SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
-_MARKS = re.compile(r"[*_`#>]")
 # How a refused write is named in "I tried to <what>": the board's own words where a call's
 # name reads badly, else "<verb> the <thing>".
 _TRIED = {"update_task_status": "move the card", "update_task": "change the card", "send_back": "send the card back",
@@ -266,12 +280,6 @@ _TRIED = {"update_task_status": "move the card", "update_task": "change the card
           "store_memory": "save that to memory", "execute_playbook": "run the playbook"}
 _VERBS = ("create", "update", "delete", "cancel", "assign", "approve", "reject", "schedule", "run", "send", "submit",
           "install", "pause", "resume", "upload", "add", "remove", "publish", "set", "generate", "make", "move", "post")
-
-
-def claims_work_done(answer: str) -> bool:
-    """Whether the answer reports, in the first person or as an outcome, work as done."""
-    text = _MARKS.sub("", answer or "")
-    return any(COMPLETED_ACTION.search(s) and not _NOT_A_REPORT.search(s) for s in _SENTENCES.findall(text))
 
 
 def _tried(r: Receipt) -> str:
@@ -287,18 +295,57 @@ def _tried(r: Receipt) -> str:
 
 def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
     """The lines above the answer: one per write that was refused (and not then done), and the
-    not-done line when no write went through and the answer says work is done."""
+    not-done line when a claim of the answer has no done write of its kind behind it (FX-006:
+    per claim, whatever else went through; it names the claim when another write did). A write
+    that waits for the owner's click (FX-004) is neither done nor refused: it writes no "I tried
+    to" line, and the answer that calls it done still gets the not-done line; the answer that says
+    its card was raised ("I've raised a card…", P256-FIX-RVW-30) does not."""
     writes = [r for r in receipts if r.get("kind") == WRITE]
-    done = {r["action"] for r in writes if r.get("status") == DONE}
+    done_writes = [r for r in writes if r.get("status") == DONE]
+    done = {r["action"] for r in done_writes}
     refused: Dict[str, Receipt] = {}
     for r in writes:
         if r.get("status") == REFUSED and r["action"] not in done:
             refused.setdefault(r["action"], r)          # one line per action: its first reason
     lines = [TRIED_LINE.format(what=_tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
              for r in refused.values()]
-    if not done and claims_work_done(answer):
-        lines.append(NOTHING_DONE_LINE)
-    return lines
+    not_done = not_done_line(answer, done_writes, waiting=_asks(writes), reads=_done_reads(receipts))
+    return [*lines, not_done] if not_done else lines
+
+
+def _asks(writes: Iterable[Receipt]) -> bool:
+    """Whether a write of the turn waits for the owner's click (its card raised)."""
+    return any(r.get("status") == WAITING for r in writes)
+
+
+def _done_reads(receipts: Iterable[Receipt]) -> List[Receipt]:
+    """The turn's reads that went through: what they name was found, not done (P256-FIX-RVW-34)."""
+    return [r for r in receipts if r.get("kind") == READ and r.get("status") == DONE]
+
+
+def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]],
+                   promises: Optional[bool] = True) -> Optional[str]:
+    """FX-007, F108's nudge from the receipts: the verb of the answer's first claim that no done
+    write of the calls so far backs (``outcomes``: the loop tracker's), "done" for a claim that says
+    only that ("Done.", "it's now on your board", "it's been done"), else None. P256-FIX-RVW-7: a
+    participle in no family ("I've prepared a summary") is never nudged (the line above the answer
+    still reads it), and an agent's run (``promises`` False; None: the turn's lane decides) is held
+    only to its first-person claims: "It has been cancelled" in its customer draft is its writer's voice.
+    P256-FIX-RVW-30: "I've raised a card…" after an ask for the owner's click is backed by it; RVW-34:
+    "#0365 has been cancelled" after a read of #0365 is what the read found."""
+    ran = [receipt(action, params, result) for action, params, result in outcomes]
+    writes = [r for r in ran if r["kind"] == WRITE]
+    done_writes = [r for r in writes if r["status"] == DONE]
+    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
+                               reads=_done_reads(ran))
+    return next((verb or "done" for verb, known in unbacked if known or verb in SAYS_DONE), None)
+
+
+def unbacked_promise(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]]) -> Optional[str]:
+    """P256-FIX-RVW-37 (F261-A): the family verb the answer's last sentence announces now ("I will now send
+    …") that no done write of the calls so far backs, else None: the tool loop's announced-step nudge."""
+    writes = [r for r in (receipt(action, params, result) for action, params, result in outcomes) if r["kind"] == WRITE]
+    return promised_unbacked(answer, [r for r in writes if r["status"] == DONE], waiting=_asks(writes))
 
 
 def with_lines_above(answer: str, above: Sequence[str]) -> str:
@@ -339,17 +386,24 @@ def _settle_above(receipts: Sequence[Receipt], answer: str) -> List[str]:
     return above
 
 
-def _frame_once(chat: Any, receipts: List[Receipt], model: Optional[str],
-                above: Sequence[str] = ()) -> Optional[str]:
+def says_nothing_was_done(answer: str) -> bool:
+    """Whether the turn's receipts put the not-done line above ``answer`` (FX-005: the one
+    producer of that line). Another notice that would say the same defers to it."""
+    receipts = current_receipts() or []
+    return not _VISITOR.get() and any(is_not_done_line(line) for line in honesty_lines(receipts, answer))
+
+
+def _frames_once(chat: Any, receipts: List[Receipt], model: Optional[str],
+                 above: Sequence[str] = ()) -> Tuple[str, ...]:
     """The turn's frame, the first time it is asked for. A public widget visitor is sent none
     (F155: a visitor sees no internals); the receipts are still saved with the message."""
     handler = getattr(chat, "streaming_handler", None)
     if _SENT.get() or handler is None:
-        return None
+        return ()
     _SENT.set(True)
     if getattr(chat, "widget_mode", False):
-        return None
-    return receipts_frame(handler, receipts, model, above)
+        return ()
+    return receipts_frames(handler, receipts, model, above)
 
 
 def writes_its_receipts(turn: Stream) -> Stream:
@@ -358,15 +412,15 @@ def writes_its_receipts(turn: Stream) -> Stream:
     @functools.wraps(turn)
     async def wrapped(chat: Any, *args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:
         for var, fresh in ((_IN_TURN, True), (_PREFETCHED, ()), (_LOOP, None), (_MODEL, None), (_SENT, False),
-                           (_ABOVE, None), (_VISITOR, bool(getattr(chat, "widget_mode", False)))):
+                           (_ABOVE, None), (_VISITOR, bool(getattr(chat, "widget_mode", False))), (READS_SAID, "")):
             var.set(fresh)
         handler = getattr(chat, "streaming_handler", None)
         finish = handler.format_aisdk_finish() if handler is not None else None
         try:
             async for chunk in turn(chat, *args, **kwargs):
-                frame = (_frame_once(chat, current_receipts() or [], _MODEL.get(), _ABOVE.get() or ())
-                         if finish and chunk == finish else None)
-                if frame:
+                frames = (_frames_once(chat, current_receipts() or [], _MODEL.get(), _ABOVE.get() or ())
+                          if finish and chunk == finish else ())
+                for frame in frames:
                     yield frame
                 yield chunk
         finally:
@@ -376,13 +430,18 @@ def writes_its_receipts(turn: Stream) -> Stream:
 
 def its_reads_are_receipted(retrieval_first: Stream) -> Stream:
     """Wrap ``StreamingChatService._retrieval_first``: the turn keeps its automatic reads
-    (``prefetched``, filled by the reads under it) for the folded read receipt."""
+    (``prefetched``, filled by the reads under it) for the folded read receipt, and what the
+    notes they added say, so a number they quote is no invented id (F187, RVW-8)."""
     @functools.wraps(retrieval_first)
     async def wrapped(chat: Any, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime: Any,
                       chat_id: str, prefetched: List[Any]) -> AsyncGenerator[Any, None]:
         _PREFETCHED.set(prefetched)
-        async for frame in retrieval_first(chat, latest_text, llm_messages, agent_runtime, chat_id, prefetched):
-            yield frame
+        before = {id(message) for message in llm_messages}
+        try:
+            async for frame in retrieval_first(chat, latest_text, llm_messages, agent_runtime, chat_id, prefetched):
+                yield frame
+        finally:
+            reads_put_in_front([message for message in llm_messages if id(message) not in before])
     return wrapped
 
 
@@ -402,9 +461,9 @@ def the_loop_writes_receipts(loop: Stream) -> Stream:
                     receipts = build_receipts(made[0] if made else None, kwargs.get("prefetched") or ())
                     _LOOP.set(receipts)
                     answer = getattr(final, "content", None)
-                    frame = _frame_once(chat, receipts, model_of(final), _settle_above(receipts, answer)) \
-                        if answer else None
-                    if frame:
+                    frames = _frames_once(chat, receipts, model_of(final), _settle_above(receipts, answer)) \
+                        if answer else ()
+                    for frame in frames:
                         yield frame
                 yield chunk
         finally:
@@ -447,8 +506,10 @@ def saves_the_turns_receipts(reply_parts: Parts) -> Parts:
     return wrapped
 
 
-__all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "NOTHING_DONE_LINE", "PART", "READ",
-           "REFUSED", "SKIPPED", "TRIED_LINE", "WRITE", "build_receipts", "claims_work_done", "current_receipts",
-           "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
-           "receipt", "receipts_frame", "saves_the_turns_receipts", "skipped_receipt", "the_answer_takes_the_receipts",
-           "the_loop_writes_receipts", "turn_receipts", "with_lines_above", "writes_its_receipts"]
+__all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIVE_KEY", "NOTHING_DONE_LINE", "PART",
+           "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WAITING", "WRITE", "build_receipts", "claims_work_done",
+           "current_receipts", "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
+           "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "says_nothing_was_done", "skipped_receipt",
+           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "unbacked_claim", "unbacked_promise",
+           "with_lines_above",
+           "writes_its_receipts"]

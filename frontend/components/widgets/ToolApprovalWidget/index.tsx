@@ -125,7 +125,9 @@ export function ToolApprovalWidget({
       <div className="flex flex-col gap-3 p-3">
         <div>
           <p className="text-sm font-medium break-all">{data.action}</p>
-          {data.message && (
+          {data.question_md ? (
+            <p className="text-xs mt-0.5 whitespace-pre-line break-words">{data.question_md}</p>
+          ) : data.message && (
             <p className="text-xs text-muted-foreground mt-0.5">{data.message}</p>
           )}
           {data.permission_level && (

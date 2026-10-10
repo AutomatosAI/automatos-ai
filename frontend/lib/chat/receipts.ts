@@ -17,8 +17,10 @@ export const NO_ACTIONS = 'No actions in this turn.'
 export const NOTHING_ON_THE_BOARD = 'No actions on the board.'
 export const REFUSED_PREFIX = 'tried, refused'
 export const SKIPPED_PREFIX = 'not run'
+/** PRD-256 FX-004: an ask for the owner's click is waiting, never a failure. */
+export const WAITING_SUFFIX = 'waiting for you'
 const NO_REASON = 'no reason given'
-const STATUSES: ReadonlySet<string> = new Set(['done', 'refused', 'skipped'])
+const STATUSES: ReadonlySet<string> = new Set(['done', 'refused', 'skipped', 'waiting'])
 /** A card on the board is named by its number, as the board shows it (#0422). */
 const CARD_NUMBER = /^#\d/
 
@@ -56,9 +58,11 @@ export function receiptsOf(message: Pick<ChatMessage, 'receipts' | 'parts'>): Re
 }
 
 /** One receipt in plain words: "#0422: moved to Done"; a call that did nothing names what it was
- * for, never an effect it did not have: "Letter to Maya: tried, refused: <reason>". */
+ * for, never an effect it did not have: "Letter to Maya: tried, refused: <reason>"; an ask says
+ * what its card asks: "card raised: change an agent 'Scout' — waiting for you". */
 export function receiptLine(r: Receipt): string {
   if (r.status === 'done') return [r.subject, r.effect].filter(Boolean).join(': ')
+  if (r.status === 'waiting') return `${r.effect || r.subject} — ${WAITING_SUFFIX}`
   const prefix = r.status === 'refused' ? REFUSED_PREFIX : SKIPPED_PREFIX
   const what = r.subject || r.effect
   return `${what ? `${what}: ` : ''}${prefix}: ${r.reason || NO_REASON}`
@@ -72,4 +76,26 @@ export function movedSomethingOnTheBoard(receipts: Receipt[]): boolean {
 /** An internal page only: a receipt's link is a path in this app, never another site. */
 export function safeLink(link: string | null): string | null {
   return link && link.startsWith('/') && !link.startsWith('//') ? link : null
+}
+
+/** The `tool-data` key the backend puts a `receipts` frame's data under (consumers/chatbot/receipts.py
+ * LIVE_KEY): `useChat` hands a `tool-data` frame to its data callback, never a frame type it does not know. */
+export const LIVE_KEY = 'receipts'
+
+/** What a `tool-data` part forwarded by `useChat`'s data callback sets on the live reply, when it
+ * carries a receipts frame's data; undefined for any other part. */
+export function liveReceiptsFromToolData(part: unknown): ReturnType<typeof liveReceipts> | undefined {
+  const forwarded = part as { type?: unknown; data?: Record<string, unknown> } | null | undefined
+  if (forwarded?.type !== 'tool-data') return undefined
+  const frame = forwarded.data?.[LIVE_KEY]
+  return receiptsFromFrame(frame) ? liveReceipts(frame) : undefined
+}
+
+/** `messages` with the live receipts on the reply being streamed (the last assistant message). Never mutates. */
+export function withReceiptsOnTheReply(
+  messages: ChatMessage[],
+  live: Pick<ChatMessage, 'receipts' | 'receiptsAbove'>,
+): ChatMessage[] {
+  const at = messages.findLastIndex((m) => m.role === 'assistant')
+  return at < 0 ? messages : messages.map((m, i) => (i === at ? { ...m, ...live } : m))
 }

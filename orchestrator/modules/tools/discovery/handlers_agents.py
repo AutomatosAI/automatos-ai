@@ -7,7 +7,8 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from services.agent_availability import says_who_can_run
+from modules.tools.discovery.agent_made_by import lists_the_team, says_who_made_it
+from modules.tools.discovery.agent_runtime import sets_the_runtime_on_create, sets_the_runtime_on_update
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +21,10 @@ def _visitor_view(agent: Any) -> Dict[str, Any]:
 
 def _widget_turn() -> bool:
     from core.security.surface import widget_turn
-
     return widget_turn()
 
 
-@says_who_can_run  # F244: each agent says whether it can run now
+@lists_the_team  # F244: whether each can run now; FX-012: who made it, and when
 async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent, agent_skills
     from core.models.composio_cache import AgentAppAssignment
@@ -109,6 +109,7 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     }
 
 
+@says_who_made_it  # FX-012: who made it, when, and how it runs
 async def get_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent, Skill, agent_skills
     from core.models.composio_cache import AgentAppAssignment
@@ -355,6 +356,7 @@ def _apply_create_org_fields(db: Session, workspace_id: UUID, agent: Any, params
     return None
 
 
+@sets_the_runtime_on_create  # FX-016: runtime api | cli (a Claude Code session), else DEFAULT_AGENT_RUNTIME
 async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent
 
@@ -395,12 +397,9 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         owner_id=str(workspace_id),
     )
 
-    # System prompt -> custom_persona_prompt
-    if system_prompt:
+    if system_prompt:  # -> custom_persona_prompt
         agent.custom_persona_prompt = system_prompt
         agent.use_custom_persona = True
-
-    # Tags
     if tags:
         agent.tags = tags
 
@@ -533,6 +532,7 @@ def _apply_update_fields(agent: Any, params: Dict[str, Any], model_id: Optional[
     )
 
 
+@sets_the_runtime_on_update  # FX-016: runtime api → cli, a session's CLI and model
 async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     agent, err = _resolve_agent(db, workspace_id, params)
     if err:
@@ -567,21 +567,20 @@ async def update_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
 
 async def delete_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Delete an agent. Requires confirmation (handled by execute())."""
+    """Delete an agent. Requires confirmation (handled by execute()). A name is read as
+    one agent's (agent_binding: the whole name, else the one name containing it); a name
+    two agents carry, or none, deletes nothing (P256-FIX-RVW-9)."""
     from core.models import Agent
+    from modules.tools.discovery.agent_binding import bound_to_the_agent
 
+    params, refused = bound_to_the_agent(db, workspace_id, "platform_delete_agent", params)
+    if refused:
+        return refused
     agent_id = params.get("agent_id")
-    agent_name = params.get("agent_name")
-
-    query = db.query(Agent).filter(Agent.workspace_id == workspace_id)
-    if agent_id:
-        query = query.filter(Agent.id == agent_id)
-    elif agent_name:
-        query = query.filter(Agent.name.ilike(f"%{agent_name}%"))
-    else:
+    if not agent_id:
         return {"success": False, "error": "Provide agent_name or agent_id"}
 
-    agent = query.first()
+    agent = db.query(Agent).filter(Agent.workspace_id == workspace_id, Agent.id == agent_id).first()
     if not agent:
         return {"success": False, "error": "Agent not found"}
 
