@@ -392,3 +392,78 @@ def test_a_call_that_is_not_a_send_never_reads_the_executors_session(monkeypatch
                                           caller_context={"session_task_id": 1}))
 
     assert out == {"success": True} and _Reader.ran == ["search_knowledge"]
+
+
+# ── P256-FIX-RVW-38: sends the word list missed, and a send by reference ─────────────────
+
+@pytest.mark.parametrize("slug, sends", [
+    ("SLACK_SCHEDULE_MESSAGE", True), ("DISCORDBOT_CREATE_MESSAGE", True), ("TWILIO_CREATE_MESSAGE", True),
+    ("TWITTER_CREATE_A_NEW_DM_CONVERSATION", True), ("GITHUB_CREATE_AN_ISSUE_COMMENT", True),
+    ("STRIPE_CREATE_REFUND", True), ("STRIPE_CREATE_PAYOUT", True), ("STRIPE_CREATE_TRANSFER", True),
+    ("SHOPIFY_CREATE_REFUND", True), ("PAYPAL_CREATE_PAYOUT", True), ("MAILCHIMP_SCHEDULE_CAMPAIGN", True),
+    ("GMAIL_SEND_DRAFT", True), ("MAILCHIMP_SEND_CAMPAIGN", True),
+    ("GMAIL_FETCH_EMAILS", False), ("GMAIL_CREATE_EMAIL_DRAFT", False), ("GMAIL_UPDATE_DRAFT", False),
+    ("OUTLOOK_CREATE_DRAFT_MESSAGE", False), ("SLACK_LIST_SCHEDULED_MESSAGES", False),
+    ("STRIPE_LIST_REFUNDS", False), ("GITHUB_LIST_ISSUE_COMMENTS", False),
+])
+def test_a_message_made_or_timed_and_money_paid_out_are_sends(slug, sends):
+    from modules.tools.discovery.owner_only import is_composio_send
+
+    assert is_composio_send(slug) is sends
+
+
+SCHEDULED = {"action": "SLACK_SCHEDULE_MESSAGE",
+             "params": {"channel": "#suppliers", "text": "Please confirm the order.", "post_at": "1767225600"}}
+
+
+def test_a_scheduled_message_on_autos_ticket_raises_one_card_and_nothing_runs(desk):
+    reply = _send(desk, _session(desk), SCHEDULED)
+
+    assert _Composio.sent == []
+    assert reply["requires_confirmation"] is True and reply["message"].startswith("Card raised: send ")
+    (grant,) = _grants(desk)
+    assert "- to: #suppliers" in grant.question_md.splitlines()
+    assert grant.details[AGENT_SEND]["task_id"] == desk.ticket.id
+
+
+@pytest.mark.parametrize("send, kind", [
+    ({"action": "GMAIL_SEND_DRAFT", "params": {"draft_id": "r-4412"}}, "draft"),
+    ({"action": "OUTLOOK_SEND_DRAFT", "params": {"message_id": "AAMk-1"}}, "draft"),
+    ({"action": "MAILCHIMP_SEND_CAMPAIGN", "params": {"campaign_id": "c-77"}}, "campaign"),
+], ids=["gmail-draft", "outlook-draft", "mailchimp-campaign"])
+@pytest.mark.parametrize("where", ["autos-ticket", "owners-chat"])
+def test_a_send_by_reference_is_refused_before_any_card(desk, send, kind, where):
+    from modules.tools.discovery.card_question_sends import SENT_BY_REFERENCE
+
+    reply = _send(desk, _session(desk) if where == "autos-ticket" else CHAT, send)
+
+    assert _Composio.sent == [] and _grants(desk) == []
+    assert reply["success"] is False and not reply.get("requires_confirmation")
+    assert reply["error"] == SENT_BY_REFERENCE.format(action=send["action"], kind=kind)
+    assert "the action that names each recipient" in reply["error"]
+    desk.db.refresh(desk.ticket)
+    assert not (desk.ticket.runtime_ref or {}).get("session_asks")
+
+
+def test_a_draft_named_by_its_id_alone_is_refused_too():
+    from modules.tools.discovery.card_question_sends import refused_as_sent_by_reference
+
+    assert refused_as_sent_by_reference("GMAIL_SEND_EMAIL", {"draft_id": "r-1"})["success"] is False
+    assert refused_as_sent_by_reference("GMAIL_SEND_EMAIL", {"draftId": "r-1"})["success"] is False
+    assert refused_as_sent_by_reference("GMAIL_SEND_EMAIL", SEND["params"]) is None
+    assert refused_as_sent_by_reference("LINKEDIN_CREATE_LINKED_IN_POST", {"text": "Hi", "campaign_id": "7"}) is None
+
+
+def test_the_gate_reads_the_classifiers_message_send_patterns():
+    from modules.tools.capabilities.classifier import ActionClassifier
+    from modules.tools.discovery.owner_only import MESSAGE_SEND, is_composio_send
+
+    assert ActionClassifier.CAPABILITY_HEURISTICS[MESSAGE_SEND]["name_patterns"]
+    assert is_composio_send("PUSHOVER_NOTIFY_USER") is True          # 'notify': the classifier's, no send word
+    assert is_composio_send("PUSHOVER_LIST_NOTIFY_RULES") is False   # a read word wins
+
+
+def test_the_fetch_still_never_asks_beside_the_new_words(desk):
+    reply = _send(desk, _session(desk), {"action": "GMAIL_FETCH_EMAILS", "params": {"query": "label:drafts"}})
+
+    assert reply["success"] is True and _Composio.sent == ["GMAIL_FETCH_EMAILS"] and _grants(desk) == []

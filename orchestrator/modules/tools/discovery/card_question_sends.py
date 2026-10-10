@@ -13,6 +13,12 @@ call carries is listed too (:func:`other_lines`): a recipient under a name the c
 know is still on it, a list of plain values item by item, uncut. A recipient the card cannot
 read (an object, a flag, a list holding one) refuses the call before any grant
 (:func:`refused_before_the_send_card`): no card approves a recipient it does not show.
+
+P256-FIX-RVW-38: a send by reference (GMAIL_SEND_DRAFT {draft_id}, MAILCHIMP_SEND_CAMPAIGN
+{campaign_id}) raised a card reading '(no recipient named)' and the id, while the draft could
+be changed after the card (GMAIL_UPDATE_DRAFT) and the click sent whatever it held. Such a
+send is refused before any grant (:func:`refused_as_sent_by_reference`), with the line that
+tells the agent to send it with the action that names the recipient.
 """
 from __future__ import annotations
 
@@ -20,6 +26,7 @@ import json
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from modules.tools.discovery.card_question_text import said_line, shown, value_line
+from modules.tools.discovery.send_words import BY_REFERENCE, BY_REFERENCE_KEYS, slug_words
 
 TO, CC, BCC = "to", "cc", "bcc"
 # A Composio send's recipient fields, by the names its actions use, in the order the card reads them.
@@ -40,6 +47,10 @@ OTHER_LABEL = "{label} {address}"
 UNREAD_RECIPIENT = ("Nothing was sent and no card was raised: the approval card cannot show the recipient "
                     "in '{field}' (a {kind}). Name each recipient as an address, or a list of addresses, "
                     "and ask again.")
+SENT_BY_REFERENCE = ("Nothing was sent and no card was raised: {action} sends a {kind} the app keeps, whose "
+                     "recipients and body can change after the card, so the approval card cannot show what the "
+                     "click would send. Send it with the action that names each recipient, the subject and the "
+                     "body itself, and ask again.")
 
 
 def recipients(params: Any) -> List[Tuple[str, str]]:
@@ -92,6 +103,18 @@ def refused_before_the_send_card(params: Any) -> Optional[Dict[str, Any]]:
         if unread is not None:
             return {"success": False, "error": UNREAD_RECIPIENT.format(field=key, kind=type(unread).__name__)}
     return None
+
+
+def refused_as_sent_by_reference(action: str, params: Any) -> Optional[Dict[str, Any]]:
+    """The refusal for a send of a draft or a campaign the app keeps, named by the action
+    (GMAIL_SEND_DRAFT, MAILCHIMP_SEND_CAMPAIGN) or by a draft's id, before any grant; else None."""
+    kept = sorted(slug_words(action) & BY_REFERENCE)
+    if not kept and isinstance(params, dict):
+        kept = [key.removesuffix("_id").removesuffix("Id") for key in BY_REFERENCE_KEYS
+                if params.get(key) not in (None, "")]
+    if not kept:
+        return None
+    return {"success": False, "error": SENT_BY_REFERENCE.format(action=action, kind=kept[0].rstrip("s"))}
 
 
 def _recipient_fields(params: Any) -> Iterator[Tuple[str, str, Any]]:
@@ -147,5 +170,6 @@ def _listed(value: Any) -> List[Any]:
     return list(value) if isinstance(value, (list, tuple)) else [value]
 
 
-__all__ = ["BCC_KEYS", "CC_KEYS", "RECIPIENT_GROUPS", "SHOWN_KEYS", "TO_KEYS", "UNREAD_RECIPIENT", "attachment_lines",
-           "other_lines", "recipient_lines", "recipients", "recipients_said", "refused_before_the_send_card"]
+__all__ = ["BCC_KEYS", "CC_KEYS", "RECIPIENT_GROUPS", "SENT_BY_REFERENCE", "SHOWN_KEYS", "TO_KEYS", "UNREAD_RECIPIENT",
+           "attachment_lines", "other_lines", "recipient_lines", "recipients", "recipients_said", "refused_as_sent_by_reference",
+           "refused_before_the_send_card"]
