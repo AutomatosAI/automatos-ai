@@ -244,10 +244,9 @@ class DurableMemoryStore:
         ws = str(workspace_id) if workspace_id else workspace_from_namespace(user_id)
         content_hash = hashlib.sha256(text.encode()).hexdigest()
 
-        existing = await self._find_by_hash(user_id, content_hash, owner=(metadata or {}).get("owner"))
-        if existing is not None:
-            logger.debug("[Durable] Deduplicated add in namespace=%s", user_id)
-            return {"success": True, "id": str(existing.id), "deduped": True}
+        deduped = await self._deduped(user_id, content_hash, (metadata or {}).get("owner"))
+        if deduped is not None:
+            return deduped
 
         embedding = await self._embedder.generate_embedding(text)
         point_id = str(uuid.uuid4())
@@ -532,6 +531,32 @@ class DurableMemoryStore:
             }
 
     # ── Internals ───────────────────────────────────────────────
+
+    async def _deduped(self, user_id: str, content_hash: str, owner: Optional[str]) -> Optional[Dict]:
+        """The add's answer when this content is already stored (for an owned write, this
+        owner's row, dated now: P256-FIX-RVW-41); None when it is new and must be stored."""
+        existing = await self._find_by_hash(user_id, content_hash, owner=owner)
+        if existing is None:
+            return None
+        logger.debug("[Durable] Deduplicated add in namespace=%s", user_id)
+        if owner:
+            await self._restated_now(user_id, existing.id)
+        return {"success": True, "id": str(existing.id), "deduped": True}
+
+    async def _restated_now(self, user_id: str, point_id: Any) -> None:
+        """P256-FIX-RVW-41: an owner restating their own row dates it now, so the restated
+        rule is their newest (it leads the standing rules and beats the rule it replaced).
+        Only ``created_at`` changes; a timeout keeps the old date and says so in the log."""
+        try:
+            await self._client.set_payload(
+                collection_name=self._collection,
+                payload={"created_at": datetime.now(timezone.utc).isoformat()},
+                points=[point_id],
+            )
+        except Exception as exc:
+            if not is_timeout(exc):
+                raise
+            logger.warning("memory restated but not re-dated: %s, point %s (%r)", user_id, point_id, exc)
 
     async def _find_by_hash(self, user_id: str, content_hash: str, owner: Optional[str] = None):
         """The namespace's row with this content, and, for an owned write, this owner's
