@@ -242,20 +242,22 @@ def test_the_rerun_chain_is_read_in_the_runs_own_workspace_only(desk, seed_works
     assert _launched_by_auto(desk.db, desk.ws, ours) is False
 
 
-def test_the_rerun_chain_is_bounded(desk):
-    """A chain deeper than RERUN_CHAIN_DEPTH (or a loop) stops reading and does not ask."""
+def test_the_rerun_chain_is_bounded_and_fails_closed(desk):
+    """A chain deeper than RERUN_CHAIN_DEPTH, or a loop, stops reading and asks; a chain that
+    ends at a run a person started, however long, does not."""
     from core.models.core import RecipeExecution
     from modules.tools.discovery import agent_sends
 
-    first = _auto_run(desk)
+    first = _auto_run(desk, triggered_by="user@example.com")
     run = first
-    for _ in range(agent_sends.RERUN_CHAIN_DEPTH):
+    for _ in range(agent_sends.RERUN_CHAIN_DEPTH - 1):
         run = _rerun(desk, run)
-    assert agent_sends._launched_by_auto(desk.db, desk.ws, run) is False
+    assert agent_sends._launched_by_auto(desk.db, desk.ws, run) is False      # its root is read: a person's
+    assert agent_sends._launched_by_auto(desk.db, desk.ws, _rerun(desk, run)) is True   # one past: asks
     looped = desk.db.query(RecipeExecution).filter(RecipeExecution.execution_id == first).one()
-    looped.triggered_by, looped.retry_of = "user@example.com", _rerun(desk, first)
+    looped.retry_of = _rerun(desk, first)
     desk.db.flush()
-    assert agent_sends._launched_by_auto(desk.db, desk.ws, first) is False
+    assert agent_sends._launched_by_auto(desk.db, desk.ws, first) is True
 
 
 def test_a_chats_composio_send_checked_against_the_intent_asks_the_owner(desk, monkeypatch):

@@ -165,13 +165,16 @@ def _on_autos_brief(db: Any, workspace_id: Any, task: Any, run_id: Optional[str]
 def _launched_by_auto(db: Any, workspace_id: Any, run_id: Optional[str]) -> bool:
     """The run, or a run its ``retry_of`` chain reruns, was started by Auto's platform call
     (P256-FIX-RVW-39: a watch's rerun of Auto's run is a new run, triggered_by 'watch_rerun').
-    The chain is read in this workspace only, at most :data:`RERUN_CHAIN_DEPTH` runs deep."""
+    The chain is read in this workspace only, at most :data:`RERUN_CHAIN_DEPTH` runs deep; a
+    chain that never reaches the run that started it (too deep, or a loop) asks: fail closed."""
     from core.models.core import RecipeExecution
 
     seen = set()
     for _ in range(RERUN_CHAIN_DEPTH):
-        if run_id is None or run_id in seen:
+        if run_id is None:
             return False
+        if run_id in seen:
+            return True
         seen.add(run_id)
         run = (db.query(RecipeExecution)
                .filter(RecipeExecution.execution_id == run_id, RecipeExecution.workspace_id == workspace_id)
@@ -181,7 +184,7 @@ def _launched_by_auto(db: Any, workspace_id: Any, run_id: Optional[str]) -> bool
         if run.triggered_by == LAUNCHED_BY_AUTO:
             return True
         run_id = run.retry_of
-    return False
+    return run_id is not None
 
 
 def _auto_id(db: Any, workspace_id: Any) -> Optional[int]:
