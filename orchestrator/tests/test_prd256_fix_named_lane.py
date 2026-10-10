@@ -9,12 +9,16 @@ agents called OPS, "Get OPS to…" could only fail. Here, through the dispatch (
   refusal does, and never files a copy; the dispatch keeps that directive over the ticket's;
 - the answer, "267, the operations one", is OPS 267's ticket, filed by its agent_id;
 - a bare number is an answer to any numbered question: it hands nothing over;
-- P256-FIX-RVW-33: the answer after "Give #1057 to OPS" hands #1057 on to the agent picked, never a copy.
+- P256-FIX-RVW-33: the answer after "Give #1057 to OPS" hands #1057 on to the agent picked, never a copy;
+- P256-FIX-RVW-42: the owner's own plan, a question about a hand-off, "to" a target, an id reply that asks
+  or doubts, and a '#' number that is no card of this workspace's hand nothing over.
 
-No model is called and no database is opened: the roster is the test's.
+No model is called and no database is opened: the roster and the board are the test's.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
@@ -36,13 +40,32 @@ ROSTER = [
     NS(id=412, name="CHRISTMAS BOX", job_title="Seasonal buyer"),
 ]
 CANDIDATES = "267 · OPS · Operations Manager; 284 · OPS · Shop floor assistant"
+GOLDEN = Path(__file__).parent / "fixtures" / "prd256_routing_golden.json"
+WS = "ws-1"
+BOARD = {"#1057": 9057}                  # the workspace's cards by number; "#1043" is an order's
 
 
 class _Brain:
+    _db, _workspace_id = object(), WS
     _match_roster_agent = AutoBrain._match_roster_agent
 
     def _active_agents(self):
         return ROSTER
+
+
+@pytest.fixture(autouse=True)
+def board(monkeypatch):
+    """The workspace's board, read by its number in this workspace only (P256-FIX-RVW-42)."""
+    import services.ticket_numbers as ticket_numbers
+
+    looked = []
+
+    def resolve(db, workspace_id, ref):
+        looked.append((workspace_id, ref))
+        return BOARD.get(ref) if workspace_id == WS else None
+
+    monkeypatch.setattr(ticket_numbers, "resolve_ticket_ref", resolve)
+    return looked
 
 
 def _turn(said, action=Action.RESPOND):
@@ -304,3 +327,102 @@ def test_dont_ask_researcher_files_no_ticket_whatever_the_tiers_said(action):
 ])
 def test_a_hand_off_beside_a_negation_or_a_question_is_still_handed_over(said, name):
     assert addressed_by_name(said, name) is True
+
+
+# ── P256-FIX-RVW-42: tickets the owner did not ask for ─────────────────────────
+
+@pytest.mark.parametrize("said, name", [
+    ("Remind me to ask WRITER to redo the About page on Friday", "WRITER"),      # (a) their own plan
+    ("I'll get WRITER to redo it tomorrow", "WRITER"),
+    ("Let me tell WRITER the news myself", "WRITER"),
+    ("I'm going to ask RESEARCHER to look at it", "RESEARCHER"),
+    ("We'll have WRITER redo it next week", "WRITER"),
+    ("Note to self: ask WRITER to redo the About page", "WRITER"),
+    ("Shall I ask OPS to check the stock?", "OPS"),                               # (b) a question about it
+    ("Shouldn't we ask RESEARCHER to look?", "RESEARCHER"),
+    ("Do you think I should ask RESEARCHER to look?", "RESEARCHER"),
+    ("Do you want me to ask WRITER to redo the About page?", "WRITER"),
+    ("Get sales to 10k this month", "Sales"),                                     # (c) "to" a target
+    ("Help me get Support to inbox zero", "Support"),
+    ("Get Sales to £10k by Friday", "Sales"),
+    ("Get Support to the end of the queue", "Support"),
+])
+def test_a_plan_a_question_or_a_target_hands_nothing_over(said, name):
+    assert addressed_by_name(said, name) is False
+
+
+@pytest.mark.parametrize("said, name", [
+    ("I need you to ask WRITER to redo the About page.", "WRITER"),
+    ("Can you ask RESEARCHER to look at it?", "RESEARCHER"),
+    ("Could you please get WRITER to redo the About page?", "WRITER"),
+    ("Auto, can you ask RESEARCHER to look?", "RESEARCHER"),
+    ("Please ask OPS to check the stock?", "OPS"),
+    ("Get OPS to order 50 bags of Harbour Blend.", "OPS"),
+])
+def test_a_request_is_still_handed_over(said, name):
+    assert addressed_by_name(said, name) is True
+
+
+@pytest.mark.parametrize("said", [
+    "agent 267, what does it do?",
+    "30, the tracker - is it broken?",          # TRACKER is agent 30, and "tracker" describes it
+    "267, not the operations one",
+    "284 — the shop floor one?",
+])
+def test_an_id_reply_that_asks_or_doubts_hands_nothing_over(said):
+    assert id_reply(said, [agent for agent in ROSTER if agent.id != AUTO]) is None
+    assert _turn(said).assessment.action == Action.RESPOND
+
+
+@pytest.mark.parametrize("action", [Action.RESPOND, Action.ASSIGN, Action.MISSION])
+def test_an_orders_number_handed_over_is_no_card(board, action):
+    said = "Hand #1043 over to Support - the customer wants a refund"
+    brain = _Brain()
+    brain._active_agents = lambda: [*ROSTER, NS(id=610, name="Support", job_title="Customer support")]
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=action, reasoning="tiers")
+
+    assert the_lane(brain, said, tiers) is tiers
+    assert board == [(WS, "#1043")]
+
+
+def test_the_workspaces_own_card_is_still_handed_on(board):
+    brain = _Brain()
+    brain._active_agents = lambda: [*ROSTER, NS(id=610, name="Support", job_title="Customer support")]
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=Action.RESPOND, reasoning="tiers")
+    verdict = the_lane(brain, "Hand #1057 over to Support - the customer wants a refund", tiers)
+
+    assert (verdict.action, verdict.target_agent_id) == (Action.ASSIGN, 610)
+    assert board == [(WS, "#1057")]
+
+
+def test_another_workspaces_card_is_no_card(board):
+    brain = _Brain()
+    brain._workspace_id = "ws-2"
+    tiers = ComplexityAssessment(complexity=Complexity.MOLECULE, action=Action.RESPOND, reasoning="tiers")
+
+    assert the_lane(brain, "Give #1057 to CHRISTMAS BOX", tiers) is tiers
+    assert board == [("ws-2", "#1057")]
+
+
+NOT_ASKED_FOR = [
+    "Remind me to ask WRITER to redo the About page on Friday", "I'll get WRITER to redo it tomorrow",
+    "Let me tell WRITER the news myself", "I'm going to ask RESEARCHER to look at it",
+    "Note to self: ask WRITER to redo the About page", "Shall I ask OPS to check the stock?",
+    "Shouldn't we ask RESEARCHER to look?", "Do you think I should ask RESEARCHER to look?",
+    "Do you want me to ask WRITER to redo the About page?", "Get sales to 10k this month",
+    "Help me get Support to inbox zero", "agent 267, what does it do?", "30, the tracker - is it broken?",
+    "Hand #1043 over to Support - the customer wants a refund",
+]
+
+
+def test_the_golden_holds_the_tickets_the_owner_did_not_ask_for():
+    """test_prd256_handoffs runs every ``task_after_the_name`` row through the lane with the night's
+    roster and board; here: the RVW-42 rows are there as 'tiers', beside the requests that still hand over."""
+    night12 = json.loads(GOLDEN.read_text())["night12"]
+    by_said = {route["said"]: route["lane"] for route in night12["task_after_the_name"]}
+
+    assert [by_said.get(said) for said in NOT_ASKED_FOR] == ["tiers"] * len(NOT_ASKED_FOR)
+    assert by_said["I need you to ask WRITER to redo the About page."] == "ASSIGN 58 WRITER"
+    assert by_said["Can you ask RESEARCHER to look at it?"] == "ASSIGN 57 RESEARCHER"
+    assert by_said["Get OPS to order 50 bags of Harbour Blend."] == "ASK OPS (267, 284)"
+    assert "#1043" not in night12["board"] and {"#0953", "#1041", "#1057"} <= set(night12["board"])

@@ -24,6 +24,12 @@ nothing over, and neither does a message that keeps the work with Auto ("do it y
 
 P256-FIX-RVW-29: the present perfect is a participle after the name, so "Have OPS check the stock?"
 hands the work over as the same words without "?" do.
+
+P256-FIX-RVW-42: the owner's own plan ("I'll get WRITER to …", "Remind me to ask WRITER …") hands
+nothing over; a question whose clause opens with anything but a request ("Shall I ask OPS …?", "Do you
+want me to ask …?") asks about the hand-off ("Can you ask OPS …?" and "Have OPS check …?" still hand it
+over); "to" then a number, a sum, a determiner or a target ("Get sales to 10k", "… to inbox zero") is
+where, not what; and an id reply that asks or doubts ("agent 267, what does it do?") picks nobody.
 """
 from __future__ import annotations
 
@@ -92,10 +98,28 @@ _NEGATED = re.compile(r"\b(?:don['’]?t|do not|never|not|no need to|stop)"
 # A sentence ends at . ! or ? before a space or the end ("1.5 kg" is no end), or at a line break.
 _SENTENCE_END = re.compile(r"[.!?](?=\s|$)|\n")
 QUESTION_MARK = "?"
-# A question about a hand-off: "Did you ask …?", "Should I get …?", "Have you told …?". "Could you get
-# OPS to …?" asks for the work, as "Can you get …?" does, so only "could I/we" asks about it.
-_ASKS_ABOUT = re.compile(r"^\W*(?:did|didn['’]?t|why|should|has|could\s+(?:i|we)|have\s+(?:you|we|i))\b")
-_WH_WORD = re.compile(r"\b(?:what|which|who|whom|whose|when|where|why|how)\b")
+# P256-FIX-RVW-42: a question about a hand-off ("Did you ask …?", "Shall I ask …?", "Do you want me to
+# ask …?") is any question whose clause has words before the verb and does not end with a request ("Can you
+# get OPS to …?", "Could you please ask …?", "Please ask …?"). "Have OPS check …?" has none: it asks for it.
+_REQUEST_OPENER = re.compile(r"(?:^|\s)(?:(?:can|could|would|will)\s+you(?:\s+please)?|please)\s*$")
+# P256-FIX-RVW-42: the owner's own plan heads the verb ("I'll get …", "Remind me to ask …", "Let me tell
+# …"), at most this many words before it; "I need you to ask …" hands the work over.
+PLANNED_GAP = 3
+_PLANNED = re.compile(r"\b(?:i['’]?ll|i will|i['’]?m going to|i am going to|i need to|i should|let me|remind me to"
+                      r"|we['’]?ll|we will)(?:\s+(?!you\b)[a-z'’-]+){0,%d}\s*$" % PLANNED_GAP)
+_NOTE_TO_SELF = re.compile(r"^\W*note to self\b")
+# P256-FIX-RVW-42: "to" then a number, a sum, a determiner, or a word and a target ("inbox zero", "sales
+# 10k", "margin 40%") says where the name is to get, not what it is to do: "Get sales to 10k this month".
+_DETERMINERS = r"the|a|an|this|that|these|those|my|our|your|their|his|her|its|every|each|some|any|no"
+_NUMBER_WORDS = r"zero|one|two|three|four|five|six|seven|eight|nine|ten|twenty|fifty|hundred|thousand|million"
+_TARGET = r"(?:zero|[£$€]\S*|\d[\d,.]*(?:k|m|bn|%))(?![a-z0-9])"
+_WHERE_NOT_WHAT = re.compile(
+    r"^\s+to\s+(?:[£$€\d]|(?:%s|%s)(?![a-z0-9'’-])|[a-z'’-]+\s+%s)" % (_DETERMINERS, _NUMBER_WORDS, _TARGET))
+# P256-FIX-RVW-42: words after an id that ask or doubt ("what does it do?", "is it broken?", "not that one").
+NEGATED_ENDING = "n't"
+ID_DOUBTS = AUXILIARIES | frozenset({
+    "what", "which", "who", "whom", "whose", "when", "where", "why", "how", "not", "no", "never",
+})
 HAVE = "have"
 # A plural noun after the name makes the name its modifier ("support tickets", "sales figures"); a verb's
 # bare form ends in a single s only after s, u or a ("process", "focus", "canvas").
@@ -132,11 +156,21 @@ def describes(rest: Optional[str], agent: Any) -> bool:
     return any(_same_word(word, other) for word in said for other in known)
 
 
+def _doubts(rest: Optional[str]) -> bool:
+    """Whether the words after an id ask or doubt rather than pick: "what does it do?", "is it broken?",
+    "not that one" (P256-FIX-RVW-42)."""
+    said = str(rest or "").lower().replace("’", "'")
+    words = _WORD.findall(said)
+    return said.rstrip().endswith(QUESTION_MARK) or any(
+        word in ID_DOUBTS or word.endswith(NEGATED_ENDING) for word in words)
+
+
 def id_reply(message: Optional[str], roster: Sequence[Any]) -> Optional[Any]:
-    """The active teammate a short reply names by its id ("267, the operations one"), else None."""
+    """The active teammate a short reply names by its id ("267, the operations one"), else None. A reply
+    that asks or doubts ("agent 267, what does it do?", "30, the tracker - is it broken?") is None."""
     text = str(message or "")
     found = ID_REPLY.match(text)
-    if not found or len(text.split()) > MAX_REPLY_WORDS:
+    if not found or len(text.split()) > MAX_REPLY_WORDS or _doubts(found.group("rest")):
         return None
     agent = next((agent for agent in roster if str(agent.id) == found.group("id").lstrip("0")), None)
     if agent is None or not (found.group("agent") or describes(found.group("rest"), agent)):
@@ -169,7 +203,7 @@ def _task_follows(verb: str, rest: str) -> bool:
         return False
     first, second = words.group("first"), words.group("second") or ""
     if first == "to":
-        return bool(second)
+        return bool(second) and not _WHERE_NOT_WHAT.match(rest)
     if verb == ONLY_WITH_TO:
         return False
     return first in ASKED_WHAT if verb == ASK else _bare_verb(first, second)
@@ -190,12 +224,12 @@ def _forbidden_or_asked(said: str, found: re.Match) -> bool:
     ends = list(_SENTENCE_END.finditer(said, 0, found.start()))
     head = said[ends[-1].end() if ends else 0:found.start()]
     clause = _CLAUSE_BREAK.split(head)[-1]
-    if _NEGATED.search(clause):
+    if _NEGATED.search(clause) or _PLANNED.search(clause) or _NOTE_TO_SELF.match(head):
         return True
     end = _SENTENCE_END.search(said, found.end())
     if not end or end.group() != QUESTION_MARK:
         return False
-    if _ASKS_ABOUT.match(head) or _WH_WORD.search(head):
+    if _WORD.search(clause) and not _REQUEST_OPENER.search(clause):
         return True
     return found.group("verb") == HAVE and not _WORD.search(head) and _perfect_after(said[found.end():])
 

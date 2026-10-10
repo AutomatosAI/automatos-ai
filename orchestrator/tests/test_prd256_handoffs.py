@@ -17,9 +17,8 @@ are here, each against the table:
   RESEARCHER…", "Give #1057 to CHRISTMAS BOX", "267, the operations one", "Delete MARKET-MANAGER")
   route to their lane whatever the tiers said (the golden file's ``night12`` rows). Social media work's row keeps its own file
   (test_f379_d), against the table;
-- P256-FIX-RVW-12: a name is handed work only when a task follows it, so "Have support tickets been
-  answered today?", "Get sales figures for Q3" and "Get OPS's stock report" stay the tiers', and work
-  handed to two teammates together stays the tiers' whatever they said (``night12.task_after_the_name``).
+- P256-FIX-RVW-12, RVW-42: a name is handed work only when a task the owner asks for follows it: "Get sales figures",
+  "I'll get WRITER to …", an order's "#1043" and work for two teammates stay the tiers' (``night12.task_after_the_name``).
 """
 from __future__ import annotations
 
@@ -272,6 +271,7 @@ class _Night12Brain:
 def night12_workspace(monkeypatch, designer):
     monkeypatch.setattr(handoffs, "find_social_media_director", lambda db, workspace_id: DIRECTOR)
     monkeypatch.setattr(handoffs, "agent_names", lambda db, workspace_id: [a["name"] for a in NIGHT_12["roster"]])
+    monkeypatch.setattr("services.ticket_numbers.resolve_ticket_ref", lambda db, ws, ref: NIGHT_12["board"].get(ref))
 
 
 def _night12_lane(said, action):
@@ -331,7 +331,7 @@ def test_the_golden_holds_the_names_that_hand_nothing_over_and_the_joined_rows()
     # P256-FIX-RVW-29: a bare verb after the name is a request, "?" or not (two agents are called OPS)
     assert [by_said[f"Have {said}?"] for said in ("OPS check the stock", "WRITER draft the About page", "OPS finished")] \
         == ["ASK OPS (267, 284)", "ASSIGN 58 WRITER", "tiers"]
-    assert len(TASK_AFTER_THE_NAME) == 23
+    assert len(TASK_AFTER_THE_NAME) == 40
 
 
 @pytest.mark.parametrize("action", TIERS_SAID)
