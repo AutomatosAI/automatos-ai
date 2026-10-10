@@ -32,6 +32,8 @@ AUTO_SLUG = "auto-{workspace_id}"   # the workspace's orchestrator agent (core/s
 WRITTEN_BY_AN_AGENT = "agent"
 # PRD-204 S9: a run a platform call started is an Auto-launched playbook run.
 LAUNCHED_BY_AUTO = "platform_action"
+# A run and the reruns behind it (services/watch_rerun ``retry_of``) read back to the run that started it.
+RERUN_CHAIN_DEPTH = 8
 PLAYBOOK_CARD_SOURCE = "recipe"
 STEP_SEPARATOR = ":"
 FAILED = "failed"
@@ -152,19 +154,34 @@ def _playbook_run(lane: str, ref: Any, task: Any) -> Optional[str]:
 
 def _on_autos_brief(db: Any, workspace_id: Any, task: Any, run_id: Optional[str]) -> bool:
     """Auto wrote the ticket (an agent's ticket, and that agent is the workspace's Auto), or
-    the playbook run it belongs to was started by Auto's platform call."""
+    the playbook run it belongs to (or the run it reruns) was started by Auto's platform call."""
     if task is not None and str(task.created_by_type or "") == WRITTEN_BY_AN_AGENT:
         auto = _auto_id(db, workspace_id)
         if auto is not None and str(task.created_by_id or "") == str(auto):
             return True
-    if run_id is None:
-        return False
+    return _launched_by_auto(db, workspace_id, run_id)
+
+
+def _launched_by_auto(db: Any, workspace_id: Any, run_id: Optional[str]) -> bool:
+    """The run, or a run its ``retry_of`` chain reruns, was started by Auto's platform call
+    (P256-FIX-RVW-39: a watch's rerun of Auto's run is a new run, triggered_by 'watch_rerun').
+    The chain is read in this workspace only, at most :data:`RERUN_CHAIN_DEPTH` runs deep."""
     from core.models.core import RecipeExecution
 
-    run = (db.query(RecipeExecution)
-           .filter(RecipeExecution.execution_id == run_id, RecipeExecution.workspace_id == workspace_id)
-           .first())
-    return run is not None and run.triggered_by == LAUNCHED_BY_AUTO
+    seen = set()
+    for _ in range(RERUN_CHAIN_DEPTH):
+        if run_id is None or run_id in seen:
+            return False
+        seen.add(run_id)
+        run = (db.query(RecipeExecution)
+               .filter(RecipeExecution.execution_id == run_id, RecipeExecution.workspace_id == workspace_id)
+               .first())
+        if run is None:
+            return False
+        if run.triggered_by == LAUNCHED_BY_AUTO:
+            return True
+        run_id = run.retry_of
+    return False
 
 
 def _auto_id(db: Any, workspace_id: Any) -> Optional[int]:
