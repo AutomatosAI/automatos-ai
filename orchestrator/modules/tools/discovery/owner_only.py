@@ -392,6 +392,7 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     from modules.tools.discovery.card_question import platform_question
     from modules.tools.discovery.card_question_skills import bound_to_the_subject
     from modules.tools.discovery.mission_targets import bound_to_the_mission
+    from modules.tools.discovery.playbook_binding import bound_to_the_playbook
     from modules.tools.discovery.ticket_edit_moves import rebrief_that_closes
     from modules.tools.execution.subject_targets import missing_targets_error, named_subject
 
@@ -399,6 +400,8 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     params, refused = bound_to_the_agent(db, workspace_id, action, params)  # FX-010: and on the agent shown
     if not refused:  # RVW-14: and on the plugin or skill shown
         params, refused = bound_to_the_subject(db, workspace_id, action, params)
+    if not refused:  # RVW-45: and on the playbook shown
+        params, refused = bound_to_the_playbook(db, workspace_id, action, params)
     refused = refused or refused_before_the_card(db, workspace_id, action, params)  # FX-016: a runtime it can't set
     refused = refused or rebrief_that_closes(db, workspace_id, action, params)  # RVW-10: re-brief or close, not both
     if refused:

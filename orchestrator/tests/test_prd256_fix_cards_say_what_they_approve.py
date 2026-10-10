@@ -324,6 +324,130 @@ def test_an_unreadable_recipient_beside_params_is_refused_before_any_grant(monke
     assert stored == {} and tools.ran == []
 
 
+# ── A playbook named by name: bound to one row before the card (P256-FIX-RVW-45) ─────
+
+SCHEDULE, DELETE_PLAYBOOK = "platform_schedule_playbook", "platform_delete_playbook"
+STOCK_TIMER = {"cron_expression": "0 8 * * 1", "timezone": "Europe/London"}
+
+
+def _playbook(db, ws, name, steps=()):
+    from core.models.core import WorkflowTemplate
+
+    playbook = WorkflowTemplate(template_id=f"rvw45-{uuid4().hex[:8]}", name=name, description="Count the stock.",
+                                workspace_id=ws, owner_type="workspace", owner_id=str(ws), created_by="test",
+                                steps=list(steps), schedule_config={"type": "manual"},
+                                template_definition={"steps": list(steps), "agents": [], "config": {}, "variables": []})
+    db.add(playbook)
+    db.flush()
+    return playbook
+
+
+@pytest.fixture
+def pantry(db_session, seed_workspace):
+    """'Monday Stock Check' only: 'Stock Check' is a name it contains, not its own."""
+    ws = UUID(seed_workspace())
+    return NS(db=db_session, ws=ws, monday=_playbook(db_session, ws, "Monday Stock Check", [{"name": "Count"}]))
+
+
+def _grants(db, ws):
+    from core.models.approval_grants import ApprovalGrant
+
+    return db.query(ApprovalGrant).filter(ApprovalGrant.workspace_id == ws).count()
+
+
+def test_a_timer_by_a_name_one_playbook_contains_names_that_playbook_and_binds_its_id(pantry):
+    ask = owner_only.platform_ask(pantry.db, pantry.ws, SCHEDULE, {"playbook_name": "Stock Check", **STOCK_TIMER},
+                                  _owners_chat())
+
+    assert ask["requires_confirmation"] is True
+    assert f"- playbook: 'Monday Stock Check' (playbook #{pantry.monday.id})" in ask["question_md"]
+    assert "- runs at (cron): (empty) → 0 8 * * 1" in ask["question_md"]
+    assert "playbook_name" not in ask["question_md"]
+    assert ask["params"]["playbook_id"] == pantry.monday.id and "playbook_name" not in ask["params"]
+    stored = _grant(pantry.db, ask["grant_id"]).details["params"]
+    assert stored["playbook_id"] == pantry.monday.id and "playbook_name" not in stored
+
+
+def test_of_two_namesakes_the_one_with_steps_gets_the_timer_and_the_card_names_it(pantry):
+    _playbook(pantry.db, pantry.ws, "Stock Check")
+    staffed = _playbook(pantry.db, pantry.ws, "stock check ", [{"name": "Count"}])
+
+    ask = owner_only.platform_ask(pantry.db, pantry.ws, SCHEDULE, {"playbook_name": "Stock Check", **STOCK_TIMER},
+                                  _owners_chat())
+
+    assert f"(playbook #{staffed.id})" in ask["question_md"] and ask["params"]["playbook_id"] == staffed.id
+
+
+def test_namesakes_none_can_be_picked_from_are_refused_listing_them_with_no_grant(pantry):
+    first, second = _playbook(pantry.db, pantry.ws, "Stock Check"), _playbook(pantry.db, pantry.ws, "Stock Check")
+
+    for action, params in ((SCHEDULE, {"playbook_name": "Stock Check", **STOCK_TIMER}),
+                           (DELETE_PLAYBOOK, {"playbook_name": "Stock Check"})):
+        reply = owner_only.platform_ask(pantry.db, pantry.ws, action, params, _owners_chat())
+        assert reply["success"] is False and "requires_confirmation" not in reply, action
+        assert f"#{first.id} 'Stock Check'" in reply["error"] and f"#{second.id} 'Stock Check'" in reply["error"]
+    assert _grants(pantry.db, pantry.ws) == 0
+
+
+def test_a_delete_takes_a_whole_name_only_never_one_it_contains(pantry):
+    reply = owner_only.platform_ask(pantry.db, pantry.ws, DELETE_PLAYBOOK, {"playbook_name": "Stock Check"},
+                                    _owners_chat())
+    assert reply["success"] is False and f"#{pantry.monday.id} 'Monday Stock Check'" in reply["error"]
+    assert _grants(pantry.db, pantry.ws) == 0
+
+    ask = owner_only.platform_ask(pantry.db, pantry.ws, DELETE_PLAYBOOK, {"playbook_name": "monday stock check"},
+                                  _owners_chat())
+    assert f"'Monday Stock Check' (playbook #{pantry.monday.id}) is deleted for good" in ask["question_md"]
+    assert ask["params"] == {"playbook_id": pantry.monday.id}
+
+
+def test_a_playbook_name_of_another_workspace_is_never_bound(pantry, seed_workspace):
+    _playbook(pantry.db, UUID(seed_workspace()), "Bravo Stock Take")
+    reply = owner_only.platform_ask(pantry.db, pantry.ws, SCHEDULE, {"playbook_name": "Bravo Stock Take", **STOCK_TIMER},
+                                    _owners_chat())
+    assert reply["success"] is False and "Bravo" not in reply.get("question_md", "")
+    assert _grants(pantry.db, pantry.ws) == 0
+
+
+def test_the_click_times_the_playbook_the_card_named(pantry, monkeypatch):
+    """A playbook made with the very name after the card does not move the click."""
+    from unittest.mock import AsyncMock, patch
+
+    from sqlalchemy import text
+
+    from core.models.approval_grants import ApprovalGrant
+    from core.services.approval_grants import grant_grant
+    from modules.tools.discovery import handlers_playbooks
+    from modules.tools.discovery.platform_executor import PlatformActionExecutor
+
+    owner = pantry.db.execute(text("INSERT INTO users (email, username) VALUES (:e, :u) RETURNING id"),
+                              {"e": f"rvw45-{uuid4().hex[:8]}@harbourline.test", "u": f"rvw45-{uuid4().hex[:8]}"}).scalar()
+    pantry.db.execute(text("INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
+                           "VALUES (CAST(:ws AS uuid), :user, 'owner', TRUE)"), {"ws": str(pantry.ws), "user": owner})
+    monkeypatch.setattr(handlers_playbooks, "_sync_schedule", lambda playbook: (None, None))
+    executor = PlatformActionExecutor(pantry.db, pantry.ws)
+    executor._full_autonomy = lambda: False
+    chat = {"driving_user_id": str(owner), "conversation_id": str(uuid4())}
+
+    def run(params):
+        with patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
+            return asyncio.run(executor.execute(SCHEDULE, params, chat))
+
+    ask = run({"playbook_name": "Stock Check", **STOCK_TIMER})
+    assert ask["requires_confirmation"] is True and ask["params"]["playbook_id"] == pantry.monday.id
+    newcomer = _playbook(pantry.db, pantry.ws, "Stock Check", [{"name": "Count"}])
+    grant_grant(pantry.db.get(ApprovalGrant, ask["grant_id"]), granted_by=f"user:{owner}")
+    pantry.db.flush()
+
+    done = run(ask["params"])
+
+    assert done["success"] is True and done["playbook_id"] == pantry.monday.id
+    pantry.db.refresh(pantry.monday)
+    pantry.db.refresh(newcomer)
+    assert pantry.monday.schedule_config["cron_expression"] == "0 8 * * 1"
+    assert newcomer.schedule_config == {"type": "manual"}
+
+
 # ── Tenancy: a card never reads another workspace's row ─────────────────────────────
 
 def test_a_card_never_leaks_another_workspaces_row(desk):

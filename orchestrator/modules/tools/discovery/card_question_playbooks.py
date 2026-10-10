@@ -6,7 +6,8 @@ new playbook's name and what it is for; a timer's cron, zone and switch 'from â†
 from the playbook's own row); or which playbook is deleted for good. P256-FIX-RVW-14: an
 update that carries a timer (``schedule_config``) shows the same timer lines, and any new
 name or purpose it gives with them. A playbook is looked
-up in the caller's workspace only, by its id or by the one playbook with that name.
+up in the caller's workspace only, by its id: a name is bound to one before the card
+(``playbook_binding``, P256-FIX-RVW-45).
 """
 from __future__ import annotations
 
@@ -74,19 +75,16 @@ def delete_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
 
 
 def _playbook(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Optional[Any]:
-    """This workspace's playbook by id, or the one playbook carrying the name said (two
-    namesakes name none: the handler asks which)."""
+    """This workspace's playbook by its id: a name is bound to one before the card is
+    asked (``playbook_binding``, P256-FIX-RVW-45), and the click runs on that id."""
     from core.models.core import WorkflowTemplate
-    from modules.tools.discovery.handlers_playbooks import _playbooks_called
 
-    query = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == workspace_id)
-    if params.get("playbook_id") not in (None, ""):
-        try:
-            return query.filter(WorkflowTemplate.id == int(params["playbook_id"])).first()
-        except (TypeError, ValueError):
-            return None
-    named = _playbooks_called(db, workspace_id, params["playbook_name"]) if params.get("playbook_name") else []
-    return query.filter(WorkflowTemplate.id == named[0].id).first() if len(named) == 1 else None
+    try:
+        playbook_id = int(params.get("playbook_id"))
+    except (TypeError, ValueError):
+        return None
+    return (db.query(WorkflowTemplate)
+            .filter(WorkflowTemplate.workspace_id == workspace_id, WorkflowTemplate.id == playbook_id).first())
 
 
 __all__ = ["create_lines", "delete_lines", "schedule_lines", "update_lines"]
