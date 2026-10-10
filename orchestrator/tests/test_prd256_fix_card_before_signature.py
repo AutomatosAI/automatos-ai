@@ -124,6 +124,63 @@ def test_delete_every_done_card_asks_naming_up_to_the_cards_named(board, says):
     board.handler.assert_not_called()
 
 
+# ── P256-FIX-RVW-40: "close" is a close too ─────────────────────────────────────────
+# 'Delete every done card' / 'close all the blocked tickets' reached the status tool as
+# status 'closed' (its description says so for "close all …"), which was not a closing
+# status: the signature rule refused it with no card, or (no note) every card closed with no click.
+
+def _close_shapes(board):
+    refs = [f"#{task.workspace_seq:04d}" for task in board.done]
+    return {
+        "bulk": ("close all the done cards", (),
+                 {"task_ids": refs, "status": "closed", "note": "Clearing out finished work."}),
+        "single": (f"close {board.number}", (board.card,), {"task_id": board.number, "status": "closed"}),
+    }
+
+
+@pytest.mark.parametrize("shape", ["bulk", "single"])
+def test_a_move_to_closed_raises_the_card_and_moves_nothing(board, says, shape):
+    words, named, params = _close_shapes(board)[shape]
+    says(words, *named)
+
+    reply = _call(board, params, _owners_chat())
+
+    assert _asked(reply), reply
+    assert SIGNATURE_REFUSAL not in str(reply.get("error", ""))
+    assert "click: close " in reply["message"]   # CLOSING_VERBS["closed"], not the action's name
+    shown = board.done[0] if shape == "bulk" else board.card
+    assert shown.title in reply["message"]
+    board.handler.assert_not_called()
+
+
+@pytest.mark.parametrize("shape", ["bulk", "single"])
+def test_the_click_on_a_close_moves_the_cards(board, says, shape):
+    from core.models.approval_grants import ApprovalGrant
+    from core.services.approval_grants import grant_grant
+
+    words, named, params = _close_shapes(board)[shape]
+    says(words, *named)
+    asked = _call(board, params, _owners_chat())
+    grant_grant(board.db.get(ApprovalGrant, asked["grant_id"]), granted_by="user:7")
+    board.db.flush()
+
+    ran = _call(board, params, _owners_chat())
+
+    assert ran["success"] is True and ran["approved_via_grant_id"] == asked["grant_id"], ran
+    board.handler.assert_called_once()
+    moved = board.handler.call_args.args[2]
+    assert moved["status"] == "closed"
+    assert moved.get("task_ids", moved.get("task_id")) is not None
+
+
+def test_closed_is_a_closing_status_with_its_own_verb():
+    from modules.tools.discovery.owner_only import CLOSING_VERBS, closing_status, is_owner_only
+
+    assert closing_status({"status": "closed"}) == "closed" and CLOSING_VERBS["closed"] == "close"
+    for action in ("platform_update_task_status", "platform_update_task"):
+        assert is_owner_only(action, {"task_ids": [1, 2], "status": "closed"}) is True
+
+
 # ── The rule still holds where the card does not show the words ─────────────────────
 
 def test_a_note_longer_than_the_card_shows_is_still_judged_by_the_rule(board, says):
