@@ -612,7 +612,7 @@ async def stream_chat(
 
 
 @router.get("/history")
-async def get_chat_history(
+def get_chat_history(
     limit: int = 20,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -691,7 +691,7 @@ def _session_doc_from_request(body: ChatSessionRequest) -> Dict[str, Any]:
 
 
 @router.get("/session")
-async def get_chat_session(
+def get_chat_session(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -706,7 +706,7 @@ async def get_chat_session(
 
 
 @router.put("/session", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def put_chat_session(
+def put_chat_session(
     body: ChatSessionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -725,7 +725,7 @@ async def put_chat_session(
 
 
 @router.get("/search")
-async def search_chat_history(
+def search_chat_history(
     q: str,
     limit: int = 20,
     days: int = 30,
@@ -787,7 +787,7 @@ async def search_chat_history(
 # and both endpoints were dead (the exact PRD-220 /search failure mode).
 # Locked by route-order regression tests.
 @router.patch("/vote", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def vote_message(
+def vote_message(
     request: VoteRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -840,7 +840,7 @@ async def vote_message(
 
 # PRD: Unified Agent-Chat System - Agent Endpoints
 @router.get("/agents")
-async def get_available_agents(
+def get_available_agents(
     status: str = "active",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -909,7 +909,7 @@ async def get_chat(
 
 
 @router.get("/{chat_id}/messages")
-async def get_chat_messages(
+def get_chat_messages(
     chat_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -945,7 +945,7 @@ async def get_chat_messages(
 
 
 @router.delete("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def delete_chat(
+def delete_chat(
     chat_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
@@ -966,7 +966,7 @@ async def delete_chat(
 
 
 @router.patch("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def update_chat(
+def update_chat(
     chat_id: str,
     request: UpdateTitleRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -988,7 +988,7 @@ async def update_chat(
 
 
 @router.post("/{chat_id}/switch-agent", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def switch_agent(
+def switch_agent(
     chat_id: str,
     request: SwitchAgentRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
