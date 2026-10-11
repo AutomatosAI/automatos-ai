@@ -447,6 +447,23 @@ def test_voice_retell_is_no_longer_than_its_base():
     assert lines <= VOICE_RETELL_BASE_LINES, f"voice_retell.py grew to {lines} lines (D6)"
 
 
+def test_the_moved_live_path_never_imports_the_pod_voice_client():
+    """The PRD-207 §6 guard (test_prd207_voice_live.py) follows the code that left
+    voice_retell.py: the moved live-path modules never import modules/voice/client."""
+    import re
+
+    pattern = re.compile(
+        r"from\s+modules\.voice\.client\s+import|from\s+modules\.voice\s+import\s+([\w,\s]*\b)?client\b"
+        r"|import\s+modules\.voice\.client\b"
+    )
+    moved = ("live_socket.py", "call_events.py", "caller.py", "turn_timing.py")
+    offenders = [
+        name for name in moved
+        if pattern.search((_orchestrator_root / "modules" / "voice" / name).read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
 def test_the_helpers_left_the_route_file():
     source = (_orchestrator_root / "api" / "voice_retell.py").read_text(encoding="utf-8")
     for name in ("_apply_call_event", "_named_call_agent", "_resolve_caller_int_id"):

@@ -1432,10 +1432,6 @@ def test_live_path_never_imports_pod_voice_client():
         "modules/voice/call_binding.py",
         "modules/voice/live_settings.py",
         "modules/voice/voice_meter.py",
-        "modules/voice/live_socket.py",
-        "modules/voice/call_events.py",
-        "modules/voice/caller.py",
-        "modules/voice/turn_timing.py",
     )
     pattern = re.compile(
         r"from\s+modules\.voice\.client\s+import|from\s+modules\.voice\s+import\s+([\w,\s]*\b)?client\b|import\s+modules\.voice\.client\b"
