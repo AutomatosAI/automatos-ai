@@ -37,15 +37,18 @@ BLACK: RGB = (0, 0, 0)
 
 # A custom property or rule whose name says what the colour is for.
 BRAND_WORDS = re.compile(r"brand|primary|secondary|accent|main|highlight|cta|button|btn|link|theme", re.I)
-_RULE = re.compile(r"([^{}@;]+)\{([^{}]*)\}")
-_DECLARATION = re.compile(r"([\w-]+)\s*:\s*([^;]+)")
-_CUSTOM_PROPERTY = re.compile(r"(--[\w-]+)\s*:\s*([^;{}]+)")
-_VAR = re.compile(r"var\(\s*(--[\w-]+)\s*(?:,\s*([^)]+))?\)")
+# The stylesheets are the page's own choice, so nothing here scans them with a pattern that can look ahead
+# without bound: rules, declarations, comments and dark blocks are split in one pass (css_rules, declarations,
+# without_dark_and_comments), and each pattern below runs only on a short, capped value.
+MAX_SELECTOR_CHARS = 500
+MAX_VALUE_CHARS = 2000
+MAX_PRELUDE_CHARS = 300
+_PROPERTY_NAME = re.compile(r"-{0,2}[A-Za-z][\w-]{0,99}")
+_VAR = re.compile(r"var\(\s*(--[\w-]{1,100})\s*(?:,\s*([^)]{0,200}))?\)")
 _HEX_COLOUR = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b")
-_FUNC_COLOUR = re.compile(r"\b(rgba?|hsla?)\(\s*([^)]*)\)", re.I)
+_FUNC_COLOUR = re.compile(r"\b(rgba?|hsla?)\(\s*([^)]{0,80})\)", re.I)
 # A size, a weight, a var() or a number: what a font-ish custom property holds when it is no family.
 _NOT_A_FAMILY = re.compile(r"^[\d.]|\d(?:px|rem|em|%)\b|^var\(|^(?:normal|bold|bolder|lighter|italic)$", re.I)
-_FONT_FACE = re.compile(r"@font-face\s*\{([^{}]*)\}", re.I)
 _GENERIC_FAMILIES = frozenset({"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-sans-serif",
                                "ui-serif", "ui-monospace", "inherit", "initial", "unset", "-apple-system",
                                "blinkmacsystemfont", "emoji", "math"})
@@ -59,11 +62,10 @@ _ROLES: Tuple[Tuple[str, re.Pattern[str]], ...] = (
     ("body", re.compile(r"(?:^|[\s,])(?:body|html|:root)\b", re.I)),
 )
 _LOGO_WORD = re.compile(r"logo", re.I)
-_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 # A dark theme's override (`.dark`, `[data-theme=dark]`, a prefers-color-scheme: dark block) is not the brand's
 # own colour: the site's light default is.
 _DARK_SELECTOR = re.compile(r"\.(?:theme-)?dark\b|\[data-[\w-]*=[\"']?dark\b", re.I)
-_DARK_MEDIA = re.compile(r"@media[^{]*prefers-color-scheme\s*:\s*dark[^{]*\{", re.I)
+_DARK_PRELUDE = re.compile(r"prefers-color-scheme\s*:\s*dark", re.I)
 _SOCIAL_HOSTS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
     ("linkedin", re.compile(r"(?:^|\.)linkedin\.com$")),
     ("twitter", re.compile(r"(?:^|\.)(?:twitter|x)\.com$")),
@@ -125,6 +127,7 @@ def _hex_colour(token: str) -> Optional[RGB]:
 
 def colours_in(value: str) -> List[RGB]:
     """Every readable colour in a CSS value, in order."""
+    value = value[:MAX_VALUE_CHARS]
     found: List[Tuple[int, RGB]] = []
     for match in _HEX_COLOUR.finditer(value):
         rgb = _hex_colour(match.group(0))
@@ -142,33 +145,84 @@ def is_neutral(rgb: RGB) -> bool:
     return max(rgb) - min(rgb) < NEUTRAL_CHROMA
 
 
-def without_dark_and_comments(css: str) -> str:
-    """``css`` with its comments and its ``prefers-color-scheme: dark`` blocks left out (braces balanced)."""
-    css = _COMMENT.sub("", css)
+def _without_comments(css: str) -> str:
     kept: List[str] = []
     position = 0
-    for match in _DARK_MEDIA.finditer(css):
-        if match.start() < position:
-            continue  # inside a block already skipped
-        kept.append(css[position:match.start()])
-        depth, index = 1, match.end()
-        while index < len(css) and depth:
-            depth += {"{": 1, "}": -1}.get(css[index], 0)
-            index += 1
-        position = index
-    kept.append(css[position:])
-    return "".join(kept)
+    while True:
+        start = css.find("/*", position)
+        if start < 0:
+            kept.append(css[position:])
+            return "".join(kept)
+        kept.append(css[position:start])
+        end = css.find("*/", start + 2)
+        if end < 0:
+            return "".join(kept)  # an unclosed comment runs to the end
+        position = end + 2
+
+
+def _block_end(css: str, opening: int) -> int:
+    """The index just past the brace that closes the block opened at ``opening`` (or the end)."""
+    depth, index = 0, opening
+    while index < len(css):
+        depth += {"{": 1, "}": -1}.get(css[index], 0)
+        index += 1
+        if depth == 0:
+            return index
+    return index
+
+
+def without_dark_and_comments(css: str) -> str:
+    """``css`` with its comments and its ``prefers-color-scheme: dark`` blocks left out, in one pass."""
+    css = _without_comments(css)
+    kept: List[str] = []
+    position = 0
+    while True:
+        at = css.find("@media", position)
+        brace = css.find("{", at) if at >= 0 else -1
+        if brace < 0:
+            kept.append(css[position:])
+            return "".join(kept)
+        if _DARK_PRELUDE.search(css[at:brace][:MAX_PRELUDE_CHARS]):
+            kept.append(css[position:at])
+            position = _block_end(css, brace)
+        else:
+            kept.append(css[position:brace + 1])
+            position = brace + 1
+
+
+def css_rules(css: str) -> List[Tuple[str, str]]:
+    """(selector, body) for every innermost rule, in order, in one pass: the text before each ``}`` back to
+    its ``{`` is the body, and the selector runs back from there to the previous brace or ``;``."""
+    rules: List[Tuple[str, str]] = []
+    for chunk in css.split("}"):
+        head, brace, body = chunk.rpartition("{")
+        if brace:
+            selector = head.rsplit("{", 1)[-1].rsplit(";", 1)[-1].strip()
+            rules.append((selector[:MAX_SELECTOR_CHARS], body))
+    return rules
+
+
+def declarations(body: str) -> List[Tuple[str, str]]:
+    """(property, value) for each ``property: value`` in a rule's body; anything else is left out."""
+    found: List[Tuple[str, str]] = []
+    for part in body.split(";"):
+        name, colon, value = part.partition(":")
+        name = name.strip()
+        if colon and _PROPERTY_NAME.fullmatch(name):
+            found.append((name, value.strip()[:MAX_VALUE_CHARS]))
+    return found
 
 
 def custom_properties(css: str) -> Dict[str, str]:
     """``--name: value`` declarations outside a dark theme, the FIRST one winning: a site declares its default
     first and overrides it later (a breakpoint, a theme), and the default is the brand."""
     props: Dict[str, str] = {}
-    for selector, body in _RULE.findall(css):
+    for selector, body in css_rules(css):
         if _DARK_SELECTOR.search(selector):
             continue
-        for name, value in _CUSTOM_PROPERTY.findall(body):
-            props.setdefault(name, value.strip())
+        for name, value in declarations(body):
+            if name.startswith("--"):
+                props.setdefault(name, value)
     return props
 
 
@@ -206,11 +260,11 @@ def _rule_role(selector: str) -> Optional[str]:
 
 
 def _tally_rules(tally: _ColourTally, css: str, props: Mapping[str, str]) -> None:
-    for selector, body in _RULE.findall(css):
+    for selector, body in css_rules(css):
         if _DARK_SELECTOR.search(selector):
             continue
         role = _rule_role(selector)
-        for prop, value in _DECLARATION.findall(body):
+        for prop, value in declarations(body):
             if prop.lower() not in _COLOUR_PROPERTIES or prop.startswith("--"):
                 continue
             label = f"{role}: {prop.lower()}" if role else None
@@ -268,9 +322,9 @@ def google_font_families(hrefs: Iterable[str]) -> List[str]:
 def _font_rules(css: str, props: Mapping[str, str]) -> List[Tuple[str, str]]:
     """(source, family) for every font-family a styled role uses, in the stylesheet's order."""
     found: List[Tuple[str, str]] = []
-    for selector, body in _RULE.findall(css):
+    for selector, body in css_rules(css):
         role = _rule_role(selector) or ("CSS variable" if "--" in body else None)
-        for prop, value in _DECLARATION.findall(body):
+        for prop, value in declarations(body):
             # the `font` shorthand mixes sizes into the list, so only font-family and --*font* properties count
             is_family = prop.lower() == "font-family" or (prop.startswith("--") and "font" in prop.lower())
             if not is_family or role is None:
@@ -292,8 +346,8 @@ def site_fonts(css: str, google_hrefs: Iterable[str]) -> List[Dict[str, Any]]:
 
     for source, family in _font_rules(css, props):
         add(family, source)
-    for block in _FONT_FACE.findall(css):
-        for prop, value in _DECLARATION.findall(block):
+    for block in (body for selector, body in css_rules(css) if selector.lower().startswith("@font-face")):
+        for prop, value in declarations(block):
             if prop.lower() == "font-family":
                 for family in _families(value)[:1]:
                     add(family, "@font-face (the site serves this font)")
@@ -428,6 +482,12 @@ def stylesheet_links(soup: BeautifulSoup, base_url: str) -> Tuple[List[str], Lis
     return sheets, google
 
 
+def stylesheet_urls(html: str, base_url: str) -> List[str]:
+    """The stylesheets a page links, to read for :func:`site_brand` (Google Fonts links are read, not fetched)."""
+    sheets, _ = stylesheet_links(BeautifulSoup(html, "html.parser"), base_url)
+    return sheets
+
+
 def _theme_colours(soup: BeautifulSoup) -> List[Tuple[str, str]]:
     keys = ("theme-color", "msapplication-TileColor")
     return [(f'<meta name="{k}">', _meta(soup, k)) for k in keys if _meta(soup, k)]
@@ -469,5 +529,6 @@ def site_brand(html: str, base_url: str, stylesheets: Mapping[str, str], skipped
     }
 
 
-__all__ = ["colours_in", "custom_properties", "google_font_families", "is_neutral", "resolve_vars",
-           "site_brand", "site_colours", "site_fonts", "stylesheet_links"]
+__all__ = ["colours_in", "css_rules", "custom_properties", "declarations", "google_font_families", "is_neutral",
+           "resolve_vars", "site_brand", "site_colours", "site_fonts", "stylesheet_links", "stylesheet_urls",
+           "without_dark_and_comments"]

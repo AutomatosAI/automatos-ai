@@ -190,6 +190,19 @@ def test_a_commented_out_rule_is_not_read():
     assert "#ff0000" not in colours and "buttons: background" in colours["#c26a2e"]
 
 
+def test_hostile_css_is_read_in_one_pass():
+    """The stylesheets are the page's choice: text built to make a scanning pattern look ahead from every
+    position (no braces, no colons, unclosed comments and functions) is read in linear time."""
+    import time
+
+    hostile = ("a" * 200_000 + "/*" * 40_000 + "@media screen and " * 10_000 + "rgb(" * 20_000
+               + "var(--x" * 20_000 + "--y:" * 20_000 + "{" * 5_000)
+    started = time.monotonic()
+    brand = site_brand("<html><body></body></html>", SITE, {SITE + "/hostile.css": hostile})
+    assert time.monotonic() - started < 5.0
+    assert brand["colours"] == []
+
+
 # ── the fetch ──────────────────────────────────────────────────────────────────────────────────
 
 def _fake_getaddrinfo(host, port, proto=None):
@@ -274,6 +287,18 @@ async def test_a_slow_stylesheet_is_cut_off_at_the_deadline(monkeypatch, web_on)
     assert brand["stylesheets_read"] == []
     assert any("not read" in note for note in brand["notes"])
     assert brand["colours"][0]["hex"] == "#1e3a5f"  # the page's own colours still count
+
+
+@pytest.mark.asyncio
+async def test_a_compressed_body_is_refused_and_identity_is_asked_for(monkeypatch, web_on):
+    """Bytes are counted as sent: a compressed body could inflate far past the cap in one chunk."""
+    import gzip
+
+    sent = _stub_http(monkeypatch, lambda req: httpx.Response(
+        200, headers={"content-type": "text/html", "content-encoding": "gzip"}, content=gzip.compress(PAGE.encode())))
+    out = await hw.web_fetch(MagicMock(), WS, {"url": SITE + "/", "brand": True})
+    assert out["success"] is False and "compressed body (gzip)" in out["error"]
+    assert sent[0].headers["accept-encoding"] == "identity"
 
 
 @pytest.mark.asyncio

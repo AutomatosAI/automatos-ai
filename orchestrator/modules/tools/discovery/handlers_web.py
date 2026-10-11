@@ -45,6 +45,9 @@ MAX_REDIRECTS = 5
 _HTML_TYPES = ("text/html", "application/xhtml+xml")
 _PAGE_ACCEPT = "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5"
 _CSS_ACCEPT = "text/css,*/*;q=0.1"
+# Bytes are counted as sent, before anything is kept: a compressed body can decode to far more than the cap in
+# one chunk, so only an unencoded one is read (the rule documents' fetches keep, modules/documents/pinned_fetch).
+_IDENTITY_ENCODINGS = ("", "identity")
 # brand: true reads at most this many of the page's stylesheets, in parallel. They are the page's own choice of
 # address (often a CDN, so not limited to the page's site), so the fan-out is bounded three ways: how many,
 # how big each one may be, and how long the whole read may take; a sheet not in by then is named as not read.
@@ -157,6 +160,7 @@ async def _send_checked(client: httpx.AsyncClient, url: str, target: OutboundTar
 async def _read_capped(resp: httpx.Response, max_bytes: int) -> Tuple[bytes, bool]:
     chunks: List[bytes] = []
     received = 0
+    # aiter_bytes yields the bytes as sent: _get_text refuses any content-encoding before reading.
     async for chunk in resp.aiter_bytes():
         received += len(chunk)
         if received > max_bytes:
@@ -175,7 +179,8 @@ async def _get_text(url: str, accept: str, max_bytes: int) -> _Page:
     timeout = httpx.Timeout(float(config.WEB_FETCH_TIMEOUT_SECONDS))
     try:
         async with _async_client(follow_redirects=False, verify=True, timeout=timeout,
-                                 headers={"User-Agent": _USER_AGENT, "Accept": accept}) as client:
+                                 headers={"User-Agent": _USER_AGENT, "Accept": accept,
+                                          "Accept-Encoding": "identity"}) as client:
             resp, final_url, hops = await _send_checked(client, url, target)
             content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
             if content_type and not content_type.startswith(_TEXT_CONTENT_TYPES):
@@ -183,6 +188,15 @@ async def _get_text(url: str, accept: str, max_bytes: int) -> _Page:
                 raise _FetchFailed({
                     "success": False,
                     "error": f"Unsupported content type '{content_type}' — web_fetch reads text, HTML, JSON and XML pages.",
+                    "url": final_url,
+                })
+            encoding_sent = (resp.headers.get("content-encoding") or "").strip().lower()
+            if encoding_sent not in _IDENTITY_ENCODINGS:
+                await resp.aclose()
+                raise _FetchFailed({
+                    "success": False,
+                    "error": f"The server sent a compressed body ({encoding_sent}) after being asked for none; "
+                             "web_fetch reads uncompressed pages only.",
                     "url": final_url,
                 })
             raw, truncated = await _read_capped(resp, max_bytes)
@@ -212,15 +226,14 @@ async def _stylesheet(url: str) -> Tuple[str, Optional[str]]:
 
 async def _site_brand(page: _Page) -> Dict[str, Any]:
     """The page's brand evidence (``site_brand``), with up to BRAND_MAX_STYLESHEETS of its stylesheets read."""
-    from bs4 import BeautifulSoup
+    from modules.tools.discovery.site_brand import site_brand, stylesheet_urls
 
-    from modules.tools.discovery.site_brand import site_brand, stylesheet_links
-
-    sheets, _ = stylesheet_links(BeautifulSoup(page.body, "html.parser"), page.final_url)
+    # Parsing is CPU work on the page's own bytes: it runs in a thread, never on the event loop.
+    sheets = await asyncio.to_thread(stylesheet_urls, page.body, page.final_url)
     read = await _stylesheets_within_deadline(sheets[:BRAND_MAX_STYLESHEETS])
     css = {url: read[url] for url in sheets if read.get(url) is not None}
     skipped = [url for url in sheets if read.get(url) is None]
-    return site_brand(page.body, page.final_url, css, skipped)
+    return await asyncio.to_thread(site_brand, page.body, page.final_url, css, skipped)
 
 
 async def _stylesheets_within_deadline(urls: List[str]) -> Dict[str, Optional[str]]:
@@ -253,7 +266,7 @@ async def web_fetch(
     except _FetchFailed as failed:
         return failed.result
 
-    title, text = html_to_text(page.body) if page.is_html else ("", page.body)
+    title, text = await asyncio.to_thread(html_to_text, page.body) if page.is_html else ("", page.body)
     truncated = page.truncated or len(text) > max_chars
     text = text[:max_chars]
     data: Dict[str, Any] = {

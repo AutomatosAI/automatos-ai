@@ -13,8 +13,12 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_web_actions(registry: ActionRegistry) -> None:
     """Register platform_web_fetch + platform_web_search (PRD-240 S2/S3)."""
+    registry.register(_web_fetch_definition())
+    registry.register(_web_search_definition())
 
-    registry.register(ActionDefinition(
+
+def _web_fetch_definition() -> ActionDefinition:
+    return ActionDefinition(
         name="platform_web_fetch",
         description=(
             "Read a public web page or document by URL and get its text back "
@@ -61,9 +65,11 @@ def register_web_actions(registry: ActionRegistry) -> None:
             "open the page the search found and summarise it",
             "read the brand colours, fonts and logo from https://example.com",
         ],
-    ))
+    )
 
-    registry.register(ActionDefinition(
+
+def _web_search_definition() -> ActionDefinition:
+    return ActionDefinition(
         name="platform_web_search",
         description=(
             "Search the web for pages about a topic and get back "
@@ -96,4 +102,4 @@ def register_web_actions(registry: ActionRegistry) -> None:
             "research the current state of EU AI Act enforcement",
             "find the latest release notes for fastapi",
         ],
-    ))
+    )
