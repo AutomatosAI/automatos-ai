@@ -1,0 +1,4 @@
+# PRD-258 US-004 (D4): the owner's ask set and results live outside the
+# repo, never here. If a copy lands in this folder, git ignores it.
+results.md
+asks*.json
