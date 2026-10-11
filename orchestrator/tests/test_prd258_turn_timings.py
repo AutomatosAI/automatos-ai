@@ -300,7 +300,8 @@ def test_a_stubbed_turn_writes_its_timings(monkeypatch):
     assert row["audio_delivered"] is True
     assert row["workspace_id"] == _WS_ID and row["conversation_id"] == _CHAT_ID
     assert row["call_id"] == "call_timed"
-    assert row["total_ms"] >= timing["first_auto_frame_ms"]
+    # total_ms is rounded only when the row is written; compare like with like
+    assert int(round(row["total_ms"])) >= timing["first_auto_frame_ms"]
     # lengths-only: the reply's text never reaches telemetry, only its length
     assert set(row["response_text"]) == {"x"}
     assert len(row["response_text"]) == len("The board is clear. ") + len("Nothing is blocked.")

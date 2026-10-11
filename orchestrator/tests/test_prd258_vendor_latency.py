@@ -130,7 +130,11 @@ def webhook(monkeypatch):
     from modules.voice import retell_api
     from modules.voice.live_settings import RetellCredentials
 
-    row = SimpleNamespace(call_id=_CALL_ID, status="ended", vendor_latency=None)
+    row = SimpleNamespace(
+        call_id=_CALL_ID, status="ended", vendor_latency=None,
+        # call_ended folds the lifecycle columns too (_apply_ended reads them)
+        started_at=None, ended_at=None, duration_seconds=None, disconnect_reason=None,
+    )
     env = SimpleNamespace(row=row, requests=[], get_call=None, vr=vr)
 
     monkeypatch.setattr(
