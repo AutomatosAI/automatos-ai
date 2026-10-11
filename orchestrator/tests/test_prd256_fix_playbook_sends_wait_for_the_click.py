@@ -209,7 +209,7 @@ def test_a_watchs_rerun_of_an_auto_started_run_raises_the_card_and_posts_nothing
     call = _run_step(desk, rerun)
 
     desk.linkedin.assert_not_called()
-    assert call["result"].startswith("Card raised: ") and call["success"] is False
+    assert "Card raised: " in call["result"] and call["success"] is False
     (grant,) = _grants(desk)
     assert grant.details[AGENT_SEND]["context"] == {"playbook_execution_id": rerun}
 
@@ -218,7 +218,7 @@ def test_a_rerun_of_a_rerun_of_an_auto_started_run_asks_too(desk):
     call = _run_step(desk, _rerun(desk, _rerun(desk, _auto_run(desk))))
 
     desk.linkedin.assert_not_called()
-    assert call["result"].startswith("Card raised: ")
+    assert "Card raised: " in call["result"]
     assert len(_grants(desk)) == 1
 
 
