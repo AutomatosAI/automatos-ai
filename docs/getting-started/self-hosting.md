@@ -191,6 +191,9 @@ docker builder prune -f
 docker compose ps
 docker system df
 
+# make logs: follow the logs; make logs s=backend for one service ($(s) is that name, or nothing for all)
+docker compose logs -f --tail=200 $(s)
+
 # make reset: DESTRUCTIVE, deletes the database and every named volume.
 # make asks you to type 'reset' first; this command does not ask.
 docker compose down -v --remove-orphans
