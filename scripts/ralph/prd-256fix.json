@@ -973,6 +973,65 @@
       "priority": 64,
       "passes": false,
       "notes": "Filed by TESTER 9 Oct from the benchmark (ledger F399)."
+    },
+    {
+      "id": "P256-FIX-T3",
+      "title": "HIGH · Gerard 11 Oct: sending a card back to its agent waits for the owner's click",
+      "description": "Decision (Gerard, 11 Oct, after the four-model benchmark): a send-back — a card the agent has worked on (status review or done) moved back to assigned / in_progress / inbox for rework, from chat ('turn it down', 'redo it', 'send #1219 back') — is owner-only, like approve and cancel. Today owner_only.is_owner_only (modules/tools/discovery/owner_only.py:118-134) makes a CARD_MOVES call owner-only only when closing_status() (:170-176) reads done/cancelled/closed, so platform_update_task_status {status: 'assigned'} on a Review card runs at once (eval N5-a on Haiku 5.5: 'I've sent #1219 back … It's now in Assigned', no card). Giving a NEW inbox card to an agent (inbox → assigned, the hand-off lane) stays free.",
+      "acceptanceCriteria": [
+        "is_owner_only reads a card move as owner-only when it closes the card (as today) OR when it sends back a worked card: the card's current status is review or done (read from the board, workspace-scoped) and the new status is one of assigned, in_progress, inbox. The rule lives beside closing_status (one helper, e.g. sends_back(card_status, new_status)), not a second list.",
+        "The card raised for a send-back says what it does: 'send #1219 back to <agent> with your note: …' (the FX-008 card text rules), and the click runs the move once; the receipt is 'waiting' until then.",
+        "orchestrator/tests/test_prd256_fix_send_back_waits_for_the_click.py: a Review card + update_task_status assigned from chat → one grant, the card stays in Review; the click moves it to Assigned with the note; an inbox card + update_task_status assigned → no grant, moved at once; a Done card reopened to in_progress → grant.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 65,
+      "passes": false,
+      "notes": "Gerard's decision 11 Oct (benchmark N5-a)."
+    },
+    {
+      "id": "P256-FIX-T4",
+      "title": "HIGH · Gerard 11 Oct: running a playbook from chat waits for the owner's click",
+      "description": "Decision (Gerard, 11 Oct): platform_execute_playbook (modules/tools/discovery/actions_playbook_runs.py:186-190) from the owner's chat raises the grant card first, like a playbook made, timed or deleted (owner_only.OWNER_ONLY_ACTIONS :42-58 lists create/schedule/update-timer/delete but not execute). Benchmark F321-a, Sonnet 5.5: 'Set the Weekly Green Coffee Stock Check to run every Monday, and run it once now' → the timer waited on a card but platform_execute_playbook succeeded at once (card #1280, GREEN BUYER started). Runs started by the playbook's own timer, a watch's rerun of a person-started run, and the owner's own Run button are unchanged.",
+      "acceptanceCriteria": [
+        "platform_execute_playbook joins OWNER_ONLY_ACTIONS for calls from the owner's chat (Auto); the card names the playbook (#id and name) and its inputs; the click starts exactly one run and its result (execution id, first card) reaches the next turn (FX-009's click-result path).",
+        "A scheduled fire, the Run button (api route, not the chat tool), and a watch rerun of a run a person started do not ask (P256-FIX-RVW-39's rule for runs Auto started still asks).",
+        "orchestrator/tests/test_prd256_fix_playbook_run_waits_for_the_click.py: Auto's platform_execute_playbook → one grant, no RecipeExecution row until the click; the click → one run; the Run-button route → runs at once; 'set a timer and run it now' → two cards (timer, run), nothing runs before the clicks.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 66,
+      "passes": false,
+      "notes": "Gerard's decision 11 Oct (benchmark F321-a)."
+    },
+    {
+      "id": "P256-FIX-T5",
+      "title": "HIGH · F314: 'draft it here' is answered in chat, not filed as a ticket",
+      "description": "Benchmark 11 Oct (eval F314-a, failed on Haiku 5.5, Sonnet 5.5 and Opus 5.5; only Fable 5.1 passed): 'Draft the intro for this fortnight's Harbour Log newsletter, about the October box. Just the draft here, please.' → platform_create_task + assign to HARBOUR LOG ('I've given this to HARBOUR LOG as card #1312'). PRD-256 US-010 / thesis D: Auto answers unless an agent is named or the work is long; 'here', 'in the chat', 'just the draft', 'reply with' ask for the text in the reply. The lane (consumers/chatbot/handoffs.py lane_for and the Tier-3 rubric in consumers/chatbot/auto.py) and the delegate default still send short writing to an agent.",
+      "acceptanceCriteria": [
+        "An owner turn that asks for writing to come back in the chat ('here', 'in the chat', 'just the draft', 'reply with it', 'paste it', 'show me') with no agent named is answered by Auto in the reply: the lane is RESPOND/answer, no platform_create_task / assign, no ticket; one rule in the hand-off lane (no new keyword family), read before the delegate default.",
+        "Naming an agent ('have HARBOUR LOG draft it') or long work (a document, a campaign, several pieces) still files the ticket as today; 'draft it and put it on a card' files it.",
+        "orchestrator/tests/test_prd256_fix_draft_here_answers_in_chat.py: the F314-a ask → no create_task, the reply holds the draft; 'Have HARBOUR LOG draft the intro' → one ticket to HARBOUR LOG; 'Draft the intro and put it on the board' → one ticket.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 67,
+      "passes": false,
+      "notes": "Filed by TESTER 11 Oct from the four-model benchmark (ledger F314 row / eval F314-a)."
+    },
+    {
+      "id": "P256-FIX-T6",
+      "title": "MEDIUM · F401: a playbook step waiting on the owner's click reads as waiting, not an error",
+      "description": "api/recipe_executor.py:795-800 wraps every unsuccessful Composio spine step as f\"Error executing {tool_name}: {error}\", so a step whose send correctly raised the grant card records 'Error executing LINKEDIN_CREATE_LINKED_IN_POST: Card raised: send …' and the run shows a failed step. Nothing is posted and the grant is right (RVW-2/RVW-39 tests). Same shape FX-004 fixed for chat. recipe_executor.py is 2,528 lines: do not grow it — the waiting branch goes in a helper module (e.g. api/recipe_step_outcome.py) and the call site stays the same line count.",
+      "acceptanceCriteria": [
+        "A spine result whose error starts with the card-raised text (modules/tools/execution/card_raised.CARD_RAISED / agent_sends.CARD_RAISED prefix) is recorded as the card text itself with a 'waiting' step state, not 'Error executing …', and the run reads as waiting on the owner (not failed); a real failure keeps 'Error executing …'.",
+        "orchestrator/tests/test_prd256_fix_playbook_sends_wait_for_the_click.py: the step result of an Auto-started run's LinkedIn post starts with 'Card raised: ' (the file's assertions tightened back to startswith) and the step state is waiting; a refused call keeps 'Error executing'.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 68,
+      "passes": false,
+      "notes": "Filed by TESTER 11 Oct (ledger F401)."
     }
   ]
 }
