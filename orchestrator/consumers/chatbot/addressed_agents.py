@@ -37,7 +37,8 @@ import re
 from typing import Any, Optional, Sequence
 
 # "agent 267", "267, the operations one", "267 — the shop floor one", "267 (ops)".
-ID_REPLY = re.compile(r"^\s*(?P<agent>agent\s+)?(?P<id>\d{1,9})\s*(?:[.!]?\s*$|[,:;(\-–—]\s*(?P<rest>.*)$)", re.IGNORECASE)
+# One whitespace run between the id and the end (no \s*[.!]?\s* overlap: CodeQL #283, polynomial on spaces).
+ID_REPLY = re.compile(r"^\s*(?P<agent>agent\s+)?(?P<id>\d{1,9})\s*(?:(?:[.!]\s*)?$|[,:;(\-–—]\s*(?P<rest>.*)$)", re.IGNORECASE)
 # The answer to "which one?" is short: a longer message that opens with a number is about something else.
 MAX_REPLY_WORDS = 8
 MIN_WORD_CHARS = 3

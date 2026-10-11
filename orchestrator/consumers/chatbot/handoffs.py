@@ -467,7 +467,8 @@ CARD_SIGN = "#"
 # purpose, a reason or a courtesy starts ("to Jim to handle by Friday, please" is Jim).
 SENTENCE_END = re.compile(r"[.?!,;\n]")
 LEADING_ARTICLE = re.compile(r"^(?:the|my|our)\s+", re.IGNORECASE)
-RECEIVER_END = re.compile(r"\s+(?:to|for|by|so|and|because|please|now|thanks|today|asap)\b.*$", re.IGNORECASE)
+# Starts only at the first space of a run (CodeQL #284: re.sub retried \s+ at every space of a long run).
+RECEIVER_END = re.compile(r"(?<!\s)\s+(?:to|for|by|so|and|because|please|now|thanks|today|asap)\b.*$", re.IGNORECASE)
 NOT_A_RECEIVER = frozenset({"him", "her", "them", "you", "myself", "yourself", "review", "done"})
 
 
