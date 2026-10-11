@@ -7,7 +7,8 @@
  * post with unsourced claims goes through Approve.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const state = vi.hoisted(() => ({ role: 'owner' }))
 
@@ -37,7 +38,7 @@ import { apiClient } from '@/lib/api-client'
 import { SocialsQueue } from '@/components/deliverables/socials/studio/socials-queue'
 import { ADD_A_CHANNEL } from '@/components/deliverables/socials/socials-post-review'
 import { DELETE_CONFIRM } from '@/components/deliverables/socials/studio/delete-post-button'
-import { POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
+import { ApproveAndPostNow, POST_NOW_LABEL } from '@/components/deliverables/socials/socials-approve-post-now'
 import { renderWith } from './socials-editor-harness'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
@@ -58,6 +59,9 @@ function renderQueue(post: any) {
 }
 
 const pane = () => screen.getByRole('region', { name: 'Post to approve' })
+const withClient = (client: QueryClient, ui: React.ReactElement) => (
+  <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+)
 
 beforeEach(() => {
   state.role = 'owner'
@@ -109,6 +113,33 @@ describe('Approve & post now', () => {
     await waitFor(() => expect(api.publishSocialPostNow).toHaveBeenCalledWith('a'))
     expect(api.approveSocialPost).toHaveBeenCalledWith('a', 'hash-a')
     expect(api.approveSocialPost.mock.invocationCallOrder[0]).toBeLessThan(api.publishSocialPostNow.mock.invocationCallOrder[0])
+  })
+
+  // 11 Oct 2026: the confirmation was open on post A when A was approved; A left the queue,
+  // the pane fell back to the next post (B, no channels) with the confirmation still open,
+  // and Post now approved B and asked to publish it (409). A was never published.
+  it('a confirmation left open never moves to the next post', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const queue = (posts: any[]) => withClient(client,
+      <SocialsQueue role="owner" posts={posts} selectedId={null} onSelect={vi.fn()} onEdit={edit} />)
+    const view = render(queue([waiting('a')]))
+    fireEvent.click(within(pane()).getByRole('button', { name: POST_NOW_LABEL }))
+    expect(within(pane()).getByRole('alertdialog', { name: POST_NOW_LABEL })).toHaveTextContent('to X?')
+    view.rerender(queue([waiting('b', { targets: [] })]))
+    expect(within(pane()).getByRole('heading', { name: 'Post b' })).toBeInTheDocument()
+    expect(within(pane()).queryByRole('alertdialog', { name: POST_NOW_LABEL })).toBeNull()
+    expect(within(pane()).getByRole('button', { name: POST_NOW_LABEL })).toBeDisabled()
+    expect(api.approveSocialPost).not.toHaveBeenCalled()
+    expect(api.publishSocialPostNow).not.toHaveBeenCalled()
+  })
+
+  it('Post now in an open confirmation waits whenever the button would', () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const post = waiting('a')
+    const view = render(withClient(client, <ApproveAndPostNow post={post} disabled={false} />))
+    fireEvent.click(screen.getByRole('button', { name: POST_NOW_LABEL }))
+    view.rerender(withClient(client, <ApproveAndPostNow post={post} disabled />))
+    expect(screen.getByRole('button', { name: 'Post now' })).toBeDisabled()
   })
 
   it('waits for a channel, and a post with unsourced claims goes through Approve', () => {
