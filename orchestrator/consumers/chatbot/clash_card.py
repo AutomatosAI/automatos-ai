@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional, Sequence
 
-from consumers.chatbot.addressed_agents import ID_REPLY
+from consumers.chatbot.addressed_agents import match_id_reply
 from consumers.chatbot.handoffs import handed_card, handed_to
 
 USER, TEXT = "user", "text"
@@ -36,7 +36,7 @@ def clashed_card(assessment: Any, message: Optional[str], before: Optional[str])
     to OPS", then "267, the operations one" for OPS 267), else None: the answer is no id reply, picked
     nobody, or the earlier message handed no card to that name."""
     name = str(getattr(assessment, "target_agent_name", "") or "").strip()
-    if not name or getattr(assessment, "target_agent_id", None) is None or not ID_REPLY.match(str(message or "")):
+    if not name or getattr(assessment, "target_agent_id", None) is None or not match_id_reply(message):
         return None
     card, who = handed_card(before), handed_to(before)
     if not card or not who:

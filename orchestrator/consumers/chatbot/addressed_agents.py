@@ -34,11 +34,42 @@ where, not what; and an id reply that asks or doubts ("agent 267, what does it d
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
-# "agent 267", "267, the operations one", "267 — the shop floor one", "267 (ops)".
-# One whitespace run between the id and the end (no \s*[.!]?\s* overlap: CodeQL #283, polynomial on spaces).
-ID_REPLY = re.compile(r"^\s*(?P<agent>agent\s+)?(?P<id>\d{1,9})\s*(?:(?:[.!]\s*)?$|[,:;(\-–—]\s*(?P<rest>.*)$)", re.IGNORECASE)
+# "agent 267", "267, the operations one", "267 — the shop floor one", "267 (ops)": the id is read by an
+# anchored head, the rest in code (CodeQL #283: a regex tail was polynomial on runs of spaces).
+ID_REPLY_HEAD = re.compile(r"^\s*(?P<agent>agent\s+)?(?P<id>\d{1,9})", re.IGNORECASE)
+ID_REPLY_ENDS = frozenset({"", ".", "!"})
+ID_REPLY_SEPARATORS = ",:;(-–—"
+
+
+@dataclass(frozen=True)
+class IdReply:
+    """A reply that names a teammate by id: ``agent`` ("agent " when said), ``id`` and ``rest`` (its description)."""
+    agent: Optional[str]
+    id: str
+    rest: Optional[str]
+
+    def group(self, name: str) -> Optional[str]:
+        return getattr(self, name)
+
+
+def match_id_reply(message: Optional[str]) -> Optional[IdReply]:
+    """The id and description of a reply that opens with one ("267", "agent 267.", "267, the ops one"), else
+    None: after the id comes nothing, '.' or '!', or a separator and a one-line description."""
+    said = str(message or "")
+    head = ID_REPLY_HEAD.match(said)
+    if not head:
+        return None
+    tail = said[head.end():]
+    if tail.strip() in ID_REPLY_ENDS:
+        return IdReply(head.group("agent"), head.group("id"), None)
+    opened = tail.lstrip()
+    if opened[:1] not in tuple(ID_REPLY_SEPARATORS):
+        return None
+    rest = opened[1:].lstrip().rstrip("\n")
+    return None if "\n" in rest else IdReply(head.group("agent"), head.group("id"), rest)
 # The answer to "which one?" is short: a longer message that opens with a number is about something else.
 MAX_REPLY_WORDS = 8
 MIN_WORD_CHARS = 3
@@ -170,7 +201,7 @@ def id_reply(message: Optional[str], roster: Sequence[Any]) -> Optional[Any]:
     """The active teammate a short reply names by its id ("267, the operations one"), else None. A reply
     that asks or doubts ("agent 267, what does it do?", "30, the tracker - is it broken?") is None."""
     text = str(message or "")
-    found = ID_REPLY.match(text)
+    found = match_id_reply(text)
     if not found or len(text.split()) > MAX_REPLY_WORDS or _doubts(found.group("rest")):
         return None
     agent = next((agent for agent in roster if str(agent.id) == found.group("id").lstrip("0")), None)
@@ -280,5 +311,5 @@ def clash_directive(agents: Sequence[Any], card: Optional[str] = None) -> str:
     return f"{directive}\n{DISPATCH_CONTRACT_FRAGMENT}\n{BOARD_MOVES_THE_CARD}\n"
 
 
-__all__ = ["ADDRESSED_BY", "CLASH_DIRECTIVE", "ID_REPLY", "MAX_REPLY_WORDS", "addressed_by_name", "clash_directive",
+__all__ = ["ADDRESSED_BY", "CLASH_DIRECTIVE", "IdReply", "match_id_reply", "MAX_REPLY_WORDS", "addressed_by_name", "clash_directive",
            "describes", "id_reply", "joined_with_another", "shared_name"]

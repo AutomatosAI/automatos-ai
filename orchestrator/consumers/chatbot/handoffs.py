@@ -45,7 +45,7 @@ from typing import Any, Awaitable, Callable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from consumers.chatbot.addressed_agents import (
-    ID_REPLY, addressed_by_name, clash_directive, id_reply, joined_with_another, shared_name,
+    addressed_by_name, clash_directive, id_reply, match_id_reply, joined_with_another, shared_name,
 )
 from consumers.chatbot.board_questions import CARD_NUMBER
 
@@ -467,9 +467,27 @@ CARD_SIGN = "#"
 # purpose, a reason or a courtesy starts ("to Jim to handle by Friday, please" is Jim).
 SENTENCE_END = re.compile(r"[.?!,;\n]")
 LEADING_ARTICLE = re.compile(r"^(?:the|my|our)\s+", re.IGNORECASE)
-# Starts only at the first space of a run (CodeQL #284: re.sub retried \s+ at every space of a long run).
-RECEIVER_END = re.compile(r"(?<!\s)\s+(?:to|for|by|so|and|because|please|now|thanks|today|asap)\b.*$", re.IGNORECASE)
+# Read word by word (CodeQL #284: the regex form was polynomial on runs of spaces).
+RECEIVER_STOP_WORDS = frozenset({"to", "for", "by", "so", "and", "because", "please", "now", "thanks", "today", "asap"})
 NOT_A_RECEIVER = frozenset({"him", "her", "them", "you", "myself", "yourself", "review", "done"})
+
+
+def receiver_name(words: str) -> str:
+    """The receiver in "Jim to handle by Friday, please": the words before the first stop word after the
+    first ('OPS to do it' is OPS, 'the OPS team please' is 'the OPS team')."""
+    kept: List[str] = []
+    for index, word in enumerate(words.split()):
+        if index and _leading_token(word) in RECEIVER_STOP_WORDS:
+            break
+        kept.append(word)
+    return " ".join(kept)
+
+
+def _leading_token(word: str) -> str:
+    """The word's leading letters and digits, lower-cased ('to,' and 'to-do' read as 'to')."""
+    lowered = word.lower()
+    end = next((i for i, ch in enumerate(lowered) if not (ch.isalnum() or ch == "_")), len(lowered))
+    return lowered[:end]
 
 
 def agents_named_in(message: Optional[str], agents: Sequence[Any]) -> List[Any]:
@@ -492,7 +510,7 @@ def _handoff(message: Optional[str]) -> Optional[Tuple[str, str]]:
         card = HANDED_CARD.search(hands_on.group("what"))
         if card:
             who = SENTENCE_END.split(said[hands_on.end():], maxsplit=1)[0].strip()
-            who = RECEIVER_END.sub("", LEADING_ARTICLE.sub("", who)).strip()
+            who = receiver_name(LEADING_ARTICLE.sub("", who))
             return CARD_REF.search(card.group(0)).group(0), who
     return None
 
@@ -604,7 +622,7 @@ def _handed_over(brain: Any, message: str) -> Tuple[Optional[Any], str]:
     handoff = _handoff(message)
     if handoff and _on_the_board(brain, handoff[0]):
         return _card_receiver(brain, message, handoff[1], _teammates(brain)), REASONING_CARD
-    if HANDED_CARD.search(message) or not (ADDRESS_VERB.search(message) or ID_REPLY.match(message)):
+    if HANDED_CARD.search(message) or not (ADDRESS_VERB.search(message) or match_id_reply(message)):
         return None, REASONING_NAMED
     roster = _teammates(brain)
     by_id = id_reply(message, roster)
