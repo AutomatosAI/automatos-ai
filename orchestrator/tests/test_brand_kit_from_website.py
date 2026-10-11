@@ -144,6 +144,23 @@ def test_marks_largest_first():
     assert marks[1]["url"] == SITE + "/favicon-32.png"
 
 
+def test_only_google_fonts_own_host_counts_as_a_font_link():
+    """CodeQL: a host that merely ends with the name (or carries it in its credentials) is a stylesheet like
+    any other, and its family= names are never reported as the brand's fonts."""
+    from bs4 import BeautifulSoup
+
+    from modules.tools.discovery.site_brand import google_font_families, stylesheet_links
+
+    html = ('<link rel="stylesheet" href="https://evilfonts.googleapis.com/css2?family=Evil">'
+            '<link rel="stylesheet" href="https://fonts.googleapis.com@evil.example/css2?family=Sneaky">'
+            '<link rel="stylesheet" href="https://FONTS.googleapis.com/css2?family=Inter">')
+    sheets, google = stylesheet_links(BeautifulSoup(html, "html.parser"), SITE)
+    assert google == ["https://FONTS.googleapis.com/css2?family=Inter"]
+    assert sheets == ["https://evilfonts.googleapis.com/css2?family=Evil",
+                      "https://fonts.googleapis.com@evil.example/css2?family=Sneaky"]
+    assert google_font_families([*sheets, *google]) == ["Inter"]
+
+
 def test_names_lines_and_social_profiles():
     brand = _brand()
     assert brand["names"][0] == {"value": "Harbourline", "found_in": "og:site_name"}

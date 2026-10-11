@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 
 from core.brand_palette import RGB, contrast, parse_hex, to_hex
 
+GOOGLE_FONTS_HOST = "fonts.googleapis.com"
 MAX_COLOURS = 12
 MAX_FONTS = 8
 MAX_LOGOS = 5
@@ -304,12 +305,17 @@ def _families(value: str) -> List[str]:
     return [n for n in names if n and n.lower() not in _GENERIC_FAMILIES and not _NOT_A_FAMILY.search(n)]
 
 
+def _is_google_fonts(url: str) -> bool:
+    """Exactly Google Fonts' stylesheet host, never a host that merely ends with its name."""
+    return (urlparse(url).hostname or "").lower() == GOOGLE_FONTS_HOST
+
+
 def google_font_families(hrefs: Iterable[str]) -> List[str]:
     """The families a Google Fonts stylesheet link asks for (``css`` and ``css2`` forms)."""
     found: List[str] = []
     for href in hrefs:
         parsed = urlparse(href)
-        if not parsed.netloc.endswith("fonts.googleapis.com"):
+        if not _is_google_fonts(href):
             continue
         for spec in parse_qs(parsed.query).get("family", []):
             for one in spec.split("|"):
@@ -475,7 +481,7 @@ def stylesheet_links(soup: BeautifulSoup, base_url: str) -> Tuple[List[str], Lis
         if "stylesheet" not in rel and "preload" not in rel:
             continue
         url = urljoin(base_url, link["href"])
-        if urlparse(url).netloc.endswith("fonts.googleapis.com"):
+        if _is_google_fonts(url):
             google.append(url)
         elif "stylesheet" in rel and urlparse(url).scheme in ("http", "https") and url not in sheets:
             sheets.append(url)
