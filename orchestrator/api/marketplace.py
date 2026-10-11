@@ -335,6 +335,63 @@ async def list_items(
 
 
 # ===================================================================
+# GET /api/marketplace/items/pending (Admin only)
+# ===================================================================
+# Declared before /items/{item_id}: routes match in declaration order, so
+# after it "pending" is parsed as an item id and the request is rejected.
+
+@router.get("/items/pending")
+def get_pending_items(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Get all pending marketplace items awaiting approval. Admin only.
+    """
+    assert_admin(ctx)
+    try:
+        # Query agents where owner_type='marketplace' and is_approved=false
+        pending_agents = db.query(Agent).filter(
+            Agent.owner_type == 'marketplace',
+            Agent.is_approved == False
+        ).order_by(desc(Agent.created_at)).all()
+
+        items = []
+        for agent in pending_agents:
+            # Get creator info if available
+            creator_name = None
+            if agent.original_creator_id:
+                creator = db.query(UserModel).filter(UserModel.id == agent.original_creator_id).first()
+                if creator:
+                    creator_name = creator.name or creator.email
+
+            items.append({
+                "id": agent.id,
+                "name": agent.name,
+                "description": agent.description,
+                "type": "agent",
+                "category": agent.marketplace_category or agent.agent_type,
+                "icon": agent.marketplace_icon or "🤖",
+                "creator": creator_name,
+                "created_at": agent.created_at.isoformat() if agent.created_at else None,
+                "version": agent.version
+            })
+
+        logger.info(f"Found {len(items)} pending marketplace items")
+
+        return {
+            "items": items,
+            "total": len(items)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error fetching pending items")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+# ===================================================================
 # GET /api/marketplace/items/:id
 # ===================================================================
 
@@ -920,61 +977,6 @@ async def delete_marketplace_item(
     except Exception as e:
         logger.error("Error deleting marketplace %s %s: %s", type, item_id, e, exc_info=True)
         db.rollback()
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# ===================================================================
-# GET /api/marketplace/items/pending (Admin only)
-# ===================================================================
-
-@router.get("/items/pending")
-async def get_pending_items(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """
-    Get all pending marketplace items awaiting approval. Admin only.
-    """
-    assert_admin(ctx)
-    try:
-        # Query agents where owner_type='marketplace' and is_approved=false
-        pending_agents = db.query(Agent).filter(
-            Agent.owner_type == 'marketplace',
-            Agent.is_approved == False
-        ).order_by(desc(Agent.created_at)).all()
-
-        items = []
-        for agent in pending_agents:
-            # Get creator info if available
-            creator_name = None
-            if agent.original_creator_id:
-                creator = db.query(UserModel).filter(UserModel.id == agent.original_creator_id).first()
-                if creator:
-                    creator_name = creator.full_name or creator.email
-
-            items.append({
-                "id": agent.id,
-                "name": agent.name,
-                "description": agent.description,
-                "type": "agent",
-                "category": agent.marketplace_category or agent.agent_type,
-                "icon": agent.marketplace_icon or "🤖",
-                "creator": creator_name,
-                "created_at": agent.created_at.isoformat() if agent.created_at else None,
-                "version": agent.version
-            })
-
-        logger.info(f"Found {len(items)} pending marketplace items")
-
-        return {
-            "items": items,
-            "total": len(items)
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching pending items: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
