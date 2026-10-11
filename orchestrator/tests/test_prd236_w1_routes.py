@@ -259,7 +259,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # its own endpoint (Azure's resource URL); the guard follows it.
     key_endpoint = (versions / "user_api_keys_base_url.py").read_text()
     assert 'down_revision = "workflows_tags_jsonb"' in key_endpoint
-    assert 'EXPECTED_HEAD = "user_api_keys_base_url"' in guard
+    # 2026-10-09: user_api_keys_provider_workspace_id chains onto it — an organization-level
+    # Anthropic key carries the workspace it bills; the guard follows it.
+    key_workspace = (versions / "user_api_keys_provider_workspace_id.py").read_text()
+    assert 'down_revision = "user_api_keys_base_url"' in key_workspace
+    assert 'EXPECTED_HEAD = "user_api_keys_provider_workspace_id"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

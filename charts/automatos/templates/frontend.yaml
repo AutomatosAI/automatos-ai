@@ -29,6 +29,7 @@ spec:
             # Server-side route handlers (the chat proxy) reach the API in-cluster.
             - name: BACKEND_INTERNAL_URL
               value: {{ printf "http://%s-api:8000" (include "automatos.fullname" .) | quote }}
+            {{- include "automatos.otelEnv" (dict "ctx" . "service" "automatos-web") | nindent 12 }}
           ports:
             - name: http
               containerPort: 3000

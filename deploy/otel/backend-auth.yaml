@@ -1,0 +1,13 @@
+# The Authorization header your backend wants, merged over collector.yaml:
+#   otelcol-contrib --config=collector.yaml --config=backend-auth.yaml
+#
+#   OTLP_BACKEND_AUTHORIZATION  the whole header value, e.g. "Basic <base64 of
+#                               id:token>" (Grafana Cloud) or "Bearer <token>"
+#
+# Kept out of collector.yaml: the collector sends every configured header, so an
+# unset value there would go out as an empty "Authorization:" (review on #1053).
+
+exporters:
+  otlp_http/backend:
+    headers:
+      Authorization: ${env:OTLP_BACKEND_AUTHORIZATION}

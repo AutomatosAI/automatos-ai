@@ -162,6 +162,11 @@ class UserApiKey(Base):
     display_name = Column(String(255))
     # #873: the key's own endpoint (Azure's resource URL); NULL for providers with a fixed one
     base_url = Column(Text, nullable=True)
+    # 9 Oct 2026: the Anthropic workspace (wrkspc_…) an organization-level key bills,
+    # sent as anthropic-workspace-id; NULL for a key scoped to its workspace already
+    provider_workspace_id = Column(String(64), nullable=True)
+    # the key's fingerprint (PBKDF2, hex), set with provider_workspace_id: the client finds the workspace by it
+    key_fingerprint = Column(String(64), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime)
     usage_count = Column(Integer, default=0)
@@ -1258,7 +1263,7 @@ class Message(Base):
     # {name, priority, token_estimate, rendered_nonempty, trimmed}, the driving
     # model, the resolved budget ceiling, injected memory ids and prep_ms. The
     # durable answer to "what did Auto know when it said that?"; written
-    # regardless of TRACING_ENABLED. NULL for turns built before this shipped or
+    # regardless of OTEL_ENABLED. NULL for turns built before this shipped or
     # by non-chat planes. Kept off `parts` so it never reaches the AI-SDK render
     # contract (same discipline as retrieval_context).
     context_trace = Column(JSONB, nullable=True)

@@ -28,6 +28,7 @@ import { useAnswerQuestion, useDenyApproval } from '@/hooks/use-approval-grants'
 import type { ApprovalGrant } from '@/lib/api-client'
 import { agentLabel, ticketLabel } from '@/lib/grant-owner'
 import { questionTicketId, ticketHref } from '@/lib/ticket-links'
+import { CardActions, CARD_ACTION_BUTTON, CARD_ACTION_ICON } from './card-actions'
 
 const DISMISS_HINT = 'Answer "use your judgment" to unblock instead.'
 
@@ -150,17 +151,19 @@ export function QuestionCard({ q, inTicket = false }: { q: ApprovalGrant; inTick
           {/* When the ask carries options — an allow/deny hold — the chips ARE
               the answer, so they are the primary control. Night 1: the biggest
               button on the card was "Answer", disabled until you typed, on
-              questions where typing was never the answer. */}
+              questions where typing was never the answer. #1045: at their own
+              width and equal weight (no option is the default), a long option
+              wraps inside its chip instead of stretching the row. */}
           {hasOptions && (
-            <div className="flex flex-wrap gap-2" aria-label="Answer options">
-              {options.map((opt, i) => (
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Answer options">
+              {options.map((opt) => (
                 <Button
                   key={opt}
                   size="sm"
-                  variant={i === 0 ? 'default' : 'outline'}
+                  variant="outline"
                   disabled={busy}
                   onClick={() => submit({ option: opt })}
-                  className="flex-1 min-w-[7rem]"
+                  className={`${CARD_ACTION_BUTTON} h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left`}
                 >
                   {opt}
                 </Button>
@@ -196,28 +199,28 @@ export function QuestionCard({ q, inTicket = false }: { q: ApprovalGrant; inTick
             />
           )}
 
-          <div className="flex gap-2">
-            {showFreeText && (
-              <Button
-                size="sm"
-                disabled={busy || !text.trim()}
-                onClick={() => submit({ answer_text: text })}
-                className="flex-1"
-              >
-                <Check className="mr-1 h-4 w-4" /> Answer
-              </Button>
-            )}
+          <CardActions>
             <Button
               size="sm"
               variant="outline"
               disabled={busy}
               onClick={dismiss}
               title={DISMISS_HINT}
-              className={showFreeText ? undefined : 'ml-auto'}
+              className={CARD_ACTION_BUTTON}
             >
-              <X className="mr-1 h-4 w-4" /> Dismiss
+              <X className={CARD_ACTION_ICON} /> Dismiss
             </Button>
-          </div>
+            {showFreeText && (
+              <Button
+                size="sm"
+                disabled={busy || !text.trim()}
+                onClick={() => submit({ answer_text: text })}
+                className={CARD_ACTION_BUTTON}
+              >
+                <Check className={CARD_ACTION_ICON} /> Answer
+              </Button>
+            )}
+          </CardActions>
         </div>
       )}
     </div>

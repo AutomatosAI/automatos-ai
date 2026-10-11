@@ -296,8 +296,10 @@ def setup_logging(
     if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
         console = logging.StreamHandler()
         console.setLevel(level)
+        # PRD-256 O5: " trace=<id>" when a sampled span is current (worker_otel); empty otherwise.
         console.setFormatter(logging.Formatter(
-            "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+            "%(asctime)s [%(name)s] %(levelname)s:%(_trace_context)s %(message)s",
+            defaults={"_trace_context": ""},
         ))
         root.addHandler(console)
 

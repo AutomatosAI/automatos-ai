@@ -29,6 +29,7 @@ from core.llm.key_resolver import ResolvedKey, resolve_provider_key  # noqa: F40
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 from modules.agents.factory.answer_check import said_plainly  # F297
+from core.observability.genai import traced_agent_run
 
 logger = logging.getLogger(__name__)
 
@@ -1042,6 +1043,7 @@ class AgentFactory:
             }
         return None
 
+    @traced_agent_run  # PRD-256 O4: one invoke_agent span per run, linked to its request
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],

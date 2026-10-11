@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Open-ended ideas are welcome in [Discussions](https://github.com/AutomatosAI/automatos-ai/discussions) first. Use this form when you have a concrete problem to solve.
+
+        If Automatos is useful to you, a ⭐ on the repository helps more people find it.
   - type: textarea
     id: problem
     attributes:

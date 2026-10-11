@@ -115,6 +115,9 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/v1/cli-hosts/{host_id}/claim"),
     ("POST", "/api/v1/cli-hosts/{host_id}/heartbeat"),
     ("POST", "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/events"),
+    # #848: a session's file, from a host that shares no folder with the backend —
+    # the same host token, and the ticket must be this host's and still running.
+    ("PUT", "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/files"),
     ("POST", "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/result"),
     # PRD-245 W1 — the loopback MCP endpoint a ticket SESSION calls Automatos
     # through. Its own credential: the per-ticket token minted at claim

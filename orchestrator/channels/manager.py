@@ -186,14 +186,28 @@ class ChannelManager:
         if legacy is not None and getattr(legacy, "is_running", False):
             return True
         # Ask every registered driver — cheap dict lookups, no I/O.
+        # Each driver is isolated: one failing check must not hide a
+        # channel that another driver is still polling (issue #1075).
+        from channels.drivers import get_driver, list_platforms
         try:
-            from channels.drivers import get_driver, list_platforms
-            for platform in list_platforms():
+            platforms = list_platforms()
+        except Exception:
+            logger.warning(
+                "[ChannelManager] Failed to list channel drivers",
+                exc_info=True,
+            )
+            return False
+        for platform in platforms:
+            try:
                 driver = get_driver(platform)()
                 if driver.is_polling_running(connection_id=connection_id):
                     return True
-        except Exception:
-            pass
+            except Exception:
+                logger.warning(
+                    "[ChannelManager] Driver %s failed is_polling_running check",
+                    platform,
+                    exc_info=True,
+                )
         return False
 
     def get_status(self) -> dict:

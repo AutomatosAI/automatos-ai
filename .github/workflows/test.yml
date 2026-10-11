@@ -17,8 +17,9 @@ name: test
 # opens one right after seeding a wave. workflow_dispatch runs it by hand.
 # Concurrency cancels superseded runs on the same ref so rapid pushes don't queue.
 #
-# The two image lanes (media-render, prod-image-parity) run on a PR only when
-# it touches what they build — the `changes` job decides — and always on main.
+# The path-gated lanes (the backend test shards, the image build, the frontend,
+# the CLI host, the sim units) run on a PR only when it touches what they read —
+# the `changes` job decides — and always on main.
 #
 # Introduced NON-REQUIRED on purpose. The net is expected to surface
 # pre-existing gaps that Wave 2 (WS-G golden journeys, WS-H untested
@@ -43,28 +44,65 @@ jobs:
   # (renames count by both names) and matches each lane's paths; on push to main
   # and on a manual run every lane runs. If the file list can't be read, or the
   # API truncates it (3000 files), every lane runs: a gap here only costs time.
+  #
+  # Gerard, 8 Oct ("it's getting so so slow to pass a PR"): the backend suite is a
+  # lane too. scripts/ci/backend_test_plan.py reads the PR's files: anything
+  # outside frontend/, docs/, graphify-out/, e2e/, .github/ (not this file) and a
+  # top-level *.md runs every test, in BACKEND_SHARDS parallel shards; a PR inside
+  # them runs, in one shard, only the test files that name what it touched; a PR
+  # no test reads runs none. The backend's non-required lanes follow the full scope.
   changes:
-    name: Which image lanes this change needs
+    name: Which lanes this change needs
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       prod_images: ${{ steps.match.outputs.prod_images }}
+      frontend: ${{ steps.match.outputs.frontend }}
+      cli_host: ${{ steps.match.outputs.cli_host }}
+      sim: ${{ steps.match.outputs.sim }}
+      backend_mode: ${{ steps.match.outputs.backend_mode }}
+      backend_keywords: ${{ steps.match.outputs.backend_keywords }}
+      backend_shards: ${{ steps.match.outputs.backend_shards }}
+      backend_shard_count: ${{ steps.match.outputs.backend_shard_count }}
     steps:
+      # The planner and the test files it searches; nothing else is needed here.
+      - name: Checkout (the test files and the planner)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            orchestrator/tests
+            scripts/ci
+
       - id: match
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests, the frontend edition literal, the worker image.
           PROD_IMAGE_PATHS: >-
             ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
+          # The frontend lane also reads the committed route manifest (route-contract).
+          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
+          CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
+          SIM_PATHS: ^tests/sim/|^\.github/workflows/test\.yml$
         run: |
           set -euo pipefail
-          all() { echo "prod_images=true" >> "$GITHUB_OUTPUT"; echo "every lane runs: $1"; }
+          full_backend() {
+            echo "backend_mode=full"
+            echo "backend_keywords="
+            echo "backend_shards=[$(seq -s, 0 $((BACKEND_SHARDS - 1)))]"
+            echo "backend_shard_count=$BACKEND_SHARDS"
+          }
+          all() {
+            { printf '%s=true\n' prod_images frontend cli_host sim; full_backend; } | tee -a "$GITHUB_OUTPUT"
+            echo "every lane runs: $1"
+          }
           if [ "$EVENT" != "pull_request" ]; then all "$EVENT"; exit 0; fi
           if ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)'); then
             all "the PR's file list could not be read"; exit 0
@@ -72,11 +110,40 @@ jobs:
           if [ "$(wc -l <<< "$files")" -ge 3000 ]; then all "the PR lists 3000+ files"; exit 0; fi
           # A here-string, not a pipe: under pipefail grep -q closing a pipe early reads as no match.
           lane() { if grep -qE "$2" <<< "$files"; then echo "$1=true"; else echo "$1=false"; fi; }
-          lane prod_images "$PROD_IMAGE_PATHS" | tee -a "$GITHUB_OUTPUT"
+          {
+            lane prod_images "$PROD_IMAGE_PATHS"
+            lane frontend "$FRONTEND_PATHS"
+            lane cli_host "$CLI_HOST_PATHS"
+            lane sim "$SIM_PATHS"
+          } | tee -a "$GITHUB_OUTPUT"
+          scope=$(python3 scripts/ci/backend_test_plan.py scope <<< "$files")
+          echo "backend scope: $scope"
+          mode=$(jq -r .mode <<< "$scope")
+          if [ "$mode" = full ]; then
+            full_backend | tee -a "$GITHUB_OUTPUT"
+          else
+            # One shard: a selection is a few dozen files. `none` keeps a valid
+            # matrix; the shard job's `if` skips it.
+            printf 'backend_mode=%s\nbackend_keywords=%s\nbackend_shards=[0]\nbackend_shard_count=1\n' \
+              "$mode" "$(jq -r '.keywords | join(",")' <<< "$scope")" | tee -a "$GITHUB_OUTPUT"
+          fi
 
-  orchestrator-tests:
+  # The backend suite (tests/), one shard per matrix entry, each with its own
+  # Postgres and MinIO so no two shards share state. scripts/ci/backend_test_plan.py
+  # gives every test file to exactly one shard, balanced by the seconds recorded in
+  # scripts/ci/backend_test_durations.json: the shards together run every test the
+  # single job ran (14,181 in 24-28 min against a 30-min timeout, 7 Oct). The
+  # required check is the `orchestrator-tests` job below, which reads their result.
+  orchestrator-tests-shard:
+    name: orchestrator-tests shard ${{ matrix.shard }}/${{ needs.changes.outputs.backend_shard_count }} (${{ needs.changes.outputs.backend_mode }})
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full' || needs.changes.outputs.backend_mode == 'select'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.changes.outputs.backend_shards) }}
 
     services:
       postgres:
@@ -115,6 +182,9 @@ jobs:
       # the anonymous-fallback resolution finds a real workspace. Fixed throwaway
       # UUID for the ephemeral CI DB.
       DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+      SHARD: ${{ matrix.shard }}/${{ needs.changes.outputs.backend_shard_count }}
+      KEYWORDS: ${{ needs.changes.outputs.backend_keywords }}
+      SYSTEM_PACKAGES: libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev libmagic1 ghostscript fonts-dejavu-core
 
     defaults:
       run:
@@ -131,6 +201,20 @@ jobs:
           cache: pip
           cache-dependency-path: orchestrator/requirements.txt
 
+      # The downloaded .debs, kept a week: on 7 Oct (run 37689615384) the Azure
+      # Ubuntu mirror served ghostscript and its libraries at 58 kB/s, 5 min 18 s
+      # for 18.5 MB, and the job hit its timeout. The week in the key refreshes them.
+      - name: The week, for the system-library cache key
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the system-library downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: apt-archives-${{ runner.os }}-${{ hashFiles('.github/workflows/test.yml') }}-${{ steps.week.outputs.week }}
+          restore-keys: apt-archives-${{ runner.os }}-
+
       # weasyprint (libpango/libcairo) and python-magic (libmagic) crash on
       # *import*, not at install, when their C libraries are missing — which
       # would break pytest collection before a single test runs. Install the
@@ -144,9 +228,12 @@ jobs:
           # partial update is fine — install fails loudly if THAT index is stale.
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           # fonts-dejavu-core: the image's PDF font, so F298's checklist boxes print here too.
-          sudo apt-get install -y --no-install-recommends \
-            libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript fonts-dejavu-core
+          # A .deb already in ~/apt-archives at the wanted version is not downloaded again.
+          mkdir -p ~/apt-archives/partial
+          # shellcheck disable=SC2086 # the package list splits on spaces on purpose
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/apt-archives" $SYSTEM_PACKAGES
+          sudo rm -f ~/apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
 
       - name: Install Python dependencies
         run: |
@@ -155,8 +242,9 @@ jobs:
 
       # PRD-140 hierarchy audit (F147): every mutating platform action is
       # hierarchy-gated or allow-listed with its reason. A new unlisted
-      # mutator fails the job here.
+      # mutator fails the job here. Once per run: the first shard.
       - name: Hierarchy gate audit
+        if: matrix.shard == 0
         run: python scripts/check_hierarchy_gate.py
 
       - name: Initialise test database schema
@@ -189,16 +277,18 @@ jobs:
           echo "::error::MinIO never answered /minio/health/live"
           exit 1
 
-      # The required gate stays pinned to `tests` explicitly. PRD-182 W12-S2
-      # widened pytest.ini `testpaths` (so `--collect-only` shows the module
-      # trees), but the green gate must keep running exactly what it ran before
-      # — the mock/unit suite — so the passing set is unchanged. The orphaned
-      # trees run in the separate `orchestrator-module-tests` job below.
+      - name: This shard's test files
+        run: |
+          python ../scripts/ci/backend_test_plan.py plan --shard "$SHARD" --keywords "$KEYWORDS" > "$RUNNER_TEMP/shard-tests.txt"
+          echo "shard $SHARD (keywords: ${KEYWORDS:-none, every test file}): $(grep -c . "$RUNNER_TEMP/shard-tests.txt" || true) test files"
+
+      # The required gate stays pinned to `tests` (its shard of it): PRD-182 W12-S2
+      # widened pytest.ini `testpaths` (so `--collect-only` shows the module trees),
+      # but the orphaned trees run in the separate `orchestrator-module-tests` job.
       #
-      # PRD-182 W12-S4 (F092): coverage is MEASURED here, on the suite that
-      # actually runs, via pytest-cov + .coveragerc, and written to coverage.xml.
-      # Collecting coverage cannot change a test's pass/fail, so it is safe to add
-      # to the required job.
+      # PRD-182 W12-S4 (F092): coverage is MEASURED on the suite that actually runs,
+      # via pytest-cov + .coveragerc. Each full-scope shard keeps its data file; the
+      # `orchestrator-tests` job combines them for the ratchet.
       - name: Run test net (with coverage)
         env:
           # The MinIO started above (tests/test_prd251w2_media_hosting.py fails,
@@ -207,16 +297,84 @@ jobs:
           SOCIALS_TEST_S3_ACCESS_KEY: ci-minio
           SOCIALS_TEST_S3_SECRET_KEY: ci-minio-pass
         run: |
-          pytest tests \
+          mapfile -t files < "$RUNNER_TEMP/shard-tests.txt"
+          if [ "${#files[@]}" -eq 0 ]; then echo "No test file in this shard."; exit 0; fi
+          pytest "${files[@]}" \
             --timeout=60 \
             --timeout-method=thread \
             -o faulthandler_timeout=90 \
             -p no:cacheprovider \
             --cov \
             --cov-config=.coveragerc \
-            --cov-report=xml \
-            --cov-report=term-missing:skip-covered \
+            --cov-report= \
             -v
+          mv .coverage ".coverage.shard${{ matrix.shard }}"
+          python -c "import coverage; print(coverage.__version__)" > coverage-version.txt
+
+      - name: Keep this shard's coverage data
+        if: needs.changes.outputs.backend_mode == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: |
+            orchestrator/.coverage.shard${{ matrix.shard }}
+            orchestrator/coverage-version.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # The required check (the Protect-Main ruleset names `orchestrator-tests`). It
+  # always reports: green when every shard passed, or when no backend test reads
+  # what the PR changed; red when a shard failed or the scope is unknown. On a
+  # full-scope run it combines the shards' coverage and runs the ratchet.
+  orchestrator-tests:
+    needs: [changes, orchestrator-tests-shard]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MODE: ${{ needs.changes.outputs.backend_mode }}
+    steps:
+      - name: Every shard passed, or this change needs no backend test
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          SHARDS: ${{ needs.orchestrator-tests-shard.result }}
+          KEYWORDS: ${{ needs.changes.outputs.backend_keywords }}
+        run: |
+          if [ "$CHANGES" != success ]; then
+            echo "::error::'Which lanes this change needs' ended $CHANGES: the backend scope is unknown, so there is no verdict."
+            exit 1
+          fi
+          if [ "$MODE" = none ]; then echo "No backend test reads what this PR changed ($KEYWORDS): none to run."; exit 0; fi
+          if [ "$SHARDS" != success ]; then echo "::error::the backend test shards ended $SHARDS."; exit 1; fi
+          echo "Every shard passed (scope: $MODE${KEYWORDS:+, keywords $KEYWORDS})."
+
+      - name: Checkout
+        if: env.MODE == 'full'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: env.MODE == 'full'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: The shards' coverage data
+        if: env.MODE == 'full'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-*
+          path: orchestrator
+          merge-multiple: true
+
+      - name: Combine the shards' coverage
+        if: env.MODE == 'full'
+        working-directory: orchestrator
+        run: |
+          python -m pip install "coverage==$(head -n 1 coverage-version.txt)"
+          python -m coverage combine --rcfile=.coveragerc .coverage.shard*
+          python -m coverage xml --rcfile=.coveragerc
+          python -m coverage report --rcfile=.coveragerc --skip-covered | tail -n 3
 
       # The ratchet. CI is ephemeral, so the floor only ENFORCES once it is
       # committed: while .coverage-baseline holds the SEED token this step prints
@@ -226,6 +384,8 @@ jobs:
       # from then on a drop below it fails the build. Ratchet the committed number
       # up toward the 80% doctrine as coverage improves.
       - name: Coverage ratchet (measured baseline)
+        if: env.MODE == 'full'
+        working-directory: orchestrator
         run: python scripts/check_coverage_baseline.py
 
   # AGENTS.md → the engineering rules, held on the lines a change touches (a ratchet:
@@ -269,6 +429,8 @@ jobs:
   # baseline.json) runs only when RUN_NL2SQL_EVAL=1 with an LLM configured.
   nl2sql-eval:
     name: NL2SQL eval (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -342,6 +504,8 @@ jobs:
   # telemetry, not the bundled fixture.
   operating-graph-uplift-eval:
     name: Operating-graph uplift eval (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -391,6 +555,8 @@ jobs:
   # with the production retriever injected (--corpus + retriever_factory).
   memory-recall-eval:
     name: Memory-recall eval (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -440,6 +606,8 @@ jobs:
   # NEVER read green ahead of the measurement (the PRD's whole discipline).
   graphiti-gate:
     name: Graphiti-vs-baseline gate (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -476,6 +644,8 @@ jobs:
   # workspace snapshot.
   retrieval-recall-eval:
     name: Retrieval-recall eval (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -537,6 +707,8 @@ jobs:
   #      Both gates are HARD (no continue-on-error) as of PRD-209 US-004.
   alembic-from-zero:
     name: Alembic from-zero — exactly one head (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -791,6 +963,8 @@ jobs:
   # to a required check once green is the repo admin's call (PRD-209 Q2).
   schema-drift:
     name: Schema-drift check (four writers) (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -832,6 +1006,8 @@ jobs:
   # fail on install. `npm install` reconciles the lockfile so the lane can run.
   frontend-ci:
     name: Frontend CI (tsc baselined, vitest, eslint, route-contract) (non-required)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -890,6 +1066,8 @@ jobs:
   # (via the widened pytest.ini testpaths) now shows these trees regardless.
   orchestrator-module-tests:
     name: Orchestrator module + integration tests (F056) (non-required)
+    needs: changes
+    if: needs.changes.outputs.backend_mode == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -975,6 +1153,8 @@ jobs:
   # where Claude Code writes it, refuses -p/--bare). Stdlib + pytest; no services.
   cli-host-tests:
     name: CLI host (PRD-234) — fake-claude end to end (non-required)
+    needs: changes
+    if: needs.changes.outputs.cli_host == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -998,6 +1178,8 @@ jobs:
   # runs on the Linux lane above.
   cli-host-windows:
     name: CLI host on Windows — ConPTY (non-required)
+    needs: changes
+    if: needs.changes.outputs.cli_host == 'true'
     runs-on: windows-latest
     timeout-minutes: 10
     defaults:
@@ -1024,6 +1206,8 @@ jobs:
   # tests/conftest.py (python-dotenv, Railway .env) out of it.
   sim-units:
     name: sim harness units (stdlib)
+    needs: changes
+    if: needs.changes.outputs.sim == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

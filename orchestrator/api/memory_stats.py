@@ -808,6 +808,75 @@ async def get_memory_layers(
     return result
 
 
+async def _find_targets(service, workspace_id, db: Session, memory_ids: List[str]) -> List[Dict]:
+    """The requested memories, read across every tier of the workspace."""
+    agent_ids = _get_agent_ids(workspace_id, db)
+    scoped_items = await _fetch_all_scoped_memories(
+        service, str(workspace_id), agent_ids, limit=500,
+    )
+    id_set = set(memory_ids)
+    return [m for _, m in scoped_items if str(m.get("id", "")) in id_set]
+
+
+_SUMMARISE_PROMPT = (
+    "Summarise the following memory entries into a single, concise memory. "
+    "Preserve all key facts and preferences. Output only the consolidated "
+    "memory text, no preamble."
+)
+_SUMMARY_MAX_TOKENS = 500
+
+
+async def _consolidated_content(strategy: str, contents: List[str]) -> str:
+    """'merge' joins the contents; 'summarise' asks the LLM (off the event
+    loop) and falls back to a merge when that fails."""
+    merged = "\n\n".join(c for c in contents if c)
+    if strategy == "merge":
+        return merged
+    try:
+        from config import config
+        import openai
+
+        client = openai.OpenAI(
+            api_key=config.OPENROUTER_API_KEY,
+            base_url=config.OPENROUTER_BASE_URL,
+        )
+        summary_resp = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=config.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": _SUMMARISE_PROMPT},
+                {"role": "user", "content": "\n---\n".join(contents)},
+            ],
+            max_tokens=_SUMMARY_MAX_TOKENS,
+        )
+        return summary_resp.choices[0].message.content or merged
+    except Exception as e:
+        logger.warning("LLM summarisation failed, falling back to merge: %s", e, exc_info=True)
+        return merged
+
+
+async def _delete_originals(service, workspace_id: str, targets: List[Dict]) -> int:
+    """Delete consolidated originals, each under the namespace it was read
+    from (workspace, agent or daily). Items without one fall back to the
+    workspace scope. Returns how many were deleted."""
+    by_namespace: Dict[Optional[str], List[str]] = {}
+    for m in targets:
+        mid = str(m.get("id", ""))
+        if mid:
+            by_namespace.setdefault(m.get("namespace"), []).append(mid)
+
+    deleted = 0
+    for namespace, ids in by_namespace.items():
+        if namespace:
+            if await service.delete_memories_scoped(ids, namespace, workspace_id):
+                deleted += len(ids)
+            continue
+        for mid in ids:
+            if await service.delete_memory(mid, workspace_id=workspace_id):
+                deleted += 1
+    return deleted
+
+
 class ConsolidateRequest(BaseModel):
     memory_ids: List[str]
     strategy: str = "merge"  # "merge" | "summarise"
@@ -834,24 +903,13 @@ async def consolidate_memories(
     if not service:
         return {"success": False, "error": "Memory service unavailable"}
 
-    # Fetch target memories across all tiers
     try:
-        agent_ids = _get_agent_ids(ctx.workspace_id, db)
-        scoped_items = await _fetch_all_scoped_memories(
-            service, str(ctx.workspace_id), agent_ids, limit=500,
-        )
-
-        id_set = set(body.memory_ids)
-        targets: List[Dict] = [
-            m for _, m in scoped_items
-            if str(m.get("id", "")) in id_set
-        ]
-
-        if len(targets) < 2:
-            return {"success": False, "error": f"Found only {len(targets)} of {len(body.memory_ids)} memories"}
+        targets = await _find_targets(service, ctx.workspace_id, db, body.memory_ids)
     except Exception as e:
         logger.error("Failed to fetch memories for consolidation: %s", e, exc_info=True)
         return {"success": False, "error": str(e)[:200]}
+    if len(targets) < 2:
+        return {"success": False, "error": f"Found only {len(targets)} of {len(body.memory_ids)} memories"}
 
     # Build consolidated content
     contents = [
@@ -859,30 +917,7 @@ async def consolidate_memories(
         for m in targets
     ]
 
-    if body.strategy == "merge":
-        merged_content = "\n\n".join(c for c in contents if c)
-    else:
-        # Summarise using LLM
-        try:
-            from config import config
-            import openai
-
-            client = openai.OpenAI(
-                api_key=config.OPENROUTER_API_KEY,
-                base_url=config.OPENROUTER_BASE_URL,
-            )
-            summary_resp = client.chat.completions.create(
-                model=config.LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": "Summarise the following memory entries into a single, concise memory. Preserve all key facts and preferences. Output only the consolidated memory text, no preamble."},
-                    {"role": "user", "content": "\n---\n".join(contents)},
-                ],
-                max_tokens=500,
-            )
-            merged_content = summary_resp.choices[0].message.content or "\n\n".join(contents)
-        except Exception as e:
-            logger.warning("LLM summarisation failed, falling back to merge: %s", e)
-            merged_content = "\n\n".join(c for c in contents if c)
+    merged_content = await _consolidated_content(body.strategy, contents)
 
     # Store the consolidated memory under global tier via UnifiedMemoryService
     try:
@@ -895,12 +930,7 @@ async def consolidate_memories(
         logger.error("Failed to store consolidated memory: %s", e, exc_info=True)
         return {"success": False, "error": f"Failed to store: {str(e)[:200]}"}
 
-    # Delete originals
-    deleted = 0
-    for m in targets:
-        mid = str(m.get("id", ""))
-        if mid and await service.delete_memory(mid):
-            deleted += 1
+    deleted = await _delete_originals(service, str(ctx.workspace_id), targets)
 
     logger.info(
         "Consolidated %d memories (strategy=%s, deleted=%d) for workspace %s",

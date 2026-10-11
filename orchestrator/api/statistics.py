@@ -96,7 +96,9 @@ async def get_system_metrics(ctx: RequestContext = Depends(get_request_context_h
         uptime = f"{uptime_hours}h {uptime_minutes}m"
         
         # Get system metrics using psutil
-        cpu_usage = psutil.cpu_percent(interval=1)
+        # #1100: interval=None is non-blocking (use since the previous call,
+        # primed once at startup). interval=1 slept a second on the event loop.
+        cpu_usage = psutil.cpu_percent(interval=None)
         memory = psutil.virtual_memory()
         memory_usage = memory.percent
         

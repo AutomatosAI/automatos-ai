@@ -2,6 +2,8 @@
 
 This guide covers the process: the licence, sign-off, the development environment, pull requests and what CI checks. **The engineering rules are in [AGENTS.md](AGENTS.md).** They apply to people and coding agents alike, and every coding tool that reads `AGENTS.md` picks them up.
 
+**New here?** Start with the pinned [welcome issue](https://github.com/AutomatosAI/automatos-ai/issues/1105) and the [`good first issue`](https://github.com/AutomatosAI/automatos-ai/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) label. Comment on an issue to claim it before you start. If Automatos is useful to you, a ⭐ on the repository and a share with a friend helps more people find it.
+
 ---
 
 ## The deal, in three lines

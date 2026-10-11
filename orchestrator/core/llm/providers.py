@@ -80,6 +80,8 @@ class ProviderSpec:
     rate_limit_note: Optional[str] = None
     setup_note: Optional[str] = None       # how to fill in the provider's fields (#873)
     endpoint_placeholder: Optional[str] = None  # set: a key carries its own endpoint (#873)
+    # set: a key may carry the workspace it bills (an organization-level Anthropic key, 9 Oct 2026)
+    workspace_id_placeholder: Optional[str] = None
 
     @property
     def chat(self) -> bool:
@@ -107,6 +109,14 @@ _AZURE_SETUP = (
 )
 _AZURE_ENDPOINT_PLACEHOLDER = "https://<resource>.openai.azure.com"
 
+# 9 Oct 2026: a key created at organization level must name a workspace on every call.
+_ANTHROPIC_SETUP = (
+    "A key created inside a Claude Console workspace needs nothing else. A key created "
+    "at organization level also needs the workspace it bills: its ID (wrkspc_…) is on "
+    "the workspace's page in the Console."
+)
+_ANTHROPIC_WORKSPACE_PLACEHOLDER = "wrkspc_… (organization-level keys only)"
+
 _SPECS: Tuple[ProviderSpec, ...] = (
     ProviderSpec(
         slug="openai", label="OpenAI", kind=KIND_DIRECT, adapter=ADAPTER_OPENAI,
@@ -119,6 +129,7 @@ _SPECS: Tuple[ProviderSpec, ...] = (
         enum_value="anthropic", env_key="ANTHROPIC_API_KEY", validation=VALIDATION_MODELS_LIST,
         openrouter_prefix="anthropic/", key_placeholder="sk-ant-…",
         docs_url="https://console.anthropic.com/settings/keys",
+        setup_note=_ANTHROPIC_SETUP, workspace_id_placeholder=_ANTHROPIC_WORKSPACE_PLACEHOLDER,
     ),
     ProviderSpec(
         slug="google", label="Google", kind=KIND_DIRECT, adapter=ADAPTER_GOOGLE,
@@ -345,6 +356,7 @@ def to_public_dict(spec: ProviderSpec, edition: Optional[str] = None) -> Dict[st
         "rate_limit_note": spec.rate_limit_note,
         "setup_note": spec.setup_note,
         "endpoint_placeholder": spec.endpoint_placeholder,
+        "workspace_id_placeholder": spec.workspace_id_placeholder,
     }
 
 

@@ -11,10 +11,19 @@ const alertVariants = cva(
         default: 'bg-background text-foreground',
         destructive:
           'border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive',
+        // Theme tokens, not amber-50: readable in every style and tone (#1045).
+        warning: 'border-warning/50 bg-warning/10 text-foreground [&>svg]:text-warning',
+      },
+      // An inline note inside a card, not a page banner.
+      size: {
+        default: '',
+        compact:
+          'rounded-md px-3 py-2 text-xs backdrop-blur-none [&>svg]:left-3 [&>svg]:top-2.5 [&>svg]:h-3.5 [&>svg]:w-3.5 [&>svg~*]:pl-5 [&>svg+div]:translate-y-0',
       },
     },
     defaultVariants: {
       variant: 'default',
+      size: 'default',
     },
   }
 );
@@ -22,11 +31,11 @@ const alertVariants = cva(
 const Alert = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & VariantProps<typeof alertVariants>
->(({ className, variant, ...props }, ref) => (
+>(({ className, variant, size, ...props }, ref) => (
   <div
     ref={ref}
     role="alert"
-    className={cn(alertVariants({ variant }), className)}
+    className={cn(alertVariants({ variant, size }), className)}
     {...props}
   />
 ));

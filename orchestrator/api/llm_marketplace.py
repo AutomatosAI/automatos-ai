@@ -60,7 +60,8 @@ class LLMModelOut(BaseModel):
     input_cost_per_1k: float
     output_cost_per_1k: float
     is_free: bool = False
-    price_tier: str = "premium"        # free | budget | mid | premium (from price)
+    price_known: bool = True           # False: the catalogue has no price for this route (not free)
+    price_tier: str = "premium"        # free | budget | mid | premium (from price) | unknown
     capabilities: Dict[str, Any] = Field(default_factory=dict)
     recommended_for: List[str] = Field(default_factory=list)
     supports_functions: bool
@@ -106,6 +107,9 @@ class InstallResult(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+PRICE_TIER_UNKNOWN = "unknown"
+
+
 def price_tier_for(input_cost_per_1k: float) -> str:
     cost = float(input_cost_per_1k or 0)
     if cost <= 0:
@@ -142,6 +146,12 @@ def _model_to_out(
     spec = registry.get_spec(m.serving_provider)
     label = spec.label if spec else (m.serving_provider or "").title()
     in_cost, out_cost, is_free = route_price(m)
+    # A row with no catalogue price shows its list price when core/llm/list_prices holds the model
+    # (P256-FIX-T2); with neither, the route is "price unknown", never free (21463f8fd). Only an
+    # explicit 0, or a provider that bills nothing, is free.
+    price_known = (m.input_cost_per_1k_tokens is not None or m.output_cost_per_1k_tokens is not None
+                   or list_rates(m.model_id) is not None)
+    is_free = bool(spec and spec.free) or (price_known and is_free)
     return LLMModelOut(
         id=m.id,
         provider=m.provider,
@@ -158,7 +168,8 @@ def _model_to_out(
         input_cost_per_1k=in_cost,
         output_cost_per_1k=out_cost,
         is_free=is_free,
-        price_tier=price_tier_for(in_cost),
+        price_known=price_known,
+        price_tier=price_tier_for(in_cost) if price_known else PRICE_TIER_UNKNOWN,
         capabilities=m.capabilities or {},
         recommended_for=m.recommended_for or [],
         supports_functions=m.supports_functions or False,

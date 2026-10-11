@@ -379,10 +379,10 @@ print(f"Reasoning: {result['explanation']}")
 
 ## 📚 Learn More
 
-- **[Execution Strategies](execution/README.md)** - How agents run tasks
-- **[Coordination Patterns](coordination/README.md)** - How agents collaborate
-- **[Skills System](skills/README.md)** - Agent capabilities
-- **[Learning & Optimization](learning/README.md)** - How agents improve
+- **[Agent Factory & Runtime](../../../docs/agents/agent-factory-runtime.md)** - How agents are created and run tasks
+- **[Mission Coordination](../../../docs/missions-multi-agent-coordination/coordinator-service-dispatcher.md)** - How agents collaborate on Missions
+- **[Plugins & Skills](../../../docs/agents/agent-plugins-skills.md)** - Agent capabilities
+- **[Prompt Optimization](../../../docs/prompt-optimization/prompt-optimization.md)** - Evaluating and improving system prompts
 
 ---
 

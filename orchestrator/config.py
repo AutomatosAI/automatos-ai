@@ -223,7 +223,7 @@ class Config:
     # Allow multiple origins (comma-separated) for Railway deployment
     # Default includes localhost for local dev and Railway frontend domain
     # Set CORS_ALLOW_ORIGINS in Railway to include your frontend domain
-    # For Railway: https://automotas-ai-frontend-production.up.railway.app
+    # For Railway: https://automatos-ai-frontend-production.up.railway.app
     # For custom domain: https://ui.automatos.app
     _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
     CORS_ALLOW_ORIGINS: str = ",".join([origin.strip() for origin in _cors_origins.split(",") if origin.strip()])
@@ -233,6 +233,9 @@ class Config:
     # =============================================================================
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
+    # The workspace an organization-level ANTHROPIC_API_KEY bills (wrkspc_…), sent as
+    # anthropic-workspace-id. Unset for a key created inside a workspace (9 Oct 2026).
+    ANTHROPIC_WORKSPACE_ID: str = os.getenv("ANTHROPIC_WORKSPACE_ID")
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY")
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     AZURE_OPENAI_API_KEY: str = os.getenv("AZURE_OPENAI_API_KEY")
@@ -714,6 +717,12 @@ class Config:
     # PRD-256 FX-016: the runtime a new agent gets when platform_create_agent names none:
     # 'api' (the platform's models) or 'cli' (a session, which needs CLI_RUNTIME_ENABLED).
     DEFAULT_AGENT_RUNTIME: str = os.getenv("DEFAULT_AGENT_RUNTIME", "api").strip().lower()
+    # #848: the host shares no folder with this backend (a cluster): the claim asks it to
+    # upload what its session left in the ticket's deliverables folder, and the backend writes
+    # it into the workspace volume (services/session_uploads.py). Off = compose's shared folder.
+    CLI_SESSION_FILE_UPLOAD: bool = os.getenv("CLI_SESSION_FILE_UPLOAD", "false").strip().lower() in ("true", "1", "yes", "on")
+    # …and the most one run of a ticket may upload in all (each file: the document upload limit).
+    CLI_SESSION_UPLOAD_MAX_TOTAL_MB: int = int(os.getenv("CLI_SESSION_UPLOAD_MAX_TOTAL_MB", "200"))
     # PRD-245 W1 (local edition): how many Automatos tool calls ONE ticket's
     # session may make through the loopback MCP bridge. A bound, not a budget —
     # the model is on the operator's own plan; this stops a looping session from
@@ -1398,20 +1407,21 @@ class Config:
     TOOL_SELECTION_STASH_MAXSIZE: int = int(os.getenv("TOOL_SELECTION_STASH_MAXSIZE", "512"))
 
     # =============================================================================
-    # OBSERVABILITY / TRACING (PRD-185 S9) — vendor-neutral trace seam
+    # OBSERVABILITY / TRACING — the PRD-185 S9 seam (core/observability/tracer.py)
+    # emits through OpenTelemetry (PRD-256 O3), so it follows OTEL_ENABLED below.
     # =============================================================================
-    # Default OFF: zero overhead + zero data egress until explicitly enabled.
-    # When ON, live traces/scores land at the tool-dispatch and retrieval
-    # chokepoints via a vendor-neutral seam (core/observability/tracer.py) —
-    # "was the tool call good / was retrieval grounded" as a queryable number.
-    # Backend today = Langfuse Cloud; swappable behind the seam (data residency
-    # is the axis that flips to self-host). `langfuse` is an OPTIONAL import: the
-    # OFF path never imports it, and enabled-but-missing degrades to no-op.
-    TRACING_ENABLED: bool = os.getenv("TRACING_ENABLED", "false").lower() in ("true", "1", "yes")
-    TRACING_BACKEND: str = os.getenv("TRACING_BACKEND", "langfuse")
-    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY")
-    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY")
-    LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    # PRD-256 (#847): OpenTelemetry traces over OTLP/HTTP, beside the PRD-73 metrics, logs
+    # and correlation IDs (core/observability/otel.py). Default OFF: nothing from
+    # `opentelemetry` is imported. The collector at the endpoint chooses the backend.
+    OTEL_ENABLED: bool = os.getenv("OTEL_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "automatos-api")
+    # The collector's OTLP/HTTP base address; /v1/traces is appended.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+    # `key=value,key2=value2` (URL-encoded values), e.g. a vendor's Authorization header.
+    OTEL_EXPORTER_OTLP_HEADERS: str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+    # The share of new traces kept (0.0–1.0); a request whose caller sampled it follows the caller.
+    # Kept as text and parsed when tracing starts, so a bad value can never stop a boot (otel.py).
+    OTEL_TRACES_SAMPLER_RATIO: str = os.getenv("OTEL_TRACES_SAMPLER_RATIO", "1.0")
 
     # =============================================================================
     # OBJECT STORAGE (S3 / MinIO) + AWS S3 VECTORS (PRD-42: Cloud Document Sync)

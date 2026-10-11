@@ -7,7 +7,7 @@
  * button answers with that choice.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { ApprovalGrant } from '@/lib/api-client'
 
 const { answerMutate, dismissMutate } = vi.hoisted(() => ({
@@ -167,6 +167,23 @@ describe('QuestionsTab — PRD-225', () => {
     render(<QuestionsTab />)
     fireEvent.click(screen.getByRole('button', { name: 'B' }))
     expect(answerMutate).toHaveBeenCalledWith({ grantId: 9, option: 'B' })
+  })
+
+  it('#1045: options are equal-weight chips at their own width; Answer and Dismiss are compact', () => {
+    setQuestions([question({ id: 9, options: ['Tier A, start 1 October 2026', 'Tier B'] })])
+    render(<QuestionsTab />)
+    const chips = within(screen.getByRole('group', { name: 'Answer options' })).getAllByRole('button')
+    expect(chips).toHaveLength(2)
+    for (const chip of chips) {
+      expect(chip.className).not.toContain('flex-1')
+      expect(chip.className.split(/\s+/)).not.toContain('bg-primary')
+    }
+    fireEvent.click(screen.getByText('Answer in your own words instead'))
+    for (const name of [/Answer$/, /Dismiss/]) {
+      const button = screen.getByRole('button', { name })
+      expect(button.className).not.toContain('flex-1')
+      expect(button).toHaveClass('h-8')
+    }
   })
 
   it('dismiss keeps the trail visible (subject stays blocked, may re-ask)', async () => {

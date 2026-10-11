@@ -1,0 +1,14 @@
+# kind e2e (deploy/kind/otel.sh): the reference collector config (deploy/otel/
+# collector.yaml) with its exporter swapped for the debug exporter, so the checks
+# read the spans the API and the worker sent from the collector's log. Merged over
+# the reference config: --config=collector.yaml --config=otel-debug.yaml.
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      exporters: [debug]
+    metrics:
+      exporters: [debug]

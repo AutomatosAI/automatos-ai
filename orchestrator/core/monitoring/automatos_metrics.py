@@ -74,12 +74,6 @@ if PROMETHEUS_AVAILABLE:
         ["agent_id"],
     )
 
-    AGENT_TOKEN_USAGE = Counter(
-        "automatos_agent_token_usage_total",
-        "Total tokens consumed by agents",
-        ["agent_id", "model", "direction"],
-    )
-
     ACTIVE_AGENTS = Gauge(
         "automatos_active_agents",
         "Number of currently active agents",
@@ -117,21 +111,9 @@ if PROMETHEUS_AVAILABLE:
         ["error_type"],
     )
 
-    # ─────────────────────────────────────────────
-    # Chat / LLM Metrics
-    # ─────────────────────────────────────────────
-    LLM_REQUEST_DURATION = Histogram(
-        "automatos_llm_request_duration_seconds",
-        "LLM API call latency",
-        ["model", "provider"],
-        buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0],
-    )
-
-    LLM_TOKEN_USAGE = Counter(
-        "automatos_llm_tokens_total",
-        "Total LLM tokens consumed",
-        ["model", "provider", "direction"],
-    )
+    # LLM calls: the OpenTelemetry GenAI metrics over OTLP (PRD-256 O5,
+    # core/observability/metrics.py), which replaced three Prometheus series here
+    # that nothing ever recorded.
 
     # ─────────────────────────────────────────────
     # Service Info

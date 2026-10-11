@@ -19,6 +19,8 @@ export interface ModelInfo {
   serving_provider_label?: string
   route_label?: string
   is_free?: boolean
+  /** False: the catalogue has no price for this route. It is not free. */
+  price_known?: boolean
   price_tier?: string
   key_available?: boolean
   sourcing?: string

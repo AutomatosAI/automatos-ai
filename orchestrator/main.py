@@ -131,6 +131,7 @@ from api.dashboard_integration import (
 )
 
 # WebSocket manager removed - using AI SDK SSE streaming instead
+from core.observability.otel import annotate_request, instrument_app, instrument_libraries, with_tracing
 from core.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
@@ -923,7 +924,7 @@ app = FastAPI(
             "description": "Production server"
         }
     ],
-    lifespan=lifespan,
+    lifespan=with_tracing(lifespan),  # PRD-256 (#847): this process's OpenTelemetry provider, when on
     docs_url="/docs" if config.ENVIRONMENT != "production" else None,
     redoc_url="/redoc" if config.ENVIRONMENT != "production" else None,
     openapi_url="/openapi.json" if config.ENVIRONMENT != "production" else None,
@@ -976,7 +977,9 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID", "X-Request-ID"],
+    # traceparent/tracestate (PRD-256 O2a): a browser that starts a trace can continue it here.
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID", "X-Request-ID",
+                   "traceparent", "tracestate"],
     expose_headers=["X-Request-ID", "X-Routing-Agent-ID", "X-Routing-Confidence", "X-Routing-Type", "X-Routing-Reasoning", "X-Routing-Request-ID"],
 )
 
@@ -1076,6 +1079,10 @@ async def add_security_headers(request, call_next):
 
 # Install logging context filter and add request-id middleware
 install_request_context_logging()
+# PRD-256 (#847): a server span per request, when OTEL_ENABLED. It wraps the whole
+# middleware stack, so it must be in place before the first ASGI call (the lifespan's).
+instrument_app(app)
+instrument_libraries()   # PRD-256 O2a: SQL, Redis, outbound HTTP and AWS spans under each request
 
 @app.middleware("http")
 async def add_request_id_middleware(request, call_next):
@@ -1091,6 +1098,7 @@ async def add_request_id_middleware(request, call_next):
     ws_header = request.headers.get("x-workspace-id", "") or request.headers.get("x-workspace", "")
     if ws_header and ws_header != "__all__":
         workspace_id_var.set(ws_header)
+    annotate_request(request_id_var.get(""), workspace_id_var.get(""))  # PRD-256: the IDs on the server span
 
     try:
         response = await call_next(request)

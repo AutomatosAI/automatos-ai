@@ -35,8 +35,6 @@ It doesn't just read files. It **compiles** them into a semantic understanding o
 ### 1️⃣ **Semantic Code Search**
 Don't search for keywords. Search for *intent*.
 
-![Chat Interface](../../../docs/assets/images/chat_interface.png)
-
 ```python
 # "Find where we handle user login"
 results = await codegraph.search_semantic("user login logic")

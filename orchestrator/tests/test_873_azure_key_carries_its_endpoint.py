@@ -208,7 +208,7 @@ def test_add_api_key_stores_the_endpoint_and_checks_the_key_there(monkeypatch, l
     resolves_to(PUBLIC_IP)
     seen = {}
 
-    async def _check(provider, key, base_url=None):
+    async def _check(provider, key, base_url=None, workspace_id=None):
         seen.update(provider=provider, base_url=base_url)
         return ApiKeyValidation(valid=False, message="Invalid key: 401", tested_at=datetime.utcnow())
 

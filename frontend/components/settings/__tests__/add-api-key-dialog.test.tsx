@@ -58,6 +58,7 @@ import { AddApiKeyDialog } from '../AddApiKeyDialog'
 const PROVIDERS = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'azure', label: 'Azure OpenAI (Microsoft Foundry)' },
+  { value: 'anthropic', label: 'Anthropic' },
 ]
 
 function savedKey(overrides: Record<string, unknown> = {}) {
@@ -196,5 +197,50 @@ describe('AddApiKeyDialog: a key with its own endpoint (issue #873)', () => {
 
     await waitFor(() => expect(postMock).toHaveBeenCalled())
     expect(postMock.mock.calls[0][1]).not.toHaveProperty('base_url', expect.anything())
+  })
+})
+
+describe('AddApiKeyDialog: an organization-level Anthropic key names its workspace (9 Oct 2026)', () => {
+  beforeEach(() => {
+    postMock.mockReset()
+    postMock.mockResolvedValue(
+      savedKey({
+        provider: 'anthropic',
+        is_active: true,
+        validation: { valid: true, message: 'API key is valid', tested_at: '2026-10-09T00:00:00Z' },
+      }),
+    )
+  })
+
+  it('asks for the workspace ID and sends it with the key', async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: /add api key/i }))
+    fireEvent.change(screen.getByTestId('provider-select'), { target: { value: 'anthropic' } })
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-ant-org-key' } })
+
+    const workspace = await screen.findByLabelText('Workspace ID')
+    expect(workspace.getAttribute('placeholder')).toContain('wrkspc_')
+    fireEvent.change(workspace, { target: { value: ' wrkspc_01ABCdef ' } })
+    fireEvent.click(screen.getByRole('button', { name: /^add key$/i }))
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled())
+    expect(postMock.mock.calls[0][1]).toMatchObject({
+      provider: 'anthropic',
+      api_key: 'sk-ant-org-key',
+      workspace_id: 'wrkspc_01ABCdef',
+    })
+  })
+
+  it('shows no workspace field and sends none for another provider', async () => {
+    renderDialog()
+    fireEvent.click(screen.getByRole('button', { name: /add api key/i }))
+    fireEvent.change(screen.getByTestId('provider-select'), { target: { value: 'openai' } })
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-good-key' } })
+
+    expect(screen.queryByLabelText('Workspace ID')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^add key$/i }))
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled())
+    expect(postMock.mock.calls[0][1]).not.toHaveProperty('workspace_id', expect.anything())
   })
 })

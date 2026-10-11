@@ -462,9 +462,9 @@ async def call_external_api(...):
 
 ## 📚 Learn More
 
-- **[Chatbot Streaming](chatbot/README.md)** - How chat works
-- **[Document Processing](document_processor/README.md)** - The pipeline
-- **[Workflow Execution](workflows/README.md)** - Orchestration details
+- **[Chatbot Streaming](../../docs/chat-interface/streaming-chat-service.md)** - How chat works
+- **[Document Processing](../../docs/knowledge-base-rag/document-ingestion-pipeline.md)** - The ingestion pipeline
+- **[Execution Streaming](workflows/)** - Real-time execution updates
 
 ---
 

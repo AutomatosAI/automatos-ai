@@ -46,6 +46,10 @@ class ContextFilter(logging.Filter):
 
     Ensures attributes always exist on LogRecord so format strings
     like %(request_id)s never raise KeyError.
+
+    PRD-256 O5: ``trace_id`` and ``span_id`` (empty with tracing off or no sampled
+    span), which log-relay ships to Loki with the rest; ``_trace_context`` is the
+    console line's `` trace=<id>``, underscored so log-relay doesn't ship it twice.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
@@ -59,6 +63,10 @@ class ContextFilter(logging.Filter):
         record.tenant_id = tenant_id_var.get("")
         record.http_method = http_method_var.get("")
         record.http_path = http_path_var.get("")
+        from core.observability.otel import current_trace_ids
+
+        record.trace_id, record.span_id = current_trace_ids()
+        record._trace_context = f" trace={record.trace_id}" if record.trace_id else ""
         return True
 
 
@@ -74,7 +82,7 @@ def install_request_context_logging(format_with_context: Optional[str] = None) -
     if not format_with_context:
         default_fmt = (
             "%(asctime)s - %(name)s - %(levelname)s - "
-            "[req=%(request_id)s ws=%(workspace_id)s agent=%(agent_id)s] - %(message)s"
+            "[req=%(request_id)s ws=%(workspace_id)s agent=%(agent_id)s%(_trace_context)s] - %(message)s"
         )
         for handler in logger.handlers:
             handler.setFormatter(logging.Formatter(default_fmt))

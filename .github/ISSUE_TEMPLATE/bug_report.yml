@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Thanks for taking the time to report this. **Security problems go through [SECURITY.md](https://github.com/AutomatosAI/automatos-ai/blob/main/SECURITY.md), not a public issue.**
+
+        If Automatos is useful to you, a ⭐ on the repository helps more people find it.
   - type: dropdown
     id: edition
     attributes:

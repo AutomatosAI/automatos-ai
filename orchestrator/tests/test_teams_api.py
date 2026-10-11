@@ -20,7 +20,7 @@ sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 import pytest  # noqa: E402
 
-from core.team_access import get_or_create_team, ensure_teams, normalize_team  # noqa: E402
+from core.team_access import get_or_create_team, ensure_teams  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #

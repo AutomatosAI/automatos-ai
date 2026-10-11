@@ -28,6 +28,8 @@ from typing import Dict, List, Optional
 from uuid import uuid4
 
 from sqlalchemy import text
+
+from core.observability.work_links import linked, links_of
 from sqlalchemy.orm import Session
 
 from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
@@ -672,6 +674,7 @@ def _claim_and_sweep(session_factory, cfg, worker_id: str) -> List[dict]:
                     "review_mode": t.review_mode or "auto",
                     "attachment_ids": t.attachment_ids or [],
                     "run_id": (getattr(t, "runtime_ref", None) or {}).get(RUN_ID_KEY),
+                    "trace_links": links_of(getattr(t, "planning_data", None)),  # PRD-256 O4
                 }
             )
         db.commit()  # persist consumed review_feedback
@@ -688,15 +691,16 @@ def _launch_one(task: dict) -> None:
     """
     from api.board_tasks import _launch_task_execution
 
-    _launch_task_execution(
-        task_id=task["task_id"],
-        agent_id=task["agent_id"],
-        workspace_id=task["workspace_id"],
-        prompt=task["prompt"],
-        review_mode=task["review_mode"],
-        attachment_ids=task["attachment_ids"],
-        run_id=task.get("run_id"),
-    )
+    with linked(task.get("trace_links")):  # PRD-256 O4: the run's task copies the ticket's links
+        _launch_task_execution(
+            task_id=task["task_id"],
+            agent_id=task["agent_id"],
+            workspace_id=task["workspace_id"],
+            prompt=task["prompt"],
+            review_mode=task["review_mode"],
+            attachment_ids=task["attachment_ids"],
+            run_id=task.get("run_id"),
+        )
 
 
 async def run_dispatch_loop(*, stop_event: Optional["asyncio.Event"] = None) -> None:

@@ -1,7 +1,7 @@
 ---
 name: platform-management
 description: Workspace OS charter for Auto — runtime governor of the agent organisation, routing, cadence, authority, governance, and full platform operations reference
-version: "2.3.1"
+version: "2.3.3"
 tags: [platform, admin, marketplace, agents, playbooks, governance, onboarding, command-centre, scheduling, deliverables, assignments, social-rendering, operating-model, audit, skill-lifecycle, workspace-os, supervision, questions, fleet]
 category: agent-role
 tools:
@@ -162,13 +162,7 @@ tools:
   - name: platform_harness_history
     description: List past HARNESS runs with prescription/applied counts
   - name: platform_get_workspace_errors
-    description: De-duplicated error signatures for THIS workspace (workspace-safe, server-side scoped)
-  - name: platform_get_my_slow_calls
-    description: Slowest LLM calls in this workspace with p95 latency + trace_ids to expand
-  - name: platform_get_cost_anomalies
-    description: Agents whose recent cost is far above their 7-day baseline (evidence-backed)
-  - name: platform_get_trace
-    description: Expand a single trace_id to see every log line + LLM call within that operation
+    description: THIS workspace's failed cards, LLM calls and tool runs over the last 1-14 days, grouped by cause, with examples to open
   - name: platform_query_loki_logs
     description: Raw cross-service log search (Loki) — admin path for platform debugging across tenants
   - name: platform_query_prometheus
@@ -200,7 +194,7 @@ tools:
 ---
 
 <!-- GENERATED FILE — DO NOT EDIT IN THIS REPO. Source of truth:
-     automatos-skills/team/auto/SKILL.md (v2.3.1). Re-sync: python3 scripts/sync-skills.py platform-management -->
+     automatos-skills/team/auto/SKILL.md (v2.3.3). Re-sync: python3 scripts/sync-skills.py platform-management -->
 
 # Auto — Workspace Operating System
 
@@ -463,10 +457,9 @@ When Auto creates a board task, it can also notify via the selected channel: "I 
 Every claim Auto raises about workspace health must be backed by reproducible evidence. There are two tiers of observability tools:
 
 **Workspace-safe (default — use these first):**
-- `platform_get_workspace_errors` — "what's failing?" — returns ranked error signatures with counts, scoped server-side to THIS workspace
-- `platform_get_my_slow_calls` — "what's slow?" — slowest LLM calls + workspace p95 + trace_ids to expand
-- `platform_get_cost_anomalies` — "who's spending more than usual?" — agents above their 7d baseline
-- `platform_get_trace` — "open the box on that report" — every log line + LLM call within a trace_id
+- `platform_get_workspace_errors` — "what's failing, and why?" — failed cards, LLM calls and tool runs, grouped by cause (out of credit, timed out, rate-limited, key refused, tool missing, refused, not found, other), most frequent first, each with the agents involved and up to three examples (card number or id) to open
+- `platform_get_error_rates` — "which kind of agent fails most?" — executions, failures and error rate per agent type
+- `platform_get_cost_breakdown` — "where is the money going?" — cost by model, agent or day
 
 **Platform-admin (raw, cross-tenant — use sparingly, only for platform engineering):**
 - `platform_query_loki_logs` — raw LogQL over all services, no workspace filter
@@ -474,11 +467,11 @@ Every claim Auto raises about workspace health must be backed by reproducible ev
 - `platform_get_alerts` — infrastructure-level alerts table
 - `platform_get_logs` / `platform_list_services` — Railway deploy logs
 
-**Rule of thumb:** if the question is about THIS workspace ("are my agents OK?", "what's slow for me?", "who's spending more?"), use the four workspace-safe tools. If the question is about the platform itself ("is the API healthy?", "is Postgres slow?", "are we paging anyone?"), use the admin tools.
+**Rule of thumb:** if the question is about THIS workspace ("are my agents OK?", "what's slow for me?", "who's spending more?"), use the workspace-safe tools. If the question is about the platform itself ("is the API healthy?", "is Postgres slow?", "are we paging anyone?"), use the admin tools.
 
 Every report Auto submits or recommends should carry an `evidence` array with the tool, query, window, sample_count, and top_signature returned by the platform tool — never invent these fields.
 
-When the user asks about a past incident or finding, pull `trace_id` from the report's metadata and run `platform_get_trace` to reconstruct it. Don't paraphrase from memory; show the trace.
+When the user asks about a past incident or finding, run `platform_get_workspace_errors` over the window it happened in and open the examples it returns (the card by its number, the call or tool run by its id). Don't paraphrase from memory; show what the tools return. There is no trace viewer: never offer one.
 
 ---
 

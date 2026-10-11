@@ -11,7 +11,7 @@ Provides REST APIs for the Community Marketplace feature including:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -48,6 +48,27 @@ def assert_admin(ctx: RequestContext) -> None:
     """Raise 403 if the current user is not an admin."""
     if not is_admin(ctx):
         raise HTTPException(status_code=403, detail="Admin access required")
+
+
+# Marketplace items come from two tables with separate id sequences, so an id
+# alone is ambiguous: every /items/{item_id} route takes the item's type too.
+# The wire value for a playbook is 'recipe' — the same value list_items emits.
+MarketplaceItemType = Literal["agent", "recipe"]
+_ITEM_MODELS = {"agent": Agent, "recipe": WorkflowRecipe}
+_ITEM_LABELS = {"agent": "Agent", "recipe": "Playbook"}
+_ITEM_TYPE_QUERY = Query(..., description="The item's type, as list_items returns it: agent or recipe")
+
+
+def _find_marketplace_item(db: Session, item_type: str, item_id: int, approved_only: bool = False):
+    """The marketplace agent or playbook with this id, or a 404."""
+    model = _ITEM_MODELS[item_type]
+    query = db.query(model).filter(model.id == item_id, model.owner_type == 'marketplace')
+    if approved_only:
+        query = query.filter(model.is_approved == True)  # noqa: E712 — SQLAlchemy column comparison
+    item = query.first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Marketplace item not found")
+    return item
 
 
 # ===================================================================
@@ -320,40 +341,24 @@ async def list_items(
 @router.get("/items/{item_id}", response_model=MarketplaceItemDetail)
 async def get_item(
     item_id: int,
+    type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """
-    Get detailed information about a marketplace item (agent or recipe)
+    Get detailed information about a marketplace item (agent or playbook)
     including dependencies.
     """
     try:
-        # Try to find as agent first
-        agent = db.query(Agent).filter(
-            Agent.id == item_id,
-            Agent.owner_type == 'marketplace',
-            Agent.is_approved == True
-        ).first()
-
-        if agent:
-            return _build_agent_detail(agent, db)
-
-        # Try to find as recipe
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.id == item_id,
-            WorkflowRecipe.owner_type == 'marketplace',
-            WorkflowRecipe.is_approved == True
-        ).first()
-
-        if recipe:
-            return _build_recipe_detail(recipe, db)
-
-        raise HTTPException(status_code=404, detail="Marketplace item not found")
+        item = _find_marketplace_item(db, type, item_id, approved_only=True)
+        if type == "agent":
+            return _build_agent_detail(item, db)
+        return _build_recipe_detail(item, db)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching marketplace item {item_id}: {str(e)}")
+        logger.error("Error fetching marketplace %s %s: %s", type, item_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -825,39 +830,30 @@ async def submit_item(
 @router.post("/items/{item_id}/approve")
 async def approve_marketplace_item(
     item_id: int,
+    type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """
-    Approve a pending marketplace item. Admin only.
+    Approve a pending marketplace agent or playbook. Admin only.
     """
     assert_admin(ctx)
     try:
-        # Get the marketplace agent
-        marketplace_agent = db.query(Agent).filter(
-            Agent.id == item_id,
-            Agent.owner_type == 'marketplace'
-        ).first()
-
-        if not marketplace_agent:
-            raise HTTPException(status_code=404, detail="Marketplace item not found")
-
-        # Approve it
-        marketplace_agent.is_approved = True
+        item = _find_marketplace_item(db, type, item_id)
+        item.is_approved = True
         db.commit()
 
-        logger.info(f"Marketplace agent approved - ID: {marketplace_agent.id}, Name: {marketplace_agent.name}")
-
+        logger.info("Marketplace %s approved - ID: %s, Name: %s", type, item.id, item.name)
         return {
             "success": True,
-            "message": f"Agent '{marketplace_agent.name}' approved and published to marketplace",
-            "item_id": marketplace_agent.id
+            "message": f"{_ITEM_LABELS[type]} '{item.name}' approved and published to marketplace",
+            "item_id": item.id,
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error approving marketplace item: {str(e)}")
+        logger.error("Error approving marketplace %s %s: %s", type, item_id, e, exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -869,44 +865,25 @@ async def approve_marketplace_item(
 @router.post("/items/{item_id}/toggle-featured")
 async def toggle_featured(
     item_id: int,
+    type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """
-    Toggle the is_featured flag on a marketplace item. Admin only.
+    Toggle the is_featured flag on a marketplace agent or playbook. Admin only.
     """
     assert_admin(ctx)
     try:
-        # Try agent first
-        agent = db.query(Agent).filter(
-            Agent.id == item_id,
-            Agent.owner_type == 'marketplace'
-        ).first()
-
-        if agent:
-            agent.is_featured = not agent.is_featured
-            db.commit()
-            logger.info("Toggled featured for marketplace agent %s → %s", item_id, agent.is_featured)
-            return {"success": True, "is_featured": agent.is_featured, "item_id": item_id}
-
-        # Try recipe
-        recipe = db.query(WorkflowRecipe).filter(
-            WorkflowRecipe.id == item_id,
-            WorkflowRecipe.owner_type == 'marketplace'
-        ).first()
-
-        if recipe:
-            recipe.is_featured = not recipe.is_featured
-            db.commit()
-            logger.info("Toggled featured for marketplace recipe %s → %s", item_id, recipe.is_featured)
-            return {"success": True, "is_featured": recipe.is_featured, "item_id": item_id}
-
-        raise HTTPException(status_code=404, detail="Marketplace item not found")
+        item = _find_marketplace_item(db, type, item_id)
+        item.is_featured = not item.is_featured
+        db.commit()
+        logger.info("Toggled featured for marketplace %s %s → %s", type, item_id, item.is_featured)
+        return {"success": True, "is_featured": item.is_featured, "item_id": item_id}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error toggling featured for item %s: %s", item_id, e)
+        logger.error("Error toggling featured for %s %s: %s", type, item_id, e, exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -918,38 +895,30 @@ async def toggle_featured(
 @router.delete("/items/{item_id}")
 async def delete_marketplace_item(
     item_id: int,
+    type: MarketplaceItemType = _ITEM_TYPE_QUERY,
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
     """
-    Delete a marketplace item. Admin only.
+    Delete a marketplace agent or playbook. Admin only.
     """
     assert_admin(ctx)
     try:
-        # Get the marketplace agent
-        marketplace_agent = db.query(Agent).filter(
-            Agent.id == item_id,
-            Agent.owner_type == 'marketplace'
-        ).first()
-
-        if not marketplace_agent:
-            raise HTTPException(status_code=404, detail="Marketplace item not found")
-
-        # Delete it
-        db.delete(marketplace_agent)
+        item = _find_marketplace_item(db, type, item_id)
+        name = item.name
+        db.delete(item)
         db.commit()
 
-        logger.info(f"Marketplace agent deleted - ID: {marketplace_agent.id}, Name: {marketplace_agent.name}")
-
+        logger.info("Marketplace %s deleted - ID: %s, Name: %s", type, item_id, name)
         return {
             "success": True,
-            "message": f"Agent '{marketplace_agent.name}' removed from marketplace"
+            "message": f"{_ITEM_LABELS[type]} '{name}' removed from marketplace",
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting marketplace item: {str(e)}")
+        logger.error("Error deleting marketplace %s %s: %s", type, item_id, e, exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 

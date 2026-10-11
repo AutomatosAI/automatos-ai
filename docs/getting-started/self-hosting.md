@@ -191,6 +191,9 @@ docker builder prune -f
 docker compose ps
 docker system df
 
+# make logs: follow the logs; make logs s=backend for one service ($(s) is that name, or nothing for all)
+docker compose logs -f --tail=200 $(s)
+
 # make reset: DESTRUCTIVE, deletes the database and every named volume.
 # make asks you to type 'reset' first; this command does not ask.
 docker compose down -v --remove-orphans
@@ -780,9 +783,10 @@ two together.
 missing or empty. `.env` must sit next to `docker-compose.yml`; a value of
 nothing counts as unset.
 
-**Logs.** `docker compose logs -f backend` (boot steps, migrations, seeds),
-`docker compose logs -f workspace-worker`, `docker compose logs -f frontend`.
-`docker compose ps` shows health.
+**Logs.** `make logs` follows the whole stack (`make logs s=backend` for one
+service). The same with plain compose: `docker compose logs -f backend` (boot
+steps, migrations, seeds), `docker compose logs -f workspace-worker`,
+`docker compose logs -f frontend`. `docker compose ps` shows health.
 
 **Windows: `exec ...entrypoint.sh: no such file or directory`.** The script
 may have CRLF line endings, making Linux read the shebang as `/bin/bash\r`.

@@ -33,8 +33,6 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
   const [installingPlaybookId, setInstallingRecipeId] = useState<number | null>(null)
   const [selectedPlaybook, setSelectedRecipe] = useState<any>(null)
   const [showViewModal, setShowViewModal] = useState(false)
-  const [approvingId, setApprovingId] = useState<number | null>(null)
-  const [deletingId, setDeletingId] = useState<number | null>(null)
   const queryClient = useQueryClient()
   const installMutation = useInstallPlaybookFromMarketplace()
   const { data: iconMappings = {} } = useSystemIcons()
@@ -44,35 +42,6 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
   // same gate the admin routes enforce. The local operator is super_admin, so a
   // fresh local install sees Import from GitHub; a Clerk email domain never did.
   const { isAdmin } = useSystemRole()
-
-  const handleApprove = async (e: React.MouseEvent, recipeId: number) => {
-    e.stopPropagation()
-    setApprovingId(recipeId)
-    try {
-      await apiClient.post(`/api/marketplace/items/${recipeId}/approve`)
-      toast('Playbook approved and published to marketplace!')
-      queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
-    } catch (error: any) {
-      toast.error('Failed to approve recipe', { description: error?.message || 'An error occurred' })
-    } finally {
-      setApprovingId(null)
-    }
-  }
-
-  const handleDeletePlaybook = async (e: React.MouseEvent, recipeId: number) => {
-    e.stopPropagation()
-    if (!confirm('Are you sure you want to delete this marketplace recipe?')) return
-    setDeletingId(recipeId)
-    try {
-      await apiClient.delete(`/api/marketplace/items/${recipeId}`)
-      toast('Playbook removed from marketplace')
-      queryClient.invalidateQueries({ queryKey: ['marketplacePlaybooks'] })
-    } catch (error: any) {
-      toast.error('Failed to delete recipe', { description: error?.message || 'An error occurred' })
-    } finally {
-      setDeletingId(null)
-    }
-  }
 
   const { data: recipes = [], isLoading } = useQuery({
     queryKey: ['marketplacePlaybooks', selectedType, searchQuery],

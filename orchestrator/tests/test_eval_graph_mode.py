@@ -134,6 +134,18 @@ def teardown_module(module):
             sys.modules.pop(_k, None)
         else:
             sys.modules[_k] = _prior
+    # A lazy import of a stub binds it on the real parent package too
+    # (``modules.tools.discovery.graph_router``); left there, a later test's
+    # monkeypatch of that dotted path patches the stub, not the module in use.
+    for _name, _mod in _STUB_SUBMODULES.items():
+        _parent, _, _attr = _name.rpartition(".")
+        _pkg = sys.modules.get(_parent)
+        if _pkg is not None and getattr(_pkg, _attr, None) is _mod:
+            _prior = _saved_eval_modules.get(_name)
+            if _prior is None:
+                delattr(_pkg, _attr)
+            else:
+                setattr(_pkg, _attr, _prior)
 
 
 # Import prompt_builder (top-level imports are stdlib-only; the

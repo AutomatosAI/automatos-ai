@@ -9,7 +9,7 @@ Two-stage security scanning for marketplace plugins:
 
 import re
 import logging
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -297,6 +297,55 @@ IMPORTANT: Be thorough but fair. Not every import or function call is malicious.
 # LLM scan implementation
 # ---------------------------------------------------------------------------
 
+def _scan_files_text(plugin_files: Dict[str, str]) -> str:
+    """Every plugin file, labelled, as one block of prompt text."""
+    return "\n\n".join(f"--- FILE: {path} ---\n{content}" for path, content in plugin_files.items())
+
+
+def _strip_code_fence(text: str) -> str:
+    """The reply without a surrounding markdown code fence (```json … ```)."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned[cleaned.index("\n") + 1:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    return cleaned.strip()
+
+
+def _scan_result_from_response(response: Any, model: str) -> LLMScanResult:
+    """The scan verdict from Claude's reply; a reply that isn't JSON raises ``JSONDecodeError``."""
+    import json as _json
+
+    response_text = "".join(block.text for block in response.content if block.type == "text")
+    tokens_used = response.usage.input_tokens + response.usage.output_tokens
+    parsed = _json.loads(_strip_code_fence(response_text))
+
+    risk_score = int(parsed.get("risk_score", 0))
+    findings = [
+        LLMFinding(
+            category=f.get("category", "unknown"),
+            severity=f.get("severity", "medium"),
+            description=f.get("description", ""),
+            file=f.get("file", ""),
+            evidence=f.get("evidence", ""),
+        )
+        for f in parsed.get("findings", [])
+    ]
+    status = "passed" if risk_score < 20 else "flagged"
+    logger.info(
+        "LLM scan complete: status=%s, risk_score=%d, findings=%d, tokens=%d",
+        status, risk_score, len(findings), tokens_used,
+    )
+    return LLMScanResult(
+        status=status,
+        risk_score=risk_score,
+        findings=findings,
+        summary=parsed.get("summary", ""),
+        model_used=model,
+        tokens_used=tokens_used,
+    )
+
+
 async def llm_security_scan(
     plugin_files: Dict[str, str],
     model: str = None,
@@ -316,131 +365,47 @@ async def llm_security_scan(
     import asyncio
     import json as _json
 
+    from config import config
+    from core.llm.anthropic_workspace import workspace_for_key, workspace_headers
+
     if model is None:
-        from config import config
         model = config.PLUGIN_LLM_SCAN_MODEL
 
     try:
         import anthropic
     except ImportError:
         logger.error("anthropic package not installed — cannot run LLM scan")
-        return LLMScanResult(
-            status="failed",
-            summary="anthropic package not installed",
-            model_used=model,
-        )
+        return LLMScanResult(status="failed", summary="anthropic package not installed", model_used=model)
 
-    # Build concatenated file content for the prompt
-    file_sections: List[str] = []
-    for path, content in plugin_files.items():
-        file_sections.append(f"--- FILE: {path} ---\n{content}")
-    all_files_text = "\n\n".join(file_sections)
-
-    # Get API key from config
-    from config import config
     api_key = config.ANTHROPIC_API_KEY
-
     if not api_key:
         logger.error("ANTHROPIC_API_KEY not configured — cannot run LLM scan")
-        return LLMScanResult(
-            status="failed",
-            summary="ANTHROPIC_API_KEY not configured",
-            model_used=model,
-        )
+        return LLMScanResult(status="failed", summary="ANTHROPIC_API_KEY not configured", model_used=model)
 
-    client = anthropic.Anthropic(api_key=api_key)
+    # An organization-level key names the workspace it bills (9 Oct 2026).
+    client = anthropic.Anthropic(api_key=api_key, default_headers=workspace_headers(workspace_for_key(api_key)))
+    user_text = f"Analyze the following plugin files for security issues:\n\n{_scan_files_text(plugin_files)}"
+
+    def _call():
+        return client.messages.create(
+            model=model,
+            max_tokens=2048,
+            temperature=0.0,
+            system=LLM_SECURITY_SCAN_PROMPT,
+            messages=[{"role": "user", "content": user_text}],
+        )
 
     try:
-        loop = asyncio.get_running_loop()
-
-        def _call():
-            return client.messages.create(
-                model=model,
-                max_tokens=2048,
-                temperature=0.0,
-                system=LLM_SECURITY_SCAN_PROMPT,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Analyze the following plugin files for security issues:\n\n{all_files_text}",
-                    }
-                ],
-            )
-
-        response = await loop.run_in_executor(None, _call)
-
-        # Extract text content from response
-        response_text = ""
-        for block in response.content:
-            if block.type == "text":
-                response_text += block.text
-
-        tokens_used = response.usage.input_tokens + response.usage.output_tokens
-
-        # Parse JSON from response
-        # Strip markdown code fences if present
-        cleaned = response_text.strip()
-        if cleaned.startswith("```"):
-            # Remove opening fence (```json or ```)
-            first_newline = cleaned.index("\n")
-            cleaned = cleaned[first_newline + 1:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        parsed = _json.loads(cleaned)
-
-        risk_score = int(parsed.get("risk_score", 0))
-        raw_findings = parsed.get("findings", [])
-        summary = parsed.get("summary", "")
-
-        findings: List[LLMFinding] = []
-        for f in raw_findings:
-            findings.append(
-                LLMFinding(
-                    category=f.get("category", "unknown"),
-                    severity=f.get("severity", "medium"),
-                    description=f.get("description", ""),
-                    file=f.get("file", ""),
-                    evidence=f.get("evidence", ""),
-                )
-            )
-
-        status = "passed" if risk_score < 20 else "flagged"
-
-        logger.info(
-            "LLM scan complete: status=%s, risk_score=%d, findings=%d, tokens=%d",
-            status,
-            risk_score,
-            len(findings),
-            tokens_used,
-        )
-
-        return LLMScanResult(
-            status=status,
-            risk_score=risk_score,
-            findings=findings,
-            summary=summary,
-            model_used=model,
-            tokens_used=tokens_used,
-        )
-
+        response = await asyncio.get_running_loop().run_in_executor(None, _call)
+        return _scan_result_from_response(response, model)
     except _json.JSONDecodeError as e:
         logger.error("Failed to parse LLM scan response as JSON: %s", e)
         return LLMScanResult(
-            status="failed",
-            summary=f"Failed to parse LLM response: {e}",
-            model_used=model,
-            tokens_used=0,
+            status="failed", summary=f"Failed to parse LLM response: {e}", model_used=model, tokens_used=0,
         )
     except Exception as e:
-        logger.error("LLM security scan failed: %s", e)
-        return LLMScanResult(
-            status="failed",
-            summary=f"LLM scan error: {e}",
-            model_used=model,
-            tokens_used=0,
-        )
+        logger.exception("LLM security scan failed")
+        return LLMScanResult(status="failed", summary=f"LLM scan error: {e}", model_used=model, tokens_used=0)
 
 
 # ---------------------------------------------------------------------------

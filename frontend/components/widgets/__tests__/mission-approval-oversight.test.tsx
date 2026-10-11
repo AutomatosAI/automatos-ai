@@ -15,7 +15,8 @@ vi.mock('@/hooks/use-missions-api', () => ({
   useUpdateMissionPlan: () => ({ isLoading: false, mutateAsync: vi.fn() }),
 }))
 
-import { MissionApprovalWidget, oversightTierLabel } from '../MissionApprovalWidget'
+import { MissionApprovalWidget } from '../MissionApprovalWidget'
+import { oversightTierLabel } from '../oversight-note'
 import type { MissionApprovalWidgetData, WidgetMetadata } from '../types'
 
 const metadata: WidgetMetadata = {

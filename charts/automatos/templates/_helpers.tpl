@@ -68,6 +68,17 @@ before any of the release's ordinary resources exist.
 {{- end }}
 - name: WORKSPACE_VOLUME_PATH
   value: /workspaces
+{{- if .Values.sessionMode.enabled }}
+{{- if ne .Values.edition.authEdition "local" }}
+{{- fail "sessionMode.enabled needs edition.authEdition=local: session mode runs the operator's own CLI sessions, and the hosted edition refuses it" }}
+{{- end }}
+- name: CLI_RUNTIME_ENABLED
+  value: "true"
+- name: CLI_SESSION_FILE_UPLOAD
+  value: "true"
+- name: CLI_SESSION_UPLOAD_MAX_TOTAL_MB
+  value: {{ .Values.sessionMode.uploadMaxTotalMb | toString | quote }}
+{{- end }}
 {{- if .Values.worker.enabled }}
 - name: WORKER_INTERNAL_URL
   value: {{ printf "http://%s-worker:8081" (include "automatos.fullname" .) | quote }}
@@ -89,4 +100,44 @@ before any of the release's ordinary resources exist.
       name: {{ $secret }}
       key: WORKER_INTERNAL_TOKEN
       optional: true
+{{- end }}
+
+{{/*
+OpenTelemetry (PRD-256) for one component: (dict "ctx" $ "service" "automatos-api").
+Nothing when otel.enabled is false.
+*/}}
+{{- define "automatos.otelEnv" -}}
+{{- $ctx := .ctx -}}
+{{- with $ctx.Values.otel }}
+{{- if .enabled }}
+- name: OTEL_ENABLED
+  value: "true"
+- name: OTEL_SERVICE_NAME
+  value: {{ $.service | quote }}
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: {{ required "otel.endpoint is required when otel.enabled is true: the OTLP/HTTP address of your collector" .endpoint | quote }}
+- name: OTEL_TRACES_SAMPLER_RATIO
+  value: {{ .samplerRatio | toString | quote }}
+- name: OTEL_EXPORTER_OTLP_HEADERS
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "automatos.secretName" $ctx }}
+      key: OTEL_EXPORTER_OTLP_HEADERS
+      optional: true
+- name: OTEL_POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: OTEL_POD_NAMESPACE
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.namespace
+{{- $extra := "" }}
+{{- if .resourceAttributes }}
+{{- $extra = printf ",%s" .resourceAttributes }}
+{{- end }}
+- name: OTEL_RESOURCE_ATTRIBUTES
+  value: {{ printf "k8s.pod.name=$(OTEL_POD_NAME),k8s.namespace.name=$(OTEL_POD_NAMESPACE)%s" $extra | quote }}
+{{- end }}
+{{- end }}
 {{- end }}

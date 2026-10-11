@@ -588,7 +588,8 @@ def test_minio_serves_the_public_buckets_copy(minio, db, monkeypatch):
 
 
 def _orchestrator_steps() -> list:
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["orchestrator-tests"]["steps"]
+    """The steps of the job that runs the test net: since 8 Oct, each of its shards."""
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["orchestrator-tests-shard"]["steps"]
 
 
 def test_ci_starts_a_pinned_minio_before_the_test_net_and_hands_the_tests_its_endpoint():

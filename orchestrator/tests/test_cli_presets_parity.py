@@ -142,7 +142,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
         f"the claim no longer carries {sorted(SESSION_BRIDGE_CLAIM_KEYS - claim_keys)}"
     )
     assert (svc.EXPECTED_CLI_HOST_VERSION, sorted(claim_keys)) == (
-        "0.13.0",
+        "0.14.0",
         sorted(_EXPECTED_CLAIM_KEYS),
     ), (
         "the claim payload's shape changed — bump EXPECTED_CLI_HOST_VERSION and the host's "
@@ -150,7 +150,7 @@ def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
     )
 
 
-# The claim payload as of host contract 0.13.0 (0.11.0 moved no claim key: Copilot is a new CLI;
+# The claim payload as of host contract 0.14.0 (0.11.0 moved no claim key: Copilot is a new CLI;
 # 0.13.0 none either: brand_files may carry the logo variants).
 _EXPECTED_CLAIM_KEYS = {
     "task_id", "workspace_id", "title", "prompt", "attachment_ids", "review_mode",
@@ -165,6 +165,8 @@ _EXPECTED_CLAIM_KEYS = {
     "plan_approved",
     # the brand kit's logo files, written into the ticket folder (0.12.0, F332)
     "brand_files",
+    # whether to upload the deliverables folder, and the limits: no shared folder (0.14.0, #848)
+    "upload",
 }
 
 BACKEND_SERVICE = _ORCH / "services" / "cli_host_service.py"

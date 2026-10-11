@@ -33,7 +33,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { endpointPlaceholder, keyPlaceholder, providerNotes, useProviderRegistry } from '@/hooks/use-provider-registry'
+import {
+  endpointPlaceholder,
+  keyPlaceholder,
+  providerNotes,
+  useProviderRegistry,
+  workspaceIdPlaceholder,
+} from '@/hooks/use-provider-registry'
 import type { AddKeyPayload, ApiKeyOut, ProviderOption } from './api-keys-types'
 
 interface AddApiKeyDialogProps {
@@ -49,14 +55,17 @@ export function AddApiKeyDialog({ providers }: AddApiKeyDialogProps) {
   const [apiKey, setApiKey] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [endpoint, setEndpoint] = useState('')
+  const [workspaceId, setWorkspaceId] = useState('')
   const selectedNotes = providerNotes(registry, provider)
   const endpointHint = endpointPlaceholder(registry, provider)
+  const workspaceHint = workspaceIdPlaceholder(registry, provider)
 
   function resetForm() {
     setProvider('')
     setApiKey('')
     setDisplayName('')
     setEndpoint('')
+    setWorkspaceId('')
   }
 
   const addKeyMutation = useMutation({
@@ -86,7 +95,8 @@ export function AddApiKeyDialog({ providers }: AddApiKeyDialogProps) {
       return
     }
     const base_url = endpointHint && endpoint.trim() ? endpoint.trim() : undefined
-    addKeyMutation.mutate({ provider, api_key: apiKey, display_name: displayName, base_url })
+    const workspace_id = workspaceHint && workspaceId.trim() ? workspaceId.trim() : undefined
+    addKeyMutation.mutate({ provider, api_key: apiKey, display_name: displayName, base_url, workspace_id })
   }
 
   return (
@@ -151,19 +161,14 @@ export function AddApiKeyDialog({ providers }: AddApiKeyDialogProps) {
               )}
             </div>
 
-            {endpointHint && (
-              <div className="space-y-2">
-                <Label htmlFor="endpoint">Endpoint</Label>
-                <Input
-                  id="endpoint"
-                  type="url"
-                  placeholder={endpointHint}
-                  value={endpoint}
-                  onChange={(e) => setEndpoint(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-            )}
+            <ProviderKeyFields
+              endpointHint={endpointHint}
+              endpoint={endpoint}
+              onEndpointChange={setEndpoint}
+              workspaceHint={workspaceHint}
+              workspaceId={workspaceId}
+              onWorkspaceIdChange={setWorkspaceId}
+            />
 
             <div className="space-y-2">
               <Label htmlFor="display-name">Display Name</Label>
@@ -191,5 +196,47 @@ export function AddApiKeyDialog({ providers }: AddApiKeyDialogProps) {
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+interface ProviderKeyFieldsProps {
+  endpointHint: string | null
+  endpoint: string
+  onEndpointChange: (value: string) => void
+  workspaceHint: string | null
+  workspaceId: string
+  onWorkspaceIdChange: (value: string) => void
+}
+
+/** The fields only some providers' keys carry: Azure's endpoint (#873), an Anthropic workspace (9 Oct 2026). */
+function ProviderKeyFields(props: ProviderKeyFieldsProps) {
+  return (
+    <>
+      {props.endpointHint && (
+        <div className="space-y-2">
+          <Label htmlFor="endpoint">Endpoint</Label>
+          <Input
+            id="endpoint"
+            type="url"
+            placeholder={props.endpointHint}
+            value={props.endpoint}
+            onChange={(e) => props.onEndpointChange(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+      )}
+      {props.workspaceHint && (
+        <div className="space-y-2">
+          <Label htmlFor="workspace-id">Workspace ID</Label>
+          <Input
+            id="workspace-id"
+            placeholder={props.workspaceHint}
+            value={props.workspaceId}
+            onChange={(e) => props.onWorkspaceIdChange(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+      )}
+    </>
   )
 }

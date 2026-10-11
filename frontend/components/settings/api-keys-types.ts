@@ -33,6 +33,8 @@ export interface AddKeyPayload {
   display_name: string
   /** The key's own endpoint, for providers that take one (Azure, #873). */
   base_url?: string
+  /** The workspace an organization-level Anthropic key bills (wrkspc_…). */
+  workspace_id?: string
 }
 
 /** Mirrors `ApiKeyTestResult` returned by `POST /api/keys/{id}/test`. */

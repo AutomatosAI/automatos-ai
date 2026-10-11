@@ -16,6 +16,10 @@
 # Needs: docker, kind, kubectl, helm, curl, openssl, python3.
 # Env:   E2E_SKIP_BUILD=1  reuse an existing automatos-api:e2e image
 #        E2E_IMAGE_TAG     published frontend/worker tag (default: edge)
+#        E2E_INGRESS=1     install ingress-nginx and send the session-mode checks
+#                          through the chart's Ingress (session-mode.sh)
+# OpenTelemetry (otel.sh): a collector on the reference config receives the API's
+# and the worker's spans; the checks read them from its log.
 # Not for CI merge gates: it needs Docker and several GB of images.
 # =============================================================================
 set -euo pipefail
@@ -30,7 +34,7 @@ TAG="${E2E_IMAGE_TAG:-edge}"
 API_IMAGE=automatos-api:e2e
 FRONTEND_IMAGE="ghcr.io/automatosai/automatos-frontend:$TAG"
 WORKER_IMAGE="ghcr.io/automatosai/automatos-workspace-worker:$TAG"
-DATASTORE_IMAGES=(pgvector/pgvector:pg16 redis:7-alpine)
+DATASTORE_IMAGES=(pgvector/pgvector:pg16 redis:7-alpine otel/opentelemetry-collector-contrib:0.161.0)
 WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 API_PORT=18000
 FRONTEND_PORT=13000
@@ -38,6 +42,11 @@ FAILURES=0
 FORWARDS=()
 
 log() { printf '\n==> %s\n' "$*"; }
+
+# shellcheck source=deploy/kind/session-mode.sh
+. "$ROOT/deploy/kind/session-mode.sh"
+# shellcheck source=deploy/kind/otel.sh
+. "$ROOT/deploy/kind/otel.sh"
 
 cleanup_forwards() {
     for pid in "${FORWARDS[@]:-}"; do
@@ -72,7 +81,12 @@ prepare_images() {
         log "Building $API_IMAGE from this checkout"
         docker build --target production --build-arg INSTALL_GRAPH_EXTRAS=false -t "$API_IMAGE" "$ROOT/orchestrator"
     fi
-    for image in "$FRONTEND_IMAGE" "$WORKER_IMAGE" "${DATASTORE_IMAGES[@]}"; do
+    # The web app and worker tags move (edge): pull them every run, or a cached
+    # image older than the API under test answers with yesterday's contract.
+    for image in "$FRONTEND_IMAGE" "$WORKER_IMAGE"; do
+        docker pull -q "$image"
+    done
+    for image in "${DATASTORE_IMAGES[@]}"; do
         docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image"
     done
     log "Loading images into the cluster"
@@ -110,14 +124,16 @@ create_secrets() {
     kubectl -n "$NS" apply -f "$ROOT/deploy/kind/datastores.yaml" >/dev/null
     kubectl -n "$NS" rollout status deploy/postgres --timeout=180s
     kubectl -n "$NS" rollout status deploy/redis --timeout=120s
+    install_otel_collector
 }
 
 helm_release() {
-    local action="$1"
+    local action="$1" extra=()
+    ingress_on && extra=(--set ingress.enabled=true --set ingress.className=nginx)
     log "helm $action (the migration hook runs first)"
     if ! helm "$action" "$RELEASE" "$ROOT/charts/automatos" -n "$NS" \
         -f "$ROOT/deploy/kind/values.yaml" \
-        --set frontend.image.tag="$TAG" --set worker.image.tag="$TAG" \
+        --set frontend.image.tag="$TAG" --set worker.image.tag="$TAG" ${extra[@]+"${extra[@]}"} \
         --wait --timeout 20m; then
         dump_diagnostics
         return 1
@@ -175,12 +191,15 @@ run_checks() {
         "! kubectl -n $NS exec deploy/$RELEASE-api -- sh -c 'echo x > /workspaces/.api-probe' 2>/dev/null"
     check "API pods did not run migrations" sh -c \
         "! kubectl -n $NS logs deploy/$RELEASE-api | grep -q 'alembic.runtime.migration'"
+    run_session_mode_checks
+    run_otel_checks
     cleanup_forwards
 }
 
 cmd_up() {
     create_cluster
     prepare_images
+    install_ingress_controller
     create_secrets
     helm_release install
 }
