@@ -45,7 +45,7 @@ export function ApproveAndPostNow({ post, disabled }: { post: SocialPost; disabl
   return (
     <div role="alertdialog" aria-label={POST_NOW_LABEL} className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
       <span className="text-sm text-foreground">{postNowQuestion(post)}</span>
-      <Button size="sm" onClick={postNow} disabled={busy}>Post now</Button>
+      <Button size="sm" onClick={postNow} disabled={busy || disabled}>Post now</Button>
       <Button size="sm" variant="ghost" onClick={() => setAsking(false)} disabled={busy}>Cancel</Button>
     </div>
   )
