@@ -34,6 +34,10 @@ actions:
     source: example
   - text: open the page the search found and summarise it
     source: example
+  - text: read the brand colours, fonts and logo from https://example.com
+    source: example
+  - text: pull our brand colours and fonts off our website
+    source: authored
   - text: fetch this url and tell me what it says https://example.com/pricing
     source: authored
   - text: read the README at that github link and summarise it

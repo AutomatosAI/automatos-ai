@@ -13,7 +13,11 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_web_actions(registry: ActionRegistry) -> None:
     """Register platform_web_fetch + platform_web_search (PRD-240 S2/S3)."""
+    _register_web_fetch(registry)
+    _register_web_search(registry)
 
+
+def _register_web_fetch(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_web_fetch",
         description=(
@@ -23,7 +27,12 @@ def register_web_actions(registry: ActionRegistry) -> None:
             "documentation, articles and READMEs. Private and internal addresses "
             "are refused. Returns {url, final_url, title, content, truncated}; when "
             "web access is switched off on this server it returns "
-            "{available:false, reason} — say so, never retry."
+            "{available:false, reason} — say so, never retry. "
+            "To read a business's brand from its website, pass brand: true on its home "
+            "page: the answer adds `brand`, what the page and its stylesheets show "
+            "(colours with their contrast on white and black, fonts, logo and mark "
+            "file addresses, the names and lines the site gives itself, its social "
+            "profiles), each value with where on the site it was found."
         ),
         category="web",
         parameters={
@@ -37,18 +46,29 @@ def register_web_actions(registry: ActionRegistry) -> None:
                     "type": "integer",
                     "description": "Cap on returned text (default 20000, max 60000).",
                 },
+                "brand": {
+                    "type": "boolean",
+                    "description": (
+                        "Also return what the page shows of its brand (colours, fonts, "
+                        "logo, mark, name, tagline, social profiles), read from its HTML "
+                        "and stylesheets. For a site's home page."
+                    ),
+                },
             },
             "required": ["url"],
         },
         permission_level="read",
         requires_confirmation=False,
-        tags=["web", "research", "browse", "fetch", "read", "url"],
+        tags=["web", "research", "browse", "fetch", "read", "url", "brand", "website"],
         examples=[
             "read https://docs.python.org/3/whatsnew/3.13.html",
             "open the page the search found and summarise it",
+            "read the brand colours, fonts and logo from https://example.com",
         ],
     ))
 
+
+def _register_web_search(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_web_search",
         description=(
