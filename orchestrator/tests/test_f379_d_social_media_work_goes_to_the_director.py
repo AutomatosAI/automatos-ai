@@ -13,6 +13,9 @@ media person" resolves to the Director, never to NEWSROOM.
 @integration (the orchestrator-tests job's Postgres, one rolled-back transaction): the Director is
 the workspace's clone of the Socials package's agent, then the active agent of that name, and a
 paused one is no Director.
+
+PRD-256 US-011: the lane is the social media row of the hand-off table (``consumers.chatbot.handoffs``):
+socials_assign_lane is deleted, and these tests read the row, its role and its note through the table.
 """
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from consumers.chatbot import socials_assign_lane as lane  # noqa: E402
+from consumers.chatbot import handoffs as lane  # noqa: E402
 from consumers.chatbot.auto import Action, AutoBrain, apply_assign_bias  # noqa: E402
 
 WS = "00000000-0000-0000-0000-0000000379d1"
@@ -64,7 +67,7 @@ def director(monkeypatch):
 
 
 def test_the_ask_is_the_assign_lane_for_the_director_and_the_ticket_is_a_socials_post(director):
-    assessment = lane.director_assignment(object(), WS, "Draft an Instagram post for the October Harvest Club box.")
+    assessment, _ = _assessed(_Brain(), "Draft an Instagram post for the October Harvest Club box.")
 
     assert assessment.action == Action.ASSIGN and assessment.confidence == 1.0
     assert (assessment.target_agent_id, assessment.target_agent_name) == (348, "Social Media Director")
@@ -73,12 +76,12 @@ def test_the_ask_is_the_assign_lane_for_the_director_and_the_ticket_is_a_socials
     assert "file this as a board ticket" in directive and 'assigned_agent_name="Social Media Director"' in directive
 
 
-def test_the_directors_turn_gets_what_its_ticket_must_say_never_how_to_make_the_post():
-    from consumers.chatbot.socials_turn_note import socials_note
+def test_the_directors_turn_gets_what_its_ticket_must_say_never_how_to_make_the_post(director):
+    said = "Draft an Instagram post for the October Harvest Club box."
 
     async def turn():
-        lane._director.set("Social Media Director")
-        return socials_note(["Draft an Instagram post for the October Harvest Club box."], [])
+        await lane.hands_off(_tiers)(_Brain(), said)
+        return lane.turn_note(object(), WS, lane.the_turn([said]), no_template_named=False)
 
     note = asyncio.run(turn())
     assert note.startswith("The ticket is a Socials post. This is social media work, the Social Media Director's job.")
@@ -93,7 +96,8 @@ def test_the_directors_turn_gets_what_its_ticket_must_say_never_how_to_make_the_
 def test_an_ask_that_names_another_agent_stays_with_the_owners_choice(director, monkeypatch, said):
     monkeypatch.setattr(lane, "agent_names", lambda db, workspace_id: ["Social Media Director", "Jim", "NEWSROOM"])
     assert lane.names_another_agent(said, ["Social Media Director", "Jim", "NEWSROOM"], "Social Media Director")
-    assert lane.director_assignment(object(), WS, said) is None
+    assert lane.active_director(object(), WS, said) is None
+    assert _assessed(_Brain(), said) == ("the tiers", None)
 
 
 def test_naming_the_director_auto_or_a_word_inside_another_name_is_not_another_agent(director, monkeypatch):
@@ -102,12 +106,13 @@ def test_naming_the_director_auto_or_a_word_inside_another_name_is_not_another_a
     for said in ("Auto: get the Social Media Director to draft an Instagram post.",
                  "Draft an Instagram post about Jimmy's café, and a carousel for Al Forno."):
         assert not lane.names_another_agent(said, names, "Social Media Director"), said
-        assert lane.director_assignment(object(), WS, said).target_agent_id == 348
+        assert lane.active_director(object(), WS, said).id == 348
 
 
 def test_no_director_leaves_the_turn_to_the_tiers(monkeypatch):
     monkeypatch.setattr(lane, "find_social_media_director", lambda db, workspace_id: None)
-    assert lane.director_assignment(object(), WS, "Draft an Instagram post for Friday.") is None
+    assert lane.active_director(object(), WS, "Draft an Instagram post for Friday.") is None
+    assert _assessed(_Brain(), "Draft an Instagram post for Friday.") == ("the tiers", None)
 
 
 def test_a_director_that_cannot_be_read_leaves_the_turn_to_the_tiers(monkeypatch):
@@ -115,7 +120,7 @@ def test_a_director_that_cannot_be_read_leaves_the_turn_to_the_tiers(monkeypatch
         raise RuntimeError("database gone")
 
     monkeypatch.setattr(lane, "find_social_media_director", broken)
-    assert lane.director_assignment(object(), WS, "Draft an Instagram post for Friday.") is None
+    assert lane.active_director(object(), WS, "Draft an Instagram post for Friday.") is None
 
 
 class _Brain:
@@ -126,14 +131,16 @@ class _Brain:
         return self.onboarding
 
 
-def _assessed(brain, message):
-    """The wrapped assessment and the turn's mark, read inside the turn's own context."""
-    async def tiers(brain, message, conversation_length=0):
-        return "the tiers"
+async def _tiers(brain, message, conversation_length=0):
+    return "the tiers"
 
+
+def _assessed(brain, message):
+    """The wrapped assessment and the turn's mark (the agent the social media row pinned), read inside
+    the turn's own context."""
     async def turn():
-        result = await lane.social_work_goes_to_the_director(tiers)(brain, message)
-        return result, lane.director_turn()
+        result = await lane.hands_off(_tiers)(brain, message)
+        return result, lane.the_turn([message]).agent_for(lane.SOCIALS)
 
     return asyncio.run(turn())
 

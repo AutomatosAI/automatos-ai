@@ -1,6 +1,12 @@
 """F241, F280, F281, F289 (night 8): Auto acts only on the card the owner names, the way they asked.
 
 Every call below is one Auto made on night 8, with the owner's words that came before it.
+
+PRD-256 US-004: an approval or a cancel is no longer judged here by the owner's words
+("approve", "cancel", "yes"): it waits for their click on the approval card
+(``owner_only``, tested in test_prd256_owner_actions_wait_for_the_click.py). The F280
+tests that judged them now show those calls pass this guard; the card the owner named
+stays the card acted on, and words signed as theirs stay theirs.
 """
 from __future__ import annotations
 
@@ -29,14 +35,14 @@ def turn(monkeypatch):
 
     said = {}
 
-    def _set(latest, *cards, earlier="", recent=(), auto=""):
-        """``recent``: the owner's last few messages; ``auto``: Auto's last reply."""
-        said.update(turn=OwnerTurn(latest=latest, earlier=earlier, cards=tuple(cards)), recent=recent, auto=auto)
+    def _set(latest, *cards, earlier="", recent=()):
+        """``recent``: the owner's last few messages. (Auto's last reply is no longer read:
+        it judged a "yes" as an approval, which is the owner's click now, PRD-256 US-004.)"""
+        said.update(turn=OwnerTurn(latest=latest, earlier=earlier, cards=tuple(cards)), recent=recent)
 
     monkeypatch.setattr(guard, "owner_turn", lambda db, ws, ctx: said.get("turn") if ctx else None)
     monkeypatch.setattr(guard, "_the_cards_words", lambda db, ws, params: ())
     monkeypatch.setattr(guard, "owners_recent_words", lambda db, ws, turn: said.get("recent", ()))
-    monkeypatch.setattr(guard, "autos_last_reply", lambda db, ws, turn: said.get("auto", ""))
     return _set
 
 
@@ -49,11 +55,13 @@ def _refused(action, **params):
 # ── A card's number never goes to something that isn't a card (F241, F281) ──────────
 
 def test_approve_by_number_is_never_a_social_post(turn):
+    """The refusal names the card's calls; PRD-256 US-004: approving it waits for the owner's click."""
     turn("Approve #0201 with this note: Good, that's the tone I want with Hannah.",
          _card("#0201", "Reply to Hannah at Mill Lane Kitchen"))
     refusal = _refused("platform_submit_social_post", post_id="0201", note="Good, that's the tone I want with Hannah.")
     assert "#0201" in refusal and "not a social post" in refusal
     assert 'platform_update_task_status {task_id: "#0201", status: "done"' in refusal
+    assert "waits for the owner's click" in refusal
 
 
 def test_cancel_by_number_is_never_a_scheduled_task(turn):
@@ -121,26 +129,46 @@ def test_start_it_again_keeps_the_missions_own_goal(turn, monkeypatch):
     assert _refused("platform_create_mission", goal=goal) is None
 
 
-# ── Decide only what the owner decided (F280) ───────────────────────────────────────
+# ── Decide only what the owner decided (F280): the owner's click, since PRD-256 US-004 ──
 
-def test_naming_a_card_is_not_approving_it(turn):
-    """#0329 was approved 'by you' when the owner only said which card they meant."""
-    turn("#0329 is a ticket on my board, in Review: the reply to Raj Patel about skipping November.",
-         _card("#0329", "Reply to Raj Patel"), earlier="Let's talk about #0329.")
-    assert "hasn't said to approve #0329" in _refused("platform_update_task_status", task_id=329, status="done")
+RAJ = _card("#0329", "Reply to Raj Patel")
+JUDGED_BY_WORDS = [
+    # #0329 was approved "by you" when the owner only named it.
+    ("#0329 is a ticket on my board, in Review: the reply to Raj Patel about skipping November.",
+     "Let's talk about #0329.", "platform_update_task_status", {"task_id": 329, "status": "done"}),
+    ("Before I approve #0410: is it set to stop after each step?", "", "platform_approve_mission",
+     {"mission_id": "#0410"}),
+    # #0393: "Yes, go ahead." answered whether to make the mission, not whether to approve its plan.
+    ("Yes, go ahead.", "Start a mission to get my wholesale price list ready for December.",
+     "platform_approve_mission", {"mission_id": "#0393"}),
+    ("#0329 is the one about Raj Patel.", "The tone is ok but it's too long.", "platform_update_task_status",
+     {"task_id": 329, "status": "done"}),
+    ("No, it's ok for now, I'll read it first.", "", "platform_update_task_status", {"task_id": 329, "status": "done"}),
+    ("#0329 is the one about Raj Patel.", "Approve #0201, please.", "platform_update_task_status",
+     {"task_id": 329, "status": "done"}),
+    ("Let's look at #0329.", "", "platform_update_task_status", {"task_id": 329, "status": "cancelled"}),
+]
 
 
-def test_cancel_is_never_an_approval(turn):
-    """#0422: 'Cancel #0422' became Done with 'User chalked it up themselves.' in the owner's name."""
+@pytest.mark.parametrize("latest, earlier, action, params", JUDGED_BY_WORDS)
+def test_an_approval_or_a_cancel_is_no_longer_judged_by_the_owners_words(turn, latest, earlier, action, params):
+    """PRD-256 US-004 changed these: each call was refused here on the owner's words (a card
+    only named, "before I approve", a yes to another question, an ok about the draft, a no,
+    an approval of the card named before). Words are not a click, and these regexes were
+    deleted with their helpers: the call passes this guard and waits for the owner's click
+    on the approval card, which they can refuse (owner_only)."""
+    turn(latest, RAJ, earlier=earlier)
+    assert _refused(action, **params) is None
+
+
+def test_a_cancel_approved_in_the_owners_name_is_still_not_their_words(turn):
+    """#0422: 'Cancel #0422' became Done with 'User chalked it up themselves.' in the owner's name.
+    PRD-256 US-004 changed this test: "said cancel, not approve" is no longer read from the words
+    (the approval card says 'approve (move to Done)', and only the owner's click runs it); a note
+    signed as theirs that they never wrote is still refused."""
     turn("Cancel #0422, please: I've chalked it up myself.", _card("#0422", "Chalkboard line"))
     refusal = _refused("platform_update_task_status", task_id=422, status="done", note="User chalked it up themselves.")
-    assert "said cancel, not approve" in refusal and 'status: "cancelled"' in refusal
-
-
-def test_before_i_approve_is_not_an_approval(turn):
-    turn("Before I approve #0410: is it set to stop after each step?", _card("#0410", "Mission: Easter box",
-                                                                            source_type="orchestration"))
-    assert "yet" in _refused("platform_approve_mission", mission_id="#0410")
+    assert "their own words" in refusal and "chalked it up myself" in refusal
 
 
 def test_the_owners_approval_with_their_note_goes_through(turn):
@@ -148,42 +176,6 @@ def test_the_owners_approval_with_their_note_goes_through(turn):
          _card("#0201", "Reply to Hannah"))
     assert _refused("platform_update_task_status", task_id=201, status="done",
                     note="Good, that's the tone I want with Hannah. I'll send it myself.") is None
-
-
-def test_a_yes_to_autos_question_is_the_owners_go_ahead(turn):
-    turn("Yes, go ahead.", earlier="Start a mission to get my wholesale price list ready for December.",
-         auto="The plan for #0393 has four steps. Shall I approve it so it starts?")
-    assert _refused("platform_approve_mission", mission_id=str(uuid4())) is None
-
-
-def test_a_yes_to_another_question_is_not_an_approval(turn):
-    """#0393: 'Yes, go ahead.' answered whether to make the mission, not whether to approve its plan."""
-    turn("Yes, go ahead.", earlier="Start a mission to get my wholesale price list ready for December.",
-         auto="Would you like me to create a mission for the wholesale price list?")
-    assert "hasn't said to approve" in _refused("platform_approve_mission", mission_id=str(uuid4()))
-
-
-def test_an_ok_about_something_else_is_not_an_approval(turn):
-    """An 'ok' in the message before, about the draft's tone, never approves the card named next."""
-    turn("#0329 is the one about Raj Patel.", _card("#0329", "Reply to Raj Patel"),
-         earlier="The tone is ok but it's too long.")
-    assert "hasn't said to approve #0329" in _refused("platform_update_task_status", task_id=329, status="done")
-
-
-def test_no_to_autos_question_is_not_an_approval(turn):
-    turn("No, it's ok for now, I'll read it first.", _card("#0329", "Reply to Raj Patel"),
-         auto="Shall I approve #0329?")
-    assert "yet" in _refused("platform_update_task_status", task_id=329, status="done")
-
-
-def test_approve_said_before_naming_the_card_is_the_owners(turn):
-    turn("#0329, the reply to Raj.", _card("#0329", "Reply to Raj Patel"), earlier="Approve the reply to Raj, please.")
-    assert _refused("platform_update_task_status", task_id=329, status="done") is None
-
-
-def test_approving_one_card_never_approves_the_next_one_named(turn):
-    turn("#0329 is the one about Raj Patel.", _card("#0329", "Reply to Raj Patel"), earlier="Approve #0201, please.")
-    assert "hasn't said to approve #0329" in _refused("platform_update_task_status", task_id=329, status="done")
 
 
 # ── Words signed as the owner's are theirs (F280, F279) ─────────────────────────────

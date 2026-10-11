@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from modules.tools.discovery.owner_only import OWNERS_OWN_DECISION
 from services.harness_service import get_harness_service
 
 logger = logging.getLogger(__name__)
@@ -227,9 +228,10 @@ async def _approve(
     current_before = svc._snapshot_current_value(rx)
     # F151: the change is made for the approving admin, so an admin_only action
     # (power mode, routing rule) applies as them; the executor re-reads their
-    # membership rather than trusting this check.
+    # membership rather than trusting this check. Their /approve is their own
+    # decision: an owner-only change does not ask them again (PRD-256 US-004).
     apply_result = await svc._auto_apply_prescription(
-        executor, rx, caller_context={"driving_user_id": str(user_id)}
+        executor, rx, caller_context={"driving_user_id": str(user_id), OWNERS_OWN_DECISION: True}
     )
     if not apply_result.get("success"):
         return {

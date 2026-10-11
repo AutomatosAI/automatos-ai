@@ -20,19 +20,28 @@ _CREATE_MISSION_PARAMETERS = {
                 "The coordinator will decompose this into agent tasks."
             ),
         },
+        # PRD-256 US-006: the config's fields are named in the schema, not only in its description.
         "config": {
             "type": "object",
-            "description": (
-                "Optional mission config overrides. Keys: "
-                "auto_approve (bool: skip the awaiting_approval gate and "
-                "start executing immediately — default false, the mission "
-                "waits for human approval), "
-                "max_retries (int), category (str), "
-                "output_format (str: 'markdown'|'json'|'code'), "
-                "publish (bool: auto-publish result if applicable), "
-                "check_each_step (bool: every step waits for the owner's check before the "
-                "mission goes on; set it whenever the owner says to wait for them)."
-            ),
+            "description": ("Optional mission config overrides: auto_approve, max_retries, category, "
+                            "output_format, publish, check_each_step."),
+            "properties": {
+                "auto_approve": {
+                    "type": "boolean",
+                    "description": ("Skip the awaiting_approval gate and start executing immediately. Default "
+                                    "false: the mission waits for human approval."),
+                },
+                "max_retries": {"type": "integer", "description": "How many times a failed step is retried."},
+                "category": {"type": "string", "description": "The mission's category."},
+                "output_format": {"type": "string", "enum": ["markdown", "json", "code"],
+                                  "description": "The form of the mission's result."},
+                "publish": {"type": "boolean", "description": "Publish the result when it applies."},
+                "check_each_step": {
+                    "type": "boolean",
+                    "description": ("Every step waits for the owner's check before the mission goes on; set it "
+                                    "whenever the owner says to wait for them."),
+                },
+            },
         },
         "staffing": {
             "type": "array",
@@ -92,6 +101,7 @@ def register_mission_create_action(registry: ActionRegistry) -> None:
         parameters=_CREATE_MISSION_PARAMETERS,
         misplaced=_CREATE_MISSION_MISPLACED,
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["missions", "write", "orchestration", "multi-agent", "research", "content"],
         examples=[

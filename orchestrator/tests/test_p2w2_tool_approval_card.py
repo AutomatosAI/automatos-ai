@@ -150,8 +150,9 @@ async def test_router_failure_envelope_carries_ask_card():
 
     assert envelope["success"] is False
     assert envelope["frontend_data"]["tool_approval"]["grant_id"] == 42
-    # S15 stays: the ask message reaches the model as ever.
-    assert "requires confirmation" in envelope["llm_context"].lower()
+    # PRD-256 FX-004: the model reads what the card asks, never "failed" or "Unknown error".
+    assert envelope["llm_context"].startswith("Card raised: delete the document.")
+    assert "failed" not in envelope["llm_context"].lower()
 
     # Grant-less ask (fail-safe floor) ⇒ prose-only, no card payload.
     bare = {k: v for k, v in ask.items() if k != "grant_id"}
@@ -162,4 +163,6 @@ async def test_router_failure_envelope_carries_ask_card():
             "platform_delete_document", {"document_id": 7}, agent_id=1
         )
     assert envelope2["frontend_data"] == {}
+    # S15 stays for a card-less ask: the ask message reaches the model, and it is not "failed".
     assert "requires confirmation" in envelope2["llm_context"].lower()
+    assert "failed" not in envelope2["llm_context"].lower()

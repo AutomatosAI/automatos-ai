@@ -7,9 +7,9 @@ import { WORKSPACE_ROOT, canvasTitleFor, normalizeCodeRoot } from '@/components/
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useChat } from '@/lib/chat/hooks'
+import { useChatWithReceipts as useChat } from '@/lib/chat/use-chat-with-receipts' // PRD-256: + the turn's receipts
 import { usePageContext } from '@/lib/page-context'
-import { Message } from './message'
+import { MessageWithReceipts as Message } from './message-with-receipts' // PRD-256: the receipts above the reply
 import { MultimodalInput } from './multimodal-input'
 import { ArtifactViewer } from './artifact-viewer'
 import { generateTitle } from '@/lib/utils'

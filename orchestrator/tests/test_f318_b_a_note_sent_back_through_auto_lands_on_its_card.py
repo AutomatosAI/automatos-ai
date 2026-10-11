@@ -64,7 +64,9 @@ def test_in_progress_with_no_note_still_runs_it_again(shop):
 
 @pytest.fixture
 def turn(monkeypatch):
-    """The owner's words this turn and the card they name, as owner_turn would read them."""
+    """The owner's words this turn and the card they name, as owner_turn would read them.
+    PRD-256 US-004: Auto's last reply is no longer patched: the guard read it only to judge a
+    "yes" as an approval, which is the owner's click now."""
     import modules.tools.discovery.follows_the_owner as guard
     from modules.tools.discovery.owner_turn import NamedCard, OwnerTurn
 
@@ -76,7 +78,6 @@ def turn(monkeypatch):
 
     monkeypatch.setattr(guard, "_the_cards_words", lambda db, ws, params: ())
     monkeypatch.setattr(guard, "owners_recent_words", lambda db, ws, turn: ())
-    monkeypatch.setattr(guard, "autos_last_reply", lambda db, ws, turn: "")
     monkeypatch.setattr(guard, "autos_proposal", lambda db, ws, turn: "")
     return _set
 

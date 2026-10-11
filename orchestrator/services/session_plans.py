@@ -57,6 +57,9 @@ MAX_PLAN_ROUNDS = 5              # O6: on the last round only Approve carries on
 MAX_PLAN_KEPT = 16_000           # the plan on the ticket, for the prompt that carries it out
 MAX_PLAN_ON_CARD = 8_000         # the card shows this much; plan.md beside the deliverables has all of it
 PARKED_FOR_PLAN_REASON = "Waiting for your approval of its plan (ask #{grant_id})"
+# PRD-256 FX-011: an agent's send on Auto's ticket parks on its approval card (agent_sends marks its ledger entry).
+PARKED_FOR_SEND_REASON = "Waiting for your click on its send card (approval #{grant_id}): nothing has gone out"
+SEND_KIND = "send"
 PLAN_REJECTED_FEEDBACK = "Plan rejected: {answer}"
 SUPERSEDED_ANSWER = "(superseded by a newer plan)"
 
@@ -120,6 +123,8 @@ def plan_marker(grant: Any) -> Optional[Dict[str, Any]]:
 def park_reason(entry: Dict[str, Any]) -> str:
     """Why a parked ticket waits: its Plan card, or its session's own question."""
     template = PARKED_FOR_PLAN_REASON if is_plan_entry(entry) else PARKED_FOR_ANSWER_REASON
+    if isinstance(entry, dict) and entry.get("kind") == SEND_KIND:
+        template = PARKED_FOR_SEND_REASON
     return template.format(grant_id=entry.get("grant_id"))
 
 

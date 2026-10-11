@@ -56,7 +56,7 @@ export function whoStopped(task: Pick<BoardTask, 'status' | 'runtime_ref' | 'com
 
 /** A person's record ("operator", "user:<id>") reads "you" on the one-operator
  * local edition; hosted, it could be any member of the workspace. */
-function personLabel(by: unknown): string | null {
+export function personLabel(by: unknown): string | null {
   if (typeof by !== 'string' || !by) return null
   if (by === 'operator' || by.startsWith('user:')) return isLocal ? 'you' : 'a workspace member'
   return by

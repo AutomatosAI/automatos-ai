@@ -1,7 +1,7 @@
 """A turn routed to the Brand designer changes no platform setting and starts no mission (Gerard, 7 Oct).
 
 F362 (night 10c) pins a brand ask to the ASSIGN lane for the workspace's Brand designer
-(``consumers.chatbot.brand_assign_lane``), and its directive files the ticket. A directive is
+(the hand-off table, ``consumers.chatbot.handoffs``), and its directive files the ticket. A directive is
 still a prompt: on night 10c "More space between sections" reached
 platform_update_system_setting and "Warmer, please" became a three-task mission. So the turn
 carries a flag, and for the rest of that turn the executor refuses the setting and every action

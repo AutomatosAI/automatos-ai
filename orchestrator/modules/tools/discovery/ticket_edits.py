@@ -27,7 +27,8 @@ board's Reject keeps the brief and adds the owner's words. So now, as on the boa
 
 Night 9 (F309): a status on this call is the card's move (``ticket_edit_moves``), its
 note kept as platform_update_task_status keeps one: #1866's approval note was lost when
-the edit tool refused ``status`` and Auto split the call in two.
+the edit tool refused ``status`` and Auto split the call in two. Beside a Re-brief the
+status is dropped and the answer says so (PRD-256 FX-013).
 
 ``_user_id`` is the server-injected driver (platform executor, OPERATOR_CONSENT_ACTIONS),
 never a model argument.
@@ -40,6 +41,8 @@ from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Dict
 
 from sqlalchemy.orm import Session
+
+from modules.tools.discovery.owner_only import CLICKED_BY
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +142,7 @@ async def _sent_back(handler: Handler, db: Session, workspace_id: Any, params: D
     if out and out.get("success") is not True:
         return out
     move = {"task_id": ticket_number(db, task) or task.id, "status": SEND_BACK_STATUS, NOTE: note or brief}
-    if params.get("_user_id"):
-        move["_user_id"] = params["_user_id"]
+    move.update({key: params[key] for key in ("_user_id", CLICKED_BY) if params.get(key)})
     return await update_board_task_status(db, workspace_id, move)
 
 

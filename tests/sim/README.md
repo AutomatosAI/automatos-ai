@@ -91,6 +91,24 @@ Runs under `caffeinate` from the repo root; stdout in `~/.automatos-sim/logs/lau
 
 `~/.automatos-sim/campaign.sqlite` keeps one row per run and per scenario for night-over-night comparison.
 
+## What the persona sees (PRD-256 FX-002)
+
+`python3 -m tests.sim.customer chat` prints a turn the way the browser lays it out: the
+receipts block first (`receipts:`, then one line per receipt: `kind · action · subject ·
+status · reason`, `-` where nothing is said), then the honesty lines that sit above the reply
+(the `receipts` frame's `above`), then the reply. Before this, `tests/sim/sse.py` read only the
+`0:` text deltas, so night 12's persona graded 779 asks without a receipt (F394).
+
+* `text` is the reply as the browser shows it. A draft the loop nudged and replaced (a
+  `narration` frame with `retracted: true`) is taken back out, the way
+  `frontend/lib/chat/narration.ts` does it. Narration that came before a tool call stays in
+  `text`: the browser moves it to the activity trail above the reply, so the owner still sees it.
+* `text_raw` is every text delta, concatenated: the doubled reply the old harness read.
+* `receipts` and `above` are the receipts frame as sent.
+
+`chats.jsonl` (customer chat) and the night runner's turn records carry all four. **`first
+time?` is judged on `text`, never on `text_raw`**: a retracted draft never reached the owner.
+
 ## Packs
 
 TOML under `tests/sim/packs/`; validated before anything is created. See the docstring in

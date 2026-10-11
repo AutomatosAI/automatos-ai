@@ -39,6 +39,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import modules.tools.discovery.platform_executor as pe
+from modules.tools.discovery import confirmation_gate
 from modules.tools.execution.telemetry import _build_router_decision
 
 _WS = "28a228aa-dd63-46c7-baac-d29a0eb67283"
@@ -117,18 +118,27 @@ def test_markers_stay_distinct():
 # ---------------------------------------------------------------------------
 
 def test_gate_wiring_source_pin():
+    """P256-FIX-RVW-9 moved the consume/ask branch into confirmation_gate.py; the
+    invariants hold across the two files."""
     src = (Path(pe.__file__)).read_text(encoding="utf-8")
+    gate_src = (Path(confirmation_gate.__file__)).read_text(encoding="utf-8")
 
-    # The skip is computed from the caller context…
-    assert "_human_directed_admin(self.db, self.workspace_id, caller_context)" in src
+    # The skip is computed from the caller context, inside clear(), before it returns…
+    decided = re.search(
+        r"human_directed = bool\(.*?_human_directed_admin\(self\.db, self\.workspace_id, caller_context\)"
+        r".*?return Cleared\(action_def, full_autonomy, approved_via_grant_id, human_directed\)",
+        src, re.S,
+    )
+    assert decided is not None, "human_directed must be decided in clear(), before the gate runs"
+
+    # …the gate wraps clear(), so it reads what clear() decided…
+    assert "@asks_at_the_confirmation_gate" in src
 
     # …and the consume/ask branch is entered only when NOT human-directed.
-    gate = re.search(
-        r"human_directed = bool\(.*?consume_tool_grant", src, re.S
-    )
-    assert gate is not None, "human_directed must be decided before the consume/ask branch"
-    assert "and not human_directed" in gate.group(0), (
-        "the requires_confirmation branch must be guarded by `not human_directed`"
+    guarded = re.search(r"not cleared\.human_directed.*?consume_tool_grant", gate_src, re.S)
+    assert guarded is not None, "the gate's guard must come before the grant is consumed"
+    assert "_the_gate(call, cleared, card_subject) if _the_gate_asks(cleared) else cleared" in gate_src, (
+        "the requires_confirmation branch must be guarded by `not cleared.human_directed`"
     )
 
     # The execution is stamped for the audit trail.

@@ -2,8 +2,10 @@
  * PRD-238 S3 — activity-trail state helpers.
  */
 import { describe, it, expect } from 'vitest'
-import { completeRunningToolCalls, formatDuration, upsertToolCall } from '@/lib/chat/tool-calls'
-import type { ToolCall } from '@/types'
+import {
+  completeRunningToolCalls, formatDuration, upsertToolCall, waitingToolCallId, withWaitingToolCall,
+} from '@/lib/chat/tool-calls'
+import type { ChatMessage, ToolCall } from '@/types'
 
 const running = (id: string): ToolCall => ({ toolCallId: id, toolName: 'platform_get_agent', state: 'running' })
 
@@ -42,5 +44,30 @@ describe('formatDuration', () => {
     expect(formatDuration(65_000)).toBe('1m 05s')
     expect(formatDuration(undefined)).toBe('')
     expect(formatDuration(-1)).toBe('')
+  })
+})
+
+describe('a waiting tool-end (P256-FIX-RVW-22)', () => {
+  const ask = { type: 'tool-end', data: { toolCallId: 'a', toolName: 'platform_execute', success: false, waiting: true } }
+
+  it('is read from a forwarded tool-end part that says waiting, and from nothing else', () => {
+    expect(waitingToolCallId(ask)).toBe('a')
+    expect(waitingToolCallId({ type: 'tool-end', data: { toolCallId: 'a', success: false, error: 'denied' } })).toBeUndefined()
+    expect(waitingToolCallId({ type: 'tool-end', data: { toolCallId: 'a', success: true } })).toBeUndefined()
+    expect(waitingToolCallId({ type: 'tool-data', data: { toolCallId: 'a', waiting: true } })).toBeUndefined()
+    expect(waitingToolCallId(null)).toBeUndefined()
+  })
+
+  it('marks that call waiting and ended, never an error, without mutating', () => {
+    const closed: ToolCall = { ...running('a'), state: 'error' }
+    const other: ToolCall = { ...running('b'), state: 'error', error: 'denied' }
+    const reply = { id: 'r', role: 'assistant', content: '', toolCalls: [closed, other] } as unknown as ChatMessage
+    const user = { id: 'u', role: 'user', content: 'Change Scout' } as unknown as ChatMessage
+    const after = withWaitingToolCall([user, reply], 'a')
+    expect(after[1].toolCalls![0]).toMatchObject({ state: 'completed', waiting: true })
+    expect(after[1].toolCalls![1]).toBe(other)
+    expect(after[0]).toBe(user)
+    expect(closed.state).toBe('error')
+    expect(closed).not.toHaveProperty('waiting')
   })
 })

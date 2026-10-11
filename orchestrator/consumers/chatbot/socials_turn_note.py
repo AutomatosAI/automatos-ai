@@ -86,13 +86,9 @@ def _named_social(texts: Sequence[str], socials: Sequence[Any]) -> Optional[Any]
 def socials_note(texts: Sequence[str], rows: Sequence[Any]) -> Optional[str]:
     """The Socials note for these owner turns (latest first), or None when they are not about social
     posts and name no social template. A turn given to the Social Media Director gets what its ticket
-    must say instead. ``rows``: the workspace's templates, every format."""
-    from consumers.chatbot.socials_assign_lane import ticket_note
+    must say instead, before this (``handoffs``). ``rows``: the workspace's templates, every format."""
     from modules.tools.discovery.social_post_checks import field_list, social_rows, template_names
 
-    ticket = ticket_note()
-    if ticket is not None:   # the Director's ticket: what goes on it, never how to make the post here
-        return ticket
     socials = social_rows(rows)
     named = _named_social(texts, socials)
     if named is None and not about_socials(texts):

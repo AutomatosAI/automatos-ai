@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from consumers.chatbot import named_template_note as note_module
-from consumers.chatbot.paperwork_to_the_team import team_note
+from consumers.chatbot.handoffs import Turn, read_the_table, turn_note
 from consumers.chatbot.socials_turn_note import SOCIALS_NOTE, about_socials, socials_note
 
 WS = uuid.UUID("00000000-0000-0000-0000-0000000379c1")
@@ -98,14 +98,16 @@ def workspace_templates(monkeypatch):
             return [row for row in ROWS if format is None or row.format == format]
 
     monkeypatch.setattr(template_service, "DocumentTemplateService", _Templates)
-    monkeypatch.setattr(note_module, "designer_note", lambda *a, **k: None)
 
 
 def test_the_turn_gets_the_socials_note_and_paperwork_still_goes_to_the_team(workspace_templates):
     price_list = "Can you make me a wholesale price list for cafés, as a spreadsheet?"
 
     assert note_module.read_note(_ChatDb(), WS, ["Make me an Instagram carousel."]).startswith(SOCIALS_NOTE[:40])
-    assert note_module.read_note(_ChatDb(), WS, [price_list]) == team_note(price_list)
+    # PRD-256 US-011: paperwork's note is the hand-off table's paperwork row
+    team_note = turn_note(object(), WS, Turn(read_the_table(price_list)), no_template_named=True)
+    assert team_note.startswith("The owner asked for a price list")
+    assert note_module.read_note(_ChatDb(), WS, [price_list]) == team_note
 
 
 def test_the_template_list_names_the_social_templates_in_one_line(workspace_templates):

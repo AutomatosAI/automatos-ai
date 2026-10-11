@@ -9,11 +9,12 @@ Night 8 (build 12), Auto in the owner's chat:
 - decided for the owner: told only which card was meant, it approved #0329 with the
   note "Reply to Raj Patel about skipping November has been reviewed and approved.",
   signed "you"; asked to cancel #0422, it approved it with "User chalked it up
-  themselves.", signed "you".
+  themselves.", signed "you". PRD-256 US-004: an approval or a cancel now waits for
+  the owner's click (``owner_only``), so their words for those are no longer read here.
 
-This reads the turn once: the owner's latest words (and the message before, for a
-"yes" that answers a question), the cards they name by number, and the verb they
-used. ``follows_the_owner`` checks each call against it.
+This reads the turn once: the owner's latest words (and the message before), the cards
+they name by number, and the verb they used. ``follows_the_owner`` checks each call
+against it.
 
 Night 9 (F309): the owner named cards in words, "card 1879", "Card 1869", "card 27.2",
 and neither the note nor the guard knew them: "card 1879" was looked up as a mission,
@@ -38,13 +39,8 @@ CARD_REF = re.compile(r"(?<![\w&#])#(\d{3,6})(?:\.(\d{1,3}))?\b")
 MAX_CARDS = 5
 MISSION_CARD, STEP_CARD, RUN_CARD = "orchestration", "orchestration_task", "recipe"
 
-# The owner's verbs, as night 8 said them.
-CANCEL = re.compile(r"\bcancel\w*\b|\bscrap (?:it|this|that)\b|\bnot needed\b"
-                    r"|\b(?:don'?t|do not|no longer) need (?:it|this|that|the card|the ticket)\b", re.I)
-APPROVE = re.compile(r"\bapprov\w*\b|\baccept\w*\b|\bsign(?:ed)? (?:it )?off\b|\bmark (?:it |this |that )?(?:as )?done\b"
-                     r"|\bthat'?s (?:the one|right|it|fine|good)\b|\blooks? (?:good|right|fine)\b|\bgood to go\b", re.I)
-# A yes that answers Auto's question ("Shall I approve it?") counts as the owner's go-ahead.
-GO_AHEAD = re.compile(r"\b(?:yes|yep|yeah|go ahead|go on|do it|please do|ok(?:ay)?)\b", re.I)
+# The owner's verbs, as night 8 said them. PRD-256 US-004: approving and cancelling are no
+# longer read from their words: they wait for the owner's click (``owner_only``).
 # Night 9 (F309): "Card 1869 needs to go back. Correction: …" is a send-back too.
 SEND_BACK = re.compile(r"\bsend\b(?:\W+\w+){0,3}?\W+back\b|\bsent back\b|\breject\w*\b|\bredo\b|\bre-do\b"
                        r"|\btake (?:out|off)\b|\bfix\b|\bwrong\b|\bisn'?t right\b|\bnot right\b|\bshould (?:be|say|start)\b"
@@ -61,12 +57,8 @@ NEW_CARD = re.compile(r"\b(?:new|another|separate|second|extra|fresh)\s+(?:card|
                       r"|\b(?:create|make|add|open|start)\s+(?:a|an)\s+(?:\w+\s+){0,2}(?:card|ticket|task)\b", re.I)
 NEW_MISSION = re.compile(r"\b(?:new|another|second|separate)\s+mission\b|\bstart (?:a|another) mission\b", re.I)
 AGAIN = re.compile(r"\b(?:start|run|do)\s+(?:it|this|that|them|#\S+)\s+again\b|\bstart again\b|\brestart\b", re.I)
-# "Before I approve #0410: is it set to stop after each step?" is not an approval, nor is
-# "No, …" or "Not yet, ok?" to Auto's "Shall I approve it?".
-NOT_YET = re.compile(r"\bbefore (?:i|we) approve\b|\b(?:don'?t|do not|not) approve\b|\bnot yet\b|^\W*no\b"
-                     r"|\bhold (?:on|off)\b|\bhang on\b|\bwait,|\bwait a (?:sec|second|minute|moment)\b", re.I)
 # The owner's other verbs: a message with one of them is not just saying which card.
-OTHER_VERB = re.compile("|".join(f"(?:{pattern.pattern})" for pattern in (CANCEL, SEND_BACK, GIVE, UPDATE)), re.I)
+OTHER_VERB = re.compile("|".join(f"(?:{pattern.pattern})" for pattern in (SEND_BACK, GIVE, UPDATE)), re.I)
 # The owner taking Auto's own proposal ("Yes, that's it… put that brief on #0204"), unless
 # they said the words are theirs ("I didn't ask you to write it… put what I wrote", #0451).
 AGREES = re.compile(r"\b(?:yes|yep|yeah|that'?s it|that'?s right|exactly|agreed|perfect|sounds good"

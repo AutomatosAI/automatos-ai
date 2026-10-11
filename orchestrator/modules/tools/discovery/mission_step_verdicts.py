@@ -38,6 +38,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.owner_only import signed_by
+
 APPROVES, REJECTS = "approve", "reject"
 PLAN_STATES = ("pending", "planning", "awaiting_approval")
 CANCELLED = "cancelled"
@@ -119,13 +121,12 @@ def lets_held_steps_through(db: Session, workspace_id: Any, task_ids: Sequence[i
     is through and its mission carries on, where the move alone left both waiting."""
     from core.models.core import BoardTask
     from modules.coordination.owner_checks import let_through
-    from services.board_consent import actor_from_user_id
 
     if not task_ids:
         return
     cards = db.query(BoardTask).filter(BoardTask.workspace_id == workspace_id, BoardTask.id.in_(list(task_ids)),
                                        BoardTask.source_type == STEP_CARD).all()
-    by = actor_from_user_id(params["_user_id"]) if params.get("_user_id") else BY_AN_AGENT
+    by = signed_by(params) or BY_AN_AGENT   # PRD-256 US-004: who clicked, never the owner on Auto's call alone
     if [card for card in cards if let_through(db, card, by=by)]:
         db.commit()
 

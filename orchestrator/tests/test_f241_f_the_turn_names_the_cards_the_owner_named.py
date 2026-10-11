@@ -83,4 +83,5 @@ def test_the_chat_runs_retrieval_first_through_it():
     from consumers.chatbot.service import StreamingChatService
 
     assert StreamingChatService._retrieval_first.__wrapped__.__name__ == "_retrieval_first"
-    assert StreamingChatService._retrieval_first.__code__ is grounds_the_cards(lambda: None).__code__
+    assert StreamingChatService._retrieval_first.__wrapped__.__code__ is grounds_the_cards(  # under PRD-256's receipts
+        lambda: None).__code__

@@ -197,6 +197,7 @@ def _register_execute_playbook(registry: ActionRegistry) -> None:
         category="playbooks",
         parameters=_EXECUTE_PLAYBOOK_PARAMETERS,
         permission_level="write",
+        promoted=True,  # PRD-256 US-006: a first-class tool, pinned
         requires_confirmation=False,
         tags=["playbooks", "execute", "run", "write"],
         examples=[

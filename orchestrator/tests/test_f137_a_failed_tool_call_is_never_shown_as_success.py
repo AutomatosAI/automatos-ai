@@ -50,8 +50,10 @@ def test_the_run_record_shows_the_failed_drafts_as_errors(monkeypatch):
 
 
 def test_every_tool_call_the_step_records_carries_its_flag():
-    """The scratchpad tools, the LinkedIn workaround, the Composio spine, the router,
-    and F140's ask to the owner and the calls not run after it."""
+    """Six records: the two scratchpad tools, the Composio spine, the router, and
+    F140's ask to the owner and the calls not run after it. (P256-FIX-RVW-2 moved
+    the LinkedIn workaround onto the spine, core/composio/tool_executor.py; its
+    tests are test_prd251_linkedin_scope.py and test_prd251w1_post_gate.py.)"""
     tree = ast.parse(Path(rex.__file__).read_text())
     records = [
         node.args[0] for node in ast.walk(tree)
@@ -59,7 +61,7 @@ def test_every_tool_call_the_step_records_carries_its_flag():
         and isinstance(node.func.value, ast.Name) and node.func.value.id == "all_tool_calls"
         and node.args and isinstance(node.args[0], ast.Dict)
     ]
-    assert len(records) == 7
+    assert len(records) == 6
     for record in records:
         keys = {k.value for k in record.keys if isinstance(k, ast.Constant)}
         assert "success" in keys, f"line {record.lineno}: {sorted(keys)}"

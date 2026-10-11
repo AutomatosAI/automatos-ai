@@ -47,7 +47,8 @@ def turn_record(index: int, prompt: str, turn: ChatTurn, status: int, ms: int | 
                 first_byte_ms: int | None) -> dict[str, Any]:
     return {
         "turn": index, "prompt": prompt, "status": status, "ms": ms, "first_byte_ms": first_byte_ms,
-        "text": turn.text, "reasoning_chars": len(turn.reasoning), "tool_names": list(turn.tool_names),
+        "text": turn.text, "text_raw": turn.text_raw, "receipts": list(turn.receipts), "above": list(turn.above),
+        "reasoning_chars": len(turn.reasoning), "tool_names": list(turn.tool_names),
         "tool_calls": [{"name": c.get("toolName"), "args": _trim(c.get("args"), ARG_CAP)} for c in turn.tool_calls],
         "tool_results": [_trim(r.get("result"), RESULT_CAP) for r in turn.tool_results],
         "errors": list(turn.errors), "finish_reason": (turn.finish or {}).get("finishReason"),

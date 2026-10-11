@@ -110,7 +110,10 @@ export function GrantCard({ grant }: { grant: ApprovalGrant }) {
         <OversightNote tier={oversight.tier} riskClass={oversight.risk_class} rationale={oversight.rationale} />
       )}
 
-      {grant.reason && <p className="text-xs text-muted-foreground">{grant.reason}</p>}
+      {/* PRD-256 FX-008: the card's own question (subject and change), as the chat card shows it. */}
+      {grant.question_md ? (
+        <p className="text-xs whitespace-pre-line break-words">{grant.question_md}</p>
+      ) : grant.reason && <p className="text-xs text-muted-foreground">{grant.reason}</p>}
 
       {grant.status === PENDING && (
         <CardActions>

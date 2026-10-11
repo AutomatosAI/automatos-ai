@@ -10,6 +10,12 @@ done, and their reports are filed after it, single or bulk.
 Night 9 (F308): a mission step's card moved to done this way stayed held: its step
 waited for the owner's check and its mission stayed paused. The move lets a held step
 through, as the board's Approve does (``mission_step_verdicts``).
+
+PRD-256 US-005 (F380): done needs the artifact the card was for. A social post card
+without a rendered post, or a document card without its Deliverable, is refused before
+the move (``ticket_moves.keeps_the_board_rules`` asks ``services.done_needs_an_artifact``,
+the rule the board's Approve asks too): the error says what is missing, the card stays
+where it was, and nothing is filed here.
 """
 from __future__ import annotations
 

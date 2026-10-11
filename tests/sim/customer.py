@@ -34,7 +34,7 @@ from .api import Api, ApiError, Trace
 from .config import (DEFAULT_WORKSPACE_ID, LOGS_DIR, MIN_BALANCE_USD, PLATFORM_KEY_WORKSPACE_ID, SIM_HOME, ConfigError,
                      load_settings)
 from .customer_ops import (cost_table, inventory, local_time, purge_tagged, question_line, render_inventory,
-                           render_prompt)
+                           render_prompt, render_turn)
 from .judge import judge_output
 from .sse import parse_data_stream
 
@@ -66,7 +66,8 @@ def cmd_chat(args: argparse.Namespace) -> int:
     response, chat_id = api.stream_chat(args.text, chat_id=args.chat_id, agent_id=args.agent_id, timeout_s=settings.chat_timeout_s)
     turn = parse_data_stream(response.body, chat_id)
     record = {"ts": time.time(), "prompt": args.text, "chat_id": turn.chat_id, "status": response.status, "ms": response.ms,
-              "text": turn.text, "tool_calls": [{"name": c.get("toolName"), "args": c.get("args")} for c in turn.tool_calls],
+              "text": turn.text, "text_raw": turn.text_raw, "receipts": list(turn.receipts), "above": list(turn.above),
+              "tool_calls": [{"name": c.get("toolName"), "args": c.get("args")} for c in turn.tool_calls],
               "errors": list(turn.errors), "usage": turn.usage}
     _append_jsonl("chats.jsonl", record)
     if args.json:
@@ -75,7 +76,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
     if response.status >= 400:
         print(f"HTTP {response.status}: {response.body[:400]}")
         return 1
-    print(turn.text or "(no reply text)")
+    print(render_turn(turn.receipts, turn.above, turn.text))
     print(f"\n--- chat_id={turn.chat_id} · {response.ms} ms · tools: {', '.join(turn.tool_names) or 'none'}"
           + (f" · errors: {'; '.join(e[:120] for e in turn.errors)}" if turn.errors else ""))
     return 0

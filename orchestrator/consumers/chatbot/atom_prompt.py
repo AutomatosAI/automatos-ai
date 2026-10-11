@@ -27,6 +27,18 @@ def _last_user_text(messages: List[Dict[str, Any]]) -> Any:
 @labels_what_is_remembered  # F316 (night 9b): a remembered figure is never today's
 async def atom_memory_block(orchestrator: Any, messages: List[Dict[str, Any]], *, workspace_id: Any,
                             agent_id: Any, widget_mode: bool, viewer_subject_id: Any) -> str:
+    """The owner's standing rules (PRD-256 FX-015: every turn, as the full path's section) and the
+    "What you remember about this user" block; "" when there is nothing to add."""
+    from modules.context.sections.memory import standing_rules_block
+
+    rules = await standing_rules_block(workspace_id, viewer_subject_id=viewer_subject_id, widget_mode=widget_mode)
+    recalled = await _recalled_block(orchestrator, messages, workspace_id=workspace_id, agent_id=agent_id,
+                                     widget_mode=widget_mode, viewer_subject_id=viewer_subject_id)
+    return (f"\n\n{rules}\n" if rules else "") + recalled
+
+
+async def _recalled_block(orchestrator: Any, messages: List[Dict[str, Any]], *, workspace_id: Any,
+                          agent_id: Any, widget_mode: bool, viewer_subject_id: Any) -> str:
     """The "What you remember about this user" block, or "" when there is nothing to add."""
     manager = getattr(orchestrator, "memory_manager", None) if orchestrator else None
     user_msg = _last_user_text(messages)

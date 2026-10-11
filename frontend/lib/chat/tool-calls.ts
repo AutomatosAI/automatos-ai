@@ -5,7 +5,7 @@
  * renders them. Both sides share these rules so a chip can never spin forever:
  * a `finish` frame closes whatever is still running.
  */
-import type { TaskCardData, ToolCall } from '@/types'
+import type { ChatMessage, TaskCardData, ToolCall } from '@/types'
 
 /** Insert or merge a tool call by id, preserving order. Never mutates. */
 export function upsertToolCall(current: ToolCall[] | undefined, next: ToolCall): ToolCall[] {
@@ -39,4 +39,23 @@ export function upsertTaskCard(current: TaskCardData[] | undefined, next: TaskCa
   const index = list.findIndex((c) => c.id === next.id)
   if (index >= 0) return list.map((c, i) => (i === index ? { ...c, ...next } : c))
   return [...list, next]
+}
+
+/** P256-FIX-RVW-22: the call id of a forwarded `tool-end` part that waits for the owner's click
+ * (`waiting: true` beside `success: false`); undefined for any other part. */
+export function waitingToolCallId(part: unknown): string | undefined {
+  const forwarded = part as { type?: unknown; data?: { toolCallId?: unknown; waiting?: unknown } } | null | undefined
+  if (forwarded?.type !== 'tool-end' || forwarded.data?.waiting !== true) return undefined
+  const id = forwarded.data.toolCallId
+  return typeof id === 'string' && id ? id : undefined
+}
+
+/** `messages` with that call's line marked waiting: ended, never an error. Never mutates. */
+export function withWaitingToolCall(messages: ChatMessage[], toolCallId: string): ChatMessage[] {
+  const waits = (tc: ToolCall): ToolCall =>
+    tc.toolCallId === toolCallId ? { ...tc, state: 'completed', waiting: true } : tc
+  return messages.map((m) => {
+    const calls = m.toolCalls ?? []
+    return calls.some((tc) => tc.toolCallId === toolCallId) ? { ...m, toolCalls: calls.map(waits) } : m
+  })
 }

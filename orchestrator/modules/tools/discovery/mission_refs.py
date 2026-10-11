@@ -18,13 +18,19 @@ A mission's id is a UUID, so anything else in ``mission_id`` is a card's number
 - any other card is no mission. Reading it gives the card itself; anything else is
   refused, naming the card and the call that does what was asked.
 
+PRD-256 FX-009 (night 12, B3): a mission is named by its title too, when one mission in
+the workspace has it (``mission_titles``). The owner's approval card for a mission tool is
+raised only on the mission the call will act on (``on_its_mission``, read by
+``mission_targets`` for the card): card 1942 asked about mission_id '220', a task card,
+and the click's run failed.
+
 A public widget turn never reads a number (F155): its call reaches the tool as sent.
 """
 from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, NamedTuple, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -47,6 +53,8 @@ KINDS = {RUN_CARD: "playbook run's card", MISSION_CARD: "mission's card"}
 TASK_KIND = "task card"
 ASKED_ABOUT_STEP = "{label} is this mission's step '{title}'. Its card in full: platform_get_task(\"{label}\")."
 A_CARD_NOT_A_MISSION = "{label} is a {kind}, not a mission: this is the card."
+# FX-009: what each mission tool does with a mission, filled by its ``takes_card_numbers``.
+DOES_BY_ACTION: Dict[str, str] = {}
 
 # The call that does on a card what the mission tool was asked to do.
 ON_ITS_CARD = {
@@ -65,45 +73,87 @@ NOT_IN_REVIEW = " It is {status}, not in Review, so it has nothing to approve ye
 
 
 def takes_card_numbers(does: str) -> Callable[[Handler], Handler]:
-    """Let a mission tool take a card's number in ``mission_id`` (see the module)."""
+    """Let a mission tool take a card's number, or its mission's title, in ``mission_id``
+    (see the module)."""
     def decorate(handler: Handler) -> Handler:
+        action = _action_of(handler)
+        DOES_BY_ACTION[action] = does
+
         @functools.wraps(handler)
         async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
             from core.security.surface import widget_turn
 
             said = (params or {}).get("mission_id")
-            if said in (None, "") or _is_uuid(said) or widget_turn():
-                return await handler(db, workspace_id, params)
-            card, refusal = _card_named(db, workspace_id, said)
-            if refusal:
-                return {"success": False, "error": refusal}
-            run_id = _mission_of(db, card)
-            step = _decided_on_its_mission(db, card, run_id, handler, does)
-            if step is not None:  # F308 (night 9): approving or sending back a started mission's step
-                return await handler(db, workspace_id, {**params, "mission_id": str(run_id), "step": step})
-            if run_id is not None and (card.source_type == MISSION_CARD or does != DECIDES):
-                out = await handler(db, workspace_id, {**params, "mission_id": str(run_id)})
-                return _naming_the_step(db, out, card) if card.source_type == STEP_CARD else out
-            if does == READS:
+            if said in (None, "") or db is None or is_uuid(said) or widget_turn():
+                return await handler(db, workspace_id, params)  # no session: the handler's own check refuses
+            card, refusal = card_named(db, workspace_id, said)
+            named = on_its_mission(db, card, action, does) if card is not None else OnItsMission(None, refusal=refusal)
+            if named.refusal:
+                return {"success": False, "error": named.refusal}
+            if named.run_id is None:
                 return await _the_card(db, workspace_id, card)
-            return {"success": False, "error": _refusal(db, card, handler, run_id)}
+            out = await handler(db, workspace_id, {**params, **named.params})
+            return _naming_the_step(db, out, card) if named.names_a_step(card) else out
         return wrapped
     return decorate
 
 
-def _decided_on_its_mission(db: Session, card: Any, run_id: Optional[UUID], handler: Handler,
+class OnItsMission(NamedTuple):
+    """What a mission tool acts on for a card: its mission (and, F308, the step it
+    decides), nothing (a read of a card that is no mission: the card itself), or why
+    nothing is done."""
+
+    run_id: Optional[UUID]
+    step: Optional[str] = None
+    refusal: Optional[str] = None
+
+    @property
+    def params(self) -> Dict[str, Any]:
+        """The call's params on its mission: its id, and the step it decides."""
+        on = {"mission_id": str(self.run_id)}
+        return {**on, "step": self.step} if self.step is not None else on
+
+    def names_a_step(self, card: Any) -> bool:
+        """A mission read or run by one of its steps says which step was meant."""
+        return self.step is None and card.source_type == STEP_CARD
+
+
+def on_its_mission(db: Session, card: Any, action: str, does: str) -> OnItsMission:
+    """What ``action`` (which ``does`` this with a mission) acts on for ``card``: the
+    same answer for the call and for its approval card (FX-009)."""
+    run_id = mission_of_card(db, card)
+    step = _decided_on_its_mission(db, card, run_id, action, does)
+    if step is not None:  # F308 (night 9): approving or sending back a started mission's step
+        return OnItsMission(run_id, step)
+    if run_id is not None and (card.source_type == MISSION_CARD or does != DECIDES):
+        return OnItsMission(run_id)
+    if does == READS:
+        return OnItsMission(None)
+    return OnItsMission(None, refusal=_refusal(db, card, action, run_id))
+
+
+def does_of(action: str) -> Optional[str]:
+    """What a mission tool does with a mission (READS, RUNS or DECIDES); None for a tool
+    that takes no mission. Each handler says it in its ``takes_card_numbers``."""
+    import modules.tools.discovery.handlers_missions  # noqa: F401 — its decorators fill DOES_BY_ACTION
+
+    return DOES_BY_ACTION.get(str(action or ""))
+
+
+def _decided_on_its_mission(db: Session, card: Any, run_id: Optional[UUID], action: str,
                             does: str) -> Optional[str]:
     """F308 (night 9): the step's number when approve or reject names a step of a mission
     that has started; its mission decides it as the board's Approve or Reject on the
     step's card would (mission_step_verdicts). None otherwise."""
-    if does != DECIDES or card.source_type != STEP_CARD or run_id is None or _action_of(handler) not in STEP_VERDICTS:
+    if does != DECIDES or card.source_type != STEP_CARD or run_id is None or action not in STEP_VERDICTS:
         return None
     from modules.tools.discovery.mission_step_verdicts import step_of_a_started_mission
 
     return step_of_a_started_mission(db, card, run_id)
 
 
-def _is_uuid(value: Any) -> bool:
+def is_uuid(value: Any) -> bool:
+    """Whether ``value`` is a mission's own id (a UUID), not a card's number or a title."""
     if isinstance(value, UUID):
         return True
     try:
@@ -113,19 +163,27 @@ def _is_uuid(value: Any) -> bool:
     return True
 
 
-def _card_named(db: Session, workspace_id: Any, said: Any) -> Tuple[Any, Optional[str]]:
-    """The card ``said`` names in this workspace, or why there is none."""
+def card_named(db: Session, workspace_id: Any, said: Any) -> Tuple[Any, Optional[str]]:
+    """The card ``said`` names in this workspace (its number, or FX-009 its mission's
+    title when one mission has it), or why there is none. A None session reads nothing."""
     from core.models.core import BoardTask
-    from services.ticket_refs import ticket_id_named
+    from services.ticket_numbers import is_bare_ref, is_number_ref
+    from services.ticket_refs import NO_TICKET_SAID, ticket_id_named
 
+    if db is None:
+        return None, NO_TICKET_SAID.format(ref=said)
+    if isinstance(said, str) and not (is_number_ref(said) or is_bare_ref(said)):
+        from modules.tools.discovery.mission_titles import mission_card_titled
+
+        return mission_card_titled(db, workspace_id, said)
     task_id, error = ticket_id_named(db, workspace_id, said)
     if error:
         return None, error
     card = db.query(BoardTask).filter(BoardTask.id == task_id, BoardTask.workspace_id == workspace_id).first()
-    return card, None
+    return (card, None) if card is not None else (None, NO_TICKET_SAID.format(ref=said))
 
 
-def _mission_of(db: Session, card: Any) -> Optional[UUID]:
+def mission_of_card(db: Session, card: Any) -> Optional[UUID]:
     """The mission a mission's card or step belongs to; None for any other card."""
     from core.models.core import BoardTask
 
@@ -159,11 +217,10 @@ async def _the_card(db: Session, workspace_id: Any, card: Any) -> Dict[str, Any]
     return {**out, "note": A_CARD_NOT_A_MISSION.format(label=label, kind=KINDS.get(card.source_type, TASK_KIND))}
 
 
-def _refusal(db: Session, card: Any, handler: Handler, run_id: Optional[UUID]) -> str:
-    """Why the tool did nothing to ``card``, and the call that does what was asked."""
+def _refusal(db: Session, card: Any, action: str, run_id: Optional[UUID]) -> str:
+    """Why ``action`` did nothing to ``card``, and the call that does what was asked."""
     from services.ticket_numbers import ticket_number
 
-    action = _action_of(handler)
     number = ticket_number(db, card) or str(card.id)
     instead = ON_ITS_CARD.get(action, OTHERWISE).format(number=number)
     if action == "platform_approve_mission" and card.status != "review":
@@ -191,4 +248,5 @@ def _action_of(handler: Handler) -> str:
     return f"platform_{getattr(handler, '__name__', '')}"
 
 
-__all__ = ["DECIDES", "READS", "RUNS", "takes_card_numbers"]
+__all__ = ["DECIDES", "READS", "RUNS", "OnItsMission", "card_named", "does_of", "is_uuid", "mission_of_card",
+           "on_its_mission", "takes_card_numbers"]

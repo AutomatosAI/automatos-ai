@@ -17,6 +17,10 @@ the action. The readers that turn ``created_by`` back into a person
 and never a number. A widget turn, a board ticket and a workflow name nobody, so
 they are still refused. So is an unreadable user. A ``_created_by`` or
 ``driving_user_id`` in the tool's arguments is ignored.
+
+PRD-256 US-004 changed the setting, not the subject: approving, cancelling and starting a
+mission from a person's chat now wait for their click on the approval card
+(``owner_only``), so the fixture gives the click. Who the call is made for is unchanged.
 """
 from __future__ import annotations
 
@@ -78,6 +82,8 @@ def mission(db_session, seed_workspace, monkeypatch):
     coordinator.replan_mission = AsyncMock(return_value=run)
     coordinator.create_mission = AsyncMock(return_value=NS(**{**vars(run), "state": "awaiting_approval"}))
     monkeypatch.setattr("services.coordinator_service.CoordinatorService", lambda: coordinator)
+    monkeypatch.setattr("modules.tools.discovery.owner_only._the_click",   # PRD-256 US-004: the owner clicked
+                        lambda db, ws, action, params: NS(id=None, granted_by="user:clicked", status="granted"))
     return NS(db=db_session, ws=UUID(seed_workspace()), run=run, coordinator=coordinator, owner=_user(db_session))
 
 

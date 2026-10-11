@@ -100,8 +100,17 @@ def _route(**kw):
 def test_an_unpriced_route_is_not_free():
     from api.llm_marketplace import PRICE_TIER_UNKNOWN, _model_to_out
 
-    out = _model_to_out(_route())
+    # A model neither the catalogue nor core/llm/list_prices prices (P256-FIX-T2 prices the Claude 5.5 ids).
+    out = _model_to_out(_route(model_id="claude-unlisted-0-20991231", display_name="Claude Unlisted"))
     assert out.is_free is False and out.price_known is False and out.price_tier == PRICE_TIER_UNKNOWN
+
+
+def test_an_unpriced_row_of_a_listed_model_shows_its_list_price_and_is_not_free():
+    from api.llm_marketplace import _model_to_out
+
+    out = _model_to_out(_route())   # dated Opus 5.5 with no catalogue price: the list table holds it
+    assert out.is_free is False and out.price_known is True
+    assert (out.input_cost_per_1k, out.output_cost_per_1k) == (0.004, 0.020)
 
 
 def test_an_explicit_zero_price_is_still_free_and_a_priced_route_is_not():

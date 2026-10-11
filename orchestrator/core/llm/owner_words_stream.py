@@ -25,6 +25,8 @@ import re
 from functools import lru_cache
 from typing import Any, Awaitable, Callable, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
+from .screen_watch import watched
+
 logger = logging.getLogger(__name__)
 
 PLATFORM_PREFIX = "platform_"
@@ -137,6 +139,7 @@ def _autos_turn() -> bool:
     return current_usage_scope().get("request_type") == LANE_CHAT
 
 
+@watched  # FX-017: the turn's screen records the exact text each call streamed
 async def in_owner_words(stream: Callable[..., Awaitable[Any]], messages: List[Dict[str, Any]],
                          tools: Optional[List[Dict[str, Any]]], on_delta: Delta) -> Any:
     """``stream`` the call, with Auto's text to the owner said in the owner's words

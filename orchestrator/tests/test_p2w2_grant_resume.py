@@ -58,6 +58,7 @@ if _camelot_unlocatable():  # pragma: no cover - env-dependent
 from core.models.approval_grants import ApprovalGrant, GrantStatus, SUBJECT_TOOL_CALL
 from core.models.core import BoardTask
 from core.services.approval_grants import deny_grant, grant_grant
+from modules.tools.discovery.click_resume import RESUMED_GRANT
 
 pytestmark = pytest.mark.asyncio
 
@@ -178,6 +179,7 @@ async def test_grant_resumes_tool_call():
     assert kwargs["caller_context"] == {
         "user_id": "user_clerk_1",
         "conversation_id": "c-1",
+        RESUMED_GRANT: grant.id,  # RVW-18: the click's resume carries its grant
     }
 
     executed = (grant.details or {}).get("executed_result")

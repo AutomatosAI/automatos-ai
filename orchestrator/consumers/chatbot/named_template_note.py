@@ -11,6 +11,10 @@ asked for the invoice number, the terms and the due date, as the rules told it t
 owner says not to ask, the rules say so: make it now, put a plain default where a number,
 a date or the terms are missing, say which in one line, and still invent no name, address,
 price or quantity.
+
+PRD-256 US-011: who owns brand work, social media work and customer paperwork is one table
+(``handoffs``), read once per turn; this module asks it for the turn's hand-off note, and keeps
+the named template's own note (the studio's shape) as data.
 """
 from __future__ import annotations
 
@@ -21,9 +25,8 @@ import re
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
+from consumers.chatbot.handoffs import the_turn, turn_note  # PRD-256 US-011: the hand-off table
 from consumers.chatbot.named_template import NamedTemplate, named_in_conversation, owner_turns
-from consumers.chatbot.paperwork_to_the_team import team_note  # F337(c) (night 10)
-from consumers.chatbot.brand_to_the_designer import designer_note  # PRD-255 US-014: Auto delegates the brand
 from consumers.chatbot.socials_turn_note import socials_note  # F379 (night 11)
 
 logger = logging.getLogger(__name__)
@@ -171,23 +174,24 @@ def _schema(db: Any, workspace_id: UUID, row: Any) -> Dict[str, Any]:
 
 
 def read_note(db: Any, workspace_id: UUID, texts: Sequence[str]) -> Optional[str]:
-    """The note for the template these owner turns name; with none named, the hand-to-the-team
-    note when the latest asks for paperwork (F337(c)); else None. Brand work (the kit, the look,
-    the templates) goes to the Brand designer first (PRD-255 US-014). Blocking: run off the loop."""
+    """The turn's last note: its hand-off ticket (brand work, the Social Media Director's post), else
+    how Socials works, else the template these owner turns name; with none named, the paperwork
+    hand-off; else None (``handoffs``). Blocking: run off the loop."""
     from modules.documents.template_service import DocumentTemplateService
 
+    turn = the_turn(texts)   # PRD-256 US-011: the table, read once for the turn
     try:
         with db.begin_nested():
-            brand = designer_note(db, workspace_id, texts[0] if texts else "", opening=len(texts) == 1)  # F362
-            if brand:
-                return brand
+            handed = turn_note(db, workspace_id, turn, no_template_named=False)
+            if handed:
+                return handed
             rows = DocumentTemplateService(db).list_templates(workspace_id)
             socials = socials_note(texts, rows)   # F379 (night 11): a turn about social posts gets how Socials works
             if socials:
                 return socials
             named = named_in_conversation(texts, rows)
             if named is None:   # F337(c): paperwork with no template named goes to the team
-                return team_note(texts[0] if texts else "")
+                return turn_note(db, workspace_id, turn, no_template_named=True)
             if named.row is None:
                 return not_found_note(named)
             return found_note(named, _schema(db, workspace_id, named.row), no_questions(texts))

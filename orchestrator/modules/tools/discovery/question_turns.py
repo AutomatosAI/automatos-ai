@@ -75,9 +75,13 @@ def asks_how(text: object) -> bool:
     return not any(_INSTRUCTION.match(sentence) for sentence in sentences)
 
 
-def refusal_on_a_question(db: Any, workspace_id: Any, action: str, caller_context: Any) -> Optional[str]:
-    """Why ``action`` is refused in this turn (its owner asked how, not for a change), or None."""
-    if action not in REFUSED_ON_A_QUESTION:
+def refusal_on_a_question(db: Any, workspace_id: Any, action: str, caller_context: Any,
+                          params: Any = None) -> Optional[str]:
+    """Why ``action`` is refused in this turn (its owner asked how, not for a change), or None.
+    ``params``: the call's, so its resume from the owner's click is known (P256-FIX-RVW-18)."""
+    from modules.tools.discovery.click_resume import on_the_click   # P256-FIX-RVW-18: the click decides
+
+    if action not in REFUSED_ON_A_QUESTION or on_the_click(db, workspace_id, action, params, caller_context):
         return None
     from modules.tools.discovery.owner_turn import owner_turn
 
@@ -101,7 +105,7 @@ def answers_the_question_first(execute: Execute) -> Execute:
     @functools.wraps(execute)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any = None) -> Dict[str, Any]:
         db, workspace_id = getattr(self, "db", None), getattr(self, "workspace_id", None)
-        refusal = refusal_on_a_question(db, workspace_id, action_name, caller_context)
+        refusal = refusal_on_a_question(db, workspace_id, action_name, caller_context, params)
         if refusal:
             logger.info("[F381] %s refused: the owner asked a question", action_name)
             return {"success": False, "error": refusal}

@@ -118,9 +118,11 @@ def test_the_card_carries_the_named_subject(monkeypatch):
 
 
 def test_the_gate_looks_before_it_asks():
-    from modules.tools.discovery import platform_executor
+    """The confirmation gate left PlatformActionExecutor.clear for its own module (P256-FIX-RVW-9)."""
+    from modules.tools.discovery import confirmation_gate, platform_executor
 
-    source = inspect.getsource(platform_executor.PlatformActionExecutor)
-    assert source.index("resolve_targets(self.db, self.workspace_id, params, action_name)") < source.index(
+    assert "asks_at_the_confirmation_gate" in inspect.getsource(platform_executor.PlatformActionExecutor)
+    source = inspect.getsource(confirmation_gate._the_cards_ask)
+    assert source.index("resolve_targets(call.db, call.workspace_id, params, call.action)") < source.index(
         "return tool_grants.attach_ask_grant(")
-    assert "return missing_targets_error(action_name, missing)" in source
+    assert "return missing_targets_error(call.action, missing)" in source

@@ -59,6 +59,7 @@ from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
+from services.done_needs_an_artifact import done_refusal, missing_artifact  # PRD-256 US-005: Done needs it
 from services.result_document_links import a_cards_document_links_open_in_the_app  # F380
 from services.ticket_result_keep import kept_result as _kept_result  # F013: a shorter re-run never overwrites
 
@@ -757,8 +758,9 @@ async def approve_task(
         return approve_from_its_card(db, ctx, task, note=note)
     if task.status != "review":  # F294: in words; a card that finished by itself keeps the note
         return approve_outside_review(db, task, note)
-    action_result = None
-    approval_action = (task.planning_data or {}).get("approval_action")
+    if missing := missing_artifact(db, task):  # PRD-256 US-005 (F380): the thing the card was for exists
+        raise HTTPException(status_code=409, detail=missing)
+    action_result, approval_action = None, (task.planning_data or {}).get("approval_action")
 
     # F195: the approval that moves the ticket out of review is the one that acts
     # on it. The move is committed before the action runs (the action can await an
@@ -1229,7 +1231,8 @@ async def update_task_status(
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
     refusal = drag_refusal(task, new_status, running=_running_now(db, task),
-                           mission_ticket=task.source_type in MISSION_TICKET_TYPES)
+                           mission_ticket=task.source_type in MISSION_TICKET_TYPES) \
+        or done_refusal(db, task, new_status)  # PRD-256 US-005: Done needs the card's artifact, as Approve does
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
     moved = _move_by_hand(db, ctx, task, new_status, body.get("blocked_reason"))

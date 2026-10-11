@@ -168,4 +168,12 @@ def test_the_lightweight_lane_holds_the_routes_too(db, graph, monkeypatch):
         lane, question, NS(agent_id=7, metadata={}), NS(orchestrator=None, get_user_name=lambda: "Gerard"),
         atom_tools=[_dispatcher()],
     ))
-    assert [t["function"]["name"] for t in tools] == ["platform_execute", "platform_query_data", "platform_query_graph"]
+    # PRD-256 US-006: the lane carries the pinned first-class tools too (platform_query_data is one of
+    # them); the routes are each there once, beside the dispatcher.
+    from modules.tools.first_class_tools import pinned_first_class
+
+    names = [t["function"]["name"] for t in tools]
+    pinned = [s["function"]["name"] for s in pinned_first_class(ws, db)]
+    assert names[0] == "platform_execute" and names[-1] == "platform_query_graph"
+    assert names == ["platform_execute", *pinned, "platform_query_graph"] and "platform_query_data" in pinned
+    assert len(names) == len(set(names))

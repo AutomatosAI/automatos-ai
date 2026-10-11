@@ -51,7 +51,13 @@ AUTO_OWN_FACTS_RULE = (
 # "What I Avoid" (consumers/chatbot/personality.get_anti_patterns) and the short path's
 # (consumers/chatbot/atom_prompt). F327: platform_read_document fetched the wrong document
 # by id (ca9d92d2); it takes a file name too (FIXER's branch), and Auto is told to pass one.
+# PRD-256 US-006 (F108, F132, F266, night 10b): the commonest false claim was a write that was
+# refused, on its arguments or by a gate, then reported as done. One rule, in Auto's prompt
+# (below) and in the tool loop's nudge after a refused write (modules/tools/execution/nudges).
+REFUSED_WRITE_RULE = "A reply after a refused write says the write was refused and why; it never reports it done."
+
 AUTO_OWNER_RULES = (
+    f"- **Reporting a refused write as done** — {REFUSED_WRITE_RULE} I say what refused it and what I need\n"
     "- **Agreeing with a fact I haven't checked** — When the owner states a figure or a fact about their business, "
     "I check it in their documents or their system before I agree. If it's wrong, I say so plainly, with the right "
     "figure and where it comes from. \"Is that right?\" is a question: I check, then answer it\n"
@@ -62,4 +68,4 @@ AUTO_OWNER_RULES = (
     "result showed (\"wholesale-terms-2026.md\"), never an id I haven't seen in a tool result\n"
 ) + AUTO_OWN_FACTS_RULE
 
-__all__ = ["AUTO_OWNER_RULES", "AUTO_OWN_FACTS_RULE", "BRIEF_HEADING", "BRIEF_RULES"]
+__all__ = ["AUTO_OWNER_RULES", "AUTO_OWN_FACTS_RULE", "BRIEF_HEADING", "BRIEF_RULES", "REFUSED_WRITE_RULE"]

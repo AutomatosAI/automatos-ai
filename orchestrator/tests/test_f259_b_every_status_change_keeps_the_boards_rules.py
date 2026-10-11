@@ -212,16 +212,19 @@ def test_autos_send_back_is_the_boards_reject(shop, word):
 
 
 def test_autos_approval_keeps_the_owners_note(shop):
-    """#0177: "Approve it with this note" — 'approved' is Done, and the note is theirs."""
+    """#0177: "Approve it with this note" — 'approved' is Done, and the note is theirs.
+    PRD-256 US-004 changed the signer: the move runs on the owner's click, and the note is
+    signed by the user who clicked (``_clicked_by``), not "you" on Auto's call alone."""
     task = f1094._ticket(shop, status="review", assigned_agent_id=shop.agent, result="35 and 22 subscriptions.",
                          completed_at=datetime.now(timezone.utc))
 
-    out = _tool(shop, task_id=task.id, status="approved", note="Going with Kestrel's 250-box run.", _user_id=OWNER)
+    out = _tool(shop, task_id=task.id, status="approved", note="Going with Kestrel's 250-box run.", _user_id=OWNER,
+                _clicked_by=f"user:{OWNER}")
 
     row = _row(shop, task)
     notes = [(n.get("by"), n.get("note")) for n in (row.runtime_ref or {}).get("session_notes") or []]
     assert out["success"] is True and row.status == "done"
-    assert ("you", "Approved: Going with Kestrel's 250-box run.") in notes
+    assert (f"user:{OWNER}", "Approved: Going with Kestrel's 250-box run.") in notes
 
 
 # --- the board: Assign is the owner's approval (F275); no stale host line (F272) ----------------

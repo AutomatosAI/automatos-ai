@@ -6,12 +6,17 @@ tool's result into a short, single-line summary for the activity trail.
 Never raw payloads: the summary is derived from the result's own headline
 fields and capped, so nothing large or sensitive rides the wire by accident.
 
-Pure, stdlib only.
+PRD-256 FX-004: an ask for the owner's click whose card is raised says so in the
+same words the model reads ("Card raised: …"), never "Failed".
+
+Pure: no I/O.
 """
 from __future__ import annotations
 
 import re
 from typing import Any, Optional
+
+from modules.tools.execution.card_raised import tool_end_summary
 
 SUMMARY_MAX_CHARS = 120
 SKIPPED_SUMMARY = "Skipped — already ran with the same input"
@@ -39,6 +44,12 @@ def tool_result_summary(result: Any, limit: int = SUMMARY_MAX_CHARS) -> Optional
         return _cap(result, limit) or None
     if not isinstance(result, dict):
         return None
+    waiting = tool_end_summary(result)
+    return _cap(waiting, limit) if waiting else _dict_summary(result, limit)
+
+
+def _dict_summary(result: dict, limit: int) -> Optional[str]:
+    """A dict result's line: its headline field, else its collection's count, else Done/Failed."""
     for key in _HEADLINE_KEYS:
         value = result.get(key)
         if isinstance(value, str) and value.strip():

@@ -142,9 +142,10 @@ def test_no_raw_execute_action_in_lanes():
     """No direct ``.execute_action(`` remains in api/widget_email.py or the
     recipe LLM-step lane (the spine is the only execution path).
 
-    Note: ``get_tools_for_step`` (discovery) is not execution; the LinkedIn
-    image workaround (``execute_linkedin_image_post``) is a named temporary
-    upstream-bug bypass, tracked for removal when Composio fixes #3094/#3113.
+    Note: ``get_tools_for_step`` (discovery) is not execution. The LinkedIn
+    image workaround (``execute_linkedin_image_post``, a temporary bypass of
+    Composio #3094/#3113) runs under the executor; since P256-FIX-RVW-2 the step
+    reaches it through the spine too, never directly.
     """
     widget_src = (_ORCH / "api" / "widget_email.py").read_text()
     assert not re.search(r"\.execute_action\(", widget_src), (
@@ -156,6 +157,8 @@ def test_no_raw_execute_action_in_lanes():
     assert not re.search(r"tool_service\.execute_action\(", recipe_src), (
         "the playbook LLM-step still calls ComposioToolService.execute_action raw"
     )
+    assert "execute_linkedin_image_post" not in recipe_src
+    assert "get_composio_client" not in recipe_src
 
 
 def test_widget_email_routes_through_spine():

@@ -35,8 +35,7 @@ from sqlalchemy.orm import Session
 
 from consumers.chatbot import auto_decisions
 from consumers.chatbot.board_questions import about_the_board
-from consumers.chatbot.brand_assign_lane import brand_work_goes_to_the_designer  # F362 (night 10c)
-from consumers.chatbot.socials_assign_lane import social_media_role, social_work_goes_to_the_director  # F379
+from consumers.chatbot.handoffs import agents_named_in, auto_always_answers, hands_off, social_media_role  # PRD-256 US-010/011
 from core.llm.decisions import MODE_LIVE, MODE_OFF, MODE_SHADOW, get_decision_engine
 
 # PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
@@ -76,7 +75,7 @@ class Complexity(str, Enum):
 class Action(str, Enum):
     """What Auto should do with this request."""
     RESPOND = "respond"      # Auto responds directly (no delegation)
-    DELEGATE = "delegate"    # Route to a single sub-agent (answers THIS turn)
+    DELEGATE = "delegate"    # Legacy verdict: Auto answers it, or the named agent gets a ticket (PRD-256 D2)
     WORKFLOW = "workflow"    # DEPRECATED — kept for backward compat parsing
     MISSION = "mission"      # PRD-125: Complex multi-step → suggest mission to user
     ASSIGN = "assign"        # PRD-224: file a board ticket for a named single agent (off-thread)
@@ -105,7 +104,7 @@ def is_deferred_phrasing(message_text: Optional[str]) -> bool:
 
 
 def build_assign_directive(
-    *, target_agent_name: Optional[str], resolved: bool, deferred: bool
+    *, target_agent_name: Optional[str], resolved: bool, deferred: bool, target_agent_id: Optional[int] = None
 ) -> str:
     """The ASSIGN-lane manager directive injected into Auto's system prompt.
 
@@ -136,7 +135,7 @@ def build_assign_directive(
             "description written as the 4-part dispatch contract below (the "
             "assigned agent must do the work from it alone, without reading this "
             "conversation), "
-            f"assigned_agent_name=\"{target_agent_name}\".\n"
+            f"assigned_agent_name=\"{target_agent_name}\"{f' and agent_id={target_agent_id}' if target_agent_id else ''}.\n"
             f"2. {start}\n"
             f"3. Confirm in ONE line with the task id and that it is {confirm_word}, "
             "then state its supervision status by echoing the platform_create_task "
@@ -175,7 +174,7 @@ def apply_assign_bias(assessment: "ComplexityAssessment", message_text: Optional
     assessment.context_directive = build_assign_directive(
         target_agent_name=assessment.target_agent_name,
         resolved=assessment.target_agent_id is not None,
-        deferred=deferred,
+        deferred=deferred, target_agent_id=assessment.target_agent_id,  # FX-014: a shared name is refused
     )
     return deferred
 
@@ -735,7 +734,7 @@ _ASSESSMENT_RUBRIC = """## What to weigh:
 
 Three lanes decide WHERE the work happens. Pick deliberately, and state which lane and why in one line in `reasoning` (Auto narrates every routing decision):
 
-- **delegate**: a specialist agent answers THIS conversation, inline, and it's over. The user wants an answer in the chat now. (Most molecule/cell/organ work.)
+- **respond**: you (Auto) answer THIS conversation yourself, with your own tools, and it's over. Any ask that names no agent and no role is yours: no specialist takes over the chat.
 - **assign**: a named or single agent does work OFF-THREAD, on the board, to a deliverable — not an inline answer. Choose assign when there are ANY of these signals:
     - an explicit agent name or role possessive: "have Jim…", "my accountant agent…", "get the researcher to…";
     - a deliverable that outlives this turn (a report to file, invoices to chase, a task to own);
@@ -757,9 +756,8 @@ Prefer an agent that already exists. Before an **assign** or **mission** implies
 
 - "Morning Auto" → atom / respond (greeting)
 - "How are you?" → atom / respond (chitchat)
-- "Send an email to John" → molecule / delegate (email tool, inline)
+- "Send an email to John" → molecule / respond (email tool, you answer)
 - "What agents do I have?" → molecule / respond (platform query)
-- "Search my docs for the Q4 report" → molecule / delegate (search tool, inline)
 - "Have my accountant agent chase the overdue invoices" → assign (named agent, off-thread deliverable), target_agent "accountant"
 - "Can you close all the blocked tickets for VECTOR? It was a token issue" → molecule / respond (addressed to YOU — do it with your platform tools; VECTOR owns the tickets and is not an assignee. Never invent an assignee from the topic, e.g. a Jira agent because the user said "tickets")
 - "Get Jim to draft the board pack, no rush" → assign + deferred (named agent, defer phrasing), target_agent "Jim"
@@ -771,7 +769,7 @@ Prefer an agent that already exists. Before an **assign** or **mission** implies
 _ASSESSMENT_OUTPUT = """Return ONLY valid JSON:
 {
   "complexity": "atom|molecule|cell|organ|organism",
-  "action": "respond|delegate|assign|mission",
+  "action": "respond|assign|mission",
   "target_agent": "the agent name for an assign (else empty)",
   "tool_hints": [],
   "needs_memory": false,
@@ -779,7 +777,8 @@ _ASSESSMENT_OUTPUT = """Return ONLY valid JSON:
   "reasoning": "one sentence"
 }
 
-action mapping: "respond" for atom; "delegate" for inline molecule/cell/organ answers; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
+action mapping: "respond" for anything you answer in this chat, atom or tool work; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
+complexity is ONLY one of atom|molecule|cell|organ|organism and action ONLY one of respond|assign|mission: a lane word never goes in complexity.
 target_agent: for "assign", the agent name the user named (or the role, e.g. "accountant") — it MUST appear in the user's own words; a request addressed to you ("can you…", "please close…") with no named assignee is NOT assign; empty otherwise.
 tool_hints: short domain keywords like "email", "github", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
 
@@ -789,9 +788,8 @@ def build_assessment_prompt(
 ) -> str:
     """The Tier-3 classifier prompt (pure — string-presence testable).
 
-    Carries the three-lane routing rubric (PRD-224 US-004): DELEGATE answers
-    THIS turn, ASSIGN files an off-thread board ticket for a named single agent,
-    MISSION staffs a multi-agent project.
+    Carries the three-lane routing rubric (PRD-224 US-004, PRD-256 D2): RESPOND is Auto's
+    answer, ASSIGN a named agent's board ticket, MISSION a multi-agent project.
     """
     return (
         "You are a message complexity classifier for an AI platform.\n\n"
@@ -831,8 +829,8 @@ class AutoBrain:
     # Main entry point
     # ------------------------------------------------------------------
 
-    @brand_work_goes_to_the_designer  # F362: a brand ask is the Brand designer's ticket (PRD-255 US-014)
-    @social_work_goes_to_the_director  # F379 (night 11): social media work is the Social Media Director's ticket
+    @hands_off  # PRD-256 US-011: brand, social media and paperwork asks go to their owners on tickets
+    @auto_always_answers  # PRD-256 US-010 (D2): Auto answers; a named agent gets a ticket
     async def assess(
         self,
         message: str,
@@ -1201,23 +1199,8 @@ class AutoBrain:
     # ------------------------------------------------------------------
 
     def _names_active_agent(self, message: str) -> bool:
-        """True when the message contains an active roster agent's name as a whole
-        word (case-insensitive). Names shorter than three characters are ignored
-        so a stray "AI" or "Bo" never counts; a name inside another word
-        ("automatically" for an agent called Auto) does not match. Fail-soft False."""
-        try:
-            text = (message or "").lower()
-            if not text:
-                return False
-            for agent in self._active_agents():
-                name = (getattr(agent, "name", "") or "").strip().lower()
-                if len(name) < 3:
-                    continue
-                if re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", text):
-                    return True
-        except Exception:
-            logger.debug("[AutoBrain] roster name check failed — pin applies", exc_info=True)
-        return False
+        """True when the message names an active roster agent (handoffs.agents_named_in)."""
+        return bool(agents_named_in(message, self._active_agents()))
 
     def _active_agents(self) -> List[Any]:
         """The whole active roster (F362) — the shared source for the Tier-3
@@ -1332,97 +1315,39 @@ class AutoBrain:
     async def _llm_classify(
         self, message: str, conversation_length: int
     ) -> ComplexityAssessment:
+        """Tier 3: a lightweight LLM gives the level, the lane, the named agent and the tool hints.
+
+        PRD-256 FX-014: the verdict is read field by field (``verdict_parser``): the action and the
+        target agent first, and a complexity that is no level defaults without losing the rest. Only a
+        failed call or a reply with no JSON object gives MOLECULE/RESPOND: tools kept, lane lost.
         """
-        Classify an incoming message's execution complexity and routing using a lightweight LLM.
-        
-        Sends a structured classification prompt to an LLM to determine complexity (atom|molecule|cell|organ|organism),
-        recommended action (respond|delegate|workflow), tool hints, memory and multi-agent needs, and a short reasoning
-        string. If LLM classification fails, returns an ATOM/RESPOND fallback assessment with reduced confidence.
-        
-        Parameters:
-            message (str): The user message to classify.
-            conversation_length (int): The current conversation turn count (used to provide context to the classifier).
-        
-        Returns:
-            ComplexityAssessment: An assessment containing complexity, action, reasoning, confidence, needs_memory,
-            tool_hints, and needs_multi_agent. On LLM failure this will be an ATOM/RESPOND assessment with lower confidence.
-        """
+        from consumers.chatbot.verdict_parser import LOST_THE_LANE, lost_the_lane, read_verdict, to_assessment
+
         logger.info("[AutoBrain] Tier 3 LLM classifying: '%s'", message[:80])
         t0 = time.monotonic()
-
-        # PRD-164 S1 (Q61): the one planning pack informs routing decisions.
-        # PRD-224 US-004: fetch the roster once — it drives BOTH the routing
-        # context block and the ASSIGN-lane name match below.
+        # PRD-224 US-004: one roster read drives the routing context AND the ASSIGN name match.
         roster = self._active_agents()
         platform_context = await self._planning_context_block(message, roster)
         prompt = build_assessment_prompt(message, conversation_length, platform_context)
-
         try:
             from core.llm import create_llm_manager
 
             llm = create_llm_manager(service_name="complexity_assessor", workspace_id=self._workspace_id, request_type="complexity_assessor")
-            response = await llm.generate_response(
-                messages=[{"role": "user", "content": prompt}]
-            )
-            content = response.content if hasattr(response, "content") else str(response)
-
-            # Extract JSON block
-            json_match = re.search(r"\{.*\}", content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-                elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
-                # PRD-125: "workflow" → MISSION (deprecated alias, back-compat).
-                action = self._normalize_action(data.get("action", "respond"))
-                # PRD-224 US-004: on the ASSIGN lane, resolve the named agent
-                # against the SAME roster shown to the classifier. An unresolved
-                # name keeps target_agent_id None → api/chat.py asks in-thread
-                # (baked decision: never reflexive matcher auto-pick).
-                target_agent_id = None
-                target_agent_name = None
-                if action == Action.ASSIGN:
-                    proposed = (data.get("target_agent") or "").strip()
-                    target_agent_id, target_agent_name = self._match_roster_agent(
-                        proposed, roster, message=message
-                    )
-                    if target_agent_name is None and proposed:
-                        target_agent_name = proposed  # keep the name for the ask
-                assessment = ComplexityAssessment(
-                    complexity=Complexity(data.get("complexity", "atom").lower()),
-                    action=action,
-                    reasoning=data.get("reasoning", "LLM classified"),
-                    confidence=0.85,
-                    target_agent_id=target_agent_id,
-                    target_agent_name=target_agent_name,
-                    needs_memory=data.get("needs_memory", False),
-                    tool_hints=data.get("tool_hints", []),
-                    needs_multi_agent=data.get("needs_multi_agent", False),
-                )
-                logger.info(
-                    "[AutoBrain] assessed",
-                    extra={
-                        "tier": 3,
-                        "complexity": assessment.complexity.value,
-                        "action": assessment.action.value,
-                        "confidence": assessment.confidence,
-                        "latency_ms": elapsed_ms,
-                        "cache_hit": False,
-                        "workspace_id": self._workspace_id,
-                    },
-                )
-                return assessment
-        except Exception:
-            logger.exception("[AutoBrain] Tier 3 LLM classification failed, falling back to ATOM")
-
-        # Fallback: treat as MOLECULE / RESPOND so tools remain available.
-        # Rationale: a wrong MOLECULE only adds tool schemas to the context
-        # (model still decides via tool_choice=auto). A wrong ATOM strips
-        # tools entirely, making the agent unable to fulfil action requests.
-        return ComplexityAssessment(
-            complexity=Complexity.MOLECULE, action=Action.RESPOND,
-            reasoning="LLM classification failed — defaulting to MOLECULE (tools available)",
-            confidence=0.50, needs_memory=False, tool_hints=[],
-            needs_multi_agent=False,
+            response = await llm.generate_response(messages=[{"role": "user", "content": prompt}])
+            verdict = read_verdict(response.content if hasattr(response, "content") else str(response))
+        except Exception as exc:
+            logger.exception(LOST_THE_LANE, exc)
+            return lost_the_lane()
+        assessment = to_assessment(verdict, lambda name: self._match_roster_agent(name, roster, message=message))
+        logger.info(
+            "[AutoBrain] assessed",
+            extra={
+                "tier": 3, "complexity": assessment.complexity.value, "action": assessment.action.value,
+                "confidence": assessment.confidence, "latency_ms": round((time.monotonic() - t0) * 1000, 1),
+                "cache_hit": False, "workspace_id": self._workspace_id,
+            },
         )
+        return assessment
 
     # ------------------------------------------------------------------
     # Redis cache (Tier 1)
@@ -1472,7 +1397,7 @@ class AutoBrain:
         return None
 
     def _cache_store(self, msg_lower: str, assessment: ComplexityAssessment) -> None:
-        if not self._redis:
+        if not self._redis or assessment.action == Action.DELEGATE:  # PRD-256 D2: never keep a routed-away verdict
             return
         try:
             cache_key = self._make_cache_key(msg_lower)
@@ -1511,9 +1436,8 @@ class AutoBrain:
         if platform_match:
             return platform_match.group(0)
 
-        # F263/F241 (night 7b): a card by its number, the board's state, or "update the
-        # card" is Auto's, with its board tools: never a specialist's (DELEGATE) or a new
-        # ticket's (ASSIGN), and never a turn with no tools.
+        # F263/F241 (night 7b): a card by its number, the board's state, or "update the card"
+        # is Auto's, with its board tools; a card handed to a named agent is ASSIGN on it (D2).
         if about_the_board(msg_lower):
             return BOARD_QUERY
 

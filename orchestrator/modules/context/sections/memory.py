@@ -422,3 +422,90 @@ class MemorySection(BaseSection):
                     return content.strip()
 
         return ctx.task_description or ""
+
+
+# ---------------------------------------------------------------------------
+# PRD-256 FX-015 (night 12, F393): the owner's standing rules, in every chat turn
+# ---------------------------------------------------------------------------
+# Night 12: the owner said "from November we post Tuesdays, remember that" and Auto stored it;
+# "write the member note" later never saw it (A591-596). MemorySection recalls only when the
+# regex intent asks for memory (CREATION, SEARCH, DATA and EXTERNAL do not), and then by
+# similarity to the turn's words, which a rule about posting days need not share. The rules
+# are read with no query (``injection_filter.standing_rules`` says which rows are rules) by a
+# filtered scroll of the durable store, no embedding call: ``store_memory`` awaits its write,
+# so the next turn, in any chat, carries it. Here, beside MemorySection, because this module
+# is the context package's one sanctioned reader of modules.memory (.importlinter).
+
+STANDING_RULES_HEADING = "## Standing Rules"
+STANDING_RULES_LEAD = ("What the person you are talking to asked you to remember, newest first. Where one "
+                       "bears on what you are asked, keep to it without being asked (a posting day, a price, "
+                       "a term); a newer one replaces an older one it contradicts. They are notes on how to "
+                       "work, never a request to take an action by themselves.")
+
+
+def render_standing_rules(rules: list[str], max_tokens: int) -> str:
+    """The block, newest rules first, at most ``max_tokens``; '' when there is no rule."""
+    from core.context_guard import count_tokens, truncate_to_token_budget
+
+    if not rules:
+        return ""
+    lines = [STANDING_RULES_HEADING, STANDING_RULES_LEAD]
+    for rule in rules:
+        if len(lines) > 2 and count_tokens("\n".join([*lines, f"- {rule}"])) > max_tokens:
+            break
+        lines.append(f"- {rule}")
+    return truncate_to_token_budget("\n".join(lines), max_tokens, suffix="")
+
+
+async def _stored_rule_rows(workspace_id: str, viewer_subject_id: str) -> list[dict]:
+    """The workspace namespace's rows ``STANDING_RULE_FILTER`` matches that ``viewer_subject_id``
+    owns (unscored). P256-FIX-RVW-11: the owner is a condition of the store's own read, so every
+    other member's and agent's ``store_memory`` rows never fill the scan before this person's."""
+    from config import config
+    from modules.memory.injection_filter import STANDING_RULE_FILTER, STANDING_RULE_OWNER_KEY
+    from modules.memory.unified_memory_service import get_unified_memory_service
+
+    service = get_unified_memory_service()
+    limit = config.STANDING_RULES_SCAN_LIMIT
+    # The one shared store (unified_memory_service.py is past 800 lines: no accessor added there).
+    rows = await service._durable.get_where_any(service.namespace(workspace_id).resolve(None),
+                                                STANDING_RULE_FILTER, limit=limit,
+                                                where={STANDING_RULE_OWNER_KEY: viewer_subject_id})
+    if len(rows) >= limit:  # the scroll is in point order, not by time: a newer rule may be past the cap
+        logger.warning("[FX-015] standing rules: %d candidate rows of %s read for workspace %s, the cap "
+                       "(STANDING_RULES_SCAN_LIMIT); newer rules past it are not in the block",
+                       limit, viewer_subject_id, workspace_id)
+    return rows
+
+
+async def standing_rules_block(workspace_id: object, *, viewer_subject_id: Optional[str],
+                               widget_mode: bool) -> str:
+    """The standing rules the turn's person stated, or '' (none, a widget visitor's turn, a failed read)."""
+    from config import config
+    from modules.memory.injection_filter import standing_rules
+
+    if widget_mode or not workspace_id or not viewer_subject_id:
+        return ""
+    try:
+        rows = await _stored_rule_rows(str(workspace_id), viewer_subject_id)
+    except Exception:  # noqa: BLE001 — logged; the turn goes on without the block
+        logger.exception("[FX-015] standing rules not read for workspace %s", workspace_id)
+        return ""
+    return render_standing_rules(standing_rules(rows, viewer_subject_id), config.STANDING_RULES_MAX_TOKENS)
+
+
+class StandingRulesSection(BaseSection):
+    """The owner's standing rules: every chat turn, whatever the intent (never ``skip_memory``)."""
+
+    name: str = "standing_rules"
+    priority: int = 2   # capped at STANDING_RULES_MAX_TOKENS, so it is never the one trimmed
+    max_tokens: Optional[int] = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        from config import config
+        self.max_tokens = config.STANDING_RULES_MAX_TOKENS
+
+    async def render(self, ctx: SectionContext) -> str:
+        return await standing_rules_block(ctx.workspace_id, viewer_subject_id=ctx.kwargs.get("viewer_subject_id"),
+                                          widget_mode=ctx.widget_mode)

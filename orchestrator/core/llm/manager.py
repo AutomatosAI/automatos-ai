@@ -27,8 +27,10 @@ from .clients.grok_client import GrokProvider
 from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 from .byok_endpoint import with_key_endpoint
+from .vendor_fit import fitted
+from .list_prices import list_rates
 
-from core.llm import output_budget, usage_status
+from core.llm import failover, output_budget, usage_status
 from core.llm.usage_counts import UsageCounts, usage_counts
 from core.observability.genai import traced_llm_call
 
@@ -648,8 +650,6 @@ class LLMManager:
             return True
         return any(p.search(error_text) for p in self._DEAD_MODEL_PATTERNS)
 
-    # No fallback helpers — errors surface directly to the user.
-
     @reprompts_in_the_users_turn  # F295 (8): a re-prompt after the model's reply is the user's turn
     @traced_llm_call  # PRD-256 O3: one GenAI span per call
     async def generate_response(
@@ -681,17 +681,22 @@ class LLMManager:
             self._note_cut(response, budget)
             return response
         except Exception as exc:
-            self._track_usage(None, start, status="error")
-            self._remember_refusal(exc)
-            self._note_refusal(exc, budget)
+            self._call_failed(exc, start, budget)
+            target = failover.failover_for(exc, self.config.model)  # PRD-256 US-008: none by default (D5)
+            if target is None:
+                self._raise_unavailable(exc)
+                raise
+            return await failover.answer_on_failover(self, target, messages, tools)
 
-            if self._is_retriable_model_error(exc):
-                raise ValueError(
-                    f"Model '{self.config.model}' is unavailable or has been removed. "
-                    f"Please select a different model in Settings."
-                ) from exc
+    def _call_failed(self, exc: Exception, start: float, budget: Optional[int]) -> None:
+        self._track_usage(None, start, status="error")
+        self._remember_refusal(exc)
+        self._note_refusal(exc, budget)
 
-            raise
+    def _raise_unavailable(self, exc: Exception) -> None:
+        if self._is_retriable_model_error(exc):
+            raise ValueError(f"Model '{self.config.model}' is unavailable or has been removed. "
+                             "Please select a different model in Settings.") from exc
 
     @traced_llm_call  # PRD-256 O3: the same span as the async path
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> Any:
@@ -706,16 +711,8 @@ class LLMManager:
             self._note_cut(response, budget)
             return response
         except Exception as exc:
-            self._track_usage(None, start, status="error")
-            self._remember_refusal(exc)
-            self._note_refusal(exc, budget)
-
-            if self._is_retriable_model_error(exc):
-                raise ValueError(
-                    f"Model '{self.config.model}' is unavailable or has been removed. "
-                    f"Please select a different model in Settings."
-                ) from exc
-
+            self._call_failed(exc, start, budget)
+            self._raise_unavailable(exc)
             raise
 
     def _call_budget(self) -> Optional[int]:
@@ -963,17 +960,13 @@ def create_llm_manager(
 
     If workspace_id is not provided, falls back to the request-scoped
     ContextVar set by auth middleware so that usage is always tracked.
+    A model given without a provider is checked against the service's settings
+    provider first (``vendor_fit.fitted``, P256-FIX-T1): never another vendor's id.
 
     Args:
         service_name: Service name for per-service settings
-        provider: Optional provider override
-        model: Optional model override
-        workspace_id: Workspace ID for usage tracking
-        agent_id: Agent ID for usage tracking
-        request_type: Request type label for usage tracking
-
-    Returns:
-        LLMManager instance
+        provider / model: Optional overrides
+        workspace_id / agent_id / request_type: Usage tracking
     """
     if not workspace_id:
         try:
@@ -981,6 +974,8 @@ def create_llm_manager(
             workspace_id = workspace_id_var.get() or None
         except Exception:
             pass
+    if model and not provider:
+        provider, model = fitted(service_name, model)
 
     return LLMManager(
         service_name=service_name,
@@ -1025,6 +1020,7 @@ _MODEL_COST_ENTRIES: Dict[str, Tuple[float, float]] = {
     "gemini-2.5-flash": (0.0003, 0.0025),
     "gemini-2.5-pro": (0.00125, 0.01),
     "gpt-5.5": (0.005, 0.03),
+    # The Claude 5-era arms are priced by core/llm/list_prices (P256-FIX-T2), tried first.
     # Anthropic's list price (9 Oct 2026). OpenRouter has no twin for it yet, so without this
     # entry its catalogue row stayed unpriced and the Anthropic sync had no price to give it.
     "claude-opus-5-5": (0.004, 0.020),
@@ -1036,6 +1032,9 @@ MODEL_COST_MAP: Dict[str, Tuple[float, float]] = dict(
 
 def estimate_cost_usd(model: Optional[str], input_tokens: int, output_tokens: int) -> float:
     """Rough USD estimate for one LLM call; conservative default for unknown models."""
+    listed = list_rates(model, input_tokens)
+    if listed is not None:
+        return (input_tokens / 1000 * listed[0]) + (output_tokens / 1000 * listed[1])
     model_lower = (model or "").lower()
     for key, (inp_rate, out_rate) in MODEL_COST_MAP.items():
         if key in model_lower:

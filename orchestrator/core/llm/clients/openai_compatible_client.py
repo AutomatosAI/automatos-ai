@@ -20,7 +20,8 @@ silent fallbacks (PRD-236 Q2: free must never silently become paid).
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
-from .base import BaseLLMProvider, LLMConfig, LLMResponse, request_max_tokens, run_blocking
+from .base import BaseLLMProvider, LLMConfig, LLMResponse, accepts_sampling_params, run_blocking
+from .openai_chat_request import chat_kwargs
 from core.llm import providers as registry
 from core.llm.reasoning import coalesce_reasoning, reasoning_from_fields, split_think_tags
 
@@ -358,21 +359,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     # ------------------------------------------------------------------ #
 
     def _base_kwargs(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {
-            "model": self.config.model,
-            "messages": messages,
-            "temperature": self.config.temperature,
-            "max_tokens": request_max_tokens(self.config),
-        }
-        if self.config.top_p is not None:
-            kwargs["top_p"] = self.config.top_p
-        if self.config.frequency_penalty is not None:
-            kwargs["frequency_penalty"] = self.config.frequency_penalty
-        if self.config.presence_penalty is not None:
-            kwargs["presence_penalty"] = self.config.presence_penalty
-        if self.config.stop is not None:
-            kwargs["stop"] = self.config.stop
-        return kwargs
+        """PRD-256 US-008: the shared chat request, sampling only for a model that
+        takes it (``accepts_sampling_params``: no temperature to a Claude 4.6+ id)."""
+        return chat_kwargs(self.config, messages, sampling=accepts_sampling_params(self.config.model),
+                           completion_tokens=False)
 
     def _request_kwargs(self, messages: List[Dict[str, str]], tools: Optional[List[Dict]]) -> Dict[str, Any]:
         """The chat-completions request for ``messages`` (+ tools and tool_choice)."""

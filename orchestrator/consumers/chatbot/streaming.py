@@ -13,6 +13,9 @@ import logging
 from typing import Dict, Any, AsyncGenerator, List, Optional
 import asyncio
 
+from consumers.chatbot import on_screen
+from modules.tools.execution.card_raised import WAITING, streams_the_wait
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,8 +52,15 @@ class StreamingHandler:
     def format_aisdk_narration(self, text: str, retracted: bool = False) -> str:
         """F186: the text just streamed was not the answer. The round ended in
         tool calls, so it is narration and belongs with the progress lines; or,
-        ``retracted``, the loop nudged it (F108) and the retry replaces it."""
-        return self.format_aisdk_data("narration", {"text": text, **({"retracted": True} if retracted else {})})
+        ``retracted``, the loop nudged it (F108) and the retry replaces it.
+        FX-017: ``text`` is the round's answer; the frame carries what that round
+        streamed, and a retraction whose replacement is blank is held (``""``)."""
+        said = on_screen.retracted(text) if retracted else on_screen.narrated(text)
+        return "" if said is None else self.narration_frame(said, retracted)
+
+    def narration_frame(self, said: str, retracted: bool = False) -> str:
+        """The narration frame for ``said``, the exact text a round streamed."""
+        return self.format_aisdk_data("narration", {"text": said, **({"retracted": True} if retracted else {})})
 
     def format_aisdk_limit_reached(self, limit: str, value: int, message: str) -> str:
         """Format a limit_reached event so the user is told an agent stopped
@@ -85,6 +95,7 @@ class StreamingHandler:
             },
         )
 
+    @streams_the_wait  # P256-FIX-RVW-22: an ask's frame says it waits (the loop's event, card_raised)
     def format_aisdk_tool_end(
         self,
         tool_call_id: str,
@@ -94,12 +105,15 @@ class StreamingHandler:
         duration_ms: Optional[int] = None,
         summary: Optional[str] = None,
         skipped: bool = False,
+        waiting: bool = False,
     ) -> str:
         """Format tool-end event for AI SDK (tool lifecycle UI).
 
         PRD-238 S3: ``summary`` is the one-line result headline the activity
         trail shows; ``skipped`` marks a de-duplicated call so the client can
-        close its chip instead of spinning forever.
+        close its chip instead of spinning forever. P256-FIX-RVW-22: ``waiting``
+        marks an ask for the owner's click (``success`` stays false): the trail
+        draws it as waiting, never as a failure.
         """
         payload: Dict[str, Any] = {
             "toolCallId": tool_call_id,
@@ -114,6 +128,8 @@ class StreamingHandler:
             payload["summary"] = summary
         if skipped:
             payload["skipped"] = True
+        if waiting:
+            payload[WAITING] = True
         return self.format_aisdk_data("tool-end", payload)
 
     def format_aisdk_usage(self, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> str:

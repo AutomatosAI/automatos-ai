@@ -1,7 +1,10 @@
 """F241 and F265 (night 7b): a new card, its brief, and a note made in chat.
 
 - "Please give #0192 to the Shopify Support Agent" made a NEW card, #0194 "Handle task
-  #0192", and #0192 stayed in the Inbox.
+  #0192", and #0192 stayed in the Inbox. Since PRD-256 US-010 (D2) the turn is the ASSIGN
+  lane on #0192 itself, with a directive that assigns the card and forbids a new one
+  (test_autos_card_directive_assigns_the_card_and_makes_no_copy); the create tool's
+  refusal below stays as the backstop.
 - Auto's brief for #0182 told the Analyst "Use `platform_update_task_status` to mark the
   task as 'review' when complete". The agent's own move was refused, and its first
   answer said a table was made where there was none (F265).
@@ -66,6 +69,15 @@ def test_the_create_tool_files_no_copy(shop):
 
     assert out["success"] is False and "already on the board" in out["error"]
     assert shop.db.query(BoardTask).filter(BoardTask.workspace_id == shop.ws).count() == 1
+
+
+def test_autos_card_directive_assigns_the_card_and_makes_no_copy():
+    """PRD-256 US-010: a card handed to a named agent is assigned, by its number."""
+    from consumers.chatbot.handoffs import card_directive
+
+    directive = card_directive("#0192", "Shopify Support Agent", deferred=False)
+    assert 'platform_assign_task with task_id "#0192" and agent_name "Shopify Support Agent"' in directive
+    assert "do NOT create a new card" in directive and "platform_create_task" not in directive
 
 
 def test_a_brief_loses_the_sentence_that_moves_its_card():
@@ -225,23 +237,24 @@ def test_a_plain_edit_of_the_brief_loses_its_status_order_too(shop):
     assert shop.card.status == "inbox"                                 # an edit never moves the card
 
 
-def test_a_status_sent_with_a_new_brief_is_told_the_re_brief_sends_it_back(in_review):
+def test_a_status_sent_with_a_new_brief_is_dropped_and_the_card_re_briefed(in_review, notes_in_this_session):
     """Night 7b's call {"status": "pending", "brief": …} for "Update #0199 with that brief and
     send it back". F309 (night 9): the edit tool takes a status now (it moves the card with
     its note: #1866's approval note was lost when the status was refused here), so the
-    params are not refused; a new brief on a worked card says the Re-brief sends it back
-    itself, and nothing changes."""
+    params are not refused. PRD-256 FX-013 (night 12, A440): a new brief on a worked card is
+    the board's Re-brief, which sends it back itself, so the status is dropped (it was
+    refused, while the owner's correction was urgent) and the answer says so."""
     from modules.tools.discovery import get_action_registry
-    from modules.tools.discovery.ticket_edit_moves import REBRIEF_MOVES_IT
+    from modules.tools.discovery.ticket_edit_moves import STATUS_IGNORED
     from modules.tools.execution.unified_executor import undeclared_params_refusal
 
     params = {"task_id": in_review.number, "status": "pending", "description": NEW_BRIEF}
     action = get_action_registry().get("platform_update_task")
     assert undeclared_params_refusal("platform_update_task", action, params, "t") is None
     out = asyncio.run(in_review.handlers.update_board_task(in_review.db, in_review.ws, params))
-    assert out["success"] is False and out["error"] == REBRIEF_MOVES_IT
+    assert out["success"] is True and out["status_ignored"] is True and STATUS_IGNORED in out["message"]
     in_review.db.refresh(in_review.card)
-    assert (in_review.card.status, in_review.card.description) == ("review", "Write the blog intro on resting espresso.")
+    assert (in_review.card.status, in_review.card.description) == ("assigned", NEW_BRIEF)
 
 
 def _cancel_with(note_written):

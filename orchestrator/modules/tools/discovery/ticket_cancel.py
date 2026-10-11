@@ -23,6 +23,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.owner_only import signed_by
+
 logger = logging.getLogger(__name__)
 
 Handler = Callable[[Session, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
@@ -47,7 +49,7 @@ def stops_what_it_cancels(handler: Handler) -> Handler:
         cards = _run_cards(db, workspace_id, [_as_id(r) for r in (listed or [params.get("task_id")])])
         if not cards:
             return await handler(db, workspace_id, params)
-        cancelled, refused = _cancel(db, workspace_id, cards, params.get("_user_id"))
+        cancelled, refused = _cancel(db, workspace_id, cards, params.get("_user_id"), signed_by(params))
         if listed is None:
             return _one_answer(cancelled, refused)
         rest = [r for r in listed if _as_id(r) not in cards]
@@ -77,14 +79,15 @@ def _run_cards(db: Session, workspace_id: Any, ids: List[Optional[int]]) -> Dict
             if is_playbook_card(t) or getattr(t, "source_type", None) in (MISSION_CARD, MISSION_STEP)}
 
 
-def _cancel(db: Session, workspace_id: Any, cards: Dict[int, Any],
-            driver: Optional[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _cancel(db: Session, workspace_id: Any, cards: Dict[int, Any], driver: Optional[str],
+            signer: Optional[str] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Each card through cancel_ticket: what was cancelled (and what of its run stopped),
-    and what was refused, with why."""
+    and what was refused, with why. Signed by the user who clicked the approval card
+    (PRD-256 US-004), an agent's otherwise; the driver's own rights decide what may stop."""
     from services.run_cancel import cancel_ticket
     from services.ticket_numbers import ticket_label
 
-    by = f"user:{driver}" if driver else BY_AN_AGENT
+    by = signer or BY_AN_AGENT
     may = _may(db, workspace_id, driver)
     cancelled: List[Dict[str, Any]] = []
     refused: List[Dict[str, Any]] = []

@@ -130,8 +130,8 @@ def test_the_chat_service_runs_each_turn_through_them():
 
     assert svc.StreamingChatService._prepare_messages.__code__ is bt.autos_prompt_carries_the_brand_kit(
         anything).__code__
-    assert svc.StreamingChatService._answer_additions.__code__ is bt.a_reply_says_its_banned_words(
-        lambda *_a: []).__code__
+    additions = svc.StreamingChatService._answer_additions.__wrapped__.__wrapped__   # under PRD-256's receipts
+    assert additions.__code__ is bt.a_reply_says_its_banned_words(lambda *_a: []).__code__
     assert svc._upload_inline_images.__code__ is bt.a_saved_reply_is_on_brand(anything).__code__
 
 

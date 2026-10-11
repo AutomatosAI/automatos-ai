@@ -43,6 +43,7 @@ from core.services.playbook_step_refs import resolve_step_references, step_value
 from services.step_lessons import a_playbook_step_carries_its_lessons
 from services.playbook_usage import books_spend_to_the_run, books_the_step_to_its_agent  # F321
 from services.brand_hooks import a_playbook_step_is_on_brand
+from modules.tools.execution.held_context import acts_for_its_run  # P256-FIX-RVW-2
 
 logger = logging.getLogger(__name__)
 
@@ -308,9 +309,18 @@ def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str
     return f"{head}: {first}" if first else head
 
 
+def step_context(recipe_execution_id: Optional[str], step_order: Any) -> Optional[Dict[str, Any]]:
+    """The server-built context of a playbook step's calls: its run and step, which the
+    owner's-click gate reads (agent_sends' playbook lane). None outside a run."""
+    if not recipe_execution_id:
+        return None
+    return {"playbook_execution_id": recipe_execution_id, "playbook_step": step_order}
+
+
 @books_the_step_to_its_agent  # F321: the step's helper calls are booked to its agent
 @a_playbook_step_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
 @a_playbook_step_is_on_brand  # brand kit at generation (night 9b): the brand's rules; the answer on brand
+@acts_for_its_run(lambda **step: step_context(step.get("recipe_execution_id"), step.get("step_order")))
 async def _execute_step(
     db: Session,
     agent: Agent,
@@ -391,7 +401,6 @@ async def _execute_step(
     from modules.tools.services.composio_hint_service import ComposioHintService
     from modules.tools.services.composio_tool_service import ComposioToolService
     from core.composio.tool_executor import resolve_file_uploads
-    from core.composio.client import get_composio_client
     from core.composio.deny_list import composio_action_denial_async
     from core.composio.off_loop import ComposioLookupTimeout, composio_lookup
     from core.composio.post_gate import post_action_refusal
@@ -750,46 +759,6 @@ async def _execute_step(
                     _temp_files: list = []
                     try:
                         t0 = time.time()
-
-                        # --- WORKAROUND: Composio LinkedIn image upload is broken (#3094, #3113) ---
-                        # Remove when Composio fixes — see linkedin_image_workaround.py
-                        _tool_upper = tool_name.upper()
-                        if _tool_upper == "LINKEDIN_CREATE_LINKED_IN_POST":
-                            from core.composio.linkedin_image_workaround import has_image_params, execute_linkedin_image_post
-                            if has_image_params(tool_args):
-                                logger.info("[LinkedInWorkaround] Intercepting %s in recipe", _tool_upper)
-                                try:
-                                    exec_result = await execute_linkedin_image_post(
-                                        params=tool_args,
-                                        workspace_id=workspace_id,
-                                        entity_id=composio_result.entity_id,
-                                        composio_client=get_composio_client(),
-                                    )
-                                except Exception as wa_exc:
-                                    logger.error("[LinkedInWorkaround] Exception: %s", wa_exc, exc_info=True)
-                                    exec_result = {"success": False, "data": None, "error": str(wa_exc)}
-                                exec_ms = int((time.time() - t0) * 1000)
-                                success = exec_result.get("success", False)
-                                data = exec_result.get("data")
-                                error = exec_result.get("error")
-                                if success:
-                                    result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
-                                    logger.info(f"[recipe_step] LinkedIn workaround OK in {exec_ms}ms")
-                                else:
-                                    result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
-                                    logger.warning(f"[recipe_step] LinkedIn workaround failed: {error}")
-                                call_ok = bool(success)
-                                _composio_call_cache[_dedup_key] = (result_text, call_ok)
-                                all_tool_calls.append({
-                                    "action": tool_name, "params": tool_args,
-                                    "result": result_text[:8000], "duration_ms": exec_ms,
-                                    "composio_direct": True, "success": call_ok,
-                                })
-                                messages.append({
-                                    "role": "tool", "tool_call_id": tool_id,
-                                    "content": result_text[:20000],
-                                })
-                                continue
 
                         tool_args, _temp_files = await resolve_file_uploads(
                             action=tool_name,

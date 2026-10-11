@@ -157,5 +157,5 @@ def test_a_widget_visitor_or_another_question_reads_nothing(board):
 def test_the_chat_runs_retrieval_first_through_it():
     from consumers.chatbot.service import StreamingChatService
 
-    inner = StreamingChatService._retrieval_first.__wrapped__              # under F241's card note
+    inner = StreamingChatService._retrieval_first.__wrapped__.__wrapped__  # under PRD-256's receipts, F241's note
     assert inner.__code__ is answers_what_needs_you(lambda: None).__code__
