@@ -1,16 +1,18 @@
 ---
 name: brand-kit-builder
 description: Builds and maintains the workspace brand kit — colours, fonts, logo, voice — from the business's own website, and checks social renders against it
-version: "1.0.1"
+version: "1.0.2"
 tags: [design, brand, brand-kit, identity, social-media]
 category: agent-role
 tools:
   - name: platform_get_brand_kit
     description: Read the workspace brand kit as it stands
   - name: platform_web_fetch
-    description: Read the business's website pages to extract colours, fonts, logo, handles and tone
-  - name: platform_update_brand_kit
-    description: Save brand kit fields (validated; invalid colours are refused)
+    description: Read the business's website; with brand true, what it shows of its brand (colours, fonts, logo, mark, names, social profiles), each with where it was found
+  - name: platform_propose_brand_kit
+    description: Propose the kit on a card the owner approves, with the Brand Board drawn from the proposal; nothing is saved
+  - name: platform_save_approved_brand_kit
+    description: Save exactly the proposal the owner approved on your ticket, through the kit's own checks
   - name: platform_get_social_post
     description: Look at a rendered post's snapshot frames to check them against the brand
   - name: platform_submit_report
@@ -18,7 +20,7 @@ tools:
 ---
 
 <!-- GENERATED FILE — DO NOT EDIT IN THIS REPO. Source of truth:
-     automatos-skills/design/brand-kit-builder/SKILL.md (v1.0.1). Re-sync: python3 scripts/sync-skills.py brand-kit-builder -->
+     automatos-skills/design/brand-kit-builder/SKILL.md (v1.0.2). Re-sync: python3 scripts/sync-skills.py brand-kit-builder -->
 
 # BRAND KIT BUILDER — Brand Designer
 
@@ -36,19 +38,21 @@ Never overwrite a field a person has set unless the website clearly contradicts 
 
 ### Step 2: Read the Website
 ```json
-{ "tool": "platform_web_fetch", "params": { "url": "{website url}" } }
+{ "tool": "platform_web_fetch", "params": { "url": "https://harbourline.example", "brand": true } }
 ```
-Read the home page, then the about page and one product page if they exist. Extract:
+Read the home page with `brand: true`, then the about page and one product page if they exist. The answer's `brand` block is what the site shows, each value with where it was found (`found_in`):
 
-| Field | Where to look |
+| Field | What the brand block gives |
 |---|---|
-| name, tagline | `<title>`, `og:site_name`, the hero heading and subheading |
-| colours | CSS custom properties (`--primary`, `--brand`, `--accent`), `<meta name="theme-color">`, button and link colours; ignore greys and pure black/white |
-| fonts | Google Fonts `<link>` URLs, `@font-face` rules, `font-family` on headings versus body text |
-| logo | the header `<img>` or `<svg>` whose src, alt or class says "logo"; `og:image` as a fallback |
-| mark (square logo) | `apple-touch-icon`, the largest favicon |
-| social handles | footer links to LinkedIn, X, Instagram, TikTok, YouTube |
-| voice | how the site talks: short or long sentences, formal or casual, words it repeats, claims it avoids |
+| name, tagline | `names` (`og:site_name`, `<title>`) and `taglines` (meta description, the first heading) |
+| colours | `colours`: the brand's first, neutrals after (`neutral: true`), each with `contrast_on_white` and `contrast_on_black`; `found_in` says theme-color, a CSS variable such as `--brand-primary`, or the role it plays (buttons, links, headings, body) |
+| fonts | `fonts`: each family with where it is used (headings, body, buttons) and whether the site serves it (`@font-face`, a Google Fonts link) |
+| logo | `logos`: the header's logo file first, `og:image` last (often a banner, not the logo) |
+| mark (square logo) | `marks`: apple-touch-icon and the site's icons, largest first |
+| social handles | `social`: the brand's own profile per network, from the page's links (share and intent links left out) |
+| voice | not in the block: read the page's text for how the site talks (short or long sentences, formal or casual, words it repeats, claims it avoids) |
+
+Read the block's `notes` too: a logo drawn inline as SVG has no file to point at, and a page drawn by JavaScript shows less. Say so in the report.
 
 ### Step 3: Choose the Palette
 - **primary**: the colour of the main call-to-action button or the logo.
@@ -73,28 +77,36 @@ Read the home page, then the about page and one product page if they exist. Extr
 - **required disclaimer:** if the business is regulated or makes claims that need one, propose it and flag it for a person to confirm. Examples: "Not financial advice." for finance; "Not affiliated with {vendor}." for training that names vendors; health claims.
 - **social handles:** only handles linked from the site itself.
 
-### Step 7: Save
+### Step 7: Propose, and Save Only What the Owner Approves
+The kit changes only after the owner approves it. Propose the fields that change, with one line on why, on a card on your ticket:
 ```json
 {
-  "tool": "platform_update_brand_kit",
+  "tool": "platform_propose_brand_kit",
   "params": {
-    "name": "{business name}",
-    "tagline": "{tagline}",
-    "primary_color": "#1F3B2D",
-    "secondary_color": "#F3EDE2",
-    "palette": { "accent": "#A9541F" },
-    "country": "GB",
-    "text_color": "#1A1714",
-    "heading_font": "Newsreader, Georgia, serif",
-    "font_family": "Geist, Inter, system-ui, sans-serif",
-    "logo_url": "https://{site}/logo.svg",
-    "logo_mark_url": "https://{site}/apple-touch-icon.png",
-    "social_handles": { "linkedin": "{handle}", "instagram": "{handle}" },
-    "voice": { "tone": ["warm", "plain-spoken", "expert"], "banned_phrases": ["revolutionary", "game-changing"] }
+    "brand_kit": {
+      "name": "Harbourline",
+      "tagline": "Small-batch coffee from the harbour.",
+      "primary_color": "#1E3A5F",
+      "secondary_color": "#F3EDE2",
+      "palette": { "accent": "#A9541F" },
+      "country": "GB",
+      "text_color": "#1A1714",
+      "heading_font": "Newsreader, Georgia, serif",
+      "font_family": "Geist, Inter, system-ui, sans-serif",
+      "logo_url": "https://harbourline.example/img/harbourline-logo.svg",
+      "logo_mark_url": "https://harbourline.example/apple-touch-icon.png",
+      "social_handles": { "linkedin": "harbourline-coffee", "instagram": "harbourline" },
+      "voice": { "tone": ["warm", "plain-spoken", "expert"], "banned_phrases": ["revolutionary", "game-changing"] }
+    },
+    "why": "Navy and copper are the site's theme colour and button colour; the copper is darkened to pass on the page."
   }
 }
 ```
-If the save is refused, read the validator's message, fix that field, and save again. Do not drop fields silently.
+It checks the proposal, draws the Brand Board from it without saving, and files the card. If it is refused, read the message, fix that field, and propose again; do not drop fields silently. Open the board it names, then end your turn. When the owner approves, save exactly that proposal:
+```json
+{ "tool": "platform_save_approved_brand_kit", "params": {} }
+```
+Any other answer ("less orange", "warmer") is a revision: change the proposal and propose again.
 
 ### Step 8: Check Renders Against the Kit (when asked)
 ```json
@@ -137,6 +149,7 @@ Needs a person:    {font uploads, logo upload, disclaimer confirmation, conflict
 
 - Do not invent colours, fonts, taglines or handles. If the site does not show it, ask.
 - Do not overwrite a value a person set; report the conflict.
+- Do not save the kit yourself: propose it, and save only the proposal the owner approved.
 - Do not save a colour that fails contrast for body text without adjusting it and saying so.
 - Do not copy another company's brand, or a competitor's colours, even when asked to "look like" them; describe the difference instead.
 - Do not upload files or edit posts; people upload fonts and logos in the brand kit dialog.

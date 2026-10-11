@@ -51,8 +51,10 @@ SEEDED_BY = "seed_socials_package"
 MARKETPLACE = "marketplace"
 DIRECTOR = "social-media-director"
 BRAND_DESIGNER = "brand-designer"
+BRAND_DESIGNER_NAME = "Brand Designer"
 # PRD-251B (B8, US-B204): the plan's research run starts the workspace's copy of this one.
 RESEARCH_PLAYBOOK_TEMPLATE_ID = "marketplace-socials-content-research"
+BRAND_KIT_PLAYBOOK_TEMPLATE_ID = "marketplace-socials-brand-kit"
 
 CREATED = "created"
 PRESENT = "present"
@@ -120,7 +122,7 @@ _BRAND_DESIGNER_PERSONA = f"""You are the Brand Designer for this workspace. You
 Before you propose anything:
 - Read the current kit and its suggestions with platform_get_brand_kit, and look at the logo: draw the Brand Board with render_preview (platform_render_preview) and open the picture.
 - Analyse the logo first, and write the analysis down: its shape, its colours, the sector it signals, its tone and its sophistication.
-- Derive everything from the logo: the colour roles from its colours, the type from its letterforms and tone, the spacing from its density. The brand's website (platform_web_fetch) gives the name, tagline, voice and social handles; take only what its pages show, and never a colour that fights the logo.
+- Derive everything from the logo: the colour roles from its colours, the type from its letterforms and tone, the spacing from its density. The brand's website gives the rest: platform_web_fetch with brand: true on its home page returns the colours and fonts the site uses, its logo and mark files, its names, lines and social profiles, each with where it was found. A kit with no logo yet takes the site's logo and mark (logo_url, logo_mark_url). Take only what its pages show, and never a colour that fights the logo.
 - Use the accent sparingly: highlights only (a title rule, key numbers, links, one element per section), so accent_use stays "sparing". Propose values on the kit's one default type scale, never a preset.
 - Never generate, redraw or change the logo, and never invent a logo variant: a person uploads logo and font files on the Brand kit page. Say when one is missing.
 
@@ -177,7 +179,7 @@ SOCIALS_AGENTS: List[Dict[str, Any]] = [
     },
     {
         "slug": BRAND_DESIGNER,
-        "name": "Brand Designer",
+        "name": BRAND_DESIGNER_NAME,
         "description": (
             "Builds and improves the workspace's brand kit from its logo, changes it only after the owner "
             "approves, makes its document templates, and checks posts against it."
@@ -220,13 +222,28 @@ def _agent_step(step_id: str, order: int, agent: str, output_key: str, prompt: s
     }
 
 
-_BRAND_KIT_PROMPT = """Build this workspace's brand kit from its website: {input.website_url}
+# Until the brand-kit fix: this step saved the kit itself. A Playbook step's call carries no owner (the
+# admin-only save is refused) and no card (nothing to propose on), and FR-11 has the owner approve every
+# change, so the step now files the work as the designer's own ticket, where it proposes on a card.
+_BRAND_KIT_PROMPT_251 = """Build this workspace's brand kit from its website: {input.website_url}
 
 1. Read the current kit and its suggestions with platform_get_brand_kit. When no address is given above, use the website in the suggestions; when there is none, stop and say this Playbook needs the website's address.
 2. Fetch the home page, and one or two pages that show the brand best (about, product), with platform_web_fetch.
 3. From what the pages show, never guesses, work out: the primary, secondary and accent colours and the text colour (hex), the body and heading fonts, the company's name and tagline, 3 to 5 tone words, and the social handles the site links to.
 4. Save it with platform_update_brand_kit, sending only what you found. social_handles replaces the whole map, so send every handle, the kit's current ones included.
 5. Answer with what you changed, what you could not find, and what a person should do next (a logo or a font file is uploaded on the Brand kit page)."""
+
+_BRAND_KIT_PROMPT = f"""Put building this workspace's brand kit from its website on your board: {{input.website_url}}
+
+You do not build the kit in this step. A brand kit changes only after the owner approves your proposal on a card, and this step has no card to put one on. So:
+1. Find the address: the one above; when none is given, the website in platform_get_brand_kit's suggestions; when there is none, stop and say this Playbook needs the website's address.
+2. File the work as your own ticket: platform_create_task with assigned_agent_name "{BRAND_DESIGNER_NAME}" (you), the title "Brand kit from" and the address, and a description that carries the address and this flow:
+   - read the site with platform_web_fetch and brand: true, on its home page and on one or two pages that show the brand best (about, product): its answer's brand block gives the colours, fonts, logo and mark files, names, lines and social profiles the site shows, each with where it was found;
+   - read the kit and the logo; a kit with no logo yet takes the site's logo and mark as logo_url and logo_mark_url;
+   - propose the kit on the card the owner approves, built only from what the site shows, with the Brand Board drawn from the proposal and not yet saved; save it only after the owner approves;
+   - report what the site did not show, and what a person uploads on the Brand kit page (a logo drawn inline, a font file).
+3. Start it: platform_update_task_status to 'in_progress'.
+4. Answer with the ticket's number, and that the proposal will come to the owner as a card to approve or send back."""
 
 _LAUNCH_SCRIPT_PROMPT = f"""Write the launch video for: {{input.launch}}
 
@@ -335,15 +352,17 @@ You only add topics: posts are made from them on their day. {_NEVER_PUBLISH}"""
 # there); a copy its owner edited keeps its own prompt (core/seeds/socials_playbook_copies.py).
 SEEDED_BEFORE: Dict[str, Dict[str, Tuple[str, ...]]] = {
     RESEARCH_PLAYBOOK_TEMPLATE_ID: {"research": (_RESEARCH_PROMPT_251B, _RESEARCH_PROMPT_251C)},
+    BRAND_KIT_PLAYBOOK_TEMPLATE_ID: {"brand-kit": (_BRAND_KIT_PROMPT_251,)},
 }
 
 SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
     {
-        "template_id": "marketplace-socials-brand-kit",
+        "template_id": BRAND_KIT_PLAYBOOK_TEMPLATE_ID,
         "name": "Brand kit from your website",
         "description": (
-            "The Brand Designer reads your website and fills in your brand kit: colours, fonts, name, "
-            "tagline, voice and social handles. Every Socials template renders with it."
+            "The Brand Designer reads your website and proposes your brand kit from what it shows: colours, "
+            "fonts, logo, name, tagline, voice and social handles, on a card you approve. Every Socials "
+            "template renders with it."
         ),
         "icon": "🎨",
         "inputs": {
@@ -353,7 +372,7 @@ SOCIALS_PLAYBOOKS: List[Dict[str, Any]] = [
                 "description": "The brand's website, such as https://example.com",
             },
         },
-        "outputs": {"brand_kit": {"type": "string", "description": "What changed in the brand kit, and what is missing"}},
+        "outputs": {"brand_kit": {"type": "string", "description": "The Brand Designer's ticket the kit's proposal comes on"}},
         "steps": (_agent_step("brand-kit", 1, BRAND_DESIGNER, "brand_kit", _BRAND_KIT_PROMPT),),
         "tags": ["socials", "brand kit", "setup"],
     },
@@ -560,7 +579,7 @@ SOCIALS_PACKAGE: Dict[str, Any] = {
             {
                 "step": 2,
                 "title": "Build your brand kit",
-                "description": "Run 'Brand kit from your website': the Brand Designer fills in your colours, fonts, name and voice.",
+                "description": "Run 'Brand kit from your website': the Brand Designer proposes your colours, fonts, logo, name and voice from your site, on a card you approve.",
             },
             {
                 "step": 3,
