@@ -16,12 +16,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 RETELL_CREATE_WEB_CALL_URL = "https://api.retellai.com/v2/create-web-call"
+# PRD-258 US-002: read one call back (its ``latency`` block) when the
+# ``call_analyzed`` webhook arrives without one.
+RETELL_GET_CALL_URL = "https://api.retellai.com/v2/get-call"
 RETELL_CREATE_AGENT_URL = "https://api.retellai.com/create-agent"
 RETELL_UPDATE_AGENT_URL = "https://api.retellai.com/update-agent"
 _TIMEOUT_SECONDS = 10.0
@@ -229,3 +233,28 @@ async def create_web_call(api_key: str, payload: Dict[str, Any]) -> RetellWebCal
     if not call_id or not access_token:
         raise RetellApiError("Retell response missing call_id/access_token")
     return RetellWebCall(call_id=str(call_id), access_token=str(access_token))
+
+
+async def get_call(api_key: str, call_id: str) -> Dict[str, Any]:
+    """GET one call object from Retell (PRD-258 US-002: its ``latency`` block).
+
+    One request with the create-web-call timeout. Raises ``RetellApiError``
+    (never the key) on an unreachable vendor, a refusal or a body that is not
+    a JSON object, so the webhook can log it and still answer 2xx.
+    """
+    url = f"{RETELL_GET_CALL_URL}/{quote(call_id, safe='')}"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError as exc:
+        raise RetellApiError(f"Retell unreachable: {type(exc).__name__}") from exc
+
+    if resp.status_code != 200:
+        raise RetellApiError(f"Retell get-call failed (HTTP {resp.status_code})")
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise RetellApiError("Retell get-call answered with a body that is not JSON") from exc
+    if not isinstance(data, dict):
+        raise RetellApiError("Retell get-call answered with a body that is not an object")
+    return data

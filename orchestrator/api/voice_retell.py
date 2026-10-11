@@ -280,7 +280,7 @@ async def retell_events_webhook(request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     event = str(payload.get("event") or "")
-    call = payload.get("call") or {}
+    call = await call_events.with_vendor_latency(event, payload.get("call") or {})
     with get_db_session() as db:
         disposition = call_events.apply_call_event(db, event, call)
 

@@ -7,15 +7,22 @@ The meter's write path: one Retell lifecycle event (``call_started``,
 ``voice_calls`` row. The HMAC check and the 2xx answer stay in the route
 (``api/voice_retell.py``); this module only applies a verified event.
 Moved out of the route by PRD-258 US-001 (D6: that file never grows).
+
+PRD-258 US-002: a call's own latency (Retell's p50/p90 per stage) is kept on
+the row as ``vendor_latency``; when ``call_analyzed`` arrives without it, one
+get-call fetches it. A failed fetch is logged and never fails the webhook.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
+
+from modules.voice import live_settings, retell_api
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +32,12 @@ EVENT_CALL_ENDED = "call_ended"
 EVENT_CALL_ANALYZED = "call_analyzed"
 # A ``disconnect_reason`` longer than the column is cut, never refused.
 _DISCONNECT_REASON_MAX = 64
+# Retell's call object carries per-stage latency under this key.
+CALL_LATENCY_KEY = "latency"
+# The stages and the statistics of each that voice_calls.vendor_latency keeps;
+# everything else Retell sends (min, max, p95, the raw values) is dropped.
+VENDOR_LATENCY_STAGES = ("e2e", "asr", "llm", "llm_websocket_network_rtt", "tts")
+VENDOR_LATENCY_STATS = ("p50", "p90", "num")
 
 
 def _ts(ms: Any) -> Optional[datetime]:
@@ -33,6 +46,64 @@ def _ts(ms: Any) -> Optional[datetime]:
         return datetime.fromtimestamp(int(ms) / 1000.0, tz=timezone.utc).replace(tzinfo=None)
     except (TypeError, ValueError, OSError):
         return None
+
+
+def _is_number(value: Any) -> bool:
+    """A finite int or float; a bool is not a number here."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value)
+
+
+def _stage_subset(stage: Any) -> Optional[Dict[str, Any]]:
+    """One stage's kept statistics, or None when it has no numeric one."""
+    if not isinstance(stage, dict):
+        return None
+    kept = {stat: stage[stat] for stat in VENDOR_LATENCY_STATS if _is_number(stage.get(stat))}
+    return kept or None
+
+
+def vendor_latency_subset(latency: Any) -> Optional[Dict[str, Dict[str, Any]]]:
+    """Pure: a Retell call's ``latency`` block → what ``vendor_latency`` stores.
+
+    For each of ``VENDOR_LATENCY_STAGES`` only ``VENDOR_LATENCY_STATS``, and
+    only finite numbers. An empty or malformed block → None, never an empty
+    dict standing in for a measurement.
+    """
+    if not isinstance(latency, dict):
+        return None
+    stages = {name: _stage_subset(latency.get(name)) for name in VENDOR_LATENCY_STAGES}
+    kept = {name: stats for name, stats in stages.items() if stats}
+    return kept or None
+
+
+async def _fetch_latency(call_id: str) -> Any:
+    """The call's ``latency`` block from one get-call, or None (logged) on any failure."""
+    api_key = live_settings.retell_credentials().api_key
+    if not api_key:
+        logger.warning("voice_live_get_call_skipped call=%s reason=no_api_key", call_id)
+        return None
+    try:
+        fetched = await retell_api.get_call(api_key, call_id)
+    except retell_api.RetellApiError as exc:
+        logger.warning("voice_live_get_call_failed call=%s reason=%s", call_id, exc)
+        return None
+    return fetched.get(CALL_LATENCY_KEY)
+
+
+async def with_vendor_latency(event: str, call: Any) -> Dict[str, Any]:
+    """The webhook's call object, with its latency fetched when Retell left it out.
+
+    Only a ``call_analyzed`` event with no ``latency`` block fetches, once.
+    Returns a new dict (the payload is never mutated); a failed fetch returns
+    the call as it came, so the webhook still answers 2xx.
+    """
+    call = call if isinstance(call, dict) else {}
+    call_id = call.get("call_id")
+    if event != EVENT_CALL_ANALYZED or call.get(CALL_LATENCY_KEY) or not call_id:
+        return call
+    latency = await _fetch_latency(str(call_id))
+    return {**call, CALL_LATENCY_KEY: latency} if latency else call
 
 
 def _call_row(db: Session, call_id: str, event: str):
@@ -68,6 +139,13 @@ def _apply_ended(row, call: dict) -> None:
     row.status = "ended" if row.started_at is not None else "failed"
 
 
+def _apply_latency(row, call: dict) -> None:
+    """Store the call's latency subset; a missing one never overwrites a stored value."""
+    latency = vendor_latency_subset(call.get(CALL_LATENCY_KEY))
+    if latency is not None:
+        row.vendor_latency = latency
+
+
 def apply_call_event(db: Session, event: str, call: dict) -> str:
     """Idempotently fold one Retell lifecycle event into voice_calls.
 
@@ -86,8 +164,11 @@ def apply_call_event(db: Session, event: str, call: dict) -> str:
         _apply_started(row, call)
     elif event == EVENT_CALL_ENDED:
         _apply_ended(row, call)
+        _apply_latency(row, call)
     elif event == EVENT_CALL_ANALYZED:
-        # Post-call analysis carries no lifecycle change we bill on — ack only.
+        # Post-call analysis carries no lifecycle change we bill on; only
+        # Retell's own latency is kept (PRD-258 US-002).
+        _apply_latency(row, call)
         disposition = "acknowledged"
     else:
         disposition = f"ignored_{event or 'unknown'}"
