@@ -99,7 +99,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # its own endpoint (Azure's resource URL).
 # 2026-10-09: user_api_keys_provider_workspace_id chains onto that — an organization-level
 # Anthropic key carries the workspace it bills.
-EXPECTED_HEAD = "user_api_keys_provider_workspace_id"
+# 2026-10-11 (PRD-258 Wave 1): prd258_voice_timings chains onto that — the ONE migration of
+# the voice-measure wave (the voice_turns timings, voice_calls.vendor_latency).
+EXPECTED_HEAD = "prd258_voice_timings"
 
 
 def _literal(node: ast.AST):

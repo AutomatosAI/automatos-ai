@@ -16,16 +16,48 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 RETELL_CREATE_WEB_CALL_URL = "https://api.retellai.com/v2/create-web-call"
+# PRD-258 US-002: read one call back (its ``latency`` block) when the
+# ``call_analyzed`` webhook arrives without one.
+RETELL_GET_CALL_URL = "https://api.retellai.com/v2/get-call"
 RETELL_CREATE_AGENT_URL = "https://api.retellai.com/create-agent"
 RETELL_UPDATE_AGENT_URL = "https://api.retellai.com/update-agent"
 _TIMEOUT_SECONDS = 10.0
 _AGENT_TIMEOUT_SECONDS = 25.0
+
+# PRD-258 US-003: where Retell reaches us — the custom-LLM socket (Retell
+# appends ``/{call_id}``) and the call-lifecycle webhook. The one place these
+# paths are spelled for the agent; creation and every re-arm build from here.
+RETELL_LLM_WEBSOCKET_PATH = "/api/voice/retell/llm-websocket"
+RETELL_EVENTS_PATH = "/api/voice/retell/events"
+RETELL_CUSTOM_LLM_ENGINE = "custom-llm"
+_SCHEME_SEPARATOR = "://"
+
+
+def build_agent_endpoints(host: str) -> Dict[str, Any]:
+    """Pure: the agent fields that point Retell at ``host``.
+
+    ``host`` is a bare public host (``config.PUBLIC_API_HOST``: no scheme, no
+    path); a trailing slash is dropped. An empty host, or one carrying a
+    scheme or a path, raises ``ValueError`` rather than pointing a live agent
+    at a broken URL.
+    """
+    clean = str(host or "").strip().rstrip("/")
+    if not clean or _SCHEME_SEPARATOR in clean or "/" in clean:
+        raise ValueError("PUBLIC_API_HOST must be a bare host name, without a scheme or a path")
+    return {
+        "response_engine": {
+            "type": RETELL_CUSTOM_LLM_ENGINE,
+            "llm_websocket_url": f"wss://{clean}{RETELL_LLM_WEBSOCKET_PATH}",
+        },
+        "webhook_url": f"https://{clean}{RETELL_EVENTS_PATH}",
+    }
 
 
 def build_agent_tuning(include_voice: bool = True) -> Dict[str, Any]:
@@ -121,23 +153,22 @@ async def create_custom_llm_agent(
     api_key: str,
     *,
     agent_name: str,
-    llm_websocket_url: str,
-    webhook_url: str,
+    endpoints: Dict[str, Any],
     voice_id: str,
 ) -> str:
     """Create the Retell agent that fronts Auto Live (one-click arming, S7).
 
     Verified request shape: ``response_engine {type: custom-llm,
     llm_websocket_url}``, ``voice_id``, ``agent_name``, ``webhook_url``;
-    the response carries ``agent_id``. Raises ``RetellApiError`` with the
+    the response carries ``agent_id``. ``endpoints`` is
+    ``build_agent_endpoints(host)``. Raises ``RetellApiError`` with the
     vendor's own words (never the key) so the settings card can show an
     honest reason.
     """
     payload = {
         "agent_name": agent_name,
         "voice_id": voice_id,
-        "response_engine": {"type": "custom-llm", "llm_websocket_url": llm_websocket_url},
-        "webhook_url": webhook_url,
+        **endpoints,
         # STT / turn-taking tuning baked in at birth (fresh agents are honest
         # in a noisy room from the first call, not just after a re-arm).
         **build_agent_tuning(),
@@ -174,6 +205,8 @@ async def update_agent(api_key: str, agent_id: str, settings: Dict[str, Any]) ->
     The already-armed agent predates the STT/turn-taking tuning, so a
     one-click re-arm re-applies ``build_agent_tuning()`` to it — the fix for
     'confident nonsense' transcripts on a live agent nobody wants to recreate.
+    PRD-258 US-003: the same PATCH carries ``build_agent_endpoints()``, so an
+    agent created against one host is moved to the current one.
     No-op on empty settings. Raises ``RetellApiError`` (never the key) so the
     arm route can log-and-continue rather than fail the whole arm.
     """
@@ -229,3 +262,28 @@ async def create_web_call(api_key: str, payload: Dict[str, Any]) -> RetellWebCal
     if not call_id or not access_token:
         raise RetellApiError("Retell response missing call_id/access_token")
     return RetellWebCall(call_id=str(call_id), access_token=str(access_token))
+
+
+async def get_call(api_key: str, call_id: str) -> Dict[str, Any]:
+    """GET one call object from Retell (PRD-258 US-002: its ``latency`` block).
+
+    One request with the create-web-call timeout. Raises ``RetellApiError``
+    (never the key) on an unreachable vendor, a refusal or a body that is not
+    a JSON object, so the webhook can log it and still answer 2xx.
+    """
+    url = f"{RETELL_GET_CALL_URL}/{quote(call_id, safe='')}"
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+    except httpx.HTTPError as exc:
+        raise RetellApiError(f"Retell unreachable: {type(exc).__name__}") from exc
+
+    if resp.status_code != 200:
+        raise RetellApiError(f"Retell get-call failed (HTTP {resp.status_code})")
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise RetellApiError("Retell get-call answered with a body that is not JSON") from exc
+    if not isinstance(data, dict):
+        raise RetellApiError("Retell get-call answered with a body that is not an object")
+    return data

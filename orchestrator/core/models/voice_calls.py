@@ -28,6 +28,7 @@ silently dropped.
 from __future__ import annotations
 
 from sqlalchemy import BigInteger, Boolean, Column, DateTime, Index, Integer, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -76,5 +77,8 @@ class VoiceCall(Base):
     # Stamped from Retell's end event timestamps; the meter's unit of truth.
     duration_seconds = Column(Integer, nullable=True)
     disconnect_reason = Column(String(64), nullable=True)
+    # PRD-258 US-002: Retell's own per-call latency (p50/p90/num of e2e, asr,
+    # llm, llm_websocket_network_rtt, tts) from the call_analyzed event.
+    vendor_latency = Column(JSONB, nullable=True)
 
     created_at = Column(DateTime, nullable=False, server_default=func.now())
