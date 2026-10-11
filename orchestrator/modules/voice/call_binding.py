@@ -366,3 +366,35 @@ def stamp_assistant_voice_source(
     if stamped:
         db.commit()
     return stamped
+
+
+# Where context assembly stores its time (modules/context/result.py, to_assembly_trace).
+CONTEXT_TRACE_PREP_KEY = "prep_ms"
+
+
+def assistant_reply_prep_ms(db: Session, *, chat_id: str, workspace_id: str, turn_started_at: datetime) -> Optional[float]:
+    """PRD-258 US-001: the ``prep_ms`` this turn's reply stored in its context_trace.
+
+    Finds the reply the way ``stamp_assistant_voice_source`` does (assistant
+    messages in this chat created since the turn began; the newest wins), in
+    the turn's proven workspace. No reply, trace or number → None, never a
+    guess; a failed read is logged and reads as None (never fails a turn).
+    """
+    from core.models.core import Message
+
+    try:
+        row = (
+            db.query(Message.context_trace)
+            .filter(
+                Message.chat_id == uuid.UUID(str(chat_id)),
+                Message.workspace_id == uuid.UUID(str(workspace_id)),
+                Message.role == "assistant",
+                Message.created_at >= turn_started_at,
+            )
+            .order_by(Message.created_at.desc()).first()
+        )
+    except Exception:
+        logger.exception("voice_turn_prep_read_failed chat=%s", chat_id)
+        return None
+    value = row[0].get(CONTEXT_TRACE_PREP_KEY) if row and isinstance(row[0], dict) else None
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None

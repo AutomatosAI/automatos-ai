@@ -15,9 +15,16 @@ disturbs the request transaction).
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _optional_ms(value: Optional[float]) -> Optional[int]:
+    """A whole number, or None when the value was never measured."""
+    if value is None or isinstance(value, bool):
+        return None
+    return int(round(value))
 
 
 def voice_turn_fields(
@@ -29,13 +36,27 @@ def voice_turn_fields(
     response_text: str,
     truncated: bool,
     audio_delivered: bool,
+    first_frame_ms: Optional[int] = None,
+    first_auto_frame_ms: Optional[int] = None,
+    prep_ms: Optional[int] = None,
+    tools_before_speech: Optional[int] = None,
+    lead_in: bool = False,
+    prefetch_hit: bool = False,
 ) -> Dict[str, Any]:
     """Pure: turn the raw per-turn measurements into typed ``voice_turns`` columns.
 
     Latencies are rounded to whole milliseconds; only text *lengths* are kept
-    (never the transcript/response content — privacy). No I/O.
+    (never the transcript/response content — privacy). No I/O. The PRD-258
+    timings (``modules/voice/turn_timing.py``) stay None when unmeasured —
+    never a fake zero.
     """
     return {
+        "first_frame_ms": _optional_ms(first_frame_ms),
+        "first_auto_frame_ms": _optional_ms(first_auto_frame_ms),
+        "prep_ms": _optional_ms(prep_ms),
+        "tools_before_speech": _optional_ms(tools_before_speech),
+        "lead_in": bool(lead_in),
+        "prefetch_hit": bool(prefetch_hit),
         "stt_latency_ms": int(round(stt_latency_ms or 0)),
         "tts_latency_ms": int(round(tts_latency_ms or 0)),
         "total_ms": int(round(total_ms or 0)),
@@ -59,12 +80,14 @@ def record_voice_turn(
     truncated: bool,
     audio_delivered: bool,
     call_id: Optional[str] = None,
+    timing: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Persist one voice turn. Never raises — a telemetry fault is not fatal.
 
     Opens its own ``get_db_session`` (which commits on clean exit) so it stays
     off the request transaction. ``call_id`` (PRD-207 S8) links a live turn to
-    its ``voice_calls`` row; None on the push-to-talk path.
+    its ``voice_calls`` row; None on the push-to-talk path. ``timing`` is the
+    PRD-258 ``voice_timing_fields`` of a live turn.
     """
     try:
         from core.database.database import get_db_session
@@ -78,6 +101,7 @@ def record_voice_turn(
             response_text=response_text,
             truncated=truncated,
             audio_delivered=audio_delivered,
+            **dict(timing or {}),
         )
         with get_db_session() as db:
             db.add(
@@ -90,4 +114,4 @@ def record_voice_turn(
                 )
             )
     except Exception:  # noqa: BLE001 — fire-and-forget; never fail the voice turn
-        logger.debug("voice_turn telemetry persist failed", exc_info=True)
+        logger.exception("voice_turn telemetry persist failed call=%s", call_id)

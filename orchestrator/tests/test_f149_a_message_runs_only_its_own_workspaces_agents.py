@@ -316,11 +316,11 @@ def test_a_chosen_agent_is_this_workspaces_own(cafes):
 
 
 def test_a_call_answers_only_with_its_own_workspaces_agent(cafes):
-    from api.voice_retell import _named_call_agent
+    from modules.voice.caller import named_call_agent
 
-    assert _named_call_agent(cafes.db, cafes.ours, str(cafes.our_agent)) == cafes.our_agent
-    assert _named_call_agent(cafes.db, cafes.ours, str(cafes.their_agent)) is None
-    assert _named_call_agent(cafes.db, cafes.ours, "latte") is None
+    assert named_call_agent(cafes.db, cafes.ours, str(cafes.our_agent)) == cafes.our_agent
+    assert named_call_agent(cafes.db, cafes.ours, str(cafes.their_agent)) is None
+    assert named_call_agent(cafes.db, cafes.ours, "latte") is None
 
 
 # ── the factory (log-only until the logs are clean) ─────────────────────────

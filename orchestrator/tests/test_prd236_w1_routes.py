@@ -263,7 +263,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # Anthropic key carries the workspace it bills; the guard follows it.
     key_workspace = (versions / "user_api_keys_provider_workspace_id.py").read_text()
     assert 'down_revision = "user_api_keys_base_url"' in key_workspace
-    assert 'EXPECTED_HEAD = "user_api_keys_provider_workspace_id"' in guard
+    # 2026-10-11 (PRD-258 Wave 1): prd258_voice_timings chains onto it — the ONE migration of
+    # the voice-measure wave (voice_turns timings, voice_calls.vendor_latency); the guard follows it.
+    timings = (versions / "prd258_voice_timings.py").read_text()
+    assert 'down_revision = "user_api_keys_provider_workspace_id"' in timings
+    assert 'EXPECTED_HEAD = "prd258_voice_timings"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

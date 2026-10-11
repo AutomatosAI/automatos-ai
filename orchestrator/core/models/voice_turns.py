@@ -67,4 +67,19 @@ class VoiceTurn(Base):
     # Whether an audio reply was actually produced + delivered this turn.
     audio_delivered = Column(Boolean, nullable=False, server_default="false")
 
+    # PRD-258 US-001 — where a live turn's time went (modules/voice/turn_timing.py).
+    # Milliseconds from Retell's response_required: to the first content frame
+    # sent (the one-time ack counts), and to Auto's own first frame (it never
+    # does). NULL when the moment never came — never a fake zero.
+    first_frame_ms = Column(Integer, nullable=True)
+    first_auto_frame_ms = Column(Integer, nullable=True)
+    # Context assembly time, copied from the reply's messages.context_trace.
+    prep_ms = Column(Integer, nullable=True)
+    # Tool calls Auto made before it first spoke.
+    tools_before_speech = Column(Integer, nullable=True)
+    # A spoken lead-in / a retrieval prefetch answered the turn (PRD-258 US-008 /
+    # US-009); false until those ship.
+    lead_in = Column(Boolean, nullable=False, server_default="false")
+    prefetch_hit = Column(Boolean, nullable=False, server_default="false")
+
     created_at = Column(DateTime, nullable=False, server_default=func.now())

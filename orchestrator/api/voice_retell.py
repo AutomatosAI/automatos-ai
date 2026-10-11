@@ -29,15 +29,7 @@ import threading
 import uuid
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import (
-    APIRouter,
-    Body,
-    Depends,
-    HTTPException,
-    Request,
-    WebSocket,
-    WebSocketDisconnect,
-)
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -45,18 +37,15 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
-from modules.voice import live_settings, retell_api, voice_meter
+from modules.voice import call_events, live_settings, live_socket, retell_api, turn_timing, voice_meter
+from modules.voice.caller import named_call_agent
+# mint_web_call keeps its call site: it is over the 50-line shape limit, so a
+# touched line inside it fails CI's changed-lines gate (PRD-258 US-001, D6).
+from modules.voice.caller import resolve_caller_int_id as _resolve_caller_int_id
 from modules.voice.providers.retell import (
-    INTERACTION_CALL_DETAILS,
-    INTERACTION_PING_PONG,
-    INTERACTION_REMINDER,
-    INTERACTION_RESPONSE_REQUIRED,
-    INTERACTION_UPDATE_ONLY,
     RetellLLMRequest,
-    parse_llm_request,
     retell_response_frames,
     verify_webhook_signature,
-    wrap_ws_response,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,28 +61,6 @@ class MintWebCallRequest(BaseModel):
 
     chat_id: Optional[str] = Field(default=None, description="The on-screen chat to bind")
     agent_id: Optional[int] = Field(default=None, description="Explicitly selected agent")
-
-
-def _resolve_caller_int_id(db: Session, ctx: RequestContext) -> Optional[int]:
-    """STRICT #513 resolution: the caller's integer ``users.id`` or None.
-
-    Deliberately not ``api.chat.get_user_id`` — that helper falls back to a
-    default user for principal-less paths, and a fallback principal must
-    never mint a call attributed to somebody. No user → no mint.
-    """
-    user = getattr(ctx, "user", None)
-    if user is None:
-        return None
-    uid = getattr(user, "id", None)
-    if isinstance(uid, int):
-        return uid
-    clerk_uid = getattr(user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
-    if not clerk_uid:
-        return None
-    from core.models.core import User
-
-    row = db.query(User.id).filter(User.clerk_user_id == str(clerk_uid)).first()
-    return int(row[0]) if row else None
 
 
 @router.post("/api/voice/web-call")
@@ -292,68 +259,6 @@ async def mint_web_call(
 # PRD-207 S3 — call lifecycle events + the S7 status read
 # ---------------------------------------------------------------------------
 
-def _apply_call_event(db: Session, event: str, call: dict) -> str:
-    """Idempotently fold one Retell lifecycle event into voice_calls.
-
-    Returns a disposition string for the log line. Timestamps arrive as
-    millisecond epochs (``start_timestamp``/``end_timestamp``); replays
-    re-apply the same values — idempotent by construction. An event for a
-    call we never minted is stored as a LOUD orphan (phone-lane compat),
-    never silently dropped.
-    """
-    from datetime import datetime, timezone
-
-    from core.models.voice_calls import VoiceCall
-
-    call_id = call.get("call_id")
-    if not call_id:
-        return "ignored_no_call_id"
-
-    def _ts(ms) -> Optional[Any]:
-        try:
-            return datetime.fromtimestamp(int(ms) / 1000.0, tz=timezone.utc).replace(tzinfo=None)
-        except (TypeError, ValueError, OSError):
-            return None
-
-    row = db.query(VoiceCall).filter(VoiceCall.call_id == str(call_id)).first()
-    disposition = "updated"
-    if row is None:
-        logger.warning(
-            "voice_live_orphan_event event=%s call=%s — no mint row; storing loud", event, call_id
-        )
-        row = VoiceCall(call_id=str(call_id), provider="retell", status="minted")
-        db.add(row)
-        disposition = "orphan_created"
-
-    started = _ts(call.get("start_timestamp"))
-    ended = _ts(call.get("end_timestamp"))
-
-    if event == "call_started":
-        row.started_at = started or row.started_at
-        if row.status in ("minted",):
-            row.status = "started"
-    elif event == "call_ended":
-        row.started_at = started or row.started_at
-        row.ended_at = ended or row.ended_at
-        if row.started_at is not None and row.ended_at is not None:
-            row.duration_seconds = max(
-                0, int((row.ended_at - row.started_at).total_seconds())
-            )
-        reason = call.get("disconnection_reason")
-        if reason:
-            row.disconnect_reason = str(reason)[:64]
-        # ended without ever starting = the call never connected.
-        row.status = "ended" if row.started_at is not None else "failed"
-    elif event == "call_analyzed":
-        # Post-call analysis carries no lifecycle change we bill on — ack only.
-        disposition = "acknowledged"
-    else:
-        disposition = f"ignored_{event or 'unknown'}"
-
-    db.commit()
-    return disposition
-
-
 @router.post("/api/voice/retell/events")
 async def retell_events_webhook(request: Request) -> dict:
     """Retell call-lifecycle webhook (S3): the meter's write path.
@@ -377,7 +282,7 @@ async def retell_events_webhook(request: Request) -> dict:
     event = str(payload.get("event") or "")
     call = payload.get("call") or {}
     with get_db_session() as db:
-        disposition = _apply_call_event(db, event, call)
+        disposition = call_events.apply_call_event(db, event, call)
 
     logger.info(
         "voice_live_call_event event=%s call=%s disposition=%s",
@@ -524,30 +429,11 @@ async def arm_voice_live(
 # The worker loop gets this long after a turn settles to run its finallys
 # (closing the inner generator, its sessions) before the loop is stopped.
 _WORKER_STOP_GRACE_SECONDS = 2.0
-# On socket exit, an in-flight turn gets this long to finish in the
-# foreground; past it the turn keeps running detached (shielded) so the
-# reply still persists to the thread.
-_TURN_EXIT_GRACE_SECONDS = 3.0
 # A cross-thread frame hand-off that cannot land this long means the caller
 # stopped draining (dead socket, cancelled turn) — the pump gives up.
 _BRIDGE_PUT_TIMEOUT_SECONDS = 10.0
 _STREAM_DONE = object()
 _STREAM_ERROR = object()
-
-
-def _named_call_agent(db: Session, workspace_id: Any, raw_agent_id: Any) -> Optional[int]:
-    """The agent a call names, when it is one of the call's workspace's own or a
-    platform system agent (F149); otherwise None, and the default answers."""
-    from core.security.workspace_scope import agent_in_workspace
-
-    try:
-        agent_id = int(raw_agent_id) if raw_agent_id else None
-    except (TypeError, ValueError):
-        return None
-    if agent_id is not None and not agent_in_workspace(db, agent_id, workspace_id):
-        logger.warning("[voice] agent %s is not in workspace %s — the default answers", agent_id, workspace_id)
-        return None
-    return agent_id
 
 
 async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str, Any]]:
@@ -635,29 +521,20 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
     (``resolve_call_binding``): a web call launched from /chat writes into the
     on-screen thread attributed to the REAL user (memory owner/Q7 scoping and
     thread checkpoints now cover spoken conversations); anything unproven
-    falls closed to a per-call chat. That also fixes two latent faults in the
-    merged-unarmed lane: ``get_chat("retell:{call_id}")`` can never parse as a
-    UUID (→ a NEW chat every TURN, multi-turn calls lost their history) and
-    ``create_chat(user_id=0)`` violates the NOT-NULL FK to ``users``.
+    falls closed to a per-call chat.
 
     S6: both turn messages carry the persisted voice source; a
     ``chat_changed`` NOTIFY lets the open thread receive them live.
-    S8: one ``voice_turns`` row per turn — the judging metric exists from
-    day one (webhook-receipt → stream-close; vendor-side STT/TTS honestly 0).
+    PRD-258 US-001: besides the frames, the stream reports its turn's facts
+    in-band (``turn_timing.landed`` once bound, ``turn_timing.finished`` once
+    the reply is saved: tool calls before speech, the reply's ``prep_ms``);
+    the socket writes the turn's ONE ``voice_turns`` row from them.
     """
     from datetime import datetime as _dt
-    from time import monotonic
 
-    from consumers.chatbot import ChatService, StreamingChatService
-    from modules.voice.call_binding import (
-        resolve_call_binding,
-        stamp_assistant_voice_source,
-        upsert_voice_user_message,
-    )
+    from modules.voice.call_binding import assistant_reply_prep_ms, resolve_call_binding
 
-    turn_t0 = monotonic()
     turn_started_at = _dt.utcnow()
-
     with get_db_session() as db:
         binding = resolve_call_binding(
             db,
@@ -671,108 +548,100 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
             # No safe place to write (logged LOUD upstream) — close the turn.
             yield {"response_id": req.response_id, "content": "", "content_complete": True}
             return
+        yield turn_timing.landed(binding.workspace_id, binding.chat_id)
 
-        chat_service = ChatService(db)
-        streaming_service = StreamingChatService(db, workspace_id=binding.workspace_id)
-        conversation_id = binding.chat_id
-
-        # Grow-aware: a continued sentence UPDATES the message it grew from
-        # (first live use stacked "…single chat" / "…voice chat?" / "…mixed?"
-        # as three messages — one voice, one message).
-        upsert_voice_user_message(
-            db,
-            chat_id=conversation_id,
-            workspace_id=binding.workspace_id,
-            text=req.user_text,
-        )
-
-        # Agent selection: an explicit dynamic-variable agent wins; otherwise the
-        # workspace default answers (minimal wire — the same default chat uses).
-        from api.chat import get_default_agent_id
-
-        agent_id = _named_call_agent(db, binding.workspace_id, req.agent_id)
-        if agent_id is None:
-            agent_id = get_default_agent_id(db, binding.workspace_id)
-
-        # ONE AUTO (Gerard, first live night: "voice auto and text auto are
-        # not the same… my auto and voice auto need to be the same"). The
-        # spoken turn keeps the SAME BRAIN as the typed turn: full memory
-        # retrieval, knowledge search, core tool router, and the caller's real
-        # privilege tier. force_text_only is NEVER set — that forces the
-        # tool-less ATOM path AND skips memory (the lobotomy Gerard killed).
-        #
-        # Two voice-specific latency trims, both measured, neither touches the
-        # brain: (1) history is the recent conversation, not the archive
-        # (rhythm, not memory — memory injection is retrieval, not replay);
-        # (2) skip_composio drops the THIRD-PARTY EXECUTION surface (Gmail/
-        # Slack/etc.). Root cause of 20-90s first-token: loading all 23
-        # Composio apps put ~58 tools / 137 actions / 44 promoted schemas into
-        # every call (24-36k input tokens) and drove a ~5-call agentic loop.
-        # Without Composio the agent runs ~14 core tools — memory + knowledge
-        # + reasoning intact, first token in a conversational range. Config
-        # dial VOICE_LIVE_SKIP_COMPOSIO restores full parity if ever wanted.
-        # Tool work mid-call still reads as the honest THINKING state.
-        messages = chat_service.get_messages_by_chat_id(conversation_id)
-        recent = messages[-int(config.VOICE_LIVE_TURN_HISTORY_MESSAGES):]
-        message_history = [{"role": m.role, "parts": m.parts} for m in recent]
-
-        agent_chunks = streaming_service.stream_response_with_agent(
-            chat_id=conversation_id,
-            messages=message_history,
-            agent_id=agent_id,
-            user_id=binding.user_id,
-            use_orchestrator_llm=True,
-            # captured at mint (Clerk claims live only there); False for the
-            # steward/orphan lanes — fail-closed. The #581 runtime lookup
-            # crashed every turn: User has no system_role attribute.
-            is_super_admin=binding.is_super_admin,
-            # The measured voice-latency lever (memory/tools stay; only
-            # third-party Composio EXECUTION is dropped from spoken turns).
-            skip_composio=bool(config.VOICE_LIVE_SKIP_COMPOSIO),
-            # She is being HEARD, not read: short sentences, no markdown.
-            # Same brain — this is a medium instruction, not a lobotomy.
-            spoken_mode=True,
-        )
-
-        response_chars = 0
-        async for frame in retell_response_frames(req.response_id, agent_chunks):
-            response_chars += len(frame.get("content") or "")
+        tap = turn_timing.SpeechTap(_start_spoken_turn(db, req, binding))
+        async for frame in retell_response_frames(req.response_id, tap):
             yield frame
 
-        # S6 — stamp this turn's assistant reply + let the open thread hear it.
-        try:
-            stamp_assistant_voice_source(
-                db, chat_id=conversation_id, turn_started_at=turn_started_at
-            )
-            from services.board_events import notify_chat_event
+        _stamp_and_notify(db, req, binding, turn_started_at)
+        yield turn_timing.finished(
+            tools_before_speech=tap.tally.tools_before_speech,
+            prep_ms=assistant_reply_prep_ms(
+                db, chat_id=binding.chat_id, workspace_id=binding.workspace_id, turn_started_at=turn_started_at
+            ),
+        )
 
-            notify_chat_event(
-                db,
-                workspace_id=binding.workspace_id,
-                chat_id=conversation_id,
-                user_id=binding.user_id,
-            )
-        except Exception:  # noqa: BLE001 — provenance/notify never fail a turn
-            logger.debug("voice turn stamp/notify failed", exc_info=True)
 
-    # S8 — telemetry parity (fire-and-forget, own session, never raises).
-    # STT/TTS run vendor-side: honestly 0, not faked. audio_delivered means
-    # content frames actually went to the vendor's TTS this turn.
-    from modules.voice.telemetry import record_voice_turn
+def _start_spoken_turn(db: Session, req: RetellLLMRequest, binding: Any) -> AsyncIterator[str]:
+    """Save the caller's words and start Auto's agent stream for this turn (AI-SDK lines)."""
+    from api.chat import get_default_agent_id
+    from consumers.chatbot import ChatService, StreamingChatService
+    from modules.voice.call_binding import upsert_voice_user_message
 
-    record_voice_turn(
-        workspace_id=binding.workspace_id,
-        conversation_id=conversation_id,
-        message_id=None,
-        call_id=req.call_id,
-        stt_latency_ms=0,
-        tts_latency_ms=0,
-        total_ms=(monotonic() - turn_t0) * 1000.0,
-        transcript=req.user_text,
-        response_text="x" * response_chars,  # lengths-only discipline: only len() is stored
-        truncated=False,
-        audio_delivered=response_chars > 0,
+    # Grow-aware: a continued sentence UPDATES the message it grew from
+    # (first live use stacked "…single chat" / "…voice chat?" / "…mixed?"
+    # as three messages — one voice, one message).
+    upsert_voice_user_message(
+        db, chat_id=binding.chat_id, workspace_id=binding.workspace_id, text=req.user_text
     )
+
+    # Agent selection: an explicit dynamic-variable agent wins; otherwise the
+    # workspace default answers (minimal wire — the same default chat uses).
+    agent_id = named_call_agent(db, binding.workspace_id, req.agent_id)
+    if agent_id is None:
+        agent_id = get_default_agent_id(db, binding.workspace_id)
+
+    # ONE AUTO (Gerard, first live night: "voice auto and text auto are
+    # not the same… my auto and voice auto need to be the same"). The
+    # spoken turn keeps the SAME BRAIN as the typed turn: full memory
+    # retrieval, knowledge search, core tool router, and the caller's real
+    # privilege tier. force_text_only is NEVER set — that forces the
+    # tool-less ATOM path AND skips memory (the lobotomy Gerard killed).
+    #
+    # Two voice-specific latency trims, both measured, neither touches the
+    # brain: (1) history is the recent conversation, not the archive
+    # (rhythm, not memory — memory injection is retrieval, not replay);
+    # (2) skip_composio drops the THIRD-PARTY EXECUTION surface (Gmail/
+    # Slack/etc.). Root cause of 20-90s first-token: loading all 23
+    # Composio apps put ~58 tools / 137 actions / 44 promoted schemas into
+    # every call (24-36k input tokens) and drove a ~5-call agentic loop.
+    # Without Composio the agent runs ~14 core tools — memory + knowledge
+    # + reasoning intact, first token in a conversational range. Config
+    # dial VOICE_LIVE_SKIP_COMPOSIO restores full parity if ever wanted.
+    # Tool work mid-call still reads as the honest THINKING state.
+    messages = ChatService(db).get_messages_by_chat_id(binding.chat_id)
+    recent = messages[-int(config.VOICE_LIVE_TURN_HISTORY_MESSAGES):]
+    return StreamingChatService(db, workspace_id=binding.workspace_id).stream_response_with_agent(
+        chat_id=binding.chat_id,
+        messages=[{"role": m.role, "parts": m.parts} for m in recent],
+        agent_id=agent_id,
+        user_id=binding.user_id,
+        use_orchestrator_llm=True,
+        # captured at mint (Clerk claims live only there); False for the
+        # steward/orphan lanes — fail-closed. The #581 runtime lookup
+        # crashed every turn: User has no system_role attribute.
+        is_super_admin=binding.is_super_admin,
+        # The measured voice-latency lever (memory/tools stay; only
+        # third-party Composio EXECUTION is dropped from spoken turns).
+        skip_composio=bool(config.VOICE_LIVE_SKIP_COMPOSIO),
+        # She is being HEARD, not read: short sentences, no markdown.
+        # Same brain — this is a medium instruction, not a lobotomy.
+        spoken_mode=True,
+    )
+
+
+def _stamp_and_notify(db: Session, req: RetellLLMRequest, binding: Any, turn_started_at: Any) -> None:
+    """S6 — stamp this turn's assistant reply + let the open thread hear it.
+    Provenance and the notify never fail a turn: a fault is logged with the call id."""
+    from modules.voice.call_binding import stamp_assistant_voice_source
+    from services.board_events import notify_chat_event
+
+    try:
+        stamp_assistant_voice_source(db, chat_id=binding.chat_id, turn_started_at=turn_started_at)
+        notify_chat_event(
+            db, workspace_id=binding.workspace_id, chat_id=binding.chat_id, user_id=binding.user_id
+        )
+    except Exception:
+        logger.exception("voice_turn_stamp_notify_failed call=%s", req.call_id)
+
+
+def _call_status(call_id: str) -> Optional[str]:
+    """The call's live ``voice_calls.status`` (None when it has no row)."""
+    from core.models.voice_calls import VoiceCall
+
+    with get_db_session() as db:
+        return db.query(VoiceCall.status).filter(VoiceCall.call_id == str(call_id)).scalar()
 
 
 @router.websocket("/api/voice/retell/llm-websocket/{call_id}")
@@ -780,12 +649,9 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
     """Retell custom-LLM WebSocket — Auto's brain on Retell's actual transport.
 
     Retell's dashboard takes a ``wss://…/api/voice/retell/llm-websocket`` URL
-    and appends ``/{call_id}``. Protocol: the server speaks FIRST with an
-    empty response (the human has the floor); ``call_details`` delivers the
-    dynamic variables once; ``ping_pong`` must be echoed; ``update_only``
-    owes nothing; ``response_required``/``reminder_required`` start a turn —
-    a newer ``response_required`` supersedes a still-streaming one (barge-in),
-    so the old stream task is cancelled.
+    and appends ``/{call_id}``; the accepted socket is run by
+    ``modules/voice/live_socket.LiveCallSocket`` (the protocol, barge-in, the
+    slow-turn ack and the per-turn ``voice_turns`` row).
 
     Auth: a WS handshake carries no HMAC — the MINTED ``call_id`` is the
     credential (born server-side at ``/api/voice/web-call``, unguessable,
@@ -810,7 +676,7 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
         logger.warning("voice_live_ws_rejected reason=unminted_call call=%s", call_id)
         await websocket.close(code=4401)
         return
-    if minted[0] == "superseded":
+    if minted[0] == live_socket.CALL_STATUS_SUPERSEDED:
         # A newer call already owns this user's conversation — refuse before
         # accept so an auto_reconnect of a superseded call can't loop back in
         # and start a second voice.
@@ -820,186 +686,10 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
 
     await websocket.accept()
     logger.info("voice_live_ws_open call=%s", call_id)
-
-    dynamic_vars: dict[str, Any] = {}
-    speaking: asyncio.Task | None = None
-    begun = False
-    # The slow-turn filler is a ONE-TIME courtesy per call. It used to fire on
-    # every slow turn, so a 3-turn utterance storm played "One moment. One
-    # moment. One moment." over itself — the "five people talking" Gerard
-    # heard. Once tells the caller the line is alive; twice is a stutter.
-    ack_spent = False
-    stats = {"pings": 0, "updates": 0, "turns": 0, "frames": 0}
-
-    async def safe_send(payload: dict) -> bool:
-        """Send or say why not — a severed socket must NEVER traceback the
-        handler (first live calls died at the ping reply with an uncaught
-        ConnectionClosedError, leaving the mic recording into a dead brain)."""
-        try:
-            await websocket.send_json(payload)
-            return True
-        except Exception as exc:  # noqa: BLE001 — closure class varies by stack layer
-            logger.warning(
-                "voice_live_ws_send_failed call=%s err=%s", call_id, type(exc).__name__
-            )
-            return False
-
-    async def respond(req: RetellLLMRequest) -> None:
-        nonlocal ack_spent
-        from time import monotonic
-
-        started = monotonic()
-        first_frame_at: Optional[float] = None
-        sendable = True
-
-        # Slow-turn honesty: if the brain has said NOTHING by the deadline,
-        # speak a short acknowledgment — the caller hears life (and the log
-        # gains the smoking gun) instead of dead air while tools run. Spoken
-        # AT MOST ONCE per call; the slow-turn WARNING still logs every time,
-        # so the telemetry keeps its teeth.
-        ack_task: asyncio.Task | None = None
-        ack_seconds = float(config.VOICE_LIVE_FIRST_FRAME_ACK_SECONDS or 0)
-        ack_text = str(config.VOICE_LIVE_FIRST_FRAME_ACK_TEXT or "").strip()
-        if ack_seconds > 0:
-            async def _slow_turn_ack() -> None:
-                nonlocal ack_spent
-                await asyncio.sleep(ack_seconds)
-                logger.warning(
-                    "voice_live_ws_turn_slow call=%s rid=%s waited_ms=%d spoken=%s",
-                    call_id, req.response_id,
-                    int((monotonic() - started) * 1000),
-                    not ack_spent,
-                )
-                if ack_text and not ack_spent:
-                    ack_spent = True
-                    await safe_send(
-                        wrap_ws_response(
-                            {
-                                "response_id": req.response_id,
-                                "content": ack_text + " ",
-                                "content_complete": False,
-                            }
-                        )
-                    )
-
-            ack_task = asyncio.create_task(_slow_turn_ack())
-
-        try:
-            async for frame in _agent_retell_stream(req):
-                if first_frame_at is None:
-                    first_frame_at = monotonic()
-                    if ack_task is not None:
-                        ack_task.cancel()
-                    logger.info(
-                        "voice_live_ws_first_frame call=%s rid=%s ms=%d",
-                        call_id, req.response_id, int((first_frame_at - started) * 1000),
-                    )
-                stats["frames"] += 1
-                if sendable and not await safe_send(wrap_ws_response(frame)):
-                    # The socket died mid-reply (Retell reconnects live calls).
-                    # Keep DRAINING: the streaming service persists the reply at
-                    # stream end, so the words still land in the thread and the
-                    # open chat hears them over SSE — only the TTS leg is lost.
-                    sendable = False
-        except asyncio.CancelledError:
-            # Superseded turn (barge-in): Retell has moved on — stop quietly.
-            raise
-        except Exception:  # noqa: BLE001 — a mid-turn fault closes the turn cleanly
-            logger.exception("retell_ws_stream_failed call=%s", call_id)
-            await safe_send(
-                wrap_ws_response(
-                    {"response_id": req.response_id, "content": "", "content_complete": True}
-                )
-            )
-        finally:
-            if ack_task is not None and not ack_task.done():
-                ack_task.cancel()
-
-    try:
-        # Handshake per Retell's own demo: config first (asks for
-        # call_details; enables auto_reconnect)…
-        if not await safe_send(
-            {"response_type": "config", "config": {"auto_reconnect": True, "call_details": True}}
-        ):
-            return
-        while True:
-            message = await websocket.receive_json()
-            itype = message.get("interaction_type")
-            if itype == INTERACTION_PING_PONG:
-                stats["pings"] += 1
-                if not await safe_send(
-                    {"response_type": "ping_pong", "timestamp": message.get("timestamp")}
-                ):
-                    break
-            elif itype == INTERACTION_CALL_DETAILS:
-                dynamic_vars = (message.get("call") or {}).get(
-                    "retell_llm_dynamic_variables"
-                ) or {}
-                logger.info("voice_live_ws_call_details call=%s vars=%s", call_id, bool(dynamic_vars))
-                # …then the begin message — the demo sends it HERE, not at
-                # accept. Empty response 0 = the human opens.
-                if not begun:
-                    begun = True
-                    if not await safe_send(
-                        wrap_ws_response({"response_id": 0, "content": "", "content_complete": True})
-                    ):
-                        break
-            elif itype in (INTERACTION_RESPONSE_REQUIRED, INTERACTION_REMINDER):
-                stats["turns"] += 1
-                logger.info(
-                    "voice_live_ws_turn call=%s rid=%s type=%s",
-                    call_id, message.get("response_id"), itype,
-                )
-                # ONE LIVE CALL PER USER: a newer mint marked this call
-                # 'superseded'. It must NOT speak — several superseded calls on
-                # one mic is the "Auto talking over herself" bug. Close quietly
-                # (the newest call owns the conversation). Checked at the turn
-                # boundary: exactly where a stale call would otherwise talk.
-                with get_db_session() as _db:
-                    _status = (
-                        _db.query(VoiceCall.status)
-                        .filter(VoiceCall.call_id == str(call_id))
-                        .scalar()
-                    )
-                if _status == "superseded":
-                    logger.info("voice_live_ws_superseded_closing call=%s", call_id)
-                    if speaking is not None and not speaking.done():
-                        speaking.cancel()  # silence any in-flight reply at once
-                    await websocket.close(code=1000)
-                    break
-                if speaking is not None and not speaking.done():
-                    speaking.cancel()
-                req = parse_llm_request(
-                    {
-                        "response_id": message.get("response_id"),
-                        "interaction_type": INTERACTION_RESPONSE_REQUIRED,
-                        "transcript": message.get("transcript") or [],
-                        "call": {
-                            "call_id": call_id,
-                            "retell_llm_dynamic_variables": dynamic_vars,
-                        },
-                    }
-                )
-                speaking = asyncio.create_task(respond(req))
-            elif itype == INTERACTION_UPDATE_ONLY:
-                stats["updates"] += 1
-            # unknown types: no response owed.
-    except WebSocketDisconnect as exc:
-        logger.info("voice_live_ws_closed call=%s code=%s", call_id, getattr(exc, "code", "?"))
-    except Exception as exc:  # noqa: BLE001 — abnormal severance is a fact of WS life
-        logger.warning(
-            "voice_live_ws_died call=%s err=%s", call_id, type(exc).__name__, exc_info=True
-        )
-    finally:
-        # The socket is gone but the brain may be mid-reply. Do NOT cancel it:
-        # give it a bounded grace to finish (the reply persists to the thread
-        # and reaches the open chat over SSE); past the grace the shield lets
-        # it run detached to the same end. Killing it here was how a severed
-        # socket turned a healthy generation into silence.
-        if speaking is not None and not speaking.done():
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(asyncio.shield(speaking), _TURN_EXIT_GRACE_SECONDS)
-        logger.info(
-            "voice_live_ws_summary call=%s turns=%s frames=%s pings=%s updates=%s begun=%s",
-            call_id, stats["turns"], stats["frames"], stats["pings"], stats["updates"], begun,
-        )
+    # Late-bound through this module's names, so the turn stream and the
+    # status read stay patchable where they live.
+    ports = live_socket.SocketPorts(
+        stream_turn=lambda req: _agent_retell_stream(req),
+        call_status=lambda cid: _call_status(cid),
+    )
+    await live_socket.LiveCallSocket(websocket, call_id, ports).run()

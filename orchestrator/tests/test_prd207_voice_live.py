@@ -1432,6 +1432,10 @@ def test_live_path_never_imports_pod_voice_client():
         "modules/voice/call_binding.py",
         "modules/voice/live_settings.py",
         "modules/voice/voice_meter.py",
+        "modules/voice/live_socket.py",
+        "modules/voice/call_events.py",
+        "modules/voice/caller.py",
+        "modules/voice/turn_timing.py",
     )
     pattern = re.compile(
         r"from\s+modules\.voice\.client\s+import|from\s+modules\.voice\s+import\s+([\w,\s]*\b)?client\b|import\s+modules\.voice\.client\b"
@@ -1451,7 +1455,7 @@ def test_live_path_never_imports_pod_voice_client():
 def test_call_lifecycle_updates_minted_row_idempotently(voice_workspace, new_session):
     from sqlalchemy import text
 
-    from api.voice_retell import _apply_call_event
+    from modules.voice.call_events import apply_call_event
 
     s = new_session()
     _mint_row(
@@ -1460,9 +1464,9 @@ def test_call_lifecycle_updates_minted_row_idempotently(voice_workspace, new_ses
     )
     start_ms, end_ms = 1_700_000_000_000, 1_700_000_090_000  # 90s call
 
-    _apply_call_event(s, "call_started", {"call_id": "call_life1", "start_timestamp": start_ms})
+    apply_call_event(s, "call_started", {"call_id": "call_life1", "start_timestamp": start_ms})
     for _ in range(2):  # Retell retries → replays must be harmless
-        _apply_call_event(
+        apply_call_event(
             s,
             "call_ended",
             {
@@ -1487,14 +1491,14 @@ def test_call_lifecycle_updates_minted_row_idempotently(voice_workspace, new_ses
 def test_call_ended_without_start_marks_failed(voice_workspace, new_session):
     from sqlalchemy import text
 
-    from api.voice_retell import _apply_call_event
+    from modules.voice.call_events import apply_call_event
 
     s = new_session()
     _mint_row(
         s, call_id="call_life2", ws_id=voice_workspace.ws_id,
         user_id=voice_workspace.owner,
     )
-    _apply_call_event(
+    apply_call_event(
         s, "call_ended", {"call_id": "call_life2", "disconnection_reason": "dial_failed"}
     )
     row = s.execute(
@@ -1506,10 +1510,10 @@ def test_call_ended_without_start_marks_failed(voice_workspace, new_session):
 def test_unknown_call_id_is_loud_orphan(voice_workspace, new_session):
     from sqlalchemy import text
 
-    from api.voice_retell import _apply_call_event
+    from modules.voice.call_events import apply_call_event
 
     s = new_session()
-    disposition = _apply_call_event(
+    disposition = apply_call_event(
         s,
         "call_started",
         {"call_id": "call_never_minted", "start_timestamp": 1_700_000_000_000},
@@ -1550,7 +1554,7 @@ def test_events_webhook_hmac_fail_closed(monkeypatch):
         lambda: RetellCredentials("k", secret, "a"),
     )
     applied = []
-    monkeypatch.setattr(vr, "_apply_call_event", lambda db, e, c: applied.append(e) or "updated")
+    monkeypatch.setattr(vr.call_events, "apply_call_event", lambda db, e, c: applied.append(e) or "updated")
 
     @contextmanager
     def fake_session():
