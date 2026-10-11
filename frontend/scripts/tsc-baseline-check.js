@@ -57,6 +57,49 @@ function runTsc() {
   return { count, output }
 }
 
+/**
+ * Syntax errors in the project's own files (node_modules excluded).
+ *
+ * tsc reports syntax errors INSTEAD of type errors: when any file fails to parse,
+ * it stops before type checking, so the count above drops far under the baseline
+ * and the ratchet passes. PR #1121 went green with a stray backtick that broke
+ * landing-page.tsx (and `next build`). Any syntax error fails on its own.
+ */
+function syntaxErrors(fileNames, options) {
+  const ts = require(require.resolve('typescript', { paths: [FRONTEND_ROOT] }))
+  const host = {
+    getCanonicalFileName: (f) => f,
+    getCurrentDirectory: () => FRONTEND_ROOT,
+    getNewLine: () => '\n',
+  }
+  const program = ts.createProgram(fileNames, options)
+  return program
+    .getSyntacticDiagnostics()
+    .filter((d) => !d.file || !/[\\/]node_modules[\\/]/.test(d.file.fileName))
+    .map((d) => ts.formatDiagnostic(d, host).trim())
+}
+
+/** The project's files and compiler options, from its tsconfig.json. */
+function projectFiles() {
+  const ts = require(require.resolve('typescript', { paths: [FRONTEND_ROOT] }))
+  const configPath = ts.findConfigFile(FRONTEND_ROOT, ts.sys.fileExists, 'tsconfig.json')
+  const { config } = ts.readConfigFile(configPath, ts.sys.readFile)
+  const parsed = ts.parseJsonConfigFileContent(config, ts.sys, FRONTEND_ROOT)
+  return { fileNames: parsed.fileNames, options: { ...parsed.options, noEmit: true } }
+}
+
+function failOnSyntaxErrors() {
+  const { fileNames, options } = projectFiles()
+  const errors = syntaxErrors(fileNames, options)
+  if (errors.length === 0) return
+  console.error(
+    `\n[FAIL] ${errors.length} syntax error(s). tsc stops before type checking when a file ` +
+      `fails to parse, so the error count below would pass the baseline. Fix these first:\n`
+  )
+  for (const e of errors) console.error('   ' + e)
+  process.exit(1)
+}
+
 function readBaseline() {
   try {
     const data = JSON.parse(fs.readFileSync(BASELINE_FILE, 'utf8'))
@@ -69,6 +112,7 @@ function readBaseline() {
 
 function main() {
   const update = process.argv.includes('--update')
+  failOnSyntaxErrors()
   const { count, output } = runTsc()
 
   if (update) {
@@ -122,4 +166,6 @@ function main() {
   process.exit(0)
 }
 
-main()
+if (require.main === module) main()
+
+module.exports = { syntaxErrors }
