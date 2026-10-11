@@ -1,0 +1,13 @@
+# PRD-258 US-003: the tunnel lets through ONLY Retell's two routes — the
+# custom-LLM socket and the call-events webhook, both under /api/voice/retell/
+# (each carries its own credential: the minted call id, the HMAC signature).
+# Everything else is refused at ngrok's edge: on the local edition an
+# anonymous request is the instance's super admin (core/auth/hybrid.py), so
+# the rest of the API must never be reachable through the tunnel.
+on_http_request:
+  - expressions:
+      - "!req.url.path.startsWith('/api/voice/retell/')"
+    actions:
+      - type: deny
+        config:
+          status_code: 404

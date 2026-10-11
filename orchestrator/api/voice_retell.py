@@ -37,7 +37,7 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
-from modules.voice import call_events, live_settings, live_socket, retell_api, turn_timing, voice_meter
+from modules.voice import arming, call_events, live_settings, live_socket, retell_api, turn_timing, voice_meter
 from modules.voice.caller import named_call_agent
 # mint_web_call keeps its call site: it is over the 50-line shape limit, so a
 # touched line inside it fails CI's changed-lines gate (PRD-258 US-001, D6).
@@ -351,79 +351,25 @@ async def arm_voice_live(
     agent in the customer's Retell account (correct wss + webhook URLs —
     nobody hand-copies transport strings), files key/signing-key/agent-id
     into the masked settings slots and flips ``voice.live_enabled`` ON.
-    Idempotent: an existing agent id is kept; re-arming just updates the key
-    or re-enables. ``enabled=false`` flips the master toggle only (creds
-    stay, instant kill preserved). Admin-gated; refusals are honest.
-
-    Also sweeps the caller-workspace's ``retell_voice_id`` if an API key was
-    mis-filed there (the field now refuses key-shaped strings, but stored
-    mistakes get cleaned rather than lectured about).
+    Idempotent: an existing agent id is kept; a re-arm re-tunes it and
+    re-points it at the current ``PUBLIC_API_HOST``. ``enabled=false`` flips
+    the master toggle only. Admin-gated here; the body is
+    ``modules/voice/arming.arm`` (PRD-258 US-003), refusals are honest.
     """
     if not _is_platform_admin(ctx):
         raise HTTPException(status_code=403, detail="Admin access required to arm voice")
 
-    if not body.enabled:
-        live_settings.set_voice_setting(db, live_settings.KEY_LIVE_ENABLED, "false")
-        db.commit()
-        logger.warning("voice_live_disarmed by=%s", getattr(getattr(ctx, "user", None), "id", "?"))
-        return {"armed": live_settings.retell_credentials().armed, "platform_enabled": False}
-
-    creds = live_settings.retell_credentials()
-    api_key = (body.api_key or creds.api_key or "").strip()
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Paste your Retell API key to arm Auto Live")
-
-    agent_id = creds.agent_id
-    if not agent_id:
-        host = str(config.PUBLIC_API_HOST).strip().rstrip("/")
-        try:
-            agent_id = await retell_api.create_custom_llm_agent(
-                api_key,
-                agent_name="Auto Live",
-                llm_websocket_url=f"wss://{host}/api/voice/retell/llm-websocket",
-                webhook_url=f"https://{host}/api/voice/retell/events",
-                voice_id=(body.voice_id or "").strip() or "retell-Cimo",
-            )
-        except retell_api.RetellApiError as exc:
-            raise HTTPException(status_code=502, detail=str(exc))
-    else:
-        # The agent already exists — re-tune its STT / turn-taking on this arm
-        # (pin language, cancel background speech, accurate STT, low
-        # interruption sensitivity). Non-fatal: a tune failure must not block
-        # arming (the agent still works with its prior settings).
-        try:
-            await retell_api.update_agent(api_key, agent_id, retell_api.build_agent_tuning())
-        except retell_api.RetellApiError as exc:
-            logger.warning("voice_live_arm_tune_failed agent=%s err=%s", agent_id, exc)
-
-    live_settings.set_voice_setting(db, live_settings.KEY_RETELL_API_KEY, api_key)
-    # Retell signs webhooks with the API key unless a distinct secret is
-    # configured — only fill the slot when it is empty, never overwrite one.
-    if not creds.webhook_secret:
-        live_settings.set_voice_setting(db, live_settings.KEY_RETELL_WEBHOOK_SECRET, api_key)
-    live_settings.set_voice_setting(db, live_settings.KEY_RETELL_AGENT_ID, agent_id)
-    live_settings.set_voice_setting(db, live_settings.KEY_LIVE_ENABLED, "true")
-
-    # Hygiene sweep: a key mis-filed into the caller-workspace's voice field.
-    from core.models.workspaces import Workspace
-
-    workspace = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
-    if workspace is not None:
-        settings = dict(workspace.settings or {})
-        vl = dict(settings.get("voice_live") or {})
-        stray = str(vl.get("retell_voice_id") or "")
-        if stray.lower().startswith("key_"):
-            vl.pop("retell_voice_id", None)
-            settings["voice_live"] = vl
-            workspace.settings = settings
-            from sqlalchemy.orm.attributes import flag_modified
-
-            flag_modified(workspace, "settings")
-            logger.info("voice_live_arm swept a mis-filed API key out of workspace %s", workspace.id)
-
-    db.commit()
-    logger.info("voice_live_armed agent=%s by=%s", agent_id, getattr(getattr(ctx, "user", None), "id", "?"))
-    return {"armed": True, "platform_enabled": True, "agent_id": agent_id}
+    try:
+        return await arming.arm(
+            db,
+            enabled=body.enabled,
+            api_key=body.api_key,
+            voice_id=body.voice_id,
+            workspace_id=ctx.workspace_id,
+            actor=getattr(getattr(ctx, "user", None), "id", "?"),
+        )
+    except arming.ArmRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 # The worker loop gets this long after a turn settles to run its finallys

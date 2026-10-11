@@ -895,13 +895,6 @@ class Config:
     SLO_DEFAULT_WINDOW_SECONDS: int = int(os.getenv("SLO_DEFAULT_WINDOW_SECONDS", "86400"))
 
     # =============================================================================
-    # CHANNELS — public-facing host used to build inbound webhook URLs
-    # (PRD-142 W3-S5 / G7)
-    # =============================================================================
-    # rstrip('/') preserves api/channels.py's prior call-site behaviour.
-    PUBLIC_API_HOST: str = os.getenv("PUBLIC_API_HOST", "api.automatos.app").rstrip("/")
-
-    # =============================================================================
     # RATE LIMITING — per-operation override helper
     # (PRD-142 W3-S5 / G7; replaces core/security/rate_limiter.py::_env_limit)
     # =============================================================================
@@ -1923,9 +1916,11 @@ class Config:
     VOICE_LIVE_SKIP_COMPOSIO: bool = os.getenv(
         "VOICE_LIVE_SKIP_COMPOSIO", "true"
     ).strip().lower() == "true"
-    # The public host Retell must reach for the custom-LLM socket + events
-    # webhook (one-click arming builds the URLs from it). Railway injects
-    # RAILWAY_PUBLIC_DOMAIN; override with PUBLIC_API_HOST where that's absent.
+    # The ONE public host (PRD-258 US-003; it was defined twice): Retell's
+    # custom-LLM socket + events webhook (arming builds the agent's URLs from
+    # it) and the channels' inbound webhook URLs (PRD-142 W3-S5 / G7). Railway
+    # injects RAILWAY_PUBLIC_DOMAIN; PUBLIC_API_HOST overrides it (the local
+    # tunnel's domain, set in the compose override). No trailing slash.
     PUBLIC_API_HOST: str = (
         os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
         or "api.automatos.app"

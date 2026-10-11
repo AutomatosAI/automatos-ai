@@ -1079,9 +1079,9 @@ def test_arm_creates_agent_stores_all_and_sweeps_misfiled_key(monkeypatch):
 
     assert out == {"armed": True, "platform_enabled": True, "agent_id": "agent_new_1"}
     # the server built the transport URLs — nobody hand-copies wss strings
-    assert created["llm_websocket_url"].startswith("wss://")
-    assert created["llm_websocket_url"].endswith("/api/voice/retell/llm-websocket")
-    assert created["webhook_url"].endswith("/api/voice/retell/events")
+    llm_url = created["endpoints"]["response_engine"]["llm_websocket_url"]
+    assert llm_url.startswith("wss://") and llm_url.endswith("/api/voice/retell/llm-websocket")
+    assert created["endpoints"]["webhook_url"].endswith("/api/voice/retell/events")
     # all four slots written; signing key defaults to the API key
     assert written["retell_api_key"] == "key_real"
     assert written["retell_webhook_secret"] == "key_real"
