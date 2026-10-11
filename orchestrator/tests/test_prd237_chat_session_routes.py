@@ -9,8 +9,6 @@
    (never mutates) under the workspace key and stamps ``updatedAt`` in UTC.
 """
 from __future__ import annotations
-
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -117,9 +115,9 @@ def _db_with_user(row):
 def test_get_session_returns_empty_doc_when_nothing_stored():
     m = _api_chat()
     ws = uuid4()
-    out = asyncio.run(m.get_chat_session(ctx=_ctx(ws), db=_db_with_user(SimpleNamespace(chat_sessions=None))))
+    out = m.get_chat_session(ctx=_ctx(ws), db=_db_with_user(SimpleNamespace(chat_sessions=None)))
     assert out == m._EMPTY_SESSION_DOC
-    out = asyncio.run(m.get_chat_session(ctx=_ctx(ws), db=_db_with_user(None)))
+    out = m.get_chat_session(ctx=_ctx(ws), db=_db_with_user(None))
     assert out == m._EMPTY_SESSION_DOC
 
 
@@ -128,7 +126,7 @@ def test_get_session_returns_this_workspace_doc_only():
     ws, other = uuid4(), uuid4()
     mine = {"activeChatId": None, "draftOpen": True, "openChatIds": [], "lastReadAt": {}, "updatedAt": "x"}
     row = SimpleNamespace(chat_sessions={str(ws): mine, str(other): {"draftOpen": False}})
-    out = asyncio.run(m.get_chat_session(ctx=_ctx(ws), db=_db_with_user(row)))
+    out = m.get_chat_session(ctx=_ctx(ws), db=_db_with_user(row))
     assert out == mine
 
 
@@ -139,7 +137,7 @@ def test_put_session_rebuilds_jsonb_under_workspace_key():
     row = SimpleNamespace(chat_sessions=original)
     db = _db_with_user(row)
     cid = str(uuid4())
-    out = asyncio.run(m.put_chat_session(_req(m, openChatIds=[cid], activeChatId=cid), ctx=_ctx(ws), db=db))
+    out = m.put_chat_session(_req(m, openChatIds=[cid], activeChatId=cid), ctx=_ctx(ws), db=db)
     assert out["openChatIds"] == [cid] and out["activeChatId"] == cid
     assert out["updatedAt"].endswith("+00:00"), out["updatedAt"]  # UTC, parseable by Date.parse
     assert row.chat_sessions[str(ws)] == out
@@ -151,5 +149,5 @@ def test_put_session_rebuilds_jsonb_under_workspace_key():
 def test_put_session_404s_without_a_user_row():
     m = _api_chat()
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(m.put_chat_session(_req(m), ctx=_ctx(uuid4()), db=_db_with_user(None)))
+        m.put_chat_session(_req(m), ctx=_ctx(uuid4()), db=_db_with_user(None))
     assert exc.value.status_code == 404
