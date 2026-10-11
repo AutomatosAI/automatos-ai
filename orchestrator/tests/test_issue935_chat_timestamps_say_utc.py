@@ -66,7 +66,7 @@ def _says_utc(value: str) -> None:
 
 
 def test_the_chat_list_says_utc(fake_chats):
-    [chat] = asyncio.run(chat_api.get_chat_history(limit=1, ctx=CTX, db=object()))
+    [chat] = chat_api.get_chat_history(limit=1, ctx=CTX, db=object())
     _says_utc(chat["createdAt"])
     _says_utc(chat["updatedAt"])
 
@@ -78,7 +78,7 @@ def test_one_chat_says_utc(fake_chats):
 
 
 def test_a_chats_messages_say_utc(fake_chats):
-    [message] = asyncio.run(chat_api.get_chat_messages("chat-1", ctx=CTX, db=object()))
+    [message] = chat_api.get_chat_messages("chat-1", ctx=CTX, db=object())
     _says_utc(message["createdAt"])
 
 
@@ -88,7 +88,7 @@ def test_message_search_says_utc(fake_chats):
         created_at=NAIVE_UTC, chat_title="test",
     )
     db = SimpleNamespace(execute=lambda *a, **k: SimpleNamespace(fetchall=lambda: [row]))
-    found = asyncio.run(chat_api.search_chat_history(q="hello", limit=5, days=30, ctx=CTX, db=db))
+    found = chat_api.search_chat_history(q="hello", limit=5, days=30, ctx=CTX, db=db)
     _says_utc(found["results"][0]["created_at"])
 
 

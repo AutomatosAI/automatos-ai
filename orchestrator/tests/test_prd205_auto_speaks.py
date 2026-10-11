@@ -528,7 +528,7 @@ def test_history_and_get_chat_surface_kind(workspace_and_user, new_session):
             user=SimpleNamespace(id=user_int_id),
         )
 
-        rows = asyncio.run(get_chat_history(limit=50, ctx=ctx, db=db))
+        rows = get_chat_history(limit=50, ctx=ctx, db=db)
         by_id = {row["id"]: row for row in rows}
         assert by_id[str(auto.id)]["kind"] == "auto"
         assert by_id[str(regular.id)]["kind"] == "user"
