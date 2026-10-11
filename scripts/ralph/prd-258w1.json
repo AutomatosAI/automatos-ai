@@ -1,0 +1,98 @@
+{
+  "decisions": [
+    "D1 (the wave): Wave 1 = PRD-258 US-001..US-004, the measuring half. US-005 (the baseline: three simulator runs and one real call) is the owner's, in ownerTest. Part 2 (US-006..US-011) is Wave 2, cut after PRD-256 #1036/#1039 are on main.",
+    "D2 (one migration): ONE Alembic revision, in US-001, adds every column this wave needs: voice_turns.first_frame_ms, first_auto_frame_ms, prep_ms, tools_before_speech (INTEGER NULL), lead_in and prefetch_hit (BOOLEAN NOT NULL DEFAULT false), and voice_calls.vendor_latency (JSONB NULL). US-002 adds no revision.",
+    "D3 (the tunnel, PRD §9-Q2): an ngrok static domain (one free account, a stable host, no DNS). The host reaches the backend as PUBLIC_API_HOST from the local compose override, never from .env.",
+    "D4 (nothing runs here): the loop never runs the runner, a server, docker, a tunnel, a Retell call, pytest or npm, and never reads or writes ~/.automatos-analyst. The ask set and results are the owner's.",
+    "D5 (one PR per wave): story commits end with ' [skip ci]'; the runner pushes them as a backup to a branch with NO pull request, so test.yml does not run (#993). The runner opens the wave's draft PR once, when the build is COMPLETE; the acceptance gate reads that one run.",
+    "D6 (the oversized file): orchestrator/api/voice_retell.py is 1,005 lines, over AGENTS.md's 800. It ends every story no longer than on the base: new behaviour lives in modules under orchestrator/modules/voice/, and code is moved out of voice_retell.py to make room for any wiring.",
+    "D7 (PRD §9, Wave 2 only): Haiku never answers in Auto's place; the lead-in shows in the thread; PRD-256 US-013 moves to PRD-258 US-006. Nothing in this wave acts on them."
+  ],
+  "project": "PRD-258 Auto Live, back on track — Wave 1: measure the voice turn",
+  "branchName": "feat/prd-258-w1-voice-measure",
+  "baseBranch": "main",
+  "description": "Wave 1 of PRD-258 (docs/PRDS/PRD-258-AUTO-LIVE-VOICE-LATENCY.md, seeded onto the branch by the runner). US-001..US-004 in priority order: every spoken turn stores where its time went; every call stores Retell's own latency; Auto Live can be armed on the local stack through a tunnel; a Retell-protocol simulator times the voice turn without a person on a call. ONE migration (US-001). The decisions above are binding. Every run (the simulator, a real call, the tunnel) is the owner's (ownerTest); the loop never runs a server, a test suite, docker or the runner, and never marks those DONE. Diff base for every check: `bash scripts/ralph/acceptance-prd258w1.sh --print-base`.",
+  "ownerTest": [
+    "After merge: rebuild the local stack from main (one Docker build at a time). The migration runs at boot.",
+    "Tunnel (D3): claim an ngrok static domain; put `PUBLIC_API_HOST=<domain>` in the backend's `environment:` in the local compose override (never .env); restart the backend; run `scripts/voice/tunnel.sh` and leave it running.",
+    "Arm: Settings → Voice → Auto Live: paste the Retell API key, Arm. Check the Retell dashboard: an agent named 'Auto Live (local)' whose custom-LLM URL is wss://<domain>/api/voice/retell/llm-websocket. Turn Auto Live on for c1.",
+    "Simulator, three runs: `docker exec -i automatos_backend python -m scripts.eval.voice_latency.run --workspace <c1 id> --user <your users.id> < ~/.automatos-analyst/voice-eval/asks.json`; append each printed results line to ~/.automatos-analyst/voice-eval/results.md.",
+    "Real call: on /chat press Live and read the 20 asks in order; then `docker exec -i automatos_backend python -m scripts.eval.voice_latency.run --call <call_id>` joins voice_turns with that call's vendor_latency. Note whether update_only grew word by word (the US-005 spike; the WS summary log line counts updates).",
+    "Confirm or move the PRD §8 bars before Wave 2."
+  ],
+  "userStories": [
+    {
+      "id": "P258-W1-US-001",
+      "title": "Each spoken turn records where its time went",
+      "description": "As Gerard, I want each voice turn to store its timings, so a slow turn says whether it was prep, the model or a tool.",
+      "acceptanceCriteria": [
+        "Make room first (D6): move the pure helpers out of `orchestrator/api/voice_retell.py` — `_apply_call_event` to a new `orchestrator/modules/voice/call_events.py`, and `_resolve_caller_int_id` and `_named_call_agent` beside the binding code in `orchestrator/modules/voice/call_binding.py` (or a new small module if that file would pass 400 lines). Update every import, tests included; no re-export shim left in voice_retell.py.",
+        "ONE Alembic revision `prd258_voice_timings` (D2) chained onto the current single head (read `EXPECTED_HEAD` in `orchestrator/tests/test_prd209_alembic_single_head.py`). It adds the voice_turns and voice_calls columns of D2 with `ADD COLUMN IF NOT EXISTS`, so it survives a database `create_all` already built; downgrade drops them with `IF EXISTS`. Both head pins move: `test_prd209_alembic_single_head.py` (EXPECTED_HEAD) and `test_prd236_w1_routes.py` (the guard assertion that names the head).",
+        "The ORM models gain the same columns: `orchestrator/core/models/voice_turns.py` (`VoiceTurn`) and `orchestrator/core/models/voice_calls.py` (`VoiceCall.vendor_latency`, JSONB).",
+        "A new `orchestrator/modules/voice/turn_timing.py` holds the timing logic as pure functions (no I/O): from the turn's start, the first content frame sent, the first frame produced by Auto (not the 'One moment.' ack) and the count of tool calls before Auto's first frame, it returns the new voice_turns fields in whole milliseconds; a missing time gives None, never an invented number.",
+        "`tools_before_speech` counts the AI-SDK tool-call lines in Auto's stream before its first text unit. Read the tool-call line prefix(es) `StreamingHandler` emits in `orchestrator/consumers/chatbot/streaming.py` and use those; name them as constants, never as literals scattered in the code.",
+        "`prep_ms` is copied from the `context_trace` of the assistant message this turn saved (find it the way `stamp_assistant_voice_source` in `modules/voice/call_binding.py` finds the turn's reply; read the key name from where `context_trace` is built in `consumers/chatbot/smart_orchestrator.py` / `context.to_assembly_trace()`). No message or no key → None.",
+        "`record_voice_turn` / `voice_turn_fields` (`orchestrator/modules/voice/telemetry.py`) take the new fields; `lead_in` and `prefetch_hit` are written false in this wave. Still ONE `voice_turns` row per live turn, written once after the stream ends, never raising. If writing it from the caller side (`respond()`, where the first frame is sent) means moving the call out of `_agent_retell_stream_inner`, move it; the existing lengths-only privacy rule stays.",
+        "A turn superseded by barge-in records `first_frame_ms` if a frame was sent before the cancel, and None otherwise.",
+        "Tests in `orchestrator/tests/test_prd258_turn_timings.py`: the pure fields function (all times, missing times, the ack not counted as Auto's frame, tool lines counted only before the first text); a turn driven through the WS handler the way `orchestrator/tests/test_prd207_voice_live.py` drives it, with the agent stream stubbed (300 ms, then two text units), writes `first_auto_frame_ms` ≥ 300 and `audio_delivered` true; `voice_turn_fields` covers the new keys; a test that fails if `voice_retell.py` is longer than 1,005 lines.",
+        "`orchestrator/api/voice_retell.py` ends the story no longer than on the base (D6). `python3 -m py_compile` passes on every changed file; `ruff check` on the changed paths if ruff is on PATH.",
+        "Committed signed with ` [skip ci]`; CI runs once at the end of the wave."
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P258-W1-US-002",
+      "title": "Each call stores Retell's own latency",
+      "description": "As Gerard, I want Retell's per-call latency kept with the call, so speech-to-text and text-to-speech time sit beside ours.",
+      "acceptanceCriteria": [
+        "A pure function in `orchestrator/modules/voice/call_events.py` turns a Retell call object's `latency` into the stored subset: for each of `e2e`, `asr`, `llm`, `llm_websocket_network_rtt`, `tts`, only `p50`, `p90` and `num`, numbers only; anything else dropped; an empty or malformed block → None. The key list is a named constant.",
+        "`_apply_call_event` writes `voice_calls.vendor_latency` from a `call_analyzed` event whose `call` carries `latency` (and from `call_ended` if it does). It stays idempotent: a replayed event writes the same value; it never overwrites a stored value with None.",
+        "When a `call_analyzed` event carries no `latency`, exactly one `GET` to Retell's get-call endpoint (`https://api.retellai.com/v2/get-call/{call_id}`, a named constant in `orchestrator/modules/voice/retell_api.py` beside the create-web-call URL) fetches it with the platform key from `live_settings.retell_credentials()` and the existing timeout constant. A failure is logged with the call id (never the key) and never fails the webhook: it still answers 2xx.",
+        "Tests in `orchestrator/tests/test_prd258_vendor_latency.py`: the subset function (full block, missing keys, junk values); a signed `call_analyzed` fixture with a `latency` block fills `vendor_latency` (sign it the way `test_prd207_voice_live.py` signs events); the same fixture without one makes exactly one mocked get-call (httpx MockTransport with a byte-stream body, not `content=`: the response is pre-read otherwise); a failing get-call still returns 2xx; a replay writes the same value.",
+        "No new Alembic revision (D2). `voice_retell.py` no longer than on the base (D6).",
+        "Committed signed with ` [skip ci]`; CI runs once at the end of the wave."
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P258-W1-US-003",
+      "title": "Auto Live runs on the local stack through a tunnel",
+      "description": "As Gerard, I want to arm Auto Live on my local stack, so voice can be measured and tested on main without deploying.",
+      "acceptanceCriteria": [
+        "`orchestrator/config.py` defines `PUBLIC_API_HOST` once: keep the Railway-aware definition (the one that reads `RAILWAY_PUBLIC_DOMAIN`) and delete the earlier one; every reader still gets a host without a trailing slash. `orchestrator/reports/config-surface.json` unchanged (the name already exists).",
+        "A pure helper in `orchestrator/modules/voice/retell_api.py` builds the agent's endpoints from a host: `{\"response_engine\": {\"type\": \"custom-llm\", \"llm_websocket_url\": \"wss://<host>/api/voice/retell/llm-websocket\"}, \"webhook_url\": \"https://<host>/api/voice/retell/events\"}`. `create_custom_llm_agent` and the re-arm both use it; the path strings live in one place.",
+        "Re-arming with an existing agent id (`arm_voice_live`, the `else` branch that today only re-tunes) sends ONE `update_agent` PATCH carrying `build_agent_tuning()` AND the endpoints built from the current `config.PUBLIC_API_HOST`, so an agent created against one host is moved to the current one. A PATCH failure stays non-fatal, as today.",
+        "On the local edition (`config.AUTH_EDITION == 'local'`) a newly created agent is named 'Auto Live (local)'; on SaaS it stays 'Auto Live'. Both names are named constants.",
+        "If this moves code, it moves OUT of `voice_retell.py` (D6): the arm handler's body may become a call into a new `orchestrator/modules/voice/arming.py`.",
+        "`scripts/voice/README.md` and `scripts/voice/tunnel.sh` (D3): the README lists the steps in order — claim an ngrok static domain, put `PUBLIC_API_HOST=<domain>` in the backend's `environment:` in the local compose override (never `.env`), restart the backend, run the script, then Settings → Auto Live → Arm. The script checks `ngrok` is installed and `NGROK_DOMAIN` is set, prints the `PUBLIC_API_HOST` line to use, then runs `ngrok http --url=$NGROK_DOMAIN <backend port>` with the port read from `docker-compose.yml`'s backend mapping (say which line in a comment). `bash -n` passes. No secret, token or domain is committed.",
+        "Tests in `orchestrator/tests/test_prd258_local_arming.py`: the endpoints helper; re-arm with an existing agent id sends exactly one PATCH whose body has the tuning keys AND both URLs for a patched `PUBLIC_API_HOST` (mock `update_agent`; no network); a local-edition create names the agent 'Auto Live (local)', a saas one 'Auto Live'; `config.PUBLIC_API_HOST` is assigned once in config.py (read the source).",
+        "`voice_retell.py` no longer than on the base (D6).",
+        "Committed signed with ` [skip ci]`; CI runs once at the end of the wave."
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P258-W1-US-004",
+      "title": "A voice-latency runner that times the turn without speaking",
+      "description": "As Gerard, I want a scripted runner that speaks Retell's socket protocol to our backend, so every change can be timed the same way without a person on a call.",
+      "acceptanceCriteria": [
+        "A new package `orchestrator/scripts/eval/voice_latency/` laid out like `orchestrator/scripts/eval/tool_routing/` (an `__init__.py` and a `README.md`), with a `.gitignore` that ignores `results.md` and `asks*.json` so the owner's data can never be committed there.",
+        "`protocol.py` (pure): the Retell custom-LLM frames the simulator sends, matching what `retell_llm_websocket` in `orchestrator/api/voice_retell.py` reads — `call_details` with `call.retell_llm_dynamic_variables` {workspace_id, user_id, chat_id}; `ping_pong` with a timestamp; for one ask, one `update_only` per word as the utterance grows (the running `transcript` list of {role, content}, earlier turns included), then `response_required` with the next `response_id`. The speaking pace (150 words a minute) and every timeout are named constants.",
+        "`report.py` (pure, no I/O): p50 and p90 (nearest-rank) per measure, per kind and overall; the one results line `<ISO time> · <build SHA> · <kind>: first_frame p50/p90 · first_auto_frame p50/p90 · full p50/p90 · prep p50/p90 · silent N`; and the join of a real call's voice_turns rows with its `voice_calls.vendor_latency` into the same line shape plus the vendor e2e/asr/llm/tts p50/p90.",
+        "`run.py` (the CLI, the only part that does I/O): reads the ask set as JSON on stdin (`[{\"kind\": \"small_talk|knowledge|board|tool\", \"text\": \"...\"}]`, validated with a clear error on a bad row); takes `--workspace` and `--user`; refuses with a clear message if `voice.live_enabled` is off; inserts a `minted` `voice_calls` row with provider `sim` bound to a chat it creates for the run (reuse `create_voice_chat`); opens `ws://localhost:<port>/api/voice/retell/llm-websocket/<call_id>` (the port the backend listens on INSIDE its container: read `orchestrator/start.sh` / the Dockerfile; a named constant with a `--port` override) with the `websockets` package already in requirements; answers the server's `config`; drives the asks in order; per ask records the client-side first frame time, the first non-ack frame time and `content_complete`; reads that call's voice_turns rows for the server-side columns; prints a JSON summary and the results line. It never writes a file. A second mode, `--call <call_id>`, reads a real call's voice_turns rows and vendor_latency and prints the joined line (no WS, no insert).",
+        "No new Python dependency; no `os.getenv` (settings via `config`); no `print` outside the CLI's output function if ruff's T20 applies to this path (check `orchestrator/pyproject.toml` / ruff config; follow what the tool_routing eval does).",
+        "Tests in `orchestrator/tests/test_prd258_voice_latency_runner.py` (no network, no database): a 3-word ask produces three growing `update_only` frames then one `response_required` with the right `response_id` and transcript; the dynamic variables frame matches what `parse_llm_request` / the WS handler read (feed it to `parse_llm_request` and assert the fields); nearest-rank p50/p90 on known lists; the results line format; a bad ask row is refused with its index.",
+        "Committed signed with ` [skip ci]`; CI runs once at the end of the wave."
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
