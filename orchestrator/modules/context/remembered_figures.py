@@ -29,13 +29,20 @@ from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
+# P256-FIX-N13-5 (F412): a recalled line is an earlier conversation's, never this chat's turn.
+EARLIER_NOT_THIS_CHAT = (
+    "None of it was said in this chat: each line is from an earlier conversation on the day it names. Only the "
+    "messages of this chat are your earlier replies here, so never call a remembered line 'my last reply' or "
+    "say 'as I said' about it."
+)
 REMEMBERED_RULE = (
     "Remembered from earlier chats and work: each was true when it was stored, not necessarily now. What the "
     "owner told you (a change, a correction, a decision) stands until they change it: apply it. A figure that "
     "was counted or read from a database, the board or a document (a count, a total, stock, takings) is not "
     "today's figure: count it again before you give it, and if you mention a remembered figure, say it is "
     "remembered from an earlier chat. Never give your memory or an earlier conversation as the source of a "
-    "current figure."
+    "current figure. "
+    + EARLIER_NOT_THIS_CHAT
 )
 MEMORY_HEADINGS = ("## What You Know About This User", "## What you remember about this user:")
 DISTILL_ANCHOR = "Return ONLY a JSON array"
@@ -84,5 +91,5 @@ def leaves_counted_figures_out(build_prompt: Prompt) -> Prompt:
     return wrapped
 
 
-__all__ = ["DISTILL_RULE", "REMEMBERED_RULE", "labels_what_is_remembered", "leaves_counted_figures_out",
-           "with_the_rule"]
+__all__ = ["DISTILL_RULE", "EARLIER_NOT_THIS_CHAT", "REMEMBERED_RULE", "labels_what_is_remembered",
+           "leaves_counted_figures_out", "with_the_rule"]

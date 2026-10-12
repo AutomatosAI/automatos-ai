@@ -36,6 +36,11 @@ are absolutely right to call me out on that, Gerard. My apologies…" (6586c8bf,
 through ``as_a_check``), the one wording every re-prompt and nudge shares, and the reply
 to a re-prompt loses the apology it opens with: on the text that streams
 (``reprompt_reply.ApologyGate``) and on the reply that is saved (``without_the_apology``).
+
+P256-FIX-N13-5 (F412, night 13): the same gate checks the opening of Auto's chat replies for two
+more faults (``core/llm/fresh_reply.opening_for``): in a chat with no earlier reply, a lead-in
+that refers back to one ("As I said, …", "My last reply said …"), and a copy of the not-done
+line the model wrote itself (the line is the receipts' alone).
 """
 from __future__ import annotations
 
@@ -111,29 +116,32 @@ def reprompts_in_the_users_turn(generate: Callable[..., Awaitable[Any]]) -> Call
     """Wrap ``LLMManager.generate_response`` (see the module)."""
     @functools.wraps(generate)
     async def wrapped(self: Any, messages: Messages, *args: Any, **kwargs: Any) -> Any:
+        from core.llm.fresh_reply import opening_for
+
         sent = with_the_loops_nudge_framed(as_the_users_turn(messages))
-        if not is_a_reprompt(sent):
+        opening = opening_for(sent, reprompt=is_a_reprompt(sent), streams=kwargs.get("on_delta") is not None)
+        if opening is None:
             return await generate(self, sent, *args, **kwargs)
-        return await _answered_without_an_apology(generate, self, sent, *args, **kwargs)
+        return await _answered_with_its_opening_checked(generate, self, sent, opening, *args, **kwargs)
     return wrapped
 
 
-async def _answered_without_an_apology(generate: Callable[..., Awaitable[Any]], manager: Any, sent: Messages,
-                                       *args: Any, **kwargs: Any) -> Any:
-    """The model's reply to a re-prompt, with the apology it opens with taken off what
-    streams and what is saved (F295, night 9b)."""
+async def _answered_with_its_opening_checked(generate: Callable[..., Awaitable[Any]], manager: Any,
+                                             sent: Messages, opening: Any, *args: Any, **kwargs: Any) -> Any:
+    """The model's reply with its opening checked on what streams and what is saved: a re-prompt's
+    apology taken off (F295, night 9b) and, in Auto's chat, a copy of the not-done line and a fresh
+    chat's back-reference to an earlier reply (P256-FIX-N13-5, ``core/llm/fresh_reply.py``)."""
     from core.llm.reprompt_reply import gated
     from core.llm.screen_watch import restated
-    from modules.tools.execution.nudges import without_the_apology
 
-    gate = gated(kwargs.get("on_delta"))
+    gate = gated(kwargs.get("on_delta"), opening.trim, opening.pending)
     if gate is not None:
         kwargs = {**kwargs, "on_delta": gate}
     response = await generate(manager, sent, *args, **kwargs)
     if gate is None:
-        return without_the_apology(response)
+        return opening.checked(response)
     await gate.close()
-    saved = without_the_apology(response)
+    saved = opening.checked(response)
     restated(response, saved, gate.passed)  # RVW-43: the screen holds what the gate let through
     return saved
 

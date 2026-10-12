@@ -25,6 +25,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from modules.context.earlier_conversations import labels_the_bundle  # P256-FIX-N13-5 (F412)
 from modules.context.remembered_figures import labels_what_is_remembered  # F316 (night 9b)
 from modules.context.sections.base import BaseSection, SectionContext
 from services.contested_facts import RULES_OUTRANK_DOCUMENTS  # P256-FIX-N13-3 (F410)
@@ -176,6 +177,7 @@ class MemorySection(BaseSection):
             )
             return None
 
+    @labels_the_bundle  # P256-FIX-N13-5 (F412): what is recalled is an earlier conversation
     def _format_context_bundle(self, bundle: object, ctx: SectionContext) -> str:
         """Format a Context Router bundle into system prompt sections."""
         parts: list[str] = []
