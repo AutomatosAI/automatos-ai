@@ -1032,6 +1032,122 @@
       "priority": 68,
       "passes": false,
       "notes": "Filed by TESTER 11 Oct (ledger F401)."
+    },
+    {
+      "id": "P256-FIX-N13-1",
+      "title": "HIGH · F408: the signal recorder's edge upsert deadlocks the backend",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F408): at 03:01 UTC the event loop stood still 6 min. modules/tools/discovery/signal_recorder._drain_loop (:344, an async task) awaits _flush (:473) which calls _upsert_edge (:555), a synchronous UPDATE tool_routing_edges on the loop; it waited on a row lock held by another connection of the same process left 'idle in transaction' after its INSERT into tool_routing_edges, whose coroutine could not resume to commit while the loop was blocked. /health timed out; cleared by pg_terminate_backend.",
+      "acceptanceCriteria": [
+        "The recorder's batch write runs off the event loop (core run_blocking / to_thread, the F196 helper) in one short transaction per batch that always commits or rolls back (no session left idle in transaction), with SET LOCAL lock_timeout (a config value, e.g. 5 s): a lock wait drops that batch with one warning instead of blocking.",
+        "orchestrator/tests/test_prd256_fix_signal_recorder_never_blocks_the_loop.py: a batch whose upsert waits on a held row lock returns within the lock_timeout and the loop keeps serving (a concurrent coroutine runs meanwhile); a normal batch upserts its edges; no connection is left idle in transaction after a failed batch.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 69,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
+    },
+    {
+      "id": "P256-FIX-N13-2",
+      "title": "HIGH · F409: the nightly EdgeBuilder's k-means freezes the backend",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F409): from ~03:20 UTC the backend sat at 105% CPU with the loop frozen ~25 min. services/edge_builder_scheduler._run_edge_builder (:60-66) awaits core/services/edge_builder.build_edges; _compute_and_upsert_clusters (:627) runs core/services/intent_clustering.compute_intent_clusters → _kmeans (:72, :140) in pure Python on the event loop. Every chat and /health timed out; cleared by a backend restart.",
+      "acceptanceCriteria": [
+        "The clustering (and any other CPU-bound step of build_edges) runs off the event loop (a worker thread via run_blocking, or a process pool), so the loop stays responsive during the nightly run; if a vectorised path (numpy, already a dependency if present — no new dependency) replaces the pure-Python k-means it gives the same clusters on the test fixture.",
+        "orchestrator/tests/test_prd256_fix_edge_builder_off_the_loop.py: while build_edges clusters a fixture large enough to take >1 s, a concurrent coroutine on the same loop completes within 100 ms; the clusters equal the current implementation's on a seeded fixture.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 70,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
+    },
+    {
+      "id": "P256-FIX-N13-3",
+      "title": "HIGH · F410: a corrected fact loses to its superseded copies",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F410): 'Club dispatch day from November' — a rule the owner told Auto at 22:05 (stored memory) and wrote into a ruling document — came back Monday on 4 of 17 cold asks (2 of 7 on identical words) because five older documents and hundreds of tickets still say Monday; Quay's 30-day terms (one stale rival) were right 5 of 5. The owner's stated rule and the newest dated document lose to the count of stale passages.",
+      "acceptanceCriteria": [
+        "When the context Auto answers from holds two values for one fact, the owner's own stated rule (a stored memory with an owner, FX-015's standing rules) outranks any document, and among documents the newest (by its date or its upload time) outranks older ones; the reply gives the winning value and, when they disagree, names the conflict in one line ('older files still say Monday: the packing checklist, …').",
+        "The ranking is applied where the answer context is assembled (the standing-rules block and the RAG passages Auto reads), in one place, with no keyword list of facts.",
+        "orchestrator/tests/test_prd256_fix_contested_facts.py: a stored owner rule 'from November we post Wednesdays' plus five document passages saying Monday → the assembled context puts the rule first and marks the passages as older; two dated documents disagreeing → the newer first; the same assembled context on ten identical asks is identical (no ordering by score ties).",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 71,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
+    },
+    {
+      "id": "P256-FIX-N13-4",
+      "title": "HIGH · F411: the owner's click changes the card but not what Auto knows",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F411): approving a card moves it to Done with the note, but the decision never reaches memory or knowledge (Auto, ask 416: 'A card approval moves the card to Done and records your note on the card… it doesn't update what I know'); consequences at asks 392 and 415. The click path is modules/tools/discovery/click_resume.on_the_click (:35) and owner_only.after_the_click (:372).",
+      "acceptanceCriteria": [
+        "After a click runs the action (approve, cancel, a rule or setting change, a send), the decision is stored as one owner-attributed memory ('Approved #1403 Autumn tier launch copy, 12 Oct, note: …') through the existing store-memory path, so a later chat recalls it; a deny is stored too.",
+        "The card says what approving does in one line (FX-008's card text): what changes, and that Auto will remember it.",
+        "orchestrator/tests/test_prd256_fix_click_is_remembered.py: a clicked approve → one memory with the owner and the card number; a deny → one memory saying it was declined; a second click on the same grant writes nothing more.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 72,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
+    },
+    {
+      "id": "P256-FIX-N13-5",
+      "title": "MEDIUM · F412: phantom continuity in a fresh chat, and the honesty line with no claim",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F412): six brand-new chats opened with 'my last reply…' / 'as I said' with no prior turn — the recalled thread checkpoints (modules/memory/thread_checkpoint.py:248, '… — where we left off: …') read to the model as its own earlier turns; and 'Just to be clear: I haven't done that yet, and nothing has changed' (consumers/chatbot/claim_check.NOT_DONE :76 via claims_backed) appeared on replies that claimed nothing (a greeting, a fact).",
+      "acceptanceCriteria": [
+        "Recalled checkpoints and memories reach the model labelled as earlier conversations ('From an earlier conversation on 11 Oct: …'), never as this chat's turns; in a chat with no prior turn the reply never refers to 'my last reply' or 'as I said' (a check on the first reply of a chat strips/rewrites such a lead-in, one rule).",
+        "The not-done honesty line is added only when the reply contains a completed-action or promised-action sentence the receipts do not back; a reply with no such sentence gets no line.",
+        "orchestrator/tests/test_prd256_fix_no_phantom_continuity.py: a fresh chat with a recalled checkpoint → the prompt labels it as an earlier conversation and the first reply 'My last reply said …' is rewritten; 'Evening Gerard. What do you need tonight?' with no receipts → no honesty line; 'I've sent it' with no receipt → the line, once.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 73,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
+    },
+    {
+      "id": "P256-FIX-N13-6",
+      "title": "MEDIUM · F413: fetched work is not shown in the reply",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F413): platform_get_deliverable · done and no text in the reply, 12 times (asks 378–379 reproduce it); asking for it 'between two lines of dashes' printed the whole file in 10 s every time. Handler: modules/tools/discovery/handlers_deliverables.get_deliverable (:107); action actions_deliverables._register_get_deliverable (:105).",
+      "acceptanceCriteria": [
+        "When the owner asks to see, read or show a deliverable, the reply contains its text (or the first N characters, N a config value, with the link to the rest): the tool result tells the model to quote it, and a reply after a successful get_deliverable that quotes none of it is retried once with that instruction (the FX-017 retry seam), not left empty.",
+        "orchestrator/tests/test_prd256_fix_fetched_work_is_shown.py: 'show me the Guji blog draft' with get_deliverable returning text → the reply holds the text; a scripted model that omits it → one retry, then the text; a long file → the first N characters and the link.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 74,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
+    },
+    {
+      "id": "P256-FIX-N13-7",
+      "title": "MEDIUM · F414: one card number everywhere, and no instruction the owner did not give",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F414): Auto writes and answers with the workspace number (#1394, workspace_seq) while the board shows the row id (2680), so 'did that go through?' got yes then no on a number the board does not have (asks 409/412); 'as you asked' recorded an instruction the owner never gave; update_mission_plan on #0936 ran with no card (ask 404, not reproduced).",
+      "acceptanceCriteria": [
+        "The board, its cards and every Auto reply and tool use the same card number (#workspace_seq, the F276 '#0042' form); a reply or a card never names a raw row id.",
+        "A brief, card note or memory Auto writes never says 'as you asked' / 'per your instruction' unless the owner's message in this chat said it (checked against the chat's own user turns); platform_update_mission_plan from chat that changes a mission's steps or checks is owner-only (a card), reading its params like FX-010's agent-setting changes.",
+        "Tests (orchestrator/tests/test_prd256_fix_one_card_number.py and frontend vitest for the board card label): the board card shows #1394 for workspace_seq 1394; 'did #1394 go through?' resolves the same card; update_mission_plan changing steps raises one grant; a note with 'as you asked' and no matching owner turn is rewritten.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 75,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
+    },
+    {
+      "id": "P256-FIX-N13-8",
+      "title": "MEDIUM · F415: agents Auto creates default to Gemini on OpenRouter",
+      "description": "Night 13 (11–12 Oct, main d5ea08e67, Auto on Haiku 5.5; ~/.automatos-sim/customer-night/2026-10-11-night13 MORNING-REPORT.md / DIARY.md; ledger F415): INVOICE DESK (#368), created by Auto at the owner's ask, got google/gemini-2.5-flash on openrouter: modules/agents/factory/agent_factory.ModelConfiguration.from_dict / get_default (:91-106) fall back to core/llm/defaults.DEFAULT_LLM_PROVIDER/MODEL ('openrouter' / 'google/gemini-2.5-flash') instead of the workspace's own default (the orchestrator_llm system setting, anthropic/claude-haiku-5-5 in c1).",
+      "acceptanceCriteria": [
+        "A new api-runtime agent with no model given takes the workspace's default model (the orchestrator_llm provider and model from system settings, falling back to core/llm/defaults only when unset); the model-fits-provider rule (P256-FIX-T1) applies.",
+        "orchestrator/tests/test_prd256_fix_new_agent_default_model.py: orchestrator_llm = anthropic/claude-haiku-5-5 → a created agent's model_config is anthropic/claude-haiku-5-5; unset → the defaults module's values.",
+        "ruff and the changed-line code-shape gate pass on the touched lines (functions ≤ 50 code lines, nesting ≤ 4, no file grown past 800 lines; never grow service.py, auto.py, tool_router.py or smart_memory.py; frontend: no edited line inside useChat or Message, use the seam outside them) — ruff not on PATH (CI runs it); py_compile clean; scripts/ci/check_changed_code_shape.py --base <wave base>: 0 errors; playbook_binding.py 112 lines (new); owner_only.py +3 lines (498); no giant touched; no frontend change",
+        "pushed; CI runs ONCE at the end of the wave: after the last review story the completion pass (`bash scripts/ralph/acceptance-prd256fix.sh --no-ci`, then ONE signed commit WITHOUT [skip ci]) starts the next run on the draft PR. — committed signed with [skip ci] (e6b4109e8); CI runs once at the wave's completion commit"
+      ],
+      "priority": 76,
+      "passes": false,
+      "notes": "Filed by TESTER 12 Oct (night 13)."
     }
   ]
 }
