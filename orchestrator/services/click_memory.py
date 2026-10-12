@@ -7,7 +7,7 @@ memory, and later chats (asks 392, 415) did not know the decision.
 Now each click on a call's approval card (api/approval_grants ``grant_approval`` and
 ``deny_approval``, wrapped by :func:`remembers_the_decision`) is stored as ONE memory, after the
 route has run it and committed: the owner's decision, the card's own words, the day, the note
-the call carried and what came of it ("It ran: number #1403." / "It did not go through: …");
+the card showed and what came of it ("It ran: number #1403." / "It did not go through: …");
 a decline says nothing ran. It goes through the existing store-memory path (the
 ``platform_store_memory`` handler: the exclusion policy, the write contract's metadata) as a
 ``decision``, workspace-shared, owned by the user who clicked (``granted_by`` / ``revoked_by``,
@@ -36,7 +36,7 @@ SOURCE_TYPE = "platform_verified"  # the owner's own click
 EVIDENCE = "approval_grant:{id}"
 USER_ACTOR = "user:"
 UNKNOWN_ACTOR = "unknown"
-NOTE_KEYS = ("note", "comment")
+CARD_NOTES = ("- note: ", "- comment: ")  # the note as the card showed it (card_question_text.said_line)
 CARD_CHARS = 160
 NOTE_CHARS = 200
 ERROR_CHARS = 200
@@ -96,7 +96,7 @@ def decision_memory(grant: Any, decision: str) -> str:
         return MEMORY.format(decision=decision, card=card_words(grant), day=_day(grant.revoked_at), note="",
                              outcome=NOTHING_RAN)
     return MEMORY.format(decision=decision, card=card_words(grant), day=_day(grant.granted_at),
-                         note=_note(details.get("params")), outcome=_outcome(details.get("executed_result"))).strip()
+                         note=_note(grant), outcome=_outcome(details.get("executed_result"))).strip()
 
 
 def card_words(grant: Any) -> str:
@@ -139,11 +139,13 @@ async def _store(db: Any, grant: Any, content: str, owner: Optional[str]) -> Dic
     return await store_memory(db, grant.workspace_id, params)
 
 
-def _note(params: Any) -> str:
-    """', note: Ship it' when the call carried the owner's note, else ''."""
-    params = params if isinstance(params, dict) else {}
-    said = next((params[key] for key in NOTE_KEYS if str(params.get(key) or "").strip()), None)
-    return NOTE.format(note=" ".join(str(said).split())[:NOTE_CHARS]) if said is not None else ""
+def _note(grant: Any) -> str:
+    """', note: Ship it' when the card showed the owner a note, else ''. Read from the card's own
+    lines, never the call's params: the memory keeps only what the owner saw when they clicked."""
+    lines = str(getattr(grant, "question_md", None) or "").splitlines()
+    said = next((line.removeprefix(mark) for line in lines for mark in CARD_NOTES if line.startswith(mark)), "")
+    said = " ".join(said.split())[:NOTE_CHARS]
+    return NOTE.format(note=said) if said else ""
 
 
 def _outcome(result: Any) -> str:

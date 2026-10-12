@@ -183,13 +183,14 @@ def test_a_deny_is_one_memory_saying_it_was_declined(board):
     assert memory.metadata["owner"] == f"user:{OWNER_ID}" and memory.metadata["type"] == "decision"
 
 
-# ── What the memory says when the click's run did not go through ─────────────────────
+# ── What the memory says when the run did not go through; only what the card showed ───
 
 def test_an_approval_that_did_not_go_through_says_so():
     from datetime import datetime, timezone
 
     grant = NS(id=3, question_md="Change an agent 'CLUB DESK' (agent #12):\n- model: a → b", tool_name="platform_update_agent",
-               details={"params": {"agent_id": 12}, "executed_result": {"success": False, "error": "agent is archived"}},
+               details={"params": {"agent_id": 12, "note": "a note the card never showed"},
+                        "executed_result": {"success": False, "error": "agent is archived"}},
                granted_at=datetime(2026, 10, 12, 9, tzinfo=timezone.utc), revoked_at=None)
 
     said = decision_memory(grant, APPROVED)
