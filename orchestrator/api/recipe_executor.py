@@ -44,6 +44,8 @@ from services.step_lessons import a_playbook_step_carries_its_lessons
 from services.playbook_usage import books_spend_to_the_run, books_the_step_to_its_agent  # F321
 from services.brand_hooks import a_playbook_step_is_on_brand
 from modules.tools.execution.held_context import acts_for_its_run  # P256-FIX-RVW-2
+from api.recipe_step_outcome import (  # P256-FIX-T6: a call waiting on the owner's click
+    call_summary, is_waiting, normalize_tool_calls as _normalize_tool_calls, records_the_wait, waiting_on, with_the_wait)
 
 logger = logging.getLogger(__name__)
 
@@ -321,6 +323,7 @@ def step_context(recipe_execution_id: Optional[str], step_order: Any) -> Optiona
 @a_playbook_step_carries_its_lessons  # F249/F269 (7b): the agent's lessons; the answer goes on the card
 @a_playbook_step_is_on_brand  # brand kit at generation (night 9b): the brand's rules; the answer on brand
 @acts_for_its_run(lambda **step: step_context(step.get("recipe_execution_id"), step.get("step_order")))
+@records_the_wait  # P256-FIX-T6 (F401): a call that raised a card is recorded as waiting, not "Error executing"
 async def _execute_step(
     db: Session,
     agent: Agent,
@@ -954,15 +957,7 @@ def _build_compact_step_result(
     Strips full output/tool_calls and replaces with summaries + S3 log_url.
     """
     tool_calls = step_result.get("tool_calls", [])
-    tool_summaries = []
-    for tc in tool_calls:
-        action = tc.get("action", "unknown")
-        # F137: the call's own success flag. B22's "Tool composio_execute failed: …"
-        # holds no "error", so the text guess showed four failed drafts as (success).
-        worked = tc.get("success")
-        if worked is None:  # a record from before the flag: the old guess
-            worked = "error" not in str(tc.get("result", "")).lower()[:100]
-        tool_summaries.append(f"{action} ({'success' if worked else 'error'})")
+    tool_summaries = [call_summary(tc) for tc in tool_calls]
 
     output = step_result.get("output", "")
     output_preview = output[:200] + "..." if output and len(output) > 200 else (output or "")
@@ -977,6 +972,7 @@ def _build_compact_step_result(
         "duration_ms": step_result.get("duration_ms"),
         "tokens_used": step_result.get("tokens_used"),
         "tool_calls_summary": tool_summaries,
+        **waiting_on(tool_calls),
         "output_preview": output_preview,
         "error": step_result.get("error"),
         "retries": step_result.get("retries", 0),
@@ -2237,30 +2233,11 @@ def step_failure(tool_calls: List[Dict[str, Any]], result: Dict[str, Any]) -> Op
     """
     if result.get("session_connected") is False:
         return "the session never reached Automatos, so it ran without any of its tools"
-    if tool_calls and tool_calls[-1].get("success") is False:
+    if tool_calls and tool_calls[-1].get("success") is False and not is_waiting(tool_calls[-1]):
         last = tool_calls[-1]
         said = " ".join(str(last.get("result") or "").split())[:200]
         return f"its last tool call, {last.get('action') or 'a tool'}, failed" + (f": {said}" if said else "")
     return None
-
-
-def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
-    """Normalize tool call data from agent execution result."""
-    if not raw_calls:
-        return []
-    if isinstance(raw_calls, list):
-        normalized = []
-        for call in raw_calls:
-            if isinstance(call, dict):
-                normalized.append({
-                    "action": call.get("action") or call.get("function", {}).get("name", "unknown"),
-                    "params": call.get("params") or call.get("function", {}).get("arguments", {}),
-                    "result": call.get("result") or call.get("content", {}),
-                    "duration_ms": call.get("duration_ms", 0),
-                    "success": call.get("success"),
-                })
-        return normalized
-    return []
 
 
 # The board card's result cap, on the success path and on a budget stop's card.
@@ -2271,7 +2248,8 @@ def _final_output(step_results: List[dict], last_step: Dict[str, Any]) -> Option
     """The run's output: the last step's full text when it completed (its dict is
     still in scope), else the newest completed step's stored preview. F321: with
     what that step saved with scratchpad_write, which used to stay in the expiring
-    scratchpad while the card said only "saved to the scratchpad"."""
+    scratchpad while the card said only "saved to the scratchpad". P256-FIX-T6: then
+    every card the steps left waiting on the owner's click."""
     from services.playbook_run_result import with_saved_values
 
     final_output = None
@@ -2283,7 +2261,7 @@ def _final_output(step_results: List[dict], last_step: Dict[str, Any]) -> Option
             if sr.get("status") == "completed":
                 final_output = sr.get("output_preview", "")
                 break
-    return final_output
+    return with_the_wait(final_output, step_results)
 
 
 def _card_text(text: str, log_url: Optional[str]) -> str:

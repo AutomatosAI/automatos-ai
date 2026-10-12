@@ -1,5 +1,9 @@
 """PRD-256 P256-FIX-RVW-2: a playbook step's LinkedIn image post waits for the owner's click.
 
+P256-FIX-T6 (F401): the step records the call as the card's own words, waiting ("Card raised: …",
+never "Error executing …: Card raised: …"), so the step is not failed and the run is not either; its
+output ends with what waits for the owner's click. A refused call keeps "Error executing …".
+
 P256-FIX-RVW-39: a watch's rerun of a run Auto started (a new run, triggered_by
 'watch_rerun', ``retry_of`` the first) is on Auto's brief too: its step's send asks.
 
@@ -30,7 +34,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from api.recipe_step_outcome import WAITING, WAITING_HEADER, WAITING_ON
 from modules.tools.discovery.agent_sends import AGENT_SEND
+from modules.tools.discovery.agent_sends import CARD_RAISED as SEND_CARD_RAISED
 from modules.tools.discovery.owner_only import asks_before_a_send
 from tests.test_prd251_composio_deny import _execution_sites, _function, _Playbook
 from tests.test_prd256_fix_agent_sends_wait_for_the_click import _auto_run, _click, _grants
@@ -135,7 +141,8 @@ def test_a_step_of_an_auto_started_run_raises_the_card_and_posts_nothing(desk):
     call = _run_step(desk, _auto_run(desk))
 
     desk.linkedin.assert_not_called()
-    assert "Card raised: " in call["result"] and call["success"] is False
+    assert call["result"].startswith("Card raised: ") and call["success"] is False
+    assert call[WAITING] is True                                   # F401: waiting, not "Error executing …"
     (grant,) = _grants(desk)
     assert grant.details[AGENT_SEND]["lane"] == "playbook"
     assert grant.details["params"] == {"action": LINKEDIN_POST, "params": IMAGES}
@@ -162,7 +169,7 @@ def test_the_models_own_composio_execute_in_an_auto_started_step_asks_too(desk):
     call = _run_step(desk, run)
 
     desk.linkedin.assert_not_called()
-    assert call["result"].startswith("Card raised: ")
+    assert call["result"].startswith("Card raised: ") and call[WAITING] is True
     (grant,) = _grants(desk)
     assert grant.details[AGENT_SEND]["lane"] == "playbook"
     assert grant.details[AGENT_SEND]["context"] == {"playbook_execution_id": run}
@@ -175,7 +182,7 @@ def test_a_step_of_a_run_a_person_started_posts_as_before(desk):
 
     desk.linkedin.assert_called_once()
     assert desk.linkedin.call_args.kwargs["params"]["images"] == IMAGES["images"]   # never an s3key
-    assert "urn:li:share:1" in call["result"] and call["success"] is True
+    assert "urn:li:share:1" in call["result"] and call["success"] is True and WAITING not in call
     assert _grants(desk) == []
 
 
@@ -209,7 +216,7 @@ def test_a_watchs_rerun_of_an_auto_started_run_raises_the_card_and_posts_nothing
     call = _run_step(desk, rerun)
 
     desk.linkedin.assert_not_called()
-    assert "Card raised: " in call["result"] and call["success"] is False
+    assert call["result"].startswith("Card raised: ") and call["success"] is False and call[WAITING] is True
     (grant,) = _grants(desk)
     assert grant.details[AGENT_SEND]["context"] == {"playbook_execution_id": rerun}
 
@@ -218,7 +225,7 @@ def test_a_rerun_of_a_rerun_of_an_auto_started_run_asks_too(desk):
     call = _run_step(desk, _rerun(desk, _rerun(desk, _auto_run(desk))))
 
     desk.linkedin.assert_not_called()
-    assert "Card raised: " in call["result"]
+    assert call["result"].startswith("Card raised: ") and call[WAITING] is True
     assert len(_grants(desk)) == 1
 
 
@@ -401,3 +408,120 @@ def test_a_step_checks_the_deny_list_then_the_gate_before_its_uploads_and_the_sp
     dispatched = _step_dispatch_lines()
     assert len(dispatched) == 2, dispatched
     assert checks[-1][0] < min(dispatched), (checks, dispatched)
+
+
+# ── The step and the run read the card as waiting, never as failed (P256-FIX-T6, F401) ───
+
+CARD = SEND_CARD_RAISED.format(subject="(no subject)", recipient="(no recipient named)")
+ONE_STEP = {"step_id": "s1", "order": 1, "agent_id": 7, "error_handling": "stop", "max_retries": 0,
+            "prompt_template": "Post the launch to LinkedIn."}
+
+
+def test_a_refused_call_keeps_error_executing_and_is_not_waiting(desk, monkeypatch):
+    import core.composio.deny_list as deny_list
+
+    monkeypatch.setattr(deny_list, "composio_action_denial_async", AsyncMock(return_value="LinkedIn posts are denied"))
+    call = _run_step(desk, _auto_run(desk))
+
+    desk.linkedin.assert_not_called()
+    assert call["result"] == f"Error executing {LINKEDIN_POST}: LinkedIn posts are denied"
+    assert call["success"] is False and WAITING not in call
+    assert _grants(desk) == []
+
+
+def _step_records(*calls):
+    """What ``_execute_step`` returns, through the T6 decorator, for a step that made these calls."""
+    from api.recipe_step_outcome import records_the_wait
+
+    async def step(**kwargs):
+        return {"status": "success", "result": "Drafted the launch post; it waits for your click.",
+                "execution": {"tokens_used": 900, "tool_calls": list(calls)}}
+
+    return asyncio.run(records_the_wait(step)())
+
+
+def test_the_step_records_the_card_text_itself_and_keeps_a_real_failure():
+    raised = {"action": LINKEDIN_POST, "result": f"Error executing {LINKEDIN_POST}: {CARD}", "success": False,
+              "composio_direct": True}
+    failed = {"action": "GMAIL_SEND_EMAIL", "result": "Error executing GMAIL_SEND_EMAIL: 401 Unauthorized",
+              "success": False, "composio_direct": True}
+    told = {"action": "composio_execute", "result": CARD, "success": False}       # the generic branch's text
+    posted = {"action": "LINKEDIN_GET_PROFILE", "result": "Card raised: nothing", "success": True}
+
+    out = _step_records(raised, failed, told, posted)["execution"]["tool_calls"]
+
+    assert out[0] == {**raised, "result": CARD, WAITING: True}
+    assert out[1] == failed                                       # a real failure keeps "Error executing …"
+    assert out[2] == {**told, WAITING: True}
+    assert out[3] == posted                                       # a call that ran is never waiting
+
+
+def test_a_step_whose_last_call_waits_is_not_failed_and_a_real_failure_still_is():
+    from api import recipe_executor as rex
+
+    calls = rex._normalize_tool_calls(_step_records(
+        {"action": LINKEDIN_POST, "result": f"Error executing {LINKEDIN_POST}: {CARD}", "success": False},
+    )["execution"]["tool_calls"])
+
+    assert calls[0][WAITING] is True and calls[0]["result"] == CARD
+    assert rex.step_failure(calls, {}) is None
+    failed = [{"action": LINKEDIN_POST, "result": f"Error executing {LINKEDIN_POST}: 500", "success": False}]
+    assert rex.step_failure(rex._normalize_tool_calls(failed), {}).startswith(
+        f"its last tool call, {LINKEDIN_POST}, failed: Error executing")
+
+
+def test_the_steps_record_says_waiting_and_names_the_card():
+    from api import recipe_executor as rex
+
+    compact = rex._build_compact_step_result({"order": 2, "status": "completed", "tool_calls": [
+        {"action": "LINKEDIN_GET_PROFILE", "result": "{}", "success": True},
+        {"action": LINKEDIN_POST, "result": CARD, "success": False, WAITING: True},
+    ]})
+
+    assert compact["tool_calls_summary"] == ["LINKEDIN_GET_PROFILE (success)", f"{LINKEDIN_POST} (waiting)"]
+    assert compact[WAITING_ON] == [CARD]
+    plain = rex._build_compact_step_result({"order": 1, "status": "completed", "tool_calls": []})
+    assert WAITING_ON not in plain
+
+
+def test_a_run_whose_step_waits_on_the_click_reads_as_waiting_not_failed(monkeypatch):
+    from tests import helpers_playbook_run as hp
+
+    outcome = _step_records({"action": LINKEDIN_POST, "result": f"Error executing {LINKEDIN_POST}: {CARD}",
+                             "success": False, "composio_direct": True})
+    execution, card = hp.run_playbook(monkeypatch, outcomes=[outcome], step_seconds=5, exec_config={},
+                                      steps=[ONE_STEP])
+
+    assert execution.status == "completed" and card.status == "done"
+    (step,) = execution.step_results
+    assert step["status"] == "completed" and step["retries"] == 0
+    assert step["tool_calls_summary"] == [f"{LINKEDIN_POST} (waiting)"] and step[WAITING_ON] == [CARD]
+    final = execution.output_data["final_output"]
+    assert final.startswith("Drafted the launch post")
+    assert f"{WAITING_HEADER}\n- Step 1: Card raised: send (no subject) to (no recipient named). " in final
+    assert "end your turn" not in final                           # the model's instruction is not the owner's
+    assert WAITING_HEADER in card.result
+
+
+def test_a_run_whose_last_call_really_failed_still_fails(monkeypatch):
+    from tests import helpers_playbook_run as hp
+
+    outcome = _step_records({"action": LINKEDIN_POST, "result": f"Error executing {LINKEDIN_POST}: 500",
+                             "success": False, "composio_direct": True})
+    execution, _card = hp.run_playbook(monkeypatch, outcomes=[outcome], step_seconds=5, exec_config={},
+                                       steps=[ONE_STEP])
+
+    assert execution.status == "failed"
+    assert execution.error_message.startswith(f"Step 1 failed: its last tool call, {LINKEDIN_POST}, failed")
+
+
+def test_every_card_starts_with_the_words_the_step_reads():
+    from api.recipe_step_outcome import CARD_TEXT, with_the_wait
+    from modules.tools.execution.card_raised import FOR_THE_MODEL
+
+    assert CARD_TEXT == "Card raised: "
+    assert SEND_CARD_RAISED.startswith(CARD_TEXT) and FOR_THE_MODEL.startswith(CARD_TEXT)
+    told = FOR_THE_MODEL.format(act="delete the document 'Q3 plan'")
+    assert with_the_wait(None, [{"order": 3, WAITING_ON: [told]}]) == (
+        f"{WAITING_HEADER}\n- Step 3: Card raised: delete the document 'Q3 plan'. Nothing happens until you click.")
+    assert with_the_wait("Done.", [{"order": 1}]) == "Done."
