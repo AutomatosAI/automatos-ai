@@ -36,6 +36,6 @@ describe('ticketKind', () => {
       'components/activity/command-center-history.tsx', 'components/activity/widgets/activity-widget.tsx']) {
       expect(read(feed), feed).toContain('numberedTitle(')
     }
-    expect(read('components/chatbot/task-card.tsx')).toContain('Ticket {card.number ?? card.id}')
+    expect(read('components/chatbot/task-card.tsx')).toContain('{ticketCalled(card, true)}')   // P256-FIX-N13-7: never the id
   })
 })

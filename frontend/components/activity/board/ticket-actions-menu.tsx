@@ -21,6 +21,7 @@ import {
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { useCancelTask, useUpdateTask } from '@/hooks/use-board-tasks-api'
 import { missionHref } from '@/lib/ticket-links'
+import { ticketCalled } from '@/lib/ticket-number'
 import type { BoardTask } from '@/types/board'
 import { canAssign, canCancel, isMissionTicket } from './ticket-actions'
 
@@ -45,12 +46,12 @@ export function useTicketActions(task: BoardTask) {
   const cancel = useCancelTask()
   const assignTo = (agent: AgentChoice) =>
     update.mutate({ taskId: task.id, payload: { assigned_agent_id: agent.id } }, {
-      onSuccess: () => toast.success(`Ticket ${task.number ?? task.id} is assigned to ${agent.name}.`),
+      onSuccess: () => toast.success(`${ticketCalled(task, true)} is assigned to ${agent.name}.`),
       onError: (err) => toast.error(failure(err, 'Could not assign the ticket')),
     })
   const cancelIt = () =>
     cancel.mutate(task.id, {
-      onSuccess: () => toast.success(`Ticket ${task.number ?? task.id} is cancelled.`),
+      onSuccess: () => toast.success(`${ticketCalled(task, true)} is cancelled.`),
       onError: (err) => toast.error(failure(err, 'Could not cancel the ticket')),
     })
   return { assignTo, cancelIt, busy: update.isLoading || cancel.isLoading }
@@ -66,7 +67,7 @@ export function TicketActionsMenu({ task, className = 'cc-kb-menu' }: { task: Bo
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={className} aria-label={`Actions for ticket ${task.id}`} onClick={stop}>
+        <button type="button" className={className} aria-label={`Actions for ${ticketCalled(task)}`} onClick={stop}>
           <MoreHorizontal style={{ width: 13, height: 13 }} />
         </button>
       </DropdownMenuTrigger>

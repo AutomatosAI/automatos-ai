@@ -55,6 +55,8 @@ export interface BoardTask {
   source_type?: string
   /** PRD-252 R4: the ticket's number in its workspace, #0042 (a mission step: #0051.3). */
   number?: string | null
+  /** P256-FIX-N13-7: the ticket's board number as stored (1394, shown #1394); its number when the API sent none. */
+  workspace_seq?: number | null
   /** PRD-252 D3: Rejects since the brief was last agreed; from 3, Review suggests Discuss. */
   times_sent_back?: number
   /** F243: the draft a failed redo keeps on the card's face (the last run that had one). */

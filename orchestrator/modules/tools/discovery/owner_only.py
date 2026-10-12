@@ -30,6 +30,7 @@ import re
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from modules.tools.discovery.agent_binding import names_the_agent_alone
+from modules.tools.discovery.said_instructions import as_the_owner_said
 from modules.tools.discovery.send_words import LEAVES_THE_WORKSPACE, READ_WORDS, makes_or_times_a_message, slug_words
 from modules.tools.execution.card_raised import ACT
 from modules.tools.execution.params_text import params_object
@@ -65,6 +66,8 @@ TIMED_UPDATES = frozenset({"platform_update_playbook"})
 # A create is owner-only only when it makes a cli agent, one that runs a CLI session on the
 # owner's paired machine, as switching an agent to cli is (P256-FIX-RVW-28).
 SESSION_CREATES = frozenset({"platform_create_agent"})
+# P256-FIX-N13-7 (F414): a plan edit is owner-only when it changes a mission's steps or checks.
+PLAN_EDITS = frozenset({"platform_update_mission_plan"})
 SCHEDULE_CONFIG = "schedule_config"
 # P256-FIX-RVW-40: "closed" is the board's close too (the status tool is the one for "close all …").
 CLOSING_STATUSES = frozenset({"done", "cancelled", "closed"})
@@ -118,6 +121,7 @@ VERBS = {
     "platform_schedule_task": "set an agent's timer",
     "platform_create_agent": "create an agent that runs as a session on the paired machine",
     "platform_execute_playbook": "run a playbook",
+    "platform_update_mission_plan": "change a mission's plan",
 }
 SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
 QUESTION = "question_md"
@@ -143,6 +147,10 @@ def is_owner_only(action_name: str, params: Any, *, composio: bool = False, db: 
 
         params = params_object(params)
         return isinstance(params, dict) and creates_a_session_agent(params)
+    if name in PLAN_EDITS:
+        from modules.tools.discovery.card_question_plans import changes_the_plan
+
+        return changes_the_plan(params_object(params))
     return name in OWNER_ONLY_ACTIONS
 
 
@@ -220,11 +228,12 @@ def asks_the_owner_first(run_cleared: Execute) -> Execute:
     its handler only on their click. Every other check of the call (the role gates before,
     the hierarchy check, the rate limit and the destructive backstop inside) comes first,
     so a call the owner could not run anyway is refused, not asked about. A caller-supplied
-    signer is always dropped."""
+    signer is always dropped, and an instruction the owner did not give (P256-FIX-N13-7)."""
     @functools.wraps(run_cleared)
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any, cleared: Any,
                       handler: Execute) -> Dict[str, Any]:
-        params = _without_a_signer(params)
+        params = as_the_owner_said(getattr(self, "db", None), getattr(self, "workspace_id", None), action_name,
+                                   _without_a_signer(params), caller_context)
         if isinstance(params, dict) and human_driven(caller_context) and is_owner_only(
                 action_name, params, db=getattr(self, "db", None), workspace_id=getattr(self, "workspace_id", None)):
             handler = _on_the_click(action_name, params, caller_context, handler, _gate_claim(cleared))
@@ -470,14 +479,16 @@ def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, call
 
 def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: Any, *, act: str,
          what: str, asked: str, level: str = PERMISSION_LEVEL) -> Dict[str, Any]:
+    from modules.tools.discovery.card_ticket_numbers import CARD_NUMBERS, numbers_on_the_card
     from modules.tools.execution import tool_grants
 
     message, asked = ASK.format(act=act), f"{asked}\n{REMEMBERED.format(act=act)}"
     # ``act``: what the card asks, in the owner's words, for the receipt and the model (FX-004);
-    # ``question_md``: what the card shows the owner, the subject and the change (FX-008).
+    # ``question_md``: what the card shows the owner, the subject and the change (FX-008);
+    # ``card_numbers``: each ticket the call names, by its board number (P256-FIX-N13-7).
     ask = {"success": False, "requires_confirmation": True, "owner_only": True, "action": action,
            "permission_level": level, "message": message, "params": params, ACT: act,
-           QUESTION: asked}
+           QUESTION: asked, CARD_NUMBERS: numbers_on_the_card(db, workspace_id, action, params_object(params))}
     logger.info("[owner_only] %s waits for the owner's click (%s)", action, what)
     return tool_grants.attach_ask_grant(db, workspace_id, action=action, params=params, ask=ask,
                                         permission_level=level, description=message,

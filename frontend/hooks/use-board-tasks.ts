@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import type { BoardTask, BoardStatus, BoardColumn } from '@/types/board'
 import { BOARD_COLUMNS } from '@/types/board'
+import { ticketNumber } from '@/lib/ticket-number'
 
 // ============= TYPES =============
 
@@ -295,7 +296,7 @@ function mapTaskToBoardTask(item: any): BoardTask {
     review_reason: item.review_reason ?? null,  // PRD-252 R3
     blocked_code: item.blocked_code ?? null,
     source_type: item.source_type ?? undefined,
-    number: item.number ?? null,  // PRD-252 R4
+    number: ticketNumber(item),  // PRD-252 R4; P256-FIX-N13-7: its workspace_seq when the API sent no number
     times_sent_back: item.times_sent_back ?? 0,  // PRD-252 D3
     kept_draft: item.kept_draft ?? null,  // F243: a failed redo keeps the draft it corrected
     knowledge_document_id: item.knowledge_document_id ?? null,  // PRE-11: its answer is in Knowledge
