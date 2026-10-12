@@ -47,6 +47,7 @@ from uuid import UUID
 from consumers.chatbot.addressed_agents import (
     addressed_by_name, clash_directive, id_reply, match_id_reply, joined_with_another, shared_name,
 )
+from consumers.chatbot.asked_here import answered_here, asks_for_it_here, is_long_work
 from consumers.chatbot.board_questions import CARD_NUMBER
 
 logger = logging.getLogger(__name__)
@@ -131,9 +132,9 @@ def keeps_it_with_auto(text: object) -> bool:
 
 def asks_for_paperwork(text: object) -> Optional[str]:
     """The kind of customer paperwork ``text`` asks to be made ("price list"), or None: a question
-    about one, a message that keeps it with Auto, or nothing of the kind."""
+    about one, a message that keeps it with Auto or asks for it here (P256-FIX-T5), or nothing of the kind."""
     said = str(text or "")
-    if keeps_it_with_auto(said):
+    if keeps_it_with_auto(said) or asks_for_it_here(said):
         return None
     found = _ASKS_FOR_PAPER.search(said)
     return " ".join(found.group("kind").lower().split()) if found else None
@@ -156,11 +157,12 @@ def asks_for_brand_work(text: object, opening: bool = False) -> bool:
 def asks_for_social_work(text: object) -> bool:
     """Whether ``text`` hands social media work over: it names the owner's social media person (or
     director, manager, team), or asks for a channel's post, a carousel, a reel or a social video. Not a
-    question about it, not about posts already made, and not an ask the owner keeps with Auto."""
+    question about it, not about posts already made, and not an ask the owner keeps with Auto. A post asked
+    for here, with no one named, is Auto's text in the reply (P256-FIX-T5: "write the caption here")."""
     said = _ADDRESS_TO_AUTO.sub("", str(text or ""))
     if not said.strip() or keeps_it_with_auto(said) or _SOCIAL_QUESTION.search(said) or _ABOUT_MADE_ONES.search(said):
         return False
-    return bool(_ADDRESSED.search(said) or _ASKS_FOR_SOCIAL.search(said))
+    return bool(_ADDRESSED.search(said) or (_ASKS_FOR_SOCIAL.search(said) and not asks_for_it_here(said)))
 
 
 # ── The notes the tickets carry ───────────────────────────────────────────────
@@ -544,8 +546,8 @@ def needs_no_apps(assessment: Any) -> bool:
 
 
 def answered_by_auto(assessment: Any) -> Any:
-    """A DELEGATE verdict as Auto's own answer: RESPOND, with the platform tools kept
-    beside any narrowing hint (no hint narrows nothing, so they are there already)."""
+    """A DELEGATE verdict (or work asked for here, P256-FIX-T5) as Auto's own answer: RESPOND, with the
+    platform tools kept beside any narrowing hint (no hint narrows nothing, so they are there already)."""
     from consumers.chatbot.auto import Action
 
     hints = list(assessment.tool_hints or [])
@@ -645,7 +647,8 @@ def _ask_which(assessment: Any, agents: List[Any], message: str) -> Any:
 
 def the_lane(brain: Any, message: str, assessment: Any) -> Any:
     """The verdict Auto acts on, from the one the tiers returned (see the module doc). FX-014: work
-    handed to a teammate by name or id is that teammate's ticket whatever the tiers said."""
+    handed to a teammate by name or id is that teammate's ticket whatever the tiers said. P256-FIX-T5:
+    otherwise, work the owner asks for here that is not long is Auto's answer in the reply."""
     from consumers.chatbot.auto import Action
 
     target, reasoning = _handed_over(brain, str(message or ""))
@@ -654,6 +657,8 @@ def the_lane(brain: Any, message: str, assessment: Any) -> Any:
     if target is not None:
         logger.info("[PRD-256 D2] %s: ASSIGN to agent %s", reasoning, target[0])
         return _ticket_for(assessment, target, reasoning)
+    if asks_for_it_here(message) and not is_long_work(assessment):
+        return answered_here(answered_by_auto(assessment))
     return answered_by_auto(assessment) if assessment.action == Action.DELEGATE else assessment
 
 
