@@ -56,6 +56,8 @@ OWNER_ONLY_ACTIONS = frozenset({
     "platform_update_skill",
     # P256-FIX-RVW-23: an agent's timer is an agent-setting change, as a playbook's timer is.
     "platform_schedule_task",
+    # P256-FIX-T4 (Gerard, 11 Oct, benchmark F321-a): a playbook run started from the chat.
+    "platform_execute_playbook",
 })
 CARD_MOVES = frozenset({"platform_update_task_status", "platform_update_task"})
 # An update is owner-only only when it sets the playbook's timer (P256-FIX-RVW-14).
@@ -113,6 +115,7 @@ VERBS = {
     "platform_update_skill": "edit a skill its agents use",
     "platform_schedule_task": "set an agent's timer",
     "platform_create_agent": "create an agent that runs as a session on the paired machine",
+    "platform_execute_playbook": "run a playbook",
 }
 SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
 QUESTION = "question_md"
