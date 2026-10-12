@@ -161,7 +161,7 @@ def refusal_for(db: Session, workspace_id: Any, action: str, params: Any, caller
         if turn is None:
             return None
         params = _as_dict(params)
-        for rule in _rules_for(action, params, caller_context):
+        for rule in _rules_for(action, params, caller_context, db, workspace_id):
             refusal = rule(db, workspace_id, turn, action, params)
             if refusal:
                 return refusal
@@ -171,15 +171,16 @@ def refusal_for(db: Session, workspace_id: Any, action: str, params: Any, caller
         return None
 
 
-def _rules_for(action: str, params: Dict[str, Any], caller_context: Any) -> tuple:
+def _rules_for(action: str, params: Dict[str, Any], caller_context: Any, db: Any = None,
+               workspace_id: Any = None) -> tuple:
     """The rules a call is judged by. An owner-only call a person's turn makes waits for
     their click on the approval card, which shows the call: the card is their words, so
-    the signature rule does not refuse it (FX-003). The card comes before that rule.
-    Words longer than the card shows whole are still judged: the click signs only what
-    the owner read."""
-    if human_driven(caller_context) and is_owner_only(action, params) and _the_card_shows_its_words(params):
-        return CARD_RULES
-    return RULES
+    the signature rule does not refuse it (FX-003). The card comes before that rule; a
+    send-back is read from the board (P256-FIX-T3). Words longer than the card shows whole
+    are still judged: the click signs only what the owner read."""
+    if not (human_driven(caller_context) and _the_card_shows_its_words(params)):
+        return RULES
+    return CARD_RULES if is_owner_only(action, params, db=db, workspace_id=workspace_id) else RULES
 
 
 def _the_card_shows_its_words(params: Dict[str, Any]) -> bool:

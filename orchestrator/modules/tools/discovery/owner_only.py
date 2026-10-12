@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 Execute = Callable[..., Awaitable[Dict[str, Any]]]
 
-# Decision D1. The two card moves are owner-only only when they close the card.
+# Decision D1. The two card moves are owner-only only when they close the card or send a worked one back.
 OWNER_ONLY_ACTIONS = frozenset({
     "platform_update_task_status", "platform_update_task",
     "platform_assign_tool_to_agent", "platform_unassign_tool_from_agent", "platform_update_agent",
@@ -66,6 +66,9 @@ SESSION_CREATES = frozenset({"platform_create_agent"})
 SCHEDULE_CONFIG = "schedule_config"
 # P256-FIX-RVW-40: "closed" is the board's close too (the status tool is the one for "close all …").
 CLOSING_STATUSES = frozenset({"done", "cancelled", "closed"})
+# P256-FIX-T3 (Gerard, 11 Oct): a card its agent has worked on, moved back for rework, is a send-back.
+WORKED_STATUSES = frozenset({"review", "done"})
+REWORK_STATUSES = frozenset({"assigned", "in_progress", "inbox"})
 # D1's "every Composio send/publish action" and D7's order (send_words, shared with brief_sends):
 # a slug with one of these words and no read word, split on any non-alphanumeric ('gmail-send-email').
 COMPOSIO_SEND_WORDS = frozenset(word.upper() for word in LEAVES_THE_WORKSPACE)
@@ -115,14 +118,18 @@ SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks to
 QUESTION = "question_md"
 
 
-def is_owner_only(action_name: str, params: Any, *, composio: bool = False) -> bool:
-    """Whether the call is one only the owner's click may run (Decision D1)."""
+def is_owner_only(action_name: str, params: Any, *, composio: bool = False, db: Any = None,
+                  workspace_id: Any = None) -> bool:
+    """Whether the call is one only the owner's click may run (Decision D1). A card move is
+    when it closes the card, or (P256-FIX-T3) sends back a worked card, read from this
+    workspace's board (``db``); without the board, by its status alone."""
     name = str(action_name or "")
     if composio:
         return is_composio_send(name)
     if name in CARD_MOVES:
         params = params_object(params)
-        return isinstance(params, dict) and closing_status(params) is not None
+        return isinstance(params, dict) and (closing_status(params) is not None
+                                             or _sends_back_a_card(db, workspace_id, name, params))
     if name in TIMED_UPDATES:
         params = params_object(params)
         return isinstance(params, dict) and params.get(SCHEDULE_CONFIG) is not None
@@ -176,6 +183,17 @@ def closing_status(params: Dict[str, Any]) -> Optional[str]:
     return status if status in CLOSING_STATUSES else None
 
 
+def sends_back(card_status: Any, new_status: Any) -> bool:
+    """Whether moving a card from ``card_status`` to ``new_status`` sends its agent's work back for rework."""
+    return card_status in WORKED_STATUSES and new_status in REWORK_STATUSES
+
+
+def _sends_back_a_card(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> bool:
+    from modules.tools.discovery.send_backs import sends_back_a_card
+
+    return sends_back_a_card(db, workspace_id, action, params)
+
+
 def human_driven(caller_context: Any) -> bool:
     """A person drove the turn, and it is not a caller whose own decision is the click."""
     from core.security.driving_user import driving_user_id
@@ -202,7 +220,8 @@ def asks_the_owner_first(run_cleared: Execute) -> Execute:
     async def wrapped(self: Any, action_name: str, params: Any, caller_context: Any, cleared: Any,
                       handler: Execute) -> Dict[str, Any]:
         params = _without_a_signer(params)
-        if isinstance(params, dict) and human_driven(caller_context) and is_owner_only(action_name, params):
+        if isinstance(params, dict) and human_driven(caller_context) and is_owner_only(
+                action_name, params, db=getattr(self, "db", None), workspace_id=getattr(self, "workspace_id", None)):
             handler = _on_the_click(action_name, params, caller_context, handler, _gate_claim(cleared))
         return await run_cleared(self, action_name, params, caller_context, cleared, handler)
     return wrapped
@@ -410,11 +429,21 @@ def platform_ask(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     if missing:
         return missing_targets_error(action, missing)
     what = (named_subject(found).removeprefix(" on ") or _said_subject(params)) + _cards_not_named(params)
-    status = closing_status(params) if action in CARD_MOVES else None
-    act = f"{CLOSING_VERBS[status] if status else VERBS.get(action, action)} {what}".strip()
+    act = _act(db, workspace_id, action, params, what)
     asked = platform_question(db, workspace_id, action, params, act)
     return _ask(db, workspace_id, action, params, caller_context, act=act, what=what, asked=asked,
                 level=permission_level)
+
+
+def _act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], what: str) -> str:
+    """What the card asks: approve, cancel or close a card, send it back (P256-FIX-T3), or the action's verb."""
+    from modules.tools.discovery.send_backs import send_back_act
+
+    status = closing_status(params) if action in CARD_MOVES else None
+    if status:
+        return f"{CLOSING_VERBS[status]} {what}".strip()
+    sent_back = send_back_act(db, workspace_id, action, params, what) if action in CARD_MOVES else None
+    return sent_back or f"{VERBS.get(action, action)} {what}".strip()
 
 
 def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, caller_context: Any, *,
@@ -495,4 +524,4 @@ def _without_a_signer(params: Any) -> Any:
 
 
 __all__ = ["CLICKED_BY", "OWNERS_OWN_DECISION", "OWNER_ONLY_ACTIONS", "after_the_click", "asks_before_a_send",
-           "asks_the_owner_first", "human_driven", "is_composio_send", "is_owner_only", "signed_by"]
+           "asks_the_owner_first", "human_driven", "is_composio_send", "is_owner_only", "sends_back", "signed_by"]
