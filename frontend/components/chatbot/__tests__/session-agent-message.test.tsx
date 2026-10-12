@@ -40,7 +40,8 @@ describe('Message (PRD-239)', () => {
     expect(screen.getByText(/filed ticket #118/)).toBeInTheDocument()
   })
 
-  it('names a card saved before ticket numbers by its id, without a #', () => {
+  // P256-FIX-N13-7 (F414): a card never shows its row id; one saved before ticket numbers has no number to show.
+  it('calls a card saved before ticket numbers "this ticket", never by its row id', () => {
     const message = {
       id: 'm0',
       role: 'assistant',
@@ -48,7 +49,8 @@ describe('Message (PRD-239)', () => {
       parts: [{ type: 'task_card', card: { id: 118, title: 'Chat with Bob: Hey Bob', status: 'assigned', assigned_agent: 'Bob' } }],
     } as unknown as ChatMessage
     render(<Message {...base} message={message} />)
-    expect(screen.getByText('Ticket 118')).toBeInTheDocument()     // a '#' now means a number
+    expect(screen.getByText('This ticket')).toBeInTheDocument()
+    expect(screen.queryByText(/118/)).not.toBeInTheDocument()
   })
 
   it('shows the failure sentence in the bubble instead of silence', () => {

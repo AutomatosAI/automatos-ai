@@ -27,7 +27,6 @@ import pytest
 
 from api.chat_dispatch import lane_for
 from consumers.chatbot import handoffs
-from consumers.chatbot import named_template_note as note_module
 from consumers.chatbot.asked_here import HERE_DIRECTIVE, asks_for_it_here
 from consumers.chatbot.auto import ASSIGN_TOOL_HINTS, Action, AutoBrain, Complexity, ComplexityAssessment
 from consumers.chatbot.handoffs import asks_for_paperwork, asks_for_social_work, auto_always_answers, hands_off

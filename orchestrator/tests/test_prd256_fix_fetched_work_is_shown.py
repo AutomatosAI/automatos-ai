@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from urllib.parse import urlparse
 
 import pytest
 
@@ -125,7 +126,8 @@ def test_a_long_file_comes_back_cut_at_the_configured_length_with_the_link(monke
     assert (found["content_truncated"], found["content_chars"], found["rest_at"]) == (True, len(DRAFT * 20), link)
     assert f"This is its first 60 of {len(DRAFT * 20):,} characters" in found["show_the_owner"]
     assert found["show_the_owner"].endswith(link)
-    assert link.startswith("https://app.example.test") and f"deliverable={DELIVERABLE_ID}" in link
+    opened = urlparse(link)
+    assert (opened.scheme, opened.hostname) == ("https", "app.example.test") and f"deliverable={DELIVERABLE_ID}" in opened.query
 
 
 def test_an_agents_run_reads_the_whole_text_with_no_note(monkeypatch):

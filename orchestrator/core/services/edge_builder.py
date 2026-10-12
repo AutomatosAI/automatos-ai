@@ -254,7 +254,7 @@ def _build_and_write(
 
         # 3. Compute intent clusters from the query embeddings (the k-means)
         cluster_map = upsert_clusters(db, embedded) if embedded else {}
-        summary.intent_clusters = len(cluster_map)
+        summary.intent_clusters = len(set(cluster_map.values()))   # clusters, not the queries mapped to them
 
         # 4. Compute affinities (succeeds/fails for intent, agent_prefers)
         affinities = _compute_affinities(logs, cluster_map)

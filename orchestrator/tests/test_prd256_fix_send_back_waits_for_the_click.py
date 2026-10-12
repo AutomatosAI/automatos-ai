@@ -189,11 +189,12 @@ def test_a_paraphrased_note_raises_the_card_before_the_signature_rule(desk, monk
 def test_a_new_inbox_card_given_to_its_agent_moves_at_once(desk):
     """The hand-off lane: inbox → assigned is no send-back."""
     task = _card(desk, "inbox")
+    before = len(_grants(desk))   # the executor commits its grants: another test's can outlive its rollback
 
     reply = _call(desk, {"task_id": _number(task), "status": "assigned"}, _owners_chat())
 
     assert reply["success"] is True and "requires_confirmation" not in reply, reply
-    assert _grants(desk) == [] and _status(desk, task) == "assigned"
+    assert len(_grants(desk)) == before and _status(desk, task) == "assigned"
 
 
 def test_an_agents_own_send_back_is_unchanged(desk):
