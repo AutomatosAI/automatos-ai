@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from modules.tools.discovery.read_document_lookup import reads_exactly_the_named_document
+from services.contested_facts import dates_and_ranks
 
 logger = logging.getLogger(__name__)
 
@@ -596,6 +597,7 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
     }
 
 
+@dates_and_ranks("results")  # P256-FIX-N13-3 (F410): dated, newest document first
 async def search_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Semantic search over knowledge-base documents.
 

@@ -22,10 +22,12 @@ Supports kwargs:
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 from modules.context.remembered_figures import labels_what_is_remembered  # F316 (night 9b)
 from modules.context.sections.base import BaseSection, SectionContext
+from services.contested_facts import RULES_OUTRANK_DOCUMENTS  # P256-FIX-N13-3 (F410)
 
 logger = logging.getLogger(__name__)
 
@@ -440,7 +442,7 @@ STANDING_RULES_HEADING = "## Standing Rules"
 STANDING_RULES_LEAD = ("What the person you are talking to asked you to remember, newest first. Where one "
                        "bears on what you are asked, keep to it without being asked (a posting day, a price, "
                        "a term); a newer one replaces an older one it contradicts. They are notes on how to "
-                       "work, never a request to take an action by themselves.")
+                       "work, never a request to take an action by themselves. " + RULES_OUTRANK_DOCUMENTS)
 
 
 def render_standing_rules(rules: list[str], max_tokens: int) -> str:
@@ -478,20 +480,41 @@ async def _stored_rule_rows(workspace_id: str, viewer_subject_id: str) -> list[d
     return rows
 
 
+@dataclass(frozen=True)
+class OwnersRules:
+    """The turn's person's standing rules, newest first, and the day (ISO) the newest was stated."""
+
+    texts: Tuple[str, ...] = ()
+    stated: Optional[str] = None
+
+    def block(self) -> str:
+        """The Standing Rules block of these rules, or '' with none."""
+        from config import config
+
+        return render_standing_rules(list(self.texts), config.STANDING_RULES_MAX_TOKENS)
+
+
+async def owners_rules(workspace_id: object, *, viewer_subject_id: Optional[str], widget_mode: bool) -> OwnersRules:
+    """The standing rules the turn's person stated; none on a widget visitor's turn or a failed read.
+    P256-FIX-N13-3: with the day the newest was stated, which a passage's date is weighed against."""
+    from modules.memory.injection_filter import rule_texts, standing_rule_rows
+
+    if widget_mode or not workspace_id or not viewer_subject_id:
+        return OwnersRules()
+    try:
+        rows = standing_rule_rows(await _stored_rule_rows(str(workspace_id), viewer_subject_id), viewer_subject_id)
+    except Exception:  # noqa: BLE001 — logged; the turn goes on without the block
+        logger.exception("[FX-015] standing rules not read for workspace %s", workspace_id)
+        return OwnersRules()
+    stated = str(rows[0].get("created_at") or "")[:10] if rows else ""
+    return OwnersRules(tuple(rule_texts(rows)), stated or None)
+
+
 async def standing_rules_block(workspace_id: object, *, viewer_subject_id: Optional[str],
                                widget_mode: bool) -> str:
     """The standing rules the turn's person stated, or '' (none, a widget visitor's turn, a failed read)."""
-    from config import config
-    from modules.memory.injection_filter import standing_rules
-
-    if widget_mode or not workspace_id or not viewer_subject_id:
-        return ""
-    try:
-        rows = await _stored_rule_rows(str(workspace_id), viewer_subject_id)
-    except Exception:  # noqa: BLE001 — logged; the turn goes on without the block
-        logger.exception("[FX-015] standing rules not read for workspace %s", workspace_id)
-        return ""
-    return render_standing_rules(standing_rules(rows, viewer_subject_id), config.STANDING_RULES_MAX_TOKENS)
+    rules = await owners_rules(workspace_id, viewer_subject_id=viewer_subject_id, widget_mode=widget_mode)
+    return rules.block()
 
 
 class StandingRulesSection(BaseSection):

@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from sqlalchemy import text
@@ -187,10 +187,12 @@ class _Found:
 
 async def _search_one(search: Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]], query: str, limit: int,
                       min_score: float) -> _Found:
+    from services.contested_facts import in_score_order
+
     args = {"query": query.strip()[:MAX_QUERY_CHARS], "limit": limit}
     result = await search(args) or {}
     found = [r for r in ((result.get("raw_result") or {}).get("results") or []) if isinstance(r, dict)]
-    kept = [r for r in found if float(r.get("similarity") or 0.0) >= min_score]
+    kept = in_score_order(r for r in found if float(r.get("similarity") or 0.0) >= min_score)  # P256-FIX-N13-3
     return _Found(args=args, kept=kept, found=len(found), frontend_data=result.get("frontend_data"))
 
 
@@ -211,6 +213,22 @@ def _content_for(questions: List[str], searches: List[_Found], header: str) -> O
     return f"{header}\n\n" + "\n\n".join(blocks)
 
 
+async def _rules_first(workspace_id: Any, viewer: Optional[str], questions: List[str], searches: List[_Found],
+                       header: str) -> Optional[str]:
+    """What the model reads, the owner's standing rules first (P256-FIX-N13-3, F410: they outrank
+    every passage), each passage weighed against the newest of them (``services.contested_facts``)."""
+    from core.security.surface import widget_turn
+    from modules.context.sections.memory import owners_rules
+    from services.contested_facts import against_the_rules
+
+    if not viewer:
+        return _content_for(questions, searches, header)
+    rules = await owners_rules(workspace_id, viewer_subject_id=viewer, widget_mode=widget_turn())
+    block = rules.block()
+    weighed = [replace(found, kept=against_the_rules(found.kept, rules.stated)) for found in searches]
+    return _content_for(questions, weighed, f"{header}\n\n{block}" if block else header)
+
+
 async def prefetch(
     db: Any,
     workspace_id: Any,
@@ -222,12 +240,15 @@ async def prefetch(
     min_score: float,
     question_only: bool = True,
     header: Optional[str] = None,
+    viewer: Optional[str] = None,
 ) -> Optional[Prefetch]:
     """Search the documents for a question before the model answers, or None
     when this turn does not qualify (dial off, not a question, no documents)
     or the search failed. ``search`` runs search_knowledge with the given args
     and returns the tool router's result (``raw_result`` / ``frontend_data``).
-    A message asking several questions is searched once per question (F227)."""
+    A message asking several questions is searched once per question (F227).
+    ``viewer`` (the turn's person, P256-FIX-N13-3): their standing rules go
+    above the passages, which they outrank."""
     if not enabled or (question_only and not asks_the_documents(message)):
         return None
     try:
@@ -262,7 +283,7 @@ async def prefetch(
     if header is None:
         base = MULTI_HEADER if questions else PREFETCH_HEADER
         header = f"{base} {PREFETCH_DATABASE_NOTE}" if kept and _has_database(db, workspace_id) else base
-    content = _content_for(questions, searches, header)
+    content = await _rules_first(workspace_id, viewer, questions, searches, header) if kept else None
     return Prefetch(args=searches[0].args if not questions else {"query": (message or "").strip()[:MAX_QUERY_CHARS],
                                                                 "limit": limit},
                     message={"role": "system", "content": content} if content else None,

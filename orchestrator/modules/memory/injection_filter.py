@@ -140,13 +140,22 @@ def is_standing_rule(mem: Any) -> bool:
     return (meta.get("type") or meta.get("category")) in STANDING_RULE_TYPES or meta.get("source") == SAID_IN_CHAT
 
 
-def standing_rules(memories: Iterable[Any], viewer_subject_id: Optional[str] = None) -> List[str]:
-    """The standing rules ``viewer_subject_id`` stated, newest first, each once (none for an
+def standing_rule_rows(memories: Iterable[Any], viewer_subject_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The rows of the standing rules ``viewer_subject_id`` stated, newest first (none for an
     unknown viewer); through the same guard as recall (no noise, no agent's document)."""
     rules = [m for m in memories if is_standing_rule(m) and viewer_subject_id
              and m["metadata"]["owner"] == viewer_subject_id]
     visible = filter_injectable_memories(rules, floor=0, viewer_subject_id=viewer_subject_id)
-    newest = sorted(visible, key=lambda m: str(m.get("created_at") or ""), reverse=True)
+    return sorted(visible, key=lambda m: str(m.get("created_at") or ""), reverse=True)
+
+
+def standing_rules(memories: Iterable[Any], viewer_subject_id: Optional[str] = None) -> List[str]:
+    """The standing rules ``viewer_subject_id`` stated, newest first, each once."""
+    return rule_texts(standing_rule_rows(memories, viewer_subject_id))
+
+
+def rule_texts(newest: Iterable[Dict[str, Any]]) -> List[str]:
+    """The rules' texts in order, each once (whitespace and case aside)."""
     seen: set = set()
     texts: List[str] = []
     for row in newest:

@@ -1436,7 +1436,7 @@ class StreamingChatService:
 
         try:
             found = await prefetch(
-                self.db, self.workspace_id, latest_text, search=_search,
+                self.db, self.workspace_id, latest_text, search=_search, viewer=getattr(self, "_viewer_subject_id", None),
                 enabled=config.CHATBOT_KNOWLEDGE_PREFETCH,
                 limit=config.KNOWLEDGE_PREFETCH_PASSAGES, min_score=config.KNOWLEDGE_PREFETCH_MIN_SCORE,
             )
