@@ -34,6 +34,7 @@ from core.models.approval_grants import (
 )
 from core.models.core import BoardTask
 from modules.policy.ai_act import oversight_for_risk
+from services.click_memory import APPROVED, DECLINED, remembers_the_decision
 from services.click_results import executed_summary, failed_summary, said_in_the_chat
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,7 @@ def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGran
 
 
 @router.post("/{grant_id}/grant")
+@remembers_the_decision(APPROVED)  # P256-FIX-N13-4: the owner's click reaches what Auto knows
 async def grant_approval(
     grant_id: int,
     ctx: RequestContext = Depends(require_workspace_admin),
@@ -278,6 +280,7 @@ def _cas_resolve_grant(
 
 
 @router.post("/{grant_id}/deny")
+@remembers_the_decision(DECLINED)  # P256-FIX-N13-4: a decline is remembered too
 async def deny_approval(
     grant_id: int,
     ctx: RequestContext = Depends(require_workspace_admin),
@@ -723,7 +726,6 @@ async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
     Fail LOUD but contained: an honest failure on the grant, never a fake success (dossier C.3),
     never an exception out of the endpoint. PRD-256 FX-011: an agent's send on Auto's ticket first.
     """
-    from datetime import datetime, timezone
     from modules.tools.discovery.agent_sends import sends_on_the_click
     from modules.tools.discovery.click_resume import resumed_context
 
@@ -799,8 +801,6 @@ def _fail_subject(db: Session, grant: ApprovalGrant) -> None:
         return
     if task is None or task.status != "blocked":
         return
-    from datetime import datetime, timezone
-
     task.status = "failed"
     task.error_message = "Approval denied by a human reviewer"
     task.completed_at = datetime.now(timezone.utc)

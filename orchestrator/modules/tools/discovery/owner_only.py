@@ -90,6 +90,8 @@ MORE_CARDS = " and {count} more"
 
 ASK = ("Waiting for the owner's click: {act}. Nothing has been done: the approval card in the chat asks "
        "them, and their click runs it.")
+# P256-FIX-N13-4 (F411): the card's last line, what approving does and that the decision is kept (services/click_memory).
+REMEMBERED = "Approving will {act}; Auto will remember your decision, and a decline too."
 CLOSING_VERBS = {"done": "approve (move to Done)", "cancelled": "cancel", "closed": "close"}
 VERBS = {
     "platform_assign_tool_to_agent": "give a tool to an agent",
@@ -470,7 +472,7 @@ def _ask(db: Any, workspace_id: Any, action: str, params: Any, caller_context: A
          what: str, asked: str, level: str = PERMISSION_LEVEL) -> Dict[str, Any]:
     from modules.tools.execution import tool_grants
 
-    message = ASK.format(act=act)
+    message, asked = ASK.format(act=act), f"{asked}\n{REMEMBERED.format(act=act)}"
     # ``act``: what the card asks, in the owner's words, for the receipt and the model (FX-004);
     # ``question_md``: what the card shows the owner, the subject and the change (FX-008).
     ask = {"success": False, "requires_confirmation": True, "owner_only": True, "action": action,
