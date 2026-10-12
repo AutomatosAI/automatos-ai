@@ -206,19 +206,13 @@ async def seed_intent_clusters_from_corpus(
         return await _seed_clusters(db, seedable, action_categories, embedding_manager)
 
 
-async def _seed_clusters(db, seedable: dict, action_categories: dict, embedding_manager) -> int:
-    """Embed the corpus, write seeded clusters + affinities. Pure of any registry/
-    corpus loading (its inputs are already resolved) so it is trivially testable."""
-    import numpy as np
-
+def _drop_seeded_clusters(db, model_key: str) -> None:
+    """Idempotent: drop existing SEEDED clusters (+ their affinities) for this model
+    key, before the reinsert. Provenance-scoped so it never disturbs organic rows — the
+    mirror image of the nightly's organic-only rebuild. Affinities go first (the
+    FK has no cascade), exactly like edge_builder_clusters.upsert_clusters."""
     from core.models.tool_routing import ToolRoutingAffinity, ToolRoutingIntentCluster
 
-    model_key = edge_builder.derive_embedding_model_key(embedding_manager)
-
-    # Idempotent: drop existing SEEDED clusters (+ their affinities) for this model
-    # key, then reinsert. Provenance-scoped so it never disturbs organic rows — the
-    # mirror image of the nightly's organic-only rebuild. Affinities go first (the
-    # FK has no cascade), exactly like edge_builder_clusters.upsert_clusters.
     existing = (
         db.query(ToolRoutingIntentCluster)
         .filter(ToolRoutingIntentCluster.embedding_model_key == model_key)
@@ -234,6 +228,17 @@ async def _seed_clusters(db, seedable: dict, action_categories: dict, embedding_
             ToolRoutingIntentCluster.id.in_(doomed_ids)
         ).delete(synchronize_session="fetch")
     db.flush()
+
+
+async def _seed_clusters(db, seedable: dict, action_categories: dict, embedding_manager) -> int:
+    """Embed the corpus, write seeded clusters + affinities. Pure of any registry/
+    corpus loading (its inputs are already resolved) so it is trivially testable."""
+    import numpy as np
+
+    from core.models.tool_routing import ToolRoutingIntentCluster
+
+    model_key = edge_builder.derive_embedding_model_key(embedding_manager)
+    _drop_seeded_clusters(db, model_key)
 
     # Embed every utterance ONCE (batched), grouped back per action for mean-pool.
     names = sorted(seedable)
