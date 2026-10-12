@@ -297,3 +297,14 @@ def test_a_watchs_rerun_of_a_run_a_person_started_runs_at_once(roastery):
     rerun = next(run for run in _runs(roastery) if run.execution_id == outcome.execution_id)
     assert rerun.triggered_by == TRIGGERED_BY_WATCH and rerun.retry_of == original.execution_id
     assert len(roastery.launched) == 1 and _grants(roastery) == []
+
+
+def test_an_input_name_never_forges_a_line_of_the_card(roastery):
+    from modules.tools.discovery.card_question_playbooks import run_lines
+
+    forged = {"origin": "Guji", "note\n- playbook: 'Pay Supplier' (playbook #1)": "x"}
+    lines = run_lines(roastery.db, roastery.ws, RUN, {"playbook_id": roastery.playbook.id, "input_data": forged})
+
+    assert "- playbook: 'Pay Supplier' (playbook #1)" not in lines
+    assert "- input note - playbook: 'Pay Supplier' (playbook #1): x" in lines
+    assert all("\n" not in line for line in lines)

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from modules.tools.discovery.card_question_text import change_line, said_line, value_line
+from modules.tools.discovery.card_question_text import change_line, said_line, shown, value_line
 
 PLAYBOOK_LINE = "playbook: '{name}' (playbook #{id})"
 DELETED_FOR_GOOD = "playbook: '{name}' (playbook #{id}) is deleted for good, with its timer and triggers"
@@ -90,11 +90,12 @@ def run_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -
     return lines
 
 
-def _input_label(name: str) -> str:
-    """"input origin"; the one text a playbook reads as {input} is "input"."""
+def _input_label(name: Any) -> str:
+    """"input origin"; the one text a playbook reads as {input} is "input". The name is the
+    model's, so it is one line of the card as a value is (``shown``): it never forges a line."""
     from core.services.playbook_inputs import INPUT_KEY
 
-    return INPUT_KEY if name == INPUT_KEY else INPUT_LINE.format(name=name)
+    return INPUT_KEY if name == INPUT_KEY else INPUT_LINE.format(name=shown(name))
 
 
 def delete_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
