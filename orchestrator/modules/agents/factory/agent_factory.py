@@ -89,10 +89,10 @@ class ModelConfiguration:
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "ModelConfiguration":
-        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
-        return ModelConfiguration(
-            provider=data.get("provider") or DEFAULT_LLM_PROVIDER,
-            model_id=data.get("model_id", DEFAULT_LLM_MODEL),
+        from core.llm.new_agent_model import DEFAULT_LLM_PROVIDER, default_route  # N13-8: no model → the workspace's
+        given = data.get("model_id")
+        provider, model_id = (data.get("provider") or DEFAULT_LLM_PROVIDER, given) if given else default_route()
+        return ModelConfiguration(provider=provider, model_id=model_id,
             temperature=data.get("temperature", 0.7),
             max_tokens=data.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
             top_p=data.get("top_p", 1.0),
@@ -103,8 +103,8 @@ class ModelConfiguration:
 
     @staticmethod
     def get_default() -> "ModelConfiguration":
-        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
-        return ModelConfiguration(provider=DEFAULT_LLM_PROVIDER, model_id=DEFAULT_LLM_MODEL)
+        from core.llm.new_agent_model import default_route  # N13-8: the workspace's default
+        return ModelConfiguration(*default_route())
 
 
 @dataclass

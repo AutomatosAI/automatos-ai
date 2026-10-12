@@ -211,7 +211,14 @@ def test_the_card_digest_cuts_as_it_did():
 
 # ── The rule still holds where no card is raised ────────────────────────────────────
 
+def _unworked(board):
+    """The card before its agent has answered: moving it on is no send-back (P256-FIX-T3), so no card."""
+    board.card.status = "assigned"
+    board.db.flush()
+
+
 def test_a_paraphrased_note_on_a_move_that_does_not_close_the_card_is_still_refused(board, says):
+    _unworked(board)
     says(f"Move {board.number} to in progress with this note: lead with the Guji's price.", board.card)
 
     reply = _call(board, {"task_id": board.number, "status": "in_progress",
@@ -223,6 +230,7 @@ def test_a_paraphrased_note_on_a_move_that_does_not_close_the_card_is_still_refu
 
 
 def test_the_owners_own_note_on_that_move_goes_through(board, says):
+    _unworked(board)
     says(f"Move {board.number} to in progress with this note: lead with the Guji's price.", board.card)
 
     reply = _call(board, {"task_id": board.number, "status": "in_progress",
@@ -252,7 +260,7 @@ def test_only_the_signature_rule_is_skipped_for_an_owner_only_call():
     assert guard._rules_for(MOVE, {"status": "done"}, driven) == guard.CARD_RULES
     assert guard._not_their_words not in guard.CARD_RULES
     assert set(guard.RULES) - set(guard.CARD_RULES) == {guard._not_their_words}
-    assert guard._rules_for(MOVE, {"status": "in_progress"}, driven) == guard.RULES
+    assert guard._rules_for(MOVE, {"status": "in_progress"}, driven) == guard.RULES   # no board: no send-back read
     assert guard._rules_for(MOVE, {"status": "done"}, {"conversation_id": str(uuid4())}) == guard.RULES
 
 

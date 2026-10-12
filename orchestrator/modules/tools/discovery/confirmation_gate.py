@@ -86,7 +86,8 @@ def _the_gate(call: _Call, cleared: Any, card_subject: str) -> Any:
         logger.info("[PlatformExecutor] '%s' authorised by approval grant %s — proceeding (workspace=%s)",
                     call.action, approved_via_grant_id, call.workspace_id)
         return cleared._replace(approved_via_grant_id=approved_via_grant_id)
-    if isinstance(call.params, dict) and human_driven(call.caller_context) and is_owner_only(call.action, call.params):
+    if isinstance(call.params, dict) and human_driven(call.caller_context) and is_owner_only(
+            call.action, call.params, db=call.db, workspace_id=call.workspace_id):
         return platform_ask(call.db, call.workspace_id, call.action, call.params, call.caller_context,
                             permission_level=level)
     return _the_cards_ask(call, cleared.action_def, card_subject)

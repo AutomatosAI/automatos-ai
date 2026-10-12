@@ -35,6 +35,7 @@ from modules.memory.write_contract import (  # noqa: F401  (re-export)
     violates_exclusions,
 )
 from modules.context.remembered_figures import leaves_counted_figures_out  # F316 (night 9b)
+from modules.context.earlier_conversations import recalled_block  # P256-FIX-N13-5 (F412)
 from modules.memory.remembered_receipts import remembers_the_receipts, the_record_beside_the_reply  # PRD-256 US-003
 
 
@@ -372,47 +373,9 @@ class SmartMemoryManager:
         memories: List[Dict],
         user_context: UserContext
     ) -> str:
-        """
-        Format memories into a string for LLM context injection.
-
-        Two-tier formatting:
-        1. Global memories (who the user is)
-        2. Agent-specific memories (how they use this agent's tools)
-        """
-        if not memories and not user_context.name:
-            return ""
-
-        lines = []
-
-        # User identity first (most important)
-        if user_context.name:
-            lines.append(f"User's name: {user_context.name}")
-
-        # Separate global and agent-specific memories
-        global_memories = [m for m in memories if m.get("_tier") != "agent"]
-        agent_memories = [m for m in memories if m.get("_tier") == "agent"]
-
-        # Global facts about the user
-        if global_memories:
-            lines.append("\nAbout this user:")
-            for mem in global_memories[:5]:
-                memory_text = mem.get("memory", "")
-                if memory_text and len(memory_text) > 5:
-                    if len(memory_text) > 150:
-                        memory_text = memory_text[:150] + "..."
-                    lines.append(f"  - {memory_text}")
-
-        # Agent-specific context
-        if agent_memories:
-            lines.append("\nWith this agent specifically:")
-            for mem in agent_memories[:4]:
-                memory_text = mem.get("memory", "")
-                if memory_text and len(memory_text) > 5:
-                    if len(memory_text) > 150:
-                        memory_text = memory_text[:150] + "..."
-                    lines.append(f"  - {memory_text}")
-
-        return "\n".join(lines)
+        """The memories as the prompt's block: global (who the user is), then agent-specific, each
+        line labelled as an earlier conversation (P256-FIX-N13-5: never read as this chat's turns)."""
+        return recalled_block(memories, user_context.name)
 
     @remembers_the_receipts  # PRD-256 US-003: the turn's receipts, read by the distiller as the record of actions
     async def store_conversation(

@@ -40,7 +40,9 @@ D1 = {"platform_update_task_status", "platform_update_task", "platform_assign_to
       "platform_update_playbook", "platform_uninstall_plugin", "platform_delete_workspace_skill",
       "platform_update_skill",
       # P256-FIX-RVW-23: an agent's timer, as a playbook's timer.
-      "platform_schedule_task"}
+      "platform_schedule_task",
+      # P256-FIX-T4: a playbook run started from the chat.
+      "platform_execute_playbook"}
 # Owner-only only when the call closes the card, or (an update) sets the playbook's timer.
 CONDITIONAL = {"platform_update_task_status", "platform_update_task", "platform_update_playbook"}
 
@@ -179,7 +181,14 @@ def test_the_harness_approve_is_the_admins_own_decision(board):
     board.handler.assert_called_once()
 
 
+def _unworked(board):
+    """The card before its agent has answered: moving it on sends nothing back (P256-FIX-T3)."""
+    board.card.status = "assigned"
+    board.db.flush()
+
+
 def test_a_move_to_in_progress_is_not_owner_only(board):
+    _unworked(board)
     reply = _call(board, {"task_id": board.number, "status": "in_progress"}, _owners_chat())
     assert reply["success"] is True and "requires_confirmation" not in reply
     board.handler.assert_called_once()
@@ -187,6 +196,7 @@ def test_a_move_to_in_progress_is_not_owner_only(board):
 
 def test_a_signer_in_the_call_is_dropped(board):
     """Only a click signs: a ``_clicked_by`` the model sends never reaches the handler."""
+    _unworked(board)
     _call(board, {"task_id": board.number, "status": "in_progress", CLICKED_BY: "user:forged"}, _owners_chat())
     assert CLICKED_BY not in board.handler.call_args.args[2]
 

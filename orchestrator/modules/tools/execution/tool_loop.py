@@ -29,10 +29,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from .nudges import ask_for_the_answer, claimed_action_nudge  # PRD-256 US-006: a refused write is named
+from .nudges import ANNOUNCED_STEP_MSG, announced_step, ask_for_the_answer, claimed_action_nudge, nudge_about  # US-006, F306
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
 from .card_raised import emit_flagged  # PRD-256 FX-005 / RVW-22: the result's own flag, and its wait (_emit)
-from .nudges import ANNOUNCED_STEP_MSG, announced_step, nudge_about  # F306
+from .fetched_work import shows_fetched_work  # F413: the work the owner asked to see is in the reply
 from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
 from .cap_answer import answers_at_the_cap  # F328
 from .tool_execution_tracker import ToolExecutionTracker
@@ -590,17 +590,17 @@ class ToolLoopExecutor:
             return await self._recover_claimed_action(current, messages, tools) or current
         return await nudge_about(self._llm, current, messages, tools, nudge)
 
+    @shows_fetched_work  # F413: then a reply showing none of the work the owner asked to see
     async def _recover_claimed_action(
         self,
         current: LLMResponse,
         messages: List[Message],
         tools: Optional[List[Dict[str, Any]]],
     ) -> Optional[LLMResponse]:
-        """F108: retry once when a reply without a tool call says an action was
-        done and no action that does it succeeded this turn. The claim stays in
-        the history; the nudge says it has not happened. F297: an empty reply
-        straight after a round of tool calls is asked once for its answer. None
-        when there is nothing to recover."""
+        """F108: retry once when a reply without a tool call says an action was done and no
+        action that does it succeeded this turn. The claim stays in the history; the nudge says
+        it has not happened. F297: an empty reply straight after a round of tool calls is asked
+        once for its answer. None when there is nothing to recover."""
         if not tools or _has_tool_calls(current):
             return None
         text = getattr(current, "content", "") or ""

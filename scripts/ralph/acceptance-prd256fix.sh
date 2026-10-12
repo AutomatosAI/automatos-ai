@@ -61,7 +61,10 @@ print("\n".join(bad)); sys.exit(1 if bad else 0)
 PY
 }
 tests_not_weakened() { local d a; d=$(git diff "$BASE"..HEAD -- $TESTS $SIM/tests | grep -cE '^-\s*(async )?def test_'); a=$(git diff "$BASE"..HEAD -- $TESTS $SIM/tests | grep -cE '^\+\s*(async )?def test_'); echo "   test functions removed $d, added $a"; [ "$a" -ge "$d" ]; }
-service_shorter() { local b h; b=$(lines_at "$BASE" $CHAT/service.py); h=$(wc -l < $CHAT/service.py | tr -d ' '); echo "   service.py: base $b, HEAD $h"; [ "$h" -lt "$b" ]; }
+# FX-007's cut is measured from the commit before the night-12 wave landed on main (#1048) when the base already
+# holds it (night 13 is cut from that main); HEAD must also not grow service.py past the base.
+fx007_base() { local m; m=$(git log -1 -F --format=%H --grep='night-12 fix wave (#1048)' "$BASE"); if [ -n "$m" ]; then git rev-parse "$m^"; else echo "$BASE"; fi; }
+service_shorter() { local f b c h; f=$(fx007_base); b=$(lines_at "$f" $CHAT/service.py); c=$(lines_at "$BASE" $CHAT/service.py); h=$(wc -l < $CHAT/service.py | tr -d ' '); echo "   service.py: FX-007 base $b, base $c, HEAD $h"; [ "$h" -lt "$b" ] && [ "$h" -le "$c" ]; }
 # The commit CI tested: HEAD, or, when HEAD and its parents are kit-only '[skip ci]' commits (scripts/ralph/
 # marks, gate or prompt fixes after the wave's CI commit), the nearest ancestor that is not. A kit-only commit
 # cannot change a test outcome, so that ancestor's run is the wave's run.

@@ -18,6 +18,8 @@ import json
 import logging
 from typing import Any, Dict, List
 
+from services.contested_facts import RANKING_RULE, ranked, standing_note
+
 logger = logging.getLogger(__name__)
 
 SEARCH_TOOLS = ("search_knowledge", "search_documents", "semantic_search")
@@ -48,15 +50,17 @@ def source_line(index: int, doc: Dict[str, Any]) -> str:
     # "Q2 2026 Metrics.md" — or answered "Source 1". The real name, always.
     name = doc.get('filename') or doc.get('source') or 'an unnamed document'
     document_id = doc.get('document_id')
-    if document_id in (None, ""):
-        return f"\n[Source {index}: {name}] ({score:.1f}%)"
-    return f"\n[Source {index}: {name}] (document {document_id}; {score:.1f}%)"
+    # P256-FIX-N13-3 (F410): the document's date and its standing among the passages.
+    parts = [] if document_id in (None, "") else [f"document {document_id}"]
+    parts += [note for note in (standing_note(doc),) if note]
+    return f"\n[Source {index}: {name}] ({'; '.join([*parts, f'{score:.1f}%'])})"
 
 
 def search_lines(results: List[Dict[str, Any]]) -> List[str]:
-    """A document search's passages, each under its source line."""
-    lines = [SEARCH_INSTRUCTION]
-    for i, doc in enumerate(results, start=1):
+    """A document search's passages, each under its source line, newest document first
+    (P256-FIX-N13-3: the ranking of contested facts, ``services.contested_facts``)."""
+    lines = [SEARCH_INSTRUCTION, RANKING_RULE]
+    for i, doc in enumerate(ranked(results), start=1):
         # PRD-136: read `content` (full body) — `excerpt` is a 500-char UI preview
         # that crippled synthesis. Fall back to excerpt if no content.
         body = doc.get('content') or doc.get('excerpt') or ''

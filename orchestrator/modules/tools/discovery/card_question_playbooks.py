@@ -7,19 +7,24 @@ from the playbook's own row); or which playbook is deleted for good. P256-FIX-RV
 update that carries a timer (``schedule_config``) shows the same timer lines, and any new
 name or purpose it gives with them. A playbook is looked
 up in the caller's workspace only, by its id: a name is bound to one before the card
-(``playbook_binding``, P256-FIX-RVW-45).
+(``playbook_binding``, P256-FIX-RVW-45). P256-FIX-T4: a run started from the chat shows the
+playbook, each input the run is given (or that it is given none) and whether it waits for the
+owner's check.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from modules.tools.discovery.card_question_text import change_line, said_line, value_line
+from modules.tools.discovery.card_question_text import change_line, said_line, shown, value_line
 
 PLAYBOOK_LINE = "playbook: '{name}' (playbook #{id})"
 DELETED_FOR_GOOD = "playbook: '{name}' (playbook #{id}) is deleted for good, with its timer and triggers"
 # platform_schedule_playbook: param (its schedule_config key too) → what the owner calls it.
 TIMER_FIELDS = (("cron_expression", "runs at (cron)"), ("timezone", "time zone"), ("enabled", "timer on"))
 WAIT_FOR_ME = ("wait_for_me", "each run waits for your check")
+RUN_WAITS = "this run waits for your check"
+INPUT_LINE = "input {name}"
+NO_INPUTS = "inputs: none"
 SCHEDULE_CONFIG = "schedule_config"
 # schedule_config's other keys: how it runs ('manual' | 'cron' | 'trigger') and its trigger.
 TIMER_KINDS = (("type", "runs"), ("trigger_config", "trigger"))
@@ -68,6 +73,31 @@ def update_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]
     return lines
 
 
+def run_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
+    """The playbook the click runs, each input the run is given, and its "wait for me"."""
+    from modules.tools.discovery.playbook_run_binding import given_inputs
+
+    playbook = _playbook(db, workspace_id, params)
+    if playbook is None:
+        return []
+    inputs, _problem = given_inputs(params)
+    lines = [value_line(PLAYBOOK_LINE.format(name=playbook.name, id=playbook.id))]
+    lines.extend(said_line(_input_label(name), value) for name, value in inputs.items())
+    if not inputs:
+        lines.append(value_line(NO_INPUTS))
+    if params.get(WAIT_FOR_ME[0]) is not None:
+        lines.append(said_line(RUN_WAITS, params[WAIT_FOR_ME[0]]))
+    return lines
+
+
+def _input_label(name: Any) -> str:
+    """"input origin"; the one text a playbook reads as {input} is "input". The name is the
+    model's, so it is one line of the card as a value is (``shown``): it never forges a line."""
+    from core.services.playbook_inputs import INPUT_KEY
+
+    return INPUT_KEY if name == INPUT_KEY else INPUT_LINE.format(name=shown(name))
+
+
 def delete_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
     """Which playbook goes, and that it cannot be undone."""
     playbook = _playbook(db, workspace_id, params)
@@ -87,4 +117,4 @@ def _playbook(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Optional[An
             .filter(WorkflowTemplate.workspace_id == workspace_id, WorkflowTemplate.id == playbook_id).first())
 
 
-__all__ = ["create_lines", "delete_lines", "schedule_lines", "update_lines"]
+__all__ = ["create_lines", "delete_lines", "run_lines", "schedule_lines", "update_lines"]

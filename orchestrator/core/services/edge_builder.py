@@ -21,32 +21,34 @@ PRD-232 §6.5 — the TWO-LAYER graph (RVW-2, Gerard's ruling):
 - PRIVACY / PRD-181 erasure: the global layer is text-free by construction — global
   edges/affinities carry only action names + counts, and organic intent clusters
   (which are global — no workspace_id column) redact sample_query to an action-name
-  label (see _redacted_cluster_label). So GDPR erasure scope stays PER-TENANT rows
+  label (see edge_builder_clusters.redacted_cluster_label). So GDPR erasure scope stays PER-TENANT rows
   only; nothing in the global layer identifies a user.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 from sqlalchemy import and_, text
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db_session
 from core.llm.embedding_manager import get_embedding_manager
 from core.models.composio_cache import ToolExecutionLog
-from core.models.tool_routing import (
-    ToolRoutingAffinity,
-    ToolRoutingEdge,
-    ToolRoutingIntentCluster,
+from core.models.tool_routing import ToolRoutingEdge
+from core.services.edge_builder_clusters import (
+    EmbeddedQueries,
+    embedded_queries,
+    query_logs,
+    upsert_clusters,
 )
-from core.services.intent_clustering import compute_intent_clusters
 
 logger = logging.getLogger(__name__)
 
@@ -143,24 +145,6 @@ def derive_embedding_model_key(embedding_manager) -> str:
     return f"{provider}:{model}:{dimension}"
 
 
-def _redacted_cluster_label(action_names_hot: List[str]) -> str:
-    """PRD-232 §6.5 (RVW-2, privacy hard rule): organic intent clusters are GLOBAL
-    (the ToolRoutingIntentCluster table has no workspace_id) and cross tenants as a
-    text-free prior — so they must NOT store a raw user query in ``sample_query``.
-
-    Redact to a NON-identifying, action-name label (action names are explicitly
-    allowed in the global layer): the cluster's top hot action, else ``(organic)``.
-    ``sample_query`` is display/debug metadata only — routing matches on the centroid
-    vector + ``action_names_hot``, never on this text — so redaction changes nothing
-    live while keeping the global layer text-free by construction (PRD-181 erasure
-    then never needs to touch a global cluster row). Seeded clusters keep their
-    SYNTHETIC utterance (authored, not user text) — see seed_tool_routing_graph.py.
-    """
-    if action_names_hot:
-        return f"(organic:{action_names_hot[0]})"
-    return "(organic)"
-
-
 def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
     """Wilson lower bound at 95% confidence."""
     if total == 0:
@@ -178,6 +162,12 @@ async def build_edges(
 ) -> EdgeBuildSummary:
     """Main entry point: read telemetry, compute edges + affinities, upsert.
 
+    P256-FIX-N13-2 (F409): only the embedding call awaits on the event loop. The
+    log read, and the whole compute-and-write (the k-means included) in one
+    session and one transaction, run in worker threads, so the loop keeps serving
+    chats and /health through the nightly run; no session is open across the
+    embedding await, so no written edge row is held idle in transaction meanwhile.
+
     Args:
         window: How far back to look in tool_execution_logs.
         workspace_id: Optional workspace UUID string — restrict the recompute
@@ -186,21 +176,53 @@ async def build_edges(
     Returns:
         EdgeBuildSummary with counts of what was built.
     """
-    import time
-
     start = time.monotonic()
-    summary = EdgeBuildSummary()
+    cutoff = datetime.utcnow() - window
+    logs = await asyncio.to_thread(_load_window, cutoff, workspace_id)
+    if not logs:
+        logger.info("EdgeBuilder: no logs in window, nothing to build")
+        return EdgeBuildSummary()
+    embedded = await _embed_queries(logs)
+    summary = await asyncio.to_thread(_build_and_write, logs, embedded, workspace_id)
+    summary.duration_ms = int((time.monotonic() - start) * 1000)
 
+    logger.info(
+        f"EdgeBuilder: built {summary.edges_built} used_after edges "
+        f"(+{summary.global_edges_built} global-prior), "
+        f"{summary.failed_edges_built} failed_after edges, "
+        f"{summary.affinities_built} affinities across "
+        f"{summary.intent_clusters} intent clusters "
+        f"({summary.gap_resolutions_built} gap→resolution, "
+        f"{summary.affinities_decayed} shown-not-used decayed)"
+    )
+    return summary
+
+
+def _load_window(cutoff: datetime, workspace_id: Optional[str]) -> List[Dict[str, Any]]:
+    """1. Load execution logs within window (a worker thread; its own session)."""
     with get_db_session() as db:
-        # 1. Load execution logs within window
-        cutoff = datetime.utcnow() - window
-        logs = _load_logs(db, cutoff, workspace_id=workspace_id)
-        summary.logs_processed = len(logs)
+        return _load_logs(db, cutoff, workspace_id=workspace_id)
 
-        if not logs:
-            logger.info("EdgeBuilder: no logs in window, nothing to build")
-            return summary
 
+async def _embed_queries(logs: List[Dict[str, Any]]) -> Optional[EmbeddedQueries]:
+    """Embed the query-bearing logs (ALL logs — a tool_gap row's query must cluster
+    so the resolution join can attribute to it); None when no log has a query."""
+    picked = query_logs(logs)
+    if not picked:
+        return None
+    embedding_manager = get_embedding_manager()
+    vectors = await embedding_manager.generate_embeddings_batch([log["user_query"] for _, log in picked])
+    return embedded_queries(picked, vectors, derive_embedding_model_key(embedding_manager))
+
+
+def _build_and_write(
+    logs: List[Dict[str, Any]],
+    embedded: Optional[EmbeddedQueries],
+    workspace_id: Optional[str],
+) -> EdgeBuildSummary:
+    """Steps 2–4c in one session and one transaction (a worker thread, F409)."""
+    summary = EdgeBuildSummary(logs_processed=len(logs))
+    with get_db_session() as db:
         # PRD-232 US-011: synthetic gap/shown rows are telemetry markers, not tool
         # executions — exclude them from co-occurrence edges + normal affinities.
         # (Clustering still sees the FULL list so a gap's intent gets a cluster;
@@ -230,10 +252,9 @@ async def build_edges(
         failed_data = _compute_failed_after_edges(real_logs)
         summary.failed_edges_built = _upsert_failed_after_edges(db, failed_data)
 
-        # 3. Compute intent clusters from query embeddings (ALL logs — a tool_gap
-        #    row's query must cluster so the resolution join can attribute to it)
-        cluster_map = await _compute_and_upsert_clusters(db, logs)
-        summary.intent_clusters = len(cluster_map)
+        # 3. Compute intent clusters from the query embeddings (the k-means)
+        cluster_map = upsert_clusters(db, embedded) if embedded else {}
+        summary.intent_clusters = len(set(cluster_map.values()))   # clusters, not the queries mapped to them
 
         # 4. Compute affinities (succeeds/fails for intent, agent_prefers)
         affinities = _compute_affinities(logs, cluster_map)
@@ -255,19 +276,6 @@ async def build_edges(
             _shown_decay_factor(), _affinity_weight_floor(),
         )
         summary.affinities_built = _upsert_affinities(db, affinities)
-
-    elapsed_ms = int((time.monotonic() - start) * 1000)
-    summary.duration_ms = elapsed_ms
-
-    logger.info(
-        f"EdgeBuilder: built {summary.edges_built} used_after edges "
-        f"(+{summary.global_edges_built} global-prior), "
-        f"{summary.failed_edges_built} failed_after edges, "
-        f"{summary.affinities_built} affinities across "
-        f"{summary.intent_clusters} intent clusters "
-        f"({summary.gap_resolutions_built} gap→resolution, "
-        f"{summary.affinities_decayed} shown-not-used decayed)"
-    )
     return summary
 
 
@@ -598,95 +606,6 @@ def _upsert_failed_after_edges(
 
     db.flush()
     return count
-
-
-async def _compute_and_upsert_clusters(
-    db: Session,
-    logs: List[Dict[str, Any]],
-) -> Dict[int, int]:
-    """Compute intent clusters and upsert to DB.
-
-    Returns:
-        Mapping of log index -> cluster_id (DB primary key) for logs with queries.
-    """
-    # Filter logs with user queries
-    query_logs = [(i, log) for i, log in enumerate(logs) if log.get("user_query")]
-    if not query_logs:
-        return {}
-
-    # Generate embeddings for queries
-    embedding_manager = get_embedding_manager()
-    queries = [log["user_query"] for _, log in query_logs]
-    action_names = [log["action_name"] for _, log in query_logs]
-    statuses = [log["status"] for _, log in query_logs]
-
-    embeddings = await embedding_manager.generate_embeddings_batch(queries)
-    embeddings_array = np.array(embeddings, dtype=np.float32)
-
-    # Run clustering
-    cluster_result = compute_intent_clusters(
-        embeddings=embeddings_array,
-        queries=queries,
-        action_names=action_names,
-        statuses=statuses,
-    )
-
-    if not cluster_result.centroids:
-        return {}
-
-    embedding_model_key = derive_embedding_model_key(embedding_manager)
-
-    # Upsert clusters - delete old ORGANIC ones and insert fresh (idempotent
-    # rebuild). PRD-232 US-007: the delete is provenance-scoped — 'seeded'
-    # cold-start clusters (and their affinities) are NEVER touched by the nightly,
-    # so the synthetic-utterance seed survives 03:00 UTC and the graph routes
-    # day-one. Affinities referencing the doomed organic clusters go FIRST: the FK
-    # (ToolRoutingAffinity.intent_cluster_id → tool_routing_intent_clusters.id, the
-    # ONLY live FK to this table) has no cascade, so without this a re-run would
-    # either FK-error on the cluster delete or strand intent affinities under dead
-    # cluster ids — re-runs must converge (PRD-143 S12).
-    existing_clusters = (
-        db.query(ToolRoutingIntentCluster)
-        .filter(ToolRoutingIntentCluster.embedding_model_key == embedding_model_key)
-        .filter(ToolRoutingIntentCluster.provenance == "organic")
-        .all()
-    )
-    if existing_clusters:
-        doomed_ids = [c.id for c in existing_clusters]
-        db.query(ToolRoutingAffinity).filter(
-            ToolRoutingAffinity.intent_cluster_id.in_(doomed_ids)
-        ).delete(synchronize_session="fetch")
-        db.query(ToolRoutingIntentCluster).filter(
-            ToolRoutingIntentCluster.id.in_(doomed_ids)
-        ).delete(synchronize_session="fetch")
-    db.flush()
-
-    now = datetime.utcnow()
-    cluster_db_ids: List[int] = []
-
-    for idx in range(len(cluster_result.centroids)):
-        cluster = ToolRoutingIntentCluster(
-            centroid_embedding=cluster_result.centroids[idx],
-            embedding_model_key=embedding_model_key,
-            # §6.5 privacy: the global cluster layer is text-free — redact the raw
-            # user query to an action-name label (routing uses centroid + hot only).
-            sample_query=_redacted_cluster_label(cluster_result.action_names_hot[idx]),
-            action_names_hot=cluster_result.action_names_hot[idx],
-            sample_count=cluster_result.sample_counts[idx],
-            provenance="organic",  # US-007: nightly-built rows are organic
-            last_updated=now,
-        )
-        db.add(cluster)
-        db.flush()
-        cluster_db_ids.append(cluster.id)
-
-    # Build mapping: original log index -> cluster DB id
-    log_to_cluster: Dict[int, int] = {}
-    for label_idx, (orig_idx, _) in enumerate(query_logs):
-        cluster_label = cluster_result.labels[label_idx]
-        log_to_cluster[orig_idx] = cluster_db_ids[cluster_label]
-
-    return log_to_cluster
 
 
 @dataclass

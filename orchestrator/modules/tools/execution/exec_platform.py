@@ -37,9 +37,11 @@ async def execute_platform_tool(
     )
     if tool_name not in DOCUMENT_SEARCHES:
         return result
+    from services.contested_facts import dated_for_agent  # P256-FIX-N13-3: each passage's date
     from services.agents_writing import owners_search
 
-    return owners_search(getattr(executor.platform_tools, "db", None), result, agent_id)
+    db = getattr(executor.platform_tools, "db", None)
+    return dated_for_agent(db, owners_search(db, result, agent_id), agent_id)
 
 
 async def execute_platform_action(

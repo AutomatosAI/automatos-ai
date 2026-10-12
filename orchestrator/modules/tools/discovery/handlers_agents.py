@@ -281,9 +281,9 @@ def _resolve_create_model_config(db: Session, workspace_id: UUID, params: Dict[s
     to the workspace default instead of failing the create (F141 told in the
     result, not silently). Returns ``(model_config, model_note, error)`` —
     ``error`` is a ready-to-return failure dict, or ``None``."""
-    from core.llm.defaults import get_default_model_config
+    from core.llm.new_agent_model import new_agent_model_config
 
-    model_config: Dict[str, Any] = get_default_model_config()
+    model_config: Dict[str, Any] = new_agent_model_config()  # N13-8 (F415): Settings > Orchestrator, fitted
     model_id = params.get("model_id") or params.get("model")  # back-compat
     model_note = None
     if model_id:

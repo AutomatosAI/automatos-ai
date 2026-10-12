@@ -91,6 +91,13 @@ def resolve_targets(db: Any, workspace_id: Any, params: Any,
     return found, missing
 
 
+def names_a_ticket(action: Optional[str], param: str) -> bool:
+    """Whether ``param`` of ``action``'s call names a board ticket (a scheduled task's
+    ``task_id`` does not, P256-FIX-N13-7)."""
+    entry = {**_TARGETS, **_ACTION_TARGETS.get(action or "", {})}.get(param)
+    return entry is not None and entry[0] == TICKETS
+
+
 def _row_id(db: Any, workspace_id: Any, table: str, raw: Any) -> Optional[int]:
     """The row a parameter names: its id, or for a ticket the ticket the ticket tools
     will act on (#0042, "0042" and 42 are its number, PRD-252 R4 and Gerard, 7 Oct),

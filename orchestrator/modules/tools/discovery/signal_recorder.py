@@ -50,6 +50,16 @@ durability claim: ``tool_execution_logs`` is the durable ground truth, and the
 nightly ``edge_builder`` RECOMPUTES authoritative edges/affinities from it, so a
 lost intra-day batch only delays freshness — it never corrupts the learned graph.
 
+Never on the event loop (F408, night 13)
+----------------------------------------
+The batch write is synchronous SQL, so it runs in a worker thread
+(``asyncio.to_thread``), in one short transaction that always commits or rolls
+back, under a transaction-local ``lock_timeout``
+(``TOOL_SIGNAL_FLUSH_LOCK_TIMEOUT_MS``). On the loop, an UPDATE that waited on a
+row lock held by another session of the same process stopped the loop, so the
+holder's coroutine could never resume to commit: /health went dark for 6 min.
+A lock not had in time now drops that batch with one warning.
+
 Leaf-loadable: module-top imports are stdlib-only; config / DB / wilson are
 imported lazily inside methods so this module can be unit-tested under a
 synthetic package without the DB-backed executor chain (matches graph_router.py).
@@ -78,6 +88,17 @@ _TOOL_SHOWN_ACTION = "__tool_shown__"
 # telemetry_source for the shown row — NOT 'production' (would pollute the
 # success-rate SLO / silence canary). Must match telemetry.SYNTHETIC_SIGNAL_SOURCE.
 _SYNTHETIC_SIGNAL_SOURCE = "synthetic_signal"
+
+# F408: the SQLSTATEs of a row lock not had in time — lock_not_available (the
+# flush's lock_timeout ran out) and deadlock_detected (Postgres broke a cycle).
+_LOCK_WAIT_SQLSTATES = frozenset({"55P03", "40P01"})
+
+
+def _is_lock_wait(error: Exception) -> bool:
+    """Whether a DB error is a lock wait given up (psycopg2 pgcode, psycopg sqlstate)."""
+    orig = getattr(error, "orig", None)
+    code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+    return code in _LOCK_WAIT_SQLSTATES
 
 
 @dataclass(frozen=True)
@@ -135,7 +156,7 @@ class ToolSignalRecorder:
         # intra-day freshness).
         self._stats: Dict[str, int] = {
             "recorded": 0, "dropped": 0, "flushes": 0, "flush_errors": 0,
-            "selection_narrowed": 0, "selection_fallback": 0,
+            "lock_drops": 0, "selection_narrowed": 0, "selection_fallback": 0,
         }
         # PRD-143 S14: last selection outcome per (workspace_id, agent_id) —
         # written by get_tools_for_agent when it builds the dispatcher schema,
@@ -193,6 +214,12 @@ class ToolSignalRecorder:
             return int(getattr(config, "TOOL_SIGNAL_QUEUE_MAXSIZE", 10000))
         except Exception:
             return 10000
+
+    @staticmethod
+    def _lock_timeout_ms() -> int:
+        from config import config
+
+        return int(config.TOOL_SIGNAL_FLUSH_LOCK_TIMEOUT_MS)
 
     @staticmethod
     def _selection_stash_maxsize() -> int:
@@ -457,29 +484,66 @@ class ToolSignalRecorder:
         A batch may mix ``ToolSignal`` (→ edges/affinities) and ``SelectionSignal``
         (→ ``__tool_shown__`` rows, PRD-232 US-011b). Both are written in the SAME
         session so the one-session-per-flush contract (PRD-141 US-019) holds.
+
+        F408: the write runs in a worker thread (``_write_batch``), never on the
+        event loop, so a lock wait can never stop the loop.
         """
         tool_signals = [s for s in batch if isinstance(s, ToolSignal)]
         selection_signals = [s for s in batch if isinstance(s, SelectionSignal)]
         edge_counts, aff_counts = self._aggregate(tool_signals)
         if not edge_counts and not aff_counts and not selection_signals:
             return
+        outcome = await asyncio.to_thread(self._write_batch, edge_counts, aff_counts, selection_signals)
+        self._stats[outcome] += 1
 
+    def _write_batch(self, edge_counts: Dict[tuple, int], aff_counts: Dict[tuple, int], selection_signals: List) -> str:
+        """Write one batch in exactly ONE session and one transaction (runs in a
+        worker thread). get_db_session commits it, or rolls it back on any error,
+        so no connection is left idle in transaction.
+
+        Returns the stats key of the outcome: ``flushes``, ``lock_drops`` (a row
+        lock not had within the lock_timeout: the batch is dropped with one
+        warning) or ``flush_errors`` (recorded to the error sink, here in the
+        thread: record_error writes error_events, a DB write of its own)."""
+        from core.database.database import get_db_session
+
+        try:
+            with get_db_session() as db:  # exactly ONE session for the whole batch
+                if not self._apply_or_drop(db, edge_counts, aff_counts, selection_signals):
+                    return "lock_drops"
+        except Exception as e:  # noqa: BLE001 — record_error logs it with its traceback; telemetry never raises
+            self._record_flush_error(e)
+            return "flush_errors"
+        return "flushes"
+
+    def _apply_or_drop(self, db, edge_counts: Dict[tuple, int], aff_counts: Dict[tuple, int],
+                       selection_signals: List) -> bool:
+        """Apply the batch under a transaction-local lock_timeout. False when a
+        row lock was not had in time: the transaction is rolled back and the
+        batch dropped with one warning (the nightly edge_builder recomputes it)."""
+        from sqlalchemy import text
+        from sqlalchemy.exc import DBAPIError
+
+        timeout_ms = self._lock_timeout_ms()
         now = datetime.utcnow()
         try:
-            from core.database.database import get_db_session
-
-            with get_db_session() as db:  # exactly ONE session for the whole batch
-                for (from_action, to_action, edge_type, agent_id, ws), inc in edge_counts.items():
-                    self._upsert_edge(db, from_action, to_action, edge_type, ws, agent_id, inc, now)
-                for (action_name, affinity_type, agent_id, ws), inc in aff_counts.items():
-                    self._upsert_affinity(db, action_name, affinity_type, ws, agent_id, inc, now)
-                for sel in selection_signals:
-                    self._insert_shown_row(db, sel, now)
-                db.flush()
-            self._stats["flushes"] += 1
-        except Exception as e:
-            self._stats["flush_errors"] += 1
-            self._record_flush_error(e)
+            db.execute(text("SELECT set_config('lock_timeout', :timeout, true)"), {"timeout": f"{timeout_ms}ms"})
+            for (from_action, to_action, edge_type, agent_id, ws), inc in edge_counts.items():
+                self._upsert_edge(db, from_action, to_action, edge_type, ws, agent_id, inc, now)
+            for (action_name, affinity_type, agent_id, ws), inc in aff_counts.items():
+                self._upsert_affinity(db, action_name, affinity_type, ws, agent_id, inc, now)
+            for sel in selection_signals:
+                self._insert_shown_row(db, sel, now)
+            db.flush()
+        except DBAPIError as e:
+            if not _is_lock_wait(e):
+                raise
+            db.rollback()
+            logger.warning("ToolSignalRecorder: a row lock was not had within %d ms; dropped a batch of %d "
+                           "edge(s), %d affinity(ies), %d shown row(s)",
+                           timeout_ms, len(edge_counts), len(aff_counts), len(selection_signals))
+            return False
+        return True
 
     @staticmethod
     def _insert_shown_row(db, sel: "SelectionSignal", now: datetime) -> None:

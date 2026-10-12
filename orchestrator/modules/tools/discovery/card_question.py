@@ -16,7 +16,9 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
   from (or, edited, moved for) every agent of the workspace, naming them;
 - P256-FIX-RVW-23: an agent's timer: the agent, when it runs, its delivery and its brief;
 - P256-FIX-RVW-28: a cli agent made: its name, 'runtime: cli', the session's CLI and model,
-  its description and its prompt's first line.
+  its description and its prompt's first line;
+- P256-FIX-T4: a playbook run: the playbook, each input it is given and its "wait for me".
+- P256-FIX-N13-7: a mission's plan changed: the mission, each step's change and the check.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -28,6 +30,7 @@ import logging
 from typing import Any, Callable, Dict, List
 
 from modules.tools.discovery import card_question_agents as agents
+from modules.tools.discovery import card_question_plans as plans
 from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
 from modules.tools.discovery import card_question_sends as sends
@@ -133,6 +136,10 @@ READERS: Dict[str, Lines] = {
     "platform_schedule_task": timers.schedule_task_lines,
     # P256-FIX-RVW-28: a cli agent made: its name, 'runtime: cli', the session's CLI and model, its prompt.
     "platform_create_agent": agents.create_agent_lines,
+    # P256-FIX-T4: a playbook run from the chat: the playbook, its inputs, its "wait for me".
+    "platform_execute_playbook": playbooks.run_lines,
+    # P256-FIX-N13-7: a mission's plan changed from the chat: the mission, each step's change, the check.
+    "platform_update_mission_plan": plans.plan_lines,
 }
 
 

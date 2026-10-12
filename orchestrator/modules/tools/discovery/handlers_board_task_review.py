@@ -41,8 +41,9 @@ CLOSES_BY_ITSELF = "It closes Done by itself: the owner does not review it first
 OWNER_ASKED = "the owner asked to see it first"
 
 
-def owner_words(db: Session, workspace_id: UUID, chat_id: Optional[UUID]) -> List[str]:
-    """The owner's latest messages in ``chat_id``, newest first. Read in a
+def owner_words(db: Session, workspace_id: UUID, chat_id: Optional[UUID], *,
+                limit: int = OWNER_WORDS_LOOKBACK) -> List[str]:
+    """The owner's latest ``limit`` messages in ``chat_id``, newest first. Read in a
     savepoint: a refused read must not abort the transaction the ticket is filed in."""
     if chat_id is None:
         return []
@@ -55,7 +56,7 @@ def owner_words(db: Session, workspace_id: UUID, chat_id: Optional[UUID]) -> Lis
                 db.query(Message.parts)
                 .filter(Message.chat_id == chat_id, Message.workspace_id == workspace_id, Message.role == OWNER_ROLE)
                 .order_by(Message.created_at.desc())
-                .limit(OWNER_WORDS_LOOKBACK)
+                .limit(limit)
                 .all()
             )
     except Exception:

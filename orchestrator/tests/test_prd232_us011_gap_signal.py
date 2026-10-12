@@ -344,7 +344,10 @@ def test_build_edges_wires_gap_resolution(monkeypatch):
     def _fake_session():
         yield object()
 
-    async def _fake_clusters(db, logs_):
+    async def _fake_embed(logs_):
+        return object()  # stands in for the run's EmbeddedQueries
+
+    def _fake_clusters(db, embedded):
         return {0: 42}  # the gap row (index 0) → cluster 42
 
     captured = {}
@@ -353,7 +356,8 @@ def test_build_edges_wires_gap_resolution(monkeypatch):
     monkeypatch.setattr(eb, "_upsert_edges", lambda db, d: 0)
     monkeypatch.setattr(eb, "_upsert_global_edges", lambda db, d: 0)  # §6.5 two-layer write
     monkeypatch.setattr(eb, "_upsert_failed_after_edges", lambda db, d: 0)
-    monkeypatch.setattr(eb, "_compute_and_upsert_clusters", _fake_clusters)
+    monkeypatch.setattr(eb, "_embed_queries", _fake_embed)
+    monkeypatch.setattr(eb, "upsert_clusters", _fake_clusters)
     monkeypatch.setattr(eb, "_upsert_affinities",
                         lambda db, affs: captured.setdefault("affs", affs) or len(affs))
 

@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useApproveTask, useRejectTask } from '@/hooks/use-board-tasks'
 import { DISCUSS_AFTER_REJECTS, discussHref } from '@/lib/discussion'
+import { ticketCalled } from '@/lib/ticket-number'
 import type { BoardTask } from '@/types/board'
 import { approveEffect, approveLabel, approvedMessage } from './approval-effect'
 
@@ -58,7 +59,7 @@ export function ReviewVerdict({ task, onDecided }: { task: BoardTask; onDecided:
   const approveNow = () => {
     approve.mutate({ taskId: task.id, note: mode === 'approve-note' ? note || undefined : undefined }, {
       onSuccess: (result) => {
-        toast.success(approvedMessage(result, task.number ?? task.id))
+        toast.success(approvedMessage(result, ticketCalled(task, true)))
         onDecided()
       },
       onError: (err) => toast.error(failure(err, 'Could not approve the ticket')),

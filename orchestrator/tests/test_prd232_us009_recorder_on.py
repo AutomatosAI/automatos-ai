@@ -33,8 +33,9 @@ def test_recorder_enabled_by_default():
 
 # ── AC3: load-shape — ceil(N/batch) flushes, one session each ────────────────
 class _SessionFactory:
-    """Counts session opens. Yields a minimal db (only .flush() is used once the
-    upserts are stubbed) — the invariant under test is 'one session per flush'."""
+    """Counts session opens. Yields a minimal db (.execute() takes the flush's
+    lock_timeout, F408; .flush() ends it once the upserts are stubbed) — the
+    invariant under test is 'one session per flush'."""
 
     def __init__(self):
         self.opens = 0
@@ -42,7 +43,7 @@ class _SessionFactory:
     @contextmanager
     def __call__(self):
         self.opens += 1
-        yield type("_DB", (), {"flush": lambda self: None})()
+        yield type("_DB", (), {"execute": lambda self, *a, **k: None, "flush": lambda self: None})()
 
 
 def test_load_shape_one_session_per_flush(monkeypatch):

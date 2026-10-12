@@ -12,15 +12,16 @@ Now the ask binds the name the click's own way (``assigned_subjects``' pattern):
 ``timer_target.target`` and its namesake check, a delete by ``delete_playbook``'s rule (the
 one playbook with that whole name, never a system one). The call the card asks about names
 the playbook by its id alone, the card reads that row, and the click runs on it. None, or
-several, is refused before any grant, listing them (F091).
+several, is refused before any grant, listing them (F091). P256-FIX-T4: a run is bound the
+same way, by ``execute_playbook``'s own rule (``playbook_run_binding``).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 PLAYBOOK_ID, PLAYBOOK_NAME = "playbook_id", "playbook_name"
-SCHEDULE, DELETE = "platform_schedule_playbook", "platform_delete_playbook"
-BINDS = frozenset({SCHEDULE, DELETE})
+SCHEDULE, DELETE, RUN = "platform_schedule_playbook", "platform_delete_playbook", "platform_execute_playbook"
+BINDS = frozenset({SCHEDULE, DELETE, RUN})
 MAX_LISTED = 12
 NAME_IT = "Provide playbook_id or playbook_name: nothing was asked or done."
 NONE_CALLED = ("No playbook {said} in this workspace, so nothing was asked or done.{near} "
@@ -43,11 +44,18 @@ def bound_to_the_playbook(db: Any, workspace_id: Any, action: str,
     said = _name_in_id(params)
     if said.get(PLAYBOOK_ID) in (None, "") and not str(said.get(PLAYBOOK_NAME) or "").strip():
         return params, {"success": False, "error": NAME_IT}
-    playbook, refusal = _timed(db, workspace_id, said) if action == SCHEDULE else _deleted(db, workspace_id, said)
+    playbook, refusal = _finder(action)(db, workspace_id, said)
     if playbook is None:
         return params, refusal
     rest = {key: value for key, value in said.items() if key != PLAYBOOK_NAME}
     return {**rest, PLAYBOOK_ID: playbook.id}, None
+
+
+def _finder(action: str) -> Callable[[Any, Any, Dict[str, Any]], Bound]:
+    """How the click finds the playbook it acts on: a timer's, a delete's or (P256-FIX-T4) a run's way."""
+    from modules.tools.discovery.playbook_run_binding import run_target
+
+    return {SCHEDULE: _timed, DELETE: _deleted, RUN: run_target}[action]
 
 
 def _timed(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Bound:
@@ -109,4 +117,4 @@ def _refused(error: str) -> Dict[str, Any]:
     return {"success": False, "error": error}
 
 
-__all__ = ["BINDS", "bound_to_the_playbook"]
+__all__ = ["BINDS", "RUN", "bound_to_the_playbook"]

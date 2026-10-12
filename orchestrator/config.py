@@ -736,6 +736,9 @@ class Config:
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
     SESSION_STEP_FILE_MAX_CHARS: int = int(os.getenv("SESSION_STEP_FILE_MAX_CHARS", "30000"))
+    # F413 (night 13): the most of a deliverable's text platform_get_deliverable hands the model to
+    # quote in its reply; a longer text comes back cut there, with the link to the rest.
+    DELIVERABLE_SHOWN_MAX_CHARS: int = int(os.getenv("DELIVERABLE_SHOWN_MAX_CHARS", "4000"))
     # F170 (night 5): how long a running mission's steps sit queued behind
     # another mission's Claude Code step before the mission says so.
     MISSION_WAIT_NOTE_AFTER_SECONDS: int = int(os.getenv("MISSION_WAIT_NOTE_AFTER_SECONDS", "300"))
@@ -1395,6 +1398,9 @@ class Config:
     TOOL_SIGNAL_FLUSH_BATCH_SIZE: int = int(os.getenv("TOOL_SIGNAL_FLUSH_BATCH_SIZE", "50"))
     TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS: float = float(os.getenv("TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS", "5.0"))
     TOOL_SIGNAL_QUEUE_MAXSIZE: int = int(os.getenv("TOOL_SIGNAL_QUEUE_MAXSIZE", "10000"))
+    # F408 (night 13): a flush waits this long for a row lock, then drops its batch
+    # with one warning (the nightly edge_builder recomputes what a dropped batch held).
+    TOOL_SIGNAL_FLUSH_LOCK_TIMEOUT_MS: int = int(os.getenv("TOOL_SIGNAL_FLUSH_LOCK_TIMEOUT_MS", "5000"))
     # PRD-143 S14: bounded (workspace, agent) -> last-selection-outcome stash
     # used to attach hit/fallback telemetry to platform_execute dispatches.
     TOOL_SELECTION_STASH_MAXSIZE: int = int(os.getenv("TOOL_SELECTION_STASH_MAXSIZE", "512"))
