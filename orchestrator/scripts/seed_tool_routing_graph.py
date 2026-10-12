@@ -218,7 +218,7 @@ async def _seed_clusters(db, seedable: dict, action_categories: dict, embedding_
     # Idempotent: drop existing SEEDED clusters (+ their affinities) for this model
     # key, then reinsert. Provenance-scoped so it never disturbs organic rows — the
     # mirror image of the nightly's organic-only rebuild. Affinities go first (the
-    # FK has no cascade), exactly like _compute_and_upsert_clusters.
+    # FK has no cascade), exactly like edge_builder_clusters.upsert_clusters.
     existing = (
         db.query(ToolRoutingIntentCluster)
         .filter(ToolRoutingIntentCluster.embedding_model_key == model_key)

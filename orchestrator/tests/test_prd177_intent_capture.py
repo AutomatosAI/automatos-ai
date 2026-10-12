@@ -109,7 +109,7 @@ def test_intent_affinity_materializes_from_query_logs():
         pytest.skip("edge_builder heavy deps unavailable in this environment")
 
     # cluster_map maps log index -> cluster id; simulate the clustering output
-    # that _compute_and_upsert_clusters would produce for query-bearing logs.
+    # that edge_builder_clusters.upsert_clusters would produce for query-bearing logs.
     logs = [
         {
             "action_name": "SLACK_SEND_MESSAGE",
