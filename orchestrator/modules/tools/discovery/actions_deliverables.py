@@ -108,7 +108,9 @@ def _register_get_deliverable(registry: ActionRegistry) -> None:
         description=(
             "Fetch one deliverable by id — metadata plus (optionally) its "
             "text content. Use after platform_list_deliverables to read a "
-            "report, generated document, or code file an agent produced."
+            "report, generated document, or code file an agent produced. "
+            "When the owner asks to see, read or show it, pass "
+            "include_content=true and put its text in your reply."
         ),
         category="deliverables",
         parameters={
@@ -120,7 +122,10 @@ def _register_get_deliverable(registry: ActionRegistry) -> None:
                 },
                 "include_content": {
                     "type": "boolean",
-                    "description": "true = also return the file's text content (default false).",
+                    "description": (
+                        "true = also return the file's text content (default false); a long "
+                        "text comes back cut, with the link to the rest."
+                    ),
                 },
             },
             "required": ["deliverable_id"],

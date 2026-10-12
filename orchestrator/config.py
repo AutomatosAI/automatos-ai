@@ -736,6 +736,9 @@ class Config:
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.
     SESSION_STEP_FILE_MAX_CHARS: int = int(os.getenv("SESSION_STEP_FILE_MAX_CHARS", "30000"))
+    # F413 (night 13): the most of a deliverable's text platform_get_deliverable hands the model to
+    # quote in its reply; a longer text comes back cut there, with the link to the rest.
+    DELIVERABLE_SHOWN_MAX_CHARS: int = int(os.getenv("DELIVERABLE_SHOWN_MAX_CHARS", "4000"))
     # F170 (night 5): how long a running mission's steps sit queued behind
     # another mission's Claude Code step before the mission says so.
     MISSION_WAIT_NOTE_AFTER_SECONDS: int = int(os.getenv("MISSION_WAIT_NOTE_AFTER_SECONDS", "300"))
