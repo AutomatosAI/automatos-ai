@@ -12,7 +12,9 @@ the comparison stays a few thousand steps.
 Both sides are read alike in any script (NFKC, casefold, Unicode words), and a stored sentence
 holding anything that is neither a word nor punctuation (an emoji, a sign) is no rule: what the
 check cannot weigh never passes for the owner's. A word that sets a condition ('only', 'unless',
-'ask', 'before') in the owner's sentence is kept in the rule, or it is not theirs.
+'ask', 'before') in the owner's sentence is kept in the rule, or it is not theirs. The negations
+and conditions known are English: an owner's sentence with any other word ('café', 'لا', 'नहीं')
+is the rule only word for word, none left out.
 """
 from __future__ import annotations
 
@@ -83,6 +85,8 @@ def _held(seq: List[str], theirs: List[str], coverage: float) -> bool:
         return False
     if not CONDITIONS.intersection(theirs) <= set(seq):
         return False
+    if not all(word.isascii() for word in theirs):    # a no or an if this check cannot read: every word
+        return seq == theirs
     return _in_order(seq, theirs) == len(seq) and len(seq) / len(theirs) >= coverage
 
 

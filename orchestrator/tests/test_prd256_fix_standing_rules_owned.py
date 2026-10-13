@@ -267,7 +267,9 @@ def test_a_no_said_either_way_is_the_same_no():
     assert in_their_words("From November we post on Tuesdays.",
                           ["Remember that from November we post on Tuesdays."], STANDING_RULE_COVERAGE)
     assert in_their_words("Ｐost on Tuesdays, café first.", ["post on tuesdays, café first"], STANDING_RULE_COVERAGE)
-    assert in_their_words("ننشر يوم الثلاثاء.", ["تذكر: ننشر يوم الثلاثاء."], STANDING_RULE_COVERAGE)
+    assert in_their_words("ننشر يوم الثلاثاء.", ["تذكر. ننشر يوم الثلاثاء."], STANDING_RULE_COVERAGE)
+    assert not in_their_words("ننشر يوم الثلاثاء.", ["لا ننشر يوم الثلاثاء."], STANDING_RULE_COVERAGE)   # a no left out
+    assert not in_their_words("post on tuesdays", ["post on tuesdays, café first"], STANDING_RULE_COVERAGE)
     assert in_their_words("हम मंगलवार को पोस्ट करते हैं।", ["हम मंगलवार को पोस्ट करते हैं।"], STANDING_RULE_COVERAGE)
 
 
