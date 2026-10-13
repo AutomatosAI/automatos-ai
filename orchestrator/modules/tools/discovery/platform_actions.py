@@ -76,6 +76,12 @@ def _register_documents_actions(registry: ActionRegistry) -> None:
     register_brand_proposal_actions(registry)
 
 
+def _register_memory_actions(registry: ActionRegistry) -> None:
+    """Storing a memory, and Auto's record of what it did across chats (P256-FIX-N14-3, F417)."""
+    register_store_memory_action(registry)
+    register_my_actions_action(registry)
+
+
 def _register_observability_actions(registry: ActionRegistry) -> None:
     """The monitoring actions, and the workspace's errors grouped by cause (9 Oct)."""
     register_monitoring_actions(registry)
@@ -90,8 +96,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_analytics_actions(registry)
     _register_documents_actions(registry)
     register_workspace_actions_defs(registry)
-    register_store_memory_action(registry)
-    register_my_actions_action(registry)  # P256-FIX-N14-3: Auto's record of what it did, across chats
+    _register_memory_actions(registry)
     _register_observability_actions(registry)
     register_search_actions(registry)
     register_tools_llms_actions(registry)
