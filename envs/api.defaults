@@ -38,6 +38,12 @@ LOG_LEVEL=INFO
 # app pods start the app directly; Kubernetes migrates in a separate Job.
 AUTOMATOS_MIGRATE_ON_BOOT=true
 
+# Stop a backend that has stopped serving (orchestrator/docker-entrypoint.sh,
+# F416): after 3 failed /health probes 30 s apart the server is stopped and the
+# container exits, so restart: unless-stopped brings it back. Docker alone never
+# restarts a container that is only unhealthy. Off in the image (Railway).
+AUTOMATOS_LIVENESS_WATCHDOG=true
+
 # Document conversion sidecar (compose profile: all) [ACTIVE]
 GOTENBERG_URL=http://gotenberg:3000
 

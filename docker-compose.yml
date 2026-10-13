@@ -296,6 +296,7 @@ services:
       # Mount source for hot-reload in development
       - ./orchestrator:/app
       - ./orchestrator/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+      - ./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
       - backend_logs:/app/logs
@@ -308,7 +309,13 @@ services:
       - workspaces_data:/workspaces:ro
       - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # The same probe the entrypoint's liveness watchdog runs (F416): Docker only
+      # marks the container unhealthy, and restart: unless-stopped never applies to
+      # an unhealthy container, so with AUTOMATOS_LIVENESS_WATCHDOG=true
+      # (envs/api.defaults) the entrypoint stops a backend that has stopped
+      # serving after 3 failed probes 30 s apart; the container exits and is
+      # restarted within ~2 minutes.
+      test: ["CMD", "docker-healthcheck.sh"]
       interval: 30s
       timeout: 10s
       retries: 3
