@@ -41,14 +41,17 @@ from sqlalchemy.orm import Session
 
 from core.database.database import get_db_session
 from core.llm.embedding_manager import get_embedding_manager
-from core.models.composio_cache import ToolExecutionLog
 from core.models.tool_routing import ToolRoutingEdge
 from core.services.edge_builder_clusters import (
     EmbeddedQueries,
+    cluster_max_queries,
+    embed_in_batches,
     embedded_queries,
-    query_logs,
+    recent_query_logs,
+    sampling_counts,
     upsert_clusters,
 )
+from core.services.edge_builder_logs import load_logs as _load_logs
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,11 @@ class EdgeBuildSummary:
     affinities_decayed: int = 0     # PRD-232 US-011: shown-not-used decays applied
     logs_processed: int = 0
     duration_ms: int = 0
+    cluster_queries: int = 0        # F416: queries clustered (at most the cap)
+    cluster_queries_total: int = 0  # F416: query-bearing logs in the window
+    cluster_sampled: bool = False   # F416: over the cap, so a recent sample clustered
+    failed: bool = False            # F416: the run ended in its worker (edge_builder_worker)
+    error: str = ""
 
 
 def _gap_resolution_window() -> timedelta:
@@ -205,14 +213,15 @@ def _load_window(cutoff: datetime, workspace_id: Optional[str]) -> List[Dict[str
 
 
 async def _embed_queries(logs: List[Dict[str, Any]]) -> Optional[EmbeddedQueries]:
-    """Embed the query-bearing logs (ALL logs — a tool_gap row's query must cluster
-    so the resolution join can attribute to it); None when no log has a query."""
-    picked = query_logs(logs)
+    """Embed the query-bearing logs (gap rows too — a tool_gap row's query must
+    cluster so the resolution join can attribute to it), the most recent up to the
+    cap (F416); None when no log has a query."""
+    picked, total = recent_query_logs(logs, cluster_max_queries())
     if not picked:
         return None
     embedding_manager = get_embedding_manager()
-    vectors = await embedding_manager.generate_embeddings_batch([log["user_query"] for _, log in picked])
-    return embedded_queries(picked, vectors, derive_embedding_model_key(embedding_manager))
+    vectors = await embed_in_batches(embedding_manager, [log["user_query"] for _, log in picked])
+    return embedded_queries(picked, vectors, derive_embedding_model_key(embedding_manager), total)
 
 
 def _build_and_write(
@@ -221,7 +230,7 @@ def _build_and_write(
     workspace_id: Optional[str],
 ) -> EdgeBuildSummary:
     """Steps 2–4c in one session and one transaction (a worker thread, F409)."""
-    summary = EdgeBuildSummary(logs_processed=len(logs))
+    summary = EdgeBuildSummary(logs_processed=len(logs), **sampling_counts(embedded))
     with get_db_session() as db:
         # PRD-232 US-011: synthetic gap/shown rows are telemetry markers, not tool
         # executions — exclude them from co-occurrence edges + normal affinities.
@@ -282,40 +291,6 @@ def _build_and_write(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _load_logs(
-    db: Session,
-    cutoff: datetime,
-    workspace_id: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    """Load tool_execution_logs rows from cutoff onwards, return as dicts."""
-    query = db.query(ToolExecutionLog).filter(ToolExecutionLog.executed_at >= cutoff)
-    if workspace_id:
-        query = query.filter(ToolExecutionLog.workspace_id == workspace_id)
-    rows = query.order_by(ToolExecutionLog.executed_at.asc()).all()
-    results = []
-    for row in rows:
-        # Extract turn_id from router_decision JSONB
-        router = row.router_decision or {}
-        # PRD-232 US-011: the surfaced action set (router_decision.candidates) is
-        # the 'shown' half of shown-vs-used decay. Present on execution rows and
-        # on the synthetic __tool_shown__ rows record_selection persists.
-        shown = router.get("candidates")
-        results.append({
-            "id": row.id,
-            "agent_id": row.agent_id,
-            "workspace_id": str(row.workspace_id) if row.workspace_id else None,
-            "action_name": row.action_name,
-            "app_name": row.app_name,
-            "status": row.status,
-            "user_query": row.user_query,
-            "executed_at": row.executed_at,
-            "turn_id": router.get("turn_id"),
-            "conversation_id": router.get("conversation_id"),
-            "shown_actions": list(shown) if isinstance(shown, (list, tuple)) else [],
-        })
-    return results
 
 
 def _derive_session_key(log: Dict[str, Any]) -> str:

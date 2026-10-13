@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 _MIN_SAMPLES_PER_CLUSTER = 3
 # Default number of clusters — adjusted dynamically based on sample size
 _DEFAULT_K = 8
+# Largest (rows, k, D) difference block a distance step builds (F416: the nightly
+# EdgeBuilder passes config.EDGE_BUILDER_KMEANS_BLOCK_MB).
+_DEFAULT_MAX_BLOCK_BYTES = 64 * 1024 * 1024
 
 
 @dataclass
@@ -41,6 +44,7 @@ def compute_intent_clusters(
     statuses: List[str],
     k: Optional[int] = None,
     max_k: int = 20,
+    max_block_bytes: int = _DEFAULT_MAX_BLOCK_BYTES,
 ) -> ClusterResult:
     """Run K-means clustering over query embeddings.
 
@@ -51,6 +55,7 @@ def compute_intent_clusters(
         statuses: parallel list of statuses ('success'/'error') per observation
         k: explicit number of clusters. If None, auto-selects based on N.
         max_k: upper bound on cluster count
+        max_block_bytes: the k-means' largest working block (F416)
 
     Returns:
         ClusterResult with centroids, labels, and per-cluster metadata.
@@ -69,7 +74,7 @@ def compute_intent_clusters(
     # Cannot have more clusters than samples
     k = min(k, n_samples)
 
-    labels, centroids = _kmeans(embeddings, k, random_state=42)
+    labels, centroids = _kmeans(embeddings, k, random_state=42, max_block_bytes=max_block_bytes)
 
     # Build per-cluster metadata
     sample_queries: List[str] = []
@@ -117,6 +122,7 @@ def _kmeans(
     random_state: int = 42,
     max_iterations: int = 300,
     tolerance: float = 1e-4,
+    max_block_bytes: int = _DEFAULT_MAX_BLOCK_BYTES,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Minimal K-means implementation.
 
@@ -136,9 +142,7 @@ def _kmeans(
 
     for i in range(1, k):
         # Distance from each point to nearest existing centroid
-        distances = np.min(
-            np.linalg.norm(data[:, np.newaxis] - centroids[:i], axis=2), axis=1
-        )
+        distances = np.min(_distances(data, centroids[:i], max_block_bytes), axis=1)
         distances_sq = distances ** 2
         total = distances_sq.sum()
         if total == 0:
@@ -153,7 +157,7 @@ def _kmeans(
     labels = np.zeros(n_samples, dtype=np.int32)
     for _ in range(max_iterations):
         # Assignment step
-        distances = np.linalg.norm(data[:, np.newaxis] - centroids, axis=2)
+        distances = _distances(data, centroids, max_block_bytes)
         new_labels = np.argmin(distances, axis=1).astype(np.int32)
 
         # Update step
@@ -175,3 +179,19 @@ def _kmeans(
             break
 
     return labels, centroids
+
+
+def _distances(data: np.ndarray, centroids: np.ndarray, max_block_bytes: int) -> np.ndarray:
+    """(N, k) Euclidean distances from every row to every centroid.
+
+    Computed a block of rows at a time so the (rows, k, D) difference tensor never
+    exceeds ``max_block_bytes`` (F416: one (N, k, D) broadcast over a 30-day window
+    ran the backend out of memory). Each row's distances are computed exactly as
+    in one broadcast, so the clusters do not depend on the block size.
+    """
+    per_row = max(1, centroids.shape[0] * data.shape[1] * data.itemsize)
+    rows = max(1, max_block_bytes // per_row)
+    return np.concatenate([
+        np.linalg.norm(data[start:start + rows, np.newaxis] - centroids, axis=2)
+        for start in range(0, data.shape[0], rows)
+    ])
