@@ -42,10 +42,6 @@ ATTRIBUTION = re.compile(
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]*")
 _WORD = re.compile(r"[a-z0-9£$€][a-z0-9'£$€.]*", re.I)
 MIN_WORD_CHARS = 4
-# P256-FIX-N14-4: the words that turn a sentence round, weighed as one (``in_their_words``).
-NEGATION = "not"
-NEGATIONS: FrozenSet[str] = frozenset({"not", "no", "never", "none", "nothing", "nobody", "neither", "nor",
-                                       "without", "cannot"})
 # The share of a sentence's words one of the owner's messages must hold for it to be theirs.
 SAID_SHARE = 0.5
 # This chat's user turns read for the check: every one a working chat holds.
@@ -125,48 +121,9 @@ def _owner_said(sentence: str, turns: List[FrozenSet[str]]) -> bool:
     return any(len(words & turn) / len(words) >= SAID_SHARE for turn in turns)
 
 
-def in_their_words(text: str, owner_turns: Sequence[str], share: float) -> bool:
-    """P256-FIX-N14-4: whether each sentence of ``text`` is one of the owner's own: a sentence of
-    ``owner_turns`` holds ``share`` of its words in the same order, and says no where it says no
-    ('Tuesdays, not Mondays' is never 'Mondays, not Tuesdays'; 'we do not post' never 'we post').
-    A sentence with no word to weigh ('OK.') is passed over; False when none is left."""
-    said = [_sequence(sentence) for turn in owner_turns for sentence in _SENTENCE.findall(turn or "")]
-    stored = [seq for seq in map(_sequence, _SENTENCE.findall(text or "")) if seq]
-    return bool(stored) and all(any(_held(seq, theirs, share) for theirs in said) for seq in stored)
-
-
-def _sequence(sentence: str) -> List[str]:
-    """The sentence's words in order (``_words``' rule), each negation as one word, NEGATION."""
-    found = (word.strip("'.").lower() for word in _WORD.findall((sentence or "").replace("\u2019", "'")))
-    return [NEGATION if _negates(word) else word for word in found
-            if _negates(word) or (len(word) >= MIN_WORD_CHARS and word not in COMMON_WORDS)]
-
-
-def _negates(word: str) -> bool:
-    return word in NEGATIONS or word.endswith("n't")
-
-
-def _held(seq: List[str], theirs: List[str], share: float) -> bool:
-    """``theirs`` holds ``share`` of ``seq`` in order (a common subsequence), and both or neither say no."""
-    if (NEGATION in seq) != (NEGATION in theirs):
-        return False
-    return _in_order(seq, theirs) / len(seq) >= share
-
-
-def _in_order(a: List[str], b: List[str]) -> int:
-    """The longest common subsequence of two word lists (a sentence is a few dozen words)."""
-    row = [0] * (len(b) + 1)
-    for word in a:
-        diagonal = 0
-        for j, other in enumerate(b, 1):
-            diagonal, row[j] = row[j], diagonal + 1 if word == other else max(row[j], row[j - 1])
-    return row[-1]
-
-
 def _words(text: str) -> FrozenSet[str]:
     found = (word.strip("'.").lower() for word in _WORD.findall(text or ""))
     return frozenset(word for word in found if len(word) >= MIN_WORD_CHARS and word not in COMMON_WORDS)
 
 
-__all__ = ["ATTRIBUTION", "WRITTEN_FIELDS", "as_the_owner_said", "chat_owner_turns", "in_their_words",
-           "without_unsaid_attributions"]
+__all__ = ["ATTRIBUTION", "WRITTEN_FIELDS", "as_the_owner_said", "chat_owner_turns", "without_unsaid_attributions"]

@@ -4,9 +4,9 @@ P256-FIX-N14-4 (night 14, F418): 'When you tell me to stop querying the database
 that turn' sat in the owner's standing rules, cut two answers short, and was never the owner's
 rule: Auto wrote it, on a turn the owner drove, so it had an owner and counted. A memory is now
 the owner's standing rule only in their own words: each of its sentences is one of the owner's
-own messages in this chat (``said_instructions.in_their_words``, at ``STANDING_RULE_SAID_SHARE``
-of its words), and then it is stored ``stated_by: owner`` (``injection_filter``). A memory Auto
-composes, or one stored on a turn no person drives, is kept and recalled, never a standing rule.
+own sentences in this chat, word for word in their order (``rule_wording.in_their_words``), and
+then it is stored ``stated_by: owner`` (``injection_filter``). A memory Auto composes, or one
+stored on a turn no person drives, is kept and recalled, never a standing rule.
 The owner's messages are read from the chat (``said_instructions.chat_owner_turns``: the turn's
 own message is saved before the turn runs), never taken from what the model says they said.
 
@@ -23,11 +23,10 @@ from sqlalchemy.orm import Session
 from modules.memory.injection_filter import STATED_BY_KEY, STATED_BY_OWNER, is_standing_rule
 from modules.tools.discovery.memory_source import SOURCE_TYPES
 
-# The share of a stored sentence's words one of the owner's messages must hold for it to be in
-# their words. Higher than ``said_instructions.SAID_SHARE`` (an attribution kept): a rule rides
-# every turn, so Auto's restatement of a passing ask ('stop querying the database' → 'when you
-# tell me to stop querying the database, I stop for that turn') must not pass for the owner's.
-STANDING_RULE_SAID_SHARE = 0.8
+# A rule is wholly the owner's words in their order (``rule_wording``); Auto may leave out at most
+# this share's complement of the owner's sentence ('Remember that from November we post on
+# Tuesdays' stored as 'From November we post on Tuesdays' keeps 7 of 9 words).
+STANDING_RULE_COVERAGE = 0.6
 SOURCE = "platform_tool"
 NOT_THE_OWNERS_RULE = ("Kept as a memory, not as the owner's standing rule: their messages in this chat do "
                        "not say it in these words. To make it their rule, store it as they said it.")
@@ -69,12 +68,13 @@ def stated_by_the_owner(db: Optional[Session], workspace_id: Any, params: Dict[s
                         owner: Optional[str]) -> bool:
     """Whether the memory is in the words of its owner's own messages in this chat (an owned
     write only: a turn no person drives has none)."""
-    from modules.tools.discovery.said_instructions import chat_owner_turns, in_their_words
+    from modules.tools.discovery.rule_wording import in_their_words
+    from modules.tools.discovery.said_instructions import chat_owner_turns
 
     if not owner:
         return False
     said = chat_owner_turns(db, workspace_id, params)
-    return in_their_words(str(params.get("content") or ""), said, STANDING_RULE_SAID_SHARE)
+    return in_their_words(str(params.get("content") or ""), said, STANDING_RULE_COVERAGE)
 
 
 def memory_metadata(db: Optional[Session], workspace_id: str, params: Dict[str, Any],
@@ -111,5 +111,5 @@ def rule_answer(metadata: Dict[str, Any]) -> Dict[str, Any]:
     return {"standing_rule": False, "rule_note": NOT_THE_OWNERS_RULE}
 
 
-__all__ = ["STANDING_RULE_SAID_SHARE", "memory_metadata", "memory_params_refusal", "rule_answer",
+__all__ = ["STANDING_RULE_COVERAGE", "memory_metadata", "memory_params_refusal", "rule_answer",
            "stated_by_the_owner"]

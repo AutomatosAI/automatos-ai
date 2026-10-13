@@ -221,16 +221,16 @@ def test_what_auto_wrote_becomes_the_owners_rule_when_they_say_it_in_those_words
     assert f"- {RULE}" in _block()
 
 
-def test_in_their_words_needs_every_sentence_and_most_of_its_words():
-    from modules.tools.discovery.memory_write import STANDING_RULE_SAID_SHARE
-    from modules.tools.discovery.said_instructions import in_their_words
+def test_in_their_words_needs_every_sentence_wholly_theirs():
+    from modules.tools.discovery.memory_write import STANDING_RULE_COVERAGE
+    from modules.tools.discovery.rule_wording import in_their_words
 
-    assert in_their_words(RULE, [SAID], STANDING_RULE_SAID_SHARE) is True
-    assert in_their_words(F418, [F418_SAID], STANDING_RULE_SAID_SHARE) is False
-    assert in_their_words(f"{RULE} OK.", [SAID], STANDING_RULE_SAID_SHARE) is True      # no counted words
-    assert in_their_words(f"{RULE} Noted.", [SAID], STANDING_RULE_SAID_SHARE) is False   # a word they never said
-    assert in_their_words(RULE, [], STANDING_RULE_SAID_SHARE) is False
-    assert in_their_words("", [SAID], STANDING_RULE_SAID_SHARE) is False
+    assert in_their_words(RULE, [SAID], STANDING_RULE_COVERAGE) is True
+    assert in_their_words(F418, [F418_SAID], STANDING_RULE_COVERAGE) is False
+    assert in_their_words(f"{RULE} Noted.", [SAID], STANDING_RULE_COVERAGE) is False   # a word they never said
+    assert in_their_words(f"{RULE} !", [SAID], STANDING_RULE_COVERAGE) is True         # no word at all
+    assert in_their_words(RULE, [], STANDING_RULE_COVERAGE) is False
+    assert in_their_words("", [SAID], STANDING_RULE_COVERAGE) is False
 
 
 @pytest.mark.parametrize("stored, said", [
@@ -238,20 +238,29 @@ def test_in_their_words_needs_every_sentence_and_most_of_its_words():
     ("We don't post on Tuesdays.", "We post on Tuesdays."),                            # a no added
     ("From November we post on Mondays, not Tuesdays.", RULE),                         # turned round
     ("Never send the newsletter before ten.", "Always send the newsletter before ten."),
+    ("Send the newsletter after ten.", "Send the newsletter before ten."),            # one word changed
+    ("Post the club boxes at 10 on Wednesdays.", "Post the club boxes at 11 on Wednesdays."),
+    ("We post on Tuesdays.", "Do we post on Tuesdays?"),                               # a question
+    ("Post on Tuesdays.", "From November, once the new courier starts and the club grows past forty "
+                          "members, we will post the club boxes on Tuesdays."),        # too little of it
+    ("Send it. " + "word " * 81, "Send it. " + "word " * 81),                         # past the cap
 ])
 def test_a_rule_that_turns_the_owners_words_round_is_not_theirs(stored, said):
-    from modules.tools.discovery.memory_write import STANDING_RULE_SAID_SHARE
-    from modules.tools.discovery.said_instructions import in_their_words
+    from modules.tools.discovery.memory_write import STANDING_RULE_COVERAGE
+    from modules.tools.discovery.rule_wording import in_their_words
 
-    assert in_their_words(stored, [said], STANDING_RULE_SAID_SHARE) is False
+    assert in_their_words(stored, [said], STANDING_RULE_COVERAGE) is False
 
 
 def test_a_no_said_either_way_is_the_same_no():
-    from modules.tools.discovery.memory_write import STANDING_RULE_SAID_SHARE
-    from modules.tools.discovery.said_instructions import in_their_words
+    from modules.tools.discovery.memory_write import STANDING_RULE_COVERAGE
+    from modules.tools.discovery.rule_wording import in_their_words
 
-    assert in_their_words("Do not post on Tuesdays.", ["Please don\u2019t post on Tuesdays."], STANDING_RULE_SAID_SHARE)
-    assert in_their_words("Post on Tuesdays.", ["Remember: post on Tuesdays. Don't forget."], STANDING_RULE_SAID_SHARE)
+    assert in_their_words("Do not post on Tuesdays.", ["Please don\u2019t post on Tuesdays."], STANDING_RULE_COVERAGE)
+    assert in_their_words("Post on Tuesdays.", ["Remember: post on Tuesdays. Don't forget."], STANDING_RULE_COVERAGE)
+    assert in_their_words("We cannot post on Sundays.", ["We can't post on Sundays."], STANDING_RULE_COVERAGE)
+    assert in_their_words("From November we post on Tuesdays.",
+                          ["Remember that from November we post on Tuesdays."], STANDING_RULE_COVERAGE)
 
 
 def test_the_checks_split_out_of_store_memory_refuse_as_before(qdrant):
