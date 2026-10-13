@@ -23,6 +23,7 @@ from .actions_brand_kit_update import (  # night 9b, PRD-255: left actions_docum
 from .actions_brand_proposals import register_brand_proposal_actions  # PRD-255 US-014: the designer's card
 from .actions_workspace import register_workspace_actions_defs
 from .actions_memory_store import register_store_memory_action
+from .actions_memory_browse import register_memory_browse_actions  # P256-FIX-N14-4: rules listed, deletable
 from .actions_monitoring import register_monitoring_actions
 from .actions_diagnostics import register_diagnostics_actions  # 9 Oct: errors grouped by cause
 from .actions_search import register_search_actions
@@ -77,8 +78,10 @@ def _register_documents_actions(registry: ActionRegistry) -> None:
 
 
 def _register_memory_actions(registry: ActionRegistry) -> None:
-    """Storing a memory, and Auto's record of what it did across chats (P256-FIX-N14-3, F417)."""
+    """Storing, browsing and deleting a memory, and Auto's record of what it did across chats
+    (P256-FIX-N14-3, F417)."""
     register_store_memory_action(registry)
+    register_memory_browse_actions(registry)
     register_my_actions_action(registry)
 
 

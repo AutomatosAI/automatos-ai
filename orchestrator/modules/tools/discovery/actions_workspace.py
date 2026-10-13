@@ -116,60 +116,6 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
         ],
     ))
 
-    # ── Memory Browse/Delete ─────────────────────────────────────────
-
-    registry.register(ActionDefinition(
-        name="platform_browse_memories",
-        description=(
-            "Browse all stored memories with optional keyword filter. Returns "
-            "paginated list with content, agent, date. For storing new memories, "
-            "use platform_store_memory instead."
-        ),
-        category="memory",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query for semantic search (optional).",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results to return (default 20).",
-                },
-            },
-            "required": [],
-        },
-        permission_level="read",
-        tags=["memory", "read", "browse"],
-        examples=[
-            "show all memories",
-            "browse memories",
-            "what has been remembered",
-            "search memories for user preferences",
-        ],
-    ))
-
-    registry.register(ActionDefinition(
-        name="platform_delete_memory",
-        description="Permanently delete a specific memory by ID. Cannot be undone.",
-        category="memory",
-        parameters={
-            "type": "object",
-            "properties": {
-                "memory_id": {
-                    "type": "string",
-                    "description": "ID of the memory to delete.",
-                },
-            },
-            "required": ["memory_id"],
-        },
-        permission_level="destructive",
-        requires_confirmation=True,
-        tags=["memory", "write", "destructive"],
-        examples=["delete memory abc-123", "remove that incorrect memory"],
-    ))
-
     # ── Integrations ─────────────────────────────────────────────────
 
     registry.register(ActionDefinition(

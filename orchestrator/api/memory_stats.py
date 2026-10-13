@@ -20,6 +20,7 @@ from modules.memory.models import MemoryShortTerm
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
+from api.memory_standing_rules import lists_the_viewers_rules
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +341,7 @@ async def get_recent_memories(
 
 
 @router.get("/browse")
+@lists_the_viewers_rules  # P256-FIX-N14-4: the viewer's standing rules first, by the ids delete takes
 async def browse_memories(
     query: Optional[str] = None,
     limit: int = 20,
@@ -477,27 +479,16 @@ async def delete_memory(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Delete a specific memory by ID — PRD-77 / PRD-187 S6.
+    """Delete a memory by the id the page shows — PRD-77 / PRD-187 S6. P256-FIX-N14-4: wherever
+    in this workspace it was stored (``modules.memory.forget`` reads the point's own namespace;
+    the old check looked in the workspace namespace alone), a private memory by its owner alone."""
+    from core.auth.principal import resolve_user_pk
+    from modules.memory.forget import forget, subject_of
 
-    Routes to the durable store through the seam. The old mem0-era version
-    pre-scanned 500 memories across every tier for an ownership check, then
-    called ``delete_memory`` WITHOUT its required ``workspace_id`` — a
-    TypeError on every invocation, so this endpoint never deleted anything.
-    Ownership is now enforced where it belongs: the adapter only deletes
-    points whose namespace matches the workspace-resolved user_id.
-    """
-    service = _get_memory_service()
-    if not service:
+    if not _get_memory_service():
         return {"success": False, "error": "Memory service unavailable"}
-
     try:
-        deleted = await service.delete_memory(
-            memory_id, workspace_id=str(ctx.workspace_id)
-        )
-        if deleted:
-            logger.info("Memory %s deleted by workspace %s", memory_id, ctx.workspace_id)
-            return {"success": True, "message": f"Memory {memory_id} deleted"}
-        return {"success": False, "error": "Memory not found or not owned by this workspace"}
+        return await forget(memory_id, ctx.workspace_id, subject_of(resolve_user_pk(db, ctx)))
     except Exception as e:
         logger.error("Memory delete failed: %s", e, exc_info=True)
         return {"success": False, "error": str(e)[:200]}

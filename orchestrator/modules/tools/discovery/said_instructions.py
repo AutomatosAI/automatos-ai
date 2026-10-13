@@ -113,12 +113,20 @@ def _sentence_as_said(sentence: str, turns: List[FrozenSet[str]]) -> str:
     return f"{lead}{rest[:1].upper()}{rest[1:]}{trail}" if rest else lead
 
 
-def _owner_said(sentence: str, turns: List[FrozenSet[str]]) -> bool:
-    """Whether one of the owner's messages holds most of ``sentence``'s words."""
+def _owner_said(sentence: str, turns: List[FrozenSet[str]], share: float = SAID_SHARE) -> bool:
+    """Whether one of the owner's messages holds ``share`` of ``sentence``'s words."""
     words = _words(sentence)
     if not words:
         return False
-    return any(len(words & turn) / len(words) >= SAID_SHARE for turn in turns)
+    return any(len(words & turn) / len(words) >= share for turn in turns)
+
+
+def in_their_words(text: str, owner_turns: Sequence[str], share: float) -> bool:
+    """P256-FIX-N14-4: whether each sentence of ``text`` that has words is one of
+    ``owner_turns``' own (one of them holds ``share`` of its words); False with none."""
+    turns = [_words(turn) for turn in owner_turns]
+    sentences = [s for s in _SENTENCE.findall(text or "") if _words(s)]
+    return bool(sentences) and all(_owner_said(s, turns, share) for s in sentences)
 
 
 def _words(text: str) -> FrozenSet[str]:
@@ -126,4 +134,5 @@ def _words(text: str) -> FrozenSet[str]:
     return frozenset(word for word in found if len(word) >= MIN_WORD_CHARS and word not in COMMON_WORDS)
 
 
-__all__ = ["ATTRIBUTION", "WRITTEN_FIELDS", "as_the_owner_said", "chat_owner_turns", "without_unsaid_attributions"]
+__all__ = ["ATTRIBUTION", "WRITTEN_FIELDS", "as_the_owner_said", "chat_owner_turns", "in_their_words",
+           "without_unsaid_attributions"]

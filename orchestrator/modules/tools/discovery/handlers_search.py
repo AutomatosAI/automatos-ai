@@ -171,9 +171,24 @@ def _memory_search_answer(query: str, kept: List[Dict[str, Any]], limit: int, ag
     }
 
 
+async def _asking_persons_rules(workspace_id: str, params: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """P256-FIX-N14-4: the standing rules of the person the call is made for (the server's
+    ``_driving_user_id``), and {} or, when they could not be read, what the answer says of it."""
+    from modules.context.sections.memory import owners_rule_rows
+    from modules.memory.forget import subject_of
+
+    try:
+        return await owners_rule_rows(workspace_id, subject_of(params.get("_driving_user_id"))), {}
+    except Exception:  # noqa: BLE001 — logged; the browse answers without them, and says so
+        logger.exception("[N14-4] standing rules not read for platform_browse_memories")
+        return [], {"standing_rules_unavailable": True}
+
+
 async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Browse/search durable memories. F325 (night 9b): one that names an agent's report
-    or output as where a fact came from is left out, and the answer says how many were."""
+    or output as where a fact came from is left out, and the answer says how many were.
+    P256-FIX-N14-4: with no query, the asking person's standing rules come first, each with
+    the id platform_delete_memory takes (the same read the prompt's block makes)."""
     try:
         from modules.memory.agent_sources import agents_document_names, left_out_note, owners_memories
         from modules.memory.unified_memory_service import get_unified_memory_service
@@ -193,6 +208,8 @@ async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any
             )
         found = [m for m in (results or []) if isinstance(m, dict)]
         kept = owners_memories(found, agents_document_names(db, workspace_id))
+        rules, unread = ([], {}) if query else await _asking_persons_rules(ws_id, params)
+        rule_ids = {str(r.get("id")) for r in rules}
 
         # Normalise to consistent format
         memories = [{
@@ -201,7 +218,8 @@ async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any
             "score": m.get("score"),
             "metadata": m.get("metadata") or m.get("metadata_"),
             "created_at": m.get("created_at"),
-        } for m in kept]
+            **({"standing_rule": True} if str(m.get("id")) in rule_ids else {}),
+        } for m in [*rules, *(m for m in kept if str(m.get("id")) not in rule_ids)]]
 
         return {
             "success": True,
@@ -210,6 +228,7 @@ async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any
             "source": "durable_memory",
             "search_query": query,
             **left_out_note(len(found) - len(kept)),
+            **unread,
         }
     except Exception as e:
         logger.exception("[PlatformExecutor] browse_memories failed")
@@ -217,28 +236,17 @@ async def browse_memories(db: Session, workspace_id: UUID, params: Dict[str, Any
 
 
 async def delete_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Delete a memory by ID with workspace ownership check."""
-    from modules.memory.unified_memory_service import get_unified_memory_service
+    """Delete a memory by the id platform_browse_memories (or the Memory page) shows, wherever in
+    this workspace it was stored. P256-FIX-N14-4: the store reads the point's own namespace (the
+    old check looked for the id among the first 500 rows and missed every newer one); a private
+    memory is deleted only for its owner (the server's ``_driving_user_id``, never the model's)."""
+    from modules.memory.forget import forget, subject_of
 
     memory_id = params.get("memory_id")
     if not memory_id:
         return {"success": False, "error": "memory_id is required"}
-
     try:
-        service = get_unified_memory_service()
-        ws_id = str(workspace_id)
-
-        # Ownership check -- verify memory belongs to this workspace
-        all_mems = await service.get_all_memories(workspace_id=ws_id, limit=500)
-        owned_ids = {str(m.get("id", "")) for m in (all_mems if isinstance(all_mems, list) else [])}
-        if memory_id not in owned_ids:
-            return {"success": False, "error": "Memory not found or not owned by this workspace"}
-
-        deleted = await service.delete_memory(memory_id=memory_id, workspace_id=ws_id)
-
-        if deleted:
-            return {"success": True, "message": f"Memory {memory_id} deleted"}
-        return {"success": False, "error": f"Failed to delete memory {memory_id}"}
+        return await forget(str(memory_id), workspace_id, subject_of(params.get("_driving_user_id")))
     except Exception as e:
         logger.error("[PlatformExecutor] delete_memory failed: %s", e, exc_info=True)
         return {"success": False, "error": f"Memory service unavailable: {str(e)[:200]}"}

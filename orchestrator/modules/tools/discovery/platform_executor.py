@@ -356,7 +356,7 @@ _DRIVER_AWARE_ACTIONS = (
     "platform_create_playbook", "platform_resume_context",   # FX-015: on local the person is the viewer
     "platform_invite_member",
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
-    "platform_my_actions",  # P256-FIX-N14-3: only the asking person's chats and clicks are read
+    "platform_my_actions", "platform_browse_memories", "platform_delete_memory",  # N14-3/4: the asker's chats, clicks, rules
 )
 
 

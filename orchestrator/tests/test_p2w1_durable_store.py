@@ -252,5 +252,7 @@ def test_stats_delete_passes_workspace_scope():
     # PRD-187 S6: the Explorer delete endpoint calls the seam with its
     # REQUIRED workspace scope — the mem0-era call omitted it and raised
     # TypeError on every invocation (the endpoint never deleted anything).
+    # P256-FIX-N14-4: the seam is modules.memory.forget (the point's own namespace, in this
+    # workspace); test_prd256_fix_standing_rules_owned.py runs it.
     src = (_ORCH / "api" / "memory_stats.py").read_text()
-    assert "service.delete_memory(\n            memory_id, workspace_id=str(ctx.workspace_id)\n        )" in src
+    assert "await forget(memory_id, ctx.workspace_id, subject_of(resolve_user_pk(db, ctx)))" in src

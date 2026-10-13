@@ -24,6 +24,7 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
+from modules.memory.injection_filter import without_server_keys
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +321,7 @@ async def store_memory(
 
     if service is not None:
         try:
-            mem0_meta = dict(body.metadata) if body.metadata else {}
+            mem0_meta = without_server_keys(body.metadata)  # P256-FIX-N14-4: owner and stated_by are the server's
             if body.tags:
                 mem0_meta["tags"] = body.tags
             result = await service.store_long_term(

@@ -24,7 +24,7 @@ from services import contested_facts as cf
 OWNER = "user:7"
 RULE = "From November we post Wednesdays."
 RULE_ROW = {"memory": RULE, "created_at": "2026-10-11T22:05:00+00:00",
-            "metadata": {"type": "preference", "owner": OWNER}}
+            "metadata": {"type": "preference", "owner": OWNER, "stated_by": "owner"}}
 ASK = "What day do we post the club boxes from November?"
 MONDAY_FILES = ["packing-checklist.md", "club-faq.md", "dispatch-calendar.md", "courier-sheet.md", "club-terms.md"]
 OLDER_THAN_THE_RULE = cf.OLDER_THAN_THE_RULES.format(stated="2026-10-11")
