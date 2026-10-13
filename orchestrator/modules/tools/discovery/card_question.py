@@ -19,6 +19,7 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
   its description and its prompt's first line;
 - P256-FIX-T4: a playbook run: the playbook, each input it is given and its "wait for me".
 - P256-FIX-N13-7: a mission's plan changed: the mission, each step's change and the check.
+- P256-FIX-N14-7: a skill made: its name, what it does and its instructions' first line.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -34,6 +35,7 @@ from modules.tools.discovery import card_question_plans as plans
 from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
 from modules.tools.discovery import card_question_sends as sends
+from modules.tools.discovery import card_question_skill_create as skill_create
 from modules.tools.discovery import card_question_skills as skills
 from modules.tools.discovery import card_question_timers as timers
 from modules.tools.discovery.card_question_text import question, said_line, shown, value_line
@@ -140,6 +142,8 @@ READERS: Dict[str, Lines] = {
     "platform_execute_playbook": playbooks.run_lines,
     # P256-FIX-N13-7: a mission's plan changed from the chat: the mission, each step's change, the check.
     "platform_update_mission_plan": plans.plan_lines,
+    # P256-FIX-N14-7: a skill made from the chat: its name, what it does, its instructions' first line.
+    "platform_create_workspace_skill": skill_create.create_skill_lines,
 }
 
 

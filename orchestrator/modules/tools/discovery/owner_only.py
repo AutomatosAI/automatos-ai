@@ -59,6 +59,8 @@ OWNER_ONLY_ACTIONS = frozenset({
     "platform_schedule_task",
     # P256-FIX-T4 (Gerard, 11 Oct, benchmark F321-a): a playbook run started from the chat.
     "platform_execute_playbook",
+    # P256-FIX-N14-7 (F421): a skill made for the workspace, as a skill given or edited is.
+    "platform_create_workspace_skill",
 })
 CARD_MOVES = frozenset({"platform_update_task_status", "platform_update_task"})
 # An update is owner-only only when it sets the playbook's timer (P256-FIX-RVW-14).
@@ -118,6 +120,7 @@ VERBS = {
     "platform_uninstall_plugin": "turn a plugin off and take it from every agent",
     "platform_delete_workspace_skill": "delete a skill and take it from every agent",
     "platform_update_skill": "edit a skill its agents use",
+    "platform_create_workspace_skill": "create a skill for this workspace",
     "platform_schedule_task": "set an agent's timer",
     "platform_create_agent": "create an agent that runs as a session on the paired machine",
     "platform_execute_playbook": "run a playbook",

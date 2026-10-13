@@ -50,11 +50,15 @@ def bound_to_the_subject(db: Any, workspace_id: Any, action: str,
                          params: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """(the call with its plugin or skill id as the row's own, the refusal when it names
     none the tool would act on). Any other call is as it is; a skill or plugin given to
-    (or taken from) one agent is bound by ``assigned_subjects`` (P256-FIX-RVW-17)."""
+    (or taken from) one agent is bound by ``assigned_subjects`` (P256-FIX-RVW-17), and a skill
+    made is refused when the click could not make it (``card_question_skill_create``)."""
     from modules.tools.discovery.assigned_subjects import BINDS as ASSIGNED, bound_to_the_assigned
+    from modules.tools.discovery.card_question_skill_create import CREATE_SKILL, refused_before_the_create
 
     if action in ASSIGNED:
         return bound_to_the_assigned(db, workspace_id, action, params)
+    if action == CREATE_SKILL:  # P256-FIX-N14-7: a skill made, never one the click could not make
+        return params, refused_before_the_create(db, workspace_id, params)
     key = BINDS.get(action)
     if key is None:
         return params, None
