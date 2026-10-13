@@ -1708,6 +1708,13 @@ class Config:
     DECISION_ENGINE_USD_PER_MTOK_IN: float = float(os.getenv("DECISION_ENGINE_USD_PER_MTOK_IN", "0.042"))
     # Shadow comparisons, one JSON line each — read by scripts/eval/decision_shadow.
     DECISION_SHADOW_LOG_PATH: str = os.getenv("DECISION_SHADOW_LOG_PATH", "logs/decision_shadow.jsonl")
+    # P256-FIX-N14-8: an experiment, off by default. On, Auto's offered tool shortlist is
+    # Jev's kept top few ahead of the platform's embedding top few (deduplicated) when Jev
+    # answers within the timeout; late or silent, the platform's list is offered unchanged.
+    TOOL_SHORTLIST_JEV_UNION: bool = os.getenv("TOOL_SHORTLIST_JEV_UNION", "false").lower() in ("true", "1", "yes")
+    TOOL_SHORTLIST_JEV_TIMEOUT_S: float = float(os.getenv("TOOL_SHORTLIST_JEV_TIMEOUT_S", "1.0"))
+    TOOL_SHORTLIST_JEV_TOP: int = int(os.getenv("TOOL_SHORTLIST_JEV_TOP", "5"))
+    TOOL_SHORTLIST_PLATFORM_TOP: int = int(os.getenv("TOOL_SHORTLIST_PLATFORM_TOP", "10"))
 
     @property
     def RAG_HYBRID_ENABLED(self) -> bool:
