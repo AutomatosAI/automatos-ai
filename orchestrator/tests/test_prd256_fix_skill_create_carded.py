@@ -46,9 +46,14 @@ def cafe(db_session, seed_workspace, monkeypatch):
     from sqlalchemy import text
 
     import modules.tools.discovery.follows_the_owner as guard
+    from core.models.core import Agent
     from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
     ws = UUID(seed_workspace())
+    auto = Agent(name="Auto", agent_type="system", description="", status="active", configuration={},
+                 workspace_id=ws, created_by="test", owner_type="workspace", owner_id=str(ws), is_system_agent=True)
+    db_session.add(auto)
+    db_session.flush()
     tag = uuid4().hex[:8]
     owner = db_session.execute(text("INSERT INTO users (email, username) VALUES (:e, :u) RETURNING id"),
                                {"e": f"n147-{tag}@harbourline.test", "u": f"n147-{tag}"}).scalar()
@@ -58,12 +63,13 @@ def cafe(db_session, seed_workspace, monkeypatch):
     executor = PlatformActionExecutor(db_session, ws)
     executor._full_autonomy = lambda: True
     chat = {"driving_user_id": str(owner), "user_id": "user_owner", "conversation_id": str(uuid4()), "turn_id": "t-1"}
-    return NS(db=db_session, ws=ws, owner=owner, executor=executor, chat=chat)
+    return NS(db=db_session, ws=ws, owner=owner, auto=auto.id, executor=executor, chat=chat)
 
 
 def _call(cafe, params):
+    """The call as the chat makes it: Auto as ``_agent_id`` (the hierarchy check's actor)."""
     with patch("core.security.rate_limiter.check_rate_limit", new=AsyncMock(return_value=None)):
-        return asyncio.run(cafe.executor.execute(CREATE, dict(params), cafe.chat))
+        return asyncio.run(cafe.executor.execute(CREATE, {**params, "_agent_id": cafe.auto}, cafe.chat))
 
 
 def _grants(cafe):

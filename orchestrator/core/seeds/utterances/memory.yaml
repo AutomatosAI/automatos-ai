@@ -29,6 +29,8 @@ actions:
   platform_browse_memories:
   - text: show all memories
     source: example
+  - text: what standing rules do you have for me
+    source: example
   - text: browse memories
     source: example
   - text: what has been remembered
@@ -104,6 +106,8 @@ actions:
     source: authored
   platform_delete_memory:
   - text: delete memory abc-123
+    source: example
+  - text: forget that standing rule
     source: example
   - text: remove that incorrect memory
     source: example
