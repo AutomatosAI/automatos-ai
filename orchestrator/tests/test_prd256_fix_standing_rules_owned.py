@@ -233,6 +233,27 @@ def test_in_their_words_needs_every_sentence_and_most_of_its_words():
     assert in_their_words("", [SAID], STANDING_RULE_SAID_SHARE) is False
 
 
+@pytest.mark.parametrize("stored, said", [
+    ("We post on Tuesdays.", "We do not post on Tuesdays any more."),                 # the no dropped
+    ("We don't post on Tuesdays.", "We post on Tuesdays."),                            # a no added
+    ("From November we post on Mondays, not Tuesdays.", RULE),                         # turned round
+    ("Never send the newsletter before ten.", "Always send the newsletter before ten."),
+])
+def test_a_rule_that_turns_the_owners_words_round_is_not_theirs(stored, said):
+    from modules.tools.discovery.memory_write import STANDING_RULE_SAID_SHARE
+    from modules.tools.discovery.said_instructions import in_their_words
+
+    assert in_their_words(stored, [said], STANDING_RULE_SAID_SHARE) is False
+
+
+def test_a_no_said_either_way_is_the_same_no():
+    from modules.tools.discovery.memory_write import STANDING_RULE_SAID_SHARE
+    from modules.tools.discovery.said_instructions import in_their_words
+
+    assert in_their_words("Do not post on Tuesdays.", ["Please don\u2019t post on Tuesdays."], STANDING_RULE_SAID_SHARE)
+    assert in_their_words("Post on Tuesdays.", ["Remember: post on Tuesdays. Don't forget."], STANDING_RULE_SAID_SHARE)
+
+
 def test_the_checks_split_out_of_store_memory_refuse_as_before(qdrant):
     from modules.tools.discovery.memory_write import memory_params_refusal
 
