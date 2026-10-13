@@ -8,6 +8,8 @@ import logging
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from .shown_reads import shows_a_read_file
+
 logger = logging.getLogger(__name__)
 
 
@@ -361,6 +363,7 @@ async def resolve_repo_dir(client) -> Optional[str]:
     return None
 
 
+@shows_a_read_file  # F420 (night 14): in the owner's chat, a file read is theirs to see
 async def execute_workspace_action(
     executor,
     tool_name: str,
