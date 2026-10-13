@@ -255,7 +255,9 @@ def test_a_number_the_cards_words_show_is_not_said_twice():
 # ── A window with no writes says so; no person, no read ──────────────────────────────────
 
 def test_a_window_with_no_writes_says_so(night):
-    out = _ask(night, {"since": (NOW + timedelta(minutes=5)).isoformat()})
+    # The real clock, not NOW (import time): the fixture's click is stamped when it is made,
+    # which on a slow shard is minutes after the module was imported.
+    out = _ask(night, {"since": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()})
 
     assert out["success"] is True and out["done"] == out["waiting"] == out["clicks"] == []
     assert out["message"].startswith("Nothing since ") and "no writes of mine" in out["message"]
