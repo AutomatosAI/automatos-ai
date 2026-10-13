@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from modules.tools.discovery.memory_owner import owned_by_the_driver
 from modules.tools.discovery.memory_source import defaults_the_source_type
+from modules.tools.discovery.memory_write import memory_metadata, memory_params_refusal, rule_answer
 
 logger = logging.getLogger(__name__)
 
@@ -169,64 +170,18 @@ async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str,
 @defaults_the_source_type  # PRD-256 FX-013: source_type is optional; the turn's driver sets its default
 @owned_by_the_driver  # PRD-256 FX-015: no Clerk id (the local edition), the driving person owns it
 async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    from modules.memory.write_contract import (
-        MEMORY_FACT_TYPES,
-        MEMORY_SCOPES,
-        build_memory_metadata,
-        violates_exclusions,
-    )
-
+    """Store a curated fact in the workspace's long-term memory (``memory_write`` checks the
+    params and builds the metadata; P256-FIX-N14-4: in the owner's own words, it is their
+    standing rule, and the answer says which it is)."""
     content = params.get("content")
     if not content:
         return {"success": False, "error": "Missing required parameter: content"}
-
-    valid_source_types = {"platform_verified", "claude_reports", "current_status", "inference"}
-    source_type = params.get("source_type", "inference")
-    if source_type not in valid_source_types:
-        return {
-            "success": False,
-            "error": f"source_type must be one of: {', '.join(sorted(valid_source_types))}",
-        }
-
-    confidence = params.get("confidence")
-    if confidence is not None:
-        try:
-            confidence = float(confidence)
-            if not 0.0 <= confidence <= 1.0:
-                raise ValueError
-        except (TypeError, ValueError):
-            return {"success": False, "error": "confidence must be a number between 0 and 1"}
-
-    fact_type = params.get("type")
-    if fact_type is not None and fact_type not in MEMORY_FACT_TYPES:
-        return {
-            "success": False,
-            "error": f"type must be one of: {', '.join(sorted(MEMORY_FACT_TYPES))}",
-        }
-
-    scope = params.get("scope")
-    if scope is not None and scope not in MEMORY_SCOPES:
-        return {
-            "success": False,
-            "error": f"scope must be one of: {', '.join(sorted(MEMORY_SCOPES))}",
-        }
-
-    # PRD-206 S1 (Q3 silent-everything): the exclusion validator IS the consent
-    # gate — refuse loudly so the model can tell the user, and never echo the
-    # content back into the refusal.
-    violation = violates_exclusions(str(content))
-    if violation:
-        return {
-            "success": False,
-            "error": (
-                f"Refused by the memory exclusion policy (rule: {violation}). "
-                "Secrets, credentials, payment and similar sensitive data are "
-                "never stored as memory."
-            ),
-        }
+    # PRD-206 S1 (Q3 silent-everything): refuse loudly so the model can tell the user.
+    refusal = memory_params_refusal(params)
+    if refusal:
+        return {"success": False, "error": refusal}
 
     try:
-        from datetime import datetime, timezone
         from modules.memory.unified_memory_service import get_unified_memory_service
 
         service = get_unified_memory_service()
@@ -239,31 +194,8 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         # text could reach public visitors. Memories go to the workspace, as this
         # tool says; nothing files for another agent (the executor strips the key).
         agent_id_int = None
-
-        # PRD-206 S1: both write paths build the SAME canonical metadata via
-        # the write contract — type + scope (Q7 split default) + provenance +
-        # owner + chat link. ``_user_id`` / ``_origin_chat_id`` are server-
-        # injected by the executor (strip-then-inject), never caller-supplied.
-        extra: Dict[str, Any] = {
-            "workspace_id": ws_id,
-            "source": "platform_tool",
-            "verified_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if params.get("evidence_uri"):
-            extra["evidence_uri"] = params["evidence_uri"]
-
-        metadata = build_memory_metadata(
-            fact_type=fact_type or "business_fact",
-            importance=params.get("importance"),
-            confidence=confidence,
-            source_type=source_type,
-            scope=scope,
-            owner=_resolve_owner_subject(db, params.get("_user_id")),
-            chat_id=params.get("_origin_chat_id"),
-            pinned=bool(params["pinned"]) if params.get("pinned") is not None else None,
-            extra=extra,
-        )
-
+        # ``_user_id`` is server-injected by the executor (strip-then-inject), never caller-supplied.
+        metadata = memory_metadata(db, ws_id, params, _resolve_owner_subject(db, params.get("_user_id")))
         result = await service.store_long_term(
             workspace_id=ws_id,
             content=content,
@@ -275,13 +207,12 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             # F103: the model must not tell the owner "noted" over a lost write.
             return {"success": False, "error": f"Memory NOT saved — {result['error']}. Tell the owner it was not stored."}
 
-        ns = service.namespace(ws_id)
-        user_id = ns.resolve(agent_id_int)
-        facts = result.get("facts_extracted", "unknown")
+        user_id = service.namespace(ws_id).resolve(agent_id_int)
         return {
             "success": True,
             "message": f"Stored in memory (user_id={user_id}): '{content[:100]}'",
-            "facts_extracted": facts,
+            "facts_extracted": result.get("facts_extracted", "unknown"),
+            **rule_answer(metadata),
         }
     except Exception as e:
         logger.warning(f"[PlatformExecutor] Memory store failed: {e}", exc_info=True)

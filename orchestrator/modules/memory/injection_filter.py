@@ -76,6 +76,17 @@ def visible_to_viewer(mem: Dict[str, Any], viewer_subject_id: Optional[str] = No
     return bool(viewer_subject_id) and owner == viewer_subject_id
 
 
+def deletable_by(mem: Dict[str, Any], deleter_subject_id: Optional[str] = None) -> bool:
+    """P256-FIX-N14-4: a private memory with an owner is deleted by that owner alone (a member's
+    standing rule is theirs to forget); any other memory of the workspace by whoever may delete
+    there. ``mem`` is a stored point's payload or a memory row (both carry ``metadata``)."""
+    meta = mem.get("metadata") if isinstance(mem, dict) else None
+    meta = meta if isinstance(meta, dict) else {}
+    if meta.get("scope") != "private" or not meta.get("owner"):
+        return True
+    return bool(deleter_subject_id) and meta["owner"] == deleter_subject_id
+
+
 def filter_injectable_memories(
     memories: Iterable[Dict[str, Any]],
     *,
@@ -115,29 +126,38 @@ def filter_injectable_memories(
 # PRD-256 FX-015 (night 12, F393): the owner's standing rules, which every chat turn carries
 # whatever its intent (``modules.context.sections.memory.StandingRulesSection``). A rule is a
 # person's: it has an owner (the executor gives a ``store_memory`` row one only from the person
-# driving the turn; the distiller, from the person whose chat it was), so an agent's note on a
-# ticket and a legacy row with no owner are never one. It is a ``preference`` (the taxonomy has
-# no ``rule`` or ``schedule`` tag), or what ``store_memory`` wrote (``source: platform_tool``)
-# on that person's turn, whatever its type. A rule rides only its own person's turns: one
-# member's note is never put to another as what they asked for (recall still finds it).
-STANDING_RULE_TYPES = ("preference",)
-SAID_IN_CHAT = "platform_tool"
+# driving the turn), so an agent's note on a ticket and a legacy row with no owner are never one.
+# A rule rides only its own person's turns: one member's note is never put to another as what
+# they asked for (recall still finds it).
+# P256-FIX-N14-4 (night 14, F418): and it is in the person's own words. ``store_memory`` marks a
+# row ``stated_by: owner`` only when that person's own messages in the chat say what it stores
+# (``modules.tools.discovery.memory_write``); a memory Auto or an agent composed (night 14's 'When
+# you tell me to stop querying the database, I stop for that turn'), and a fact the distiller
+# drew from a chat, is recalled as memory but is never a standing rule.
+STATED_BY_KEY = "stated_by"
+STATED_BY_OWNER = "owner"
 # The durable-store read: a row matching any of these is read, then ``is_standing_rule`` decides.
-STANDING_RULE_FILTER: Dict[str, List[str]] = {
-    "metadata.type": list(STANDING_RULE_TYPES),
-    "metadata.category": list(STANDING_RULE_TYPES),
-    "metadata.source": [SAID_IN_CHAT],
-}
+STANDING_RULE_FILTER: Dict[str, List[str]] = {f"metadata.{STATED_BY_KEY}": [STATED_BY_OWNER]}
 # P256-FIX-RVW-11: the read holds only the viewer's rows (``metadata.owner`` == their subject id).
 STANDING_RULE_OWNER_KEY = "metadata.owner"
 
 
+# The keys only the platform writes: who a memory belongs to, and that it is in their words.
+SERVER_SET_KEYS = ("owner", STATED_BY_KEY)
+
+
+def without_server_keys(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """P256-FIX-N14-4: a caller's metadata with the platform's own keys taken off (a new dict), so
+    no request can store a memory as another person's, or as their standing rule."""
+    return {k: v for k, v in (metadata or {}).items() if k not in SERVER_SET_KEYS}
+
+
 def is_standing_rule(mem: Any) -> bool:
-    """A person's preference, or a memory ``store_memory`` wrote on a turn a person drove."""
+    """A memory with an owner, stored in that person's own words (``stated_by: owner``)."""
     meta = mem.get("metadata") if isinstance(mem, dict) else None
     if not isinstance(meta, dict) or not meta.get("owner"):
         return False
-    return (meta.get("type") or meta.get("category")) in STANDING_RULE_TYPES or meta.get("source") == SAID_IN_CHAT
+    return meta.get(STATED_BY_KEY) == STATED_BY_OWNER
 
 
 def standing_rule_rows(memories: Iterable[Any], viewer_subject_id: Optional[str] = None) -> List[Dict[str, Any]]:

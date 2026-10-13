@@ -18,7 +18,7 @@ import pytest
 from core.llm.clients.base import LLMResponse
 from core.llm.usage_context import LANE_CHAT, usage_scope
 from modules.tools.discovery import handlers_deliverables
-from modules.tools.execution import fetched_work
+from modules.tools.execution import fetched_work, shown_reads
 from modules.tools.execution.nudges import is_nudge
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 from tests.test_prd256_fix_waiting_receipt import _chats, _routed
@@ -105,7 +105,7 @@ def _run(*replies, said=SHOW, promises=True, envelopes=None, first=None):
 
 def test_the_fetch_tells_the_model_the_text_is_the_owners_to_see_before_the_text():
     found = _fetch()["deliverable"]
-    assert found["content"] == DRAFT and found["show_the_owner"] == handlers_deliverables.SHOW_IT_NOTE
+    assert found["content"] == DRAFT and found["show_the_owner"] == shown_reads.SHOW_IT_NOTE
     assert list(found).index("show_the_owner") < list(found).index("content")
 
     seen = _routed(_fetch(), tool=GET)["llm_context"]       # what the model reads

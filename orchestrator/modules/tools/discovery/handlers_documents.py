@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from modules.tools.discovery.read_document_lookup import reads_exactly_the_named_document
+from modules.tools.execution.shown_reads import document_link, shows_the_owner
 from services.contested_facts import dates_and_ranks
 
 logger = logging.getLogger(__name__)
@@ -488,6 +489,7 @@ def _resolve_agent_team(db: Session, agent_id: Any) -> Optional[str]:
 
 
 @reads_exactly_the_named_document  # F327 (night 9b): exactly the document asked for, never another
+@shows_the_owner(document_link)  # F420 (night 14): in the owner's chat, the text is theirs to see
 async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Paged full-content reading of a document, workspace+team scoped (S1),
     token-budgeted per page (D11). Lets an agent read past the short search snippet.

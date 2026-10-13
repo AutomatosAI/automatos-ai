@@ -23,6 +23,7 @@ from .actions_brand_kit_update import (  # night 9b, PRD-255: left actions_docum
 from .actions_brand_proposals import register_brand_proposal_actions  # PRD-255 US-014: the designer's card
 from .actions_workspace import register_workspace_actions_defs
 from .actions_memory_store import register_store_memory_action
+from .actions_memory_browse import register_memory_browse_actions  # P256-FIX-N14-4: rules listed, deletable
 from .actions_monitoring import register_monitoring_actions
 from .actions_diagnostics import register_diagnostics_actions  # 9 Oct: errors grouped by cause
 from .actions_search import register_search_actions
@@ -64,6 +65,7 @@ from .actions_intake import register_intake_actions  # PRD-222 W1S8
 from .actions_packages import register_package_actions  # PRD-230 US-006
 from .actions_web import register_web_actions  # PRD-240: platform_web_fetch + platform_web_search
 from .actions_socials import register_socials_actions  # PRD-251 US-116: Socials drafts (never approve/publish)
+from .actions_my_actions import register_my_actions_action  # P256-FIX-N14-3 (F417): what Auto did
 
 
 def _register_documents_actions(registry: ActionRegistry) -> None:
@@ -73,6 +75,14 @@ def _register_documents_actions(registry: ActionRegistry) -> None:
     register_brand_kit_get_action(registry)
     register_brand_kit_update_action(registry)
     register_brand_proposal_actions(registry)
+
+
+def _register_memory_actions(registry: ActionRegistry) -> None:
+    """Storing, browsing and deleting a memory, and Auto's record of what it did across chats
+    (P256-FIX-N14-3, F417)."""
+    register_store_memory_action(registry)
+    register_memory_browse_actions(registry)
+    register_my_actions_action(registry)
 
 
 def _register_observability_actions(registry: ActionRegistry) -> None:
@@ -89,7 +99,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_analytics_actions(registry)
     _register_documents_actions(registry)
     register_workspace_actions_defs(registry)
-    register_store_memory_action(registry)
+    _register_memory_actions(registry)
     _register_observability_actions(registry)
     register_search_actions(registry)
     register_tools_llms_actions(registry)

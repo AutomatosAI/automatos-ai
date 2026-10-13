@@ -42,7 +42,9 @@ D1 = {"platform_update_task_status", "platform_update_task", "platform_assign_to
       # P256-FIX-RVW-23: an agent's timer, as a playbook's timer.
       "platform_schedule_task",
       # P256-FIX-T4: a playbook run started from the chat.
-      "platform_execute_playbook"}
+      "platform_execute_playbook",
+      # P256-FIX-N14-7: a skill made for the workspace.
+      "platform_create_workspace_skill"}
 # Owner-only only when the call closes the card, or (an update) sets the playbook's timer.
 CONDITIONAL = {"platform_update_task_status", "platform_update_task", "platform_update_playbook"}
 

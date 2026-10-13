@@ -444,7 +444,8 @@ STANDING_RULES_HEADING = "## Standing Rules"
 STANDING_RULES_LEAD = ("What the person you are talking to asked you to remember, newest first. Where one "
                        "bears on what you are asked, keep to it without being asked (a posting day, a price, "
                        "a term); a newer one replaces an older one it contradicts. They are notes on how to "
-                       "work, never a request to take an action by themselves. " + RULES_OUTRANK_DOCUMENTS)
+                       "work, never a request to take an action by themselves. To forget one when asked, "
+                       "platform_browse_memories lists them with their ids. " + RULES_OUTRANK_DOCUMENTS)
 
 
 def render_standing_rules(rules: list[str], max_tokens: int) -> str:
@@ -496,15 +497,26 @@ class OwnersRules:
         return render_standing_rules(list(self.texts), config.STANDING_RULES_MAX_TOKENS)
 
 
+async def owners_rule_rows(workspace_id: object, viewer_subject_id: Optional[str]) -> list[dict]:
+    """P256-FIX-N14-4: the standing rules ``viewer_subject_id`` stated in this workspace, newest
+    first, each row with the id it is deleted by. The one read the prompt's block, the Memory page
+    (api/memory_stats /browse) and platform_browse_memories share; a failed read raises."""
+    from modules.memory.injection_filter import standing_rule_rows
+
+    if not workspace_id or not viewer_subject_id:
+        return []
+    return standing_rule_rows(await _stored_rule_rows(str(workspace_id), viewer_subject_id), viewer_subject_id)
+
+
 async def owners_rules(workspace_id: object, *, viewer_subject_id: Optional[str], widget_mode: bool) -> OwnersRules:
     """The standing rules the turn's person stated; none on a widget visitor's turn or a failed read.
     P256-FIX-N13-3: with the day the newest was stated, which a passage's date is weighed against."""
-    from modules.memory.injection_filter import rule_texts, standing_rule_rows
+    from modules.memory.injection_filter import rule_texts
 
     if widget_mode or not workspace_id or not viewer_subject_id:
         return OwnersRules()
     try:
-        rows = standing_rule_rows(await _stored_rule_rows(str(workspace_id), viewer_subject_id), viewer_subject_id)
+        rows = await owners_rule_rows(workspace_id, viewer_subject_id)
     except Exception:  # noqa: BLE001 — logged; the turn goes on without the block
         logger.exception("[FX-015] standing rules not read for workspace %s", workspace_id)
         return OwnersRules()

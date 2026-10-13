@@ -16,14 +16,19 @@ set by the server from the request) and evidenced by its grant.
 Only a call's card is remembered (``tool_call``, never a question: an answer has its own path).
 A click the route refuses (already decided, 422) raises before this runs, so one grant is one
 memory. A memory that is not stored is logged with its reason; the click has already run.
+
+P256-FIX-N14-3 (night 14, F417): "what did I decide about #1437?" found 1 click of 8. The memory
+names each card the call does by its board number (``numbers_of_the_card``), the card's words
+first, so recall by number finds it; ``platform_my_actions`` reads the grant row itself.
 """
 from __future__ import annotations
 
 import functools
 import inspect
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +43,18 @@ USER_ACTOR = "user:"
 UNKNOWN_ACTOR = "unknown"
 CARD_NOTES = ("- note: ", "- comment: ")  # the note as the card showed it (card_question_text.said_line)
 CARD_CHARS = 160
+NUMBER_MARK = "#"
 NOTE_CHARS = 200
 ERROR_CHARS = 200
 CHAT_LANE = "chat"
-MEMORY = 'The owner {decision} the card "{card}" on {day}{note}. {outcome}'
+MEMORY = 'The owner {decision} the card "{card}"{numbers} on {day}{note}. {outcome}'
 NOTE = ", note: {note}"
 RAN = "It ran."
 RAN_WITH = "It ran: {ids}."
 NOT_THROUGH = "It did not go through: {error}"
 NOTHING_RAN = "Nothing ran."
 NO_REASON = "no reason given"
+ON_CARDS = " (card {numbers})"
 
 
 def remembers_the_decision(decision: str) -> Callable[[Route], Route]:
@@ -78,7 +85,8 @@ async def remember_the_click(db: Any, ctx: Any, grant_id: Any, decision: str) ->
         grant = _a_calls_card(db, getattr(ctx, "workspace_id", None), grant_id)
         if grant is None:
             return None
-        stored = await _store(db, grant, decision_memory(grant, decision), owner_of(grant, decision))
+        said = decision_memory(grant, decision, numbers_of_the_card(db, grant))
+        stored = await _store(db, grant, said, owner_of(grant, decision))
     except Exception as exc:  # the click has run: the lost memory is logged, and the answer says so
         logger.exception("[click_memory] the decision on grant %s was not remembered", grant_id)
         return {"success": False, "error": str(exc)[:ERROR_CHARS]}
@@ -88,15 +96,31 @@ async def remember_the_click(db: Any, ctx: Any, grant_id: Any, decision: str) ->
     return stored
 
 
-def decision_memory(grant: Any, decision: str) -> str:
+def decision_memory(grant: Any, decision: str, numbers: Sequence[str] = ()) -> str:
     """'The owner approved the card "Approve (move to Done) #1403 'Autumn tier launch copy'" on
-    12 Oct 2026, note: Ship it. It ran: number #1403.' A decline names no note and says nothing ran."""
+    12 Oct 2026, note: Ship it. It ran: number #1403.' A decline names no note and says nothing ran.
+    A board number of ``numbers`` the card's words do not show follows them: '"…" (card #1437)'."""
     details = grant.details if isinstance(grant.details, dict) else {}
+    card = card_words(grant)
+    unsaid = [number for number in dict.fromkeys(numbers) if not re.search(rf"{re.escape(number)}(?![\d.])", card)]
+    shown = ON_CARDS.format(numbers=", ".join(unsaid)) if unsaid else ""
     if decision == DECLINED:
-        return MEMORY.format(decision=decision, card=card_words(grant), day=_day(grant.revoked_at), note="",
+        return MEMORY.format(decision=decision, card=card, numbers=shown, day=_day(grant.revoked_at), note="",
                              outcome=NOTHING_RAN)
-    return MEMORY.format(decision=decision, card=card_words(grant), day=_day(grant.granted_at),
-                         note=_note(grant), outcome=_outcome(details.get("executed_result"))).strip()
+    return MEMORY.format(decision=decision, card=card, numbers=shown, day=_day(grant.granted_at),
+                         note=_note(grant), outcome=outcome_of(details.get("executed_result"))).strip()
+
+
+def numbers_of_the_card(db: Any, grant: Any) -> List[str]:
+    """The board numbers of the tickets the card's call names ('#1437'), read the way the card
+    shows them (``card_ticket_numbers``); [] for a call that names none."""
+    from modules.tools.discovery.card_ticket_numbers import numbers_on_the_card
+
+    details = grant.details if isinstance(getattr(grant, "details", None), dict) else {}
+    shown = numbers_on_the_card(db, grant.workspace_id, str(details.get("action") or grant.tool_name or ""),
+                                details.get("params"))
+    said = [value for named in shown.values() for value in (named if isinstance(named, list) else [named])]
+    return [number for number in said if isinstance(number, str) and number.startswith(NUMBER_MARK)]
 
 
 def card_words(grant: Any) -> str:
@@ -148,7 +172,7 @@ def _note(grant: Any) -> str:
     return NOTE.format(note=said) if said else ""
 
 
-def _outcome(result: Any) -> str:
+def outcome_of(result: Any) -> str:
     """What the click's run came to (``executed_result``): ran, with the ids it named, or why not."""
     if not isinstance(result, dict) or "success" not in result:
         return ""
@@ -164,4 +188,5 @@ def _day(when: Any) -> str:
     return f"{when.day} {when:%b %Y}"
 
 
-__all__ = ["APPROVED", "DECLINED", "card_words", "decision_memory", "owner_of", "remember_the_click", "remembers_the_decision"]
+__all__ = ["APPROVED", "DECLINED", "NOTHING_RAN", "card_words", "decision_memory", "numbers_of_the_card", "outcome_of", "owner_of",
+           "remember_the_click", "remembers_the_decision"]

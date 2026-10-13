@@ -98,6 +98,8 @@ FROM base as development
 # AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it); otherwise it runs the CMD
 # directly. Compose also bind-mounts it, so edits apply without a rebuild.
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
+COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
 
 # Copy application code (Dockerfile is in orchestrator/, so copy from current dir)
 COPY . .
@@ -117,7 +119,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD docker-healthcheck.sh
 
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
@@ -132,7 +134,9 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # --reload first waits for open HTTP connections to close and the browser's SSE
 # streams (notifications, board events) never do, so every code edit wedged the
 # server in "Waiting for connections to close" until a restart (PRD-233 finding).
-CMD sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5"
+# `exec` (F416): uvicorn replaces the shell, so the entrypoint's watchdog and a
+# `docker stop` signal uvicorn itself, not a shell that would die without it.
+CMD sh -c "alembic upgrade heads && exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5"
 
 # =============================================================================
 # Production Stage - Optimized & Minimal
@@ -148,6 +152,8 @@ COPY . .
 # migrate` runs the full lifecycle and exits (the Kubernetes migration Job);
 # AUTOMATOS_MIGRATE_ON_BOOT=true runs it before the CMD.
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+# The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
+COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
@@ -173,7 +179,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+    CMD docker-healthcheck.sh
 
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]

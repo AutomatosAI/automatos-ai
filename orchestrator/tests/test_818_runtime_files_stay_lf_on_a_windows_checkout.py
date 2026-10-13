@@ -32,6 +32,7 @@ RUNTIME_NAME_PATTERNS = (
 RUNTIME_DIRS = ("envs",)
 MUST_BE_SWEPT = (
     "orchestrator/docker-entrypoint.sh",
+    "orchestrator/docker-healthcheck.sh",
     "services/workspace-worker/entrypoint.sh",
     "Dockerfile.backend",
     "envs/api.defaults",

@@ -20,7 +20,9 @@ A card's kind is read from its own brief, with the detectors the platform alread
   generated while working it, a file its agent wrote, a session's files);
 * any other card (a question answered in text) moves as before, and so does a Playbook's or
   a mission's card: their engines file the work under the run (``exec_workspace``'s source
-  is the mission or the Playbook, not the card), and judge their own steps.
+  is the mission or the Playbook, not the card), and judge their own steps;
+* a card filed for the owner's decision (P256-FIX-N14-7, ``approval_cards``) asks for nothing:
+  the owner's approval is what it is for, and no agent works it.
 
 ``missing_artifact`` is the ONE rule: Auto's status tool (``ticket_moves._refusal``), the
 board's Approve, its drag and its PATCH all ask it. A refusal names what is missing in
@@ -77,8 +79,11 @@ def artifact_need(task: Any) -> Optional[ArtifactNeed]:
     """The artifact ``task``'s brief asks for, or None for a card that asks for none. Pure."""
     # Read when called: the chatbot package's __init__ loads the chat service, which reaches the board.
     from consumers.chatbot.handoffs import asks_for_paperwork
+    from modules.tools.discovery.approval_cards import is_an_approval_card
 
     if getattr(task, "source_type", None) in ENGINE_CARD_SOURCES:
+        return None
+    if is_an_approval_card(getattr(task, "planning_data", None)):  # P256-FIX-N14-7: the card is the decision
         return None
     title, description = getattr(task, "title", None) or "", getattr(task, "description", None) or ""
     if asks_for_a_social_post(title, description):

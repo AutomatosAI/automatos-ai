@@ -32,7 +32,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from .nudges import ANNOUNCED_STEP_MSG, announced_step, ask_for_the_answer, claimed_action_nudge, nudge_about  # US-006, F306
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
 from .card_raised import emit_flagged  # PRD-256 FX-005 / RVW-22: the result's own flag, and its wait (_emit)
-from .fetched_work import shows_fetched_work  # F413: the work the owner asked to see is in the reply
+from .draft_here import shows_the_work  # F413, F419: the work the owner asked to see, or for here, is in the reply
 from .nudges import LENGTH_RECOVERY_MSG as _LENGTH_RECOVERY_MSG
 from .cap_answer import answers_at_the_cap  # F328
 from .tool_execution_tracker import ToolExecutionTracker
@@ -590,7 +590,7 @@ class ToolLoopExecutor:
             return await self._recover_claimed_action(current, messages, tools) or current
         return await nudge_about(self._llm, current, messages, tools, nudge)
 
-    @shows_fetched_work  # F413: then a reply showing none of the work the owner asked to see
+    @shows_the_work  # F413, F419: then a reply showing none of the work the owner asked to see, or for here
     async def _recover_claimed_action(
         self,
         current: LLMResponse,

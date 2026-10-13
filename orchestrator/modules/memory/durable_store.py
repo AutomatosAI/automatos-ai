@@ -45,8 +45,14 @@ from qdrant_client.models import (
 from config import config
 from core.llm.embedding_manager import EmbeddingManager
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
+from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
 
 logger = logging.getLogger(__name__)
+
+# P256-FIX-N14-4: what ``delete_in_workspace`` found.
+DELETED = "deleted"
+NOT_FOUND = "not_found"
+NOT_THEIRS = "not_theirs"
 
 
 def filter_by_relevance_floor(results: List[Dict], floor: float) -> List[Dict]:
@@ -73,6 +79,16 @@ def workspace_from_namespace(user_id: str) -> Optional[str]:
         return None
     parts = user_id.split(":")
     return parts[1] if len(parts) > 1 and parts[1] else None
+
+
+def _is_point_id(memory_id: Any) -> bool:
+    """Whether ``memory_id`` is a point id this store writes (a UUID): anything else is no
+    memory of any workspace, and is never sent to Qdrant, which refuses it."""
+    try:
+        uuid.UUID(str(memory_id))
+    except ValueError:
+        return False
+    return True
 
 
 class DurableMemoryStore:
@@ -244,7 +260,7 @@ class DurableMemoryStore:
         ws = str(workspace_id) if workspace_id else workspace_from_namespace(user_id)
         content_hash = hashlib.sha256(text.encode()).hexdigest()
 
-        deduped = await self._deduped(user_id, content_hash, (metadata or {}).get("owner"))
+        deduped = await self._deduped(user_id, content_hash, metadata or {})
         if deduped is not None:
             return deduped
 
@@ -414,6 +430,26 @@ class DurableMemoryStore:
         logger.info("[Durable] Deleted %d memor(ies) namespace=%s", len(owned), user_id)
         return True
 
+    async def delete_in_workspace(self, memory_id: str, workspace_id: str,
+                                  deleter_subject_id: Optional[str] = None) -> str:
+        """P256-FIX-N14-4 (F418): delete the memory the Memory page shows by this id, in whichever
+        of the workspace's namespaces it was stored (its own, an agent's, the daily log's): the
+        point's own namespace must be this workspace's, read from the point, never assumed. A
+        private memory with an owner is deleted by that owner alone (``deletable_by``). Returns
+        ``DELETED``, ``NOT_FOUND`` (no such point in this workspace) or ``NOT_THEIRS``."""
+        if not self._enabled or not _is_point_id(memory_id):
+            return NOT_FOUND
+        await self.ensure_collection()
+        points = await self._client.retrieve(self._collection, ids=[memory_id], with_payload=True)
+        payload = (points[0].payload or {}) if points else {}
+        if not points or workspace_from_namespace(payload.get("namespace") or "") != str(workspace_id):
+            return NOT_FOUND
+        if not deletable_by(payload, deleter_subject_id):
+            return NOT_THEIRS
+        await self._client.delete(collection_name=self._collection, points_selector=[points[0].id])
+        logger.info("[Durable] Deleted memory %s namespace=%s", memory_id, payload.get("namespace"))
+        return DELETED
+
     # ── GDPR (PRD-181 S3/S4 surface) ────────────────────────────
 
     async def erase_workspace(self, workspace_id: str) -> int:
@@ -532,31 +568,39 @@ class DurableMemoryStore:
 
     # ── Internals ───────────────────────────────────────────────
 
-    async def _deduped(self, user_id: str, content_hash: str, owner: Optional[str]) -> Optional[Dict]:
+    async def _deduped(self, user_id: str, content_hash: str, metadata: Dict) -> Optional[Dict]:
         """The add's answer when this content is already stored (for an owned write, this
         owner's row, dated now: P256-FIX-RVW-41); None when it is new and must be stored."""
+        owner = metadata.get("owner")
         existing = await self._find_by_hash(user_id, content_hash, owner=owner)
         if existing is None:
             return None
         logger.debug("[Durable] Deduplicated add in namespace=%s", user_id)
         if owner:
-            await self._restated_now(user_id, existing.id)
+            await self._restated_now(user_id, existing, metadata)
         return {"success": True, "id": str(existing.id), "deduped": True}
 
-    async def _restated_now(self, user_id: str, point_id: Any) -> None:
+    async def _restated_now(self, user_id: str, existing: Any, metadata: Dict) -> None:
         """P256-FIX-RVW-41: an owner restating their own row dates it now, so the restated
         rule is their newest (it leads the standing rules and beats the rule it replaced).
-        Only ``created_at`` changes; a timeout keeps the old date and says so in the log."""
+        P256-FIX-N14-4: a row Auto wrote that the owner now says in their own words becomes
+        their standing rule (``stated_by`` is added, never taken off). Nothing else changes;
+        a timeout keeps the old row as it was and says so in the log."""
+        payload: Dict[str, Any] = {"created_at": datetime.now(timezone.utc).isoformat()}
+        stored = (getattr(existing, "payload", None) or {}).get("metadata") or {}
+        stated = metadata.get(STATED_BY_KEY)
+        if stated and not stored.get(STATED_BY_KEY):
+            payload["metadata"] = {**stored, STATED_BY_KEY: stated}
         try:
             await self._client.set_payload(
                 collection_name=self._collection,
-                payload={"created_at": datetime.now(timezone.utc).isoformat()},
-                points=[point_id],
+                payload=payload,
+                points=[existing.id],
             )
         except Exception as exc:
             if not is_timeout(exc):
                 raise
-            logger.warning("memory restated but not re-dated: %s, point %s (%r)", user_id, point_id, exc)
+            logger.warning("memory restated but not re-dated: %s, point %s (%r)", user_id, existing.id, exc)
 
     async def _find_by_hash(self, user_id: str, content_hash: str, owner: Optional[str] = None):
         """The namespace's row with this content, and, for an owned write, this owner's

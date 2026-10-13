@@ -10,6 +10,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from modules.tools.execution.shown_reads import deliverable_link, shown_chars, text_to_show
+
 logger = logging.getLogger(__name__)
 
 _MAX_LIST_LIMIT = 50
@@ -17,15 +19,6 @@ _DEFAULT_LIST_LIMIT = 20
 # platform_list_deliverables' exclude_source_types: at most this many origins, each a plain name.
 _MAX_EXCLUDED_ORIGINS = 10
 EXCLUDED_ORIGINS_REFUSED = 'exclude_source_types must be a list of origins, such as ["social_post"]'
-# F413 (night 13): a fetched text is the owner's to see, and the model is told so before the text.
-SHOW_IT_NOTE = (
-    "The owner sees none of this text until you put it in your reply. When they asked to see, read or "
-    "show it, put the text itself in your reply as it is here, never a description of it."
-)
-CUT_NOTE = (
-    " This is its first {shown:,} of {total:,} characters: put those in your reply, then the link to the "
-    "rest: {link}"
-)
 
 
 def excluded_origins(value: Any) -> Optional[str]:
@@ -39,37 +32,6 @@ def excluded_origins(value: Any) -> Optional[str]:
     if not all(isinstance(origin, str) and origin.strip() and "," not in origin for origin in origins):
         raise ValueError(EXCLUDED_ORIGINS_REFUSED)
     return ",".join(origin.strip() for origin in origins)
-
-
-def _shown_chars() -> Optional[int]:
-    """How much of a text a fetch hands back: in the owner's chat DELIVERABLE_SHOWN_MAX_CHARS, for
-    the reply to show; elsewhere (an agent's run, a session's read_step_file) all of it, as before."""
-    from config import config
-    from core.llm.usage_context import LANE_CHAT, current_usage_scope
-
-    if current_usage_scope().get("request_type") != LANE_CHAT:
-        return None
-    return max(1, int(config.DELIVERABLE_SHOWN_MAX_CHARS))
-
-
-def text_to_show(data: Dict[str, Any], max_chars: Optional[int]) -> Dict[str, Any]:
-    """The content fields of a fetch. In the owner's chat (``max_chars`` set) a text comes with the
-    note that it is the owner's to see, first so it survives the loop's cut, and is cut at
-    ``max_chars`` with the link to the rest."""
-    shown: Dict[str, Any] = {"content_truncated": bool(data.get("content_truncated", False))}
-    if data.get("content_error"):
-        shown["content_error"] = data["content_error"]
-    content = data.get("content")
-    if not isinstance(content, str) or max_chars is None:
-        return {"content": content, **shown}
-    if len(content) <= max_chars:
-        return {"show_the_owner": SHOW_IT_NOTE, "content": content, **shown}
-    from modules.tools.execution.generate_document_tool import deliverable_open_url
-
-    link = deliverable_open_url(data.get("id"))
-    note = SHOW_IT_NOTE + CUT_NOTE.format(shown=max_chars, total=len(content), link=link)
-    return {"show_the_owner": note, "content": content[:max_chars], **shown, "content_truncated": True,
-            "content_chars": len(content), "rest_at": link}
 
 
 def _compact_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -166,5 +128,5 @@ async def get_deliverable(
     data = result.get("deliverable") or {}
     payload = _compact_row(data)
     if include_content:
-        payload.update(text_to_show(data, _shown_chars()))
+        payload.update(text_to_show(data, shown_chars(), deliverable_link))  # F413, F420: shown_reads
     return {"success": True, "deliverable": payload}

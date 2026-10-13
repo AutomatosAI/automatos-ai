@@ -84,11 +84,16 @@ def teardown_module(module):
             sys.modules[_name] = _prior
 
 # Load exec_workspace directly to avoid pulling the entire modules.tools package.
+# It sits in a bare package over its own folder, so its relative imports (the stdlib-only
+# ``.shown_reads``, F420) resolve without running modules/tools/__init__.py.
 _THIS = Path(__file__).resolve()
-_EXEC_WORKSPACE = _THIS.parents[4] / "modules" / "tools" / "execution" / "exec_workspace.py"
-_spec = importlib.util.spec_from_file_location("exec_workspace_under_test", _EXEC_WORKSPACE)
+_EXECUTION_DIR = _THIS.parents[4] / "modules" / "tools" / "execution"
+_EXEC_WORKSPACE = _EXECUTION_DIR / "exec_workspace.py"
+_PKG = "exec_workspace_pkg_under_test"
+sys.modules[_PKG] = _make_stub_module(_PKG, __path__=[str(_EXECUTION_DIR)])
+_spec = importlib.util.spec_from_file_location(f"{_PKG}.exec_workspace", _EXEC_WORKSPACE)
 exec_workspace = importlib.util.module_from_spec(_spec)
-sys.modules["exec_workspace_under_test"] = exec_workspace
+sys.modules[f"{_PKG}.exec_workspace"] = exec_workspace
 _spec.loader.exec_module(exec_workspace)
 
 _derive_source = exec_workspace._derive_source

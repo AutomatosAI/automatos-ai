@@ -8,7 +8,11 @@ allow-list the embedding index produced for a turn:
            list and the cut is written to the shadow log beside today's, the
            surface itself unchanged;
 * live   — the reranked cut replaces the embedding top-K; on any miss (no
-           answer, too few answers, an error) the embedding cut is kept.
+           answer, too few answers, an error) the embedding cut is kept;
+* union  — not a dial value: ``TOOL_SHORTLIST_JEV_UNION`` (an experiment,
+           off by default) offers Jev's kept few ahead of the embedding's
+           own, or the embedding cut unchanged when Jev is late or silent
+           (``jev_union``).
 
 The judgement itself is the pure ``core.llm.decisions.rerank``. The index,
 registry, engine and shadow writer are passed in, so this runs in tests with
@@ -41,6 +45,8 @@ PREVIEW_CHARS = 120
 MODE_OFF = "off"
 MODE_SHADOW = "shadow"
 MODE_LIVE = "live"
+# P256-FIX-N14-8: not a dial value; TOOL_SHORTLIST_JEV_UNION selects it (jev_union.offered_mode).
+MODE_UNION = "union"
 
 RankWide = Callable[[int], Awaitable[Sequence[Tuple[str, Optional[float]]]]]
 Describe = Callable[[str], str]
@@ -84,6 +90,56 @@ async def _rerank_turn(
     return cut, result, names, source
 
 
+def shadow_row(query: str, allowed: Sequence[str], workspace_id: Any) -> Dict[str, Any]:
+    """The head of a ``tool_rerank`` shadow row: the turn and the embedding cut."""
+    return {
+        "purpose": PURPOSE,
+        "workspace_id": workspace_id,
+        "query_sha": query_digest(query),
+        "query_preview": (query or "")[:PREVIEW_CHARS],
+        "embedding_top": list(allowed),
+    }
+
+
+def judged_fields(
+    allowed: Sequence[str],
+    cut: Optional[RerankCut],
+    result: Optional[DecisionResult],
+    wide: Sequence[str],
+    source: str,
+) -> Dict[str, Any]:
+    """What the engine's judgement adds to a shadow row (a miss names its kind)."""
+    fields: Dict[str, Any] = {"wide": list(wide), "candidate_source": source}
+    if not wide:
+        # Nothing ranked (the embedding and the lexical fallback both came
+        # back empty): the engine was never asked, so this is not its miss.
+        fields["error"] = "no_candidates"
+        return fields
+    if result is None:
+        fields["error"] = "no_result"
+        return fields
+    fields.update(
+        provider=result.provider,
+        model=result.model,
+        latency_ms=result.latency_ms,
+        input_tokens=result.input_tokens,
+    )
+    if cut is None:
+        fields["error"] = "too_few_answers"
+    else:
+        fields.update(cut.to_dict())
+        fields["compare"] = compare_surfaces(allowed, cut.kept)
+    return fields
+
+
+def write_shadow(record_shadow: Callable[[Mapping[str, Any]], None], row: Mapping[str, Any]) -> None:
+    """Hand one row to the shadow writer; a failed write never surfaces."""
+    try:
+        record_shadow(row)
+    except Exception:  # noqa: BLE001
+        logger.debug("[tool-rerank] shadow row not written", exc_info=True)
+
+
 async def _shadow_turn(
     *,
     query: str,
@@ -93,42 +149,14 @@ async def _shadow_turn(
     **rerank_kwargs: Any,
 ) -> None:
     started = time.monotonic()
-    row: Dict[str, Any] = {
-        "purpose": PURPOSE,
-        "workspace_id": workspace_id,
-        "query_sha": query_digest(query),
-        "query_preview": (query or "")[:PREVIEW_CHARS],
-        "embedding_top": list(allowed),
-    }
+    row = shadow_row(query, allowed, workspace_id)
     try:
         cut, result, wide, source = await _rerank_turn(query=query, workspace_id=workspace_id, **rerank_kwargs)
-        row["wide"] = wide
-        row["candidate_source"] = source
-        if not wide:
-            # Nothing ranked (the embedding and the lexical fallback both came
-            # back empty): the engine was never asked, so this is not its miss.
-            row["error"] = "no_candidates"
-        elif result is None:
-            row["error"] = "no_result"
-        else:
-            row.update(
-                provider=result.provider,
-                model=result.model,
-                latency_ms=result.latency_ms,
-                input_tokens=result.input_tokens,
-            )
-            if cut is None:
-                row["error"] = "too_few_answers"
-            else:
-                row.update(cut.to_dict())
-                row["compare"] = compare_surfaces(allowed, cut.kept)
+        row.update(judged_fields(allowed, cut, result, wide, source))
     except Exception as exc:  # noqa: BLE001 — a shadow must never surface
         row["error"] = f"{exc!r}"[:200]
     row["shadow_ms"] = int((time.monotonic() - started) * 1000)
-    try:
-        record_shadow(row)
-    except Exception:  # noqa: BLE001
-        logger.debug("[tool-rerank] shadow row not written", exc_info=True)
+    write_shadow(record_shadow, row)
     logger.info(
         "[tool-rerank] shadow",
         extra={
@@ -139,6 +167,50 @@ async def _shadow_turn(
             "nothing_fits": row.get("nothing_fits"),
         },
     )
+
+
+def _schedule_shadow(*, query: str, allowed: List[str], record_shadow: Callable[[Mapping[str, Any]], None],
+                     workspace_id: Any, rerank_kwargs: Dict[str, Any]) -> List[str]:
+    """Start the fire-and-forget comparison; the surface is returned unchanged."""
+    try:
+        task = asyncio.get_running_loop().create_task(
+            _shadow_turn(
+                query=query,
+                allowed=allowed,
+                record_shadow=record_shadow,
+                workspace_id=workspace_id,
+                **rerank_kwargs,
+            )
+        )
+    except RuntimeError:
+        return allowed
+    _SHADOW_TASKS.add(task)
+    task.add_done_callback(_SHADOW_TASKS.discard)
+    return allowed
+
+
+async def _live_turn(*, query: str, allowed: List[str], workspace_id: Any,
+                     rerank_kwargs: Dict[str, Any]) -> List[str]:
+    """The reranked cut in place of the embedding top-K; the embedding cut on any miss."""
+    try:
+        cut, _result, _wide, _source = await _rerank_turn(query=query, workspace_id=workspace_id, **rerank_kwargs)
+    except Exception as exc:  # noqa: BLE001 — fail-open to the embedding cut
+        logger.warning("[tool-rerank] live rerank failed — embedding cut kept: %s", exc)
+        return allowed
+    if cut is None or not cut.kept:
+        logger.info("[tool-rerank] live rerank returned no cut — embedding cut kept")
+        return allowed
+    logger.info(
+        "[tool-rerank] live kept %d of %d (nothing_fits=%s)",
+        len(cut.kept), cut.answered, cut.nothing_fits,
+        extra={"workspace_id": workspace_id},
+    )
+    # Canonical order, not probability order: the tool block sits at the head
+    # of Auto's cached prefix, so the same SET of actions must produce the
+    # same bytes turn after turn or a live rerank pays for its smaller
+    # surface in prompt-cache misses (night-1 data: first calls cached only
+    # 2.4–3.5k of a ~34k prefix because the block changed per query).
+    return sorted(cut.kept)
 
 
 async def narrow_with_decisions(
@@ -170,39 +242,18 @@ async def narrow_with_decisions(
         min_keep=min_keep,
     )
     if mode == MODE_SHADOW:
-        try:
-            task = asyncio.get_running_loop().create_task(
-                _shadow_turn(
-                    query=query,
-                    allowed=allowed,
-                    record_shadow=record_shadow,
-                    workspace_id=workspace_id,
-                    **rerank_kwargs,
-                )
-            )
-        except RuntimeError:
-            return allowed
-        _SHADOW_TASKS.add(task)
-        task.add_done_callback(_SHADOW_TASKS.discard)
-        return allowed
-    if mode == MODE_LIVE:
-        try:
-            cut, _result, _wide, _source = await _rerank_turn(query=query, workspace_id=workspace_id, **rerank_kwargs)
-        except Exception as exc:  # noqa: BLE001 — fail-open to the embedding cut
-            logger.warning("[tool-rerank] live rerank failed — embedding cut kept: %s", exc)
-            return allowed
-        if cut is None or not cut.kept:
-            logger.info("[tool-rerank] live rerank returned no cut — embedding cut kept")
-            return allowed
-        logger.info(
-            "[tool-rerank] live kept %d of %d (nothing_fits=%s)",
-            len(cut.kept), cut.answered, cut.nothing_fits,
-            extra={"workspace_id": workspace_id},
+        return _schedule_shadow(
+            query=query, allowed=allowed, record_shadow=record_shadow,
+            workspace_id=workspace_id, rerank_kwargs=rerank_kwargs,
         )
-        # Canonical order, not probability order: the tool block sits at the head
-        # of Auto's cached prefix, so the same SET of actions must produce the
-        # same bytes turn after turn or a live rerank pays for its smaller
-        # surface in prompt-cache misses (night-1 data: first calls cached only
-        # 2.4–3.5k of a ~34k prefix because the block changed per query).
-        return sorted(cut.kept)
+    if mode == MODE_LIVE:
+        return await _live_turn(query=query, allowed=allowed, workspace_id=workspace_id, rerank_kwargs=rerank_kwargs)
+    if mode == MODE_UNION:
+        # P256-FIX-N14-8: Jev's kept few ahead of the platform's own, under a timeout.
+        from modules.tools.discovery.jev_union import union_shortlist
+
+        return await union_shortlist(
+            query=query, allowed=allowed, rerank=_rerank_turn, record_shadow=record_shadow,
+            workspace_id=workspace_id, rerank_kwargs=rerank_kwargs,
+        )
     return allowed

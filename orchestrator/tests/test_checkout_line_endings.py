@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
     "relative_path",
     [
         "orchestrator/docker-entrypoint.sh",
+        "orchestrator/docker-healthcheck.sh",
         "services/workspace-worker/entrypoint.sh",
         "Dockerfile.backend",
         "services/workspace-worker/Dockerfile",

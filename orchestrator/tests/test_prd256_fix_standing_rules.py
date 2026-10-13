@@ -49,6 +49,16 @@ class _FakeDurable:
         return hits[:limit]
 
 
+@pytest.fixture(autouse=True)
+def the_owner_said_it(monkeypatch):
+    """P256-FIX-N14-4: a memory is the owner's standing rule only in their own words. Every
+    memory these tests store is one the owner said in the chat, so the chat holds it (a memory
+    Auto composed is test_prd256_fix_standing_rules_owned.py's)."""
+    import modules.tools.discovery.said_instructions as said
+
+    monkeypatch.setattr(said, "chat_owner_turns", lambda db, workspace_id, params: [str(params.get("content") or "")])
+
+
 @pytest.fixture
 def durable(monkeypatch):
     """A UnifiedMemoryService over the fake store, as the one the handler and the section read."""
@@ -207,16 +217,19 @@ def test_the_durable_read_is_the_namespace_and_any_of_the_filter():
 
 
 def test_what_is_a_standing_rule():
+    """P256-FIX-N14-4: an owner and the owner's own words (``stated_by: owner``); what Auto or the
+    distiller composed, even on the owner's turn and typed a preference, is recalled, never a rule."""
     from modules.memory.injection_filter import is_standing_rule
 
-    said = {"metadata": {"source": "platform_tool", "owner": "user:7", "type": "business_fact"}}
-    headless = {"metadata": {"source": "platform_tool", "type": "business_fact"}}     # a ticket's agent
+    said = {"metadata": {"source": "platform_tool", "owner": "user:7", "type": "business_fact", "stated_by": "owner"}}
+    composed = {"metadata": {"source": "platform_tool", "owner": "user:7", "type": "business_fact"}}
+    headless = {"metadata": {"source": "platform_tool", "type": "business_fact", "stated_by": "owner"}}  # no person
     distilled_preference = {"metadata": {"source_type": "distilled", "type": "preference", "owner": "user:7"}}
     legacy_preference = {"metadata": {"category": "preference", "owner": "user:7"}}
     nobodys_preference = {"metadata": {"category": "preference"}}                    # no person behind it
     a_learning = {"metadata": {"type": "task_learning", "owner": "user:7"}}
-    rows = (said, headless, distilled_preference, legacy_preference, nobodys_preference, a_learning)
-    assert [is_standing_rule(m) for m in rows] == [True, False, True, True, False, False]
+    rows = (said, composed, headless, distilled_preference, legacy_preference, nobodys_preference, a_learning)
+    assert [is_standing_rule(m) for m in rows] == [True, False, False, False, False, False, False]
 
 
 def test_a_widget_turn_carries_none_of_the_owners_rules(durable):
@@ -247,7 +260,7 @@ def test_the_cap_holds_newest_first():
 
     rows = [{"memory": f"Rule {i}: the Friday newsletter goes out before ten, with the week's roasts listed.",
              "created_at": f"2026-10-{1 + i // 24:02d}T{i % 24:02d}:00:00+00:00",
-             "metadata": {"type": "preference", "owner": "user:7"}} for i in range(120)]
+             "metadata": {"type": "preference", "owner": "user:7", "stated_by": "owner"}} for i in range(120)]
     block = render_standing_rules(standing_rules(rows, "user:7"), 600)
     assert count_tokens(block) <= 600
     lines = [ln for ln in block.splitlines() if ln.startswith("- ")]
@@ -260,7 +273,7 @@ def test_the_cap_holds_newest_first():
 def test_the_same_rule_twice_is_said_once():
     from modules.memory.injection_filter import standing_rules
 
-    meta = {"type": "preference", "owner": "user:7"}
+    meta = {"type": "preference", "owner": "user:7", "stated_by": "owner"}
     rows = [{"memory": RULE, "created_at": "2026-10-07", "metadata": meta},
             {"memory": f"  {RULE.upper()} ", "created_at": "2026-10-06", "metadata": meta}]
     assert standing_rules(rows, "user:7") == [RULE]
@@ -393,7 +406,8 @@ def test_the_owners_rule_is_read_past_600_other_rows(qdrant):
 
     assert config.STANDING_RULES_SCAN_LIMIT < 600
     for i in range(300):
-        _seed(qdrant, f"Member {i} prefers the dark roast.", {"source": "platform_tool", "owner": f"user:{100 + i}"})
+        _seed(qdrant, f"Member {i} prefers the dark roast.", {"source": "platform_tool", "owner": f"user:{100 + i}",
+                                                               "stated_by": "owner"})
         _seed(qdrant, f"Ticket #{i} shipped on time.", {"source": "platform_tool", "type": "business_fact"})
     assert _store(_said_by(OWNER))["success"] is True                   # written after all 600
     block = _block(uuid.UUID(int=1), f"user:{OWNER}")

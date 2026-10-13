@@ -1365,6 +1365,17 @@ class Config:
     TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY: float = float(os.getenv("TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY", "1.0"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
+    # F416 (night 14): the nightly run's memory is bounded. It clusters at most the
+    # CLUSTER_MAX_QUERIES most recent queries (the embedding matrix's row cap), embeds
+    # them EMBED_BATCH_SIZE at a time, reads the logs LOG_PAGE_SIZE rows a page, and
+    # the k-means' working block stays under KMEANS_BLOCK_MB. It runs in a child
+    # process whose address space is capped at WORKER_MEMORY_MB (0 = no cap), so
+    # running out of memory ends the run, never the backend.
+    EDGE_BUILDER_CLUSTER_MAX_QUERIES: int = int(os.getenv("EDGE_BUILDER_CLUSTER_MAX_QUERIES", "5000"))
+    EDGE_BUILDER_EMBED_BATCH_SIZE: int = int(os.getenv("EDGE_BUILDER_EMBED_BATCH_SIZE", "256"))
+    EDGE_BUILDER_LOG_PAGE_SIZE: int = int(os.getenv("EDGE_BUILDER_LOG_PAGE_SIZE", "1000"))
+    EDGE_BUILDER_KMEANS_BLOCK_MB: int = int(os.getenv("EDGE_BUILDER_KMEANS_BLOCK_MB", "64"))
+    EDGE_BUILDER_WORKER_MEMORY_MB: int = int(os.getenv("EDGE_BUILDER_WORKER_MEMORY_MB", "4096"))
     # PRD-232 US-011: the learning loop's gap + shown-vs-used signals (nightly).
     # GAP_RESOLUTION_HOURS: a tool_gap answered by a successful action within this
     # window in the SAME conversation becomes a succeeds_for_intent for that
@@ -1697,6 +1708,13 @@ class Config:
     DECISION_ENGINE_USD_PER_MTOK_IN: float = float(os.getenv("DECISION_ENGINE_USD_PER_MTOK_IN", "0.042"))
     # Shadow comparisons, one JSON line each — read by scripts/eval/decision_shadow.
     DECISION_SHADOW_LOG_PATH: str = os.getenv("DECISION_SHADOW_LOG_PATH", "logs/decision_shadow.jsonl")
+    # P256-FIX-N14-8: an experiment, off by default. On, Auto's offered tool shortlist is
+    # Jev's kept top few ahead of the platform's embedding top few (deduplicated) when Jev
+    # answers within the timeout; late or silent, the platform's list is offered unchanged.
+    TOOL_SHORTLIST_JEV_UNION: bool = os.getenv("TOOL_SHORTLIST_JEV_UNION", "false").lower() in ("true", "1", "yes")
+    TOOL_SHORTLIST_JEV_TIMEOUT_S: float = float(os.getenv("TOOL_SHORTLIST_JEV_TIMEOUT_S", "1.0"))
+    TOOL_SHORTLIST_JEV_TOP: int = int(os.getenv("TOOL_SHORTLIST_JEV_TOP", "5"))
+    TOOL_SHORTLIST_PLATFORM_TOP: int = int(os.getenv("TOOL_SHORTLIST_PLATFORM_TOP", "10"))
 
     @property
     def RAG_HYBRID_ENABLED(self) -> bool:

@@ -24,6 +24,9 @@
 #       This is the image default, so Railway (which builds this image and
 #       relies on the CMD's own `alembic upgrade heads`) boots unchanged.
 #       Note the image CMD itself runs `alembic upgrade heads` before uvicorn.
+#       AUTOMATOS_LIVENESS_WATCHDOG=true (envs/api.defaults): the command runs
+#       as this script's child, and a server that stops serving is stopped so
+#       the container exits and restarts (the liveness watchdog, below).
 #       Where a migration Job owns the schema (Kubernetes), override the app
 #       container's command to start uvicorn directly, so several replicas
 #       don't race Alembic with each other or with the Job.
@@ -249,6 +252,101 @@ run_lifecycle() {
 }
 
 # =============================================================================
+# Liveness watchdog (F416)
+# =============================================================================
+# uvicorn's supervisors (--reload, and --workers in 0.24) outlive a worker the
+# kernel kills: the container stays "running" and unhealthy with nothing
+# serving, and Docker's restart policy never applies to an unhealthy container
+# (night 14: ~5 h dark after an OOM kill). With AUTOMATOS_LIVENESS_WATCHDOG=true
+# the entrypoint runs the command as its child and probes it with the
+# healthcheck script (docker-healthcheck.sh) every AUTOMATOS_LIVENESS_INTERVAL
+# seconds. Once the server has served, AUTOMATOS_LIVENESS_RETRIES failed probes
+# in a row stop it (TERM, then KILL after AUTOMATOS_LIVENESS_GRACE seconds) and
+# the entrypoint exits non-zero, so the container exits and its restart policy
+# brings it back. A server that exits by itself passes its exit status on. The
+# watchdog arms at the first passing probe, so a slow boot (F228) is Docker's
+# start_period to judge, never a restart. Off by default (the command is
+# exec'd as before, as Railway runs it); envs/api.defaults turns it on.
+LIVENESS_DEFAULT_INTERVAL_SECONDS=30
+LIVENESS_DEFAULT_RETRIES=3
+LIVENESS_DEFAULT_GRACE_SECONDS=10
+LIVENESS_STOP_POLL_SECONDS=1
+LIVENESS_EXIT_CODE=1
+
+probe_server() {
+    "${AUTOMATOS_HEALTHCHECK_CMD:-docker-healthcheck.sh}" > /dev/null 2>&1
+}
+
+# TERM the server, then KILL it if it is still there after the grace period.
+stop_server() {
+    grace=${AUTOMATOS_LIVENESS_GRACE:-$LIVENESS_DEFAULT_GRACE_SECONDS}
+    kill -TERM "$SERVER_PID" 2>/dev/null || return 0
+    waited=0
+    while kill -0 "$SERVER_PID" 2>/dev/null; do
+        if [ "$waited" -ge "$grace" ]; then
+            kill -KILL "$SERVER_PID" 2>/dev/null || true
+            return 0
+        fi
+        sleep "$LIVENESS_STOP_POLL_SECONDS"
+        waited=$((waited + LIVENESS_STOP_POLL_SECONDS))
+    done
+}
+
+watch_liveness() {
+    interval=${AUTOMATOS_LIVENESS_INTERVAL:-$LIVENESS_DEFAULT_INTERVAL_SECONDS}
+    retries=${AUTOMATOS_LIVENESS_RETRIES:-$LIVENESS_DEFAULT_RETRIES}
+    armed=false
+    failures=0
+    while kill -0 "$SERVER_PID" 2>/dev/null; do
+        sleep "$interval"
+        if probe_server; then
+            [ "$armed" = true ] || echo "🩺 Liveness watchdog armed (the backend serves)"
+            armed=true
+            failures=0
+        elif [ "$armed" = true ]; then
+            failures=$((failures + 1))
+            echo "⚠️  Liveness probe failed ($failures/$retries)"
+            if [ "$failures" -ge "$retries" ]; then
+                echo "❌ The backend stopped serving — stopping it so the container exits and restarts"
+                : > "$LIVENESS_MARK" || true
+                stop_server
+                return 0
+            fi
+        fi
+    done
+}
+
+# Wait for the server's own exit status. A forwarded signal interrupts `wait`
+# (status > 128) while the server is still stopping: wait again.
+wait_for_server() {
+    while :; do
+        wait "$SERVER_PID" && return 0
+        status=$?
+        if [ "$status" -le 128 ] || ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            return "$status"
+        fi
+    done
+}
+
+run_supervised() {
+    LIVENESS_MARK="${TMPDIR:-/tmp}/automatos-liveness.$$"
+    rm -f "$LIVENESS_MARK"
+    "$@" &
+    SERVER_PID=$!
+    trap 'kill -TERM "$SERVER_PID" 2>/dev/null || true' TERM INT
+    watch_liveness &
+    WATCHDOG_PID=$!
+    server_status=0
+    wait_for_server || server_status=$?
+    kill "$WATCHDOG_PID" 2>/dev/null || true
+    if [ -e "$LIVENESS_MARK" ]; then
+        rm -f "$LIVENESS_MARK"
+        exit "$LIVENESS_EXIT_CODE"
+    fi
+    exit "$server_status"
+}
+
+# =============================================================================
 # Main Execution
 # =============================================================================
 if [ "${1:-}" = "migrate" ]; then
@@ -270,6 +368,10 @@ if [ "${AUTOMATOS_MIGRATE_ON_BOOT:-}" = "true" ]; then
     echo "   Environment: $ENVIRONMENT"
     echo "========================================="
     echo ""
+fi
+
+if [ "${AUTOMATOS_LIVENESS_WATCHDOG:-}" = "true" ]; then
+    run_supervised "$@"
 fi
 
 # Execute the CMD from Dockerfile (uvicorn command)

@@ -118,6 +118,9 @@ class _FakeQuery:
     def order_by(self, *a, **k):
         return self
 
+    def options(self, *a, **k):  # F416: the log read loads only its columns
+        return self
+
     def limit(self, n):
         self._limit = n
         return self

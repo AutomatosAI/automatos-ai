@@ -80,18 +80,18 @@ CREATABLE_STATUSES = ("inbox", "assigned", "review")
 def initial_board_status(requested: Any, assigned_agent_id: Optional[int], planning_data: Any) -> str:
     """The status a chat-filed ticket starts in — never a state that skips dispatch.
 
-    The tool schema offers inbox / assigned / review, but a model can send anything
-    (ticket 80: Auto passed ``in_progress``, so the ticket was born "running" with
-    no dispatch, no consent and no gate). Anything else collapses to assigned (an
-    agent is set) or inbox; ``assigned`` without an agent is inbox; an
-    ``approval_action`` still means review.
+    The tool schema offers inbox / assigned / review, but a model can send anything (ticket 80:
+    Auto passed ``in_progress``, so the ticket was born "running" with no dispatch, no consent and
+    no gate). Anything else collapses to assigned (an agent is set) or inbox; ``assigned`` without
+    an agent is inbox; an ``approval_action`` still means review, as does the server's mark on a
+    card filed for the owner's decision (P256-FIX-N14-7, ``approval_cards``).
     """
-    if isinstance(planning_data, dict) and planning_data.get("approval_action"):
+    from modules.tools.discovery.approval_cards import is_an_approval_card
+
+    if is_an_approval_card(planning_data) or (isinstance(planning_data, dict) and planning_data.get("approval_action")):
         return "review"
     status = requested if isinstance(requested, str) and requested in CREATABLE_STATUSES else None
-    if status == "review":
-        return "review"
-    return "assigned" if assigned_agent_id else "inbox"
+    return "review" if status == "review" else ("assigned" if assigned_agent_id else "inbox")
 
 
 def _consent_for_chat_filed(db: Session, workspace_id: UUID, task, params: Dict[str, Any]) -> None:

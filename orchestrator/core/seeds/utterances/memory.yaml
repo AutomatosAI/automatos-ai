@@ -29,6 +29,8 @@ actions:
   platform_browse_memories:
   - text: show all memories
     source: example
+  - text: what standing rules do you have for me
+    source: example
   - text: browse memories
     source: example
   - text: what has been remembered
@@ -105,6 +107,8 @@ actions:
   platform_delete_memory:
   - text: delete memory abc-123
     source: example
+  - text: forget that standing rule
+    source: example
   - text: remove that incorrect memory
     source: example
   - text: delete memory
@@ -177,6 +181,41 @@ actions:
   - text: what's the total memory count and storage?
     source: authored
   - text: how many entries in memory right now?
+    source: authored
+  platform_my_actions:
+  - text: "what have you done tonight?"
+    source: example
+  - text: "what did you create today?"
+    source: example
+  - text: "what did I decide about #1437?"
+    source: example
+  - text: "did you send anything overnight?"
+    source: example
+  - text: "what did you do while I was away?"
+    source: authored
+  - text: "list everything you changed today"
+    source: authored
+  - text: "which cards did you make last night?"
+    source: authored
+  - text: "what's waiting for my approval from you?"
+    source: authored
+  - text: "did I approve the card #0942?"
+    source: authored
+  - text: "what have I approved today?"
+    source: authored
+  - text: "show me what you sent this week"
+    source: authored
+  - text: "have you created any agents today?"
+    source: authored
+  - text: "what did you actually do in my other chats?"
+    source: authored
+  - text: "recap your actions since 6pm"
+    source: authored
+  - text: "what did I say yes or no to tonight?"
+    source: authored
+  - text: "did that playbook run you started go through?"
+    source: authored
+  - text: "what writes are still waiting on my click?"
     source: authored
   platform_resume_context:
   - text: where did we leave off?

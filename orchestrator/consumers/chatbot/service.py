@@ -32,6 +32,7 @@ from modules.tools.execution.tool_loop import (
     ToolPostResult,
 )
 from modules.tools.execution.nudges import is_nudge  # F295: the loop's nudges are the user's turn
+from modules.tools.execution.draft_here import a_bare_pointer_goes_through_the_loop  # F419 (night 14)
 from modules.tools.execution.telemetry import resolve_action_name
 
 from core.models import Chat, Message, Vote, Workspace
@@ -1454,16 +1455,15 @@ class StreamingChatService:
         if found.message:
             llm_messages.append(found.message)
 
+    @a_bare_pointer_goes_through_the_loop  # F419: or it only points to a draft the owner asked for here
     async def _first_reply_goes_through_the_loop(
         self, response: Any, use_tools: Optional[List[Dict[str, Any]]],
         prefetched: List[Tuple[str, Dict[str, Any]]], latest_text: str,
     ) -> bool:
-        """F187 (night 6): a first reply that ran no tool but says an action was
-        done or names an id that does not exist (tier 2) goes through the tool
-        loop, which nudges the claim once (F108) and re-prompts the id once.
-        FX-007: the claim is the receipts' (the first reply made no write, and the
-        automatic reads in ``prefetched`` back none, so any report of work done is
-        unbacked). The check never breaks a turn."""
+        """F187 (night 6): a first reply that ran no tool but says an action was done or names an id
+        that does not exist (tier 2) goes through the tool loop, which nudges the claim once (F108) and
+        re-prompts the id once. FX-007: the claim is the receipts' (the first reply made no write, and the
+        automatic reads in ``prefetched`` back none, so any report of work done is unbacked). Never breaks a turn."""
         if not use_tools or getattr(response, "tool_calls", None) or not getattr(response, "content", None):
             return False
         try:

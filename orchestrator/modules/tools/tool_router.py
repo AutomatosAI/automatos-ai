@@ -607,11 +607,11 @@ async def _apply_decision_rerank(
     cached settings read."""
     try:
         from core.llm.decisions import MODE_OFF, get_decision_engine
-        from modules.tools.discovery import decision_rerank
+        from modules.tools.discovery import decision_rerank, jev_union
 
         engine = get_decision_engine()
         dials = engine.dials()
-        if dials.tool_rerank_mode == MODE_OFF or not query or not allowed:
+        if jev_union.offered_mode(dials.tool_rerank_mode) == MODE_OFF or not query or not allowed:
             return allowed
         from modules.tools.discovery import get_action_registry
         from modules.tools.discovery.action_semantic_index import get_action_semantic_index
@@ -627,7 +627,7 @@ async def _apply_decision_rerank(
         return await decision_rerank.narrow_with_decisions(
             query=query,
             allowed=allowed,
-            mode=dials.tool_rerank_mode,
+            mode=jev_union.offered_mode(dials.tool_rerank_mode),  # P256-FIX-N14-8: the experiment's flag
             rank_wide=rank_wide,
             describe=describe,
             decide=engine.decide,

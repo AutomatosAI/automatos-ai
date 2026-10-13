@@ -21,6 +21,7 @@ import contextlib
 import importlib.util
 import os
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -152,7 +153,11 @@ def _load_exec_workspace():
     """Load exec_workspace by path — its own imports are stdlib-only, and the
     modules.tools package would pull the whole tool stack."""
     target = _ORCH / "modules" / "tools" / "execution" / "exec_workspace.py"
-    spec = importlib.util.spec_from_file_location("prd251_exec_workspace_under_test", target)
+    # A bare package over its folder, so its relative imports (.shown_reads) resolve.
+    pkg = types.ModuleType("prd251_exec_workspace_under_test_pkg")
+    pkg.__path__ = [str(target.parent)]
+    sys.modules[pkg.__name__] = pkg
+    spec = importlib.util.spec_from_file_location(f"{pkg.__name__}.exec_workspace", target)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

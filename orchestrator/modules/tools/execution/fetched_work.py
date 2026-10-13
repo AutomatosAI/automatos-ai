@@ -4,8 +4,11 @@ Night 13 (11–12 Oct, Auto on Haiku 5.5): "show me the Guji blog draft" ran
 platform_get_deliverable, its receipt said done, and the reply held none of the draft, 12
 times; asked for it "between two lines of dashes", Auto printed the whole file every time.
 
-Now the fetch's answer in the owner's chat says first that the text is the owner's to see
-and to be put in the reply (``handlers_deliverables.SHOW_IT_NOTE``), cut at
+Night 14 (F420): 3 of 3 "show me the file" misses went through workspace_read_file and
+platform_read_document, so the rule covers every read in ``shown_reads.READS``, one table.
+
+Now a read's answer in the owner's chat says first that the text is the owner's to see
+and to be put in the reply (``shown_reads.SHOW_IT_NOTE``), cut at
 DELIVERABLE_SHOWN_MAX_CHARS with the link to the rest. And when the owner's own words ask
 to see, read or show something, a final reply after a fetch that succeeded which quotes
 none of the fetched text is nudged once (``shows_fetched_work``, on the loop's final-reply
@@ -23,11 +26,11 @@ import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from .nudges import is_nudge, nudge_about
+from .shown_reads import READS
 from .turn_account import auto_speaks
 
 logger = logging.getLogger(__name__)
 
-FETCH_ACTION = "platform_get_deliverable"
 SHOW_FETCHED_MSG = (
     "The owner asked to see {title} and you fetched it, but your reply shows none of its text. Write your "
     "reply again with the text itself in it, as the tool returned it{cut}. Do not describe or summarise it "
@@ -39,10 +42,13 @@ FETCH_THE_TEXT_MSG = (
     "include_content=true, in this response, and put its text in your reply."
 )
 UNTITLED = "the deliverable"
+# What a read is called when it has no title: a document's file name, a workspace file's name or path.
+TITLE_KEYS = ("title", "filename", "name", "path")
 TITLE_SHOWN_CHARS = 120
 # The owner asks to see a thing: "show me the draft", "can I see it", "read me the post", "open the report".
-_ASKS_TO_SEE = re.compile(r"\b(?:show|see|read|open|view|print|display|paste|pull\s+up|bring\s+up)\b",
-                          re.IGNORECASE)
+# F420: every read is covered now, so "read the brief and…" and "see if…" (work on a text) are no ask to see it.
+_ASKS_TO_SEE = re.compile(r"\b(?:show|see(?!\s+(?:if|whether)\b)|read\s+(?:me|out|aloud|back|it\s+to\s+me)|open|view"
+                          r"|print|display|paste|pull\s+up|bring\s+up)\b", re.IGNORECASE)
 # A quote is the opening of one of the text's lines, its marks (markdown, rules) and spacing aside.
 QUOTE_PROBE_CHARS = 40
 # Lines shorter than this ("Hi", "---") prove nothing when the text has longer ones.
@@ -81,17 +87,22 @@ def owners_words(messages: List[Dict[str, Any]]) -> str:
                  if m.get("role") == "user" and not is_nudge(m)), "")
 
 
-def _fetched(result: Any) -> Optional[Dict[str, Any]]:
-    """The deliverable a fetch that succeeded returned (the chat wraps the action's answer as raw_result)."""
-    if not isinstance(result, dict):
+def _fetched(action: str, result: Any) -> Optional[Dict[str, Any]]:
+    """What a read that succeeded returned (the chat wraps the action's answer as raw_result): a
+    deliverable, with or without its text; a document or a workspace file, only with its text."""
+    if action not in READS or not isinstance(result, dict):
         return None
     raw = result.get("raw_result") if isinstance(result.get("raw_result"), dict) else result
-    found = raw.get("deliverable")
-    return found if raw.get("success") is not False and isinstance(found, dict) else None
+    key = READS[action]
+    found = raw.get(key) if key else raw
+    if raw.get("success") is False or not isinstance(found, dict):
+        return None
+    return found if key or isinstance(found.get("content"), str) else None
 
 
 def _title(found: Dict[str, Any]) -> str:
-    title = " ".join(str(found.get("title") or "").split())[:TITLE_SHOWN_CHARS]
+    named = next((found[key] for key in TITLE_KEYS if found.get(key)), "")
+    title = " ".join(str(named).split())[:TITLE_SHOWN_CHARS]
     return f'"{title}"' if title else UNTITLED
 
 
@@ -110,8 +121,8 @@ def unshown_fetch(reply: str, outcomes: Sequence[Outcome], messages: List[Dict[s
     owner asked for nothing to see, nothing was fetched, or the reply quotes a fetched text."""
     if not _ASKS_TO_SEE.search(owners_words(messages)):
         return None
-    fetched = [found for action, _params, result in outcomes if action == FETCH_ACTION
-               for found in [_fetched(result)] if found is not None]
+    fetched = [found for action, _params, result in outcomes
+               for found in [_fetched(action, result)] if found is not None]
     if not fetched:
         return None
     texts = [found["content"] for found in fetched if isinstance(found.get("content"), str)]
@@ -138,5 +149,5 @@ def shows_fetched_work(recover: Recover) -> Recover:
     return check
 
 
-__all__ = ["FETCH_ACTION", "FETCH_THE_TEXT_MSG", "SHOW_FETCHED_MSG", "owners_words", "quotes_any",
+__all__ = ["FETCH_THE_TEXT_MSG", "SHOW_FETCHED_MSG", "owners_words", "quotes_any",
            "shows_fetched_work", "unshown_fetch"]

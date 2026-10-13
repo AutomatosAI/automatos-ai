@@ -40,6 +40,7 @@ from modules.tools.discovery.handlers_playbooks import (
 )
 from modules.tools.discovery.playbook_staffing import add_playbook_step, execute_playbook  # F321: an agent on each step
 from modules.tools.discovery.handlers_diagnostics import get_workspace_errors
+from modules.tools.discovery.handlers_my_actions import my_actions  # P256-FIX-N14-3 (F417): what Auto did
 from modules.tools.discovery.handlers_analytics import (
     get_llm_usage,
     get_cost_breakdown,
@@ -355,6 +356,7 @@ _DRIVER_AWARE_ACTIONS = (
     "platform_create_playbook", "platform_resume_context",   # FX-015: on local the person is the viewer
     "platform_invite_member",
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
+    "platform_my_actions", "platform_browse_memories", "platform_delete_memory",  # N14-3/4: the asker's chats, clicks, rules
 )
 
 
@@ -1279,6 +1281,7 @@ PLATFORM_HANDLERS: Dict[str, Callable] = {
     "platform_get_llm_usage": get_llm_usage,
     "platform_get_cost_breakdown": get_cost_breakdown,
     "platform_get_workspace_errors": get_workspace_errors,  # 9 Oct: errors grouped by cause
+    "platform_my_actions": my_actions,  # P256-FIX-N14-3 (F417): Auto's writes and the owner's clicks, across chats
     "platform_list_documents": says_who_wrote_each(list_documents),  # F269 (night 9): an agent's writing
     "platform_read_document": says_an_agent_wrote_it(read_document),  # is never the owner's source
     "platform_grep_documents": owners_passages_only("matches")(grep_documents),

@@ -58,16 +58,24 @@ class EdgeBuilderScheduler:
         )
 
     async def _run_edge_builder(self):
-        """Execute the edge builder pipeline."""
+        """Execute the edge builder pipeline in its memory-capped child process
+        (F416): running out of memory ends the run, never the backend. A failed
+        run has already logged its one error; the next night runs as usual."""
         try:
-            from core.services.edge_builder import build_edges
+            from core.services.edge_builder_worker import build_edges_in_worker
 
-            summary = await build_edges(window=self._window)
+            summary = await build_edges_in_worker(window=self._window)
+            if summary.failed:
+                return
             logger.info(
-                "[EdgeBuilder] Nightly run complete — %d edges, %d affinities, %d clusters",
+                "[EdgeBuilder] Nightly run complete — %d edges, %d affinities, %d clusters "
+                "(clustered %d of %d queries%s)",
                 summary.edges_built,
                 summary.affinities_built,
                 summary.intent_clusters,
+                summary.cluster_queries,
+                summary.cluster_queries_total,
+                ", a recent sample" if summary.cluster_sampled else "",
             )
         except Exception:
             logger.exception("[EdgeBuilder] Nightly run failed")
