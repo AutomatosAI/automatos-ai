@@ -20,7 +20,7 @@ describe('studio menu consistency', () => {
     expect(Object.keys(menu)).not.toContain('slugifyTab')
   })
 
-  it('keeps execution detail pages under Command Centre', () => {
+  it('keeps execution detail pages under Command Center', () => {
     expect(resolveActiveMenuId('/activity/execution/42')).toBe('cmd')
     expect(resolveActiveMenuId('/command-center')).toBe('cmd')
   })
