@@ -244,6 +244,11 @@ def test_in_their_words_needs_every_sentence_wholly_theirs():
     ("Post on Tuesdays.", "From November, once the new courier starts and the club grows past forty "
                           "members, we will post the club boxes on Tuesdays."),        # too little of it
     ("Send it. " + "word " * 81, "Send it. " + "word " * 81),                         # past the cap
+    ("Post on Tuesdays.", "Only post on Tuesdays."),                                   # a condition dropped
+    ("Post on Tuesdays.", "Post on Tuesdays unless it rains."),
+    ("We post on Tuesdays.", "Do we post on Tuesdays?!"),
+    ("Post on Tuesdays. لا تنشر يوم الأحد", "Post on Tuesdays."),                       # a clause in another script
+    ("Post on Tuesdays 🚫", "Post on Tuesdays."),                                       # what cannot be weighed
 ])
 def test_a_rule_that_turns_the_owners_words_round_is_not_theirs(stored, said):
     from modules.tools.discovery.memory_write import STANDING_RULE_COVERAGE
@@ -261,6 +266,9 @@ def test_a_no_said_either_way_is_the_same_no():
     assert in_their_words("We cannot post on Sundays.", ["We can't post on Sundays."], STANDING_RULE_COVERAGE)
     assert in_their_words("From November we post on Tuesdays.",
                           ["Remember that from November we post on Tuesdays."], STANDING_RULE_COVERAGE)
+    assert in_their_words("Ｐost on Tuesdays, café first.", ["post on tuesdays, café first"], STANDING_RULE_COVERAGE)
+    assert in_their_words("ننشر يوم الثلاثاء.", ["تذكر: ننشر يوم الثلاثاء."], STANDING_RULE_COVERAGE)
+    assert in_their_words("हम मंगलवार को पोस्ट करते हैं।", ["हम मंगलवार को पोस्ट करते हैं।"], STANDING_RULE_COVERAGE)
 
 
 def test_the_checks_split_out_of_store_memory_refuse_as_before(qdrant):
