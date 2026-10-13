@@ -64,6 +64,7 @@ from .actions_intake import register_intake_actions  # PRD-222 W1S8
 from .actions_packages import register_package_actions  # PRD-230 US-006
 from .actions_web import register_web_actions  # PRD-240: platform_web_fetch + platform_web_search
 from .actions_socials import register_socials_actions  # PRD-251 US-116: Socials drafts (never approve/publish)
+from .actions_my_actions import register_my_actions_action  # P256-FIX-N14-3 (F417): what Auto did
 
 
 def _register_documents_actions(registry: ActionRegistry) -> None:
@@ -90,6 +91,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_documents_actions(registry)
     register_workspace_actions_defs(registry)
     register_store_memory_action(registry)
+    register_my_actions_action(registry)  # P256-FIX-N14-3: Auto's record of what it did, across chats
     _register_observability_actions(registry)
     register_search_actions(registry)
     register_tools_llms_actions(registry)
