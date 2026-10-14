@@ -31,6 +31,8 @@ export const ACCENT_LINE_ALPHA = 0.45
 export const ACCENT_FILL_ALPHA = 0.12
 /** --pl-glow is the accent at glow / GLOW_SCALE alpha. */
 export const GLOW_SCALE = 100
+/** The page glow's variable (the pre-paint script builds its value from the stored glow). */
+export const GLOW_VAR = '--pl-glow'
 
 const HEX = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i
 
@@ -147,7 +149,7 @@ export function lightVars(key: LightKey): CssVars {
 }
 
 export function glowVars(accent: AccentKey, glow: number): CssVars {
-  return { '--pl-glow': rgba(ACCENTS[accent].hex, glow / GLOW_SCALE) }
+  return { [GLOW_VAR]: rgba(ACCENTS[accent].hex, glow / GLOW_SCALE) }
 }
 
 export function lookToCssVars(look: Look): CssVars {

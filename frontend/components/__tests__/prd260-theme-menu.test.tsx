@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, renderHook, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
-const tone = vi.hoisted(() => ({ theme: 'dark', setTheme: vi.fn() }))
+const tone = vi.hoisted(() => ({ theme: 'dark', setTheme: vi.fn(), forcedTheme: undefined as string | undefined }))
 vi.mock('next-themes', () => ({ useTheme: () => tone }))
 // A plain anchor that forwards its ref, as Radix's asChild item needs.
 vi.mock('next/link', async () => {
@@ -153,5 +153,42 @@ describe('PRD-260 D2 — useIsStudio and useIsPlay under each style', () => {
   it('both are false outside the provider', () => {
     const { result } = renderHook(both)
     expect(result.current).toEqual({ studio: false, play: false })
+  })
+})
+
+describe('PRD-260 K4 — under Play the look sets the tone', () => {
+  it('shows the Tone items disabled with "Set by your look", and choosing one changes nothing', async () => {
+    renderMenu('play')
+    await openMenu()
+    expect(screen.getByText('Set by your look')).toBeInTheDocument()
+    for (const name of ['Light', 'Dark', 'System']) {
+      expect(screen.getByRole('menuitemradio', { name })).toHaveAttribute('aria-disabled', 'true')
+    }
+    choose('Light')
+    expect(tone.setTheme).not.toHaveBeenCalled()
+  })
+
+  it('checks the tone the look forces, not the stored one it keeps for later', async () => {
+    tone.forcedTheme = 'light'
+    try {
+      renderMenu('play')
+      await openMenu()
+      expect(screen.getByRole('menuitemradio', { name: 'Light' })).toHaveAttribute('aria-checked', 'true')
+      expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'false')
+    } finally {
+      tone.forcedTheme = undefined
+    }
+  })
+
+  it('keeps the Tone items live, with no note, under Studio and Classic', async () => {
+    for (const style of ['studio', 'classic'] as const) {
+      renderMenu(style)
+      await openMenu()
+      expect(screen.queryByText('Set by your look'), style).toBeNull()
+      for (const name of ['Light', 'Dark', 'System']) {
+        expect(screen.getByRole('menuitemradio', { name }), `${style} ${name}`).not.toHaveAttribute('aria-disabled')
+      }
+      cleanup()
+    }
   })
 })
