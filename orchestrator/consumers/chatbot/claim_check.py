@@ -37,7 +37,8 @@ board after." under Auto's timer reply (chat b8d9121f), a line that read like th
 system talking about Auto. Each line is now Auto's own, in plain words, and says what
 did not happen for the kind of claim it was ("I didn't approve anything in this
 reply", "nothing is still running from this reply, and I won't come back to this on
-my own"). Since FX-007 the receipts say it (``claims_backed.not_done_line``).
+my own"). Since FX-007 the receipts say it; since P256-FIX-N15-2 only in the claim's place
+(``claim_removed``), never above the reply.
 
 PRD-256 US-002: the saved correction line keeps tier 2 only (an id that does not exist). What
 was not done is said above the text from the turn's receipts (``consumers/chatbot/receipts.py``).
@@ -74,8 +75,7 @@ logger = logging.getLogger(__name__)
 
 # F314: the owner's line under a claim no action backed, in Auto's own words (claims_backed names it).
 NOT_DONE = "Just to be clear: {said}. Ask me again if you want it done."
-NOTHING_DONE_SAID = "I haven't done that yet, and nothing has changed"
-NOTHING_DONE = NOT_DONE.format(said=NOTHING_DONE_SAID)
+NOTHING_DONE_SAID = "I haven't done that yet, and nothing has changed"   # a bare "Done." (claim_removed)
 NO_SUCH_ID = "Just to be clear: {ids} {verb} not exist — I named {it} without looking {it} up."
 ID_NUDGE = (
     "Your previous reply names {ids}, which {verb} not exist in this workspace. Look it up now with a tool "

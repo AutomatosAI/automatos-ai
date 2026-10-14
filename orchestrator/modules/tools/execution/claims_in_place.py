@@ -1,0 +1,61 @@
+"""P256-FIX-N15-2 (F423, night 15): the not-done line is said only in place of a claim, never above.
+
+"Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it
+done." sat above 148 of night 15's 458 replies, most with no write call at all, pure questions among
+them ("why does a natural Ethiopian taste different", "what's on my board"). It came from the receipts'
+second path (``receipts.honesty_lines``), which read every past participle as a claim ("the agent field
+was cut off in this pull", "I've used 'Harbour Blend'", "It's been run 18 times") and put the line above
+the text. N15-1 already takes an unbacked claim out of the reply and puts the line in its place; that is
+now the line's one producer, and the receipts put only a refused write above the text.
+
+The loop's final-reply check (``ToolLoopExecutor._recover_claimed_action``) runs only when the loop ends
+on a reply with no tool call and no nudge spent. A run that ends another way (a forced synthesis, the
+round cap's answer, a retry after the narration nudge) was answered by the line above; ``its_answer_is_checked``
+gives that answer the same check, so a claim is taken out whichever way the run ended. Taking out twice
+changes nothing: the line in place denies, and a denial is no claim. As with the loop's own check, a run
+offered no tools is not checked (F108-b).
+"""
+from __future__ import annotations
+
+import dataclasses
+import functools
+import logging
+from typing import Any, Awaitable, Callable, Optional
+
+logger = logging.getLogger(__name__)
+
+Run = Callable[..., Awaitable[Any]]
+
+UNBACKED_LOGGED = "[tool-loop] unbacked claim family=%s sentence=%r — replaced by the not-done line"
+
+
+def in_place(loop: Any, reply: Any) -> Optional[Any]:
+    """A copy of ``reply`` with its unbacked claims taken out and the not-done line in the first one's
+    place (``claim_removed``), logged with the claim and its sentence; None when it calls a tool, says
+    nothing or claims nothing the run's calls did not do (``loop.promises``: whose voice it is, RVW-7)."""
+    text = getattr(reply, "content", None)
+    if not isinstance(text, str) or not text.strip() or getattr(reply, "tool_calls", None):
+        return None
+    from consumers.chatbot.claim_removed import in_place_of, without_unbacked_claims
+
+    removed = without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)
+    if removed is None:
+        return None
+    logger.warning(UNBACKED_LOGGED, removed.family, removed.sentence)
+    return in_place_of(reply, removed.text)
+
+
+def its_answer_is_checked(run: Run) -> Run:
+    """Wraps ``ToolLoopExecutor.run``: the response it ends on, however it ended, holds no unbacked claim
+    (a run offered tools; ``run`` takes its arguments by keyword)."""
+    @functools.wraps(run)
+    async def checked(loop: Any, *args: Any, **kwargs: Any) -> Any:
+        result = await run(loop, *args, **kwargs)
+        if not kwargs.get("tools"):
+            return result
+        fresh = in_place(loop, getattr(result, "response", None))
+        return result if fresh is None else dataclasses.replace(result, response=fresh)
+    return checked
+
+
+__all__ = ["UNBACKED_LOGGED", "in_place", "its_answer_is_checked"]

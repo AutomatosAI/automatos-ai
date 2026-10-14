@@ -73,7 +73,7 @@ def test_the_board_list_is_delivered_without_the_claim_and_the_model_is_called_o
 
 def test_the_warning_names_the_family_and_the_sentence(caplog):
     model = _Model(LLMResponse(content=DRAFT, tool_calls=None))
-    with caplog.at_level(logging.WARNING, logger="modules.tools.execution.tool_loop"):
+    with caplog.at_level(logging.WARNING, logger="modules.tools.execution.claims_in_place"):   # N15-2: one check
         _run(model)
     said = [r.getMessage() for r in caplog.records if "unbacked claim" in r.getMessage()]
     assert said == [f"[tool-loop] unbacked claim family=sent sentence={SENT!r} — replaced by the not-done line"]

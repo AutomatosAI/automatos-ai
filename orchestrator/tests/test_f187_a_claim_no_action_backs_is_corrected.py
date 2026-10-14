@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
-import json
 import logging
 from types import SimpleNamespace as NS
 
@@ -119,10 +118,15 @@ def _turn(model, first, owner="Please put the newsletter on the board for review
 
 # ── tier 1: no tool ran, and the reply says it did something ────────────────
 
+# P256-FIX-N15-2: the line in the claim's place names its verb (never the plain line above the reply).
+ZERO_TOOL_VERBS = {"02:14:34": "assigned", "02:31:34": "updated", "02:33:59": "assigned", "02:49:35": "created",
+                   "03:11:48": "created"}
+
+
 @pytest.mark.parametrize("at", list(ZERO_TOOL_CLAIMS))
 def test_each_of_night_6s_zero_tool_claims_is_a_claim(at):
     assert nudged(ZERO_TOOL_CLAIMS[at])
-    assert line(ZERO_TOOL_CLAIMS[at]) == ("Just to be clear: I haven't done that yet, and nothing has changed. "
+    assert line(ZERO_TOOL_CLAIMS[at]) == (f"Just to be clear: I haven't {ZERO_TOOL_VERBS[at]} anything in this reply. "
                                           "Ask me again if you want it done.")
 
 
@@ -158,20 +162,18 @@ def test_the_turn_routes_its_first_reply_through_that_check():
     assert "if response.tool_calls or _first_reply_check:" in turn
 
 
-def test_a_retry_that_still_claims_is_saved_with_the_correction(rows):
+def test_a_first_reply_that_claims_is_answered_with_its_claim_taken_out_and_no_retry(rows):
+    """P256-FIX-N15-1: F108's nudge is gone; the claim's sentence is taken out and the line put in its
+    place, with no second model call. N15-2: that is the line's only place (nothing above the text)."""
     claim = ZERO_TOOL_CLAIMS["03:11:48"]
     model = _Model("I've created the task on your board, as I said.")
     frames, final = _turn(model, _round(claim))
 
-    (sent,) = model.sent                                             # F108's one nudge
-    assert sent[-2] == {"role": "assistant", "content": claim}
-    assert "has not happened" in sent[-1]["content"]
+    assert model.sent == []                                          # no nudge, no retry
     verdict = final["_f187"]
-    assert verdict.tools == 0 and verdict.ids == []
-    assert verdict.correction is None and line(claim) == (                       # PRD-256: the receipts say it
-        "Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it done.")
-    marks = [json.loads(f[2:]) for f in frames if f.startswith('d:{"type": "narration"')]
-    assert {"type": "narration", "data": {"text": claim, "retracted": True}} in marks
+    assert verdict.tools == 0 and verdict.ids == [] and verdict.correction is None
+    assert final["_final_response"].content == line(claim) == (
+        "Just to be clear: I haven't created anything in this reply. Ask me again if you want it done.")
 
 
 def test_a_retry_that_owns_up_needs_no_correction(rows):
@@ -206,11 +208,11 @@ def test_the_turn_saves_the_additions_and_logs_the_verdict_with_the_reply_id():
 
 def test_night_6s_task_1100_is_re_prompted_once_then_corrected(rows):
     first = ZERO_TOOL_CLAIMS["02:49:35"]
-    model = _Model("I've created it: New Task ID: 1100, in the assigned column.",
-                   "Your newsletter task is Task ID 1100.")
+    model = _Model("Your newsletter task is Task ID 1100.")
     frames, final = _turn(model, _round(first))
 
-    nudge = model.sent[1][-1]["content"]
+    (sent,) = model.sent                                             # N15-1: the claim is taken out, not nudged
+    nudge = sent[-1]["content"]
     assert nudge.startswith("Your previous reply names task 1100, which does not exist in this workspace.")
     verdict = final["_f187"]
     assert verdict.ids == [("task", "1100")] and verdict.reprompted
@@ -298,7 +300,7 @@ def test_a_cancel_made_through_the_task_status_is_backed():
 
 # ── a claim when tools ran: the receipts say it (tier 3 is gone) ─────────────
 
-def test_a_claim_no_action_backed_when_tools_ran_is_said_above_the_answer():
+def test_a_claim_no_action_backed_when_tools_ran_is_said_in_its_place():
     """F261 (night 8): "I've cancelled Mission #0365" beside a playbook run was only logged."""
     said = "I've cancelled Mission #0365."
     assert nudged(said, "platform_execute_playbook") == "cancelled"

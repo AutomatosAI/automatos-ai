@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import pytest
 
-from consumers.chatbot.receipts import NOTHING_DONE_LINE
 from tests.helpers_receipts_rule import line, nudged
 
 ANNOUNCED_NOW = "I will now send this updated brief to the agent."
@@ -44,7 +43,7 @@ def test_work_announced_now_with_no_call_is_caught_until_a_call_of_its_kind_runs
     from tests.helpers_receipts_rule import tracker_of
 
     assert nudged(ANNOUNCED_NOW) == "sent"
-    assert line(ANNOUNCED_NOW) == NOTHING_DONE_LINE
+    assert line(ANNOUNCED_NOW) == "Just to be clear: I haven't sent anything in this reply. Ask me again if you want it done."
     assert announced_step(ANNOUNCED_NOW, tracker_of([]).outcomes) == ANNOUNCED_NOW
     sent = ("composio_execute", {"action": "GMAIL_SEND_EMAIL", "params": {}}, {"successful": True})
     assert nudged(ANNOUNCED_NOW, sent) is None and line(ANNOUNCED_NOW, sent) is None

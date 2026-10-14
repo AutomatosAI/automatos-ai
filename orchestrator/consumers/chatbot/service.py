@@ -1477,7 +1477,7 @@ class StreamingChatService:
 
     @staticmethod
     @notes_the_answering_model  # PRD-256 US-001: the receipts frame names the model that answered
-    @the_answer_takes_the_receipts  # PRD-256 US-002: what was not done is said above the text, from receipts
+    @the_answer_takes_the_receipts  # PRD-256 US-002: a refused write is said above the text, from receipts
     @a_reply_says_its_banned_words  # F337 (night 10): the banned words a reply uses, said after it
     @never_all_clear_unread  # F307 (night 9): never "all clear" while Needs you holds something
     def _answer_additions(f187_verdict: Optional[Verdict], final_round: Any) -> List[str]:

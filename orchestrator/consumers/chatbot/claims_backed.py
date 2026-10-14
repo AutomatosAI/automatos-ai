@@ -19,9 +19,9 @@ participle coordinated with a claim is a claim of its own ("I've created the tas
 to Declan" is created and sent), and the reply's own content exempts only its clause ("Here's
 the update: the card has been approved." is a claim).
 
-The line names what was not done when another write went through ("Just to be clear: I
-haven't reverted anything in this reply…"); when nothing went through it stays the plain
-not-done line ("…nothing has changed").
+The line names what was not done ("Just to be clear: I haven't reverted anything in this
+reply…"); a bare "Done." gets the plain not-done line ("…nothing has changed"). P256-FIX-N15-1/N15-2:
+it is said in the claim's place, the claim taken out (``claim_removed``), never above the reply.
 
 The shapes read as a report of work done: "I've <verb>", "has/have been <verb>" (a state like
 "has been based on" is not a report), "it's been <verb>", "is now <verb>", "<Subject> launched ✅",
@@ -80,7 +80,7 @@ import re
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from consumers.chatbot import claims_by_kind as kinds
-from consumers.chatbot.claim_check import NOT_DONE, NOTHING_DONE
+from consumers.chatbot.claim_check import NOT_DONE
 from consumers.chatbot.claims_not_reports import looked_something_up, not_a_report, recalled
 from modules.tools.execution.composio_action import is_slug, slug_stems
 
@@ -88,6 +88,7 @@ Receipt = Dict[str, Any]
 Backs = Callable[[Receipt], bool]
 
 NOT_DONE_PREFIX = NOT_DONE.split("{", 1)[0]          # "Just to be clear: "
+_NOT_DONE_SAID = re.compile("{}[^\n]*?{}".format(*(re.escape(part) for part in NOT_DONE.split("{said}"))))
 NAMED_SAID = "I haven't {verbs} anything in this reply"
 
 # Looking things up is not work done: "I've checked the board" claims no change.
@@ -645,26 +646,18 @@ def not_said(named: Sequence[str]) -> str:
     return "; ".join([NAMED_SAID.format(verbs=_listed(verbs))] + own if verbs else own)
 
 
-def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = False,
-                  reads: Sequence[Receipt] = ()) -> Optional[str]:
-    """The one not-done line for the answer, or None when every claim is backed (``waiting``: by
-    the card the turn raised, too; ``reads``: the turn's done reads). It names what was not done
-    when another write went through (a verb in no family too, RVW-36: "I haven't rejected anything");
-    else it is the plain not-done line."""
-    unbacked = unbacked_claims(answer, done_writes, waiting=waiting, reads=reads)
-    if not unbacked:
-        return None
-    named = list(dict.fromkeys(verb for verb, _known in unbacked if verb not in SAYS_DONE))
-    if not done_writes or not named:
-        return NOTHING_DONE
-    return NOT_DONE.format(said=not_said(named))
-
-
 def is_not_done_line(line: str) -> bool:
-    """Whether a line above the answer is the not-done line (plain or naming its claim)."""
+    """Whether a line (or a sentence) is the not-done line (plain or naming its claim)."""
     return line.startswith(NOT_DONE_PREFIX)
 
 
+def says_not_done(text: str) -> bool:
+    """Whether ``text`` carries the not-done line, opening to close ("Just to be clear: … Ask me again if
+    you want it done."): where a claim was taken out, the line is in its place (P256-FIX-N15-1). Another
+    line that opens the same way (an id that does not exist) is not it."""
+    return _NOT_DONE_SAID.search(text or "") is not None
+
+
 __all__ = ["COMPLETED_ACTION", "FAMILIES", "NOT_DONE_PREFIX", "SAYS_DONE", "SENTENCES", "claims", "claims_work_done",
-           "is_not_done_line", "not_done_line", "not_said", "numbers_read", "own_lines", "promised_unbacked",
-           "unbacked_claims", "unbacked_where", "without_marks"]
+           "is_not_done_line", "not_said", "numbers_read", "own_lines", "promised_unbacked",
+           "says_not_done", "unbacked_claims", "unbacked_where", "without_marks"]

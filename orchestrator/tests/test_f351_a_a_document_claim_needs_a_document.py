@@ -22,11 +22,11 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from consumers.chatbot.receipts import NOTHING_DONE_LINE, build_receipts, honesty_lines
+from consumers.chatbot.receipts import build_receipts, honesty_lines
 from core.llm.usage_context import LANE_CHAT, usage_scope
 from modules.tools.execution.call_effects import MAKE_REFUSED
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
-from tests.helpers_receipts_rule import line, nudged, tracker_of
+from tests.helpers_receipts_rule import line, nudged, tracker_of, unbacked
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
 MADE = ("generate_document", {"title": "Letter to Maya Osei"}, {"success": True})
@@ -87,11 +87,12 @@ def test_a_document_said_to_be_made_needs_one_made(chat, reply, claim):
 
 @pytest.mark.parametrize("chat, reply", DRAFTED, ids=[chat for chat, _ in DRAFTED])
 def test_a_document_said_drafted_is_the_lines_not_the_nudges(chat, reply):
-    """P256-FIX-RVW-7: a participle in no family costs no extra model call; the owner still reads
-    that nothing was made, unless a document was."""
+    """P256-FIX-RVW-7: a participle in no family costs no extra model call. P256-FIX-N15-2: the rule
+    still reads it as unbacked unless a document was made, but it is never taken out, so it draws no
+    line (the line is said only in place of a claim taken out, never above the reply)."""
     assert nudged(reply) is None and nudged(reply, *OTHER_CALLS) is None
-    assert line(reply) == NOTHING_DONE_LINE and line(reply, *OTHER_CALLS) == NOTHING_DONE_LINE
-    assert line(reply, MADE) is None
+    assert unbacked(reply) and unbacked(reply, *OTHER_CALLS) and not unbacked(reply, MADE)
+    assert line(reply) is None and line(reply, *OTHER_CALLS) is None and line(reply, MADE) is None
 
 
 def test_an_agents_own_draft_is_not_checked():
@@ -116,9 +117,12 @@ def test_a_refused_document_call_makes_no_document():
 
     assert tracker.succeeded == {MAKE_REFUSED} and "generate_document" in tracker.failed
     assert nudged(LETTER, REFUSED) == "generated"
-    tried, not_done = honesty_lines(build_receipts(tracker), LETTER)
+    (tried,) = honesty_lines(build_receipts(tracker), LETTER)                 # above: the refused call alone
     assert tried.startswith('I tried to generate the document "Letter to Maya Osei" and it didn\'t go through')
-    assert not_done == NOTHING_DONE_LINE
+    in_place = line(LETTER, REFUSED)                                          # in the claim's place: the refusal too
+    assert in_place == ("Just to be clear: I haven't generated or saved anything in this reply; I tried to generate "
+                        "the document \"Letter to Maya Osei\" and it didn't go through. Ask me again if you want it done.")
+    assert honesty_lines(build_receipts(tracker), f"Here it is. {in_place}") == []   # the line names it: once
     assert nudged(LETTER, REFUSED, MADE) is None
 
 
@@ -151,10 +155,12 @@ def test_a_question_an_offer_a_quoted_draft_or_a_plan_is_no_claim(reply):
 ])
 def test_a_report_of_work_with_no_write_is_caught_whatever_it_made(reply, claim):
     """The families read these as no document claim; the receipts rule reads a report of work
-    done with no write behind it, which the owner is told plainly. P256-FIX-RVW-7: the nudge
-    names only a claim of a known family; a verb in none ("drafted", "prepared") is the line's."""
-    assert nudged(reply) == claim
-    assert line(reply) == NOTHING_DONE_LINE
+    done with no write behind it. P256-FIX-RVW-7: the nudge names only a claim of a known family.
+    P256-FIX-N15-2: only that claim is taken out, the line in its place; a verb in none ("drafted",
+    "prepared") is still read as unbacked, and draws no line."""
+    assert nudged(reply) == claim and unbacked(reply)
+    assert line(reply) == (None if claim is None else
+                           f"Just to be clear: I haven't {claim} anything in this reply. Ask me again if you want it done.")
 
 
 def test_a_card_made_to_write_the_document_backs_the_card_it_names():

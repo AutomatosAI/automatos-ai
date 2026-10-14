@@ -111,7 +111,7 @@ def test_the_table_is_the_families_26_sentences():
 @pytest.mark.parametrize("family, said, calls, claim", SENTENCES, ids=[case[0] for case in SENTENCES])
 def test_each_sentence_is_caught_or_cleared_by_the_receipts_rule(family, said, calls, claim):
     assert nudged(said, *calls) == claim, family
-    assert (line(said, *calls) is None) is (claim is None), family     # caught: the line above the answer too
+    assert (line(said, *calls) is None) is (claim is None), family     # caught: the line in its place too (N15-2)
 
 
 # ── P256-FIX-RVW-37: the four rows FX-007 inverted, each cleared by its backing call ──
@@ -272,9 +272,13 @@ def test_the_in_loop_check_and_the_first_reply_read_the_receipts_rule():
     from consumers.chatbot.service import StreamingChatService
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
+    from modules.tools.execution import claims_in_place
+
     check = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    # RVW-7: the run's voice; P256-FIX-N15-1: the claim is taken out in place, never nudged
-    assert "without_unbacked_claims(text, self.tracker.outcomes, promises=self.promises)" in check
+    # RVW-7: the run's voice; P256-FIX-N15-1: the claim is taken out in place, never nudged (N15-2: claims_in_place)
+    assert "return in_place(self, current)" in check
+    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)" in inspect.getsource(
+        claims_in_place.in_place)
     assert "claims_work_done(response.content)" in inspect.getsource(
         StreamingChatService._first_reply_goes_through_the_loop)
 

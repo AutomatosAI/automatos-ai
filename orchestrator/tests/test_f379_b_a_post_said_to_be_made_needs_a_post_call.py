@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.helpers_receipts_rule import line, nudged
+from tests.helpers_receipts_rule import line, nudged, unbacked
 
 MADE = ("platform_create_social_post",)
 CHANGED = ("platform_update_social_post",)
@@ -41,7 +41,9 @@ def test_a_post_claim_needs_a_post_call_and_a_read_never_backs_it(reply, claim, 
     assert nudged(reply) == claim
     assert nudged(reply, *READ) == claim
     assert nudged(reply, *backing) is None
-    assert line(reply, *READ) is not None and line(reply, *backing) is None    # the line reads every claim
+    assert unbacked(reply, *READ) and not unbacked(reply, *backing)              # the rule reads every claim
+    # P256-FIX-N15-2: the line only in place of a claim taken out (a known family's), never above the reply
+    assert (line(reply, *READ) is None) is (claim is None) and line(reply, *backing) is None
 
 
 @pytest.mark.parametrize("reply, backing", WAITING, ids=[r[:40] for r, _ in WAITING])
@@ -64,14 +66,17 @@ def test_an_offer_a_place_and_a_back_reference_are_no_claim(reply):
     assert nudged(reply) is None and line(reply) is None
 
 
-@pytest.mark.parametrize("reply", [
-    "I've drafted a blog post about the Harvest Club.",
-    'I\'ve turned off the timer for your "Weekly Instagram posts" playbook.',
+@pytest.mark.parametrize("reply, claim", [
+    ("I've drafted a blog post about the Harvest Club.", None),
+    ('I\'ve turned off the timer for your "Weekly Instagram posts" playbook.', "turned off"),
 ])
-def test_a_blog_post_or_a_timer_said_done_with_nothing_run_is_caught(reply):
-    """No post claim, as the families read them; a report of work done with nothing run, as the receipts do."""
-    assert line(reply) == ("Just to be clear: I haven't done that yet, and nothing has changed. "
-                           "Ask me again if you want it done.")
+def test_a_blog_post_or_a_timer_said_done_with_nothing_run_is_caught(reply, claim):
+    """No post claim, as the families read them; a report of work done with nothing run, as the receipts do.
+    P256-FIX-N15-2: a known family's claim is taken out, the line in its place; "drafted" (no family) is
+    read but draws no line."""
+    assert unbacked(reply)
+    assert line(reply) == (None if claim is None else
+                           f"Just to be clear: I haven't {claim} anything in this reply. Ask me again if you want it done.")
 
 
 def test_a_read_of_the_posts_never_backs_a_save_or_a_post_out():
@@ -87,6 +92,6 @@ def test_the_rest_of_the_reply_is_still_checked():
 
 def test_the_owner_reads_what_did_not_happen_in_plain_words():
     assert line("I've made a carousel.", *READ) == (
-        "Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it done.")
+        "Just to be clear: I haven't made anything in this reply. Ask me again if you want it done.")
     assert line("I've made a carousel.", "platform_store_memory") == (
         "Just to be clear: I haven't made anything in this reply. Ask me again if you want it done.")

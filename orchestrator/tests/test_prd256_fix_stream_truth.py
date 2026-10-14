@@ -10,7 +10,8 @@ G3: two producers wrote "Just to be clear…": the turn's ``no_tool_call`` notic
 deduped them. Now the receipts rule is the only producer: the notice keeps the unrun source
 (F099) and the prose narration (#746), and the narration defers to the receipts when they already
 say nothing was done. Both reply paths are tested: the first reply that ran no tool, and the
-tool loop's reply.
+tool loop's reply. P256-FIX-N15-2: the line is said only in place of the claim it answers (taken
+out of the reply), never above it; a reply that carries it gets no notice.
 """
 from __future__ import annotations
 
@@ -22,12 +23,13 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from consumers.chatbot.receipts import (
-    ABOVE, DONE, NOTHING_DONE_LINE, READ, WRITE, honesty_lines, says_nothing_was_done,
-)
+from consumers.chatbot.claim_removed import without_unbacked_claims
+from consumers.chatbot.claims_backed import claims_work_done
+from consumers.chatbot.receipts import ABOVE, DONE, READ, WRITE, honesty_lines, says_nothing_was_done
 from consumers.chatbot.tool_summary import tool_result_summary
 from modules.tools.execution.card_raised import ACT, TOOL_END, WAITING, emit_flagged
 from modules.tools.execution.tool_loop import ToolLoopExecutor
+from tests.helpers_receipts_rule import call, line, unbacked
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
 MODEL = "google/gemini-2.5-flash"
@@ -50,6 +52,8 @@ NIGHT_3 = [
     ("I've cancelled the Friday schedule.", "platform_cancel_scheduled_task"),
     ("I've renamed task 12 for you.", "platform_update_task"),
 ]
+NO_FAMILY_NIGHT_3 = "I've put your newsletter on the board."   # read as a claim, in no family: no line (N15-2)
+CREATED_NOT_DONE = "Just to be clear: I haven't created anything in this reply. Ask me again if you want it done."
 
 
 # ── C3: the tool-end flag is the result's own ───────────────────────────────
@@ -174,19 +178,26 @@ def _receipt(action, status, kind=WRITE):
 @pytest.mark.parametrize("reply, backing", NIGHT_3, ids=[r[:24] for r, _ in NIGHT_3])
 def test_a_claim_with_nothing_behind_it_is_the_receipts_line_only(reply, backing):
     """F108's sentences (moved from test_f108's chat-notice test): the receipts say it; the
-    notice never says it again, whatever other tools ran."""
+    notice never says it again, whatever other tools ran. P256-FIX-N15-2: in the claim's place
+    (a verb of a family: "put" is in none, read but never taken out), never above the reply."""
     assert _notice(reply) is None
     assert _notice(reply, ran={"platform_get_mission"}, any_tool_ran=True) is None
-    assert honesty_lines([], reply) == [NOTHING_DONE_LINE]
-    assert honesty_lines([_receipt("platform_get_mission", DONE, READ)], reply) == [NOTHING_DONE_LINE]
-    assert honesty_lines([_receipt(backing, DONE)], reply) == []          # a write went through: no line
+    assert honesty_lines([], reply) == honesty_lines([_receipt("platform_get_mission", DONE, READ)], reply) == []
+    assert unbacked(reply) and unbacked(reply, "platform_get_mission") and not unbacked(reply, call(backing))
+    in_place = line(reply, "platform_get_mission")
+    assert in_place == line(reply) and (in_place is None) is (reply == NO_FAMILY_NIGHT_3)
+    assert in_place is None or in_place.startswith(f"{CLEAR}: I haven't ")
+    assert line(reply, call(backing)) is None                              # a write went through: no line
 
 
 def test_a_first_reply_claiming_work_with_no_tool_gets_exactly_one_line():
     narrated_claim = "Let me set that up now. I've created the OPS agent ✅"
-    assert says_nothing_was_done(narrated_claim)
-    assert _notice(narrated_claim) is None                                # the receipts say it
-    assert honesty_lines([], narrated_claim) == [NOTHING_DONE_LINE]
+    assert claims_work_done(narrated_claim)                               # it goes through the loop (F187)…
+    in_place = without_unbacked_claims(narrated_claim, []).text           # …which takes the claim out
+    assert in_place == f"Let me set that up now. {CREATED_NOT_DONE}"
+    assert not says_nothing_was_done(narrated_claim) and says_nothing_was_done(in_place)
+    assert _notice(in_place) is None                                      # the line says it: no notice
+    assert honesty_lines([], in_place) == []                              # and nothing above it
 
 
 def test_a_narration_the_receipts_do_not_read_keeps_its_one_notice():
@@ -196,7 +207,7 @@ def test_a_narration_the_receipts_do_not_read_keeps_its_one_notice():
     narrated = "Now let me create OPS and TRACKER. Good — both created."
     assert not says_nothing_was_done(narrated)
     assert _notice(narrated) == NARRATED_ACTIONS_NOTICE
-    assert honesty_lines([], narrated) == []
+    assert honesty_lines([], narrated) == [] and line(narrated) is None
 
 
 def test_the_notice_has_no_claim_family_and_takes_no_done_set():
@@ -263,10 +274,10 @@ def _service(result):
     return svc
 
 
-def _turn(monkeypatch, *, answer, result=None, with_loop=True):
+def _turn(monkeypatch, *, answer, result=None, with_loop=True, finals=None):
     """One chat turn: the real tool loop (the model calls ``APPROVE``, then answers), or a first
     reply that ran nothing and asks the notice as the turn's first-reply branch does; then the
-    answer's additions and the finish."""
+    answer's additions and the finish. ``finals`` collects the answer the loop ends on."""
     from consumers.chatbot.service import StreamingChatService, unexecuted_claims_notice
 
     monkeypatch.setattr(StreamingChatService, "_hidden_action_scope", lambda self, agent_id: nullcontext())
@@ -285,6 +296,8 @@ def _turn(monkeypatch, *, answer, result=None, with_loop=True):
             async for chunk in loop():
                 if isinstance(chunk, str):
                     yield chunk
+                elif isinstance(chunk, dict) and finals is not None and chunk.get("_final_response"):
+                    finals.append(chunk["_final_response"].content)
         else:
             notice = unexecuted_claims_notice(answer, TOOLS, set(), any_tool_ran=False)
             if notice:
@@ -312,21 +325,27 @@ def _lines_said(chunks):
 
 
 def test_the_tool_loop_reply_carries_one_just_to_be_clear(monkeypatch):
-    chunks = _turn(monkeypatch, answer=SAID_APPROVED, result=REFUSED)
+    finals = []
+    chunks = _turn(monkeypatch, answer=SAID_APPROVED, result=REFUSED, finals=finals)
 
-    said = _lines_said(chunks)
-    assert sum(line.startswith(CLEAR) for line in said) == 1
-    assert said[-1] == NOTHING_DONE_LINE
+    assert _lines_said(chunks) == []                       # P256-FIX-N15-2: no notice, nothing above
+    (answer,) = finals                                     # the line in the claims' place, the refusal in it
+    assert answer.count(CLEAR) == 1
+    assert answer == ("Just to be clear: I haven't approved anything in this reply; I tried to approve the mission "
+                      "and it didn't go through. Ask me again if you want it done.")
     (end,) = _data(chunks, "tool-end")
     assert end["success"] is False and end["summary"]      # no green tick on the refusal
     assert WAITING not in end                              # and no hourglass: it was refused
 
 
 def test_the_no_tool_first_reply_carries_one_just_to_be_clear(monkeypatch):
-    chunks = _turn(monkeypatch, answer="Let me set that up now. I've created the OPS agent ✅", with_loop=False)
+    """A first reply that claims work goes through the loop (F187: ``claims_work_done``), which ends on
+    it with the claim taken out: one line, in its place, and no notice."""
+    finals = []
+    chunks = _turn(monkeypatch, answer="Let me set that up now. I've created the OPS agent ✅", finals=finals)
 
-    assert _lines_said(chunks) == [NOTHING_DONE_LINE]
-    assert not _data(chunks, "limit_reached")
+    assert _lines_said(chunks) == [] and not _data(chunks, "limit_reached")
+    assert finals == [f"Let me set that up now. {CREATED_NOT_DONE}"]
 
 
 def test_a_done_write_streams_true_and_no_line(monkeypatch):

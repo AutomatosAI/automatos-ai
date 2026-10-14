@@ -28,6 +28,6 @@ def test_a_post_that_was_made_backs_the_save():
 
 def test_the_owner_is_told_plainly_that_nothing_was_saved():
     assert line(SAID_OUTRIGHT, "platform_list_social_posts") == (
-        "Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it done.")
+        "Just to be clear: I haven't saved anything in this reply. Ask me again if you want it done.")
     assert line(SAID_OUTRIGHT, "platform_assign_task") == (
         "Just to be clear: I haven't saved anything in this reply. Ask me again if you want it done.")

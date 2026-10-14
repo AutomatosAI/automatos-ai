@@ -21,9 +21,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from consumers.chatbot.receipts import (
-    NOTHING_DONE_LINE, REFUSED, WAITING, WRITE, build_receipts, honesty_lines, unbacked_claim,
-)
+from consumers.chatbot.claim_removed import without_unbacked_claims
+from consumers.chatbot.receipts import REFUSED, WAITING, WRITE, build_receipts, honesty_lines, unbacked_claim
 from consumers.chatbot.tool_summary import tool_result_summary
 from modules.tools.execution.card_raised import ACT, FOR_THE_MODEL, TOOL_END
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
@@ -80,6 +79,18 @@ def _tracker(*calls):
 
 def _receipts(*calls):
     return build_receipts(_tracker(*calls))
+
+
+def _in_place(answer, *calls):
+    """P256-FIX-N15-2: the answer as the owner gets it, its unbacked claims taken out and the not-done
+    line in the first one's place (the line's only place); None when it claims nothing unbacked."""
+    removed = without_unbacked_claims(answer, _tracker(*calls).outcomes)
+    return removed.text if removed else None
+
+
+def _asked_line(verbs):
+    return (f"Just to be clear: I haven't {verbs} anything in this reply; I asked for your click to change an "
+            "agent 'Scout' (agent #12), so it hasn't happened yet. Ask me again if you want it done.")
 
 
 # ── The ask: one waiting receipt, no refused-write line ─────────────────────────────
@@ -146,9 +157,10 @@ def test_a_genuine_refusal_is_still_refused():
 
 
 def test_saying_the_waiting_change_is_done_gets_the_nothing_done_line():
-    receipts = _receipts((UPDATE_AGENT, {"agent_id": 12}, _chats(_routed(_agent_ask()))))
+    call = (UPDATE_AGENT, {"agent_id": 12}, _chats(_routed(_agent_ask())))
 
-    assert honesty_lines(receipts, SAID_DONE) == [NOTHING_DONE_LINE]
+    assert honesty_lines(_receipts(call), SAID_DONE) == []                 # P256-FIX-N15-2: nothing above
+    assert _in_place(SAID_DONE, call) == _asked_line("changed")            # the line, and its card, in place
 
 
 # ── P256-FIX-RVW-30: the honest first-person account of the ask is no claim of the change ──
@@ -171,6 +183,7 @@ def _waiting_agent_change():
 @pytest.mark.parametrize("answer", SAID_ASKED)
 def test_saying_the_card_was_raised_gets_no_line(answer):
     assert honesty_lines(_receipts(_waiting_agent_change()), answer) == []
+    assert _in_place(answer, _waiting_agent_change()) is None
 
 
 @pytest.mark.parametrize("answer", SAID_ASKED)
@@ -180,7 +193,7 @@ def test_the_nudge_lets_the_ask_be_said(answer):
 
 def test_a_claim_of_the_change_itself_still_gets_the_line_and_the_nudge():
     calls = _waiting_agent_change()
-    assert honesty_lines(_receipts(calls), SAID_CHANGED) == [NOTHING_DONE_LINE]
+    assert _in_place(SAID_CHANGED, calls) == _asked_line("changed")
     assert unbacked_claim(SAID_CHANGED, _tracker(calls).outcomes) == "changed"
 
 
@@ -191,14 +204,14 @@ def test_a_claim_of_the_change_itself_still_gets_the_line_and_the_nudge():
 ))
 def test_a_send_beside_the_ask_is_still_a_claim(answer):
     calls = _waiting_agent_change()
-    assert honesty_lines(_receipts(calls), answer) == [NOTHING_DONE_LINE]
+    assert _in_place(answer, calls) == _asked_line("sent")
     assert unbacked_claim(answer, _tracker(calls).outcomes) == "sent"
 
 
 def test_without_a_waiting_receipt_the_ask_words_back_nothing():
     """No card was raised this turn: 'I've sent you an approval card' is an unbacked send."""
     answer = SAID_ASKED[1]
-    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
+    assert _in_place(answer) == "Just to be clear: I haven't sent anything in this reply. Ask me again if you want it done."
     assert unbacked_claim(answer, ()) == "sent"
 
 
@@ -240,4 +253,9 @@ def test_an_approve_from_chat_is_a_waiting_receipt_end_to_end(board):
     assert board.card.title in envelope["llm_context"]
     assert [r["status"] for r in receipts] == [WAITING]
     assert receipts[0]["effect"].startswith("card raised: approve (move to Done)")
-    assert honesty_lines(receipts, "Done. #0001 is approved and moved to Done.") == [NOTHING_DONE_LINE]
+    said = "Done. #0001 is approved and moved to Done."
+    assert honesty_lines(receipts, said) == []                             # P256-FIX-N15-2: nothing above
+    in_place = _in_place(said, (MOVE, params, _chats(envelope)))           # the claims out, the line in place
+    assert in_place.startswith("Just to be clear: I haven't approved or moved anything in this reply; I asked for "
+                               "your click to approve (move to Done)")
+    assert in_place.endswith("so it hasn't happened yet. Ask me again if you want it done.")

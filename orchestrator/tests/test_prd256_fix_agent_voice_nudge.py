@@ -28,12 +28,11 @@ import inspect
 
 import pytest
 
-from consumers.chatbot.receipts import NOTHING_DONE_LINE
 from core.llm.clients.base import LLMResponse
 from core.llm.usage_context import LANE_BOARD_TASK, LANE_CHAT, usage_scope
 from modules.tools.execution.nudges import is_nudge
 from modules.tools.execution.tool_loop import ToolLoopExecutor
-from tests.helpers_receipts_rule import line, nudged
+from tests.helpers_receipts_rule import line, nudged, unbacked
 
 TOOLS = [{"type": "function", "function": {"name": "platform_execute", "parameters": {}}}]
 CANCELLED = "It has been cancelled, and you won't be charged."
@@ -89,7 +88,7 @@ def test_autos_passive_is_still_nudged():
 @pytest.mark.parametrize("said", NO_FAMILY)
 def test_a_participle_in_no_family_is_never_nudged(said):
     assert nudged(said) is None and nudged(said, promises=False) is None
-    assert line(said) == NOTHING_DONE_LINE                     # the line above the answer is unchanged
+    assert unbacked(said) and line(said) is None              # read, never taken out: no line (N15-2)
 
 
 def test_the_reply_written_below_is_no_claim_at_all():
@@ -149,8 +148,11 @@ def test_i_ve_prepared_a_summary_costs_no_extra_model_call():
 
 
 def test_the_check_passes_the_runs_voice():
-    source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "without_unbacked_claims(text, self.tracker.outcomes, promises=self.promises)" in source
+    from modules.tools.execution import claims_in_place
+
+    assert "return in_place(self, current)" in inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)" in inspect.getsource(
+        claims_in_place.in_place)                                                     # N15-2: the one check
 
 
 # ── F201 is unchanged ───────────────────────────────────────────────────────
