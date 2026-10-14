@@ -1,0 +1,98 @@
+/*
+ * PRD-260 §4 — the chat's frame and the message box (Ember mocks 01, 02 and
+ * 06), ported from Automatos Play's components/chat/composer.module.css. The
+ * conversation scrolls above; the box stays at the bottom of the column.
+ * Every variable is --pl-* (K2).
+ */
+
+.chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.footer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-2);
+  padding: var(--pl-space-2) var(--pl-space-7) var(--pl-space-6);
+}
+
+.box {
+  width: 100%;
+  max-width: var(--pl-content-max);
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--pl-space-3);
+  padding: var(--pl-space-2) var(--pl-space-2) var(--pl-space-2) var(--pl-space-5);
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+}
+
+/* The ring goes round the whole box, not inside it. */
+.box:focus-within {
+  box-shadow: var(--pl-focus-ring);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--pl-tap-min);
+  max-height: var(--pl-composer-max-height);
+  padding: var(--pl-space-2) 0;
+  border: 0;
+  resize: none;
+  field-sizing: content;
+  background: transparent;
+  color: var(--pl-color-text);
+  font: var(--pl-text-body);
+}
+
+.input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.input::placeholder {
+  color: var(--pl-color-text-3);
+}
+
+.send,
+.stop {
+  flex: none;
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pl-space-2);
+  padding: 0 var(--pl-space-5);
+  border: 0;
+  border-radius: var(--pl-radius-button);
+  background: var(--pl-color-text);
+  color: var(--pl-color-bg);
+  font: var(--pl-text-button-sm);
+  cursor: pointer;
+}
+
+/* Send and Stop are the secondary (cream) button in a conversation; on the empty chat
+   (first open) Send is the screen's one primary, in the accent. */
+.chat[data-empty] .send {
+  background: var(--pl-color-accent);
+  color: var(--pl-color-accent-ink);
+  box-shadow: var(--pl-shadow-primary);
+}
+
+.send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.stopIcon {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--pl-radius-icon);
+  background: var(--pl-color-bg);
+}

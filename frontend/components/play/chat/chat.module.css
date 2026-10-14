@@ -1,0 +1,201 @@
+/*
+ * PRD-260 §4 — the conversation (Ember mocks 01 and 02): your messages
+ * outlined, Auto's unboxed, the answer in Geist with bold as a serif highlight,
+ * ported from Automatos Play's components/chat/chat.module.css. The list
+ * scrolls inside Play's frame. Every variable is --pl-* (K2).
+ */
+
+.messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--pl-space-7);
+}
+
+/* The list sits at the bottom of a short conversation, as Play's does. */
+.messageList {
+  width: 100%;
+  max-width: var(--pl-content-max);
+  margin: auto auto 0;
+  padding: var(--pl-space-5) 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-5);
+}
+
+.userItem {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.replyItem {
+  display: flex;
+}
+
+/* A message rises 12px and fades in over 180 ms (Ember motion). */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--pl-rise-distance));
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.bubble {
+  max-width: var(--pl-bubble-max);
+  margin: 0;
+  padding: var(--pl-space-3) var(--pl-space-4);
+  border: 1px solid var(--pl-line-strong);
+  border-radius: var(--pl-radius-card);
+  color: var(--pl-color-text);
+  font: var(--pl-text-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: rise var(--pl-duration-message) var(--pl-ease-out);
+}
+
+.reply {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pl-space-3);
+  animation: rise var(--pl-duration-message) var(--pl-ease-out);
+}
+
+.speaker {
+  margin: 0;
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-3);
+}
+
+.above {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-text);
+}
+
+.activity {
+  margin: 0;
+  font: var(--pl-text-small);
+  font-style: italic;
+  color: var(--pl-color-text-3);
+}
+
+.notice {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-2);
+}
+
+.error {
+  margin: 0;
+  display: flex;
+  gap: var(--pl-space-2);
+  font: var(--pl-text-small);
+  color: var(--pl-color-error-text);
+}
+
+.mark {
+  flex: none;
+  color: inherit;
+}
+
+/* The answer: Geist for reading, with bold set as a serif highlight in the accent. */
+
+.answer {
+  width: 100%;
+  font: var(--pl-text-reply);
+  color: var(--pl-color-text);
+  overflow-wrap: anywhere;
+}
+
+.markdown {
+  font: inherit;
+  color: inherit;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol {
+  margin: 0 0 var(--pl-space-3);
+}
+
+.markdown strong {
+  font-family: var(--pl-font-display);
+  font-style: var(--pl-font-display-style);
+  font-weight: var(--pl-font-display-weight);
+  font-size: var(--pl-text-highlight-size);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-accent-text);
+}
+
+.markdown a {
+  color: var(--pl-color-accent-text);
+}
+
+.markdown code {
+  font: var(--pl-text-mono);
+}
+
+.markdown pre {
+  overflow-x: auto;
+  padding: var(--pl-space-3);
+  border-radius: var(--pl-radius-tool);
+  background: var(--pl-color-surface);
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 var(--pl-space-3);
+}
+
+.markdown th,
+.markdown td {
+  padding: var(--pl-space-1) var(--pl-space-2);
+  border: 1px solid var(--pl-line);
+  text-align: left;
+}
+
+/* An image shown as its alt text: italic in the text's own colour. */
+.imageAlt {
+  font-style: italic;
+  color: inherit;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 20px;
+  margin-left: 3px;
+  vertical-align: -4px;
+  border-radius: var(--pl-radius-icon);
+  background: var(--pl-color-accent);
+  animation: blink 1s steps(1) infinite;
+}

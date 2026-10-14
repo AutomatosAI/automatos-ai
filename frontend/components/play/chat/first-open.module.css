@@ -1,0 +1,57 @@
+/*
+ * PRD-260 §4 — the empty chat (Ember mock 06): Auto big and centred, the serif
+ * headline and the example chips, ported from Automatos Play's
+ * components/chat/first-open.module.css. Every variable is --pl-* (K2).
+ */
+
+.hero {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pl-space-3);
+  padding: var(--pl-space-6);
+  text-align: center;
+}
+
+.title {
+  margin: var(--pl-space-3) 0 0;
+  font: var(--pl-text-hero);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
+}
+
+.line {
+  margin: 0;
+  font: var(--pl-text-lead);
+  color: var(--pl-color-text-2);
+}
+
+.chips {
+  width: 100%;
+  max-width: var(--pl-content-max);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--pl-space-2);
+}
+
+.chip {
+  min-height: var(--pl-tap-min);
+  padding: 0 var(--pl-space-4);
+  border: 1px solid var(--pl-line-button);
+  border-radius: var(--pl-radius-pill);
+  background: transparent;
+  color: var(--pl-color-text);
+  font: var(--pl-text-small);
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--pl-tint-hover);
+}
