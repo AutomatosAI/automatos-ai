@@ -1039,9 +1039,12 @@ UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/docu
 # get theirs.
 from modules.documents.brand_fonts import BRAND_FONTS_ROUTE, MAX_FONT_BYTES
 from modules.documents.brand_logo import BRAND_LOGO_ROUTE, MAX_LOGO_BYTES
+# PRD-259 S-003: a .autoskin package is capped at SKIN_MAX_PACKAGE_MB (15 MB), over the 10 MB default.
+from services.skins.package import SKIN_IMPORT_ROUTE, package_max_bytes
 PATH_BODY_LIMITS = {
     BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024,
     BRAND_FONTS_ROUTE: MAX_FONT_BYTES + 512 * 1024,
+    SKIN_IMPORT_ROUTE: package_max_bytes() + 512 * 1024,
 }
 
 

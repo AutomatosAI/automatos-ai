@@ -1,5 +1,5 @@
 {
-  "route_count": 915,
+  "route_count": 918,
   "routes": [
     {
       "method": "GET",
@@ -2154,8 +2154,20 @@
       "path": "/api/sites/{site_id}/settings"
     },
     {
+      "method": "POST",
+      "path": "/api/skins/import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/skins/installed"
+    },
+    {
       "method": "GET",
       "path": "/api/skins/schema"
+    },
+    {
+      "method": "GET",
+      "path": "/api/skins/{skin_id}/assets/{asset_path:path}"
     },
     {
       "method": "GET",

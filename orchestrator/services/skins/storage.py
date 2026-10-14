@@ -15,7 +15,7 @@ the event loop.
 from __future__ import annotations
 
 import logging
-from typing import List, Mapping, NamedTuple, Optional
+from typing import Iterable, List, Mapping, NamedTuple, Optional
 from uuid import UUID
 
 from config import config
@@ -88,3 +88,16 @@ def read_skin_file(prefix: str, path: str) -> bytes:
     """The bytes of one stored skin file (blocking)."""
     response = get_s3_client().get_object(Bucket=config.MARKETPLACE_S3_BUCKET, Key=skin_key(prefix, path))
     return response["Body"].read()
+
+
+def delete_skin_files(prefix: str, paths: Iterable[str]) -> List[str]:
+    """Remove the files at ``paths`` under ``prefix`` (blocking); returns the keys removed.
+
+    Every path is checked before the first delete, like :func:`write_skin_files`.
+    """
+    keys = [skin_key(prefix, path) for path in paths]
+    client = get_s3_client()
+    for key in keys:
+        client.delete_object(Bucket=config.MARKETPLACE_S3_BUCKET, Key=key)
+    logger.info("Removed %d skin files under s3://%s/%s", len(keys), config.MARKETPLACE_S3_BUCKET, prefix)
+    return keys
