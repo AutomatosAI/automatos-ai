@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { useTheme } from 'next-themes'
-import { Sun, Moon, Monitor, BookOpen, LayoutTemplate } from 'lucide-react'
+import { Sun, Moon, Monitor, BookOpen, LayoutTemplate, Sparkles, Palette } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -16,13 +18,31 @@ import {
 import { useUiStyle } from '@/contexts/ui-style-context'
 import { isUiStyle } from '@/lib/ui-style'
 
+/** PRD-260 K9: Play's look editor ("Make it yours"). */
+const LOOK_EDITOR_HREF = '/looks'
+
 /**
- * PRD-244 D1 — two axes in one menu: Style (Classic | Studio) and Tone
+ * PRD-260 K9: the look editor, offered only while Play is the style — the
+ * menu never switches style by surprise.
+ */
+function CustomiseLookItem() {
+  return (
+    <DropdownMenuItem asChild>
+      <Link href={LOOK_EDITOR_HREF}>
+        <Palette className="mr-2 h-4 w-4" />
+        Customise look…
+      </Link>
+    </DropdownMenuItem>
+  )
+}
+
+/**
+ * PRD-244 D1 — two axes in one menu: Style (Classic | Studio | Play) and Tone
  * (Light | Dark | System). Picking on one axis never changes the other.
  */
 export function ThemeToggle() {
   const { setTheme, theme } = useTheme()
-  const { style, setStyle } = useUiStyle()
+  const { style, setStyle, isPlay } = useUiStyle()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -57,7 +77,12 @@ export function ThemeToggle() {
             <BookOpen className="mr-2 h-4 w-4" />
             Studio
           </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="play">
+            <Sparkles className="mr-2 h-4 w-4" />
+            Play
+          </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
+        {isPlay && <CustomiseLookItem />}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Tone</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme ?? 'system'} onValueChange={setTheme}>

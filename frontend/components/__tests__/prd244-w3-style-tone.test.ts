@@ -35,7 +35,9 @@ describe('PRD-244 W3 — Style × Tone', () => {
     const src = read('app/layout.tsx')
     expect(src).toContain("from 'next/headers'")
     expect(src).toContain('UI_STYLE_COOKIE')
-    expect(src).toContain('STUDIO_HTML_CLASS')
+    // PRD-260 D1: the classes come from styleHtmlClasses (['studio'] for Studio,
+    // asserted in lib/__tests__/ui-style-play.test.ts).
+    expect(src).toContain('...styleHtmlClasses(uiStyle)')
     expect(src).toContain('initialUiStyle={uiStyle}')
   })
 

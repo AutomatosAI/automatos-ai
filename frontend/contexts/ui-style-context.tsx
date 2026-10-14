@@ -1,12 +1,13 @@
 'use client'
 
 /**
- * PRD-244 D1 — the Style axis (Classic | Studio) as React context.
+ * PRD-244 D1 — the Style axis (Classic | Studio | Play) as React context.
  *
- * The server reads the style cookie and renders <html class="studio"> plus
- * `initialStyle`, so the first paint is already the right design system.
- * Switching writes the cookie (for the next request), the html class (for
- * this document) and localStorage (a mirror), and never touches the tone.
+ * The server reads the style cookie and renders <html class="studio"> (or
+ * "studio play", PRD-260) plus `initialStyle`, so the first paint is already
+ * the right design system. Switching writes the cookie (for the next request),
+ * the html classes (for this document) and localStorage (a mirror), and never
+ * touches the tone.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTheme } from 'next-themes'
@@ -15,17 +16,22 @@ import {
   APPEARANCE_DEFAULTS_VERSION,
   DEFAULT_TONE,
   DEFAULT_UI_STYLE,
-  STUDIO_HTML_CLASS,
+  STYLE_HTML_CLASS_NAMES,
   UI_STYLE_COOKIE,
   UI_STYLE_COOKIE_MAX_AGE_S,
   UI_STYLE_STORAGE_KEY,
+  rendersStudio,
+  styleHtmlClasses,
   type UiStyle,
 } from '@/lib/ui-style'
 
 export interface UiStyleContextValue {
   style: UiStyle
   setStyle: (next: UiStyle) => void
+  /** True for Studio AND Play (PRD-260 D2): Play renders Studio's layout where it has no design. */
   isStudio: boolean
+  /** True only for Play: the frame and the Play-designed pages render Play's version. */
+  isPlay: boolean
 }
 
 const UiStyleContext = createContext<UiStyleContextValue | null>(null)
@@ -33,7 +39,10 @@ const UiStyleContext = createContext<UiStyleContextValue | null>(null)
 /** Where the next request (cookie) and this document (html class) see the style. */
 export function applyUiStyleToDocument(style: UiStyle): void {
   if (typeof document === 'undefined') return
-  document.documentElement.classList.toggle(STUDIO_HTML_CLASS, style === 'studio')
+  const wanted = styleHtmlClasses(style)
+  for (const name of STYLE_HTML_CLASS_NAMES) {
+    document.documentElement.classList.toggle(name, wanted.includes(name))
+  }
   const secure = window.location.protocol === 'https:' ? '; Secure' : ''
   document.cookie = `${UI_STYLE_COOKIE}=${style}; Path=/; Max-Age=${UI_STYLE_COOKIE_MAX_AGE_S}; SameSite=Lax${secure}`
   try {
@@ -82,7 +91,7 @@ export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, children }: U
   }, [setTheme, setStyle])
 
   const value = useMemo<UiStyleContextValue>(
-    () => ({ style, setStyle, isStudio: style === 'studio' }),
+    () => ({ style, setStyle, isStudio: rendersStudio(style), isPlay: style === 'play' }),
     [style, setStyle],
   )
   return <UiStyleContext.Provider value={value}>{children}</UiStyleContext.Provider>
