@@ -265,6 +265,8 @@ actions:
     source: example
   - text: show me the next page of tasks
     source: example
+  - text: show me the Guji blog draft
+    source: example
   - text: list tasks
     source: phrase_map
   - text: show tasks
@@ -302,6 +304,8 @@ actions:
   - text: list the cards waiting on the researcher
     source: authored
   - text: give me every card in review, all of them, not just the first page
+    source: authored
+  - text: did the Westmoor invoice come back?
     source: authored
   platform_update_task:
   - text: "rename task 12 to 'Compare three compostable bag suppliers'"
