@@ -75,7 +75,7 @@ export const GLOW_MAX = 40
 
 export const SLUG_MAX = 64
 export const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/
-export const VERSION_MAX = 64
+export const VERSION_MAX = 32 // marketplace_skins.version is VARCHAR(32)
 export const VERSION_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
 export const PREVIEW_PATH = 'assets/preview.png'
 

@@ -101,7 +101,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # Anthropic key carries the workspace it bills.
 # 2026-10-11 (PRD-258 Wave 1): prd258_voice_timings chains onto that — the ONE migration of
 # the voice-measure wave (the voice_turns timings, voice_calls.vendor_latency).
-EXPECTED_HEAD = "prd258_voice_timings"
+# 2026-10-14 (PRD-259 Wave 1): prd259_skins chains onto that — the ONE migration of the
+# skins wave (marketplace_skins, skin_installations).
+EXPECTED_HEAD = "prd259_skins"
 
 
 def _literal(node: ast.AST):

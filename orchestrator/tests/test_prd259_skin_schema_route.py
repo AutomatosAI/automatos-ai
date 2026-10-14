@@ -61,6 +61,23 @@ def test_schema_route_returns_the_schema_document():
     assert "url(" in body["text"]["forbidden"]
 
 
+def test_schema_route_serves_the_package_limits_from_config(monkeypatch):
+    """S-002: the Skin Kit reads the package caps from the route; they come from config."""
+    from config import config as settings
+
+    body = _client().get("/api/skins/schema").json()
+    assert body["limits"] == {
+        "packageMb": settings.SKIN_MAX_PACKAGE_MB,
+        "fontKb": settings.SKIN_MAX_FONT_KB,
+        "mascotMb": settings.SKIN_MAX_MASCOT_MB,
+        "previewKb": settings.SKIN_MAX_PREVIEW_KB,
+    }
+    assert body["limits"] == {"packageMb": 15, "fontKb": 400, "mascotMb": 8, "previewKb": 1024}
+
+    monkeypatch.setattr(settings, "SKIN_MAX_FONT_KB", 123)
+    assert _client().get("/api/skins/schema").json()["limits"]["fontKb"] == 123
+
+
 def test_schema_route_needs_a_caller():
     response = _client(authenticated=False).get("/api/skins/schema")
     assert response.status_code == 401

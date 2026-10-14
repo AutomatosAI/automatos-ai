@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, NamedTuple, Tuple
 
+from config import config
+
 SKIN_SCHEMA_ID = "automatos-skin/v1"
 
 ALLOWED_TOKENS: Tuple[str, ...] = (
@@ -75,7 +77,7 @@ GLOW_MIN, GLOW_MAX = 0, 40
 
 SLUG_MAX = 64
 SLUG_PATTERN = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
-VERSION_MAX = 64
+VERSION_MAX = 32  # marketplace_skins.version is VARCHAR(32) (S-002)
 VERSION_PATTERN = re.compile(
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
@@ -111,6 +113,16 @@ def contrast_pairs_document() -> List[Dict[str, Any]]:
     return [{"foreground": p.foreground, "background": p.background, "min": p.min} for p in CONTRAST_PAIRS]
 
 
+def package_limits_document() -> Dict[str, int]:
+    """The package size caps (``config.SKIN_MAX_*``) the import route enforces."""
+    return {
+        "packageMb": config.SKIN_MAX_PACKAGE_MB,
+        "fontKb": config.SKIN_MAX_FONT_KB,
+        "mascotMb": config.SKIN_MAX_MASCOT_MB,
+        "previewKb": config.SKIN_MAX_PREVIEW_KB,
+    }
+
+
 def schema_document() -> Dict[str, Any]:
     """The rule set as JSON, served at GET /api/skins/schema for the Skin Kit to sync from."""
     return {
@@ -130,4 +142,5 @@ def schema_document() -> Dict[str, Any]:
             "limits": {field: {"min": lo, "max": hi} for field, (lo, hi) in TEXT_LIMITS.items()},
             "forbidden": list(TEXT_FORBIDDEN),
         },
+        "limits": package_limits_document(),
     }
