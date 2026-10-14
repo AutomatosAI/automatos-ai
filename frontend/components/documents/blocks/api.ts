@@ -1,5 +1,6 @@
 // API helpers for the document-template studio (PRD-167 S3/S4/S5 → PRD-242).
 import { apiClient } from '@/lib/api-client'
+import { fetchApiFile } from '@/lib/api-file-fetch'
 import { apiFileUrl, NOT_AN_API_FILE } from '@/lib/api-file-url'
 import type {
   BlockDocument,
@@ -110,12 +111,8 @@ export const templateBlocksApi = {
   // <img src> or @font-face cannot send (SaaS), so fetch it and hand back an
   // object URL (the FilePreview pattern). null = none.
   fetchBrandFileObjectUrl: async (path: string): Promise<string | null> => {
-    const url = apiFileUrl(apiClient.getBaseUrl(), path)  // F358: the token goes to the API only
-    if (!url) return null
-    const headers = await apiClient.getAuthHeaders()
-    const resp = await fetch(url, { headers })
-    if (!resp.ok) return null
-    return URL.createObjectURL(await resp.blob())
+    const blob = await fetchApiFile(path)  // F358: the token goes to the API only
+    return blob === null ? null : URL.createObjectURL(blob)
   },
 
   // Live preview: render a block tree to HTML without persisting.
