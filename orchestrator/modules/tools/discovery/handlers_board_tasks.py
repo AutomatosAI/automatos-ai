@@ -19,9 +19,6 @@ from modules.tools.discovery.ticket_moves import keeps_the_board_rules
 from modules.tools.discovery.auto_approve_scope import auto_approves_only_what_it_runs
 from modules.tools.discovery.agent_refs import gives_the_card_on_update, resolve_active_agent, takes_the_agent_id
 
-# list_board_tasks: the page size the model may ask for. "Close all the blocked
-# tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
-MAX_LIST_TASKS_LIMIT = 200
 # update_board_task_status: how many task_ids one bulk call may carry. The chat
 # loop caps a tool at 8 calls per turn, so one-id-per-call could never close more
 # than eight tasks — the bulk path exists so "close all …" is one honest call.
@@ -369,96 +366,6 @@ def _widget_turn() -> bool:
     from core.security.surface import widget_turn
 
     return widget_turn()
-
-
-@by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
-async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """List board tasks with optional filters."""
-    from core.models.core import BoardTask
-
-    query = db.query(BoardTask).filter(
-        BoardTask.workspace_id == workspace_id,
-    )
-
-    status = params.get("status")
-    if status:
-        query = query.filter(BoardTask.status == status)
-
-    priority = params.get("priority")
-    if priority:
-        query = query.filter(BoardTask.priority == priority)
-
-    # Tag filter — return tasks whose tags include ALL requested tags. BoardTask.tags
-    # is JSONB, so .contains([...]) compiles to `tags @> [...]` (array containment).
-    # HARNESS self-management relies on this to find its own '[HARNESS]' tasks
-    # (tagged 'harness' + 'rx:{id}'); without it the lookup returns unrelated tasks.
-    tags = params.get("tags")
-    if isinstance(tags, str):
-        tags = [tags]
-    if isinstance(tags, list) and tags:
-        query = query.filter(BoardTask.tags.contains(tags))
-
-    agent_name = params.get("assigned_agent_name")
-    if agent_name:
-        from core.models import Agent
-        from sqlalchemy import func as sa_func
-        agent = db.query(Agent).filter(
-            Agent.workspace_id == workspace_id,
-            sa_func.lower(Agent.name) == agent_name.lower(),
-        ).first()
-        if agent:
-            query = query.filter(BoardTask.assigned_agent_id == agent.id)
-        elif _widget_turn():
-            # F155: a widget turn cannot tell a name no agent has from an agent
-            # with no tickets: who the agents are is agents:read's, not tasks:read's.
-            return {"success": True, "tasks": [], "total": 0, "total_matching": 0,
-                    "limit": min(int(params.get("limit", 20)), MAX_LIST_TASKS_LIMIT)}
-        else:
-            return {"success": True, "tasks": [], "total": 0, "note": f"No agent named '{agent_name}' found"}
-
-    limit = min(int(params.get("limit", 20)), MAX_LIST_TASKS_LIMIT)
-    # How many match in all, so the model knows whether it saw everything
-    # (the page is the sample, total_matching is the truth).
-    try:
-        total_matching = int(query.count())
-    except Exception:  # noqa: BLE001 — a count failure never fails the listing
-        total_matching = None
-    tasks = query.order_by(BoardTask.created_at.desc()).limit(limit).all()
-    if _widget_turn():
-        return {"success": True, "tasks": [task_visitor_view(t) for t in tasks], "total": len(tasks),
-                "total_matching": total_matching if total_matching is not None else len(tasks), "limit": limit}
-
-    # Enrich with agent names
-    agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
-    agents_map = {}
-    if agent_ids:
-        from core.models import Agent
-        for a in db.query(Agent).filter(Agent.id.in_(agent_ids)).all():
-            agents_map[a.id] = a.name
-
-    result = []
-    for t in tasks:
-        result.append({
-            "id": t.id,
-            "title": t.title,
-            "description": t.description,
-            "status": t.status,
-            "priority": t.priority,
-            "tags": t.tags or [],
-            "assigned_agent": agents_map.get(t.assigned_agent_id, "unassigned"),
-            "created_at": str(t.created_at) if t.created_at else None,
-            "started_at": str(t.started_at) if t.started_at else None,
-            "completed_at": str(t.completed_at) if t.completed_at else None,
-            "error_message": t.error_message,
-        })
-
-    return {
-        "success": True,
-        "tasks": result,
-        "total": len(result),
-        "total_matching": total_matching if total_matching is not None else len(result),
-        "limit": limit,
-    }
 
 
 def _agent_name_for(db: Session, agent_id: Optional[int]) -> Optional[str]:

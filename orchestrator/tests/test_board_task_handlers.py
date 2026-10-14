@@ -72,17 +72,18 @@ def _install_fake_apscheduler():
 _install_fake_apscheduler()
 
 
-def _load_handler():
-    """Load handlers_board_tasks.py directly, skipping the package __init__."""
+def _load_handler(stem="handlers_board_tasks", alias="hbt_under_test"):
+    """Load a discovery handler file directly, skipping the package __init__."""
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(here, "modules", "tools", "discovery", "handlers_board_tasks.py")
-    spec = importlib.util.spec_from_file_location("hbt_under_test", path)
+    path = os.path.join(here, "modules", "tools", "discovery", f"{stem}.py")
+    spec = importlib.util.spec_from_file_location(alias, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
 _HANDLER = _load_handler()
+_LIST = _load_handler("board_task_list", "btl_under_test")  # F424: platform_list_tasks
 _WS_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
@@ -116,6 +117,12 @@ class _FakeQuery:
     def limit(self, *a, **k):
         return self
 
+    def offset(self, *a, **k):
+        return self
+
+    def count(self):
+        return len(self._rows)
+
     def all(self):
         return self._rows
 
@@ -144,7 +151,7 @@ def test_list_board_tasks_projects_tags_and_description():
     db = _FakeDB(rows)
 
     result = asyncio.run(
-        _HANDLER.list_board_tasks(db, _WS_ID, {"tags": ["harness"]})
+        _LIST.list_board_tasks(db, _WS_ID, {"tags": ["harness"]})
     )
 
     assert result["success"] is True
@@ -161,7 +168,7 @@ def test_list_board_tasks_tags_default_empty_list():
     rows = [_FakeRow(id=8, title="plain task", description="d", tags=None, assigned_agent_id=None)]
     db = _FakeDB(rows)
 
-    result = asyncio.run(_HANDLER.list_board_tasks(db, _WS_ID, {}))
+    result = asyncio.run(_LIST.list_board_tasks(db, _WS_ID, {}))
 
     assert result["tasks"][0]["tags"] == []
 
@@ -1533,6 +1540,9 @@ class _MultiQ:
     def limit(self, *a, **k):
         return self
 
+    def offset(self, *a, **k):
+        return self
+
     def first(self):
         return self._tasks.get(self._id) if self._id is not None else None
 
@@ -1613,23 +1623,24 @@ def test_single_status_update_without_any_id_names_both_forms():
     assert result["success"] is False and "task_ids" in result["error"]
 
 
-def test_list_tasks_reports_total_matching_beyond_the_page():
+def test_list_tasks_total_is_the_filters_not_the_pages():
+    """F424: 'total' is how many match the filter, whatever the page holds."""
     tasks = [_fresh_task(id=i, status="blocked", tags=[], description="d", priority="low",
                          assigned_agent_id=None, created_at=None, error_message=None)
              for i in range(1, 8)]
     result = asyncio.run(
-        _HANDLER.list_board_tasks(_MultiSession(tasks), _WS_ID, {"status": "blocked", "limit": 3})
+        _LIST.list_board_tasks(_MultiSession(tasks), _WS_ID, {"status": "blocked", "limit": 3})
     )
     assert result["success"] is True
-    assert result["total_matching"] == 7 and result["limit"] == 3
-    assert result["total"] == len(result["tasks"])
+    assert result["total"] == 7 and result["limit"] == 3 and result["offset"] == 0
+    assert result["returned"] == len(result["tasks"])
 
 
 def test_list_tasks_limit_is_capped_at_the_module_maximum():
     result = asyncio.run(
-        _HANDLER.list_board_tasks(_MultiSession([]), _WS_ID, {"limit": 10_000})
+        _LIST.list_board_tasks(_MultiSession([]), _WS_ID, {"limit": 10_000})
     )
-    assert result["limit"] == _HANDLER.MAX_LIST_TASKS_LIMIT
+    assert result["limit"] == _LIST.MAX_LIST_TASKS_LIMIT
 
 
 class _StubRegistry:

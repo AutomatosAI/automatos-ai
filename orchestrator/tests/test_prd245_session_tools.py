@@ -506,14 +506,17 @@ def _list_handler_row_keys():
     import ast
     from pathlib import Path
 
-    src = Path(__file__).resolve().parents[1] / "modules" / "tools" / "discovery" / "handlers_board_tasks.py"
+    src = Path(__file__).resolve().parents[1] / "modules" / "tools" / "discovery" / "board_task_list.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
-    # By NAME: ``list_board_tasks`` is what ``platform_list_tasks`` runs. A looser
-    # match (any dict carrying description + error_message) found a DIFFERENT
-    # handler's row first, one with raw_prompt and review_mode on it.
+    # By NAME: ``list_board_tasks`` is what ``platform_list_tasks`` runs, and
+    # ``_owner_row`` builds its rows (F424). A looser match (any dict carrying
+    # description + error_message) found a DIFFERENT handler's row first, one
+    # with raw_prompt and review_mode on it.
+    names = {n.name for n in ast.walk(tree) if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef))}
+    assert "list_board_tasks" in names, "list_board_tasks was renamed — re-verify what list_tasks returns"
     handler = next((n for n in ast.walk(tree)
-                    if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == "list_board_tasks"), None)
-    assert handler is not None, "list_board_tasks was renamed — re-verify what list_tasks returns"
+                    if isinstance(n, ast.FunctionDef) and n.name == "_owner_row"), None)
+    assert handler is not None, "_owner_row was renamed — re-verify what list_tasks returns"
     for node in ast.walk(handler):
         if isinstance(node, ast.Dict):
             keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}

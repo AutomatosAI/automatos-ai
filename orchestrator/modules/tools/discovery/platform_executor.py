@@ -139,9 +139,9 @@ from modules.tools.discovery.owner_only import asks_the_owner_first  # PRD-256 U
 from modules.tools.discovery.confirmation_gate import asks_at_the_confirmation_gate  # P256-FIX-RVW-9
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
+from modules.tools.discovery.board_task_list import list_board_tasks  # F424: pages, one total
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
-    list_board_tasks,
     get_board_task,
     update_board_task,
 )

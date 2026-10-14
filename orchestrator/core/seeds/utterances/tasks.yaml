@@ -261,6 +261,10 @@ actions:
     source: example
   - text: list urgent tasks
     source: example
+  - text: how many cards are in review?
+    source: example
+  - text: show me the next page of tasks
+    source: example
   - text: list tasks
     source: phrase_map
   - text: show tasks
@@ -296,6 +300,8 @@ actions:
   - text: which tickets are still open?
     source: authored
   - text: list the cards waiting on the researcher
+    source: authored
+  - text: give me every card in review, all of them, not just the first page
     source: authored
   platform_update_task:
   - text: "rename task 12 to 'Compare three compostable bag suppliers'"

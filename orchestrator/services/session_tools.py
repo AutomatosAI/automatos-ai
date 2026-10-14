@@ -203,7 +203,7 @@ def _scope_nothing(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any
 
 
 def _scope_list_tasks(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
-    return {k: v for k, v in params.items() if k in ("status", "assigned_agent_name", "limit")}
+    return {k: v for k, v in params.items() if k in ("status", "assigned_agent_name", "limit", "offset")}
 
 
 # What ``list_tasks`` says it returns, and therefore all it may return. The board
@@ -214,10 +214,9 @@ def _scope_list_tasks(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, 
 # page or repo file may be steering. The tool promises a few fields; it returns
 # those fields.
 #
-# These are the handler's OWN key names (``handlers_board_tasks``: the list
-# handler builds each row by hand, and names the agent ``assigned_agent``), and
-# the handler's dict comes back from the executor AS IS — ``tasks`` sits at the
-# top level, not under a ``result`` key. The first version of this projection
+# These are the handler's OWN key names (``board_task_list._owner_row`` names the
+# agent ``assigned_agent``), and the handler's dict comes back from the executor AS
+# IS: ``tasks`` sits at the top level, not under a ``result`` key. The first version of this projection
 # assumed both wrongly, and its test fed it the imagined shape: it narrowed
 # nothing and passed. A parity test reads the handler's source (``number`` is by_ticket_number's).
 LIST_TASKS_FIELDS: Tuple[str, ...] = ("number", "id", "title", "status", "priority", "assigned_agent")
@@ -468,15 +467,16 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         action="platform_list_tasks",
         description=(
             "List this workspace's board tasks — number (#0042, how you name one), title, status, agent. "
-            "Filter by status or agent name. The result's 'total_matching' says how many match "
-            "in all, so raise 'limit' when you need every one."
+            "Filter by status or agent name. The result's 'total' is how many match in all; while "
+            "'next_offset' is not null, call again with offset=next_offset for the rest."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "status": {"type": "string", "description": "Only tasks in this status (omit for all)."},
                 "assigned_agent_name": {"type": "string", "description": "Only tasks assigned to this agent."},
-                "limit": {"type": "integer", "description": "Max results (default 20, max 200)."},
+                "limit": {"type": "integer", "description": "Page size (default 20, max 200)."},
+                "offset": {"type": "integer", "description": "Matching tasks to skip (the last page's next_offset)."},
             },
             "required": [],
         },
