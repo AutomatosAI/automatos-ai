@@ -1,0 +1,85 @@
+/*
+ * PRD-260 §4 — the style sheet's Type section, ported from Automatos Play's
+ * components/looks/style/style.module.css: a label column, then each specimen
+ * set in its own app/play-theme.css token, so the display ones follow the
+ * look's type style and sizes. Every variable is --pl-* (K2).
+ */
+
+.specimens {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-4);
+}
+
+.specimen {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--pl-space-4);
+}
+
+.specimen dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.specimenLabel {
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-3);
+}
+
+.hero {
+  font: var(--pl-text-hero);
+  letter-spacing: var(--pl-display-letter-spacing);
+}
+
+.status {
+  font: var(--pl-text-status);
+  letter-spacing: var(--pl-display-letter-spacing);
+}
+
+.title {
+  font: var(--pl-text-title);
+  letter-spacing: var(--pl-display-letter-spacing);
+}
+
+.reply {
+  font: var(--pl-text-reply);
+}
+
+.body {
+  font: var(--pl-text-body);
+}
+
+.button {
+  font: var(--pl-text-button-sm);
+}
+
+.caps {
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-2);
+}
+
+.mono {
+  font: var(--pl-text-mono);
+  color: var(--pl-color-text-2);
+}
+
+@media (max-width: 767.98px) {
+  .specimen {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--pl-space-1);
+  }
+
+  .hero {
+    font: var(--pl-text-hero-phone);
+  }
+
+  .status {
+    font: var(--pl-text-status-phone);
+  }
+}

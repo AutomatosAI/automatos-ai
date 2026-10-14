@@ -37,9 +37,22 @@ export interface AutoMascotProps {
   readonly size?: AutoMascotSize
   /** False when the page already says it in words (the first-open headline). */
   readonly showCaption?: boolean
+  /**
+   * False where he is a specimen, not the page's Auto (the style sheet shows all
+   * 12 states at once): his stage then leaves the page glow alone (no data-glow).
+   */
+  readonly lightsPage?: boolean
 }
 
-export function AutoMascot({ state, onClipEnded, caption, detail, size = 'regular', showCaption = true }: AutoMascotProps) {
+export function AutoMascot({
+  state,
+  onClipEnded,
+  caption,
+  detail,
+  size = 'regular',
+  showCaption = true,
+  lightsPage = true,
+}: AutoMascotProps) {
   const reducedMotion = usePrefersReducedMotion()
   const format = useVideoFormat()
   // One clip that won't play means the set is broken: stills from then on, not a stuck clip.
@@ -62,7 +75,7 @@ export function AutoMascot({ state, onClipEnded, caption, detail, size = 'regula
         aria-label={label}
         data-testid="auto-stage"
         data-ring={ringTone(player.showing)}
-        data-glow={pageGlow(player.showing)}
+        data-glow={lightsPage ? pageGlow(player.showing) : undefined}
       >
         <div className={styles.ring} />
         {video !== null ? (

@@ -1,0 +1,328 @@
+/**
+ * PRD-260 §4, K9 — the live style sheet at /looks/style, ported from Automatos
+ * Play's tests/looks/StyleScreen.test.tsx. Under Play every value comes from
+ * the active look and redraws when it changes (a test button changes it
+ * through useLook, as Make it yours does); Auto's 12 states are the real
+ * AutoMascot, every state's PNG under reduced motion, and none of them lights
+ * the page glow. Under Classic or Studio the page is a note with Switch to
+ * Play. MainLayout is a pass-through here (Play's frame has its own tests).
+ * Roles, attributes and text only: CSS modules are proxies.
+ */
+import React from 'react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}))
+vi.mock('@/components/layout/main-layout', () => ({
+  MainLayout: ({ children }: { children: React.ReactNode }) => <div data-testid="main-layout">{children}</div>,
+}))
+
+import LookStylePage from '@/app/looks/style/page'
+import { LookProvider, useLook } from '@/components/looks/look-provider'
+import { SWITCH_TO_PLAY } from '@/components/looks/style/play-only-note'
+import { COPY_FAILED, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
+import { UiStyleProvider } from '@/contexts/ui-style-context'
+import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
+import { ACCENTS, GROUNDS, LIGHTS } from '@/lib/looks/catalogue'
+import { lookToCssVars } from '@/lib/looks/css'
+import { lookDocumentVars } from '@/lib/looks/document'
+import { AURORA, DAYLIGHT, EMBER } from '@/lib/looks/presets'
+import { rootBlock } from '@/lib/looks/style'
+import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
+import type { Look } from '@/lib/looks/types'
+import { ringTone } from '@/lib/mascot/ring'
+import { MASCOT_STATES } from '@/lib/mascot/types'
+import {
+  APPEARANCE_DEFAULTS_KEY,
+  APPEARANCE_DEFAULTS_VERSION,
+  PLAY_HTML_CLASS,
+  UI_STYLE_COOKIE,
+  type UiStyle,
+} from '@/lib/ui-style'
+
+const ACCURACY = 0.05
+const MASCOT_REGION = /^Mascot slot/
+const REDUCED_MOTION = 'prefers-reduced-motion'
+
+function Pick({ look }: { readonly look: Look }) {
+  const { setLook } = useLook()
+  return (
+    <button type="button" onClick={() => setLook(look)}>
+      {`Pick ${look.name}`}
+    </button>
+  )
+}
+
+function renderPage(style: UiStyle = 'play') {
+  return render(
+    <UiStyleProvider initialStyle={style}>
+      <LookProvider>
+        <Pick look={DAYLIGHT} />
+        <Pick look={AURORA} />
+        <LookStylePage />
+      </LookProvider>
+    </UiStyleProvider>,
+  )
+}
+
+/** The LookProvider has put the look on <html>, so storage is read and the sheet shows it. */
+async function ready(look: Look = EMBER): Promise<void> {
+  await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(look)))
+}
+
+function pick(look: Look): void {
+  fireEvent.click(screen.getByRole('button', { name: `Pick ${look.name}` }))
+}
+
+function rowFor(label: string): HTMLElement {
+  const row = screen.getByRole('rowheader', { name: label }).closest('tr')
+  if (!row) throw new Error(`no row for ${label}`)
+  return row
+}
+
+/** The ratio shown in the contrast table's row for a pair, e.g. "text / bg". */
+function ratioFor(label: string): number {
+  return Number.parseFloat(within(rowFor(label)).getByText(/^\d+\.\d{2}:1$/).textContent ?? '')
+}
+
+function verdictFor(label: string): string {
+  return within(rowFor(label)).getByText(/AA (pass|fail)/).textContent ?? ''
+}
+
+/** The swatch for a look variable, e.g. "--pl-ground-bg": its chip, name, value, role and note. */
+function swatchItem(name: string): HTMLElement {
+  const item = screen.getByText(name).closest('li')
+  if (!item) throw new Error(`no swatch ${name}`)
+  return item
+}
+
+function swatchValue(name: string): string {
+  return swatchItem(name).children[2]?.textContent ?? ''
+}
+
+function mascotRegion(): HTMLElement {
+  return screen.getByRole('region', { name: MASCOT_REGION })
+}
+
+const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia')
+const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard')
+
+function preferReducedMotion(): void {
+  const matchMedia = (media: string) => ({
+    matches: media.includes(REDUCED_MOTION),
+    media,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+  })
+  Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: matchMedia })
+}
+
+function stubClipboard(writeText: (text: string) => Promise<void>): void {
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
+}
+
+function restore(target: object, name: string, original: PropertyDescriptor | undefined): void {
+  if (original) Object.defineProperty(target, name, original)
+  else Reflect.deleteProperty(target, name)
+}
+
+beforeEach(() => {
+  window.localStorage.clear()
+  // A browser already moved to the current defaults, so the provider keeps the given style.
+  window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
+  clearRoot()
+})
+
+afterEach(() => {
+  cleanup()
+  restore(window, 'matchMedia', originalMatchMedia)
+  restore(window.navigator, 'clipboard', originalClipboard)
+  document.cookie = `${PLAY_TONE_COOKIE}=; Max-Age=0; Path=/`
+  document.cookie = `${UI_STYLE_COOKIE}=; Max-Age=0; Path=/`
+  window.localStorage.clear()
+  clearRoot()
+  vi.restoreAllMocks()
+})
+
+describe('the style sheet under Play, on Ember', () => {
+  it('renders inside MainLayout with the live contrast ratios and an AA verdict in words', async () => {
+    renderPage()
+    await ready()
+    expect(within(screen.getByTestId('main-layout')).getByRole('heading', { level: 1, name: 'Style sheet' })).toBeInTheDocument()
+    expect(screen.queryByText(STYLE_SHEET_NOTE)).toBeNull()
+    expect(Math.abs(ratioFor('text / bg') - 16.36)).toBeLessThanOrEqual(ACCURACY)
+    expect(Math.abs(ratioFor('text-2 / bg') - 8.54)).toBeLessThanOrEqual(ACCURACY)
+    expect(Math.abs(ratioFor('ink / molten') - 6.74)).toBeLessThanOrEqual(ACCURACY)
+    expect(ratioFor('text / surface')).toBeGreaterThan(4.5)
+    expect(verdictFor('text / bg')).toBe('✓ AA pass')
+    expect(verdictFor('accent text / bg')).toBe('✓ AA pass')
+  })
+
+  it('shows a swatch for every colour with its name, value and role', async () => {
+    renderPage()
+    await ready()
+    const colour = within(screen.getByRole('region', { name: 'Colour' }))
+    expect(colour.getAllByRole('listitem')).toHaveLength(21)
+    expect(swatchValue('--pl-ground-bg')).toBe(GROUNDS.graphite.bg)
+    expect(within(swatchItem('--pl-ground-bg')).getByText('page')).toBeInTheDocument()
+    expect(swatchValue('--pl-accent')).toBe(ACCENTS.molten.hex)
+    expect(swatchValue('--pl-accent-text')).toBe(ACCENTS.molten.hex)
+    expect(within(swatchItem('--pl-accent-text')).queryByText(/for reading on/)).toBeNull()
+  })
+
+  it('shows the type, spacing, radii and a components gallery that is only a picture', async () => {
+    renderPage()
+    await ready()
+    const type = within(screen.getByRole('region', { name: 'Type' }))
+    for (const text of ['Hero 72px', 'The fun way.', 'Searching.', 'Laptop shortlist', 'Mono 13']) {
+      expect(type.getByText(text)).toBeInTheDocument()
+    }
+    expect(type.getByText(/Editorial · Instrument Serif italic 400/)).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Spacing · 4px base' })).getAllByRole('listitem')).toHaveLength(7)
+    expect(within(screen.getByRole('region', { name: 'Radii' })).getByText('pill chip')).toBeInTheDocument()
+    const components = within(screen.getByRole('region', { name: 'Components' }))
+    for (const text of ['Send', 'Stop', 'All', 'Reading 4 pages', "Web search didn't answer", 'What Auto did', 'Open']) {
+      expect(components.getByText(text)).toBeInTheDocument()
+    }
+    expect(components.queryAllByRole('button')).toEqual([])
+    expect(components.queryAllByRole('link')).toEqual([])
+  })
+
+  it("shows Auto's 12 states as AutoMascot, each ring in the look, none lighting the page glow", async () => {
+    renderPage()
+    await ready()
+    const mascot = within(mascotRegion())
+    expect(mascot.getAllByRole('listitem')).toHaveLength(MASCOT_STATES.length)
+    const stages = mascot.getAllByTestId('auto-stage')
+    expect(stages.map((stage) => stage.getAttribute('data-ring'))).toEqual(MASCOT_STATES.map((state) => ringTone(state)))
+    expect(stages.filter((stage) => stage.hasAttribute('data-glow'))).toEqual([])
+    const clips = Array.from(mascotRegion().querySelectorAll('video'))
+    expect(clips.map((clip) => clip.getAttribute('poster'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.png`))
+    expect(mascot.getAllByText(`ring light · ${LIGHTS.mint.hex}`)).toHaveLength(4)
+    expect(mascot.getAllByText(`ring accent · ${ACCENTS.molten.hex}`)).toHaveLength(4)
+  })
+
+  it("shows every state's PNG under reduced motion, and no clip", async () => {
+    preferReducedMotion()
+    renderPage()
+    await ready()
+    const stills = Array.from(mascotRegion().querySelectorAll('img'))
+    expect(stills.map((still) => still.getAttribute('src'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.png`))
+    expect(mascotRegion().querySelectorAll('video')).toHaveLength(0)
+  })
+
+  it('links back to Make it yours', async () => {
+    renderPage()
+    await ready()
+    expect(screen.getByRole('link', { name: 'Back to Looks' })).toHaveAttribute('href', '/looks')
+  })
+})
+
+describe('the style sheet follows the active look', () => {
+  it('redraws the bg swatch and shows a darkened accent text on Daylight', async () => {
+    renderPage()
+    await ready()
+    pick(DAYLIGHT)
+    await ready(DAYLIGHT)
+    expect(swatchValue('--pl-ground-bg')).toBe(GROUNDS.paper.bg)
+    expect(swatchValue('--pl-accent-text')).not.toBe(ACCENTS.molten.hex)
+    expect(swatchValue('--pl-accent-text')).toBe(lookToCssVars(DAYLIGHT)['--pl-accent-text'])
+    expect(within(swatchItem('--pl-accent-text')).getByText('darkened for reading on Paper')).toBeInTheDocument()
+    expect(within(swatchItem('--pl-error-text')).getByText('darkened for reading on Paper')).toBeInTheDocument()
+    expect(ratioFor('accent text / bg')).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('redraws the type and the rings for another look', async () => {
+    renderPage()
+    await ready()
+    pick(AURORA)
+    await ready(AURORA)
+    expect(screen.getByText('Hero 58px')).toBeInTheDocument()
+    expect(screen.getByText(/Characterful · Bricolage Grotesque/)).toBeInTheDocument()
+    expect(screen.getAllByText(`ring light · ${LIGHTS.ice.hex}`)).toHaveLength(4)
+    expect(screen.getAllByText(`ring accent · ${ACCENTS.mint.hex}`)).toHaveLength(4)
+    expect(screen.getByRole('rowheader', { name: 'ink / mint' })).toBeInTheDocument()
+    expect(swatchValue('--pl-accent')).toBe(ACCENTS.mint.hex)
+  })
+})
+
+describe('Copy tokens', () => {
+  it("copies the active look's variables as a :root block, and the notice goes with the look", async () => {
+    const writeText = vi.fn(async (_text: string) => undefined)
+    stubClipboard(writeText)
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy tokens' }))
+    expect(await screen.findByText("Copied Ember's tokens as a :root block.")).toBeInTheDocument()
+    expect(writeText).toHaveBeenCalledWith(rootBlock(EMBER))
+    pick(DAYLIGHT)
+    await ready(DAYLIGHT)
+    expect(screen.queryByText("Copied Ember's tokens as a :root block.")).toBeNull()
+  })
+
+  it('says so when the browser blocks the clipboard', async () => {
+    const denied = new DOMException('Write permission denied.', 'NotAllowedError')
+    stubClipboard(async () => {
+      throw denied
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy tokens' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(COPY_FAILED)
+    expect(console.error).toHaveBeenCalledWith('[looks] copying the tokens failed', denied)
+  })
+})
+
+describe('Motion', () => {
+  it('plays the notes with a toggle', async () => {
+    renderPage()
+    await ready()
+    const motion = within(screen.getByRole('region', { name: 'Motion' }))
+    expect(motion.getByText(/rise 12px/)).toBeInTheDocument()
+    const toggle = motion.getByRole('button', { name: 'Play the motion' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('is off under reduced motion, and says why', async () => {
+    preferReducedMotion()
+    renderPage()
+    await ready()
+    const motion = within(screen.getByRole('region', { name: 'Motion' }))
+    expect(motion.getByRole('button', { name: 'Play the motion' })).toBeDisabled()
+    expect(motion.getByText(/reduced motion, so nothing plays/)).toBeInTheDocument()
+  })
+})
+
+describe('/looks/style under Classic or Studio (K9)', () => {
+  it.each<UiStyle>(['studio', 'classic'])('shows the note and Switch to Play under %s, never the sheet', (style) => {
+    renderPage(style)
+    expect(screen.getByRole('heading', { level: 1, name: 'Style sheet' })).toBeInTheDocument()
+    expect(screen.getByText(STYLE_SHEET_NOTE)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: SWITCH_TO_PLAY })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Colour' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy tokens' })).toBeNull()
+    expect(document.documentElement.style.getPropertyValue('--pl-ground-bg')).toBe('')
+  })
+
+  it('Switch to Play makes Play the style and the sheet renders in place, on the look', async () => {
+    renderPage('studio')
+    fireEvent.click(screen.getByRole('button', { name: SWITCH_TO_PLAY }))
+    expect(await screen.findByRole('region', { name: 'Colour' })).toBeInTheDocument()
+    expect(screen.queryByText(STYLE_SHEET_NOTE)).toBeNull()
+    expect(document.documentElement.classList.contains(PLAY_HTML_CLASS)).toBe(true)
+    await ready()
+  })
+})
