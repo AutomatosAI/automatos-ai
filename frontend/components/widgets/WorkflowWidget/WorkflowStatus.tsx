@@ -35,62 +35,62 @@ interface WorkflowStatusProps {
   className?: string
 }
 
+interface StatusConfig {
+  icon: typeof Clock
+  label: string
+  variant: 'default' | 'secondary' | 'destructive'
+  className: string
+  iconClassName?: string
+}
+
 /**
- * Status badge styling
+ * Status badge styling. A table, not a switch, so each status's classes sit in
+ * data (PRD-259 S-010b: the dark: classes here are theme tokens).
  */
-function getStatusConfig(status: WorkflowStatusType) {
-  switch (status) {
-    case 'pending':
-      return {
-        icon: Clock,
-        label: 'Pending',
-        variant: 'secondary' as const,
-        className: 'bg-gray-100 text-foreground/70 dark:bg-secondary dark:text-foreground/90',
-      }
-    case 'running':
-      return {
-        icon: Loader2,
-        label: 'Running',
-        variant: 'default' as const,
-        className: 'bg-blue-100 text-info dark:bg-blue-900 dark:text-info/80',
-        iconClassName: 'animate-spin',
-      }
-    case 'paused':
-      return {
-        icon: Pause,
-        label: 'Paused',
-        variant: 'secondary' as const,
-        className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
-      }
-    case 'completed':
-      return {
-        icon: Check,
-        label: 'Completed',
-        variant: 'default' as const,
-        className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-      }
-    case 'failed':
-      return {
-        icon: X,
-        label: 'Failed',
-        variant: 'destructive' as const,
-        className: 'bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive/80',
-      }
-    case 'cancelled':
-      return {
-        icon: AlertCircle,
-        label: 'Cancelled',
-        variant: 'secondary' as const,
-        className: 'bg-warning text-warning dark:bg-warning dark:text-warning',
-      }
-    default:
-      return {
-        icon: Clock,
-        label: 'Unknown',
-        variant: 'secondary' as const,
-        className: '',
-      }
-  }
+const STATUS_CONFIG: Record<WorkflowStatusType, StatusConfig> = {
+  pending: {
+    icon: Clock,
+    label: 'Pending',
+    variant: 'secondary',
+    className: 'bg-gray-100 text-foreground/70 dark:bg-secondary dark:text-foreground/90',
+  },
+  running: {
+    icon: Loader2,
+    label: 'Running',
+    variant: 'default',
+    className: 'bg-blue-100 text-info dark:bg-info/20 dark:text-info/80',
+    iconClassName: 'animate-spin',
+  },
+  paused: {
+    icon: Pause,
+    label: 'Paused',
+    variant: 'secondary',
+    className: 'bg-yellow-100 text-yellow-700 dark:bg-warning/20 dark:text-warning',
+  },
+  completed: {
+    icon: Check,
+    label: 'Completed',
+    variant: 'default',
+    className: 'bg-green-100 text-green-700 dark:bg-success/20 dark:text-success',
+  },
+  failed: {
+    icon: X,
+    label: 'Failed',
+    variant: 'destructive',
+    className: 'bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive/80',
+  },
+  cancelled: {
+    icon: AlertCircle,
+    label: 'Cancelled',
+    variant: 'secondary',
+    className: 'bg-warning text-warning',
+  },
+}
+
+const UNKNOWN_STATUS: StatusConfig = { icon: Clock, label: 'Unknown', variant: 'secondary', className: '' }
+
+function getStatusConfig(status: WorkflowStatusType): StatusConfig {
+  return STATUS_CONFIG[status] ?? UNKNOWN_STATUS
 }
 
 /**
