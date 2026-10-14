@@ -29,8 +29,9 @@ NUMBER_SAID = re.compile(r"#\d+(?:\.\d+)?")
 
 
 def clicks_in(db: Any, workspace_id: Any, user_id: int, window: Window) -> Found:
-    """``user_id``'s own clicks on call cards in ``window`` (approved or declined), oldest first."""
-    from sqlalchemy import and_, or_
+    """``user_id``'s own clicks on call cards in ``window`` (approved or declined), oldest first; a cap
+    leaves out the newest (P256-FIX-N15-4), and ``rest_from`` says when they begin."""
+    from sqlalchemy import and_, func, or_
 
     from core.models.approval_grants import KIND_QUESTION, SUBJECT_TOOL_CALL, ApprovalGrant, GrantStatus
 
@@ -42,9 +43,11 @@ def clicks_in(db: Any, workspace_id: Any, user_id: int, window: Window) -> Found
     grants = (db.query(ApprovalGrant)
               .filter(ApprovalGrant.workspace_id == workspace_id, ApprovalGrant.subject_type == SUBJECT_TOOL_CALL,
                       ApprovalGrant.kind != KIND_QUESTION, or_(said_yes, said_no))
-              .order_by(ApprovalGrant.id.desc()).limit(MAX_CLICKS + 1).all())
+              .order_by(func.coalesce(ApprovalGrant.granted_at, ApprovalGrant.revoked_at).asc(), ApprovalGrant.id.asc())
+              .limit(MAX_CLICKS + 1).all())
     clicks = sorted((_click(db, grant) for grant in grants[:MAX_CLICKS]), key=lambda item: item["at"])
-    return Found(clicks, len(grants) > MAX_CLICKS)
+    rest = grants[MAX_CLICKS] if len(grants) > MAX_CLICKS else None
+    return Found(clicks, _utc(rest.granted_at or rest.revoked_at) if rest is not None else None)
 
 
 def settled(db: Any, workspace_id: Any, items: List[Item], window: Window) -> List[Item]:

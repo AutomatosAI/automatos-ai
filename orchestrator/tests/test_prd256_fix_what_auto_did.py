@@ -7,11 +7,13 @@ with each message and each click on its grant, and nothing read them across chat
 
 ``platform_my_actions`` reads them: the asking person's chats' done and waiting writes and their
 clicks, each card by its board number, for a window or one card (``ticket``). A click's memory
-names its card's number even when the card's words do not.
+names its card's number even when the card's words do not. P256-FIX-N15-4: the answer's ``record``
+gives them one line each, oldest first ("23:01 card made #1588"), under its day's heading.
 """
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
@@ -29,6 +31,7 @@ from modules.tools.discovery.my_actions_window import (
 from services.click_memory import APPROVED, decision_memory, remember_the_click
 
 ACTION = "platform_my_actions"
+DAY_HEADING = re.compile(r"^\d{1,2} [A-Z][a-z]{2}:$")
 MOVE = "platform_update_task_status"
 NOW = datetime.now(timezone.utc)
 
@@ -135,24 +138,30 @@ def _since(hours=2):
     return (NOW - timedelta(hours=hours)).isoformat()
 
 
+def _lines(out):
+    """The record's lines, its day headings left out ("13 Oct:")."""
+    return [line for line in out["record"].splitlines() if line and not DAY_HEADING.match(line)]
+
+
 # ── Two chats with writes and one click: all four, each card by its number ───────────────
 
 def test_the_read_lists_the_writes_of_both_chats_and_the_click_with_board_numbers(night):
     out = _ask(night, {"since": _since()})
 
     assert out["success"] is True, out
-    done = out["done"]
-    assert [item["action"] for item in done] == ["platform_create_task", "platform_create_agent",
-                                                  "platform_store_memory", "platform_update_task"]
-    assert done[0]["number"] == night.number[night.made.id]           # by the number its answer gave
-    assert done[3]["number"] == night.number[night.linked.id]         # by the card its link opens
-    assert done[1]["subject"] == "Scout" and {item["chat"] for item in done} == {"Launch", "Notes"}
-    assert all("task_id" not in item for item in done)                # a row id is never shown
-    assert [click["numbers"] for click in out["clicks"]] == [[night.number[night.clicked.id]]]
-    assert out["clicks"][0]["decision"] == "approved" and out["clicks"][0]["grant_id"] == night.grant.id
-    assert out["counts"] == {"done": 4, "waiting": 0, "decided": 0, "clicks": 1} and out["truncated"] is False
+    lines = _lines(out)                                               # oldest first: both chats, then the click
+    assert len(lines) == 5, out["record"]
+    assert lines[0].endswith(night.number[night.made.id])             # by the number its answer gave
+    assert lines[1].endswith("'Scout'")
+    assert lines[3].endswith(night.number[night.linked.id])           # by the card its link opens
+    assert "you approved the card: Approve (move to Done) 'Spring menu'" in lines[4]
+    assert lines[4].count(night.number[night.clicked.id]) == 1         # the click's card, by its number
+    assert all(re.match(r"^\d\d:\d\d ", line) for line in lines)      # each at its time
+    assert "task_id" not in str(out) and f"#{night.linked.id} " not in out["record"]   # a row id is never shown
+    assert out["counts"] == {"done": 4, "waiting": 0, "decided": 0, "clicks": 1}
+    assert out["truncated"] is False and out["left_out"] is None
     assert out["message"].endswith("4 done, 0 waiting for your click, 0 asked and since decided, 1 decided by you.")
-    assert "Ghost" not in str(out) and "Autumn tier launch copy'" not in str(out["clicks"])  # not the stranger's
+    assert "Ghost" not in str(out) and "Autumn tier launch copy" not in out["record"]  # not the stranger's
 
 
 def _asked_to_delete(night, minutes_ago=5):
@@ -177,8 +186,8 @@ def test_a_write_waiting_for_the_click_is_listed_as_waiting(night):
 
     out = _ask(night, {"since": _since()})
 
-    assert [item["action"] for item in out["waiting"]] == ["platform_delete_agent"]
-    assert out["counts"]["waiting"] == 1 and out["decided"] == []
+    assert len([line for line in _lines(out) if "waiting for your click: " in line]) == 1
+    assert out["counts"]["waiting"] == 1 and out["counts"]["decided"] == 0
 
 
 @pytest.mark.parametrize("decide, decision", [("grant", "approved"), ("deny", "declined")])
@@ -192,8 +201,9 @@ def test_a_waiting_write_whose_card_was_since_decided_no_longer_waits(night, dec
 
     out = _ask(night, {"since": _since()})
 
-    assert out["waiting"] == [] and out["counts"]["waiting"] == 0
-    assert [(item["action"], item["decision"]) for item in out["decided"]] == [("platform_delete_agent", decision)]
+    assert out["counts"]["waiting"] == 0 and out["counts"]["decided"] == 1
+    assert "waiting for your click" not in out["record"]
+    assert [line for line in _lines(out) if line[6:].startswith(f"asked your click, you {decision}: ")]
 
 
 def test_a_decision_on_a_board_task_is_no_click_on_a_call_card(night):
@@ -207,7 +217,7 @@ def test_a_decision_on_a_board_task_is_no_click_on_a_call_card(night):
 
     out = _ask(night, {"since": _since()})
 
-    assert [click["grant_id"] for click in out["clicks"]] == [night.grant.id]
+    assert out["counts"]["clicks"] == 1 and len([line for line in _lines(out) if " you approved " in line]) == 1
 
 
 # ── 'What did I decide about #<n>' finds the click ───────────────────────────────────────
@@ -217,16 +227,17 @@ def test_what_did_i_decide_about_a_card_finds_the_click_by_its_number(night):
 
     out = _ask(night, {"ticket": said})                                # no window: the lookback
 
-    assert [click["grant_id"] for click in out["clicks"]] == [night.grant.id]
-    assert out["done"] == [] and out["message"].startswith("In the last 30 days")
-    assert f"about card {said}" in out["message"]
-    assert _ask(night, {"ticket": said.lstrip("#").lstrip("0")})["clicks"] == out["clicks"]  # "1437" is #1437
+    assert out["counts"] == {"done": 0, "waiting": 0, "decided": 0, "clicks": 1}
+    assert _lines(out) and " you approved the card: " in _lines(out)[0] and said in _lines(out)[0]
+    assert out["message"].startswith("In the last 30 days") and f"about card {said}" in out["message"]
+    assert _ask(night, {"ticket": said.lstrip("#").lstrip("0")})["record"] == out["record"]  # "1437" is #1437
 
 
 def test_a_ticket_narrows_the_writes_to_that_card(night):
     out = _ask(night, {"since": _since(), "ticket": night.number[night.linked.id]})
 
-    assert [item["action"] for item in out["done"]] == ["platform_update_task"] and out["clicks"] == []
+    assert _lines(out) == [line for line in _lines(out) if line.endswith(night.number[night.linked.id])]
+    assert out["counts"] == {"done": 1, "waiting": 0, "decided": 0, "clicks": 0}
 
 
 def test_the_clicks_memory_names_the_cards_number(night, monkeypatch):
@@ -259,7 +270,7 @@ def test_a_window_with_no_writes_says_so(night):
     # which on a slow shard is minutes after the module was imported.
     out = _ask(night, {"since": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()})
 
-    assert out["success"] is True and out["done"] == out["waiting"] == out["clicks"] == []
+    assert out["success"] is True and out["record"] == "" and not any(out["counts"].values())
     assert out["message"].startswith("Nothing since ") and "no writes of mine" in out["message"]
     assert out["note"] is None
 
@@ -315,10 +326,10 @@ def test_a_recap_given_with_each_items_time_is_not_taken_for_this_replys_claims(
     from consumers.chatbot.claims_backed import unbacked_claims
 
     out = _ask(night, {"since": _since()})
-    made = out["done"][1]
-    recap = f"{made['when'].capitalize()} I created the agent {made['subject']}."
+    made = _lines(out)[1]                                             # "23:01 agent made 'Scout'"
+    recap = f"At {made.split()[0]} I created the agent Scout."
 
-    assert made["when"].startswith("at ") and unbacked_claims(recap, []) == []
+    assert made.endswith("'Scout'") and unbacked_claims(recap, []) == []
     assert unbacked_claims("I created the agent Scout.", []) != []           # with no time, still a claim
 
 
