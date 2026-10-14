@@ -5,7 +5,11 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_search_actions(registry: ActionRegistry) -> None:
     """Register search-related platform actions."""
+    _register_search_chat_history(registry)
+    _register_search_memory(registry)
 
+
+def _register_search_chat_history(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_search_chat_history",
         description=(
@@ -44,6 +48,8 @@ def register_search_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_search_memory(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_search_memory",
         description=(
