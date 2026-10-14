@@ -1,5 +1,5 @@
 {
-  "project": "PRD-256 Auto, receipts not narration — the night-12 fix wave (17 fixes, one branch, one PR, one CI run)",
+  "project": "PRD-256 Auto, receipts not narration — the night-15 fix wave (N15-1..7 and N15-9; removes the nudge-and-replace path; one branch, one PR, one CI run)",
   "branchName": "feat/prd-256-fix-night12",
   "baseBranch": "feat/prd-256-w2-model-lanes",
   "description": "Fixes from night 12 (8 Oct 2026) and the review <workspace>/.claude/NIGHT12-REVIEW.md, on one branch cut from the Wave 2 tip (which carries Wave 1), so one local build holds the whole PRD plus the fixes for night 13. Not a feature PRD: each story is a fix with its cause (file:line on the base), what to change and a test. Priority order is the build order: CI green first, the harness second, then gates, honesty, cards, tools, the lane, memory, runtime, the stream. Diff base for every check: `bash scripts/ralph/acceptance-prd256fix.sh --print-base`.",
@@ -1278,6 +1278,110 @@
       "priority": 85,
       "passes": false,
       "notes": "Filed by TESTER 13 Oct (night 14)."
+    },
+    {
+      "id": "P256-FIX-N15-1",
+      "title": "CRITICAL · F422: remove nudge-and-replace — the claimed-action retry throws away the answer",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F422): about one board/roster reply in four came back as commentary on a reply the owner never saw ('Nothing has been sent. My last reply said…', '\"the list shows 27 of the 67\"' with no list). Cause, verified by TESTER on the base: modules/tools/execution/tool_loop.py:594 _recover_claimed_action → consumers/chatbot/receipts.py:326 unbacked_claim finds a claim → nudges.py:254 nudge_about appends the draft as the assistant turn and CLAIMED_ACTION_RECOVERY_MSG (nudges.py:59: 'Your previous reply says something was {claim}… say plainly that it has not been done') as the USER's turn, and returns the retry IN PLACE of the draft. The retry answers the nudge and drops what the reads fetched. Backend log 23:11–05:16Z: ~100 such nudges ('sent' 36, 'posted' 18, 'saved' 9, 'created' 9, 'done' 7…) on ~372 asks. The draft and the sentence that matched are not logged. Plain negations ('Nothing has been sent.', 'has not been sent', 'CELLAR's note says it sent nothing') do NOT match unbacked_claim (checked in the container), so the false-positive shapes are still unknown. The persona's 'cross-conversation state bleed' is refuted: the 'other chat' details it cited (CELLAR's note on #1588, '67') come from board reads any chat makes.",
+      "acceptanceCriteria": [
+        "Observability first: when an unbacked claim is found, the warning names the claim family AND the sentence that matched (first 200 chars, after the req id), so the false-positive shapes can be read off a night's log. A test pins the line.",
+        "REMOVE, don't patch: for an unbacked claim, _recover_claimed_action (tool_loop.py:594) no longer sends a nudge and no longer returns a retry in place of the draft. The owner gets the draft as composed, with the sentence that makes the unbacked claim removed and, in its place, one plain line saying what has not been done (the NOT_DONE wording, naming the claim). No second LLM call on this path. Delete CLAIMED_ACTION_RECOVERY_MSG and claimed_action_nudge if nothing else uses them, and the tests that pinned the retry. A test: a draft holding a 12-card board list plus one unbacked 'I've sent it' sentence is delivered with the 12 cards, without that sentence, with the one line in its place, and the fake LLM is called once.",
+        "Scope: only the claimed-action path changes. The announced-step nudge (F306) and the empty-reply ask (F297) stay as they are, because they recover a missing answer and don't replace one. The refused-write and waiting-card notes (US-006, RVW-4) move into the one line (e.g. 'I asked for your click on #1234, so it hasn't happened yet').",
+        "False positives: run unbacked_claim over every sentence of the night's delivered replies (~/.automatos-sim/customer-night/2026-10-14-night15/chats.jsonl, local-only data: read it, never commit it) and over the eval set's replies (~/.automatos-analyst/auto-eval/runs/20261013-*/rows.jsonl). Every shape that fires on a read-only report (a card's own note, a past event on the board, an agent's work described in the third person, a draft described as unsent) is fixed in the detector, with a test per shape, phrased in the test from the real sentence.",
+        "→ OWNER: TESTER: on the local build, six fresh chats in the same second with 'Which cards are sitting in review right now, and who has each one?': 6 of 6 list cards; no delivered reply in a fresh chat says 'my last reply'; the eval (phase.sh a-haiku-5.5) at ≥ 61/65 with no new must-not breach."
+      ],
+      "priority": 86,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
+    },
+    {
+      "id": "P256-FIX-N15-2",
+      "title": "HIGH · F423: 'Just to be clear: I haven't done that yet' above read-only answers",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F423): 'Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it done.' sat above 148 of 458 replies, most with no write call at all, including pure questions ('why does a natural Ethiopian taste different', 'what's on my board'). The line is consumers/chatbot/claim_check.py:77 NOTHING_DONE / receipts.py:273 NOTHING_DONE_LINE.",
+      "acceptanceCriteria": [
+        "One honest line, in one place: the 'Just to be clear…' line exists only as N15-1's replacement for a removed claim sentence. Nothing puts it ABOVE a reply. Remove the separate above-the-reply path (claim_check.py:77 NOTHING_DONE / receipts.py:273 NOTHING_DONE_LINE as an 'above' item) if N15-1's inline line covers it; keep one implementation. Tests: a read-only answer carries no line; a delivered 'I've sent it' with no send has that sentence replaced by the line.",
+        "From the night's 148 replies with the line above them (chats.jsonl, the 'above' field; read locally, never committed), each shape that drew it on a read-only answer gets a test that it no longer does.",
+        "→ OWNER: TESTER: the eval and night 16 show the line only where a claim was removed, never above a plain answer."
+      ],
+      "priority": 87,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
+    },
+    {
+      "id": "P256-FIX-N15-3",
+      "title": "HIGH · F424: platform_list_tasks cannot page, so the board count changes from ask to ask",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F424): 'platform_list_tasks does not take [offset]'; six identical asks in the same second counted the review column as 66, 66, 66, 31, 66, 13 and named owners for 4 to 20 cards. Every reply declared its partial view, which is why receipts held. Action and handler: modules/tools/discovery/actions_board_tasks.py, platform_executor.py.",
+      "acceptanceCriteria": [
+        "platform_list_tasks takes a page (offset and limit, or a cursor) and returns the total for the filter, so 'how many in review' is one number and a full list is reachable. The action's description, examples and the utterance corpus (core/seeds/utterances/<category>.yaml) cover paging.",
+        "A test: 70 review cards, three pages: every card exactly once, and the total is 70 on every page.",
+        "→ OWNER: TESTER: six parallel 'which cards are in review and who has each' asks give the same count and a complete list."
+      ],
+      "priority": 88,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
+    },
+    {
+      "id": "P256-FIX-N15-4",
+      "title": "HIGH · F425: 'What have you done for me tonight?' stops at 23:55, and chat-history search finds nothing",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F425): 12 of 12 'what have you done tonight' asks stop between 23:50 and 23:55; asked hour by hour (A387), platform_my_actions (N14-3: modules/tools/discovery/handlers_my_actions.py, my_actions_window.py, my_actions_reads.py) returns the full record with the owner's clicks and notes. platform_search_chat_history (handlers_search.py) returned nothing for any term all night.",
+      "acceptanceCriteria": [
+        "A wide window (tonight, today, this_week) returns every write and click in it: page internally or raise the cap, and when anything is left out the answer says how many and how to get them. A test: 120 receipts across a night are all returned for 'tonight', newest and oldest included.",
+        "platform_search_chat_history finds a term the owner used earlier tonight in another chat. Find why it returned nothing (index never written, wrong workspace or user scope, a filter), fix it, and add a test that writes a message and finds it.",
+        "→ OWNER: TESTER: 'What have you done for me tonight?' at 05:00 lists the night from its first write, with the clicks."
+      ],
+      "priority": 89,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
+    },
+    {
+      "id": "P256-FIX-N15-5",
+      "title": "MEDIUM · F426: Auto can't find the work on the owner's own review queue",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F426): 'show me the Guji blog draft' → 'there isn't a Guji blog draft'; with the ticket number → the whole post in 15 s. 'Did the Westmoor invoice come back?' → 'I can't find a Westmoor invoice'; with the card number → finished, £184.00. Its agents wrote both within the hour.",
+      "acceptanceCriteria": [
+        "Auto's search for a named piece of work (draft, quote, invoice, post) covers the cards in Review and their deliverables, by title and by the deliverable's file name. A test: a card in Review titled 'Guji blog draft' is found by 'the Guji blog draft'.",
+        "→ OWNER: TESTER: 'show me the <title> draft' finds a card in Review without its number."
+      ],
+      "priority": 90,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
+    },
+    {
+      "id": "P256-FIX-N15-6",
+      "title": "MEDIUM · F427: a stale `active` flag reported as 'this agent can't run'",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F427): 'RESEARCHER and WRITER can't run right now… no connected machine serves either' (A371) while both had finished work for the owner that night; corrected only when challenged ('WRITER's record still shows it as inactive, which is a display issue').",
+      "acceptanceCriteria": [
+        "What Auto says about whether an agent can run comes from the live serving state (a CLI host serving it, its last run), not the stored flag alone; the flag is refreshed when the agent runs. A test: an agent flagged inactive with a run in the last hour is reported as able to run.",
+        "→ OWNER: TESTER: asked whether WRITER can take a job right after it finished one, Auto says yes."
+      ],
+      "priority": 91,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
+    },
+    {
+      "id": "P256-FIX-N15-7",
+      "title": "MEDIUM · F428: the intent gate cuts the Gmail path, and not consistently",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F428): 'Draft me a reply to the last email I got from a supplier' → GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID refused: 'Action capabilities [data.query, message.read] don't match intent capabilities [email.draft, email.reply, …]', five times. GMAIL_CREATE_EMAIL_DRAFT succeeded at 04:05 and 04:08 and was refused at 04:35 on the same request shape; Auto then told the owner drafts don't work.",
+      "acceptanceCriteria": [
+        "A reply or draft intent may read mail (message.read and the fetch it needs); reading is never a write. A test: an email.reply intent allows GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID.",
+        "The 04:35 refusal of GMAIL_CREATE_EMAIL_DRAFT is reproduced from the night's log (req ids in the diary) and its cause fixed, so the same request shape gets the same answer. A test pins it.",
+        "→ OWNER: TESTER: 'draft a reply to the last supplier email, draft only' reads the email and leaves a Gmail draft, three times out of three."
+      ],
+      "priority": 92,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
+    },
+    {
+      "id": "P256-FIX-N15-9",
+      "title": "LOW · F429: one number per card, and a superseded standing rule retired",
+      "description": "Night 15 (13–14 Oct, main 6a5848420, Auto on Haiku 5.5, Jev union on: 372 asks, 71% first time, receipts match 87%; ~/.automatos-sim/customer-night/2026-10-14-night15 MORNING-REPORT.md / DIARY.md / chats.jsonl; ledger F429): one object, three numbers (board 2894 = Auto's 1607 = card 2603), and platform_get_task #2895 refused; the memory store still holds the 12 kg rule the owner replaced with 10 kg, so the memory page and the rules list disagree.",
+      "acceptanceCriteria": [
+        "Auto names a card only by its board number (#workspace_seq) and platform_get_task accepts it; a test with a card whose row id and board number differ.",
+        "When the owner replaces a standing rule, the old one is retired from the memory store too; the memory page and the rules list agree. A test.",
+        "→ OWNER: TESTER: night 16 sees one number per card and one cafe minimum."
+      ],
+      "priority": 94,
+      "passes": false,
+      "notes": "Filed by TESTER 14 Oct (night 15)."
     }
   ]
 }
