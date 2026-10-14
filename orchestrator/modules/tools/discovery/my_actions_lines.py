@@ -12,6 +12,7 @@ the answer says from when on, and the ``since`` that reads it.
 from __future__ import annotations
 
 import json
+from collections import deque
 from datetime import datetime
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
@@ -70,10 +71,9 @@ def _built(items: Sequence[Item]) -> Iterator[Tuple[int, List[str]]]:
 
 
 def _lines_of(items: Sequence[Item]) -> List[str]:
-    built: List[str] = []
-    for _spent, built in _built(items):
-        pass
-    return built
+    """Every line of ``items``: the lines after the last one is built."""
+    last = deque(_built(items), maxlen=1)
+    return last[0][1] if last else []
 
 
 def _time_boundary(items: Sequence[Item], fitted: int) -> int:
