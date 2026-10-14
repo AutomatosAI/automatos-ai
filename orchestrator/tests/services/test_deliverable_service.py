@@ -274,7 +274,7 @@ class TestListDeliverables:
         assert count_call_params["artifact_type"] == "image"
         assert count_call_params["source_type"] == "chat"
         assert count_call_params["agent_id"] == 42
-        assert count_call_params["search"] == "%weekly%"
+        assert count_call_params["search_0"] == "%weekly%"
         assert count_call_params["date_from"] == "2026-01-01"
         assert count_call_params["date_to"] == "2026-12-31"
 

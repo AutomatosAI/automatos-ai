@@ -168,6 +168,14 @@ def _list_tasks_parameters() -> Dict[str, Any]:
                 "type": "string",
                 "description": "Filter by assigned agent name",
             },
+            "search": {
+                "type": "string",
+                "description": (
+                    "The name of a piece of work (a draft, quote, invoice, post), e.g. "
+                    "'Guji blog draft': keeps the tasks whose title, or a deliverable on "
+                    "them (its title or file name), holds every word of it, in any order."
+                ),
+            },
             "limit": {
                 "type": "integer",
                 "description": "Page size (default 20, max 200).",
@@ -194,7 +202,10 @@ def _register_list_tasks(registry: ActionRegistry) -> None:
             "The result's 'total' is how many tasks match the filter, on every page: that is "
             "the count to give. When 'next_offset' is not null there are more: call again with "
             "offset=next_offset (same filters) until it is null before listing every one. "
-            "Each ticket has a number (#0042): name tickets by it, never by their place in a list."
+            "Each ticket has a number (#0042): name tickets by it, never by their place in a list. "
+            "When the owner names a piece of work without its number ('the Guji blog draft', "
+            "'the Westmoor invoice'), pass search with its name: work waiting on the owner is "
+            "in Review, and a ticket's deliverables are searched by title and file name too."
         ),
         category="tasks",
         parameters=_list_tasks_parameters(),
@@ -207,6 +218,7 @@ def _register_list_tasks(registry: ActionRegistry) -> None:
             "list urgent tasks",
             "how many cards are in review?",
             "show me the next page of tasks",
+            "show me the Guji blog draft",
         ],
         accepts=("tags",),
     ))

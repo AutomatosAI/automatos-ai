@@ -7,20 +7,33 @@ filter's count. Six identical asks in one second counted the review column as
 page, ``offset``/``next_offset`` walk the rest, and the order is total
 (created_at, then id: Postgres stamps one transaction's rows with one
 created_at), so consecutive pages never repeat or skip a card.
+
+F426 (night 15): Auto could not find "the Guji blog draft" waiting in Review
+without its number: the action had no search. ``search`` keeps the cards whose
+title, or a Deliverable on them (its title or file name), holds every word that
+names the work (services/named_work.py).
 """
 
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
+from sqlalchemy import String, and_, cast, column, exists, or_, table
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery.handlers_board_tasks import _widget_turn, task_visitor_view
+from services.deliverable_tags import CARD_SOURCE_TYPE
+from services.named_work import search_patterns
 from services.ticket_refs import by_ticket_number
 
 # The page size the model may ask for. "Close all the blocked tasks" needs to
 # SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
 MAX_LIST_TASKS_LIMIT = 200
 DEFAULT_LIST_TASKS_LIMIT = 20
+# The Deliverables registered on a card (source_type 'task', the card's id): what search reads.
+CARD_DELIVERABLES = table(
+    "deliverables", column("workspace_id"), column("source_type"), column("source_id"),
+    column("title"), column("file_path"), column("deleted_at"),
+)
 
 
 def _page(params: Dict[str, Any]) -> Tuple[int, int]:
@@ -51,7 +64,7 @@ def _agent_filter(db: Session, workspace_id: UUID, name: str) -> Optional[int]:
 
 
 def _filtered(query: Any, params: Dict[str, Any]) -> Any:
-    """Status, priority and tags filters. BoardTask.tags is JSONB, so .contains([...])
+    """Status, priority, tags and search filters. BoardTask.tags is JSONB, so .contains([...])
     compiles to ``tags @> [...]``: a task carrying ALL the tags. HARNESS finds its
     own '[HARNESS]' tasks (tagged 'harness' + 'rx:{id}') this way."""
     from core.models.core import BoardTask
@@ -64,6 +77,21 @@ def _filtered(query: Any, params: Dict[str, Any]) -> Any:
     tags = [tags] if isinstance(tags, str) else tags
     if isinstance(tags, list) and tags:
         query = query.filter(BoardTask.tags.contains(tags))
+    return _named(query, params.get("search"))
+
+
+def _named(query: Any, raw: Any) -> Any:
+    """F426: the cards whose title, or a Deliverable on them, holds every word of ``raw``."""
+    from core.models.core import BoardTask
+
+    d = CARD_DELIVERABLES.c
+    for pattern in search_patterns(raw):
+        on_card = exists().where(and_(
+            d.workspace_id == BoardTask.workspace_id, d.source_type == CARD_SOURCE_TYPE,
+            d.source_id == cast(BoardTask.id, String), d.deleted_at.is_(None),
+            or_(d.title.ilike(pattern), d.file_path.ilike(pattern)),
+        ))
+        query = query.filter(or_(BoardTask.title.ilike(pattern), on_card))
     return query
 
 

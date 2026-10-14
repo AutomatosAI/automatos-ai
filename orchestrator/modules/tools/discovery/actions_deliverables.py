@@ -67,7 +67,10 @@ def _list_parameters() -> dict:
             },
             "search": {
                 "type": "string",
-                "description": "Search in title/summary/file path (optional).",
+                "description": (
+                    "The work's name, e.g. 'Guji blog draft' (optional): keeps the "
+                    "deliverables whose title, summary or file path holds every word of it."
+                ),
             },
             "limit": {
                 "type": "integer",
