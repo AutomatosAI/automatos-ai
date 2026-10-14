@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Search } from 'lucide-react'
 
 import { StudioHeaderUtilities } from '@/components/layout/studio-header'
+import { AsleepGate } from '@/components/play/edges/asleep-gate'
 import { openGlobalSearch } from '@/lib/global-search-event'
 
 import { PlaySidebar } from './play-sidebar'
@@ -26,7 +27,20 @@ export interface PlayFrameProps {
   readonly autoWidget?: ReactNode
 }
 
-export function PlayFrame({ children, fullBleed = false, autoWidget }: PlayFrameProps) {
+/**
+ * PRD-260 T-009 — while GET /health fails, AsleepGate shows "Automatos is
+ * asleep" in place of the frame and its page; they mount again, fresh, when the
+ * backend answers (Ember mock 07, the whole window).
+ */
+export function PlayFrame(props: PlayFrameProps) {
+  return (
+    <AsleepGate>
+      <FrameLayout {...props} />
+    </AsleepGate>
+  )
+}
+
+function FrameLayout({ children, fullBleed = false, autoWidget }: PlayFrameProps) {
   // `safe-bottom` (the one safe-area helper, globals.css) keeps the frame's
   // bottom edge clear of a home bar, as the Studio shell does.
   return (
