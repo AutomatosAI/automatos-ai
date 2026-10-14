@@ -19,7 +19,7 @@ import json
 from typing import Any, Dict, List
 
 ROUTING = ("id", "name", "job_title", "team", "status", "runtime", "provider", "can_run", "why")
-ESSENTIALS = ROUTING + ("created_by", "created_at", "tags")
+ESSENTIALS = ROUTING + ("created_by", "created_at", "tags", "last_run")  # N15-6: its last run
 MADE = "made"
 DATE_CHARS = 10  # created_at's date: "2026-10-06"
 # The formatter's "Tool: <name>\nStatus: success\n\n" header, with room to spare.

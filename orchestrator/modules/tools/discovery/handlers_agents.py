@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from modules.tools.discovery.agent_made_by import lists_the_team, says_who_made_it
+from modules.tools.discovery.agent_made_by import describes_the_agent, lists_the_team
 from modules.tools.discovery.agent_runtime import sets_the_runtime_on_create, sets_the_runtime_on_update
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
     }
 
 
-@says_who_made_it  # FX-012: who made it, when, and how it runs
+@describes_the_agent  # FX-012: who made it and how it runs; N15-6: whether it can run now
 async def get_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     from core.models import Agent, Skill, agent_skills
     from core.models.composio_cache import AgentAppAssignment
