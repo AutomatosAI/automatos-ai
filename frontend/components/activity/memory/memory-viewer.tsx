@@ -155,7 +155,7 @@ export function MemoryViewer({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm max-w-none">
             <p className="whitespace-pre-wrap leading-relaxed">{memory.content}</p>
           </div>
 
