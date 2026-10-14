@@ -1,0 +1,89 @@
+/**
+ * PRD-260 T-007a, K7, D7, D8 — app/deliverables/layout.tsx mounts Play's
+ * shelf through PlayRouteSwitch: under Play at >= 1024 px on /deliverables
+ * only, the existing page under Classic and Studio, below 1024 px, on the
+ * explorer, and for a link into one of the page's other sections (a tab, a
+ * post, a type drill-down). DeliverableDeepLink stays mounted either way.
+ */
+import React from 'react'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const state = vi.hoisted(() => ({ play: true, narrow: false, pathname: '/deliverables', search: '' }))
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => state.pathname,
+  useSearchParams: () => new URLSearchParams(state.search),
+}))
+vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => state.narrow, useIsMobile: () => state.narrow }))
+vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => state.play }))
+vi.mock('@/components/play/deliverables/play-shelf', () => ({ PlayShelf: () => <div data-testid="play-shelf" /> }))
+vi.mock('@/components/deliverables/deliverable-deep-link', () => ({
+  DeliverableDeepLink: () => <div data-testid="deep-link" />,
+}))
+
+import DeliverablesLayout from '@/app/deliverables/layout'
+
+function renderLayout() {
+  return render(
+    <DeliverablesLayout>
+      <div data-testid="page">The Deliverables page</div>
+    </DeliverablesLayout>,
+  )
+}
+
+function showsShelf(yes: boolean) {
+  if (yes) {
+    expect(screen.getByTestId('play-shelf')).toBeInTheDocument()
+    expect(screen.queryByTestId('page')).toBeNull()
+  } else {
+    expect(screen.getByTestId('page')).toBeInTheDocument()
+    expect(screen.queryByTestId('play-shelf')).toBeNull()
+  }
+  expect(screen.getByTestId('deep-link')).toBeInTheDocument()
+}
+
+afterEach(() => {
+  cleanup()
+  Object.assign(state, { play: true, narrow: false, pathname: '/deliverables', search: '' })
+})
+
+describe('app/deliverables/layout.tsx', () => {
+  it("renders Play's shelf instead of the page under Play at desktop width, with the deep link", () => {
+    renderLayout()
+    showsShelf(true)
+  })
+
+  it('keeps the shelf for a link that opens one Deliverable (K8)', () => {
+    state.search = 'deliverable=d-laptop'
+    renderLayout()
+    showsShelf(true)
+  })
+
+  it('renders the existing page under Classic or Studio', () => {
+    state.play = false
+    renderLayout()
+    showsShelf(false)
+  })
+
+  it('renders the existing page below 1024 px (D7)', () => {
+    state.narrow = true
+    renderLayout()
+    showsShelf(false)
+  })
+
+  it("keeps Studio's explorer inside Play's frame", () => {
+    state.pathname = '/deliverables/explorer'
+    renderLayout()
+    showsShelf(false)
+  })
+
+  it.each(['tab=brand', 'tab=socials&post=p1', 'artifact_type=code'])(
+    "keeps the core's page for ?%s under Play (D8)",
+    (search) => {
+      state.search = search
+      renderLayout()
+      showsShelf(false)
+    },
+  )
+})
