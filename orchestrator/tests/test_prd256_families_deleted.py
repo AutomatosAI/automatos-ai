@@ -108,9 +108,25 @@ def test_the_table_is_the_families_26_sentences():
     assert len(SENTENCES) == 26 and len({case[0] for case in SENTENCES}) == 26
 
 
+# P256-FIX-N15-CI: a claim that said a done write to the card it names wrong takes that write's account
+# in its place, never the line ("I haven't moved anything" over #0422 moved to Done would be false).
+ACCOUNTED = {"F261 moved to cancelled over a move to done": "#0422 was moved to Done."}
+
+
+def _in_place(said, *calls):
+    """The reply as the owner gets it, its unbacked claims taken out (Auto's voice)."""
+    from consumers.chatbot.claim_removed import without_unbacked_claims
+    from tests.helpers_receipts_rule import tracker_of
+
+    return without_unbacked_claims(said, tracker_of(calls).outcomes, True).text
+
+
 @pytest.mark.parametrize("family, said, calls, claim", SENTENCES, ids=[case[0] for case in SENTENCES])
 def test_each_sentence_is_caught_or_cleared_by_the_receipts_rule(family, said, calls, claim):
     assert nudged(said, *calls) == claim, family
+    if family in ACCOUNTED:                                            # caught: the write's account in its place
+        assert _in_place(said, *calls) == ACCOUNTED[family], family
+        return
     assert (line(said, *calls) is None) is (claim is None), family     # caught: the line in its place too (N15-2)
 
 

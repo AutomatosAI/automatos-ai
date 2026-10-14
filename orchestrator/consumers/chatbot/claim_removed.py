@@ -22,9 +22,10 @@ N15-CI:
   goes on from it on its line ("I've approved the mission. It's now running."); the owner is told
   beside the answer (``Removed.taken_out``: the card's note, services/claims_taken_out.py). Only when
   nothing of the agent's text is left is the line the whole answer.
-- The line never denies a write that went through: a claim whose verb's family a done write is in,
-  said wrong ("Task #0422 has been moved to 'cancelled'." after a move to Done), is replaced by that
-  write's account ("#0422 was moved to Done."). A reply that was nothing but such claims says so
+- The line never denies a write that went through: a claim whose verb's family a done write to the
+  very card it names is in, said wrong ("Task #0422 has been moved to 'cancelled'." after #0422 moved to
+  Done), is replaced by that write's account ("#0422 was moved to Done."). A claim about anything else
+  (a letter over an unrelated card made) still takes the line. A reply that was nothing but such claims says so
   (``Removed.denies_done``): Auto's turn answers with the account of its calls (F264-b).
 """
 from __future__ import annotations
@@ -51,6 +52,8 @@ SENTENCE_LOGGED_CHARS = 200    # the loop's warning names the sentence, cut to t
 WENT_THROUGH = "What went through: {effect}{subject}."
 _DID_TO = ("moved to", "sent back", "started", "marked")   # a receipt's effect that reads "<card> was …"
 _LINE = "\0the not-done line"     # in a sentence's place: the line, said once
+_CARD_KEYS = ("task_id", "task_number", "number")      # a write's params that name its card
+_NUMBER = re.compile(r"(?<![\w.#])#?(\d{1,7}(?:\.\d+)?)(?!\w)")
 _LEADING_SPACE = re.compile(r"^\s*")
 _OPENING_MARKS = re.compile(r"^\s*([*_`]+)")
 
@@ -177,8 +180,22 @@ def _going_on(answer: str, claimed: FrozenSet[str], voiced: FrozenSet[str]) -> T
     return tuple(dict.fromkeys(going))
 
 
-def _done_writes(outcomes: List[Outcome]) -> List[Dict[str, Any]]:
-    return [r for r in (receipt(*outcome) for outcome in outcomes) if r["kind"] == WRITE and r["status"] == DONE]
+def _named(text: str) -> Dict[str, str]:
+    """The numbers ``text`` names (a card's "#0422", "0422" or 422), each as read ("422") to as written."""
+    return {number.lstrip("0") or "0": number for number in _NUMBER.findall(text)}
+
+
+def _done_writes(outcomes: List[Outcome]) -> List[Tuple[Dict[str, Any], FrozenSet[str]]]:
+    """The turn's done writes, each with the numbers of what it wrote to (its card's number or id,
+    from its params and its receipt's subject)."""
+    done = []
+    for action, params, result in outcomes:
+        r = receipt(action, params, result)
+        if r["kind"] != WRITE or r["status"] != DONE:
+            continue
+        given = [str(params.get(key)) for key in _CARD_KEYS if isinstance(params, dict) and params.get(key) is not None]
+        done.append((r, frozenset(number for text in (*given, str(r.get("subject") or "")) for number in _named(text))))
+    return done
 
 
 def _of_its_family(verb: str, r: Dict[str, Any]) -> bool:
@@ -187,23 +204,27 @@ def _of_its_family(verb: str, r: Dict[str, Any]) -> bool:
     return any(verb in family and backs(r) for family, backs in FAMILIES)
 
 
-def _what_it_did(r: Dict[str, Any]) -> str:
-    """A done write, in a sentence: "#0422 was moved to Done."; "What went through: Card made (#0231)."."""
-    subject, effect = str(r.get("subject") or ""), str(r.get("effect") or "")
-    if subject and effect.startswith(_DID_TO):
+def _what_it_did(r: Dict[str, Any], written: str) -> str:
+    """A done write, in a sentence: "#0422 was moved to Done."; "What went through: Card made (#0231)."
+    ``written``: its number as the claim wrote it, when its receipt names none."""
+    subject, effect = str(r.get("subject") or "") or f"#{written}", str(r.get("effect") or "")
+    if effect.startswith(_DID_TO):
         return f"{subject} was {effect}."
-    return WENT_THROUGH.format(effect=effect[:1].upper() + effect[1:], subject=f" ({subject})" if subject else "")
+    return WENT_THROUGH.format(effect=effect[:1].upper() + effect[1:], subject=f" ({subject})")
 
 
 def _own_instead(found: List[Tuple[str, str]], outcomes: List[Outcome]) -> Dict[str, str]:
     """In Auto's voice, what goes in place of each claim: the account of the done writes of its verb's
-    family when there are any (the claim said them wrong: a line saying "I haven't moved anything" over
-    a move to Done is false), else the not-done line (``_LINE``)."""
+    family to the very thing the claim names ("Task #0422 has been moved to 'cancelled'." over #0422
+    moved to Done: "I haven't moved anything" would be false), else the not-done line (``_LINE``). A
+    claim that names no number a write was to (a letter, a card it doesn't name) takes the line."""
     done = _done_writes(outcomes)
     put: Dict[str, str] = {}
     for verb, sentence in found:
-        did = [r for r in done if _of_its_family(verb, r)]
-        put.setdefault(sentence.strip(), " ".join(dict.fromkeys(_what_it_did(r) for r in did)) if did else _LINE)
+        named = _named(sentence)
+        did = [_what_it_did(r, named[next(iter(cards & named.keys()))]) for r, cards in done
+               if cards & named.keys() and _of_its_family(verb, r)]
+        put.setdefault(sentence.strip(), " ".join(dict.fromkeys(did)) if did else _LINE)
     return put
 
 
