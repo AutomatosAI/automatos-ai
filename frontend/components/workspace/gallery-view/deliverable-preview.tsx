@@ -33,6 +33,7 @@ import {
   type Deliverable,
 } from '@/hooks/use-deliverables-api'
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
+import { DEFAULT_FILENAME, deliverableFilename, deliverableFileUrl } from '@/lib/deliverables/download'
 import { DeliverablePreviewActions } from './deliverable-preview-actions'
 import { DeliverableTags } from './deliverable-tags'
 import { usePreviewFullscreen } from './use-preview-fullscreen'
@@ -174,11 +175,8 @@ export function DeliverablePreview({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onOpenChange])
 
-  const downloadUrl = deliverable?.content_url || deliverable?.preview_url || null
-  const filename =
-    deliverable?.file_name ||
-    deliverable?.file_path?.split('/').pop() ||
-    'download'
+  const downloadUrl = deliverable ? deliverableFileUrl(deliverable) : null
+  const filename = deliverable ? deliverableFilename(deliverable) : DEFAULT_FILENAME
 
   // F358: the authenticated download; a failed fetch shows the error toast.
   const handleDownload = useCallback(() => {

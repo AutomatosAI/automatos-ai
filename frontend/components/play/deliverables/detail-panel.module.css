@@ -1,0 +1,61 @@
+/*
+ * PRD-260 §4 — the side panel on a Deliverable's page (Ember mock 05): Ask
+ * Auto about this and Download, then About this Deliverable, ported from
+ * Automatos Play's components/deliverables/detail.module.css. Every variable
+ * is --pl-* (K2).
+ */
+
+.panel {
+  position: sticky;
+  top: var(--pl-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-5);
+  padding-left: var(--pl-space-5);
+  border-left: 1px solid var(--pl-line-faint);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}
+
+.panelSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}
+
+.panelLabel {
+  margin: 0;
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-3);
+}
+
+.facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+  font: var(--pl-text-small);
+}
+
+.fact {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--pl-space-3);
+}
+
+.fact dt {
+  color: var(--pl-color-text-2);
+}
+
+.fact dd {
+  margin: 0;
+  text-align: right;
+  color: var(--pl-color-text);
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,126 @@
+/*
+ * PRD-260 §4 — a Deliverable's content (Ember mock 05), ported from Automatos
+ * Play's components/deliverables/detail.module.css: the text printed on a sheet
+ * lying on the desk (--pl-color-sheet: cream on a dark ground, white on Paper),
+ * a picture or a video full width, else the file card. On the sheet every
+ * colour is a --pl-color-sheet-* token: the ground's text colours don't read
+ * there. The core's markdown renderer styles its .md-view in globals.css's
+ * components layer; these unlayered rules recolour it for the sheet. Every
+ * variable is --pl-* (K2).
+ */
+
+.document {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-4);
+  padding: var(--pl-space-7) var(--pl-space-7) var(--pl-space-6);
+  border-radius: var(--pl-radius-paper);
+  background: var(--pl-color-sheet);
+  color: var(--pl-color-sheet-text);
+  box-shadow: var(--pl-shadow-sheet);
+}
+
+.prose {
+  font: var(--pl-text-document-body);
+  color: var(--pl-color-sheet-text);
+  overflow-wrap: anywhere;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin: var(--pl-space-5) 0 var(--pl-space-3);
+  padding: 0;
+  border: 0;
+  font: var(--pl-text-status);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-sheet-text);
+}
+
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  font: var(--pl-text-title);
+  letter-spacing: var(--pl-display-letter-spacing);
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose strong,
+.prose a {
+  color: var(--pl-color-sheet-accent);
+}
+
+.prose li::marker,
+.prose blockquote {
+  color: var(--pl-color-sheet-text);
+}
+
+.prose blockquote {
+  border-left-color: var(--pl-color-sheet-accent);
+}
+
+.prose code {
+  font: var(--pl-text-mono);
+  background: var(--pl-tint-sheet-line);
+  border-color: transparent;
+}
+
+.prose pre {
+  background: var(--pl-tint-sheet-line);
+}
+
+.prose hr {
+  border-top-color: var(--pl-tint-sheet-line);
+}
+
+.prose table {
+  border-top: 2px solid var(--pl-color-sheet-text);
+}
+
+.prose th,
+.prose td {
+  padding: var(--pl-space-3) var(--pl-space-4) var(--pl-space-3) 0;
+  border: 0;
+  border-bottom: 1px solid var(--pl-tint-sheet-line);
+  background: transparent;
+  color: var(--pl-color-sheet-text);
+}
+
+.prose th {
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+}
+
+.sheetNote {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-sheet-text);
+}
+
+.media {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+}
+
+.unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pl-space-3);
+  padding: var(--pl-space-5);
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+}

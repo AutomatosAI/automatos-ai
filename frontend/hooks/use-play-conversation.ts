@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
+import { type ComposerFill, DRAFT_PARAM, draftFrom } from '@/lib/play/draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { Chat, ChatMessage } from '@/types'
 
@@ -15,7 +16,9 @@ import type { Chat, ChatMessage } from '@/types'
  * `?chatId=` deep link opens that conversation (once per value, then leaves the
  * URL); a cold start on this device lands on the newest conversation, else a
  * new chat; the active pointer's conversation comes from getChat and
- * getChatMessages, and one that can't be loaded is closed with a toast.
+ * getChatMessages, and one that can't be loaded is closed with a toast. A
+ * `?draft=` link (a Deliverable's "Ask Auto about this") opens a new chat with
+ * its words waiting in the message box, then leaves the URL.
  *
  * One difference, for Auto: when the backend names a new chat mid-turn, the
  * screen keeps it (`adopt`) instead of reloading it, so the stream and Auto's
@@ -42,12 +45,16 @@ export interface PlayConversation {
   readonly view: PlayConversationView | null
   /** The backend named the new chat on screen: keep showing it. Call before the session store hears. */
   readonly adopt: (chatId: string) => void
+  /** A link's words for the new chat's message box, until the chat screen takes them. */
+  readonly draft: ComposerFill | null
+  /** The chat screen put the draft in its box: later new chats start empty. */
+  readonly takeDraft: () => void
 }
 
-/** `/chat` with the query as it is, less one parameter. */
-export function chatUrlWithout(params: URLSearchParams | null, name: string): string {
+/** `/chat` with the query as it is, less the named parameters. */
+export function chatUrlWithout(params: URLSearchParams | null, ...names: readonly string[]): string {
   const next = new URLSearchParams(params?.toString() ?? '')
-  next.delete(name)
+  names.forEach((name) => next.delete(name))
   const query = next.toString()
   return query ? `${CHAT_ROUTE}?${query}` : CHAT_ROUTE
 }
@@ -77,21 +84,49 @@ function useDeepLink(hydrated: boolean, activeChatId: string | null): { linked: 
     if (!hydrated || !linked || handled.current === linked) return
     handled.current = linked
     openChat(linked)
-    router.replace(chatUrlWithout(params, CHAT_ID_PARAM))
+    // A draft's words riding the same link are dropped with it: the conversation wins.
+    router.replace(chatUrlWithout(params, CHAT_ID_PARAM, DRAFT_PARAM))
   }, [hydrated, linked, openChat, router, params])
 
   return { linked, pending: linked !== null && activeChatId !== linked }
 }
 
+/**
+ * A `?draft=` link, once per appearance in the URL: a new chat (the session's
+ * draft), its words handed to the chat screen, the parameter dropped. Pending
+ * until the draft is the active one. A `?chatId=` link wins over it (and drops
+ * it with itself, useDeepLink).
+ */
+function useDraftLink(hydrated: boolean, linked: string | null, activeChatId: string | null) {
+  const params = useSearchParams()
+  const router = useRouter()
+  const newDraft = useChatSessionStore((s) => s.newDraft)
+  const text = linked ? null : draftFrom(params)
+  const handled = useRef<string | null>(null)
+  const [draft, setDraft] = useState<ComposerFill | null>(null)
+
+  useEffect(() => {
+    if (text === null) handled.current = null
+    if (!hydrated || text === null || handled.current === text) return
+    handled.current = text
+    newDraft()
+    setDraft((prev) => ({ text, serial: (prev?.serial ?? 0) + 1 }))
+    router.replace(chatUrlWithout(params, DRAFT_PARAM))
+  }, [hydrated, text, newDraft, router, params])
+
+  const takeDraft = useCallback(() => setDraft(null), [])
+  return { draft, takeDraft, held: text !== null, pending: text !== null && activeChatId !== null }
+}
+
 /** Nothing stored on this device and no link: the newest conversation, else a new chat. True while it settles. */
-function useColdStart(hydrated: boolean, linked: string | null): boolean {
+function useColdStart(hydrated: boolean, linkHeld: boolean): boolean {
   const nothingOpen = useChatSessionStore((s) => s.session.openChatIds.length === 0 && !s.session.draftOpen)
   const openChat = useChatSessionStore((s) => s.openChat)
   const newDraft = useChatSessionStore((s) => s.newDraft)
   const started = useRef(false)
 
   useEffect(() => {
-    if (!hydrated || linked || started.current || !nothingOpen) return
+    if (!hydrated || linkHeld || started.current || !nothingOpen) return
     started.current = true
     getChatHistory(1)
       .then((rows) => (rows[0] ? openChat(rows[0].id) : newDraft()))
@@ -99,9 +134,9 @@ function useColdStart(hydrated: boolean, linked: string | null): boolean {
         console.warn('[play-chat] the newest conversation could not be read, so a new chat opens:', error)
         newDraft()
       })
-  }, [hydrated, linked, nothingOpen, openChat, newDraft])
+  }, [hydrated, linkHeld, nothingOpen, openChat, newDraft])
 
-  return hydrated && linked === null && nothingOpen
+  return hydrated && !linkHeld && nothingOpen
 }
 
 interface LoadHandlers {
@@ -177,8 +212,9 @@ export function usePlayConversation(): PlayConversation {
   const { hydrated } = useChatSessionHydration()
   const activeChatId = useChatSessionStore((s) => s.session.activeChatId)
   const { linked, pending } = useDeepLink(hydrated, activeChatId)
-  const coldStarting = useColdStart(hydrated, linked)
-  const ready = hydrated && !pending && !coldStarting
+  const drafting = useDraftLink(hydrated, linked, activeChatId)
+  const coldStarting = useColdStart(hydrated, linked !== null || drafting.held)
+  const ready = hydrated && !pending && !drafting.pending && !coldStarting
   const { view, adopt } = useActiveView(ready, activeChatId)
-  return { view: ready ? view : null, adopt }
+  return { view: ready ? view : null, adopt, draft: drafting.draft, takeDraft: drafting.takeDraft }
 }

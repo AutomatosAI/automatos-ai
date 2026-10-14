@@ -1,10 +1,13 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { DELIVERABLE_PARAM } from '@/components/deliverables/deliverable-deep-link'
 import { MainLayout } from '@/components/layout/main-layout'
 import { AutoMascot } from '@/components/mascot/auto-mascot'
+import { isDeliverableId } from '@/components/play/chat/deliverables'
 import { PageColumns } from '@/components/play/shell/page-columns'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useDeliverables } from '@/hooks/use-deliverables-api'
@@ -20,6 +23,7 @@ import {
   type ShelfFilter,
 } from '@/lib/play/shelf'
 
+import { PlayDeliverable } from './play-deliverable'
 import { ShelfBody, type ShelfPaging } from './shelf-body'
 import styles from './shelf.module.css'
 
@@ -36,18 +40,30 @@ import styles from './shelf.module.css'
  * sections (?tab=, a post, a type drill-down) keeps the core's page inside
  * Play's frame (D8), and the shelf links to those sections, so none of them
  * is out of reach under Play.
+ *
+ * It is also the switch for one Deliverable (K8): the core's own
+ * /deliverables?deliverable=<id> shows Play's page for it (play-deliverable.tsx)
+ * instead of the shelf, and DeliverableDeepLink's sheet stays closed (the
+ * layout mounts it beside the page only). An id that isn't one (the id
+ * pattern) shows the shelf with a quiet notice.
  */
 
 export const SHELF_TITLE = 'Your shelf'
 export const FILTER_GROUP_LABEL = 'Show Deliverables by type'
 export const SECTIONS_LABEL = 'More in Deliverables'
+export const BAD_LINK = "That link doesn't name a Deliverable, so here's your shelf."
 const EXPLORER_LABEL = 'Explorer'
 
-/** The shelf in Play's frame: the route's layout shows it instead of the page. */
+/** The shelf, or the Deliverable the link names, in Play's frame: the route's layout shows it instead of the page. */
 export function PlayShelf() {
+  const asked = useSearchParams()?.get(DELIVERABLE_PARAM) || null
   return (
     <MainLayout fullBleed>
-      <ShelfScreen />
+      {asked !== null && isDeliverableId(asked) ? (
+        <PlayDeliverable key={asked} id={asked} />
+      ) : (
+        <ShelfScreen notice={asked === null ? undefined : BAD_LINK} />
+      )}
     </MainLayout>
   )
 }
@@ -55,6 +71,8 @@ export function PlayShelf() {
 export interface ShelfScreenProps {
   /** What "today" is; tests pin it. */
   readonly now?: Date
+  /** A quiet line over the shelf (a link that named no Deliverable). */
+  readonly notice?: string
 }
 
 /**
@@ -93,7 +111,7 @@ function useShelfList(filter: ShelfFilter) {
   return { view, paging }
 }
 
-export function ShelfScreen({ now }: ShelfScreenProps) {
+export function ShelfScreen({ now, notice }: ShelfScreenProps) {
   const [filter, setFilter] = useState<ShelfFilter>(ALL_FILTER)
   const { view, paging } = useShelfList(filter)
   const auto = useShelfMascot(view)
@@ -111,6 +129,11 @@ export function ShelfScreen({ now }: ShelfScreenProps) {
             <AutoMascot state={auto.mascot} onClipEnded={auto.onClipEnded} caption={auto.caption} size="small" />
           </div>
         </header>
+        {notice && (
+          <p className={styles.status} role="status">
+            {notice}
+          </p>
+        )}
         <FilterChips selected={filter} onSelect={setFilter} />
         <ShelfBody view={view} filter={filter} paging={paging} now={now ?? new Date()} />
       </div>

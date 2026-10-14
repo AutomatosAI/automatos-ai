@@ -3,7 +3,9 @@
  * shelf through PlayRouteSwitch: under Play at >= 1024 px on /deliverables
  * only, the existing page under Classic and Studio, below 1024 px, on the
  * explorer, and for a link into one of the page's other sections (a tab, a
- * post, a type drill-down). DeliverableDeepLink stays mounted either way.
+ * post, a type drill-down). DeliverableDeepLink is mounted beside the page
+ * only: under Play the shelf switch opens a Deliverable as Play's own page
+ * (T-007b, K8), so its sheet never opens over it.
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -36,11 +38,12 @@ function showsShelf(yes: boolean) {
   if (yes) {
     expect(screen.getByTestId('play-shelf')).toBeInTheDocument()
     expect(screen.queryByTestId('page')).toBeNull()
+    expect(screen.queryByTestId('deep-link')).toBeNull()
   } else {
     expect(screen.getByTestId('page')).toBeInTheDocument()
     expect(screen.queryByTestId('play-shelf')).toBeNull()
+    expect(screen.getByTestId('deep-link')).toBeInTheDocument()
   }
-  expect(screen.getByTestId('deep-link')).toBeInTheDocument()
 }
 
 afterEach(() => {
@@ -49,12 +52,12 @@ afterEach(() => {
 })
 
 describe('app/deliverables/layout.tsx', () => {
-  it("renders Play's shelf instead of the page under Play at desktop width, with the deep link", () => {
+  it("renders Play's shelf instead of the page under Play at desktop width, without the deep link's sheet", () => {
     renderLayout()
     showsShelf(true)
   })
 
-  it('keeps the shelf for a link that opens one Deliverable (K8)', () => {
+  it("keeps Play's screen for a link that opens one Deliverable, and the deep link stays closed (K8)", () => {
     state.search = 'deliverable=d-laptop'
     renderLayout()
     showsShelf(true)

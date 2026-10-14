@@ -320,3 +320,47 @@ describe("Auto's column", () => {
     expect(auto()).toHaveAttribute('data-state', 'idle')
   })
 })
+
+// T-007b: a Deliverable's "Ask Auto about this" links to /chat?draft=<words> (lib/play/draft.ts).
+describe('a ?draft= link (Ask Auto about this)', () => {
+  const ASK = 'About my Deliverable "Laptop shortlist": '
+
+  it('opens a new chat with the words waiting in the message box, and leaves the URL', async () => {
+    openStoredChat()
+    nav.search = `draft=${encodeURIComponent(ASK)}`
+    render(<PlayChat />)
+    expect(await screen.findByRole('textbox', { name: PLACEHOLDER })).toHaveValue(ASK)
+    expect(screen.getByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    expect(useChatSessionStore.getState().newDraft).toHaveBeenCalled()
+    expect(nav.replace).toHaveBeenCalledWith('/chat')
+    expect(chat.sendMessage).not.toHaveBeenCalled()
+    expect(api.getChat).not.toHaveBeenCalled()
+    expect(api.getChatHistory).not.toHaveBeenCalled()
+  })
+
+  it('puts the words in only once: a later new chat starts empty', async () => {
+    nav.search = `draft=${encodeURIComponent(ASK)}`
+    const view = render(<PlayChat />)
+    expect(await screen.findByRole('textbox', { name: PLACEHOLDER })).toHaveValue(ASK)
+    nav.search = ''
+    view.rerender(<PlayChat />)
+    api.getChat.mockResolvedValue(storedChat('c1', 'Laptop for uni'))
+    api.getChatMessages.mockResolvedValue(STORED)
+    act(() => useChatSessionStore.getState().openChat('c1'))
+    expect(await screen.findByText('What should I look for in a laptop?')).toBeInTheDocument()
+    act(() => useChatSessionStore.getState().newDraft())
+    expect(await screen.findByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    expect(box()).toHaveValue('')
+  })
+
+  it('a ?chatId= link wins over the words, and drops them with itself', async () => {
+    setSession({ activeChatId: null, draftOpen: false, openChatIds: [] })
+    nav.search = `chatId=c2&draft=${encodeURIComponent(ASK)}`
+    api.getChat.mockResolvedValue(storedChat('c2', 'Bake sale'))
+    api.getChatMessages.mockResolvedValue([userMessage('m1', 'Captions for the bake sale')])
+    render(<PlayChat />)
+    expect(await screen.findByText('Captions for the bake sale')).toBeInTheDocument()
+    expect(nav.replace).toHaveBeenCalledWith('/chat')
+    expect(box()).toHaveValue('')
+  })
+})

@@ -15,19 +15,24 @@ import styles from './opening.module.css'
  * (MainLayout fullBleed). The conversation on screen is the core's
  * (usePlayConversation: the session store and lib/chat/api.ts); while it
  * settles or loads, Auto says so. The chat screen is keyed by the
- * conversation, so switching conversations starts it afresh.
+ * conversation, so switching conversations starts it afresh; a `?draft=`
+ * link's words go into the new chat's message box once.
  */
 
 export const OPENING = 'Opening this conversation…'
 export const OPENING_TITLE = 'Conversation'
 
 export function PlayChat() {
-  const { view, adopt } = usePlayConversation()
+  const { view, adopt, draft, takeDraft } = usePlayConversation()
   return (
     <MainLayout fullBleed>
       {/* PRD-233 S3: the local edition's first-run nudge (nothing in saas, or once a key exists). */}
       <FirstRunNudge />
-      {view ? <PlayChatView key={view.key} view={view} onChatIdAssigned={adopt} /> : <PlayChatOpening />}
+      {view ? (
+        <PlayChatView key={view.key} view={view} onChatIdAssigned={adopt} draft={draft} onDraftTaken={takeDraft} />
+      ) : (
+        <PlayChatOpening />
+      )}
     </MainLayout>
   )
 }

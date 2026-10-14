@@ -28,7 +28,8 @@ function ImageAsText({ alt }: ComponentPropsWithoutRef<'img'>) {
   return alt ? <span className={styles.imageAlt}>{alt}</span> : null
 }
 
-const PLAY_MARKDOWN_COMPONENTS = { a: ExternalLink, img: ImageAsText }
+/** Play's rules for untrusted markdown, also on a Deliverable's page (components/play/deliverables). */
+export const PLAY_MARKDOWN_COMPONENTS = { a: ExternalLink, img: ImageAsText }
 
 export function PlayMarkdown({ text }: { readonly text: string }) {
   return (

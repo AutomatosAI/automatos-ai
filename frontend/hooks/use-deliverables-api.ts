@@ -75,6 +75,8 @@ export interface Deliverable {
   content?: string | null
   content_url?: string | null
   content_error?: string
+  /** True when the file is over the inline cap (1 MB) and `content` is its first part only. */
+  content_truncated?: boolean
   /** F354: the owner's document this Deliverable was added to knowledge as, or null. */
   knowledge_document_id?: number | null
   /** 7 Oct: the Deliverable's tags (lowercase, at most 10); a board card's tags included. */

@@ -10,6 +10,7 @@ import type { PlayConversationView } from '@/hooks/use-play-conversation'
 import { type PlayTurn, usePlayTurn } from '@/hooks/use-play-turn'
 import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { usePageContext } from '@/lib/page-context'
+import type { ComposerFill } from '@/lib/play/draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { ChatMessage } from '@/types'
 
@@ -41,6 +42,10 @@ export interface PlayChatViewProps {
   readonly onChatIdAssigned: (chatId: string) => void
   /** How long without input before Auto naps (tests shorten it). */
   readonly idleMs?: number
+  /** A link's words for the message box (a Deliverable's "Ask Auto about this"). */
+  readonly draft?: ComposerFill | null
+  /** The words are in the box: the link's draft is spent. */
+  readonly onDraftTaken?: () => void
 }
 
 const BACKEND_OF: Readonly<Record<BackendConnection, BackendStatus | undefined>> = {
@@ -84,12 +89,18 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
   return { chat, auto, turn }
 }
 
-/** An example chip's words, put in a fresh message box (a new key) so it focuses with them. */
-type Fill = { readonly text: string; readonly serial: number }
-
-/** The chips' fill, and focus and blur as Auto's events (he listens while you type). */
-function useComposer(auto: AutoMascotDriver) {
-  const [fill, setFill] = useState<Fill | null>(null)
+/**
+ * The box's fill (an example chip's words, or a link's draft, each in a fresh
+ * box: a new key, so it focuses with them), and focus and blur as Auto's events
+ * (he listens while you type). A link's draft is taken once.
+ */
+function useComposer(auto: AutoMascotDriver, linked: ComposerFill | null, onTaken?: () => void) {
+  const [fill, setFill] = useState<ComposerFill | null>(linked)
+  useEffect(() => {
+    if (!linked) return
+    setFill((prev) => (prev === linked ? prev : { text: linked.text, serial: (prev?.serial ?? 0) + 1 }))
+    onTaken?.()
+  }, [linked, onTaken])
   const { dispatch } = auto
   const pick = useCallback((text: string) => setFill((prev) => ({ text, serial: (prev?.serial ?? 0) + 1 })), [])
   const onFocus = useCallback(() => dispatch({ type: 'input-focus' }), [dispatch])
@@ -126,7 +137,7 @@ function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn
 
 export function PlayChatView(props: PlayChatViewProps) {
   const { chat, auto, turn } = usePlayChat(props)
-  const composer = useComposer(auto)
+  const composer = useComposer(auto, props.draft ?? null, props.onDraftTaken)
   const { send, retry } = useSending(chat, turn)
   const streaming = chat.status === 'streaming'
   const empty = chat.messages.length === 0
