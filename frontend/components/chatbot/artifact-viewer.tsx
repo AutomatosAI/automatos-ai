@@ -52,7 +52,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-6 py-4 bg-muted">
         <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-semibold text-foreground dark:text-white truncate">{artifact.title}</h3>
+          <h3 className="text-lg font-semibold text-foreground truncate">{artifact.title}</h3>
           <div className="flex items-center space-x-2 mt-1">
             <Badge variant="outline" className="bg-agent/10 border-agent/20 text-agent text-xs">
               {artifact.kind}
@@ -70,7 +70,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={handleCopy}
-            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground"
           >
             <Copy className="w-4 h-4" />
           </Button>
@@ -78,7 +78,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={handleDownload}
-            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground"
           >
             <Download className="w-4 h-4" />
           </Button>
@@ -86,7 +86,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground"
           >
             <Maximize2 className="w-4 h-4" />
           </Button>
@@ -94,7 +94,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
+            className="text-muted-foreground hover:text-foreground"
           >
             <X className="w-4 h-4" />
           </Button>
