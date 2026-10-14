@@ -10,7 +10,8 @@ import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsPlay } from '@/hooks/use-studio-theme'
 
 /**
- * PRD-260 K9, D7 — a page only Play has (Make it yours at /looks). Under Play
+ * PRD-260 K9, D7 — a page only Play has (Make it yours at /looks, the style
+ * sheet at /looks/style). Under Play
  * at >= 1024 px it renders Play's screen full bleed inside MainLayout (Play's
  * frame); under Classic or Studio, a short note with 'Switch to Play' (the
  * theme menu's Play choice: setStyle('play'), so the screen appears at once,
@@ -18,7 +19,8 @@ import { useIsPlay } from '@/hooks/use-studio-theme'
  * render (D7), a note that it opens on a wider screen. The notes wear the
  * core's own frame, the shared PageHeader (Studio's editorial head under
  * Studio, the classic head under Classic: PRD-244, app/__tests__/page-frames),
- * since Play's variables exist only under html.play.
+ * since Play's variables exist only under html.play. Each note is a region
+ * named by the page, so its words and Switch to Play read as one block.
  */
 
 export const SWITCH_TO_PLAY = 'Switch to Play'
@@ -81,5 +83,9 @@ export function PlayOnlyNote({ title, note, offerSwitch }: PlayOnlyNoteProps) {
       {SWITCH_TO_PLAY}
     </Button>
   ) : undefined
-  return <PageHeader title={lead} titleAccent={accent} subtitle={note} actions={action} />
+  return (
+    <section aria-label={title}>
+      <PageHeader title={lead} titleAccent={accent} subtitle={note} actions={action} />
+    </section>
+  )
 }
