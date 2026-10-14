@@ -101,6 +101,7 @@ import { APPROVALS_LABEL } from '@/components/play/chat/approval-cards'
 import {
   approvalsInPart,
   fileApprovals,
+  looseApprovals,
   MISSION_APPROVAL_TITLE,
   TOOL_APPROVAL_TITLE,
   withStatus,
@@ -333,5 +334,13 @@ describe('approvals.ts: the part read as chat.tsx reads it', () => {
     expect(closed[0].status).toBe('closed')
     expect(withStatus(closed, 'tool-42', 'answered')).toBe(closed)
     expect(withStatus(filed, 'tool-9', 'answered')).toBe(filed)
+  })
+
+  it('a card whose reply left the conversation is loose until it is closed (play-chat-approvals-stream.test.tsx: Stop, Try again)', () => {
+    const filed = fileApprovals([], approvalsInPart(toolData({ tool_approval: TOOL_APPROVAL })), 'm2', new Date(0))
+    expect(looseApprovals(filed, new Set(['m1', 'm2']))).toEqual([])
+    expect(looseApprovals(filed, new Set(['m1']))).toEqual(filed)
+    expect(looseApprovals(withStatus(filed, 'tool-42', 'answered'), new Set(['m1']))).toHaveLength(1)
+    expect(looseApprovals(withStatus(filed, 'tool-42', 'closed'), new Set(['m1']))).toEqual([])
   })
 })

@@ -72,6 +72,12 @@ export type MascotState = {
   readonly backendDown: boolean
   /** An approval card waits for the owner's answer: Auto rests on listening instead of idle. */
   readonly approvalWaiting: boolean
+  /**
+   * This turn has moved Auto past thinking: its words started or a tool ran. Once
+   * no card waits, a turn still running goes back to its tool, or to thinking
+   * only while this is false.
+   */
+  readonly pastThinking: boolean
 }
 
 /**

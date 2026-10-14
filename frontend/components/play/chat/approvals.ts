@@ -14,7 +14,8 @@ import type {
  * payloads come off the wire (result_formatter.py builds them), so every field
  * is checked here, and the ids are checked before they reach a request path.
  * A filed card remembers the reply that raised it and whether the owner has
- * answered it or closed it. Pure.
+ * answered it or closed it; a card whose reply left the conversation is
+ * loose, still open. Pure.
  */
 
 /** chat.tsx's widget titles. */
@@ -164,4 +165,15 @@ export function withStatus(filed: readonly FiledApproval[], key: string, status:
 /** Whether a card still waits for the owner. */
 export function isWaiting(filed: readonly FiledApproval[]): boolean {
   return filed.some((card) => card.status === 'waiting')
+}
+
+/**
+ * The open cards whose reply is no longer in the conversation: useChat drops
+ * the reply on Stop (and when the request fails mid-turn), and Try again
+ * replaces it. The grant or Mission still waits on the server, so the card
+ * stays on screen (as Studio's widget stays on its canvas) until the owner
+ * answers or closes it. Never mutates.
+ */
+export function looseApprovals(filed: readonly FiledApproval[], replyIds: ReadonlySet<string>): FiledApproval[] {
+  return filed.filter((card) => card.status !== 'closed' && !replyIds.has(card.replyId))
 }

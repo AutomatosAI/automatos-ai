@@ -35,6 +35,7 @@ export const INITIAL_MASCOT: MascotState = {
   celebrateOnFinish: false,
   backendDown: false,
   approvalWaiting: false,
+  pastThinking: false,
 }
 
 const pose = (mascot: MascotName, rank: number): Pose => ({ mascot, rank })
@@ -101,9 +102,15 @@ function afterTools(state: MascotState): Pose {
   return busiest === IDLE ? rest(state) : busiest
 }
 
+/** A turn's words started or a tool ran: the turn is past thinking (only a turn's own events mark it). */
+function markPastThinking(state: MascotState): MascotState {
+  return state.turnActive && !state.pastThinking ? { ...state, pastThinking: true } : state
+}
+
 function onToolStart(state: MascotState, event: ToolStartEvent): MascotState {
   const activity = toolActivity(event.toolName)
-  const opened = { ...state, openTools: [...state.openTools, { toolCallId: event.toolCallId, activity }] }
+  const marked = markPastThinking(state)
+  const opened = { ...marked, openTools: [...marked.openTools, { toolCallId: event.toolCallId, activity }] }
   return propose(opened, ACTIVITY_POSE[activity])
 }
 
@@ -122,7 +129,7 @@ function onReceipts(state: MascotState, event: ReceiptsEvent): MascotState {
 }
 
 function endTurn(state: MascotState): MascotState {
-  return { ...state, openTools: [], turnActive: false, celebrateOnFinish: false }
+  return { ...state, openTools: [], turnActive: false, celebrateOnFinish: false, pastThinking: false }
 }
 
 function onFinish(state: MascotState): MascotState {
@@ -132,9 +139,10 @@ function onFinish(state: MascotState): MascotState {
   return state.celebrateOnFinish ? propose(ended, CELEBRATE) : ended
 }
 
-/** A text delta changes nothing, except that it ends thinking: the words show Auto answering. */
+/** A text delta ends thinking (the words show Auto answering), and marks the turn past it while a card waits too. */
 function onText(state: MascotState): MascotState {
-  return pendingPose(state).mascot === 'thinking' ? settle(state, rest(state)) : state
+  const marked = markPastThinking(state)
+  return pendingPose(marked).mascot === 'thinking' ? settle(marked, rest(marked)) : marked
 }
 
 function reduceStream(state: MascotState, event: StreamEvent): MascotState {
@@ -174,7 +182,7 @@ function onClipEnded(state: MascotState, ended: MascotName): MascotState {
 }
 
 function onSend(state: MascotState): MascotState {
-  const started = { ...state, openTools: [], turnActive: true, celebrateOnFinish: false }
+  const started = { ...state, openTools: [], turnActive: true, celebrateOnFinish: false, pastThinking: false }
   return settle(started, THINKING)
 }
 
@@ -251,6 +259,17 @@ const isClientEvent = (event: MascotEvent): event is ClientEvent => CLIENT_TYPES
 const isWaiting = (p: Pose): boolean => p.mascot === WAITING.mascot && p.rank === WAITING.rank
 
 /**
+ * Where Auto goes when the last card settles while he listens for it: what the
+ * turn shows without the card. A tool still running (its start was outranked by
+ * the card); thinking while the turn runs and nothing moved him past it; idle
+ * once its words started, a tool ran or the turn is over.
+ */
+function afterCard(cleared: MascotState): Pose {
+  if (cleared.openTools.length > 0) return afterTools(cleared)
+  return cleared.turnActive && !cleared.pastThinking ? THINKING : rest(cleared)
+}
+
+/**
  * An approval card waits (Auto listens, above the turn's tools and thinking) or
  * every card is settled (listening for it ends). The flag is kept while the
  * backend is down, so Auto wakes to the right rest; only the pose waits.
@@ -262,7 +281,7 @@ function reduceApproval(state: MascotState, event: ApprovalEvent): MascotState {
   }
   if (!state.approvalWaiting) return state
   const cleared = { ...state, approvalWaiting: false }
-  return !cleared.backendDown && isWaiting(pendingPose(cleared)) ? settle(cleared, IDLE) : cleared
+  return !cleared.backendDown && isWaiting(pendingPose(cleared)) ? settle(cleared, afterCard(cleared)) : cleared
 }
 
 const isApprovalEvent = (event: MascotEvent): event is ApprovalEvent =>

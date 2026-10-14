@@ -7,6 +7,7 @@ import {
   type FiledApproval,
   fileApprovals,
   isWaiting,
+  looseApprovals,
   withStatus,
 } from '@/components/play/chat/approvals'
 import { type DeliverableRef, deliverablesInPart, mergeDeliverables } from '@/components/play/chat/deliverables'
@@ -26,7 +27,10 @@ import type { ChatMessage } from '@/types'
  * makes Auto play oops even when the stream ended in the same render; and the
  * approvals a reply raised (T-005c: tool_approval and mission_approval, the
  * core's widgets), each waiting for the owner until answered or closed, with
- * Auto listening meanwhile (approval-waiting, approval-settled).
+ * Auto listening meanwhile (approval-waiting, approval-settled). A card
+ * outlives its reply: when useChat drops the reply (Stop, a request failing
+ * mid-turn) or Try again replaces it, the card is loose and stays on screen,
+ * so it can still be answered or closed.
  */
 
 /** The live Deliverables by the id of the reply that made them. */
@@ -39,6 +43,8 @@ const NO_APPROVALS: readonly FiledApproval[] = []
 export interface PlayApprovals {
   /** The cards a reply raised and the owner hasn't closed. */
   readonly of: (replyId: string) => readonly FiledApproval[]
+  /** The open cards whose reply is no longer in the conversation: shown after it. */
+  readonly loose: readonly FiledApproval[]
   /** A card's approve or deny went through. */
   readonly answered: (key: string) => void
   /** A card closed (its X, or the Mission card itself after a decision). */
@@ -123,8 +129,20 @@ function useSettledEvent(waiting: boolean, dispatch: Dispatch<MascotEvent>): voi
   }, [waiting, dispatch])
 }
 
+/** The open cards whose reply left the conversation (the same empty list while there are none). */
+function useLooseApprovals(filed: readonly FiledApproval[], messages: readonly ChatMessage[]): readonly FiledApproval[] {
+  return useMemo(() => {
+    const loose = looseApprovals(filed, new Set(messages.map((message) => message.id)))
+    return loose.length > 0 ? loose : NO_APPROVALS
+  }, [filed, messages])
+}
+
 /** The approvals a part raises, filed under the reply being written (once per grant or Mission); Auto listens. */
-function useLiveApprovals(replyId: MutableRefObject<string | undefined>, dispatch: Dispatch<MascotEvent>) {
+function useLiveApprovals(
+  messages: readonly ChatMessage[],
+  replyId: MutableRefObject<string | undefined>,
+  dispatch: Dispatch<MascotEvent>,
+) {
   const [filed, setFiled] = useState<readonly FiledApproval[]>(NO_APPROVALS)
   const seen = useRef<ReadonlySet<string>>(new Set())
   const onPart = useCallback(
@@ -145,9 +163,13 @@ function useLiveApprovals(replyId: MutableRefObject<string | undefined>, dispatc
     (id: string) => filed.filter((card) => card.replyId === id && card.status !== 'closed'),
     [filed],
   )
+  const loose = useLooseApprovals(filed, messages)
   const waiting = isWaiting(filed)
   useSettledEvent(waiting, dispatch)
-  const approvals = useMemo<PlayApprovals>(() => ({ of, answered, closed, waiting }), [of, answered, closed, waiting])
+  const approvals = useMemo<PlayApprovals>(
+    () => ({ of, loose, answered, closed, waiting }),
+    [of, loose, answered, closed, waiting],
+  )
   return { onPart, approvals }
 }
 
@@ -155,7 +177,7 @@ export function usePlayTurn({ messages, streaming, dispatch }: PlayTurnOptions):
   const [suggestion, setSuggestion] = useState<MissionSuggestion | null>(null)
   const replyId = useReplyBeingWritten(messages)
   const { onPart, deliverablesOf } = useLiveDeliverables(replyId, dispatch)
-  const { onPart: onApprovalPart, approvals } = useLiveApprovals(replyId, dispatch)
+  const { onPart: onApprovalPart, approvals } = useLiveApprovals(messages, replyId, dispatch)
   useFailureEvents(messages, streaming, dispatch)
 
   const onData = useCallback(

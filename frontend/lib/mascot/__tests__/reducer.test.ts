@@ -249,6 +249,16 @@ describe('mascot reducer: an approval waits for the owner (T-005c)', () => {
     expect(mascotReducer(state, WAITS)).toBe(state)
   })
 
+  it('settling while the turn runs returns him to what the turn shows: its running tool, its thinking, or idle once it answered', () => {
+    const toolUnderCard = replay([SEND, WAITS, start('1', 'platform_web_search')])
+    expect(toolUnderCard.mascot).toBe('listening')
+    expect(sequence([SETTLED, end('1'), FINISH], toolUnderCard)).toEqual(['searching', 'idle'])
+    expect(sequence([SEND, WAITS, SETTLED, say('Done')])).toEqual(['thinking', 'listening', 'thinking', 'idle'])
+    expect(replay([SEND, WAITS, say('That needs your OK first'), SETTLED])).toMatchObject({ mascot: 'idle', turnActive: true })
+    expect(replay([SEND, start('1', 'generate_document'), end('1'), WAITS, SETTLED]).mascot).toBe('idle')
+    expect(replay([SEND, say('a'), FINISH, SEND, WAITS, SETTLED]).mascot).toBe('thinking')
+  })
+
   it('settling ends listening for the card, not a stronger state', () => {
     expect(replay([SEND, FAILED, WAITS, SETTLED]).mascot).toBe('oops')
     const celebrating = replay([WAITS, { type: 'deliverable-added' }, SETTLED])

@@ -15,10 +15,14 @@ import styles from './approval-cards.module.css'
  * useRejectMission) exactly as in Studio. The widgets draw on Studio's tokens,
  * which the look writes under Play (D3); Play only frames them. A tool card
  * tells the chat once it is answered (it then shows its outcome); the Mission
- * card closes itself after a decision, as it leaves Studio's canvas.
+ * card closes itself after a decision, as it leaves Studio's canvas. A card
+ * whose reply left the conversation (Stop, Try again) shows after it, under
+ * its own label, until it is answered or closed.
  */
 
 export const APPROVALS_LABEL = 'Approvals'
+/** The cards whose reply is no longer in the conversation. */
+export const LOOSE_APPROVALS_LABEL = 'Approvals still open'
 
 interface CardProps {
   readonly card: FiledApproval
@@ -56,12 +60,14 @@ function ApprovalCard({ card, chatId, onAnswered, onClosed }: CardProps) {
 
 export interface ApprovalCardsProps extends Omit<CardProps, 'card'> {
   readonly cards: readonly FiledApproval[]
+  /** The section's name: APPROVALS_LABEL inside a reply, LOOSE_APPROVALS_LABEL after the conversation. */
+  readonly label?: string
 }
 
-export function ApprovalCards({ cards, ...actions }: ApprovalCardsProps) {
+export function ApprovalCards({ cards, label = APPROVALS_LABEL, ...actions }: ApprovalCardsProps) {
   if (cards.length === 0) return null
   return (
-    <section className={styles.approvals} aria-label={APPROVALS_LABEL}>
+    <section className={styles.approvals} aria-label={label}>
       {cards.map((card) => (
         <div key={card.key} className={styles.card}>
           <ApprovalCard card={card} {...actions} />
