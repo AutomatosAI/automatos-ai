@@ -215,8 +215,8 @@
         "check-changed-lines-eslint.js → 0 errors; every new file <= 400 lines (LookManager and LookOptions split if they grow)."
       ],
       "priority": 11,
-      "passes": false,
-      "notes": "Import is untrusted input: everything goes through validateLook (T-002a); the file size cap and messages are transfer.ts's. Play's: play-ref/components/looks/*, play-ref/app/pages/looks/page.tsx."
+      "passes": true,
+      "notes": "Import is untrusted input: everything goes through validateLook (T-002a); the file size cap and messages are transfer.ts's. Play's: play-ref/components/looks/*, play-ref/app/pages/looks/page.tsx. Built in parallel (f916b3940, fix fe7499603: the note wears PageHeader for page-frames, LookManage \"keeps unsaved edits in the copy\" ported); merged 86205bba7. Design match vs looks-01.png is for the ownerTest visual check."
     },
     {
       "id": "T-008b",
@@ -229,8 +229,8 @@
         "check-changed-lines-eslint.js → 0 errors; every new file <= 400 lines (style.module.css 384 and gallery.module.css 235 in Play: keep them split)."
       ],
       "priority": 12,
-      "passes": false,
-      "notes": "Play's: play-ref/components/looks/style/*, play-ref/app/pages/looks/style/page.tsx, play-ref/tests/looks/{StyleScreen,style}.test.*."
+      "passes": true,
+      "notes": "Play's: play-ref/components/looks/style/*, play-ref/app/pages/looks/style/page.tsx, play-ref/tests/looks/{StyleScreen,style}.test.*. Built in parallel (b12410247, fix 2058b9fd9: shares PlayOnlyRoute and swatch-style, D7 note below 1024 px); merged 2a5b48c0a with the note as a named section around PageHeader."
     },
     {
       "id": "T-009",
@@ -243,8 +243,8 @@
         "check-changed-lines-eslint.js → 0 errors; every new file <= 400 lines."
       ],
       "priority": 13,
-      "passes": false,
-      "notes": "Play's: play-ref/components/edges/*, play-ref/app/pages/not-found.tsx, play-ref/hooks/useBackendStatus.ts (its proxy health becomes the core's /health via apiClient), play-ref/tests/edges/*, mocks ember-07.png and ember-08.png."
+      "passes": true,
+      "notes": "Play's: play-ref/components/edges/*, play-ref/app/pages/not-found.tsx, play-ref/hooks/useBackendStatus.ts (its proxy health becomes the core's /health via apiClient), play-ref/tests/edges/*, mocks ember-07.png and ember-08.png. Built in parallel (7b8f31170), verify met 4/4 with no gaps; merged 0f33b2bdc."
     },
     {
       "id": "T-010",
