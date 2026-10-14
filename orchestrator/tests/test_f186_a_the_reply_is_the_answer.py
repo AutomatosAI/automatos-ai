@@ -11,9 +11,10 @@ never saw what it had already said, and it greeted the owner again.
 
 Now the round's text rides its tool-call message: on the OpenRouter/Gemini route
 as sent, and on the Anthropic route as a text block beside the tool_use blocks.
-Each streamed round is marked as narration or, when F108 nudged it, retracted.
-The reply saved, remembered and read by the next turn is the answer, with the
-narration in its own part. A nudged claim is not saved beside its retry.
+Each streamed round is marked as narration or, when a nudge's retry replaced it,
+retracted. The reply saved, remembered and read by the next turn is the answer,
+with the narration in its own part. A claim taken out is not saved beside the
+reply it was taken from (P256-FIX-N15-1: it is never nudged).
 """
 from __future__ import annotations
 
@@ -123,19 +124,22 @@ def test_the_saved_reply_is_the_answer_and_the_narration_is_its_own_part():
         {"type": "narration", "narration": NARRATION}, {"type": "text", "text": ANSWER}]
 
 
-def test_a_nudged_claim_is_not_saved_beside_its_retry():
-    """02:42:01: F108 nudged a claim, and the claim and its retry were both saved."""
+def test_a_claim_taken_out_is_not_saved_beside_its_correction():
+    """02:42:01: F108 nudged a claim, and the claim and its retry were both saved. P256-FIX-N15-1: the
+    claim is no longer nudged; the reply is saved once, its claim taken out and the not-done line in its
+    place, and the sentence that went on from the claim ("It's now running.") goes with it (N15-CI)."""
     from consumers.chatbot.narration import split_reply
 
-    claim, retry = "I've approved the mission. It's now running.", "I have not approved it: that needs you."
+    claim = "I've approved the mission. It's now running."
+    corrected = "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done."
     first = _round("Let me look at the mission first.", [_call("platform_get_mission")])
     rounds = [first]
-    frames, final = _turn(_Model((claim, None), (retry, None)), first, rounds=rounds)
+    model = _Model((claim, None))
+    frames, final = _turn(model, first, rounds=rounds)
 
-    assert final.content == retry
-    assert split_reply(rounds, final, final.content) == (["Let me look at the mission first."], retry)
-    marks = [json.loads(f[2:]) for f in frames if f.startswith('d:{"type": "narration"')]
-    assert {"type": "narration", "data": {"text": claim, "retracted": True}} in marks
+    assert model.rounds == [] and len(model.sent) == 1                  # one call: no retry
+    assert final.content == corrected and not final.streamed           # the corrected copy is sent next
+    assert split_reply(rounds, final, final.content) == (["Let me look at the mission first."], corrected)
 
 
 def test_an_empty_answer_falls_back_to_the_narration():

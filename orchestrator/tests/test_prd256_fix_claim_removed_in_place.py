@@ -141,6 +141,46 @@ def test_a_quoted_draft_is_never_touched():
     assert removed.text.endswith("\n\n> I've sent your order, Sam.")
 
 
+# ── N15-CI: what goes on from a claim goes with it; a line never denies a done write ──
+
+def test_a_claim_that_goes_on_from_one_taken_out_goes_with_it():
+    """An agent's run is held to its first-person claims: "It's now running." stayed after the line
+    that denied the approval it reports. Read in Auto's voice it is a claim, right after one taken out."""
+    removed = without_unbacked_claims("I've approved the mission. It's now running.", [], promises=False)
+    assert removed.text == "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done."
+
+
+def test_a_claim_in_an_agents_draft_that_goes_on_from_none_stays():
+    removed = without_unbacked_claims("I've cancelled your order. Thanks for waiting. It has been refunded.", [],
+                                      promises=False)
+    assert removed.text == ("Just to be clear: I haven't cancelled anything in this reply. Ask me again if you want "
+                            "it done. Thanks for waiting. It has been refunded.")
+
+
+MOVED_TO_DONE = ("platform_execute", {"action": "platform_update_task_status", "params": {"task_id": 422, "status": "done"}},
+                 {"success": True, "raw_result": {"task_id": 1422, "number": "#0422", "status": "done"}})
+PLAYBOOK_MADE = ("platform_execute", {"action": "platform_create_playbook", "params": {"name": "Weekly Social Posts"}},
+                 {"success": True})
+
+
+def test_a_reply_that_was_only_a_claim_its_line_would_deny_says_so():
+    """F264-b, night 8: #0422 moved to Done, the reply said to Cancelled. "I haven't moved anything" is
+    false: the loop answers with the turn's account instead (test_f264_b)."""
+    removed = without_unbacked_claims("Task #0422 has been moved to 'cancelled'.", _outcomes(MOVED_TO_DONE),
+                                      promises=True)
+    assert removed.family == "moved" and removed.denies_done
+
+
+@pytest.mark.parametrize("answer, calls", [
+    ("I've installed the playbook for you.", (PLAYBOOK_MADE,)),          # no install ran: the line is true
+    ("I've moved #0422 to Cancelled.", ()),                                # nothing ran
+    ("#0422 is on the board. Task #0422 has been moved to 'cancelled'.", (MOVED_TO_DONE,)),   # more is left
+])
+def test_a_line_that_is_true_or_not_alone_stays(answer, calls):
+    removed = without_unbacked_claims(answer, _outcomes(*calls), promises=True)
+    assert removed is not None and not removed.denies_done
+
+
 # ── the screen: the streamed reply comes off, the copy is sent in its place ──
 
 def test_the_streamed_reply_is_retracted_when_its_copy_answers():

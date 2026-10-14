@@ -14,6 +14,10 @@ round cap's answer, a retry after the narration nudge) was answered by the line 
 gives that answer the same check, so a claim is taken out whichever way the run ended. Taking out twice
 changes nothing: the line in place denies, and a denial is no claim. As with the loop's own check, a run
 offered no tools is not checked (F108-b).
+
+N15-CI (F264-b): in Auto's own turn, a reply that was nothing but claims, whose line would deny a write
+the turn did, is answered by the account of the turn's calls (``turn_account.account_of``): what changed,
+never "Ask me again" over work that happened.
 """
 from __future__ import annotations
 
@@ -42,7 +46,18 @@ def in_place(loop: Any, reply: Any) -> Optional[Any]:
     if removed is None:
         return None
     logger.warning(UNBACKED_LOGGED, removed.family, removed.sentence)
-    return in_place_of(reply, removed.text)
+    return in_place_of(reply, _said(loop, removed))
+
+
+def _said(loop: Any, removed: Any) -> str:
+    """What the owner gets in place of the reply: the reply without its unbacked claims; in Auto's own
+    turn, the account of the run's calls when nothing else was left and the line would deny a write
+    the run did (``Removed.denies_done``, F264-b)."""
+    from .turn_account import account_of, auto_speaks
+
+    if removed.denies_done and auto_speaks(loop.promises):
+        return account_of(loop.tracker.outcomes)
+    return removed.text
 
 
 def its_answer_is_checked(run: Run) -> Run:

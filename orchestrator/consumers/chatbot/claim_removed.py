@@ -14,6 +14,13 @@ this reply. …"). A write that waits for the owner's click, or was refused, is 
 (what the nudge's notes said, US-006 and P256-FIX-RVW-4). There is no second model call. The reply
 streamed live, so the screen is told it stands corrected (``screen_watch.corrected``): the reply is
 taken off and the corrected copy is sent in its place.
+
+N15-CI: a claim the rule reads only in Auto's voice (an agent's run is held to its first-person claims)
+goes with the claim it continues on its line: "I've approved the mission. It's now running." left "It's
+now running." after the line that denied it. A reply that was nothing but its claims, whose line would
+deny a write the turn did ("Task #0422 has been moved to 'cancelled'." after a move to Done: "I haven't
+moved anything" is false), says so (``Removed.denies_done``): Auto's turn answers it with the account
+of its calls instead (F264-b, ``turn_account.account_of``).
 """
 from __future__ import annotations
 
@@ -24,10 +31,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from consumers.chatbot.claim_check import NOT_DONE, NOTHING_DONE_SAID
-from consumers.chatbot.claims_backed import SAYS_DONE, SENTENCES, not_said, own_lines, without_marks
+from consumers.chatbot.claims_backed import FAMILIES, SAYS_DONE, SENTENCES, not_said, own_lines, without_marks
 from consumers.chatbot.receipts import DONE, REFUSED, WRITE, receipt, tried, unbacked_sentences
 from core.llm.screen_watch import corrected
 from modules.tools.execution.card_raised import act_of, has_a_card, the_ask
+from modules.tools.execution.turn_account import auto_speaks
 
 Outcome = Tuple[str, Dict[str, Any], Any]
 
@@ -43,11 +51,13 @@ _OPENING_MARKS = re.compile(r"^\s*([*_`]+)")
 class Removed:
     """A reply with its unbacked claims taken out: the text the owner gets, the first claim's verb
     ("done" for a bare claim) and the sentence that made it (its first ``SENTENCE_LOGGED_CHARS``, for the
-    loop's warning: a night's log shows which sentences fire)."""
+    loop's warning: a night's log shows which sentences fire); ``denies_done``: nothing of the reply is
+    left but the line, and the line denies a write the turn did (N15-CI, F264-b)."""
 
     text: str
     family: str
     sentence: str
+    denies_done: bool = False
 
 
 def _asks(outcomes: Iterable[Outcome]) -> List[str]:
@@ -119,18 +129,53 @@ def _replaced(answer: str, claimed: FrozenSet[str], line: str) -> str:
     return "\n".join(kept)
 
 
+def _going_on(answer: str, claimed: FrozenSet[str], voiced: FrozenSet[str]) -> FrozenSet[str]:
+    """The claims read in Auto's voice (``voiced``) that go on, on its line, from a claim taken out
+    ("I've approved the mission. It's now running." in an agent's run, held to its first-person claims):
+    they go with it, or the reply would go on to say what the line denies. Each is one of ``voiced`` the
+    rule did not take out, right after a sentence taken out (or another that goes on from one)."""
+    more = voiced - claimed
+    if not more:
+        return frozenset()
+    going = set()
+    for text in answer.split("\n"):
+        after_one = False
+        for found in SENTENCES.finditer(text):
+            said = without_marks(found.group(0)).strip()
+            after_one = said in claimed or (after_one and said in more)
+            if after_one and said in more:
+                going.add(said)
+    return frozenset(going)
+
+
+def _denies_a_done_write(verbs: Iterable[str], outcomes: List[Outcome]) -> bool:
+    """Whether the not-done line would deny work a write of the turn did: a claim's verb whose family a
+    done write is in, though not as the claim said it (F264-b, night 8: #0422 moved to Done, the reply
+    said to Cancelled; "I haven't moved anything" is false)."""
+    named = set(verbs)
+    done = [r for r in (receipt(*outcome) for outcome in outcomes) if r["kind"] == WRITE and r["status"] == DONE]
+    families = [backs for family, backs in FAMILIES if named & family]
+    return any(backs(r) for backs in families for r in done)
+
+
 def without_unbacked_claims(answer: str, outcomes: Iterable[Outcome],
                             promises: Optional[bool] = True) -> Optional[Removed]:
     """The reply with the sentences that make an unbacked claim taken out and the not-done line in
     the first one's place, or None when every claim is backed (``promises``: whose voice the reply
-    is, as ``receipts.unbacked_claim`` reads it)."""
+    is, as ``receipts.unbacked_claim`` reads it). The claims in Auto's voice that go on from one taken
+    out go with it (``_going_on``)."""
     ran = list(outcomes)
     found = unbacked_sentences(answer, ran, promises)
     if not found:
         return None
-    line = not_done_in_place((verb for verb, _sentence in found), ran)
-    text = _replaced(answer, frozenset(sentence.strip() for _verb, sentence in found), line)
-    return Removed(text=text, family=found[0][0], sentence=found[0][1].strip()[:SENTENCE_LOGGED_CHARS])
+    verbs = [verb for verb, _sentence in found]
+    line = not_done_in_place(verbs, ran)
+    claimed = frozenset(sentence.strip() for _verb, sentence in found)
+    voiced = claimed if auto_speaks(promises) else frozenset(
+        sentence.strip() for _verb, sentence in unbacked_sentences(answer, ran, True))
+    text = _replaced(answer, claimed | _going_on(answer, claimed, voiced), line)
+    return Removed(text=text, family=found[0][0], sentence=found[0][1].strip()[:SENTENCE_LOGGED_CHARS],
+                   denies_done=text.strip() == line and _denies_a_done_write(verbs, ran))
 
 
 def in_place_of(response: Any, text: str) -> Any:
