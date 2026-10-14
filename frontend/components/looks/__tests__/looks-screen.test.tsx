@@ -33,7 +33,7 @@ import { clearRoot, lookNamesLeft, myLook } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS, SHELLS, TYPE_STYLES } from '@/lib/looks/catalogue'
 import { rgba } from '@/lib/looks/css'
 import { SAVED_SUB } from '@/lib/looks/editor'
-import { AURORA, EMBER, PRESETS, WORKSHOP } from '@/lib/looks/presets'
+import { AURORA, EMBER, OBSIDIAN, PRESETS, WORKSHOP } from '@/lib/looks/presets'
 import { ACTIVE_LOOK_KEY, SAVED_LOOKS_KEY } from '@/lib/looks/storage'
 import { LOOK_FILE_MAX_BYTES, LOOK_FILE_TYPE, TOO_BIG, lookJson } from '@/lib/looks/transfer'
 import { PLAY_HTML_CLASS, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
@@ -167,6 +167,20 @@ describe('Make it yours under Play', () => {
     const edited = { ...EMBER, ground: 'paper', font: 'round', shell: 'cobalt', light: 'ice', glow: 31 } as const
     expect(stored(ACTIVE_LOOK_KEY)).toEqual(edited)
     await lookOnPage(edited)
+  })
+
+  it("reaches the looks in Gerard's screenshots: Ember, Night, and Obsidian with a cobalt Auto", async () => {
+    const user = userEvent.setup()
+    renderLooks()
+    await lookOnPage(EMBER)
+    await user.click(group('Background').getByRole('button', { name: 'Night' }))
+    await lookOnPage({ ...EMBER, ground: 'indigo' })
+    await user.click(card('Obsidian'))
+    await user.click(group("Auto's shell").getByRole('button', { name: 'Cobalt' }))
+    expect(status()).toHaveTextContent(/^Obsidian · edited$/)
+    await lookOnPage({ ...OBSIDIAN, shell: 'cobalt' })
+    expect(rootVar('--pl-auto-shell-filter')).toBe(SHELLS.cobalt.filter)
+    expect(within(screen.getByRole('region', { name: 'Preview' })).getByTestId('auto-stage')).toBeInTheDocument()
   })
 
   it("Save as new look adds 'My look 1' to the row and selects it", async () => {
@@ -309,6 +323,8 @@ describe('/looks outside Play (K9) and on a narrow screen (D7)', () => {
   it.each(OUTSIDE_PLAY)("under %s shows the note with 'Switch to Play', and no editor", (_label, style) => {
     renderLooks(style)
     expect(screen.getByRole('heading', { level: 1, name: 'Make it yours' })).toBeInTheDocument()
+    // The note wears the core's frame: the shared PageHeader (PRD-244, app/__tests__/page-frames).
+    expect(screen.getByTestId('page-title')).toHaveTextContent('Make it yours')
     expect(screen.getByText('Make it yours is part of the Play theme.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Switch to Play' })).toBeInTheDocument()
     expect(layout()).toHaveAttribute('data-full-bleed', 'false')
@@ -334,6 +350,7 @@ describe('/looks outside Play (K9) and on a narrow screen (D7)', () => {
   it('under Play below 1024 px says it opens on a wider screen, with no editor and no switch', () => {
     viewport.narrow = true
     renderLooks('play')
+    expect(screen.getByTestId('page-title')).toHaveTextContent('Make it yours')
     expect(screen.getByText(/opens on a laptop or desktop screen/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Switch to Play' })).not.toBeInTheDocument()
     expect(screen.queryByRole('complementary', { name: 'Edit the look' })).not.toBeInTheDocument()

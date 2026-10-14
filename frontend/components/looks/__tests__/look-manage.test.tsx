@@ -97,6 +97,22 @@ describe('This look: managing looks', () => {
     expect(manage().getByRole('button', { name: 'Rename' })).toBeInTheDocument()
   })
 
+  it('keeps unsaved edits in the copy', async () => {
+    const user = userEvent.setup()
+    renderLooks()
+    await lookOnPage(EMBER)
+    await user.click(group(/^Accent/).getByRole('button', { name: 'Rose' }))
+    expect(status()).toHaveTextContent(/^Ember · edited$/)
+    await user.click(manage().getByRole('button', { name: 'Duplicate' }))
+
+    const copy = { ...EMBER, id: 'look-1', name: 'Ember copy', accent: 'rose' } as const
+    expect(stored(SAVED_LOOKS_KEY)).toEqual([copy])
+    expect(stored(ACTIVE_LOOK_KEY)).toEqual(copy)
+    expect(status()).toHaveTextContent(/^Ember copy$/)
+    expect(pressedCard()).toHaveTextContent(`${copy.name} ${copy.sub}`)
+    await lookOnPage(copy)
+  })
+
   it('Save writes the edits over the saved look they were made to, and only then is offered', async () => {
     const user = userEvent.setup()
     await readyOnMyLook()

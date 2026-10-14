@@ -1,8 +1,9 @@
 'use client'
 
-import { type ReactNode, useId } from 'react'
+import type { ReactNode } from 'react'
 
 import { MainLayout } from '@/components/layout/main-layout'
+import { PageHeader } from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
@@ -14,8 +15,10 @@ import { useIsPlay } from '@/hooks/use-studio-theme'
  * frame); under Classic or Studio, a short note with 'Switch to Play' (the
  * theme menu's Play choice: setStyle('play'), so the screen appears at once,
  * never a redirect loop); under Play below 1024 px, where Play's pages don't
- * render (D7), a note that it opens on a wider screen. The notes are drawn
- * with the core's tokens, since Play's variables exist only under html.play.
+ * render (D7), a note that it opens on a wider screen. The notes wear the
+ * core's own frame, the shared PageHeader (Studio's editorial head under
+ * Studio, the classic head under Classic: PRD-244, app/__tests__/page-frames),
+ * since Play's variables exist only under html.play.
  */
 
 export const SWITCH_TO_PLAY = 'Switch to Play'
@@ -57,9 +60,15 @@ interface PlayOnlyNoteProps {
   readonly offerSwitch: boolean
 }
 
+/** PageHeader's two-part title: the words before the last, then the last word as its accent. */
+function titleParts(title: string): { readonly lead: string; readonly accent: string } {
+  const words = title.trim().split(/\s+/)
+  return { lead: words.slice(0, -1).join(' '), accent: words[words.length - 1] ?? '' }
+}
+
 export function PlayOnlyNote({ title, note, offerSwitch }: PlayOnlyNoteProps) {
   const uiStyle = useUiStyleOptional()
-  const headingId = useId()
+  const { lead, accent } = titleParts(title)
   const switchToPlay = () => {
     if (!uiStyle) {
       console.warn('[looks] Switch to Play needs the UiStyleProvider above it; nothing changed')
@@ -67,20 +76,10 @@ export function PlayOnlyNote({ title, note, offerSwitch }: PlayOnlyNoteProps) {
     }
     uiStyle.setStyle('play')
   }
-  return (
-    <section
-      aria-labelledby={headingId}
-      className="mx-auto mt-12 max-w-md rounded-lg border border-border bg-card p-6 text-center"
-    >
-      <h1 id={headingId} className="text-lg font-semibold text-foreground">
-        {title}
-      </h1>
-      <p className="mt-2 text-sm text-muted-foreground">{note}</p>
-      {offerSwitch && (
-        <Button type="button" className="mt-5" onClick={switchToPlay}>
-          {SWITCH_TO_PLAY}
-        </Button>
-      )}
-    </section>
-  )
+  const action = offerSwitch ? (
+    <Button type="button" onClick={switchToPlay}>
+      {SWITCH_TO_PLAY}
+    </Button>
+  ) : undefined
+  return <PageHeader title={lead} titleAccent={accent} subtitle={note} actions={action} />
 }
