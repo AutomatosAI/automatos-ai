@@ -21,6 +21,8 @@ vi.mock('framer-motion', () => ({
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => state.narrow, useIsMobile: () => state.narrow }))
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => state.studio, useIsPlay: () => state.play }))
+// GET /health answers, so the frame shows (edges.test.tsx covers the asleep screen in its place).
+vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
 
 // The chrome's parts: the sidebars have their own tests.
 vi.mock('@/components/play/shell/play-sidebar', () => ({ PlaySidebar: () => <aside data-testid="play-sidebar" /> }))
