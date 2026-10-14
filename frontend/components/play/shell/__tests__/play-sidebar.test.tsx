@@ -2,12 +2,19 @@
  * PRD-260 T-004 — Play's sidebar: the nav built from the Studio menu with the
  * filters StudioSidebar applies (studio-sidebar-edition.test.tsx expects the same
  * of the Studio rail), Play's Conversations and Look added; the wordmark; New
- * chat; Recent from getChatHistory; the connection pill from GET /health.
+ * chat; Recent from getChatHistory; the connection pill from GET /health, "Not
+ * running" only once every retry has failed (P260-RVW-1).
  * Roles, attributes and text only (CSS modules are proxies under css: false).
  */
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  BACKEND_HEALTH_POLL_MS,
+  BACKEND_HEALTH_RETRIES,
+  BACKEND_HEALTH_RETRY_DELAY_MS,
+} from '@/hooks/use-backend-health'
 
 // The edition is read once at import, so each case imports the sidebar afresh.
 vi.setConfig({ testTimeout: 30_000 })
@@ -56,10 +63,12 @@ function chat(id: string, title: string) {
   return { id, userId: 'u1', title, createdAt: '2026-10-14T09:00:00Z', updatedAt: '2026-10-14T09:00:00Z', visibility: 'private' }
 }
 
-async function renderSidebar(edition: 'local' | 'saas' = 'saas') {
+async function renderSidebar(edition: 'local' | 'saas' = 'saas', { fakeTimers = false } = {}) {
   vi.stubEnv('NEXT_PUBLIC_AUTH_EDITION', edition)
   const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
   const { PlaySidebar } = await import('../play-sidebar')
+  // Faked after the imports, before the health query sets its timers.
+  if (fakeTimers) vi.useFakeTimers()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
@@ -78,8 +87,17 @@ function primeBackend({ up = true, chats = [] as ReturnType<typeof chat>[] } = {
   chatApi.getChatHistory.mockResolvedValue(chats)
 }
 
+const healthCalls = () => api.request.mock.calls.filter(([endpoint]) => endpoint === '/health').length
+
+/** Let `ms` of fake time pass, with the promises and React updates it starts. */
+const elapse = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms)
+  })
+
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllEnvs()
   vi.resetModules()
   vi.clearAllMocks()
@@ -230,9 +248,33 @@ describe('Play sidebar — the connection pill (GET /health)', () => {
     expect(api.request).toHaveBeenCalledWith('/health')
   })
 
-  it('reads Not running when /health fails', async () => {
+  it('reads Not running only once /health has failed on every retry', async () => {
     primeBackend({ up: false })
-    await renderSidebar()
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Not running'))
+    await renderSidebar('saas', { fakeTimers: true })
+    await elapse(0)
+    const pill = screen.getByRole('status')
+    for (let retry = 1; retry <= BACKEND_HEALTH_RETRIES; retry += 1) {
+      // A failed ask is not the answer yet: /health is asked again first.
+      expect(pill).toHaveTextContent('Checking…')
+      await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
+    }
+    expect(healthCalls()).toBe(1 + BACKEND_HEALTH_RETRIES)
+    expect(pill).toHaveTextContent('Not running')
+  })
+
+  it('stays Connected while a failed poll is asked again, and reads Not running once every retry fails', async () => {
+    primeBackend({ up: true })
+    await renderSidebar('saas', { fakeTimers: true })
+    await elapse(0)
+    const pill = screen.getByRole('status')
+    expect(pill).toHaveTextContent('Connected · localhost')
+    primeBackend({ up: false })
+    await elapse(BACKEND_HEALTH_POLL_MS)
+    for (let retry = 1; retry <= BACKEND_HEALTH_RETRIES; retry += 1) {
+      expect(pill).toHaveTextContent('Connected · localhost')
+      await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
+    }
+    expect(healthCalls()).toBe(2 + BACKEND_HEALTH_RETRIES)
+    expect(pill).toHaveTextContent('Not running')
   })
 })

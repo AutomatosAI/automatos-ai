@@ -160,13 +160,13 @@ How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`
 ## J. Automatos is asleep
 
 41. [ ] **Stop the backend.** With Play open on any page: `docker compose -p <your stack's project> stop backend`.
-    - *Expected:* within the health poll (up to 30 s) the connection pill says "Not running" and Play's frame shows the asleep screen in place of the page: Auto sleeping, "Automatos is asleep", the detail, Check again and the recheck countdown.
+    - *Expected:* not on the first failed `GET /health`: the health poll (up to 30 s) fails, it is asked again three times 2.5 s apart (DevTools > Network: four failed `/health` requests), and only then does the connection pill say "Not running" and Play's frame show the asleep screen in place of the page: Auto sleeping, "Automatos is asleep", the detail, Check again and the recheck countdown. Until then the page stays as it was, with anything typed in it.
 
 42. [ ] **Check again, then start it.** Press Check again while it is still stopped; then `docker compose -p <your stack's project> start backend`.
-    - *Expected:* Check again makes a new `GET /health` (DevTools > Network) and the screen stays; once the backend answers, the page mounts again (on the countdown or Check again), the pill says "Connected · localhost" and Auto wakes to idle.
+    - *Expected:* Check again makes a new `GET /health` (DevTools > Network), followed by its retries while the backend stays stopped, and the screen stays; once the backend answers, the page mounts again (on the countdown or Check again), the pill says "Connected · localhost" and Auto wakes to idle.
 
 43. [ ] **A snag mid-turn.** Send `Write a 2,000-word story about a lighthouse` and stop the backend while words stream; when the asleep screen shows, start it again; then press Try again.
-    - *Expected:* the reply ends in "I hit a snag" with Try again and Auto plays oops; the asleep screen follows once the health check fails; after the backend is back, Try again answers the last message again.
+    - *Expected:* the reply ends in "I hit a snag" with Try again and Auto plays oops; the asleep screen follows once the health check has failed on every retry (the next poll plus about 7.5 s); after the backend is back, Try again answers the last message again.
 
 ## K. Back to Studio and Classic
 

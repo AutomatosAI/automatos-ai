@@ -19,7 +19,9 @@ import { AsleepScreen, asleepDetail } from './asleep-screen'
  * his nap is the gate: the screen opens once he has gone to sleep (never idle
  * first) and stays until /health answers. A recheck in flight is not an
  * answer: react-query reports a query that has never succeeded as loading
- * again while it asks, which must not flash the page back in between.
+ * again while it asks, which must not flash the page back in between. Down is
+ * /health failing on every retry, never one failed request (useBackendHealth,
+ * P260-RVW-1): the swap unmounts the page and whatever was typed in it.
  */
 
 /** How often the asleep screen asks again on its own (Automatos Play's RECHECK_MS). */

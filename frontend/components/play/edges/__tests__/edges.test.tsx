@@ -3,18 +3,24 @@
  * tests/edges/{NotFound,Asleep}.test.tsx onto the core: the 404
  * (app/not-found.tsx: Play's lost screen under Play at >= 1024 px, Next's plain
  * words everywhere else) and "Automatos is asleep" (Play's frame over a mocked
- * apiClient: GET /health failing shows it in place of the page, answering
- * mounts the page again, Check again asks again, the automatic recheck counts
- * down). Roles, attributes and text only (CSS modules are proxies under
- * css: false).
+ * apiClient and fake timers: GET /health failing on every retry shows it in
+ * place of the page, one failed ask whose retry answers never does
+ * (P260-RVW-1), answering mounts the page again, Check again asks again, the
+ * automatic recheck counts down). Roles, attributes and text only (CSS modules
+ * are proxies under css: false).
  */
-import React, { useEffect } from 'react'
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import React, { useEffect, useState } from 'react'
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { BackendConnection } from '@/hooks/use-backend-health'
+import {
+  type BackendConnection,
+  BACKEND_HEALTH_POLL_MS,
+  BACKEND_HEALTH_RETRIES,
+  BACKEND_HEALTH_RETRY_DELAY_MS,
+} from '@/hooks/use-backend-health'
 
 const look = vi.hoisted(() => ({ play: true, narrow: false }))
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => look.play }))
@@ -53,12 +59,21 @@ import { COPIED_LABEL, COPY_LABEL, START_COMMAND } from '../start-command'
 const health = { up: false }
 const mounts = { page: 0 }
 
-/** The page inside the frame, counting its mounts. */
+const DRAFT_LABEL = 'Draft'
+const TYPED = 'Half a message, not sent yet'
+
+/** The page inside the frame, counting its mounts; its draft lives only while it stays mounted. */
 function Page() {
+  const [draft, setDraft] = useState('')
   useEffect(() => {
     mounts.page += 1
   }, [])
-  return <p>The page</p>
+  return (
+    <>
+      <p>The page</p>
+      <input aria-label={DRAFT_LABEL} value={draft} onChange={(event) => setDraft(event.target.value)} />
+    </>
+  )
 }
 
 function primeHealth() {
@@ -70,10 +85,10 @@ function primeHealth() {
 
 const healthCalls = () => api.request.mock.calls.filter(([endpoint]) => endpoint === '/health').length
 
+/** Play's frame around the page; the hook's own retry options win over the client's default. */
 function renderFrame() {
   primeHealth()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const user = userEvent.setup()
   render(
     <QueryClientProvider client={client}>
       <PlayFrame>
@@ -81,7 +96,6 @@ function renderFrame() {
       </PlayFrame>
     </QueryClientProvider>,
   )
-  return user
 }
 
 function renderAsleep(props: { onCheck?: () => void; recheckSeconds?: number; local?: boolean } = {}) {
@@ -102,6 +116,27 @@ const tick = (ms: number) =>
   act(() => {
     vi.advanceTimersByTime(ms)
   })
+
+/** Let `ms` of fake time pass, with the promises and React updates it starts. */
+const elapse = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms)
+  })
+
+/** Let every retry of the ask in flight run: each fails or answers as `health.up` says. */
+async function throughRetries() {
+  for (let retry = 0; retry < BACKEND_HEALTH_RETRIES; retry += 1) await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
+}
+
+const asleepHeading = () => screen.queryByRole('heading', { level: 1, name: ASLEEP_TITLE })
+
+/** Play's frame with /health failing on the first ask and every retry: the asleep screen. */
+async function renderAsleepFrame() {
+  renderFrame()
+  await elapse(0)
+  await throughRetries()
+  expect(asleepHeading()).toBeInTheDocument()
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -142,11 +177,23 @@ describe('the 404 (app/not-found.tsx)', () => {
 })
 
 describe("Play's frame while Automatos is asleep (GET /health)", () => {
-  it('shows the asleep screen in place of the page while /health fails, Auto asleep', async () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  })
+
+  it('shows the asleep screen in place of the page only once /health has failed on every retry, Auto asleep', async () => {
     renderFrame()
-    expect(await screen.findByRole('heading', { level: 1, name: ASLEEP_TITLE })).toBeInTheDocument()
+    await elapse(0)
+    for (let retry = 1; retry <= BACKEND_HEALTH_RETRIES; retry += 1) {
+      // A failed ask is not the answer yet: the page stays while /health is asked again.
+      expect(asleepHeading()).not.toBeInTheDocument()
+      expect(screen.getByText('The page')).toBeInTheDocument()
+      await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
+    }
+    expect(healthCalls()).toBe(1 + BACKEND_HEALTH_RETRIES)
     expect(api.request).toHaveBeenCalledWith('/health')
+    expect(asleepHeading()).toBeInTheDocument()
     expect(screen.queryByText('The page')).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
     expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'sleeping')
@@ -155,42 +202,95 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
     expect(screen.getByText(countdownLine(ASLEEP_RECHECK_MS / SECOND_MS))).toBeInTheDocument()
   })
 
-  it('Check again asks /health again, and the page stays away while it asks', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const user = renderFrame()
-    const check = await screen.findByRole('button', { name: CHECK_AGAIN })
+  it('one failed poll whose retry answers never shows the asleep screen, and the page keeps what was typed', async () => {
+    health.up = true
+    renderFrame()
+    await elapse(0)
+    fireEvent.change(screen.getByRole('textbox', { name: DRAFT_LABEL }), { target: { value: TYPED } })
+    health.up = false
+    await elapse(BACKEND_HEALTH_POLL_MS)
+    expect(healthCalls()).toBe(2)
+    expect(asleepHeading()).not.toBeInTheDocument()
+    health.up = true
+    await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
+    expect(healthCalls()).toBe(3)
+    expect(asleepHeading()).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: DRAFT_LABEL })).toHaveValue(TYPED)
+    expect(mounts.page).toBe(1)
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+  })
+
+  it('after an answer, a poll that fails on every retry shows the asleep screen, and only then', async () => {
+    health.up = true
+    renderFrame()
+    await elapse(0)
+    health.up = false
+    await elapse(BACKEND_HEALTH_POLL_MS)
+    for (let retry = 1; retry <= BACKEND_HEALTH_RETRIES; retry += 1) {
+      expect(asleepHeading()).not.toBeInTheDocument()
+      expect(screen.getByText('The page')).toBeInTheDocument()
+      await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
+    }
+    expect(healthCalls()).toBe(2 + BACKEND_HEALTH_RETRIES)
+    expect(asleepHeading()).toBeInTheDocument()
+    expect(screen.queryByText('The page')).not.toBeInTheDocument()
+    expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'sleeping')
+  })
+
+  it('Check again asks /health again, and the page stays away while it asks and retries', async () => {
+    await renderAsleepFrame()
     const before = healthCalls()
     const mountsWhileAsleep = mounts.page
-    await user.click(check)
-    await waitFor(() => expect(healthCalls()).toBe(before + 1))
-    await act(async () => undefined)
-    expect(screen.getByRole('heading', { name: ASLEEP_TITLE })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: CHECK_AGAIN }))
+    await elapse(0)
+    expect(healthCalls()).toBe(before + 1)
+    expect(asleepHeading()).toBeInTheDocument()
+    await throughRetries()
+    expect(healthCalls()).toBe(before + 1 + BACKEND_HEALTH_RETRIES)
     // A recheck of a query that never succeeded reads as loading in react-query: not an answer.
+    expect(asleepHeading()).toBeInTheDocument()
     expect(mounts.page).toBe(mountsWhileAsleep)
     expect(screen.queryByText('The page')).not.toBeInTheDocument()
   })
 
   it('mounts the frame and the page again once /health answers', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const user = renderFrame()
-    await screen.findByRole('heading', { name: ASLEEP_TITLE })
+    await renderAsleepFrame()
     const mountsWhileAsleep = mounts.page
     health.up = true
-    await user.click(screen.getByRole('button', { name: CHECK_AGAIN }))
-    expect(await screen.findByText('The page')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: CHECK_AGAIN }))
+    await elapse(0)
+    expect(screen.getByText('The page')).toBeInTheDocument()
     expect(mounts.page).toBe(mountsWhileAsleep + 1)
-    expect(screen.queryByRole('heading', { name: ASLEEP_TITLE })).not.toBeInTheDocument()
+    expect(asleepHeading()).not.toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+  })
+
+  it('the automatic recheck mounts the page again once /health answers', async () => {
+    await renderAsleepFrame()
+    health.up = true
+    await elapse(ASLEEP_RECHECK_MS)
+    // The countdown asks as React renders its last second; the answer reaches the gate on the next turn.
+    await elapse(0)
+    expect(healthCalls()).toBe(2 + BACKEND_HEALTH_RETRIES)
+    expect(screen.getByText('The page')).toBeInTheDocument()
+    expect(asleepHeading()).not.toBeInTheDocument()
+  })
+
+  it("a recheck's retries finish before the next automatic recheck asks", () => {
+    expect(BACKEND_HEALTH_RETRIES * BACKEND_HEALTH_RETRY_DELAY_MS).toBeLessThan(ASLEEP_RECHECK_MS)
   })
 
   it('shows the frame and the page, never the asleep screen, while /health answers', async () => {
     health.up = true
     renderFrame()
     expect(screen.getByText('The page')).toBeInTheDocument()
-    await waitFor(() => expect(healthCalls()).toBe(1))
-    await act(async () => undefined)
-    expect(screen.queryByRole('heading', { name: ASLEEP_TITLE })).not.toBeInTheDocument()
+    await elapse(0)
+    expect(healthCalls()).toBe(1)
+    await elapse(BACKEND_HEALTH_POLL_MS)
+    expect(healthCalls()).toBe(2)
+    expect(asleepHeading()).not.toBeInTheDocument()
     expect(screen.getByText('The page')).toBeInTheDocument()
+    expect(mounts.page).toBe(1)
   })
 })
 
