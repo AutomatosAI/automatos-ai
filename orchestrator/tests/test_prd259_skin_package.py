@@ -226,6 +226,49 @@ def test_skin_json_goes_through_the_validator():
     assert "CONTRAST" in codes
 
 
+LONE_SURROGATE = "\ud800"  # json.dumps writes it as the escape "\\ud800"; it parses back unencodable
+
+
+def _with_bad_key(where: str) -> dict:
+    skin = base_skin()
+    if where == "top":
+        return {**skin, LONE_SURROGATE: "x"}
+    skin["tokens"]["light"][LONE_SURROGATE] = "0 0% 0%"
+    return skin
+
+
+def _bad_json_echoes_nothing(error: SkinPackageError) -> None:
+    assert [item["code"] for item in error.errors] == ["BAD_JSON"]
+    assert json.dumps(error.errors, ensure_ascii=False).encode("utf-8")  # the 400 can be written
+    assert LONE_SURROGATE not in json.dumps(error.errors, ensure_ascii=False)
+
+
+def test_a_lone_surrogate_in_free_text_is_bad_json():
+    _bad_json_echoes_nothing(_refusal(package({**base_skin(), "name": LONE_SURROGATE})))
+
+
+@pytest.mark.parametrize("where", ["top", "tokens.light"])
+def test_a_lone_surrogate_key_is_bad_json_not_an_unknown_field(where):
+    _bad_json_echoes_nothing(_refusal(package(_with_bad_key(where))))
+
+
+def test_a_skin_json_nested_past_the_parsers_limit_is_bad_json():
+    deep = b"[" * 5000 + b"]" * 5000
+    _bad_json_echoes_nothing(_refusal(build_zip([("skin.json", deep), ("assets/preview.png", PNG)])))
+
+
+def test_a_valid_astral_character_is_still_accepted():
+    # json.dumps writes it as a surrogate pair escape, which parses back to one encodable character.
+    skin = read_package(package({**base_skin(), "description": "Brand \U0001F600"})).skin
+    assert skin["description"] == "Brand \U0001F600"
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_a_member_compressed_other_than_stored_or_deflated_is_refused(compression):
+    skin_json = json.dumps(base_skin()).encode("utf-8")
+    assert "NOT_ALLOWED" in _codes(build_zip([("skin.json", skin_json), ("assets/preview.png", PNG)], compression))
+
+
 # ---------------------------------------------------------------------------
 # What skin.json names against what the package holds
 # ---------------------------------------------------------------------------

@@ -159,6 +159,14 @@ def test_an_invalid_skin_json_is_400_with_the_validators_codes(env):
     assert "CONTRAST" in [error["code"] for error in response.json()["detail"]["errors"]]
 
 
+def test_a_lone_surrogate_in_skin_json_is_400_bad_json_and_stores_nothing(env):
+    response = _import(_client(env, uuid4()), package({**base_skin(), "name": "\ud800"}))
+
+    assert response.status_code == 400
+    assert [error["code"] for error in response.json()["detail"]["errors"]] == ["BAD_JSON"]
+    assert env.s3.objects == {} and _rows(env, MarketplaceSkin) == [] and _rows(env, SkinInstallation) == []
+
+
 def test_a_package_over_the_cap_is_413(env, monkeypatch):
     monkeypatch.setattr(config, "SKIN_MAX_PACKAGE_MB", 1)
     response = _import(_client(env, uuid4()), b"PK\x03\x04" + b"\x00" * (1024 * 1024 + 1))

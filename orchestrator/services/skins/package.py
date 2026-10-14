@@ -7,13 +7,15 @@
 * a central directory bigger than ``MAX_MEMBERS`` entries could need, measured from the
   end record BEFORE zipfile parses it (a flood of tiny entries would cost memory first);
 * a member that is a symlink, has an absolute path, a '..' segment or a backslash,
-  repeats a name, is encrypted, or isn't ``skin.json`` or one of the asset paths in
-  ``services/skins/assets.py``;
+  repeats a name, is encrypted, is compressed other than stored or deflated, or isn't
+  ``skin.json`` or one of the asset paths in ``services/skins/assets.py``;
 * a total uncompressed size over the package cap: checked from the central directory
   before anything is read, and again while reading (each read stops one byte past
   what is left);
-* a skin.json the validator (``services/skins/validate.py``) refuses, a file it names
-  that is missing, a file it does not name, a 'custom' mascot without all its files;
+* a skin.json that isn't JSON text, nests past the parser's limit or holds a lone
+  surrogate escape (``BAD_JSON``), or one the validator (``services/skins/validate.py``)
+  refuses; a file it names that is missing, a file it does not name, a 'custom' mascot
+  without all its files;
 * an asset whose bytes are not what its path says, or over its cap.
 
 Nothing here touches storage or the database: the route stores what this returns.
@@ -42,6 +44,9 @@ from services.skins.validate import validate_skin
 SKIN_IMPORT_ROUTE = "/api/skins/import"
 SKIN_JSON_PATH = "skin.json"
 SKIN_JSON_MAX_BYTES = 64 * 1024
+# A skin nests three levels (tokens.light.<name>); far deeper is refused before anything walks it,
+# whatever the running Python's parser would accept (3.11's raises RecursionError, 3.14's doesn't).
+SKIN_JSON_MAX_DEPTH = 32
 ZIP_SIGNATURE = b"PK\x03\x04"
 # Folder entries a zip tool writes on its own; they hold nothing and are skipped.
 DIRECTORY_ENTRIES = frozenset({"assets/", "assets/fonts/", "assets/mascot/"})
@@ -57,6 +62,8 @@ ZIP64_LOCATOR_BYTES = 20
 CENTRAL_ENTRY_MAX_BYTES = 1024
 CENTRAL_DIRECTORY_MAX_BYTES = MAX_MEMBERS * CENTRAL_ENTRY_MAX_BYTES
 ENCRYPTED_FLAG = 0x1
+# Only the two methods every zip tool writes: an lzma member's header can declare a 4 GiB dictionary.
+ALLOWED_COMPRESSION = frozenset({zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED})
 DRIVE_PREFIX = re.compile(r"[A-Za-z]:")
 # What a damaged or hostile member raises while it is decompressed.
 READ_ERRORS = (zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError, EOFError, ValueError)
@@ -149,6 +156,10 @@ def _member_error(info: zipfile.ZipInfo, seen: Set[str]) -> Optional[SkinError]:
         return skin_error("DUPLICATE_FILE", name, f"{shown} is in the package more than once.")
     if info.flag_bits & ENCRYPTED_FLAG:
         return skin_error("ENCRYPTED", name, f"{shown} is encrypted: a skin package can't be.")
+    if info.compress_type not in ALLOWED_COMPRESSION:
+        return skin_error(
+            "NOT_ALLOWED", name, f"{shown} is compressed a way a skin package can't be: only stored or deflated.",
+        )
     if not _is_allowed(name):
         return skin_error(
             "NOT_ALLOWED", name,
@@ -187,6 +198,42 @@ def _read_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> Opti
     return data if len(data) <= limit else None
 
 
+def _nests_deeper_than(data: Any, limit: int) -> bool:
+    """True when ``data`` has arrays or objects nested past ``limit`` (walked without recursion)."""
+    stack = [(data, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if not isinstance(node, (dict, list)):
+            continue
+        if depth > limit:
+            return True
+        stack.extend((child, depth + 1) for child in (node.values() if isinstance(node, dict) else node))
+    return False
+
+
+def _parse_skin_json(raw: bytes) -> Any:
+    """skin.json's document, refused as BAD_JSON when it isn't JSON text or can't be stored as UTF-8.
+
+    A nesting deep enough to exhaust the parser raises RecursionError, and one the parser
+    accepts is still capped at ``SKIN_JSON_MAX_DEPTH``; a ``\\ud800``-style escape parses to a
+    lone surrogate that no UTF-8 writer (the database, the error response) can carry. All are
+    refused here, before the validator could echo the text back.
+    """
+    try:
+        data = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise _refuse("BAD_JSON", SKIN_JSON_PATH, "skin.json is not valid JSON text.") from exc
+    if _nests_deeper_than(data, SKIN_JSON_MAX_DEPTH):
+        raise _refuse("BAD_JSON", SKIN_JSON_PATH, f"skin.json nests deeper than {SKIN_JSON_MAX_DEPTH} levels.")
+    try:
+        json.dumps(data, ensure_ascii=False).encode("utf-8")
+    except (UnicodeEncodeError, RecursionError) as exc:
+        raise _refuse(
+            "BAD_JSON", SKIN_JSON_PATH, "skin.json holds text that isn't valid Unicode (a lone surrogate escape).",
+        ) from exc
+    return data
+
+
 def _read_skin_json(zf: zipfile.ZipFile, members: Dict[str, zipfile.ZipInfo]) -> Dict[str, Any]:
     info = members.get(SKIN_JSON_PATH)
     if info is None:
@@ -194,11 +241,7 @@ def _read_skin_json(zf: zipfile.ZipFile, members: Dict[str, zipfile.ZipInfo]) ->
     raw = _read_member(zf, info, SKIN_JSON_MAX_BYTES)
     if raw is None:
         raise _refuse("BAD_JSON", SKIN_JSON_PATH, f"skin.json must be {SKIN_JSON_MAX_BYTES // 1024} KB or smaller.")
-    try:
-        data = json.loads(raw.decode("utf-8-sig"))
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise _refuse("BAD_JSON", SKIN_JSON_PATH, "skin.json is not valid JSON text.") from exc
-    result = validate_skin(data)
+    result = validate_skin(_parse_skin_json(raw))
     if not result["ok"]:
         raise SkinPackageError(result["errors"])
     return result["skin"]
