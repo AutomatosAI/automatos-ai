@@ -47,6 +47,13 @@
   color: var(--pl-color-text-3);
 }
 
+.pageAction {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--pl-space-3);
+}
+
 .mascotColumn {
   width: var(--pl-mascot-column-width);
   flex: none;

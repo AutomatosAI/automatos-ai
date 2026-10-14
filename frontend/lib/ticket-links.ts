@@ -46,12 +46,15 @@ export function missionHref(missionId: string | number): string {
   return `/missions/${encodeURIComponent(String(missionId))}`
 }
 
+/** The chat. */
+export const CHAT_HREF = '/chat'
+
 /**
  * A conversation's link: a query param on /chat, so client-side auth loads the
  * thread (the /chat/[id] server route 404s without a server-side auth context).
  */
 export function chatHref(chatId: string): string {
-  return `/chat?chatId=${encodeURIComponent(chatId)}`
+  return `${CHAT_HREF}?chatId=${encodeURIComponent(chatId)}`
 }
 
 /**

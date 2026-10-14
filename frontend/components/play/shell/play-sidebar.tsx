@@ -1,15 +1,16 @@
 'use client'
 
-import { useCallback, useId, useMemo } from 'react'
+import { useId, useMemo } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { ExternalLink } from 'lucide-react'
 
 import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { useSystemRoleOptional } from '@/contexts/role-context'
 import { useBackendHealth } from '@/hooks/use-backend-health'
 import { useRecentChats } from '@/hooks/use-recent-chats'
-import { chatHref } from '@/lib/ticket-links'
+import { useStartChat } from '@/hooks/use-start-chat'
+import { CHAT_HREF, chatHref } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 
 import { ConnectionPill } from './connection-pill'
@@ -24,7 +25,6 @@ import styles from './play-sidebar.module.css'
  * /health). Rendered by PlayFrame, only under Play at >= 1024 px.
  */
 
-const CHAT_HREF = '/chat'
 /** A conversation the backend has not named yet. */
 const UNTITLED_CHAT = 'Conversation'
 
@@ -73,12 +73,7 @@ export function PlaySidebar() {
 
 /** New chat: a fresh draft in the chat session store, then the chat. */
 function NewChatButton() {
-  const router = useRouter()
-  const newDraft = useChatSessionStore((s) => s.newDraft)
-  const startChat = useCallback(() => {
-    newDraft()
-    router.push(CHAT_HREF)
-  }, [newDraft, router])
+  const startChat = useStartChat()
   return (
     <button type="button" className={styles.newChat} onClick={startChat}>
       New chat

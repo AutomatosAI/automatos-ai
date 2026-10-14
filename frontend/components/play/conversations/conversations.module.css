@@ -1,0 +1,166 @@
+/*
+ * PRD-260 §4 — Conversations (Ember mock 03): the search box and the grouped
+ * list under the page header, ported from Automatos Play's
+ * components/conversations/conversations.module.css. Play's pages render only
+ * at >= 1024 px (D7), so Play's phone rules are not ported. Every variable is
+ * --pl-* (K2).
+ */
+
+.body {
+  padding: 0 var(--pl-space-7) var(--pl-space-6);
+}
+
+.page {
+  width: 100%;
+  max-width: var(--pl-content-max);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-4);
+  padding-top: var(--pl-space-5);
+}
+
+/* New chat is the secondary (cream) button; Try again is the failed state's one primary. */
+.newChat,
+.retry {
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--pl-space-4);
+  border: 0;
+  border-radius: var(--pl-radius-button);
+  background: var(--pl-color-accent);
+  color: var(--pl-color-accent-ink);
+  font: var(--pl-text-button-sm);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.newChat {
+  background: var(--pl-color-text);
+  color: var(--pl-color-bg);
+}
+
+.newChat:focus-visible,
+.retry:focus-visible {
+  outline: none;
+  box-shadow: var(--pl-focus-field);
+}
+
+.search {
+  min-height: var(--pl-tap-min);
+  padding: 0 var(--pl-space-3);
+  border-radius: var(--pl-radius-button);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+  color: var(--pl-color-text);
+  font: var(--pl-text-body);
+}
+
+.search::placeholder {
+  color: var(--pl-color-text-3);
+}
+
+.search:focus-visible {
+  outline: none;
+  border-color: var(--pl-color-accent-text); /* a focus edge: the readable accent, 3:1 on every ground */
+  box-shadow: var(--pl-focus-field);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+}
+
+.groupLabel {
+  margin: 0;
+  padding: var(--pl-space-2) var(--pl-space-3);
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-3);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.row {
+  min-height: var(--pl-tap-min);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+  padding: var(--pl-space-3) var(--pl-space-2);
+  border-bottom: 1px solid var(--pl-line-faint);
+  color: var(--pl-color-text);
+  text-decoration: none;
+}
+
+.row:hover {
+  border-radius: var(--pl-radius-button);
+  background: var(--pl-tint-hover);
+}
+
+.row:focus-visible {
+  outline: none;
+  border-radius: var(--pl-radius-button);
+  box-shadow: var(--pl-focus-field);
+}
+
+.rowTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pl-space-3);
+}
+
+.rowTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--pl-text-title);
+  letter-spacing: var(--pl-display-letter-spacing);
+}
+
+.time {
+  flex: none;
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-2);
+}
+
+.preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--pl-text-small);
+  font-weight: 400;
+  color: var(--pl-color-text-2);
+}
+
+.status {
+  margin: 0;
+  padding: var(--pl-space-3);
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-2);
+}
+
+.failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pl-space-3);
+  padding: var(--pl-space-3);
+}
+
+.error {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-error-text);
+}
