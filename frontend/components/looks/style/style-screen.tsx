@@ -22,9 +22,10 @@ import styles from './style.module.css'
  * Auto's 12 states. Everything is computed from useLook().look, so it redraws
  * as soon as the look changes anywhere in the app. Copy tokens puts the look's
  * variables on the clipboard as a :root block. app/looks/style/page.tsx shows
- * it under Play only.
+ * it through PlayOnlyRoute: under Play at >= 1024 px only, full bleed.
  */
 
+/** The sheet's heading, and the title of the note /looks/style shows outside Play (PlayOnlyRoute). */
 export const STYLE_HEADING = 'Style sheet'
 export const COPY_TOKENS = 'Copy tokens'
 export const BACK_TO_LOOKS = 'Back to Looks'

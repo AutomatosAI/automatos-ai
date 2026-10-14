@@ -1,7 +1,7 @@
+import { colourStyle } from '@/components/looks/swatch-style'
 import { colourSwatches, contrastChecks, formatRatio, type ContrastCheck } from '@/lib/looks/style'
 import type { Look } from '@/lib/looks/types'
 
-import { swatchStyle } from './specimen-style'
 import styles from './style.module.css'
 
 /**
@@ -9,7 +9,8 @@ import styles from './style.module.css'
  * components/looks/style/StyleColour.tsx: a swatch for every colour the look
  * sets (name, value, role, and why a readable variant differs from its raw
  * colour), then the live contrast ratios with an AA verdict in a glyph and a
- * word, never colour alone.
+ * word, never colour alone. A chip's colour goes through swatch-style.ts's
+ * colourStyle, the helper Make it yours draws its swatches with.
  */
 
 export const COLOUR_LABEL = 'Colour'
@@ -62,7 +63,7 @@ export function StyleColour({ look }: { readonly look: Look }) {
       <ul className={styles.swatches}>
         {colourSwatches(look).map((swatch) => (
           <li key={swatch.name} className={styles.swatch}>
-            <span className={styles.swatchChip} style={swatchStyle(swatch.value)} aria-hidden="true" />
+            <span className={styles.swatchChip} style={colourStyle(swatch.value)} aria-hidden="true" />
             <span className={styles.tokenName}>{swatch.name}</span>
             <span className={styles.tokenValue}>{swatch.value}</span>
             <span className={styles.tokenRole}>{swatch.role}</span>

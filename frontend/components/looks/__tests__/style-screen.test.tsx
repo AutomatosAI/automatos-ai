@@ -4,9 +4,13 @@
  * the active look and redraws when it changes (a test button changes it
  * through useLook, as Make it yours does); Auto's 12 states are the real
  * AutoMascot, every state's PNG under reduced motion, and none of them lights
- * the page glow. Under Classic or Studio the page is a note with Switch to
- * Play. MainLayout is a pass-through here (Play's frame has its own tests).
- * Roles, attributes and text only: CSS modules are proxies.
+ * the page glow. The page goes through PlayOnlyRoute, as /looks does: under
+ * Play at >= 1024 px the sheet is full bleed in MainLayout; under Classic or
+ * Studio the page is the same note with Switch to Play (K9); under Play below
+ * 1024 px, the same 'wider screen' note and no sheet (D7). MainLayout is a
+ * pass-through here that records fullBleed (Play's frame has its own tests).
+ * Roles, attributes, inline custom properties and text only: CSS modules are
+ * proxies.
  */
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -19,21 +23,30 @@ vi.mock('next/link', () => ({
     </a>
   ),
 }))
+const viewport = vi.hoisted(() => ({ narrow: false }))
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsTabletOrBelow: () => viewport.narrow,
+  useIsMobile: () => viewport.narrow,
+}))
 vi.mock('@/components/layout/main-layout', () => ({
-  MainLayout: ({ children }: { children: React.ReactNode }) => <div data-testid="main-layout">{children}</div>,
+  MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (
+    <div data-testid="main-layout" data-full-bleed={fullBleed ? 'true' : 'false'}>
+      {children}
+    </div>
+  ),
 }))
 
 import LookStylePage from '@/app/looks/style/page'
 import { LookProvider, useLook } from '@/components/looks/look-provider'
-import { SWITCH_TO_PLAY } from '@/components/looks/style/play-only-note'
-import { COPY_FAILED, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
+import { SWITCH_TO_PLAY, WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
+import { COPY_FAILED, STYLE_HEADING, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS } from '@/lib/looks/catalogue'
 import { lookToCssVars } from '@/lib/looks/css'
 import { lookDocumentVars } from '@/lib/looks/document'
 import { AURORA, DAYLIGHT, EMBER } from '@/lib/looks/presets'
-import { rootBlock } from '@/lib/looks/style'
+import { RADII, SPACING_STEPS, radiusToken, rootBlock } from '@/lib/looks/style'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
 import { ringTone } from '@/lib/mascot/ring'
@@ -59,16 +72,20 @@ function Pick({ look }: { readonly look: Look }) {
   )
 }
 
-function renderPage(style: UiStyle = 'play') {
-  return render(
+function pageTree(style: UiStyle) {
+  return (
     <UiStyleProvider initialStyle={style}>
       <LookProvider>
         <Pick look={DAYLIGHT} />
         <Pick look={AURORA} />
         <LookStylePage />
       </LookProvider>
-    </UiStyleProvider>,
+    </UiStyleProvider>
   )
+}
+
+function renderPage(style: UiStyle = 'play') {
+  return render(pageTree(style))
 }
 
 /** The LookProvider has put the look on <html>, so storage is read and the sheet shows it. */
@@ -106,6 +123,24 @@ function swatchValue(name: string): string {
   return swatchItem(name).children[2]?.textContent ?? ''
 }
 
+/** The colour a swatch's chip is drawn in: the --pl-look-swatch swatch-style.ts's colourStyle sets. */
+function chipColour(name: string): string {
+  const chip = swatchItem(name).children[0]
+  if (!(chip instanceof HTMLElement)) throw new Error(`no chip for ${name}`)
+  return chip.style.getPropertyValue('--pl-look-swatch')
+}
+
+/** The inline custom property each item's drawn specimen carries, in a scale section. */
+function specimenValues(section: string, property: string): string[] {
+  const items = within(screen.getByRole('region', { name: section })).getAllByRole('listitem')
+  return items.map((item) => {
+    const specimen = item.firstElementChild
+    return specimen instanceof HTMLElement ? specimen.style.getPropertyValue(property) : ''
+  })
+}
+
+const layout = () => screen.getByTestId('main-layout')
+
 function mascotRegion(): HTMLElement {
   return screen.getByRole('region', { name: MASCOT_REGION })
 }
@@ -135,6 +170,7 @@ function restore(target: object, name: string, original: PropertyDescriptor | un
 }
 
 beforeEach(() => {
+  viewport.narrow = false
   window.localStorage.clear()
   // A browser already moved to the current defaults, so the provider keeps the given style.
   window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
@@ -153,10 +189,11 @@ afterEach(() => {
 })
 
 describe('the style sheet under Play, on Ember', () => {
-  it('renders inside MainLayout with the live contrast ratios and an AA verdict in words', async () => {
+  it('renders full bleed inside MainLayout with the live contrast ratios and an AA verdict in words', async () => {
     renderPage()
     await ready()
-    expect(within(screen.getByTestId('main-layout')).getByRole('heading', { level: 1, name: 'Style sheet' })).toBeInTheDocument()
+    expect(within(layout()).getByRole('heading', { level: 1, name: STYLE_HEADING })).toBeInTheDocument()
+    expect(layout()).toHaveAttribute('data-full-bleed', 'true')
     expect(screen.queryByText(STYLE_SHEET_NOTE)).toBeNull()
     expect(Math.abs(ratioFor('text / bg') - 16.36)).toBeLessThanOrEqual(ACCURACY)
     expect(Math.abs(ratioFor('text-2 / bg') - 8.54)).toBeLessThanOrEqual(ACCURACY)
@@ -172,6 +209,8 @@ describe('the style sheet under Play, on Ember', () => {
     const colour = within(screen.getByRole('region', { name: 'Colour' }))
     expect(colour.getAllByRole('listitem')).toHaveLength(21)
     expect(swatchValue('--pl-ground-bg')).toBe(GROUNDS.graphite.bg)
+    expect(chipColour('--pl-ground-bg')).toBe(GROUNDS.graphite.bg)
+    expect(chipColour('--pl-accent')).toBe(ACCENTS.molten.hex)
     expect(within(swatchItem('--pl-ground-bg')).getByText('page')).toBeInTheDocument()
     expect(swatchValue('--pl-accent')).toBe(ACCENTS.molten.hex)
     expect(swatchValue('--pl-accent-text')).toBe(ACCENTS.molten.hex)
@@ -188,6 +227,10 @@ describe('the style sheet under Play, on Ember', () => {
     expect(type.getByText(/Editorial · Instrument Serif italic 400/)).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Spacing · 4px base' })).getAllByRole('listitem')).toHaveLength(7)
     expect(within(screen.getByRole('region', { name: 'Radii' })).getByText('pill chip')).toBeInTheDocument()
+    const steps = SPACING_STEPS.map((step) => `var(${step.token})`)
+    const radii = RADII.map((radius) => `var(${radiusToken(radius.kind)})`)
+    expect(specimenValues('Spacing · 4px base', '--pl-specimen-step')).toEqual(steps)
+    expect(specimenValues('Radii', '--pl-specimen-radius')).toEqual(radii)
     const components = within(screen.getByRole('region', { name: 'Components' }))
     for (const text of ['Send', 'Stop', 'All', 'Reading 4 pages', "Web search didn't answer", 'What Auto did', 'Open']) {
       expect(components.getByText(text)).toBeInTheDocument()
@@ -233,6 +276,7 @@ describe('the style sheet follows the active look', () => {
     pick(DAYLIGHT)
     await ready(DAYLIGHT)
     expect(swatchValue('--pl-ground-bg')).toBe(GROUNDS.paper.bg)
+    expect(chipColour('--pl-ground-bg')).toBe(GROUNDS.paper.bg)
     expect(swatchValue('--pl-accent-text')).not.toBe(ACCENTS.molten.hex)
     expect(swatchValue('--pl-accent-text')).toBe(lookToCssVars(DAYLIGHT)['--pl-accent-text'])
     expect(within(swatchItem('--pl-accent-text')).getByText('darkened for reading on Paper')).toBeInTheDocument()
@@ -306,23 +350,53 @@ describe('Motion', () => {
   })
 })
 
-describe('/looks/style under Classic or Studio (K9)', () => {
-  it.each<UiStyle>(['studio', 'classic'])('shows the note and Switch to Play under %s, never the sheet', (style) => {
+describe('/looks/style under Classic or Studio (K9), the same note as /looks', () => {
+  it.each<UiStyle>(['studio', 'classic'])("shows PlayOnlyRoute's note and Switch to Play under %s, never the sheet", (style) => {
     renderPage(style)
-    expect(screen.getByRole('heading', { level: 1, name: 'Style sheet' })).toBeInTheDocument()
-    expect(screen.getByText(STYLE_SHEET_NOTE)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: SWITCH_TO_PLAY })).toBeInTheDocument()
+    const note = within(screen.getByRole('region', { name: STYLE_HEADING }))
+    expect(note.getByRole('heading', { level: 1, name: STYLE_HEADING })).toBeInTheDocument()
+    expect(note.getByText(STYLE_SHEET_NOTE)).toBeInTheDocument()
+    expect(note.getByRole('button', { name: SWITCH_TO_PLAY })).toBeInTheDocument()
+    expect(layout()).toHaveAttribute('data-full-bleed', 'false')
     expect(screen.queryByRole('region', { name: 'Colour' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Copy tokens' })).toBeNull()
     expect(document.documentElement.style.getPropertyValue('--pl-ground-bg')).toBe('')
   })
 
-  it('Switch to Play makes Play the style and the sheet renders in place, on the look', async () => {
+  it('Switch to Play makes Play the style and the sheet renders in place, full bleed, on the look', async () => {
     renderPage('studio')
     fireEvent.click(screen.getByRole('button', { name: SWITCH_TO_PLAY }))
     expect(await screen.findByRole('region', { name: 'Colour' })).toBeInTheDocument()
     expect(screen.queryByText(STYLE_SHEET_NOTE)).toBeNull()
+    expect(layout()).toHaveAttribute('data-full-bleed', 'true')
     expect(document.documentElement.classList.contains(PLAY_HTML_CLASS)).toBe(true)
+    await ready()
+  })
+})
+
+describe('/looks/style under Play below 1024 px (D7), as /looks', () => {
+  it('says it opens on a wider screen, with no sheet and no switch', () => {
+    viewport.narrow = true
+    renderPage('play')
+    const note = within(screen.getByRole('region', { name: STYLE_HEADING }))
+    expect(note.getByText(WIDER_SCREEN_NOTE)).toBeInTheDocument()
+    expect(screen.queryByText(STYLE_SHEET_NOTE)).toBeNull()
+    expect(screen.queryByRole('button', { name: SWITCH_TO_PLAY })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Colour' })).toBeNull()
+    expect(screen.queryByRole('region', { name: MASCOT_REGION })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy tokens' })).toBeNull()
+    expect(layout()).toHaveAttribute('data-full-bleed', 'false')
+  })
+
+  it('shows the sheet once the window is wide enough', async () => {
+    viewport.narrow = true
+    const { rerender } = renderPage('play')
+    expect(screen.queryByRole('region', { name: 'Colour' })).toBeNull()
+    viewport.narrow = false
+    rerender(pageTree('play'))
+    expect(await screen.findByRole('region', { name: 'Colour' })).toBeInTheDocument()
+    expect(screen.queryByText(WIDER_SCREEN_NOTE)).toBeNull()
+    expect(layout()).toHaveAttribute('data-full-bleed', 'true')
     await ready()
   })
 })

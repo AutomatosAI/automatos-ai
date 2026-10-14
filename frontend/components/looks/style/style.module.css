@@ -1,17 +1,26 @@
 /*
  * PRD-260 §4 — the live style sheet (Ember style sheet ember-12/-13), ported
  * from Automatos Play's components/looks/style/style.module.css. Every colour
- * is a look token, so the sheet redraws with the look; a swatch and a spacing
- * step read inline custom properties computed from the active look and the
- * catalogue. Every variable is --pl-* (K2). Play's frame pads and scrolls the
- * page, so the sheet sets no page padding of its own.
+ * is a look token, so the sheet redraws with the look. A swatch's colour
+ * arrives as --pl-look-swatch from swatch-style.ts (shared with Make it yours);
+ * a spacing step and a radius as --pl-specimen-* from style-scale.tsx. Every
+ * variable is --pl-* (K2). Like Make it yours, the sheet sits full bleed in
+ * Play's frame (a viewport-bound column, PlayOnlyRoute), so the page pads and
+ * scrolls itself; a grid, so no row is squeezed as it would be in a flex column
+ * that scrolls. Play's pages render only at >= 1024 px (D7), so Play's phone
+ * and tablet rules are not ported.
  */
 
 .page {
+  flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: var(--pl-space-5);
+  padding: var(--pl-space-5) var(--pl-space-6);
   color: var(--pl-color-text);
 }
 
@@ -179,7 +188,7 @@
   margin-bottom: var(--pl-space-1);
   border-radius: var(--pl-radius-button);
   border: 1px solid var(--pl-line);
-  background: var(--pl-specimen-swatch);
+  background: var(--pl-look-swatch);
 }
 
 .tokenName {
@@ -278,26 +287,4 @@
   gap: var(--pl-space-1);
   font: var(--pl-text-small);
   color: var(--pl-color-text-2);
-}
-
-@media (max-width: 1023.98px) {
-  .columns {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 767.98px) {
-  .sheet {
-    gap: var(--pl-space-6);
-    padding: var(--pl-space-4);
-  }
-
-  .heading {
-    font: var(--pl-text-status-phone);
-  }
-
-  .contrast th,
-  .contrast td {
-    white-space: normal;
-  }
 }
