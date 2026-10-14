@@ -1,0 +1,290 @@
+/*
+ * PRD-260 §4 — the live style sheet (Ember style sheet ember-12/-13), ported
+ * from Automatos Play's components/looks/style/style.module.css. Every colour
+ * is a look token, so the sheet redraws with the look. A swatch's colour
+ * arrives as --pl-look-swatch from swatch-style.ts (shared with Make it yours);
+ * a spacing step and a radius as --pl-specimen-* from style-scale.tsx. Every
+ * variable is --pl-* (K2). Like Make it yours, the sheet sits full bleed in
+ * Play's frame (a viewport-bound column, PlayOnlyRoute), so the page pads and
+ * scrolls itself; a grid, so no row is squeezed as it would be in a flex column
+ * that scrolls. Play's pages render only at >= 1024 px (D7), so Play's phone
+ * and tablet rules are not ported.
+ */
+
+.page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: var(--pl-space-5);
+  padding: var(--pl-space-5) var(--pl-space-6);
+  color: var(--pl-color-text);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--pl-space-4);
+}
+
+.headingText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-2);
+}
+
+.heading {
+  margin: 0;
+  font: var(--pl-text-status);
+  letter-spacing: var(--pl-display-letter-spacing);
+}
+
+.lead {
+  margin: 0;
+  font: var(--pl-text-body);
+  color: var(--pl-color-text-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pl-space-2);
+}
+
+.linkButton,
+.copyButton,
+.toggle {
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--pl-space-4);
+  border-radius: var(--pl-radius-button);
+  font: var(--pl-text-button-sm);
+  cursor: pointer;
+}
+
+.linkButton,
+.toggle {
+  border: 1px solid var(--pl-line-button);
+  background: transparent;
+  color: var(--pl-color-text);
+  text-decoration: none;
+}
+
+/* The cream secondary button: the sheet has no accent primary of its own. */
+.copyButton {
+  border: 0;
+  background: var(--pl-color-text);
+  color: var(--pl-color-bg);
+}
+
+.toggle {
+  align-self: flex-start;
+}
+
+.toggle[aria-pressed="true"] {
+  border-color: var(--pl-color-text);
+  background: var(--pl-tint-selected);
+}
+
+.toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* What Copy tokens did: a polite line when it worked (always present, so a screen reader
+   hears the change), an alert when the browser refused. */
+.done {
+  margin: 0;
+  min-height: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-2);
+}
+
+.failed {
+  margin: 0;
+  display: flex;
+  gap: var(--pl-space-2);
+  font: var(--pl-text-small);
+  color: var(--pl-color-error-text);
+}
+
+/* The sheet: one panel holding every section. */
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-7);
+  padding: var(--pl-space-6);
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-tint-panel);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: var(--pl-space-7);
+}
+
+.stack {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-6);
+}
+
+.section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-4);
+}
+
+.label,
+.caption {
+  margin: 0;
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-3);
+  text-align: left;
+}
+
+.note {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-3);
+}
+
+/* Colour: swatches, then the live contrast table. */
+
+.swatches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--pl-space-5) var(--pl-space-4);
+}
+
+.swatch {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+  overflow-wrap: anywhere;
+}
+
+.swatchChip {
+  display: block;
+  height: 64px;
+  margin-bottom: var(--pl-space-1);
+  border-radius: var(--pl-radius-button);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-look-swatch);
+}
+
+.tokenName {
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text);
+}
+
+.tokenValue {
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-2);
+}
+
+.tokenRole {
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-2);
+}
+
+/* "darkened for reading on Paper". */
+.tokenNote {
+  font: var(--pl-text-meta);
+  color: var(--pl-color-accent-text);
+}
+
+.contrast {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-2);
+}
+
+.contrast th,
+.contrast td {
+  padding: var(--pl-space-2) var(--pl-space-4) var(--pl-space-2) 0;
+  border-bottom: 1px solid var(--pl-line);
+  text-align: left;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.contrast th[scope="row"] {
+  color: var(--pl-color-text);
+}
+
+.verdict {
+  color: var(--pl-color-text);
+}
+
+.verdict[data-passes="false"] {
+  color: var(--pl-color-error-text);
+}
+
+/* Spacing and radii, drawn in the accent. */
+
+.scale {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--pl-space-3) var(--pl-space-4);
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-2);
+}
+
+.scaleItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--pl-space-2);
+}
+
+.step {
+  display: block;
+  width: var(--pl-specimen-step);
+  height: var(--pl-specimen-step);
+  background: var(--pl-color-accent);
+}
+
+.radius {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--pl-color-accent);
+  border-radius: var(--pl-specimen-radius);
+}
+
+.notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-2);
+}
