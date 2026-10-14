@@ -3,13 +3,22 @@
  * PRD-260 D5, D6 — the core chat as Auto's events: each of useChat's onData
  * parts (lib/chat/hooks.ts, the receipts frame as useChatWithReceipts reads it)
  * and each status change maps as lib/mascot/events.ts says, unknown parts map to
- * nothing, and whole turns built from those parts play the states Play's spec
- * expects.
+ * nothing, the reply's words starting end thinking (T-003b), and whole turns
+ * built from those parts play the states Play's spec expects.
  */
 import { describe, expect, it } from 'vitest'
 
 import { LIVE_KEY } from '@/lib/chat/receipts'
-import { BLOCKED_TURN, type ChatStatus, FAILED_TURN, mascotEventsFromData, mascotEventsFromStatus } from '@/lib/mascot/events'
+import {
+  BLOCKED_TURN,
+  type ChatStatus,
+  FAILED_TURN,
+  mascotEventsFromData,
+  mascotEventsFromReply,
+  mascotEventsFromStatus,
+  NO_REPLY,
+  type ReplyProgress,
+} from '@/lib/mascot/events'
 import type { MascotEvent } from '@/lib/mascot/types'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import type { Receipt } from '@/types'
@@ -192,5 +201,63 @@ describe("whole turns from the core chat's parts", () => {
     ]
     expect(sequence(events)).toEqual(['thinking', 'reading', 'idle'])
     expect(replay([...STARTED, ...data({ type: 'workflow-update', data: { workflowId: 'w', status: 'running' } })]).mascot).toBe('working')
+  })
+})
+
+describe("mascotEventsFromReply: the reply's words starting (T-003b)", () => {
+  const empty = (id: string): ReplyProgress => ({ id, hasText: false, toolRunning: false })
+  const words = (id: string, toolRunning = false): ReplyProgress => ({ id, hasText: true, toolRunning })
+  const ANSWER: MascotEvent[] = [{ type: 'text', text: '' }]
+
+  it("the newest reply's first words while the chat streams are one text event", () => {
+    expect(mascotEventsFromReply(empty('r2'), words('r2'), 'streaming')).toEqual(ANSWER)
+    expect(mascotEventsFromReply(NO_REPLY, words('r2'), 'streaming')).toEqual(ANSWER)
+    expect(mascotEventsFromReply(words('r1'), words('r2'), 'streaming')).toEqual(ANSWER)
+  })
+
+  it("the same reply's later words, an empty reply and no reply map to nothing", () => {
+    expect(mascotEventsFromReply(words('r2'), words('r2'), 'streaming')).toEqual([])
+    expect(mascotEventsFromReply(empty('r2'), empty('r2'), 'streaming')).toEqual([])
+    expect(mascotEventsFromReply(words('r1'), NO_REPLY, 'streaming')).toEqual([])
+  })
+
+  it('words that start while a tool runs map to nothing, also once the tool ends: the tool decides', () => {
+    expect(mascotEventsFromReply(empty('r2'), words('r2', true), 'streaming')).toEqual([])
+    expect(mascotEventsFromReply(words('r2', true), words('r2'), 'streaming')).toEqual([])
+  })
+
+  it("maps nothing unless the chat streams (a stored reply, a finished or failed turn)", () => {
+    for (const status of ['idle', 'error'] as const) {
+      expect({ status, events: mascotEventsFromReply(empty('r2'), words('r2'), status) }).toEqual({ status, events: [] })
+    }
+  })
+})
+
+describe('a whole turn with its words (T-003b)', () => {
+  const reply = (hasText: boolean, toolRunning = false): ReplyProgress => ({ id: 'r2', hasText, toolRunning })
+  const words = (previous: ReplyProgress, next: ReplyProgress) => mascotEventsFromReply(previous, next, 'streaming')
+
+  it('send → thinking → first text → idle → tool-start → working → tool-end → idle → finish', () => {
+    const events = [
+      ...STARTED,
+      ...words(reply(false), reply(true)),
+      ...data(toolStart('c1', 'query_database')),
+      ...words(reply(true), reply(true, true)),
+      ...data(toolEnd('c1')),
+      ...words(reply(true, true), reply(true)),
+      ...FINISHED,
+    ]
+    expect(sequence(events)).toEqual(['thinking', 'idle', 'working', 'idle'])
+    expect(replay(events)).toMatchObject({ mascot: 'idle', turnActive: false, openTools: [] })
+  })
+
+  it('tool-start still wins: words that arrive while a tool runs keep its state until it ends', () => {
+    const events = [
+      ...STARTED,
+      ...data(toolStart('c1', 'platform_web_search')),
+      ...words(reply(false, true), reply(true, true)),
+    ]
+    expect(sequence(events)).toEqual(['thinking', 'searching'])
+    expect(sequence([...events, ...data(toolEnd('c1')), ...FINISHED])).toEqual(['thinking', 'searching', 'idle'])
   })
 })

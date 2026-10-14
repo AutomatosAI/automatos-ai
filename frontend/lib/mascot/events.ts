@@ -12,7 +12,8 @@ import type { JsonObject, MascotEvent } from './types'
  * status is 'idle' | 'streaming' | 'error' (an awaited detached reply reads as
  * 'streaming'), and its errorCode names a blocked turn ('trial_exhausted').
  * These parts come off the wire, so every field is checked here: a part that
- * isn't what it says maps to nothing.
+ * isn't what it says maps to nothing. The words themselves never reach onData:
+ * the start of the answer is read from the newest reply (mascotEventsFromReply).
  */
 
 export type ChatStatus = 'idle' | 'streaming' | 'error'
@@ -130,4 +131,34 @@ export function mascotEventsFromStatus(previous: ChatStatus, next: ChatStatus, e
   if (previous !== 'streaming') return []
   if (errorCode !== null) return [{ type: 'error', message: BLOCKED_TURN, code: errorCode }]
   return [{ type: 'finish', finishReason: null }]
+}
+
+/**
+ * The newest reply, as far as Auto cares: which one it is, whether its words
+ * have started, and whether one of its tool calls is still running. useChat
+ * writes the words into the reply instead of handing text parts to onData, so
+ * the start of the answer is read from the reply itself.
+ */
+export type ReplyProgress = {
+  readonly id: string | null
+  readonly hasText: boolean
+  readonly toolRunning: boolean
+}
+
+export const NO_REPLY: ReplyProgress = { id: null, hasText: false, toolRunning: false }
+
+/** The reducer only reads that a text event came: its words are on the reply. */
+const ANSWER_STARTED: MascotEvent = { type: 'text', text: '' }
+
+/**
+ * What a change of the newest reply means for Auto (Play's spec: thinking when
+ * the first words arrive → idle). While the chat streams, the reply's words
+ * starting with no tool running on it is one text event. Its later words, words
+ * that start while a tool runs (the tool's state wins, and its end settles
+ * Auto), and any status other than streaming map to nothing.
+ */
+export function mascotEventsFromReply(previous: ReplyProgress, next: ReplyProgress, status: ChatStatus): MascotEvent[] {
+  if (status !== 'streaming' || !next.hasText || next.toolRunning) return []
+  const alreadyStarted = previous.id === next.id && previous.hasText
+  return alreadyStarted ? [] : [ANSWER_STARTED]
 }

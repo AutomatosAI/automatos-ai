@@ -54,7 +54,7 @@ How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`
     - *Expected:* Auto listens while the box has focus, and goes back to idle when it loses it.
 
 11. [ ] **Thinking.** Send `hello`.
-    - *Expected:* your message shows at once; Auto thinks ("Thinking", his ring in the accent, the page glow brighter); the reply streams in word by word. Auto stays thinking while the words stream (the core's chat gives Auto no per-word event) and goes back to idle when the reply finishes. The conversation appears under Recent.
+    - *Expected:* your message shows at once; Auto thinks ("Thinking", his ring in the accent, the page glow brighter) until the reply's first words appear, then goes to idle ("Ready when you are") while the rest streams in word by word, and stays idle when the reply finishes. The conversation appears under Recent.
 
 12. [ ] **Searching.** Send `Search the web for the latest news about electric bikes`.
     - *Expected:* a tool line "Searching the web" with the query and a spinner; Auto searching, caption "Searching the web" with the query under it. The line turns ✓ with its time and Auto goes back to idle. "What Auto did" lists the receipts once. If a receipt says done, Auto celebrates when the turn ends.

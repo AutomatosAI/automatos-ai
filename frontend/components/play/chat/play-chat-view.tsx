@@ -18,7 +18,7 @@ import { chatCaption } from './caption'
 import { ExampleChips, FirstOpenHero } from './first-open'
 import { MessageBox } from './message-box'
 import { MessageList } from './message-list'
-import { chatTitle, latestReply, runningToolInput } from './message-text'
+import { chatTitle, latestReply, replyProgress, runningToolInput } from './message-text'
 import { isTrialBlocked, PlayTrialBanner, TurnEnd } from './turn-end'
 import styles from './composer.module.css'
 
@@ -27,7 +27,8 @@ import styles from './composer.module.css'
  * Automatos Play's components/chat/ChatView.tsx onto the core's data: sending
  * and streaming through useChatWithReceipts (the hook chat.tsx uses), a new
  * chat's id into the session store as chat.tsx does, and Auto driven by
- * useAutoMascot from the chat's data parts and status. The page lays out the
+ * useAutoMascot from the chat's data parts, its status and the reply being
+ * written (his thinking ends when the words start). The page lays out the
  * conversation and the message box, with Auto in the mascot column and his
  * caption saying what he is doing; an empty chat is the first open. Stop calls
  * the hook's stop(), which also cancels the turn on the server. A turn's
@@ -72,7 +73,13 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
       useChatSessionStore.getState().chatIdAssigned(chatId)
     },
   })
-  const auto = useAutoMascot({ status: chat.status, errorCode: chat.errorCode, backend: BACKEND_OF[connection], idleMs })
+  const auto = useAutoMascot({
+    status: chat.status,
+    errorCode: chat.errorCode,
+    reply: replyProgress(chat.messages),
+    backend: BACKEND_OF[connection],
+    idleMs,
+  })
   const turn = usePlayTurn({ messages: chat.messages, streaming: chat.status === 'streaming', dispatch: auto.dispatch })
   const toAuto = auto.onData
   const toTurn = turn.onData

@@ -3,17 +3,24 @@
 import { type Dispatch, useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 
 import { IDLE_MS, useIdleTimeout } from '@/hooks/use-idle-timeout'
-import { type ChatStatus, mascotEventsFromData, mascotEventsFromStatus } from '@/lib/mascot/events'
+import {
+  type ChatStatus,
+  mascotEventsFromData,
+  mascotEventsFromReply,
+  mascotEventsFromStatus,
+  NO_REPLY,
+  type ReplyProgress,
+} from '@/lib/mascot/events'
 import { INITIAL_MASCOT, mascotReducer } from '@/lib/mascot/reducer'
 import { claimFirstOpen, type SessionSource } from '@/lib/mascot/session'
 import type { MascotEvent, MascotName, MascotState } from '@/lib/mascot/types'
 
 /**
  * PRD-260 D5, D6 — Auto driven by the core chat. Play's reducer
- * (lib/mascot/reducer.ts) is fed from useChatWithReceipts' data callback and
- * status through lib/mascot/events.ts, from the page's own events through
- * dispatch, and from the idle nap. The screen hands `mascot` and `onClipEnded`
- * to <AutoMascot>.
+ * (lib/mascot/reducer.ts) is fed from useChatWithReceipts' data callback, its
+ * status and its newest reply (the words starting) through lib/mascot/events.ts,
+ * from the page's own events through dispatch, and from the idle nap. The
+ * screen hands `mascot` and `onClipEnded` to <AutoMascot>.
  */
 
 export type BackendStatus = 'up' | 'down'
@@ -23,6 +30,8 @@ export interface AutoMascotOptions {
   readonly status?: ChatStatus
   /** useChat's errorCode: set when the last turn was blocked ('trial_exhausted'). */
   readonly errorCode?: string | null
+  /** The newest reply (its words starting end thinking). Play's chat: replyProgress(messages). */
+  readonly reply?: ReplyProgress
   /** The connection's state: down puts Auto to sleep until it is up again. Unknown: leave undefined. */
   readonly backend?: BackendStatus
   /** How long without input before Auto naps. */
@@ -55,6 +64,18 @@ function useStatusEvents(status: ChatStatus, errorCode: string | null, dispatch:
   }, [status, errorCode, dispatch])
 }
 
+/** The newest reply's words starting, after the status events of the same render (so a send thinks first). */
+function useReplyEvents(reply: ReplyProgress, status: ChatStatus, dispatch: Dispatch<MascotEvent>): void {
+  const previous = useRef<ReplyProgress>(NO_REPLY)
+  const { id, hasText, toolRunning } = reply
+  useEffect(() => {
+    const next: ReplyProgress = { id, hasText, toolRunning }
+    const events = mascotEventsFromReply(previous.current, next, status)
+    previous.current = next
+    events.forEach(dispatch)
+  }, [id, hasText, toolRunning, status, dispatch])
+}
+
 function useBackendEvents(backend: BackendStatus | undefined, dispatch: Dispatch<MascotEvent>): void {
   useEffect(() => {
     if (backend === 'down') dispatch({ type: 'backend-down' })
@@ -63,10 +84,11 @@ function useBackendEvents(backend: BackendStatus | undefined, dispatch: Dispatch
 }
 
 export function useAutoMascot(options: AutoMascotOptions = {}): AutoMascotDriver {
-  const { status = 'idle', errorCode = null, backend, idleMs = IDLE_MS, session } = options
+  const { status = 'idle', errorCode = null, reply = NO_REPLY, backend, idleMs = IDLE_MS, session } = options
   const [state, dispatch] = useReducer(mascotReducer, INITIAL_MASCOT)
 
   useStatusEvents(status, errorCode, dispatch)
+  useReplyEvents(reply, status, dispatch)
   useBackendEvents(backend, dispatch)
 
   const nap = useCallback(() => dispatch({ type: 'idle-timeout' }), [])

@@ -2,7 +2,8 @@
  * PRD-260 §4 — the words around Play's chat, ported from Automatos Play's
  * tests/chat (caption and labels): what Auto's caption says, a tool call's
  * detail, and the core's ChatMessage read for the chat (text, title, the newest
- * reply, its activity and its running tool call).
+ * reply, its activity and its running tool call, and the reply being written as
+ * Auto reads it: T-003b).
  */
 import { describe, expect, it } from 'vitest'
 
@@ -14,8 +15,10 @@ import {
   latestReply,
   messageText,
   NEW_CHAT,
+  replyProgress,
   runningToolInput,
 } from '@/components/play/chat/message-text'
+import { NO_REPLY } from '@/lib/mascot/events'
 import { captionFor } from '@/lib/mascot/media'
 import type { ChatMessage } from '@/types'
 
@@ -93,5 +96,34 @@ describe("the core's messages, read for Play", () => {
     expect(activityLines(reply)).toEqual(['Checking prices first.', '3 of 5 pages'])
     expect(runningToolInput(reply)).toEqual({ query: 'new' })
     expect(runningToolInput(undefined)).toBeUndefined()
+  })
+})
+
+describe('replyProgress: the reply being written, as Auto reads it (T-003b)', () => {
+  const asked = message({ id: 'u', role: 'user', parts: [{ type: 'text', text: 'Battery?' }] })
+
+  it('is no reply until the newest message is a reply: a turn awaiting its reply never reads the last one', () => {
+    expect(replyProgress([])).toBe(NO_REPLY)
+    expect(replyProgress([message({ id: 'r1', parts: [{ type: 'text', text: 'Old words' }] }), asked])).toBe(NO_REPLY)
+  })
+
+  it("says whether the reply's words have started (blank is not started), by its id", () => {
+    expect(replyProgress([asked, message({ id: 'r2' })])).toEqual({ id: 'r2', hasText: false, toolRunning: false })
+    expect(replyProgress([asked, message({ id: 'r2', parts: [{ type: 'text', text: '  ' }] })]).hasText).toBe(false)
+    expect(replyProgress([asked, message({ id: 'r2', parts: [{ type: 'text', text: 'Look for' }] })])).toEqual({
+      id: 'r2',
+      hasText: true,
+      toolRunning: false,
+    })
+    expect(replyProgress([asked, message({ id: 'r2', parts: [], content: 'stored words' })]).hasText).toBe(true)
+  })
+
+  it('says whether one of its tool calls is still running', () => {
+    const calls = (state: string) => [
+      { toolCallId: 'a', toolName: 'x', state: 'completed' },
+      { toolCallId: 'b', toolName: 'y', state },
+    ]
+    expect(replyProgress([asked, message({ id: 'r2', toolCalls: calls('running') })]).toolRunning).toBe(true)
+    expect(replyProgress([asked, message({ id: 'r2', toolCalls: calls('error') })]).toolRunning).toBe(false)
   })
 })

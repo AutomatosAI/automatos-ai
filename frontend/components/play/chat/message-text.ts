@@ -1,11 +1,13 @@
+import { NO_REPLY, type ReplyProgress } from '@/lib/mascot/events'
 import type { ChatMessage } from '@/types'
 
 /**
  * PRD-260 §4 — the core's chat messages (types/chat.ts ChatMessage, as
  * useChat and getChatMessages hand them over) read for Play's chat: the words
  * of a message, the conversation's name, the newest reply, the lines a reply
- * shows above its answer. Pure. (The frontend compiles against ES2020, so no
- * findLast: the newest is found from the end by hand.)
+ * shows above its answer, and the reply being written as Auto reads it. Pure.
+ * (The frontend compiles against ES2020, so no findLast: the newest is found
+ * from the end by hand.)
  */
 
 export const NEW_CHAT = 'New chat'
@@ -61,4 +63,20 @@ export function activityLines(message: ChatMessage): string[] {
 /** The input of the newest tool call still running on the reply, or undefined. */
 export function runningToolInput(reply: ChatMessage | undefined): unknown {
   return newest(reply?.toolCalls ?? [], (call) => call.state === 'running')?.input
+}
+
+/**
+ * The reply being written, for Auto (lib/mascot/events.ts): the newest message
+ * when it is a reply (useChat appends the empty reply as it sends), whether its
+ * words have started, and whether one of its tool calls still runs. A turn still
+ * awaiting its reply has none, so the previous turn's words never end thinking.
+ */
+export function replyProgress(messages: readonly ChatMessage[]): ReplyProgress {
+  const last = messages[messages.length - 1]
+  if (last?.role !== 'assistant') return NO_REPLY
+  return {
+    id: last.id,
+    hasText: messageText(last).trim().length > 0,
+    toolRunning: (last.toolCalls ?? []).some((call) => call.state === 'running'),
+  }
 }

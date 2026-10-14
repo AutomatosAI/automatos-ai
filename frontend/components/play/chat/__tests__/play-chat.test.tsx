@@ -299,6 +299,22 @@ describe("Auto's column", () => {
     expect(auto()).toHaveAttribute('data-state', 'thinking')
   })
 
+  it("leaves thinking when the reply's first words stream in (T-003b), and a tool after them still wins", async () => {
+    openStoredChat()
+    const view = render(<PlayChat />)
+    await screen.findByRole('list', { name: 'Conversation' })
+    const asked = userMessage('m3', 'And the battery?')
+    chat.status = 'streaming'
+    chat.messages = [...STORED, asked, autoMessage('m4', '')]
+    view.rerender(<PlayChat />)
+    expect(auto()).toHaveAttribute('data-state', 'thinking')
+    chat.messages = [...STORED, asked, autoMessage('m4', 'Aim for')]
+    view.rerender(<PlayChat />)
+    expect(auto()).toHaveAttribute('data-state', 'idle')
+    act(() => chat.options?.onData({ type: 'tool-start', data: { toolCallId: 't1', toolName: 'query_database', input: {} } }))
+    expect(auto()).toHaveAttribute('data-state', 'working')
+  })
+
   it("follows the chat's tool parts, with the search query in his caption", async () => {
     const running: ToolCall = { toolCallId: 't1', toolName: 'platform_web_search', state: 'running', input: { query: 'budget laptops' } }
     openStoredChat([userMessage('m1', 'Shortlist?'), autoMessage('m2', '', { toolCalls: [running] })])

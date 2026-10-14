@@ -334,11 +334,13 @@ Auto is a state machine ported from Play (`frontend/lib/mascot/`), fed from the 
 graph LR
     Chat["useChatWithReceipts<br/>(lib/chat/use-chat-with-receipts.ts)"] -->|"onData parts"| Events["lib/mascot/events.ts<br/>mascotEventsFromData"]
     Chat -->|"status, errorCode"| Status["mascotEventsFromStatus"]
+    Chat -->|"messages: the newest reply"| Reply["mascotEventsFromReply"]
     Page["Play's screens<br/>(focus, blur, first open)"] --> Driver
     Turn["hooks/use-play-turn.ts"] -->|"deliverable-added, error"| Driver
     Health["useBackendHealth<br/>(GET /health)"] -->|"backend-down / up"| Driver
     Events --> Driver["hooks/use-auto-mascot.ts<br/>useReducer(mascotReducer)"]
     Status --> Driver
+    Reply --> Driver
     Driver -->|"state.mascot"| View["components/mascot/auto-mascot.tsx"]
 ```
 
@@ -346,6 +348,7 @@ graph LR
 |---|---|---|
 | `status` goes to `streaming` (a send, or an awaited reply after a reload) | `send` | thinking |
 | `status` goes from `streaming` to `idle` | `finish` | thinking or a tool state settles to idle; celebrate if the turn had a done receipt |
+| the newest reply's words start while the chat streams and no tool runs on it (`replyProgress` → `mascotEventsFromReply`, once per reply) | `text` | thinking → idle |
 | `status` goes from `streaming` to `idle` with an `errorCode` (a blocked turn, e.g. `trial_exhausted`) | `error` | oops |
 | `status` goes to `error` | `error` | oops |
 | `tool-start` part | `tool-start` | searching, reading or working, by `toolActivity(toolName)` (`lib/mascot/tools.ts`) |
@@ -361,7 +364,7 @@ graph LR
 | `useBackendHealth` reports down / connected | `backend-down` / `backend-up` | sleeping until up / idle |
 | no key, pointer, wheel or touch input for 3 minutes (`useIdleTimeout`, `IDLE_MS`) / the next input | `idle-timeout` / `wake` | sleeping (a nap, not during a turn) / idle |
 
-The core's `useChat` hands its data callback no per-word event, so Auto stays thinking while the reply's words stream, until the turn finishes or a tool moves him. Every part is checked field by field in `lib/mascot/events.ts`; a part that isn't what it says maps to nothing.
+The core's `useChat` hands its data callback no per-word event: it writes the words into the reply. So the start of the answer is read from the reply itself. `replyProgress(messages)` (`components/play/chat/message-text.ts`) gives the newest message when it is a reply (none while a turn still awaits its reply, so the previous turn's words never count), whether its words have started and whether one of its tool calls runs; `mascotEventsFromReply` turns the words starting, while the chat streams and no tool runs, into one `text` event, which ends thinking as in the standalone Play app. Words that start while a tool runs change nothing: the tool's state wins, and its end settles Auto. Every part is checked field by field in `lib/mascot/events.ts`; a part that isn't what it says maps to nothing.
 
 `toolActivity` matches exact names first (`SEARCHING_TOOLS`, `READING_TOOLS`, `WORKING_TOOLS`), then the patterns `/web_|browse_marketplace/` (searching) and `/document|knowledge|memor|semantic|graph/` (reading); anything else is working. It is the only place in the frontend that knows tool names.
 

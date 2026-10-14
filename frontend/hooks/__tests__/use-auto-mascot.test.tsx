@@ -1,13 +1,14 @@
 /**
- * PRD-260 D5, D6 — useAutoMascot: Auto driven by the core chat's onData parts
- * and status (through lib/mascot/events.ts), the page's events, hello once per
- * session, the backend's state and the idle nap.
+ * PRD-260 D5, D6 — useAutoMascot: Auto driven by the core chat's onData parts,
+ * status and newest reply (through lib/mascot/events.ts), the page's events,
+ * hello once per session, the backend's state and the idle nap.
  */
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { type AutoMascotOptions, useAutoMascot } from '@/hooks/use-auto-mascot'
 import { LIVE_KEY } from '@/lib/chat/receipts'
+import { NO_REPLY, type ReplyProgress } from '@/lib/mascot/events'
 import { memoryStorage } from '@/lib/looks/__tests__/helpers'
 import { receipt } from '@/lib/mascot/__tests__/helpers'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
@@ -66,6 +67,45 @@ describe('useAutoMascot: the chat', () => {
     act(() => result.current.onData({ type: 'mission-suggestion', data: { goal: 'Plan' } }))
     act(() => result.current.onData({ type: 'data-usage', data: { totalTokens: 3 } }))
     expect(result.current.state).toBe(before)
+  })
+})
+
+describe("useAutoMascot: the reply's words (T-003b)", () => {
+  const reply = (hasText: boolean, toolRunning = false): ReplyProgress => ({ id: 'r2', hasText, toolRunning })
+
+  it('send → thinking → first text → idle → tool-start → working → tool-end → idle → finish', () => {
+    const { result, rerender } = mount({ status: 'idle', reply: NO_REPLY })
+    rerender({ status: 'streaming', reply: reply(false) })
+    expect(result.current.mascot).toBe('thinking')
+    rerender({ status: 'streaming', reply: reply(true) })
+    expect(result.current.mascot).toBe('idle')
+    act(() => result.current.onData(toolStart('c1', 'query_database')))
+    rerender({ status: 'streaming', reply: reply(true, true) })
+    expect(result.current.mascot).toBe('working')
+    act(() => result.current.onData(toolEnd('c1')))
+    rerender({ status: 'streaming', reply: reply(true) })
+    expect(result.current.mascot).toBe('idle')
+    rerender({ status: 'idle', reply: reply(true) })
+    expect(result.current.mascot).toBe('idle')
+    expect(result.current.state.turnActive).toBe(false)
+  })
+
+  it("words that start while a tool runs keep the tool's state", () => {
+    const { result, rerender } = mount({ status: 'idle', reply: NO_REPLY })
+    rerender({ status: 'streaming', reply: reply(false) })
+    act(() => result.current.onData(toolStart('c1', 'platform_web_search')))
+    rerender({ status: 'streaming', reply: reply(false, true) })
+    rerender({ status: 'streaming', reply: reply(true, true) })
+    expect(result.current.mascot).toBe('searching')
+  })
+
+  it('thinks until the words come: an empty reply, or the previous reply already on screen, leaves him thinking', () => {
+    const previousReply: ReplyProgress = { id: 'r1', hasText: true, toolRunning: false }
+    const { result, rerender } = mount({ status: 'idle', reply: previousReply })
+    rerender({ status: 'streaming', reply: previousReply })
+    expect(result.current.mascot).toBe('thinking')
+    rerender({ status: 'streaming', reply: reply(false) })
+    expect(result.current.mascot).toBe('thinking')
   })
 })
 
