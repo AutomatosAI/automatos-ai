@@ -1093,6 +1093,10 @@ class Config:
     # hung embedding/Qdrant backend can never stall the dispatch tick — on
     # timeout the matcher falls back to lexical-only scoring.
     AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS", "10"))
+    # PRD-256 N15-6 (F427): an agent with a run this recent (a ticket in progress, or finished
+    # into Review or Done) is said to be able to run, whatever its stored flag or a lapsed
+    # CLI host heartbeat says (services/agent_last_run.py).
+    AGENT_RECENT_RUN_WINDOW_SECONDS: int = int(os.getenv("AGENT_RECENT_RUN_WINDOW_SECONDS", "3600"))
     # Cost estimation per 1K tokens (PRD-82B US-004). PRD-192 S3 (F059 finish):
     # DEMOTED to modules/policy/pricing.py's registry-miss last resort — pricing
     # is this constant's ONLY consumer (source-grep-guarded); every dollar

@@ -10,6 +10,48 @@ later through the Questions tab or a Telegram reply and resumes the work.
 from .action_registry import ActionDefinition, ActionRegistry
 
 
+_ASK_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "subject_type": {
+            "type": "string",
+            "enum": ["board_task", "playbook_run", "tool_call"],
+            "description": "What the answer unblocks — the kind of work parked.",
+        },
+        "subject_id": {
+            "type": "string",
+            "description": (
+                "What to park: a board task by its number as the board shows it "
+                "(#0042), or the playbook run id or tool-call id. Must belong to your "
+                "workspace."
+            ),
+        },
+        "question": {
+            "type": "string",
+            "description": (
+                "The ask, as short markdown. A decision, not a status report."
+            ),
+        },
+        "options": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Optional discrete choices, rendered as buttons. Free text is "
+                "always allowed in addition."
+            ),
+        },
+        "expires_hours": {
+            "type": "integer",
+            "description": (
+                "Optional: hours until the ask lapses if unanswered. Omit for "
+                "the workspace default."
+            ),
+        },
+    },
+    "required": ["subject_type", "subject_id", "question"],
+}
+
+
 def register_asks_actions(registry: ActionRegistry) -> None:
     """Register the human-question platform action."""
 
@@ -27,45 +69,7 @@ def register_asks_actions(registry: ActionRegistry) -> None:
             "that step, and the owner's answer runs the playbook again from step 1."
         ),
         category="governance",
-        parameters={
-            "type": "object",
-            "properties": {
-                "subject_type": {
-                    "type": "string",
-                    "enum": ["board_task", "playbook_run", "tool_call"],
-                    "description": "What the answer unblocks — the kind of work parked.",
-                },
-                "subject_id": {
-                    "type": "string",
-                    "description": (
-                        "Id of the subject to park (the board task id, playbook run id, "
-                        "or tool-call id). Must belong to your workspace."
-                    ),
-                },
-                "question": {
-                    "type": "string",
-                    "description": (
-                        "The ask, as short markdown. A decision, not a status report."
-                    ),
-                },
-                "options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Optional discrete choices, rendered as buttons. Free text is "
-                        "always allowed in addition."
-                    ),
-                },
-                "expires_hours": {
-                    "type": "integer",
-                    "description": (
-                        "Optional: hours until the ask lapses if unanswered. Omit for "
-                        "the workspace default."
-                    ),
-                },
-            },
-            "required": ["subject_type", "subject_id", "question"],
-        },
+        parameters=_ASK_PARAMETERS,
         permission_level="write",
         tags=["human", "question", "ask", "approval", "blocked", "clarification"],
         examples=[

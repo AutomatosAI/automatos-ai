@@ -29,13 +29,16 @@ DELEGATE turn), ``its_reads_are_receipted`` (retrieval first), ``the_loop_writes
 ``saves_the_turns_receipts`` (the saved parts). The turn's state is a few context variables,
 set once per turn and never mutated.
 
-US-002, one honesty rule: the line about what was not done comes from the receipts alone
-(``honesty_lines``). FX-006: it is decided per claim (``claims_backed``): a report of work done
-(``COMPLETED_ACTION``, one generic pattern) with no done write of its kind behind it gets the
-line, whatever else went through; a refused write gets its own line.
-``the_answer_takes_the_receipts`` (the answer's additions) settles them when the loop has not; they go above the text, in the frame (``above``) and at the top of
-the saved answer, never under it. FX-005: they are the only not-done line; the turn's
-``no_tool_call`` notice never says it again (``says_nothing_was_done``).
+US-002, one honesty rule, from the receipts alone. FX-006: a claim is decided per claim
+(``claims_backed``): a report of work done (``COMPLETED_ACTION``, one generic pattern) with no done
+write of its kind behind it is unbacked, whatever else went through. P256-FIX-N15-2: the not-done
+line ("Just to be clear: …") is said only in place of the claim it answers, taken out of the reply
+(``claim_removed``, by the tool loop: ``modules/tools/execution/claims_in_place.py``), never above
+the text. Above the text go only the refused writes (``honesty_lines``), one line each, and none
+when the reply carries the line in place, which names them. ``the_answer_takes_the_receipts`` (the
+answer's additions) settles them when the loop has not; they go in the frame (``above``) and at the
+top of the saved answer, never under it. FX-005: the turn's ``no_tool_call`` notice never says
+again what the reply's line says (``says_nothing_was_done``).
 """
 from __future__ import annotations
 
@@ -43,11 +46,12 @@ import functools
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from consumers.chatbot.claim_check import NOTHING_DONE, READS_SAID, reads_put_in_front
+from consumers.chatbot.claim_check import READS_SAID, reads_put_in_front
 from consumers.chatbot.claims_backed import (
-    COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, promised_unbacked, unbacked_claims,
+    COMPLETED_ACTION, SAYS_DONE, claims_work_done, promised_unbacked, says_not_done, unbacked_where,
 )
 from consumers.chatbot.claims_by_kind import EACH_STEP_WAITS
+from consumers.chatbot.claims_not_reports import AUTOMATIC_READS  # the folded read's action (N15-1 reads it too)
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED, STEPS_UNCHECKED,
     answers_in, done_effects,
@@ -67,7 +71,6 @@ SUBJECT_CHARS = 80
 LOOKED_UP = "looked up"
 FAILED = "it reported a failure"
 # The automatic reads, folded: "read your documents and the board".
-AUTOMATIC_READS = "automatic_reads"
 DOCUMENTS, BOARD = "your documents", "the board"
 FOLD_EFFECT = "read {what}"
 # Why a call was not run, in the owner's words (the tracker's own are written for the model).
@@ -263,14 +266,10 @@ def receipts_frames(handler: Any, receipts: List[Receipt], model: Optional[str] 
 
 
 # ── US-002: one honesty rule, from the receipts alone ──────────────────────
-# The line about what was not done is decided by the receipts, never by a vocabulary of
-# claims (the regex families are gone, FX-007). It fires for a
-# claim of the answer (one generic pattern, ``claims_backed.COMPLETED_ACTION``) that no done
-# write of its kind backs, whatever else went through (FX-006); a write of its kind is never
-# denied. A refused write gets its own line. Both sit above the text: in the frame
-# (``above``) live, at the top of the saved answer on reload.
+# A refused write gets its own line above the text: in the frame (``above``) live, at the top
+# of the saved answer on reload. A claim no done write backs is answered in its own place in
+# the reply, never here (P256-FIX-N15-2).
 ABOVE = "above"
-NOTHING_DONE_LINE = NOTHING_DONE   # "Just to be clear: I haven't done that yet, and nothing has changed. …"
 TRIED_LINE = "I tried to {what} and it didn't go through: {reason}."
 # How a refused write is named in "I tried to <what>": the board's own words where a call's
 # name reads badly, else "<verb> the <thing>".
@@ -282,7 +281,7 @@ _VERBS = ("create", "update", "delete", "cancel", "assign", "approve", "reject",
           "install", "pause", "resume", "upload", "add", "remove", "publish", "set", "generate", "make", "move", "post")
 
 
-def _tried(r: Receipt) -> str:
+def tried(r: Receipt) -> str:
     """A refused write in plain words, for "I tried to <what>": "move the card #0422"."""
     name = r["action"].lower().removeprefix("platform_")
     verb = name.split("_")[0]
@@ -294,23 +293,21 @@ def _tried(r: Receipt) -> str:
 
 
 def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
-    """The lines above the answer: one per write that was refused (and not then done), and the
-    not-done line when a claim of the answer has no done write of its kind behind it (FX-006:
-    per claim, whatever else went through; it names the claim when another write did). A write
-    that waits for the owner's click (FX-004) is neither done nor refused: it writes no "I tried
-    to" line, and the answer that calls it done still gets the not-done line; the answer that says
-    its card was raised ("I've raised a card…", P256-FIX-RVW-30) does not."""
+    """The lines above the answer: one per write that was refused (and not then done). A write that
+    waits for the owner's click (FX-004) is neither done nor refused: it writes no "I tried to" line.
+    P256-FIX-N15-2: never the not-done line, which is said only in place of the claim it answers
+    (``claim_removed``); an answer that carries it has nothing above, since that line names the
+    refused writes too."""
+    if says_not_done(answer):
+        return []
     writes = [r for r in receipts if r.get("kind") == WRITE]
-    done_writes = [r for r in writes if r.get("status") == DONE]
-    done = {r["action"] for r in done_writes}
+    done = {r["action"] for r in writes if r.get("status") == DONE}
     refused: Dict[str, Receipt] = {}
     for r in writes:
         if r.get("status") == REFUSED and r["action"] not in done:
             refused.setdefault(r["action"], r)          # one line per action: its first reason
-    lines = [TRIED_LINE.format(what=_tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
-             for r in refused.values()]
-    not_done = not_done_line(answer, done_writes, waiting=_asks(writes), reads=_done_reads(receipts))
-    return [*lines, not_done] if not_done else lines
+    return [TRIED_LINE.format(what=tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
+            for r in refused.values()]
 
 
 def _asks(writes: Iterable[Receipt]) -> bool:
@@ -333,12 +330,20 @@ def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], An
     only to its first-person claims: "It has been cancelled" in its customer draft is its writer's voice.
     P256-FIX-RVW-30: "I've raised a card…" after an ask for the owner's click is backed by it; RVW-34:
     "#0365 has been cancelled" after a read of #0365 is what the read found."""
+    found = unbacked_sentences(answer, outcomes, promises)
+    return found[0][0] if found else None
+
+
+def unbacked_sentences(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]],
+                       promises: Optional[bool] = True) -> List[Tuple[str, str]]:
+    """Each claim ``unbacked_claim`` reads, with the sentence that makes it (marks off): (its verb,
+    "done" for a bare claim; the sentence). P256-FIX-N15-1 takes those sentences out of the reply."""
     ran = [receipt(action, params, result) for action, params, result in outcomes]
     writes = [r for r in ran if r["kind"] == WRITE]
     done_writes = [r for r in writes if r["status"] == DONE]
-    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
-                               reads=_done_reads(ran))
-    return next((verb or "done" for verb, known in unbacked if known or verb in SAYS_DONE), None)
+    unbacked = unbacked_where(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
+                              reads=_done_reads(ran))
+    return [(verb or "done", sentence) for verb, known, sentence in unbacked if known or verb in SAYS_DONE]
 
 
 def unbacked_promise(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]]) -> Optional[str]:
@@ -387,10 +392,9 @@ def _settle_above(receipts: Sequence[Receipt], answer: str) -> List[str]:
 
 
 def says_nothing_was_done(answer: str) -> bool:
-    """Whether the turn's receipts put the not-done line above ``answer`` (FX-005: the one
-    producer of that line). Another notice that would say the same defers to it."""
-    receipts = current_receipts() or []
-    return not _VISITOR.get() and any(is_not_done_line(line) for line in honesty_lines(receipts, answer))
+    """Whether ``answer`` carries the not-done line in place of a claim (FX-005, P256-FIX-N15-2: the
+    one producer of that line is ``claim_removed``). Another notice that would say the same defers to it."""
+    return says_not_done(answer)
 
 
 def _frames_once(chat: Any, receipts: List[Receipt], model: Optional[str],
@@ -482,10 +486,10 @@ def notes_the_answering_model(answer_additions: Additions) -> Additions:
 
 
 def the_answer_takes_the_receipts(answer_additions: Additions) -> Additions:
-    """Wrap ``StreamingChatService._answer_additions`` (US-002): the lines above the answer are
-    settled from the turn's receipts and the answer that is kept (the first reply, a forced
-    synthesis), unless the loop already settled them on its own answer. Nothing is added
-    under the text: the lines go above it, in the frame and in the saved answer."""
+    """Wrap ``StreamingChatService._answer_additions`` (US-002): the lines above the answer (its
+    refused writes) are settled from the turn's receipts and the answer that is kept (the first
+    reply, a forced synthesis), unless the loop already settled them on its own answer. Nothing is
+    added under the text: the lines go above it, in the frame and in the saved answer."""
     @functools.wraps(answer_additions)
     def wrapped(f187_verdict: Any, final_round: Any) -> List[str]:
         if _IN_TURN.get() and _ABOVE.get() is None:
@@ -506,10 +510,10 @@ def saves_the_turns_receipts(reply_parts: Parts) -> Parts:
     return wrapped
 
 
-__all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIVE_KEY", "NOTHING_DONE_LINE", "PART",
+__all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIVE_KEY", "PART",
            "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WAITING", "WRITE", "build_receipts", "claims_work_done",
            "current_receipts", "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
            "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "says_nothing_was_done", "skipped_receipt",
-           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "unbacked_claim", "unbacked_promise",
-           "with_lines_above",
+           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "tried", "turn_receipts", "unbacked_claim",
+           "unbacked_promise", "unbacked_sentences", "with_lines_above",
            "writes_its_receipts"]

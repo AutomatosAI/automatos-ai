@@ -6,7 +6,9 @@ an agent is read from the database, so every worker answers the same:
 - an agent that calls the AI provider (an API agent) can't run while the workspace's
   AI credit is out. That means a run failed for credit after the last model call that
   went through;
-- a CLI session agent can't run while no CLI host that runs its CLI is online.
+- a CLI session agent can't run while no CLI host that runs its CLI is online, unless it
+  ran inside the recent-run window (N15-6: a run shows a host serves it, whatever a lapsed
+  heartbeat or its stored flag says; services/agent_last_run.py).
 
 "active" keeps its meaning (the agent is switched on). Why it can't run *now* is
 said beside it, and Auto can suggest one that can.
@@ -59,7 +61,17 @@ def why_unavailable(db: Session, workspace_id: Any, agents: Iterable[Any]) -> Di
             reason = CREDIT_OUT if _once(found, "credit_out", lambda: ai_credit_out(db, workspace_id)) else None
         if reason:
             out[_agent_id(agent)] = reason
-    return out
+    return _unless_it_ran(db, workspace_id, out)
+
+
+def _unless_it_ran(db: Session, workspace_id: Any, reasons: Dict[int, str]) -> Dict[int, str]:
+    """``reasons`` without the no-host ones of agents that ran inside the window (N15-6): a run
+    shows a host serves them, whatever a lapsed heartbeat says. The credit is live and stays."""
+    from services.agent_last_run import last_runs
+
+    host_bound = [agent_id for agent_id, why in reasons.items() if why != CREDIT_OUT]
+    ran = last_runs(db, workspace_id, host_bound) if host_bound else {}
+    return {agent_id: why for agent_id, why in reasons.items() if agent_id not in ran}
 
 
 def _no_host(db: Session, workspace_id: Any, config: Mapping[str, Any], found: Dict[str, Any]) -> Any:
@@ -89,24 +101,41 @@ def _agent_id(agent: Any) -> Any:
 
 
 def says_who_can_run(handler: Callable[..., Awaitable[Dict[str, Any]]]) -> Callable[..., Awaitable[Dict[str, Any]]]:
-    """Wrap platform_list_agents: each agent says whether it can run now, and why not,
-    so Auto suggests one that can, and every agent reaches the model however long the
-    team (F362). Never on a public widget turn."""
+    """Wrap platform_list_agents or platform_get_agent: each agent says whether it can run now,
+    why not, and its last run (N15-6), so Auto suggests one that can, and every agent reaches the
+    model however long the team (F362). Never on a public widget turn."""
     @functools.wraps(handler)
     async def wrapped(db: Session, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         from core.security.surface import widget_turn
 
         result = await handler(db, workspace_id, params)
-        agents = result.get("agents") if isinstance(result, dict) and result.get("success") else None
-        if not agents or widget_turn():
+        if not isinstance(result, dict) or not result.get("success") or widget_turn():
             return result
-        reasons = _reasons(db, workspace_id, [
-            {"id": a.get("id"), "configuration": {"runtime": a.get("runtime"), "provider": a.get("provider")}}
-            for a in agents])
-        listed = [{**a, "can_run": a.get("id") not in reasons, **({"why": reasons[a["id"]]} if a.get("id") in reasons
-                                                                   else {})} for a in agents]
-        return every_agent_fits({**result, "agents": listed})  # F362: a long team is shortened, never cut
+        agents, agent = result.get("agents"), result.get("agent")
+        if isinstance(agents, list) and agents:
+            return every_agent_fits({**result, "agents": _can_run(db, workspace_id, agents)})
+        if isinstance(agent, dict) and "id" in agent:
+            return {**result, "agent": _can_run(db, workspace_id, [agent])[0]}
+        return result
     return wrapped
+
+
+def _can_run(db: Session, workspace_id: Any, agents: List[Any]) -> List[Any]:
+    """Each listed agent with ``can_run``, ``why`` when it can't, and its last run (N15-6)."""
+    from services.agent_last_run import read_last_runs, with_last_run
+
+    listed = [a for a in agents if isinstance(a, dict)]
+    reasons = _reasons(db, workspace_id, [
+        {"id": a.get("id"), "configuration": {"runtime": a.get("runtime"), "provider": a.get("provider")}}
+        for a in listed])
+    ran = read_last_runs(db, workspace_id, [a.get("id") for a in listed])
+
+    def one(agent: Any) -> Any:
+        if not isinstance(agent, dict):
+            return agent
+        why = {"why": reasons[agent["id"]]} if agent.get("id") in reasons else {}
+        return with_last_run({**agent, "can_run": agent.get("id") not in reasons, **why}, ran)
+    return [one(a) for a in agents]
 
 
 def with_unavailable(endpoint: Callable[..., Awaitable[List[Any]]]) -> Callable[..., Awaitable[List[Any]]]:

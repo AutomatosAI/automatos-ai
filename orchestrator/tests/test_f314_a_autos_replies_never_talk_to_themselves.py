@@ -80,9 +80,9 @@ def test_the_owner_reads_plain_words_under_a_claim_no_action_backed():
     plain = line("I've started the weekly report.")
     named = line("I've started the weekly report.", "platform_store_memory")
 
-    assert plain == ("Just to be clear: I haven't done that yet, and nothing has changed. "
-                     "Ask me again if you want it done.")
-    assert named == "Just to be clear: I haven't started anything in this reply. Ask me again if you want it done."
+    # P256-FIX-N15-2: the line in the claim's place names it, whether or not another write went through
+    assert plain == named == (
+        "Just to be clear: I haven't started anything in this reply. Ask me again if you want it done.")
     for said in (plain, named):
         assert "Correction:" not in said and "this reply says something was" not in said
 

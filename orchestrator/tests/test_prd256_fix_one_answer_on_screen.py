@@ -10,6 +10,12 @@ Now a frame carries the exact text its round streamed, and a retraction waits fo
 replacement with something in it. These tests drive the real tool loop with a scripted
 provider streaming through ``in_owner_words``, and apply the frames with the frontend's
 rule (frontend/lib/chat/narration.ts ``withoutNarration``, hooks.ts), ported below.
+
+P256-FIX-N15-1: a claim is no longer nudged; its sentence is taken out of the draft and the
+corrected copy, never streamed, answers (the draft is retracted once the answer is known). The
+nudges that remain (F306's announced step here) keep the rules below: a blank retry keeps the
+draft, a draft is retracted once whatever its retry did, a held round settles by where the
+answer came from.
 """
 from __future__ import annotations
 
@@ -26,6 +32,8 @@ TOOLS = [{"type": "function", "function": {"name": "platform_execute", "paramete
 LOOKING = "Let me look at the mission first."
 CLAIM = "I've approved the mission. It's now running."
 ANSWER = "I have not approved it: that needs you."
+APPROVED_LINE = "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done."
+STEP = "Let me check the mission's steps first:"           # F306: a step announced, no call made
 NAMED = "I missed a required parameter for the create_blog_post tool. What title would you like?"
 THINKING_CLAIM = ["<think>The owner wants it ", "approved.</think>", "I've approved the mission. ",
                   "It's now running (`platform_", "execute`)."]
@@ -171,22 +179,26 @@ def _retractions(frames):
 
 def test_a_thinking_rewritten_draft_is_retracted_as_it_streamed():
     """The draft streamed its <think> block and its name said in plain words live; its
-    content lost the block. The retraction is the streamed text, so the screen keeps one answer."""
-    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), (THINKING_CLAIM, None), ([ANSWER], None))
+    content lost the block. Its claim is taken out (N15-1, the model is not called again): the
+    retraction is the streamed text, so the screen holds nothing until the turn sends the copy."""
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), (THINKING_CLAIM, None))
     frames, final = _turn(provider, chat_lane=True)
 
     assert _retractions(frames) == [STREAMED_CLAIM]
     assert STREAMED_CLAIM != "I've approved the mission. It's now running (execute)."  # the draft's content
-    assert final.content == ANSWER
-    assert _screen_after(frames) == ANSWER
+    assert provider.rounds == []                                                       # no retry
+    assert final.content == APPROVED_LINE and not getattr(final, "streamed", False)    # the turn sends it next
+    assert _screen_after(frames) == ""
 
 
-def test_a_nudged_draft_then_a_real_answer_is_one_retraction_and_one_answer():
-    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([CLAIM], None), ([ANSWER], None))
+def test_a_draft_with_its_claim_taken_out_is_one_retraction_and_one_answer():
+    """In an agent's voice too: the sentence that goes on from the claim goes with it (N15-CI)."""
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([CLAIM], None))
     frames, final = _turn(provider)
 
     assert _retractions(frames) == [CLAIM]
-    assert final.content == ANSWER and _screen_after(frames) == ANSWER
+    assert final.content == APPROVED_LINE and not getattr(final, "streamed", False)
+    assert _screen_after(frames) == ""
 
 
 # ── a blank retry never replaces an answer ──────────────────────────────────
@@ -203,52 +215,52 @@ def test_a_blank_owner_words_retry_sends_no_retraction_and_the_original_is_saved
 
 
 def test_a_blank_retry_to_a_nudge_keeps_the_draft_on_screen():
-    """``kept_if_blank``: the nudge got an empty reply, the reply it was about stands."""
-    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([CLAIM], None), ([], None))
+    """``kept_if_blank``: the nudge (F306's) got an empty reply, the reply it was about stands."""
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([STEP], None), ([], None))
     frames, final = _turn(provider)
 
     assert _retractions(frames) == []
-    assert final.content == CLAIM and _screen_after(frames) == CLAIM
+    assert final.content == STEP and _screen_after(frames) == STEP
 
 
 def test_a_held_retraction_goes_out_when_the_answer_replaced_the_draft():
     """Auto's own turn turns a blank reply into the account of its calls (F264): that account
     replaces the draft, so the draft is retracted once, before the answer the turn streams."""
-    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([CLAIM], None), ([], None))
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([STEP], None), ([], None))
     frames, final = _turn(provider, chat_lane=True)
 
-    assert _retractions(frames) == [CLAIM]
-    assert final.content != CLAIM and not getattr(final, "streamed", False)  # the turn streams it next
+    assert _retractions(frames) == [STEP]
+    assert final.content != STEP and not getattr(final, "streamed", False)  # the turn streams it next
     assert _screen_after(frames) == ""
 
 
 # ── P256-FIX-RVW-24: a draft is retracted once, whatever its retry did ───────
 
-DONE = "Done."
-MOVED = "I've moved #0231 to Done."
+LOOKING_AT_THE_BOARD = "Let me check the board:"
+FOUND = "Let me check the board: #0231 is in Review."
 
 
 def test_a_draft_whose_retry_only_calls_tools_is_retracted_once_and_the_answer_stays():
     """The retry made the call with no text, so it never became the latest streamed round:
     the answer after it (the draft's own words) must not retract the draft a second time,
     or the frontend's rule takes the answer off the screen."""
-    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([CLAIM], None),
-                         ([], [_call("platform_update_task_status")]), ([CLAIM], None))
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([STEP], None),
+                         ([], [_call("platform_list_tasks")]), ([STEP], None))
     frames, final = _turn(provider, chat_lane=True)
 
-    assert _retractions(frames) == [CLAIM]
-    assert final.content == CLAIM
-    assert _screen_after(frames) == CLAIM
+    assert _retractions(frames) == [STEP]
+    assert final.content == STEP
+    assert _screen_after(frames) == STEP
 
 
 def test_an_answer_that_contains_the_draft_stays_whole_after_a_tool_only_retry():
-    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([DONE], None),
-                         ([], [_call("platform_update_task_status")]), ([MOVED], None))
-    frames, final = _turn(provider, chat_lane=True, owner="Move ticket 231 to Done.")
+    provider = _Provider(([LOOKING], [_call("platform_get_mission")]), ([LOOKING_AT_THE_BOARD], None),
+                         ([], [_call("platform_list_tasks")]), ([FOUND], None))
+    frames, final = _turn(provider, chat_lane=True, owner="Where is ticket 231 now?")
 
-    assert _retractions(frames) == [DONE]
-    assert final.content == MOVED
-    assert _screen_after(frames) == MOVED
+    assert _retractions(frames) == [LOOKING_AT_THE_BOARD]
+    assert final.content == FOUND
+    assert _screen_after(frames) == FOUND
 
 
 # ── the screen on its own ───────────────────────────────────────────────────
@@ -329,23 +341,23 @@ def test_a_held_round_settled_is_never_retracted_again():
 
 # ── P256-FIX-RVW-43: a held round is settled by where the answer came from ──
 
-UPDATED = "I've updated the agent and switched its model."
+CHECKING = "Let me check which models OPS can use:"
 APOLOGY_R = ("My apologies. platform_update_agent was refused: it needs a value I don't have. "
              "Which model should the agent use?")
 WITHOUT_APOLOGY_R = APOLOGY_R.removeprefix("My apologies. ")
 
 
 def test_a_blank_owner_words_retry_after_an_apology_stripped_answer_leaves_it_on_screen():
-    """The write is refused, the claim is nudged, the retry opens with an apology and names
-    the action; the answer saved is the retry without its apology (a copy), and the F205
-    re-prompt comes back blank. The retry's text stays on the screen: never none."""
-    provider = _Provider(([LOOKING], [_call("platform_update_agent")]), ([UPDATED], None),
+    """The write is refused, the draft announcing a step is nudged (F306), the retry opens with
+    an apology and names the action; the answer saved is the retry without its apology (a copy),
+    and the F205 re-prompt comes back blank. The retry's text stays on the screen: never none."""
+    provider = _Provider(([LOOKING], [_call("platform_update_agent")]), ([CHECKING], None),
                          ([APOLOGY_R], None), ([], None))
     frames, final = _turn(provider, success=False, owner="Switch OPS to a cheaper model.")
 
     assert provider.tools[-1] is None                       # the F205 re-prompt ran, with no tools
     assert final.content == WITHOUT_APOLOGY_R and final.streamed
-    assert _retractions(frames) == [UPDATED]                 # the nudged claim, and only it
+    assert _retractions(frames) == [CHECKING]                # the nudged draft, and only it
     assert _screen_after(frames) == APOLOGY_R
 
 
@@ -363,13 +375,13 @@ def test_a_gated_apology_never_streamed_and_the_blank_retry_leaves_the_answer_on
     """Through LLMManager the apology never reaches the screen: the screen's round is the
     copy the gate saved, holding what the gate let through, so the blank F205 re-prompt
     holds it and the answer, that copy, stands."""
-    provider = _gated(([LOOKING], [_call("platform_update_agent")]), ([UPDATED], None),
+    provider = _gated(([LOOKING], [_call("platform_update_agent")]), ([CHECKING], None),
                       ([APOLOGY_R], None), ([], None))
     frames, final = _turn(provider, success=False, owner="Switch OPS to a cheaper model.")
 
     assert provider.tools[-1] is None
     assert final.content == WITHOUT_APOLOGY_R
-    assert _retractions(frames) == [UPDATED]
+    assert _retractions(frames) == [CHECKING]
     assert _screen_after(frames) == WITHOUT_APOLOGY_R
 
 

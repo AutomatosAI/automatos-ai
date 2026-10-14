@@ -25,6 +25,7 @@ from ..capabilities.taxonomy import (
     intent_is_destructive,
 )
 from ..capabilities.models import ComposioActionMetadata
+from ..capabilities.intent_match import intent_allows
 
 logger = logging.getLogger(__name__)
 
@@ -271,39 +272,16 @@ class ActionCapabilityFilter:
         ).scalar_one_or_none()
 
         if not metadata:
-            # PRD-177 S3 (F018): the metadata table has no row for this action.
-            total = self.db.execute(
-                select(ComposioActionMetadata.action_id).limit(1)
-            ).first()
-            if not total:
-                # Empty table (sync not yet run) — we cannot classify. Fail
-                # CLOSED for destructive intent so an unclassified action is
-                # never silently permitted to do damage; still allow clearly
-                # non-destructive intent so a cold start is not bricked.
-                from config import config
-
-                fail_closed = bool(getattr(config, "COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", True))
-                if fail_closed and not allow_destructive and intent_is_destructive(intent):
-                    logger.warning(
-                        f"Action metadata empty and intent reads destructive — "
-                        f"failing CLOSED (requires confirmation): {action_id}"
-                    )
-                    return False, (
-                        "Action metadata not yet synced and the request looks "
-                        "destructive — confirmation required before running."
-                    )
-                logger.info(f"Action metadata table empty (sync not run), allowing non-destructive: {action_id}")
-                return True, "Metadata not yet synced (non-destructive, allowing)"
-            return False, f"Unknown action: {action_id}"
+            return self._unclassified_verdict(action_id, intent, allow_destructive)
 
         # Extract capabilities from intent
         required_caps = self._intent_to_capabilities(intent)
 
-        # Check capability alignment
-        action_caps = set(metadata.capabilities or [])
-        if required_caps and not action_caps.intersection(set(required_caps)):
+        # Check capability alignment. F428 (night 15): a read meets any intent, and a draft
+        # action is one whatever the sync stored (capabilities/intent_match.py).
+        if not intent_allows(action_id, metadata.capabilities, required_caps):
             return False, (
-                f"Action capabilities {list(action_caps)} "
+                f"Action capabilities {list(metadata.capabilities or [])} "
                 f"don't match intent capabilities {required_caps}"
             )
 
@@ -313,6 +291,40 @@ class ActionCapabilityFilter:
                 return False, "Destructive action not allowed for non-destructive intent"
 
         return True, "Action is eligible"
+
+    def _unclassified_verdict(
+        self,
+        action_id: str,
+        intent: str,
+        allow_destructive: bool,
+    ) -> tuple[bool, str]:
+        """PRD-177 S3 (F018): the metadata table has no row for this action.
+
+        An empty table (sync not yet run) cannot classify: fail CLOSED for a
+        destructive intent so an unclassified action is never silently permitted
+        to do damage; still allow a clearly non-destructive intent so a cold start
+        is not bricked. A row missing from a synced table is an unknown action.
+        """
+        total = self.db.execute(
+            select(ComposioActionMetadata.action_id).limit(1)
+        ).first()
+        if total:
+            return False, f"Unknown action: {action_id}"
+
+        from config import config
+
+        fail_closed = bool(getattr(config, "COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", True))
+        if fail_closed and not allow_destructive and intent_is_destructive(intent):
+            logger.warning(
+                "Action metadata empty and intent reads destructive — "
+                "failing CLOSED (requires confirmation): %s", action_id
+            )
+            return False, (
+                "Action metadata not yet synced and the request looks "
+                "destructive — confirmation required before running."
+            )
+        logger.info("Action metadata table empty (sync not run), allowing non-destructive: %s", action_id)
+        return True, "Metadata not yet synced (non-destructive, allowing)"
 
     def get_actions_by_capability(
         self,

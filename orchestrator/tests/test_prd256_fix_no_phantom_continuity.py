@@ -18,7 +18,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from consumers.chatbot.receipts import NOTHING_DONE_LINE, honesty_lines
+from consumers.chatbot.claim_check import NOT_DONE, NOTHING_DONE_SAID
+from consumers.chatbot.receipts import honesty_lines
 from core.llm.clients.base import LLMResponse
 from core.llm.fresh_reply import (
     EARLIER_CONVERSATION, opening_for, opens_the_conversation, without_a_back_reference, without_the_platforms_line,
@@ -27,6 +28,9 @@ from core.llm.turn_order import reprompts_in_the_users_turn
 from modules.context.earlier_conversations import EARLIER, labelled, recalled_block
 from modules.context.remembered_figures import EARLIER_NOT_THIS_CHAT, REMEMBERED_RULE
 from modules.tools.execution.nudges import PLATFORM_CHECK
+from tests.helpers_receipts_rule import line
+
+NOTHING_DONE_LINE = NOT_DONE.format(said=NOTHING_DONE_SAID)   # the plain not-done line (a bare "Done.")
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
 CHECKPOINT = {
@@ -150,14 +154,16 @@ def test_one_rule_for_the_lead_ins():
 
 
 # ── the not-done line: only for a claim the receipts do not back, and once ────
+# P256-FIX-N15-2: said only in place of the claim it answers, never above the reply.
 
 def test_a_greeting_or_a_fact_with_no_receipts_gets_no_honesty_line():
-    assert honesty_lines([], GREETING) == []
-    assert honesty_lines([], "The Taster plan is £14 a month and ships on the first Monday.") == []
+    assert line(GREETING) is None and honesty_lines([], GREETING) == []
+    assert line("The Taster plan is £14 a month and ships on the first Monday.") is None
 
 
 def test_i_have_sent_it_with_no_receipt_gets_the_line_once():
-    assert honesty_lines([], "I've sent it.") == [NOTHING_DONE_LINE]
+    assert honesty_lines([], "I've sent it.") == []
+    assert line("I've sent it.") == "Just to be clear: I haven't sent anything in this reply. Ask me again if you want it done."
 
 
 def test_a_copy_of_the_line_the_model_wrote_never_reaches_the_screen():
@@ -167,13 +173,13 @@ def test_a_copy_of_the_line_the_model_wrote_never_reaches_the_screen():
     screen, saved = _reply(copied, earlier)
 
     assert screen == saved == GREETING
-    assert honesty_lines([], saved) == []                    # the greeting claims nothing: no line at all
+    assert line(saved) is None                               # the greeting claims nothing: no line at all
 
 
 def test_a_claim_after_a_copied_line_is_answered_by_the_receipts_line_alone():
     answer = without_the_platforms_line(f"{NOTHING_DONE_LINE}\n\nI've sent it.")
     assert answer == "I've sent it."
-    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]  # once, above the text
+    assert line(answer) == "Just to be clear: I haven't sent anything in this reply. Ask me again if you want it done."   # once, in the claim's place
 
 
 def test_a_reply_that_is_only_the_line_is_left_as_it_is():

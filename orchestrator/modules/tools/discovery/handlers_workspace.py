@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from modules.tools.discovery.memory_owner import owned_by_the_driver
 from modules.tools.discovery.memory_source import defaults_the_source_type
 from modules.tools.discovery.memory_write import memory_metadata, memory_params_refusal, rule_answer
+from modules.tools.discovery.rule_replaces import retires_what_it_replaces
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,7 @@ async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str,
 
 @defaults_the_source_type  # PRD-256 FX-013: source_type is optional; the turn's driver sets its default
 @owned_by_the_driver  # PRD-256 FX-015: no Clerk id (the local edition), the driving person owns it
+@retires_what_it_replaces  # P256-FIX-N15-9 (F429): the owner's new rule retires the one it replaces
 async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Store a curated fact in the workspace's long-term memory (``memory_write`` checks the
     params and builds the metadata; P256-FIX-N14-4: in the owner's own words, it is their

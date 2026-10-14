@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Tuple
 
 from services.deliverable_tags import clean_tag
+from services.named_work import search_patterns
 
 Clause = Tuple[List[str], Dict[str, Any]]
 
@@ -48,9 +49,10 @@ def _dates(filters: Mapping[str, Any]) -> Clause:
 
 
 def _search(raw: Any) -> Clause:
-    if not raw:
-        return [], {}
-    return ["(o.title ILIKE :search OR o.summary ILIKE :search OR o.file_path ILIKE :search)"], {"search": f"%{raw}%"}
+    """F426: every word that names the work, in the title, summary or file path, in any order."""
+    names = {f"search_{i}": pattern for i, pattern in enumerate(search_patterns(raw))}
+    return [f"(o.title ILIKE :{name} OR o.summary ILIKE :{name} OR o.file_path ILIKE :{name})"
+            for name in names], names
 
 
 def _tag(raw: Any) -> Clause:

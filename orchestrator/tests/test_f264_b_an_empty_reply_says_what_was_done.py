@@ -113,7 +113,9 @@ def _loop_turn(lane, first, *texts):
 
 
 def test_the_nudges_empty_retry_says_what_the_turns_call_did():
-    """Night 8 05:43: #0422 moved to done, "moved to cancelled" claimed, the retry empty."""
+    """Night 8 05:43: #0422 moved to done, "moved to cancelled" claimed, the retry empty. P256-FIX-N15-1:
+    the claim is no longer nudged; a reply that was only that claim would leave just "I haven't moved
+    anything", which the move to Done makes false, so the turn's account answers (N15-CI)."""
     result = _loop_turn(LANE_CHAT, LLMResponse(content="", tool_calls=[_move(422, "done")]),
                         "Task #0422 has been moved to 'cancelled'.", "")
     assert APOLOGY not in result.response.content
@@ -121,9 +123,18 @@ def test_the_nudges_empty_retry_says_what_the_turns_call_did():
     assert result.response.streamed is False                     # the chat shows it: it was never streamed
 
 
-def test_an_empty_answer_after_a_claim_with_no_call_says_nothing_changed():
-    result = _loop_turn(LANE_CHAT, LLMResponse(content="I've cancelled Mission #0336.", tool_calls=None), "")
-    assert result.response.content == NOTHING_CHANGED.format(why=WHY_NO_CALL)
+def test_a_claim_with_no_call_says_nothing_was_done_and_asks_the_model_nothing():
+    """P256-FIX-N15-1: "I've cancelled Mission #0336." with no call is no longer nudged (whose retry came
+    back empty); the line takes its place and says it was not done."""
+    model = _Model("")
+    executor = ToolLoopExecutor(llm_callback=model, tool_callback=None, max_iterations=5)
+    with usage_scope(request_type=LANE_CHAT, execution_id="chat:1"):
+        result = asyncio.run(executor.run(
+            initial_response=LLMResponse(content="I've cancelled Mission #0336.", tool_calls=None),
+            messages=[{"role": "user", "content": "Please cancel #0336."}], tools=TOOLS, workspace_id=WS))
+    assert len(model.queue) == 1                                 # never called
+    assert result.response.content == (
+        "Just to be clear: I haven't cancelled anything in this reply. Ask me again if you want it done.")
 
 
 def test_an_agent_runs_empty_answer_is_left_to_its_run():

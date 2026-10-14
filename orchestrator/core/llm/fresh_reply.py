@@ -14,7 +14,8 @@ Two faults opened Auto's replies on night 13:
   and every saved answer opens with the lines above it, so the conversation the model reads
   holds the line at the top of its own earlier replies, and the model wrote it again itself.
   A reply in such a conversation (or in a fresh one) loses a copy of the line it opens with
-  (``without_the_platforms_line``): the line is the receipts' alone, and said once.
+  (``without_the_platforms_line``): the line is the receipts' alone, and said once. Since
+  P256-FIX-N15-2 the platform says it only in place of a claim it took out, never above a reply.
 
 ``opening_for`` gives the checks a call's reply opening goes through; ``core/llm/turn_order.py``
 runs them on the text that streams (``reprompt_reply.ApologyGate``) and on the reply that is

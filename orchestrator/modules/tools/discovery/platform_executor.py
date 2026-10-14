@@ -139,9 +139,9 @@ from modules.tools.discovery.owner_only import asks_the_owner_first  # PRD-256 U
 from modules.tools.discovery.confirmation_gate import asks_at_the_confirmation_gate  # P256-FIX-RVW-9
 from modules.tools.discovery.session_ticket import carries_the_session_ticket  # PRD-255 US-012
 from modules.tools.discovery.question_turns import answers_the_question_first  # F381 (night 11)
+from modules.tools.discovery.board_task_list import list_board_tasks  # F424: pages, one total
 from modules.tools.discovery.handlers_board_tasks import (
     wait_for_board_task,
-    list_board_tasks,
     get_board_task,
     update_board_task,
 )
@@ -356,7 +356,7 @@ _DRIVER_AWARE_ACTIONS = (
     "platform_create_playbook", "platform_resume_context",   # FX-015: on local the person is the viewer
     "platform_invite_member",
     "platform_set_member_role", "platform_store_memory",   # FX-013: a memory a person said is platform_verified
-    "platform_my_actions", "platform_browse_memories", "platform_delete_memory",  # N14-3/4: the asker's chats, clicks, rules
+    "platform_my_actions", "platform_browse_memories", "platform_delete_memory", "platform_search_chat_history",  # N14-3/4, N15-4: the asker's chats, clicks, rules
 )
 
 

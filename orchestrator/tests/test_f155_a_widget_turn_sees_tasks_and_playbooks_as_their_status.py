@@ -44,13 +44,14 @@ def _task(db, ws, **fields):
 
 
 def test_a_widget_turn_sees_a_board_task_as_its_status(db_session, seed_workspace):
+    from modules.tools.discovery import board_task_list as board_list
     from modules.tools.discovery import handlers_board_tasks as board
 
     ws = UUID(seed_workspace())
     task = _task(db_session, ws, status="done", result=f"Dear chef, {PRIVATE}", error_message=f"retried at {PRIVATE}")
     with _widget_turn("tasks:read"):
         one = asyncio.run(board.get_board_task(db_session, ws, {"task_id": task.id}))
-        listed = asyncio.run(board.list_board_tasks(db_session, ws, {}))
+        listed = asyncio.run(board_list.list_board_tasks(db_session, ws, {}))
         waited = asyncio.run(board.wait_for_board_task(db_session, ws, {"task_id": task.id}))
     assert set(one["task"]) == VISITOR_TASK and "frontend_data" not in one
     assert [set(t) for t in listed["tasks"]] == [VISITOR_TASK]
@@ -114,7 +115,7 @@ def test_a_widget_turn_cannot_tell_a_name_no_agent_has_from_an_agent_without_tic
     agent-name oracle for a key that holds tasks:read but not agents:read."""
     from sqlalchemy import text
 
-    from modules.tools.discovery import handlers_board_tasks as board
+    from modules.tools.discovery import board_task_list as board
 
     ws = UUID(seed_workspace())
     db_session.execute(text("INSERT INTO agents (name, agent_type, workspace_id, status, configuration) "
@@ -123,7 +124,8 @@ def test_a_widget_turn_cannot_tell_a_name_no_agent_has_from_an_agent_without_tic
     with _widget_turn("tasks:read"):
         idle = asyncio.run(board.list_board_tasks(db_session, ws, {"assigned_agent_name": "Payroll Clerk"}))
         nobody = asyncio.run(board.list_board_tasks(db_session, ws, {"assigned_agent_name": "Nobody Here"}))
-    assert idle == nobody == {"success": True, "tasks": [], "total": 0, "total_matching": 0, "limit": 20}
+    assert idle == nobody == {"success": True, "tasks": [], "total": 0, "offset": 0, "limit": 20,
+                              "returned": 0, "next_offset": None}
 
     owner = asyncio.run(board.list_board_tasks(db_session, ws, {"assigned_agent_name": "Nobody Here"}))
     assert owner["note"] == "No agent named 'Nobody Here' found"

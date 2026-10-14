@@ -149,44 +149,66 @@ def _create_task_properties() -> dict:
 
 # ── Board read tools ────────────────────────────────────────────
 
+def _list_tasks_parameters() -> Dict[str, Any]:
+    """F424: filters plus a page (offset, limit); the result's total is the filter's."""
+    return {
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": _board_statuses(),
+                "description": "Filter by status (omit for all)",
+            },
+            "priority": {
+                "type": "string",
+                "enum": ["urgent", "high", "medium", "low"],
+                "description": "Filter by priority",
+            },
+            "assigned_agent_name": {
+                "type": "string",
+                "description": "Filter by assigned agent name",
+            },
+            "search": {
+                "type": "string",
+                "description": (
+                    "The name of a piece of work (a draft, quote, invoice, post), e.g. "
+                    "'Guji blog draft': keeps the tasks whose title, or a deliverable on "
+                    "them (its title or file name), holds every word of it, in any order."
+                ),
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Page size (default 20, max 200).",
+            },
+            "offset": {
+                "type": "integer",
+                "description": (
+                    "How many matching tasks to skip (default 0). For the next page, "
+                    "pass the result's 'next_offset'; it is null on the last page."
+                ),
+            },
+        },
+        "required": [],
+    }
+
+
 def _register_list_tasks(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_list_tasks",
         description=(
-            "List tasks on the board with optional filters. Returns task titles, "
-            "statuses, priorities, assigned agents, and dates. Use when the user asks "
+            "List tasks on the board with optional filters, one page at a time. Returns task "
+            "titles, statuses, priorities, assigned agents, and dates. Use when the user asks "
             "about their tasks, board status, what's in progress, or what's in the queue. "
-            "Each ticket has a number (#0042): name tickets by it, never by their place in a list."
+            "The result's 'total' is how many tasks match the filter, on every page: that is "
+            "the count to give. When 'next_offset' is not null there are more: call again with "
+            "offset=next_offset (same filters) until it is null before listing every one. "
+            "Each ticket has a number (#0042): name tickets by it, never by their place in a list. "
+            "When the owner names a piece of work without its number ('the Guji blog draft', "
+            "'the Westmoor invoice'), pass search with its name: work waiting on the owner is "
+            "in Review, and a ticket's deliverables are searched by title and file name too."
         ),
         category="tasks",
-        parameters={
-            "type": "object",
-            "properties": {
-                "status": {
-                    "type": "string",
-                    "enum": _board_statuses(),
-                    "description": "Filter by status (omit for all)",
-                },
-                "priority": {
-                    "type": "string",
-                    "enum": ["urgent", "high", "medium", "low"],
-                    "description": "Filter by priority",
-                },
-                "assigned_agent_name": {
-                    "type": "string",
-                    "description": "Filter by assigned agent name",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": (
-                        "Max results (default 20, max 200). The result's "
-                        "'total_matching' says how many match in all — raise the "
-                        "limit when you need every one (e.g. to close all blocked tasks)."
-                    ),
-                },
-            },
-            "required": [],
-        },
+        parameters=_list_tasks_parameters(),
         permission_level="read",
         tags=["tasks", "read", "board", "list"],
         examples=[
@@ -194,6 +216,9 @@ def _register_list_tasks(registry: ActionRegistry) -> None:
             "show me in-progress tasks",
             "what's assigned to the researcher?",
             "list urgent tasks",
+            "how many cards are in review?",
+            "show me the next page of tasks",
+            "show me the Guji blog draft",
         ],
         accepts=("tags",),
     ))

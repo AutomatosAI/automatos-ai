@@ -6,7 +6,9 @@ playbook run that night. Each turn's receipts were saved with its message (PRD-2
 ``receipts`` part), and nothing read them across chats.
 
 ``writes_in`` reads the done and waiting write receipts of the asking person's own chats in the
-window, in this workspace only, never another person's chat. Each names its card by the board
+window, in this workspace only, never another person's chat. P256-FIX-N15-4 (F425): it reads only the
+turns that hold a write, oldest first, so a cap leaves out the newest and the answer can say where
+the rest begins (``Found.rest_from``) and how to read on. Each names its card by the board
 number (``#workspace_seq``): by the receipt's subject, else by the card its link opens; a row id
 is never shown (P256-FIX-N13-7). The clicks are ``my_actions_clicks``'s.
 """
@@ -22,7 +24,8 @@ Item = Dict[str, Any]
 
 RECEIPTS_PART, WRITE, DONE, WAITING = "receipts", "write", "done", "waiting"  # consumers/chatbot/receipts.py
 ASSISTANT = "assistant"
-MAX_MESSAGES = 500   # the newest assistant messages of the window that are read
+MAX_MESSAGES = 500   # the window's assistant turns holding a write that are read, oldest first
+HOLDS_A_WRITE = [{"type": RECEIPTS_PART, RECEIPTS_PART: [{"kind": WRITE}]}]   # JSONB containment
 # Each item's time as history: "at 03:04 on 13 Oct" (claims_backed reads "at 03:04" as a past time,
 # so a recap the owner asked for is not taken for this reply's own claims).
 AT = "at {when}"
@@ -31,10 +34,10 @@ NUMBER_KEY = re.compile(r"^#?0*(\d+)(?:\.(\d+))?$")
 
 
 class Found(NamedTuple):
-    """What a read found, oldest first, and whether its cap cut older rows off."""
+    """What a read found, oldest first, and, when its cap cut the newest rows off, when they begin."""
 
     items: List[Item]
-    capped: bool
+    rest_from: Optional[datetime] = None
 
 
 def number_key(ref: Any) -> Optional[str]:
@@ -60,11 +63,12 @@ def writes_in(db: Any, workspace_id: Any, user_id: int, window: Window) -> Found
     rows = (db.query(Message.parts, Message.created_at, Chat.id, Chat.title)
             .join(Chat, Chat.id == Message.chat_id)
             .filter(Message.workspace_id == workspace_id, Chat.workspace_id == workspace_id,
-                    Chat.user_id == user_id, Message.role == ASSISTANT,
+                    Chat.user_id == user_id, Message.role == ASSISTANT, Message.parts.contains(HOLDS_A_WRITE),
                     Message.created_at >= _naive(window.start), Message.created_at < _naive(window.end))
-            .order_by(Message.created_at.desc()).limit(MAX_MESSAGES + 1).all())
-    items = [item for row in reversed(rows[:MAX_MESSAGES]) for item in _writes_of(row)]
-    return Found(_numbered(db, workspace_id, items), len(rows) > MAX_MESSAGES)
+            .order_by(Message.created_at.asc(), Message.id.asc()).limit(MAX_MESSAGES + 1).all())
+    items = [item for row in rows[:MAX_MESSAGES] for item in _writes_of(row)]
+    rest_from = rows[MAX_MESSAGES][1] if len(rows) > MAX_MESSAGES else None
+    return Found(_numbered(db, workspace_id, items), _utc(rest_from) if rest_from is not None else None)
 
 
 def at_said(moment: datetime) -> str:
@@ -118,9 +122,13 @@ def _keys(numbers: Sequence[Any]) -> Set[str]:
     return {key for key in (number_key(number) for number in numbers) if key}
 
 
+def _utc(moment: datetime) -> datetime:
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment.astimezone(timezone.utc)
+
+
 def _naive(moment: datetime) -> datetime:
     """``messages.created_at`` is stored without a zone, in UTC."""
     return moment.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-__all__ = ["DONE", "WAITING", "Found", "at_said", "iso_utc", "matching", "number_key", "writes_in"]
+__all__ = ["DONE", "WAITING", "Found", "Item", "at_said", "iso_utc", "matching", "number_key", "writes_in"]

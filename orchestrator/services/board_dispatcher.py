@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
+from services.agent_last_run import refreshes_the_flag
 from services.board_events import notify_board_event
 from services.daily_spend_guard import release_spend_holds
 from services.pasted_data import pasted_data_rule
@@ -136,6 +137,7 @@ def notify_task_available(db: Session, *, workspace_id, task_id: int) -> None:
         logger.debug("[dispatch] pg_notify failed for task %s", task_id, exc_info=True)
 
 
+@refreshes_the_flag  # N15-6: a CLI host's claim is its agent running; a stale inactive flag goes
 def claim_tasks(
     db: Session,
     *,

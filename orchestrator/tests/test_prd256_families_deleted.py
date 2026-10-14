@@ -108,10 +108,26 @@ def test_the_table_is_the_families_26_sentences():
     assert len(SENTENCES) == 26 and len({case[0] for case in SENTENCES}) == 26
 
 
+# P256-FIX-N15-CI: a claim that said a done write to the card it names wrong takes that write's account
+# in its place, never the line ("I haven't moved anything" over #0422 moved to Done would be false).
+ACCOUNTED = {"F261 moved to cancelled over a move to done": "#0422 was moved to Done."}
+
+
+def _in_place(said, *calls):
+    """The reply as the owner gets it, its unbacked claims taken out (Auto's voice)."""
+    from consumers.chatbot.claim_removed import without_unbacked_claims
+    from tests.helpers_receipts_rule import tracker_of
+
+    return without_unbacked_claims(said, tracker_of(calls).outcomes, True).text
+
+
 @pytest.mark.parametrize("family, said, calls, claim", SENTENCES, ids=[case[0] for case in SENTENCES])
 def test_each_sentence_is_caught_or_cleared_by_the_receipts_rule(family, said, calls, claim):
     assert nudged(said, *calls) == claim, family
-    assert (line(said, *calls) is None) is (claim is None), family     # caught: the line above the answer too
+    if family in ACCOUNTED:                                            # caught: the write's account in its place
+        assert _in_place(said, *calls) == ACCOUNTED[family], family
+        return
+    assert (line(said, *calls) is None) is (claim is None), family     # caught: the line in its place too (N15-2)
 
 
 # ── P256-FIX-RVW-37: the four rows FX-007 inverted, each cleared by its backing call ──
@@ -268,12 +284,17 @@ def test_service_py_is_shorter_and_holds_no_family():
         assert gone not in source, gone
 
 
-def test_the_in_loop_nudge_and_the_first_reply_read_the_receipts_rule():
+def test_the_in_loop_check_and_the_first_reply_read_the_receipts_rule():
     from consumers.chatbot.service import StreamingChatService
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
-    nudge = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in nudge   # RVW-7: the run's voice
+    from modules.tools.execution import claims_in_place
+
+    check = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    # RVW-7: the run's voice; P256-FIX-N15-1: the claim is taken out in place, never nudged (N15-2: claims_in_place)
+    assert "return in_place(self, current)" in check
+    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)" in inspect.getsource(
+        claims_in_place.in_place)
     assert "claims_work_done(response.content)" in inspect.getsource(
         StreamingChatService._first_reply_goes_through_the_loop)
 

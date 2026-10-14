@@ -64,7 +64,7 @@ def test_stored_or_card_tags_are_read_leniently():
 def test_the_tag_filter_matches_the_cleaned_tag_as_a_bound_parameter():
     where, params = list_filter(WS, {"tag": "  Q3 ", "search": "box"})
     assert TAG_CONDITION in where and params["tag"] == "q3"
-    assert params["search"] == "%box%" and params["workspace_id"] == str(WS)
+    assert params["search_0"] == "%box%" and params["workspace_id"] == str(WS)
 
     where, params = list_filter(WS, {"tag": "   "})
     assert TAG_CONDITION not in where and "tag" not in params

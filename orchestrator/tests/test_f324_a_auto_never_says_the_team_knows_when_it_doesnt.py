@@ -80,17 +80,16 @@ def test_what_the_team_will_know_is_no_report_of_work_done(said):
     assert nudged(said, *MEMORY) is None and line(said, *MEMORY) is None
 
 
-def test_the_reply_is_nudged_once_by_the_receipts_rule():
-    """No team family: the first reply goes through the loop (``claims_work_done``) and its one nudge
-    names the claim; the honest retry is the answer."""
-    model = f187._Model(HONEST)
+def test_the_reply_is_checked_once_by_the_receipts_rule():
+    """No team family: the first reply goes through the loop (``claims_work_done``) and its check
+    replaces the claim with the line that says the agents haven't been told (P256-FIX-N15-1: no
+    nudge, no second model call)."""
+    model = f187._Model()
     with usage_scope(request_type=LANE_CHAT):
         _frames, final = f187._turn(model, f187._round(TOLD), owner=OWNER)
 
-    (sent,) = model.sent
-    assert sent[-2] == {"role": "assistant", "content": TOLD}
-    assert f"says something was {TEAM_LABEL}" in sent[-1]["content"]
-    assert final["_final_response"].content == HONEST and final["_f187"].correction is None
+    assert model.sent == []
+    assert final["_final_response"].content == TEAM_NOT_TOLD and final["_f187"].correction is None
 
 
 def test_the_lane_is_deleted_and_the_chat_no_longer_runs_it():

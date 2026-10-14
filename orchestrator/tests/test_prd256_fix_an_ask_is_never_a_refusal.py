@@ -12,6 +12,9 @@ F030's identical-failure guard counted it a failure.
 Now an ask is waiting: neither failed, refused nor succeeded. A claim after it is nudged with
 the card that waits, a repeat is skipped with the card's words, and F030 never counts it. A
 genuine refusal, through the same envelope, is still refused, now with the tool's own reason.
+
+P256-FIX-N15-1 (F422): the claim is no longer nudged; its sentence is replaced by the not-done
+line, which says the card waits (or, after a genuine refusal, that the write was tried).
 """
 from __future__ import annotations
 
@@ -19,7 +22,8 @@ import asyncio
 import json
 
 from core.llm.clients.base import LLMResponse
-from modules.tools.execution.nudges import is_nudge, refused_writes
+from consumers.chatbot.claim_removed import not_done_in_place
+from modules.tools.execution.nudges import is_nudge
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 from tests.test_prd256_fix_waiting_receipt import UPDATE_AGENT, _agent_ask, _chats, _routed
@@ -93,25 +97,22 @@ def test_the_tracker_records_an_ask_inside_the_chats_envelope_as_waiting():
 
     assert (tracker.failed, tracker.succeeded, tracker.refused) == (set(), set(), {})
     assert len(tracker.outcomes) == 1                                   # its receipt still reads it (waiting)
-    assert refused_writes(tracker.outcomes) == []
+    line = not_done_in_place(["changed"], tracker.outcomes)
+    assert f"I asked for your click to {ACT}, so it hasn't happened yet" in line and "I tried" not in line
     assert list(tracker.waiting.values())[0].startswith(CARD)
 
 
-# ── through the loop: the nudge, the repeat ─────────────────────────────────────
+# ── through the loop: the line in the claim's place, the repeat ───────────────────
 
-def test_a_claim_after_an_ask_is_nudged_with_its_card_never_a_refusal():
-    executor, messages, ran, result = _run(_ask_envelope,
-                                           LLMResponse(content=SAID_DONE, tool_calls=None),
-                                           LLMResponse(content=SAID_WAITING, tool_calls=None))
-    nudges = _nudges(messages)
+def test_a_claim_after_an_ask_is_replaced_by_the_line_with_its_card_never_a_refusal():
+    executor, messages, ran, result = _run(_ask_envelope, LLMResponse(content=SAID_DONE, tool_calls=None))
+    answer = result.response.content
 
-    assert len(ran) == 1 and len(nudges) == 1
-    assert f"Card raised: {ACT}." in nudges[0]
-    assert "refused" not in nudges[0].lower()
-    assert "it reported a failure" not in nudges[0]
-    assert "A write in this turn was refused" not in nudges[0]
+    assert len(ran) == 1 and _nudges(messages) == []
+    assert answer == ("Just to be clear: I haven't changed anything in this reply; I asked for your click to "
+                      f"{ACT}, so it hasn't happened yet. Ask me again if you want it done.")
+    assert "refused" not in answer.lower() and "it reported a failure" not in answer and "I tried" not in answer
     assert not executor.tracker.failed                                  # F205's re-prompt reads this
-    assert result.response.content == SAID_WAITING
 
 
 def test_the_same_ask_repeated_is_skipped_with_the_cards_words():
@@ -131,21 +132,19 @@ def test_the_same_ask_repeated_is_skipped_with_the_cards_words():
 
 # ── a genuine refusal is still a refusal ────────────────────────────────────────
 
-def test_a_genuine_refusal_still_gets_refused_again_and_the_refused_write_note():
-    executor, messages, ran, _result = _run(_refusal_envelope,
-                                            LLMResponse(content="", tool_calls=[_update_call("call_again")]),
-                                            LLMResponse(content=SAID_DONE, tool_calls=None),
-                                            LLMResponse(content="That change was refused: no agent #99.",
-                                                        tool_calls=None))
+def test_a_genuine_refusal_still_gets_refused_again_and_the_line_says_it_was_tried():
+    executor, messages, ran, result = _run(_refusal_envelope,
+                                           LLMResponse(content="", tool_calls=[_update_call("call_again")]),
+                                           LLMResponse(content=SAID_DONE, tool_calls=None))
     repeat = _tool_results(messages)[1]
-    nudges = _nudges(messages)
+    answer = result.response.content
 
     assert len(ran) == 1
     assert repeat.startswith("Skipped: Skipped: this exact call already failed in this reply")
     assert NO_AGENT in repeat                                           # the tool's own reason, from raw_result
-    assert len(nudges) == 1 and "A write in this turn was refused" in nudges[0]
-    assert f'{UPDATE_AGENT} (the tool said: "{NO_AGENT}")' in nudges[0]
-    assert "Card raised" not in nudges[0]
+    assert _nudges(messages) == []
+    assert answer.startswith("Just to be clear: I haven't changed anything in this reply; I tried to update the agent")
+    assert "and it didn't go through" in answer and "asked for your" not in answer
     assert executor.tracker.failed == {UPDATE_AGENT}
 
 

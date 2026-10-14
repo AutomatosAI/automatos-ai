@@ -6,12 +6,15 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.board_task_numbers import numbers_its_tickets
+
 logger = logging.getLogger(__name__)
 
 
 _VALID_URGENCIES = {"low", "normal", "high", "urgent"}
 
 
+@numbers_its_tickets  # P256-FIX-N15-9 (F429): the ticket it files is named by its board number too
 async def notify_owner(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Send a message to the workspace owner via their configured channel.
 

@@ -18,12 +18,11 @@ import inspect
 import pytest
 
 import consumers.chatbot.claims_backed as claims_backed
-from consumers.chatbot.receipts import (
-    DONE, NOTHING_DONE_LINE, READ, WRITE, build_receipts, honesty_lines, unbacked_claim,
-)
+from consumers.chatbot.receipts import DONE, READ, WRITE, build_receipts, honesty_lines, unbacked_claim
 from modules.tools.execution.composio_action import action_that_ran, is_slug, slug_reads, slug_stems
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 from modules.tools.execution.turn_account import is_read
+from tests.helpers_receipts_rule import line, unbacked
 
 OK = {"successful": True}
 SAID_SENT = "I've sent the reply to Declan."
@@ -48,6 +47,12 @@ def _receipts(*calls):
     return build_receipts(_tracker(*calls))
 
 
+def _said(answer, *calls):
+    """P256-FIX-N15-2: the not-done line the answer carries in place of its claims, as a list ([] when none)."""
+    in_place = line(answer, *calls)
+    return [in_place] if in_place else []
+
+
 MAIL_FETCHED = _composio("GMAIL_FETCH_EMAILS", {"max_results": 5})
 MAIL_SENT = _composio("GMAIL_SEND_EMAIL", {"to": "declan@example.com"})
 CONTACT_MADE = ("HUBSPOT_CREATE_CONTACT", {"email": "declan@example.com"}, OK)
@@ -58,21 +63,22 @@ CONTACT_MADE = ("HUBSPOT_CREATE_CONTACT", {"email": "declan@example.com"}, OK)
 def test_a_mail_fetch_is_a_read_and_backs_no_send():
     receipts = _receipts(MAIL_FETCHED)
     assert [(r["action"], r["kind"], r["status"]) for r in receipts] == [("GMAIL_FETCH_EMAILS", READ, DONE)]
-    assert honesty_lines(receipts, SAID_SENT) == [NOTHING_DONE_LINE]
+    assert honesty_lines(receipts, SAID_SENT) == []                      # P256-FIX-N15-2: nothing above
+    assert _said(SAID_SENT, MAIL_FETCHED) == [_named("sent")]           # the line in the claim's place
 
 
 def test_a_mail_send_backs_the_send():
     receipts = _receipts(MAIL_SENT)
     assert [(r["action"], r["kind"], r["status"]) for r in receipts] == [("GMAIL_SEND_EMAIL", WRITE, DONE)]
-    assert honesty_lines(receipts, SAID_SENT) == []
+    assert honesty_lines(receipts, SAID_SENT) == [] and _said(SAID_SENT, MAIL_SENT) == []
 
 
 def test_a_per_action_create_backs_the_create():
-    assert honesty_lines(_receipts(CONTACT_MADE), "I've created the contact.") == []
+    assert _said("I've created the contact.", CONTACT_MADE) == []
 
 
 def test_a_send_does_not_back_a_delete():
-    assert honesty_lines(_receipts(MAIL_SENT), "I've deleted the draft.") == [_named("deleted")]
+    assert _said("I've deleted the draft.", MAIL_SENT) == [_named("deleted")]
 
 
 # ── the nudge reads the same receipts ────────────────────────────────────────
@@ -95,7 +101,7 @@ def test_the_loop_nudges_a_send_claimed_after_a_fetch():
     (_composio("gmail-send-email"), SAID_SENT),                  # written the way Composio writes it
 ], ids=["reply", "forward", "publish", "linkedin-post", "update", "delete", "per-action-create", "lower-case"])
 def test_a_write_backs_the_claim_its_verb_says(call, answer):
-    assert honesty_lines(_receipts(call), answer) == []
+    assert _said(answer, call) == []
 
 
 @pytest.mark.parametrize("call, answer, verb", [
@@ -105,15 +111,17 @@ def test_a_write_backs_the_claim_its_verb_says(call, answer):
     (_composio("GOOGLECALENDAR_CREATE_EVENT"), "I've deleted the old event.", "deleted"),
 ], ids=["draft-is-no-send", "label-is-no-send", "create-is-no-update", "create-is-no-delete"])
 def test_a_write_does_not_back_another_verb(call, answer, verb):
-    assert honesty_lines(_receipts(call), answer) == [_named(verb)]
+    assert _said(answer, call) == [_named(verb)]
 
 
 def test_a_claim_with_no_family_needs_the_composio_write_its_stem_names():
     """P256-FIX-RVW-36: a send backed "set" (no family) until any write stopped backing such a verb;
-    a write whose slug says SET does."""
-    assert honesty_lines(_receipts(MAIL_SENT), "I've set it up for you.") == [_named("set")]
-    assert honesty_lines(_receipts(_composio("SLACK_SET_USER_PRESENCE")), "I've set it up for you.") == []
-    assert honesty_lines(_receipts(MAIL_FETCHED), "I've set it up for you.") == [NOTHING_DONE_LINE]
+    a write whose slug says SET does. P256-FIX-N15-2: a verb in no family is read, never taken out, so
+    it draws no line."""
+    assert unbacked("I've set it up for you.", MAIL_SENT) == ["set"]
+    assert unbacked("I've set it up for you.", _composio("SLACK_SET_USER_PRESENCE")) == []
+    assert unbacked("I've set it up for you.", MAIL_FETCHED) == ["set"]
+    assert _said("I've set it up for you.", MAIL_SENT) == _said("I've set it up for you.", MAIL_FETCHED) == []
 
 
 # ── read words are whole words ───────────────────────────────────────────────
@@ -155,9 +163,14 @@ def test_the_tracker_records_the_action_that_ran_and_counts_the_dispatcher():
 
 
 def test_a_refused_composio_send_is_named_by_its_action():
-    tracker = _tracker(_composio("GMAIL_SEND_EMAIL", result={"successful": False, "error": "no recipient"}))
+    refused = _composio("GMAIL_SEND_EMAIL", result={"successful": False, "error": "no recipient"})
+    tracker = _tracker(refused)
     assert tracker.failed == {"GMAIL_SEND_EMAIL"}
-    assert honesty_lines(build_receipts(tracker), SAID_SENT)[-1] == NOTHING_DONE_LINE
+    (tried,) = honesty_lines(build_receipts(tracker), SAID_SENT)          # above: the refused send alone
+    assert tried == "I tried to do that and it didn't go through: no recipient."
+    assert _said(SAID_SENT, refused) == [
+        "Just to be clear: I haven't sent anything in this reply; I tried to do that and it didn't go through. "
+        "Ask me again if you want it done."]
 
 
 def test_a_skipped_composio_call_is_named_by_its_action():

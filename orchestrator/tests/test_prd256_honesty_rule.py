@@ -5,16 +5,21 @@ in action_claims, document_claims and shop_and_team_claims; deleted in FX-007). 
 sentences from the nights: it caught 12, and in three of the four firings the nights recorded it
 denied a write that had gone through (F319, F337, F363). Now the line is decided by the turn's
 receipts: it fires when the answer says, in one generic way, that work is done and no done write
-of that kind is behind the claim (FX-006), and never when one is. A refused write gets its own line. Both go ABOVE
-the text: in the receipts frame live, at the top of the saved answer on reload.
+of that kind is behind the claim (FX-006), and never when one is. A refused write gets its own line. Both went ABOVE
+the text: in the receipts frame live, at the top of the saved answer on reload. P256-FIX-N15-2: the not-done
+line is said only in place of the claim it answers, taken out of the reply (N15-1), naming any refused write;
+only a refused write the reply's line does not already name goes above.
 
 The replay (``.claude/AUTO-REVIEW-FINDINGS.md`` §2.1 and its evidence in
 ``.claude/auto-review/claims-evidence.md``) is reproduced below: each sentence with the calls that
 ran in its turn. Under the receipts rule each one passes in one of three ways:
 
-- ``NOT_DONE``: the answer reports work no done write of its kind backs → the not-done line
-  (FX-006: per claim; it names the claim when another write went through).
-- ``TRIED``: a write was refused → its own line (and the not-done line when the answer claims).
+- ``NOT_DONE``: the answer reports work no done write of its kind backs → the claim is taken out
+  and the not-done line, naming it, is in its place (FX-006: per claim).
+- ``TRIED``: a write was refused → named in that line when the answer claims it done, else its
+  own line above the text.
+- ``UNTAKEN``: the rule reads a claim no write backs, but its verb is in no family ("turned down"):
+  it is never taken out, so no line (N15-2).
 - ``SHOWN``: no line, and the receipts above the text say what really ran (nothing; only reads;
   only a memory note and nothing on the board; the writes that really went through).
 """
@@ -29,16 +34,17 @@ from types import SimpleNamespace as NS
 import pytest
 
 from consumers.chatbot.claim_check import Verdict
-from consumers.chatbot.claims_backed import is_not_done_line
+from consumers.chatbot.claim_removed import without_unbacked_claims
 from consumers.chatbot.receipts import (
-    ABOVE, DONE, NOTHING_DONE_LINE, READ, WRITE, build_receipts, claims_work_done, honesty_lines, with_lines_above,
+    ABOVE, DONE, READ, WRITE, build_receipts, claims_work_done, honesty_lines, with_lines_above,
 )
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
 
 WS = "dacae30f-7840-40c1-8d03-25c3910affd0"
 MODEL = "google/gemini-2.5-flash"
 OK = {"success": True}
-NOT_DONE, TRIED, SHOWN = "not done", "tried", "shown"
+NOT_DONE, TRIED, SHOWN, UNTAKEN = "not done", "tried", "shown", "untaken"
+CLEAR = "Just to be clear: "
 
 
 def _refused(error):
@@ -50,11 +56,22 @@ def _platform(action, params, result=OK):
     return ("platform_execute", {"action": action, "params": params}, result)
 
 
-def _receipts(calls):
+def _tracker(calls):
     tracker = ToolExecutionTracker()
     for tool, args, result in calls:
         tracker.record_outcome(tool, args, result)
-    return build_receipts(tracker)
+    return tracker
+
+
+def _receipts(calls):
+    return build_receipts(_tracker(calls))
+
+
+def _in_place(answer, calls):
+    """P256-FIX-N15-2: the answer as the owner gets it, its unbacked claims taken out and the not-done line in
+    the first one's place; None when it claims nothing unbacked (or only in a verb of no family)."""
+    removed = without_unbacked_claims(answer, _tracker(calls).outcomes)
+    return removed.text if removed else None
 
 
 # ── the calls of the nights' turns ──────────────────────────────────────────
@@ -119,7 +136,7 @@ CAUGHT_TODAY = [
     ("F133 updated the step", "I've updated the BEANCOUNTER step with the correct parameters.", [STEP_REFUSED],
      TRIED, None),
     ("night 5 cancelled the plan", "I've turned down the previous mission. Now, I'll create the new mission plan "
-     "with your specific requirements and five changes.", [FEED_READ, FEED_READ], NOT_DONE, None),
+     "with your specific requirements and five changes.", [FEED_READ, FEED_READ], UNTAKEN, None),
     ("F280 #0422 moved to cancelled", "My apologies, Gerard. I understand. Task #0422 has been moved to "
      "'cancelled'.", [], NOT_DONE, None),
     ("F303 the Analyst's count is correct", "You are right to call that out! I apologize for the discrepancy. The "
@@ -186,18 +203,21 @@ def test_the_replay_is_the_reviews_22_sentences_and_three_false_denials():
 @pytest.mark.parametrize("finding, answer, calls, passes, shows", REPLAY, ids=[case[0] for case in REPLAY])
 def test_each_of_the_22_sentences_passes_under_the_receipts_rule(finding, answer, calls, passes, shows):
     receipts = _receipts(calls)
-    lines = honesty_lines(receipts, answer)
+    in_place = _in_place(answer, calls)
+    above = honesty_lines(receipts, in_place or answer)
 
-    if passes == NOT_DONE:
-        assert len(lines) == 1 and is_not_done_line(lines[0]), finding
-        assert lines == [NOTHING_DONE_LINE] or any(r["status"] == DONE and r["kind"] == WRITE for r in receipts)
+    if passes == NOT_DONE:                                       # the line in the claim's place, nothing above
+        assert in_place is not None and in_place.count(CLEAR) == 1 and above == [], finding
         assert shows is None or shows(receipts), (finding, receipts)
-    elif passes == TRIED:
-        *tried, last = lines
-        assert len(tried) == 1 and tried[0].startswith("I tried to ") and " and it didn't go through: " in tried[0]
-        assert last == NOTHING_DONE_LINE, finding                # each of these answers also says it was done
+    elif passes == TRIED and in_place is None:                   # a claim in no family: the refusal alone, above
+        (tried,) = above
+        assert tried.startswith("I tried to ") and " and it didn't go through: " in tried, finding
+    elif passes == TRIED:                                        # the refusal named in the line in the claim's place
+        assert in_place.count(CLEAR) == 1 and "I tried to " in in_place and above == [], finding
+    elif passes == UNTAKEN:                                      # read as a claim, never taken out: no line
+        assert claims_work_done(answer) and in_place is None and above == [], finding
     else:
-        assert lines == [], finding
+        assert in_place is None and above == [], finding
         assert shows(receipts), (finding, receipts)              # the receipts above the text say what really ran
 
 
@@ -206,7 +226,8 @@ def test_a_write_that_went_through_is_never_denied(finding, answer, calls):
     receipts = _receipts(calls)
     assert any(r["kind"] == WRITE and r["status"] == DONE for r in receipts), finding
     assert claims_work_done(answer)                              # the answer does report work done…
-    assert honesty_lines(receipts, answer) == []                 # …and a write backs it: no line
+    assert _in_place(answer, calls) is None                      # …and a write backs it: no line
+    assert honesty_lines(receipts, answer) == []
 
 
 def test_the_refused_lines_say_what_was_tried_and_why_in_plain_words():
@@ -224,7 +245,7 @@ def test_the_refused_lines_say_what_was_tried_and_why_in_plain_words():
 
 
 def test_three_refused_posts_are_one_line_with_the_first_reason():
-    (tried, _not_done) = honesty_lines(_receipts(POSTS_REFUSED), "I've drafted the three posts.")
+    (tried,) = honesty_lines(_receipts(POSTS_REFUSED), "I've drafted the three posts.")   # "drafted": no family
     assert tried == ("I tried to create the social post \"Harvest Club Launching!\" and it didn't go through: "
                      "No template 'instagram_carousel'.")
 
@@ -233,6 +254,7 @@ def test_a_refused_write_that_a_retry_then_did_needs_no_line():
     made = _platform("platform_create_mission", {"goal": "Café report"}, {"success": True, "mission_id": "m-1"})
     refused = _platform("platform_create_mission", {}, _refused("Missing required params: ['goal']"))
     assert honesty_lines(_receipts([refused, made]), "I've created the mission.") == []
+    assert _in_place("I've created the mission.", [refused, made]) is None
 
 
 @pytest.mark.parametrize("answer", [
@@ -247,7 +269,7 @@ def test_a_refused_write_that_a_retry_then_did_needs_no_line():
 ])
 def test_reading_planning_or_offering_is_not_reported_as_done(answer):
     assert not claims_work_done(answer)
-    assert honesty_lines(_receipts([TASKS_LISTED]), answer) == []
+    assert honesty_lines(_receipts([TASKS_LISTED]), answer) == [] and _in_place(answer, [TASKS_LISTED]) is None
 
 
 @pytest.mark.parametrize("answer", [
@@ -262,10 +284,15 @@ def test_the_one_generic_pattern_reads_a_report_of_work_done(answer):
 
 def test_the_lines_go_above_the_answer_refused_first():
     receipts = _receipts([APPROVE_REFUSED])
-    lines = honesty_lines(receipts, "I've approved the mission.")
-    assert lines[-1] == NOTHING_DONE_LINE and lines[0].startswith("I tried to approve the mission")
-    assert with_lines_above("I've approved the mission.", lines) == "\n\n".join([*lines, "I've approved the mission."])
+    (tried,) = honesty_lines(receipts, "Here's where the mission stands.")   # a refusal the reply does not name
+    assert tried.startswith("I tried to approve the mission")
+    assert with_lines_above("Here's where it stands.", [tried]) == f"{tried}\n\nHere's where it stands."
     assert with_lines_above("Hello.", []) == "Hello."
+    # P256-FIX-N15-2: the reply that claimed it carries the line in the claim's place, naming the refusal: once
+    in_place = _in_place("I've approved the mission.", [APPROVE_REFUSED])
+    assert in_place == ("Just to be clear: I haven't approved anything in this reply; I tried to approve the mission "
+                        "and it didn't go through. Ask me again if you want it done.")
+    assert honesty_lines(receipts, in_place) == []
 
 
 def test_the_saved_correction_keeps_only_tier_2():
@@ -278,15 +305,19 @@ def test_the_saved_correction_keeps_only_tier_2():
     assert not hasattr(Verdict(tools=0), "claim") and not hasattr(Verdict(tools=0), "passive")
 
 
-def test_the_in_loop_nudge_reads_the_receipts_rule():
-    """FX-007: the families are gone; F108's nudge is the receipts' rule over the loop's calls."""
+def test_the_in_loop_check_reads_the_receipts_rule():
+    """FX-007: the families are gone; F108's check is the receipts' rule over the loop's calls.
+    P256-FIX-N15-1: it takes the claim out in place, with no nudge (N15-2: ``claims_in_place``)."""
     import inspect
 
+    from modules.tools.execution import claims_in_place
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
     source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in source   # RVW-7: the run's voice
-    assert "claimed_action_not_done" not in source
+    assert "return in_place(self, current)" in source
+    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)" in inspect.getsource(
+        claims_in_place.in_place)                                                                   # RVW-7
+    assert "claimed_action_not_done" not in source and "claimed_action_nudge" not in source
 
 
 # ── the turn: the frame carries the lines, the saved answer starts with them ─
@@ -353,7 +384,8 @@ SAID_APPROVED = "I've approved the mission. It's now running."
 
 def _turn(monkeypatch, *, result=None, answer=SAID_APPROVED, with_loop=True, widget=False):
     """One chat turn: the loop (the model calls ``APPROVE``, then answers) or a first reply, then
-    the answer's additions, the finish and the save, as the turn does them."""
+    the answer's additions, the finish and the save, as the turn does them: the answer saved is the
+    one the loop ended on (its unbacked claims taken out, P256-FIX-N15-2), else the first reply."""
     from consumers.chatbot.narration import reply_parts
     from consumers.chatbot.service import StreamingChatService
 
@@ -370,13 +402,16 @@ def _turn(monkeypatch, *, result=None, answer=SAID_APPROVED, with_loop=True, wid
             yield chunk
 
     async def scoped(*args, **kwargs):
+        final = answer
         if with_loop:
             async for chunk in loop():
                 if isinstance(chunk, str):
                     yield chunk
-        StreamingChatService._answer_additions(None, _round(answer))
+                elif isinstance(chunk, dict) and chunk.get("_final_response"):
+                    final = chunk["_final_response"].content
+        StreamingChatService._answer_additions(None, _round(final))
         yield svc.streaming_handler.format_aisdk_finish()
-        saved.append(reply_parts("", "", answer))
+        saved.append(reply_parts("", "", final))
 
     svc._stream_response_with_agent_scoped = scoped
 
@@ -391,14 +426,18 @@ def _frame(chunks):
     return frame["data"]
 
 
-def test_a_refused_write_reported_as_done_is_said_above_the_text_live_and_saved(monkeypatch):
+def test_a_refused_write_reported_as_done_is_said_in_the_claims_place_live_and_saved(monkeypatch):
+    """P256-FIX-N15-2: the claims are taken out and the one line, naming the refusal, is in their place;
+    nothing goes above the text (the refusal's reason rides on its receipt)."""
     refused = _refused("Mission m-1 is not waiting for approval.")
     chunks, (parts,) = _turn(monkeypatch, result=refused)
 
-    above = _frame(chunks)[ABOVE]
-    assert above == ["I tried to approve the mission and it didn't go through: Mission m-1 is not waiting for "
-                     "approval.", NOTHING_DONE_LINE]
-    assert parts[-1] == {"type": "text", "text": "\n\n".join([*above, SAID_APPROVED])}   # above, never under
+    frame = _frame(chunks)
+    assert ABOVE not in frame
+    assert [(r["status"], r["reason"]) for r in frame["receipts"]] == [("refused", refused["error"])]
+    assert parts[-1] == {"type": "text", "text": (
+        "Just to be clear: I haven't approved anything in this reply; I tried to approve the mission and it didn't "
+        "go through. Ask me again if you want it done.")}
 
 
 def test_a_write_that_went_through_saves_the_answer_as_it_is(monkeypatch):
@@ -409,10 +448,16 @@ def test_a_write_that_went_through_saves_the_answer_as_it_is(monkeypatch):
 
 
 def test_a_first_reply_that_ran_nothing_and_claims_is_said_above_before_the_finish(monkeypatch):
-    chunks, (parts,) = _turn(monkeypatch, answer="I've noted that the Taster plan is now £14.", with_loop=False)
+    """P256-FIX-N15-2: nothing goes above the text. A claim in a first reply sends it through the loop
+    (F187, ``claims_work_done``), which takes the claim out and puts the line in its place."""
+    noted = "I've noted that the Taster plan is now £14."
+    chunks, (parts,) = _turn(monkeypatch, answer=noted, with_loop=False)
+    assert _frame(chunks) == {"receipts": [], "model": MODEL}
+    assert claims_work_done(noted)
 
-    assert _frame(chunks) == {"receipts": [], "model": MODEL, ABOVE: [NOTHING_DONE_LINE]}
-    assert parts[-1]["text"] == f"{NOTHING_DONE_LINE}\n\nI've noted that the Taster plan is now £14."
+    chunks, (parts,) = _turn(monkeypatch, answer=noted, result={"success": True, "mission_id": "m-1"})
+    assert ABOVE not in _frame(chunks)
+    assert parts[-1]["text"] == "Just to be clear: I haven't noted anything in this reply. Ask me again if you want it done."
 
 
 def test_the_answers_additions_take_the_receipts():
@@ -425,11 +470,15 @@ def test_the_answers_additions_take_the_receipts():
 
 
 def test_a_public_widget_visitor_is_shown_no_lines_and_none_are_saved(monkeypatch):
-    """F155: a visitor sees no internals, and a refused call's reason is the platform's."""
+    """F155: a visitor sees no internals, and a refused call's reason is the platform's. P256-FIX-N15-2:
+    the claim is taken out in place for a visitor too, its line naming no reason."""
     chunks, (parts,) = _turn(monkeypatch, result=_refused("Mission m-1 is not waiting for approval."), widget=True)
 
     assert not any(isinstance(c, str) and c.startswith('d:{"type": "receipts"') for c in chunks)
-    assert parts[-1] == {"type": "text", "text": SAID_APPROVED}
+    assert parts[-1] == {"type": "text", "text": (
+        "Just to be clear: I haven't approved anything in this reply; I tried to approve the mission and it didn't "
+        "go through. Ask me again if you want it done.")}
+    assert "not waiting for approval" not in parts[-1]["text"]
 
 
 # ── D10: the families are gone (FX-007) ─────────────────────────────────────

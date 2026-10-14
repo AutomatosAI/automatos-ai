@@ -34,6 +34,10 @@ its response or a streamed copy whose words end the round's. A reply to a re-pro
 goes through the apology gate (core/llm/turn_order.py) after it streamed through here:
 the gate reports what it let through and the copy it saved (``restated``), so the round
 is that copy and its frames carry the text the owner saw.
+
+P256-FIX-N15-1: the loop takes an unbacked claim out of a streamed reply, with no retry; the copy
+that answers never streamed (``screen_watch.corrected``). The reply's round is held like a nudged
+one and retracted when the loop's answer is known; the copy is sent in its place.
 """
 from __future__ import annotations
 
@@ -97,6 +101,13 @@ class Screen:
         content = getattr(copy, "content", None) or ""
         self._rounds = tuple(Round(content, said, r.blank, copy) if r.response is response else r
                              for r in self._rounds)
+
+    def corrected(self, response: Any, copy: Any) -> None:
+        """P256-FIX-N15-1: the round that returned ``response`` is answered by ``copy``, which did not
+        stream: its retraction is held until the loop's answer is known (``settled``)."""
+        match = next((r for r in self._rounds if r.response is response), None)
+        if match is not None and not self._retracted(match):
+            self._held = (*(r for r in self._held if r is not match), match)
 
     def narration(self, content: str) -> str:
         """What streamed for the latest round that answered ``content``."""

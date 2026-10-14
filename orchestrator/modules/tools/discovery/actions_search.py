@@ -5,13 +5,18 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_search_actions(registry: ActionRegistry) -> None:
     """Register search-related platform actions."""
+    _register_search_chat_history(registry)
+    _register_search_memory(registry)
 
+
+def _register_search_chat_history(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_search_chat_history",
         description=(
-            "Search across all past chat conversations by keyword. Returns matching "
+            "Search this person's own past chats in this workspace by keyword: a message "
+            "matches when it holds every word of the query, in any order. Returns matching "
             "messages with the chat title, role (user/assistant), content snippet, and "
-            "timestamp. Use when the user asks about previous conversations, wants to "
+            "timestamp (UTC). Use when the user asks about previous conversations, wants to "
             "find something they discussed before, or references past chats."
         ),
         category="chat",
@@ -20,7 +25,7 @@ def register_search_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Keyword or phrase to search for in chat messages.",
+                    "description": "Words to search for in chat messages (each must appear; a few distinctive ones work best).",
                 },
                 "days": {
                     "type": "integer",
@@ -43,6 +48,8 @@ def register_search_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+
+def _register_search_memory(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_search_memory",
         description=(

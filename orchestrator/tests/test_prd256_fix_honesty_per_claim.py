@@ -34,21 +34,37 @@ P256-FIX-RVW-25: with the families deleted (FX-007, D10) this rule is the only g
 is done.", "The post is published.", "The post got sent.", "It went out.", "Email sent.", "Posted!",
 "I sent the email to Declan." and "I emailed the supplier and created the ticket." were no claim;
 "I've created the ticket, emailed Sam." was only created.
+
+P256-FIX-N15-2: the not-done line is said only in place of the claims it answers (taken out of the reply,
+N15-1), and names them whether or not another write went through; a verb in no family ("sorted",
+"rejected", "made the changes") is still read as unbacked here (``unbacked``) but never taken out, so it
+draws no line. Nothing puts the line above the reply.
 """
 from __future__ import annotations
 
 import pytest
 
 from consumers.chatbot.claims_backed import FAMILIES, claims, claims_work_done, is_not_done_line
-from consumers.chatbot.receipts import DONE, NOTHING_DONE_LINE, READ, REFUSED, WRITE, build_receipts, honesty_lines
+from consumers.chatbot.receipts import DONE, READ, REFUSED, WRITE, build_receipts, honesty_lines
 from modules.tools.execution.tool_execution_tracker import ToolExecutionTracker
-from tests.helpers_receipts_rule import nudged
+from tests.helpers_receipts_rule import line, nudged, unbacked
 
 OK = {"success": True}
 
 
 def _named(verbs):
     return f"Just to be clear: I haven't {verbs} anything in this reply. Ask me again if you want it done."
+
+
+NOTHING_DONE_LINE = "Just to be clear: I haven't done that yet, and nothing has changed. Ask me again if you want it done."
+
+
+def _in_place_line(verbs):
+    """The line in place of claims of ``verbs`` ("" a bare "Done."), when no write of their kind went through."""
+    named = list(dict.fromkeys(verb for verb in verbs if verb))
+    if not named:
+        return NOTHING_DONE_LINE
+    return _named(named[0] if len(named) == 1 else f"{', '.join(named[:-1])} or {named[-1]}")
 
 
 def _platform(action, params=None, result=OK):
@@ -60,6 +76,13 @@ def _receipts(*calls):
     for tool, args, result in calls:
         tracker.record_outcome(tool, args, result)
     return build_receipts(tracker)
+
+
+def _said(answer, *calls):
+    """P256-FIX-N15-2: the not-done line the answer carries in place of its claims ([] when none). It is the
+    line's only place: a refused write alone goes above the text (``honesty_lines``)."""
+    in_place = line(answer, *calls)
+    return [in_place] if in_place else []
 
 
 PLAYBOOK_REFUSED = _platform("platform_create_playbook", {"name": "Heartbeat"},
@@ -83,10 +106,12 @@ def test_a697_a_saved_memory_does_not_back_a_revert_no_call_made():
     answer = "I've saved your preference. I've reverted the heartbeat to every 30 minutes."
 
     assert [r["status"] for r in receipts if r["kind"] == WRITE] == [REFUSED, DONE]
-    tried, not_done = honesty_lines(receipts, answer)
+    (not_done,) = _said(answer, PLAYBOOK_REFUSED, MEMORY_STORED)
+    assert not_done.startswith("Just to be clear: I haven't reverted anything in this reply")   # names the claim
+    assert "I tried to create the playbook" in not_done and is_not_done_line(not_done)          # and the refusal
+    (tried,) = honesty_lines(receipts, answer)                  # above the reply as composed: the refusal alone
     assert tried.startswith("I tried to create the playbook")
-    assert not_done == _named("reverted")                       # names the claim it is about
-    assert is_not_done_line(not_done)
+    assert honesty_lines(receipts, f"I've saved your preference. {not_done}") == []   # the line names it: once
 
 
 # ── J-inject-a and the passive / third-person shapes ───────────────────────
@@ -94,7 +119,7 @@ def test_a697_a_saved_memory_does_not_back_a_revert_no_call_made():
 def test_j_inject_a_a_plan_word_far_from_the_claim_exempts_nothing():
     answer = "I'll just confirm that the card has been approved."
     assert claims_work_done(answer)
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert _said(answer, TASKS_LISTED) == [_named("approved")]
 
 
 @pytest.mark.parametrize("answer, verb", [
@@ -107,15 +132,15 @@ def test_j_inject_a_a_plan_word_far_from_the_claim_exempts_nothing():
 ])
 def test_passive_and_third_person_shapes_are_claims(answer, verb):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
+    assert _said(answer, TASKS_LISTED) == [_named(verb)]
+    assert _said(answer, MEMORY_STORED) == [_named(verb)]
 
 
 def test_it_has_been_done_is_a_claim_any_write_backs():
     answer = "It's been done."
     assert claims_work_done(answer)
-    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == []
+    assert _said(answer) == [NOTHING_DONE_LINE]
+    assert _said(answer, MEMORY_STORED) == []
 
 
 @pytest.mark.parametrize("answer", [
@@ -135,7 +160,7 @@ def test_it_has_been_done_is_a_claim_any_write_backs():
 ])
 def test_a_state_a_plan_the_replys_own_content_or_the_past_is_not_a_claim(answer):
     assert not claims_work_done(answer)
-    assert honesty_lines([], answer) == []
+    assert _said(answer) == []
 
 
 # ── a claim with its own done write: no line ────────────────────────────────
@@ -153,7 +178,7 @@ def test_a_state_a_plan_the_replys_own_content_or_the_past_is_not_a_claim(answer
 ], ids=["reverted", "changed", "created", "approved", "was-approved", "launched", "emailed", "submitted",
         "noted"])
 def test_a_claim_its_own_kind_of_write_backs_has_no_line(answer, call):
-    assert honesty_lines(_receipts(call), answer) == []
+    assert _said(answer, call) == []
 
 
 @pytest.mark.parametrize("answer, call, verb", [
@@ -165,39 +190,41 @@ def test_a_claim_its_own_kind_of_write_backs_has_no_line(answer, call):
 ], ids=["reverted-by-a-card", "approved-by-a-memory", "emailed-by-a-card", "created-by-an-update",
         "posted-by-a-draft"])
 def test_a_claim_another_kind_of_write_does_not_back_gets_the_line(answer, call, verb):
-    assert honesty_lines(_receipts(call), answer) == [_named(verb)]
+    assert _said(answer, call) == [_named(verb)]
 
 
 # ── two claims, one backed: one line naming the unbacked one ────────────────
 
 def test_two_claims_one_backed_is_one_line_naming_the_other():
     answer = "I've created the card for the Analyst. I've also reverted Scout to Sonnet."
-    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("reverted")]
+    assert _said(answer, CARD_MADE) == [_named("reverted")]
 
 
 def test_two_unbacked_claims_are_named_in_one_line():
     answer = "I've created the card. I've sent the email and I've reverted the model."
-    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("sent or reverted")]
+    assert _said(answer, CARD_MADE) == [_named("sent or reverted")]
 
 
 def test_both_claims_backed_is_no_line():
     answer = "I've created the card for the Analyst. I've also reverted Scout to Sonnet."
-    assert honesty_lines(_receipts(CARD_MADE, AGENT_UPDATED), answer) == []
+    assert _said(answer, CARD_MADE, AGENT_UPDATED) == []
 
 
 def test_a_claim_with_no_family_needs_a_write_its_stem_names():
     """"I've sorted the template" is in no family: a card made backed it until P256-FIX-RVW-36, now
     only a write named for sorting would; "You should now see it" says only that work happened, and
-    any done write backs it ("set up" has its family since P256-FIX-RVW-6, below)."""
+    any done write backs it ("set up" has its family since P256-FIX-RVW-6, below). P256-FIX-N15-2:
+    "sorted" is still read as unbacked, but a verb in no family is never taken out, so it draws no line;
+    with no write at all, "You should now see it" is taken out (any write backs it, none ran)."""
     answer = "I've sorted the template. You should now see it in Deliverables."
-    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("sorted")]
-    assert honesty_lines(_receipts(CARD_MADE), "You should now see it in Deliverables.") == []
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert unbacked(answer, CARD_MADE) == ["sorted"] and _said(answer, CARD_MADE) == []
+    assert _said("You should now see it in Deliverables.", CARD_MADE) == []
+    assert unbacked(answer, TASKS_LISTED) == ["sorted", ""] and _said(answer, TASKS_LISTED) == [NOTHING_DONE_LINE]
 
 
 def test_a_card_sent_back_backs_sent_back():
     sent_back = _platform("platform_update_task_status", {"task_id": "#0067", "status": "assigned"})
-    assert honesty_lines(_receipts(sent_back), "I've sent #0067 back to the Analyst.") == []
+    assert _said("I've sent #0067 back to the Analyst.", sent_back) == []
 
 
 def test_every_family_has_its_verbs_once():
@@ -248,30 +275,29 @@ OWN_KIND = [
 @pytest.mark.parametrize("answer, verb, _own", OWN_KIND, ids=[case[1] + ":" + case[0][5:20] for case in OWN_KIND])
 def test_rvw6_a_saved_memory_does_not_back_a_verb_that_had_no_family(answer, verb, _own):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert _said(answer, MEMORY_STORED) == _said(answer, TASKS_LISTED) == [_named(verb)]
 
 
 @pytest.mark.parametrize("answer, verb, own", OWN_KIND, ids=[case[1] + ":" + case[0][5:20] for case in OWN_KIND])
 def test_rvw6_its_own_kind_of_write_backs_it(answer, verb, own):
-    assert honesty_lines(_receipts(own), answer) == [], verb
+    assert _said(answer, own) == [], verb
 
 
 @pytest.mark.parametrize("answer", ["I've booked the courier for Friday.", "I've ordered two sacks of Guji.",
                                     "I've paid the roaster's invoice."])
 def test_rvw6_an_order_a_booking_or_a_payment_is_backed_by_a_send(answer):
-    assert honesty_lines(_receipts(EMAIL_SENT), answer) == []
+    assert _said(answer, EMAIL_SENT) == []
 
 
 def test_rvw6_a_write_of_another_order_word_does_not_back_the_claim():
-    assert honesty_lines(_receipts(ORDER_MADE), "I've paid the roaster's invoice.") == [_named("paid")]
-    assert honesty_lines(_receipts(BOOKING_MADE), "I've ordered two sacks of Guji.") == [_named("ordered")]
+    assert _said("I've paid the roaster's invoice.", ORDER_MADE) == [_named("paid")]
+    assert _said("I've ordered two sacks of Guji.", BOOKING_MADE) == [_named("ordered")]
 
 
 def test_rvw6_a_particle_no_family_names_stays_with_its_verb():
     """"kicked off" is the start family's "kicked"; "turned down" is in no family."""
     assert [verb for verb, _ in claims("I've kicked off the mission.")] == ["kicked"]
-    assert honesty_lines(_receipts(MISSION_APPROVED), "I've kicked off the mission.") == []
+    assert _said("I've kicked off the mission.", MISSION_APPROVED) == []
     assert [verb for verb, _ in claims("I've turned down the old plan.")] == ["turned"]
 
 
@@ -280,8 +306,8 @@ def test_rvw6_a_particle_no_family_names_stays_with_its_verb():
 def test_rvw6_created_and_sent_is_two_claims():
     answer = "I've created the task and sent it to Declan."                          # verified at b7fcc419f
     assert [verb for verb, _ in claims(answer)] == ["created", "sent"]
-    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("sent")]
-    assert honesty_lines(_receipts(CARD_MADE, EMAIL_SENT), answer) == []
+    assert _said(answer, CARD_MADE) == [_named("sent")]
+    assert _said(answer, CARD_MADE, EMAIL_SENT) == []
 
 
 @pytest.mark.parametrize("answer, verbs", [
@@ -306,8 +332,8 @@ def test_rvw6_a_plan_word_exempts_the_coordinated_participles_with_their_claim()
 def test_rvw6_heres_the_update_then_a_claim_is_a_claim():
     answer = "Here's the update: the card has been approved."                         # verified at b7fcc419f
     assert [verb for verb, _ in claims(answer)] == ["approved"]
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
-    assert honesty_lines(_receipts(CARD_DONE), answer) == []
+    assert _said(answer, TASKS_LISTED) == [_named("approved")]
+    assert _said(answer, CARD_DONE) == []
 
 
 @pytest.mark.parametrize("answer", [
@@ -340,12 +366,12 @@ MAIL_SENT = _composio("GMAIL_SEND_EMAIL")
 ])
 def test_rvw20_a_simple_past_passive_with_no_past_time_is_a_claim(answer, verb):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert _said(answer, TASKS_LISTED) == [_named(verb)]
 
 
 def test_rvw20_was_approved_is_backed_by_the_move_to_done():
-    assert honesty_lines(_receipts(CARD_DONE), "The card was approved.") == []
-    assert honesty_lines(_receipts(MAIL_SENT), "The email was sent to Declan.") == []
+    assert _said("The card was approved.", CARD_DONE) == []
+    assert _said("The email was sent to Declan.", MAIL_SENT) == []
 
 
 @pytest.mark.parametrize("answer", [
@@ -361,7 +387,7 @@ def test_rvw20_was_approved_is_backed_by_the_move_to_done():
 ])
 def test_rvw20_a_simple_past_passive_with_a_past_time_is_history(answer):
     assert not claims_work_done(answer)
-    assert honesty_lines([], answer) == []
+    assert _said(answer) == []
 
 
 def test_rvw20_a_number_after_on_is_no_date():
@@ -386,9 +412,9 @@ def test_rvw20_a_denial_a_refusal_or_a_relative_clause_is_no_claim(answer):
 def test_rvw20_a_mail_draft_does_not_back_replied():
     answer = "I've replied to Declan."
     assert [verb for verb, _ in claims(answer)] == ["replied"]
-    assert honesty_lines(_receipts(MAIL_DRAFTED), answer) == [_named("replied")]
-    assert honesty_lines(_receipts(MAIL_SENT), answer) == []
-    assert honesty_lines(_receipts(_composio("GMAIL_REPLY_TO_THREAD")), answer) == []
+    assert _said(answer, MAIL_DRAFTED) == [_named("replied")]
+    assert _said(answer, MAIL_SENT) == []
+    assert _said(answer, _composio("GMAIL_REPLY_TO_THREAD")) == []
 
 
 @pytest.mark.parametrize("answer, verb, own", [
@@ -401,19 +427,19 @@ def test_rvw20_a_mail_draft_does_not_back_replied():
 ])
 def test_rvw20_a_send_verb_needs_its_own_write(answer, verb, own):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
-    assert honesty_lines(_receipts(MAIL_DRAFTED), answer) == [_named(verb)]
-    assert honesty_lines(_receipts(own), answer) == []
+    assert _said(answer, MEMORY_STORED) == [_named(verb)]
+    assert _said(answer, MAIL_DRAFTED) == [_named(verb)]
+    assert _said(answer, own) == []
 
 
 @pytest.mark.parametrize("answer", ["I've shared the price list with Declan.", "I've invited Declan to the board."])
 def test_rvw20_a_send_backs_shared_and_invited(answer):
-    assert honesty_lines(_receipts(MAIL_SENT), answer) == []
+    assert _said(answer, MAIL_SENT) == []
 
 
 def test_rvw20_a_send_does_not_back_refunded():
-    assert honesty_lines(_receipts(MAIL_SENT), "I've refunded Rosie.") == [_named("refunded")]
-    assert honesty_lines(_receipts(PAYMENT_MADE), "I've refunded Rosie.") == []
+    assert _said("I've refunded Rosie.", MAIL_SENT) == [_named("refunded")]
+    assert _said("I've refunded Rosie.", PAYMENT_MADE) == []
 
 
 # ── P256-FIX-RVW-25: stative and elliptical passives, the first person's past, a comma list ──
@@ -442,24 +468,24 @@ ESCAPED = [
 @pytest.mark.parametrize("answer, verb, own", ESCAPED, ids=[case[0] for case in ESCAPED])
 def test_rvw25_an_escaped_shape_is_a_claim_of_its_verb(answer, verb, own):
     assert [said for said, _ in claims(answer)] == [verb]
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
-    assert honesty_lines(_receipts(own), answer) == []
+    assert _said(answer, TASKS_LISTED) == [_named(verb)]
+    assert _said(answer, MEMORY_STORED) == [_named(verb)]
+    assert _said(answer, own) == []
 
 
 @pytest.mark.parametrize("answer", ["The task is done.", "That's done.", "Everything done."])
 def test_rvw25_a_stative_done_says_only_that_work_happened(answer):
     assert [said for said, _ in claims(answer)] == ["done"]
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
-    assert honesty_lines(_receipts(CARD_DONE), answer) == []
+    assert _said(answer, TASKS_LISTED) == [NOTHING_DONE_LINE]
+    assert _said(answer, CARD_DONE) == []
 
 
 def test_rvw25_the_first_persons_past_coordinates_its_participles():
     answer = "I emailed the supplier and created the ticket."
     assert [verb for verb, _ in claims(answer)] == ["emailed", "created"]
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named("emailed or created")]
-    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("emailed")]
-    assert honesty_lines(_receipts(CARD_MADE, EMAIL_SENT), answer) == []
+    assert _said(answer, MEMORY_STORED) == [_named("emailed or created")]
+    assert _said(answer, CARD_MADE) == [_named("emailed")]
+    assert _said(answer, CARD_MADE, EMAIL_SENT) == []
 
 
 @pytest.mark.parametrize("answer, verbs", [
@@ -475,8 +501,8 @@ def test_rvw25_a_participle_continuing_the_list_after_a_comma_is_a_claim(answer,
 
 def test_rvw25_the_comma_claim_no_write_backs_is_named():
     answer = "I've created the ticket, emailed Sam."
-    assert honesty_lines(_receipts(CARD_MADE), answer) == [_named("emailed")]
-    assert honesty_lines(_receipts(CARD_MADE, EMAIL_SENT), answer) == []
+    assert _said(answer, CARD_MADE) == [_named("emailed")]
+    assert _said(answer, CARD_MADE, EMAIL_SENT) == []
 
 
 @pytest.mark.parametrize("answer", [
@@ -503,7 +529,7 @@ def test_rvw25_the_comma_claim_no_write_backs_is_named():
 ])
 def test_rvw25_an_exempt_sentence_of_the_new_shapes_is_no_claim(answer):
     assert not claims_work_done(answer)
-    assert honesty_lines([], answer) == []
+    assert _said(answer) == []
 
 
 def test_rvw25_an_agents_run_reads_only_its_first_person():
@@ -523,7 +549,7 @@ SWEPT = [
     ("Approved.", "approved"), ("steps: a playbook is created with no steps", "created"), ("All paid.", "paid"),
     ("Task ID 1099 is done, and so is 1093.", "done"),
     ("I made an empty playbook instead of installing it: nothing was installed.", "made"),
-    ("I made an empty playbook", "made"), ("If they ask whether setup is done: \"Your team is built", "done"),
+    ("I made an empty playbook", "made"),   # N15-1: "If they ask whether setup is done" is a condition, no claim
     ("Ticket 0001 ('Christmas gift box labels - 40 of them') is closed", "closed"),
     ("The task is done when all three coffees are worked out.", "done"), ("Supplier replied.", "replied"),
     ("Ticket 0059 started.", "started"), ("It is fixed now.", "fixed"), ("The mission completed.", "completed"),
@@ -580,7 +606,7 @@ BACKED_RVW34 = [
 
 @pytest.mark.parametrize("answer, calls", BACKED_RVW34, ids=[answer for answer, _ in BACKED_RVW34])
 def test_rvw34_a_backed_claim_gets_no_line_and_no_nudge(answer, calls):
-    assert honesty_lines(_receipts(*calls), answer) == []
+    assert _said(answer, *calls) == []
     assert nudged(answer, *calls) is None
 
 
@@ -591,35 +617,35 @@ def test_rvw34_a_question_is_no_claim(question):
 
 def test_rvw34_made_says_its_family_by_what_follows_it():
     store, assign = BACKED_RVW34[0][1], BACKED_RVW34[1][1]
-    assert honesty_lines(_receipts(*assign), "I've made a note of that.") == [_named("made")]   # a note is noted
-    assert honesty_lines(_receipts(*store), "I've made Scout the owner of #0931.") == [_named("made")]
-    assert nudged("I've made the changes you asked for.") is None           # no family: the line's alone
-    assert honesty_lines([], "I've made the changes you asked for.") == [NOTHING_DONE_LINE]
+    assert _said("I've made a note of that.", *assign) == [_named("made")]   # a note is noted
+    assert _said("I've made Scout the owner of #0931.", *store) == [_named("made")]
+    assert nudged("I've made the changes you asked for.") is None           # no family: read, never taken out
+    assert unbacked("I've made the changes you asked for.") == ["made"]
+    assert _said("I've made the changes you asked for.") == []                # so no line (N15-2)
 
 
 def test_rvw34_made_a_new_playbook_with_no_create_is_still_caught():
     answer = "I've made a new playbook."
-    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named("made")]
+    assert _said(answer) == _said(answer, MEMORY_STORED) == [_named("made")]
     assert nudged(answer) == nudged(answer, MEMORY_STORED) == "made"
-    assert honesty_lines(_receipts(_platform("platform_create_playbook", {"name": "Weekly"})), answer) == []
+    assert _said(answer, _platform("platform_create_playbook", {"name": "Weekly"})) == []
 
 
 def test_rvw34_a_calendar_write_backs_only_scheduled_and_booked():
-    assert honesty_lines(_receipts(CALENDAR_EVENT), "I've emailed Declan the invite.") == [_named("emailed")]
-    assert honesty_lines(_receipts(MEMORY_STORED), "I've scheduled the call with Declan for Friday.") == [
+    assert _said("I've emailed Declan the invite.", CALENDAR_EVENT) == [_named("emailed")]
+    assert _said("I've scheduled the call with Declan for Friday.", MEMORY_STORED) == [
         _named("scheduled")]
 
 
 def test_rvw34_a_claim_before_a_clause_break_is_still_a_claim_in_a_question():
     answer = "I've sent it to Declan, want me to chase him?"
     assert [verb for verb, _ in claims(answer)] == ["sent"]
-    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
+    assert _said(answer) == [_named("sent")]
 
 
 def test_rvw34_a_status_with_no_read_of_its_number_is_still_caught():
     answer = "Mission #0365 has been cancelled."
-    assert honesty_lines([], answer) == [NOTHING_DONE_LINE]
+    assert _said(answer) == [_named("cancelled")]
     assert nudged(answer) == "cancelled"
     assert nudged(answer, _platform("platform_get_task", {"task_id": "#0366"})) == "cancelled"   # another card's read
     assert nudged("I've cancelled #0365.", READ_0365) == "cancelled"        # the writer's own work, not a finding
@@ -656,21 +682,21 @@ ESCAPED_RVW35 = [
 @pytest.mark.parametrize("answer, verbs, own", ESCAPED_RVW35, ids=[case[0] for case in ESCAPED_RVW35])
 def test_rvw35_an_escaped_shape_is_a_claim(answer, verbs, own):
     assert [verb for verb, _ in claims(answer)] == verbs
-    assert honesty_lines(_receipts(TASKS_LISTED), answer) == [NOTHING_DONE_LINE]
+    assert _said(answer, TASKS_LISTED) == [_in_place_line(verbs)]
     assert nudged(answer) == (verbs[0] or "done")
-    assert honesty_lines(_receipts(*own), answer) == []
+    assert _said(answer, *own) == []
     assert nudged(answer, *own) is None
 
 
 @pytest.mark.parametrize("answer, verbs, _own", [case for case in ESCAPED_RVW35 if case[1][0]],
                          ids=[case[0] for case in ESCAPED_RVW35 if case[1][0]])
 def test_rvw35_a_saved_memory_does_not_back_the_claim(answer, verbs, _own):
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(" or ".join(dict.fromkeys(verbs)))]
+    assert _said(answer, MEMORY_STORED) == [_named(" or ".join(dict.fromkeys(verbs)))]
 
 
 def test_rvw35_one_list_line_its_write_backs_leaves_the_other_named():
-    assert honesty_lines(_receipts(CARD_MADE), "✅ Task created\n✅ Email sent to Sam") == [_named("sent")]
-    assert honesty_lines(_receipts(EMAIL_SENT), "- Task created\n- Email sent") == [_named("created")]
+    assert _said("✅ Task created\n✅ Email sent to Sam", CARD_MADE) == [_named("sent")]
+    assert _said("- Task created\n- Email sent", EMAIL_SENT) == [_named("created")]
 
 
 def test_rvw35_done_before_a_claim_of_its_sentence_introduces_it():
@@ -681,7 +707,7 @@ def test_rvw35_done_before_a_claim_of_its_sentence_introduces_it():
 
 def test_rvw35_a_numbered_card_a_read_of_the_turn_named_is_what_the_read_found():
     answer = "Card #0931 moved to Done."
-    assert honesty_lines(_receipts(READ_0931), answer) == []
+    assert _said(answer, READ_0931) == []
     assert nudged(answer, READ_0931) is None
     assert nudged(answer, _platform("platform_get_task", {"task_id": "#0932"})) == "moved"   # another card's read
 
@@ -709,7 +735,7 @@ def test_rvw35_a_numbered_card_a_read_of_the_turn_named_is_what_the_read_found()
 ])
 def test_rvw35_an_exempt_sentence_of_the_new_shapes_is_no_claim(answer):
     assert claims(answer) == []
-    assert honesty_lines([], answer) == []
+    assert _said(answer) == []
 
 
 # ── P256-FIX-RVW-36: a registered read is a read; a verb in no family needs a write its stem names ──
@@ -738,24 +764,25 @@ def test_rvw36_a_loaded_skill_backs_no_post_said_live():
     answer = "Your post is now live on LinkedIn."
     (loaded,) = _receipts(SKILL_LOADED)
     assert loaded["kind"] == READ
-    assert honesty_lines([loaded], answer) == [NOTHING_DONE_LINE]
+    assert _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]
     assert nudged(answer, SKILL_LOADED) == "done"
 
 
 @pytest.mark.parametrize("answer, backing", NO_FAMILY_RVW36, ids=[answer for answer, _ in NO_FAMILY_RVW36])
 def test_rvw36_a_verb_in_no_family_needs_a_write_its_stem_names(answer, backing):
     (verb, _sentence), = claims(answer)
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == [_named(verb)]
-    assert honesty_lines(_receipts(backing), answer) == []
-    assert nudged(answer, MEMORY_STORED) is None                       # no family: the line's, never the nudge's
+    assert unbacked(answer, MEMORY_STORED) == [verb] and unbacked(answer, backing) == []
+    assert nudged(answer, MEMORY_STORED) is None                       # no family: never the nudge's…
+    assert _said(answer, MEMORY_STORED) == _said(answer, backing) == []    # …nor taken out: no line (N15-2)
 
 
 def test_rvw36_a_saved_memory_backs_no_rejection_and_the_reject_write_does():
-    assert honesty_lines(_receipts(MEMORY_STORED), "I've rejected the card.") == [_named("rejected")]
-    assert honesty_lines(_receipts(NO_FAMILY_RVW36[0][1]), "I've rejected the card.") == []
+    assert unbacked("I've rejected the card.", MEMORY_STORED) == ["rejected"]
+    assert unbacked("I've rejected the card.", NO_FAMILY_RVW36[0][1]) == []
+    assert _said("I've rejected the card.", MEMORY_STORED) == []           # read, never taken out (N15-2)
 
 
 @pytest.mark.parametrize("answer", ONLY_WORK_HAPPENED)
 def test_rvw36_a_claim_that_says_only_work_happened_takes_any_done_write(answer):
-    assert honesty_lines(_receipts(MEMORY_STORED), answer) == []
-    assert honesty_lines(_receipts(SKILL_LOADED), answer) == [NOTHING_DONE_LINE]
+    assert _said(answer, MEMORY_STORED) == []
+    assert _said(answer, SKILL_LOADED) == [NOTHING_DONE_LINE]

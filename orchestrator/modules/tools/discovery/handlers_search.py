@@ -11,77 +11,89 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+# P256-FIX-N15-4 (night 15, F425): platform_search_chat_history found nothing all night. It read the
+# chats of the workspace's active members, joined through workspace_members, and the local edition's
+# operator has no such row (core/seeds/seed_local_first_run.py writes none), so on local every search
+# came back empty; and the chat's own workspace was never checked. It now reads the asking person's
+# own chats in this workspace (the server's _driving_user_id, as GET /api/chat/search reads the
+# signed-in user's), and finds a message holding every word of the query, in any order.
+CHAT_SEARCH_DAYS, CHAT_SEARCH_MAX_DAYS = 30, 365
+CHAT_SEARCH_LIMIT, CHAT_SEARCH_MAX_LIMIT = 20, 100
+CHAT_SEARCH_TERMS = 8          # words of the query matched; the rest are ignored
+CHAT_SNIPPET_CHARS = 300
+_TERM_EDGES = " \"'“”‘’.,;:!?()[]{}"
+_LIKE_SPECIALS = str.maketrans({"\\": "\\\\", "%": "\\%", "_": "\\_"})
+NO_PERSON_CHATS = ("Chat history is searched for the person in the chat, and no person is behind this call: "
+                   "nothing was searched.")
+CHAT_SEARCH_FAILED = "The chat history search could not run, so nothing was searched; the detail is in the server log."
+_CHAT_SEARCH_SQL = """
+    SELECT m.id, m.chat_id, m.role, m.parts, m.created_at, c.title AS chat_title
+    FROM messages m
+    JOIN chats c ON c.id = m.chat_id
+    WHERE c.user_id = :user_id
+      AND c.workspace_id = CAST(:workspace_id AS uuid)
+      AND m.workspace_id = CAST(:workspace_id AS uuid)
+      AND m.created_at >= :since
+      AND NOT EXISTS (
+          SELECT 1 FROM unnest(CAST(:terms AS text[])) AS term
+          WHERE NOT EXISTS (
+              SELECT 1 FROM jsonb_array_elements(
+                  CASE WHEN jsonb_typeof(m.parts) = 'array' THEN m.parts ELSE '[]'::jsonb END) AS p
+              WHERE p->>'text' ILIKE '%' || term || '%'
+          )
+      )
+    ORDER BY m.created_at DESC
+    LIMIT :lim
+"""
+
+
+def chat_search_terms(query: str) -> List[str]:
+    """The query's words (quotes and stops trimmed, LIKE wildcards escaped), at most ``CHAT_SEARCH_TERMS``."""
+    words = [word.strip(_TERM_EDGES) for word in query.split()]
+    return [word.translate(_LIKE_SPECIALS) for word in words if word][:CHAT_SEARCH_TERMS]
+
+
 async def search_chat_history(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Search across all chat messages by keyword."""
+    """Search the asking person's own chats in this workspace for messages holding every word of ``query``."""
+    from datetime import datetime, timedelta, timezone
+
     from sqlalchemy import text
 
-    query = params.get("query", "").strip()
-    if not query:
+    query = str(params.get("query") or "").strip()
+    terms = chat_search_terms(query)
+    if not terms:
         return {"success": False, "error": "query parameter is required"}
-
+    user_id = params.get("_driving_user_id")
+    if not isinstance(user_id, int) or isinstance(user_id, bool):
+        return {"success": False, "error": NO_PERSON_CHATS}
+    days = _bounded(params.get("days"), CHAT_SEARCH_DAYS, CHAT_SEARCH_MAX_DAYS)
+    since = (datetime.now(timezone.utc) - timedelta(days=max(days, 1))).replace(tzinfo=None)
     try:
-        days = min(int(params.get("days", 30)), 365)
-    except (TypeError, ValueError):
-        days = 30
-    try:
-        limit = min(int(params.get("limit", 20)), 100)
-    except (TypeError, ValueError):
-        limit = 20
-    search_term = f"%{query}%"
+        with db.begin_nested():   # a failed search rolls back to here, not the turn's whole session
+            rows = db.execute(text(_CHAT_SEARCH_SQL), {
+                "user_id": user_id, "workspace_id": str(workspace_id), "since": since, "terms": terms,
+                "lim": max(_bounded(params.get("limit"), CHAT_SEARCH_LIMIT, CHAT_SEARCH_MAX_LIMIT), 1),
+            }).fetchall()
+    except Exception:
+        logger.exception("[PlatformExecutor] Chat search failed")
+        return {"success": False, "error": CHAT_SEARCH_FAILED}
+    return _chat_search_answer(query, [_chat_hit(row) for row in rows])
 
-    try:
-        rows = db.execute(
-            text("""
-                SELECT m.id, m.chat_id, m.role, m.parts, m.created_at,
-                       c.title AS chat_title
-                FROM messages m
-                JOIN chats c ON c.id = m.chat_id
-                JOIN workspace_members wm ON wm.user_id = c.user_id
-                WHERE wm.workspace_id = :workspace_id
-                  AND wm.is_active = true
-                  AND m.created_at >= NOW() - make_interval(days => :days)
-                  AND EXISTS (
-                      SELECT 1 FROM jsonb_array_elements(m.parts) AS p
-                      WHERE p->>'text' ILIKE :search
-                  )
-                ORDER BY m.created_at DESC
-                LIMIT :lim
-            """),
-            {"workspace_id": str(workspace_id), "days": days, "search": search_term, "lim": limit},
-        ).fetchall()
 
-        results = []
-        for r in rows:
-            parts = r.parts if isinstance(r.parts, list) else []
-            text_content = " ".join(
-                p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
-            )
-            results.append({
-                "chat_title": r.chat_title,
-                "role": r.role,
-                "content": text_content[:300],
-                "date": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else None,
-                "chat_id": str(r.chat_id),
-            })
+def _chat_hit(row: Any) -> Dict[str, Any]:
+    parts = row.parts if isinstance(row.parts, list) else []
+    said = " ".join(p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text"))
+    return {"chat_title": row.chat_title, "role": row.role, "content": said[:CHAT_SNIPPET_CHARS],
+            "date": row.created_at.strftime("%Y-%m-%d %H:%M UTC") if row.created_at else None,
+            "chat_id": str(row.chat_id)}
 
-        # Format for LLM
-        lines = [f"Found {len(results)} message(s) matching '{query}':\n"]
-        for i, r in enumerate(results, 1):
-            lines.append(
-                f"{i}. [{r['date']}] ({r['role']}) in \"{r['chat_title']}\":\n"
-                f"   {r['content']}\n"
-            )
 
-        return {
-            "success": True,
-            "query": query,
-            "total": len(results),
-            "results": results,
-            "formatted": "\n".join(lines),
-        }
-    except Exception as exc:
-        logger.error("[PlatformExecutor] Chat search failed: %s", exc, exc_info=True)
-        return {"success": False, "error": f"Chat search failed: {exc}"}
+def _chat_search_answer(query: str, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    lines = [f"Found {len(results)} message(s) matching '{query}':\n"]
+    lines += [f"{i}. [{r['date']}] ({r['role']}) in \"{r['chat_title']}\":\n   {r['content']}\n"
+              for i, r in enumerate(results, 1)]
+    return {"success": True, "query": query, "total": len(results), "results": results,
+            "formatted": "\n".join(lines)}
 
 
 # How much of each memory a search answer repeats; how many of the workspace's agents it reads.

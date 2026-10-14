@@ -26,11 +26,14 @@ APPROVED, DECLINED, LAPSED = "approved", "declined", "lapsed"
 DECIDED = "decided"
 USER_ACTOR = "user:"
 NUMBER_SAID = re.compile(r"#\d+(?:\.\d+)?")
+# '#' and the most digits a board number has (services.ticket_numbers.MAX_SEARCHED_DIGITS).
+MAX_NUMBER_CHARS = 10
 
 
 def clicks_in(db: Any, workspace_id: Any, user_id: int, window: Window) -> Found:
-    """``user_id``'s own clicks on call cards in ``window`` (approved or declined), oldest first."""
-    from sqlalchemy import and_, or_
+    """``user_id``'s own clicks on call cards in ``window`` (approved or declined), oldest first; a cap
+    leaves out the newest (P256-FIX-N15-4), and ``rest_from`` says when they begin."""
+    from sqlalchemy import and_, func, or_
 
     from core.models.approval_grants import KIND_QUESTION, SUBJECT_TOOL_CALL, ApprovalGrant, GrantStatus
 
@@ -42,9 +45,11 @@ def clicks_in(db: Any, workspace_id: Any, user_id: int, window: Window) -> Found
     grants = (db.query(ApprovalGrant)
               .filter(ApprovalGrant.workspace_id == workspace_id, ApprovalGrant.subject_type == SUBJECT_TOOL_CALL,
                       ApprovalGrant.kind != KIND_QUESTION, or_(said_yes, said_no))
-              .order_by(ApprovalGrant.id.desc()).limit(MAX_CLICKS + 1).all())
+              .order_by(func.coalesce(ApprovalGrant.granted_at, ApprovalGrant.revoked_at).asc(), ApprovalGrant.id.asc())
+              .limit(MAX_CLICKS + 1).all())
     clicks = sorted((_click(db, grant) for grant in grants[:MAX_CLICKS]), key=lambda item: item["at"])
-    return Found(clicks, len(grants) > MAX_CLICKS)
+    rest = grants[MAX_CLICKS] if len(grants) > MAX_CLICKS else None
+    return Found(clicks, _utc(rest.granted_at or rest.revoked_at) if rest is not None else None)
 
 
 def settled(db: Any, workspace_id: Any, items: List[Item], window: Window) -> List[Item]:
@@ -92,10 +97,30 @@ def _click(db: Any, grant: Any) -> Item:
     at = grant.granted_at if approved else grant.revoked_at
     card = card_words(grant)
     details = grant.details if isinstance(grant.details, dict) else {}
-    numbers = list(dict.fromkeys([*numbers_of_the_card(db, grant), *NUMBER_SAID.findall(card)]))
+    numbers = list(dict.fromkeys([*numbers_of_the_card(db, grant), *board_numbers_said(db, grant.workspace_id, card)]))
     outcome = outcome_of(details.get("executed_result")) if approved else NOTHING_RAN
     return {"at": iso_utc(at), "when": at_said(at), "decision": APPROVED if approved else DECLINED,
             "card": card, "numbers": numbers, "outcome": outcome or None, "grant_id": grant.id}
+
+
+def board_numbers_said(db: Any, workspace_id: Any, card: str) -> List[str]:
+    """The '#N' a card's words show that are a ticket's board number in this workspace.
+    P256-FIX-N15-9 (F429): a card also writes an agent's, a document's or another card's own id
+    with a '#' ('agent #12', 'send card #1607'), and none of those is a ticket's number."""
+    from core.models.core import BoardTask
+    from services.ticket_numbers import resolve_ticket_ref
+
+    said = NUMBER_SAID.findall(card)
+    whole = {int(n[1:]) for n in said if "." not in n and len(n) <= MAX_NUMBER_CHARS}
+    known = {seq for (seq,) in db.query(BoardTask.workspace_seq).filter(
+        BoardTask.workspace_id == workspace_id, BoardTask.workspace_seq.in_(whole)).all()} if whole else set()
+
+    def is_a_card(number: str) -> bool:   # a mission step's (#0051.3) is read one at a time: they are rare
+        if "." in number:
+            return resolve_ticket_ref(db, workspace_id, number) is not None
+        return int(number[1:]) in known
+
+    return [n for n in said if is_a_card(n)]
 
 
 def _actor_refs(db: Any, user_id: int) -> List[str]:

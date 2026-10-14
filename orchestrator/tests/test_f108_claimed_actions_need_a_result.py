@@ -72,12 +72,10 @@ def test_a_write_that_failed_does_not_back_a_claim():
 
 def test_the_notice_says_what_did_not_happen():
     # F314 (night 9): in Auto's own plain words, never "This reply says something was approved …";
-    # FX-006/FX-007: named when another write went through, plain when nothing did
+    # FX-006/FX-007, P256-FIX-N15-2: in the claim's place, naming it, whether or not another write went through
     said = "I've approved the mission."
-    assert line(said, "platform_store_memory") == (
+    assert line(said, "platform_store_memory") == line(said) == (
         "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done.")
-    assert line(said) == ("Just to be clear: I haven't done that yet, and nothing has changed. "
-                          "Ask me again if you want it done.")
 
 
 # ── the loop records what succeeded ─────────────────────────────────────────
@@ -99,9 +97,8 @@ def test_the_loop_records_the_actions_that_succeeded():
     async def tools(name, args, call_id, workspace_id):
         return {"success": args["action"] != "platform_approve_mission", "error": "not yours to approve"}
 
-    # the claim is nudged once (test_f108_b); the retry says what happened
-    executor = ToolLoopExecutor(llm_callback=_Model(LLMResponse(content="I've approved the mission.", tool_calls=None),
-                                                    LLMResponse(content="The approval was refused.", tool_calls=None)),
+    # the claim's sentence is replaced by the not-done line, with no retry (test_f108_b, P256-FIX-N15-1)
+    executor = ToolLoopExecutor(llm_callback=_Model(LLMResponse(content="I've approved the mission.", tool_calls=None)),
                                 tool_callback=tools, max_iterations=5)
     first = LLMResponse(content="", tool_calls=[_call("platform_get_mission"), _call("platform_approve_mission")])
     asyncio.run(executor.run(initial_response=first, messages=[{"role": "user", "content": "approve it"}],
@@ -116,16 +113,17 @@ def test_the_loop_records_the_actions_that_succeeded():
 
 def test_the_chat_notice_covers_a_claimed_action():
     """PRD-256 FX-005: the claim is the receipts' line, the one producer of it; the turn's
-    notice never says it again (test_prd256_fix_stream_truth covers both reply paths)."""
-    from consumers.chatbot.receipts import DONE, NOTHING_DONE_LINE, READ, WRITE, honesty_lines
+    notice never says it again (test_prd256_fix_stream_truth covers both reply paths). P256-FIX-N15-2:
+    the line is in the claim's place, never above the reply."""
+    from consumers.chatbot.receipts import honesty_lines
     from consumers.chatbot.service import unexecuted_claims_notice
 
     tools = [{"type": "function", "function": {"name": "platform_execute"}}]
     reply = "I've approved the mission. It's now running."
-    read = {"action": "platform_get_mission", "kind": READ, "status": DONE}
-    approved = {"action": "platform_approve_mission", "kind": WRITE, "status": DONE}
-    assert honesty_lines([read], reply) == [NOTHING_DONE_LINE]
-    assert honesty_lines([read, approved], reply) == []
+    read, approved = call("platform_get_mission"), call("platform_approve_mission")
+    assert line(reply, read) == (
+        "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done.")
+    assert line(reply, read, approved) is None and honesty_lines([], reply) == []
     assert unexecuted_claims_notice(reply, tools, {"platform_get_mission"}, any_tool_ran=True) is None
     assert unexecuted_claims_notice(reply, None, set(), any_tool_ran=False) is None   # no tools offered
 

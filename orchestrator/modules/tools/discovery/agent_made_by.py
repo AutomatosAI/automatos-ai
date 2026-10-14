@@ -90,4 +90,12 @@ def lists_the_team(handler: Handler) -> Handler:
     return says_who_can_run(says_who_made_it(handler))
 
 
-__all__ = ["MADE_BY", "NOT_RECORDED", "lists_the_team", "made_by", "says_who_made_it"]
+def describes_the_agent(handler: Handler) -> Handler:
+    """Wrap platform_get_agent: who made the agent and how it runs (here), then whether it can
+    run now and its last run (N15-6: asked whether WRITER can take a job, Auto read its flag)."""
+    from services.agent_availability import says_who_can_run
+
+    return says_who_can_run(says_who_made_it(handler))
+
+
+__all__ = ["MADE_BY", "NOT_RECORDED", "describes_the_agent", "lists_the_team", "made_by", "says_who_made_it"]

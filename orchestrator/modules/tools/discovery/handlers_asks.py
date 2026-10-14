@@ -18,6 +18,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from modules.tools.discovery.ask_ticket_numbers import asks_by_ticket_number
+
 logger = logging.getLogger(__name__)
 
 _SUBJECTS = ("board_task", "playbook_run", "tool_call")
@@ -55,6 +57,7 @@ def clean_question(question: str, options: Optional[list]) -> Tuple[str, Optiona
     return text[:first.start()].rstrip(), options
 
 
+@asks_by_ticket_number  # P256-FIX-N15-9 (F429): the ticket by its board number, and said by it
 async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Raise a human question that parks its subject and returns at once."""
     from core.services.approval_grants import DEFAULT_TTL_SECONDS
