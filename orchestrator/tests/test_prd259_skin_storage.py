@@ -129,8 +129,24 @@ def test_the_longest_slug_and_version_still_make_a_prefix():
     assert storage.skin_prefix(slug, version) == f"skins/{slug}/{version}/"
 
 
+def _imported_modules(source: str) -> set[str]:
+    """Every module storage.py imports, read from its syntax tree, so a docstring that
+    names MinIO (as it should: MinIO is the local store behind core.storage) can't trip it."""
+    import ast
+
+    modules: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
+
+
 def test_no_client_of_its_own():
     source = (ORCH_ROOT / "services" / "skins" / "storage.py").read_text(encoding="utf-8")
-    assert "boto3" not in source and "minio" not in source.lower()
+    imported = _imported_modules(source)
+    assert not any(name.split(".")[0] in {"boto3", "botocore", "minio"} for name in imported), imported
+    assert "core.storage" in imported
     assert "from core.storage import ensure_bucket, get_s3_client" in source
     assert "config.MARKETPLACE_S3_BUCKET" in source
