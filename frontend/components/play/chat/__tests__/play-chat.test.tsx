@@ -38,6 +38,11 @@ vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))
 vi.mock('@/components/local/first-run-nudge', () => ({ FirstRunNudge: () => null }))
+// T-005b: the chat shows the core's trial banner off the workspace snapshot; no snapshot here.
+vi.mock('@/components/workspace-provider', () => ({
+  useWorkspace: () => ({ workspace: null }),
+  useWorkspaceOptional: () => null,
+}))
 vi.mock('@/components/mascot/auto-mascot', () => ({
   AutoMascot: ({ state, caption, detail }: { state: string; caption?: string; detail?: string }) => (
     <div data-testid="auto" data-state={state}>
