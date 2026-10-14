@@ -9,10 +9,13 @@ import {
   DEFAULT_SKIN_BASE,
   DEFAULT_UI_STYLE,
   UI_SKIN_BASE_COOKIE,
+  UI_SKIN_TONE_COOKIE,
   baseOf,
   htmlAttrsFor,
   isUiStyle,
+  lockedToneFor,
   parseSkinBase,
+  parseSkinTone,
   parseUiStyle,
   skinIdOf,
   skinStyle,
@@ -88,6 +91,35 @@ describe('htmlAttrsFor — what the server puts on <html>', () => {
   it('a tampered cookie: the default style, no data-skin', () => {
     for (const value of TAMPERED) {
       expect(htmlAttrsFor(value, 'classic'), value).toEqual({ style: DEFAULT_UI_STYLE, base: DEFAULT_UI_STYLE, studioClass: true, skinId: null })
+    }
+  })
+})
+
+describe('the tone cookie — a single-tone skin\'s lock, read by the server', () => {
+  const TAMPERED_TONES = ['dark;x', '"><script>alert(1)</script>', 'Dark', 'system', ' dark', 'light ', '']
+
+  it('names the tone cookie automatos-skin-tone', () => {
+    expect(UI_SKIN_TONE_COOKIE).toBe('automatos-skin-tone')
+  })
+
+  it('parses light and dark, and nothing else', () => {
+    expect(parseSkinTone('light')).toBe('light')
+    expect(parseSkinTone('dark')).toBe('dark')
+    for (const value of [...TAMPERED_TONES, undefined, null]) expect(parseSkinTone(value), String(value)).toBeUndefined()
+  })
+
+  it('a valid skin style with a valid tone cookie locks that tone', () => {
+    expect(lockedToneFor(`skin:${ID}`, 'dark')).toBe('dark')
+    expect(lockedToneFor(`skin:${ID}`, 'light')).toBe('light')
+  })
+
+  it('a tampered or missing tone cookie locks nothing', () => {
+    for (const value of [...TAMPERED_TONES, undefined, null]) expect(lockedToneFor(`skin:${ID}`, value), String(value)).toBeUndefined()
+  })
+
+  it('a tone cookie means nothing unless the style is a valid skin', () => {
+    for (const style of ['classic', 'studio', undefined, null, ...TAMPERED]) {
+      expect(lockedToneFor(style, 'dark'), String(style)).toBeUndefined()
     }
   })
 })

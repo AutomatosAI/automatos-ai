@@ -10,7 +10,8 @@
  * skin stylesheet. Switching writes the cookies (for the next request), the html class and
  * the skin (for this document) and localStorage (a mirror), and never touches the tone: a
  * single-tone skin LOCKS the tone through `onToneLock` (ThemeProvider's forcedTheme), which
- * leaves the user's own stored tone alone. `isStudio` follows the BASE, so every page that
+ * leaves the user's own stored tone alone; the server starts that lock from the tone cookie
+ * (`initialLockedTone`), so it holds from the first paint. `isStudio` follows the BASE, so every page that
  * branches on it keeps its layout under a skin.
  */
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
@@ -55,16 +56,20 @@ interface UiStyleProviderProps {
   initialStyle?: UiStyle
   /** The active skin's base, from its cookie (decision K1); ignored unless the style is a skin. */
   initialSkinBase?: BaseStyle
+  /** The tone the server locked from the tone cookie; holds until the installed list resolves the skin. */
+  initialLockedTone?: SkinTone
   /** Called with the tone a single-tone skin locks, or undefined when nothing is locked. */
   onToneLock?: (tone: SkinTone | undefined) => void
   children: ReactNode
 }
 
-export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, initialSkinBase, onToneLock, children }: UiStyleProviderProps) {
+export function UiStyleProvider({
+  initialStyle = DEFAULT_UI_STYLE, initialSkinBase, initialLockedTone, onToneLock, children,
+}: UiStyleProviderProps) {
   const { style, base, active, setStyle, installed } = useSkinStyle(initialStyle, baseOf(initialStyle, initialSkinBase))
   const { setTheme } = useTheme()
   useSkinFonts(active)
-  useToneLock(active, onToneLock)
+  useToneLock({ style, active }, initialLockedTone, onToneLock)
 
   // PRD-244 D1 (Gerard, 2026-09-17): Studio + Dark are the defaults for
   // everyone, once — a browser that has not seen this defaults version is moved

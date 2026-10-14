@@ -3,6 +3,8 @@
  * layout changes), choosing it writes both cookies, data-skin, the one <style> element and
  * the cache; leaving it removes all three; a single-tone skin locks the tone and leaving it
  * restores the user's own; and every fallback trigger shows the base with a notice, once.
+ * P259-W1-RVW-2: the lock rides in the tone cookie, so it holds from the first paint, before
+ * (or without) the installed list.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -33,6 +35,7 @@ import {
   APPEARANCE_DEFAULTS_VERSION,
   STUDIO_HTML_CLASS,
   UI_SKIN_BASE_COOKIE,
+  UI_SKIN_TONE_COOKIE,
   UI_STYLE_COOKIE,
   type BaseStyle,
   type UiStyle,
@@ -53,6 +56,7 @@ beforeEach(() => {
   styleElement()?.remove()
   clearCookie(UI_STYLE_COOKIE)
   clearCookie(UI_SKIN_BASE_COOKIE)
+  clearCookie(UI_SKIN_TONE_COOKIE)
   window.localStorage.clear()
   window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
   api.get.mockReset()
@@ -147,6 +151,98 @@ describe('the tone lock', () => {
     const src = readFileSync(path.resolve(__dirname, '..', '..', 'components', 'providers.tsx'), 'utf8')
     expect(src).toContain('forcedTheme={lockedTone}')
     expect(src).toContain('onToneLock={setLockedTone}')
+  })
+})
+
+describe('the tone lock from the first paint (the tone cookie)', () => {
+  const lockedSkin = `skin:${SKIN_ID}` as const
+  const toneCookie = (tone: string) => `${UI_SKIN_TONE_COOKIE}=${tone}`
+
+  /** What the server had: the style cookie on a dark-only skin, and its tone cookie. */
+  function serverCookies() {
+    document.cookie = `${UI_STYLE_COOKIE}=${lockedSkin}; Path=/`
+    document.cookie = `${toneCookie('dark')}; Path=/`
+  }
+
+  function mountLocked() {
+    render(
+      <SkinHarness initialStyle={lockedSkin} initialSkinBase="studio" initialLockedTone="dark">
+        <StyleProbe />
+      </SkinHarness>,
+    )
+  }
+
+  it('(a) the locked Dark holds before the installed list resolves, over a stored light', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    api.get.mockReturnValue(new Promise(() => undefined))
+    mountLocked()
+    expect(screen.getByTestId('skins').textContent).not.toMatch(/^ready:/)
+    expect(html().classList.contains('dark')).toBe(true)
+    expect(html().classList.contains('light')).toBe(false)
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
+  })
+
+  it('(b) a failed list load leaves Dark forced and the stored light alone', async () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    serverCookies()
+    api.get.mockRejectedValue(new Error('offline'))
+    mountLocked()
+    await waitFor(() => expect(screen.getByTestId('skins').textContent).toMatch(/^error:/))
+    expect(html().classList.contains('dark')).toBe(true)
+    expect(html().classList.contains('light')).toBe(false)
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
+    expect(document.cookie).toContain(toneCookie('dark'))
+  })
+
+  it('(c) choosing Studio afterwards clears the tone cookie and restores the stored light', async () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    serverCookies()
+    api.get.mockRejectedValue(new Error('offline'))
+    mountLocked()
+    await waitFor(() => expect(screen.getByTestId('skins').textContent).toMatch(/^error:/))
+    click('go studio')
+    await waitFor(() => expect(html().classList.contains('light')).toBe(true))
+    expect(html().classList.contains('dark')).toBe(false)
+    expect(document.cookie).not.toContain(`${UI_SKIN_TONE_COOKIE}=`)
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
+  })
+
+  it('(d) the fallback clears the tone cookie and the lock', async () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    serverCookies()
+    api.get.mockResolvedValue([])
+    mountLocked()
+    await waitFor(() => expect(screen.getByTestId('style').textContent).toBe('studio'))
+    await waitFor(() => expect(html().classList.contains('light')).toBe(true))
+    expect(document.cookie).not.toContain(`${UI_SKIN_TONE_COOKIE}=`)
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+  })
+
+  it('a single-tone skin writes its tone cookie; a two-tone skin clears it', async () => {
+    await loaded([installedItem(CASES.darkOnly, SKIN_ID), installedItem(CASES.twoTone, OTHER_SKIN_ID)], { initialStyle: 'studio' })
+    click('go skin')
+    expect(document.cookie).toContain(toneCookie('dark'))
+    click('go other skin')
+    expect(document.cookie).not.toContain(`${UI_SKIN_TONE_COOKIE}=`)
+  })
+
+  it('the server reads the tone cookie and Providers starts forcedTheme from it', () => {
+    const read = (...parts: string[]) => readFileSync(path.resolve(__dirname, '..', '..', ...parts), 'utf8')
+    const layout = read('app', 'layout.tsx')
+    expect(layout).toContain('lockedToneFor(styleCookie, store.get(UI_SKIN_TONE_COOKIE)?.value)')
+    expect(layout).toContain('initialLockedTone={lockedTone}')
+    const providers = read('components', 'providers.tsx')
+    expect(providers).toContain('useState<SkinTone | undefined>(initialLockedTone)')
+    expect(providers).toContain('initialLockedTone={initialLockedTone}')
+  })
+
+  it('the list resolving the same dark-only skin keeps the lock and rewrites the cookie', async () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    api.get.mockResolvedValue([installedItem(CASES.darkOnly, SKIN_ID)])
+    mountLocked()
+    await waitFor(() => expect(styleElement()?.textContent).toContain(SKIN_ID))
+    expect(html().classList.contains('dark')).toBe(true)
+    expect(document.cookie).toContain(toneCookie('dark'))
   })
 })
 

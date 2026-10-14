@@ -44,12 +44,13 @@ export function installedItem(caseName: string, id: string, overrides: Record<st
 interface HarnessProps {
   initialStyle?: UiStyle
   initialSkinBase?: BaseStyle
+  initialLockedTone?: SkinTone
   children: ReactNode
 }
 
 /** ThemeProvider + UiStyleProvider with the tone lock lifted, as Providers does it. */
-export function SkinHarness({ initialStyle, initialSkinBase, children }: HarnessProps) {
-  const [lockedTone, setLockedTone] = useState<SkinTone | undefined>(undefined)
+export function SkinHarness({ initialStyle, initialSkinBase, initialLockedTone, children }: HarnessProps) {
+  const [lockedTone, setLockedTone] = useState<SkinTone | undefined>(initialLockedTone)
   return (
     <ThemeProvider
       attribute="class"
@@ -59,7 +60,12 @@ export function SkinHarness({ initialStyle, initialSkinBase, children }: Harness
       storageKey={THEME_STORAGE_KEY}
       forcedTheme={lockedTone}
     >
-      <UiStyleProvider initialStyle={initialStyle} initialSkinBase={initialSkinBase} onToneLock={setLockedTone}>
+      <UiStyleProvider
+        initialStyle={initialStyle}
+        initialSkinBase={initialSkinBase}
+        initialLockedTone={initialLockedTone}
+        onToneLock={setLockedTone}
+      >
         {children}
       </UiStyleProvider>
     </ThemeProvider>

@@ -79,12 +79,15 @@ interface ProvidersProps {
   initialUiStyle?: UiStyle
   /** PRD-259 decision K1: the active skin's base, read from its own cookie. */
   initialSkinBase?: BaseStyle
+  /** PRD-259: a single-tone skin's locked tone, read from its cookie, so the lock holds from the first paint. */
+  initialLockedTone?: SkinTone
 }
 
-export function Providers({ children, initialUiStyle, initialSkinBase }: ProvidersProps) {
+export function Providers({ children, initialUiStyle, initialSkinBase, initialLockedTone }: ProvidersProps) {
   // PRD-259 §4: a single-tone skin locks the tone. forcedTheme forces it without
-  // overwriting the user's stored tone, which returns when they leave the skin.
-  const [lockedTone, setLockedTone] = useState<SkinTone | undefined>(undefined)
+  // overwriting the user's stored tone, which returns when they leave the skin. It
+  // starts from the server's tone cookie, so next-themes' script forces it before paint.
+  const [lockedTone, setLockedTone] = useState<SkinTone | undefined>(initialLockedTone)
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -106,7 +109,12 @@ export function Providers({ children, initialUiStyle, initialSkinBase }: Provide
           disableTransitionOnChange
           forcedTheme={lockedTone}
         >
-          <UiStyleProvider initialStyle={initialUiStyle} initialSkinBase={initialSkinBase} onToneLock={setLockedTone}>
+          <UiStyleProvider
+            initialStyle={initialUiStyle}
+            initialSkinBase={initialSkinBase}
+            initialLockedTone={initialLockedTone}
+            onToneLock={setLockedTone}
+          >
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
               {/* PRD-222: a new workspace lands directly in the conversation

@@ -4,7 +4,14 @@ import { Geist, Geist_Mono, Newsreader } from 'next/font/google'
 import { cookies } from 'next/headers'
 import { Providers } from '../components/providers'
 import { SKIN_PREPAINT_SCRIPT } from '@/lib/skins/prepaint'
-import { htmlAttrsFor, STUDIO_HTML_CLASS, UI_SKIN_BASE_COOKIE, UI_STYLE_COOKIE } from '@/lib/ui-style'
+import {
+  htmlAttrsFor,
+  lockedToneFor,
+  STUDIO_HTML_CLASS,
+  UI_SKIN_BASE_COOKIE,
+  UI_SKIN_TONE_COOKIE,
+  UI_STYLE_COOKIE,
+} from '@/lib/ui-style'
 import './globals.css'
 
 // Force dynamic rendering to prevent build-time Clerk errors
@@ -47,8 +54,12 @@ export default async function RootLayout({
   // PRD-259 §4: a skin (`skin:<id>`) carries its base in a second cookie
   // (decision K1), so the studio class follows the base with no database call,
   // and <html data-skin> tells the pre-paint script which cached skin to apply.
+  // A single-tone skin's lock rides in a third cookie: ThemeProvider renders with
+  // forcedTheme, so next-themes' script forces that tone before paint.
   const store = await cookies()
-  const attrs = htmlAttrsFor(store.get(UI_STYLE_COOKIE)?.value, store.get(UI_SKIN_BASE_COOKIE)?.value)
+  const styleCookie = store.get(UI_STYLE_COOKIE)?.value
+  const attrs = htmlAttrsFor(styleCookie, store.get(UI_SKIN_BASE_COOKIE)?.value)
+  const lockedTone = lockedToneFor(styleCookie, store.get(UI_SKIN_TONE_COOKIE)?.value)
   const uiStyle = attrs.style
   const htmlClass = [
     geistSans.variable,
@@ -69,7 +80,7 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: SKIN_PREPAINT_SCRIPT }} />
       </head>
       <body>
-        <Providers initialUiStyle={uiStyle} initialSkinBase={attrs.base}>
+        <Providers initialUiStyle={uiStyle} initialSkinBase={attrs.base} initialLockedTone={lockedTone}>
           {children}
         </Providers>
       </body>

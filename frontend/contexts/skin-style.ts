@@ -19,6 +19,7 @@ import type { SkinTone } from '@/lib/skins/schema'
 import {
   STUDIO_HTML_CLASS,
   UI_SKIN_BASE_COOKIE,
+  UI_SKIN_TONE_COOKIE,
   UI_STYLE_COOKIE,
   UI_STYLE_COOKIE_MAX_AGE_S,
   UI_STYLE_STORAGE_KEY,
@@ -32,27 +33,32 @@ import {
 
 export const BASE_STYLE_LABELS: Readonly<Record<BaseStyle, string>> = { classic: 'Classic', studio: 'Studio' }
 const UNNAMED_SKIN = 'The skin'
+/** Max-Age that deletes a cookie. */
+const COOKIE_EXPIRED_S = 0
 
 /** The fallback notice (PRD-259 §4): '<name> isn't available here, so <base> is showing.' */
 export function fallbackNotice(name: string | null, base: BaseStyle): string {
   return `${name ?? UNNAMED_SKIN} isn't available here, so ${BASE_STYLE_LABELS[base]} is showing.`
 }
 
-function writeCookie(name: string, value: string): void {
+function writeCookie(name: string, value: string, maxAgeS = UI_STYLE_COOKIE_MAX_AGE_S): void {
   const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${name}=${value}; Path=/; Max-Age=${UI_STYLE_COOKIE_MAX_AGE_S}; SameSite=Lax${secure}`
+  document.cookie = `${name}=${value}; Path=/; Max-Age=${maxAgeS}; SameSite=Lax${secure}`
 }
 
 /**
- * Where the next request (the two cookies) and this document (the studio class) see the
- * style. The base cookie travels with every choice, so the server never needs the database
- * to know a skin's base (decision K1). Never touches the tone.
+ * Where the next request (the cookies) and this document (the studio class) see the style.
+ * The base cookie travels with every choice, so the server never needs the database to know
+ * a skin's base (decision K1); the tone cookie carries a single-tone skin's lock the same way
+ * and is cleared for everything else. Never touches the user's own stored tone.
  */
-export function applyUiStyleToDocument(style: UiStyle, base: BaseStyle): void {
+export function applyUiStyleToDocument(style: UiStyle, base: BaseStyle, lockedTone?: SkinTone): void {
   if (typeof document === 'undefined') return
   document.documentElement.classList.toggle(STUDIO_HTML_CLASS, base === 'studio')
   writeCookie(UI_STYLE_COOKIE, style)
   writeCookie(UI_SKIN_BASE_COOKIE, base)
+  if (lockedTone) writeCookie(UI_SKIN_TONE_COOKIE, lockedTone)
+  else writeCookie(UI_SKIN_TONE_COOKIE, '', COOKIE_EXPIRED_S)
   try {
     window.localStorage.setItem(UI_STYLE_STORAGE_KEY, style)
   } catch {
@@ -105,7 +111,7 @@ export function useSkinStyle(initialStyle: UiStyle, initialBase: BaseStyle): Ski
   const commit = useCallback((next: StyleState) => {
     stateRef.current = next
     setState(next)
-    applyUiStyleToDocument(next.style, next.base)
+    applyUiStyleToDocument(next.style, next.base, lockedToneOf(next.active?.skin))
     if (next.active) applySkinToDocument(next.active)
     else removeSkinFromDocument()
   }, [])
@@ -155,9 +161,18 @@ export function useSkinFonts(active: ResolvedSkin | null): void {
   }, [active])
 }
 
-/** Tells the tone owner (ThemeProvider's forcedTheme) which tone a single-tone skin locks. */
-export function useToneLock(active: ResolvedSkin | null, onToneLock?: (tone: SkinTone | undefined) => void): void {
-  const tone = lockedToneOf(active?.skin)
+/**
+ * Tells the tone owner (ThemeProvider's forcedTheme) which tone a single-tone skin locks. Until
+ * the installed list resolves the skin (or when it fails to load), the server's lock from the
+ * tone cookie holds, so a reload never paints the base's other tone first.
+ */
+export function useToneLock(
+  { style, active }: Pick<SkinStyle, 'style' | 'active'>,
+  cookieTone: SkinTone | undefined,
+  onToneLock?: (tone: SkinTone | undefined) => void,
+): void {
+  const pending = active === null && isSkinStyle(style)
+  const tone = pending ? cookieTone : lockedToneOf(active?.skin)
   useEffect(() => {
     onToneLock?.(tone)
   }, [tone, onToneLock])

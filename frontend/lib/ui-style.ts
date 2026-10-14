@@ -8,7 +8,7 @@
  * setting: a cookie the server reads (app/layout.tsx) so the Studio chrome
  * renders on first paint with no classic flash, mirrored to localStorage.
  */
-import { SKIN_ID_PATTERN } from '@/lib/skins/schema'
+import { SKIN_ID_PATTERN, SKIN_TONES, type SkinTone } from '@/lib/skins/schema'
 
 /** The two design systems. A skin sits on one of them (its `base`), never a third layout. */
 export type BaseStyle = 'classic' | 'studio'
@@ -52,6 +52,13 @@ export const UI_STYLE_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 365
 export const UI_SKIN_BASE_COOKIE = 'automatos-skin-base'
 export const DEFAULT_SKIN_BASE: BaseStyle = 'studio'
 
+/**
+ * The tone a single-tone skin locks rides in a third cookie, on K1's pattern, so the server
+ * renders ThemeProvider with forcedTheme and the first paint is already that tone. Cleared
+ * for Classic, Studio, a two-tone skin and every fallback.
+ */
+export const UI_SKIN_TONE_COOKIE = 'automatos-skin-tone'
+
 /** The class the Studio stylesheet hangs off (`.studio {}` in globals.css). */
 export const STUDIO_HTML_CLASS = 'studio'
 
@@ -77,6 +84,11 @@ export function parseUiStyle(value: string | null | undefined): UiStyle {
 /** The base cookie, strictly: 'studio' or 'classic', anything else → Studio. */
 export function parseSkinBase(value: string | null | undefined): BaseStyle {
   return isBaseStyle(value) ? value : DEFAULT_SKIN_BASE
+}
+
+/** The tone cookie, strictly: 'light' or 'dark', anything else → no lock. */
+export function parseSkinTone(value: string | null | undefined): SkinTone | undefined {
+  return SKIN_TONES.find((tone) => tone === value)
 }
 
 export function skinStyle(skinId: string): SkinStyle {
@@ -108,4 +120,9 @@ export function htmlAttrsFor(styleCookie: string | null | undefined, baseCookie:
   const style = parseUiStyle(styleCookie)
   const base = baseOf(style, baseCookie)
   return { style, base, studioClass: base === 'studio', skinId: skinIdOf(style) }
+}
+
+/** The tone the server forces from the two cookies: only when the style is a valid skin. */
+export function lockedToneFor(styleCookie: string | null | undefined, toneCookie: string | null | undefined): SkinTone | undefined {
+  return isSkinStyle(parseUiStyle(styleCookie)) ? parseSkinTone(toneCookie) : undefined
 }
