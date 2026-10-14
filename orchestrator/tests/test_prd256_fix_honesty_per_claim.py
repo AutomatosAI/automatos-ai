@@ -523,7 +523,7 @@ SWEPT = [
     ("Approved.", "approved"), ("steps: a playbook is created with no steps", "created"), ("All paid.", "paid"),
     ("Task ID 1099 is done, and so is 1093.", "done"),
     ("I made an empty playbook instead of installing it: nothing was installed.", "made"),
-    ("I made an empty playbook", "made"), ("If they ask whether setup is done: \"Your team is built", "done"),
+    ("I made an empty playbook", "made"),   # N15-1: "If they ask whether setup is done" is a condition, no claim
     ("Ticket 0001 ('Christmas gift box labels - 40 of them') is closed", "closed"),
     ("The task is done when all three coffees are worked out.", "done"), ("Supplier replied.", "replied"),
     ("Ticket 0059 started.", "started"), ("It is fixed now.", "fixed"), ("The mission completed.", "completed"),

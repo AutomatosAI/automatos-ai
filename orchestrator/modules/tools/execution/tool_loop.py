@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from .nudges import ANNOUNCED_STEP_MSG, announced_step, ask_for_the_answer, claimed_action_nudge, nudge_about  # US-006, F306
+from .nudges import ANNOUNCED_STEP_MSG, announced_step, ask_for_the_answer, nudge_about  # F306, F297
 from .nudges import NARRATION_RECOVERY_MSG as _NARRATION_RECOVERY_MSG, UNRUN_SOURCE_RECOVERY_MSG as _UNRUN_SOURCE_RECOVERY_MSG
 from .card_raised import emit_flagged  # PRD-256 FX-005 / RVW-22: the result's own flag, and its wait (_emit)
 from .draft_here import shows_the_work  # F413, F419: the work the owner asked to see, or for here, is in the reply
@@ -597,9 +597,9 @@ class ToolLoopExecutor:
         messages: List[Message],
         tools: Optional[List[Dict[str, Any]]],
     ) -> Optional[LLMResponse]:
-        """F108: retry once when a reply without a tool call says an action was done and no
-        action that does it succeeded this turn. The claim stays in the history; the nudge says
-        it has not happened. F297: an empty reply straight after a round of tool calls is asked
+        """F108, P256-FIX-N15-1: a reply without a tool call that says an action was done that no
+        action this turn did is answered as composed, the claim's sentence replaced by the not-done
+        line, with no retry. F297: an empty reply straight after a round of tool calls is asked
         once for its answer. None when there is nothing to recover."""
         if not tools or _has_tool_calls(current):
             return None
@@ -610,13 +610,13 @@ class ToolLoopExecutor:
         if step:  # F306 (night 9): "Let me try a more specific query:" and no call made
             logger.warning("[tool-loop] reply announced a step it never took — nudging once")
             return await nudge_about(self._llm, current, messages, tools, ANNOUNCED_STEP_MSG.format(step=step))
-        from consumers.chatbot.receipts import unbacked_claim  # FX-007: the receipts rule, not a family
-
-        claim = unbacked_claim(text, self.tracker.outcomes, promises=self.promises)  # RVW-7: an agent's own voice
-        if not claim:
+        from consumers.chatbot.claim_removed import in_place_of, without_unbacked_claims  # N15-1: never nudged
+        removed = without_unbacked_claims(text, self.tracker.outcomes, promises=self.promises)  # RVW-7: its voice
+        if removed is None:
             return None
-        logger.warning("[tool-loop] reply says something was %s with no action behind it — nudging once", claim)
-        return await nudge_about(self._llm, current, messages, tools, claimed_action_nudge(claim, self.tracker.outcomes))
+        logger.warning("[tool-loop] unbacked claim family=%s sentence=%r — replaced by the not-done line",
+                       removed.family, removed.sentence)
+        return in_place_of(current, removed.text)
 
 
 # ---------------------------------------------------------------------------

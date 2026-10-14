@@ -242,12 +242,16 @@ def _turn(model, first, *, made):
         return asyncio.run(run())
 
 
-def test_a_letter_said_made_after_a_refused_call_is_nudged_then_corrected():
-    model = _Model(LETTER, LETTER)
+def test_a_letter_said_made_after_a_refused_call_is_replaced_by_the_line():
+    """P256-FIX-N15-1: no nudge; the claim's sentence goes and the line says the call was tried."""
+    model = _Model(LETTER)
     final = _turn(model, _round("", [_call()]), made=False)
 
-    nudge = model.sent[-1][-1]["content"]
-    assert "says something was generated" in nudge and "A write in this turn was refused: generate_document" in nudge
+    assert len(model.sent) == 1
+    answer = final["_final_response"].content
+    assert answer.startswith("Just to be clear: I haven't generated or saved anything in this reply; I tried to "
+                             "generate the document")
+    assert answer.endswith("and it didn't go through. Ask me again if you want it done. You can download the PDF here.")
     assert final["_f187"].ids == [] and final["_f187"].correction is None   # PRD-256: said above, from receipts
 
 

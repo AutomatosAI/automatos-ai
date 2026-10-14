@@ -4,9 +4,10 @@ The regex claim families are gone (D10); a reply's claim is matched to the turn'
 by the receipts (``consumers/chatbot/claims_backed.py``). The tests that pinned a family's
 sentence read it the same two ways the turn does:
 
-- ``nudged``: what the tool loop's one nudge (F108) says was claimed, from the calls so far
+- ``nudged``: what the tool loop's claim check (F108) says was claimed, from the calls so far
   (``receipts.unbacked_claim``), or None; in Auto's chat turn unless ``promises`` says it is an
-  agent's run (False) or leaves it to the turn's lane (None), P256-FIX-RVW-7;
+  agent's run (False) or leaves it to the turn's lane (None), P256-FIX-RVW-7. Since P256-FIX-N15-1
+  the check nudges nothing: it replaces the claim's sentence with the not-done line in place;
 - ``line``: the not-done line above the answer (``receipts.honesty_lines``), or None.
 
 A call is ``(action, params, result)`` or an action's name alone (it went through).
@@ -37,7 +38,7 @@ def tracker_of(calls: Iterable[Call]) -> ToolExecutionTracker:
 
 
 def nudged(text: str, *calls: Call, promises: Optional[bool] = True) -> Optional[str]:
-    """What F108's nudge says the reply claimed with no done write of its kind behind it, else None."""
+    """What F108's check says the reply claimed with no done write of its kind behind it, else None."""
     return unbacked_claim(text, tracker_of(calls).outcomes, promises=promises)
 
 

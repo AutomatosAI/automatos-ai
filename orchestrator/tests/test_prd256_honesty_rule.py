@@ -278,15 +278,16 @@ def test_the_saved_correction_keeps_only_tier_2():
     assert not hasattr(Verdict(tools=0), "claim") and not hasattr(Verdict(tools=0), "passive")
 
 
-def test_the_in_loop_nudge_reads_the_receipts_rule():
-    """FX-007: the families are gone; F108's nudge is the receipts' rule over the loop's calls."""
+def test_the_in_loop_check_reads_the_receipts_rule():
+    """FX-007: the families are gone; F108's check is the receipts' rule over the loop's calls.
+    P256-FIX-N15-1: it takes the claim out in place, with no nudge."""
     import inspect
 
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
     source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in source   # RVW-7: the run's voice
-    assert "claimed_action_not_done" not in source
+    assert "without_unbacked_claims(text, self.tracker.outcomes, promises=self.promises)" in source   # RVW-7
+    assert "claimed_action_not_done" not in source and "claimed_action_nudge" not in source
 
 
 # ── the turn: the frame carries the lines, the saved answer starts with them ─

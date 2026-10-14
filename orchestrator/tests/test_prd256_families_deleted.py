@@ -268,12 +268,13 @@ def test_service_py_is_shorter_and_holds_no_family():
         assert gone not in source, gone
 
 
-def test_the_in_loop_nudge_and_the_first_reply_read_the_receipts_rule():
+def test_the_in_loop_check_and_the_first_reply_read_the_receipts_rule():
     from consumers.chatbot.service import StreamingChatService
     from modules.tools.execution.tool_loop import ToolLoopExecutor
 
-    nudge = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in nudge   # RVW-7: the run's voice
+    check = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
+    # RVW-7: the run's voice; P256-FIX-N15-1: the claim is taken out in place, never nudged
+    assert "without_unbacked_claims(text, self.tracker.outcomes, promises=self.promises)" in check
     assert "claims_work_done(response.content)" in inspect.getsource(
         StreamingChatService._first_reply_goes_through_the_loop)
 

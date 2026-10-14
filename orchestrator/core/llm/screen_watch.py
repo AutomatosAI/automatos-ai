@@ -11,6 +11,9 @@ P256-FIX-RVW-43: a reply to a re-prompt passes through the apology gate after th
 (core/llm/turn_order.py), which drops the apology it opens with from the stream and
 saves a copy without it. ``restated`` tells the watcher what of that call reached the
 screen and which copy answers for it.
+
+P256-FIX-N15-1: a reply whose unbacked claim the loop took out is answered by a copy that never
+streamed; ``corrected`` tells the watcher, which takes the streamed reply off the screen.
 """
 from __future__ import annotations
 
@@ -28,6 +31,9 @@ class Watcher(Protocol):
         ...
 
     def restated(self, response: Any, copy: Any, said: str) -> None:
+        ...
+
+    def corrected(self, response: Any, copy: Any) -> None:
         ...
 
 
@@ -62,4 +68,12 @@ def restated(response: Any, copy: Any, said: str) -> None:
         watcher.restated(response, copy, said)
 
 
-__all__ = ["WATCHER", "Watcher", "restated", "watched"]
+def corrected(response: Any, copy: Any) -> None:
+    """P256-FIX-N15-1: the reply ``response`` stands corrected as ``copy`` (an unbacked claim taken out),
+    which did not stream: the screen takes the reply off once the loop's answer is known."""
+    watcher = WATCHER.get()
+    if watcher is not None:
+        watcher.corrected(response, copy)
+
+
+__all__ = ["WATCHER", "Watcher", "corrected", "restated", "watched"]

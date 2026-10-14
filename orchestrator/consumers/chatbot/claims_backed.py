@@ -81,6 +81,7 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Tup
 
 from consumers.chatbot import claims_by_kind as kinds
 from consumers.chatbot.claim_check import NOT_DONE, NOTHING_DONE
+from consumers.chatbot.claims_not_reports import looked_something_up, not_a_report, recalled
 from modules.tools.execution.composio_action import is_slug, slug_stems
 
 Receipt = Dict[str, Any]
@@ -166,7 +167,7 @@ _NO_WORK_AFTER = re.compile(
     r"(?:that\s+)?you(?:'re|’re| are|'d|’d| would| want| wish| have|'ve|’ve|'ll|’ll| will)\b|"
     r"to\s+(?:read|review|look|check|analy[sz]e|process|search|dig)\b|"
     r"(?:reading|reviewing|looking|checking|analy[sz]ing|processing|searching|digging|going\s+through)\b)", re.I)
-_SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
+SENTENCES = re.compile(r"[^.!?\n]+[.!?]?")
 _MARKS = re.compile(r"[*_`#>]")
 _SENT_BACK = re.compile(r"\bsent\b.*\bback\b", re.I)
 # P256-FIX-RVW-30: the verbs that say an ask was raised, and the words that name the ask in their clause
@@ -459,21 +460,21 @@ def _found_by_a_read(sentence: str, match: re.Match, read: FrozenSet[str]) -> bo
     return any(re.search(rf"(?<!\d){re.escape(number)}(?!\d)", sentence) for number in read)
 
 
-def _counts(sentence: str, match: re.Match, first_person: bool, read: FrozenSet[str]) -> bool:
+def _counts(sentence: str, match: re.Match, first_person: bool, read: FrozenSet[str], looked_up: bool = False) -> bool:
     """Whether a claim shape reports this turn's work: no plan word before it, not the reply's own
     content, nor a simple past's history, a read's finding or a denial, nor a question or what a read
-    of the turn found (RVW-34); with ``first_person``, only the writer's own "I've <verb>"
-    (P256-FIX-RVW-7) or "I <verb>" (RVW-25)."""
+    of the turn found (RVW-34), nor a read-only report (P256-FIX-N15-1, ``claims_not_reports``); with
+    ``first_person``, only the writer's own "I've <verb>" (P256-FIX-RVW-7) or "I <verb>" (RVW-25)."""
     if first_person and not _FIRST_PERSON.match(match.group(0)):
         return False
     if _history_or_denial(sentence, match) or _QUESTION.match(sentence) or _ASKS.match(sentence, match.end()):
         return False
-    if _found_by_a_read(sentence, match, read):
+    if _found_by_a_read(sentence, match, read) or not_a_report(sentence, match, looked_up):
         return False
     return not _PLANNED.search(sentence[: match.start()]) and _reported(sentence, match.start(), match.end())
 
 
-def _claims_in(sentence: str, first_person: bool, read: FrozenSet[str]) -> List[str]:
+def _claims_in(sentence: str, first_person: bool, read: FrozenSet[str], looked_up: bool = False) -> List[str]:
     """The verbs of the sentence's reports of work done ("" for a shape with no verb)."""
     if _PAST.search(sentence):
         return []
@@ -481,34 +482,46 @@ def _claims_in(sentence: str, first_person: bool, read: FrozenSet[str]) -> List[
     ends = [found.start() for found in matches[1:]] + [len(sentence)]
     verbs = []
     for match, upto in zip(matches, ends):
-        if not _counts(sentence, match, first_person, read):
+        if not _counts(sentence, match, first_person, read, looked_up):
             continue
         verbs.append(_verb(sentence, match.group(0), match.end()))
         verbs.extend(_coordinated(sentence, match.end(), upto))
     return verbs[1:] if len(verbs) > 1 and not verbs[0] and _DONE_FIRST.match(sentence) else verbs
 
 
-def _own_words(text: str) -> str:
-    """``text`` without what it quotes ("> " lines, fenced blocks): a draft written for the owner
-    speaks in its writer's voice (FX-007 keeps the families' rule)."""
-    kept, fenced = [], False
-    for line in text.splitlines():
+def own_lines(lines: Sequence[str]) -> List[bool]:
+    """Which of ``lines`` are in the writer's own words: not what it quotes ("> " lines, fenced
+    blocks): a draft written for the owner speaks in its writer's voice (FX-007 keeps the families' rule)."""
+    own, fenced = [], False
+    for line in lines:
         stripped = line.lstrip()
         if stripped.startswith("```"):
             fenced = not fenced
-        elif not fenced and not stripped.startswith(">"):
-            kept.append(line)
+        own.append(not fenced and not stripped.startswith(("```", ">")))
     if fenced:  # a fence never closed quotes nothing: only the "> " lines are left out
-        kept = [line for line in text.splitlines() if not line.lstrip().startswith(">")]
-    return "\n".join(kept)
+        own = [not line.lstrip().startswith(">") for line in lines]
+    return own
 
 
-def claims(answer: str, first_person: bool = False, read: FrozenSet[str] = frozenset()) -> List[Tuple[str, str]]:
+def _own_words(text: str) -> str:
+    """``text`` without what it quotes (``own_lines``)."""
+    lines = text.splitlines()
+    return "\n".join(line for line, own in zip(lines, own_lines(lines)) if own)
+
+
+def without_marks(text: str) -> str:
+    """``text`` as the claims are read in it: its markdown marks off ("**Sent**" is "Sent")."""
+    return _MARKS.sub("", text)
+
+
+def claims(answer: str, first_person: bool = False, read: FrozenSet[str] = frozenset(),
+           looked_up: bool = False) -> List[Tuple[str, str]]:
     """Each report of work done in the writer's own words: (its verb, its sentence); with
-    ``first_person``, only its "I've <verb>" claims; ``read``: the numbers the turn's reads named."""
+    ``first_person``, only its "I've <verb>" claims; ``read``: the numbers the turn's reads named;
+    ``looked_up``: the turn looked something up and wrote nothing (N15-1: a stative passive is a finding)."""
     text = _MARKS.sub("", _own_words(answer or ""))
-    return [(verb, sentence) for sentence in _SENTENCES.findall(text)
-            for verb in _claims_in(sentence, first_person, read)]
+    return [(verb, sentence) for sentence in SENTENCES.findall(text)
+            for verb in _claims_in(sentence, first_person, read, looked_up)]
 
 
 def numbers_read(reads: Sequence[Receipt]) -> FrozenSet[str]:
@@ -523,16 +536,21 @@ def claims_work_done(answer: str) -> bool:
 
 
 def _said(answer: str, first_person: bool, waiting: bool = False) -> List[Tuple[str, Backs]]:
-    """P256-FIX-RVW-37: the answer's claims no verb's family reads, each with what backs it: that each step
-    waits (F308) or the team knows (F324), Auto's own (not an agent's run, ``first_person``), and the work
-    its last sentence announces now (F261-A: "I will now send …" is "sent", a send's family), unless a write
-    of the turn waits for the owner's click (``waiting``: the send waits on its card, RVW-30)."""
+    """P256-FIX-RVW-37: the answer's claims no verb's family reads, each with what backs it (``_said_where``)."""
+    return [(label, backs) for label, backs, _sentence in _said_where(answer, first_person, waiting)]
+
+
+def _said_where(answer: str, first_person: bool, waiting: bool = False) -> List[Tuple[str, Backs, str]]:
+    """P256-FIX-RVW-37: the answer's claims no verb's family reads, each with what backs it and its sentence:
+    that each step waits (F308) or the team knows (F324), Auto's own (not an agent's run, ``first_person``),
+    and the work its last sentence announces now (F261-A: "I will now send …" is "sent", a send's family),
+    unless a write of the turn waits for the owner's click (``waiting``: the send waits on its card, RVW-30)."""
     text = _MARKS.sub("", _own_words(answer or ""))
-    sentences = [found for found in _SENTENCES.findall(text) if found.strip() and not _PAST.search(found)]
-    said = [] if first_person else [claim for sentence in sentences for claim in kinds.said_in(sentence)]
+    sentences = [found for found in SENTENCES.findall(text) if found.strip() and not _PAST.search(found)]
+    said = [] if first_person else [(*claim, sentence) for sentence in sentences for claim in kinds.said_in(sentence)]
     last = sentences[-1] if sentences else ""
     verb = next((verb for verb in kinds.promised_now(last) if _of(verb)), None)
-    return [*said, (verb, _family(verb, last))] if verb and not waiting else said
+    return [*said, (verb, _family(verb, last), last)] if verb and not waiting else said
 
 
 def promised_unbacked(answer: str, done_writes: Sequence[Receipt], waiting: bool = False) -> Optional[str]:
@@ -552,16 +570,29 @@ def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: b
     for the owner's click), a claim that reports that ask is backed by it (P256-FIX-RVW-30); a
     has-been or was claim about a number one of the turn's done ``reads`` names is none (RVW-34). RVW-37
     (``kinds_too``): the steps, the team and a promise of work now, too (a customer draft's are its writer's)."""
+    return [(verb, known) for verb, known, _sentence in unbacked_where(answer, done_writes, first_person, waiting,
+                                                                       reads, kinds_too)]
+
+
+def unbacked_where(answer: str, done_writes: Sequence[Receipt], first_person: bool = False, waiting: bool = False,
+                   reads: Sequence[Receipt] = (), kinds_too: bool = True) -> List[Tuple[str, bool, str]]:
+    """``unbacked_claims``, each with the sentence that makes it, as ``claims`` reads it (its marks
+    off): P256-FIX-N15-1 takes that sentence out of the reply. A turn that wrote nothing and read
+    Auto's own record reports that record: no claim (N15-1)."""
+    wrote = bool(done_writes) or waiting
+    if not wrote and recalled(reads):
+        return []
     unbacked = []
-    for verb, sentence in claims(answer, first_person, numbers_read(reads)):
+    looked_up = not wrote and looked_something_up(reads)
+    for verb, sentence in claims(answer, first_person, numbers_read(reads), looked_up):
         if waiting and _asked(verb, sentence):
             continue
         backs = _family(verb, sentence)
-        backed = any((backs or _unfamiliar(verb))(r) for r in done_writes)
-        if not backed:
-            unbacked.append((verb, backs is not None))
-    said = _said(answer, first_person, waiting) if kinds_too else []
-    return [*unbacked, *((label, True) for label, backs in said if not any(backs(r) for r in done_writes))]
+        if not any((backs or _unfamiliar(verb))(r) for r in done_writes):
+            unbacked.append((verb, backs is not None, sentence))
+    said = _said_where(answer, first_person, waiting) if kinds_too else []
+    return [*unbacked, *((label, True, sentence) for label, backs, sentence in said
+                         if not any(backs(r) for r in done_writes))]
 
 
 # P256-FIX-RVW-36: a verb in no family is backed by a done write a word of whose name starts with the
@@ -603,7 +634,7 @@ def _listed(verbs: Sequence[str]) -> str:
     return verbs[0] if len(verbs) == 1 else f"{', '.join(verbs[:-1])} or {verbs[-1]}"
 
 
-def _not_said(named: Sequence[str]) -> str:
+def not_said(named: Sequence[str]) -> str:
     """What the line says was not done: the verbs named, then each RVW-37 claim in its own words."""
     verbs = [verb for verb in named if verb not in kinds.OWN_SAID]
     own = [kinds.OWN_SAID[verb] for verb in named if verb in kinds.OWN_SAID]
@@ -622,7 +653,7 @@ def not_done_line(answer: str, done_writes: Sequence[Receipt], waiting: bool = F
     named = list(dict.fromkeys(verb for verb, _known in unbacked if verb not in SAYS_DONE))
     if not done_writes or not named:
         return NOTHING_DONE
-    return NOT_DONE.format(said=_not_said(named))
+    return NOT_DONE.format(said=not_said(named))
 
 
 def is_not_done_line(line: str) -> bool:
@@ -630,5 +661,6 @@ def is_not_done_line(line: str) -> bool:
     return line.startswith(NOT_DONE_PREFIX)
 
 
-__all__ = ["COMPLETED_ACTION", "FAMILIES", "NOT_DONE_PREFIX", "SAYS_DONE", "claims", "claims_work_done",
-           "is_not_done_line", "not_done_line", "numbers_read", "promised_unbacked", "unbacked_claims"]
+__all__ = ["COMPLETED_ACTION", "FAMILIES", "NOT_DONE_PREFIX", "SAYS_DONE", "SENTENCES", "claims", "claims_work_done",
+           "is_not_done_line", "not_done_line", "not_said", "numbers_read", "own_lines", "promised_unbacked",
+           "unbacked_claims", "unbacked_where", "without_marks"]

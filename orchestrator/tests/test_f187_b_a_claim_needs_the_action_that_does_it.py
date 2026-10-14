@@ -35,6 +35,7 @@ import pytest
 
 from core.llm.clients.base import LLMResponse
 from core.llm.usage_context import LANE_BOARD_TASK, LANE_CHAT, usage_scope
+from modules.tools.execution.nudges import is_nudge
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 from tests.helpers_receipts_rule import line, nudged
 
@@ -192,14 +193,15 @@ def _install_turn(lane, *texts):
     with usage_scope(request_type=lane, execution_id=f"{lane}:1"):
         result = asyncio.run(executor.run(initial_response=LLMResponse(content="", tool_calls=[create]),
                                           messages=messages, tools=TOOLS, workspace_id=WS))
-    nudges = [m for m in messages if m["role"] == "user" and "says something was installed" in m["content"]]
+    nudges = [m for m in messages if is_nudge(m)]
     return result, nudges
 
 
-def test_the_chat_loop_nudges_an_install_a_create_did_not_do_once():
-    result, nudges = _install_turn(LANE_CHAT, "I've installed the playbook for you.",
-                                   "I made an empty playbook instead of installing it: nothing was installed.")
-    assert len(nudges) == 1 and result.response.content.startswith("I made an empty playbook")
+def test_the_chat_loop_replaces_an_install_a_create_did_not_do():
+    """P256-FIX-N15-1: no nudge; the claim's sentence is replaced by the line naming it."""
+    result, nudges = _install_turn(LANE_CHAT, "I've installed the playbook for you.")
+    assert nudges == [] and result.response.content == (
+        "Just to be clear: I haven't installed anything in this reply. Ask me again if you want it done.")
 
 
 def test_an_agent_run_leaves_a_drafted_promise_alone():

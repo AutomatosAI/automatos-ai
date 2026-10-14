@@ -74,7 +74,8 @@ logger = logging.getLogger(__name__)
 
 # F314: the owner's line under a claim no action backed, in Auto's own words (claims_backed names it).
 NOT_DONE = "Just to be clear: {said}. Ask me again if you want it done."
-NOTHING_DONE = NOT_DONE.format(said="I haven't done that yet, and nothing has changed")
+NOTHING_DONE_SAID = "I haven't done that yet, and nothing has changed"
+NOTHING_DONE = NOT_DONE.format(said=NOTHING_DONE_SAID)
 NO_SUCH_ID = "Just to be clear: {ids} {verb} not exist — I named {it} without looking {it} up."
 ID_NUDGE = (
     "Your previous reply names {ids}, which {verb} not exist in this workspace. Look it up now with a tool "

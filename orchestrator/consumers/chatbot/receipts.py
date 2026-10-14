@@ -45,9 +45,10 @@ from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional
 
 from consumers.chatbot.claim_check import NOTHING_DONE, READS_SAID, reads_put_in_front
 from consumers.chatbot.claims_backed import (
-    COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, promised_unbacked, unbacked_claims,
+    COMPLETED_ACTION, SAYS_DONE, claims_work_done, is_not_done_line, not_done_line, promised_unbacked, unbacked_where,
 )
 from consumers.chatbot.claims_by_kind import EACH_STEP_WAITS
+from consumers.chatbot.claims_not_reports import AUTOMATIC_READS  # the folded read's action (N15-1 reads it too)
 from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED, STEPS_UNCHECKED,
     answers_in, done_effects,
@@ -67,7 +68,6 @@ SUBJECT_CHARS = 80
 LOOKED_UP = "looked up"
 FAILED = "it reported a failure"
 # The automatic reads, folded: "read your documents and the board".
-AUTOMATIC_READS = "automatic_reads"
 DOCUMENTS, BOARD = "your documents", "the board"
 FOLD_EFFECT = "read {what}"
 # Why a call was not run, in the owner's words (the tracker's own are written for the model).
@@ -282,7 +282,7 @@ _VERBS = ("create", "update", "delete", "cancel", "assign", "approve", "reject",
           "install", "pause", "resume", "upload", "add", "remove", "publish", "set", "generate", "make", "move", "post")
 
 
-def _tried(r: Receipt) -> str:
+def tried(r: Receipt) -> str:
     """A refused write in plain words, for "I tried to <what>": "move the card #0422"."""
     name = r["action"].lower().removeprefix("platform_")
     verb = name.split("_")[0]
@@ -307,7 +307,7 @@ def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
     for r in writes:
         if r.get("status") == REFUSED and r["action"] not in done:
             refused.setdefault(r["action"], r)          # one line per action: its first reason
-    lines = [TRIED_LINE.format(what=_tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
+    lines = [TRIED_LINE.format(what=tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
              for r in refused.values()]
     not_done = not_done_line(answer, done_writes, waiting=_asks(writes), reads=_done_reads(receipts))
     return [*lines, not_done] if not_done else lines
@@ -333,12 +333,20 @@ def unbacked_claim(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], An
     only to its first-person claims: "It has been cancelled" in its customer draft is its writer's voice.
     P256-FIX-RVW-30: "I've raised a card…" after an ask for the owner's click is backed by it; RVW-34:
     "#0365 has been cancelled" after a read of #0365 is what the read found."""
+    found = unbacked_sentences(answer, outcomes, promises)
+    return found[0][0] if found else None
+
+
+def unbacked_sentences(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]],
+                       promises: Optional[bool] = True) -> List[Tuple[str, str]]:
+    """Each claim ``unbacked_claim`` reads, with the sentence that makes it (marks off): (its verb,
+    "done" for a bare claim; the sentence). P256-FIX-N15-1 takes those sentences out of the reply."""
     ran = [receipt(action, params, result) for action, params, result in outcomes]
     writes = [r for r in ran if r["kind"] == WRITE]
     done_writes = [r for r in writes if r["status"] == DONE]
-    unbacked = unbacked_claims(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
-                               reads=_done_reads(ran))
-    return next((verb or "done" for verb, known in unbacked if known or verb in SAYS_DONE), None)
+    unbacked = unbacked_where(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
+                              reads=_done_reads(ran))
+    return [(verb or "done", sentence) for verb, known, sentence in unbacked if known or verb in SAYS_DONE]
 
 
 def unbacked_promise(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]]) -> Optional[str]:
@@ -510,6 +518,6 @@ __all__ = ["ABOVE", "AUTOMATIC_READS", "COMPLETED_ACTION", "DONE", "FRAME", "LIV
            "READ", "REFUSED", "SKIPPED", "TRIED_LINE", "WAITING", "WRITE", "build_receipts", "claims_work_done",
            "current_receipts", "folded_reads", "honesty_lines", "its_reads_are_receipted", "model_of", "notes_the_answering_model",
            "receipt", "receipts_frame", "receipts_frames", "saves_the_turns_receipts", "says_nothing_was_done", "skipped_receipt",
-           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "turn_receipts", "unbacked_claim", "unbacked_promise",
-           "with_lines_above",
+           "the_answer_takes_the_receipts", "the_loop_writes_receipts", "tried", "turn_receipts", "unbacked_claim",
+           "unbacked_promise", "unbacked_sentences", "with_lines_above",
            "writes_its_receipts"]

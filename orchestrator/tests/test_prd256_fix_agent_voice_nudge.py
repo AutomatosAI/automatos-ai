@@ -17,6 +17,9 @@ Now:
   (as "done"). The line above the answer is unchanged: it still reads every claim.
 - F201's customer-draft check (services/draft_guides.py) reads the draft the same way: only its
   first-person claims (P256-FIX-RVW-44).
+
+P256-FIX-N15-1 (F422): the check no longer nudges. A claim it reads is taken out of the reply in
+place and the not-done line put there, with no model call; what it reads is unchanged.
 """
 from __future__ import annotations
 
@@ -126,18 +129,18 @@ def test_an_agent_run_in_its_own_lane_is_not_nudged_for_its_draft():
     assert calls == 0 and nudges == [] and result.response.content == CANCELLED
 
 
-def test_an_agents_own_claim_is_nudged_once():
-    plain = "I haven't cancelled the subscription: I have no tool for it."
-    result, calls, nudges = _run(OWN_CLAIM, plain, promises=False)
-    assert calls == 1 and len(nudges) == 1 and "says something was cancelled" in nudges[0]
-    assert result.response.content == plain
+NOT_CANCELLED = "Just to be clear: I haven't cancelled anything in this reply. Ask me again if you want it done."
 
 
-def test_autos_passive_is_nudged_once_in_the_chat_lane():
-    plain = "It hasn't been cancelled yet: shall I cancel it?"
+def test_an_agents_own_claim_is_replaced_by_the_line():
+    result, calls, nudges = _run(OWN_CLAIM, promises=False)
+    assert calls == 0 and nudges == [] and result.response.content == NOT_CANCELLED
+
+
+def test_autos_passive_is_replaced_by_the_line_in_the_chat_lane():
     with usage_scope(request_type=LANE_CHAT, execution_id="chat:rvw7"):
-        result, calls, nudges = _run(CANCELLED, plain)
-    assert calls == 1 and "says something was cancelled" in nudges[0] and result.response.content == plain
+        result, calls, nudges = _run(CANCELLED)
+    assert calls == 0 and nudges == [] and result.response.content == NOT_CANCELLED
 
 
 def test_i_ve_prepared_a_summary_costs_no_extra_model_call():
@@ -145,9 +148,9 @@ def test_i_ve_prepared_a_summary_costs_no_extra_model_call():
     assert calls == 0 and nudges == [] and result.response.content == PREPARED
 
 
-def test_the_nudge_passes_the_runs_voice():
+def test_the_check_passes_the_runs_voice():
     source = inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "unbacked_claim(text, self.tracker.outcomes, promises=self.promises)" in source
+    assert "without_unbacked_claims(text, self.tracker.outcomes, promises=self.promises)" in source
 
 
 # ── F201 is unchanged ───────────────────────────────────────────────────────

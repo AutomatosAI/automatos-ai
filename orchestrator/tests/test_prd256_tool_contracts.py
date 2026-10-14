@@ -8,7 +8,7 @@ On 53% of dispatcher calls the action used sat outside the ranked top-15 of the 
 these writes. They are now promoted and pinned (``TOOL_ROUTING_PROMOTION_PINS``), each its own
 tool with a strict schema; the ATOM lane and the heartbeat's dispatcher-only load ship them
 beside the dispatcher; a direct call is held to its required fields; and after a refused write
-the loop's nudge and Auto's prompt carry one rule.
+Auto's prompt carries one rule and the not-done line says the refusal (P256-FIX-N15-1: no nudge).
 """
 from __future__ import annotations
 
@@ -292,60 +292,56 @@ def _approve_call():
                          "arguments": json.dumps({"action": "platform_approve_mission", "params": {}})}}
 
 
-def test_after_a_refused_write_the_nudge_says_it_was_refused_and_why():
+def test_after_a_refused_write_the_claim_is_replaced_by_the_refusal():
+    """P256-FIX-N15-1: no nudge and no retry; the claim's sentences go and the one line says the
+    write was tried and refused, in the claim's place."""
+    from modules.tools.execution.nudges import is_nudge
     from modules.tools.execution.tool_loop import ToolLoopExecutor
-    from services.brief_facts import REFUSED_WRITE_RULE
 
-    model = _Model(LLMResponse(content="I've approved the mission. It's now running.", tool_calls=None),
-                   LLMResponse(content="The approval didn't go through: it needs the mission's id.", tool_calls=None))
-    executor = ToolLoopExecutor(llm_callback=model, tool_callback=_refuse_the_approval, max_iterations=5)
+    model = _Model(LLMResponse(content="I've approved the mission. It's now running.", tool_calls=None))
+    executor = ToolLoopExecutor(llm_callback=model, tool_callback=_refuse_the_approval, max_iterations=5,
+                                promises=True)
     messages = [{"role": "user", "content": "approve the Harbourline mission"}]
     result = asyncio.run(executor.run(initial_response=LLMResponse(content="", tool_calls=[_approve_call()]),
                                       messages=messages, tools=[{"type": "function",
                                                                  "function": {"name": "platform_execute"}}],
                                       workspace_id="ws"))
-    nudges = [m["content"] for m in messages
-              if m["role"] == "user" and "A write in this turn was refused" in m["content"]]
-    assert len(nudges) == 1
-    assert ("platform_approve_mission (the tool said: \"Missing required params for 'platform_approve_mission': "
-            "['mission_id']\")") in nudges[0]
-    assert REFUSED_WRITE_RULE in nudges[0]
-    assert "says something was approved" in nudges[0]          # F108's sentence, kept
-    assert result.response.content.startswith("The approval didn't go through")
+    assert model.queue == [] and not any(is_nudge(m) for m in messages)
+    assert result.response.content == (
+        "Just to be clear: I haven't approved anything in this reply; I tried to approve the mission and it didn't "
+        "go through. Ask me again if you want it done.")
 
 
-def test_a_claim_with_no_refused_write_keeps_f108s_nudge():
-    from modules.tools.execution.nudges import CLAIMED_ACTION_RECOVERY_MSG, claimed_action_nudge
+def test_a_refused_read_or_a_write_made_good_is_no_refusal_in_the_line():
+    from consumers.chatbot.claim_removed import not_done_in_place
 
-    plain = CLAIMED_ACTION_RECOVERY_MSG.format(claim="approved")
-    assert claimed_action_nudge("approved", []) == plain
-    # a refused read is not a refused write
-    assert claimed_action_nudge("approved", [("platform_get_mission", {}, {"success": False})]) == plain
-    # a write refused, then made good by the same action, is done
+    plain = "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done."
+    assert not_done_in_place(["approved"], []) == plain
+    assert not_done_in_place(["approved"], [("platform_get_mission", {}, {"success": False})]) == plain
     later_done = [("platform_create_task", {}, {"success": False, "error": "no description"}),
                   ("platform_create_task", {}, {"success": True})]
-    assert claimed_action_nudge("created", later_done) == CLAIMED_ACTION_RECOVERY_MSG.format(claim="created")
+    assert not_done_in_place(["created"], later_done) == plain.replace("approved", "created")
 
 
-def test_the_refused_writes_are_named_with_what_refused_them():
-    from modules.tools.execution.nudges import refused_writes
+def test_the_refused_writes_are_named_in_the_line():
+    from consumers.chatbot.claim_removed import not_done_in_place
 
     outcomes = [("platform_update_task_status", {"task_id": "#0422"},
-                 {"success": False, "error": "A running ticket can only be cancelled.\nPress Cancel."}),
-                ("COMPOSIO_GMAIL_SEND_EMAIL", {}, {"successful": False, "message": "not connected"})]
-    assert refused_writes(outcomes) == [
-        'platform_update_task_status (the tool said: "A running ticket can only be cancelled. Press Cancel.")',
-        'COMPOSIO_GMAIL_SEND_EMAIL (the tool said: "not connected")',
-    ]
+                 {"success": False, "error": "A running ticket can only be cancelled.\nPress Cancel."})]
+    assert not_done_in_place(["cancelled"], outcomes) == (
+        "Just to be clear: I haven't cancelled anything in this reply; I tried to move the card #0422 and it didn't "
+        "go through. Ask me again if you want it done.")
 
 
 def test_a_write_held_for_the_owners_click_is_waiting_not_refused():
-    """PRD-256 US-004's ask is success False with requires_confirmation: no refusal to report."""
-    from modules.tools.execution.nudges import refused_writes
+    """PRD-256 US-004's ask is success False with requires_confirmation: the line says it waits."""
+    from consumers.chatbot.claim_removed import not_done_in_place
 
     ask = {"success": False, "requires_confirmation": True, "owner_only": True,
            "message": "Waiting for the owner's click: cancel #0422."}
-    assert refused_writes([("platform_update_task_status", {"task_id": "#0422", "status": "cancelled"}, ask)]) == []
+    line = not_done_in_place(["cancelled"], [("platform_update_task_status",
+                                              {"task_id": "#0422", "status": "cancelled"}, ask)])
+    assert "I asked for your OK to " in line and "so it hasn't happened yet" in line and "I tried" not in line
 
 
 def test_autos_prompt_carries_the_same_one_rule():
@@ -354,6 +350,6 @@ def test_autos_prompt_carries_the_same_one_rule():
 
     assert REFUSED_WRITE_RULE in AUTO_OWNER_RULES
     assert REFUSED_WRITE_RULE in AutomatosPersonality.get_anti_patterns()
-    # one rule, one home: the nudge reads it from the prompt's module
+    # one rule, one home: no nudge repeats it (P256-FIX-N15-1: the refusal is said in the not-done line)
     nudges = (ORCH / "modules" / "tools" / "execution" / "nudges.py").read_text()
-    assert "from services.brief_facts import REFUSED_WRITE_RULE" in nudges
+    assert "REFUSED_WRITE_RULE" not in nudges

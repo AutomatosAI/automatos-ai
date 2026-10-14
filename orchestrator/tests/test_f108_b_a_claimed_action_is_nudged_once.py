@@ -1,10 +1,14 @@
-"""F108 (night 3), the nudge — a reply that says an action was done with no action
-behind it is retried once: make the call, or say plainly it has not happened.
+"""F108 (night 3), the check — a reply that says an action was done with no action
+behind it never reaches the owner as a report of that action.
 
 F099's mechanism for a source that did not run, applied to claimed actions. The
 check runs on the first reply and on the loop's final reply (night 3's "I've
-approved the mission. It's now running" came after other tools had run); a
-retry that makes the call runs it in the same loop. One nudge per run.
+approved the mission. It's now running" came after other tools had run).
+
+P256-FIX-N15-1 (F422, night 15): it used to nudge the reply and return the retry in its
+place; the retry answered the nudge and dropped what the reads had fetched. Now the reply
+stands, the sentences that claim are replaced by one not-done line, and the model is not
+called again.
 """
 from __future__ import annotations
 
@@ -12,10 +16,11 @@ import asyncio
 import json
 
 from core.llm.clients.base import LLMResponse
+from modules.tools.execution.nudges import is_nudge
 from modules.tools.execution.tool_loop import ToolLoopExecutor
 
 TOOLS = [{"type": "function", "function": {"name": "platform_execute"}}]
-NUDGE = "says something was approved, but no tool call in this turn did that"
+NOT_APPROVED = "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done."
 
 
 class _Model:
@@ -46,67 +51,57 @@ def _reply(text):
 
 
 def _run(model, tools, first):
-    executor = ToolLoopExecutor(llm_callback=model, tool_callback=tools, max_iterations=5)
+    executor = ToolLoopExecutor(llm_callback=model, tool_callback=tools, max_iterations=5, promises=True)
     messages = [{"role": "user", "content": "approve the Harbourline mission"}]
     result = asyncio.run(executor.run(initial_response=first, messages=messages, tools=TOOLS, workspace_id="ws"))
-    nudges = [m for m in messages if m["role"] == "user" and NUDGE in m["content"]]  # F295: the user's turn
+    nudges = [m for m in messages if is_nudge(m)]
     return result, nudges
 
 
-def test_the_final_reply_claims_an_approval_and_the_retry_makes_the_call():
-    model = _Model(_reply("I've approved the mission. It's now running."),
-                   LLMResponse(content="", tool_calls=[_call("platform_approve_mission")]),
-                   _reply("Approved — the mission is running."))
-    tools = _Tools()
-    result, nudges = _run(model, tools, LLMResponse(content="", tool_calls=[_call("platform_get_mission")]))
-    assert tools.executed == ["platform_get_mission", "platform_approve_mission"]
-    assert result.response.content == "Approved — the mission is running."
-    assert len(nudges) == 1
-
-
-def test_a_retry_that_says_plainly_it_has_not_happened_is_the_reply():
-    model = _Model(_reply("I've approved the mission. It's now running."),
-                   _reply("I have not approved it — the approval is refused for agents; it needs you."))
+def test_the_final_reply_claims_an_approval_and_the_line_takes_its_place():
+    model = _Model(_reply("I've approved the mission. It's now running."))
     tools = _Tools()
     result, nudges = _run(model, tools, LLMResponse(content="", tool_calls=[_call("platform_get_mission")]))
     assert tools.executed == ["platform_get_mission"]
-    assert result.response.content.startswith("I have not approved it")
-    assert len(nudges) == 1
+    assert result.response.content == NOT_APPROVED
+    assert nudges == [] and len(model.calls) == 1                       # no retry
+
+
+def test_what_the_reply_says_besides_the_claim_stays():
+    model = _Model(_reply("The mission is waiting in Review. I've approved the mission."))
+    result, nudges = _run(model, _Tools(), LLMResponse(content="", tool_calls=[_call("platform_get_mission")]))
+    assert result.response.content == f"The mission is waiting in Review. {NOT_APPROVED}"
+    assert nudges == [] and len(model.calls) == 1
 
 
 def test_a_refused_approval_does_not_back_the_claim():
-    model = _Model(_reply("I've approved the mission."), _reply("The approval was refused — it needs you."))
+    model = _Model(_reply("I've approved the mission."))
     tools = _Tools(refuse={"platform_approve_mission"})
     result, nudges = _run(model, tools, LLMResponse(content="", tool_calls=[_call("platform_approve_mission")]))
-    assert len(nudges) == 1 and result.response.content.startswith("The approval was refused")
+    assert nudges == [] and result.response.content == (
+        "Just to be clear: I haven't approved anything in this reply; I tried to approve the mission and it didn't "
+        "go through. Ask me again if you want it done.")
 
 
-def test_an_approval_that_ran_is_not_nudged():
+def test_an_approval_that_ran_is_left_as_it_is():
     model = _Model(_reply("I've approved the mission. It's now running."))
     result, nudges = _run(model, _Tools(), LLMResponse(content="", tool_calls=[_call("platform_approve_mission")]))
     assert nudges == [] and len(model.calls) == 1
     assert result.response.content == "I've approved the mission. It's now running."
 
 
-def test_one_nudge_per_run():
-    model = _Model(_reply("I've approved the mission."), _reply("I've approved it, as I said."))
-    result, nudges = _run(model, _Tools(), LLMResponse(content="", tool_calls=[_call("platform_get_mission")]))
-    assert len(nudges) == 1 and len(model.calls) == 2
-    assert result.response.content == "I've approved it, as I said."    # the chat notice says so
-
-
-def test_a_first_reply_that_claims_is_nudged_too():
-    model = _Model(LLMResponse(content="", tool_calls=[_call("platform_store_memory")]), _reply("Saved."))
-    tools = _Tools()
-    executor = ToolLoopExecutor(llm_callback=model, tool_callback=tools, max_iterations=5)
+def test_a_first_reply_that_claims_is_checked_too():
+    model = _Model()
+    executor = ToolLoopExecutor(llm_callback=model, tool_callback=_Tools(), max_iterations=5, promises=True)
     messages = [{"role": "user", "content": "the Taster plan is £14 now"}]
     result = asyncio.run(executor.run(initial_response=_reply("I've noted that the Taster plan is now £14."),
                                       messages=messages, tools=TOOLS, workspace_id="ws"))
-    assert tools.executed == ["platform_store_memory"] and result.response.content == "Saved."
-    assert any(m["role"] == "user" and "says something was noted" in m["content"] for m in messages)
+    assert model.calls == [] and not any(is_nudge(m) for m in messages)
+    assert result.response.content == (
+        "Just to be clear: I haven't noted anything in this reply. Ask me again if you want it done.")
 
 
-def test_without_tools_offered_nothing_is_nudged():
+def test_without_tools_offered_nothing_is_checked():
     model = _Model()
     executor = ToolLoopExecutor(llm_callback=model, tool_callback=_Tools(), max_iterations=5)
     result = asyncio.run(executor.run(initial_response=_reply("I've approved the mission."),
