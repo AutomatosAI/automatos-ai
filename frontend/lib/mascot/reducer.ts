@@ -1,5 +1,6 @@
 import { toolActivity, type ToolActivity } from './tools'
 import {
+  type ApprovalEvent,
   type ClientEvent,
   type MascotEvent,
   type MascotName,
@@ -20,7 +21,9 @@ import {
  * DOM. The rules (the state table, the priority order, the one-shots) are
  * Play's mascot spec. hooks/use-mascot-player.ts owns the clip boundary, the
  * hold time and reduced motion, and reports clip-ended when a one-shot's clip
- * ends. Unchanged input returns the same object.
+ * ends. Unchanged input returns the same object. While an approval card waits
+ * for the owner (Play's chat, T-005c), Auto rests on listening where he would
+ * otherwise go back to idle.
  */
 
 export const INITIAL_MASCOT: MascotState = {
@@ -31,6 +34,7 @@ export const INITIAL_MASCOT: MascotState = {
   turnActive: false,
   celebrateOnFinish: false,
   backendDown: false,
+  approvalWaiting: false,
 }
 
 const pose = (mascot: MascotName, rank: number): Pose => ({ mascot, rank })
@@ -56,9 +60,12 @@ const ACTIVITY_POSE: Readonly<Record<ToolActivity, Pose>> = {
 
 const playingOneShot = (state: MascotState): boolean => ONE_SHOTS.has(state.mascot)
 
+/** Where Auto goes when nothing else is going on: listening while an approval waits for the owner, else idle. */
+const rest = (state: MascotState): Pose => (state.approvalWaiting ? WAITING : IDLE)
+
 /** The pose that is on screen, or that will be once the current one-shot ends. */
 export function pendingPose(state: MascotState): Pose {
-  if (playingOneShot(state)) return state.queued ?? IDLE
+  if (playingOneShot(state)) return state.queued ?? rest(state)
   return pose(state.mascot, state.rank)
 }
 
@@ -86,11 +93,12 @@ function settle(state: MascotState, next: Pose): MascotState {
 
 const isToolPose = (p: Pose): boolean => p.rank === RANK.tool || p.rank === RANK.working
 
-/** The highest-ranked tool still running, or idle. */
-function afterTools(openTools: MascotState['openTools']): Pose {
-  return openTools
+/** The highest-ranked tool still running, or where Auto rests when none is. */
+function afterTools(state: MascotState): Pose {
+  const busiest = state.openTools
     .map((tool) => ACTIVITY_POSE[tool.activity])
     .reduce((best, next) => (next.rank > best.rank ? next : best), IDLE)
+  return busiest === IDLE ? rest(state) : busiest
 }
 
 function onToolStart(state: MascotState, event: ToolStartEvent): MascotState {
@@ -104,7 +112,7 @@ function onToolEnd(state: MascotState, event: ToolEndEvent): MascotState {
   const closed = openTools.length === state.openTools.length ? state : { ...state, openTools }
   if (event.waiting) return propose(closed, WAITING)
   if (!event.success && !event.skipped) return propose(closed, OOPS)
-  return isToolPose(pendingPose(closed)) ? settle(closed, afterTools(openTools)) : closed
+  return isToolPose(pendingPose(closed)) ? settle(closed, afterTools(closed)) : closed
 }
 
 function onReceipts(state: MascotState, event: ReceiptsEvent): MascotState {
@@ -119,14 +127,14 @@ function endTurn(state: MascotState): MascotState {
 
 function onFinish(state: MascotState): MascotState {
   const pending = pendingPose(state)
-  const quiet = pending.rank >= RANK.thinking && pending.rank <= RANK.tool ? settle(state, IDLE) : state
+  const quiet = pending.rank >= RANK.thinking && pending.rank <= RANK.tool ? settle(state, rest(state)) : state
   const ended = endTurn(quiet)
   return state.celebrateOnFinish ? propose(ended, CELEBRATE) : ended
 }
 
 /** A text delta changes nothing, except that it ends thinking: the words show Auto answering. */
 function onText(state: MascotState): MascotState {
-  return pendingPose(state).mascot === 'thinking' ? settle(state, IDLE) : state
+  return pendingPose(state).mascot === 'thinking' ? settle(state, rest(state)) : state
 }
 
 function reduceStream(state: MascotState, event: StreamEvent): MascotState {
@@ -162,7 +170,7 @@ function reduceStream(state: MascotState, event: StreamEvent): MascotState {
 
 function onClipEnded(state: MascotState, ended: MascotName): MascotState {
   if (!playingOneShot(state) || ended !== state.mascot) return state
-  return show(state, state.queued ?? IDLE)
+  return show(state, state.queued ?? rest(state))
 }
 
 function onSend(state: MascotState): MascotState {
@@ -182,15 +190,15 @@ function reducePresence(state: MascotState, event: ClientEvent): MascotState {
   const pending = pendingPose(state)
   switch (event.type) {
     case 'input-blur':
-      return pending.mascot === 'listening' && pending.rank === RANK.typing ? settle(state, IDLE) : state
+      return pending.mascot === 'listening' && pending.rank === RANK.typing ? settle(state, rest(state)) : state
     case 'idle-timeout':
       return !state.turnActive && pending.rank <= RANK.typing ? settle(state, SLEEPING) : state
     case 'wake':
-      return pending.mascot === 'sleeping' ? settle(state, IDLE) : state
+      return pending.mascot === 'sleeping' ? settle(state, rest(state)) : state
     case 'loading-start':
       return pending.rank <= RANK.idle ? settle(state, LOADING) : state
     case 'loading-end':
-      return pending.mascot === 'loading' ? settle(state, IDLE) : state
+      return pending.mascot === 'loading' ? settle(state, rest(state)) : state
     default:
       return state
   }
@@ -207,7 +215,7 @@ function reduceClient(state: MascotState, event: ClientEvent): MascotState {
     case 'backend-down':
       return settle(endTurn({ ...state, backendDown: true }), SLEEPING)
     case 'backend-up':
-      return state.backendDown ? settle({ ...state, backendDown: false }, IDLE) : state
+      return state.backendDown ? settle({ ...state, backendDown: false }, rest(state)) : state
     case 'not-found':
       return settle(state, LOST)
     case 'deliverable-added':
@@ -240,7 +248,28 @@ const CLIENT_TYPES: ReadonlySet<MascotEvent['type']> = new Set<MascotEvent['type
 
 const isClientEvent = (event: MascotEvent): event is ClientEvent => CLIENT_TYPES.has(event.type)
 
+const isWaiting = (p: Pose): boolean => p.mascot === WAITING.mascot && p.rank === WAITING.rank
+
+/**
+ * An approval card waits (Auto listens, above the turn's tools and thinking) or
+ * every card is settled (listening for it ends). The flag is kept while the
+ * backend is down, so Auto wakes to the right rest; only the pose waits.
+ */
+function reduceApproval(state: MascotState, event: ApprovalEvent): MascotState {
+  if (event.type === 'approval-waiting') {
+    const flagged = state.approvalWaiting ? state : { ...state, approvalWaiting: true }
+    return flagged.backendDown ? flagged : propose(flagged, WAITING)
+  }
+  if (!state.approvalWaiting) return state
+  const cleared = { ...state, approvalWaiting: false }
+  return !cleared.backendDown && isWaiting(pendingPose(cleared)) ? settle(cleared, IDLE) : cleared
+}
+
+const isApprovalEvent = (event: MascotEvent): event is ApprovalEvent =>
+  event.type === 'approval-waiting' || event.type === 'approval-settled'
+
 export function mascotReducer(state: MascotState, event: MascotEvent): MascotState {
+  if (isApprovalEvent(event)) return reduceApproval(state, event)
   if (state.backendDown && !WHILE_DOWN.has(event.type)) return state
   return isClientEvent(event) ? reduceClient(state, event) : reduceStream(state, event)
 }

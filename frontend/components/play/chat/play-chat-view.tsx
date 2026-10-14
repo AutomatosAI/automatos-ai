@@ -14,6 +14,7 @@ import type { ComposerFill } from '@/lib/play/draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { ChatMessage } from '@/types'
 
+import { ApprovalCards } from './approval-cards'
 import { chatCaption } from './caption'
 import { ExampleChips, FirstOpenHero } from './first-open'
 import { MessageBox } from './message-box'
@@ -32,9 +33,9 @@ import styles from './composer.module.css'
  * conversation and the message box, with Auto in the mascot column and his
  * caption saying what he is doing; an empty chat is the first open. Stop calls
  * the hook's stop(), which also cancels the turn on the server. A turn's
- * details (its Deliverables, a Mission suggestion, a failure) come from
- * usePlayTurn; Try again is the hook's reload(); a spent trial shows the
- * core's banner above the box.
+ * details (its Deliverables, a Mission suggestion, a failure, the approvals
+ * it raised as the core's cards) come from usePlayTurn; Try again is the hook's
+ * reload(); a spent trial shows the core's banner above the box.
  */
 
 export interface PlayChatViewProps {
@@ -142,10 +143,20 @@ function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn
   return { send, retry }
 }
 
+/** The approval cards a reply raised, as the conversation shows them inside that reply. */
+function useApprovalSlot(turn: PlayTurn, chatId: string) {
+  const { of, answered, closed } = turn.approvals
+  return useCallback(
+    (replyId: string) => <ApprovalCards cards={of(replyId)} chatId={chatId} onAnswered={answered} onClosed={closed} />,
+    [of, answered, closed, chatId],
+  )
+}
+
 export function PlayChatView(props: PlayChatViewProps) {
   const { chat, auto, turn } = usePlayChat(props)
   const composer = useComposer(auto, props.draft ?? null, props.onDraftTaken)
   const { send, retry } = useSending(chat, turn)
+  const approvalsOf = useApprovalSlot(turn, props.view.chatId ?? '')
   const streaming = chat.status === 'streaming'
   const empty = chat.messages.length === 0
   const reply = latestReply(chat.messages)
@@ -153,6 +164,7 @@ export function PlayChatView(props: PlayChatViewProps) {
     runningInput: runningToolInput(reply),
     deliverableKind: newestKind(turn, reply),
     backendDown: auto.state.backendDown,
+    approvalWaiting: auto.state.approvalWaiting,
   })
 
   const mascot = empty ? undefined : (
@@ -174,6 +186,7 @@ export function PlayChatView(props: PlayChatViewProps) {
             deliverablesOf={turn.deliverablesOf}
             onRetry={retry}
             trialBlocked={isTrialBlocked(chat.errorCode)}
+            approvalsOf={approvalsOf}
             after={
               <TurnEnd
                 status={chat.status}

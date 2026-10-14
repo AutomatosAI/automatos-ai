@@ -1,7 +1,14 @@
 'use client'
 
-import { type Dispatch, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type Dispatch, type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  approvalsInPart,
+  type FiledApproval,
+  fileApprovals,
+  isWaiting,
+  withStatus,
+} from '@/components/play/chat/approvals'
 import { type DeliverableRef, deliverablesInPart, mergeDeliverables } from '@/components/play/chat/deliverables'
 import { latestReply } from '@/components/play/chat/message-text'
 import { type MissionSuggestion, suggestionFromData } from '@/components/play/chat/suggestion'
@@ -15,14 +22,30 @@ import type { ChatMessage } from '@/types'
  * document tool's generated_document and the receipts that link one; useChat
  * keeps neither on the reply), each announced to Auto once
  * (deliverable-added); the Mission Auto suggests, cleared when you send again
- * (as chat.tsx does); and a reply that failed in words (an error part), which
- * makes Auto play oops even when the stream ended in the same render.
+ * (as chat.tsx does); a reply that failed in words (an error part), which
+ * makes Auto play oops even when the stream ended in the same render; and the
+ * approvals a reply raised (T-005c: tool_approval and mission_approval, the
+ * core's widgets), each waiting for the owner until answered or closed, with
+ * Auto listening meanwhile (approval-waiting, approval-settled).
  */
 
 /** The live Deliverables by the id of the reply that made them. */
 type MadeBy = Readonly<Record<string, readonly DeliverableRef[]>>
 
 const NONE: readonly DeliverableRef[] = []
+const NO_APPROVALS: readonly FiledApproval[] = []
+
+/** The approvals a reply raised, and what the owner does with them on their cards. */
+export interface PlayApprovals {
+  /** The cards a reply raised and the owner hasn't closed. */
+  readonly of: (replyId: string) => readonly FiledApproval[]
+  /** A card's approve or deny went through. */
+  readonly answered: (key: string) => void
+  /** A card closed (its X, or the Mission card itself after a decision). */
+  readonly closed: (key: string) => void
+  /** A card still waits for the owner. */
+  readonly waiting: boolean
+}
 
 export interface PlayTurnOptions {
   readonly messages: readonly ChatMessage[]
@@ -40,6 +63,8 @@ export interface PlayTurn {
   readonly suggestion: MissionSuggestion | null
   /** The Deliverables a reply made live this session (a stored reply's come from its receipts). */
   readonly deliverablesOf: (replyId: string) => readonly DeliverableRef[]
+  /** The approvals the turn's replies raised live (chat.tsx's widgets are live-only too). */
+  readonly approvals: PlayApprovals
 }
 
 /** The id of the newest reply when it failed in words and is no longer being written; else null. */
@@ -60,14 +85,19 @@ function useFailureEvents(messages: readonly ChatMessage[], streaming: boolean, 
   }, [failedId, code, dispatch])
 }
 
-/** The Deliverables a part announces, filed under the reply being written, each one new to Auto once. */
-function useLiveDeliverables(messages: readonly ChatMessage[], dispatch: Dispatch<MascotEvent>) {
-  const [madeBy, setMadeBy] = useState<MadeBy>({})
+/** The id of the reply being written, for the data parts that arrive while it is. */
+function useReplyBeingWritten(messages: readonly ChatMessage[]): MutableRefObject<string | undefined> {
   const replyId = useRef<string | undefined>(undefined)
-  const seen = useRef<ReadonlySet<string>>(new Set())
   useEffect(() => {
     replyId.current = latestReply(messages)?.id
   }, [messages])
+  return replyId
+}
+
+/** The Deliverables a part announces, filed under the reply being written, each one new to Auto once. */
+function useLiveDeliverables(replyId: MutableRefObject<string | undefined>, dispatch: Dispatch<MascotEvent>) {
+  const [madeBy, setMadeBy] = useState<MadeBy>({})
+  const seen = useRef<ReadonlySet<string>>(new Set())
 
   const onPart = useCallback(
     (part: unknown) => {
@@ -78,15 +108,54 @@ function useLiveDeliverables(messages: readonly ChatMessage[], dispatch: Dispatc
       setMadeBy((prev) => ({ ...prev, [reply]: mergeDeliverables(prev[reply] ?? NONE, fresh) }))
       dispatch({ type: 'deliverable-added' })
     },
-    [dispatch],
+    [dispatch, replyId],
   )
   const deliverablesOf = useCallback((id: string) => madeBy[id] ?? NONE, [madeBy])
   return { onPart, deliverablesOf }
 }
 
+/** Auto stops listening for the owner once no card waits any more. */
+function useSettledEvent(waiting: boolean, dispatch: Dispatch<MascotEvent>): void {
+  const was = useRef(false)
+  useEffect(() => {
+    if (was.current && !waiting) dispatch({ type: 'approval-settled' })
+    was.current = waiting
+  }, [waiting, dispatch])
+}
+
+/** The approvals a part raises, filed under the reply being written (once per grant or Mission); Auto listens. */
+function useLiveApprovals(replyId: MutableRefObject<string | undefined>, dispatch: Dispatch<MascotEvent>) {
+  const [filed, setFiled] = useState<readonly FiledApproval[]>(NO_APPROVALS)
+  const seen = useRef<ReadonlySet<string>>(new Set())
+  const onPart = useCallback(
+    (part: unknown) => {
+      const reply = replyId.current
+      const raised = approvalsInPart(part).filter((card) => !seen.current.has(card.key))
+      if (reply === undefined || raised.length === 0) return
+      seen.current = new Set([...Array.from(seen.current), ...raised.map((card) => card.key)])
+      const filedAt = new Date()
+      setFiled((prev) => fileApprovals(prev, raised, reply, filedAt))
+      dispatch({ type: 'approval-waiting' })
+    },
+    [dispatch, replyId],
+  )
+  const answered = useCallback((key: string) => setFiled((prev) => withStatus(prev, key, 'answered')), [])
+  const closed = useCallback((key: string) => setFiled((prev) => withStatus(prev, key, 'closed')), [])
+  const of = useCallback(
+    (id: string) => filed.filter((card) => card.replyId === id && card.status !== 'closed'),
+    [filed],
+  )
+  const waiting = isWaiting(filed)
+  useSettledEvent(waiting, dispatch)
+  const approvals = useMemo<PlayApprovals>(() => ({ of, answered, closed, waiting }), [of, answered, closed, waiting])
+  return { onPart, approvals }
+}
+
 export function usePlayTurn({ messages, streaming, dispatch }: PlayTurnOptions): PlayTurn {
   const [suggestion, setSuggestion] = useState<MissionSuggestion | null>(null)
-  const { onPart, deliverablesOf } = useLiveDeliverables(messages, dispatch)
+  const replyId = useReplyBeingWritten(messages)
+  const { onPart, deliverablesOf } = useLiveDeliverables(replyId, dispatch)
+  const { onPart: onApprovalPart, approvals } = useLiveApprovals(replyId, dispatch)
   useFailureEvents(messages, streaming, dispatch)
 
   const onData = useCallback(
@@ -94,13 +163,14 @@ export function usePlayTurn({ messages, streaming, dispatch }: PlayTurnOptions):
       const suggested = suggestionFromData(part)
       if (suggested) setSuggestion(suggested)
       onPart(part)
+      onApprovalPart(part)
     },
-    [onPart],
+    [onPart, onApprovalPart],
   )
   const onSend = useCallback(() => setSuggestion(null), [])
 
   return useMemo(
-    () => ({ onData, onSend, suggestion, deliverablesOf }),
-    [onData, onSend, suggestion, deliverablesOf],
+    () => ({ onData, onSend, suggestion, deliverablesOf, approvals }),
+    [onData, onSend, suggestion, deliverablesOf, approvals],
   )
 }

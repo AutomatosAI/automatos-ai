@@ -13,6 +13,10 @@
  * Approving resumes the interrupted execution server-side (PRD-193 S4); the
  * card reflects the executed result honestly — a failed resume is shown as a
  * failure, never a fake success.
+ *
+ * PRD-260 T-005c: Play's chat renders this same card inline in Auto's reply and
+ * passes onDecided, told once an approve or a deny went through, so Auto stops
+ * waiting on the owner. Studio's canvas passes none.
  */
 
 import { useState } from 'react'
@@ -46,6 +50,14 @@ export function executedOutcomeLine(executed?: ExecutedResult | null): string {
   return `Approved, but execution failed: ${executed.error || 'unknown error'}`
 }
 
+/** What the owner decided on the card. */
+export type ApprovalDecision = 'approved' | 'denied'
+
+export interface ToolApprovalWidgetProps extends WidgetBaseProps<ToolApprovalWidgetData> {
+  /** Told once an approve or a deny went through (never after a failed call). */
+  onDecided?: (decision: ApprovalDecision) => void
+}
+
 export function ToolApprovalWidget({
   title,
   data,
@@ -56,7 +68,8 @@ export function ToolApprovalWidget({
   onClose,
   onMaximize,
   onRefresh,
-}: WidgetBaseProps<ToolApprovalWidgetData>) {
+  onDecided,
+}: ToolApprovalWidgetProps) {
   const grantApproval = useGrantApproval()
   const denyApproval = useDenyApproval()
   const [done, setDone] = useState<'approved' | 'denied' | null>(null)
@@ -73,6 +86,7 @@ export function ToolApprovalWidget({
       const line = executedOutcomeLine(executed)
       setOutcome(line)
       setDone('approved')
+      onDecided?.('approved')
       if (executed && executed.success === false) {
         toast.error(line)
       } else {
@@ -88,6 +102,7 @@ export function ToolApprovalWidget({
       await denyApproval.mutateAsync(data.grant_id)
       setOutcome('Denied — the action will not run.')
       setDone('denied')
+      onDecided?.('denied')
       toast.info('Action denied')
     } catch {
       toast.error('Failed to deny the action')

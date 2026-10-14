@@ -2,7 +2,8 @@
 /**
  * PRD-260 D6 — Auto's state machine, ported from Automatos Play's
  * tests/mascot/reducer.test.ts: the state table, the priority order, the
- * one-shots and the page's own states.
+ * one-shots and the page's own states; and (T-005c) Auto listening while an
+ * approval card waits for the owner.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -200,5 +201,58 @@ describe('mascot reducer: client states', () => {
   it('returns the same state object when nothing changes', () => {
     expect(mascotReducer(INITIAL_MASCOT, { type: 'input-blur' })).toBe(INITIAL_MASCOT)
     expect(mascotReducer(INITIAL_MASCOT, { type: 'loading-end' })).toBe(INITIAL_MASCOT)
+  })
+})
+
+describe('mascot reducer: an approval waits for the owner (T-005c)', () => {
+  const WAITS: MascotEvent = { type: 'approval-waiting' }
+  const SETTLED: MascotEvent = { type: 'approval-settled' }
+  const waiting = () => replay([WAITS])
+
+  it('listens while an approval waits, after the turn ends too, and idles once every card is settled', () => {
+    expect(sequence([SEND, say('Here is the plan'), WAITS, FINISH, SETTLED])).toEqual(['thinking', 'idle', 'listening', 'idle'])
+    expect(replay([SEND, WAITS, FINISH])).toMatchObject({ mascot: 'listening', approvalWaiting: true, turnActive: false })
+  })
+
+  it("outranks the turn's tools and thinking, never oops", () => {
+    expect(replay([SEND, start('1', 'generate_document'), WAITS]).mascot).toBe('listening')
+    expect(replay([SEND, WAITS]).mascot).toBe('listening')
+    expect(replay([SEND, FAILED, WAITS])).toMatchObject({ mascot: 'oops', approvalWaiting: true })
+  })
+
+  it('rests on listening instead of idle: after a celebrate, and after a later send thinks, works and answers', () => {
+    expect(sequence([{ type: 'deliverable-added' }, ended('celebrate')], waiting())).toEqual(['celebrate', 'listening'])
+    expect(sequence([SEND, say('On it')], waiting())).toEqual(['thinking', 'listening'])
+    const worked = [SEND, start('1', 'generate_document'), start('2', 'platform_web_search'), end('2')]
+    expect(sequence(worked, waiting())).toEqual(['thinking', 'working', 'searching', 'working'])
+    expect(sequence([...worked, end('1'), FINISH], waiting())).toEqual(['thinking', 'working', 'searching', 'working', 'listening'])
+  })
+
+  it('never naps while an approval waits', () => {
+    const state = waiting()
+    expect(mascotReducer(state, { type: 'idle-timeout' })).toBe(state)
+  })
+
+  it('keeps the flag while the backend is down, and wakes to listening or, once settled, to idle', () => {
+    const down = replay([WAITS, { type: 'backend-down' }])
+    expect(down).toMatchObject({ mascot: 'sleeping', approvalWaiting: true })
+    expect(mascotReducer(down, { type: 'backend-up' }).mascot).toBe('listening')
+    const settledWhileDown = mascotReducer(down, SETTLED)
+    expect(settledWhileDown).toMatchObject({ mascot: 'sleeping', approvalWaiting: false })
+    expect(mascotReducer(settledWhileDown, { type: 'backend-up' }).mascot).toBe('idle')
+    expect(replay([{ type: 'backend-down' }, WAITS])).toMatchObject({ mascot: 'sleeping', approvalWaiting: true })
+  })
+
+  it('settling with nothing waiting changes nothing; a second wait returns the same state', () => {
+    expect(mascotReducer(INITIAL_MASCOT, SETTLED)).toBe(INITIAL_MASCOT)
+    const state = waiting()
+    expect(mascotReducer(state, WAITS)).toBe(state)
+  })
+
+  it('settling ends listening for the card, not a stronger state', () => {
+    expect(replay([SEND, FAILED, WAITS, SETTLED]).mascot).toBe('oops')
+    const celebrating = replay([WAITS, { type: 'deliverable-added' }, SETTLED])
+    expect(celebrating.mascot).toBe('celebrate')
+    expect(mascotReducer(celebrating, ended('celebrate')).mascot).toBe('idle')
   })
 })

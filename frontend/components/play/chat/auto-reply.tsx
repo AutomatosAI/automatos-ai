@@ -1,5 +1,7 @@
 'use client'
 
+import type { ReactNode } from 'react'
+
 import { receiptsOf } from '@/lib/chat/receipts'
 import type { ChatMessage } from '@/types'
 
@@ -18,9 +20,9 @@ import styles from './chat.module.css'
  * top to bottom: the "Auto" label, the lines the platform puts above the answer
  * (a refused write, work not done), what he said before his tools and their
  * progress, his tool lines, the answer as markdown with a cursor while it
- * streams, the Deliverables the turn made, what he did (the receipts), a limit
- * reached, then a failure: in the snag box once the turn is over, as a plain
- * line while he answers.
+ * streams, the Deliverables the turn made, the approvals it raised (the core's
+ * cards, T-005c), what he did (the receipts), a limit reached, then a failure:
+ * in the snag box once the turn is over, as a plain line while he answers.
  */
 
 export const SPEAKER = 'Auto'
@@ -84,9 +86,18 @@ export interface AutoReplyProps {
   readonly onRetry?: () => void
   /** A spent trial blocked this turn: the core's banner says so instead of the snag box. */
   readonly snagHidden?: boolean
+  /** The approval cards this reply raised (approval-cards.tsx). */
+  readonly approvals?: ReactNode
 }
 
-export function AutoReply({ message, streaming, deliverables = NO_DELIVERABLES, onRetry, snagHidden = false }: AutoReplyProps) {
+export function AutoReply({
+  message,
+  streaming,
+  deliverables = NO_DELIVERABLES,
+  onRetry,
+  snagHidden = false,
+  approvals,
+}: AutoReplyProps) {
   const receipts = receiptsOf(message)
   const made = mergeDeliverables(deliverables, deliverablesFromReceipts(receipts))
   const notices = message.limitReached?.message ? [message.limitReached.message] : []
@@ -100,6 +111,7 @@ export function AutoReply({ message, streaming, deliverables = NO_DELIVERABLES, 
       {made.map((deliverable) => (
         <DeliverableCard key={deliverable.id} deliverable={deliverable} />
       ))}
+      {approvals}
       <Receipts receipts={receipts} />
       <Lines lines={notices} className={styles.notice} />
       <Failure message={message.error?.message} streaming={streaming} onRetry={onRetry} hidden={snagHidden} />

@@ -70,9 +70,19 @@ export interface MessageListProps {
   readonly trialBlocked?: boolean
   /** Shown under the conversation, inside the scroll. */
   readonly after?: ReactNode
+  /** The approval cards a reply raised, by its id (T-005c). */
+  readonly approvalsOf?: (replyId: string) => ReactNode
 }
 
-export function MessageList({ messages, streaming, deliverablesOf, onRetry, trialBlocked = false, after }: MessageListProps) {
+export function MessageList({
+  messages,
+  streaming,
+  deliverablesOf,
+  onRetry,
+  trialBlocked = false,
+  after,
+  approvalsOf,
+}: MessageListProps) {
   const { scrollerRef, endRef } = useFollow(messages)
   const newest = messages[messages.length - 1]?.id
   return (
@@ -89,6 +99,7 @@ export function MessageList({ messages, streaming, deliverablesOf, onRetry, tria
                 deliverables={deliverablesOf?.(message.id)}
                 onRetry={message.id === newest ? onRetry : undefined}
                 snagHidden={trialBlocked && message.id === newest}
+                approvals={approvalsOf?.(message.id)}
               />
             )}
           </li>

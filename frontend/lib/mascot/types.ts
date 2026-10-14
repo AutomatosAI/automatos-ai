@@ -70,6 +70,8 @@ export type MascotState = {
   readonly celebrateOnFinish: boolean
   /** The backend is unreachable: Auto sleeps until backend-up. */
   readonly backendDown: boolean
+  /** An approval card waits for the owner's answer: Auto rests on listening instead of idle. */
+  readonly approvalWaiting: boolean
 }
 
 /**
@@ -77,7 +79,8 @@ export type MascotState = {
  * browser session (the caller checks, lib/mascot/session.ts). clip-ended names
  * the clip that ended, so a stale one can't end a newer one-shot. request-failed
  * is a failed call. wake is any input after the idle timeout (it ends an idle
- * nap, not the backend's).
+ * nap, not the backend's). approval-waiting: an approval card in the chat waits
+ * for the owner's answer; approval-settled: every card is answered or closed.
  */
 export type ClientEvent =
   | { readonly type: 'app-open' }
@@ -94,6 +97,10 @@ export type ClientEvent =
   | { readonly type: 'deliverable-added' }
   | { readonly type: 'request-failed' }
   | { readonly type: 'clip-ended'; readonly state: MascotName }
+  | ApprovalEvent
+
+/** The approval cards in Play's chat (T-005c): Auto listens while one waits for the owner. */
+export type ApprovalEvent = { readonly type: 'approval-waiting' } | { readonly type: 'approval-settled' }
 
 // --- The stream events (re-declared from Play's lib/stream/types.ts) ----------------------
 
