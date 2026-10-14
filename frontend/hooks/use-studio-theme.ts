@@ -9,8 +9,10 @@ import { useUiStyleOptional } from '@/contexts/ui-style-context';
  * PRD-244 D1: Studio is the Style axis (Classic | Studio), not a tone. The
  * style is known on the server (cookie → app/layout.tsx → UiStyleProvider),
  * so this is stable across SSR and hydration and never flips after mount.
- * Outside the provider (isolated mounts, tests) it is Classic.
+ * PRD-259 §4: a skin built on Studio is Studio here (its base drives the
+ * layout; a skin never changes one). Outside the provider (isolated mounts,
+ * tests) it is Classic.
  */
 export function useIsStudio(): boolean {
-  return useUiStyleOptional()?.style === 'studio';
+  return useUiStyleOptional()?.isStudio === true;
 }
