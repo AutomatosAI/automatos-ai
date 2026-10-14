@@ -59,6 +59,7 @@ from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
+from services.claims_taken_out import a_cards_claims_taken_out_are_noted  # N15-CI
 from services.done_needs_an_artifact import done_refusal, missing_artifact  # PRD-256 US-005: Done needs it
 from services.result_document_links import a_cards_document_links_open_in_the_app  # F380
 from services.ticket_result_keep import kept_result as _kept_result  # F013: a shorter re-run never overwrites
@@ -1697,6 +1698,7 @@ def ending_summary(task: Any) -> Optional[str]:
 @a_cards_answer_is_on_brand  # the kit's sign-off fills "[Your name]" before the notes below read the answer
 @a_social_card_has_its_post  # F380: a social ticket is done only when its post exists and has rendered
 @a_cards_document_links_open_in_the_app  # F380: a generated file is linked by its Deliverable
+@a_cards_claims_taken_out_are_noted  # N15-CI: what the claim check took out of the agent's text is in the note
 async def finalize_board_task_run(
     db: Session,
     *,

@@ -29,6 +29,7 @@ from core.llm.key_resolver import ResolvedKey, resolve_provider_key  # noqa: F40
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 from modules.agents.factory.answer_check import said_plainly  # F297
+from core.llm.taken_out import reports_the_claims_it_took_out  # N15-CI: the owner is told what was taken out
 from core.observability.genai import traced_agent_run
 
 logger = logging.getLogger(__name__)
@@ -1125,6 +1126,7 @@ class AgentFactory:
                 attachment_ids, start_time, conversation,
             )
 
+    @reports_the_claims_it_took_out  # N15-CI: an agent's text carries no not-done line; its result says it
     @said_plainly  # F297: a run's raw tool output is never its answer
     async def _execute_with_prompt_scoped(
         self,

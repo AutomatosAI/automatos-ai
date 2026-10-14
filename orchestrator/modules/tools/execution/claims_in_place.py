@@ -15,9 +15,11 @@ gives that answer the same check, so a claim is taken out whichever way the run 
 changes nothing: the line in place denies, and a denial is no claim. As with the loop's own check, a run
 offered no tools is not checked (F108-b).
 
-N15-CI (F264-b): in Auto's own turn, a reply that was nothing but claims, whose line would deny a write
-the turn did, is answered by the account of the turn's calls (``turn_account.account_of``): what changed,
-never "Ask me again" over work that happened.
+N15-CI (F264-b): in Auto's own turn, a reply that was nothing but claims, one of them a write said wrong,
+is answered by the account of the turn's calls (``turn_account.account_of``): what changed, never "Ask
+me again" over work that happened. In an agent's run nothing is put in a claim's place (its text may be
+a customer's); the sentences taken out are kept for the run (core/llm/taken_out.py), which puts them
+in its result's ``execution`` for the card's note (services/claims_taken_out.py).
 """
 from __future__ import annotations
 
@@ -41,11 +43,13 @@ def in_place(loop: Any, reply: Any) -> Optional[Any]:
     if not isinstance(text, str) or not text.strip() or getattr(reply, "tool_calls", None):
         return None
     from consumers.chatbot.claim_removed import in_place_of, without_unbacked_claims
+    from core.llm.taken_out import kept_for_the_run
 
     removed = without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)
     if removed is None:
         return None
     logger.warning(UNBACKED_LOGGED, removed.family, removed.sentence)
+    kept_for_the_run(removed.taken_out)
     return in_place_of(reply, _said(loop, removed))
 
 

@@ -22,7 +22,6 @@ CLAIMING_0245 = ("To: nadia@brook.example\n\nHi Nadia,\n\nThanks for letting us 
                  "address on your club box, so the November box goes to the new one.\n\nGerard")
 NARRATED = ("Let me create OPS. Now let me assign Gmail to it. Good — both created.")
 CHANGED = "I've changed the address on your club box, so the November box goes to the new one."
-NOT_CHANGED = "Just to be clear: I haven't changed anything in this reply. Ask me again if you want it done."
 STEPPING_0245 = ("To: nadia@brook.example\n\nHi Nadia,\n\nThanks for letting us know.\n\n"
                  "Let me look up the club box on your account:")
 
@@ -46,11 +45,42 @@ def _run(first, *replies):
 
 
 def test_a_claim_is_never_retried_and_the_answer_stays():
-    """#0245's answer stands, its claim's sentence replaced by the line: the model is not called again."""
+    """#0245's answer stands, its claim's sentence taken out: the model is not called again. It is an
+    email for a customer, so nothing is put in the claim's place (N15-CI)."""
     result, model = _run(CLAIMING_0245, LLMResponse(content="  ", tool_calls=None))
+    draft = result.response.content
     assert model.calls == 0
-    assert result.response.content == CLAIMING_0245.replace(CHANGED, NOT_CHANGED)
-    assert result.response.content.endswith("\n\nGerard")
+    assert draft == CLAIMING_0245.replace(f" {CHANGED}", "")
+    assert "Just to be clear" not in draft and "Ask me again" not in draft and CHANGED not in draft
+
+
+def test_the_owner_finds_what_was_taken_out_of_the_draft_in_the_cards_note():
+    """The run's result carries the sentence taken out (core/llm/taken_out.py) and the card's answer
+    gets the note, after the draft, and goes to review (services/claims_taken_out.py)."""
+    from core.llm.taken_out import TAKEN_OUT_KEY, reports_the_claims_it_took_out
+    from services.claims_taken_out import TAKEN_OUT_NOTE, with_the_note
+
+    executor = ToolLoopExecutor(llm_callback=_Model(), tool_callback=None, max_iterations=5)
+
+    @reports_the_claims_it_took_out
+    async def agent_run():
+        result = await executor.run(initial_response=LLMResponse(content=CLAIMING_0245, tool_calls=None),
+                                    messages=[{"role": "user", "content": "Reply to Nadia Brook"}],
+                                    tools=TOOLS, workspace_id="ws")
+        return {"status": "success", "result": result.response.content, "execution": {"actions": []}}
+
+    out = asyncio.run(agent_run())
+    draft = out["result"]
+    assert "Just to be clear" not in draft and CHANGED not in draft
+    assert out["execution"] == {"actions": [], TAKEN_OUT_KEY: [CHANGED]}
+
+    kwargs = with_the_note({"task_id": 245, "exec_result": out, "review_mode": "auto"})
+    assert kwargs["exec_result"]["result"] == f"{draft}\n\n{TAKEN_OUT_NOTE.format(quoted=repr_quoted(CHANGED))}"
+    assert kwargs["force_review"] is True and out["result"] == draft            # a new dict: the run's is as it was
+
+
+def repr_quoted(sentence):
+    return f'"{sentence}"'
 
 
 def test_an_empty_retry_of_an_announced_step_leaves_the_answer():

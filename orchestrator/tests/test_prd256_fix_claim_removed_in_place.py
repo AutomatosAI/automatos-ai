@@ -150,11 +150,20 @@ def test_a_claim_that_goes_on_from_one_taken_out_goes_with_it():
     assert removed.text == "Just to be clear: I haven't approved anything in this reply. Ask me again if you want it done."
 
 
-def test_a_claim_in_an_agents_draft_that_goes_on_from_none_stays():
+def test_an_agents_text_never_carries_the_line_and_keeps_what_does_not_go_on_from_the_claim():
+    """The line is Auto's, to the owner: an agent's text may be for a customer. The claim goes with
+    nothing in its place, and the run is told what was taken out (the card's note says it)."""
     removed = without_unbacked_claims("I've cancelled your order. Thanks for waiting. It has been refunded.", [],
                                       promises=False)
-    assert removed.text == ("Just to be clear: I haven't cancelled anything in this reply. Ask me again if you want "
-                            "it done. Thanks for waiting. It has been refunded.")
+    assert removed.text == "Thanks for waiting. It has been refunded."
+    assert removed.taken_out == ("I've cancelled your order.",)
+
+
+def test_autos_reply_keeps_the_line_and_says_nothing_aside():
+    removed = without_unbacked_claims("Thanks for waiting. I've cancelled your order.", [], promises=True)
+    assert removed.text == ("Thanks for waiting. Just to be clear: I haven't cancelled anything in this reply. "
+                            "Ask me again if you want it done.")
+    assert removed.taken_out == ()
 
 
 MOVED_TO_DONE = ("platform_execute", {"action": "platform_update_task_status", "params": {"task_id": 422, "status": "done"}},
@@ -179,6 +188,30 @@ def test_a_reply_that_was_only_a_claim_its_line_would_deny_says_so():
 def test_a_line_that_is_true_or_not_alone_stays(answer, calls):
     removed = without_unbacked_claims(answer, _outcomes(*calls), promises=True)
     assert removed is not None and not removed.denies_done
+
+
+def test_a_claim_that_said_a_done_write_wrong_is_replaced_by_its_account():
+    """Other text is left, and a move did go through (to Done, not Cancelled): "I haven't moved anything"
+    would be false, so the claim's place holds what the move did."""
+    removed = without_unbacked_claims("Here's the board: 3 cards in Review. Task #0422 has been moved to 'cancelled'.",
+                                      _outcomes(MOVED_TO_DONE), promises=True)
+    assert removed.text == "Here's the board: 3 cards in Review. #0422 was moved to Done."
+    assert "haven't moved" not in removed.text and not removed.denies_done
+
+
+def test_a_claim_said_wrong_and_a_claim_not_done_each_take_their_own_place():
+    removed = without_unbacked_claims("#0422 is on the board. I've sent it to Declan. Task #0422 has been moved to "
+                                      "'cancelled'.", _outcomes(MOVED_TO_DONE), promises=True)
+    assert removed.text == ("#0422 is on the board. Just to be clear: I haven't sent anything in this reply. Ask me "
+                            "again if you want it done. #0422 was moved to Done.")
+
+
+def test_a_claim_of_another_family_than_the_write_still_takes_the_line():
+    """f187_b's install after a create: the families are matched precisely, so the line is said."""
+    removed = without_unbacked_claims("The playbook is ready. I've installed the playbook for you.",
+                                      _outcomes(PLAYBOOK_MADE), promises=True)
+    assert removed.text == ("The playbook is ready. Just to be clear: I haven't installed anything in this reply. "
+                            "Ask me again if you want it done.")
 
 
 # ── the screen: the streamed reply comes off, the copy is sent in its place ──

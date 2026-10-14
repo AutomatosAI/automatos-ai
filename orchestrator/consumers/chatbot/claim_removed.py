@@ -15,12 +15,17 @@ this reply. …"). A write that waits for the owner's click, or was refused, is 
 streamed live, so the screen is told it stands corrected (``screen_watch.corrected``): the reply is
 taken off and the corrected copy is sent in its place.
 
-N15-CI: a claim the rule reads only in Auto's voice (an agent's run is held to its first-person claims)
-goes with the claim it continues on its line: "I've approved the mission. It's now running." left "It's
-now running." after the line that denied it. A reply that was nothing but its claims, whose line would
-deny a write the turn did ("Task #0422 has been moved to 'cancelled'." after a move to Done: "I haven't
-moved anything" is false), says so (``Removed.denies_done``): Auto's turn answers it with the account
-of its calls instead (F264-b, ``turn_account.account_of``).
+N15-CI:
+
+- The line is Auto's, to the owner: an agent's text (a customer's email among them) never carries
+  it. In an agent's voice the claim is taken out with nothing in its place, and so is a claim that
+  goes on from it on its line ("I've approved the mission. It's now running."); the owner is told
+  beside the answer (``Removed.taken_out``: the card's note, services/claims_taken_out.py). Only when
+  nothing of the agent's text is left is the line the whole answer.
+- The line never denies a write that went through: a claim whose verb's family a done write is in,
+  said wrong ("Task #0422 has been moved to 'cancelled'." after a move to Done), is replaced by that
+  write's account ("#0422 was moved to Done."). A reply that was nothing but such claims says so
+  (``Removed.denies_done``): Auto's turn answers with the account of its calls (F264-b).
 """
 from __future__ import annotations
 
@@ -43,6 +48,9 @@ ASKED = "I asked for your {how} to {act}, so it hasn't happened yet"
 CLICK, OK = "click", "OK"
 TRIED = "I tried to {what} and it didn't go through"
 SENTENCE_LOGGED_CHARS = 200    # the loop's warning names the sentence, cut to this
+WENT_THROUGH = "What went through: {effect}{subject}."
+_DID_TO = ("moved to", "sent back", "started", "marked")   # a receipt's effect that reads "<card> was …"
+_LINE = "\0the not-done line"     # in a sentence's place: the line, said once
 _LEADING_SPACE = re.compile(r"^\s*")
 _OPENING_MARKS = re.compile(r"^\s*([*_`]+)")
 
@@ -51,13 +59,16 @@ _OPENING_MARKS = re.compile(r"^\s*([*_`]+)")
 class Removed:
     """A reply with its unbacked claims taken out: the text the owner gets, the first claim's verb
     ("done" for a bare claim) and the sentence that made it (its first ``SENTENCE_LOGGED_CHARS``, for the
-    loop's warning: a night's log shows which sentences fire); ``denies_done``: nothing of the reply is
-    left but the line, and the line denies a write the turn did (N15-CI, F264-b)."""
+    loop's warning: a night's log shows which sentences fire). N15-CI: ``denies_done``, Auto's reply was
+    nothing but claims and one of them said a write that went through wrong (F264-b: the loop answers
+    with the turn's account); ``taken_out``, the sentences taken out of an agent's text with nothing in
+    their place, for the owner to be told beside it (``claims_in_place.TAKEN_OUT``)."""
 
     text: str
     family: str
     sentence: str
     denies_done: bool = False
+    taken_out: Tuple[str, ...] = ()
 
 
 def _asks(outcomes: Iterable[Outcome]) -> List[str]:
@@ -89,16 +100,28 @@ def not_done_in_place(verbs: Iterable[str], outcomes: List[Outcome]) -> str:
     return NOT_DONE.format(said="; ".join(said))
 
 
-def _line_without(line: str, claimed: FrozenSet[str], put: str) -> Tuple[str, bool]:
-    """``line`` with its claimed sentences taken out, ``put`` in the first one's place when given;
-    and whether a sentence was taken out. What only closes a taken-out sentence's marks goes with it."""
+def _instead_of(said: str, put: Dict[str, str], line: str, placed: bool) -> Tuple[str, bool]:
+    """What goes in place of the sentence ``said`` (one of ``put``), and whether the line is said now:
+    the line once, at the first sentence it stands for; a write's own account; or nothing."""
+    instead = put[said]
+    if instead != _LINE:
+        return instead, placed
+    return ("" if placed else line), True
+
+
+def _line_without(text: str, put: Dict[str, str], line: str, placed: bool) -> Tuple[str, bool, bool]:
+    """``text`` (one line) with its sentences in ``put`` taken out, each with what ``put`` says goes in
+    its place; whether a sentence was taken out, and whether the line is said by now. What only
+    closes a taken-out sentence's marks goes with it."""
     kept, at, removed, marks = [], 0, False, ""
-    for found in SENTENCES.finditer(line):
+    for found in SENTENCES.finditer(text):
         sentence = found.group(0)
-        kept.append(line[at:found.start()])
+        kept.append(text[at:found.start()])
         at = found.end()
-        if without_marks(sentence).strip() in claimed:
-            kept.append(f"{_LEADING_SPACE.match(sentence).group(0)}{put}" if put and not removed else "")
+        said = without_marks(sentence).strip()
+        if said in put:
+            instead, placed = _instead_of(said, put, line, placed)
+            kept.append(f"{_LEADING_SPACE.match(sentence).group(0)}{instead}" if instead else "")
             opening = _OPENING_MARKS.match(sentence)
             removed, marks = True, opening.group(1) if opening else ""
             continue
@@ -106,76 +129,111 @@ def _line_without(line: str, claimed: FrozenSet[str], put: str) -> Tuple[str, bo
             sentence = sentence[len(marks):]
         kept.append(sentence)
         marks = ""
-    kept.append(line[at:])
-    return "".join(kept), removed
+    kept.append(text[at:])
+    return "".join(kept), removed, placed
 
 
-def _replaced(answer: str, claimed: FrozenSet[str], line: str) -> str:
-    """``answer`` with each of its own sentences in ``claimed`` taken out and ``line`` in the first
-    one's place; quoted lines are never touched. A line left empty goes; ``line`` ends a reply whose
-    sentences could not be found."""
+def _tidied(text: str, cut: str) -> str:
+    """A line a sentence was taken out of with nothing in its place: its indent kept, its words single-spaced."""
+    return f"{_LEADING_SPACE.match(text).group(0)}{' '.join(cut.split())}"
+
+
+def _replaced(answer: str, put: Dict[str, str], line: str, tidy: bool = False) -> str:
+    """``answer`` with each of its own sentences in ``put`` taken out and what ``put`` says in its
+    place (``_LINE``: the not-done line, once, at the first); quoted lines are never touched. A line
+    left empty goes; the line ends a reply whose sentences could not be found. ``tidy``: a line a
+    sentence left with nothing in its place is single-spaced."""
     lines = answer.split("\n")
     kept, placed = [], False
     for text, mine in zip(lines, own_lines(lines)):
         if not mine:
             kept.append(text)
             continue
-        cut, removed = _line_without(text, claimed, "" if placed else line)
-        placed = placed or removed
+        cut, removed, placed = _line_without(text, put, line, placed)
+        cut = _tidied(text, cut) if removed and tidy else cut
         if not (removed and not cut.strip()):
             kept.append(cut)
-    if not placed:
+    if not placed and _LINE in put.values():
         kept.extend(["", line])
     return "\n".join(kept)
 
 
-def _going_on(answer: str, claimed: FrozenSet[str], voiced: FrozenSet[str]) -> FrozenSet[str]:
+def _going_on(answer: str, claimed: FrozenSet[str], voiced: FrozenSet[str]) -> Tuple[str, ...]:
     """The claims read in Auto's voice (``voiced``) that go on, on its line, from a claim taken out
     ("I've approved the mission. It's now running." in an agent's run, held to its first-person claims):
-    they go with it, or the reply would go on to say what the line denies. Each is one of ``voiced`` the
+    they go with it, or the reply would go on to say what was taken out. Each is one of ``voiced`` the
     rule did not take out, right after a sentence taken out (or another that goes on from one)."""
     more = voiced - claimed
     if not more:
-        return frozenset()
-    going = set()
+        return ()
+    going: List[str] = []
     for text in answer.split("\n"):
         after_one = False
         for found in SENTENCES.finditer(text):
             said = without_marks(found.group(0)).strip()
             after_one = said in claimed or (after_one and said in more)
             if after_one and said in more:
-                going.add(said)
-    return frozenset(going)
+                going.append(said)
+    return tuple(dict.fromkeys(going))
 
 
-def _denies_a_done_write(verbs: Iterable[str], outcomes: List[Outcome]) -> bool:
-    """Whether the not-done line would deny work a write of the turn did: a claim's verb whose family a
-    done write is in, though not as the claim said it (F264-b, night 8: #0422 moved to Done, the reply
-    said to Cancelled; "I haven't moved anything" is false)."""
-    named = set(verbs)
-    done = [r for r in (receipt(*outcome) for outcome in outcomes) if r["kind"] == WRITE and r["status"] == DONE]
-    families = [backs for family, backs in FAMILIES if named & family]
-    return any(backs(r) for backs in families for r in done)
+def _done_writes(outcomes: List[Outcome]) -> List[Dict[str, Any]]:
+    return [r for r in (receipt(*outcome) for outcome in outcomes) if r["kind"] == WRITE and r["status"] == DONE]
+
+
+def _of_its_family(verb: str, r: Dict[str, Any]) -> bool:
+    """Whether the done write ``r`` is of the family of the claim's verb, however the claim said it
+    ("moved": any card moved, to whichever column; "installed" is no create)."""
+    return any(verb in family and backs(r) for family, backs in FAMILIES)
+
+
+def _what_it_did(r: Dict[str, Any]) -> str:
+    """A done write, in a sentence: "#0422 was moved to Done."; "What went through: Card made (#0231)."."""
+    subject, effect = str(r.get("subject") or ""), str(r.get("effect") or "")
+    if subject and effect.startswith(_DID_TO):
+        return f"{subject} was {effect}."
+    return WENT_THROUGH.format(effect=effect[:1].upper() + effect[1:], subject=f" ({subject})" if subject else "")
+
+
+def _own_instead(found: List[Tuple[str, str]], outcomes: List[Outcome]) -> Dict[str, str]:
+    """In Auto's voice, what goes in place of each claim: the account of the done writes of its verb's
+    family when there are any (the claim said them wrong: a line saying "I haven't moved anything" over
+    a move to Done is false), else the not-done line (``_LINE``)."""
+    done = _done_writes(outcomes)
+    put: Dict[str, str] = {}
+    for verb, sentence in found:
+        did = [r for r in done if _of_its_family(verb, r)]
+        put.setdefault(sentence.strip(), " ".join(dict.fromkeys(_what_it_did(r) for r in did)) if did else _LINE)
+    return put
+
+
+def _dropped(answer: str, found: List[Tuple[str, str]], outcomes: List[Outcome]) -> Dict[str, str]:
+    """In an agent's voice (its text may be for a customer), each claim and each claim in Auto's voice
+    that goes on from one is taken out with nothing in its place."""
+    claimed = frozenset(sentence.strip() for _verb, sentence in found)
+    voiced = frozenset(sentence.strip() for _verb, sentence in unbacked_sentences(answer, outcomes, True))
+    return dict.fromkeys((*claimed, *_going_on(answer, claimed, voiced)), "")
 
 
 def without_unbacked_claims(answer: str, outcomes: Iterable[Outcome],
                             promises: Optional[bool] = True) -> Optional[Removed]:
-    """The reply with the sentences that make an unbacked claim taken out and the not-done line in
-    the first one's place, or None when every claim is backed (``promises``: whose voice the reply
-    is, as ``receipts.unbacked_claim`` reads it). The claims in Auto's voice that go on from one taken
-    out go with it (``_going_on``)."""
+    """The reply with the sentences that make an unbacked claim taken out, or None when every claim
+    is backed (``promises``: whose voice the reply is, as ``receipts.unbacked_claim`` reads it). In
+    Auto's voice, the not-done line takes the first one's place, or the account of a write the claim
+    said wrong takes its; in an agent's, nothing does (``Removed.taken_out`` tells the owner), unless
+    nothing of its text is left, when the line is the whole answer."""
     ran = list(outcomes)
     found = unbacked_sentences(answer, ran, promises)
     if not found:
         return None
-    verbs = [verb for verb, _sentence in found]
-    line = not_done_in_place(verbs, ran)
-    claimed = frozenset(sentence.strip() for _verb, sentence in found)
-    voiced = claimed if auto_speaks(promises) else frozenset(
-        sentence.strip() for _verb, sentence in unbacked_sentences(answer, ran, True))
-    text = _replaced(answer, claimed | _going_on(answer, claimed, voiced), line)
+    own = auto_speaks(promises)
+    put = _own_instead(found, ran) if own else _dropped(answer, found, ran)
+    line = not_done_in_place([verb for verb, sentence in found if not own or put[sentence.strip()] == _LINE], ran)
+    only = not _replaced(answer, dict.fromkeys(put, ""), line).strip()
+    text = line if only and not own else _replaced(answer, put, line, tidy=not own)
     return Removed(text=text, family=found[0][0], sentence=found[0][1].strip()[:SENTENCE_LOGGED_CHARS],
-                   denies_done=text.strip() == line and _denies_a_done_write(verbs, ran))
+                   denies_done=only and own and any(said != _LINE for said in put.values()),
+                   taken_out=() if own or only else tuple(put))
 
 
 def in_place_of(response: Any, text: str) -> Any:
