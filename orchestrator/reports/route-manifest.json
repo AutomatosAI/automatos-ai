@@ -1,5 +1,5 @@
 {
-  "route_count": 914,
+  "route_count": 915,
   "routes": [
     {
       "method": "GET",
@@ -2152,6 +2152,10 @@
     {
       "method": "PATCH",
       "path": "/api/sites/{site_id}/settings"
+    },
+    {
+      "method": "GET",
+      "path": "/api/skins/schema"
     },
     {
       "method": "GET",

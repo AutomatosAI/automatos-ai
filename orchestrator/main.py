@@ -71,6 +71,7 @@ from api.routing import router as routing_router  # PRD-50: Universal Orchestrat
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
 from api.admin_workspaces import router as admin_workspaces_router  # Admin workspace lifecycle (pause/delete)
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
+from api.marketplace_skins import router as marketplace_skins_router  # PRD-259: Skins in Studio
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
 from api.workspace_skills import router as workspace_skills_router  # PRD-71: Workspace Skill Enablement
 from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
@@ -1218,6 +1219,7 @@ app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
 app.include_router(admin_workspaces_router)  # Admin workspace lifecycle
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
+app.include_router(marketplace_skins_router)  # PRD-259: Skins in Studio
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
 app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)
 app.include_router(llm_analytics_router)  # PRD-54: LLM Usage Analytics
