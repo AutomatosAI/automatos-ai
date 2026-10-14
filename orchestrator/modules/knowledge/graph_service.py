@@ -288,7 +288,7 @@ class GraphifyService:
         merged = self._merge_extractions(extractions)
 
         # 3. Build graph (sync graphify call → executor)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         graph: nx.Graph = await loop.run_in_executor(
             None, partial(build_from_json, merged)
         )
@@ -372,7 +372,7 @@ class GraphifyService:
             logger.error("load_graph: corrupt graph.json for workspace %s: %s", workspace_id, exc)
             return None
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         data = self._normalize_node_link_data(data)
         graph: nx.Graph = await loop.run_in_executor(
             None, partial(nx.node_link_graph, data)
@@ -437,7 +437,7 @@ class GraphifyService:
             workspace_id, merge, len(graph_data.get("nodes", [])),
         )
         ws = DbWorkspaceClient(str(workspace_id))
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Normalize edge format for NetworkX 3.1 compatibility
         graph_data = self._normalize_node_link_data(graph_data)
@@ -521,7 +521,7 @@ class GraphifyService:
                 workspace_id,
             )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         handle = loop.call_later(
             _DEBOUNCE_SECONDS,
             lambda: asyncio.ensure_future(self._debounced_rebuild(workspace_id)),
@@ -568,7 +568,7 @@ class GraphifyService:
         Returns list of dicts with ``score``, ``id``, and ``label`` keys,
         sorted highest-score first.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         # _score_nodes returns list[tuple[float, str]]
         raw: List = await loop.run_in_executor(
             None, partial(_score_nodes, graph, terms)
@@ -591,7 +591,7 @@ class GraphifyService:
 
         Returns dict with ``nodes`` (set[str]) and ``edges`` (list[tuple]).
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         # _bfs expects start_nodes as a list
         nodes, edges = await loop.run_in_executor(
             None, partial(_bfs, graph, [start], depth)
@@ -605,7 +605,7 @@ class GraphifyService:
 
         Returns dict with ``nodes`` (set[str]) and ``edges`` (list[tuple]).
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         # _dfs expects start_nodes as a list
         nodes, edges = await loop.run_in_executor(
             None, partial(_dfs, graph, [start], depth)
@@ -621,7 +621,7 @@ class GraphifyService:
     ) -> str:
         """Convert a subgraph (nodes + edges) to a text summary. F312: each EDGE
         line reads source -> target as extracted, not in the walk's order."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, lambda: _subgraph_to_text(graph, nodes, oriented_pairs(graph, edges), token_budget)
         )
@@ -678,7 +678,7 @@ class GraphifyService:
             members.sort(key=lambda n: graph.degree(n), reverse=True)
             members = members[:max_nodes]
             truncated = True
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(
             None, partial(self._serialize_subgraph, graph, members)
         )
@@ -697,7 +697,7 @@ class GraphifyService:
             neighbours.sort(key=lambda n: graph.degree(n), reverse=True)
             neighbours = neighbours[:max_nodes]
         ids = [node_id, *neighbours]
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, partial(self._serialize_subgraph, graph, ids)
         )
@@ -713,7 +713,7 @@ class GraphifyService:
         if target not in graph:
             return {"found": False, "error": f"Node '{target}' not found in the graph."}
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _compute():
             try:
@@ -768,7 +768,7 @@ class GraphifyService:
                 for _rank, _negdeg, nid, label, attrs in scored[:limit]
             ]
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _search)
 
     async def set_community_label(
@@ -1083,7 +1083,7 @@ class GraphifyService:
         community_reports: Optional[Dict[int, Dict[str, Any]]] = None,
     ) -> None:
         """Export graph artefacts to workspace files."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # graph.json — NetworkX node_link_data (in-memory, not graphify's to_json).
         # node_link_data carries only node *attributes*; community membership
@@ -1473,7 +1473,7 @@ class GraphifyService:
         )
 
         # Re-cluster and re-export (same as full build steps 4-11)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         communities = await loop.run_in_executor(
             None, partial(cluster, existing_graph)
         )
