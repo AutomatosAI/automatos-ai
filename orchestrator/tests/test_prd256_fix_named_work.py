@@ -89,6 +89,19 @@ def test_a_card_is_found_by_its_deliverables_title_or_file_name(db_session, seed
     assert _ids(_search(db_session, ws, "Guji brew")) == {posted.id}
 
 
+def test_a_widget_turn_searches_titles_only_never_the_deliverables(db_session, seed_workspace, monkeypatch):
+    """A visitor holds tasks:read, not the Deliverables: no file name answers their search."""
+    import core.security.surface as surface
+
+    ws = UUID(seed_workspace())
+    billed = _card(db_session, ws, "Bill the client for March")
+    _deliverable(db_session, ws, billed, "March statement", f"invoices/westmoor-invoice-{uuid4().hex}.pdf")
+    monkeypatch.setattr(surface, "widget_turn", lambda: True)
+
+    assert _search(db_session, ws, "Westmoor invoice")["tasks"] == []
+    assert len(_search(db_session, ws, "Bill March")["tasks"]) == 1
+
+
 def test_a_card_missing_one_word_of_the_name_is_not_found(db_session, seed_workspace):
     ws = UUID(seed_workspace())
     _card(db_session, ws, "Westmoor quote")

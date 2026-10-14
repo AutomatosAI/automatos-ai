@@ -80,18 +80,27 @@ def _filtered(query: Any, params: Dict[str, Any]) -> Any:
     return _named(query, params.get("search"))
 
 
-def _named(query: Any, raw: Any) -> Any:
-    """F426: the cards whose title, or a Deliverable on them, holds every word of ``raw``."""
+def _on_card(pattern: str) -> Any:
+    """A Deliverable on the card whose title or file name holds ``pattern``."""
     from core.models.core import BoardTask
 
     d = CARD_DELIVERABLES.c
+    return exists().where(and_(
+        d.workspace_id == BoardTask.workspace_id, d.source_type == CARD_SOURCE_TYPE,
+        d.source_id == cast(BoardTask.id, String), d.deleted_at.is_(None),
+        or_(d.title.ilike(pattern), d.file_path.ilike(pattern)),
+    ))
+
+
+def _named(query: Any, raw: Any) -> Any:
+    """F426: the cards whose title, or a Deliverable on them, holds every word of ``raw``.
+    A widget turn holds tasks:read, not the Deliverables: it searches titles only."""
+    from core.models.core import BoardTask
+
+    titles_only = _widget_turn()
     for pattern in search_patterns(raw):
-        on_card = exists().where(and_(
-            d.workspace_id == BoardTask.workspace_id, d.source_type == CARD_SOURCE_TYPE,
-            d.source_id == cast(BoardTask.id, String), d.deleted_at.is_(None),
-            or_(d.title.ilike(pattern), d.file_path.ilike(pattern)),
-        ))
-        query = query.filter(or_(BoardTask.title.ilike(pattern), on_card))
+        on_title = BoardTask.title.ilike(pattern)
+        query = query.filter(on_title if titles_only else or_(on_title, _on_card(pattern)))
     return query
 
 
