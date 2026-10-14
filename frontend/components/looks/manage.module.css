@@ -1,0 +1,127 @@
+/*
+ * PRD-260 §4 — 'This look' and 'Import a look' on Make it yours: quiet
+ * outlined actions, small forms, and what the last action did. Ported from
+ * Automatos Play's components/looks/manage.module.css (no design mock there:
+ * drawn with the editor's parts). Every variable is --pl-* (K2).
+ */
+
+.manage {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+  color: var(--pl-color-text);
+}
+
+.label {
+  margin: 0;
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-2);
+}
+
+.toolbar,
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pl-space-2);
+}
+
+/* Outlined, like Reset: the screen's one primary stays Save as new look. */
+.action,
+.danger {
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--pl-space-4);
+  border-radius: var(--pl-radius-button);
+  border: 1px solid var(--pl-line-button);
+  background: transparent;
+  color: var(--pl-color-text);
+  font: var(--pl-text-button-sm);
+  cursor: pointer;
+}
+
+/* Delete look: the error colour as an edge and as readable text. */
+.danger {
+  border-color: var(--pl-tint-error-line);
+  color: var(--pl-color-error-text);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-2);
+  padding: var(--pl-space-3);
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+}
+
+.fieldLabel {
+  font: var(--pl-text-meta);
+  color: var(--pl-color-text-2);
+}
+
+.field,
+.paste,
+.file {
+  min-height: var(--pl-tap-min);
+  padding: var(--pl-space-2) var(--pl-space-3);
+  border-radius: var(--pl-radius-button);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-bg);
+  color: var(--pl-color-text);
+}
+
+.field {
+  font: var(--pl-text-body);
+}
+
+/* JSON is code: monospaced, never wrapped by spell-checking. */
+.paste {
+  resize: vertical;
+  font: var(--pl-text-mono);
+}
+
+.file {
+  font: var(--pl-text-meta);
+  cursor: pointer;
+}
+
+.confirmText {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-text);
+}
+
+.done {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-2);
+}
+
+.errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+  padding: var(--pl-space-3);
+  border-radius: var(--pl-radius-tool);
+  border: 1px solid var(--pl-tint-error-line);
+  background: var(--pl-color-surface);
+  font: var(--pl-text-small);
+  color: var(--pl-color-text);
+}
+
+.errorTitle {
+  margin: 0;
+  font-weight: 600;
+  color: var(--pl-color-error-text);
+}
+
+.errorList {
+  margin: 0;
+  padding-left: var(--pl-space-4);
+}
