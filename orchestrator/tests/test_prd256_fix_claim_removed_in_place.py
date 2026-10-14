@@ -232,6 +232,16 @@ def test_a_state_found_by_a_read_of_that_thing_is_no_claim(sentence, read):
     assert unbacked_where(sentence, [], reads=[_read("platform_list_tasks", "cards")]) != []   # RVW-25 holds
 
 
+def test_a_run_waiting_on_its_card_is_no_claim():
+    """The eval's F288-b, word for word: the run waits on the owner's click, and the reply says so."""
+    said = ("The run is now on the board as a card for playbook #85, New Café Onboarding, for The Driftwood Cafe, "
+            "Portishead. The system hasn't given me its card number, so check the board for it. Nothing runs until "
+            "you click it.")
+    assert unbacked_where(said, [], waiting=True) == []
+    assert unbacked_where("Done, it's now on your board.", [], waiting=True) != []   # no ask named: still a claim
+    assert unbacked_where(said, [], waiting=False) != []                              # no card raised: a claim
+
+
 @pytest.mark.parametrize("sentence, verb", [
     ("I haven't sent the email, but the card has been approved.", "approved"),
     ("No, the card has been approved.", "approved"),

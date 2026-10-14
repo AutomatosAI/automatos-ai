@@ -417,7 +417,11 @@ def _in_reply_content(sentence: str, start: int, end: int) -> bool:
 
 def _asked(verb: str, sentence: str) -> bool:
     """Whether a claim of ``verb`` reports the ask for the owner's click (P256-FIX-RVW-30): a card
-    raised, an approval requested, an approval card sent; never a card sent back."""
+    raised, an approval requested, an approval card sent; never a card sent back. A claim with no verb
+    of its own names the ask anywhere in its sentence (P256-FIX-N15-1: "The run is now on the board as
+    a card for playbook 85")."""
+    if not verb:
+        return bool(_THE_ASK.search(sentence))
     if verb not in _ASKED or (verb == "sent" and _SENT_BACK.search(sentence)):
         return False
     found = re.search(rf"\b{verb}\b", sentence, re.I)
