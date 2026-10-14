@@ -178,8 +178,10 @@ def outcome_of(result: Any) -> str:
         return ""
     if not result.get("success"):
         return NOT_THROUGH.format(error=str(result.get("error") or NO_REASON)[:ERROR_CHARS])
-    ids = result.get("ids") if isinstance(result.get("ids"), dict) else {}
-    return RAN_WITH.format(ids=", ".join(f"{key} {value}" for key, value in ids.items())) if ids else RAN
+    from services.click_results import said_ids
+
+    ids = said_ids(result)   # P256-FIX-N15-9: a numbered ticket by its number, never its row id
+    return RAN_WITH.format(ids=ids) if ids else RAN
 
 
 def _day(when: Any) -> str:

@@ -7,7 +7,8 @@ into its next call named another ticket whenever that id was also a board number
 workspace with one tenant, ids and numbers run close together.
 
 So what a model reads of a tool's answer names each ticket by its number alone: wherever a
-ticket's number stands, its integer ``id`` and ``task_id`` beside it are left out, and a bulk
+ticket's number stands, its row id beside it is left out (``id``, ``task_id`` and, P256-FIX-N15-9,
+``board_task_id``, ``ticket_id`` and ``source_id``, as an integer, digits or "task-2603"), and a bulk
 answer's ``updated`` lists the numbers. A ticket with no number keeps its id, the one way to
 name it. The answer itself is unchanged: the chat's cards, the frontend and the platform's
 own code read the ids as before. The id fallback stays: an id no ticket has as its number
@@ -21,7 +22,11 @@ from typing import Any, Callable, Dict
 
 # A ticket's number as the board shows it: "#0892", a mission step's "#0051.3".
 TICKET_NUMBER = re.compile(r"^#\d+(?:\.\d+)?$")
-ID_KEYS = ("id", "task_id")
+# P256-FIX-N15-9 (F429): the keys a ticket's row id rides under beside its number (the feed's
+# "task-2603" and source_id "2603", the schedule's board_task_id), as an integer, digits or
+# "<kind>-<digits>".
+ID_KEYS = ("id", "task_id", "board_task_id", "ticket_id", "source_id")
+ROW_ID_TEXT = re.compile(r"^(?:[a-z_]+-)?\d+$")
 PLATFORM_PREFIX = "platform_"
 # Deep enough for a bulk answer's failures and a card inside frontend_data.
 MAX_DEPTH = 6
@@ -56,6 +61,8 @@ def _is_number(value: Any) -> bool:
 
 
 def _is_row_id(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(ROW_ID_TEXT.match(value))
     return isinstance(value, int) and not isinstance(value, bool)
 
 

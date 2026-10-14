@@ -46,6 +46,7 @@ from config import config
 from core.llm.embedding_manager import EmbeddingManager
 from core.qdrant_writes import is_timeout, upsert_retrying_a_timeout_once
 from modules.memory.injection_filter import STATED_BY_KEY, deletable_by
+from modules.memory.retired import leaves_out_retired, retired_metadata, unretired
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +293,7 @@ class DurableMemoryStore:
 
     # ── Read ────────────────────────────────────────────────────
 
+    @leaves_out_retired  # P256-FIX-N15-9: a rule the owner replaced is never recalled
     async def search(
         self,
         query: str,
@@ -381,6 +383,7 @@ class DurableMemoryStore:
         flt = Filter(must=[*self._namespace_filter(user_id).must, *exact], should=should or None)
         return await self._scroll(flt, limit)
 
+    @leaves_out_retired  # P256-FIX-N15-9: nor listed (the rules, the Memory page, Auto's browse)
     async def _scroll(self, flt: Filter, limit: int) -> List[Dict]:
         """The memories ``flt`` matches, up to ``limit`` (unscored, scroll order)."""
         if not self._enabled:
@@ -449,6 +452,26 @@ class DurableMemoryStore:
         await self._client.delete(collection_name=self._collection, points_selector=[points[0].id])
         logger.info("[Durable] Deleted memory %s namespace=%s", memory_id, payload.get("namespace"))
         return DELETED
+
+    async def retire(self, user_id: str, rows: List[Dict], replaced_by: str) -> List[str]:
+        """P256-FIX-N15-9 (F429): mark ``rows`` retired, replaced by the rule ``replaced_by``
+        (``modules.memory.retired``): each keeps its metadata and gains when and by what; reads
+        leave it out from then on. Only rows of the namespace ``user_id`` are marked; the ids
+        marked. Nothing is deleted."""
+        if not self._enabled:
+            return []
+        at = datetime.now(timezone.utc).isoformat()
+        marked: List[str] = []
+        for row in rows:
+            if row.get("namespace") != user_id or not _is_point_id(row.get("id")):
+                continue
+            await self._client.set_payload(
+                collection_name=self._collection,
+                payload={"metadata": retired_metadata(row.get("metadata"), replaced_by, at)},
+                points=[row["id"]],
+            )
+            marked.append(str(row["id"]))
+        return marked
 
     # ── GDPR (PRD-181 S3/S4 surface) ────────────────────────────
 
@@ -584,13 +607,18 @@ class DurableMemoryStore:
         """P256-FIX-RVW-41: an owner restating their own row dates it now, so the restated
         rule is their newest (it leads the standing rules and beats the rule it replaced).
         P256-FIX-N14-4: a row Auto wrote that the owner now says in their own words becomes
-        their standing rule (``stated_by`` is added, never taken off). Nothing else changes;
-        a timeout keeps the old row as it was and says so in the log."""
+        their standing rule (``stated_by`` is added, never taken off). P256-FIX-N15-9: a row a
+        newer rule retired is back when the owner says it again in their own words (another write
+        of it leaves it retired). Nothing else changes; a timeout keeps the old row as it was and
+        says so in the log."""
         payload: Dict[str, Any] = {"created_at": datetime.now(timezone.utc).isoformat()}
         stored = (getattr(existing, "payload", None) or {}).get("metadata") or {}
         stated = metadata.get(STATED_BY_KEY)
-        if stated and not stored.get(STATED_BY_KEY):
-            payload["metadata"] = {**stored, STATED_BY_KEY: stated}
+        kept = unretired(stored) if stated else stored  # P256-FIX-N15-9: the owner saying it again brings it back
+        if stated and not kept.get(STATED_BY_KEY):
+            kept = {**kept, STATED_BY_KEY: stated}
+        if kept != stored:
+            payload["metadata"] = kept
         try:
             await self._client.set_payload(
                 collection_name=self._collection,

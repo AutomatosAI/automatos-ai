@@ -46,6 +46,12 @@ def in_their_words(text: str, owner_turns: Sequence[str], coverage: float) -> bo
     return bool(stored) and all(any(_held(seq, theirs, coverage) for theirs in said) for seq in stored)
 
 
+def words(text: Optional[str]) -> List[str]:
+    """Every word of ``text`` in order, read as a rule is weighed (normalised, punctuation off, a
+    negation as NEGATION), across its sentences."""
+    return _words(_normal(text))
+
+
 def _normal(text: Optional[str]) -> str:
     return unicodedata.normalize("NFKC", text or "").replace("\u2019", "'").casefold()
 
@@ -100,4 +106,4 @@ def _in_order(a: List[str], b: List[str]) -> int:
     return row[-1]
 
 
-__all__ = ["MAX_RULE_WORDS", "NEGATION", "in_their_words"]
+__all__ = ["MAX_RULE_WORDS", "NEGATION", "in_their_words", "words"]

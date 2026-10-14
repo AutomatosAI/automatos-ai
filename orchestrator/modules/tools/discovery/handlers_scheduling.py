@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from modules.tools.discovery.agent_refs import resolve_active_agent, takes_the_agent_id
+from modules.tools.discovery.board_task_numbers import numbers_its_tickets
 from modules.tools.discovery.brief_sends import REVIEW_MODE, reviewed_by_a_person, says_it_is_reviewed
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,7 @@ async def cancel_scheduled_task(db: Session, workspace_id: UUID, params: Dict[st
     return await svc.update_task_status(task_id, "cancelled")
 
 
+@numbers_its_tickets  # P256-FIX-N15-9 (F429): a ticket due is named by its board number too
 async def get_schedule(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Return the workspace's unified schedule — the SAME DB-first truth the
     calendar shows (PRD-162): heartbeat routines, cron-scheduled playbooks, and

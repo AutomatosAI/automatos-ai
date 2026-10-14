@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 # The result keys that name what the call made or changed, in the order the line reads them.
 ID_KEYS = ("mission_id", "task_id", "agent_id", "document_id", "execution_id", "playbook_id", "post_id", "id")
 NUMBER_KEY = "number"
+# A ticket's row id as the ids name it (a result's own "task_id", or its "task" row's "id").
+TICKET_ROW_IDS = ("task_id", "id")
 TITLE_KEYS = ("title", "name", "goal")
 # Result objects that carry the row the call made or changed (get_mission's "mission", a ticket's "task").
 ROWS = ("mission", "task", "agent", "execution", "post", "document")
@@ -95,8 +97,16 @@ def click_line(grant: Any, result: Dict[str, Any]) -> str:
     act = _act(grant)
     if not result.get("success"):
         return NOT_DONE.format(act=act, error=result.get("error") or NO_REASON)
+    return LINE.format(act=act, ids=said_ids(result) or NO_IDS)
+
+
+def said_ids(result: Dict[str, Any]) -> str:
+    """The ids a click's ``executed_result`` names, as a line says them: "mission_id 3f2…, number
+    #0992". P256-FIX-N15-9 (F429): a ticket the line numbers is named by its number alone, never by
+    its row id beside it (night 15 read "task_id 2603" as a third card number)."""
     ids = result.get(IDS) if isinstance(result.get(IDS), dict) else {}
-    return LINE.format(act=act, ids=", ".join(f"{key} {value}" for key, value in ids.items()) or NO_IDS)
+    hidden = TICKET_ROW_IDS if ids.get(NUMBER_KEY) else ()
+    return ", ".join(f"{key} {value}" for key, value in ids.items() if key not in hidden)
 
 
 def _act(grant: Any) -> str:
@@ -131,4 +141,4 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-__all__ = ["click_line", "executed_summary", "failed_summary", "result_ids", "said_in_the_chat"]
+__all__ = ["click_line", "executed_summary", "failed_summary", "result_ids", "said_ids", "said_in_the_chat"]

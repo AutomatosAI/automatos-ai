@@ -38,8 +38,9 @@ def register_asks_actions(registry: ActionRegistry) -> None:
                 "subject_id": {
                     "type": "string",
                     "description": (
-                        "Id of the subject to park (the board task id, playbook run id, "
-                        "or tool-call id). Must belong to your workspace."
+                        "What to park: a board task by its number as the board shows it "
+                        "(#0042), or the playbook run id or tool-call id. Must belong to your "
+                        "workspace."
                     ),
                 },
                 "question": {
