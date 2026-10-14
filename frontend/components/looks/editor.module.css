@@ -1,0 +1,236 @@
+/*
+ * PRD-260 §4 — the editor panel of Make it yours (Ember looks-01): the option
+ * groups, the glow slider and the actions, ported from Automatos Play's
+ * components/looks/editor.module.css. A column of Play's frame beside the
+ * main one, scrolling on its own (Play's sticky 100dvh panel, for a frame that
+ * has a header row). Desktop only (D7). Every variable is --pl-* (K2); a
+ * swatch's own colour arrives as --pl-look-swatch from swatch-style.ts.
+ */
+
+/* Room under Save and Reset for the floating Auto widget MainLayout keeps on every page but
+   the chat (a 48 px button 16 px from the corner), so it never covers Reset. */
+.editor {
+  --pl-look-widget-room: 56px;
+  width: var(--pl-look-editor-width);
+  flex: none;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-5);
+  padding: var(--pl-space-5) var(--pl-space-5) calc(var(--pl-space-5) + var(--pl-look-widget-room));
+  border-left: 1px solid var(--pl-line);
+  color: var(--pl-color-text);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}
+
+.label {
+  margin: 0;
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-2);
+}
+
+/* Shared by every option: a quiet edge, the accent edge when chosen. */
+.option,
+.typeOption,
+.chip {
+  min-height: var(--pl-tap-min);
+  display: flex;
+  align-items: center;
+  gap: var(--pl-space-2);
+  padding: 0 var(--pl-space-3);
+  border-radius: var(--pl-radius-button);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+  color: var(--pl-color-text);
+  font: var(--pl-text-meta);
+  cursor: pointer;
+}
+
+.option[aria-pressed="true"],
+.typeOption[aria-pressed="true"],
+.chip[aria-pressed="true"] {
+  border-color: var(--pl-color-accent);
+  box-shadow: 0 0 0 1px var(--pl-color-accent);
+}
+
+/* Accent: round swatches, the chosen one ringed in the text colour. */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pl-space-2);
+}
+
+.swatch {
+  width: var(--pl-tap-min);
+  height: var(--pl-tap-min);
+  padding: 0;
+  border-radius: var(--pl-radius-round);
+  border: 2px solid var(--pl-color-bg);
+  background: var(--pl-look-swatch);
+  cursor: pointer;
+}
+
+.swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--pl-color-text);
+}
+
+/* Background: two columns, each with a square of the ground. */
+.grounds {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--pl-space-2);
+}
+
+.option {
+  min-height: 48px;
+}
+
+.groundSwatch {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--pl-radius-paper);
+  border: 1px solid var(--pl-line-button);
+  background: var(--pl-look-swatch);
+}
+
+/* Type: each style set in its own face, at its card size. */
+.types {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-2);
+}
+
+.typeOption {
+  min-height: 46px;
+  justify-content: space-between;
+  padding: 0 var(--pl-space-4);
+}
+
+.typeSample {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--pl-look-option-family);
+  font-style: var(--pl-look-option-style);
+  font-weight: var(--pl-look-option-weight);
+  font-size: var(--pl-look-option-size);
+  letter-spacing: var(--pl-look-option-tracking);
+}
+
+.typeName {
+  flex: none;
+  font: var(--pl-text-meta);
+  color: var(--pl-color-text-2);
+}
+
+/* Auto's shell and light: four chips in a row, each with a dot of its colour. */
+.chips {
+  display: flex;
+  gap: var(--pl-space-2);
+}
+
+.chip {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+  padding: 0 var(--pl-space-2);
+}
+
+.dot,
+.lightDot {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: var(--pl-radius-round);
+  background: var(--pl-look-swatch);
+}
+
+.lightDot {
+  box-shadow: 0 0 8px var(--pl-look-swatch);
+}
+
+/* Glow: the label and its value above the slider. */
+.glowHead {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--pl-space-3);
+}
+
+.slider {
+  width: 100%;
+  min-height: var(--pl-tap-min);
+  margin: 0;
+  accent-color: var(--pl-color-accent);
+  cursor: pointer;
+}
+
+.errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+  padding: var(--pl-space-3);
+  border-radius: var(--pl-radius-tool);
+  border: 1px solid var(--pl-tint-error-line);
+  background: var(--pl-color-surface);
+  font: var(--pl-text-small);
+  color: var(--pl-color-text);
+}
+
+.errorTitle {
+  margin: 0;
+  font-weight: 600;
+  color: var(--pl-color-error-text);
+}
+
+.errorList {
+  margin: 0;
+  padding-left: var(--pl-space-4);
+}
+
+.actions {
+  margin-top: auto;
+  display: flex;
+  gap: var(--pl-space-2);
+}
+
+/* Save as new look is the screen's one primary; Reset is outlined. */
+.save,
+.reset {
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--pl-space-4);
+  border-radius: var(--pl-radius-button);
+  font: var(--pl-text-button-sm);
+  cursor: pointer;
+}
+
+.save {
+  flex: 1;
+  border: 0;
+  background: var(--pl-color-accent);
+  color: var(--pl-color-accent-ink);
+  box-shadow: var(--pl-shadow-primary);
+}
+
+.reset {
+  border: 1px solid var(--pl-line-button);
+  background: transparent;
+  color: var(--pl-color-text);
+}
+
+.reset:disabled {
+  color: var(--pl-color-text-2);
+  cursor: default;
+}

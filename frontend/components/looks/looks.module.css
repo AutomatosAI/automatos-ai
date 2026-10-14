@@ -1,0 +1,329 @@
+/*
+ * PRD-260 §4 — Make it yours (Ember looks-01): the heading, the live preview
+ * and the Looks row beside the editor, ported from Automatos Play's
+ * components/looks/looks.module.css. Inside Play's frame (a viewport-bound
+ * column, full bleed), so the main column scrolls and the editor scrolls on its
+ * own. Play's pages render only at >= 1024 px (D7), so Play's phone rules are
+ * not ported. Every variable is --pl-* (K2); a card's own colours arrive as
+ * --pl-look-* properties from swatch-style.ts.
+ */
+
+.screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-5);
+  padding: var(--pl-space-5) var(--pl-space-6);
+}
+
+.header {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--pl-space-4);
+}
+
+.headingText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-2);
+}
+
+.heading {
+  margin: 0;
+  font: var(--pl-text-hero);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
+}
+
+.lead {
+  margin: 0;
+  font: var(--pl-text-body);
+  color: var(--pl-color-text-2);
+}
+
+.headerSide {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--pl-space-1);
+}
+
+/* "Ember", or "Ember · edited". */
+.status {
+  margin: 0;
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-2);
+}
+
+/* "See the style sheet": a quiet link to the live style sheet (/looks/style). */
+.styleLink {
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  font: var(--pl-text-meta);
+  color: var(--pl-color-accent-text);
+}
+
+/* The live preview: Auto on the left, a slice of the chat on the right. */
+
+.preview {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pl-space-5);
+  padding: var(--pl-space-5);
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-tint-panel);
+}
+
+.previewAuto {
+  flex: none;
+  display: flex;
+  justify-content: center;
+}
+
+/* Beside Auto while there is room; under him in a narrow window. */
+.previewChat {
+  --pl-look-preview-chat-min: 280px;
+  flex: 1 1 var(--pl-look-preview-chat-min);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}
+
+.previewBubble {
+  align-self: flex-end;
+  max-width: var(--pl-bubble-max);
+  margin: 0;
+  padding: var(--pl-space-3) var(--pl-space-4);
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line-strong);
+  font: var(--pl-text-body);
+  color: var(--pl-color-text);
+}
+
+.previewChips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pl-space-2);
+}
+
+.previewChip {
+  padding: var(--pl-space-1) var(--pl-space-3);
+  border-radius: var(--pl-radius-tool);
+  background: var(--pl-tint-tool);
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-2);
+}
+
+.previewAnswer {
+  margin: 0;
+  font: var(--pl-text-body);
+  color: var(--pl-color-text);
+}
+
+/* Bold as a serif highlight in the accent, as in Auto's answers. */
+.previewHighlight {
+  font-family: var(--pl-font-display);
+  font-style: var(--pl-font-display-style);
+  font-weight: var(--pl-font-display-weight);
+  font-size: var(--pl-text-highlight-size);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-accent-text);
+}
+
+.previewCard,
+.previewBox {
+  display: flex;
+  align-items: center;
+  gap: var(--pl-space-3);
+  padding: var(--pl-space-3);
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+}
+
+.previewBox {
+  padding-left: var(--pl-space-4);
+}
+
+/* A printed sheet: two lines of text and an accent bar. */
+.previewTile {
+  width: 48px;
+  height: 60px;
+  flex: none;
+  border-radius: var(--pl-radius-paper);
+  background:
+    linear-gradient(var(--pl-color-sheet-text), var(--pl-color-sheet-text)) 7px 9px / 60% 4px no-repeat,
+    linear-gradient(var(--pl-tint-sheet-line), var(--pl-tint-sheet-line)) 7px 17px / 70% 2px no-repeat,
+    linear-gradient(var(--pl-color-accent), var(--pl-color-accent)) right 7px bottom 7px / 8px 18px no-repeat,
+    var(--pl-color-sheet);
+}
+
+.previewCardText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+}
+
+.previewCardTitle {
+  font: var(--pl-text-title);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
+}
+
+.previewCardMeta {
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-2);
+}
+
+.previewPlaceholder {
+  flex: 1;
+  min-width: 0;
+  font: var(--pl-text-body);
+  color: var(--pl-color-text-2);
+}
+
+/* Drawn like the accent button, but only a picture of one: the preview isn't a chat. */
+.previewButton {
+  flex: none;
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--pl-space-4);
+  border-radius: var(--pl-radius-button);
+  background: var(--pl-color-accent);
+  color: var(--pl-color-accent-ink);
+  font: var(--pl-text-button-sm);
+}
+
+/* The Looks row: presets then saved looks, scrolling sideways inside itself. */
+
+.looks {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}
+
+.sectionLabel {
+  margin: 0;
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-2);
+}
+
+.row {
+  list-style: none;
+  margin: 0;
+  padding: var(--pl-space-1);
+  display: flex;
+  gap: var(--pl-space-3);
+  overflow-x: auto;
+}
+
+.rowItem {
+  flex: none;
+}
+
+.card {
+  width: var(--pl-look-card-width);
+  min-height: var(--pl-tap-min);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border-radius: var(--pl-radius-card);
+  border: 1px solid var(--pl-line);
+  background: var(--pl-color-surface);
+  color: var(--pl-color-text);
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* The active look: a 2px accent edge (border plus a ring, so the card doesn't move). */
+.card[aria-pressed="true"] {
+  border-color: var(--pl-color-accent);
+  box-shadow: 0 0 0 1px var(--pl-color-accent);
+}
+
+/* The swatch, in the card's own look (custom properties from swatch-style.ts). */
+.cardTop {
+  height: var(--pl-look-card-top);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: var(--pl-space-2) var(--pl-space-3);
+  background: var(--pl-look-card-bg);
+}
+
+.cardType {
+  font-family: var(--pl-look-card-family);
+  font-style: var(--pl-look-card-style);
+  font-weight: var(--pl-look-card-weight);
+  font-size: 34px;
+  line-height: 1;
+  color: var(--pl-look-card-text);
+}
+
+.cardMarks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.cardLight {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--pl-radius-round);
+  border: 2px solid var(--pl-look-card-light);
+  box-shadow: 0 0 8px var(--pl-look-card-light);
+}
+
+.cardAccent {
+  width: 34px;
+  height: 12px;
+  border-radius: var(--pl-radius-icon);
+  background: var(--pl-look-card-accent);
+}
+
+.cardText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--pl-space-2) var(--pl-space-3) var(--pl-space-3);
+}
+
+.cardName {
+  font: var(--pl-text-button-sm);
+}
+
+.cardSub {
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-2);
+}
