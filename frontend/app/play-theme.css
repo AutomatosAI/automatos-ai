@@ -184,6 +184,9 @@ html.play {
   --pl-look-editor-width: 360px; /* the Looks page's editor panel (Ember looks-01) */
   --pl-look-card-width: 136px; /* a look's mini swatch card in the Looks row */
   --pl-look-card-top: 84px; /* its swatch: the look's ground, type, light and accent */
+  --pl-page-max: 1720px; /* a Studio page inside Play's frame: the Studio shell's own cap */
+  --pl-search-min-width: 240px; /* the frame's search button, as wide as Studio's */
+  --pl-control-height: 32px; /* the frame's header row controls, beside the core's 30px utilities */
 }
 
 /*

@@ -23,7 +23,7 @@ vi.mock('@/components/ui/sheet', () => ({
   SheetContent: () => null,
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => true, useIsMobile: () => true }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true }))
+vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => false }))
 
 import { MainLayout } from '../main-layout'
 

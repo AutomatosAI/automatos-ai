@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type 
 import { apiClient, type WorkspaceSocialsState } from '@/lib/api-client'
 import { feedItemHref } from '@/lib/ticket-links'
 import { SOCIAL_STATUS_LABELS } from '@/components/deliverables/socials/socials-status'
+import { GLOBAL_SEARCH_OPEN_EVENT } from '@/lib/global-search-event'
 
 const ACTIVITY_HREF = '/command-center?tab=activity'
 
@@ -180,10 +181,10 @@ function useSearchShortcut(setOpen: Dispatch<SetStateAction<boolean>>) {
     }
     const openHandler = () => setOpen(true)
     window.addEventListener('keydown', handler)
-    window.addEventListener('automatos:global-search-open', openHandler)
+    window.addEventListener(GLOBAL_SEARCH_OPEN_EVENT, openHandler)
     return () => {
       window.removeEventListener('keydown', handler)
-      window.removeEventListener('automatos:global-search-open', openHandler)
+      window.removeEventListener(GLOBAL_SEARCH_OPEN_EVENT, openHandler)
     }
   }, [setOpen])
 }
