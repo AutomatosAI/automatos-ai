@@ -91,6 +91,10 @@ describe("Play's New chat away from the chat (saas)", () => {
     fireEvent.click(newChat())
     expect(store.getState().session).toMatchObject({ activeChatId: null, draftOpen: true, openChatIds: ['abc'] })
     expect(nav.push).toHaveBeenCalledWith('/chat')
+    // SaaS keeps the tabs on the server. Waiting for that debounced save also keeps its timer
+    // from firing into the next test (the local edition's, which asserts nothing is sent).
+    await waitFor(() => expect(chatApi.putChatSession).toHaveBeenCalled(), { timeout: SAVE_WAIT_MS })
+    expect(sentTabLists()).toContainEqual(['abc'])
   })
 
   it('never saves an empty tab list to the server, even when pressed before hydration', async () => {

@@ -303,6 +303,9 @@ describe('Export and Import through lib/looks/transfer.ts', () => {
     const text = await blobText(stub.blobs[0] as Blob)
     expect(text).toBe(lookJson({ ...EMBER, ground: 'paper' }))
     expect(JSON.parse(text)).toEqual({ ...EMBER, ground: 'paper' })
+    // The Blob URL is let go DOWNLOAD_REVOKE_AFTER_MS later: wait for it while the stub is in place,
+    // or the timer fires after afterEach has removed jsdom's missing revokeObjectURL.
+    await waitFor(() => expect(stub.revoke).toHaveBeenCalledWith(BLOB_URL), { timeout: 2000 })
     expect(manage().getByText(exportStarted('Ember.look.json'))).toBeInTheDocument()
   })
 
