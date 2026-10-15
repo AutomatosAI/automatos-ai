@@ -8,83 +8,14 @@
 
 import { useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Check,
-  X,
-  Clock,
-  Loader2,
-  SkipForward,
-  ChevronRight,
-  GitBranch,
-  Repeat,
-  Split,
-} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StepDetail } from './StepDetail'
+import { WorkflowStepRow } from './workflow-step-row'
 import type { WorkflowStep } from '../types'
 
 interface WorkflowStepsProps {
   steps: WorkflowStep[]
   className?: string
-}
-
-/**
- * Get status icon component
- */
-function getStepIcon(status: WorkflowStep['status']) {
-  switch (status) {
-    case 'pending':
-      return Clock
-    case 'running':
-      return Loader2
-    case 'completed':
-      return Check
-    case 'failed':
-      return X
-    case 'skipped':
-      return SkipForward
-    default:
-      return Clock
-  }
-}
-
-/**
- * Get step type icon
- */
-function getTypeIcon(type: WorkflowStep['type']) {
-  switch (type) {
-    case 'condition':
-      return GitBranch
-    case 'loop':
-      return Repeat
-    case 'parallel':
-      return Split
-    default:
-      return null
-  }
-}
-
-/**
- * Format duration in ms to human-readable string
- */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  const mins = Math.floor(ms / 60000)
-  const secs = Math.floor((ms % 60000) / 1000)
-  if (mins < 60) return `${mins}m ${secs}s`
-  const hours = Math.floor(mins / 60)
-  const remainingMins = mins % 60
-  return `${hours}h ${remainingMins}m`
-}
-
-/**
- * Compute elapsed ms from startedAt to now (or completedAt)
- */
-function computeElapsed(startedAt: string, completedAt?: string): number {
-  const start = new Date(startedAt).getTime()
-  const end = completedAt ? new Date(completedAt).getTime() : Date.now()
-  return Math.max(0, end - start)
 }
 
 export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
@@ -100,98 +31,9 @@ export function WorkflowSteps({ steps, className }: WorkflowStepsProps) {
     <>
       <ScrollArea className={cn('flex-1', className)}>
         <div className="divide-y divide-border/30">
-          {steps.map((step, index) => {
-            const StatusIcon = getStepIcon(step.status)
-            const TypeIcon = getTypeIcon(step.type)
-            const isRunning = step.status === 'running'
-            const isCompleted = step.status === 'completed'
-            const isFailed = step.status === 'failed'
-            const isPending = step.status === 'pending'
-            const isSkipped = step.status === 'skipped'
-
-            return (
-              <button
-                key={step.id}
-                className={cn(
-                  'w-full text-left px-3 py-2.5 hover:bg-muted/50 transition-colors',
-                  'focus:outline-none focus:bg-muted/50',
-                  isRunning && 'bg-blue-50/50 dark:bg-blue-950/20'
-                )}
-                onClick={() => handleStepClick(step)}
-              >
-                <div className="flex items-start gap-3">
-                  {/* Step number and status icon */}
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-muted-foreground w-4">
-                      {index + 1}.
-                    </span>
-                    <StatusIcon
-                      className={cn(
-                        'h-4 w-4 flex-shrink-0',
-                        isPending && 'text-muted-foreground',
-                        isRunning && 'text-info animate-spin',
-                        isCompleted && 'text-success',
-                        isFailed && 'text-destructive',
-                        isSkipped && 'text-muted-foreground'
-                      )}
-                    />
-                  </div>
-
-                  {/* Step content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          'text-sm',
-                          isCompleted && 'text-muted-foreground',
-                          isFailed && 'text-destructive dark:text-destructive'
-                        )}
-                      >
-                        {step.name}
-                      </span>
-
-                      {/* Type icon */}
-                      {TypeIcon && (
-                        <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                      )}
-
-                      {/* Running indicator */}
-                      {isRunning && (
-                        <span className="text-xs text-blue-600 dark:text-info">
-                          ← Currently running
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Error preview */}
-                    {step.error && (
-                      <p className="text-xs text-destructive truncate mt-0.5">
-                        {step.error}
-                      </p>
-                    )}
-
-                    {/* Nested steps indicator */}
-                    {step.children && step.children.length > 0 && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {step.children.length} sub-step
-                        {step.children.length !== 1 ? 's' : ''}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Duration */}
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    {step.duration !== undefined ? (
-                      <span>{formatDuration(step.duration)}</span>
-                    ) : step.startedAt ? (
-                      <span>{formatDuration(computeElapsed(step.startedAt, step.completedAt))}</span>
-                    ) : null}
-                    <ChevronRight className="h-4 w-4" />
-                  </div>
-                </div>
-              </button>
-            )
-          })}
+          {steps.map((step, index) => (
+            <WorkflowStepRow key={step.id} step={step} index={index} onSelect={handleStepClick} />
+          ))}
         </div>
       </ScrollArea>
 

@@ -58,7 +58,7 @@ const STATUS_CONFIG: Record<WorkflowStatusType, StatusConfig> = {
     icon: Loader2,
     label: 'Running',
     variant: 'default',
-    className: 'bg-blue-100 text-info dark:bg-info/20 dark:text-info/80',
+    className: 'bg-blue-100 text-info dark:bg-info/20 dark:text-foreground',
     iconClassName: 'animate-spin',
   },
   paused: {
@@ -77,7 +77,7 @@ const STATUS_CONFIG: Record<WorkflowStatusType, StatusConfig> = {
     icon: X,
     label: 'Failed',
     variant: 'destructive',
-    className: 'bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive/80',
+    className: 'bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-foreground',
   },
   cancelled: {
     icon: AlertCircle,

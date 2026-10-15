@@ -10,6 +10,7 @@ import { copyToClipboard } from '@/lib/utils'
 import { CodeArtifact } from './code-artifact'
 import { TextArtifact } from './text-artifact'
 import { SheetArtifact } from './sheet-artifact'
+import { SheetClarifications } from './sheet-clarifications'
 import { DocumentArtifact } from './document-artifact'
 import { ArtifactMetadataPanel } from './artifact-metadata-panel'
 import type { Artifact } from '@/types'
@@ -117,6 +118,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
               metadata={artifact.metadata}
             />
           )}
+          {artifact.kind === 'sheet' && <SheetClarifications metadata={artifact.metadata} />}
           {artifact.kind === 'sheet' && (
             <SheetArtifact
               content={artifact.content}
