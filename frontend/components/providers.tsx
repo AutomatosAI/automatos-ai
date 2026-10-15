@@ -11,6 +11,7 @@ import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
 import { UiStyleProvider } from '../contexts/ui-style-context'
 import { LookProvider } from './looks/look-provider'
+import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import type { UiStyle } from '@/lib/ui-style'
 import type { PlayTone } from '@/lib/looks/tone'
 import { Toaster } from './ui/sonner'
@@ -88,6 +89,9 @@ export function Providers({ children, initialUiStyle, initialPlayTone }: Provide
   // they leave Play; it starts from the server's tone cookie, so next-themes' script
   // forces it before paint.
   const [playTone, setPlayTone] = useState<PlayTone | undefined>(initialPlayTone)
+  // PRD-260 D7, M85: Play is desktop-only, so the look forces its tone only from 1024 px up;
+  // below, the user's own tone applies and the theme menu's Tone items change it.
+  const narrow = useIsTabletOrBelow()
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -107,7 +111,7 @@ export function Providers({ children, initialUiStyle, initialPlayTone }: Provide
           themes={['light', 'dark']}
           storageKey="automatos-theme"
           disableTransitionOnChange
-          forcedTheme={playTone}
+          forcedTheme={narrow ? undefined : playTone}
         >
           <UiStyleProvider initialStyle={initialUiStyle}>
           <LookProvider onToneChange={setPlayTone}>

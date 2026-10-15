@@ -3,13 +3,13 @@
 /**
  * PRD-244 D1 — the Style axis (Classic | Studio | Play) as React context.
  *
- * The server reads the style cookie and renders <html class="studio"> (or
- * "studio play", PRD-260) plus `initialStyle`, so the first paint is already
- * the right design system. Switching writes the cookie (for the next request),
+ * The server reads the style cookie and puts <html class="studio"> (or
+ * "studio play", PRD-260) on before first paint with STYLE_CLASS_SCRIPT, plus
+ * `initialStyle`, so the first paint is already the right design system. Switching writes the cookie (for the next request),
  * the html classes (for this document) and localStorage (a mirror), and never
  * touches the tone.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTheme } from 'next-themes'
 import {
   APPEARANCE_DEFAULTS_KEY,
@@ -79,7 +79,14 @@ export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, children }: U
   // everyone, once — a browser that has not seen this defaults version is moved
   // to them on its next load and then picks freely. This also retires the
   // pre-W3 "studio" tone value, since the tone is rewritten here.
+  // PRD-260 M87: once per mount, not once per setTheme. next-themes 0.2.1 hands out a new
+  // setTheme whenever forcedTheme changes (Play's look forcing its tone), and a browser whose
+  // storage can't be read never records the defaults version, so a re-run moved it straight
+  // back to Studio the moment it chose Play.
+  const defaultsChecked = useRef(false)
   useEffect(() => {
+    if (defaultsChecked.current) return
+    defaultsChecked.current = true
     if (readAppliedDefaultsVersion() === APPEARANCE_DEFAULTS_VERSION) return
     setStyle(DEFAULT_UI_STYLE)
     setTheme(DEFAULT_TONE)

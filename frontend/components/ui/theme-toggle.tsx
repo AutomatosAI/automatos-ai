@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useUiStyle } from '@/contexts/ui-style-context'
+import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { isUiStyle } from '@/lib/ui-style'
 
 /** PRD-260 K9: Play's look editor ("Make it yours"). */
@@ -23,6 +24,23 @@ const LOOK_EDITOR_HREF = '/looks'
 
 /** PRD-260 K4: under Play the look's ground sets the tone, so the Tone items rest. */
 const TONE_SET_BY_LOOK = 'Set by your look'
+
+/** A resting Tone item reads as unavailable; it keeps its focus highlight. */
+const TONE_ITEM_CLASS = 'aria-disabled:opacity-50'
+
+/** Radix closes the menu after a select unless the item's select event is prevented. */
+function keepMenuOpen(event: Event): void {
+  event.preventDefault()
+}
+
+/**
+ * PRD-260 K4, M85: a resting Tone item stays focusable and announced, described by
+ * the 'Set by your look' note: aria-disabled rather than `disabled`, which would take
+ * it out of the keyboard's reach. Choosing it changes nothing and keeps the menu open.
+ */
+function restingToneItem(noteId: string) {
+  return { 'aria-disabled': true, 'aria-describedby': noteId, onSelect: keepMenuOpen } as const
+}
 
 /**
  * PRD-260 K9: the look editor, offered only while Play is the style — the
@@ -44,12 +62,19 @@ function CustomiseLookItem() {
  * (Light | Dark | System). Picking on one axis never changes the other.
  */
 export function ThemeToggle() {
-  const { setTheme, theme: storedTone, forcedTheme } = useTheme()
+  const { setTheme: setStoredTone, theme: storedTone, forcedTheme } = useTheme()
   // The tone in effect: under Play the look forces one and keeps the stored one for later.
   const theme = forcedTheme ?? storedTone
   const { style, setStyle, isPlay } = useUiStyle()
+  // PRD-260 D7: Play (its look's tone, its /looks editor) is desktop-only; below 1024 px the
+  // look forces no tone, so the Tone items work as under Studio.
+  const narrow = useIsTabletOrBelow()
+  const toneLocked = isPlay && !narrow
   const [mounted, setMounted] = useState(false)
   const toneNoteId = useId()
+  // Under the lock the Tone group has no handler at all, so no pick reaches the stored tone.
+  const setTheme = toneLocked ? undefined : setStoredTone
+  const toneItemLock = toneLocked ? restingToneItem(toneNoteId) : {}
 
   useEffect(() => {
     setMounted(true)
@@ -88,20 +113,20 @@ export function ThemeToggle() {
             Play
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
-        {isPlay && <CustomiseLookItem />}
+        {toneLocked && <CustomiseLookItem />}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Tone</DropdownMenuLabel>
-        {isPlay && <p id={toneNoteId} className="px-2 pb-1.5 text-xs text-muted-foreground">{TONE_SET_BY_LOOK}</p>}
-        <DropdownMenuRadioGroup value={theme ?? 'system'} onValueChange={setTheme} aria-describedby={isPlay ? toneNoteId : undefined}>
-          <DropdownMenuRadioItem value="light" disabled={isPlay}>
+        {toneLocked && <p id={toneNoteId} className="px-2 pb-1.5 text-xs text-muted-foreground">{TONE_SET_BY_LOOK}</p>}
+        <DropdownMenuRadioGroup value={theme ?? 'system'} onValueChange={setTheme}>
+          <DropdownMenuRadioItem value="light" className={TONE_ITEM_CLASS} {...toneItemLock}>
             <Sun className="mr-2 h-4 w-4" />
             Light
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="dark" disabled={isPlay}>
+          <DropdownMenuRadioItem value="dark" className={TONE_ITEM_CLASS} {...toneItemLock}>
             <Moon className="mr-2 h-4 w-4" />
             Dark
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="system" disabled={isPlay}>
+          <DropdownMenuRadioItem value="system" className={TONE_ITEM_CLASS} {...toneItemLock}>
             <Monitor className="mr-2 h-4 w-4" />
             System
           </DropdownMenuRadioItem>
