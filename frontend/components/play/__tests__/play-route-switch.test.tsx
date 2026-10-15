@@ -4,6 +4,9 @@
  * existing page under Classic and Studio, below 1024 px, on another path, and
  * for a link into a surface only the core chat has (the Code canvas, a
  * session's runtime, plan mode). The DiscussionBar stays either way.
+ *
+ * P260-FX-23 (M17): the layout hands the switch Play's chat through its lazy
+ * slot, so the chat arrives a moment after the first render (findBy*).
  */
 import React from 'react'
 import { render, screen } from '@testing-library/react'
@@ -86,9 +89,9 @@ describe('app/chat/layout.tsx', () => {
     )
   }
 
-  it("renders Play's chat instead of the chat page under Play at desktop width, with the DiscussionBar", () => {
+  it("renders Play's chat instead of the chat page under Play at desktop width, with the DiscussionBar", async () => {
     renderLayout()
-    expect(screen.getByTestId('play-chat')).toBeInTheDocument()
+    expect(await screen.findByTestId('play-chat')).toBeInTheDocument()
     expect(screen.queryByTestId('page')).toBeNull()
     expect(screen.getByTestId('discussion-bar')).toBeInTheDocument()
   })

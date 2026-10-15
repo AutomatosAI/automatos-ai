@@ -209,9 +209,10 @@ afterEach(() => {
 })
 
 describe('the 404 (app/not-found.tsx)', () => {
-  it("under Play at >= 1024 px: Auto lost, 'This page wandered off' and the way back to /chat", () => {
+  it("under Play at >= 1024 px: Auto lost, 'This page wandered off' and the way back to /chat", async () => {
     render(<NotFound />)
-    expect(screen.getByRole('heading', { level: 1, name: LOST_TITLE })).toBeInTheDocument()
+    // Play's lost screen loads through its lazy slot (P260-FX-23, M17).
+    expect(await screen.findByRole('heading', { level: 1, name: LOST_TITLE })).toBeInTheDocument()
     expect(LOST_TITLE).toBe('This page wandered off')
     expect(screen.getByText(LOST_LINE)).toBeInTheDocument()
     expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'lost')

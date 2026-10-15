@@ -16,6 +16,10 @@
  * (d) M01, M16: Play's own type, inline code and sheet colours win over
  *     Studio's element rules, which reach Play's elements because <html>
  *     carries studio and play together. Proven statically (css: false).
+ * (e) M17: the core's seams (the chrome, every layout, the 404) load none of
+ *     Play's screens with them: the static import graph from a seam reaches
+ *     components/play only at the switches and the lazy slots, whose screen
+ *     comes through import() when it renders.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -447,5 +451,141 @@ describe("PRD-260 (d) — Play's own type, inline code and sheet colours win ove
   it("draws the keyboard ring on the Deliverable sheet in the sheet's accent (M16)", () => {
     const sheet = rulesOf(path.join(FRONTEND, SHEET_CSS)).find(({ selector }) => selector === '.document')
     expect(sheet?.body).toMatch(SHEET_FOCUS)
+  })
+})
+
+// --- (e) the core's seams load Play's screens on demand (M17) -----------------------------
+
+/** The chrome every page renders: MainLayout, the headers, the sidebars. */
+const CHROME_DIR = 'components/layout'
+/** The files every page of a route loads with it: its layouts and its 404. */
+const APP_SEAM = /^(layout|not-found)\.tsx$/
+const PLAY_DIR = 'components/play/'
+/** A slot: a 'use client' module that fetches one Play screen with import() when it renders. */
+const LAZY_SLOT = /-lazy\.tsx$/
+/** The switches that pick Play's screen or the core's: they hold no Play design of their own. */
+const PLAY_SWITCHES = new Set(['components/play/play-route-switch.tsx', 'components/play/edges/not-found-view.tsx'])
+/** Each seam and the slot its Play screen comes through. */
+const SEAM_SLOTS: ReadonlyArray<readonly [string, string]> = [
+  ['components/layout/main-layout.tsx', 'components/play/shell/play-frame-lazy.tsx'],
+  ['app/chat/layout.tsx', 'components/play/chat/play-chat-lazy.tsx'],
+  ['app/deliverables/layout.tsx', 'components/play/deliverables/play-shelf-lazy.tsx'],
+  ['app/not-found.tsx', 'components/play/edges/lost-screen-lazy.tsx'],
+]
+const MODULE_SUFFIXES = ['', '.tsx', '.ts', '/index.tsx', '/index.ts']
+
+type LoadKind = 'static' | 'dynamic'
+
+/** How a node loads a module: a declaration or require() loads it with the file, import() on demand; type-only never. */
+function loadKindOf(node: ts.Node): LoadKind | null {
+  if (ts.isImportDeclaration(node)) return node.importClause?.isTypeOnly ? null : 'static'
+  if (ts.isExportDeclaration(node)) return node.isTypeOnly ? null : 'static'
+  if (ts.isImportEqualsDeclaration(node)) return node.isTypeOnly ? null : 'static'
+  if (!ts.isCallExpression(node)) return null
+  if (node.expression.kind === ts.SyntaxKind.ImportKeyword) return 'dynamic'
+  return ts.isIdentifier(node.expression) && node.expression.text === 'require' ? 'static' : null
+}
+
+/** The module specifiers the source loads in that way. */
+function loadsOf(fileName: string, source: string, kind: LoadKind): string[] {
+  const scriptKind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, scriptKind)
+  const found: string[] = []
+  const visit = (node: ts.Node): void => {
+    const specifier = loadKindOf(node) === kind ? specifierOf(node) : null
+    if (specifier !== null) found.push(specifier)
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return found
+}
+
+/** The frontend file a local specifier names, relative to the frontend; null for a package. */
+function localModule(fromFile: string, specifier: string): string | null {
+  if (!specifier.startsWith('@/') && !specifier.startsWith('.')) return null
+  const base = resolveSpecifier(fromFile, specifier)
+  const hit = MODULE_SUFFIXES.map((suffix) => base + suffix).find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile())
+  return hit === undefined ? null : relative(hit)
+}
+
+/** The local modules a frontend file loads in that way (a stylesheet loads none). */
+function localLoads(rel: string, kind: LoadKind): string[] {
+  if (!SOURCE_FILE.test(rel)) return []
+  const full = path.join(FRONTEND, rel)
+  return loadsOf(full, fs.readFileSync(full, 'utf8'), kind).flatMap((specifier) => localModule(full, specifier) ?? [])
+}
+
+/** Every local module a seam loads with it, however deep, through Play's modules and the core's alike. */
+function staticGraph(seam: string): string[] {
+  const reached = new Set<string>([seam])
+  const queue = [seam]
+  for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
+    for (const dependency of localLoads(next, 'static')) {
+      if (reached.has(dependency)) continue
+      reached.add(dependency)
+      queue.push(dependency)
+    }
+  }
+  return Array.from(reached)
+}
+
+function seamFiles(): string[] {
+  const chrome = walk(path.join(FRONTEND, CHROME_DIR), (name) => SOURCE_FILE.test(name))
+  const app = walk(path.join(FRONTEND, 'app'), (name) => APP_SEAM.test(name))
+  return [...chrome, ...app].map(relative).filter((rel) => !TEST_FILE.test(rel))
+}
+
+function isSlot(rel: string): boolean {
+  return LAZY_SLOT.test(rel) || PLAY_SWITCHES.has(rel)
+}
+
+describe("PRD-260 (e) — the core's seams load Play's screens only when Play renders them (M17)", () => {
+  it('reads how a module loads another: declarations and require() with it, import() on demand, types never', () => {
+    const source = [
+      "import { PlayFrame } from '@/components/play/shell/play-frame'",
+      "export { PlayChat } from './play-chat'",
+      "import './frame.module.css'",
+      "const legacy = require('../edges/lost-screen')",
+      "import type { PlayFrameProps } from '@/components/play/shell/play-frame'",
+      "export type { Look } from '@/lib/looks/types'",
+      "type Shelf = import('@/components/play/deliverables/play-shelf').PlayShelfProps",
+      "const Lazy = dynamic(() => import('./play-shelf').then((m) => m.PlayShelf))",
+      "// import { LostScreen } from '@/components/play/edges/lost-screen'",
+      "const note = 'components/play/chat/play-chat'",
+    ].join('\n')
+    expect(loadsOf('sample.tsx', source, 'static')).toEqual([
+      '@/components/play/shell/play-frame',
+      './play-chat',
+      './frame.module.css',
+      '../edges/lost-screen',
+    ])
+    expect(loadsOf('sample.tsx', source, 'dynamic')).toEqual(['./play-shelf'])
+  })
+
+  it("finds the seams, and walks a seam's graph through the core's modules", () => {
+    const seams = seamFiles()
+    expect(seams).toEqual(expect.arrayContaining(['app/layout.tsx', ...SEAM_SLOTS.map(([seam]) => seam)]))
+    expect(seams.some((rel) => rel.includes('__tests__'))).toBe(false)
+    const graph = staticGraph('app/chat/layout.tsx')
+    expect(graph).toContain('components/play/play-route-switch.tsx')
+    expect(graph).toContain('components/chatbot/discussion-bar.tsx')
+    expect(staticGraph('components/layout/main-layout.tsx')).toContain('components/layout/studio-header.tsx')
+  })
+
+  it('reaches components/play from a seam only at the switches and the lazy slots, however deep', () => {
+    const loaded = seamFiles().flatMap((seam) =>
+      staticGraph(seam)
+        .filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel))
+        .map((rel) => `${seam} loads ${rel}`),
+    )
+    expect(loaded).toEqual([])
+  }, SCAN_TIMEOUT_MS)
+
+  it('mounts each Play screen through its slot, which fetches it with import() and loads nothing of Play with it', () => {
+    for (const [seam, slot] of SEAM_SLOTS) {
+      expect(staticGraph(seam), seam).toContain(slot)
+      expect(localLoads(slot, 'static').filter((rel) => rel.startsWith(PLAY_DIR)), slot).toEqual([])
+      expect(localLoads(slot, 'dynamic').filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel)), slot).toHaveLength(1)
+    }
   })
 })

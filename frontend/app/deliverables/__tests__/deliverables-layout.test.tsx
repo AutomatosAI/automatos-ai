@@ -6,6 +6,9 @@
  * post, a type drill-down). DeliverableDeepLink is mounted beside the page
  * only: under Play the shelf switch opens a Deliverable as Play's own page
  * (T-007b, K8), so its sheet never opens over it.
+ *
+ * P260-FX-23 (M17): the layout hands the switch Play's shelf through its lazy
+ * slot, so the shelf arrives a moment after the first render (findBy*).
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -34,9 +37,9 @@ function renderLayout() {
   )
 }
 
-function showsShelf(yes: boolean) {
+async function showsShelf(yes: boolean) {
   if (yes) {
-    expect(screen.getByTestId('play-shelf')).toBeInTheDocument()
+    expect(await screen.findByTestId('play-shelf')).toBeInTheDocument()
     expect(screen.queryByTestId('page')).toBeNull()
     expect(screen.queryByTestId('deep-link')).toBeNull()
   } else {
@@ -52,41 +55,41 @@ afterEach(() => {
 })
 
 describe('app/deliverables/layout.tsx', () => {
-  it("renders Play's shelf instead of the page under Play at desktop width, without the deep link's sheet", () => {
+  it("renders Play's shelf instead of the page under Play at desktop width, without the deep link's sheet", async () => {
     renderLayout()
-    showsShelf(true)
+    await showsShelf(true)
   })
 
-  it("keeps Play's screen for a link that opens one Deliverable, and the deep link stays closed (K8)", () => {
+  it("keeps Play's screen for a link that opens one Deliverable, and the deep link stays closed (K8)", async () => {
     state.search = 'deliverable=d-laptop'
     renderLayout()
-    showsShelf(true)
+    await showsShelf(true)
   })
 
-  it('renders the existing page under Classic or Studio', () => {
+  it('renders the existing page under Classic or Studio', async () => {
     state.play = false
     renderLayout()
-    showsShelf(false)
+    await showsShelf(false)
   })
 
-  it('renders the existing page below 1024 px (D7)', () => {
+  it('renders the existing page below 1024 px (D7)', async () => {
     state.narrow = true
     renderLayout()
-    showsShelf(false)
+    await showsShelf(false)
   })
 
-  it("keeps Studio's explorer inside Play's frame", () => {
+  it("keeps Studio's explorer inside Play's frame", async () => {
     state.pathname = '/deliverables/explorer'
     renderLayout()
-    showsShelf(false)
+    await showsShelf(false)
   })
 
   it.each(['tab=brand', 'tab=socials&post=p1', 'artifact_type=code'])(
     "keeps the core's page for ?%s under Play (D8)",
-    (search) => {
+    async (search) => {
       state.search = search
       renderLayout()
-      showsShelf(false)
+      await showsShelf(false)
     },
   )
 })

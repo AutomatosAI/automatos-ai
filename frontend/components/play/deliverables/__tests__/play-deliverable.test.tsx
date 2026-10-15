@@ -368,11 +368,12 @@ describe('DeliverableDeepLink under Play (app/deliverables/layout.tsx)', () => {
     )
   }
 
-  it("stays closed under Play at desktop width: Play's page is the one detail", () => {
+  it("stays closed under Play at desktop width: Play's page is the one detail", async () => {
     nav.search = 'deliverable=d-laptop'
     found()
     renderLayout()
-    expect(screen.getByRole('heading', { level: 1, name: 'Laptop shortlist' })).toBeInTheDocument()
+    // Play's shelf loads through its lazy slot (P260-FX-23, M17).
+    expect(await screen.findByRole('heading', { level: 1, name: 'Laptop shortlist' })).toBeInTheDocument()
     expect(screen.queryByTestId('deep-link')).toBeNull()
     expect(screen.queryByRole('dialog')).toBeNull()
   })

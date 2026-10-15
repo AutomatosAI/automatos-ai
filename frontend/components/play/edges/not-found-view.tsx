@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 
-import { LostScreen } from '@/components/play/edges/lost-screen'
+import { LostScreen } from '@/components/play/edges/lost-screen-lazy'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsPlay } from '@/hooks/use-studio-theme'
 
@@ -12,7 +12,9 @@ import { useIsPlay } from '@/hooks/use-studio-theme'
  * Classic, Studio, or below 1024 px, a plain page with the words of Next's own
  * 404 and a link home, so those users see no new design. A client component:
  * the width is known only in the browser, as for every Play page. app/not-found.tsx
- * renders it and sets the page's title (P260-FX-21, M68).
+ * renders it and sets the page's title (P260-FX-21, M68). Every route carries
+ * the 404, so Play's lost screen comes through its lazy slot: Classic and
+ * Studio never download it (P260-FX-23, M17).
  */
 export function NotFoundView() {
   const isPlay = useIsPlay()
