@@ -3,7 +3,7 @@ import composer from '@/components/play/chat/composer.module.css'
 import { JUST_NOW, OPEN } from '@/components/play/chat/deliverable-card'
 import { KIND_WORDS } from '@/components/play/chat/deliverables'
 import { MARK_DONE, MARK_FAILED } from '@/components/play/chat/labels'
-import { RECEIPTS_TITLE } from '@/components/play/chat/receipts'
+import { BADGE_DONE, RECEIPTS_TITLE } from '@/components/play/chat/receipts'
 import turn from '@/components/play/chat/turn.module.css'
 
 import gallery from './gallery.module.css'
@@ -14,9 +14,9 @@ import styles from './style.module.css'
  * Play's components/looks/style/StyleComponents.tsx and drawn with Play's own
  * chat styles (components/play/chat/*.module.css), so it shows exactly what
  * the active look produces: your message and Auto's answer, tool lines
- * (running, done, failed), "What Auto did", a Deliverable card, filter chips
- * (on, off, focus) and the message box with Send and Stop. It is a picture:
- * nothing here is a real button or link.
+ * (running, done, failed), "What Auto did" (a write tagged Done), a
+ * Deliverable card, filter chips (on, off, focus) and the message box with
+ * Send and Stop. It is a picture: nothing here is a real button or link.
  */
 
 export const COMPONENTS_LABEL = 'Components'
@@ -85,6 +85,7 @@ function ReceiptsBox() {
               {MARK_DONE}
             </span>
             <span>Made a report: {SAMPLE_TITLE}</span>
+            <span className={turn.badge}>{BADGE_DONE}</span>
           </li>
         </ul>
       </div>

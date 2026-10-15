@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest'
 import type { BoardTask } from '@/types/board'
 import type { ChatMessage } from '@/types'
-import { discussHref, discussionLabel, discussionOf, discussionSelection, proposedBrief } from '@/lib/discussion'
+import { discussHref, discussionHint, discussionLabel, discussionOf, discussionSelection, proposedBrief } from '@/lib/discussion'
 
 function ticket(over: Partial<BoardTask> = {}): BoardTask {
   return { id: '612', type: 'task', name: 'Welcome email', status: 'review', priority: 'medium', tags: [],
@@ -30,6 +30,21 @@ describe('a discussion', () => {
   it("on a mission's ticket, discusses the mission (D4)", () => {
     const discussion = discussionOf(ticket({ type: 'mission', mission_id: 'run-9' }))
     expect(discussionSelection(discussion)).toEqual({ type: 'mission', id: 'run-9' })
+  })
+})
+
+describe("the bar's hint (PRD-260 M67)", () => {
+  it("names the ticket's agent: in Studio's chat through the message box, in Play's chat through Studio", () => {
+    const discussion = discussionOf(ticket())
+    expect(discussionHint(discussion, false)).toBe('You are talking to Auto. To ask Words instead, pick them in the message box.')
+    expect(discussionHint(discussion, true)).toBe(
+      "You are talking to Auto in Play's chat. To ask Words, switch to Studio from the theme menu.",
+    )
+  })
+
+  it("is null on a mission's ticket and on a ticket with no agent", () => {
+    expect(discussionHint(discussionOf(ticket({ type: 'mission', mission_id: 'run-9' })), true)).toBeNull()
+    expect(discussionHint(discussionOf(ticket({ assignee: undefined })), false)).toBeNull()
   })
 })
 

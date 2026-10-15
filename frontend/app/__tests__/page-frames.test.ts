@@ -23,6 +23,7 @@ const COMPONENTS = path.resolve(__dirname, '..', '..', 'components')
 const NO_HEADER: Record<string, string> = {
   '/': 'redirects to the workspace entry point',
   '/chat': 'a conversation surface, not a document page',
+  '/conversations': "Play's Conversations: its title row heads the list's own column, as in the Play app (P260-FX-14, M35); Classic and Studio redirect to /chat",
   '/missions': 'redirects to the Assignments Missions tab',
   '/playbooks': 'redirects to the Assignments Playbooks tab',
   '/marketplace/widgets/[id]': 'item detail — the record’s own name is the title',

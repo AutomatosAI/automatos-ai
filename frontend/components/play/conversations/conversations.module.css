@@ -1,6 +1,6 @@
 /*
- * PRD-260 §4 — Conversations (Ember mock 03): the search box and the grouped
- * list under the page header, ported from Automatos Play's
+ * PRD-260 §4 — Conversations (Ember mock 03): the title row, the search box and
+ * the grouped list in one centred column, ported from Automatos Play's
  * components/conversations/conversations.module.css. Play's pages render only
  * at >= 1024 px (D7), so Play's phone rules are not ported. Every variable is
  * --pl-* (K2).
@@ -18,6 +18,24 @@
   flex-direction: column;
   gap: var(--pl-space-4);
   padding-top: var(--pl-space-5);
+}
+
+/* The title row heads the list's own column, over the search box (mock 03), as in the Play
+   app: not a page header across the whole main column (P260-FX-14, M35). */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pl-space-4);
+}
+
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .title {
+  margin: 0;
+  min-width: 0;
+  font: var(--pl-text-status);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
 }
 
 /* New chat is the secondary (cream) button; Try again is the failed state's one primary. */

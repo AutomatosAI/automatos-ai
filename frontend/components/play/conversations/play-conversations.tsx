@@ -4,7 +4,7 @@ import { type ChangeEvent, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { MascotColumn, PageColumns, PageHeader } from '@/components/play/shell/page-columns'
+import { MascotColumn, PageColumns } from '@/components/play/shell/page-columns'
 import { type ConversationListState, useConversationList } from '@/hooks/use-conversation-list'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useStartChat } from '@/hooks/use-start-chat'
@@ -20,8 +20,10 @@ import styles from './conversations.module.css'
  * Play's components/conversations/ConversationsScreen.tsx onto the core's
  * history (useConversationList: getChatHistory): every conversation grouped
  * into Today, This week and Earlier, a search on the title, and New chat. A row
- * opens the conversation in the chat (/chat?chatId=<id>). Auto idles in the
- * mascot column, in the same spot as in the chat so nothing jumps.
+ * opens the conversation in the chat (/chat?chatId=<id>). The title and New
+ * chat head the list's own column, over the search box, as in the Play app
+ * (P260-FX-14). Auto idles in the mascot column, in the same spot as in the
+ * chat so nothing jumps.
  *
  * app/conversations/page.tsx sends Classic and Studio to /chat on the server
  * (K10); PlayConversations does the same in the browser when the style leaves
@@ -58,11 +60,6 @@ export function ConversationsScreen({ now }: PlayConversationsProps) {
   const { startChat, ready } = useStartChat()
   const [query, setQuery] = useState('')
   const onSearch = (event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)
-  const newChat = (
-    <button type="button" className={styles.newChat} onClick={startChat} disabled={!ready}>
-      {NEW_CHAT}
-    </button>
-  )
   return (
     <PageColumns
       mascot={
@@ -71,9 +68,14 @@ export function ConversationsScreen({ now }: PlayConversationsProps) {
         </MascotColumn>
       }
     >
-      <PageHeader title={CONVERSATIONS_TITLE} action={newChat} />
       <div className={styles.body}>
         <div className={styles.page}>
+          <div className={styles.header}>
+            <h1 className={styles.title}>{CONVERSATIONS_TITLE}</h1>
+            <button type="button" className={styles.newChat} onClick={startChat} disabled={!ready}>
+              {NEW_CHAT}
+            </button>
+          </div>
           <input
             type="search"
             className={styles.search}

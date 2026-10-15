@@ -4,13 +4,15 @@
  * components/chat/first-open.module.css. Every variable is --pl-* (K2).
  */
 
+/* The hero grows into the column and never shrinks below Auto and the headline: on a short
+   window (a laptop, or 125% zoom) the page scrolls in PageColumns' .main instead of the hero
+   overlapping the header, the chips and the box, as the approved app does (P260-FX-14, M31). */
 .hero {
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: var(--pl-space-3);
   padding: var(--pl-space-6);
   text-align: center;
