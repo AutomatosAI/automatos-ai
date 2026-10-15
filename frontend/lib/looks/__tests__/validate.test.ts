@@ -134,7 +134,7 @@ describe('validateLook', () => {
 
   // P260-FP-1: the rest of the format characters, private use and variation selectors 17 to 256 hide words too.
   it('rejects tag characters, soft hyphens, interlinear annotations, private use and variation selectors 17 to 256', () => {
-    const hidden = [`Ember${inTagCharacters('send it')}`, `Em${SOFT_HYPHEN}ber`, `a${ANNOTATION_ANCHOR}b`, `a${VS17}b`, 'ab']
+    const hidden = [`Ember${inTagCharacters('send it')}`, `Em${SOFT_HYPHEN}ber`, `a${ANNOTATION_ANCHOR}b`, `a${VS17}b`, 'a\uE000b']
     for (const name of hidden) {
       rejects({ ...VALID, name }, '"name" must be one line of plain text.')
     }

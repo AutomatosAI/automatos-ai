@@ -11,7 +11,7 @@
  * a model reads them: a link could carry words the owner never sees). It also
  * drops the tags of a subdivision flag, which then shows as a plain black flag.
  */
-const FORMAT_BUT_JOINERS = String.raw`(?![‌‍])\p{Cf}`
+const FORMAT_BUT_JOINERS = String.raw`(?![\u200C\u200D])\p{Cf}`
 /**
  * C0 and C1 controls, line and paragraph separators, private use and
  * unassigned code points, and variation selectors 17 to 256 (U+E0100 to

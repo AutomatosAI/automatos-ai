@@ -18,13 +18,13 @@ export function inTagCharacters(words: string): string {
 }
 
 /** A family: man, woman and girl joined by two ZWJs. */
-export const FAMILY_EMOJI = '\u{1F468}‍\u{1F469}‍\u{1F467}'
+export const FAMILY_EMOJI = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'
 /** A red heart: U+2764 and VARIATION SELECTOR-16 (emoji presentation). */
-export const RED_HEART = '❤️'
+export const RED_HEART = '\u2764\uFE0F'
 /** SOFT HYPHEN: invisible unless a line breaks at it. */
-export const SOFT_HYPHEN = '­'
+export const SOFT_HYPHEN = '\u00AD'
 /** INTERLINEAR ANNOTATION ANCHOR. */
-export const ANNOTATION_ANCHOR = '￹'
+export const ANNOTATION_ANCHOR = '\uFFF9'
 /** VARIATION SELECTOR-17, the first of the 240 that can carry hidden data. */
 export const VS17 = '\u{E0100}'
 /** VARIATION SELECTOR-256, the last of them. */
