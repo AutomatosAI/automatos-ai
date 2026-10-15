@@ -360,6 +360,90 @@ async def get_item(
         raise HTTPException(status_code=500, detail="Failed to list credentials")
 
 
+# Static GET routes must be registered before "/{credential_id}", otherwise
+# Starlette matches "health" / "stats" as a credential id and returns 422.
+
+@router.get("/health")
+async def credentials_health(ctx: RequestContext = Depends(get_request_context_hybrid)):
+    """Health check for credentials service"""
+    from core.credentials.encryption import get_encryption_service
+
+    try:
+        get_encryption_service()
+
+        return {
+            "status": "healthy",
+            "service": "credentials",
+            "encryption": {
+                "status": "active",
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception:
+        logger.exception("Credentials health check failed")
+        return {
+            "status": "unhealthy",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
+@router.get("/stats")
+async def get_credential_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get credential system statistics"""
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        from sqlalchemy import func
+        
+        total_types = db.query(func.count(CredentialType.id)).scalar()
+        active_types = db.query(func.count(CredentialType.id)).filter(
+            CredentialType.is_active == True
+        ).scalar()
+        
+        total_creds = db.query(func.count(Credential.id)).filter(
+            Credential.workspace_id == ctx.workspace_id
+        ).scalar()
+        active_creds = db.query(func.count(Credential.id)).filter(
+            Credential.is_active == True,
+            Credential.workspace_id == ctx.workspace_id
+        ).scalar()
+
+        by_env = db.query(
+            Credential.environment,
+            func.count(Credential.id)
+        ).filter(
+            Credential.workspace_id == ctx.workspace_id
+        ).group_by(Credential.environment).all()
+
+        by_type = db.query(
+            CredentialType.display_name,
+            func.count(Credential.id)
+        ).join(Credential).filter(
+            Credential.workspace_id == ctx.workspace_id
+        ).group_by(CredentialType.display_name).all()
+        
+        return {
+            "credential_types": {
+                "total": total_types,
+                "active": active_types
+            },
+            "credentials": {
+                "total": total_creds,
+                "active": active_creds,
+                "by_environment": {env: count for env, count in by_env},
+                "by_type": {type_name: count for type_name, count in by_type}
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.exception("Failed to get credential stats")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+
+
 @router.get("/{credential_id}", response_model=CredentialResponse)
 async def get_credential(
     credential_id: int,
@@ -717,31 +801,6 @@ async def get_audit_logs(
 # Utility Endpoints
 # ============================================================================
 
-@router.get("/health")
-async def credentials_health(ctx: RequestContext = Depends(get_request_context_hybrid)):
-    """Health check for credentials service"""
-    from core.credentials.encryption import get_encryption_service
-
-    try:
-        encryption_service = get_encryption_service()
-        key_info = encryption_service.get_key_info()
-
-        return {
-            "status": "healthy",
-            "service": "credentials",
-            "encryption": {
-                "status": "active",
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Credentials health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-
 @router.post("/cache/clear", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def clear_credential_cache(
     credential_name: Optional[str] = Query(None, description="Specific credential to clear"),
@@ -762,61 +821,3 @@ async def clear_credential_cache(
     except Exception as e:
         logger.error(f"Failed to clear cache: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.get("/stats")
-async def get_credential_stats(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Get credential system statistics"""
-    set_request_id(str(uuid.uuid4()))
-    
-    try:
-        from sqlalchemy import func
-        
-        total_types = db.query(func.count(CredentialType.id)).scalar()
-        active_types = db.query(func.count(CredentialType.id)).filter(
-            CredentialType.is_active == True
-        ).scalar()
-        
-        total_creds = db.query(func.count(Credential.id)).filter(
-            Credential.workspace_id == ctx.workspace_id
-        ).scalar()
-        active_creds = db.query(func.count(Credential.id)).filter(
-            Credential.is_active == True,
-            Credential.workspace_id == ctx.workspace_id
-        ).scalar()
-
-        by_env = db.query(
-            Credential.environment,
-            func.count(Credential.id)
-        ).filter(
-            Credential.workspace_id == ctx.workspace_id
-        ).group_by(Credential.environment).all()
-
-        by_type = db.query(
-            CredentialType.display_name,
-            func.count(Credential.id)
-        ).join(Credential).filter(
-            Credential.workspace_id == ctx.workspace_id
-        ).group_by(CredentialType.display_name).all()
-        
-        return {
-            "credential_types": {
-                "total": total_types,
-                "active": active_types
-            },
-            "credentials": {
-                "total": total_creds,
-                "active": active_creds,
-                "by_environment": {env: count for env, count in by_env},
-                "by_type": {type_name: count for type_name, count in by_type}
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    
-    except Exception as e:
-        logger.error(f"Failed to get credential stats: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
