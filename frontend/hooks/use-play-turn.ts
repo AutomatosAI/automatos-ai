@@ -22,10 +22,12 @@ import type { ChatMessage } from '@/types'
  * approvals a reply raised (T-005c: tool_approval and mission_approval, the
  * core's widgets), each waiting for the owner until answered or closed, with
  * Auto listening meanwhile (approval-waiting, approval-settled). A card
- * outlives its reply: when useChat drops the reply (Stop, a request failing
+ * outlives its reply: when useChat drops the reply (a request failing
  * mid-turn) or Try again replaces it, the card is loose and stays on screen,
- * so it can still be answered or closed. And it outlives the chat screen
- * (M46): the cards live in play-approvals-store by conversation, so leaving
+ * so it can still be answered or closed; a reply you stopped stays in the
+ * conversation Play shows (use-stopped-reply.ts), and its cards stay in it.
+ * And it outlives the chat screen (M46): the cards live in
+ * play-approvals-store by conversation, so leaving
  * the chat or switching conversation and coming back shows them again (loose
  * when the server's copy of the reply has its own id), as Studio's widgets
  * stay in the workspace store; a reload clears them, as it clears Studio's.
@@ -57,6 +59,7 @@ export interface PlayTurnOptions {
    * mounts (it is keyed by the conversation); a new chat's name comes through onChatNamed.
    */
   readonly chatId: string
+  /** The conversation as Play shows it (useChat's, with the replies you stopped kept). */
   readonly messages: readonly ChatMessage[]
   /** The reply is still being written. */
   readonly streaming: boolean

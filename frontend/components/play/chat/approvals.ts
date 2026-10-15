@@ -174,9 +174,10 @@ export function isWaiting(filed: readonly FiledApproval[]): boolean {
 
 /**
  * The open cards whose reply is no longer in the conversation: useChat drops
- * the reply on Stop (and when the request fails mid-turn), and Try again
- * replaces it; a conversation shown again (the chat screen mounted afresh)
- * holds the server's copy of a reply, under its own id. The grant or Mission
+ * the reply when the request fails mid-turn (a reply you stopped Play keeps,
+ * hooks/use-stopped-reply.ts), and Try again replaces it; a conversation
+ * shown again (the chat screen mounted afresh) holds the server's copy of a
+ * reply, under its own id. The grant or Mission
  * still waits on the server, so the card stays on screen (as Studio's widget
  * stays on its canvas) until the owner answers or closes it. Never mutates.
  */

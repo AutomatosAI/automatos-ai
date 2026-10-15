@@ -16,7 +16,8 @@ import styles from './chat.module.css'
  * viewport-bound), keeping the newest line in view while Auto answers unless
  * you scrolled up to read; a new message follows again. What follows the
  * conversation (a turn that failed before a reply began, a Mission Auto
- * suggests) sits under the list, inside the scroll.
+ * suggests) sits under the list, inside the scroll. A reply you stopped says
+ * so (P260-FX-30).
  */
 
 /** How close to the bottom counts as "reading the newest line". */
@@ -72,6 +73,8 @@ export interface MessageListProps {
   readonly after?: ReactNode
   /** The approval cards a reply raised, by its id (T-005c). */
   readonly approvalsOf?: (replyId: string) => ReactNode
+  /** Stop ended this reply (hooks/use-stopped-reply.ts). */
+  readonly isStopped?: (replyId: string) => boolean
 }
 
 export function MessageList({
@@ -82,6 +85,7 @@ export function MessageList({
   trialBlocked = false,
   after,
   approvalsOf,
+  isStopped,
 }: MessageListProps) {
   const { scrollerRef, endRef } = useFollow(messages)
   const newest = messages[messages.length - 1]?.id
@@ -100,6 +104,7 @@ export function MessageList({
                 onRetry={message.id === newest ? onRetry : undefined}
                 snagHidden={trialBlocked && message.id === newest}
                 approvals={approvalsOf?.(message.id)}
+                stopped={isStopped?.(message.id)}
               />
             )}
           </li>

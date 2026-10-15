@@ -16,9 +16,10 @@ import styles from './approval-cards.module.css'
  * which the look writes under Play (D3); Play only frames them. A tool card
  * tells the chat once it is answered (it then shows its outcome); the Mission
  * card closes itself after a decision, as it leaves Studio's canvas. A card
- * whose reply left the conversation (Stop, Try again, the conversation shown
- * again) shows after it until it is answered or closed: under "Approvals
- * still open" while it waits, under "Approvals" once answered.
+ * whose reply left the conversation (Try again, a request failing mid-turn,
+ * the conversation shown again; a reply you stopped stays, its cards in it)
+ * shows after it until it is answered or closed: under "Approvals still
+ * open" while it waits, under "Approvals" once answered.
  */
 
 export const APPROVALS_LABEL = 'Approvals'

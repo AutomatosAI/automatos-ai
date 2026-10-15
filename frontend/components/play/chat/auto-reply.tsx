@@ -27,9 +27,13 @@ import styles from './chat.module.css'
  * (reply-cards.tsx, P260-FX-29), what he did (the receipts), a limit reached,
  * then a failure: in the snag box once the turn is over, as a plain line while
  * he answers. A failed turn the server saved is that failure, never an answer.
+ * A reply you stopped keeps what it had and says so last (P260-FX-30, as the
+ * approved Play app does; hooks/use-stopped-reply.ts keeps it on screen).
  */
 
 export const SPEAKER = 'Auto'
+/** Under a reply you stopped (the approved Play app's words). */
+export const STOPPED_NOTICE = 'You stopped this answer.'
 
 const NO_DELIVERABLES: readonly DeliverableRef[] = []
 
@@ -92,6 +96,8 @@ export interface AutoReplyProps {
   readonly snagHidden?: boolean
   /** The approval cards this reply raised (approval-cards.tsx). */
   readonly approvals?: ReactNode
+  /** You pressed Stop while Auto wrote this reply. */
+  readonly stopped?: boolean
 }
 
 export function AutoReply({
@@ -101,6 +107,7 @@ export function AutoReply({
   onRetry,
   snagHidden = false,
   approvals,
+  stopped = false,
 }: AutoReplyProps) {
   const receipts = receiptsOf(message)
   const made = mergeDeliverables(deliverables, deliverablesFromReceipts(receipts))
@@ -128,6 +135,7 @@ export function AutoReply({
         onRetry={onRetry}
         hidden={snagHidden}
       />
+      {stopped && <p className={styles.notice}>{STOPPED_NOTICE}</p>}
     </article>
   )
 }

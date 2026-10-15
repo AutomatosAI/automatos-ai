@@ -9,6 +9,7 @@ import { type BackendConnection, useBackendHealth } from '@/hooks/use-backend-he
 import type { PlayConversationView } from '@/hooks/use-play-conversation'
 import { type PlayTurn, usePlayTurn } from '@/hooks/use-play-turn'
 import { useRefreshHistoryOnTurnEnd } from '@/hooks/use-refresh-history-on-turn-end'
+import { useStoppedReplies } from '@/hooks/use-stopped-reply'
 import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { usePageContext } from '@/lib/page-context'
 import type { ComposerFill } from '@/lib/play/draft'
@@ -33,12 +34,15 @@ import styles from './composer.module.css'
  * written (his thinking ends when the words start). The page lays out the
  * conversation and the message box, with Auto in the mascot column and his
  * caption saying what he is doing; an empty chat is the first open. Stop calls
- * the hook's stop(), which also cancels the turn on the server. A turn's
- * details (its Deliverables, a Mission suggestion, a failure, the approvals
- * it raised as the core's cards) come from usePlayTurn; Try again is the hook's
- * reload(); a spent trial shows the core's banner above the box. A card whose
- * reply left the conversation (Stop, Try again, the conversation shown again)
- * shows after it, in its column, until answered or closed.
+ * the hook's stop(), which also cancels the turn on the server, and keeps the
+ * reply Auto was writing, as stopped (useStoppedReplies, P260-FX-30): the
+ * conversation on screen, and the one usePlayTurn reads, is useChat's with the
+ * stopped replies kept. A turn's details (its Deliverables, a Mission
+ * suggestion, a failure, the approvals it raised as the core's cards) come
+ * from usePlayTurn; Try again is the hook's reload(); a spent trial shows the
+ * core's banner above the box. A card whose reply left the conversation (Try
+ * again, a request failing mid-turn, the conversation shown again) shows after
+ * it, in its column, until answered or closed.
  */
 
 export interface PlayChatViewProps {
@@ -80,6 +84,7 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
     },
   })
   useRefreshHistoryOnTurnEnd(chat.status)
+  const shown = useStoppedReplies(chat)
   const auto = useAutoMascot({
     status: chat.status,
     errorCode: chat.errorCode,
@@ -89,7 +94,7 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
   })
   const turn = usePlayTurn({
     chatId: view.chatId ?? '',
-    messages: chat.messages,
+    messages: shown.messages,
     streaming: chat.status === 'streaming',
     dispatch: auto.dispatch,
   })
@@ -106,7 +111,7 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
   useEffect(() => {
     greet()
   }, [greet])
-  return { chat, auto, turn }
+  return { chat, auto, turn, shown }
 }
 
 /**
@@ -167,7 +172,7 @@ function useApprovalSlots(turn: PlayTurn, chatId: string) {
 }
 
 export function PlayChatView(props: PlayChatViewProps) {
-  const { chat, auto, turn } = usePlayChat(props)
+  const { chat, auto, turn, shown } = usePlayChat(props)
   const composer = useComposer(auto, props.draft ?? null, props.onDraftTaken)
   const { send, retry } = useSending(chat, turn)
   const { approvalsOf, looseCards } = useApprovalSlots(turn, props.view.chatId ?? '')
@@ -195,12 +200,13 @@ export function PlayChatView(props: PlayChatViewProps) {
           <FirstOpenHero state={auto.mascot} onClipEnded={auto.onClipEnded} {...caption} />
         ) : (
           <MessageList
-            messages={chat.messages}
+            messages={shown.messages}
             streaming={streaming}
             deliverablesOf={turn.deliverablesOf}
             onRetry={retry}
             trialBlocked={isTrialBlocked(chat.errorCode)}
             approvalsOf={approvalsOf}
+            isStopped={shown.isStopped}
             after={
               <TurnEnd
                 status={chat.status}
@@ -221,7 +227,7 @@ export function PlayChatView(props: PlayChatViewProps) {
             key={composer.fill ? `fill-${composer.fill.serial}` : 'box'}
             streaming={streaming}
             onSend={send}
-            onStop={chat.stop}
+            onStop={shown.stop}
             onFocus={composer.onFocus}
             onBlur={composer.onBlur}
             initialDraft={composer.fill?.text}

@@ -432,7 +432,7 @@ describe('approvals.ts: the part read as chat.tsx reads it', () => {
     expect(withStatus(filed, 'tool-9', 'answered')).toBe(filed)
   })
 
-  it('a card whose reply left the conversation is loose until it is closed (play-chat-approvals-stream.test.tsx: Stop, Try again)', () => {
+  it('a card whose reply left the conversation is loose until it is closed (play-chat-approvals-stream.test.tsx: Try again)', () => {
     const filed = fileApprovals([], approvalsInPart(toolData({ tool_approval: TOOL_APPROVAL })), 'm2', new Date(0))
     expect(looseApprovals(filed, new Set(['m1', 'm2']))).toEqual([])
     expect(looseApprovals(filed, new Set(['m1']))).toEqual(filed)
