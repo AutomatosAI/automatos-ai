@@ -80,13 +80,31 @@ is_usage_limit_error() {
   [[ "$exit_code" -eq 0 ]] && return 1
   echo "$output" | grep '^{' | jq -e 'select(.type == "result") | select(.subtype | test("error.*limit|rate_limit"))' &>/dev/null && return 0
   local text; text=$(echo "$output" | grep -v '^{' || true)
-  text+=$(echo "$output" | grep '^{' | jq -r 'select(.type == "result" and .is_error == true) | .result // empty' 2>/dev/null || true)
-  [[ "$text" =~ "hit your limit" || "$text" =~ Error:\ 429 || "$text" =~ Error:\ 529 || "$text" =~ rate.?limit || "$text" =~ usage.?limit ]]
+  text+=$(echo "$output" | grep '^{' | jq -r 'select(.type == "result" and (.is_error == true or .terminal_reason == "api_error")) | .result // empty' 2>/dev/null || true)
+  # 14 Oct (night 16): the subscription says "You've hit your session limit · resets 12:50am (Europe/Lisbon)"; the old
+  # match ("hit your limit") missed it, three iterations counted as failures and the night stopped at 00:03.
+  [[ "$text" =~ hit\ your\ ([a-z]+\ )?limit || "$text" =~ session\ limit || "$text" =~ Error:\ 429 || "$text" =~ Error:\ 529 || "$text" =~ rate.?limit || "$text" =~ usage.?limit ]]
 }
 get_sleep_duration() {
   local output="$1"
   [[ "$output" =~ "try again in "([0-9]+)" minute" ]] && { echo $(( ${BASH_REMATCH[1]} * 60 + 60 )); return; }
   [[ "$output" =~ "try again in "([0-9]+)" hour" ]] && { echo $(( ${BASH_REMATCH[1]} * 3600 + 60 )); return; }
+  # "resets 4:50am (Europe/Lisbon)": sleep until that time (+2 min), in the zone it names (the Mac's own if none).
+  local until_reset; until_reset=$(python3 - "$output" <<'PY' 2>/dev/null
+import re, sys, datetime as dt
+from zoneinfo import ZoneInfo
+m = re.search(r"resets (\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([^)]+)\))?", sys.argv[1], re.I)
+if m:
+    h, mi, ap, tz = int(m[1]) % 12, int(m[2] or 0), m[3].lower(), m[4]
+    h += 12 if ap == "pm" else 0
+    zone = ZoneInfo(tz) if tz else None
+    now = dt.datetime.now(zone) if zone else dt.datetime.now().astimezone()
+    at = now.replace(hour=h, minute=mi, second=0, microsecond=0)
+    at += dt.timedelta(days=1) if at <= now else dt.timedelta(0)
+    print(int((at - now).total_seconds()) + 120)
+PY
+)
+  [[ "$until_reset" =~ ^[0-9]+$ ]] && { echo "$until_reset"; return; }
   local wait_time; wait_time=$(seconds_until_next_hour); [[ $wait_time -lt 300 ]] && wait_time=300; echo $wait_time
 }
 
