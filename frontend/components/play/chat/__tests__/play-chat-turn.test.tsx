@@ -37,6 +37,8 @@ vi.mock('@/lib/chat/api', () => api)
 vi.mock('@/lib/page-context', () => ({ usePageContext: () => ({ page: 'chat', route: '/chat' }) }))
 vi.mock('@/hooks/use-chat-session', () => ({ useChatSessionHydration: () => ({ key: 'k', hydrated: true }) }))
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
+// PlayChat holds the chat_changed SSE lane open (P260-FX-02); no stream and no QueryClient here.
+vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: vi.fn() }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))

@@ -7,11 +7,15 @@
  * again (reload) slices it off, yet the grant still waits on the server, so the
  * card stays on screen under "Approvals still open" until it is answered or
  * closed, and Auto stops listening then. Settling a card mid-turn returns Auto
- * to the tool still running. Only the network (fetch), the identity, the
- * approval hooks (as the core's widget tests mock them) and Auto's stand-in are
- * mocked. Roles and text only.
+ * to the tool still running. And the page holds the core's SSE lane open
+ * (useBoardEventStream, real, under a QueryClient as the root providers give
+ * it): a reply the server finishes detached (the page opened mid-turn) merges
+ * in when the lane says chat_changed. Only the network (fetch), the identity,
+ * the approval hooks (as the core's widget tests mock them) and Auto's stand-in
+ * are mocked. Roles and text only.
  */
 import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -84,9 +88,15 @@ import { AWAITING_ANSWER } from '@/components/play/chat/caption'
 import { PLACEHOLDER } from '@/components/play/chat/message-box'
 import { PlayChat } from '@/components/play/chat/play-chat'
 import { TRY_AGAIN } from '@/components/play/chat/snag-box'
+import { apiClient } from '@/lib/api-client'
 import { HELLO_KEY } from '@/lib/mascot/session'
 
 // --- the wire: useChat's data stream (`0:` words, `d:` data, `e:` a failure), one stream per request -----------
+
+interface Writable {
+  readonly write: (text: string) => void
+  readonly end: () => void
+}
 
 interface Turn {
   readonly push: (line: string) => void
@@ -94,25 +104,46 @@ interface Turn {
 }
 
 const turns: Turn[] = []
+/** The SSE lanes useBoardEventStream opened (GET /api/v1/tasks/stream), newest last. */
+const lanes: Writable[] = []
 
-/** A /api/chat response body the test writes line by line; Stop's abort fails the read as a browser's does. */
-function chatResponse(signal: AbortSignal | null | undefined): Response {
+/** A response body the test writes into; an abort (Stop, an unmount) fails the read as a browser's does. */
+function writableResponse(signal: AbortSignal | null | undefined): { response: Response; body: Writable } {
   const encoder = new TextEncoder()
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null
-  const body = new ReadableStream<Uint8Array>({
+  const stream = new ReadableStream<Uint8Array>({
     start(c) {
       controller = c
     },
   })
   signal?.addEventListener('abort', () => controller?.error(new DOMException('The user aborted a request.', 'AbortError')))
-  turns.push({ push: (line) => controller?.enqueue(encoder.encode(`${line}\n`)), end: () => controller?.close() })
-  return { ok: true, status: 200, headers: { get: () => null }, body } as unknown as Response
+  const body = { write: (text: string) => controller?.enqueue(encoder.encode(text)), end: () => controller?.close() }
+  return { response: { ok: true, status: 200, headers: { get: () => null }, body: stream } as unknown as Response, body }
+}
+
+/** A /api/chat response body the test writes line by line. */
+function chatResponse(signal: AbortSignal | null | undefined): Response {
+  const { response, body } = writableResponse(signal)
+  turns.push({ push: (line) => body.write(`${line}\n`), end: body.end })
+  return response
 }
 
 const chatEndpoint = vi.fn(async (url: string, init?: RequestInit) => {
   if (url !== '/api/chat') throw new Error(`unexpected request: ${url}`)
   return chatResponse(init?.signal)
 })
+
+const laneEndpoint = vi.fn(async (_url: string, init?: RequestInit) => {
+  const { response, body } = writableResponse(init?.signal)
+  lanes.push(body)
+  return response
+})
+
+/** The network: the SSE lane to its own stream, everything else to the chat endpoint. */
+function network(url: string, init?: RequestInit): Promise<Response> {
+  const lane = `${apiClient.getBaseUrl()}/api/v1/tasks/stream`
+  return url === lane ? laneEndpoint(url, init) : chatEndpoint(url, init)
+}
 
 const dataLine = (type: string, data: Record<string, unknown>) => `d:${JSON.stringify({ type, data })}`
 const wordsLine = (text: string) => `0:${JSON.stringify(text)}`
@@ -157,9 +188,18 @@ const click = (button: HTMLElement) => act(async () => {
   fireEvent.click(button)
 })
 
+/** PlayChat under a QueryClient, as the root providers (components/providers.tsx) give it: the lane needs one. */
+function renderChat() {
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <PlayChat />
+    </QueryClientProvider>,
+  )
+}
+
 /** Open the stored chat and send ASK through the message box: useChat posts to /api/chat. */
 async function openAndSend() {
-  render(<PlayChat />)
+  renderChat()
   await screen.findByRole('list', { name: 'Conversation' })
   const box = screen.getByRole('textbox', { name: PLACEHOLDER })
   fireEvent.change(box, { target: { value: ASK } })
@@ -175,13 +215,14 @@ beforeEach(() => {
   api.getChatMessages.mockResolvedValue([message('m1', 'user', 'Hello'), message('m2', 'assistant', 'Hi.')])
   api.getChatHistory.mockResolvedValue([])
   api.cancelChatTurn.mockResolvedValue(undefined)
-  vi.stubGlobal('fetch', chatEndpoint)
+  vi.stubGlobal('fetch', network)
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.clearAllMocks()
   turns.length = 0
+  lanes.length = 0
   window.sessionStorage.clear()
 })
 
@@ -253,5 +294,30 @@ describe('a card settled while the turn still runs', () => {
     expect(auto()).toHaveAttribute('data-state', 'idle')
     await endStream()
     expect(auto()).toHaveAttribute('data-state', 'idle')
+  })
+})
+
+describe('the chat_changed lane', () => {
+  it('a reply the server finishes detached merges in when the lane says the chat changed: Send comes back, Auto idles', async () => {
+    const asked = message('m3', 'user', ASK)
+    api.getChat.mockResolvedValue({ ...STORED_CHAT, turnInFlight: true })
+    api.getChatMessages.mockResolvedValue([message('m1', 'user', 'Hello'), message('m2', 'assistant', 'Hi.'), asked])
+    renderChat()
+    await screen.findByRole('list', { name: 'Conversation' })
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'thinking'))
+    await waitFor(() => expect(lanes).toHaveLength(1))
+
+    api.getChatMessages.mockResolvedValue([message('m1', 'user', 'Hello'), message('m2', 'assistant', 'Hi.'), asked, message('m4', 'assistant', 'Here it is.')])
+    await act(async () => {
+      lanes[0].write('event: chat_changed\ndata: {"chat_id":"c1"}\n\n')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(await screen.findByText('Here it is.')).toBeInTheDocument()
+    expect(api.getChatMessages).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+    await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
+    expect(chatEndpoint).not.toHaveBeenCalled()
   })
 })

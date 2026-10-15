@@ -34,6 +34,8 @@ vi.mock('@/lib/chat/api', () => api)
 vi.mock('@/lib/page-context', () => ({ usePageContext: () => ({ page: 'chat', route: '/chat' }) }))
 vi.mock('@/hooks/use-chat-session', () => ({ useChatSessionHydration: () => ({ key: 'k', hydrated: true }) }))
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
+// PlayChat holds the chat_changed SSE lane open (P260-FX-02); no stream and no QueryClient here.
+vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: vi.fn() }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))
@@ -95,6 +97,7 @@ vi.mock('@/stores/chat-session-store', async () => {
 import { PlayChat } from '@/components/play/chat/play-chat'
 import { EXAMPLES, HELLO_TITLE } from '@/components/play/chat/first-open'
 import { PLACEHOLDER } from '@/components/play/chat/message-box'
+import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -140,6 +143,13 @@ afterEach(() => {
   window.sessionStorage.clear()
   Object.assign(chat, { options: null, status: 'idle', isLoading: false, messages: null })
   nav.search = ''
+})
+
+describe('the chat_changed lane', () => {
+  it("opens the core's SSE lane, as Studio's chat does, so an awaited reply and a background post merge in", () => {
+    render(<PlayChat />)
+    expect(useBoardEventStream).toHaveBeenCalledWith(true)
+  })
 })
 
 describe('first open (an empty chat)', () => {
