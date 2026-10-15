@@ -13,8 +13,9 @@ import { kindOf, shelfCaption, type ShelfView } from '@/lib/play/shelf'
  * PRD-260 §4, D6 — Auto in the shelf's header (Ember mock 04), as Automatos
  * Play's ShelfScreen drives him: proud of the count while he idles, a
  * celebration once for a Deliverable this browser hasn't seen
- * (useCelebrateNew), oops when the shelf doesn't load, and asleep while the
- * backend doesn't answer (useBackendHealth, the frame's GET /health).
+ * (useCelebrateNew), oops when the shelf doesn't load until it does (Try
+ * again), and asleep while the backend doesn't answer (useBackendHealth, the
+ * frame's GET /health).
  */
 
 export interface ShelfMascot {
@@ -33,6 +34,11 @@ export function useShelfMascot(view: ShelfView): ShelfMascot {
   const { connection } = useBackendHealth()
   const celebrate = useCallback(() => dispatch({ type: 'deliverable-added' }), [])
   const onClipEnded = useCallback((mascot: MascotName) => dispatch({ type: 'clip-ended', state: mascot }), [])
+  // A shelf that loads ends a failed load's oops. Declared before useCelebrateNew,
+  // so this effect runs first and a new Deliverable still celebrates.
+  useEffect(() => {
+    if (view.status === 'ready') dispatch({ type: 'request-ok' })
+  }, [view.status])
   const latest = useCelebrateNew(view.status === 'ready' ? view.items : null, celebrate)
 
   useEffect(() => {

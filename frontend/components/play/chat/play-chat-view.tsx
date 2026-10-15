@@ -31,8 +31,9 @@ import styles from './composer.module.css'
  * useAutoMascot from the chat's data parts, its status and the reply being
  * written (his thinking ends when the words start). The page lays out the
  * conversation and the message box, with Auto in the mascot column and his
- * caption saying what he is doing; an empty chat is the first open. Stop calls
- * the hook's stop(), which also cancels the turn on the server. A turn's
+ * caption saying what he is doing; an empty chat is the first open. Stop tells
+ * Auto (no celebration for a stopped turn), then calls the hook's stop(), which
+ * also cancels the turn on the server. A turn's
  * details (its Deliverables, a Mission suggestion, a failure, the approvals
  * it raised as the core's cards) come from usePlayTurn; Try again is the hook's
  * reload(); a spent trial shows the core's banner above the box. A card whose
@@ -124,10 +125,15 @@ function newestKind(turn: PlayTurn, reply: ChatMessage | undefined): string | un
   return made[made.length - 1]?.kind
 }
 
-/** Send and Try again: each clears the turn's suggestion first, as chat.tsx does on a new message. */
-function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn) {
-  const { isLoading, sendMessage, reload } = chat
+/**
+ * Send and Try again: each clears the turn's suggestion first, as chat.tsx does
+ * on a new message. Stop tells Auto first (a done receipt no longer celebrates
+ * the stopped turn), then stops the chat.
+ */
+function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn, auto: AutoMascotDriver) {
+  const { isLoading, sendMessage, reload, stop } = chat
   const { onSend } = turn
+  const { dispatch } = auto
   const send = useCallback(
     (text: string): boolean => {
       if (isLoading) return false
@@ -142,7 +148,11 @@ function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn
     onSend()
     reload()
   }, [isLoading, reload, onSend])
-  return { send, retry }
+  const onStop = useCallback(() => {
+    dispatch({ type: 'stop' })
+    stop()
+  }, [dispatch, stop])
+  return { send, retry, onStop }
 }
 
 /** The approval cards a reply raised, inside that reply; the loose ones (their reply is gone) after the conversation. */
@@ -161,7 +171,7 @@ function useApprovalSlots(turn: PlayTurn, chatId: string) {
 export function PlayChatView(props: PlayChatViewProps) {
   const { chat, auto, turn } = usePlayChat(props)
   const composer = useComposer(auto, props.draft ?? null, props.onDraftTaken)
-  const { send, retry } = useSending(chat, turn)
+  const { send, retry, onStop } = useSending(chat, turn, auto)
   const { approvalsOf, looseCards } = useApprovalSlots(turn, props.view.chatId ?? '')
   const streaming = chat.status === 'streaming'
   const empty = chat.messages.length === 0
@@ -215,7 +225,7 @@ export function PlayChatView(props: PlayChatViewProps) {
             key={composer.fill ? `fill-${composer.fill.serial}` : 'box'}
             streaming={streaming}
             onSend={send}
-            onStop={chat.stop}
+            onStop={onStop}
             onFocus={composer.onFocus}
             onBlur={composer.onBlur}
             initialDraft={composer.fill?.text}

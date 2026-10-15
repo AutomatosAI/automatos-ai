@@ -66,8 +66,10 @@ export type MascotState = {
   readonly openTools: readonly OpenTool[]
   /** A message was sent and the turn hasn't finished or failed. */
   readonly turnActive: boolean
-  /** This turn's receipts include a done receipt: celebrate on finish. */
+  /** This turn's receipts include a done receipt: celebrate on finish (Stop clears it). */
   readonly celebrateOnFinish: boolean
+  /** A Deliverable made in this turn was celebrated when it landed: finish adds no second celebration. */
+  readonly celebratedThisTurn: boolean
   /** The backend is unreachable: Auto sleeps until backend-up. */
   readonly backendDown: boolean
   /** An approval card waits for the owner's answer: Auto rests on listening instead of idle. */
@@ -84,15 +86,19 @@ export type MascotState = {
  * Events from the page, not the stream. app-open means the first open in this
  * browser session (the caller checks, lib/mascot/session.ts). clip-ended names
  * the clip that ended, so a stale one can't end a newer one-shot. request-failed
- * is a failed call. wake is any input after the idle timeout (it ends an idle
- * nap, not the backend's). approval-waiting: an approval card in the chat waits
- * for the owner's answer; approval-settled: every card is answered or closed.
+ * is a failed call; request-ok, a call that answered (the shelf loading after
+ * Try again), ends that oops outside a turn. stop: the owner stopped the turn,
+ * so its done receipt no longer celebrates at finish. wake is any input after
+ * the idle timeout (it ends an idle nap, not the backend's). approval-waiting:
+ * an approval card in the chat waits for the owner's answer;
+ * approval-settled: every card is answered or closed.
  */
 export type ClientEvent =
   | { readonly type: 'app-open' }
   | { readonly type: 'input-focus' }
   | { readonly type: 'input-blur' }
   | { readonly type: 'send' }
+  | { readonly type: 'stop' }
   | { readonly type: 'idle-timeout' }
   | { readonly type: 'wake' }
   | { readonly type: 'backend-down' }
@@ -102,6 +108,7 @@ export type ClientEvent =
   | { readonly type: 'loading-end' }
   | { readonly type: 'deliverable-added' }
   | { readonly type: 'request-failed' }
+  | { readonly type: 'request-ok' }
   | { readonly type: 'clip-ended'; readonly state: MascotName }
   | ApprovalEvent
 

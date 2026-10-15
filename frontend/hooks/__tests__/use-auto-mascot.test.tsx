@@ -44,8 +44,32 @@ describe('useAutoMascot: the chat', () => {
     expect(result.current.mascot).toBe('idle')
   })
 
+  it('a Deliverable made mid-turn and its done receipt: one celebration, then idle, and the next send thinks (P260-FX-04)', () => {
+    const { result, rerender } = mount({ status: 'idle' })
+    rerender({ status: 'streaming' })
+    act(() => result.current.dispatch({ type: 'deliverable-added' }))
+    expect(result.current.mascot).toBe('celebrate')
+    act(() => result.current.onData(doneReceipts))
+    rerender({ status: 'idle' })
+    act(() => result.current.onClipEnded('celebrate'))
+    expect(result.current.mascot).toBe('idle')
+    rerender({ status: 'streaming' })
+    expect(result.current.mascot).toBe('thinking')
+  })
+
   it('thinks at once when it mounts on an awaited reply', () => {
     expect(mount({ status: 'streaming' }).result.current.mascot).toBe('thinking')
+  })
+
+  it("hello on the first open of an awaited reply, then back to the reply's thinking (P260-FX-04)", () => {
+    const session = memoryStorage()
+    const { result } = mount({ status: 'streaming', session: () => session })
+    act(() => {
+      result.current.greet()
+    })
+    expect(result.current.mascot).toBe('hello')
+    act(() => result.current.onClipEnded('hello'))
+    expect(result.current.mascot).toBe('thinking')
   })
 
   it('plays oops when the turn fails or is blocked', () => {

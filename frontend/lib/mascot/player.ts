@@ -49,6 +49,9 @@ export function atClipBoundary(currentTime: number, duration: number): boolean {
  * The reducer's target changed. Urgent states (oops, hello) swap at once, and so
  * does anything after a finished one-shot; the rest wait for the boundary. Going
  * back to the clip on screen cancels the queue, so a 200 ms tool call never shows.
+ * A finished one-shot re-targeted to itself stays finished and never reports its
+ * end again: the player relies on the reducer never re-targeting the one-shot on
+ * screen (lib/mascot/reducer.ts enqueue).
  */
 export function retarget(player: PlayerState, target: MascotName): PlayerState {
   if (target === player.showing) {
