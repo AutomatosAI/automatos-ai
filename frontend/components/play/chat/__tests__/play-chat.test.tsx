@@ -1,9 +1,11 @@
 /**
  * PRD-260 §4, D5, D6 — Play's chat on the core's data. The chat hook
  * (useChatWithReceipts) and the session store are mocked; the conversation
- * loading, Auto's reducer (useAutoMascot) and the markdown renderer are real.
- * Auto himself is a stand-in that shows his state and caption (his clips have
- * their own tests). Roles and text only (CSS modules are proxies).
+ * loading, the session hydration (useChatSessionHydration, over a stand-in
+ * identity and workspace), Play's asleep gate, Auto's reducer (useAutoMascot)
+ * and the markdown renderer are real. Auto himself is a stand-in that shows his
+ * state and caption (his clips have their own tests). Roles and text only (CSS
+ * modules are proxies).
  */
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -25,6 +27,11 @@ const chat = vi.hoisted(() => ({
 }))
 const api = vi.hoisted(() => ({ getChat: vi.fn(), getChatMessages: vi.fn(), getChatHistory: vi.fn() }))
 const toastError = vi.hoisted(() => vi.fn())
+const ids = vi.hoisted(() => ({ user: 'u1' }))
+/** GET /health as Play's frame and the chat read it (useBackendHealth); tests switch it to put Automatos to sleep. */
+const health = vi.hoisted(() => ({ connection: 'connected' as 'checking' | 'connected' | 'down', check: vi.fn() }))
+/** The workspace provider's value (useWorkspaceOptional); null is no provider. */
+const scope = vi.hoisted(() => ({ workspace: null as null | { workspace: { id: string } | null; isLoading: boolean } }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/chat',
@@ -34,18 +41,35 @@ vi.mock('next/navigation', () => ({
 vi.mock('sonner', () => ({ toast: { error: toastError } }))
 vi.mock('@/lib/chat/api', () => api)
 vi.mock('@/lib/page-context', () => ({ usePageContext: () => ({ page: 'chat', route: '/chat' }) }))
-vi.mock('@/hooks/use-chat-session', () => ({ useChatSessionHydration: () => ({ key: 'k', hydrated: true }) }))
-vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
+// The session hydration is real (P260-FX-07): the identity is a stand-in, the local edition's shapes (lib/auth-hooks.ts).
+vi.mock('@/lib/auth-hooks', () => ({
+  useAuth: () => ({ isLoaded: true, isSignedIn: true, getToken: async () => null }),
+  useUser: () => ({ isLoaded: true, isSignedIn: true, user: { id: ids.user } }),
+  useSession: () => ({ isLoaded: true, isSignedIn: true, session: null }),
+  useOrganization: () => ({ isLoaded: true, organization: null, membership: null }),
+  useClerk: () => ({ signOut: async () => undefined }),
+}))
+vi.mock('@/hooks/use-backend-health', () => ({
+  useBackendHealth: () => ({ connection: health.connection, check: health.check }),
+}))
 // PlayChat holds the chat_changed SSE lane open (P260-FX-02); no stream and no QueryClient here.
 vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: vi.fn() }))
-vi.mock('@/components/layout/main-layout', () => ({
-  MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
-}))
+// Play's frame as MainLayout renders it under Play (play-frame.tsx): the real asleep gate around the page, the rest left out.
+vi.mock('@/components/layout/main-layout', async () => {
+  const { AsleepGate } = await import('@/components/play/edges/asleep-gate')
+  return {
+    MainLayout: ({ children }: { children?: React.ReactNode }) => (
+      <div data-testid="frame">
+        <AsleepGate>{children}</AsleepGate>
+      </div>
+    ),
+  }
+})
 vi.mock('@/components/local/first-run-nudge', () => ({ FirstRunNudge: () => null }))
-// T-005b: the chat shows the core's trial banner off the workspace snapshot; no snapshot here.
+// T-005b: the chat shows the core's trial banner off the workspace snapshot; no snapshot here unless a test sets one.
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: null }),
-  useWorkspaceOptional: () => null,
+  useWorkspaceOptional: () => scope.workspace,
 }))
 vi.mock('@/components/mascot/auto-mascot', () => ({
   AutoMascot: ({ state, caption, detail }: { state: string; caption?: string; detail?: string }) => (
@@ -78,6 +102,7 @@ vi.mock('@/lib/chat/use-chat-with-receipts', async () => {
 })
 vi.mock('@/stores/chat-session-store', async () => {
   const { create } = await import('zustand')
+  const { chatSessionKey } = await import('@/lib/chat/chat-session')
   type Session = { activeChatId: string | null; draftOpen: boolean; openChatIds: string[] }
   const open = (session: Session, id: string): Session => ({
     ...session,
@@ -85,9 +110,16 @@ vi.mock('@/stores/chat-session-store', async () => {
     draftOpen: false,
     openChatIds: session.openChatIds.includes(id) ? session.openChatIds : [...session.openChatIds, id],
   })
-  const store = create<any>((set) => ({
+  const store = create<any>((set, get) => ({
+    key: chatSessionKey(null, ids.user),
     hydrated: true,
     session: { activeChatId: null, draftOpen: true, openChatIds: [] },
+    // As the real store: a key already hydrated is kept as it is; a new one is bound (the browser copy is the stand-in's session).
+    hydrate: vi.fn(async (key: string) => {
+      if (get().key !== key || !get().hydrated) set({ key, hydrated: true })
+    }),
+    reload: vi.fn(),
+    touchChat: vi.fn(),
     openChat: vi.fn((id: string) => set((s: { session: Session }) => ({ session: open(s.session, id) }))),
     chatIdAssigned: vi.fn((id: string) => set((s: { session: Session }) => ({ session: open(s.session, id) }))),
     newDraft: vi.fn(() => set((s: { session: Session }) => ({ session: { ...s.session, activeChatId: null, draftOpen: true } }))),
@@ -101,12 +133,13 @@ vi.mock('@/stores/chat-session-store', async () => {
   return { useChatSessionStore: store }
 })
 
-import { PlayChat } from '@/components/play/chat/play-chat'
+import { OPENING, PlayChat } from '@/components/play/chat/play-chat'
 import { EXAMPLES, HELLO_TITLE } from '@/components/play/chat/first-open'
 import { PLACEHOLDER } from '@/components/play/chat/message-box'
+import { ASLEEP_TITLE } from '@/components/play/edges/asleep-screen'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useStartChat } from '@/hooks/use-start-chat'
-import { EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
+import { chatSessionKey, EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 
@@ -151,6 +184,7 @@ const box = () => screen.getByRole('textbox', { name: PLACEHOLDER })
 
 beforeEach(() => {
   window.sessionStorage.setItem(HELLO_KEY, '1') // hello already played this session
+  useChatSessionStore.setState({ key: chatSessionKey(null, ids.user), hydrated: true })
   setSession({ activeChatId: null, draftOpen: true, openChatIds: [] })
   Object.values(api).forEach((fn) => fn.mockReset())
   api.getChatHistory.mockResolvedValue([])
@@ -161,6 +195,8 @@ afterEach(() => {
   window.sessionStorage.clear()
   Object.assign(chat, { options: null, status: 'idle', isLoading: false, messages: null, mounts: 0 })
   nav.search = ''
+  health.connection = 'connected'
+  scope.workspace = null
 })
 
 describe('the chat_changed lane', () => {
@@ -313,6 +349,8 @@ describe('sending and stopping', () => {
     expect(chat.options?.id).toBe('new-1')
     expect(api.getChat).not.toHaveBeenCalled()
     expect(screen.queryByText('Opening this conversation…')).toBeNull()
+    // The same chat screen all along: its stream carries on.
+    expect(chat.mounts).toBe(1)
   })
 })
 
@@ -453,5 +491,137 @@ describe('a ?draft= link (Ask Auto about this)', () => {
     expect(await screen.findByText('Captions for the bake sale')).toBeInTheDocument()
     expect(nav.replace).toHaveBeenCalledWith('/chat')
     expect(box()).toHaveValue('')
+  })
+})
+
+// P260-FX-07: the conversation on screen survives Play's frame mounting again, a workspace refresh and a late cold start.
+describe('the conversation on screen across remounts and races', () => {
+  const WEEK = [userMessage('m1', 'Plan my week, please'), autoMessage('m2', 'Here is your week.')]
+
+  /** Automatos stops answering (the frame shows the asleep screen in place of the page), then answers again. */
+  async function sleepAndWake(view: ReturnType<typeof render>) {
+    health.connection = 'down'
+    view.rerender(<PlayChat />)
+    expect(await screen.findByRole('heading', { name: ASLEEP_TITLE })).toBeInTheDocument()
+    health.connection = 'connected'
+    view.rerender(<PlayChat />)
+    expect(screen.queryByRole('heading', { name: ASLEEP_TITLE })).toBeNull()
+  }
+
+  /** getChatHistory's answer, held until the test gives it. */
+  function holdHistory(): (rows: Chat[]) => Promise<void> {
+    let answer: (rows: Chat[]) => void = () => undefined
+    api.getChatHistory.mockReturnValue(
+      new Promise<Chat[]>((resolve) => {
+        answer = resolve
+      }),
+    )
+    return (rows) =>
+      act(async () => {
+        answer(rows)
+      })
+  }
+
+  it('a new chat the backend named comes back from the server after Automatos was asleep, not as an empty first open (M09)', async () => {
+    const view = render(<PlayChat />)
+    act(() => chat.options?.onChatIdUpdate('c-1'))
+    api.getChat.mockResolvedValue(storedChat('c-1', 'Weekly plan'))
+    api.getChatMessages.mockResolvedValue(WEEK)
+    await sleepAndWake(view)
+    const list = await screen.findByRole('list', { name: 'Conversation' })
+    expect(within(list).getByText('Plan my week, please')).toBeInTheDocument()
+    expect(within(list).getByRole('article', { name: 'Auto said' })).toHaveTextContent('Here is your week.')
+    expect(api.getChatMessages).toHaveBeenCalledWith('c-1')
+    expect(screen.queryByRole('heading', { name: HELLO_TITLE })).toBeNull()
+  })
+
+  it('a stored conversation shows what was said meanwhile after Automatos was asleep (M09)', async () => {
+    openStoredChat()
+    const view = render(<PlayChat />)
+    await screen.findByRole('list', { name: 'Conversation' })
+    api.getChatMessages.mockResolvedValue([...STORED, userMessage('m3', 'And the battery?'), autoMessage('m4', 'Ten hours at least.')])
+    await sleepAndWake(view)
+    expect(await screen.findByText('And the battery?')).toBeInTheDocument()
+    expect(api.getChatMessages).toHaveBeenCalledTimes(2)
+  })
+
+  it('a refresh of the same workspace (a key saved from the trial banner) keeps the chat on screen: never Opening, one chat screen (M09)', () => {
+    const workspace = { id: 'ws-1' }
+    scope.workspace = { workspace, isLoading: false }
+    useChatSessionStore.setState({ key: chatSessionKey(workspace.id, ids.user) })
+    const view = render(<PlayChat />)
+    act(() => chat.options?.onChatIdUpdate('c-1'))
+    expect(screen.queryByText(OPENING)).toBeNull()
+    scope.workspace = { workspace, isLoading: true }
+    view.rerender(<PlayChat />)
+    expect(screen.queryByText(OPENING)).toBeNull()
+    scope.workspace = { workspace, isLoading: false }
+    view.rerender(<PlayChat />)
+    expect(screen.queryByText(OPENING)).toBeNull()
+    expect(chat.mounts).toBe(1)
+    expect(chat.options?.id).toBe('c-1')
+    expect(api.getChat).not.toHaveBeenCalled()
+  })
+
+  it('a Recent link opens the next conversation without mounting the previous one again on the way', async () => {
+    openStoredChat()
+    const view = render(<PlayChat />)
+    await screen.findByRole('list', { name: 'Conversation' })
+    api.getChat.mockResolvedValue(storedChat('c2', 'Bake sale'))
+    api.getChatMessages.mockResolvedValue([userMessage('m5', 'Captions for the bake sale')])
+    nav.search = 'chatId=c2'
+    view.rerender(<PlayChat />)
+    expect(await screen.findByText('Captions for the bake sale')).toBeInTheDocument()
+    // One chat screen per conversation: c1's, then c2's.
+    expect(chat.mounts).toBe(2)
+  })
+
+  it('New chat pressed before the cold start reads the newest conversation stays a new chat (M10)', async () => {
+    setSession({ activeChatId: null, draftOpen: false, openChatIds: [] })
+    const answer = holdHistory()
+    render(<PlayChat />)
+    expect(screen.getByText(OPENING)).toBeInTheDocument()
+    act(() => useChatSessionStore.getState().newDraft())
+    expect(await screen.findByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    await answer([storedChat('c1', 'Laptop for uni')])
+    expect(useChatSessionStore.getState().openChat).not.toHaveBeenCalled()
+    expect(useChatSessionStore.getState().session.activeChatId).toBeNull()
+    expect(screen.getByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    expect(api.getChat).not.toHaveBeenCalled()
+  })
+
+  it('a conversation opened before the cold start answers stays on screen (M10)', async () => {
+    setSession({ activeChatId: null, draftOpen: false, openChatIds: [] })
+    const answer = holdHistory()
+    api.getChat.mockResolvedValue(storedChat('c2', 'Bake sale'))
+    api.getChatMessages.mockResolvedValue([userMessage('m1', 'Captions for the bake sale')])
+    render(<PlayChat />)
+    act(() => useChatSessionStore.getState().openChat('c2'))
+    expect(await screen.findByText('Captions for the bake sale')).toBeInTheDocument()
+    await answer([storedChat('c1', 'Laptop for uni')])
+    expect(useChatSessionStore.getState().session.activeChatId).toBe('c2')
+    expect(api.getChat).not.toHaveBeenCalledWith('c1')
+    expect(screen.getByText('Captions for the bake sale')).toBeInTheDocument()
+  })
+
+  it('a blank ?chatId= is no link: the first open shows, never Opening, and it leaves the URL (M11)', async () => {
+    nav.search = 'chatId='
+    render(<PlayChat />)
+    expect(await screen.findByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    expect(screen.queryByText(OPENING)).toBeNull()
+    expect(nav.replace).toHaveBeenCalledWith('/chat')
+    expect(useChatSessionStore.getState().openChat).not.toHaveBeenCalled()
+  })
+
+  it('a blank ?chatId= on a cold start lands on the newest conversation (M11)', async () => {
+    setSession({ activeChatId: null, draftOpen: false, openChatIds: [] })
+    nav.search = 'chatId=%20'
+    api.getChatHistory.mockResolvedValue([storedChat('c1', 'Laptop for uni')])
+    api.getChat.mockResolvedValue(storedChat('c1', 'Laptop for uni'))
+    api.getChatMessages.mockResolvedValue(STORED)
+    render(<PlayChat />)
+    expect(await screen.findByText('What should I look for in a laptop?')).toBeInTheDocument()
+    expect(api.getChatHistory).toHaveBeenCalledWith(1)
+    expect(screen.queryByText(OPENING)).toBeNull()
   })
 })

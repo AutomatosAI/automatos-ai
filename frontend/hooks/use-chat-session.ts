@@ -22,8 +22,11 @@ export function useChatSessionHydration(): { key: string | null; hydrated: boole
   const touchChat = useChatSessionStore((s) => s.touchChat)
 
   // Wait for both scopes to settle — hydrating under a provisional key would
-  // write the session where later reads never look.
-  const ready = isLoaded && (workspaceCtx === null || !workspaceCtx.isLoading)
+  // write the session where later reads never look. A workspace already known
+  // keeps its key while it refetches (saving a key from the trial banner
+  // refreshes it), so the conversation on screen never blinks out; a different
+  // workspace still rehydrates under its own key once it arrives.
+  const ready = isLoaded && (workspaceCtx === null || !workspaceCtx.isLoading || workspaceCtx.workspace != null)
   const key = ready ? chatSessionKey(workspaceCtx?.workspace?.id ?? null, user?.id ?? null) : null
 
   useEffect(() => {

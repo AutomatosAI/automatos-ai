@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
+import type { ChatSession } from '@/lib/chat/chat-session'
 import { type ComposerFill, DRAFT_PARAM, draftFrom } from '@/lib/play/draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { usePlayChatStore } from '@/stores/play-chat-store'
@@ -42,7 +43,7 @@ export interface PlayConversationView {
 }
 
 export interface PlayConversation {
-  /** null while the session hydrates, a link or a cold start settles, or a conversation loads. */
+  /** null while the session hydrates, a link or a cold start settles, a conversation loads, or the pointer has just moved off it. */
   readonly view: PlayConversationView | null
   /** The backend named the new chat on screen: keep showing it. Call before the session store hears. */
   readonly adopt: (chatId: string) => void
@@ -71,14 +72,22 @@ export function storedView(chatId: string, chat: Chat, messages: ChatMessage[]):
 /**
  * A deep link wins over the stored pointer, once per appearance in the URL (it
  * leaves the URL at once, and the same link clicked again later opens again);
- * pending until that conversation is the active one.
+ * pending until that conversation is the active one. The id is normalised once
+ * here (the draft link and the cold start read this one): a blank `?chatId=` is
+ * no link, so nothing waits on it, and it leaves the URL.
  */
 function useDeepLink(hydrated: boolean, activeChatId: string | null): { linked: string | null; pending: boolean } {
   const params = useSearchParams()
   const router = useRouter()
   const openChat = useChatSessionStore((s) => s.openChat)
-  const linked = params?.get(CHAT_ID_PARAM) ?? null
+  const raw = params?.get(CHAT_ID_PARAM) ?? null
+  const linked = raw?.trim() || null
+  const blank = raw !== null && linked === null
   const handled = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (blank) router.replace(chatUrlWithout(params, CHAT_ID_PARAM))
+  }, [blank, router, params])
 
   useEffect(() => {
     if (!linked) handled.current = null
@@ -119,9 +128,19 @@ function useDraftLink(hydrated: boolean, linked: string | null, activeChatId: st
   return { draft, takeDraft, held: text !== null, pending: text !== null && activeChatId !== null }
 }
 
-/** Nothing stored on this device and no link: the newest conversation, else a new chat. True while it settles. */
+/** No conversation and no new chat open in the session. */
+function isNothingOpen(session: ChatSession): boolean {
+  return session.openChatIds.length === 0 && !session.draftOpen
+}
+
+/**
+ * Nothing stored on this device and no link: the newest conversation, else a
+ * new chat. True while it settles. Its answer acts only while nothing is open
+ * yet (the store as it is then, as app/chat/page.tsx's cancelled guard does): a
+ * late one never replaces a new chat or a conversation opened meanwhile.
+ */
 function useColdStart(hydrated: boolean, linkHeld: boolean): boolean {
-  const nothingOpen = useChatSessionStore((s) => s.session.openChatIds.length === 0 && !s.session.draftOpen)
+  const nothingOpen = useChatSessionStore((s) => isNothingOpen(s.session))
   const openChat = useChatSessionStore((s) => s.openChat)
   const newDraft = useChatSessionStore((s) => s.newDraft)
   const started = useRef(false)
@@ -129,11 +148,16 @@ function useColdStart(hydrated: boolean, linkHeld: boolean): boolean {
   useEffect(() => {
     if (!hydrated || linkHeld || started.current || !nothingOpen) return
     started.current = true
+    const stillNothingOpen = () => isNothingOpen(useChatSessionStore.getState().session)
     getChatHistory(1)
-      .then((rows) => (rows[0] ? openChat(rows[0].id) : newDraft()))
+      .then((rows) => {
+        if (!stillNothingOpen()) return
+        if (rows[0]) openChat(rows[0].id)
+        else newDraft()
+      })
       .catch((error: unknown) => {
         console.warn('[play-chat] the newest conversation could not be read, so a new chat opens:', error)
-        newDraft()
+        if (stillNothingOpen()) newDraft()
       })
   }, [hydrated, linkHeld, nothingOpen, openChat, newDraft])
 
@@ -227,7 +251,10 @@ function useActiveView(enabled: boolean, activeChatId: string | null) {
     if (shown.current === null) adopted.current = chatId
   }, [])
 
-  return { view, adopt }
+  // The active pointer's conversation only (a Recent link never shows the previous one for a render); the new
+  // chat on screen stays while it takes the name the backend gave it, before and after the effect above adopts it.
+  const naming = view?.chatId === null && activeChatId !== null && (activeChatId === adopted.current || activeChatId === shown.current)
+  return { view: view?.chatId === activeChatId || naming ? view : null, adopt }
 }
 
 export function usePlayConversation(): PlayConversation {
