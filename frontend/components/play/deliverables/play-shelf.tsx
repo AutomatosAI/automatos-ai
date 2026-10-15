@@ -16,8 +16,8 @@ import { EXPLORER_HREF, TAB_LABELS, visibleDeliverableTabs } from '@/lib/deliver
 import {
   ALL_FILTER,
   countLine,
-  failureDetail,
   SHELF_FILTERS,
+  SHELF_REFRESH_MS,
   shelfFilters,
   shelfView,
   type ShelfFilter,
@@ -76,31 +76,33 @@ export interface ShelfScreenProps {
 }
 
 /**
- * The list query for one chip, read as the shelf shows it. A Load more that
- * failed is remembered for the chip it was asked under, so another chip starts
- * clean; the backend's own words for a failure go to the log, never the screen.
+ * The list query for one chip, read as the shelf shows it, asked again every
+ * SHELF_REFRESH_MS while the shelf is open and the tab visible (M38). A Load
+ * more that failed is remembered for the chip it was asked under, so another
+ * chip starts clean; the backend's own words for a failure (an HTTP error, or
+ * the list's success: false, which the hook throws) go to the log, never the
+ * screen.
  */
 function useShelfList(filter: ShelfFilter) {
   const filters = useMemo(() => shelfFilters(filter), [filter])
-  const { data, isError, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = useDeliverables(filters)
+  const { data, isError, error, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = useDeliverables(filters, {
+    refetchInterval: SHELF_REFRESH_MS,
+  })
   const view = useMemo(() => shelfView({ data, isError }), [data, isError])
   const [moreFailedFor, setMoreFailedFor] = useState<ShelfFilter | null>(null)
   const loadMore = useCallback(() => {
     setMoreFailedFor(null)
     void fetchNextPage().then((result) => {
-      if (!result.isError) return
-      console.error('[shelf] the next page of Deliverables did not load:', result.error)
-      setMoreFailedFor(filter)
+      if (result.isError) setMoreFailedFor(filter)
     })
   }, [fetchNextPage, filter])
   const retry = useCallback(() => {
     setMoreFailedFor(null)
     void refetch()
   }, [refetch])
-  const detail = failureDetail(data?.pages)
   useEffect(() => {
-    if (detail) console.error('[shelf] the Deliverables list answered success: false:', detail)
-  }, [detail])
+    if (isError) console.error('[shelf] the Deliverables list did not load:', error)
+  }, [isError, error])
   const paging: ShelfPaging = {
     hasMore: hasNextPage === true,
     loadingMore: isFetchingNextPage,

@@ -3,8 +3,10 @@
  * Automatos Play's tests/deliverables/shelf.test.ts onto the core's
  * Deliverables: the chips as the core's artifact_type values and words, the
  * badge, the card date, the count and caption lines, the empty states, the
- * feed's filters, and what the list query's pages amount to (success: false
- * read on every page). "Now" is pinned to a local date.
+ * feed's filters, and what the list query's pages amount to. A list answer
+ * of success: false never reaches the pages: the hook throws it (P260-FX-12;
+ * play-shelf.test.tsx runs that through the real hook). "Now" is pinned to a
+ * local date.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -13,7 +15,6 @@ import {
   ALL_FILTER,
   countLine,
   emptyMessage,
-  failureDetail,
   kindOf,
   SHELF_FILTERS,
   shelfCaption,
@@ -32,8 +33,6 @@ function item(id: string): Deliverable {
 function page(ids: readonly string[], total: number, offset = 0): DeliverableListResponse {
   return { success: true, deliverables: ids.map(item), total, limit: 24, offset }
 }
-
-const FAILED: DeliverableListResponse = { success: false, error: 'list failed: boom', deliverables: [], total: 0, limit: 24, offset: 24 }
 
 describe('the chips', () => {
   it("maps each chip to the core's artifact_type, in the core's words", () => {
@@ -91,34 +90,21 @@ describe('the card', () => {
 })
 
 describe('shelfView', () => {
-  it('is loading before the first page, failed when the request failed', () => {
+  it("is loading before the first page, failed when the request failed (an HTTP error, or the list's success: false)", () => {
     expect(shelfView({ isError: false })).toEqual({ status: 'loading' })
     expect(shelfView({ isError: true })).toEqual({ status: 'failed' })
-  })
-
-  it('is failed when the first page answered success: false, whatever its rows', () => {
-    expect(shelfView({ data: { pages: [{ ...FAILED, offset: 0 }] }, isError: false })).toEqual({ status: 'failed' })
+    expect(shelfView({ data: { pages: [] }, isError: true })).toEqual({ status: 'failed' })
   })
 
   it('joins the pages, one row per id, with the latest total', () => {
     const view = shelfView({ data: { pages: [page(['a', 'b'], 3), page(['b', 'c'], 3, 2)] }, isError: false })
     expect(view.status === 'ready' && view.items.map((row) => row.id)).toEqual(['a', 'b', 'c'])
-    expect(view).toMatchObject({ status: 'ready', total: 3, moreFailed: false })
+    expect(view).toEqual({ status: 'ready', items: expect.any(Array), total: 3 })
   })
 
-  it('keeps the loaded rows when a later page answered success: false', () => {
-    const view = shelfView({ data: { pages: [page(['a', 'b'], 30), FAILED] }, isError: false })
-    expect(view).toMatchObject({ status: 'ready', total: 30, moreFailed: true })
+  it('keeps the loaded rows when a later page or a background refetch failed (react-query keeps the data)', () => {
+    const view = shelfView({ data: { pages: [page(['a', 'b'], 30)] }, isError: true })
+    expect(view).toMatchObject({ status: 'ready', total: 30 })
     expect(view.status === 'ready' && view.items).toHaveLength(2)
-  })
-
-  it('keeps the list when a background refetch failed', () => {
-    expect(shelfView({ data: { pages: [page(['a'], 1)] }, isError: true })).toMatchObject({ status: 'ready', moreFailed: false })
-  })
-
-  it("hands the first failure's own words to the log only", () => {
-    expect(failureDetail([page(['a'], 30), FAILED])).toBe('list failed: boom')
-    expect(failureDetail([page(['a'], 1)])).toBeNull()
-    expect(failureDetail(undefined)).toBeNull()
   })
 })

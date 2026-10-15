@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { deliverableFilename, deliverableFileUrl } from '@/lib/deliverables/download'
+import { deliverableDownloadUrl, deliverableFilename, deliverableFileUrl } from '@/lib/deliverables/download'
 import {
   ASK_TITLE_CHARS,
   askAboutText,
@@ -166,6 +166,12 @@ describe("the file a Deliverable hands over (shared with the core's preview)", (
     expect(deliverableFileUrl({ content_url: RAW, preview_url: CONTENT })).toBe(RAW)
     expect(deliverableFileUrl({ content_url: null, preview_url: CONTENT })).toBe(CONTENT)
     expect(deliverableFileUrl({ content_url: undefined, preview_url: null })).toBeNull()
+  })
+
+  it("downloads the file's bytes: a text file's content route (JSON for the code viewer) becomes its raw route", () => {
+    expect(deliverableDownloadUrl({ content_url: RAW, preview_url: CONTENT })).toBe(RAW)
+    expect(deliverableDownloadUrl({ content_url: null, preview_url: CONTENT })).toBe('/api/workspaces/ws-1/files/raw?path=notes.md')
+    expect(deliverableDownloadUrl({ content_url: undefined, preview_url: null })).toBeNull()
   })
 
   it("saves under the file's own name, else the last segment of its path", () => {

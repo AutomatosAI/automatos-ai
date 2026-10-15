@@ -5,7 +5,7 @@ import { useId } from 'react'
 
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { deliverableFilename, deliverableFileUrl } from '@/lib/deliverables/download'
+import { deliverableDownloadUrl, deliverableFilename, DOWNLOAD_FAILED } from '@/lib/deliverables/download'
 import { askAboutText, madeBy, sourceLabel } from '@/lib/play/detail'
 import { draftHref } from '@/lib/play/draft'
 import { typeLabel } from '@/lib/play/shelf'
@@ -19,8 +19,9 @@ import styles from './detail-panel.module.css'
  * this (a new chat with the Deliverable named in its message box: the core has
  * no way to attach one to a message, so the words alone, through
  * /chat?draft=, which Play's chat reads), Download when it has a file (the
- * core's authenticated download), and About this Deliverable: its type, when
- * it was made, by which agent, and where it came from (the core's source_type).
+ * core's authenticated download of the file's bytes, deliverableDownloadUrl),
+ * and About this Deliverable: its type, when it was made, by which agent, and
+ * where it came from (the core's source_type).
  */
 
 export const ASK_AUTO = 'Ask Auto about this'
@@ -57,8 +58,8 @@ export function DetailPanel({ deliverable, kind, title, date }: DetailPanelProps
 }
 
 function DownloadButton({ deliverable }: { readonly deliverable: Deliverable }) {
-  const { download, downloading } = useApiFileDownload()
-  const url = deliverableFileUrl(deliverable)
+  const { download, downloading } = useApiFileDownload(DOWNLOAD_FAILED)
+  const url = deliverableDownloadUrl(deliverable)
   if (!url) return null
   return (
     <button

@@ -37,6 +37,13 @@ export const SHELF_FILTERS: readonly ShelfFilter[] = [
 /** The type a Deliverable with none is shown as. */
 export const DEFAULT_KIND = 'document'
 
+/**
+ * How often the open shelf asks for its pages again while the tab is visible
+ * (P260-FX-12, M38): a Deliverable a running Mission files lands, and Auto
+ * celebrates it, without a refocus or a navigation.
+ */
+export const SHELF_REFRESH_MS = 30_000
+
 /** Badge words that aren't the type with a capital (mock 04 says "Slides"). */
 const KIND_LABELS: Readonly<Record<string, string>> = { slide: 'Slides', blog_post: 'Blog post' }
 
@@ -100,8 +107,6 @@ export type ShelfView =
       readonly status: 'ready'
       readonly items: readonly Deliverable[]
       readonly total: number
-      /** A later page answered success: false: the loaded list stays, Load more says so. */
-      readonly moreFailed: boolean
     }
 
 /** What useDeliverables(filters) gives the shelf: react-query's infinite result, read only. */
@@ -117,24 +122,14 @@ function uniqueById(pages: readonly DeliverableListResponse[]): readonly Deliver
 }
 
 /**
- * The shelf's state from the list query. The list endpoint answers 200 with
- * success: false when it fails (DeliverableService.list_deliverables), so each
- * page is read for that as well as the query for an HTTP failure: a failed
- * first page is the error state, never "nothing here yet"; a later page that
- * answered success: false keeps the list. A failed background refetch keeps
- * the list on screen too (react-query keeps the data).
+ * The shelf's state from the list query. A list page that answers
+ * success: false is the query's error (useDeliverables throws it), never a
+ * page: with no page loaded that is the error state, never "nothing here yet";
+ * once pages are loaded they stay on screen through a failed refetch or a
+ * failed Load more (react-query keeps the data), with the latest total.
  */
 export function shelfView(query: ShelfQuery): ShelfView {
   const pages = query.data?.pages ?? []
-  const [first] = pages
-  if (!first) return query.isError ? { status: 'failed' } : { status: 'loading' }
-  if (first.success === false) return { status: 'failed' }
-  const loaded = pages.filter((page) => page.success !== false)
-  const total = loaded[loaded.length - 1].total
-  return { status: 'ready', items: uniqueById(loaded), total, moreFailed: loaded.length < pages.length }
-}
-
-/** The first failure's own text, for the log only: the shelf never shows the backend's words. */
-export function failureDetail(pages: readonly DeliverableListResponse[] | undefined): string | null {
-  return pages?.find((page) => page.success === false)?.error ?? null
+  if (pages.length === 0) return query.isError ? { status: 'failed' } : { status: 'loading' }
+  return { status: 'ready', items: uniqueById(pages), total: pages[pages.length - 1].total }
 }

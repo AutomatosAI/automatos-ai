@@ -6,6 +6,7 @@ import { PLAY_MARKDOWN_COMPONENTS } from '@/components/play/chat/play-markdown'
 import { MarkdownView } from '@/components/shared/markdown-view'
 import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
+import { DOWNLOAD_FAILED, fileDownloadUrl } from '@/lib/deliverables/download'
 import { type ContentView, unsupportedMessage } from '@/lib/play/detail'
 
 import styles from './deliverable-content.module.css'
@@ -22,7 +23,8 @@ import page from './deliverable-detail.module.css'
  *   path the core's FilePreview loads them by (a blob: URL, so an SVG's
  *   scripts never run in its <img>);
  * - anything else as Play's file card, with the core's download
- *   (useApiFileDownload: the API client's auth, never a plain link).
+ *   (useApiFileDownload: the API client's auth, never a plain link) of the
+ *   file's bytes (fileDownloadUrl: never a text file's JSON content route).
  */
 
 export const TRUNCATED = 'This is the first part: the file is too long to show here in full.'
@@ -112,8 +114,8 @@ interface FileCardProps {
 
 /** Nothing to show here: what the file is, and Download when it has one. */
 function FileCard({ message, url, filename }: FileCardProps) {
-  const { download, downloading } = useApiFileDownload()
-  const file = url
+  const { download, downloading } = useApiFileDownload(DOWNLOAD_FAILED)
+  const file = url ? fileDownloadUrl(url) : null
   return (
     <div className={styles.unavailable}>
       <p className={page.note}>{message}</p>

@@ -59,7 +59,7 @@ export function ShelfBody({ view, filter, paging, now }: ShelfBodyProps) {
           <ShelfCard key={deliverable.id} deliverable={deliverable} now={now} newest={index === 0} />
         ))}
       </ul>
-      <More paging={{ ...paging, moreFailed: paging.moreFailed || view.moreFailed }} />
+      <More paging={paging} />
     </>
   )
 }
