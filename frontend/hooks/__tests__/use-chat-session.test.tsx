@@ -22,7 +22,7 @@ vi.mock('@/components/workspace-provider', () => ({ useWorkspaceOptional: () => 
 const chatApi = vi.hoisted(() => ({ getChatSession: vi.fn(), putChatSession: vi.fn() }))
 vi.mock('@/lib/chat/api', () => chatApi)
 
-import { useChatSessionHydration } from '@/hooks/use-chat-session'
+import { useChatScope, useChatSessionHydration } from '@/hooks/use-chat-session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 
 /** The server copy a fresh account has: never written. */
@@ -82,5 +82,40 @@ describe('useChatSessionHydration while the workspace loads', () => {
     const key = chatSessionKey(SECOND.id, ids.user)
     await waitFor(() => expect(hook.result.current).toEqual({ key, hydrated: true }))
     expect(useChatSessionStore.getState().key).toBe(key)
+  })
+})
+
+// P260-FX-10 (M45): Play's history caches are keyed by the same scope the session binds under.
+describe('useChatScope', () => {
+  it("is null until the workspace's first load, then the session key", () => {
+    scope.workspace = { workspace: null, isLoading: true }
+    const hook = renderHook(() => useChatScope())
+    expect(hook.result.current).toBeNull()
+    scope.workspace = { workspace: FIRST, isLoading: false }
+    hook.rerender()
+    expect(hook.result.current).toBe(chatSessionKey(FIRST.id, ids.user))
+  })
+
+  it('names the account: another user, or another workspace, is another scope', () => {
+    scope.workspace = { workspace: FIRST, isLoading: false }
+    const hook = renderHook(() => useChatScope())
+    const first = hook.result.current
+    ids.user = 'u-2'
+    try {
+      hook.rerender()
+      expect(hook.result.current).toBe(chatSessionKey(FIRST.id, 'u-2'))
+      expect(hook.result.current).not.toBe(first)
+    } finally {
+      ids.user = 'u-1'
+    }
+    scope.workspace = { workspace: SECOND, isLoading: false }
+    hook.rerender()
+    expect(hook.result.current).toBe(chatSessionKey(SECOND.id, ids.user))
+  })
+
+  it('is the key the session hydrates under', async () => {
+    const hook = await hydratedIn(FIRST)
+    const scoped = renderHook(() => useChatScope())
+    expect(scoped.result.current).toBe(hook.result.current.key)
   })
 })

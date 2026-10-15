@@ -8,6 +8,7 @@ import { type AutoMascotDriver, type BackendStatus, useAutoMascot } from '@/hook
 import { type BackendConnection, useBackendHealth } from '@/hooks/use-backend-health'
 import type { PlayConversationView } from '@/hooks/use-play-conversation'
 import { type PlayTurn, usePlayTurn } from '@/hooks/use-play-turn'
+import { useRefreshHistoryOnTurnEnd } from '@/hooks/use-refresh-history-on-turn-end'
 import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { usePageContext } from '@/lib/page-context'
 import type { ComposerFill } from '@/lib/play/draft'
@@ -78,6 +79,7 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
       useChatSessionStore.getState().chatIdAssigned(chatId)
     },
   })
+  useRefreshHistoryOnTurnEnd(chat.status)
   const auto = useAutoMascot({
     status: chat.status,
     errorCode: chat.errorCode,

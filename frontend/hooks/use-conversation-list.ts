@@ -2,6 +2,8 @@
 
 import { useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useChatScope } from '@/hooks/use-chat-session'
+import { CHAT_HISTORY_QUERY_PREFIX } from '@/hooks/use-refresh-history-on-turn-end'
 import { getChatHistory } from '@/lib/chat/api'
 import type { Chat } from '@/types'
 
@@ -10,12 +12,14 @@ import type { Chat } from '@/types'
  * (lib/chat/api.ts), newest activity first, at most CONVERSATION_LIMIT; the
  * page's search filters what was loaded. Ported from Automatos Play's
  * useConversations onto react-query. A failed load is logged here with its
- * detail; the page says only that it failed, with Try again.
+ * detail; the page says only that it failed, with Try again. The cache is the
+ * account's own (useChatScope), asked again each time the page opens and after
+ * every turn (useRefreshHistoryOnTurnEnd): P260-FX-10.
  */
 
 /** The history's page size. */
 export const CONVERSATION_LIMIT = 50
-export const CONVERSATION_LIST_QUERY_KEY = ['chat-history', 'conversations'] as const
+export const CONVERSATION_LIST_QUERY_KEY = [...CHAT_HISTORY_QUERY_PREFIX, 'conversations'] as const
 
 export type ConversationListState =
   | { readonly status: 'loading' }
@@ -32,9 +36,13 @@ async function loadConversations(limit: number): Promise<Chat[]> {
 }
 
 export function useConversationList(limit: number = CONVERSATION_LIMIT): ConversationListState {
+  const scope = useChatScope()
   const query = useQuery({
-    queryKey: [...CONVERSATION_LIST_QUERY_KEY, limit],
+    queryKey: [...CONVERSATION_LIST_QUERY_KEY, scope, limit],
     queryFn: () => loadConversations(limit),
+    enabled: scope !== null,
+    // A conversation started since the page was last open is on it when it opens again.
+    refetchOnMount: 'always',
   })
   const { refetch } = query
   const retry = useCallback(() => {

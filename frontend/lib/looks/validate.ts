@@ -1,3 +1,5 @@
+import { UNSAFE_TEXT } from '@/lib/text/plain-line'
+
 import { ACCENTS, GROUNDS, LIGHTS, SHELLS, TYPE_STYLES, isKeyOf } from './catalogue'
 import {
   GLOW_MAX,
@@ -22,12 +24,7 @@ const ECHO_MAX = 40
 const UNKNOWN_FIELDS_NAMED = 5
 const ECHO_REPLACEMENT = '?'
 
-/**
- * Characters that don't belong in a one-line name: C0 and C1 controls, line and
- * paragraph separators, bidi overrides and isolates, zero-width spaces and the
- * BOM. ZWJ and ZWNJ stay: emoji sequences and some scripts need them.
- */
-const UNSAFE_TEXT = /[\p{Cc}\p{Zl}\p{Zp}\u061C\u200B\u200E\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/u
+/** Every character that doesn't belong in a one-line name (lib/text/plain-line.ts). */
 const UNSAFE_TEXT_ALL = new RegExp(UNSAFE_TEXT.source, 'gu')
 /** Blank to the eye: spaces, format characters and the Hangul fillers. */
 const INVISIBLE = /[\p{Z}\p{Cf}\u115F\u1160\u3164\uFFA0]/gu
