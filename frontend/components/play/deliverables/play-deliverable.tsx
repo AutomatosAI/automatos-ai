@@ -23,7 +23,9 @@ import { TypeBadge } from './shelf-card'
  * (deliverable-content.tsx) and the side panel (detail-panel.tsx); or says the
  * Deliverable isn't on the shelf (the backend's 404), or that it couldn't be
  * opened, with Try again. No mascot here: the Deliverable is the hero, and
- * Auto comes back with "Ask Auto about this".
+ * Auto comes back with "Ask Auto about this". Opening and "not on your shelf"
+ * share one status paragraph that stays for the page's life, so a screen
+ * reader hears the change from one to the other (P260-FX-24, M22).
  *
  * The shelf switch (PlayShelf) renders it for the core's own
  * /deliverables?deliverable=<id> (K8), in place of DeliverableDeepLink's sheet.
@@ -36,6 +38,8 @@ export const BACK_TO_SHELF = 'Shelf'
 export const TRY_AGAIN = 'Try again'
 const SHELF_HREF = '/deliverables'
 const NOT_FOUND = 404
+/** sr-only: the Tailwind utility the core uses; the empty status line takes no room on the page. */
+const SCREEN_READER_ONLY = 'sr-only'
 
 export interface PlayDeliverableProps {
   /** A Deliverable id the shelf switch checked against the id pattern. */
@@ -75,6 +79,12 @@ export function detailState(query: DetailQuery): DetailState {
   return query.data ? { status: 'failed' } : { status: 'loading' }
 }
 
+/** The page's status line: opening, or not on the shelf; empty once there is a Deliverable or an alert. */
+function statusNote(state: DetailState): string {
+  if (state.status === 'loading') return OPENING
+  return state.status === 'missing' ? NOT_ON_SHELF : ''
+}
+
 /** The backend's own words for a failure go to the log, never the screen. */
 function useLogFailure(id: string, query: DetailQuery) {
   const { isError, error } = query
@@ -89,6 +99,8 @@ export function PlayDeliverable({ id, now }: PlayDeliverableProps) {
   const query = useDeliverable(id, true)
   useLogFailure(id, query)
   const retry = () => void query.refetch()
+  const state = detailState(query)
+  const note = statusNote(state)
   return (
     <PageColumns>
       <div className={styles.page}>
@@ -96,7 +108,10 @@ export function PlayDeliverable({ id, now }: PlayDeliverableProps) {
           <span aria-hidden="true">← </span>
           {BACK_TO_SHELF}
         </Link>
-        <DetailBody state={detailState(query)} retry={retry} now={now ?? new Date()} />
+        <p className={note ? styles.note : SCREEN_READER_ONLY} role="status">
+          {note}
+        </p>
+        <DetailBody state={state} retry={retry} now={now ?? new Date()} />
       </div>
     </PageColumns>
   )
@@ -108,15 +123,8 @@ interface DetailBodyProps {
   readonly now: Date
 }
 
+/** The failed state's alert, or the Deliverable; opening and missing are the status line's. */
 function DetailBody({ state, retry, now }: DetailBodyProps) {
-  if (state.status === 'loading') {
-    return (
-      <p className={styles.note} role="status">
-        {OPENING}
-      </p>
-    )
-  }
-  if (state.status === 'missing') return <p className={styles.note}>{NOT_ON_SHELF}</p>
   if (state.status === 'failed') {
     return (
       <div className={styles.failed} role="alert">
@@ -129,7 +137,7 @@ function DetailBody({ state, retry, now }: DetailBodyProps) {
       </div>
     )
   }
-  return <DeliverableView deliverable={state.deliverable} now={now} />
+  return state.status === 'ready' ? <DeliverableView deliverable={state.deliverable} now={now} /> : null
 }
 
 interface DeliverableViewProps {

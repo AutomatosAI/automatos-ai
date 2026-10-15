@@ -2,6 +2,7 @@
 
 import { type ChangeEvent, type FormEvent, useEffect, useId, useRef, useState } from 'react'
 
+import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
 import { importLook, readLookFile } from '@/lib/looks/transfer'
 import type { ValidationResult } from '@/lib/looks/types'
 
@@ -16,7 +17,8 @@ import styles from './manage.module.css'
  * byte is read, JSON, validateLook, a fresh id). A valid look is added to the
  * saved looks and picked; an invalid one adds nothing and lists transfer's
  * reasons in words. The success says when this browser isn't keeping looks
- * (LookNotice, M98).
+ * (LookNotice, M98). Each outcome is numbered (useNoticeSeq), so the same
+ * import or the same refusal twice is announced again (M22).
  */
 
 export const IMPORT_LABEL = 'Import a look'
@@ -32,7 +34,8 @@ const FILE_ACCEPT = '.json,application/json'
 function useImport() {
   const { saved, saveLook, setLook } = useLook()
   const [text, setText] = useState('')
-  const [notice, setNotice] = useState<Notice | null>(null)
+  const [notice, setNotice] = useState<Told<Notice> | null>(null)
+  const stamp = useNoticeSeq()
   // Reading a file takes a moment: its fresh id must come from the saved looks after the read.
   const savedNow = useRef(saved)
   useEffect(() => {
@@ -42,11 +45,11 @@ function useImport() {
   const add = (imported: ValidationResult): boolean => {
     const result = imported.ok ? saveLook(imported.look) : imported
     if (!result.ok) {
-      setNotice(failed(NOT_ADDED, result.errors))
+      setNotice(stamp(failed(NOT_ADDED, result.errors)))
       return false
     }
     setLook(result.look)
-    setNotice(storedNotice(`Added ${result.look.name} to your Looks.`))
+    setNotice(stamp(storedNotice(`Added ${result.look.name} to your Looks.`)))
     return true
   }
 

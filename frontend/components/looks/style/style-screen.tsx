@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import { useLook } from '@/components/looks/look-provider'
 import { PLAY_ONLY_HEADING } from '@/components/looks/play-only-route'
+import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
 import { rootBlock } from '@/lib/looks/style'
 
 import { StyleColour } from './style-colour'
@@ -27,7 +28,9 @@ import styles from './style.module.css'
  * Until the stored look is read the frame shows only the heading and is
  * aria-busy, so the sheet never describes Ember in place of the user's look
  * (M72). Copy tokens' block names each face itself (lib/looks/style.ts
- * rootBlock), so it works outside Automatos.
+ * rootBlock), so it works outside Automatos. Each copy's outcome is numbered
+ * (useNoticeSeq), so copying twice, or the same refusal twice, is announced
+ * again (M22).
  */
 
 /** The sheet's heading, and the title of the note /looks/style shows outside Play (PlayOnlyRoute). */
@@ -40,37 +43,43 @@ export const COPY_FAILED = "The tokens weren't copied. The browser blocked the c
 export const STYLE_SHEET_NOTE = 'The style sheet is part of the Play theme.'
 
 /** What the last copy did, kept with the block it copied: a change of look hides it. */
-type CopyNotice =
+type CopyOutcome =
   | { readonly kind: 'done'; readonly block: string; readonly text: string }
   | { readonly kind: 'failed'; readonly block: string }
+
+type CopyNotice = Told<CopyOutcome>
 
 function useCopyTokens() {
   const { look } = useLook()
   const block = rootBlock(look)
   const [notice, setNotice] = useState<CopyNotice | null>(null)
+  const stamp = useNoticeSeq()
 
   const copy = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(block)
-      setNotice({ kind: 'done', block, text: `Copied ${look.name}'s tokens as a :root block.` })
+      setNotice(stamp<CopyOutcome>({ kind: 'done', block, text: `Copied ${look.name}'s tokens as a :root block.` }))
     } catch (error) {
       console.error('[looks] copying the tokens failed', error)
-      setNotice({ kind: 'failed', block })
+      setNotice(stamp<CopyOutcome>({ kind: 'failed', block }))
     }
   }
 
   return { notice: notice?.block === block ? notice : null, copy }
 }
 
-/** A success goes to a polite live region that is always present; a failure is an alert. */
+/**
+ * A success goes to a polite live region that is always present, its words in a span keyed by
+ * the copy's seq; a failure is an alert keyed the same way: a repeat is a new node, told again.
+ */
 function CopyResult({ notice }: { readonly notice: CopyNotice | null }) {
   return (
     <>
       <p className={styles.done} aria-live="polite">
-        {notice?.kind === 'done' ? notice.text : ''}
+        {notice?.kind === 'done' && <span key={notice.seq}>{notice.text}</span>}
       </p>
       {notice?.kind === 'failed' && (
-        <p className={styles.failed} role="alert">
+        <p key={notice.seq} className={styles.failed} role="alert">
           <span aria-hidden="true">✕</span> {COPY_FAILED}
         </p>
       )}

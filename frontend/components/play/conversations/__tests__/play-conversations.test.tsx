@@ -7,6 +7,8 @@
  * states; and the page sending anyone not on Play at >= 1024 px to /chat.
  * Roles, attributes and text only (CSS modules are proxies under css: false).
  * "Now" is pinned to a local date, so it passes in any time zone.
+ * P260-FX-24 (M22): one status line under the search box, there for the
+ * page's life, says the search's result (the count, or that nothing matches).
  */
 import React from 'react'
 import { cleanup, render, screen, within } from '@testing-library/react'
@@ -45,10 +47,13 @@ import { CONVERSATION_LIMIT } from '@/hooks/use-conversation-list'
 import {
   CONVERSATIONS_TITLE,
   LIST_FAILED,
+  LOADING_LIST,
   NEW_CHAT,
   NO_CONVERSATIONS,
   PlayConversations,
   SEARCH_LABEL,
+  matchLine,
+  noMatchLine,
 } from '../play-conversations'
 
 const NOW = new Date(2026, 9, 14, 15, 30) // Wed 14 Oct 2026, 15:30
@@ -150,6 +155,35 @@ describe('PlayConversations — the list', () => {
 
     await user.clear(search)
     expect(screen.getAllByRole('region')).toHaveLength(3)
+  })
+
+  it('says the search result in one status line under the search box: the count, or that nothing matches (P260-FX-24, M22)', async () => {
+    const { user } = renderPage()
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent(LOADING_LIST)
+    await screen.findByRole('region', { name: 'Today' })
+    const search = screen.getByRole('searchbox', { name: SEARCH_LABEL })
+    // The same paragraph, kept from loading on: a screen reader hears each change to it.
+    expect(screen.getByRole('status')).toBe(status)
+    expect(search.nextElementSibling).toBe(status)
+    expect(status).toHaveTextContent('4 conversations.')
+
+    await user.type(search, 'the')
+    expect(screen.getAllByRole('link')).toHaveLength(2)
+    expect(screen.getByRole('status')).toBe(status)
+    expect(status).toHaveTextContent('2 conversations match “the”.')
+    expect(status).toHaveTextContent(matchLine(2, 'the'))
+
+    await user.clear(search)
+    await user.type(search, 'laptop')
+    expect(status).toHaveTextContent('1 conversation matches “laptop”.')
+
+    await user.clear(search)
+    await user.type(search, 'lisbon')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toBe(status)
+    expect(status).toHaveTextContent('No conversation titles match “lisbon”.')
+    expect(status).toHaveTextContent(noMatchLine('lisbon'))
   })
 
   it("heads the list's own column with the title and New chat, over the search box, as in the Play app (P260-FX-14)", async () => {

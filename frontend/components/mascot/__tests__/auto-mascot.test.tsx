@@ -5,8 +5,10 @@
  * attribute (the player swaps at the clip boundary), and an accessible name
  * saying what Auto is doing. jsdom plays no media: the tests fire the media
  * events by hand, and play() is a mock that resolves (AutoMascot starts each
- * clip itself, to hear when the browser blocks autoplay: P260-FX-15). Roles,
- * attributes and text only (CSS modules are proxies).
+ * clip itself, to hear when the browser blocks autoplay: P260-FX-15). A
+ * decorative Auto (the style sheet's specimens) is hidden from assistive
+ * technology (P260-FX-24, M74). Roles, attributes and text only (CSS modules
+ * are proxies).
  */
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -264,6 +266,21 @@ describe('AutoMascot: what Auto is doing, in words', () => {
     rerender(<AutoMascot state="hello" showCaption={false} />)
     expect(screen.getByRole('img', { name: "Hi, I'm Auto." })).toBeInTheDocument()
     expect(screen.queryByText("Hi, I'm Auto.")).toBeNull()
+  })
+
+  it('is hidden from assistive technology when decorative: no image role, no name (P260-FX-24, M74)', () => {
+    const { container } = render(<AutoMascot state="oops" showCaption={false} decorative />)
+    const stage = screen.getByTestId('auto-stage')
+    expect(stage).not.toHaveAttribute('role')
+    expect(stage).not.toHaveAttribute('aria-label')
+    expect(container.firstElementChild).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.queryByRole('img', { hidden: true, name: 'Something went wrong' })).toBeNull()
+  })
+
+  it('keeps his image role and name by default', () => {
+    const { container } = render(<AutoMascot state="oops" showCaption={false} />)
+    expect(screen.getByRole('img', { name: 'Something went wrong' })).toBe(screen.getByTestId('auto-stage'))
+    expect(container.firstElementChild).not.toHaveAttribute('aria-hidden')
   })
 
   it('tells the page glow what he is showing (app/play-theme.css reads data-glow)', () => {

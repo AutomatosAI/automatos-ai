@@ -1,5 +1,7 @@
 'use client'
 
+import type { Told } from '@/hooks/use-notice-seq'
+
 import { useLook } from './look-provider'
 import styles from './manage.module.css'
 
@@ -12,6 +14,10 @@ import styles from './manage.module.css'
  * A success that changed the looks (`stored`) adds LOOKS_NOT_KEPT while
  * storage isn't keeping them (useLook().persisted), including when the write
  * after the action is the one refused (M98).
+ * Every notice carries a `seq` (hooks/use-notice-seq.ts): the words sit in a
+ * <span key={seq}> inside the polite region and the alert is keyed by it, so
+ * the same outcome twice (the same import, the same failure) is a new node a
+ * screen reader announces again, never an unchanged text it skips (M22).
  */
 
 export const LOOKS_NOT_KEPT = "This browser isn't keeping looks, so it lasts until you close this tab."
@@ -30,17 +36,21 @@ export function storedNotice(text: string): Notice {
   return { kind: 'done', text, stored: true }
 }
 
-export function LookNotice({ notice }: { readonly notice: Notice | null }) {
+export function LookNotice({ notice }: { readonly notice: Told<Notice> | null }) {
   const { persisted } = useLook()
   const notKept = notice?.kind === 'done' && notice.stored === true && !persisted
   return (
     <>
       <p className={styles.done} aria-live="polite">
-        {notice?.kind === 'done' ? notice.text : ''}
-        {notKept ? ` ${LOOKS_NOT_KEPT}` : ''}
+        {notice?.kind === 'done' && (
+          <span key={notice.seq}>
+            {notice.text}
+            {notKept ? ` ${LOOKS_NOT_KEPT}` : ''}
+          </span>
+        )}
       </p>
       {notice?.kind === 'failed' && (
-        <div className={styles.errors} role="alert">
+        <div key={notice.seq} className={styles.errors} role="alert">
           <p className={styles.errorTitle}>{notice.title}</p>
           <ul className={styles.errorList}>
             {notice.errors.map((error, index) => (

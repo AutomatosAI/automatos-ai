@@ -17,7 +17,9 @@ import styles from './style.module.css'
  * ring he takes in this look (lib/mascot/ring.ts) and its colour in words.
  * Play drew stand-ins; here each slot is the real AutoMascot (T-003). He is a
  * specimen, not the page's Auto, so his stages leave the page glow alone
- * (lightsPage={false}) and no caption speaks: the slot names the state. The
+ * (lightsPage={false}) and no caption speaks: the slot names the state, so he
+ * is decorative (aria-hidden, no image named by a live caption such as
+ * 'Something went wrong': P260-FX-24, M74). The
  * slots show each state's still until Play Auto's states plays the 12 clips
  * (P260-FX-15: 12 clips at once are megabytes and 12 alpha decoders); the
  * toggle is off by default and, as Play the motion is, off under reduced motion.
@@ -47,7 +49,7 @@ export function StyleMascots({ look }: { readonly look: Look }) {
         {mascotSlots(look).map((slot) => (
           <li key={slot.state} className={gallery.slotItem}>
             <div className={gallery.slotStage}>
-              <AutoMascot state={slot.state} showCaption={false} lightsPage={false} playing={playing} />
+              <AutoMascot state={slot.state} showCaption={false} lightsPage={false} playing={playing} decorative />
             </div>
             <span className={gallery.slotName}>{slot.state}</span>
             <span className={gallery.slotWhen}>{slot.when}</span>

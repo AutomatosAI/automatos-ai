@@ -20,7 +20,9 @@ import styles from './auto-mascot.module.css'
  * region, so a screen reader hears what he is doing whenever it changes. A
  * browser that blocks muted autoplay gets the stills too, so the one-shots still
  * end on a timer (P260-FX-15). The clips live in public/auto/ (committed), so
- * there is no stand-in for missing files.
+ * there is no stand-in for missing files. A `decorative` Auto (a specimen whose
+ * page names his state in its own words) is hidden from assistive technology:
+ * no image role, no name, no caption read out (P260-FX-24, M74).
  */
 
 export type AutoMascotSize = 'small' | 'regular' | 'large'
@@ -48,6 +50,12 @@ export interface AutoMascotProps {
    * 12 states and plays their clips only when asked (StyleMascots).
    */
   readonly playing?: boolean
+  /**
+   * True where the page already names the state in visible words (the style
+   * sheet's slots): he is aria-hidden, with no role and no name, so a specimen
+   * is never announced as a live status ('Something went wrong').
+   */
+  readonly decorative?: boolean
 }
 
 /** play()'s refusal when the browser blocks autoplay. */
@@ -64,6 +72,7 @@ export function AutoMascot({
   showCaption = true,
   lightsPage = true,
   playing = true,
+  decorative = false,
 }: AutoMascotProps) {
   const reducedMotion = usePrefersReducedMotion()
   const format = useVideoFormat()
@@ -80,12 +89,12 @@ export function AutoMascot({
   const onVideoBlocked = useCallback(() => setVideoFailed(true), [])
 
   return (
-    <div className={styles.auto} data-size={size}>
+    <div className={styles.auto} data-size={size} aria-hidden={decorative ? true : undefined}>
       {/* data-glow: app/play-theme.css lights the page behind everything from it (body:has). */}
       <div
         className={styles.stage}
-        role="img"
-        aria-label={label}
+        role={decorative ? undefined : 'img'}
+        aria-label={decorative ? undefined : label}
         data-testid="auto-stage"
         data-ring={ringTone(player.showing)}
         data-glow={lightsPage ? pageGlow(player.showing) : undefined}

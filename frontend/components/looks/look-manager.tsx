@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
 import { asDuplicate, baseLook, isEdited, isSavedLook } from '@/lib/looks/editor'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
 import { LOOK_FILE_TYPE, lookFileName, lookJson } from '@/lib/looks/transfer'
@@ -28,7 +29,8 @@ import styles from './manage.module.css'
  * Save, Duplicate and Rename say when this
  * browser isn't keeping looks (LookNotice, M98); Export can't see whether the
  * browser saved the file, so it says the download started and offers Copy
- * JSON (M71).
+ * JSON (M71). Each telling is numbered (useNoticeSeq), so Copy JSON twice or
+ * the same failure twice is announced again (M22).
  */
 
 export const MANAGE_LABEL = 'This look'
@@ -146,7 +148,7 @@ function useManage(tell: Tell, closeForm: () => void, returnFocus: ReturnFocus) 
 export function LookManager() {
   const { look, saved } = useLook()
   const [mode, setMode] = useState<Mode | null>(null)
-  const [notice, setNotice] = useState<ForLook<Notice> | null>(null)
+  const [notice, setNotice] = useState<ForLook<Told<Notice>> | null>(null)
   const [shownFor, setShownFor] = useState(look.id)
   const headingId = useId()
 
@@ -158,7 +160,8 @@ export function LookManager() {
     if (notice !== null && notice.id !== look.id) setNotice(null)
   }
 
-  const tell: Tell = (id, value) => setNotice({ id, value })
+  const stamp = useNoticeSeq()
+  const tell: Tell = (id, value) => setNotice({ id, value: stamp(value) })
   const close = () => setMode(null)
   const open = (value: Mode) => {
     setNotice(null)

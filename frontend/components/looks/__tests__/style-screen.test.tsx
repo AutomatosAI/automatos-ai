@@ -14,6 +14,10 @@
  * never says 'reduced motion' before the browser has answered (M72).
  * Switch to Play hands focus to the sheet's heading as the note goes
  * (P260-FX-22, M21).
+ * The 12 specimens are decorative: no image named with a live status caption
+ * ('Something went wrong'); each slot's visible name says the state
+ * (P260-FX-24, M74). Copy tokens twice, or refused twice, is announced twice:
+ * a new node each time (M22).
  * Roles, attributes, inline custom properties and text only: CSS modules are
  * proxies.
  */
@@ -271,6 +275,20 @@ describe('the style sheet under Play, on Ember', () => {
     expect(mascot.getAllByText(`ring accent · ${ACCENTS.molten.hex}`)).toHaveLength(4)
   })
 
+  it('names no specimen with a live status caption: the 12 slots name the states, Auto is decorative (P260-FX-24, M74)', async () => {
+    renderPage()
+    await ready()
+    const region = mascotRegion()
+    expect(screen.queryByRole('img', { name: 'Something went wrong' })).toBeNull()
+    expect(screen.queryByRole('img', { name: "Automatos isn't running" })).toBeNull()
+    expect(within(region).queryAllByRole('img')).toEqual([])
+    for (const state of MASCOT_STATES) expect(within(region).getByText(state)).toBeInTheDocument()
+    const stages = within(region).getAllByTestId('auto-stage')
+    expect(stages).toHaveLength(MASCOT_STATES.length)
+    expect(stages.filter((stage) => stage.hasAttribute('role') || stage.hasAttribute('aria-label'))).toEqual([])
+    expect(stages.filter((stage) => stage.closest('[aria-hidden="true"]') === null)).toEqual([])
+  })
+
   it("shows the 12 states as lazy stills, and Play Auto's states plays their 12 clips (P260-FX-15)", async () => {
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     renderPage()
@@ -353,6 +371,36 @@ describe('Copy tokens', () => {
     pick(DAYLIGHT)
     await ready(DAYLIGHT)
     expect(screen.queryByText("Copied Ember's tokens as a :root block.")).toBeNull()
+  })
+
+  it('says it again when the same copy is made twice: a new node in the polite region (P260-FX-24, M22)', async () => {
+    const writeText = vi.fn(async (_text: string) => undefined)
+    stubClipboard(writeText)
+    renderPage()
+    await ready()
+    const copied = "Copied Ember's tokens as a :root block."
+    fireEvent.click(screen.getByRole('button', { name: COPY_TOKENS }))
+    const first = await screen.findByText(copied)
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_TOKENS }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(first.isConnected).toBe(false))
+    expect(screen.getByText(copied).closest('[aria-live="polite"]')).not.toBeNull()
+  })
+
+  it('puts the alert in again when the browser refuses the clipboard twice (P260-FX-24, M22)', async () => {
+    stubClipboard(async () => {
+      throw new DOMException('Write permission denied.', 'NotAllowedError')
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: COPY_TOKENS }))
+    const first = await screen.findByRole('alert')
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_TOKENS }))
+    await waitFor(() => expect(first.isConnected).toBe(false))
+    expect(screen.getByRole('alert')).toHaveTextContent(COPY_FAILED)
   })
 
   it('says so when the browser blocks the clipboard', async () => {

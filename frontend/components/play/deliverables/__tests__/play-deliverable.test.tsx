@@ -10,7 +10,9 @@
  * shelf with a notice), and DeliverableDeepLink staying closed under Play. One
  * test runs the real hook over a mocked apiClient, to see the request on the
  * wire. Roles, attributes and text only (CSS modules are proxies under
- * css: false). "Now" is pinned to a local date.
+ * css: false). "Now" is pinned to a local date. Opening and "not on your
+ * shelf" are one status paragraph, kept from one to the other, so the change
+ * is announced (P260-FX-24, M22).
  */
 import React from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
@@ -87,7 +89,7 @@ import { askAboutText } from '@/lib/play/detail'
 import { DRAFT_PARAM } from '@/lib/play/draft'
 import { DOWNLOAD_FILE, PICTURE_FAILED, TRUNCATED, UNREADABLE } from '../deliverable-content'
 import { ABOUT, ASK_AUTO, DOWNLOAD, SOURCES } from '../detail-panel'
-import { NOT_ON_SHELF, OPEN_FAILED, PlayDeliverable, TRY_AGAIN } from '../play-deliverable'
+import { NOT_ON_SHELF, OPENING, OPEN_FAILED, PlayDeliverable, TRY_AGAIN } from '../play-deliverable'
 import { BAD_LINK, PlayShelf } from '../play-shelf'
 
 const NOW = new Date(2026, 9, 14, 16, 0) // Wed 14 Oct 2026, 16:00
@@ -385,6 +387,25 @@ describe('PlayDeliverable — loading and failures', () => {
     renderDetail()
     expect(screen.getByText(NOT_ON_SHELF)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: TRY_AGAIN })).toBeNull()
+  })
+
+  it("says a 404 in the page's status line (P260-FX-24, M22)", () => {
+    answer({ isError: true, error: Object.assign(new Error('Deliverable not found'), { status: 404 }) })
+    renderDetail()
+    expect(screen.getByRole('status')).toHaveTextContent(NOT_ON_SHELF)
+  })
+
+  it("turns the status line that said it was opening into 'not on your shelf': the same paragraph, so it is announced", () => {
+    answer({})
+    const { rerender } = renderDetail()
+    const status = screen.getByRole('status')
+    expect(status).toHaveTextContent(OPENING)
+
+    answer({ isError: true, error: Object.assign(new Error('Deliverable not found'), { status: 404 }) })
+    rerender(<PlayDeliverable id="d-laptop" now={NOW} />)
+    expect(screen.getByRole('status')).toBe(status)
+    expect(status).toHaveTextContent(NOT_ON_SHELF)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('shows an error with Try again (refetch) when it can not be opened, the backend words in the log only', async () => {

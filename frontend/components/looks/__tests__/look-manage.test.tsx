@@ -11,6 +11,10 @@
  * P260-FX-22 (M20): by keyboard, focus never falls to <body> when the control
  * just used goes (Save, Save name, Cancel, Keep it, Delete look), and Delete
  * moves it into its question, on Keep it.
+ *
+ * P260-FX-24 (M22): the same outcome twice is announced twice. A second
+ * identical success is a new node in the polite region, and a second identical
+ * failure puts the alert in again, so a screen reader never skips a repeat.
  */
 import React from 'react'
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
@@ -442,5 +446,52 @@ describe("When this browser isn't keeping looks (M98)", () => {
     } finally {
       stub.restore()
     }
+  })
+})
+
+describe('A repeat is announced again (P260-FX-24, M22)', () => {
+  const ADDED = 'Added My look 1 to your Looks.'
+
+  it("pasting the same JSON twice puts a new 'Added …' node in the polite region", async () => {
+    const user = userEvent.setup()
+    renderLooks()
+    await lookOnPage(EMBER)
+    await paste(user, lookJson(myLook()))
+    const first = importer().getByText(ADDED)
+
+    await paste(user, lookJson(myLook()))
+    const second = importer().getByText(ADDED)
+    expect(second).not.toBe(first)
+    expect(first.isConnected).toBe(false)
+    expect(second.closest('[aria-live="polite"]')).not.toBeNull()
+    expect(stored(KEYS.saved)).toEqual([myLook({ id: 'look-1' }), myLook({ id: 'look-2' })])
+  })
+
+  it('two identical bad pastes put the alert in again', async () => {
+    const user = userEvent.setup()
+    renderLooks()
+    await lookOnPage(EMBER)
+    await paste(user, '{ name: Ember')
+    const first = importer().getByRole('alert')
+    expect(first).toHaveTextContent(NOT_JSON)
+
+    await user.clear(importer().getByLabelText("Paste a Look's JSON"))
+    await paste(user, '{ name: Ember')
+    const second = importer().getByRole('alert')
+    expect(second).toHaveTextContent(NOT_JSON)
+    expect(second).not.toBe(first)
+    expect(first.isConnected).toBe(false)
+  })
+
+  it('Copy JSON twice says it twice: the second is a new node', async () => {
+    const user = userEvent.setup()
+    renderLooks()
+    await lookOnPage(EMBER)
+    await user.click(manage().getByRole('button', { name: 'Copy JSON' }))
+    const first = await manage().findByText('Copied the JSON.')
+
+    await user.click(manage().getByRole('button', { name: 'Copy JSON' }))
+    await waitFor(() => expect(first.isConnected).toBe(false))
+    expect(manage().getByText('Copied the JSON.').closest('[aria-live="polite"]')).not.toBeNull()
   })
 })
