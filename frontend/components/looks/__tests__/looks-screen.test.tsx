@@ -401,6 +401,6 @@ describe('Make it yours by keyboard', () => {
     const slider = screen.getByRole('slider', { name: 'Glow' })
     expect(slider).toHaveAttribute('aria-valuetext', '24%')
     expect(slider).toHaveAttribute('min', '0')
-    expect(slider).toHaveAttribute('max', '40')
+    expect(slider).toHaveAttribute('max', String(safeGlow('graphite', 'molten')))
   })
 })
