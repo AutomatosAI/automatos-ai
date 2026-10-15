@@ -8,6 +8,7 @@ import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
 import type { ChatSession } from '@/lib/chat/chat-session'
 import { type ComposerFill, DRAFT_PARAM, draftFrom } from '@/lib/play/draft'
+import { CHAT_HREF } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { usePlayChatStore } from '@/stores/play-chat-store'
 import type { Chat, ChatMessage } from '@/types'
@@ -28,7 +29,6 @@ import type { Chat, ChatMessage } from '@/types'
  */
 
 export const CHAT_ID_PARAM = 'chatId'
-export const CHAT_ROUTE = '/chat'
 export const CONVERSATION_GONE = 'That conversation is no longer available'
 
 export interface PlayConversationView {
@@ -58,7 +58,7 @@ export function chatUrlWithout(params: URLSearchParams | null, ...names: readonl
   const next = new URLSearchParams(params?.toString() ?? '')
   names.forEach((name) => next.delete(name))
   const query = next.toString()
-  return query ? `${CHAT_ROUTE}?${query}` : CHAT_ROUTE
+  return query ? `${CHAT_HREF}?${query}` : CHAT_HREF
 }
 
 export function draftView(serial: number): PlayConversationView {

@@ -8,6 +8,7 @@
 import type { WorkspaceExposure } from '@/components/workspace-provider'
 import { filterNavForEdition, navExposureForEdition } from '@/lib/auth-edition'
 import { isNavItemVisible } from '@/lib/nav-exposure'
+import { LOOKS_HREF } from '@/lib/ticket-links'
 import {
   STUDIO_MENU_FOOTER,
   STUDIO_MENU_PRIMARY,
@@ -46,7 +47,7 @@ export interface PlayNavAccess {
 /** Play's conversation list (T-006): right after Chat. */
 export const PLAY_CONVERSATIONS_ITEM: PlayNavItem = { id: 'conversations', label: 'Conversations', href: '/conversations' }
 /** Make it yours (T-008a): last, on its own. */
-export const PLAY_LOOK_ITEM: PlayNavItem = { id: 'looks', label: 'Look', href: '/looks' }
+export const PLAY_LOOK_ITEM: PlayNavItem = { id: 'looks', label: 'Look', href: LOOKS_HREF }
 const CONVERSATIONS_FOLLOW = 'chat'
 const LOOK_GROUP_ID = 'look'
 

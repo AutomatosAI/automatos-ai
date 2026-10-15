@@ -17,10 +17,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useUiStyle } from '@/contexts/ui-style-context'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
+import { LOOKS_HREF } from '@/lib/ticket-links'
 import { isUiStyle } from '@/lib/ui-style'
-
-/** PRD-260 K9: Play's look editor ("Make it yours"). */
-const LOOK_EDITOR_HREF = '/looks'
 
 /** PRD-260 K4: under Play the look's ground sets the tone, so the Tone items rest. */
 const TONE_SET_BY_LOOK = 'Set by your look'
@@ -49,7 +47,7 @@ function restingToneItem(noteId: string) {
 function CustomiseLookItem() {
   return (
     <DropdownMenuItem asChild>
-      <Link href={LOOK_EDITOR_HREF}>
+      <Link href={LOOKS_HREF}>
         <Palette className="mr-2 h-4 w-4" />
         Customise look…
       </Link>

@@ -1,3 +1,4 @@
+import { writeCookie } from '@/lib/cookies'
 import { UI_STYLE_COOKIE_MAX_AGE_S, type UiStyle } from '@/lib/ui-style'
 
 import type { GroundKey } from './catalogue'
@@ -32,13 +33,8 @@ export function playToneFor(style: UiStyle, toneCookie: string | null | undefine
   return style === 'play' ? parsePlayTone(toneCookie) : undefined
 }
 
-function writeToneCookie(value: string, maxAgeS: number): void {
-  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${PLAY_TONE_COOKIE}=${value}; Path=/; Max-Age=${maxAgeS}; SameSite=Lax${secure}`
-}
-
 export function writePlayToneCookie(tone: PlayTone): void {
-  writeToneCookie(tone, UI_STYLE_COOKIE_MAX_AGE_S)
+  writeCookie(PLAY_TONE_COOKIE, tone, UI_STYLE_COOKIE_MAX_AGE_S)
 }
 
 function hasPlayToneCookie(): boolean {
@@ -47,5 +43,5 @@ function hasPlayToneCookie(): boolean {
 
 /** Deletes the tone cookie; a no-op when there is none, so Classic and Studio loads write nothing. */
 export function clearPlayToneCookie(): void {
-  if (hasPlayToneCookie()) writeToneCookie('', COOKIE_EXPIRED_S)
+  if (hasPlayToneCookie()) writeCookie(PLAY_TONE_COOKIE, '', COOKIE_EXPIRED_S)
 }

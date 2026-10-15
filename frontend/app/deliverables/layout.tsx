@@ -3,9 +3,10 @@ import { DeliverableDeepLink } from '@/components/deliverables/deliverable-deep-
 import { PlayRouteSwitch } from '@/components/play/play-route-switch'
 import { PlayShelf } from '@/components/play/deliverables/play-shelf-lazy'
 import type { DeliverableTab } from '@/lib/deliverables/tabs'
+import { DELIVERABLES_HREF } from '@/lib/ticket-links'
 
 /** The Deliverables page under Play at >= 1024 px: Play's shelf (or one Deliverable) instead of the page (PRD-260 K7, K8). Not the explorer. */
-const PLAY_DELIVERABLES_PATHS = ['/deliverables']
+const PLAY_DELIVERABLES_PATHS = [DELIVERABLES_HREF]
 /** Links into one of the page's other sections: a tab (Blogs, Templates, Brand kit, Socials), a post, a type drill-down. */
 const CORE_DELIVERABLES_PARAMS = ['tab', 'post', 'artifact_type']
 /**

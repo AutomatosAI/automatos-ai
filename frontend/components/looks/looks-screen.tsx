@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { asNewLook, baseLook, statusLine, withValues, type LookValues } from '@/lib/looks/editor'
 import { PRESETS } from '@/lib/looks/presets'
 import type { Look } from '@/lib/looks/types'
+import { LOOK_STYLE_HREF } from '@/lib/ticket-links'
 
 import { LookEditor } from './look-editor'
 import { LookImport } from './look-import'
@@ -36,7 +37,6 @@ export const LOOKS_PLAY_ONLY_NOTE = 'Make it yours is part of the Play theme.'
 export const LOOKS_HEADING = 'Make it yours.'
 export const LOOKS_LEAD = 'Pick a look, then tweak it. Auto changes with it.'
 export const STYLE_SHEET_LINK = 'See the style sheet'
-export const STYLE_SHEET_HREF = '/looks/style'
 
 /** The editor's state and actions: picking, editing, Save as new look and Reset. */
 function useLookEditing() {
@@ -87,7 +87,7 @@ export function LooksScreen() {
               <p className={styles.status} role="status">
                 {statusLine(look, saved)}
               </p>
-              <Link href={STYLE_SHEET_HREF} className={styles.styleLink}>
+              <Link href={LOOK_STYLE_HREF} className={styles.styleLink}>
                 {STYLE_SHEET_LINK}
               </Link>
             </div>

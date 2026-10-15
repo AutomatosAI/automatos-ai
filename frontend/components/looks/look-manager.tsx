@@ -3,13 +3,13 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
 import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
+import { downloadText } from '@/lib/download-text'
 import { asDuplicate, baseLook, isEdited, isSavedLook } from '@/lib/looks/editor'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
 import { LOOK_FILE_TYPE, lookFileName, lookJson } from '@/lib/looks/transfer'
 import type { Look } from '@/lib/looks/types'
 import { copyToClipboard } from '@/lib/utils'
 
-import { downloadText } from './download'
 import { DeleteConfirm, RenameForm } from './look-manage-forms'
 import { LookNotice, type Notice, failed, storedNotice } from './look-notice'
 import { useLook } from './look-provider'

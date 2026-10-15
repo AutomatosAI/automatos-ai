@@ -1,4 +1,5 @@
 import { liveReceiptsFromToolData } from '@/lib/chat/receipts'
+import { DELIVERABLE_PARAM, DELIVERABLES_HREF } from '@/lib/ticket-links'
 import type { Receipt } from '@/types'
 
 /**
@@ -30,9 +31,6 @@ export type DeliverableRef = {
 }
 
 const DELIVERABLE_ID = /^[A-Za-z0-9_-]{1,128}$/
-const DELIVERABLES_PATH = '/deliverables'
-/** DeliverableDeepLink's DELIVERABLE_PARAM (components/deliverables/deliverable-deep-link.tsx). */
-const OPEN_PARAM = 'deliverable'
 const DELIVERABLE_PAGE = /^\/deliverables\/([^/]+)\/?$/
 const DELIVERABLES_LIST = /^\/deliverables\/?$/
 /** Only for resolving relative links; never fetched. */
@@ -70,7 +68,7 @@ export function isDeliverableId(id: string): boolean {
 
 /** The core's page for one Deliverable (K8). */
 export function deliverableHref(id: string): string {
-  return `${DELIVERABLES_PATH}?${OPEN_PARAM}=${encodeURIComponent(id)}`
+  return `${DELIVERABLES_HREF}?${DELIVERABLE_PARAM}=${encodeURIComponent(id)}`
 }
 
 /** The generated document's format as a shelf kind: the core files non-media documents as "document". */
@@ -135,7 +133,7 @@ export function deliverableIdFromLink(link: string | null): string | null {
   if (!link || !isReceiptLink(link)) return null
   const url = parseLink(link)
   if (url === null) return null
-  const id = idOnPage(url) ?? (DELIVERABLES_LIST.test(url.pathname) ? url.searchParams.get(OPEN_PARAM) : null)
+  const id = idOnPage(url) ?? (DELIVERABLES_LIST.test(url.pathname) ? url.searchParams.get(DELIVERABLE_PARAM) : null)
   return id && isDeliverableId(id) ? id : null
 }
 

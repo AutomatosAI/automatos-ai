@@ -8,6 +8,7 @@ import { type Deliverable, type DeliverableDetailResponse, useDeliverable } from
 import { deliverableFilename } from '@/lib/deliverables/download'
 import { contentView, detailDate, detailTitle, madeLine } from '@/lib/play/detail'
 import { kindOf } from '@/lib/play/shelf'
+import { DELIVERABLES_HREF } from '@/lib/ticket-links'
 
 import { DeliverableContent } from './deliverable-content'
 import styles from './deliverable-detail.module.css'
@@ -36,7 +37,6 @@ export const OPEN_FAILED = "Play couldn't open this Deliverable."
 export const NOT_ON_SHELF = "This Deliverable isn't on your shelf. It may have been deleted."
 export const BACK_TO_SHELF = 'Shelf'
 export const TRY_AGAIN = 'Try again'
-const SHELF_HREF = '/deliverables'
 const NOT_FOUND = 404
 /** sr-only: the Tailwind utility the core uses; the empty status line takes no room on the page. */
 const SCREEN_READER_ONLY = 'sr-only'
@@ -104,7 +104,7 @@ export function PlayDeliverable({ id, now }: PlayDeliverableProps) {
   return (
     <PageColumns>
       <div className={styles.page}>
-        <Link href={SHELF_HREF} className={styles.back}>
+        <Link href={DELIVERABLES_HREF} className={styles.back}>
           <span aria-hidden="true">← </span>
           {BACK_TO_SHELF}
         </Link>

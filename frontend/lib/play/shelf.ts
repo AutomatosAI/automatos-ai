@@ -1,4 +1,4 @@
-import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
+import { deliverableLabel } from '@/components/icons/deliverable-icon'
 import {
   type Deliverable,
   type DeliverableListResponse,
@@ -89,13 +89,6 @@ export function emptyMessage(filter: ShelfFilter): string {
     return 'Nothing on your shelf yet. Ask Auto for a report or a document and it lands here.'
   }
   return `No ${filter.label.toLowerCase()} yet. Ask Auto for one and it lands here.`
-}
-
-/** The chip's type for a ?artifact_type= link, when it is one of the chips; else All. */
-export function filterForType(artifactType: string | null | undefined): ShelfFilter {
-  const wanted = artifactType?.trim().toLowerCase()
-  if (!wanted || !isDeliverableType(wanted)) return ALL_FILTER
-  return SHELF_FILTERS.find((filter) => filter.artifactType === wanted) ?? ALL_FILTER
 }
 
 // --- The list query's pages, as the shelf shows them --------------------------------

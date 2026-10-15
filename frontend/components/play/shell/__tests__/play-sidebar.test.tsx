@@ -72,11 +72,18 @@ async function renderSidebar(edition: 'local' | 'saas' = 'saas', { fakeTimers = 
   vi.stubEnv('NEXT_PUBLIC_AUTH_EDITION', edition)
   const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
   const { PlaySidebar } = await import('../play-sidebar')
+  const { useBackendHealth } = await import('@/hooks/use-backend-health')
+  // The pill reads the /health poll Play's frame owns (AsleepGate, P260-FX-27): the frame's part stands beside it.
+  function FramePoll() {
+    useBackendHealth({ poll: true })
+    return null
+  }
   // Faked after the imports, before the health query sets its timers.
   if (fakeTimers) vi.useFakeTimers()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
+      <FramePoll />
       <PlaySidebar />
     </QueryClientProvider>,
   )

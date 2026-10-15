@@ -7,6 +7,7 @@ import { useLook } from '@/components/looks/look-provider'
 import { PLAY_ONLY_HEADING } from '@/components/looks/play-only-route'
 import { type Told, useNoticeSeq } from '@/hooks/use-notice-seq'
 import { rootBlock } from '@/lib/looks/style'
+import { LOOKS_HREF } from '@/lib/ticket-links'
 
 import { StyleColour } from './style-colour'
 import { StyleComponents } from './style-components'
@@ -37,7 +38,6 @@ import styles from './style.module.css'
 export const STYLE_HEADING = 'Style sheet'
 export const COPY_TOKENS = 'Copy tokens'
 export const BACK_TO_LOOKS = 'Back to Looks'
-export const LOOKS_HREF = '/looks'
 export const COPY_FAILED = "The tokens weren't copied. The browser blocked the clipboard."
 /** What /looks/style says under Classic or Studio, beside Switch to Play (K9). */
 export const STYLE_SHEET_NOTE = 'The style sheet is part of the Play theme.'

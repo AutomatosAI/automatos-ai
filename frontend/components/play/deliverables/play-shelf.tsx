@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { DELIVERABLE_PARAM } from '@/components/deliverables/deliverable-deep-link'
 import { MainLayout } from '@/components/layout/main-layout'
 import { AutoMascot } from '@/components/mascot/auto-mascot'
 import { isDeliverableId } from '@/components/play/chat/deliverables'
@@ -22,6 +21,7 @@ import {
   shelfView,
   type ShelfFilter,
 } from '@/lib/play/shelf'
+import { DELIVERABLE_PARAM, DELIVERABLES_HREF } from '@/lib/ticket-links'
 
 import { PlayDeliverable } from './play-deliverable'
 import { ShelfBody, type ShelfPaging } from './shelf-body'
@@ -172,7 +172,7 @@ function Sections() {
   // PRD-251 D1: Socials only while the platform offers it, as on the page's own tabs.
   const tabs = visibleDeliverableTabs(workspace?.socials?.available === true).filter((tab) => tab !== 'outputs')
   const links = [
-    ...tabs.map((tab) => ({ href: `/deliverables?tab=${tab}`, label: TAB_LABELS[tab] })),
+    ...tabs.map((tab) => ({ href: `${DELIVERABLES_HREF}?tab=${tab}`, label: TAB_LABELS[tab] })),
     { href: EXPLORER_HREF, label: EXPLORER_LABEL },
   ]
   return (

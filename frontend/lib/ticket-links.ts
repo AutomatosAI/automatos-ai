@@ -49,6 +49,16 @@ export function missionHref(missionId: string | number): string {
 /** The chat. */
 export const CHAT_HREF = '/chat'
 
+/** The Deliverables page. */
+export const DELIVERABLES_HREF = '/deliverables'
+/** The query parameter that opens one Deliverable on it: /deliverables?deliverable=<id> (F298, PRD-260 K8). */
+export const DELIVERABLE_PARAM = 'deliverable'
+
+/** Make it yours, Play's looks (PRD-260 K9). */
+export const LOOKS_HREF = '/looks'
+/** The active look's style sheet. */
+export const LOOK_STYLE_HREF = '/looks/style'
+
 /**
  * A conversation's link: a query param on /chat, so client-side auth loads the
  * thread (the /chat/[id] server route 404s without a server-side auth context).

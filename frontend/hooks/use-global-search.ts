@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { apiClient, type WorkspaceSocialsState } from '@/lib/api-client'
-import { feedItemHref } from '@/lib/ticket-links'
+import { feedItemHref, LOOK_STYLE_HREF, LOOKS_HREF } from '@/lib/ticket-links'
 import { SOCIAL_STATUS_LABELS } from '@/components/deliverables/socials/socials-status'
 import { GLOBAL_SEARCH_OPEN_EVENT } from '@/lib/global-search-event'
 
@@ -46,8 +46,8 @@ const NAVIGATION_PAGES: SearchResult[] = [
 /** PRD-260 M90: Play's own pages, listed only while Play is the style (elsewhere they show a note). */
 const PLAY_PAGES: SearchResult[] = [
   { id: 'nav-play-conversations', label: 'Conversations', category: 'pages', path: '/conversations' },
-  { id: 'nav-play-looks', label: 'Make it yours', category: 'pages', path: '/looks' },
-  { id: 'nav-play-style-sheet', label: 'Style sheet', category: 'pages', path: '/looks/style' },
+  { id: 'nav-play-looks', label: 'Make it yours', category: 'pages', path: LOOKS_HREF },
+  { id: 'nav-play-style-sheet', label: 'Style sheet', category: 'pages', path: LOOK_STYLE_HREF },
 ]
 
 /** The query waits this long after the last keystroke, and needs this many characters. */

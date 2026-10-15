@@ -2,9 +2,10 @@ import { Suspense, type ReactNode } from 'react'
 import { DiscussionBar } from '@/components/chatbot/discussion-bar'
 import { PlayRouteSwitch } from '@/components/play/play-route-switch'
 import { PlayChat } from '@/components/play/chat/play-chat-lazy'
+import { CHAT_HREF } from '@/lib/ticket-links'
 
 /** The chat page under Play at >= 1024 px: Play's chat instead of the page (PRD-260 K7). */
-const PLAY_CHAT_PATHS = ['/chat']
+const PLAY_CHAT_PATHS = [CHAT_HREF]
 /** Links into a surface only the core chat has: the Code canvas (repo), a session's runtime, plan mode. */
 const CORE_CHAT_PARAMS = ['repo', 'runtime', 'mode']
 

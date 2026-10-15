@@ -11,6 +11,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTheme } from 'next-themes'
+import { writeCookie } from '@/lib/cookies'
 import {
   APPEARANCE_DEFAULTS_KEY,
   APPEARANCE_DEFAULTS_VERSION,
@@ -43,8 +44,7 @@ export function applyUiStyleToDocument(style: UiStyle): void {
   for (const name of STYLE_HTML_CLASS_NAMES) {
     document.documentElement.classList.toggle(name, wanted.includes(name))
   }
-  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-  document.cookie = `${UI_STYLE_COOKIE}=${style}; Path=/; Max-Age=${UI_STYLE_COOKIE_MAX_AGE_S}; SameSite=Lax${secure}`
+  writeCookie(UI_STYLE_COOKIE, style, UI_STYLE_COOKIE_MAX_AGE_S)
   try {
     window.localStorage.setItem(UI_STYLE_STORAGE_KEY, style)
   } catch {

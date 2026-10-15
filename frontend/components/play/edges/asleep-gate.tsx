@@ -15,7 +15,9 @@ import { ASLEEP_TITLE, AsleepScreen, asleepDetail } from './asleep-screen'
  * shows it); the frame and its page mount again, fresh, once it answers.
  * Ported from LiveShell and useBackendStatus: Play's proxy check becomes the
  * core's GET /health through apiClient (useBackendHealth, the connection
- * pill's own query, so Check again refreshes the pill too). Auto takes
+ * pill's own query, so Check again refreshes the pill too). The gate is the
+ * one caller that polls it (P260-FX-27, M88): it is mounted with the frame on
+ * every Play page, and the pill, the chat and the shelf read its answers. Auto takes
  * backend-down and backend-up through Play's reducer (useBackendMascot), and
  * his nap is the gate: the screen opens once he has gone to sleep (never idle
  * first) and stays until /health answers. A recheck in flight is not an
@@ -36,6 +38,8 @@ import { ASLEEP_TITLE, AsleepScreen, asleepDetail } from './asleep-screen'
 
 /** How often the asleep screen asks again on its own (Automatos Play's RECHECK_MS). */
 export const ASLEEP_RECHECK_MS = 10_000
+/** The gate owns the frame's /health poll. */
+const OWNS_THE_POLL = { poll: true } as const
 const MS_PER_SECOND = 1000
 /** What the gate's live region says once the page is back after a nap. */
 export const AWAKE_LINE = 'Automatos is back'
@@ -69,7 +73,7 @@ function useWakeFocus(asleep: boolean, target: RefObject<HTMLElement> | undefine
 }
 
 export function AsleepGate({ children, wakeFocus }: AsleepGateProps) {
-  const backend = useBackendHealth()
+  const backend = useBackendHealth(OWNS_THE_POLL)
   const auto = useBackendMascot(backend.connection)
   const asleep = auto.asleep && backend.connection !== 'connected'
   const announcement = useNapAnnouncement(asleep)

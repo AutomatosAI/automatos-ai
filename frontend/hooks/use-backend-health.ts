@@ -1,14 +1,23 @@
 'use client'
 
 import { useCallback, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 
 /**
  * PRD-260 T-004 — is the backend answering? Play's connection pill asks
- * GET /health through apiClient (the request SessionModeTab already makes),
- * again every BACKEND_HEALTH_POLL_MS. Ported from Automatos Play's
- * useBackendStatus, whose proxy check becomes the core's /health.
+ * GET /health through apiClient, again every BACKEND_HEALTH_POLL_MS. Ported
+ * from Automatos Play's useBackendStatus, whose proxy check becomes the core's
+ * /health.
+ *
+ * One query, one poll (P260-FX-27, M88): every caller reads the same cache
+ * (BACKEND_HEALTH_QUERY_KEY, fetchBackendHealth), Settings → Session mode
+ * included (useBackendHealthQuery), and only a caller that asks for `poll`
+ * starts a timer: Play's AsleepGate, mounted with the frame on every Play
+ * page. react-query runs one timer per polling observer, each in its own
+ * phase, so a second poller would be a second request every period. An answer
+ * stays fresh until the poll asks again, so a reader that mounts in between
+ * reads it instead of asking.
  *
  * One failed request is never the answer (P260-RVW-1): Play's frame swaps
  * its page for "Automatos is asleep" on 'down' (AsleepGate), so a blip — a
@@ -24,7 +33,7 @@ import { apiClient } from '@/lib/api-client'
  * it is asked again and on the first render of a hook that mounts then.
  */
 
-/** How often the pill asks again. */
+/** How often the poll owner (Play's AsleepGate) asks again. */
 export const BACKEND_HEALTH_POLL_MS = 30_000
 /** How many times a failed ask is repeated before the backend is down. */
 export const BACKEND_HEALTH_RETRIES = 3
@@ -42,6 +51,11 @@ export const BACKEND_HEALTH_TIMEOUT_MS = 5_000
 export const BACKEND_HEALTH_QUERY_KEY = ['health', 'connection'] as const
 
 export type BackendConnection = 'checking' | 'connected' | 'down'
+
+export interface BackendHealthOptions {
+  /** Ask again every BACKEND_HEALTH_POLL_MS: the page's one poll owner (AsleepGate). Others read. */
+  readonly poll?: boolean
+}
 
 export interface BackendHealth {
   readonly connection: BackendConnection
@@ -83,16 +97,27 @@ export function apiHost(baseUrl: string, pageUrl: string): string | undefined {
   }
 }
 
-export function useBackendHealth(): BackendHealth {
-  const query = useQuery({
+/** GET /health. A frozen backend never answers: the ask gives up, and fails like any other. */
+export function fetchBackendHealth<T = unknown>(): Promise<T> {
+  return apiClient.request<T>('/health', { signal: AbortSignal.timeout(BACKEND_HEALTH_TIMEOUT_MS) })
+}
+
+/** The one GET /health query, as react-query reports it; `T` is the answer's shape the caller reads. */
+export function useBackendHealthQuery<T = unknown>({ poll = false }: BackendHealthOptions = {}): UseQueryResult<T> {
+  return useQuery({
     queryKey: BACKEND_HEALTH_QUERY_KEY,
-    // A frozen backend never answers: the ask gives up, and fails like any other.
-    queryFn: () => apiClient.request<unknown>('/health', { signal: AbortSignal.timeout(BACKEND_HEALTH_TIMEOUT_MS) }),
-    refetchInterval: BACKEND_HEALTH_POLL_MS,
+    queryFn: () => fetchBackendHealth<T>(),
+    refetchInterval: poll ? BACKEND_HEALTH_POLL_MS : false,
+    // Fresh until the poll asks again: a caller mounting in between reads the answer.
+    staleTime: BACKEND_HEALTH_POLL_MS,
     // Down only once every retry has failed: the pill says "Not running" until the next answer.
     retry: BACKEND_HEALTH_RETRIES,
     retryDelay: BACKEND_HEALTH_RETRY_DELAY_MS,
   })
+}
+
+export function useBackendHealth({ poll = false }: BackendHealthOptions = {}): BackendHealth {
+  const query = useBackendHealthQuery({ poll })
   const { refetch } = query
   const check = useCallback(() => {
     void refetch()
