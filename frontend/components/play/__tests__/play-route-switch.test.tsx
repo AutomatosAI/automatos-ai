@@ -4,16 +4,31 @@
  * existing page under Classic and Studio, below 1024 px, on another path, and
  * for a link into a surface only the core chat has (the Code canvas, a
  * session's runtime, plan mode). The DiscussionBar stays either way.
+ *
+ * P260-FX-11 (M13, M14): a value Play's screen serves (`playServes`) keeps
+ * Play, and the switch carries its own Suspense boundary whose fallback is the
+ * route's own page, so a search-params read that suspends (a static
+ * prerender) renders the page.
  */
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ play: true, narrow: false, pathname: '/chat', search: '' }))
+const state = vi.hoisted(() => ({
+  play: true,
+  narrow: false,
+  pathname: '/chat',
+  search: '',
+  /** While set, reading the search params suspends on it (Next's static-prerender bailout). */
+  pending: null as Promise<void> | null,
+}))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
-  useSearchParams: () => new URLSearchParams(state.search),
+  useSearchParams: () => {
+    if (state.pending !== null) throw state.pending
+    return new URLSearchParams(state.search)
+  },
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => state.narrow, useIsMobile: () => state.narrow }))
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => state.play }))
@@ -23,9 +38,14 @@ vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => <di
 import ChatLayout from '@/app/chat/layout'
 import { PlayRouteSwitch } from '@/components/play/play-route-switch'
 
-function renderSwitch(props: { paths?: string[]; keepPageFor?: string[] } = {}) {
+function renderSwitch(props: { paths?: string[]; keepPageFor?: string[]; playServes?: Record<string, string[]> } = {}) {
   return render(
-    <PlayRouteSwitch play={<div data-testid="play">Play</div>} paths={props.paths ?? ['/chat']} keepPageFor={props.keepPageFor}>
+    <PlayRouteSwitch
+      play={<div data-testid="play">Play</div>}
+      paths={props.paths ?? ['/chat']}
+      keepPageFor={props.keepPageFor}
+      playServes={props.playServes}
+    >
       <div data-testid="page">The page</div>
     </PlayRouteSwitch>,
   )
@@ -37,7 +57,7 @@ function shows(testId: 'play' | 'page') {
 }
 
 afterEach(() => {
-  Object.assign(state, { play: true, narrow: false, pathname: '/chat', search: '' })
+  Object.assign(state, { play: true, narrow: false, pathname: '/chat', search: '', pending: null })
 })
 
 describe('PlayRouteSwitch', () => {
@@ -74,6 +94,37 @@ describe('PlayRouteSwitch', () => {
     state.search = 'chatId=c1'
     renderSwitch({ keepPageFor: ['repo', 'runtime', 'mode'] })
     shows('play')
+  })
+
+  describe('playServes: values of a page parameter that Play still serves', () => {
+    const served = { keepPageFor: ['tab', 'post'], playServes: { tab: ['outputs'] } }
+
+    it("keeps Play's screen for a value Play serves", () => {
+      state.search = 'tab=outputs'
+      renderSwitch(served)
+      shows('play')
+    })
+
+    it.each(['tab=brand', 'tab=', 'tab=outputs&post=p1'])('renders the page for ?%s', (search) => {
+      state.search = search
+      renderSwitch(served)
+      shows('page')
+    })
+  })
+
+  it("renders the page as the fallback while the search params suspend (a static prerender), then Play's screen", async () => {
+    let release = () => {}
+    state.pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    renderSwitch()
+    shows('page')
+    state.pending = null
+    await act(async () => {
+      release()
+    })
+    expect(await screen.findByTestId('play')).toBeInTheDocument()
+    expect(screen.queryByTestId('page')).toBeNull()
   })
 })
 

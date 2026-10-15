@@ -6,12 +6,15 @@
  * more asking for the next page, a card's link (?deliverable=<id>), the
  * pictures through the core's authenticated path, the loading, empty and error
  * states (success: false included), Auto's caption, and the page's other
- * sections. One test runs the real hook over a mocked apiClient, to see the
- * next page's offset on the wire. Roles, attributes and text only (CSS
- * modules are proxies under css: false). "Now" is pinned to a local date.
+ * sections. Some tests run the real hook over a mocked apiClient: the next
+ * page's offset on the wire, a list answer of success: false (the hook throws
+ * it, so a failed refetch or Load more keeps the loaded cards), and the shelf
+ * asking again every SHELF_REFRESH_MS (P260-FX-12). Roles, attributes and text
+ * only (CSS modules are proxies under css: false). "Now" is pinned to a local
+ * date.
  */
 import React from 'react'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,8 +26,10 @@ vi.mock('@/hooks/use-deliverables-api', async () => {
   const actual = await vi.importActual<typeof import('@/hooks/use-deliverables-api')>('@/hooks/use-deliverables-api')
   return {
     ...actual,
-    useDeliverables: (filters: Parameters<typeof actual.useDeliverables>[0]) =>
-      hook.real ? actual.useDeliverables(filters) : hook.mock(filters),
+    useDeliverables: (
+      filters: Parameters<typeof actual.useDeliverables>[0],
+      options?: Parameters<typeof actual.useDeliverables>[1],
+    ) => (hook.real ? actual.useDeliverables(filters, options) : hook.mock(filters)),
   }
 })
 
@@ -62,6 +67,7 @@ vi.mock('@/components/mascot/auto-mascot', () => ({
 
 import { FEED_DEFAULT_FILTERS } from '@/hooks/use-deliverables-api'
 import { SEEN_KEY } from '@/lib/play/seen'
+import { SHELF_REFRESH_MS } from '@/lib/play/shelf'
 import { FILTER_GROUP_LABEL, SECTIONS_LABEL, ShelfScreen } from '../play-shelf'
 import { MORE_FAILED, SHELF_FAILED } from '../shelf-body'
 
@@ -146,6 +152,41 @@ function lastFilters() {
   return hook.mock.mock.calls[hook.mock.mock.calls.length - 1]?.[0]
 }
 
+/** The shelf over the real hook (useDeliverables) and a fresh query client; apiClient stays mocked. */
+function renderRealShelf() {
+  hook.real = true
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const user = userEvent.setup()
+  render(
+    <QueryClientProvider client={client}>
+      <ShelfScreen now={NOW} />
+    </QueryClientProvider>,
+  )
+  return { client, user }
+}
+
+/** The offset a list request asked for. */
+function offsetOf(path: unknown): number {
+  return Number(new URLSearchParams(String(path).split('?')[1]).get('offset'))
+}
+
+/** Let `ms` of fake time pass, with the promises and React updates it starts. */
+const elapse = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms)
+  })
+
+/** Let react-query hand a settled answer to React: its notify is a setTimeout(0), which fires a fake ms later. */
+async function settle() {
+  await elapse(1)
+  await elapse(1)
+}
+
+/** The '[shelf]' line the log got for a list that didn't load, with the error it carried. */
+function shelfLogged(detail: string) {
+  return [expect.stringContaining('[shelf]'), expect.objectContaining({ message: expect.stringContaining(detail) })]
+}
+
 beforeEach(() => {
   window.localStorage.clear()
   pictures.blobUrl.mockImplementation((url) => ({ src: null, error: null, url }))
@@ -153,6 +194,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.clearAllMocks()
   vi.restoreAllMocks()
   window.localStorage.clear()
@@ -224,6 +266,31 @@ describe('ShelfScreen — the cards', () => {
     expect(screen.getByTestId('auto')).toHaveTextContent('Your report is ready')
     expect(JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? '{}').ids).toEqual(['d-chem', 'd-laptop'])
   })
+
+  it('asks again every SHELF_REFRESH_MS while open: a new Deliverable lands as the Newest card and Auto celebrates it', async () => {
+    vi.useFakeTimers()
+    let rows: readonly Deliverable[] = ROWS.slice(1)
+    api.request.mockImplementation(async () => page(rows))
+    renderRealShelf()
+    await settle()
+    expect(cards()).toHaveLength(3)
+    expect(cards()[0]).toHaveTextContent('Chemistry revision plan')
+    expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'idle')
+
+    // A running Mission files a report while the shelf is open.
+    rows = ROWS
+    await elapse(SHELF_REFRESH_MS / 2)
+    expect(api.request).toHaveBeenCalledTimes(1)
+    await elapse(SHELF_REFRESH_MS / 2)
+    await settle()
+    expect(api.request).toHaveBeenCalledTimes(2)
+    const [newest] = cards()
+    expect(newest).toHaveTextContent('Laptop shortlist')
+    expect(newest).toHaveTextContent('Newest')
+    expect(cards()).toHaveLength(4)
+    expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'celebrate')
+    expect(screen.getByTestId('auto')).toHaveTextContent('Your report is ready')
+  })
 })
 
 describe('ShelfScreen — the chips', () => {
@@ -289,23 +356,32 @@ describe('ShelfScreen — Load more', () => {
     expect(screen.getByRole('button', { name: 'Load more' })).toBeEnabled()
   })
 
-  it('keeps the list when a later page answers success: false, with Try again', async () => {
+  it('keeps the list when the next page answers success: false (the hook throws it), and Load more asks again', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const result = answer({ data: { pages: [page(ROWS, 30), { ...FAILED_PAGE, offset: 24 }] } })
-    const { user } = renderShelf()
-    expect(screen.getByRole('alert')).toHaveTextContent(MORE_FAILED)
-    expect(cards()).toHaveLength(4)
+    const rows = Array.from({ length: 30 }, (_, index) => row(`d-${index}`, { title: `Deliverable number ${index}`, created_at: at(14) }))
+    api.request.mockImplementation(async (path: string) => {
+      const offset = offsetOf(path)
+      return offset === 0 ? page(rows.slice(0, 24), 30) : { ...FAILED_PAGE, offset }
+    })
+    const { user } = renderRealShelf()
+    await screen.findByRole('heading', { name: 'Deliverable number 0' })
+    await user.click(screen.getByRole('button', { name: 'Load more' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(MORE_FAILED)
+    expect(cards()).toHaveLength(24)
     expect(screen.getByText('30 Deliverables')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(result.refetch).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(SHELF_FAILED)).toBeNull()
+    await waitFor(() => expect(console.error).toHaveBeenCalledWith(...shelfLogged('v_workspace_outputs')))
+    await user.click(screen.getByRole('button', { name: 'Load more' }))
+    await waitFor(() => expect(api.request).toHaveBeenCalledTimes(3))
+    expect(offsetOf(api.request.mock.calls[2]?.[0])).toBe(24)
   })
 
   it('sends the next offset on the wire through the real hook (buildListQuery), with the chip', async () => {
     hook.real = true
     const rows = Array.from({ length: 30 }, (_, index) => row(`d-${index}`, { title: `Deliverable number ${index}`, created_at: at(14) }))
     api.request.mockImplementation(async (path: string) => {
-      const params = new URLSearchParams(path.split('?')[1])
-      const offset = Number(params.get('offset'))
+      const offset = offsetOf(path)
       return page(rows.slice(offset, offset + 24), 30, offset)
     })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -351,16 +427,34 @@ describe('ShelfScreen — loading, empty and error', () => {
 
   it('shows the error state when the list answers success: false, never the empty state or the backend text', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const result = answer({ data: { pages: [FAILED_PAGE] } })
-    const { user } = renderShelf()
-    const alert = screen.getByRole('alert')
+    api.request.mockResolvedValue(FAILED_PAGE)
+    const { user } = renderRealShelf()
+    const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent(SHELF_FAILED)
     expect(alert).not.toHaveTextContent('v_workspace_outputs')
     expect(screen.queryByText(/Nothing on your shelf yet/)).toBeNull()
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('[shelf]'), expect.stringContaining('v_workspace_outputs'))
-    expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'oops')
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(result.refetch).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(console.error).toHaveBeenCalledWith(...shelfLogged('v_workspace_outputs')))
+    await waitFor(() => expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'oops'))
+    await user.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(api.request).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps the loaded cards when a refetch answers success: false: no error state, the log has why', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    api.request.mockResolvedValueOnce(page(ROWS.slice(0, 2))).mockResolvedValue(FAILED_PAGE)
+    const { client } = renderRealShelf()
+    await screen.findByRole('heading', { name: 'Laptop shortlist' })
+    expect(cards()).toHaveLength(2)
+
+    await act(async () => {
+      await client.refetchQueries()
+    })
+    await waitFor(() => expect(console.error).toHaveBeenCalledWith(expect.stringContaining('[shelf]'), expect.anything()))
+    expect(api.request).toHaveBeenCalledTimes(2)
+    expect(cards()).toHaveLength(2)
+    expect(screen.getByText('2 Deliverables')).toBeInTheDocument()
+    expect(screen.queryByText(SHELF_FAILED)).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('shows the error state when the request fails', () => {

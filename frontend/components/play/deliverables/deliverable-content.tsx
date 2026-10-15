@@ -6,6 +6,7 @@ import { PLAY_MARKDOWN_COMPONENTS } from '@/components/play/chat/play-markdown'
 import { MarkdownView } from '@/components/shared/markdown-view'
 import { useAuthenticatedBlobUrl } from '@/components/widgets/FileWidget/FilePreview'
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
+import { DOWNLOAD_FAILED, fileDownloadUrl } from '@/lib/deliverables/download'
 import { type ContentView, unsupportedMessage } from '@/lib/play/detail'
 
 import styles from './deliverable-content.module.css'
@@ -15,14 +16,16 @@ import page from './deliverable-detail.module.css'
  * PRD-260 §4 — a Deliverable's content on its page (Ember mock 05), ported
  * from Automatos Play's components/deliverables/DeliverableContent.tsx onto the
  * core's own renderers and file paths:
- * - text and markdown on the sheet through the core's MarkdownView (no raw
- *   HTML) with Play's rules for model output: links open in a new tab without
- *   this window, images show as their alt text;
+ * - text and markdown on the sheet through the core's MarkdownView with Play's
+ *   rules for model output: raw HTML dropped (skipHtml), links open in a new
+ *   tab without this window, images show as their alt text, a code block in
+ *   Play's own pre rules (PrintedPre) on the sheet's colours;
  * - a picture or a video through useAuthenticatedBlobUrl, the authenticated
  *   path the core's FilePreview loads them by (a blob: URL, so an SVG's
  *   scripts never run in its <img>);
  * - anything else as Play's file card, with the core's download
- *   (useApiFileDownload: the API client's auth, never a plain link).
+ *   (useApiFileDownload: the API client's auth, never a plain link) of the
+ *   file's bytes (fileDownloadUrl: never a text file's JSON content route).
  */
 
 export const TRUNCATED = 'This is the first part: the file is too long to show here in full.'
@@ -48,7 +51,7 @@ export function DeliverableContent({ view, kind, title, filename }: DeliverableC
   if (view.kind === 'text') {
     return (
       <div className={styles.document}>
-        <MarkdownView components={PLAY_MARKDOWN_COMPONENTS} className={styles.prose}>
+        <MarkdownView components={PLAY_MARKDOWN_COMPONENTS} skipHtml className={styles.prose}>
           {view.markdown}
         </MarkdownView>
         {view.truncated && <p className={styles.sheetNote}>{TRUNCATED}</p>}
@@ -112,8 +115,8 @@ interface FileCardProps {
 
 /** Nothing to show here: what the file is, and Download when it has one. */
 function FileCard({ message, url, filename }: FileCardProps) {
-  const { download, downloading } = useApiFileDownload()
-  const file = url
+  const { download, downloading } = useApiFileDownload(DOWNLOAD_FAILED)
+  const file = url ? fileDownloadUrl(url) : null
   return (
     <div className={styles.unavailable}>
       <p className={page.note}>{message}</p>

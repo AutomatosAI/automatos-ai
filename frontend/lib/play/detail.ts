@@ -1,4 +1,5 @@
 import { UNTITLED } from '@/components/play/chat/deliverables'
+import { MADE_BY_SOURCE } from '@/components/workspace/gallery-view/made-by'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { deliverableFileUrl } from '@/lib/deliverables/download'
 
@@ -8,8 +9,9 @@ import { kindOf, shelfDate } from './shelf'
  * PRD-260 §4, K8 — one Deliverable's page (Ember mock 05) as pure data, ported
  * from Automatos Play's lib/deliverables/detail.ts onto the core's Deliverable
  * (GET /api/deliverables/{id}?include_content=true): how its content shows, the
- * date and "Made by" lines, where it came from, and the words "Ask Auto about
- * this" puts in a new chat's message box. "Now" is always passed in.
+ * date and "Made by" lines, where it came from, what it was made from (its
+ * sources), and the words "Ask Auto about this" puts in a new chat's message
+ * box. "Now" is always passed in.
  */
 
 /** File types read as markdown; any other text file shows verbatim in a code block. */
@@ -38,10 +40,26 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   playbook: 'A Playbook',
   trigger: 'A trigger',
   upload: 'An upload',
+  document: 'A template',
+  social_post: 'A social post',
 }
 /** The longest title "Ask Auto about this" quotes. */
 export const ASK_TITLE_CHARS = 120
 const MADE_BY_DEFAULT = 'Auto'
+/**
+ * Sources Auto didn't make (the owner's uploads, documents made in Templates,
+ * Socials posts), with the line under the title. "Made by" takes the core's own
+ * word for them (made-by.ts, the Deliverables cards'): never "Auto".
+ */
+const MADE_ELSEWHERE_LINES: Readonly<Record<string, string>> = {
+  upload: MADE_BY_SOURCE.upload,
+  document: `Made in ${MADE_BY_SOURCE.document}`,
+  social_post: `Made in ${MADE_BY_SOURCE.social_post}`,
+}
+/** The most sources the side panel lists (extra.sources is off the wire: any length). */
+export const SOURCES_SHOWN_MAX = 20
+const WEB_ADDRESS = /^https?:\/\//i
+const WWW_PREFIX = /^www\./i
 
 export type ContentView =
   /** Markdown (or a text file wrapped as a code block) for the core's markdown renderer. */
@@ -128,15 +146,32 @@ function agentOf(agentName: string | null | undefined): string | null {
   return agent && agent.toLowerCase() !== MADE_BY_DEFAULT.toLowerCase() ? agent : null
 }
 
-/** The "Made by" value in the side panel: the agent, else Auto. */
-export function madeBy(agentName: string | null | undefined): string {
-  return agentOf(agentName) ?? MADE_BY_DEFAULT
+/** "upload", "document" or "social_post" (lowercase, trimmed): a Deliverable Auto didn't make; else null. */
+function madeElsewhere(sourceType: string | null | undefined): string | null {
+  const source = sourceType?.trim().toLowerCase() ?? ''
+  return hasOwn(MADE_ELSEWHERE_LINES, source) ? source : null
 }
 
-/** The line under the title: "Made by Auto with Researcher", or "Made by Auto". */
-export function madeLine(agentName: string | null | undefined): string {
+/**
+ * The "Made by" value in the side panel: the agent; else the core's word for
+ * an upload, a Templates document or a Socials post ("Uploaded", "Templates",
+ * "Socials"); else Auto (a chat, a Task, a Mission…).
+ */
+export function madeBy(agentName: string | null | undefined, sourceType?: string | null): string {
+  const elsewhere = madeElsewhere(sourceType)
+  return agentOf(agentName) ?? (elsewhere ? MADE_BY_SOURCE[elsewhere] : MADE_BY_DEFAULT)
+}
+
+/**
+ * The line under the title: "Made by Auto with Researcher"; without an agent
+ * "Uploaded", "Made in Templates" or "Made in Socials" for what Auto didn't
+ * make, else "Made by Auto".
+ */
+export function madeLine(agentName: string | null | undefined, sourceType?: string | null): string {
   const agent = agentOf(agentName)
-  return agent ? `Made by Auto with ${agent}` : 'Made by Auto'
+  if (agent) return `Made by Auto with ${agent}`
+  const elsewhere = madeElsewhere(sourceType)
+  return elsewhere ? MADE_ELSEWHERE_LINES[elsewhere] : 'Made by Auto'
 }
 
 /** Where it came from: "A chat", "A Mission"; an unknown source in its own words; "" for none. */
@@ -146,6 +181,41 @@ export function sourceLabel(sourceType: string | null | undefined): string {
   if (hasOwn(SOURCE_WORDS, source)) return SOURCE_WORDS[source]
   const words = source.replace(/_/g, ' ')
   return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function nonBlank(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+/** One source as a short label: a URL's host without www, else its title, else the text itself; null for nothing. */
+function sourceLabelOf(value: unknown): string | null {
+  const raw = isRecord(value) ? (nonBlank(value.url) ?? nonBlank(value.title)) : nonBlank(value)
+  if (!raw || !WEB_ADDRESS.test(raw)) return raw
+  try {
+    return new URL(raw).hostname.replace(WWW_PREFIX, '') || raw
+  } catch {
+    // Not a URL after all: the text is still a readable label.
+    return raw
+  }
+}
+
+/**
+ * What the Deliverable was made from (its extra.sources, Automatos Play's
+ * "Sources · N"), checked off the wire: each a string or { url | title },
+ * trimmed, a web address shown as its host; anything else is skipped, and at
+ * most SOURCES_SHOWN_MAX are listed. [] when it carries none.
+ */
+export function sourcesOf(deliverable: Pick<Deliverable, 'extra'>): readonly string[] {
+  const sources: unknown = isRecord(deliverable.extra) ? deliverable.extra.sources : undefined
+  if (!Array.isArray(sources)) return []
+  return sources
+    .map(sourceLabelOf)
+    .filter((label): label is string => label !== null)
+    .slice(0, SOURCES_SHOWN_MAX)
 }
 
 /** What "Ask Auto about this" puts in the new chat's message box; a very long title is cut, not the words around it. */

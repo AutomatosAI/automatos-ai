@@ -47,6 +47,12 @@ export interface MarkdownViewProps {
   components?: Record<string, unknown>
   /** Elements to drop (their children are kept), e.g. `['img']`. */
   disallowedElements?: string[]
+  /**
+   * Drop raw HTML in the text instead of printing it as literal tags (off by
+   * default: other surfaces keep today's behaviour). Model output on Play's
+   * surfaces sets it, as Automatos Play does.
+   */
+  skipHtml?: boolean
   className?: string
 }
 
@@ -55,6 +61,7 @@ export function MarkdownView({
   density = 'default',
   components,
   disallowedElements,
+  skipHtml = false,
   className,
 }: MarkdownViewProps) {
   return (
@@ -64,6 +71,7 @@ export function MarkdownView({
         components={{ ...documentMarkdownComponents, ...(components ?? {}) } as any}
         disallowedElements={disallowedElements}
         unwrapDisallowed={disallowedElements ? true : undefined}
+        skipHtml={skipHtml}
       >
         {children ?? ''}
       </ReactMarkdown>

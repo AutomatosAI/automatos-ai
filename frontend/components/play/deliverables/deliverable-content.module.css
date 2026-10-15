@@ -78,14 +78,21 @@
   font: var(--pl-text-mono);
 }
 
-/* A code block's code carries no chip of its own. */
+/* A code block's code carries no chip of its own, and prints in the sheet's ink:
+   prism's theme (code[class*='language-'], loaded with the core's CodeBlock) would
+   paint a fenced block's code light grey. */
 :global(html.play) .prose pre code {
   padding: 0;
   border-radius: 0;
   background: none;
+  color: var(--pl-color-sheet-text);
 }
 
+/* A fenced block is a plain <pre> (PrintedPre), in Play's own block rules on the sheet. */
 :global(html.play) .prose pre {
+  overflow-x: auto;
+  padding: var(--pl-space-3);
+  border-radius: var(--pl-radius-tool);
   background: var(--pl-tint-sheet-line);
 }
 

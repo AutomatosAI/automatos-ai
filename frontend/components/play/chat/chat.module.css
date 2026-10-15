@@ -170,6 +170,12 @@
   background: var(--pl-color-surface);
 }
 
+/* A fenced block (PrintedPre) prints in the reply's own colour: prism's theme
+   (code[class*='language-'], loaded with the core's CodeBlock) paints it light grey. */
+:global(html.play) .markdown pre code {
+  color: inherit;
+}
+
 :global(html.play) .markdown table {
   display: block;
   max-width: 100%;

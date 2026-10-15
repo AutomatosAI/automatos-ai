@@ -32,7 +32,11 @@ vi.mock('@/hooks/use-deliverables-api', async () => {
 })
 
 const api = vi.hoisted(() => ({ request: vi.fn() }))
-vi.mock('@/lib/api-client', () => ({ apiClient: api }))
+// The real raw-file route builder: Download swaps a text file's content route for it (P260-FX-12, M49).
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const { apiClient } = await importOriginal<typeof import('@/lib/api-client')>()
+  return { apiClient: { request: api.request, getWorkspaceFileRawUrl: apiClient.getWorkspaceFileRawUrl.bind(apiClient) } }
+})
 vi.mock('@/hooks/use-workspace', () => ({ useWorkspace: () => ({ workspaceId: 'ws-1' }) }))
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspace: () => ({ workspace: { id: 'ws-1', socials: { available: false } }, isLoading: false }),
@@ -43,8 +47,13 @@ vi.mock('@/components/widgets/FileWidget/FilePreview', async (importOriginal) =>
   ...(await importOriginal<typeof import('@/components/widgets/FileWidget/FilePreview')>()),
   useAuthenticatedBlobUrl: media.blobUrl,
 }))
-const files = vi.hoisted(() => ({ download: vi.fn(async (_url: string, _filename: string) => undefined) }))
-vi.mock('@/hooks/use-api-file-download', () => ({ useApiFileDownload: () => ({ download: files.download, downloading: false }) }))
+const files = vi.hoisted(() => {
+  const download = vi.fn(async (_url: string, _filename: string) => undefined)
+  // Each use of the hook, with the toast a failed download shows.
+  const hook = vi.fn((_failedMessage?: string) => ({ download, downloading: false }))
+  return { download, hook }
+})
+vi.mock('@/hooks/use-api-file-download', () => ({ useApiFileDownload: (failedMessage?: string) => files.hook(failedMessage) }))
 
 const nav = vi.hoisted(() => ({ search: '', pathname: '/deliverables', push: vi.fn(), replace: vi.fn() }))
 vi.mock('next/navigation', () => ({
@@ -73,10 +82,11 @@ vi.mock('@/components/deliverables/deliverable-deep-link', async (importOriginal
 }))
 
 import DeliverablesLayout from '@/app/deliverables/layout'
+import { DOWNLOAD_FAILED } from '@/lib/deliverables/download'
 import { askAboutText } from '@/lib/play/detail'
 import { DRAFT_PARAM } from '@/lib/play/draft'
 import { DOWNLOAD_FILE, PICTURE_FAILED, TRUNCATED, UNREADABLE } from '../deliverable-content'
-import { ABOUT, ASK_AUTO, DOWNLOAD } from '../detail-panel'
+import { ABOUT, ASK_AUTO, DOWNLOAD, SOURCES } from '../detail-panel'
 import { NOT_ON_SHELF, OPEN_FAILED, PlayDeliverable, TRY_AGAIN } from '../play-deliverable'
 import { BAD_LINK, PlayShelf } from '../play-shelf'
 
@@ -85,6 +95,8 @@ const MADE = new Date(2026, 9, 14, 15, 42).toISOString()
 const RAW_PNG = '/api/workspaces/ws-1/files/raw?path=outputs%2Fposter.png'
 const RAW_MP4 = '/api/workspaces/ws-1/files/raw?path=outputs%2Fteaser.mp4'
 const RAW_XLSX = '/api/workspaces/ws-1/files/raw?path=outputs%2Fbudget.xlsx'
+/** The report's own bytes: its content_url (the content route) answers JSON for the code viewer. */
+const RAW_MD = '/api/workspaces/ws-1/files/raw?path=outputs%2Flaptop-shortlist.md'
 const TABLE = [
   '# The short answer',
   '',
@@ -208,6 +220,27 @@ describe('PlayDeliverable — the page', () => {
     expect(screen.getByText(TRUNCATED)).toBeInTheDocument()
   })
 
+  it("prints a code Deliverable in Play's own <pre> on the sheet, not the core's CodeBlock card (P260-FX-13, M36)", () => {
+    found({ artifact_type: 'code', file_type: 'py', file_name: 'fit.py', content: 'print("hi")' })
+    renderDetail()
+    const article = screen.getByRole('article', { name: 'Laptop shortlist' })
+    const pre = article.querySelector('pre')
+    expect(pre).toHaveTextContent('print("hi")')
+    expect(pre?.querySelector('code')).toHaveTextContent('print("hi")')
+    // CodeBlock's <pre> carries Tailwind classes and sits under a Copy header: Play's carries neither.
+    expect(pre).not.toHaveAttribute('class')
+    expect(within(article).queryByRole('button', { name: /copy/i })).toBeNull()
+  })
+
+  it('drops raw HTML from the sheet instead of printing its tags (P260-FX-13, M39)', () => {
+    found({ content: `a<br>b\n\n${TABLE}` })
+    renderDetail()
+    const article = screen.getByRole('article', { name: 'Laptop shortlist' })
+    expect(article.textContent).not.toMatch(/<br>|<script>|<\/script>/)
+    expect(within(article).getByText('ab')).toBeInTheDocument()
+    expect(article.querySelector('br, script')).toBeNull()
+  })
+
   it("shows an image Deliverable through the core's authenticated path", () => {
     media.blobUrl.mockImplementation((url) => ({ src: 'blob:core/poster', error: null, url }))
     found({ artifact_type: 'image', title: 'Bake sale poster', file_type: 'png', content: null, content_url: RAW_PNG, preview_url: RAW_PNG })
@@ -247,6 +280,16 @@ describe('PlayDeliverable — the page', () => {
     renderDetail()
     expect(screen.getByText(UNREADABLE)).toBeInTheDocument()
   })
+
+  it("the file card downloads a text file's bytes, not its JSON content route, and a failure says try again in a moment", async () => {
+    found({ content: null, content_error: 'File not found' })
+    const { user } = renderDetail()
+    await user.click(screen.getByRole('button', { name: DOWNLOAD_FILE }))
+    expect(files.download).toHaveBeenCalledWith(RAW_MD, 'laptop-shortlist.md')
+    // The file card and the side panel's Download both say it: "Try again from Deliverables" sent users where they were.
+    expect(files.hook.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(files.hook.mock.calls.every(([failedMessage]) => failedMessage === DOWNLOAD_FAILED)).toBe(true)
+  })
 })
 
 describe('PlayDeliverable — the side panel', () => {
@@ -266,6 +309,35 @@ describe('PlayDeliverable — the side panel', () => {
     expect(panel().queryByText('From')).toBeNull()
   })
 
+  it.each([
+    ['upload', 'Uploaded', 'An upload', 'Uploaded'],
+    ['document', 'Templates', 'A template', 'Made in Templates'],
+    ['social_post', 'Socials', 'A social post', 'Made in Socials'],
+  ])("never credits Auto with a %s: the core's word instead (P260-FX-13, M104)", (sourceType, maker, from, line) => {
+    found({ agent_name: null, source_type: sourceType })
+    renderDetail()
+    expect(fact('Made by')).toBe(maker)
+    expect(fact('From')).toBe(from)
+    const article = screen.getByRole('article', { name: 'Laptop shortlist' })
+    expect(article).toHaveTextContent(line)
+    expect(article).not.toHaveTextContent('Made by Auto')
+  })
+
+  it("lists Sources · N from extra.sources, as Play's panel does: a web address as its host (P260-FX-13, M81)", () => {
+    const extra = { sources: ['https://www.which.co.uk/reviews/laptops', { url: 'https://rtings.com/x' }, { title: 'Asus spec sheet' }] }
+    found({ extra })
+    renderDetail()
+    expect(panel().getByRole('heading', { level: 2, name: `${SOURCES} · 3` })).toBeInTheDocument()
+    expect(panel().getAllByRole('listitem').map((item) => item.textContent)).toEqual(['which.co.uk', 'rtings.com', 'Asus spec sheet'])
+  })
+
+  it('has no Sources section when it carries none', () => {
+    found({ extra: {} })
+    renderDetail()
+    expect(panel().queryByRole('heading', { name: new RegExp(SOURCES) })).toBeNull()
+    expect(panel().queryAllByRole('listitem')).toHaveLength(0)
+  })
+
   it('Ask Auto about this opens /chat with a new draft naming the Deliverable', () => {
     found()
     renderDetail()
@@ -278,11 +350,20 @@ describe('PlayDeliverable — the side panel', () => {
     expect(url.searchParams.get(DRAFT_PARAM)).toBe('About my Deliverable "Laptop shortlist":')
   })
 
-  it("Download hands over the file through the core's download", async () => {
+  it("Download hands over the file through the core's download: the file's bytes, not the content route's JSON", async () => {
     found()
     const { user } = renderDetail()
     await user.click(panel().getByRole('button', { name: DOWNLOAD }))
-    expect(files.download).toHaveBeenCalledWith(deliverable().content_url, 'laptop-shortlist.md')
+    expect(files.download).toHaveBeenCalledWith(RAW_MD, 'laptop-shortlist.md')
+    expect(files.hook).toHaveBeenCalledWith(DOWNLOAD_FAILED)
+    expect(files.hook).not.toHaveBeenCalledWith(undefined)
+  })
+
+  it('Download keeps a raw file route as it is', async () => {
+    found({ artifact_type: 'spreadsheet', file_type: 'xlsx', file_name: 'budget.xlsx', content: null, content_url: RAW_XLSX })
+    const { user } = renderDetail()
+    await user.click(panel().getByRole('button', { name: DOWNLOAD }))
+    expect(files.download).toHaveBeenCalledWith(RAW_XLSX, 'budget.xlsx')
   })
 
   it('has no Download when there is no file', () => {
@@ -314,6 +395,20 @@ describe('PlayDeliverable — loading and failures', () => {
     expect(console.error).toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: TRY_AGAIN }))
     expect(result.refetch).toHaveBeenCalled()
+  })
+
+  it('keeps the open Deliverable on screen when a background refetch fails (react-query keeps the data)', () => {
+    answer({
+      data: { success: true, deliverable: deliverable() },
+      isError: true,
+      error: Object.assign(new Error('get failed: boom'), { status: 500 }),
+    })
+    renderDetail()
+    expect(screen.getByRole('heading', { level: 1, name: 'Laptop shortlist' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText(OPEN_FAILED)).toBeNull()
+    expect(screen.queryByText(NOT_ON_SHELF)).toBeNull()
+    expect(console.error).toHaveBeenCalled()
   })
 
   it('reads an answer of success: false as a failure', () => {

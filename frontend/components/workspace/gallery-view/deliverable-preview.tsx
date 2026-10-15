@@ -33,7 +33,7 @@ import {
   type Deliverable,
 } from '@/hooks/use-deliverables-api'
 import { useApiFileDownload } from '@/hooks/use-api-file-download'
-import { DEFAULT_FILENAME, deliverableFilename, deliverableFileUrl } from '@/lib/deliverables/download'
+import { DEFAULT_FILENAME, deliverableDownloadUrl, deliverableFilename, deliverableFileUrl } from '@/lib/deliverables/download'
 import { DeliverablePreviewActions } from './deliverable-preview-actions'
 import { DeliverableTags } from './deliverable-tags'
 import { usePreviewFullscreen } from './use-preview-fullscreen'
@@ -175,7 +175,9 @@ export function DeliverablePreview({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onOpenChange])
 
-  const downloadUrl = deliverable ? deliverableFileUrl(deliverable) : null
+  // What the sheet shows, and what Download fetches: a text file's bytes, never its JSON content route (M49).
+  const fileUrl = deliverable ? deliverableFileUrl(deliverable) : null
+  const downloadUrl = deliverable ? deliverableDownloadUrl(deliverable) : null
   const filename = deliverable ? deliverableFilename(deliverable) : DEFAULT_FILENAME
 
   // F358: the authenticated download; a failed fetch shows the error toast.
@@ -256,7 +258,7 @@ export function DeliverablePreview({
                       ? deliverable.content
                       : undefined
                   }
-                  url={downloadUrl ?? undefined}
+                  url={fileUrl ?? undefined}
                   previewType={getPreviewTypeForDeliverable(deliverable)}
                   filename={filename}
                   className="flex-1 rounded-lg border border-border/50"

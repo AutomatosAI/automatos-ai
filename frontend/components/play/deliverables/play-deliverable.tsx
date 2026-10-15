@@ -62,12 +62,17 @@ function statusOf(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
-/** The page's state: a 404 is "not on your shelf", any other failure (success: false included) "couldn't open". */
+/**
+ * The page's state. A Deliverable it has loaded stays on screen: react-query
+ * keeps the last good answer when a background refetch fails, so data is read
+ * first (P260-FX-12, M37). Without one, a 404 is "not on your shelf", any other
+ * failure (success: false included) "couldn't open".
+ */
 export function detailState(query: DetailQuery): DetailState {
+  const deliverable = query.data?.success === false ? undefined : query.data?.deliverable
+  if (deliverable) return { status: 'ready', deliverable }
   if (query.isError) return statusOf(query.error) === NOT_FOUND ? { status: 'missing' } : { status: 'failed' }
-  if (!query.data) return { status: 'loading' }
-  if (query.data.success === false || !query.data.deliverable) return { status: 'failed' }
-  return { status: 'ready', deliverable: query.data.deliverable }
+  return query.data ? { status: 'failed' } : { status: 'loading' }
 }
 
 /** The backend's own words for a failure go to the log, never the screen. */
@@ -146,7 +151,7 @@ function DeliverableView({ deliverable, now }: DeliverableViewProps) {
             <TypeBadge kind={kind} />
             {date && <time dateTime={deliverable.created_at}>{date}</time>}
             {date && <span aria-hidden="true">·</span>}
-            <span>{madeLine(deliverable.agent_name)}</span>
+            <span>{madeLine(deliverable.agent_name, deliverable.source_type)}</span>
           </p>
         </header>
         <DeliverableContent
