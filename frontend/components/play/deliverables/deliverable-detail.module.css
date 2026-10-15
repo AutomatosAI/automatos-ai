@@ -61,7 +61,8 @@
   gap: var(--pl-space-3);
 }
 
-.title {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .title {
   margin: 0;
   font: var(--pl-text-document-title);
   letter-spacing: var(--pl-display-letter-spacing);

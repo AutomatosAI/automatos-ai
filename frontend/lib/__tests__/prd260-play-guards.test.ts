@@ -13,11 +13,25 @@
  * (c) Every visible colour comes from the look: no #hex and no rgb()/hsl()
  *     literal in Play's CSS or components. lib/looks/catalogue.ts is the one
  *     home for a literal colour.
+ * (d) M01, M16: Play's own type, inline code and sheet colours win over
+ *     Studio's element rules, which reach Play's elements because <html>
+ *     carries studio and play together. Proven statically (css: false).
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+
+import {
+  compareSpecificity,
+  cssRules,
+  declaredProperties,
+  elementOf,
+  lastCompound,
+  namesClass,
+  specificity,
+  splitTopLevel,
+} from './css-cascade'
 
 const FRONTEND = path.resolve(__dirname, '../..')
 const SOURCE_DIRS = ['app', 'components', 'lib', 'hooks', 'contexts', 'stores']
@@ -214,5 +228,224 @@ describe('PRD-260 (c) — no literal colours outside the look catalogue', () => 
   it('keeps the catalogue as the place the colours live', () => {
     const catalogue = fs.readFileSync(path.join(FRONTEND, CATALOGUE), 'utf8')
     expect(literalColours(catalogue).length).toBeGreaterThan(CATALOGUE_MIN_COLOURS)
+  })
+})
+
+// --- (d) the cascade on Play's elements ---------------------------------------------------
+
+const GLOBALS_CSS = 'app/globals.css'
+const SHEET_CSS = 'components/play/deliverables/deliverable-content.module.css'
+const PLAY_PREFIX = ':global(html.play)'
+/** The elements Studio's element rules restyle: headings, keyboard keys and inline code. */
+const GUARDED_TAGS = new Set(['h1', 'h2', 'kbd', 'code'])
+const CHIP_TAGS = new Set(['kbd', 'code'])
+/** A code block's code: Studio's chip rule (code:not(pre code)) never reaches it. */
+const INSIDE_PRE = /(?:^|[\s>+~])pre(?![\w-])/
+const MARKDOWN_RENDERER = 'MarkdownView'
+/** 7 h1, 16 h2, 1 kbd and 2 code carried a module class on 15 Oct (the review fix plan, P260-FX-01). */
+const GUARDED_ELEMENTS_MIN = 26
+/** The Deliverable sheet and Auto's reply. */
+const MARKDOWN_SURFACES_MIN = 2
+const SHEET_FOCUS = /--pl-focus-outline\s*:[^;]*var\(\s*--pl-color-sheet-accent\s*\)/
+/** Studio's chip rule sets all four, so Play's inline kbd and code rules set each (either name). */
+const CHIP_PROPERTIES = [['background', 'background-color'], ['padding'], ['border-radius'], ['font', 'font-size']]
+/** Studio's element rules in globals.css: they reach every Play element, since <html> carries studio. */
+const STUDIO_ELEMENT_RULES: Readonly<Record<string, readonly string[]>> = {
+  h1: ['.studio h1'],
+  h2: ['.studio h2'],
+  kbd: ['.studio kbd'],
+  code: ['.studio code', '.studio code:not(pre code)'],
+}
+/** The core markdown's rules in globals.css: they reach the elements inside a MarkdownView. */
+const MARKDOWN_ELEMENT_RULES: Readonly<Record<string, readonly string[]>> = {
+  h1: ['.md-view h1', '.studio .md-view h1'],
+  h2: ['.md-view h2', '.studio .md-view h2'],
+  h3: ['.md-view h3', '.studio .md-view h3'],
+  code: ['.md-view code', '.md-view pre code'],
+  a: ['.md-view a', '.studio .md-view a'],
+  strong: ['.md-view strong'],
+}
+
+interface StyledElement {
+  /** file:line of the JSX element. */
+  readonly where: string
+  readonly tag: string
+  /** The CSS module the class comes from (absolute path). */
+  readonly css: string
+  readonly className: string
+}
+
+interface PlayRule {
+  readonly css: string
+  readonly selector: string
+  /** The element the rule lands on: the JSX tag, or the selector's own element name. */
+  readonly tag: string
+  readonly body: string
+  /** A rule of a markdown surface, where the core markdown's rules reach too. */
+  readonly inMarkdown: boolean
+}
+
+function resolveSpecifier(fromFile: string, specifier: string): string {
+  return specifier.startsWith('@/') ? path.join(FRONTEND, specifier.slice(2)) : path.resolve(path.dirname(fromFile), specifier)
+}
+
+/** `import styles from './x.module.css'` → styles → the module's path. */
+function cssModuleBindings(file: ts.SourceFile): Map<string, string> {
+  const bindings = new Map<string, string>()
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement)) continue
+    const local = statement.importClause?.name?.text
+    const specifier = stringArgument(statement.moduleSpecifier)
+    if (local && specifier?.endsWith('.module.css')) bindings.set(local, resolveSpecifier(file.fileName, specifier))
+  }
+  return bindings
+}
+
+/** The module classes a className names: styles.x, also inside cn() or a template literal. */
+function moduleClasses(value: ts.Node, bindings: Map<string, string>): Array<{ css: string; className: string }> {
+  const found: Array<{ css: string; className: string }> = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
+      const css = bindings.get(node.expression.text)
+      if (css !== undefined) found.push({ css, className: node.name.text })
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(value)
+  return found
+}
+
+function elementClasses(file: ts.SourceFile, element: ts.JsxOpeningLikeElement, bindings: Map<string, string>): StyledElement[] {
+  const attribute = element.attributes.properties.find(
+    (property) => ts.isJsxAttribute(property) && ts.isIdentifier(property.name) && property.name.text === 'className',
+  )
+  const value = attribute !== undefined && ts.isJsxAttribute(attribute) ? attribute.initializer : undefined
+  if (value === undefined) return []
+  const tag = ts.isIdentifier(element.tagName) ? element.tagName.text : ''
+  const where = `${relative(file.fileName)}:${file.getLineAndCharacterOfPosition(element.getStart(file)).line + 1}`
+  return moduleClasses(value, bindings).map((named) => ({ where, tag, ...named }))
+}
+
+/** Every JSX element in the file whose className names a CSS-module class. */
+function styledElements(fileName: string, source: string): StyledElement[] {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const bindings = cssModuleBindings(file)
+  const found: StyledElement[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) found.push(...elementClasses(file, node, bindings))
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return found
+}
+
+function allStyledElements(): StyledElement[] {
+  return playComponentFiles()
+    .filter((file) => file.endsWith('.tsx'))
+    .flatMap((file) => styledElements(file, fs.readFileSync(file, 'utf8')))
+}
+
+function rulesOf(css: string): Array<{ selector: string; body: string }> {
+  return cssRules(fs.readFileSync(css, 'utf8')).flatMap((rule) => rule.selectors.map((selector) => ({ selector, body: rule.body })))
+}
+
+/** The rules that style the element's class: those whose last compound names it. */
+function rulesForElement(element: StyledElement): PlayRule[] {
+  return rulesOf(element.css)
+    .filter(({ selector }) => namesClass(lastCompound(selector), element.className))
+    .map(({ selector, body }) => ({ css: element.css, selector, tag: element.tag, body, inMarkdown: false }))
+}
+
+/** Every rule of a markdown surface: any selector naming the class on the MarkdownView. */
+function rulesForMarkdown(surface: StyledElement): PlayRule[] {
+  return rulesOf(surface.css)
+    .filter(({ selector }) => namesClass(selector, surface.className))
+    .map(({ selector, body }) => ({ css: surface.css, selector, tag: elementOf(lastCompound(selector)), body, inMarkdown: true }))
+}
+
+function guardedRules(): PlayRule[] {
+  const elements = allStyledElements()
+  return [
+    ...elements.filter((element) => GUARDED_TAGS.has(element.tag)).flatMap(rulesForElement),
+    ...elements.filter((element) => element.tag === MARKDOWN_RENDERER).flatMap(rulesForMarkdown),
+  ]
+}
+
+function label(rule: PlayRule): string {
+  return `${relative(rule.css)}: ${rule.selector}`
+}
+
+/** One line per finding: a class on several elements (edges' .title) is one rule. */
+function unique(findings: readonly string[]): string[] {
+  return Array.from(new Set(findings))
+}
+
+/** The core rules the Play rule ties with or loses to, on the element it lands on. */
+function outrankedBy(rule: PlayRule): string[] {
+  const own = specificity(rule.selector)
+  const markdown = rule.inMarkdown ? (MARKDOWN_ELEMENT_RULES[rule.tag] ?? []) : []
+  return [...(STUDIO_ELEMENT_RULES[rule.tag] ?? []), ...markdown].filter((core) => compareSpecificity(own, specificity(core)) <= 0)
+}
+
+/** Inline kbd and code: the chip properties none of the rules for that target sets. */
+function missingChipProperties(rules: readonly PlayRule[]): string[] {
+  const declared = new Map<string, Set<string>>()
+  for (const rule of rules.filter((each) => CHIP_TAGS.has(each.tag) && !INSIDE_PRE.test(each.selector))) {
+    const key = `${relative(rule.css)}: ${lastCompound(rule.selector)}`
+    declared.set(key, new Set([...(declared.get(key) ?? []), ...declaredProperties(rule.body)]))
+  }
+  return Array.from(declared).flatMap(([key, names]) =>
+    CHIP_PROPERTIES.filter((either) => !either.some((name) => names.has(name))).map((either) => `${key} sets no ${either.join('/')}`),
+  )
+}
+
+describe("PRD-260 (d) — Play's own type, inline code and sheet colours win over Studio's element rules (M01, M16)", () => {
+  it('reads rules, selector lists and specificity', () => {
+    const css = '@tailwind base; /* .x { } */ .a, .b:is(.c, .d) { color: red } @media (min-width: 1px) { .e h1 { margin: 0 } } @keyframes k { from { opacity: 0 } }'
+    expect(cssRules(css).map((rule) => rule.selectors)).toEqual([['.a', '.b:is(.c, .d)'], ['.e h1']])
+    expect(splitTopLevel(':global(html.play) .x,\n  .y  z')).toEqual([':global(html.play) .x', '.y z'])
+    expect(lastCompound(':global(html.play) .prose > :first-child')).toBe(':first-child')
+    expect(elementOf(lastCompound('.prose li::marker'))).toBe('li')
+    expect(namesClass('.titleRow', 'title')).toBe(false)
+    expect(declaredProperties(' font: var(--x); --pl-y: 1px ;')).toEqual(['font', '--pl-y'])
+    expect(INSIDE_PRE.test('.prose pre code')).toBe(true)
+    expect(INSIDE_PRE.test('.pre-wrap code')).toBe(false)
+    expect(specificity('.studio h1')).toEqual([0, 1, 1])
+    expect(specificity('.studio code:not(pre code)')).toEqual([0, 1, 3])
+    expect(specificity('.studio .md-view a')).toEqual([0, 2, 1])
+    expect(specificity(':global(html.play) .title')).toEqual([0, 2, 1])
+    expect(specificity(":global(html.play) .item[data-newest='true'] .cardTitle")).toEqual([0, 4, 1])
+    expect(specificity(':where(html.play :focus-visible)')).toEqual([0, 0, 0])
+    expect(specificity('.prose li::marker')).toEqual([0, 1, 2])
+  })
+
+  it('finds the core rules it compares against in globals.css', () => {
+    const core = new Set(rulesOf(path.join(FRONTEND, GLOBALS_CSS)).map(({ selector }) => selector))
+    const named = [...Object.values(STUDIO_ELEMENT_RULES), ...Object.values(MARKDOWN_ELEMENT_RULES)].flat()
+    expect(named.filter((selector) => !core.has(selector))).toEqual([])
+  })
+
+  it("finds Play's headings, keys and inline code, and both markdown surfaces", () => {
+    const elements = allStyledElements()
+    expect(elements.filter((element) => GUARDED_TAGS.has(element.tag)).length).toBeGreaterThanOrEqual(GUARDED_ELEMENTS_MIN)
+    expect(elements.filter((element) => element.tag === MARKDOWN_RENDERER).length).toBeGreaterThanOrEqual(MARKDOWN_SURFACES_MIN)
+  })
+
+  it('starts every rule on those elements, and every markdown-surface rule, with html.play', () => {
+    expect(unique(guardedRules().filter((rule) => !rule.selector.startsWith(PLAY_PREFIX)).map(label))).toEqual([])
+  })
+
+  it('outranks every globals.css rule that reaches the same element (.studio h1, .studio code:not(pre code), .studio .md-view a)', () => {
+    const lost = guardedRules().flatMap((rule) => outrankedBy(rule).map((core) => `${label(rule)} does not beat ${core}`))
+    expect(unique(lost)).toEqual([])
+  })
+
+  it("sets the background, padding, radius and size of inline kbd and code itself, since Studio's chip sets all four", () => {
+    expect(missingChipProperties(guardedRules())).toEqual([])
+  })
+
+  it("draws the keyboard ring on the Deliverable sheet in the sheet's accent (M16)", () => {
+    const sheet = rulesOf(path.join(FRONTEND, SHEET_CSS)).find(({ selector }) => selector === '.document')
+    expect(sheet?.body).toMatch(SHEET_FOCUS)
   })
 })

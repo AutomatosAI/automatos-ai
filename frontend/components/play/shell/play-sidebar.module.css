@@ -113,7 +113,8 @@
   color: var(--pl-color-text-3);
 }
 
-.sectionLabel {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .sectionLabel {
   margin: 0;
   padding: 0 var(--pl-space-2) var(--pl-space-2);
   font: var(--pl-text-label);

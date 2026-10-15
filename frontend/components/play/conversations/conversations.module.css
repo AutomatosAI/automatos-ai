@@ -73,7 +73,8 @@
   gap: var(--pl-space-1);
 }
 
-.groupLabel {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .groupLabel {
   margin: 0;
   padding: var(--pl-space-2) var(--pl-space-3);
   font: var(--pl-text-label);

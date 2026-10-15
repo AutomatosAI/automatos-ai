@@ -4,9 +4,11 @@
  * lying on the desk (--pl-color-sheet: cream on a dark ground, white on Paper),
  * a picture or a video full width, else the file card. On the sheet every
  * colour is a --pl-color-sheet-* token: the ground's text colours don't read
- * there. The core's markdown renderer styles its .md-view in globals.css's
- * components layer; these unlayered rules recolour it for the sheet. Every
- * variable is --pl-* (K2).
+ * there. The core's markdown renderer styles its .md-view in globals.css, and
+ * Tailwind 3 emits that file's @layer blocks as plain rules (no cascade layers),
+ * so specificity decides: every .prose rule starts with html.play, which beats
+ * .md-view's rules and Studio's (.studio .md-view a, .studio code), because
+ * <html> carries studio and play together. Every variable is --pl-* (K2).
  */
 
 .document {
@@ -18,20 +20,22 @@
   background: var(--pl-color-sheet);
   color: var(--pl-color-sheet-text);
   box-shadow: var(--pl-shadow-sheet);
+  /* The keyboard ring on the sheet: the ground's accent text doesn't read on it. */
+  --pl-focus-outline: 2px solid var(--pl-color-sheet-accent);
 }
 
-.prose {
+:global(html.play) .prose {
   font: var(--pl-text-document-body);
   color: var(--pl-color-sheet-text);
   overflow-wrap: anywhere;
 }
 
-.prose h1,
-.prose h2,
-.prose h3,
-.prose h4,
-.prose h5,
-.prose h6 {
+:global(html.play) .prose h1,
+:global(html.play) .prose h2,
+:global(html.play) .prose h3,
+:global(html.play) .prose h4,
+:global(html.play) .prose h5,
+:global(html.play) .prose h6 {
   margin: var(--pl-space-5) 0 var(--pl-space-3);
   padding: 0;
   border: 0;
@@ -40,52 +44,61 @@
   color: var(--pl-color-sheet-text);
 }
 
-.prose h3,
-.prose h4,
-.prose h5,
-.prose h6 {
+:global(html.play) .prose h3,
+:global(html.play) .prose h4,
+:global(html.play) .prose h5,
+:global(html.play) .prose h6 {
   font: var(--pl-text-title);
   letter-spacing: var(--pl-display-letter-spacing);
 }
 
-.prose > :first-child {
+:global(html.play) .prose > :first-child {
   margin-top: 0;
 }
 
-.prose strong,
-.prose a {
+:global(html.play) .prose strong,
+:global(html.play) .prose a {
   color: var(--pl-color-sheet-accent);
 }
 
-.prose li::marker,
-.prose blockquote {
+:global(html.play) .prose li::marker,
+:global(html.play) .prose blockquote {
   color: var(--pl-color-sheet-text);
 }
 
-.prose blockquote {
+:global(html.play) .prose blockquote {
   border-left-color: var(--pl-color-sheet-accent);
 }
 
-.prose code {
-  font: var(--pl-text-mono);
-  background: var(--pl-tint-sheet-line);
+:global(html.play) .prose code {
+  padding: 0 var(--pl-space-1);
   border-color: transparent;
+  border-radius: var(--pl-radius-icon);
+  background: var(--pl-tint-sheet-line);
+  font: var(--pl-text-mono);
 }
 
-.prose pre {
+/* A code block's code carries no chip of its own. */
+:global(html.play) .prose pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+
+:global(html.play) .prose pre {
   background: var(--pl-tint-sheet-line);
 }
 
-.prose hr {
+:global(html.play) .prose hr {
   border-top-color: var(--pl-tint-sheet-line);
 }
 
-.prose table {
+:global(html.play) .prose table {
   border-top: 2px solid var(--pl-color-sheet-text);
 }
 
-.prose th,
-.prose td {
+:global(html.play) .prose th,
+:global(html.play) .prose td {
   padding: var(--pl-space-3) var(--pl-space-4) var(--pl-space-3) 0;
   border: 0;
   border-bottom: 1px solid var(--pl-tint-sheet-line);
@@ -93,7 +106,7 @@
   color: var(--pl-color-sheet-text);
 }
 
-.prose th {
+:global(html.play) .prose th {
   font: var(--pl-text-label);
   letter-spacing: var(--pl-label-tracking);
   text-transform: uppercase;

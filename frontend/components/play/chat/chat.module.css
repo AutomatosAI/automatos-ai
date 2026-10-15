@@ -70,7 +70,8 @@
   animation: rise var(--pl-duration-message) var(--pl-ease-out);
 }
 
-.speaker {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .speaker {
   margin: 0;
   font: var(--pl-text-label);
   letter-spacing: var(--pl-label-tracking);
@@ -110,7 +111,10 @@
   color: inherit;
 }
 
-/* The answer: Geist for reading, with bold set as a serif highlight in the accent. */
+/* The answer: Geist for reading, with bold set as a serif highlight in the accent. The
+   core's MarkdownView styles .md-view in globals.css (plain rules: Tailwind 3 emits no
+   cascade layers), Studio's .studio .md-view a and .studio code on top; every .markdown
+   rule starts with html.play so the reply's own rules win (<html> carries both). */
 
 .answer {
   width: 100%;
@@ -119,26 +123,26 @@
   overflow-wrap: anywhere;
 }
 
-.markdown {
+:global(html.play) .markdown {
   font: inherit;
   color: inherit;
 }
 
-.markdown > :first-child {
+:global(html.play) .markdown > :first-child {
   margin-top: 0;
 }
 
-.markdown > :last-child {
+:global(html.play) .markdown > :last-child {
   margin-bottom: 0;
 }
 
-.markdown p,
-.markdown ul,
-.markdown ol {
+:global(html.play) .markdown p,
+:global(html.play) .markdown ul,
+:global(html.play) .markdown ol {
   margin: 0 0 var(--pl-space-3);
 }
 
-.markdown strong {
+:global(html.play) .markdown strong {
   font-family: var(--pl-font-display);
   font-style: var(--pl-font-display-style);
   font-weight: var(--pl-font-display-weight);
@@ -147,22 +151,26 @@
   color: var(--pl-color-accent-text);
 }
 
-.markdown a {
+:global(html.play) .markdown a {
   color: var(--pl-color-accent-text);
 }
 
-.markdown code {
+:global(html.play) .markdown code {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   font: var(--pl-text-mono);
 }
 
-.markdown pre {
+:global(html.play) .markdown pre {
   overflow-x: auto;
   padding: var(--pl-space-3);
   border-radius: var(--pl-radius-tool);
   background: var(--pl-color-surface);
 }
 
-.markdown table {
+:global(html.play) .markdown table {
   display: block;
   max-width: 100%;
   overflow-x: auto;
@@ -170,8 +178,8 @@
   margin: 0 0 var(--pl-space-3);
 }
 
-.markdown th,
-.markdown td {
+:global(html.play) .markdown th,
+:global(html.play) .markdown td {
   padding: var(--pl-space-1) var(--pl-space-2);
   border: 1px solid var(--pl-line);
   text-align: left;

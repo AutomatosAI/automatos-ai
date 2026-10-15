@@ -13,7 +13,8 @@
   color: var(--pl-color-text);
 }
 
-.label {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .label {
   margin: 0;
   font: var(--pl-text-label);
   letter-spacing: var(--pl-label-tracking);

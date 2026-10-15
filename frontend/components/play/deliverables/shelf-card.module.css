@@ -102,14 +102,15 @@
   min-width: 0;
 }
 
-.cardTitle {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .cardTitle {
   margin: 0;
   font: var(--pl-text-title);
   letter-spacing: var(--pl-display-letter-spacing);
   overflow-wrap: anywhere;
 }
 
-.item[data-newest='true'] .cardTitle {
+:global(html.play) .item[data-newest='true'] .cardTitle {
   font: var(--pl-text-title-lg);
   letter-spacing: var(--pl-display-letter-spacing);
 }

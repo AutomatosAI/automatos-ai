@@ -73,7 +73,8 @@
   gap: var(--pl-space-4);
 }
 
-.title {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .title {
   margin: 0;
   font: var(--pl-text-hero);
   letter-spacing: var(--pl-display-letter-spacing);
@@ -87,8 +88,14 @@
   color: var(--pl-color-text-2);
 }
 
-.inline {
+/* html.play outranks Studio's kbd/code chip (globals.css .studio code, kbd), which sets the
+   background, padding, radius and size: each is set here. */
+:global(html.play) .inline {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   font-family: var(--pl-font-mono);
+  font-size: 1em;
   color: var(--pl-color-text);
 }
 
@@ -108,7 +115,11 @@
   color: var(--pl-color-text-3);
 }
 
-.commandText {
+/* As .inline: Studio's code chip is overruled property by property. */
+:global(html.play) .commandText {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   font: var(--pl-text-mono);
   color: var(--pl-color-text);
   user-select: all;

@@ -55,11 +55,14 @@
   flex: none;
 }
 
-.kbd {
+/* html.play outranks Studio's kbd/code chip (globals.css .studio code, kbd), which sets the
+   background, padding, radius and size: each is set here. */
+:global(html.play) .kbd {
   margin-left: auto;
   padding: 1px var(--pl-space-1);
   border: 1px solid var(--pl-line);
   border-radius: var(--pl-radius-icon);
+  background: transparent;
   font: var(--pl-text-mono-sm);
   color: var(--pl-color-text-3);
 }

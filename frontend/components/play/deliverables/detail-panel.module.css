@@ -27,7 +27,8 @@
   gap: var(--pl-space-3);
 }
 
-.panelLabel {
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .panelLabel {
   margin: 0;
   font: var(--pl-text-label);
   letter-spacing: var(--pl-label-tracking);
