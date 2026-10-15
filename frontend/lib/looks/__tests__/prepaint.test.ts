@@ -8,12 +8,14 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { lookToCssVars } from '@/lib/looks/css'
+import { ACCENTS } from '@/lib/looks/catalogue'
+import { GLOW_SCALE, GLOW_VAR, lookToCssVars, rgba, safeGlow } from '@/lib/looks/css'
 import { lookDocumentVars } from '@/lib/looks/document'
 import { LOOK_PREPAINT_SCRIPT, scriptSafeJson } from '@/lib/looks/prepaint'
-import { DEFAULT_LOOK, EMBER, PRESETS } from '@/lib/looks/presets'
+import { DAYLIGHT, DEFAULT_LOOK, EMBER, PRESETS } from '@/lib/looks/presets'
 import { ACTIVE_LOOK_KEY } from '@/lib/looks/storage'
 import { lookToStudioTokens } from '@/lib/looks/studio-tokens'
+import { GLOW_MAX } from '@/lib/looks/types'
 import { PLAY_HTML_CLASS, STUDIO_HTML_CLASS } from '@/lib/ui-style'
 
 import { clearRoot, lookNamesLeft, myLook, rootVars } from './helpers'
@@ -54,6 +56,19 @@ describe('the pre-paint look script under Play', () => {
       runPrepaint()
       const expected = { ...lookToCssVars(look), ...lookToStudioTokens(look) }
       expect({ id: look.id, vars: rootVars() }).toEqual({ id: look.id, vars: expected })
+      clearRoot()
+      underPlay()
+    }
+  })
+
+  it("paints a stored glow past its ground and accent's safe glow at that cap, as lookToCssVars does (M50)", () => {
+    for (const look of [myLook({ glow: GLOW_MAX }), { ...EMBER, glow: GLOW_MAX }, DAYLIGHT]) {
+      const cap = safeGlow(look.ground, look.accent)
+      store(look)
+      runPrepaint()
+      expect({ id: look.id, cap, under: cap < look.glow }).toEqual({ id: look.id, cap, under: true })
+      expect(rootVars()[GLOW_VAR]).toBe(rgba(ACCENTS[look.accent].hex, cap / GLOW_SCALE))
+      expect(rootVars()).toEqual(lookDocumentVars(look))
       clearRoot()
       underPlay()
     }

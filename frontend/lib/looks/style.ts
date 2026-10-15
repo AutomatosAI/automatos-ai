@@ -37,6 +37,7 @@ export const COLOUR_TOKENS: readonly ColourToken[] = [
   { name: '--pl-accent-line', role: 'selected and new edges' },
   { name: '--pl-accent-fill', role: 'a running tool line' },
   { name: '--pl-glow', role: 'the page glow' },
+  { name: '--pl-glow-snag', role: 'the page glow on a snag' },
   { name: '--pl-error', role: 'errors: fills, rings, icons' },
   { name: '--pl-error-text', role: 'the error as text' },
   { name: '--pl-auto-light', role: "Auto's eyes, ring and connected only" },

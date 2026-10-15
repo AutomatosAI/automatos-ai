@@ -48,7 +48,8 @@ html.play {
   --pl-line-strong: color-mix(in srgb, var(--pl-ground-text) 16%, transparent); /* your message, chips */
   --pl-line-button: color-mix(in srgb, var(--pl-ground-text) 24%, transparent); /* outlined buttons */
 
-  /* Colour: tints */
+  /* Colour: tints. The accent text reads on the fill, the halo and the faint tint: their alphas are
+     lib/looks/css.ts ACCENT_TEXT_TINTS (contrast.test.ts holds these literals to them). */
   --pl-tint-hover: var(--pl-ground-chip);
   --pl-tint-panel: var(--pl-ground-panel);
   --pl-tint-tool: var(--pl-ground-chip); /* a finished tool line */
@@ -57,23 +58,21 @@ html.play {
   --pl-tint-accent: var(--pl-accent-fill); /* a running tool line */
   --pl-tint-accent-line: var(--pl-accent-line); /* its edge, the new Deliverable's edge */
   --pl-tint-accent-track: color-mix(in srgb, var(--pl-accent) 30%, transparent); /* the spinner's track */
-  --pl-tint-accent-halo: color-mix(in srgb, var(--pl-accent) 18%, transparent); /* the focus halo */
+  --pl-tint-accent-halo: color-mix(in srgb, var(--pl-accent) 18%, transparent); /* the focus halo (ACCENT_HALO_ALPHA) */
   --pl-tint-accent-strong: color-mix(in srgb, var(--pl-accent) 28%, transparent); /* the newest shelf card */
-  --pl-tint-accent-faint: color-mix(in srgb, var(--pl-accent) 4%, transparent);
+  --pl-tint-accent-faint: color-mix(in srgb, var(--pl-accent) 4%, transparent); /* a card's faint end (ACCENT_FAINT_ALPHA) */
   --pl-tint-error: color-mix(in srgb, var(--pl-error) 10%, transparent);
   --pl-tint-error-line: color-mix(in srgb, var(--pl-error) 45%, transparent);
   --pl-tint-placeholder: color-mix(in srgb, var(--pl-auto-shell) 30%, transparent); /* Auto's stand-in */
   --pl-tint-visor: color-mix(in srgb, var(--pl-ground-bg) 60%, transparent);
   --pl-tint-scrim: color-mix(in srgb, var(--pl-ground-bg) 72%, transparent); /* the page behind the phone More sheet */
 
-  /* Page ground and its glow (the base rules below). --pl-glow is the look's accent at its glow level. */
+  /* Page ground and its glow (the base rules below). --pl-glow is the look's accent at its glow level and
+     --pl-glow-snag the coral at the ground's snag level, each capped where the page's text still reads at AA
+     (lib/looks/css.ts safeGlow, snagGlowAlpha). */
   --pl-page-background: var(--pl-color-bg);
   --pl-page-glow: radial-gradient(760px 520px at 82% 62%, var(--pl-glow), transparent 65%);
-  --pl-page-glow-snag: radial-gradient(
-    760px 520px at 82% 62%,
-    color-mix(in srgb, var(--pl-error) 15%, transparent),
-    transparent 65%
-  );
+  --pl-page-glow-snag: radial-gradient(760px 520px at 82% 62%, var(--pl-glow-snag), transparent 65%);
 
   /* Type: families. Display comes from the look (Instrument Serif italic in Ember). */
   --pl-font-display: var(--pl-display-family);

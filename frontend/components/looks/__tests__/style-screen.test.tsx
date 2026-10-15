@@ -207,7 +207,7 @@ describe('the style sheet under Play, on Ember', () => {
     renderPage()
     await ready()
     const colour = within(screen.getByRole('region', { name: 'Colour' }))
-    expect(colour.getAllByRole('listitem')).toHaveLength(21)
+    expect(colour.getAllByRole('listitem')).toHaveLength(22)
     expect(swatchValue('--pl-ground-bg')).toBe(GROUNDS.graphite.bg)
     expect(chipColour('--pl-ground-bg')).toBe(GROUNDS.graphite.bg)
     expect(chipColour('--pl-accent')).toBe(ACCENTS.molten.hex)

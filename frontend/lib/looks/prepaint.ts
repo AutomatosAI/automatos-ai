@@ -17,6 +17,7 @@ import {
   groundVars,
   lightVars,
   rgbList,
+  safeGlowAlpha,
   shellVars,
   type CssVars,
 } from './css'
@@ -41,14 +42,15 @@ import { GLOW_MAX, GLOW_MIN, LOOK_INTERFACE, LOOK_SCHEMA } from './types'
  * with, plus the schema; a look that validateLook() refuses only for its
  * name or id paints here and gives way to the default once storage is read.
  * Never put user text into this string; it writes custom properties only,
- * never markup.
+ * never markup. The glow is painted as glowVars() paints it: never past the
+ * ground and accent's safe glow (table c, from safeGlowAlpha()).
  *
  * The tone is not set here: next-themes' own script runs later in <body> and
  * owns the light/dark class, so the tone reaches the first paint through its
  * cookie and ThemeProvider's forcedTheme (lib/looks/tone.ts).
  */
 
-function table<K extends string>(keys: readonly K[], vars: (key: K) => CssVars): Readonly<Record<string, CssVars>> {
+function table<K extends string, V>(keys: readonly K[], vars: (key: K) => V): Readonly<Record<string, V>> {
   return Object.fromEntries(keys.map((key) => [key, vars(key)]))
 }
 
@@ -65,6 +67,7 @@ export function prepaintTable() {
     s: table(SHELL_KEYS, shellVars),
     l: table(LIGHT_KEYS, lightVars),
     r: Object.fromEntries(ACCENT_KEYS.map((key) => [key, rgbList(ACCENTS[key].hex)])),
+    c: table(GROUND_KEYS, (key) => table(ACCENT_KEYS, (other) => safeGlowAlpha(key, other))),
     d: { ground, accent, font, shell, light, glow },
   }
 }
@@ -91,5 +94,5 @@ var l=null;
 try{l=JSON.parse(window.localStorage.getItem(${scriptSafeJson(ACTIVE_LOOK_KEY)})||"null");}catch(e){l=null;}
 if(!valid(l)){l=T.d;}
 put(T.g[l.ground]);put(T.a[l.accent]);put(T.x[l.ground][l.accent]);put(T.f[l.font]);put(T.s[l.shell]);put(T.l[l.light]);
-d.style.setProperty(${scriptSafeJson(GLOW_VAR)},"rgba("+T.r[l.accent]+","+l.glow/${GLOW_SCALE}+")");
+d.style.setProperty(${scriptSafeJson(GLOW_VAR)},"rgba("+T.r[l.accent]+","+Math.min(l.glow/${GLOW_SCALE},T.c[l.ground][l.accent])+")");
 })();`

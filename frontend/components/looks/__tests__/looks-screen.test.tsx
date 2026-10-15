@@ -31,7 +31,7 @@ vi.mock('@/components/layout/main-layout', () => ({
 import { LooksScreen } from '@/components/looks/looks-screen'
 import { clearRoot, lookNamesLeft, myLook } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS, SHELLS, TYPE_STYLES } from '@/lib/looks/catalogue'
-import { rgba } from '@/lib/looks/css'
+import { GLOW_SCALE, rgba, safeGlow } from '@/lib/looks/css'
 import { SAVED_SUB } from '@/lib/looks/editor'
 import { AURORA, EMBER, OBSIDIAN, PRESETS, WORKSHOP } from '@/lib/looks/presets'
 import { ACTIVE_LOOK_KEY, SAVED_LOOKS_KEY } from '@/lib/looks/storage'
@@ -154,17 +154,24 @@ describe('Make it yours under Play', () => {
     await user.click(group(/^Auto's light/).getByRole('button', { name: 'Ice' }))
     await waitFor(() => expect(rootVar('--pl-auto-light')).toBe(LIGHTS.ice.hex))
 
+    // Paper × Molten keeps its text at AA only up to its safe glow (M50): the slider stops there.
+    const safe = safeGlow('paper', 'molten')
     const slider = screen.getByRole('slider', { name: 'Glow' })
+    expect(slider).toHaveAttribute('max', String(safe))
     fireEvent.change(slider, { target: { value: '0' } })
     await waitFor(() => expect(rootVar('--pl-glow')).toBe(rgba(ACCENTS.molten.hex, 0)))
     expect(slider).toHaveAttribute('aria-valuetext', 'Off')
     expect(screen.getByText('Off')).toBeInTheDocument()
 
     fireEvent.change(slider, { target: { value: '31' } })
-    await waitFor(() => expect(rootVar('--pl-glow')).toBe(rgba(ACCENTS.molten.hex, 0.31)))
-    expect(slider).toHaveAttribute('aria-valuetext', '31%')
+    await waitFor(() => expect(rootVar('--pl-glow')).toBe(rgba(ACCENTS.molten.hex, safe / GLOW_SCALE)))
+    expect(slider).toHaveAttribute('aria-valuetext', `${safe}%`)
 
-    const edited = { ...EMBER, ground: 'paper', font: 'round', shell: 'cobalt', light: 'ice', glow: 31 } as const
+    fireEvent.change(slider, { target: { value: String(safe - 2) } })
+    await waitFor(() => expect(rootVar('--pl-glow')).toBe(rgba(ACCENTS.molten.hex, (safe - 2) / GLOW_SCALE)))
+    expect(slider).toHaveAttribute('aria-valuetext', `${safe - 2}%`)
+
+    const edited = { ...EMBER, ground: 'paper', font: 'round', shell: 'cobalt', light: 'ice', glow: safe - 2 } as const
     expect(stored(ACTIVE_LOOK_KEY)).toEqual(edited)
     await lookOnPage(edited)
   })
