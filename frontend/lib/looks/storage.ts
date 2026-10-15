@@ -1,29 +1,48 @@
-import { isPresetId } from './presets'
+import { DEFAULT_LOOK, isPresetId } from './presets'
+import { moveUnscopedOnce, scopedKey } from './scope'
 import type { Look } from './types'
 import { validateLook } from './validate'
 
 /**
- * PRD-260 — looks are kept per browser in localStorage, which may be missing,
- * blocked or full: then Play runs in Ember and nothing is kept. Every look read
- * back goes through validateLook().
+ * PRD-260 — looks are kept in localStorage, per signed-in user and workspace
+ * (F5: each key is scoped, lib/looks/scope.ts). localStorage may be missing,
+ * blocked or full: then Play runs in Ember, nothing is kept, and the read and
+ * write helpers say so (StoredLooks.persisted, the writes' boolean) so the
+ * Looks page can tell the user. Every look read back goes through
+ * validateLook().
  */
 
-/** The user's saved looks, a JSON array of Look objects. */
+/** The user's saved looks, a JSON array of Look objects: this base plus the scope. Unscoped, the key before F5. */
 export const SAVED_LOOKS_KEY = 'automatos-play.looks'
-/** The active look: its id plus its values, so an unsaved edit survives a reload. */
+/** The active look: its id plus its values, so an unsaved edit survives a reload. Scoped as SAVED_LOOKS_KEY. */
 export const ACTIVE_LOOK_KEY = 'automatos-play.look'
+/** The scope whose active look the pre-paint script paints: it runs before anyone is signed in. */
+export const LOOK_SCOPE_KEY = 'automatos-play.look.current'
+/** The scope the unscoped looks moved to: they move once, to the first account that reads them. */
+export const UNSCOPED_LOOKS_MOVED_KEY = 'automatos-play.looks.moved-to'
 
 export type StorageSource = () => Storage
 
 export const browserStorage: StorageSource = () => window.localStorage
 
+export interface LookKeys {
+  readonly saved: string
+  readonly active: string
+}
+
+export function lookKeys(scope: string): LookKeys {
+  return { saved: scopedKey(SAVED_LOOKS_KEY, scope), active: scopedKey(ACTIVE_LOOK_KEY, scope) }
+}
+
 export interface StoredLooks {
+  /** The scope they were read for. */
+  readonly scope: string
   /** null when nothing valid is stored: the caller uses DEFAULT_LOOK. */
   readonly active: Look | null
   readonly saved: readonly Look[]
+  /** False when storage can't be read: nothing the user does is kept past this tab. */
+  readonly persisted: boolean
 }
-
-const NOTHING_STORED: StoredLooks = { active: null, saved: [] }
 
 type Parsed = { readonly ok: true; readonly value: unknown } | { readonly ok: false }
 
@@ -73,31 +92,83 @@ export function parseSavedLooks(raw: string | null): readonly Look[] {
   return entries.reduce<readonly Look[]>(keepLook, [])
 }
 
-export function readStoredLooks(storage: StorageSource): StoredLooks {
+export function readStoredLooks(storage: StorageSource, scope: string): StoredLooks {
+  const keys = lookKeys(scope)
   try {
     const store = storage()
     return {
-      active: parseActiveLook(store.getItem(ACTIVE_LOOK_KEY)),
-      saved: parseSavedLooks(store.getItem(SAVED_LOOKS_KEY)),
+      scope,
+      active: parseActiveLook(store.getItem(keys.active)),
+      saved: parseSavedLooks(store.getItem(keys.saved)),
+      persisted: true,
     }
   } catch (error) {
     console.warn("[looks] can't read localStorage, so Play uses Ember and Looks aren't kept:", error)
-    return NOTHING_STORED
+    return { scope, active: null, saved: [], persisted: false }
   }
 }
 
-export function writeActiveLook(storage: StorageSource, look: Look): void {
+/** The first read for a scope: what this browser kept before F5 moves to it once (never deleted), then readStoredLooks. */
+export function loadStoredLooks(storage: StorageSource, scope: string): StoredLooks {
+  const keys = lookKeys(scope)
   try {
-    storage().setItem(ACTIVE_LOOK_KEY, JSON.stringify(look))
+    moveUnscopedOnce(storage(), UNSCOPED_LOOKS_MOVED_KEY, scope, [
+      { from: SAVED_LOOKS_KEY, to: keys.saved },
+      { from: ACTIVE_LOOK_KEY, to: keys.active },
+    ])
   } catch (error) {
-    console.warn("[looks] can't save the active Look to localStorage; it lasts until the page closes", error)
+    console.warn("[looks] can't move this browser's earlier Looks to the signed-in account:", error)
+  }
+  return readStoredLooks(storage, scope)
+}
+
+/** True when it was kept; false (with a warning) when storage refused it. */
+function write(storage: StorageSource, key: string, value: unknown, what: string): boolean {
+  try {
+    storage().setItem(key, JSON.stringify(value))
+    return true
+  } catch (error) {
+    console.warn(`[looks] can't save ${what} to localStorage; it lasts until the page closes`, error)
+    return false
   }
 }
 
-export function writeSavedLooks(storage: StorageSource, looks: readonly Look[]): void {
+export function writeActiveLook(storage: StorageSource, scope: string, look: Look): boolean {
+  return write(storage, lookKeys(scope).active, look, 'the active Look')
+}
+
+export function writeSavedLooks(storage: StorageSource, scope: string, looks: readonly Look[]): boolean {
+  return write(storage, lookKeys(scope).saved, looks, 'the saved Looks')
+}
+
+/**
+ * The look the pre-paint script paints (lib/looks/prepaint.ts): the active
+ * look of the scope LOOK_SCOPE_KEY names, else the one this browser kept
+ * before F5, else the default. It only reads: nothing moves, nothing is
+ * written. The LookProvider paints it under Play until the account's own
+ * looks are read, so Play always has its variables, also when the account or
+ * its workspace isn't known yet and the style was switched to Play after the
+ * page loaded (no pre-paint ran).
+ */
+export function readPrepaintLook(storage: StorageSource): Look {
   try {
-    storage().setItem(SAVED_LOOKS_KEY, JSON.stringify(looks))
+    const store = storage()
+    const pointer = store.getItem(LOOK_SCOPE_KEY)
+    return parseActiveLook(store.getItem(pointer ? lookKeys(pointer).active : ACTIVE_LOOK_KEY)) ?? DEFAULT_LOOK
   } catch (error) {
-    console.warn("[looks] can't save the saved Looks to localStorage; they last until the page closes", error)
+    console.warn("[looks] can't read localStorage, so Play paints Ember until the account's Looks are read:", error)
+    return DEFAULT_LOOK
+  }
+}
+
+/** Points the pre-paint script at this scope's active look (lib/looks/prepaint.ts). */
+export function rememberLookScope(storage: StorageSource, scope: string): boolean {
+  try {
+    const store = storage()
+    if (store.getItem(LOOK_SCOPE_KEY) !== scope) store.setItem(LOOK_SCOPE_KEY, scope)
+    return true
+  } catch (error) {
+    console.warn("[looks] can't note the signed-in account's Look for the next page load:", error)
+    return false
   }
 }

@@ -30,7 +30,8 @@
 }
 
 .card:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   border-radius: var(--pl-radius-card);
   box-shadow: var(--pl-focus-field);
 }

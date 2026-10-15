@@ -72,7 +72,8 @@
 }
 
 .sectionLink:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   border-radius: var(--pl-radius-paper);
   box-shadow: var(--pl-focus-field);
 }
@@ -103,7 +104,8 @@
 }
 
 .chip:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   box-shadow: var(--pl-focus-field);
 }
 
@@ -166,7 +168,8 @@
 
 .button:focus-visible,
 .moreButton:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   box-shadow: var(--pl-focus-field);
 }
 

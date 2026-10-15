@@ -7,7 +7,11 @@
 
 const REVOKE_AFTER_MS = 1000
 
-/** Starts a download of `text` as `fileName`. Throws if the browser refuses; callers say so. */
+/**
+ * Starts a download of `text` as `fileName`. It throws only when the Blob or
+ * its URL can't be made: a download the browser blocks, or the user cancels,
+ * can't be seen from here, so callers say it started, never that it arrived.
+ */
 export function downloadText(fileName: string, text: string, type: string): void {
   const url = URL.createObjectURL(new Blob([text], { type }))
   const link = document.createElement('a')

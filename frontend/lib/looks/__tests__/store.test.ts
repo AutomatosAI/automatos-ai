@@ -1,9 +1,14 @@
 // @vitest-environment node
-/** PRD-260 — the LookProvider's state as a pure reducer. */
+/**
+ * PRD-260 — the LookProvider's state as a pure reducer: looks belong to one
+ * scope (F5), another tab's change is taken without being written back (M25),
+ * and a refused write is remembered (M98).
+ */
 import { describe, expect, it } from 'vitest'
 
-import { AURORA, DAYLIGHT, EMBER } from '@/lib/looks/presets'
+import { AURORA, DAYLIGHT, EMBER, OBSIDIAN } from '@/lib/looks/presets'
 import { INITIAL_LOOK_STATE, type LookAction, type LookState, lookReducer } from '@/lib/looks/store'
+import type { Look } from '@/lib/looks/types'
 
 import { myLook } from './helpers'
 
@@ -11,17 +16,50 @@ function run(actions: readonly LookAction[], from: LookState = INITIAL_LOOK_STAT
   return actions.reduce(lookReducer, from)
 }
 
-const loaded = (active = DAYLIGHT, saved = [myLook()]): LookAction => ({ type: 'loaded', active, saved })
+const SCOPE = 'ws-1:user-a'
+const OTHER_SCOPE = 'ws-1:user-b'
+
+const loaded = (active: Look | null = DAYLIGHT, saved: readonly Look[] = [myLook()], scope = SCOPE): LookAction => ({
+  type: 'loaded',
+  scope,
+  active,
+  saved,
+  persisted: true,
+})
+
+const synced = (active: Look | null, saved: readonly Look[], scope = SCOPE): LookAction => ({
+  type: 'synced',
+  scope,
+  active,
+  saved,
+  persisted: true,
+})
 
 describe('lookReducer', () => {
   it('starts in Ember with nothing saved and nothing to write', () => {
-    expect(INITIAL_LOOK_STATE).toMatchObject({ look: EMBER, saved: [], loaded: false, lookChanged: false, savedChanged: false })
+    expect(INITIAL_LOOK_STATE).toMatchObject({
+      look: EMBER,
+      saved: [],
+      loaded: false,
+      scope: null,
+      persisted: true,
+      lookChanged: false,
+      savedChanged: false,
+    })
   })
 
   it('takes what storage holds without marking it for writing', () => {
     const state = run([loaded()])
-    expect(state).toEqual({ look: DAYLIGHT, saved: [myLook()], loaded: true, lookChanged: false, savedChanged: false })
-    expect(run([{ type: 'loaded', active: null, saved: [] }]).look).toBe(EMBER)
+    expect(state).toEqual({
+      look: DAYLIGHT,
+      saved: [myLook()],
+      loaded: true,
+      scope: SCOPE,
+      persisted: true,
+      lookChanged: false,
+      savedChanged: false,
+    })
+    expect(run([loaded(null, [])]).look).toBe(EMBER)
   })
 
   it('keeps a change made before storage was read', () => {
@@ -70,5 +108,46 @@ describe('lookReducer', () => {
     const copy = structuredClone(before)
     run([{ type: 'save', look: myLook({ id: 'x' }) }, { type: 'rename', id: 'my-look-1', name: 'B' }, { type: 'delete', id: 'x' }], before)
     expect(before).toEqual(copy)
+  })
+
+  it("takes another tab's looks whole and marks nothing for writing (M25)", () => {
+    const theirs = myLook({ id: 'look-1', name: 'Theirs' })
+    const state = run([loaded(), { type: 'set', look: AURORA }, synced(DAYLIGHT, [myLook(), theirs])])
+    expect(state).toMatchObject({ look: DAYLIGHT, saved: [myLook(), theirs], lookChanged: false, savedChanged: false })
+    expect(run([loaded(), synced(null, [])]).look).toBe(EMBER)
+  })
+
+  it("ignores a sync for another scope, and one before storage was read", () => {
+    const before = run([loaded()])
+    expect(run([synced(AURORA, [], OTHER_SCOPE)], before)).toBe(before)
+    expect(run([synced(AURORA, [], SCOPE)])).toBe(INITIAL_LOOK_STATE)
+  })
+
+  it("reads another account's looks whole: nothing of the first is kept or written to it (F5)", () => {
+    const state = run([loaded(), { type: 'set', look: AURORA }, { type: 'save', look: myLook({ glow: 3 }) }, loaded(null, [], OTHER_SCOPE)])
+    expect(state).toEqual({
+      look: EMBER,
+      saved: [],
+      loaded: true,
+      scope: OTHER_SCOPE,
+      persisted: true,
+      lookChanged: false,
+      savedChanged: false,
+    })
+  })
+
+  it('keeps what it holds, unsaved edits included, when the same scope is read again', () => {
+    const edited = run([loaded(), { type: 'set', look: AURORA }])
+    expect(run([loaded(OBSIDIAN, [], SCOPE)], edited)).toBe(edited)
+  })
+
+  it('remembers a refused read or write until storage is read again (M98)', () => {
+    const refused = run([loaded(), { type: 'written', ok: false }])
+    expect(refused.persisted).toBe(false)
+    expect(run([{ type: 'written', ok: true }], refused).persisted).toBe(false)
+    expect(run([{ type: 'written', ok: true }], run([loaded()]))).toEqual(run([loaded()]))
+    const blocked: LookAction = { type: 'loaded', scope: SCOPE, active: null, saved: [], persisted: false }
+    expect(run([blocked]).persisted).toBe(false)
+    expect(run([blocked, synced(DAYLIGHT, [])]).persisted).toBe(true)
   })
 })

@@ -587,5 +587,179 @@ describe("PRD-260 (e) — the core's seams load Play's screens only when Play re
       expect(localLoads(slot, 'static').filter((rel) => rel.startsWith(PLAY_DIR)), slot).toEqual([])
       expect(localLoads(slot, 'dynamic').filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel)), slot).toHaveLength(1)
     }
+
+// --- (e) Make it yours on Paper, in forced colours and with a long name ---------------------
+//
+// M18: the raw accents fall below 3:1 on Paper (1.07:1 for cream to 2.94:1 for rose), so a
+// pressed or current state is marked in the accent as text, and an accent swatch has an edge
+// of its own. M19: forced colours (Windows High Contrast) drop box-shadows and repaint
+// backgrounds, so the colour samples opt out, pressed edges widen, every pressed control is
+// ringed in Highlight, and no focus style hides the outline behind a box-shadow ring. M73: a
+// long look name wraps instead of squeezing the heading or being clipped in its card.
+
+const EDITOR_CSS = 'components/looks/editor.module.css'
+const LOOKS_CSS = 'components/looks/looks.module.css'
+const STYLE_CSS = 'components/looks/style/style.module.css'
+/** A rule on a pressed or current state: it marks what is chosen, or where you are. */
+const STATE_SELECTOR = /\[aria-(?:pressed|current)\b/
+/** The raw accent (--pl-accent, --pl-color-accent): not its text colour, ink or a tint. */
+const RAW_ACCENT = /var\(\s*--pl-(?:color-)?accent\s*[,)]/
+/** Play's CSS held 8 rules on a pressed or current state on 15 Oct. */
+const STATE_RULES_MIN = 8
+const FORCED_COLOURS_BLOCK = /@media\s*\(\s*forced-colors\s*:\s*active\s*\)\s*\{/g
+/** `outline: none` or `0`, `outline-style: none`, `outline-width: 0`: no ring forced colours could draw. */
+const HIDDEN_OUTLINE: Readonly<Record<string, RegExp>> = {
+  outline: /^(?:none|0(?:px)?)(?:\s*!important)?$/,
+  'outline-style': /^none\b/,
+  'outline-width': /^0(?:px)?\b/,
+}
+/** The colour samples, file by file: each keeps its own colour in forced colours. */
+const COLOUR_SAMPLES: Readonly<Record<string, readonly string[]>> = {
+  [EDITOR_CSS]: ['.swatch', '.groundSwatch', '.dot', '.lightDot'],
+  [LOOKS_CSS]: ['.cardTop', '.cardLight', '.cardAccent'],
+  [STYLE_CSS]: ['.swatchChip', '.step'],
+}
+/** The pressed edges forced colours widen (their ring is a box-shadow, which forced colours drop). */
+const WIDENED_IN_FORCED_COLOURS: Readonly<Record<string, readonly string[]>> = {
+  [EDITOR_CSS]: ['.option[aria-pressed="true"]', '.typeOption[aria-pressed="true"]', '.chip[aria-pressed="true"]'],
+  [LOOKS_CSS]: ['.card[aria-pressed="true"]'],
+}
+const PRESSED_EDGE_MIN_PX = 2
+const PRESSED_ANYWHERE = 'html.play [aria-pressed="true"]'
+
+type Rules = ReturnType<typeof cssRules>
+
+function readFrontend(file: string): string {
+  return fs.readFileSync(path.join(FRONTEND, file), 'utf8')
+}
+
+/** A selector compared as written, whichever quotes its attribute value uses. */
+function sameSelector(a: string, b: string): boolean {
+  return a.replace(/'/g, '"') === b.replace(/'/g, '"')
+}
+
+/** The bodies of every rule whose selector list names exactly this selector, in source order. */
+function bodyOf(rules: Rules, selector: string): string {
+  return rules
+    .filter((rule) => rule.selectors.some((each) => sameSelector(each, selector)))
+    .map((rule) => rule.body)
+    .join(';')
+}
+
+/** A body's declarations, property to value; a later one wins, as in the cascade. */
+function declarations(body: string): ReadonlyMap<string, string> {
+  const pairs = body.split(';').flatMap((declaration): Array<[string, string]> => {
+    const colon = declaration.indexOf(':')
+    if (colon < 0) return []
+    return [[declaration.slice(0, colon).trim().toLowerCase(), declaration.slice(colon + 1).trim().replace(/\s+/g, ' ')]]
+  })
+  return new Map(pairs)
+}
+
+/** The index of the brace that closes the block opened at `open`. */
+function blockEnd(css: string, open: number): number {
+  let depth = 0
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === '{') depth++
+    else if (css[i] === '}' && --depth === 0) return i
+  }
+  return css.length
+}
+
+/** The rules inside the stylesheet's @media (forced-colors: active) blocks. */
+function forcedColoursRules(css: string): Rules {
+  const bare = withoutCssComments(css)
+  return Array.from(bare.matchAll(FORCED_COLOURS_BLOCK)).flatMap((match) => {
+    const open = (match.index ?? 0) + match[0].length - 1
+    return cssRules(bare.slice(open + 1, blockEnd(bare, open)))
+  })
+}
+
+function hidesOutline(body: string): boolean {
+  const declared = declarations(body)
+  return Object.entries(HIDDEN_OUTLINE).some(([property, hidden]) => hidden.test(declared.get(property) ?? ''))
+}
+
+function located(file: string, rule: Rules[number]): string {
+  return `${relative(file)}: ${rule.selectors.join(', ')}`
+}
+
+describe('PRD-260 (e) — Make it yours on Paper, in forced colours and with a long name (M18, M19, M73)', () => {
+  it('reads declarations, forced-colours blocks, hidden outlines and the raw accent', () => {
+    const css = ".a { color: red } @media (forced-colors: active) { .b[aria-pressed='true'] { border-width: 2px } } @media (min-width: 1px) { .c { outline: none } }"
+    expect(forcedColoursRules(css).map((rule) => rule.selectors)).toEqual([[".b[aria-pressed='true']"]])
+    expect(bodyOf(forcedColoursRules(css), '.b[aria-pressed="true"]')).toContain('border-width')
+    expect(declarations(' outline: 2px  solid transparent; outline-offset: 2px ').get('outline')).toBe('2px solid transparent')
+    expect(['outline: none', 'outline:0', 'outline-style: none', 'outline-width: 0px'].map(hidesOutline)).toEqual([true, true, true, true])
+    expect(['outline: 2px solid transparent', 'outline-offset: 0', 'outline: var(--pl-focus-outline)'].map(hidesOutline)).toEqual([false, false, false])
+    expect(['var(--pl-color-accent)', 'var( --pl-accent , red)'].map((value) => RAW_ACCENT.test(value))).toEqual([true, true])
+    expect(['var(--pl-color-accent-text)', 'var(--pl-accent-ink)', 'var(--pl-tint-accent-line)'].map((value) => RAW_ACCENT.test(value))).toEqual([false, false, false])
+  })
+
+  it('marks every pressed and current state in the accent as text, never the raw accent (M18)', () => {
+    const states = playCssFiles().flatMap((file) =>
+      cssRules(fs.readFileSync(file, 'utf8'))
+        .filter((rule) => rule.selectors.some((selector) => STATE_SELECTOR.test(selector)))
+        .map((rule) => ({ file, rule })),
+    )
+    expect(states.length).toBeGreaterThanOrEqual(STATE_RULES_MIN)
+    expect(states.filter(({ rule }) => RAW_ACCENT.test(rule.body)).map(({ file, rule }) => located(file, rule))).toEqual([])
+  })
+
+  it('draws the glow slider in the accent as text, and edges every accent swatch in text2 under the chosen ring (M18)', () => {
+    const rules = cssRules(readFrontend(EDITOR_CSS))
+    expect(declarations(bodyOf(rules, '.slider')).get('accent-color')).toBe('var(--pl-color-accent-text)')
+    expect(declarations(bodyOf(rules, '.swatch')).get('box-shadow')).toBe('inset 0 0 0 1px var(--pl-color-text-2)')
+    expect(declarations(bodyOf(rules, '.swatch[aria-pressed="true"]')).get('box-shadow')).toBe(
+      '0 0 0 2px var(--pl-color-text), inset 0 0 0 1px var(--pl-color-text-2)',
+    )
+  })
+
+  it('keeps every colour sample in its own colours in forced colours (M19)', () => {
+    const adjusted = Object.entries(COLOUR_SAMPLES).flatMap(([file, selectors]) => {
+      const rules = cssRules(readFrontend(file))
+      return selectors
+        .filter((selector) => declarations(bodyOf(rules, selector)).get('forced-color-adjust') !== 'none')
+        .map((selector) => `${file}: ${selector}`)
+    })
+    expect(adjusted).toEqual([])
+  })
+
+  it('widens the chosen option and look card in forced colours and rings every pressed control in Highlight (M19)', () => {
+    const narrow = Object.entries(WIDENED_IN_FORCED_COLOURS).flatMap(([file, selectors]) => {
+      const rules = forcedColoursRules(readFrontend(file))
+      return selectors
+        .filter((selector) => !(Number.parseFloat(declarations(bodyOf(rules, selector)).get('border-width') ?? '') >= PRESSED_EDGE_MIN_PX))
+        .map((selector) => `${file}: ${selector}`)
+    })
+    expect(narrow).toEqual([])
+    const theme = forcedColoursRules(readFrontend(PLAY_THEME_CSS))
+    const pressed = declarations(bodyOf(theme, PRESSED_ANYWHERE))
+    expect(pressed.get('outline')).toBe('2px solid Highlight')
+    expect(pressed.get('outline-offset')).toBe('2px')
+    expect(declarations(bodyOf(theme, `${PRESSED_ANYWHERE}:focus-visible`)).get('outline-width')).toBe('4px')
+    const swatchFocus = declarations(bodyOf(forcedColoursRules(readFrontend(EDITOR_CSS)), '.swatch:focus-visible'))
+    expect(swatchFocus.get('outline-color')).toBe('CanvasText')
+  })
+
+  it("never hides the outline in Play's, the looks' or Auto's CSS: forced colours drop the box-shadow ring in its place (M19)", () => {
+    const hidden = playCssFiles().flatMap((file) =>
+      cssRules(fs.readFileSync(file, 'utf8'))
+        .filter((rule) => hidesOutline(rule.body))
+        .map((rule) => located(file, rule)),
+    )
+    expect(hidden).toEqual([])
+  })
+
+  it("lets a long look name wrap: the status column shrinks to 40% and the card's text breaks (M73)", () => {
+    const rules = cssRules(readFrontend(LOOKS_CSS))
+    const side = declarations(bodyOf(rules, '.headerSide'))
+    expect(side.get('flex')).toBe('0 1 auto')
+    expect(side.get('min-width')).toBe('0')
+    expect(side.get('max-width')).toBe('40%')
+    expect(declarations(bodyOf(rules, '.status')).get('overflow-wrap')).toBe('anywhere')
+    const text = declarations(bodyOf(rules, '.cardText'))
+    expect(text.get('min-width')).toBe('0')
+    expect(text.get('overflow-wrap')).toBe('anywhere')
   })
 })

@@ -2,6 +2,7 @@
 /** PRD-260 — the Looks page's rules: edited or not, Save as new look, Duplicate, rename, delete. */
 import { describe, expect, it } from 'vitest'
 
+import { safeGlow } from '@/lib/looks/css'
 import {
   SAVED_SUB,
   asDuplicate,
@@ -78,6 +79,15 @@ describe('the glow', () => {
     expect(clampGlow(-3)).toBe(0)
     expect(clampGlow(99)).toBe(40)
     expect(clampGlow(Number.NaN)).toBe(0)
+  })
+
+  it("stops at the cap the Glow slider gives it, the look's safe glow, and never past 40 (M50)", () => {
+    const cap = safeGlow('paper', 'molten')
+    expect(cap).toBeLessThan(24)
+    expect(clampGlow(24, cap)).toBe(cap)
+    expect(clampGlow(cap - 1, cap)).toBe(cap - 1)
+    expect(clampGlow(-3, cap)).toBe(0)
+    expect(clampGlow(99, 60)).toBe(40)
   })
 
   it('reads Off at 0 and as a percentage otherwise', () => {

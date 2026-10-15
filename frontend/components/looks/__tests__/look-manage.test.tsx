@@ -4,7 +4,9 @@
  * Delete for the user's saved looks (a preset only duplicates), Export as a
  * .look.json download, Copy JSON, and Import from pasted text or a file
  * through lib/looks/transfer.ts with its messages shown. Imports are untrusted:
- * nothing invalid is kept, and imported text is never read as HTML.
+ * nothing invalid is kept, and imported text is never read as HTML. Export
+ * says the download started, never that it arrived (M71), and a success says
+ * so when this browser isn't keeping looks (M98).
  *
  * P260-FX-22 (M20): by keyboard, focus never falls to <body> when the control
  * just used goes (Save, Save name, Cancel, Keep it, Delete look), and Delete
@@ -19,14 +21,16 @@ vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children: React.ReactNode }) => <div data-testid="main-layout">{children}</div>,
 }))
 
-import { myLook } from '@/lib/looks/__tests__/helpers'
+import { exportStarted } from '@/components/looks/look-manager'
+import { LOOKS_NOT_KEPT } from '@/components/looks/look-notice'
+import { blockedStorage, memoryStorage, myLook } from '@/lib/looks/__tests__/helpers'
 import { EMBER, PRESETS } from '@/lib/looks/presets'
-import { ACTIVE_LOOK_KEY, SAVED_LOOKS_KEY } from '@/lib/looks/storage'
 import { LOOK_FILE_TYPE, NOT_JSON, lookJson } from '@/lib/looks/transfer'
 
 import {
   BLOB_URL,
   type DownloadStub,
+  KEYS,
   blobText,
   freshBrowser,
   group,
@@ -45,8 +49,8 @@ type User = ReturnType<typeof userEvent.setup>
 
 /** Starts on the user's own 'My look 1' (rose on Night). */
 async function readyOnMyLook(): Promise<void> {
-  window.localStorage.setItem(SAVED_LOOKS_KEY, JSON.stringify([myLook()]))
-  window.localStorage.setItem(ACTIVE_LOOK_KEY, JSON.stringify(myLook()))
+  window.localStorage.setItem(KEYS.saved, JSON.stringify([myLook()]))
+  window.localStorage.setItem(KEYS.active, JSON.stringify(myLook()))
   renderLooks()
   await waitFor(() => expect(status()).toHaveTextContent(/^My look 1$/))
 }
@@ -95,8 +99,8 @@ describe('This look: managing looks', () => {
     expect(pressedCard()).toHaveTextContent(`${copy.name} ${copy.sub}`)
     expect(status()).toHaveTextContent(/^Ember copy$/)
     expect(manage().getByText('Duplicated as Ember copy.')).toBeInTheDocument()
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([copy])
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(copy)
+    expect(stored(KEYS.saved)).toEqual([copy])
+    expect(stored(KEYS.active)).toEqual(copy)
     // The copy is the user's own: it can be renamed and deleted.
     expect(manage().getByRole('button', { name: 'Rename' })).toBeInTheDocument()
   })
@@ -110,8 +114,8 @@ describe('This look: managing looks', () => {
     await user.click(manage().getByRole('button', { name: 'Duplicate' }))
 
     const copy = { ...EMBER, id: 'look-1', name: 'Ember copy', accent: 'rose' } as const
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([copy])
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(copy)
+    expect(stored(KEYS.saved)).toEqual([copy])
+    expect(stored(KEYS.active)).toEqual(copy)
     expect(status()).toHaveTextContent(/^Ember copy$/)
     expect(pressedCard()).toHaveTextContent(`${copy.name} ${copy.sub}`)
     await lookOnPage(copy)
@@ -129,8 +133,8 @@ describe('This look: managing looks', () => {
 
     expect(status()).toHaveTextContent(/^My look 1$/)
     expect(manage().getByText('Saved My look 1.')).toBeInTheDocument()
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([myLook({ accent: 'gold' })])
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(myLook({ accent: 'gold' }))
+    expect(stored(KEYS.saved)).toEqual([myLook({ accent: 'gold' })])
+    expect(stored(KEYS.active)).toEqual(myLook({ accent: 'gold' }))
     expect(looksRow().getAllByRole('button')).toHaveLength(PRESETS.length + 1)
     expect(manage().queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     await lookOnPage(myLook({ accent: 'gold' }))
@@ -161,8 +165,8 @@ describe('This look: managing looks', () => {
     expect(pressedCard()).toHaveTextContent('Sunset')
     expect(manage().getByText('Renamed to Sunset.')).toBeInTheDocument()
     expect(manage().queryByRole('textbox')).not.toBeInTheDocument()
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([myLook({ name: 'Sunset' })])
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(myLook({ name: 'Sunset' }))
+    expect(stored(KEYS.saved)).toEqual([myLook({ name: 'Sunset' })])
+    expect(stored(KEYS.active)).toEqual(myLook({ name: 'Sunset' }))
   })
 
   it("says in words why a name wasn't saved, and keeps the old one", async () => {
@@ -176,7 +180,7 @@ describe('This look: managing looks', () => {
     expect(alert).toHaveTextContent("That name wasn't saved.")
     expect(alert).toHaveTextContent(`"name" can't be empty.`)
     expect(status()).toHaveTextContent(/^My look 1$/)
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([myLook()])
+    expect(stored(KEYS.saved)).toEqual([myLook()])
   })
 
   it('deletes a saved look only once confirmed, then goes back to Ember', async () => {
@@ -186,14 +190,14 @@ describe('This look: managing looks', () => {
     const confirm = () => within(screen.getByRole('group', { name: /^Delete My look 1\?/ }))
     await user.click(confirm().getByRole('button', { name: 'Keep it' }))
     expect(screen.queryByRole('group', { name: /^Delete My look 1\?/ })).not.toBeInTheDocument()
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([myLook()])
+    expect(stored(KEYS.saved)).toEqual([myLook()])
 
     await user.click(manage().getByRole('button', { name: 'Delete' }))
     await user.click(confirm().getByRole('button', { name: 'Delete look' }))
     expect(status()).toHaveTextContent(/^Ember$/)
     expect(looksRow().getAllByRole('button')).toHaveLength(PRESETS.length)
     expect(manage().getByText('Deleted My look 1. Play is back to Ember.')).toBeInTheDocument()
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([])
+    expect(stored(KEYS.saved)).toEqual([])
     await lookOnPage(EMBER)
   })
 })
@@ -290,7 +294,17 @@ describe('Export and Copy JSON', () => {
     await readyOnMyLook()
     expect(await exportActive(user)).toBe('My look 1.look.json')
     expect(await blobText(stub.blobs[0] as Blob)).toBe(lookJson(myLook()))
-    expect(manage().getByText('Downloaded My look 1.look.json.')).toBeInTheDocument()
+    expect(manage().getByText(exportStarted('My look 1.look.json'))).toBeInTheDocument()
+  })
+
+  it("says the download started, never that it arrived, and offers Copy JSON (M71)", async () => {
+    const user = userEvent.setup()
+    renderLooks()
+    await lookOnPage(EMBER)
+    await exportActive(user)
+    const notice = manage().getByText(exportStarted('Ember.look.json'))
+    expect(notice).toHaveTextContent("Your browser is saving Ember.look.json. If it didn't appear, use Copy JSON.")
+    expect(manage().queryByText(/^Downloaded/)).not.toBeInTheDocument()
   })
 
   it('round-trips: an exported look imports as an equal saved look with a new id', async () => {
@@ -302,8 +316,8 @@ describe('Export and Copy JSON', () => {
 
     await paste(user, text)
     const imported = { ...EMBER, id: 'look-1' }
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([imported])
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(imported)
+    expect(stored(KEYS.saved)).toEqual([imported])
+    expect(stored(KEYS.active)).toEqual(imported)
     const cards = looksRow().getAllByRole('button')
     expect(cards).toHaveLength(PRESETS.length + 1)
     expect(cards[cards.length - 1]).toHaveAttribute('aria-pressed', 'true')
@@ -345,7 +359,7 @@ describe('Import a look', () => {
     await user.upload(fileInput(), file)
 
     const added = myLook({ id: 'look-1' })
-    await waitFor(() => expect(stored(SAVED_LOOKS_KEY)).toEqual([added]))
+    await waitFor(() => expect(stored(KEYS.saved)).toEqual([added]))
     expect(status()).toHaveTextContent(/^My look 1$/)
     expect(pressedCard()).toHaveTextContent('My look 1')
     expect(importer().getByText('Added My look 1 to your Looks.')).toBeInTheDocument()
@@ -359,7 +373,7 @@ describe('Import a look', () => {
     await paste(user, '{ name: Ember')
     expect(importer().getByRole('alert')).toHaveTextContent(NOT_JSON)
     expect(importer().getByLabelText("Paste a Look's JSON")).toHaveValue('{ name: Ember')
-    expect(stored(SAVED_LOOKS_KEY)).toBeNull()
+    expect(stored(KEYS.saved)).toBeNull()
   })
 
   it('never renders imported text as HTML', async () => {
@@ -374,5 +388,59 @@ describe('Import a look', () => {
     const imports = screen.getByRole('region', { name: 'Import a look' })
     expect([row, imports].map((region) => region.querySelector('b, img'))).toEqual([null, null])
     expect(status()).toHaveTextContent('<b>bold</b>')
+  })
+})
+
+describe("When this browser isn't keeping looks (M98)", () => {
+  function fullStorage(): Storage {
+    const full = memoryStorage()
+    full.setItem = () => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+    }
+    return full
+  }
+
+  it('with storage blocked, Duplicate, Rename and Import say the look lasts until the tab closes', async () => {
+    const user = userEvent.setup()
+    renderLooks('play', blockedStorage)
+    await lookOnPage(EMBER)
+
+    await user.click(manage().getByRole('button', { name: 'Duplicate' }))
+    expect(manage().getByText(`Duplicated as Ember copy. ${LOOKS_NOT_KEPT}`)).toBeInTheDocument()
+
+    await user.click(manage().getByRole('button', { name: 'Rename' }))
+    await user.clear(manage().getByRole('textbox', { name: 'New name' }))
+    await user.type(manage().getByRole('textbox', { name: 'New name' }), 'Sunset')
+    await user.click(manage().getByRole('button', { name: 'Save name' }))
+    expect(manage().getByText(`Renamed to Sunset. ${LOOKS_NOT_KEPT}`)).toBeInTheDocument()
+
+    await paste(user, lookJson(myLook()))
+    expect(importer().getByText(`Added My look 1 to your Looks. ${LOOKS_NOT_KEPT}`)).toBeInTheDocument()
+    expect([stored(KEYS.saved), stored(KEYS.active)]).toEqual([null, null])
+  })
+
+  it('with storage full, the refused write after Duplicate is told in its notice', async () => {
+    const user = userEvent.setup()
+    const full = fullStorage()
+    renderLooks('play', () => full)
+    await lookOnPage(EMBER)
+    await user.click(manage().getByRole('button', { name: 'Duplicate' }))
+    expect(await manage().findByText(`Duplicated as Ember copy. ${LOOKS_NOT_KEPT}`)).toBeInTheDocument()
+    expect(full.length).toBe(0)
+  })
+
+  it('Export still says the download started and offers Copy JSON', async () => {
+    const user = userEvent.setup()
+    const stub = stubDownloads()
+    try {
+      renderLooks('play', blockedStorage)
+      await lookOnPage(EMBER)
+      await user.click(manage().getByRole('button', { name: 'Export' }))
+      // Exact text: Export changes no look, so it never adds LOOKS_NOT_KEPT.
+      expect(manage().getByText(exportStarted('Ember.look.json'))).toHaveTextContent('Copy JSON')
+      await waitFor(() => expect(stub.revoke).toHaveBeenCalledWith(BLOB_URL), { timeout: 2000 })
+    } finally {
+      stub.restore()
+    }
   })
 })

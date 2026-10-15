@@ -24,6 +24,9 @@ import styles from './looks.module.css'
  * Delete, Export, Copy JSON), Import, and the editor over EDITABLE_FIELDS.
  * Every change goes through useLook().setLook, which re-themes the whole app
  * at once, not only the preview. 'See the style sheet' opens /looks/style.
+ * Until the stored look is read (after hydration, once the account is known)
+ * the frame shows only the heading and is aria-busy: never Ember's choices
+ * standing in for the user's look (M72).
  */
 
 /** The page's name, and what /looks says under Classic or Studio (K9: app/looks/page.tsx). */
@@ -37,7 +40,7 @@ export const STYLE_SHEET_HREF = '/looks/style'
 
 /** The editor's state and actions: picking, editing, Save as new look and Reset. */
 function useLookEditing() {
-  const { look, saved, setLook, saveLook } = useLook()
+  const { look, saved, loaded, setLook, saveLook } = useLook()
   const [errors, setErrors] = useState<readonly string[]>([])
 
   const pick = (next: Look) => {
@@ -64,13 +67,13 @@ function useLookEditing() {
     if (base) setLook(base)
   }
 
-  return { look, saved, errors, pick, change, saveAsNew, reset, canReset: base !== undefined }
+  return { look, saved, loaded, errors, pick, change, saveAsNew, reset, canReset: base !== undefined }
 }
 
 export function LooksScreen() {
-  const { look, saved, errors, pick, change, saveAsNew, reset, canReset } = useLookEditing()
+  const { look, saved, loaded, errors, pick, change, saveAsNew, reset, canReset } = useLookEditing()
   return (
-    <div className={styles.screen}>
+    <div className={styles.screen} aria-busy={loaded ? undefined : true}>
       <div className={styles.main}>
         <div className={styles.header}>
           <div className={styles.headingText}>
@@ -79,28 +82,36 @@ export function LooksScreen() {
             </h1>
             <p className={styles.lead}>{LOOKS_LEAD}</p>
           </div>
-          <div className={styles.headerSide}>
-            <p className={styles.status} role="status">
-              {statusLine(look, saved)}
-            </p>
-            <Link href={STYLE_SHEET_HREF} className={styles.styleLink}>
-              {STYLE_SHEET_LINK}
-            </Link>
-          </div>
+          {loaded && (
+            <div className={styles.headerSide}>
+              <p className={styles.status} role="status">
+                {statusLine(look, saved)}
+              </p>
+              <Link href={STYLE_SHEET_HREF} className={styles.styleLink}>
+                {STYLE_SHEET_LINK}
+              </Link>
+            </div>
+          )}
         </div>
-        <LookPreview />
-        <LooksRow looks={[...PRESETS, ...saved]} activeId={look.id} onPick={pick} />
-        <LookManager />
-        <LookImport />
+        {loaded && (
+          <>
+            <LookPreview />
+            <LooksRow looks={[...PRESETS, ...saved]} activeId={look.id} onPick={pick} />
+            <LookManager />
+            <LookImport />
+          </>
+        )}
       </div>
-      <LookEditor
-        look={look}
-        onChange={change}
-        onSaveAs={saveAsNew}
-        onReset={reset}
-        canReset={canReset}
-        errors={errors}
-      />
+      {loaded && (
+        <LookEditor
+          look={look}
+          onChange={change}
+          onSaveAs={saveAsNew}
+          onReset={reset}
+          canReset={canReset}
+          errors={errors}
+        />
+      )}
     </div>
   )
 }

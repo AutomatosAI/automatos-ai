@@ -6,6 +6,10 @@
  * own. Play's pages render only at >= 1024 px (D7), so Play's phone rules are
  * not ported. Every variable is --pl-* (K2); a card's own colours arrive as
  * --pl-look-* properties from swatch-style.ts.
+ *
+ * M18, M19, M73: the active look's card is marked in the accent as text (the raw
+ * accents fall below 3:1 on Paper); a card's swatch keeps its own colours in forced
+ * colours; a long look name wraps instead of squeezing the heading or being clipped.
  */
 
 .screen {
@@ -54,19 +58,24 @@
   color: var(--pl-color-text-2);
 }
 
+/* At most 40% of the row, so a long look name can't squeeze the heading into a sliver. */
 .headerSide {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: var(--pl-space-1);
 }
 
-/* "Ember", or "Ember · edited". */
+/* "Ember", or "Ember · edited"; a name with no spaces still wraps. */
 .status {
   margin: 0;
   font: var(--pl-text-mono-sm);
   color: var(--pl-color-text-2);
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 /* "See the style sheet": a quiet link to the live style sheet (/looks/style). */
@@ -267,10 +276,10 @@
   cursor: pointer;
 }
 
-/* The active look: a 2px accent edge (border plus a ring, so the card doesn't move). */
+/* The active look: a 2px edge in the readable accent (border plus a ring, so the card doesn't move). */
 .card[aria-pressed="true"] {
-  border-color: var(--pl-color-accent);
-  box-shadow: 0 0 0 1px var(--pl-color-accent);
+  border-color: var(--pl-color-accent-text);
+  box-shadow: 0 0 0 1px var(--pl-color-accent-text);
 }
 
 /* The swatch, in the card's own look (custom properties from swatch-style.ts). */
@@ -281,6 +290,7 @@
   justify-content: space-between;
   padding: var(--pl-space-2) var(--pl-space-3);
   background: var(--pl-look-card-bg);
+  forced-color-adjust: none;
 }
 
 .cardType {
@@ -305,6 +315,7 @@
   border-radius: var(--pl-radius-round);
   border: 2px solid var(--pl-look-card-light);
   box-shadow: 0 0 8px var(--pl-look-card-light);
+  forced-color-adjust: none;
 }
 
 .cardAccent {
@@ -312,13 +323,17 @@
   height: 12px;
   border-radius: var(--pl-radius-icon);
   background: var(--pl-look-card-accent);
+  forced-color-adjust: none;
 }
 
+/* A name with no spaces breaks inside the card instead of being clipped by it. */
 .cardText {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: var(--pl-space-2) var(--pl-space-3) var(--pl-space-3);
+  overflow-wrap: anywhere;
 }
 
 .cardName {
@@ -328,4 +343,13 @@
 .cardSub {
   font: var(--pl-text-small);
   color: var(--pl-color-text-2);
+}
+
+/* Forced colours (Windows High Contrast) drop the ring and paint every border in one system
+   colour, so the active look's edge widens instead (app/play-theme.css also rings every pressed
+   control in Highlight). */
+@media (forced-colors: active) {
+  .card[aria-pressed="true"] {
+    border-width: 2px;
+  }
 }

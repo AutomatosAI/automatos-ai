@@ -160,6 +160,24 @@ describe('Copy tokens', () => {
     expect(lines).toContain(`  --pl-accent-text: ${vars['--pl-accent-text']};`)
     expect(rootBlock(DAYLIGHT)).toContain(`  --pl-ground-bg: ${GROUNDS.paper.bg};`)
   })
+
+  it("names the display face itself, so the block works outside Automatos (M99)", () => {
+    expect(rootBlock(EMBER)).toContain("  --pl-display-family: 'Instrument Serif',serif;")
+    expect(rootBlock(AURORA)).toContain("  --pl-display-family: 'Bricolage Grotesque',sans-serif;")
+    for (const look of PRESETS) {
+      const withVar = rootBlock(look).split('\n').filter((line) => line.includes('var('))
+      expect({ id: look.id, withVar }).toEqual({ id: look.id, withVar: [] })
+    }
+  })
+
+  it("leaves what the app paints alone: lookToCssVars keeps next/font's variable", () => {
+    expect(lookToCssVars(EMBER)['--pl-display-family']).toBe(TYPE_STYLES.serif.family)
+    for (const key of TYPE_STYLE_KEYS) {
+      const look = { ...EMBER, font: key }
+      const { face, generic } = TYPE_STYLES[key]
+      expect(rootBlock(look)).toContain(`  --pl-display-family: '${face}',${generic};`)
+    }
+  })
 })
 
 describe('type specimens', () => {

@@ -42,10 +42,14 @@ export function withValues(look: Look, values: Partial<LookValues>): Look {
   return { ...look, ...values }
 }
 
-/** A slider reading as a whole glow inside the allowed range. */
-export function clampGlow(value: number): number {
+/**
+ * A slider reading as a whole glow from GLOW_MIN to `max`: the Glow slider
+ * passes the look's safeGlow() (lib/looks/css.ts), the cap glowVars() paints
+ * at; never past GLOW_MAX.
+ */
+export function clampGlow(value: number, max: number = GLOW_MAX): number {
   if (!Number.isFinite(value)) return GLOW_MIN
-  return Math.min(GLOW_MAX, Math.max(GLOW_MIN, Math.round(value)))
+  return Math.min(max, GLOW_MAX, Math.max(GLOW_MIN, Math.round(value)))
 }
 
 /** 'Off' at 0, else '24%'. */

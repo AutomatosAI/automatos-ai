@@ -3,14 +3,29 @@
  * (lib/play/seen.ts), ported from Automatos Play's tests/deliverables/seen.test.ts
  * onto the core's created_at: the first visit only remembers, a new one is
  * newer than the newest seen, the record is capped and survives a broken or
- * blocked localStorage.
+ * blocked localStorage. It is kept per user and workspace (F5): another account
+ * in this browser starts its own, and a record kept before moves once.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { freshDeliverables, markSeen, parseSeen, readSeen, SEEN_CAP, SEEN_KEY, writeSeen } from '../seen'
+import { lookScope } from '@/lib/looks/scope'
+
+import {
+  freshDeliverables,
+  markSeen,
+  parseSeen,
+  readSeen,
+  SEEN_CAP,
+  SEEN_KEY,
+  seenKey,
+  UNSCOPED_SEEN_MOVED_KEY,
+  writeSeen,
+} from '../seen'
 
 const OLD = { id: 'd-old', created_at: '2026-10-10T09:00:00+00:00' }
 const NEW = { id: 'd-new', created_at: '2026-10-14T09:00:00+00:00' }
+const A = lookScope('ws-1', 'user_a')
+const B = lookScope('ws-1', 'user_b')
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -54,9 +69,25 @@ describe('markSeen', () => {
 
 describe('the stored record', () => {
   it('round-trips through localStorage', () => {
-    writeSeen({ ids: ['d-old'], newest: OLD.created_at })
-    expect(window.localStorage.getItem(SEEN_KEY)).not.toBeNull()
-    expect(readSeen()).toEqual({ ids: ['d-old'], newest: OLD.created_at })
+    writeSeen(A, { ids: ['d-old'], newest: OLD.created_at })
+    expect(window.localStorage.getItem(seenKey(A))).not.toBeNull()
+    expect(readSeen(A)).toEqual({ ids: ['d-old'], newest: OLD.created_at })
+  })
+
+  it("is kept per user and workspace: another account in this browser doesn't read it (F5)", () => {
+    writeSeen(A, { ids: ['d-old'], newest: OLD.created_at })
+    expect(seenKey(A)).toBe('automatos-play:seen-deliverables:ws-1:user_a')
+    expect(readSeen(B)).toBeNull()
+    expect(readSeen(lookScope('ws-2', 'user_a'))).toBeNull()
+  })
+
+  it('moves a record kept before F5 to the first account that reads one, once, never deleting it', () => {
+    const before = JSON.stringify({ ids: ['d-old'], newest: OLD.created_at })
+    window.localStorage.setItem(SEEN_KEY, before)
+    expect(readSeen(A)).toEqual({ ids: ['d-old'], newest: OLD.created_at })
+    expect(window.localStorage.getItem(UNSCOPED_SEEN_MOVED_KEY)).toBe(A)
+    expect(readSeen(B)).toBeNull()
+    expect(window.localStorage.getItem(SEEN_KEY)).toBe(before)
   })
 
   it('reads a broken record as none, keeping only string ids', () => {
@@ -74,8 +105,8 @@ describe('the stored record', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('blocked')
     })
-    expect(readSeen()).toBeNull()
-    expect(() => writeSeen({ ids: [], newest: null })).not.toThrow()
+    expect(readSeen(A)).toBeNull()
+    expect(() => writeSeen(A, { ids: [], newest: null })).not.toThrow()
     expect(window.localStorage.length).toBe(0)
   })
 })

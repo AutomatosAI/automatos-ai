@@ -7,7 +7,17 @@ import { describe, expect, it } from 'vitest'
 
 import { ACCENT_KEYS, GROUNDS, GROUND_KEYS, TYPE_STYLES, TYPE_STYLE_KEYS } from '@/lib/looks/catalogue'
 import { AA_TEXT, READABLE_TARGET, contrastRatio } from '@/lib/looks/contrast'
-import { LOOK_VAR_NAMES, fontVars, lookToCssVars, rgbList, rgba, sheetOf } from '@/lib/looks/css'
+import {
+  GLOW_VAR,
+  LOOK_VAR_NAMES,
+  fontVars,
+  lookToCssVars,
+  rgbList,
+  rgba,
+  safeGlow,
+  sheetOf,
+  snagGlowAlpha,
+} from '@/lib/looks/css'
 import { DAYLIGHT, EMBER, PRESETS } from '@/lib/looks/presets'
 
 describe('lookToCssVars', () => {
@@ -25,6 +35,7 @@ describe('lookToCssVars', () => {
       '--pl-auto-dusk': '#5D5753',
       '--pl-error': '#FF6B6B',
       '--pl-error-text': '#FF6B6B',
+      '--pl-glow-snag': 'rgba(255,107,107,0.15)',
       '--pl-accent': '#FF6A1F',
       '--pl-accent-ink': '#1A0A02',
       '--pl-accent-line': 'rgba(255,106,31,0.45)',
@@ -55,7 +66,8 @@ describe('lookToCssVars', () => {
   it('darkens accent and error text on Paper (Daylight) and keeps the fills raw', () => {
     const vars = lookToCssVars(DAYLIGHT)
     expect(vars['--pl-accent']).toBe('#FF6A1F')
-    expect(vars['--pl-accent-text']).toBe('#AA4C1C')
+    // Darker than the flat grounds alone need (#AA4C1C): it also reads on molten's own 18% tint (M50).
+    expect(vars['--pl-accent-text']).toBe('#93441B')
     expect(vars['--pl-error']).toBe('#FF6B6B')
     expect(vars['--pl-error-text']).toBe('#A54B49')
     for (const name of ['--pl-accent-text', '--pl-error-text'] as const) {
@@ -89,9 +101,30 @@ describe('lookToCssVars', () => {
     for (const look of PRESETS) expect(Object.keys(lookToCssVars(look)).sort()).toEqual([...LOOK_VAR_NAMES].sort())
   })
 
-  it('turns the glow off at 0 and scales it to 40%', () => {
+  it('turns the glow off at 0, scales it to 40% where the text still reads, and caps it where it would not (M50)', () => {
     expect(lookToCssVars({ ...EMBER, glow: 0 })['--pl-glow']).toBe('rgba(255,106,31,0)')
-    expect(lookToCssVars({ ...EMBER, glow: 40 })['--pl-glow']).toBe('rgba(255,106,31,0.4)')
+    expect(lookToCssVars({ ...EMBER, ground: 'paper', accent: 'cream', glow: 40 })['--pl-glow']).toBe('rgba(237,230,222,0.4)')
+    expect(safeGlow('graphite', 'molten')).toBe(25)
+    expect(lookToCssVars({ ...EMBER, glow: 40 })['--pl-glow']).toBe('rgba(255,106,31,0.25)')
+  })
+
+  it("paints every preset's own glow but Daylight's 10, past Paper × Molten's safe 9 (its error text is 4.48:1 at 10)", () => {
+    expect(PRESETS.map((look) => [look.id, lookToCssVars(look)[GLOW_VAR]])).toEqual([
+      ['ember', 'rgba(255,106,31,0.24)'],
+      ['obsidian', 'rgba(237,230,222,0.06)'],
+      ['aurora', 'rgba(75,240,183,0.2)'],
+      ['workshop', 'rgba(255,106,31,0.14)'],
+      ['daylight', 'rgba(255,106,31,0.09)'],
+    ])
+  })
+
+  it("keeps Play's 15% snag glow on the dark grounds and lowers it to 10% on Paper", () => {
+    expect(GROUND_KEYS.map((ground) => [ground, snagGlowAlpha(ground)])).toEqual([
+      ['graphite', 0.15],
+      ['obsidian', 0.15],
+      ['indigo', 0.15],
+      ['paper', 0.1],
+    ])
   })
 
   it("takes the type style and Auto's finish from the catalogue", () => {

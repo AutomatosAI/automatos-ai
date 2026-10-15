@@ -165,7 +165,8 @@
   color: var(--pl-color-text-3);
 }
 
-/* Colour: swatches, then the live contrast table. */
+/* Colour: swatches, then the live contrast table. A chip keeps its own colour in forced colours
+   (M19): it is the sample. */
 
 .swatches {
   list-style: none;
@@ -191,6 +192,7 @@
   border-radius: var(--pl-radius-button);
   border: 1px solid var(--pl-line);
   background: var(--pl-look-swatch);
+  forced-color-adjust: none;
 }
 
 .tokenName {
@@ -244,7 +246,7 @@
   color: var(--pl-color-error-text);
 }
 
-/* Spacing and radii, drawn in the accent. */
+/* Spacing and radii, drawn in the accent; a step keeps its fill in forced colours (M19). */
 
 .scale {
   list-style: none;
@@ -270,6 +272,7 @@
   width: var(--pl-specimen-step);
   height: var(--pl-specimen-step);
   background: var(--pl-color-accent);
+  forced-color-adjust: none;
 }
 
 .radius {

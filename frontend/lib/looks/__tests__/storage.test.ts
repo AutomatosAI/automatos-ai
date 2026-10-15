@@ -1,22 +1,42 @@
 // @vitest-environment node
 /**
  * PRD-260 — looks in localStorage: every read through validateLook, every
- * access in try/catch (blocked storage → the default look, nothing kept).
+ * access in try/catch (blocked storage → the default look, nothing kept, and
+ * the helpers say so: M98). Keys are scoped per user and workspace (F5); what
+ * a browser kept before moves to the first account once, never deleted.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DAYLIGHT, EMBER } from '@/lib/looks/presets'
+import { lookScope } from '@/lib/looks/scope'
 import {
   ACTIVE_LOOK_KEY,
+  LOOK_SCOPE_KEY,
   SAVED_LOOKS_KEY,
+  UNSCOPED_LOOKS_MOVED_KEY,
+  loadStoredLooks,
+  lookKeys,
   parseActiveLook,
   parseSavedLooks,
+  readPrepaintLook,
   readStoredLooks,
+  rememberLookScope,
   writeActiveLook,
   writeSavedLooks,
 } from '@/lib/looks/storage'
 
 import { blockedStorage, memoryStorage, myLook } from './helpers'
+
+const A = lookScope('ws-1', 'user_a')
+const B = lookScope('ws-1', 'user_b')
+
+function fullStorage(): Storage {
+  const full = memoryStorage()
+  full.setItem = () => {
+    throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+  }
+  return full
+}
 
 beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -30,6 +50,11 @@ describe('the storage keys', () => {
   it('are the ones in the PRD', () => {
     expect(SAVED_LOOKS_KEY).toBe('automatos-play.looks')
     expect(ACTIVE_LOOK_KEY).toBe('automatos-play.look')
+  })
+
+  it('carry the workspace and the user (F5)', () => {
+    expect(lookKeys(A)).toEqual({ saved: 'automatos-play.looks:ws-1:user_a', active: 'automatos-play.look:ws-1:user_a' })
+    expect(lookKeys(lookScope('ws-local', null)).saved).toBe('automatos-play.looks:ws-local:local')
   })
 })
 
@@ -71,13 +96,21 @@ describe('parseSavedLooks', () => {
 describe('reading and writing', () => {
   it('round-trips the active look and the saved looks', () => {
     const store = memoryStorage()
-    writeActiveLook(() => store, DAYLIGHT)
-    writeSavedLooks(() => store, [myLook()])
-    expect(readStoredLooks(() => store)).toEqual({ active: DAYLIGHT, saved: [myLook()] })
+    expect(writeActiveLook(() => store, A, DAYLIGHT)).toBe(true)
+    expect(writeSavedLooks(() => store, A, [myLook()])).toBe(true)
+    expect(readStoredLooks(() => store, A)).toEqual({ scope: A, active: DAYLIGHT, saved: [myLook()], persisted: true })
+  })
+
+  it("keeps each account's looks apart: another user in the same browser reads none of them", () => {
+    const store = memoryStorage()
+    writeActiveLook(() => store, A, DAYLIGHT)
+    writeSavedLooks(() => store, A, [myLook()])
+    expect(readStoredLooks(() => store, B)).toEqual({ scope: B, active: null, saved: [], persisted: true })
+    expect(readStoredLooks(() => store, lookScope('ws-2', 'user_a')).saved).toEqual([])
   })
 
   it('reads nothing, with a warning, when storage is blocked', () => {
-    expect(readStoredLooks(blockedStorage)).toEqual({ active: null, saved: [] })
+    expect(readStoredLooks(blockedStorage, A)).toEqual({ scope: A, active: null, saved: [], persisted: false })
     expect(console.warn).toHaveBeenCalledTimes(1)
   })
 
@@ -86,16 +119,96 @@ describe('reading and writing', () => {
     throwing.getItem = () => {
       throw new DOMException('The operation is insecure.', 'SecurityError')
     }
-    expect(readStoredLooks(() => throwing)).toEqual({ active: null, saved: [] })
+    expect(readStoredLooks(() => throwing, A)).toEqual({ scope: A, active: null, saved: [], persisted: false })
   })
 
   it('warns instead of throwing when storage refuses a write', () => {
-    const full = memoryStorage()
+    const full = fullStorage()
+    expect(() => writeActiveLook(() => full, A, EMBER)).not.toThrow()
+    expect(() => writeSavedLooks(blockedStorage, A, [])).not.toThrow()
+    expect(console.warn).toHaveBeenCalledTimes(2)
+  })
+
+  it('says false when storage refuses a write, so the page can tell the user (M98)', () => {
+    expect(writeActiveLook(fullStorage, A, EMBER)).toBe(false)
+    expect(writeSavedLooks(fullStorage, A, [myLook()])).toBe(false)
+    expect(writeActiveLook(blockedStorage, A, EMBER)).toBe(false)
+    expect(writeSavedLooks(blockedStorage, A, [])).toBe(false)
+  })
+})
+
+describe('the looks a browser kept before F5', () => {
+  function upgradedBrowser(): Storage {
+    return memoryStorage({
+      [SAVED_LOOKS_KEY]: JSON.stringify([myLook()]),
+      [ACTIVE_LOOK_KEY]: JSON.stringify(myLook()),
+    })
+  }
+
+  it('move to the first account that reads them, once, and are never deleted', () => {
+    const store = upgradedBrowser()
+    expect(loadStoredLooks(() => store, A)).toEqual({ scope: A, active: myLook(), saved: [myLook()], persisted: true })
+    expect(store.getItem(UNSCOPED_LOOKS_MOVED_KEY)).toBe(A)
+    expect(loadStoredLooks(() => store, B)).toEqual({ scope: B, active: null, saved: [], persisted: true })
+    expect(store.getItem(SAVED_LOOKS_KEY)).toBe(JSON.stringify([myLook()]))
+    expect(store.getItem(ACTIVE_LOOK_KEY)).toBe(JSON.stringify(myLook()))
+  })
+
+  it("never overwrite looks the account already has", () => {
+    const store = upgradedBrowser()
+    writeSavedLooks(() => store, A, [])
+    expect(loadStoredLooks(() => store, A)).toMatchObject({ active: myLook(), saved: [] })
+  })
+
+  it('leave nothing marked when there is nothing to move', () => {
+    const store = memoryStorage()
+    expect(loadStoredLooks(() => store, A).saved).toEqual([])
+    expect(store.getItem(UNSCOPED_LOOKS_MOVED_KEY)).toBeNull()
+  })
+
+  it("still read the account's looks when the move is refused", () => {
+    const full = upgradedBrowser()
     full.setItem = () => {
       throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
     }
-    expect(() => writeActiveLook(() => full, EMBER)).not.toThrow()
-    expect(() => writeSavedLooks(blockedStorage, [])).not.toThrow()
-    expect(console.warn).toHaveBeenCalledTimes(2)
+    expect(loadStoredLooks(() => full, A)).toEqual({ scope: A, active: null, saved: [], persisted: true })
+    expect(loadStoredLooks(blockedStorage, A).persisted).toBe(false)
+  })
+})
+
+describe('the pre-paint pointer', () => {
+  it("names the scope whose active look the next page load paints", () => {
+    const store = memoryStorage()
+    expect(rememberLookScope(() => store, A)).toBe(true)
+    expect(store.getItem(LOOK_SCOPE_KEY)).toBe(A)
+    expect(rememberLookScope(blockedStorage, A)).toBe(false)
+  })
+})
+
+describe('the pre-paint look (painted under Play until the account is known)', () => {
+  it("is the pointer scope's active look, else the one kept before F5, else the default", () => {
+    const store = memoryStorage({
+      [ACTIVE_LOOK_KEY]: JSON.stringify(myLook()),
+      [lookKeys(A).active]: JSON.stringify(DAYLIGHT),
+    })
+    expect(readPrepaintLook(() => store)).toEqual(myLook())
+    store.setItem(LOOK_SCOPE_KEY, A)
+    expect(readPrepaintLook(() => store)).toEqual(DAYLIGHT)
+    store.setItem(LOOK_SCOPE_KEY, B)
+    expect(readPrepaintLook(() => store)).toEqual(EMBER)
+    expect(readPrepaintLook(() => memoryStorage())).toEqual(EMBER)
+    expect(readPrepaintLook(() => memoryStorage({ [ACTIVE_LOOK_KEY]: '{not json' }))).toEqual(EMBER)
+    expect(readPrepaintLook(blockedStorage)).toEqual(EMBER)
+  })
+
+  it('only reads: nothing moves and nothing is written', () => {
+    const store = memoryStorage({
+      [SAVED_LOOKS_KEY]: JSON.stringify([myLook()]),
+      [ACTIVE_LOOK_KEY]: JSON.stringify(myLook()),
+    })
+    const setItem = vi.spyOn(store, 'setItem')
+    readPrepaintLook(() => store)
+    expect(setItem).not.toHaveBeenCalled()
+    expect(store.getItem(UNSCOPED_LOOKS_MOVED_KEY)).toBeNull()
   })
 })

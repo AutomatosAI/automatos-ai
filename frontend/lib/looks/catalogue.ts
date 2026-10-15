@@ -7,7 +7,9 @@
  * K6: a type style's `family` reaches its face through the next/font variable
  * (app/play-fonts.ts; Geist through the core's --font-geist-sans), because
  * next/font renames the family and a literal 'Instrument Serif' would not
- * resolve. `face` keeps the design's name for the style sheet.
+ * resolve. `face` keeps the design's name for the style sheet, and with
+ * `generic` (the family's fallback) names the face where those variables
+ * don't exist: Copy tokens' :root block (lib/looks/style.ts rootBlock, M99).
  */
 
 /** Errors stay coral in every look. Not themeable. */
@@ -44,6 +46,8 @@ export interface TypeStyle {
   readonly face: string
   /** The CSS font-family: the face's next/font variable, then the generic family. */
   readonly family: string
+  /** The generic family `family` falls back to. */
+  readonly generic: 'serif' | 'sans-serif'
   readonly style: 'italic' | 'normal'
   readonly weight: number
   readonly letterSpacing: string
@@ -80,10 +84,10 @@ export const ACCENTS = {
 } as const satisfies Record<string, Accent>
 
 export const TYPE_STYLES = {
-  serif: { name: 'Editorial', face: 'Instrument Serif', family: 'var(--pl-font-instrument-serif),serif', style: 'italic', weight: 400, letterSpacing: '0', sizes: { hero: 72, brand: 28, status: 40, card: 22 } },
-  clean: { name: 'Clean', face: 'Geist', family: 'var(--font-geist-sans),sans-serif', style: 'normal', weight: 600, letterSpacing: '-.03em', sizes: { hero: 58, brand: 18, status: 30, card: 17 } },
-  bric: { name: 'Characterful', face: 'Bricolage Grotesque', family: 'var(--pl-font-bricolage),sans-serif', style: 'normal', weight: 700, letterSpacing: '-.02em', sizes: { hero: 58, brand: 18, status: 30, card: 17 } },
-  round: { name: 'Playful', face: 'Fredoka', family: 'var(--pl-font-fredoka),sans-serif', style: 'normal', weight: 600, letterSpacing: '0', sizes: { hero: 58, brand: 20, status: 30, card: 17 } },
+  serif: { name: 'Editorial', face: 'Instrument Serif', family: 'var(--pl-font-instrument-serif),serif', generic: 'serif', style: 'italic', weight: 400, letterSpacing: '0', sizes: { hero: 72, brand: 28, status: 40, card: 22 } },
+  clean: { name: 'Clean', face: 'Geist', family: 'var(--font-geist-sans),sans-serif', generic: 'sans-serif', style: 'normal', weight: 600, letterSpacing: '-.03em', sizes: { hero: 58, brand: 18, status: 30, card: 17 } },
+  bric: { name: 'Characterful', face: 'Bricolage Grotesque', family: 'var(--pl-font-bricolage),sans-serif', generic: 'sans-serif', style: 'normal', weight: 700, letterSpacing: '-.02em', sizes: { hero: 58, brand: 18, status: 30, card: 17 } },
+  round: { name: 'Playful', face: 'Fredoka', family: 'var(--pl-font-fredoka),sans-serif', generic: 'sans-serif', style: 'normal', weight: 600, letterSpacing: '0', sizes: { hero: 58, brand: 20, status: 30, card: 17 } },
 } as const satisfies Record<string, TypeStyle>
 
 export const SHELLS = {

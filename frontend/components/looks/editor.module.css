@@ -5,6 +5,10 @@
  * main one, scrolling on its own (Play's sticky 100dvh panel, for a frame that
  * has a header row). Desktop only (D7). Every variable is --pl-* (K2); a
  * swatch's own colour arrives as --pl-look-swatch from swatch-style.ts.
+ *
+ * M18, M19: a chosen option is marked in the accent as text (the raw accents fall
+ * below 3:1 on Paper), and the colour samples keep their own colours in forced
+ * colours (forced-color-adjust: none), since they are what the owner picks from.
  */
 
 /* Room under Save and Reset for the floating Auto widget MainLayout keeps on every page but
@@ -37,7 +41,7 @@
   color: var(--pl-color-text-2);
 }
 
-/* Shared by every option: a quiet edge, the accent edge when chosen. */
+/* Shared by every option: a quiet edge, the readable accent's edge when chosen. */
 .option,
 .typeOption,
 .chip {
@@ -57,11 +61,12 @@
 .option[aria-pressed="true"],
 .typeOption[aria-pressed="true"],
 .chip[aria-pressed="true"] {
-  border-color: var(--pl-color-accent);
-  box-shadow: 0 0 0 1px var(--pl-color-accent);
+  border-color: var(--pl-color-accent-text);
+  box-shadow: 0 0 0 1px var(--pl-color-accent-text);
 }
 
-/* Accent: round swatches, the chosen one ringed in the text colour. */
+/* Accent: round swatches, each edged in text2 so a pale accent shows on Paper, the chosen one
+   ringed in the text colour on top. */
 .swatches {
   display: flex;
   flex-wrap: wrap;
@@ -75,11 +80,13 @@
   border-radius: var(--pl-radius-round);
   border: 2px solid var(--pl-color-bg);
   background: var(--pl-look-swatch);
+  box-shadow: inset 0 0 0 1px var(--pl-color-text-2);
+  forced-color-adjust: none;
   cursor: pointer;
 }
 
 .swatch[aria-pressed="true"] {
-  box-shadow: 0 0 0 2px var(--pl-color-text);
+  box-shadow: 0 0 0 2px var(--pl-color-text), inset 0 0 0 1px var(--pl-color-text-2);
 }
 
 /* Background: two columns, each with a square of the ground. */
@@ -100,6 +107,7 @@
   border-radius: var(--pl-radius-paper);
   border: 1px solid var(--pl-line-button);
   background: var(--pl-look-swatch);
+  forced-color-adjust: none;
 }
 
 /* Type: each style set in its own face, at its card size. */
@@ -153,6 +161,7 @@
   flex: none;
   border-radius: var(--pl-radius-round);
   background: var(--pl-look-swatch);
+  forced-color-adjust: none;
 }
 
 .lightDot {
@@ -170,7 +179,7 @@
   width: 100%;
   min-height: var(--pl-tap-min);
   margin: 0;
-  accent-color: var(--pl-color-accent);
+  accent-color: var(--pl-color-accent-text);
   cursor: pointer;
 }
 
@@ -233,4 +242,19 @@
 .reset:disabled {
   color: var(--pl-color-text-2);
   cursor: default;
+}
+
+/* Forced colours (Windows High Contrast) drop box-shadows and paint every border in one system
+   colour, so the chosen option's edge widens instead (app/play-theme.css also rings every pressed
+   control in Highlight). A swatch keeps its own colours, so its focus ring takes a system colour. */
+@media (forced-colors: active) {
+  .option[aria-pressed="true"],
+  .typeOption[aria-pressed="true"],
+  .chip[aria-pressed="true"] {
+    border-width: 2px;
+  }
+
+  .swatch:focus-visible {
+    outline-color: CanvasText;
+  }
 }

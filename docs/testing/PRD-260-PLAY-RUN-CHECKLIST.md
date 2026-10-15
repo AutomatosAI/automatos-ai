@@ -27,7 +27,7 @@ How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`
 
 4. [ ] **Test data and a clean slate.** Use a workspace holding test data only (c1 on the local stack): the steps send messages, make Deliverables and may start a Mission (real tokens). Make the browser window at least 1024 px wide (1440 is good). In the DevTools console on localhost:3000:
    ```js
-   ['automatos-play.look', 'automatos-play.looks', 'automatos-play:seen-deliverables'].forEach((k) => localStorage.removeItem(k)); sessionStorage.removeItem('automatos-play.hello-played')
+   Object.keys(localStorage).filter((k) => k.startsWith('automatos-play')).forEach((k) => localStorage.removeItem(k)); sessionStorage.removeItem('automatos-play.hello-played')
    ```
    - *Expected:* no error. Play will open in Ember and Auto will say hello.
 
@@ -132,16 +132,17 @@ How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`
     - *Expected:* Save as adds "My look 1" to the row and picks it; Rename and Save change it; Delete removes it, and deleting the active look returns the app to Ember. A preset can't be renamed, deleted or saved over.
 
 34. [ ] **Export.** Save a look again and Export it.
-    - *Expected:* the browser downloads `<name>.look.json`. Opened, it holds exactly eleven fields (`schema`, `id`, `name`, `sub`, `interface`, `ground`, `accent`, `font`, `shell`, `light`, `glow`): catalogue keys and a number, no colours.
+    - *Expected:* the notice says "Your browser is saving `<name>.look.json`. If it didn't appear, use Copy JSON." and the browser downloads `<name>.look.json`. Opened, it holds exactly eleven fields (`schema`, `id`, `name`, `sub`, `interface`, `ground`, `accent`, `font`, `shell`, `light`, `glow`): catalogue keys and a number, no colours.
 
 35. [ ] **Import.** Delete that saved look, then import the file; then paste the same JSON and import it; then paste it with `"accent": "#ff0000"`; then with `"name": "<b>hi</b>"`.
     - *Expected:* the file comes back as a saved look under a new id (`look-N`); the paste adds a second copy; the bad accent shows `"accent" must be one of the catalogue's accents: molten, cream, mint, gold, periwinkle, rose.` and adds nothing; the `<b>` name shows as plain text, never bold. A file of 1 MB or more is refused with "That's 1 MB or more. A Look file is well under 1 KB: check it's a .look.json file."
 
 36. [ ] **Reload keeps the active look.** With a saved Daylight-based look active, reload with the cache off and Slow 4G; then make an unsaved edit and reload again.
-    - *Expected:* the page paints straight in the look, never a frame of Ember's dark ground first; the unsaved edit survives the reload too.
+    - *Expected:* the page paints straight in the look, never a frame of Ember's dark ground first; the unsaved edit survives the reload too. Make it yours shows only its heading until the look is read, never Ember's card pressed first.
+    - *Also (F5, M25):* with Make it yours open in two tabs, pick another look in one: the other follows at once, its tone too, and Save as new look in either keeps both tabs' looks. Signed in as a second account in this browser (SaaS), the Looks row has none of the first account's looks and the page opens in Ember; back on the first account, its looks return.
 
 37. [ ] **No storage (optional).** In a private window with site data blocked, switch to Play.
-    - *Expected:* Play opens in Ember and Make it yours still re-themes the app; nothing is kept after a reload.
+    - *Expected:* Play opens in Ember and Make it yours still re-themes the app; Duplicate, Rename and Import add "This browser isn't keeping looks, so it lasts until you close this tab." to their notice; nothing is kept after a reload.
 
 ## G. The style sheet
 
@@ -213,6 +214,15 @@ The 15 Oct review's fixes that only a browser can show (`scripts/ralph/prd260-re
 53. [ ] **Play's type wins over Studio's (P260-FX-01).** Under Ember, open `/looks` and in DevTools select the "Make it yours." heading (an `h1`); then pick Workshop and look again. Then open an Ember Deliverable whose text has a link and `inline code` (ask Auto: `Write a short note as a document with a link to https://example.com and the command npm run build in backticks`), and press Tab until the link has focus.
     - *Expected:* the heading's computed `font-family` is the look's display face: Instrument Serif's next/font family (`__Instrument_Serif_…`), italic, under Ember; Fredoka's (`__Fredoka_…`) under Workshop; never Newsreader, at Studio's weight 500. On the cream sheet the link is the sheet's accent (dark molten, not Studio's light navy), the inline code sits on a faint line-coloured chip and reads clearly, and the focus ring is drawn in the same sheet accent, plainly visible on the cream.
 
+54. [ ] **Make it yours on Paper (P260-FX-19).** On `/looks` pick Daylight, then press each accent in turn, and pick a background, a type, a shell and a light.
+    - *Expected:* every accent swatch has a thin grey edge, so Cream, Mint and Gold show plainly on the Paper ground, and the chosen one has a dark ring round it. The chosen background, type, shell and light, and the Daylight card in the Looks row, have a 2px edge in the dark molten of the "See the style sheet" link, never the light orange, and the glow slider is the same dark molten. Pick Ember: the edges and the slider are molten, as before.
+
+55. [ ] **Forced colours (P260-FX-19).** Chrome DevTools > More tools > Rendering > "Emulate CSS media feature forced-colors: active" (on Windows: Settings > Accessibility > Contrast themes). Open `/looks` in Ember, then in Daylight, and Tab through it; then Tab through `/deliverables` (the type chips, a card, the "More in Deliverables" links, Load more), a Deliverable's page (the Shelf link, Download) and `/conversations` (New chat, the search box, a row); then open `/looks/style`.
+    - *Expected:* on `/looks` the six accent swatches, the ground squares, the shell and light dots and the tops of the look cards keep their own colours; the chosen accent, background, type, shell and light and the active look's card each carry a ring in the system's highlight colour (the options and the card a wider border too); every swatch shows a ring when Tab reaches it. Everywhere else every control Tab reaches shows an outline, and a pressed type chip with the focus has a thicker ring than without it. On `/looks/style` the colour chips and the spacing steps keep their colours.
+
+56. [ ] **A long look name (P260-FX-19).** Make the window 1024 px wide. On `/looks` use Save as, rename the new look to `abcdefghijklmnopqrstuvwxyz0123456789abcd` (40 characters, no space), then change one option so the status reads `<name> · edited`.
+    - *Expected:* "Make it yours." keeps its full size and reads on one or two lines, never a sliver one word wide; the status beside it wraps, right-aligned, within at most 40% of the row; the look's card in the Looks row shows the whole name, broken over lines, never cut off at its edge.
+
 ---
 
 ## Map: the owner's test to these steps
@@ -228,4 +238,4 @@ The 15 Oct review's fixes that only a browser can show (`scripts/ralph/prd260-re
 | 7. The visible changes cherry-picked from PRD-259 W1: rounded corners, `dark:` classes in Classic Dark and Studio Dark | 50–51 |
 | 8. §7.1: should Play become the default for new users? (not changed here) | 52 |
 
-The PRD's other pages, beyond the owner's list: Conversations (24), the shelf and Load more (25–28), the style sheet (38), the 404 (40, 46, 47) and "Automatos is asleep" (41–43); the review fixes (53).
+The PRD's other pages, beyond the owner's list: Conversations (24), the shelf and Load more (25–28), the style sheet (38), the 404 (40, 46, 47) and "Automatos is asleep" (41–43); the review fixes (53–56).

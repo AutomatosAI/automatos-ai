@@ -14,8 +14,9 @@ import {
   TYPE_STYLES,
   TYPE_STYLE_KEYS,
 } from '@/lib/looks/catalogue'
+import { safeGlow } from '@/lib/looks/css'
 import { clampGlow, glowLabel, type LookValues } from '@/lib/looks/editor'
-import { GLOW_MAX, GLOW_MIN, type Look } from '@/lib/looks/types'
+import { GLOW_MIN, type Look } from '@/lib/looks/types'
 
 import styles from './editor.module.css'
 import { colourStyle, typeStyle } from './swatch-style'
@@ -152,11 +153,18 @@ export function LightOptions({ look, onChange }: OptionsProps) {
   )
 }
 
-/** GLOW_MIN to GLOW_MAX, 'Off' at 0. The value is read out as '24%' or 'Off'. */
+/**
+ * GLOW_MIN to the look's safe glow (GLOW_MAX at most: the strongest glow its
+ * ground and accent keep readable), 'Off' at 0. It shows the glow the page
+ * paints, so a stored glow past the cap reads as the cap. The value is read
+ * out as '24%' or 'Off'.
+ */
 export function GlowSlider({ look, onChange }: OptionsProps) {
   const inputId = useId()
-  const value = glowLabel(look.glow)
-  const onInput = (event: ChangeEvent<HTMLInputElement>) => onChange({ glow: clampGlow(Number(event.target.value)) })
+  const max = safeGlow(look.ground, look.accent)
+  const glow = clampGlow(look.glow, max)
+  const value = glowLabel(glow)
+  const onInput = (event: ChangeEvent<HTMLInputElement>) => onChange({ glow: clampGlow(Number(event.target.value), max) })
   return (
     <div className={styles.section}>
       <div className={styles.glowHead}>
@@ -173,9 +181,9 @@ export function GlowSlider({ look, onChange }: OptionsProps) {
         type="range"
         className={styles.slider}
         min={GLOW_MIN}
-        max={GLOW_MAX}
+        max={max}
         step={GLOW_STEP}
-        value={look.glow}
+        value={glow}
         aria-valuetext={value}
         onChange={onInput}
       />
