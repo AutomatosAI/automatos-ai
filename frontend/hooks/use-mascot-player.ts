@@ -11,7 +11,8 @@ import { type MascotName, ONE_SHOTS } from '@/lib/mascot/types'
  * clip boundary, restarts loops, and reports when a one-shot's clip ends. With
  * no video (reduced motion, a clip that won't play) it shows the target at once
  * and ends one-shots on a CLIP_MS timer instead. The queue rules are
- * lib/mascot/player.ts.
+ * lib/mascot/player.ts. The <video>'s handlers say which clip they belong to,
+ * so each clip's boundary is taken once (P260-FX-15, M27).
  */
 
 export interface MascotPlayerOptions {
@@ -26,8 +27,10 @@ export interface MascotPlayerOptions {
 export interface MascotPlayer {
   /** The state whose clip (or still) is on screen. */
   readonly showing: MascotName
-  readonly onTimeUpdate: (event: SyntheticEvent<HTMLVideoElement>) => void
-  readonly onEnded: (event: SyntheticEvent<HTMLVideoElement>) => void
+  /** timeupdate from the <video> that plays `clip` (the clip it belongs to, not what shows now). */
+  readonly onTimeUpdate: (event: SyntheticEvent<HTMLVideoElement>, clip: MascotName) => void
+  /** ended from the <video> that plays `clip`. */
+  readonly onEnded: (event: SyntheticEvent<HTMLVideoElement>, clip: MascotName) => void
 }
 
 function restart(video: HTMLVideoElement): void {
@@ -66,18 +69,21 @@ export function useMascotPlayer({ target, still, onClipEnded }: MascotPlayerOpti
     if (player.finished) onClipEndedRef.current?.(player.showing)
   }, [player.finished, player.showing])
 
-  const handleBoundary = (video: HTMLVideoElement): void => {
-    setPlayer((current) => clipBoundary(current).player)
+  // A boundary counts once, for the clip whose <video> reached it: a clip's last
+  // timeupdate and its ended can both land before React re-renders, and the second
+  // must not finish the one-shot the first one swapped in.
+  const handleBoundary = (video: HTMLVideoElement, clip: MascotName): void => {
+    setPlayer((current) => (current.showing === clip ? clipBoundary(current).player : current))
     // A stale restart is harmless: a swap remounts the <video>, and `ended` retries.
-    if (clipBoundary(player).action === 'restart') restart(video)
+    if (player.showing === clip && clipBoundary(player).action === 'restart') restart(video)
   }
 
   return {
     showing: still ? target : player.showing,
-    onTimeUpdate: (event) => {
+    onTimeUpdate: (event, clip) => {
       const video = event.currentTarget
-      if (atClipBoundary(video.currentTime, video.duration)) handleBoundary(video)
+      if (atClipBoundary(video.currentTime, video.duration)) handleBoundary(video, clip)
     },
-    onEnded: (event) => handleBoundary(event.currentTarget),
+    onEnded: (event, clip) => handleBoundary(event.currentTarget, clip),
   }
 }

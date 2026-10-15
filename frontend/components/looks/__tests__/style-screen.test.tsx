@@ -3,8 +3,8 @@
  * Play's tests/looks/StyleScreen.test.tsx. Under Play every value comes from
  * the active look and redraws when it changes (a test button changes it
  * through useLook, as Make it yours does); Auto's 12 states are the real
- * AutoMascot, every state's PNG under reduced motion, and none of them lights
- * the page glow. The page goes through PlayOnlyRoute, as /looks does: under
+ * AutoMascot, each state's PNG until Play Auto's states plays their clips (never
+ * under reduced motion), and none of them lights the page glow. The page goes through PlayOnlyRoute, as /looks does: under
  * Play at >= 1024 px the sheet is full bleed in MainLayout; under Classic or
  * Studio the page is the same note with Switch to Play (K9); under Play below
  * 1024 px, the same 'wider screen' note and no sheet (D7). MainLayout is a
@@ -39,6 +39,7 @@ vi.mock('@/components/layout/main-layout', () => ({
 import LookStylePage from '@/app/looks/style/page'
 import { LookProvider, useLook } from '@/components/looks/look-provider'
 import { SWITCH_TO_PLAY, WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
+import { PLAY_STATES } from '@/components/looks/style/style-mascots'
 import { COPY_FAILED, STYLE_HEADING, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
@@ -145,6 +146,10 @@ function mascotRegion(): HTMLElement {
   return screen.getByRole('region', { name: MASCOT_REGION })
 }
 
+const playStates = () => within(mascotRegion()).getByRole('button', { name: PLAY_STATES })
+const stillsIn = (region: HTMLElement) => Array.from(region.querySelectorAll('img'))
+const clipsIn = (region: HTMLElement) => Array.from(region.querySelectorAll('video'))
+
 const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia')
 const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard')
 
@@ -247,19 +252,43 @@ describe('the style sheet under Play, on Ember', () => {
     const stages = mascot.getAllByTestId('auto-stage')
     expect(stages.map((stage) => stage.getAttribute('data-ring'))).toEqual(MASCOT_STATES.map((state) => ringTone(state)))
     expect(stages.filter((stage) => stage.hasAttribute('data-glow'))).toEqual([])
-    const clips = Array.from(mascotRegion().querySelectorAll('video'))
-    expect(clips.map((clip) => clip.getAttribute('poster'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.png`))
+    expect(stillsIn(mascotRegion()).map((still) => still.getAttribute('src'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.png`))
     expect(mascot.getAllByText(`ring light · ${LIGHTS.mint.hex}`)).toHaveLength(4)
     expect(mascot.getAllByText(`ring accent · ${ACCENTS.molten.hex}`)).toHaveLength(4)
   })
 
-  it("shows every state's PNG under reduced motion, and no clip", async () => {
+  it("shows the 12 states as lazy stills, and Play Auto's states plays their 12 clips (P260-FX-15)", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    renderPage()
+    await ready()
+    const region = mascotRegion()
+    expect(within(region).getAllByTestId('auto-stage')).toHaveLength(MASCOT_STATES.length)
+    expect(clipsIn(region)).toEqual([])
+    expect(stillsIn(region).map((still) => still.getAttribute('src'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.png`))
+    expect(stillsIn(region).map((still) => still.getAttribute('loading'))).toEqual(MASCOT_STATES.map(() => 'lazy'))
+    expect(playStates()).toHaveAttribute('aria-pressed', 'false')
+    expect(playStates()).toBeEnabled()
+
+    fireEvent.click(playStates())
+    expect(playStates()).toHaveAttribute('aria-pressed', 'true')
+    expect(clipsIn(region).map((clip) => clip.getAttribute('src'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.webm`))
+    expect(clipsIn(region).map((clip) => clip.getAttribute('poster'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.png`))
+    expect(stillsIn(region)).toEqual([])
+
+    fireEvent.click(playStates())
+    expect(playStates()).toHaveAttribute('aria-pressed', 'false')
+    expect(clipsIn(region)).toEqual([])
+  })
+
+  it("shows every state's PNG under reduced motion, no clip, and Play Auto's states is off", async () => {
     preferReducedMotion()
     renderPage()
     await ready()
-    const stills = Array.from(mascotRegion().querySelectorAll('img'))
+    const stills = stillsIn(mascotRegion())
     expect(stills.map((still) => still.getAttribute('src'))).toEqual(MASCOT_STATES.map((state) => `/auto/${state}.png`))
-    expect(mascotRegion().querySelectorAll('video')).toHaveLength(0)
+    expect(clipsIn(mascotRegion())).toHaveLength(0)
+    expect(playStates()).toBeDisabled()
+    expect(playStates()).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('links back to Make it yours', async () => {

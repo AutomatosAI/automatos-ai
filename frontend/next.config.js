@@ -14,6 +14,23 @@ const apiOrigin = (() => {
 // F237: presigned media (Socials thumbnails, a post's files) loads from object storage's public origin.
 const mediaSources = mediaOrigins(process.env.NEXT_PUBLIC_MEDIA_ORIGINS).join(' ')
 
+// PRD-260 (P260-FX-15): Auto's clips and stills (public/auto/, lib/mascot/media.ts MASCOT_DIR).
+// Next serves public files with max-age=0, so every state swap waited a revalidation round trip:
+// they stay fresh for a day, then a stale copy plays while the browser revalidates in the
+// background. Not `immutable`: the file names carry no version, so a changed clip must still arrive.
+const SECONDS_PER_DAY = 24 * 60 * 60
+const MASCOT_MAX_AGE_S = SECONDS_PER_DAY
+const MASCOT_SWR_S = 7 * SECONDS_PER_DAY
+const MASCOT_CACHE_RULE = {
+  source: '/auto/:file*',
+  headers: [
+    {
+      key: 'Cache-Control',
+      value: `public, max-age=${MASCOT_MAX_AGE_S}, stale-while-revalidate=${MASCOT_SWR_S}`,
+    },
+  ],
+}
+
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: false,
@@ -128,6 +145,7 @@ const nextConfig = {
           },
         ],
       },
+      MASCOT_CACHE_RULE,
     ]
   },
 }

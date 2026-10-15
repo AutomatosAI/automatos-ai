@@ -17,9 +17,10 @@ import styles from './auto-mascot.module.css'
  * else the .webm (lib/mascot/media.ts videoFormat); under reduced motion, on the
  * server and after a clip that won't play, the state's PNG shows instead. The
  * stage is an image named by the caption; the caption itself is a polite live
- * region, so a screen reader hears what he is doing whenever it changes. The
- * clips live in public/auto/ (committed), so there is no stand-in for missing
- * files.
+ * region, so a screen reader hears what he is doing whenever it changes. A
+ * browser that blocks muted autoplay gets the stills too, so the one-shots still
+ * end on a timer (P260-FX-15). The clips live in public/auto/ (committed), so
+ * there is no stand-in for missing files.
  */
 
 export type AutoMascotSize = 'small' | 'regular' | 'large'
@@ -42,7 +43,17 @@ export interface AutoMascotProps {
    * 12 states at once): his stage then leaves the page glow alone (no data-glow).
    */
   readonly lightsPage?: boolean
+  /**
+   * False keeps him a still where a clip could play: the style sheet shows all
+   * 12 states and plays their clips only when asked (StyleMascots).
+   */
+  readonly playing?: boolean
 }
+
+/** play()'s refusal when the browser blocks autoplay. */
+const AUTOPLAY_BLOCKED = 'NotAllowedError'
+/** play()'s refusal when a swap or an unmount cut the start short: the next clip starts itself. */
+const START_INTERRUPTED = 'AbortError'
 
 export function AutoMascot({
   state,
@@ -52,12 +63,13 @@ export function AutoMascot({
   size = 'regular',
   showCaption = true,
   lightsPage = true,
+  playing = true,
 }: AutoMascotProps) {
   const reducedMotion = usePrefersReducedMotion()
   const format = useVideoFormat()
-  // One clip that won't play means the set is broken: stills from then on, not a stuck clip.
+  // One clip that won't play, or blocked autoplay, means stills from then on, not a stuck clip.
   const [videoFailed, setVideoFailed] = useState(false)
-  const video = !reducedMotion && !videoFailed ? format : null
+  const video = playing && !reducedMotion && !videoFailed ? format : null
   const player = useMascotPlayer({ target: state, still: video === null, onClipEnded })
   const label = caption ?? captionFor(state)
 
@@ -65,6 +77,7 @@ export function AutoMascot({
     console.warn(`[mascot] Auto's clip ${event.currentTarget.src} didn't play, so he is a still.`)
     setVideoFailed(true)
   }, [])
+  const onVideoBlocked = useCallback(() => setVideoFailed(true), [])
 
   return (
     <div className={styles.auto} data-size={size}>
@@ -79,7 +92,13 @@ export function AutoMascot({
       >
         <div className={styles.ring} />
         {video !== null ? (
-          <MascotVideo state={player.showing} format={video} player={player} onError={onVideoError} />
+          <MascotVideo
+            state={player.showing}
+            format={video}
+            player={player}
+            onError={onVideoError}
+            onBlocked={onVideoBlocked}
+          />
         ) : (
           <MascotStill state={player.showing} />
         )}
@@ -99,14 +118,59 @@ interface MascotVideoProps {
   readonly format: VideoFormat
   readonly player: MascotPlayer
   readonly onError: (event: SyntheticEvent<HTMLVideoElement>) => void
+  /** The browser refused to play the clip (blocked autoplay): show the still instead. */
+  readonly onBlocked: () => void
 }
 
-/** No `loop`: the player restarts loops itself, at the boundary (lib/mascot/player.ts). */
-function MascotVideo({ state, format, player, onError }: MascotVideoProps) {
+/** The name of what play() threw or rejected with ('' for anything without one). */
+function errorName(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'name' in error ? String(error.name) : ''
+}
+
+/**
+ * Starts the clip by hand as well as by autoPlay: a browser that blocks autoplay
+ * only says so through play()'s promise. Blocked → onBlocked; a start cut short
+ * by a swap is normal and ignored; anything else is logged, and the <video>'s
+ * own error event decides whether the clip is broken.
+ */
+function startClip(video: HTMLVideoElement, onBlocked: () => void): void {
+  const refused = (error: unknown): void => {
+    const name = errorName(error)
+    if (name === START_INTERRUPTED) return
+    if (name === AUTOPLAY_BLOCKED) {
+      console.warn("[mascot] The browser blocked Auto's clip, so he is a still.", error)
+      onBlocked()
+      return
+    }
+    console.warn("[mascot] Auto's clip didn't start:", error)
+  }
+  try {
+    // Older browsers return undefined instead of a promise.
+    Promise.resolve(video.play()).catch(refused)
+  } catch (error) {
+    refused(error)
+  }
+}
+
+/**
+ * No `loop`: the player restarts loops itself, at the boundary (lib/mascot/player.ts).
+ * Each handler carries the clip it belongs to (`state`), so a boundary counts once
+ * per clip even when timeupdate and ended both land before React re-renders.
+ */
+function MascotVideo({ state, format, player, onError, onBlocked }: MascotVideoProps) {
   const urls = clipUrls(state, format)
+  // Stable, so React calls it once per <video> (a new one per state, by key), never on a re-render:
+  // play() on a finished one-shot would start it again.
+  const startOnMount = useCallback(
+    (video: HTMLVideoElement | null) => {
+      if (video) startClip(video, onBlocked)
+    },
+    [onBlocked],
+  )
   return (
     <video
       key={state}
+      ref={startOnMount}
       className={styles.figure}
       src={urls.video}
       poster={urls.poster}
@@ -114,8 +178,8 @@ function MascotVideo({ state, format, player, onError }: MascotVideoProps) {
       muted
       playsInline
       preload="auto"
-      onTimeUpdate={player.onTimeUpdate}
-      onEnded={player.onEnded}
+      onTimeUpdate={(event) => player.onTimeUpdate(event, state)}
+      onEnded={(event) => player.onEnded(event, state)}
       onError={onError}
     />
   )
@@ -123,7 +187,8 @@ function MascotVideo({ state, format, player, onError }: MascotVideoProps) {
 
 /** The state's PNG: the poster, and all there is under reduced motion. */
 function MascotStill({ state }: { readonly state: MascotName }) {
-  // A plain <img>: a 512 px transparent still from public/auto/, never resized.
+  // A plain <img>: a 512 px transparent still from public/auto/, never resized. Lazy, so a
+  // page of specimens (the style sheet's 12) loads only the ones in view.
   // eslint-disable-next-line @next/next/no-img-element
-  return <img className={styles.figure} src={posterUrl(state)} alt="" />
+  return <img className={styles.figure} src={posterUrl(state)} alt="" loading="lazy" />
 }
