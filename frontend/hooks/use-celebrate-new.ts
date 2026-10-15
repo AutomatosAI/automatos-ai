@@ -28,7 +28,8 @@ export function useCelebrateNew(items: readonly Deliverable[] | null, celebrate:
 
   useEffect(() => {
     if (!items || items.length === 0 || scope === null) return
-    const before = seen.current?.scope === scope ? seen.current.record : readSeen(scope)
+    const cached = seen.current
+    const before = cached !== undefined && cached.scope === scope ? cached.record : readSeen(scope)
     const fresh = freshDeliverables(before, items)
     const after = markSeen(before, items)
     seen.current = { scope, record: after }
