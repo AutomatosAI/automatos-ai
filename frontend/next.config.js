@@ -14,6 +14,69 @@ const apiOrigin = (() => {
 // F237: presigned media (Socials thumbnails, a post's files) loads from object storage's public origin.
 const mediaSources = mediaOrigins(process.env.NEXT_PUBLIC_MEDIA_ORIGINS).join(' ')
 
+// SECURITY: HTTP response headers for all routes (OWASP A05:2021 - Security Misconfiguration)
+const SECURITY_HEADERS_RULE = {
+  source: '/(.*)',
+  headers: [
+    {
+      key: 'X-Frame-Options',
+      value: 'DENY',
+    },
+    {
+      key: 'X-Content-Type-Options',
+      value: 'nosniff',
+    },
+    {
+      key: 'Referrer-Policy',
+      value: 'strict-origin-when-cross-origin',
+    },
+    {
+      key: 'Permissions-Policy',
+      value: 'camera=(), microphone=(self), geolocation=(), interest-cohort=()',
+    },
+    {
+      key: 'Strict-Transport-Security',
+      value: 'max-age=31536000; includeSubDomains',
+    },
+    {
+      key: 'X-DNS-Prefetch-Control',
+      value: 'on',
+    },
+    // PRD-70 FIX-08: Content-Security-Policy
+    // Restricts script/style/image sources to prevent XSS.
+    // 'unsafe-inline' needed for Next.js styled-jsx and Clerk components.
+    // 'unsafe-eval' needed for Next.js dev mode — remove in production hardening phase.
+    // connect-src includes api.automatos.app (cross-origin API) and Clerk auth endpoints.
+    {
+      key: 'Content-Security-Policy',
+      value: [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com https://cdn.jsdelivr.net",
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        `img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev ${mediaSources}`.trim(),
+        `media-src 'self' blob: ${mediaSources}`.trim(),
+        "font-src 'self' data: https://cdn.jsdelivr.net",
+        // The API origin is derived from NEXT_PUBLIC_API_URL so the local edition
+        // (http://localhost:8000) is allowed too — without it the browser refuses
+        // every API call ("Failed to fetch") before it leaves the page. In SaaS the
+        // value is https://api.automatos.app, already covered by the wildcard.
+        `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev https://api.clerk.com https://cdn.jsdelivr.net wss: ws:`,
+        // F352 (night 10b): a PDF preview (Deliverables side panel, Explorer, chat file card)
+        // is fetched with the Bearer header and shown as a blob: URL in an <iframe>
+        // (useAuthenticatedBlobUrl). 'self' never matches blob:, so frame-src names it. The
+        // blob document inherits this policy, and the browser's PDF viewer is a plugin, so
+        // object-src allows blob: too. Only this page's own script can mint a blob: URL.
+        "frame-src 'self' blob: https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+        "worker-src 'self' blob:",
+        "object-src blob:",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+      ].join('; '),
+    },
+  ],
+}
+
 // PRD-260 (P260-FX-15): Auto's clips and stills (public/auto/, lib/mascot/media.ts MASCOT_DIR).
 // Next serves public files with max-age=0, so every state swap waited a revalidation round trip:
 // they stay fresh for a day, then a stale copy plays while the browser revalidates in the
@@ -77,76 +140,9 @@ const nextConfig = {
     ]
   },
 
-  // SECURITY: HTTP response headers for all routes (OWASP A05:2021 - Security Misconfiguration)
+  // SECURITY_HEADERS_RULE for every route; MASCOT_CACHE_RULE for Auto's clips and stills.
   async headers() {
-    return [
-      {
-        source: '/(.*)',
-        headers: [
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'strict-origin-when-cross-origin',
-          },
-          {
-            key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(self), geolocation=(), interest-cohort=()',
-          },
-          {
-            key: 'Strict-Transport-Security',
-            value: 'max-age=31536000; includeSubDomains',
-          },
-          {
-            key: 'X-DNS-Prefetch-Control',
-            value: 'on',
-          },
-          // PRD-70 FIX-08: Content-Security-Policy
-          // Restricts script/style/image sources to prevent XSS.
-          // 'unsafe-inline' needed for Next.js styled-jsx and Clerk components.
-          // 'unsafe-eval' needed for Next.js dev mode — remove in production hardening phase.
-          // PRD-70 FIX-08: Content-Security-Policy
-          // Restricts script/style/image sources to prevent XSS.
-          // 'unsafe-inline' needed for Next.js styled-jsx and Clerk components.
-          // 'unsafe-eval' needed for Next.js dev mode — remove in production hardening phase.
-          // connect-src includes api.automatos.app (cross-origin API) and Clerk auth endpoints.
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com https://cdn.jsdelivr.net",
-              "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-              `img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev ${mediaSources}`.trim(),
-              `media-src 'self' blob: ${mediaSources}`.trim(),
-              "font-src 'self' data: https://cdn.jsdelivr.net",
-              // The API origin is derived from NEXT_PUBLIC_API_URL so the local edition
-              // (http://localhost:8000) is allowed too — without it the browser refuses
-              // every API call ("Failed to fetch") before it leaves the page. In SaaS the
-              // value is https://api.automatos.app, already covered by the wildcard.
-              `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev https://api.clerk.com https://cdn.jsdelivr.net wss: ws:`,
-              // F352 (night 10b): a PDF preview (Deliverables side panel, Explorer, chat file card)
-              // is fetched with the Bearer header and shown as a blob: URL in an <iframe>
-              // (useAuthenticatedBlobUrl). 'self' never matches blob:, so frame-src names it. The
-              // blob document inherits this policy, and the browser's PDF viewer is a plugin, so
-              // object-src allows blob: too. Only this page's own script can mint a blob: URL.
-              "frame-src 'self' blob: https://*.clerk.accounts.dev https://challenges.cloudflare.com",
-              "worker-src 'self' blob:",
-              "object-src blob:",
-              "base-uri 'self'",
-              "form-action 'self'",
-              "frame-ancestors 'none'",
-            ].join('; '),
-          },
-        ],
-      },
-      MASCOT_CACHE_RULE,
-    ]
+    return [SECURITY_HEADERS_RULE, MASCOT_CACHE_RULE]
   },
 }
 
