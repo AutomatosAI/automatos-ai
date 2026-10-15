@@ -21,10 +21,15 @@ import styles from './turn.module.css'
  * words, a done call's page linked only when safeLink says it is a path in
  * this app; a turn that ran nothing says NO_ACTIONS, one whose calls moved
  * nothing on the board says NOTHING_ON_THE_BOARD. A reply from before receipts
- * (undefined) shows nothing.
+ * (undefined) shows nothing. Beside a line, Play's tag (receiptBadge): Done in
+ * the accent for a done write, Not done for a refused call, Skipped for one
+ * not run; only the mark and the tag carry the tone, never the whole line.
  */
 
 export const RECEIPTS_TITLE = 'What Auto did'
+export const BADGE_DONE = 'Done'
+export const BADGE_NOT_DONE = 'Not done'
+export const BADGE_SKIPPED = 'Skipped'
 
 const LOOK: Readonly<Record<Receipt['status'], { readonly mark: string; readonly tone: LineTone }>> = {
   done: { mark: MARK_DONE, tone: 'done' },
@@ -33,10 +38,22 @@ const LOOK: Readonly<Record<Receipt['status'], { readonly mark: string; readonly
   waiting: { mark: MARK_WAITING, tone: 'waiting' },
 }
 
+/**
+ * The tag beside a receipt's line, as in the Play app: a done write says Done, a refused call
+ * Not done, a skipped one Skipped; a done read and a waiting ask have none (the line itself says
+ * "waiting for you"). Pure.
+ */
+export function receiptBadge(r: Receipt): string | null {
+  if (r.status === 'refused') return BADGE_NOT_DONE
+  if (r.status === 'skipped') return BADGE_SKIPPED
+  return r.status === 'done' && r.kind === 'write' ? BADGE_DONE : null
+}
+
 function ReceiptItem({ receipt }: { readonly receipt: Receipt }) {
   const look = LOOK[receipt.status]
   const line = receiptLine(receipt)
   const link = receipt.status === 'done' ? safeLink(receipt.link) : null
+  const badge = receiptBadge(receipt)
   return (
     <li className={styles.receipt} data-tone={look.tone} data-status={receipt.status}>
       <span className={styles.mark} aria-hidden="true">
@@ -49,6 +66,7 @@ function ReceiptItem({ receipt }: { readonly receipt: Receipt }) {
       ) : (
         <span>{line}</span>
       )}
+      {badge && <span className={styles.badge}>{badge}</span>}
     </li>
   )
 }

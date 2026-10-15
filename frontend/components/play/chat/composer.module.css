@@ -12,6 +12,13 @@
   flex-direction: column;
 }
 
+/* The empty chat (first open) grows with the hero, the chips and the box and never shrinks
+   below them, so PageColumns' .main scrolls on a short window; a conversation keeps the
+   rule above and scrolls its own list (P260-FX-14, M31). */
+.chat[data-empty] {
+  flex: 1 0 auto;
+}
+
 .footer {
   flex: none;
   display: flex;

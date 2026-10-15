@@ -39,7 +39,14 @@ vi.mock('@/components/mascot/auto-mascot', () => ({
 }))
 
 import { CONVERSATION_LIMIT } from '@/hooks/use-conversation-list'
-import { LIST_FAILED, NO_CONVERSATIONS, PlayConversations } from '../play-conversations'
+import {
+  CONVERSATIONS_TITLE,
+  LIST_FAILED,
+  NEW_CHAT,
+  NO_CONVERSATIONS,
+  PlayConversations,
+  SEARCH_LABEL,
+} from '../play-conversations'
 
 const NOW = new Date(2026, 9, 14, 15, 30) // Wed 14 Oct 2026, 15:30
 
@@ -140,6 +147,19 @@ describe('PlayConversations — the list', () => {
 
     await user.clear(search)
     expect(screen.getAllByRole('region')).toHaveLength(3)
+  })
+
+  it("heads the list's own column with the title and New chat, over the search box, as in the Play app (P260-FX-14)", async () => {
+    renderPage()
+    await screen.findByRole('region', { name: 'Today' })
+    const search = screen.getByRole('searchbox', { name: SEARCH_LABEL })
+    const column = search.parentElement as HTMLElement
+    const heading = within(column).getByRole('heading', { level: 1, name: CONVERSATIONS_TITLE })
+    const newChat = within(column).getByRole('button', { name: NEW_CHAT })
+    const titleRow = column.firstElementChild
+    expect(titleRow).toContainElement(heading)
+    expect(titleRow).toContainElement(newChat)
+    expect(titleRow?.nextElementSibling).toBe(search)
   })
 
   it('starts a new chat: a fresh draft, then the chat', async () => {

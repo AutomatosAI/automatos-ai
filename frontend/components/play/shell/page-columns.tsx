@@ -28,16 +28,13 @@ export interface PageHeaderProps {
   readonly title: string
   /** A quiet line at the right: a date, a count. */
   readonly meta?: string
-  /** The page's own button at the far right (Conversations' New chat). */
-  readonly action?: ReactNode
 }
 
-export function PageHeader({ title, meta, action }: PageHeaderProps) {
+export function PageHeader({ title, meta }: PageHeaderProps) {
   return (
     <div className={styles.pageHeader}>
       <h1 className={styles.pageTitle}>{title}</h1>
       {meta && <span className={styles.pageMeta}>{meta}</span>}
-      {action && <div className={styles.pageAction}>{action}</div>}
     </div>
   )
 }

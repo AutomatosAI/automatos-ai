@@ -115,8 +115,19 @@
   overflow-wrap: anywhere;
 }
 
-.receipt[data-tone="failed"] {
+/* The tag beside a line (Play's receiptBadge): Done in the accent, Not done in the error,
+   Skipped muted. Only the mark and the tag carry the tone; the line stays quiet. */
+.badge {
+  flex: none;
+  color: var(--pl-color-accent-text);
+}
+
+[data-tone="failed"] .badge {
   color: var(--pl-color-error-text);
+}
+
+[data-tone="muted"] .badge {
+  color: var(--pl-color-text-3);
 }
 
 .receiptLink {

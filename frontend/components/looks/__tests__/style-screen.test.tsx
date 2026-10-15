@@ -39,7 +39,9 @@ vi.mock('@/components/layout/main-layout', () => ({
 import LookStylePage from '@/app/looks/style/page'
 import { LookProvider, useLook } from '@/components/looks/look-provider'
 import { SWITCH_TO_PLAY, WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
+import { SAMPLE_TITLE } from '@/components/looks/style/style-components'
 import { COPY_FAILED, STYLE_HEADING, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
+import { BADGE_DONE } from '@/components/play/chat/receipts'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS } from '@/lib/looks/catalogue'
@@ -235,6 +237,9 @@ describe('the style sheet under Play, on Ember', () => {
     for (const text of ['Send', 'Stop', 'All', 'Reading 4 pages', "Web search didn't answer", 'What Auto did', 'Open']) {
       expect(components.getByText(text)).toBeInTheDocument()
     }
+    // "What Auto did": Play's Done tag beside the write, none beside the read (P260-FX-14).
+    expect(components.getByText(`Made a report: ${SAMPLE_TITLE}`).nextElementSibling).toHaveTextContent(BADGE_DONE)
+    expect(components.getByText('Searched the web · 5 results').nextElementSibling).toBeNull()
     expect(components.queryAllByRole('button')).toEqual([])
     expect(components.queryAllByRole('link')).toEqual([])
   })

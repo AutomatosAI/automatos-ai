@@ -93,7 +93,14 @@ vi.mock('@/stores/chat-session-store', async () => {
 })
 
 import { DeliverableCard } from '@/components/play/chat/deliverable-card'
-import { RECEIPTS_TITLE } from '@/components/play/chat/receipts'
+import { MARK_DONE, MARK_FAILED, MARK_MUTED, MARK_WAITING } from '@/components/play/chat/labels'
+import {
+  BADGE_DONE,
+  BADGE_NOT_DONE,
+  BADGE_SKIPPED,
+  RECEIPTS_TITLE,
+  receiptBadge,
+} from '@/components/play/chat/receipts'
 import { SNAG_TITLE, TRY_AGAIN, TURN_FAILED } from '@/components/play/chat/snag-box'
 import { MISSION_CREATED_LABEL, SUGGESTION_LABEL } from '@/components/play/chat/mission-suggestion'
 import { TOOL_LINES_LABEL } from '@/components/play/chat/tool-lines'
@@ -190,10 +197,38 @@ describe('receipts', () => {
     await renderChat([QUESTION, autoMessage('m2', 'Done.', { parts: [{ type: 'text', text: 'Done.' }, { type: 'receipts', receipts }] })])
     const section = within(reply()).getByRole('region', { name: RECEIPTS_TITLE })
     const items = within(section).getAllByRole('listitem')
-    expect(items.map((item) => item.textContent?.slice(1))).toEqual(receipts.map(receiptLine))
+    // The mark, the line in receiptLine's words, then Play's tag (P260-FX-14).
+    expect(items.map((item) => item.textContent)).toEqual([
+      `${MARK_DONE}${receiptLine(done)}${BADGE_DONE}`,
+      `${MARK_FAILED}${receiptLine(refused)}${BADGE_NOT_DONE}`,
+    ])
     expect(within(items[0]).getByRole('link', { name: receiptLine(done) })).toHaveAttribute('href', '/activity?ticket=422')
     expect(within(items[1]).queryByRole('link')).toBeNull()
     expect(section).not.toHaveTextContent(NOTHING_ON_THE_BOARD)
+  })
+
+  it("tags a done write 'Done' beside its line, a refused one 'Not done', a skipped one 'Skipped'; a done read and a waiting ask have none (P260-FX-14)", async () => {
+    const read = receipt({ kind: 'read', subject: 'Brief', effect: 'looked up' })
+    const skipped = receipt({ status: 'skipped', subject: 'Draft to Sam', reason: 'nothing to send' })
+    const waiting = receipt({ status: 'waiting', effect: "card raised: change an agent 'Scout'" })
+    await renderChat([QUESTION, autoMessage('m2', 'Done.', { receipts: [done, read, refused, skipped, waiting] })])
+    const section = within(reply()).getByRole('region', { name: RECEIPTS_TITLE })
+    const [doneItem, readItem, refusedItem, skippedItem, waitingItem] = within(section).getAllByRole('listitem')
+    // Beside its line: the tag is the element right after the line's link, inside the same item.
+    const tag = within(doneItem).getByText(BADGE_DONE)
+    expect(tag.previousElementSibling).toBe(within(doneItem).getByRole('link', { name: receiptLine(done) }))
+    expect(readItem.textContent).toBe(`${MARK_DONE}${receiptLine(read)}`)
+    expect(within(refusedItem).getByText(BADGE_NOT_DONE).previousElementSibling).toHaveTextContent(receiptLine(refused))
+    expect(skippedItem.textContent).toBe(`${MARK_MUTED}${receiptLine(skipped)}${BADGE_SKIPPED}`)
+    expect(waitingItem.textContent).toBe(`${MARK_WAITING}${receiptLine(waiting)}`)
+  })
+
+  it('receiptBadge is the tag alone: Done only for a done write', () => {
+    expect(receiptBadge(receipt({}))).toBe(BADGE_DONE)
+    expect(receiptBadge(receipt({ kind: 'read' }))).toBeNull()
+    expect(receiptBadge(receipt({ kind: 'read', status: 'refused' }))).toBe(BADGE_NOT_DONE)
+    expect(receiptBadge(receipt({ status: 'skipped' }))).toBe(BADGE_SKIPPED)
+    expect(receiptBadge(receipt({ status: 'waiting' }))).toBeNull()
   })
 
   it('a turn that ran nothing says so; one that moved nothing on the board says that', async () => {
