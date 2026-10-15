@@ -218,6 +218,19 @@ describe('receipts', () => {
     view.rerender(<PlayChat />)
     expect(auto()).toHaveAttribute('data-state', 'celebrate')
   })
+
+  it("Stop after a done receipt calls the hook's stop(), and the stopped turn does not celebrate (P260-FX-04)", async () => {
+    const view = await renderChat([QUESTION, autoMessage('m2', '')])
+    chat.status = 'streaming'
+    view.rerender(<PlayChat />)
+    data({ type: 'tool-data', data: { receipts: { receipts: [done], above: [] } } })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    expect(chat.stop).toHaveBeenCalledTimes(1)
+    chat.status = 'idle'
+    view.rerender(<PlayChat />)
+    expect(auto()).not.toHaveAttribute('data-state', 'celebrate')
+    expect(auto()).toHaveAttribute('data-state', 'idle')
+  })
 })
 
 describe('the Deliverable card', () => {

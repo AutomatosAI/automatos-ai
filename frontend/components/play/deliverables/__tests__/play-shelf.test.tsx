@@ -369,6 +369,20 @@ describe('ShelfScreen — loading, empty and error', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(SHELF_FAILED)
   })
 
+  it('lets Auto go back to the count once Try again loads the shelf, off oops (P260-FX-04)', async () => {
+    const failed = answer({ isError: true })
+    const user = userEvent.setup()
+    const view = render(<ShelfScreen now={NOW} />)
+    expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'oops')
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(failed.refetch).toHaveBeenCalledTimes(1)
+    answer({ data: { pages: [page(ROWS)] } }) // the refetch answered
+    view.rerender(<ShelfScreen now={NOW} />)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'idle')
+    expect(screen.getByTestId('auto')).toHaveTextContent('4 on the shelf. Nice collection!')
+  })
+
   it('lets Auto sleep while the backend does not answer', () => {
     health.connection = 'down'
     answer({ isError: true })

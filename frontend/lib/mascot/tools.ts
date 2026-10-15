@@ -38,10 +38,12 @@ export const READING_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * Tools that write, although their names match the reading pattern. They work:
- * creating or deleting a document is not reading one.
+ * creating or deleting a document is not reading one, and acknowledging a report
+ * is no knowledge lookup ('acknowledge' contains 'knowledge').
  */
 export const WORKING_TOOLS: ReadonlySet<string> = new Set([
   'generate_document',
+  'platform_acknowledge_report',
   'platform_upload_document',
   'platform_delete_document',
   'platform_reprocess_document',

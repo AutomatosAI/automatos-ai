@@ -4,10 +4,12 @@
  * Safari, the PNG as poster, only the PNG under reduced motion, no loop
  * attribute (the player swaps at the clip boundary), and an accessible name
  * saying what Auto is doing. jsdom plays no media: the tests fire the media
- * events by hand. Roles, attributes and text only (CSS modules are proxies).
+ * events by hand, and play() is a mock that resolves (AutoMascot starts each
+ * clip itself, to hear when the browser blocks autoplay: P260-FX-15). Roles,
+ * attributes and text only (CSS modules are proxies).
  */
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AutoMascot } from '@/components/mascot/auto-mascot'
 import { CLIP_MS } from '@/lib/mascot/player'
@@ -57,6 +59,21 @@ function playTo(video: HTMLVideoElement, seconds: number): void {
 const ring = () => screen.getByTestId('auto-stage').getAttribute('data-ring')
 const glow = () => screen.getByTestId('auto-stage').getAttribute('data-glow')
 
+/** jsdom has no play(): every <video> AutoMascot mounts gets this one, resolved unless a test says otherwise. */
+const mockPlay = () => vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+let play: ReturnType<typeof mockPlay>
+
+/** Lets play()'s promise settle, inside act: what AutoMascot does with a refusal is a state update. */
+async function settlePlay(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve()
+  })
+}
+
+beforeEach(() => {
+  play = mockPlay()
+})
+
 afterEach(() => {
   if (originalMatchMedia) Object.defineProperty(window, 'matchMedia', originalMatchMedia)
   else Reflect.deleteProperty(window, 'matchMedia')
@@ -86,6 +103,15 @@ describe('AutoMascot: the clip for the browser', () => {
     expect(videoOf(container).getAttribute('poster')).toBe('/auto/thinking.png')
   })
 
+  it('stays a still, loaded lazily, where the page has not asked him to play (playing={false})', () => {
+    setUserAgent(CHROME)
+    const { container } = render(<AutoMascot state="idle" playing={false} />)
+    expect(container.querySelector('video')).toBeNull()
+    expect(stillOf(container).getAttribute('src')).toBe('/auto/idle.png')
+    expect(stillOf(container).getAttribute('loading')).toBe('lazy')
+    expect(play).not.toHaveBeenCalled()
+  })
+
   it('falls back to the still when a clip will not play', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { container } = render(<AutoMascot state="idle" />)
@@ -93,6 +119,37 @@ describe('AutoMascot: the clip for the browser', () => {
     expect(container.querySelector('video')).toBeNull()
     expect(stillOf(container).getAttribute('src')).toBe('/auto/idle.png')
     expect(warn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AutoMascot when the browser blocks autoplay', () => {
+  it('shows the still at once and ends a one-shot on the timer, as under reduced motion', async () => {
+    setUserAgent(CHROME)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    play.mockRejectedValue(new DOMException('blocked', 'NotAllowedError'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const onClipEnded = vi.fn()
+    const { container } = render(<AutoMascot state="hello" onClipEnded={onClipEnded} />)
+    await settlePlay()
+    expect(container.querySelector('video')).toBeNull()
+    expect(stillOf(container).getAttribute('src')).toBe('/auto/hello.png')
+    expect(warn).toHaveBeenCalledTimes(1)
+    act(() => {
+      vi.advanceTimersByTime(CLIP_MS)
+    })
+    expect(onClipEnded).toHaveBeenCalledTimes(1)
+    expect(onClipEnded).toHaveBeenCalledWith('hello')
+  })
+
+  it('keeps the clip when a start is only cut short (an AbortError from a swap)', async () => {
+    setUserAgent(CHROME)
+    play.mockRejectedValue(new DOMException('interrupted', 'AbortError'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { container } = render(<AutoMascot state="idle" />)
+    await settlePlay()
+    expect(videoOf(container).getAttribute('src')).toBe('/auto/idle.webm')
+    expect(container.querySelector('img')).toBeNull()
+    expect(warn).not.toHaveBeenCalled()
   })
 })
 
@@ -151,13 +208,33 @@ describe('AutoMascot: the clip boundary', () => {
   })
 
   it('plays a loop again at the boundary when nothing is queued', () => {
-    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     const { container } = render(<AutoMascot state="reading" />)
     const video = videoOf(container)
+    // Once as the clip mounts (AutoMascot starts it, to hear a blocked autoplay), once more at the boundary.
+    expect(play).toHaveBeenCalledTimes(1)
     playTo(video, CLIP_SECONDS - 0.03)
     expect(video.currentTime).toBe(0)
-    expect(play).toHaveBeenCalledTimes(1)
+    expect(play).toHaveBeenCalledTimes(2)
     expect(videoOf(container)).toBe(video)
+  })
+
+  it("takes a clip's boundary once: its last timeupdate and its ended swap a queued celebrate in, never finish it", () => {
+    setUserAgent(CHROME)
+    const onClipEnded = vi.fn()
+    const { container, rerender } = render(<AutoMascot state="idle" onClipEnded={onClipEnded} />)
+    rerender(<AutoMascot state="celebrate" onClipEnded={onClipEnded} />)
+    const idle = videoOf(container)
+    // In a browser both land before React re-renders: one act, so neither sees the swap.
+    act(() => {
+      playTo(idle, CLIP_SECONDS)
+      fireEvent.ended(idle)
+    })
+    const celebrate = videoOf(container)
+    expect(celebrate.getAttribute('src')).toBe('/auto/celebrate.webm')
+    expect(onClipEnded).not.toHaveBeenCalled()
+    fireEvent.ended(celebrate)
+    expect(onClipEnded).toHaveBeenCalledTimes(1)
+    expect(onClipEnded).toHaveBeenCalledWith('celebrate')
   })
 
   it("reports a one-shot's end once, then swaps to the next state at once", () => {

@@ -23,7 +23,9 @@ import {
  * hold time and reduced motion, and reports clip-ended when a one-shot's clip
  * ends. Unchanged input returns the same object. While an approval card waits
  * for the owner (Play's chat, T-005c), Auto rests on listening where he would
- * otherwise go back to idle.
+ * otherwise go back to idle. A Deliverable made mid-turn is celebrated when it
+ * lands, so the turn's done receipt adds no second celebration at finish, and
+ * Stop drops the celebration a done receipt promised (P260-FX-04).
  */
 
 export const INITIAL_MASCOT: MascotState = {
@@ -33,6 +35,7 @@ export const INITIAL_MASCOT: MascotState = {
   openTools: [],
   turnActive: false,
   celebrateOnFinish: false,
+  celebratedThisTurn: false,
   backendDown: false,
   approvalWaiting: false,
   pastThinking: false,
@@ -75,7 +78,13 @@ function show(state: MascotState, next: Pose): MascotState {
   return { ...state, mascot: next.mascot, rank: next.rank, queued: null }
 }
 
+/**
+ * What plays when the current one-shot ends. The one-shot on screen never
+ * queues behind itself: its finished clip would never end again, and Auto
+ * would freeze on it (lib/mascot/player.ts retarget).
+ */
 function enqueue(state: MascotState, next: Pose): MascotState {
+  if (ONE_SHOTS.has(next.mascot) && next.mascot === state.mascot) return state
   const queued = state.queued
   if (queued && queued.mascot === next.mascot && queued.rank === next.rank) return state
   return { ...state, queued: next }
@@ -128,15 +137,23 @@ function onReceipts(state: MascotState, event: ReceiptsEvent): MascotState {
   return event.receipts.some((r) => r.status === 'refused') ? propose(marked, OOPS) : marked
 }
 
+/** What a turn's start and its end both clear. */
+const TURN_RESET: Pick<MascotState, 'openTools' | 'celebrateOnFinish' | 'celebratedThisTurn' | 'pastThinking'> = {
+  openTools: [],
+  celebrateOnFinish: false,
+  celebratedThisTurn: false,
+  pastThinking: false,
+}
+
 function endTurn(state: MascotState): MascotState {
-  return { ...state, openTools: [], turnActive: false, celebrateOnFinish: false, pastThinking: false }
+  return { ...state, ...TURN_RESET, turnActive: false }
 }
 
 function onFinish(state: MascotState): MascotState {
   const pending = pendingPose(state)
   const quiet = pending.rank >= RANK.thinking && pending.rank <= RANK.tool ? settle(state, rest(state)) : state
   const ended = endTurn(quiet)
-  return state.celebrateOnFinish ? propose(ended, CELEBRATE) : ended
+  return state.celebrateOnFinish && !state.celebratedThisTurn ? propose(ended, CELEBRATE) : ended
 }
 
 /** A text delta ends thinking (the words show Auto answering), and marks the turn past it while a card waits too. */
@@ -182,8 +199,25 @@ function onClipEnded(state: MascotState, ended: MascotName): MascotState {
 }
 
 function onSend(state: MascotState): MascotState {
-  const started = { ...state, openTools: [], turnActive: true, celebrateOnFinish: false, pastThinking: false }
-  return settle(started, THINKING)
+  return settle({ ...state, ...TURN_RESET, turnActive: true }, THINKING)
+}
+
+/** The owner stopped the turn: its done receipt no longer celebrates at finish. */
+function onStop(state: MascotState): MascotState {
+  return state.celebrateOnFinish ? { ...state, celebrateOnFinish: false } : state
+}
+
+/** A new Deliverable: celebrate now. Made mid-turn, it is the turn's celebration (the shelf's, outside a turn, marks nothing). */
+function onDeliverableAdded(state: MascotState): MascotState {
+  const marked = state.turnActive && !state.celebratedThisTurn ? { ...state, celebratedThisTurn: true } : state
+  return propose(marked, CELEBRATE)
+}
+
+/** hello on the first open. A pose above idle (an awaited reply's thinking, a running tool) waits behind it and plays when it ends. */
+function onAppOpen(state: MascotState): MascotState {
+  const pending = pendingPose(state)
+  const greeted = propose(state, HELLO)
+  return greeted !== state && pending.rank > RANK.idle ? enqueue(greeted, pending) : greeted
 }
 
 /** Only these get through while the backend is unreachable. */
@@ -207,6 +241,8 @@ function reducePresence(state: MascotState, event: ClientEvent): MascotState {
       return pending.rank <= RANK.idle ? settle(state, LOADING) : state
     case 'loading-end':
       return pending.mascot === 'loading' ? settle(state, rest(state)) : state
+    case 'request-ok':
+      return pending.mascot === 'oops' && !state.turnActive ? settle(state, rest(state)) : state
     default:
       return state
   }
@@ -215,11 +251,13 @@ function reducePresence(state: MascotState, event: ClientEvent): MascotState {
 function reduceClient(state: MascotState, event: ClientEvent): MascotState {
   switch (event.type) {
     case 'app-open':
-      return propose(state, HELLO)
+      return onAppOpen(state)
     case 'input-focus':
       return propose(state, TYPING)
     case 'send':
       return onSend(state)
+    case 'stop':
+      return onStop(state)
     case 'backend-down':
       return settle(endTurn({ ...state, backendDown: true }), SLEEPING)
     case 'backend-up':
@@ -227,7 +265,7 @@ function reduceClient(state: MascotState, event: ClientEvent): MascotState {
     case 'not-found':
       return settle(state, LOST)
     case 'deliverable-added':
-      return propose(state, CELEBRATE)
+      return onDeliverableAdded(state)
     case 'request-failed':
       return propose(state, OOPS)
     case 'clip-ended':
@@ -242,6 +280,7 @@ const CLIENT_TYPES: ReadonlySet<MascotEvent['type']> = new Set<MascotEvent['type
   'input-focus',
   'input-blur',
   'send',
+  'stop',
   'idle-timeout',
   'wake',
   'backend-down',
@@ -251,6 +290,7 @@ const CLIENT_TYPES: ReadonlySet<MascotEvent['type']> = new Set<MascotEvent['type
   'loading-end',
   'deliverable-added',
   'request-failed',
+  'request-ok',
   'clip-ended',
 ])
 

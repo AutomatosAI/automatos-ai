@@ -68,8 +68,10 @@ export function runningToolInput(reply: ChatMessage | undefined): unknown {
 /**
  * The reply being written, for Auto (lib/mascot/events.ts): the newest message
  * when it is a reply (useChat appends the empty reply as it sends), whether its
- * words have started, and whether one of its tool calls still runs. A turn still
- * awaiting its reply has none, so the previous turn's words never end thinking.
+ * words have started, whether one of its tool calls still runs, how long the
+ * model's reasoning on it is and whether a cap ended its turn (useChat writes
+ * both onto the reply). A turn still awaiting its reply has none, so the
+ * previous turn's words never end thinking.
  */
 export function replyProgress(messages: readonly ChatMessage[]): ReplyProgress {
   const last = messages[messages.length - 1]
@@ -78,5 +80,7 @@ export function replyProgress(messages: readonly ChatMessage[]): ReplyProgress {
     id: last.id,
     hasText: messageText(last).trim().length > 0,
     toolRunning: (last.toolCalls ?? []).some((call) => call.state === 'running'),
+    reasoningChars: last.reasoning?.length ?? 0,
+    limitReached: Boolean(last.limitReached?.message),
   }
 }

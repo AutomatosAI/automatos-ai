@@ -30,4 +30,8 @@ describe('toolActivity', () => {
     expect(toolActivity('query_database')).toBe('working')
     expect(toolActivity('')).toBe('working')
   })
+
+  it("calls acknowledging a report working, although 'acknowledge' contains 'knowledge' (P260-FX-16)", () => {
+    expect(toolActivity('platform_acknowledge_report')).toBe('working')
+  })
 })

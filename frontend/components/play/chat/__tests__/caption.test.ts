@@ -108,12 +108,12 @@ describe('replyProgress: the reply being written, as Auto reads it (T-003b)', ()
   })
 
   it("says whether the reply's words have started (blank is not started), by its id", () => {
-    expect(replyProgress([asked, message({ id: 'r2' })])).toEqual({ id: 'r2', hasText: false, toolRunning: false })
+    expect(replyProgress([asked, message({ id: 'r2' })])).toEqual({ ...NO_REPLY, id: 'r2' })
     expect(replyProgress([asked, message({ id: 'r2', parts: [{ type: 'text', text: '  ' }] })]).hasText).toBe(false)
     expect(replyProgress([asked, message({ id: 'r2', parts: [{ type: 'text', text: 'Look for' }] })])).toEqual({
+      ...NO_REPLY,
       id: 'r2',
       hasText: true,
-      toolRunning: false,
     })
     expect(replyProgress([asked, message({ id: 'r2', parts: [], content: 'stored words' })]).hasText).toBe(true)
   })
@@ -125,5 +125,14 @@ describe('replyProgress: the reply being written, as Auto reads it (T-003b)', ()
     ]
     expect(replyProgress([asked, message({ id: 'r2', toolCalls: calls('running') })]).toolRunning).toBe(true)
     expect(replyProgress([asked, message({ id: 'r2', toolCalls: calls('error') })]).toolRunning).toBe(false)
+  })
+
+  it("reads how long the model's reasoning on it is, and whether a cap ended its turn (P260-FX-16)", () => {
+    expect(replyProgress([asked, message({ id: 'r2', reasoning: 'Weighing the two' })]).reasoningChars).toBe(16)
+    expect(replyProgress([asked, message({ id: 'r2' })]).reasoningChars).toBe(0)
+    const capped = { limit: 'max_tool_rounds', value: 8, message: 'I stopped after 8 rounds.' }
+    expect(replyProgress([asked, message({ id: 'r2', limitReached: capped })]).limitReached).toBe(true)
+    expect(replyProgress([asked, message({ id: 'r2', limitReached: { ...capped, message: '' } })]).limitReached).toBe(false)
+    expect(replyProgress([asked, message({ id: 'r2' })]).limitReached).toBe(false)
   })
 })

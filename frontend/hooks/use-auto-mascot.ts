@@ -18,9 +18,10 @@ import type { MascotEvent, MascotName, MascotState } from '@/lib/mascot/types'
 /**
  * PRD-260 D5, D6 — Auto driven by the core chat. Play's reducer
  * (lib/mascot/reducer.ts) is fed from useChatWithReceipts' data callback, its
- * status and its newest reply (the words starting) through lib/mascot/events.ts,
- * from the page's own events through dispatch, and from the idle nap. The
- * screen hands `mascot` and `onClipEnded` to <AutoMascot>.
+ * status and its newest reply (the model's reasoning, the words starting, a cap)
+ * through lib/mascot/events.ts, from the page's own events through dispatch,
+ * and from the idle nap. The screen hands `mascot` and `onClipEnded` to
+ * <AutoMascot>.
  */
 
 export type BackendStatus = 'up' | 'down'
@@ -30,7 +31,10 @@ export interface AutoMascotOptions {
   readonly status?: ChatStatus
   /** useChat's errorCode: set when the last turn was blocked ('trial_exhausted'). */
   readonly errorCode?: string | null
-  /** The newest reply (its words starting end thinking). Play's chat: replyProgress(messages). */
+  /**
+   * The newest reply: its reasoning thinks, its words starting end thinking, a
+   * cap plays oops. Play's chat: replyProgress(messages).
+   */
   readonly reply?: ReplyProgress
   /** The connection's state: down puts Auto to sleep until it is up again. Unknown: leave undefined. */
   readonly backend?: BackendStatus
@@ -64,16 +68,20 @@ function useStatusEvents(status: ChatStatus, errorCode: string | null, dispatch:
   }, [status, errorCode, dispatch])
 }
 
-/** The newest reply's words starting, after the status events of the same render (so a send thinks first). */
+/**
+ * The newest reply's reasoning, its words starting and a cap ending its turn,
+ * after the status events of the same render (so a send thinks first, and a cap
+ * that lands with the stream's end plays oops after the finish).
+ */
 function useReplyEvents(reply: ReplyProgress, status: ChatStatus, dispatch: Dispatch<MascotEvent>): void {
   const previous = useRef<ReplyProgress>(NO_REPLY)
-  const { id, hasText, toolRunning } = reply
+  const { id, hasText, toolRunning, reasoningChars, limitReached } = reply
   useEffect(() => {
-    const next: ReplyProgress = { id, hasText, toolRunning }
+    const next: ReplyProgress = { id, hasText, toolRunning, reasoningChars, limitReached }
     const events = mascotEventsFromReply(previous.current, next, status)
     previous.current = next
     events.forEach(dispatch)
-  }, [id, hasText, toolRunning, status, dispatch])
+  }, [id, hasText, toolRunning, reasoningChars, limitReached, status, dispatch])
 }
 
 function useBackendEvents(backend: BackendStatus | undefined, dispatch: Dispatch<MascotEvent>): void {

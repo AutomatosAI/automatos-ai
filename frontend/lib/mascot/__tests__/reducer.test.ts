@@ -266,3 +266,66 @@ describe('mascot reducer: an approval waits for the owner (T-005c)', () => {
     expect(mascotReducer(celebrating, ended('celebrate')).mascot).toBe('idle')
   })
 })
+
+describe('mascot reducer: one celebration per turn, never stuck on a one-shot (P260-FX-04)', () => {
+  const ADDED: MascotEvent = { type: 'deliverable-added' }
+  const STOP: MascotEvent = { type: 'stop' }
+  const OPEN: MascotEvent = { type: 'app-open' }
+  const FAILED_CALL: MascotEvent = { type: 'request-failed' }
+  const OK: MascotEvent = { type: 'request-ok' }
+
+  it('a Deliverable made mid-turn plus its done receipt ends in idle, not frozen on celebrate (M05)', () => {
+    const turn = replay([SEND, ADDED, receipts('done'), FINISH])
+    expect(turn.mascot).toBe('celebrate')
+    expect(turn.queued).toBeNull()
+    expect(mascotReducer(turn, ended('celebrate')).mascot).toBe('idle')
+  })
+
+  it('a second celebrate while one plays never queues behind itself; the next send thinks', () => {
+    const once = replay([ADDED])
+    const twice = mascotReducer(once, ADDED)
+    expect(twice).toBe(once)
+    const over = mascotReducer(twice, ended('celebrate'))
+    expect(over.mascot).toBe('idle')
+    expect(mascotReducer(over, SEND).mascot).toBe('thinking')
+    const thinkingQueued = replay([ADDED, SEND, ADDED])
+    expect(pendingPose(thinkingQueued).mascot).toBe('thinking')
+    expect(mascotReducer(thinkingQueued, ended('celebrate')).mascot).toBe('thinking')
+  })
+
+  it('celebrates one Deliverable once: its done receipt adds no second celebration at finish (#158)', () => {
+    expect(sequence([SEND, ADDED, ended('celebrate'), receipts('done'), FINISH])).toEqual(['thinking', 'celebrate', 'idle'])
+    expect(replay([SEND, receipts('done'), ADDED, ended('celebrate'), FINISH]).mascot).toBe('idle')
+  })
+
+  it('a done-receipts turn with no Deliverable still celebrates, the turn after a Deliverable too', () => {
+    expect(sequence([SEND, receipts('done'), FINISH])).toEqual(['thinking', 'celebrate'])
+    const afterDeliverable = replay([SEND, ADDED, ended('celebrate'), receipts('done'), FINISH])
+    expect(afterDeliverable.celebratedThisTurn).toBe(false)
+    expect(sequence([SEND, receipts('done'), FINISH], afterDeliverable)).toEqual(['thinking', 'celebrate'])
+  })
+
+  it("the shelf's Deliverable outside a turn celebrates and marks no turn", () => {
+    const shelf = replay([ADDED])
+    expect(shelf).toMatchObject({ mascot: 'celebrate', celebratedThisTurn: false })
+  })
+
+  it('Stop after a done receipt: the stopped turn does not celebrate (M101)', () => {
+    expect(sequence([SEND, receipts('done'), STOP, FINISH])).toEqual(['thinking', 'idle'])
+    const thinking = replay([SEND])
+    expect(mascotReducer(thinking, STOP)).toBe(thinking)
+  })
+
+  it('hello on the first open keeps an awaited reply thinking behind it (M102)', () => {
+    expect(sequence([SEND, OPEN, ended('hello'), FINISH])).toEqual(['thinking', 'hello', 'thinking', 'idle'])
+    const searching = replay([SEND, start('1', 'platform_web_search'), OPEN])
+    expect(pendingPose(searching).mascot).toBe('searching')
+    expect(replay([OPEN, ended('hello')]).mascot).toBe('idle')
+  })
+
+  it("a call that answers ends a failed call's oops outside a turn; during a turn oops stays (M47)", () => {
+    expect(sequence([FAILED_CALL, OK])).toEqual(['oops', 'idle'])
+    expect(replay([SEND, FAILED_CALL, OK]).mascot).toBe('oops')
+    expect(mascotReducer(INITIAL_MASCOT, OK)).toBe(INITIAL_MASCOT)
+  })
+})
