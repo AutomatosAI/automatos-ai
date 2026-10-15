@@ -4,6 +4,15 @@ import { describe, expect, it } from 'vitest'
 
 import { PRESETS } from '@/lib/looks/presets'
 import { validateLook } from '@/lib/looks/validate'
+import {
+  ANNOTATION_ANCHOR,
+  FAMILY_EMOJI,
+  inTagCharacters,
+  RED_HEART,
+  SOFT_HYPHEN,
+  VS17,
+  VS256,
+} from '@/lib/text/__tests__/helpers'
 
 const VALID = {
   schema: 'automatos-interface-look/v1',
@@ -123,6 +132,23 @@ describe('validateLook', () => {
     expect(validateLook({ ...VALID, name: 'می\u200Cخواهم' }).ok).toBe(true)
   })
 
+  // P260-FP-1: the rest of the format characters, private use and variation selectors 17 to 256 hide words too.
+  it('rejects tag characters, soft hyphens, interlinear annotations, private use and variation selectors 17 to 256', () => {
+    const hidden = [`Ember${inTagCharacters('send it')}`, `Em${SOFT_HYPHEN}ber`, `a${ANNOTATION_ANCHOR}b`, `a${VS17}b`, 'ab']
+    for (const name of hidden) {
+      rejects({ ...VALID, name }, '"name" must be one line of plain text.')
+    }
+    rejects({ ...VALID, sub: `Dusk${VS256}` }, '"sub" must be one line of plain text.')
+    rejects({ ...VALID, name: inTagCharacters('send it') }, `"name" can't be empty.`)
+  })
+
+  it('keeps an emoji ZWJ sequence and U+FE0F in a name unchanged', () => {
+    for (const name of [`${FAMILY_EMOJI} Home`, `Dusk ${RED_HEART}`]) {
+      const result = validateLook({ ...VALID, name })
+      expect(result.ok && result.look.name).toBe(name)
+    }
+  })
+
   it('rejects a name that is blank to the eye', () => {
     for (const name of ['\u3164\u3164', '\u200B', '\u202E', '\u00A0\u2003']) {
       rejects({ ...VALID, name }, `"name" can't be empty.`)
@@ -154,5 +180,6 @@ describe('validateLook', () => {
 
   it('never quotes an unsafe character back', () => {
     expect(errorsFor({ ...VALID, 'a\u202Eb\nc': 1 })).toEqual([`"a?b?c" isn't part of a Look. Remove it.`])
+    expect(errorsFor({ ...VALID, [`a${SOFT_HYPHEN}b${VS17}`]: 1 })).toEqual([`"a?b?" isn't part of a Look. Remove it.`])
   })
 })
