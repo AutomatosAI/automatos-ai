@@ -1,7 +1,8 @@
 /**
  * PRD-260 D5, D6 — useAutoMascot: Auto driven by the core chat's onData parts,
- * status and newest reply (through lib/mascot/events.ts), the page's events,
- * hello once per session, the backend's state and the idle nap.
+ * status and newest reply (through lib/mascot/events.ts: its words, its
+ * reasoning and a cap on its turn), the page's events, hello once per session,
+ * the backend's state and the idle nap.
  */
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -95,7 +96,7 @@ describe('useAutoMascot: the chat', () => {
 })
 
 describe("useAutoMascot: the reply's words (T-003b)", () => {
-  const reply = (hasText: boolean, toolRunning = false): ReplyProgress => ({ id: 'r2', hasText, toolRunning })
+  const reply = (hasText: boolean, toolRunning = false): ReplyProgress => ({ ...NO_REPLY, id: 'r2', hasText, toolRunning })
 
   it('send → thinking → first text → idle → tool-start → working → tool-end → idle → finish', () => {
     const { result, rerender } = mount({ status: 'idle', reply: NO_REPLY })
@@ -124,11 +125,56 @@ describe("useAutoMascot: the reply's words (T-003b)", () => {
   })
 
   it('thinks until the words come: an empty reply, or the previous reply already on screen, leaves him thinking', () => {
-    const previousReply: ReplyProgress = { id: 'r1', hasText: true, toolRunning: false }
+    const previousReply: ReplyProgress = { ...NO_REPLY, id: 'r1', hasText: true }
     const { result, rerender } = mount({ status: 'idle', reply: previousReply })
     rerender({ status: 'streaming', reply: previousReply })
     expect(result.current.mascot).toBe('thinking')
     rerender({ status: 'streaming', reply: reply(false) })
+    expect(result.current.mascot).toBe('thinking')
+  })
+})
+
+describe("useAutoMascot: the model's reasoning and a cap on the turn (P260-FX-16)", () => {
+  const at = (fields: Partial<ReplyProgress> = {}): ReplyProgress => ({ ...NO_REPLY, id: 'r2', ...fields })
+
+  /** A turn streaming on reply r2, with query_database running on it: Auto works. */
+  function working() {
+    const mounted = mount({ status: 'idle', reply: NO_REPLY })
+    mounted.rerender({ status: 'streaming', reply: at() })
+    act(() => mounted.result.current.onData(toolStart('c1', 'query_database')))
+    mounted.rerender({ status: 'streaming', reply: at({ toolRunning: true }) })
+    expect(mounted.result.current.mascot).toBe('working')
+    return mounted
+  }
+
+  it("tool-start → tool-end (idle) → the reply's reasoning grows (thinking) → its words start (idle); growth while the tool runs changes nothing", () => {
+    const { result, rerender } = working()
+    rerender({ status: 'streaming', reply: at({ toolRunning: true, reasoningChars: 30 }) })
+    expect(result.current.mascot).toBe('working')
+    act(() => result.current.onData(toolEnd('c1')))
+    rerender({ status: 'streaming', reply: at({ reasoningChars: 30 }) })
+    expect(result.current.mascot).toBe('idle')
+    rerender({ status: 'streaming', reply: at({ reasoningChars: 80 }) })
+    expect(result.current.mascot).toBe('thinking')
+    rerender({ status: 'streaming', reply: at({ reasoningChars: 80, hasText: true }) })
+    expect(result.current.mascot).toBe('idle')
+  })
+
+  it('working → a cap → finish ends on oops', () => {
+    const { result, rerender } = working()
+    rerender({ status: 'streaming', reply: at({ toolRunning: true, limitReached: true }) })
+    expect(result.current.mascot).toBe('oops')
+    rerender({ status: 'idle', reply: at({ limitReached: true }) })
+    expect(result.current.mascot).toBe('oops')
+    expect(result.current.state.turnActive).toBe(false)
+  })
+
+  it('a cap that lands with the end of the stream still ends on oops, and the next send thinks', () => {
+    const { result, rerender } = working()
+    rerender({ status: 'idle', reply: at({ limitReached: true }) })
+    expect(result.current.mascot).toBe('oops')
+    expect(result.current.state.turnActive).toBe(false)
+    rerender({ status: 'streaming', reply: NO_REPLY })
     expect(result.current.mascot).toBe('thinking')
   })
 })

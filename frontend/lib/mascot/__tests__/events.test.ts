@@ -3,8 +3,9 @@
  * PRD-260 D5, D6 — the core chat as Auto's events: each of useChat's onData
  * parts (lib/chat/hooks.ts, the receipts frame as useChatWithReceipts reads it)
  * and each status change maps as lib/mascot/events.ts says, unknown parts map to
- * nothing, the reply's words starting end thinking (T-003b), and whole turns
- * built from those parts play the states Play's spec expects.
+ * nothing, the reply's words starting end thinking (T-003b), its reasoning
+ * thinks and a cap plays oops (P260-FX-16), and whole turns built from those
+ * parts play the states Play's spec expects.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -205,8 +206,8 @@ describe("whole turns from the core chat's parts", () => {
 })
 
 describe("mascotEventsFromReply: the reply's words starting (T-003b)", () => {
-  const empty = (id: string): ReplyProgress => ({ id, hasText: false, toolRunning: false })
-  const words = (id: string, toolRunning = false): ReplyProgress => ({ id, hasText: true, toolRunning })
+  const empty = (id: string): ReplyProgress => ({ ...NO_REPLY, id })
+  const words = (id: string, toolRunning = false): ReplyProgress => ({ ...NO_REPLY, id, hasText: true, toolRunning })
   const ANSWER: MascotEvent[] = [{ type: 'text', text: '' }]
 
   it("the newest reply's first words while the chat streams are one text event", () => {
@@ -234,7 +235,7 @@ describe("mascotEventsFromReply: the reply's words starting (T-003b)", () => {
 })
 
 describe('a whole turn with its words (T-003b)', () => {
-  const reply = (hasText: boolean, toolRunning = false): ReplyProgress => ({ id: 'r2', hasText, toolRunning })
+  const reply = (hasText: boolean, toolRunning = false): ReplyProgress => ({ ...NO_REPLY, id: 'r2', hasText, toolRunning })
   const words = (previous: ReplyProgress, next: ReplyProgress) => mascotEventsFromReply(previous, next, 'streaming')
 
   it('send → thinking → first text → idle → tool-start → working → tool-end → idle → finish', () => {
@@ -259,5 +260,86 @@ describe('a whole turn with its words (T-003b)', () => {
     ]
     expect(sequence(events)).toEqual(['thinking', 'searching'])
     expect(sequence([...events, ...data(toolEnd('c1')), ...FINISHED])).toEqual(['thinking', 'searching', 'idle'])
+  })
+})
+
+describe("mascotEventsFromReply: the model's reasoning and a cap on the turn (P260-FX-16)", () => {
+  const at = (fields: Partial<ReplyProgress> = {}): ReplyProgress => ({ ...NO_REPLY, id: 'r2', ...fields })
+  const step = (previous: ReplyProgress, next: ReplyProgress, status: ChatStatus = 'streaming') =>
+    mascotEventsFromReply(previous, next, status)
+  const kinds = (events: readonly MascotEvent[]) => events.map((event) => event.type)
+
+  it("send → tool-start → tool-end (idle) → the reply's reasoning grows (thinking) → its words start (idle)", () => {
+    const events = [
+      ...STARTED,
+      ...data(toolStart('c1', 'query_database')),
+      ...step(at(), at({ toolRunning: true })),
+      ...data(toolEnd('c1')),
+      ...step(at({ toolRunning: true }), at()),
+      ...step(at(), at({ reasoningChars: 40 })),
+      ...step(at({ reasoningChars: 40 }), at({ reasoningChars: 40, hasText: true })),
+      ...FINISHED,
+    ]
+    expect(sequence(events)).toEqual(['thinking', 'working', 'idle', 'thinking', 'idle'])
+  })
+
+  it("a round's words, its narration clearing them, then the next round's reasoning thinks until its words", () => {
+    const events = [
+      ...STARTED,
+      ...step(at(), at({ hasText: true })),
+      ...data(toolStart('c1', 'platform_web_search')),
+      ...data(toolEnd('c1')),
+      ...step(at({ hasText: true }), at()),
+      ...step(at(), at({ reasoningChars: 12 })),
+      ...step(at({ reasoningChars: 12 }), at({ reasoningChars: 90 })),
+      ...step(at({ reasoningChars: 90 }), at({ reasoningChars: 90, hasText: true })),
+    ]
+    expect(sequence(events)).toEqual(['thinking', 'idle', 'searching', 'idle', 'thinking', 'idle'])
+  })
+
+  it('reasoning and the first words in one render: thinking, then the words end it', () => {
+    expect(kinds(step(at(), at({ reasoningChars: 40, hasText: true })))).toEqual(['reasoning', 'text'])
+    expect(replay([...STARTED, ...step(at(), at({ reasoningChars: 40, hasText: true }))]).mascot).toBe('idle')
+  })
+
+  it('reasoning growth while a tool runs changes nothing; once the tool ends, the next growth thinks', () => {
+    const working = replay([...STARTED, ...data(toolStart('c1', 'query_database'))])
+    const whileTool = step(at({ toolRunning: true }), at({ toolRunning: true, reasoningChars: 40 }))
+    expect(whileTool).toEqual([])
+    expect(replay(whileTool, working)).toBe(working)
+    const ended = step(at({ toolRunning: true, reasoningChars: 40 }), at({ reasoningChars: 40 }))
+    const afterTool = replay([...data(toolEnd('c1')), ...ended], working)
+    expect(afterTool.mascot).toBe('idle')
+    expect(replay(step(at({ reasoningChars: 40 }), at({ reasoningChars: 55 })), afterTool).mascot).toBe('thinking')
+  })
+
+  it("the same reply's reasoning growing is one reasoning event; reasoning that stays put, starts on another reply or comes outside streaming is none", () => {
+    expect(kinds(step(at({ reasoningChars: 40 }), at({ reasoningChars: 55 })))).toEqual(['reasoning'])
+    expect(step(at({ reasoningChars: 40 }), at({ reasoningChars: 40 }))).toEqual([])
+    expect(step({ ...at({ reasoningChars: 10 }), id: 'r1' }, at({ reasoningChars: 40 }))).toEqual([])
+    expect(step(NO_REPLY, at({ reasoningChars: 40 }))).toEqual([])
+    expect(step(at(), at({ reasoningChars: 40 }), 'idle')).toEqual([])
+  })
+
+  it('a cap: one limit_reached on its transition whatever the status, nothing on a repeat, one again for a new reply', () => {
+    for (const status of ['streaming', 'idle', 'error'] as const) {
+      expect({ status, events: kinds(step(at(), at({ limitReached: true }), status)) })
+        .toEqual({ status, events: ['limit_reached'] })
+    }
+    expect(kinds(step(at({ toolRunning: true }), at({ toolRunning: true, limitReached: true })))).toEqual(['limit_reached'])
+    expect(step(at({ limitReached: true }), at({ limitReached: true }))).toEqual([])
+    expect(step(at({ limitReached: true }), at({ limitReached: true, reasoningChars: 5 }), 'idle')).toEqual([])
+    expect(step(at({ limitReached: true }), NO_REPLY)).toEqual([])
+    expect(kinds(step(at({ limitReached: true }), { ...at({ limitReached: true }), id: 'r3' }))).toEqual(['limit_reached'])
+  })
+
+  it('a turn that hits a cap ends on oops, also when the cap lands with the end of the stream', () => {
+    const working = [...STARTED, ...data(toolStart('c1', 'query_database')), ...step(at(), at({ toolRunning: true }))]
+    const capped = [...working, ...step(at({ toolRunning: true }), at({ toolRunning: true, limitReached: true })), ...FINISHED]
+    expect(sequence(capped)).toEqual(['thinking', 'working', 'oops'])
+    expect(replay(capped)).toMatchObject({ mascot: 'oops', turnActive: false })
+    // One render: useAutoMascot dispatches the status's finish before the reply's cap.
+    const together = [...working, ...FINISHED, ...step(at({ toolRunning: true }), at({ limitReached: true }), 'idle')]
+    expect(replay(together)).toMatchObject({ mascot: 'oops', turnActive: false })
   })
 })

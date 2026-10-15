@@ -12,8 +12,9 @@ import type { JsonObject, MascotEvent } from './types'
  * status is 'idle' | 'streaming' | 'error' (an awaited detached reply reads as
  * 'streaming'), and its errorCode names a blocked turn ('trial_exhausted').
  * These parts come off the wire, so every field is checked here: a part that
- * isn't what it says maps to nothing. The words themselves never reach onData:
- * the start of the answer is read from the newest reply (mascotEventsFromReply).
+ * isn't what it says maps to nothing. The words, the model's reasoning and a cap
+ * that ended the turn never reach onData: useChat writes them onto the newest
+ * reply, so they are read from it (mascotEventsFromReply).
  */
 
 export type ChatStatus = 'idle' | 'streaming' | 'error'
@@ -135,30 +136,60 @@ export function mascotEventsFromStatus(previous: ChatStatus, next: ChatStatus, e
 
 /**
  * The newest reply, as far as Auto cares: which one it is, whether its words
- * have started, and whether one of its tool calls is still running. useChat
- * writes the words into the reply instead of handing text parts to onData, so
- * the start of the answer is read from the reply itself.
+ * have started, whether one of its tool calls is still running, how much the
+ * model has reasoned on it, and whether a cap ended its turn. useChat writes the
+ * words, the reasoning and the cap onto the reply (lib/chat/hooks.ts) instead of
+ * handing them to onData, so they are read from the reply itself.
  */
 export type ReplyProgress = {
   readonly id: string | null
   readonly hasText: boolean
   readonly toolRunning: boolean
+  /** The length of the reply's reasoning: its growth is the model thinking. */
+  readonly reasoningChars: number
+  /** A cap (limit_reached) ended the reply's turn. */
+  readonly limitReached: boolean
 }
 
-export const NO_REPLY: ReplyProgress = { id: null, hasText: false, toolRunning: false }
+export const NO_REPLY: ReplyProgress = { id: null, hasText: false, toolRunning: false, reasoningChars: 0, limitReached: false }
 
 /** The reducer only reads that a text event came: its words are on the reply. */
 const ANSWER_STARTED: MascotEvent = { type: 'text', text: '' }
+/** The reducer only reads that the model reasons: its reasoning is on the reply. */
+const MODEL_REASONING: MascotEvent = { type: 'reasoning', delta: '' }
+/** The reducer only reads that a cap ended the turn: the reply shows its message. */
+const CAP_REACHED: MascotEvent = { type: 'limit_reached', limit: '', value: 0, message: '' }
+
+const sameReply = (previous: ReplyProgress, next: ReplyProgress): boolean => previous.id === next.id
+
+/** The same reply's reasoning growing (between tool rounds too) is the model thinking. */
+function reasoningEvents(previous: ReplyProgress, next: ReplyProgress): MascotEvent[] {
+  return sameReply(previous, next) && next.reasoningChars > previous.reasoningChars ? [MODEL_REASONING] : []
+}
+
+/** The reply's words starting (the narration frame clears them each tool round, so each round's start counts). */
+function answerEvents(previous: ReplyProgress, next: ReplyProgress): MascotEvent[] {
+  if (!next.hasText) return []
+  return sameReply(previous, next) && previous.hasText ? [] : [ANSWER_STARTED]
+}
+
+/** A cap ending the reply's turn, told once per reply whatever the status (the frame and the stream's end can land in one render). */
+function capEvents(previous: ReplyProgress, next: ReplyProgress): MascotEvent[] {
+  const alreadyTold = sameReply(previous, next) && previous.limitReached
+  return next.limitReached && !alreadyTold ? [CAP_REACHED] : []
+}
 
 /**
- * What a change of the newest reply means for Auto (Play's spec: thinking when
- * the first words arrive → idle). While the chat streams, the reply's words
- * starting with no tool running on it is one text event. Its later words, words
- * that start while a tool runs (the tool's state wins, and its end settles
- * Auto), and any status other than streaming map to nothing.
+ * What a change of the newest reply means for Auto (Play's spec: thinking while
+ * the model reasons, the first words → idle, a cap → oops). While the chat
+ * streams and no tool runs on the reply, its reasoning growing is one reasoning
+ * event and its words starting one text event (both, in that order, when they
+ * land in one render). Later words, words or reasoning while a tool runs (the
+ * tool's state wins, and its end settles Auto) and any status other than
+ * streaming map to nothing, except the cap: its transition is one limit_reached.
  */
 export function mascotEventsFromReply(previous: ReplyProgress, next: ReplyProgress, status: ChatStatus): MascotEvent[] {
-  if (status !== 'streaming' || !next.hasText || next.toolRunning) return []
-  const alreadyStarted = previous.id === next.id && previous.hasText
-  return alreadyStarted ? [] : [ANSWER_STARTED]
+  const cap = capEvents(previous, next)
+  if (status !== 'streaming' || next.toolRunning) return cap
+  return [...reasoningEvents(previous, next), ...answerEvents(previous, next), ...cap]
 }
