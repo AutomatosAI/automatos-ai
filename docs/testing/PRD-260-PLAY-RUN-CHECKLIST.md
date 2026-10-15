@@ -27,7 +27,7 @@ How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`
 
 4. [ ] **Test data and a clean slate.** Use a workspace holding test data only (c1 on the local stack): the steps send messages, make Deliverables and may start a Mission (real tokens). Make the browser window at least 1024 px wide (1440 is good). In the DevTools console on localhost:3000:
    ```js
-   ['automatos-play.look', 'automatos-play.looks', 'automatos-play:seen-deliverables'].forEach((k) => localStorage.removeItem(k)); sessionStorage.removeItem('automatos-play.hello-played')
+   Object.keys(localStorage).filter((k) => k.startsWith('automatos-play')).forEach((k) => localStorage.removeItem(k)); sessionStorage.removeItem('automatos-play.hello-played')
    ```
    - *Expected:* no error. Play will open in Ember and Auto will say hello.
 
@@ -131,16 +131,17 @@ How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`
     - *Expected:* Save as adds "My look 1" to the row and picks it; Rename and Save change it; Delete removes it, and deleting the active look returns the app to Ember. A preset can't be renamed, deleted or saved over.
 
 34. [ ] **Export.** Save a look again and Export it.
-    - *Expected:* the browser downloads `<name>.look.json`. Opened, it holds exactly eleven fields (`schema`, `id`, `name`, `sub`, `interface`, `ground`, `accent`, `font`, `shell`, `light`, `glow`): catalogue keys and a number, no colours.
+    - *Expected:* the notice says "Your browser is saving `<name>.look.json`. If it didn't appear, use Copy JSON." and the browser downloads `<name>.look.json`. Opened, it holds exactly eleven fields (`schema`, `id`, `name`, `sub`, `interface`, `ground`, `accent`, `font`, `shell`, `light`, `glow`): catalogue keys and a number, no colours.
 
 35. [ ] **Import.** Delete that saved look, then import the file; then paste the same JSON and import it; then paste it with `"accent": "#ff0000"`; then with `"name": "<b>hi</b>"`.
     - *Expected:* the file comes back as a saved look under a new id (`look-N`); the paste adds a second copy; the bad accent shows `"accent" must be one of the catalogue's accents: molten, cream, mint, gold, periwinkle, rose.` and adds nothing; the `<b>` name shows as plain text, never bold. A file of 1 MB or more is refused with "That's 1 MB or more. A Look file is well under 1 KB: check it's a .look.json file."
 
 36. [ ] **Reload keeps the active look.** With a saved Daylight-based look active, reload with the cache off and Slow 4G; then make an unsaved edit and reload again.
-    - *Expected:* the page paints straight in the look, never a frame of Ember's dark ground first; the unsaved edit survives the reload too.
+    - *Expected:* the page paints straight in the look, never a frame of Ember's dark ground first; the unsaved edit survives the reload too. Make it yours shows only its heading until the look is read, never Ember's card pressed first.
+    - *Also (F5, M25):* with Make it yours open in two tabs, pick another look in one: the other follows at once, its tone too, and Save as new look in either keeps both tabs' looks. Signed in as a second account in this browser (SaaS), the Looks row has none of the first account's looks and the page opens in Ember; back on the first account, its looks return.
 
 37. [ ] **No storage (optional).** In a private window with site data blocked, switch to Play.
-    - *Expected:* Play opens in Ember and Make it yours still re-themes the app; nothing is kept after a reload.
+    - *Expected:* Play opens in Ember and Make it yours still re-themes the app; Duplicate, Rename and Import add "This browser isn't keeping looks, so it lasts until you close this tab." to their notice; nothing is kept after a reload.
 
 ## G. The style sheet
 

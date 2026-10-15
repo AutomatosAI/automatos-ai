@@ -9,10 +9,14 @@
  * Studio the page is the same note with Switch to Play (K9); under Play below
  * 1024 px, the same 'wider screen' note and no sheet (D7). MainLayout is a
  * pass-through here that records fullBleed (Play's frame has its own tests).
+ * Until the stored look is read (on the server, and in the first moments in
+ * the browser) the page is only its heading, aria-busy, and the Motion section
+ * never says 'reduced motion' before the browser has answered (M72).
  * Roles, attributes, inline custom properties and text only: CSS modules are
  * proxies.
  */
 import React from 'react'
+import { renderToString } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -39,13 +43,16 @@ vi.mock('@/components/layout/main-layout', () => ({
 import LookStylePage from '@/app/looks/style/page'
 import { LookProvider, useLook } from '@/components/looks/look-provider'
 import { SWITCH_TO_PLAY, WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
-import { COPY_FAILED, STYLE_HEADING, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
+import { REDUCED_MOTION_NOTE, StyleMotion } from '@/components/looks/style/style-motion'
+import { COPY_FAILED, COPY_TOKENS, STYLE_HEADING, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS } from '@/lib/looks/catalogue'
 import { lookToCssVars } from '@/lib/looks/css'
 import { lookDocumentVars } from '@/lib/looks/document'
 import { AURORA, DAYLIGHT, EMBER } from '@/lib/looks/presets'
+import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
+import { lookKeys } from '@/lib/looks/storage'
 import { RADII, SPACING_STEPS, radiusToken, rootBlock } from '@/lib/looks/style'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
@@ -398,5 +405,37 @@ describe('/looks/style under Play below 1024 px (D7), as /looks', () => {
     expect(screen.queryByText(WIDER_SCREEN_NOTE)).toBeNull()
     expect(layout()).toHaveAttribute('data-full-bleed', 'true')
     await ready()
+  })
+})
+
+describe('/looks/style before the stored look is read (M72)', () => {
+  it('renders on the server as a busy frame with the heading: no sheet, no look named, no reduced-motion note', () => {
+    window.localStorage.setItem(lookKeys(DEFAULT_LOOK_SCOPE).active, JSON.stringify(DAYLIGHT))
+    const html = renderToString(pageTree('play'))
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain(STYLE_HEADING)
+    expect(html).not.toContain(COPY_TOKENS)
+    expect(html).not.toContain('Every value here comes from')
+    expect(html).not.toContain(REDUCED_MOTION_NOTE)
+  })
+
+  it("the Motion section waits for the browser's own answer before it says reduced motion", () => {
+    // The server reads every browser as asking for reduced motion (hooks/use-media-preferences.ts).
+    const html = renderToString(
+      <LookProvider>
+        <StyleMotion />
+      </LookProvider>,
+    )
+    expect(html).toContain('Play the motion')
+    expect(html).not.toContain(REDUCED_MOTION_NOTE)
+  })
+
+  it('in the browser, drops aria-busy once the stored look is read', async () => {
+    window.localStorage.setItem(lookKeys(DEFAULT_LOOK_SCOPE).active, JSON.stringify(DAYLIGHT))
+    renderPage()
+    await ready(DAYLIGHT)
+    const heading = screen.getByRole('heading', { level: 1, name: STYLE_HEADING })
+    expect(heading.closest('[aria-busy]')).toBeNull()
+    expect(screen.getByText(/Every value here comes from Daylight/)).toBeInTheDocument()
   })
 })

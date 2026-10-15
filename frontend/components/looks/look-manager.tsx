@@ -10,7 +10,7 @@ import { copyToClipboard } from '@/lib/utils'
 
 import { downloadText } from './download'
 import { DeleteConfirm, RenameForm } from './look-manage-forms'
-import { LookNotice, type Notice, failed } from './look-notice'
+import { LookNotice, type Notice, failed, storedNotice } from './look-notice'
 import { useLook } from './look-provider'
 import styles from './manage.module.css'
 
@@ -22,7 +22,10 @@ import styles from './manage.module.css'
  * Duplicate, Export and Copy JSON take the active look as it is now, edits
  * included; Save writes those edits over the saved look it was picked from;
  * Rename and Delete act on that saved look. Everything goes through useLook(),
- * so every page follows at once.
+ * so every page follows at once. Save, Duplicate and Rename say when this
+ * browser isn't keeping looks (LookNotice, M98); Export can't see whether the
+ * browser saved the file, so it says the download started and offers Copy
+ * JSON (M71).
  */
 
 export const MANAGE_LABEL = 'This look'
@@ -32,6 +35,12 @@ export const DUPLICATE_LABEL = 'Duplicate'
 export const DELETE_LABEL = 'Delete'
 export const EXPORT_LABEL = 'Export'
 export const COPY_JSON_LABEL = 'Copy JSON'
+/** After Export: a blocked or cancelled download can't be seen from the page, so it never claims the file arrived. */
+export const EXPORT_FALLBACK = `If it didn't appear, use ${COPY_JSON_LABEL}.`
+
+export function exportStarted(fileName: string): string {
+  return `Your browser is saving ${fileName}. ${EXPORT_FALLBACK}`
+}
 
 type Mode = 'rename' | 'delete'
 
@@ -49,7 +58,7 @@ function useTransfer(look: Look, tell: Tell) {
     const fileName = lookFileName(look)
     try {
       downloadText(fileName, lookJson(look), LOOK_FILE_TYPE)
-      tell(look.id, { kind: 'done', text: `Downloaded ${fileName}.` })
+      tell(look.id, { kind: 'done', text: exportStarted(fileName) })
     } catch (error) {
       console.error('[looks] export failed', error)
       tell(look.id, failed("That look wasn't exported.", ["The download didn't start. Use Copy JSON instead."]))
@@ -76,21 +85,21 @@ function useManage(tell: Tell, closeForm: () => void) {
     const result = saveLook(edited)
     if (!result.ok) return tell(edited.id, failed("That look wasn't saved.", result.errors))
     setLook(result.look)
-    tell(result.look.id, { kind: 'done', text: `Saved ${result.look.name}.` })
+    tell(result.look.id, storedNotice(`Saved ${result.look.name}.`))
   }
 
   const duplicate = (from: Look) => {
     const result = saveLook(asDuplicate(from, saved))
     if (!result.ok) return tell(look.id, failed("That look wasn't duplicated.", result.errors))
     setLook(result.look)
-    tell(result.look.id, { kind: 'done', text: `Duplicated as ${result.look.name}.` })
+    tell(result.look.id, storedNotice(`Duplicated as ${result.look.name}.`))
   }
 
   const rename = (from: Look, name: string) => {
     const result = renameLook(from.id, name)
     if (!result.ok) return tell(from.id, failed("That name wasn't saved.", result.errors))
     closeForm()
-    tell(from.id, { kind: 'done', text: `Renamed to ${result.look.name}.` })
+    tell(from.id, storedNotice(`Renamed to ${result.look.name}.`))
   }
 
   // Deleting the active look takes Play back to the default (lib/looks/store.ts).

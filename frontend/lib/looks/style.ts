@@ -116,9 +116,23 @@ export function formatRatio(ratio: number): string {
   return `${ratio.toFixed(2)}:1`
 }
 
-/** The active look's variables as a block to paste into a stylesheet ("Copy tokens"). */
+const DISPLAY_FAMILY = '--pl-display-family'
+
+/** The look's display face by name, then its generic family: what a stylesheet outside Automatos can resolve. */
+export function portableFamily(look: Look): string {
+  const { face, generic } = TYPE_STYLES[look.font]
+  return `'${face}',${generic}`
+}
+
+/**
+ * The active look's variables as a block to paste into a stylesheet ("Copy
+ * tokens"). In the app the display family points at next/font's variables,
+ * which exist only inside Automatos; the block names the face instead (M99).
+ * lookToCssVars, what the app paints, is unchanged.
+ */
 export function rootBlock(look: Look): string {
-  const lines = Object.entries(lookToCssVars(look)).map(([name, value]) => `  ${name}: ${value};`)
+  const vars: CssVars = { ...lookToCssVars(look), [DISPLAY_FAMILY]: portableFamily(look) }
+  const lines = Object.entries(vars).map(([name, value]) => `  ${name}: ${value};`)
   return [':root {', ...lines, '}'].join('\n')
 }
 

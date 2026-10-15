@@ -190,8 +190,8 @@ It runs on every look read from storage, every import, and every save or rename.
 
 ### Storage, state and the editor rules
 
-- **Storage** (`frontend/lib/looks/storage.ts`), per browser, in localStorage: `automatos-play.looks` (the saved looks, a JSON array) and `automatos-play.look` (the active look, whole, so an unsaved edit survives a reload). A stored look that fails validation is skipped with a console warning; a saved look whose id is a preset's or a duplicate is skipped. Blocked or full storage means Play runs in Ember and nothing is kept. Nothing about looks is sent to the backend.
-- **State** (`frontend/lib/looks/store.ts`, `components/looks/use-look-store.ts`): a pure reducer (`loaded`, `set`, `save`, `delete`, `rename`). Storage is read after mount and written back only when the user changed that part, so a read never rewrites what is stored. Deleting the active look switches Play back to Ember. `saveLook` refuses a preset id ("A preset can't be changed. Save it as a new look instead.") and validates before saving.
+- **Storage** (`frontend/lib/looks/storage.ts`), in localStorage, per signed-in user and workspace in this browser (F5, Gerard 15 Oct): `automatos-play.looks:<scope>` (the saved looks, a JSON array) and `automatos-play.look:<scope>` (the active look, whole, so an unsaved edit survives a reload), where the scope is `<workspace id>:<user id>` (`frontend/lib/looks/scope.ts`; the local edition has no user id, so its one user is `local`). `components/looks/account-look-scope.tsx` (`AccountLookScope`, inside the `WorkspaceProvider` in `components/providers.tsx`) gives the scope (read through `useLookScope`, `components/looks/look-scope.ts`) once Clerk and the workspace have loaded, and none while signed out or while the workspace hasn't answered: nothing is read or written until then. Looks a browser kept before F5 under the unscoped keys move to the first account that reads them, once (`automatos-play.looks.moved-to` names it), and are never deleted. A stored look that fails validation is skipped with a console warning; a saved look whose id is a preset's or a duplicate is skipped. Blocked or full storage means Play runs in Ember and nothing is kept, and Save, Duplicate, Rename and Import say so ("This browser isn't keeping looks, so it lasts until you close this tab."). Nothing about looks is sent to the backend.
+- **State** (`frontend/lib/looks/store.ts`, `components/looks/use-look-store.ts`): a pure reducer (`loaded`, `synced`, `written`, `set`, `save`, `delete`, `rename`). Storage is read after mount for the account's scope and written back only when the user changed that part, so a read never rewrites what is stored. Another account or workspace (`loaded` for a new scope) and another tab (`synced`, from the window's `storage` event for this scope's keys) replace what the provider holds and mark nothing for writing, so tabs stay in step without writing back and forth, and the tone follows the stored look. `written` records a refused write (`useLook().persisted`). Deleting the active look switches Play back to Ember. `saveLook` refuses a preset id ("A preset can't be changed. Save it as a new look instead.") and validates before saving.
 - **Editor rules** (`frontend/lib/looks/editor.ts`, pure): `EDITABLE_FIELDS` are ground, accent, font, shell, light, glow. `statusLine` reads "Ember" or "Ember · edited". Save as new look makes id `look-N` (the lowest free N), name "My look N", sub "Saved just now". `asDuplicate` names a copy "<name> copy", then "copy 2" and so on. `glowLabel` reads "Off" at 0, else "24%".
 
 ### Export and import
@@ -282,7 +282,7 @@ sequenceDiagram
 
     Server->>Server: read automatos-style and automatos-play-tone cookies
     Server->>Head: html class "studio play"; script rendered only when the style is play
-    Head->>Head: read automatos-play.look from localStorage, check it, else Ember
+    Head->>Head: read automatos-play.look:<scope> (the scope automatos-play.look.current names) from localStorage, check it, else Ember
     Head->>Head: set --pl-* and Studio tokens inline on html
     Server->>NT: forcedTheme = the tone cookie (playToneFor)
     NT->>NT: dark or light class before paint
@@ -387,7 +387,7 @@ The 36 files are committed under `frontend/public/auto/`: each state as `<state>
 ### Where Auto appears
 
 - The chat: Auto's column beside the conversation (`PageColumns`, `MascotColumn` in `components/play/shell/page-columns.tsx`), large on the first open ("Hi, I'm Auto." with three example chips that fill the message box).
-- The shelf's header (`hooks/use-shelf-mascot.ts`): proud of the count while idle, celebrating once for a Deliverable this browser hasn't seen (`lib/play/seen.ts`, localStorage `automatos-play:seen-deliverables`), oops when the shelf fails to load, asleep while `/health` doesn't answer.
+- The shelf's header (`hooks/use-shelf-mascot.ts`): proud of the count while idle, celebrating once for a Deliverable this account hasn't seen in this browser (`lib/play/seen.ts`, localStorage `automatos-play:seen-deliverables:<scope>`, the looks' scope), oops when the shelf fails to load, asleep while `/health` doesn't answer.
 - Conversations: idle in the mascot column.
 - The style sheet, the 404 and the asleep screen (T-008b, T-009, below).
 
@@ -410,8 +410,8 @@ All data comes through the core's existing hooks and `lib/chat/api.ts` (`apiClie
 
 Written from the acceptance criteria of T-008a and T-008b (built on parallel branches); check against the code once merged.
 
-- **`/looks`, Make it yours** (`frontend/app/looks/page.tsx`, `frontend/components/looks/looks-screen.tsx` and its parts, ported from Play's `LooksScreen`, `LooksRow`, `LookPreview`, `LookEditor`, `LookOptions`, `LookManager`, `LookImport`, `LookNotice`): the five presets and the saved looks in a row; a live preview with Auto; the editor over `EDITABLE_FIELDS` (ground, accent, type, shell, light, glow 0 to 40); Save, Save as, Rename and Delete for saved looks; Export as a `.look.json` download; Import from a file or pasted text through `lib/looks/transfer.ts`, its messages shown. Everything goes through `useLook()`, so every page follows a change at once.
-- **`/looks/style`, the style sheet** (`frontend/app/looks/style/page.tsx`, `frontend/components/looks/style/style-screen.tsx` with its colour, type, scale, motion, components and mascots sections; the data in `frontend/lib/looks/style.ts`, pure): the active look's colour, type, scale, motion, components and Auto's states. Auto's states use `AutoMascot`, every state's PNG under reduced motion.
+- **`/looks`, Make it yours** (`frontend/app/looks/page.tsx`, `frontend/components/looks/looks-screen.tsx` and its parts, ported from Play's `LooksScreen`, `LooksRow`, `LookPreview`, `LookEditor`, `LookOptions`, `LookManager`, `LookImport`, `LookNotice`): the five presets and the saved looks in a row; a live preview with Auto; the editor over `EDITABLE_FIELDS` (ground, accent, type, shell, light, glow 0 to 40); Save, Save as, Rename and Delete for saved looks; Export as a `.look.json` download (its notice says the browser is saving the file and offers Copy JSON: a blocked or cancelled download can't be seen from the page); Import from a file or pasted text through `lib/looks/transfer.ts`, its messages shown. Everything goes through `useLook()`, so every page follows a change at once. Until the stored look is read the page shows only its heading, `aria-busy`, never Ember's choices in place of the user's look.
+- **`/looks/style`, the style sheet** (`frontend/app/looks/style/page.tsx`, `frontend/components/looks/style/style-screen.tsx` with its colour, type, scale, motion, components and mascots sections; the data in `frontend/lib/looks/style.ts`, pure): the active look's colour, type, scale, motion, components and Auto's states. Auto's states use `AutoMascot`, every state's PNG under reduced motion. Like `/looks`, it is only its heading, `aria-busy`, until the stored look is read; the reduced-motion note waits for the browser's answer. Copy tokens' `:root` block names the display face itself (`--pl-display-family: 'Instrument Serif',serif`), since the next/font variables the app uses exist only inside Automatos.
 - **Under Classic or Studio** both routes render a short note ("Make it yours is part of the Play theme.") with a **Switch to Play** button that calls `setStyle('play')` (K9): no redirect, no loop.
 
 ## The 404 and "Automatos is asleep" (T-009)
@@ -461,7 +461,7 @@ frontend/
 └── public/auto/                   # Auto's 36 clips and stills
 ```
 
-Storage and cookies Play uses: the cookies `automatos-style` and `automatos-play-tone`; localStorage `automatos-play.look`, `automatos-play.looks` and `automatos-play:seen-deliverables`; sessionStorage `automatos-play.hello-played`.
+Storage and cookies Play uses: the cookies `automatos-style` and `automatos-play-tone`; localStorage `automatos-play.look:<scope>`, `automatos-play.looks:<scope>` and `automatos-play:seen-deliverables:<scope>` (the scope is `<workspace id>:<user id>`), `automatos-play.look.current` (the scope the pre-paint script reads) and the two `…moved-to` markers (the scope the unscoped keys moved to, once); sessionStorage `automatos-play.hello-played`.
 
 ## Guards and tests
 
@@ -477,7 +477,7 @@ Not built in PRD-260 (§6, D10; Gerard's to revisit, not deferred decisions):
 - Play designs for Missions, Agents and Knowledge: under Play they render Studio's version in Play's frame.
 - Phones: below 1024 px Play uses the fallback chrome, as Studio does.
 - The Design Kit and the theme Marketplace (steps 2 and 3 of the plan).
-- Saving looks per user on the server: looks live in the browser only.
+- Saving looks per user on the server: looks live in the browser only (per user and workspace there, F5).
 
 Open (§7): whether Play becomes the default for new users (§7.1; nothing changed here). "Customise look…" in the theme menu (§7.2) is added.
 

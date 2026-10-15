@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 
 import { useLook } from '@/components/looks/look-provider'
 import { MOTION_NOTES } from '@/lib/looks/style'
@@ -13,12 +13,23 @@ import styles from './style.module.css'
  * components/looks/style/StyleMotion.tsx: the Ember motion notes, and a toggle
  * that plays them as small loops (a message rising, the ring pulsing, a
  * Deliverable landing, the glow fading). Under reduced motion the toggle is
- * off and says why; app/play-theme.css also stops every loop.
+ * off and says why; app/play-theme.css also stops every loop. The server
+ * reads every browser as asking for reduced motion (use-media-preferences.ts),
+ * so the note waits for the browser's own answer, once mounted (M72).
  */
 
 export const MOTION_LABEL = 'Motion'
 export const PLAY_MOTION = 'Play the motion'
 export const REDUCED_MOTION_NOTE = 'Your system asks for reduced motion, so nothing plays here.'
+
+const noSubscription = (): (() => void) => () => undefined
+const mountedInBrowser = (): boolean => true
+const notMountedOnServer = (): boolean => false
+
+/** False on the server and while hydrating, true once mounted in the browser. */
+function useMounted(): boolean {
+  return useSyncExternalStore(noSubscription, mountedInBrowser, notMountedOnServer)
+}
 
 function MotionDemos({ playing }: { readonly playing: boolean }) {
   return (
@@ -44,7 +55,8 @@ function MotionDemos({ playing }: { readonly playing: boolean }) {
 }
 
 export function StyleMotion() {
-  const { reducedMotion } = useLook()
+  const mounted = useMounted()
+  const reducedMotion = useLook().reducedMotion && mounted
   const [wantsPlay, setWantsPlay] = useState(false)
   const playing = wantsPlay && !reducedMotion
 

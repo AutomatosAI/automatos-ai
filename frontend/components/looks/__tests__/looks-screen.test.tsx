@@ -8,9 +8,13 @@
  * rest of 'This look' and 'Import a look').
  * Under Classic or Studio the page is a short note with 'Switch to Play' (K9);
  * under Play below 1024 px, a note that it opens on a wider screen (D7).
+ * Until the stored look is read (on the server, and in the first moments in
+ * the browser) the page is only its heading, aria-busy, never Ember standing
+ * in for the user's look (M72).
  * Roles, attributes and text only (CSS modules are proxies under css: false).
  */
 import React from 'react'
+import { renderToString } from 'react-dom/server'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -28,19 +32,21 @@ vi.mock('@/components/layout/main-layout', () => ({
   ),
 }))
 
+import { exportStarted } from '@/components/looks/look-manager'
 import { LooksScreen } from '@/components/looks/looks-screen'
 import { clearRoot, lookNamesLeft, myLook } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS, SHELLS, TYPE_STYLES } from '@/lib/looks/catalogue'
 import { GLOW_SCALE, rgba, safeGlow } from '@/lib/looks/css'
 import { SAVED_SUB } from '@/lib/looks/editor'
-import { AURORA, EMBER, OBSIDIAN, PRESETS, WORKSHOP } from '@/lib/looks/presets'
-import { ACTIVE_LOOK_KEY, SAVED_LOOKS_KEY } from '@/lib/looks/storage'
+import { AURORA, DAYLIGHT, EMBER, OBSIDIAN, PRESETS, WORKSHOP } from '@/lib/looks/presets'
+import { LOOK_SCOPE_KEY } from '@/lib/looks/storage'
 import { LOOK_FILE_MAX_BYTES, LOOK_FILE_TYPE, TOO_BIG, lookJson } from '@/lib/looks/transfer'
 import { PLAY_HTML_CLASS, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
 
 import {
   BLOB_URL,
   type DownloadStub,
+  KEYS,
   blobText,
   card,
   freshBrowser,
@@ -48,6 +54,7 @@ import {
   importer,
   lookOnPage,
   looksRow,
+  looksTree,
   manage,
   renderLooks,
   rootVar,
@@ -119,7 +126,7 @@ describe('Make it yours under Play', () => {
     expect(card('Aurora')).toHaveAttribute('aria-pressed', 'true')
     expect(card('Ember')).toHaveAttribute('aria-pressed', 'false')
     expect(status()).toHaveTextContent(/^Aurora$/)
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(AURORA)
+    expect(stored(KEYS.active)).toEqual(AURORA)
   })
 
   it("changing the accent updates the preview: the accent it draws with, its label, and '· edited'", async () => {
@@ -134,7 +141,7 @@ describe('Make it yours under Play', () => {
     // The preview (and every page) reads the look's variables on <html>: Play's and Studio's.
     await lookOnPage({ ...EMBER, accent: 'rose' })
     expect(rootVar('--pl-accent')).toBe(ACCENTS.rose.hex)
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual({ ...EMBER, accent: 'rose' })
+    expect(stored(KEYS.active)).toEqual({ ...EMBER, accent: 'rose' })
   })
 
   it('re-themes the whole app from every control at once', async () => {
@@ -172,7 +179,7 @@ describe('Make it yours under Play', () => {
     expect(slider).toHaveAttribute('aria-valuetext', `${safe - 2}%`)
 
     const edited = { ...EMBER, ground: 'paper', font: 'round', shell: 'cobalt', light: 'ice', glow: safe - 2 } as const
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(edited)
+    expect(stored(KEYS.active)).toEqual(edited)
     await lookOnPage(edited)
   })
 
@@ -204,8 +211,8 @@ describe('Make it yours under Play', () => {
     expect(status()).toHaveTextContent(/^My look 1$/)
 
     const mine = { ...EMBER, id: 'look-1', name: 'My look 1', sub: SAVED_SUB, accent: 'gold' }
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([mine])
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(mine)
+    expect(stored(KEYS.saved)).toEqual([mine])
+    expect(stored(KEYS.active)).toEqual(mine)
     await waitFor(() => expect(rootVar('--pl-accent')).toBe(ACCENTS.gold.hex))
 
     await user.click(screen.getByRole('button', { name: 'Save as new look' }))
@@ -227,13 +234,13 @@ describe('Make it yours under Play', () => {
     expect(status()).toHaveTextContent(/^Workshop$/)
     await lookOnPage(WORKSHOP)
     expect(screen.getByRole('slider', { name: 'Glow' })).toHaveValue(String(WORKSHOP.glow))
-    expect(stored(ACTIVE_LOOK_KEY)).toEqual(WORKSHOP)
+    expect(stored(KEYS.active)).toEqual(WORKSHOP)
   })
 
   it('Reset on a saved look goes back to what was saved, not to a preset', async () => {
     const user = userEvent.setup()
-    window.localStorage.setItem(SAVED_LOOKS_KEY, JSON.stringify([myLook()]))
-    window.localStorage.setItem(ACTIVE_LOOK_KEY, JSON.stringify(myLook({ accent: 'cream' })))
+    window.localStorage.setItem(KEYS.saved, JSON.stringify([myLook()]))
+    window.localStorage.setItem(KEYS.active, JSON.stringify(myLook({ accent: 'cream' })))
     renderLooks()
     await waitFor(() => expect(status()).toHaveTextContent(/^My look 1 · edited$/))
     await user.click(screen.getByRole('button', { name: 'Reset' }))
@@ -242,11 +249,32 @@ describe('Make it yours under Play', () => {
   })
 
   it("can't Reset a look that has nothing to go back to", async () => {
-    window.localStorage.setItem(ACTIVE_LOOK_KEY, JSON.stringify(myLook({ id: 'gone' })))
+    window.localStorage.setItem(KEYS.active, JSON.stringify(myLook({ id: 'gone' })))
     renderLooks()
     await lookOnPage(myLook({ id: 'gone' }))
     expect(status()).toHaveTextContent(/^My look 1$/)
     expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled()
+  })
+})
+
+describe('Make it yours before the stored look is read (M72)', () => {
+  it('renders on the server as a busy frame with the heading, and no Ember card or option pressed', () => {
+    window.localStorage.setItem(KEYS.active, JSON.stringify(DAYLIGHT))
+    const html = renderToString(looksTree('play'))
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain('Make it yours.')
+    expect(html).not.toContain('aria-pressed="true"')
+    expect(html).not.toContain(EMBER.sub)
+    expect(html).not.toContain('Edit the look')
+  })
+
+  it('in the browser, shows the stored look once it is read, and is no longer busy', async () => {
+    window.localStorage.setItem(KEYS.active, JSON.stringify(DAYLIGHT))
+    renderLooks()
+    await lookOnPage(DAYLIGHT)
+    expect(card('Daylight')).toHaveAttribute('aria-pressed', 'true')
+    expect(card('Ember')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('heading', { level: 1, name: 'Make it yours.' }).closest('[aria-busy]')).toBeNull()
   })
 })
 
@@ -271,7 +299,7 @@ describe('Export and Import through lib/looks/transfer.ts', () => {
     const text = await blobText(stub.blobs[0] as Blob)
     expect(text).toBe(lookJson({ ...EMBER, ground: 'paper' }))
     expect(JSON.parse(text)).toEqual({ ...EMBER, ground: 'paper' })
-    expect(manage().getByText('Downloaded Ember.look.json.')).toBeInTheDocument()
+    expect(manage().getByText(exportStarted('Ember.look.json'))).toBeInTheDocument()
   })
 
   it("importing a bad file shows transfer's messages and adds nothing", async () => {
@@ -288,7 +316,7 @@ describe('Export and Import through lib/looks/transfer.ts', () => {
     expect(alert).toHaveTextContent(`"accent" must be one of the catalogue's accents`)
     expect(looksRow().getAllByRole('button')).toHaveLength(PRESETS.length)
     expect(status()).toHaveTextContent(/^Ember$/)
-    expect(stored(SAVED_LOOKS_KEY)).toBeNull()
+    expect(stored(KEYS.saved)).toBeNull()
     await lookOnPage(EMBER)
   })
 
@@ -302,7 +330,7 @@ describe('Export and Import through lib/looks/transfer.ts', () => {
 
     expect(await importer().findByRole('alert')).toHaveTextContent(TOO_BIG)
     expect(read).not.toHaveBeenCalled()
-    expect(stored(SAVED_LOOKS_KEY)).toBeNull()
+    expect(stored(KEYS.saved)).toBeNull()
   })
 })
 
@@ -337,9 +365,10 @@ describe('/looks outside Play (K9) and on a narrow screen (D7)', () => {
     expect(layout()).toHaveAttribute('data-full-bleed', 'false')
     expect(screen.queryByRole('complementary', { name: 'Edit the look' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Make it yours.' })).not.toBeInTheDocument()
-    // Nothing of the look reaches <html> outside Play, and nothing is written.
+    // Nothing of the look reaches <html> outside Play, and nothing is written, not even the pre-paint pointer.
     expect(lookNamesLeft()).toEqual([])
-    expect(window.localStorage.getItem(ACTIVE_LOOK_KEY)).toBeNull()
+    expect(window.localStorage.getItem(KEYS.active)).toBeNull()
+    expect(window.localStorage.getItem(LOOK_SCOPE_KEY)).toBeNull()
   })
 
   it("'Switch to Play' is the menu's Play choice: the editor appears at once, on the default look", async () => {

@@ -23,6 +23,10 @@ import styles from './style.module.css'
  * as soon as the look changes anywhere in the app. Copy tokens puts the look's
  * variables on the clipboard as a :root block. app/looks/style/page.tsx shows
  * it through PlayOnlyRoute: under Play at >= 1024 px only, full bleed.
+ * Until the stored look is read the frame shows only the heading and is
+ * aria-busy, so the sheet never describes Ember in place of the user's look
+ * (M72). Copy tokens' block names each face itself (lib/looks/style.ts
+ * rootBlock), so it works outside Automatos.
  */
 
 /** The sheet's heading, and the title of the note /looks/style shows outside Play (PlayOnlyRoute). */
@@ -74,40 +78,46 @@ function CopyResult({ notice }: { readonly notice: CopyNotice | null }) {
 }
 
 export function StyleScreen() {
-  const { look } = useLook()
+  const { look, loaded } = useLook()
   const { notice, copy } = useCopyTokens()
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} aria-busy={loaded ? undefined : true}>
       <header className={styles.header}>
         <div className={styles.headingText}>
           <h1 className={styles.heading}>{STYLE_HEADING}</h1>
-          <p className={styles.lead}>
-            Every value here comes from {look.name}, the active look. Change the look and this page redraws.
-          </p>
+          {loaded && (
+            <p className={styles.lead}>
+              Every value here comes from {look.name}, the active look. Change the look and this page redraws.
+            </p>
+          )}
         </div>
-        <div className={styles.actions}>
-          <Link href={LOOKS_HREF} className={styles.linkButton}>
-            {BACK_TO_LOOKS}
-          </Link>
-          <button type="button" className={styles.copyButton} onClick={() => void copy()}>
-            {COPY_TOKENS}
-          </button>
-        </div>
+        {loaded && (
+          <div className={styles.actions}>
+            <Link href={LOOKS_HREF} className={styles.linkButton}>
+              {BACK_TO_LOOKS}
+            </Link>
+            <button type="button" className={styles.copyButton} onClick={() => void copy()}>
+              {COPY_TOKENS}
+            </button>
+          </div>
+        )}
       </header>
       <CopyResult notice={notice} />
-      <div className={styles.sheet}>
-        <StyleColour look={look} />
-        <div className={styles.columns}>
-          <StyleType look={look} />
-          <div className={styles.stack}>
-            <StyleScale />
-            <StyleMotion />
+      {loaded && (
+        <div className={styles.sheet}>
+          <StyleColour look={look} />
+          <div className={styles.columns}>
+            <StyleType look={look} />
+            <div className={styles.stack}>
+              <StyleScale />
+              <StyleMotion />
+            </div>
           </div>
+          <StyleComponents />
+          <StyleMascots look={look} />
         </div>
-        <StyleComponents />
-        <StyleMascots look={look} />
-      </div>
+      )}
     </div>
   )
 }

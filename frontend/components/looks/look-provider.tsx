@@ -6,10 +6,11 @@ import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { applyLook, applyMotion, clearLook } from '@/lib/looks/document'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
-import { browserStorage, type StorageSource } from '@/lib/looks/storage'
+import { browserStorage, rememberLookScope, type StorageSource } from '@/lib/looks/storage'
 import { clearPlayToneCookie, toneOfGround, writePlayToneCookie, type PlayTone } from '@/lib/looks/tone'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 
+import { useLookScope } from './look-scope'
 import { useLookStore, type LookStore } from './use-look-store'
 
 /**
@@ -21,9 +22,15 @@ import { useLookStore, type LookStore } from './use-look-store'
  * handed up to ThemeProvider's forcedTheme); leaving Play takes every
  * property, the motion marks and the tone cookie off again, and drops the
  * forced tone so the user's own returns.
+ *
+ * F5: the looks are the signed-in user's in the active workspace
+ * (useLookScope, from account-look-scope.tsx); another account in this
+ * browser reads its own, and under Play the pre-paint script is pointed at
+ * this account's active look for the next page load. M25: a change made in
+ * another tab arrives here (use-look-store.ts), and the tone follows it.
  */
 
-export interface LookContextValue extends Omit<LookStore, 'loaded'> {
+export interface LookContextValue extends Omit<LookStore, 'scope'> {
   /** The user asks for reduced motion: no loops, no glow crossfade, no rise. */
   readonly reducedMotion: boolean
   /** Under Play, once storage is read: the tone the look's ground sets. Undefined otherwise. */
@@ -36,10 +43,13 @@ function missingProvider(action: string): void {
 
 const NO_PROVIDER: ValidationResult = { ok: false, errors: ["Looks aren't available here."] }
 
-// Outside a provider (a component test of a single screen) everything reads as the default look.
+// Outside a provider (a component test of a single screen) everything reads as the default look,
+// already loaded (nothing to wait for) and not kept (nothing can be).
 const LookContext = createContext<LookContextValue>({
   look: DEFAULT_LOOK,
   saved: [],
+  loaded: true,
+  persisted: false,
   reducedMotion: false,
   tone: undefined,
   setLook: () => missingProvider('setLook'),
@@ -80,6 +90,13 @@ function useLookOnDocument({ active, loaded, look, reducedMotion }: DocumentLook
   useEffect(() => () => clearLook(document.documentElement), [])
 }
 
+/** Under Play, the next page load's pre-paint script paints this account's active look (lib/looks/prepaint.ts). */
+function useLookPointer(storage: StorageSource, active: boolean, scope: string | null): void {
+  useEffect(() => {
+    if (active && scope !== null) rememberLookScope(storage, scope)
+  }, [storage, active, scope])
+}
+
 /** Until storage is read the server's tone (from its cookie) stands, so a reload never flips it. */
 function useLookTone(active: boolean, tone: PlayTone | undefined, onToneChange?: (tone: PlayTone | undefined) => void): void {
   useEffect(() => {
@@ -103,17 +120,19 @@ export interface LookProviderProps {
 }
 
 export function LookProvider({ children, storage = browserStorage, onToneChange }: LookProviderProps) {
-  const { loaded, look, saved, setLook, saveLook, deleteLook, renameLook } = useLookStore(storage)
+  const store = useLookStore(storage, useLookScope())
+  const { scope, loaded, persisted, look, saved, setLook, saveLook, deleteLook, renameLook } = store
   const reducedMotion = usePrefersReducedMotion()
   const active = useUiStyleOptional()?.isPlay ?? false
   const tone = active && loaded ? toneOfGround(look.ground) : undefined
 
   useLookOnDocument({ active, loaded, look, reducedMotion })
   useLookTone(active, tone, onToneChange)
+  useLookPointer(storage, active, scope)
 
   const value = useMemo<LookContextValue>(
-    () => ({ look, saved, reducedMotion, tone, setLook, saveLook, deleteLook, renameLook }),
-    [look, saved, reducedMotion, tone, setLook, saveLook, deleteLook, renameLook],
+    () => ({ look, saved, loaded, persisted, reducedMotion, tone, setLook, saveLook, deleteLook, renameLook }),
+    [look, saved, loaded, persisted, reducedMotion, tone, setLook, saveLook, deleteLook, renameLook],
   )
 
   return <LookContext.Provider value={value}>{children}</LookContext.Provider>

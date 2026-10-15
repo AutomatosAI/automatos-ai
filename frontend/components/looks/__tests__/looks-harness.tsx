@@ -13,18 +13,28 @@ import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
 import { lookDocumentVars } from '@/lib/looks/document'
 import { EMBER } from '@/lib/looks/presets'
+import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
+import { lookKeys, type StorageSource } from '@/lib/looks/storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
 
-export function renderLooks(style: UiStyle = 'play') {
-  return render(
+/** Where the looks are kept here: no AccountLookScope above the provider, so the default scope (F5). */
+export const KEYS = lookKeys(DEFAULT_LOOK_SCOPE)
+
+/** /looks as the app nests it; `storage` stands in for localStorage (blocked, full). */
+export function looksTree(style: UiStyle = 'play', storage?: StorageSource) {
+  return (
     <UiStyleProvider initialStyle={style}>
-      <LookProvider>
+      <LookProvider storage={storage}>
         <LooksPage />
       </LookProvider>
-    </UiStyleProvider>,
+    </UiStyleProvider>
   )
+}
+
+export function renderLooks(style: UiStyle = 'play', storage?: StorageSource) {
+  return render(looksTree(style, storage))
 }
 
 /** A browser already moved to the current appearance defaults, so the provider keeps the given style. */

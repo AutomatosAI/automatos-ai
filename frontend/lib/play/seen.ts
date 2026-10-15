@@ -1,4 +1,5 @@
 import type { Deliverable } from '@/hooks/use-deliverables-api'
+import { moveUnscopedOnce, scopedKey } from '@/lib/looks/scope'
 
 /**
  * PRD-260 §4 — which Deliverables this browser has already shown on Play's
@@ -8,8 +9,11 @@ import type { Deliverable } from '@/hooks/use-deliverables-api'
  * newest one seen: old rows met for the first time (a chip, Load more) don't
  * count. The first visit only remembers, it doesn't celebrate.
  *
- * A per-browser convenience in localStorage, which may be missing or blocked:
- * then the shelf remembers for as long as it is open. Nothing else reads it.
+ * A convenience in localStorage, kept per signed-in user and workspace (F5:
+ * the scope from lib/looks/scope.ts, as looks are), which may be missing or
+ * blocked: then the shelf remembers for as long as it is open. Nothing else
+ * reads it. A record this browser kept before F5 moves to the first scope
+ * that reads one, once, and is never deleted.
  */
 
 export type SeenRecord = {
@@ -20,7 +24,10 @@ export type SeenRecord = {
 
 type Dated = Pick<Deliverable, 'id' | 'created_at'>
 
+/** The record's key: this base plus the scope. Unscoped, the key before F5. */
 export const SEEN_KEY = 'automatos-play:seen-deliverables'
+/** The scope the unscoped record moved to: it moves once, to the first account that reads one. */
+export const UNSCOPED_SEEN_MOVED_KEY = 'automatos-play:seen-deliverables.moved-to'
 /** The most ids kept; the newest ones win. */
 export const SEEN_CAP = 500
 
@@ -48,18 +55,24 @@ export function parseSeen(raw: string | null): SeenRecord | null {
   }
 }
 
-export function readSeen(): SeenRecord | null {
+export function seenKey(scope: string): string {
+  return scopedKey(SEEN_KEY, scope)
+}
+
+export function readSeen(scope: string): SeenRecord | null {
   try {
-    return parseSeen(window.localStorage.getItem(SEEN_KEY))
+    const store = window.localStorage
+    moveUnscopedOnce(store, UNSCOPED_SEEN_MOVED_KEY, scope, [{ from: SEEN_KEY, to: seenKey(scope) }])
+    return parseSeen(store.getItem(seenKey(scope)))
   } catch (error) {
     console.warn("[shelf] can't read localStorage; new Deliverables are remembered only while the shelf is open", error)
     return null
   }
 }
 
-export function writeSeen(record: SeenRecord): void {
+export function writeSeen(scope: string, record: SeenRecord): void {
   try {
-    window.localStorage.setItem(SEEN_KEY, JSON.stringify(record))
+    window.localStorage.setItem(seenKey(scope), JSON.stringify(record))
   } catch (error) {
     console.warn("[shelf] can't save the seen Deliverables to localStorage", error)
   }

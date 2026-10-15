@@ -2,7 +2,9 @@
  * PRD-260 D4, K3 — the pre-paint script: run as the browser runs it, in the
  * page, it puts the stored look's --pl-* variables AND Studio's tokens on
  * <html>, only under the 'play' class, and anything stored that isn't a
- * catalogue look gets the default look.
+ * catalogue look gets the default look. Looks are kept per account (F5): it
+ * paints the active look of the scope the pointer names, or with no pointer
+ * the unscoped key a browser kept before.
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -13,7 +15,8 @@ import { GLOW_SCALE, GLOW_VAR, lookToCssVars, rgba, safeGlow } from '@/lib/looks
 import { lookDocumentVars } from '@/lib/looks/document'
 import { LOOK_PREPAINT_SCRIPT, scriptSafeJson } from '@/lib/looks/prepaint'
 import { DAYLIGHT, DEFAULT_LOOK, EMBER, PRESETS } from '@/lib/looks/presets'
-import { ACTIVE_LOOK_KEY } from '@/lib/looks/storage'
+import { lookScope } from '@/lib/looks/scope'
+import { ACTIVE_LOOK_KEY, LOOK_SCOPE_KEY, lookKeys } from '@/lib/looks/storage'
 import { lookToStudioTokens } from '@/lib/looks/studio-tokens'
 import { GLOW_MAX } from '@/lib/looks/types'
 import { PLAY_HTML_CLASS, STUDIO_HTML_CLASS } from '@/lib/ui-style'
@@ -72,6 +75,23 @@ describe('the pre-paint look script under Play', () => {
       clearRoot()
       underPlay()
     }
+  })
+
+  it("paints the active look of the account the pointer names, not another account's or the unscoped one (F5)", () => {
+    const mine = lookScope('ws-1', 'user_a')
+    window.localStorage.setItem(lookKeys(mine).active, JSON.stringify(DAYLIGHT))
+    window.localStorage.setItem(lookKeys(lookScope('ws-1', 'user_b')).active, JSON.stringify(myLook()))
+    store(EMBER)
+    window.localStorage.setItem(LOOK_SCOPE_KEY, mine)
+    runPrepaint()
+    expect(rootVars()).toEqual(lookDocumentVars(DAYLIGHT))
+  })
+
+  it('applies the default look when the account the pointer names has no active look yet', () => {
+    store(myLook())
+    window.localStorage.setItem(LOOK_SCOPE_KEY, lookScope('ws-1', 'user_new'))
+    runPrepaint()
+    expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK))
   })
 
   it('applies the default look when nothing is stored', () => {

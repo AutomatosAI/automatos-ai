@@ -39,16 +39,23 @@ describe('the Ember catalogue', () => {
       name: 'Editorial',
       face: 'Instrument Serif',
       family: 'var(--pl-font-instrument-serif),serif',
+      generic: 'serif',
       style: 'italic',
       weight: 400,
       letterSpacing: '0',
       sizes: { hero: 72, brand: 28, status: 40, card: 22 },
     })
-    expect(TYPE_STYLES.clean).toMatchObject({ face: 'Geist', family: 'var(--font-geist-sans),sans-serif', letterSpacing: '-.03em' })
+    expect(TYPE_STYLES.clean).toMatchObject({ face: 'Geist', family: 'var(--font-geist-sans),sans-serif', generic: 'sans-serif', letterSpacing: '-.03em' })
     expect(TYPE_STYLES.round.sizes.brand).toBe(20)
     expect(SHELLS.bronze.filter).toBe('none')
     expect(SHELLS.cobalt.filter).toBe('hue-rotate(195deg) saturate(1.1)')
     expect(LIGHTS.ice.hex).toBe('#9FD8FF')
+  })
+
+  it("names each type style's generic family as the one its family falls back to (M99)", () => {
+    for (const style of Object.values(TYPE_STYLES)) {
+      expect({ face: style.face, ends: style.family.endsWith(`,${style.generic}`) }).toEqual({ face: style.face, ends: true })
+    }
   })
 
   it('fixes the error colour', () => {

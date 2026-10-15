@@ -11,6 +11,7 @@ import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
 import { UiStyleProvider } from '../contexts/ui-style-context'
 import { LookProvider } from './looks/look-provider'
+import { AccountLookScope } from './looks/account-look-scope'
 import type { UiStyle } from '@/lib/ui-style'
 import type { PlayTone } from '@/lib/looks/tone'
 import { Toaster } from './ui/sonner'
@@ -110,18 +111,22 @@ export function Providers({ children, initialUiStyle, initialPlayTone }: Provide
           forcedTheme={playTone}
         >
           <UiStyleProvider initialStyle={initialUiStyle}>
-          <LookProvider onToneChange={setPlayTone}>
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
+              {/* PRD-260 F5: looks are the signed-in user's in this workspace,
+                  so the LookProvider sits inside the WorkspaceProvider. */}
+              <AccountLookScope>
+              <LookProvider onToneChange={setPlayTone}>
               {/* PRD-222: a new workspace lands directly in the conversation
                   where Auto opens (OnboardingOpener) — no first-login modal or
                   guided tour (both retired in W2·S5). */}
               {children}
               <GlobalSearch />
               <Toaster position="top-right" richColors closeButton />
+              </LookProvider>
+              </AccountLookScope>
             </WorkspaceProvider>
           </QueryClientProvider>
-          </LookProvider>
           </UiStyleProvider>
         </ThemeProvider>
       </RoleProvider>

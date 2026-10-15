@@ -5,7 +5,7 @@ import { type ChangeEvent, type FormEvent, useEffect, useId, useRef, useState } 
 import { importLook, readLookFile } from '@/lib/looks/transfer'
 import type { ValidationResult } from '@/lib/looks/types'
 
-import { LookNotice, type Notice, failed } from './look-notice'
+import { LookNotice, type Notice, failed, storedNotice } from './look-notice'
 import { useLook } from './look-provider'
 import styles from './manage.module.css'
 
@@ -15,7 +15,8 @@ import styles from './manage.module.css'
  * untrusted: it goes through lib/looks/transfer.ts (the size check before a
  * byte is read, JSON, validateLook, a fresh id). A valid look is added to the
  * saved looks and picked; an invalid one adds nothing and lists transfer's
- * reasons in words.
+ * reasons in words. The success says when this browser isn't keeping looks
+ * (LookNotice, M98).
  */
 
 export const IMPORT_LABEL = 'Import a look'
@@ -45,7 +46,7 @@ function useImport() {
       return false
     }
     setLook(result.look)
-    setNotice({ kind: 'done', text: `Added ${result.look.name} to your Looks.` })
+    setNotice(storedNotice(`Added ${result.look.name} to your Looks.`))
     return true
   }
 

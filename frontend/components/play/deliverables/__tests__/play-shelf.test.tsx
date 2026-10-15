@@ -61,11 +61,14 @@ vi.mock('@/components/mascot/auto-mascot', () => ({
 }))
 
 import { FEED_DEFAULT_FILTERS } from '@/hooks/use-deliverables-api'
-import { SEEN_KEY } from '@/lib/play/seen'
+import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
+import { seenKey } from '@/lib/play/seen'
 import { FILTER_GROUP_LABEL, SECTIONS_LABEL, ShelfScreen } from '../play-shelf'
 import { MORE_FAILED, SHELF_FAILED } from '../shelf-body'
 
 const NOW = new Date(2026, 9, 14, 15, 30) // Wed 14 Oct 2026, 15:30
+/** The shelf's seen record here: no AccountLookScope above it, so the default scope (F5). */
+const SEEN_ON_SHELF = seenKey(DEFAULT_LOOK_SCOPE)
 
 function at(day: number, hour = 9): string {
   return new Date(2026, 9, day, hour).toISOString()
@@ -217,12 +220,12 @@ describe('ShelfScreen — the cards', () => {
   })
 
   it('makes Auto celebrate a Deliverable this browser has not seen, and remembers it', () => {
-    window.localStorage.setItem(SEEN_KEY, JSON.stringify({ ids: ['d-chem'], newest: at(13) }))
+    window.localStorage.setItem(SEEN_ON_SHELF, JSON.stringify({ ids: ['d-chem'], newest: at(13) }))
     answer({ data: { pages: [page(ROWS.slice(0, 2))] } })
     renderShelf()
     expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'celebrate')
     expect(screen.getByTestId('auto')).toHaveTextContent('Your report is ready')
-    expect(JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? '{}').ids).toEqual(['d-chem', 'd-laptop'])
+    expect(JSON.parse(window.localStorage.getItem(SEEN_ON_SHELF) ?? '{}').ids).toEqual(['d-chem', 'd-laptop'])
   })
 })
 
