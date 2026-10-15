@@ -6,8 +6,7 @@ import { MainLayout } from '@/components/layout/main-layout'
 import { PageHeader } from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsPlay } from '@/hooks/use-studio-theme'
+import { useIsPlay, usePlayLayout } from '@/hooks/use-studio-theme'
 import { refocusWhenShown } from '@/lib/play/focus'
 
 /**
@@ -25,6 +24,11 @@ import { refocusWhenShown } from '@/lib/play/focus'
  * Switch to Play replaces the whole frame, the button with it: once Play's
  * screen renders, its h1 (marked PLAY_ONLY_HEADING, tabIndex={-1}) takes the
  * focus that dropped to <body> (P260-FX-22, M21).
+ * The width comes from usePlayLayout, known on a browser mount's first render,
+ * so a phone never mounts the screen for a render (its editor, its 12 mascot
+ * slots: P260-FX-25, M69). While it isn't known (the server, hydration) the
+ * screen goes to MainLayout, which renders nothing until it is; the screen is
+ * only its busy heading then anyway, the stored look not read yet (M72).
  */
 
 export const SWITCH_TO_PLAY = 'Switch to Play'
@@ -62,8 +66,8 @@ function useHeadingFocusAfterSwitch(isPlay: boolean, showsScreen: boolean): void
 
 export function PlayOnlyRoute({ title, note, children }: PlayOnlyRouteProps) {
   const isPlay = useIsPlay()
-  const narrow = useIsTabletOrBelow()
-  useHeadingFocusAfterSwitch(isPlay, isPlay && !narrow)
+  const layout = usePlayLayout()
+  useHeadingFocusAfterSwitch(isPlay, layout === 'play')
   if (!isPlay) {
     return (
       <MainLayout>
@@ -71,7 +75,7 @@ export function PlayOnlyRoute({ title, note, children }: PlayOnlyRouteProps) {
       </MainLayout>
     )
   }
-  if (narrow) {
+  if (layout === 'fallback') {
     return (
       <MainLayout>
         <PlayOnlyNote title={title} note={WIDER_SCREEN_NOTE} offerSwitch={false} />

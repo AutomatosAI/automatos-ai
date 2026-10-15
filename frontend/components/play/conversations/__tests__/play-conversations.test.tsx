@@ -9,6 +9,9 @@
  * "Now" is pinned to a local date, so it passes in any time zone.
  * P260-FX-24 (M22): one status line under the search box, there for the
  * page's life, says the search's result (the count, or that nothing matches).
+ * P260-FX-25 (M69): the width comes from usePlayLayout (stood in for here;
+ * play-layout-phone.test.tsx runs the real one); while it isn't known (the
+ * server, hydration) the page shows nothing, sends nowhere and asks for nothing.
  */
 import React from 'react'
 import { cleanup, render, screen, within } from '@testing-library/react'
@@ -35,9 +38,15 @@ vi.mock('@/hooks/use-chat-session', () => ({
 const chatApi = vi.hoisted(() => ({ getChatHistory: vi.fn() }))
 vi.mock('@/lib/chat/api', () => chatApi)
 
-const style = vi.hoisted(() => ({ isPlay: true, narrow: false }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsPlay: () => style.isPlay, useIsStudio: () => true }))
-vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => style.narrow, useIsMobile: () => style.narrow }))
+const style = vi.hoisted(() => ({ isPlay: true, narrow: false, widthUnknown: false }))
+vi.mock('@/hooks/use-studio-theme', () => ({
+  useIsPlay: () => style.isPlay,
+  useIsStudio: () => true,
+  usePlayLayout: () => {
+    if (!style.isPlay || style.narrow) return 'fallback'
+    return style.widthUnknown ? 'pending' : 'play'
+  },
+}))
 
 vi.mock('@/components/mascot/auto-mascot', () => ({
   AutoMascot: ({ state }: { state: string }) => <div data-testid="auto" data-state={state} />,
@@ -98,6 +107,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   style.isPlay = true
   style.narrow = false
+  style.widthUnknown = false
 })
 
 describe('PlayConversations — the list', () => {
@@ -250,6 +260,14 @@ describe('PlayConversations — only under Play at >= 1024 px', () => {
     renderPage()
     expect(nav.replace).toHaveBeenCalledWith('/chat')
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+  })
+
+  it('while the width is not known, shows nothing, sends nowhere and asks for nothing (M69)', () => {
+    style.widthUnknown = true
+    renderPage()
+    expect(nav.replace).not.toHaveBeenCalled()
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+    expect(chatApi.getChatHistory).not.toHaveBeenCalled()
   })
 
   it('stays put under Play on a desktop', async () => {

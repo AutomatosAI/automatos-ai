@@ -13,19 +13,28 @@
  * another tab, a post or a type drill-down still keeps the core's page.
  * P260-FX-23 (M17): the layout hands the switch Play's shelf through its lazy
  * slot, so the shelf arrives a moment after the first render (findBy*).
+ * P260-FX-25 (M69): the width comes from usePlayLayout (stood in for here);
+ * while it isn't known (the server, hydration) neither the shelf nor the page
+ * and its deep link mount.
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ play: true, narrow: false, pathname: '/deliverables', search: '' }))
+const state = vi.hoisted(() => ({ play: true, narrow: false, widthUnknown: false, pathname: '/deliverables', search: '' }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.search),
 }))
-vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => state.narrow, useIsMobile: () => state.narrow }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => state.play }))
+vi.mock('@/hooks/use-studio-theme', () => ({
+  useIsStudio: () => true,
+  useIsPlay: () => state.play,
+  usePlayLayout: () => {
+    if (!state.play || state.narrow) return 'fallback'
+    return state.widthUnknown ? 'pending' : 'play'
+  },
+}))
 vi.mock('@/components/play/deliverables/play-shelf', () => ({ PlayShelf: () => <div data-testid="play-shelf" /> }))
 vi.mock('@/components/deliverables/deliverable-deep-link', () => ({
   DeliverableDeepLink: () => <div data-testid="deep-link" />,
@@ -55,7 +64,7 @@ async function showsShelf(yes: boolean) {
 
 afterEach(() => {
   cleanup()
-  Object.assign(state, { play: true, narrow: false, pathname: '/deliverables', search: '' })
+  Object.assign(state, { play: true, narrow: false, widthUnknown: false, pathname: '/deliverables', search: '' })
 })
 
 describe('app/deliverables/layout.tsx', () => {
@@ -80,6 +89,16 @@ describe('app/deliverables/layout.tsx', () => {
     state.narrow = true
     renderLayout()
     await showsShelf(false)
+  })
+
+  it('mounts neither the shelf nor the page and its deep link while the width is not known (M69)', () => {
+    state.widthUnknown = true
+    state.search = 'deliverable=d-laptop'
+    renderLayout()
+    // The shelf's chunk is loaded by now (the tests above), so it would render in this pass.
+    expect(screen.queryByTestId('play-shelf')).toBeNull()
+    expect(screen.queryByTestId('page')).toBeNull()
+    expect(screen.queryByTestId('deep-link')).toBeNull()
   })
 
   it("keeps Studio's explorer inside Play's frame", async () => {

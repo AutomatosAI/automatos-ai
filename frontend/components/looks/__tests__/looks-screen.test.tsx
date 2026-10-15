@@ -13,6 +13,8 @@
  * in for the user's look (M72).
  * Switch to Play hands focus to the screen's heading as the note goes
  * (P260-FX-22, M21).
+ * The width is a real window's (window-width.ts) read by Play's width source,
+ * usePlayLayout (P260-FX-25, M69): on a phone the editor never mounts at all.
  * Roles, attributes and text only (CSS modules are proxies under css: false).
  */
 import React from 'react'
@@ -21,11 +23,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const viewport = vi.hoisted(() => ({ narrow: false }))
-vi.mock('@/hooks/use-mobile', () => ({
-  useIsTabletOrBelow: () => viewport.narrow,
-  useIsMobile: () => viewport.narrow,
-}))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (
     <div data-testid="main-layout" data-full-bleed={fullBleed ? 'true' : 'false'}>
@@ -35,6 +32,7 @@ vi.mock('@/components/layout/main-layout', () => ({
 }))
 
 import { exportStarted } from '@/components/looks/look-manager'
+import { PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
 import { LooksScreen } from '@/components/looks/looks-screen'
 import { clearRoot, lookNamesLeft, myLook } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS, SHELLS, TYPE_STYLES } from '@/lib/looks/catalogue'
@@ -70,8 +68,10 @@ type User = ReturnType<typeof userEvent.setup>
 const layout = () => screen.getByTestId('main-layout')
 const fileInput = () => importer().getByLabelText<HTMLInputElement>('Or choose a .json file')
 
+/** A phone-wide window, while a test sets one. */
+let phone: WindowWidth | null = null
+
 beforeEach(() => {
-  viewport.narrow = false
   freshBrowser()
   // jsdom plays no media; refused saves and imports are logged as warnings.
   vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -79,6 +79,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  phone?.restore()
+  phone = null
   vi.restoreAllMocks()
   freshBrowser()
   clearRoot()
@@ -399,7 +401,7 @@ describe('/looks outside Play (K9) and on a narrow screen (D7)', () => {
   })
 
   it('under Play below 1024 px says it opens on a wider screen, with no editor and no switch', () => {
-    viewport.narrow = true
+    phone = stubWindowWidth(PHONE_WIDTH_PX)
     renderLooks('play')
     expect(screen.getByTestId('page-title')).toHaveTextContent('Make it yours')
     expect(screen.getByText(/opens on a laptop or desktop screen/)).toBeInTheDocument()

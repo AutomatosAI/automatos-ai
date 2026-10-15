@@ -64,8 +64,12 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(nav.search),
 }))
 const style = vi.hoisted(() => ({ play: true, narrow: false }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => style.play }))
-vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => style.narrow, useIsMobile: () => style.narrow }))
+// Play's width source (P260-FX-25): Play's version only under Play at >= 1024 px.
+vi.mock('@/hooks/use-studio-theme', () => ({
+  useIsStudio: () => true,
+  useIsPlay: () => style.play,
+  usePlayLayout: () => (style.play && !style.narrow ? 'play' : 'fallback'),
+}))
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
 vi.mock('@/stores/chat-session-store', () => ({
   useChatSessionStore: (select: (state: { newDraft: () => void }) => unknown) => select({ newDraft: vi.fn() }),

@@ -9,12 +9,17 @@
  * P260-FX-23 (M17): MainLayout loads the frame through its lazy slot, so a
  * Classic or Studio page never downloads it; under Play the frame arrives a
  * moment after the first render, so each test waits for it (findBy*).
+ *
+ * P260-FX-25 (M69): MainLayout reads Play's width from usePlayLayout (stood in
+ * for here; play-layout-phone.test.tsx runs the real one) and, under Play
+ * while it isn't known (the server, hydration), renders nothing, so the page
+ * never mounts in one chrome and again in the other.
  */
 import React from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ play: true, studio: true, narrow: false, pathname: '/command-center' }))
+const state = vi.hoisted(() => ({ play: true, studio: true, narrow: false, widthUnknown: false, pathname: '/command-center' }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
@@ -24,7 +29,14 @@ vi.mock('framer-motion', () => ({
   motion: { div: ({ children, className }: { children?: React.ReactNode; className?: string }) => <div className={className}>{children}</div> },
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => state.narrow, useIsMobile: () => state.narrow }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => state.studio, useIsPlay: () => state.play }))
+vi.mock('@/hooks/use-studio-theme', () => ({
+  useIsStudio: () => state.studio,
+  useIsPlay: () => state.play,
+  usePlayLayout: () => {
+    if (!state.play || state.narrow) return 'fallback'
+    return state.widthUnknown ? 'pending' : 'play'
+  },
+}))
 // GET /health answers, so the frame shows (edges.test.tsx covers the asleep screen in its place).
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
 
@@ -68,7 +80,7 @@ beforeAll(async () => {
 })
 
 afterEach(() => {
-  Object.assign(state, { play: true, studio: true, narrow: false, pathname: '/command-center' })
+  Object.assign(state, { play: true, studio: true, narrow: false, widthUnknown: false, pathname: '/command-center' })
 })
 
 describe('MainLayout under Play at desktop width', () => {
@@ -142,6 +154,14 @@ describe('MainLayout under the other styles and widths', () => {
     expect(screen.queryByTestId('play-sidebar')).toBeNull()
     expect(screen.queryByTestId('studio-sidebar')).toBeNull()
     expect(screen.getByTestId('page')).toBeInTheDocument()
+  })
+
+  it('under Play while the width is not known renders nothing: neither chrome, nor the page (M69)', () => {
+    state.widthUnknown = true
+    const { container } = renderLayout()
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByTestId('page')).toBeNull()
+    expect(screen.queryByTestId('auto-widget')).toBeNull()
   })
 
   it('under Classic renders the fallback chrome, never the frame', () => {

@@ -13,7 +13,7 @@ import { AutoWidget } from '../chatbot/chat-widget'
 import { PlayFrame } from '@/components/play/shell/play-frame-lazy'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsPlay, useIsStudio } from '@/hooks/use-studio-theme'
+import { useIsStudio, usePlayLayout } from '@/hooks/use-studio-theme'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -105,7 +105,7 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isMobileLayout = useIsTabletOrBelow()
   const isStudio = useIsStudio()
-  const isPlay = useIsPlay()
+  const playLayout = usePlayLayout()
   const pathname = usePathname()
 
   // Get current page context for the chat
@@ -148,7 +148,10 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   }
 
   // PRD-260 D7: Play's frame at >= 1024 px; below it, the fallback chrome as for Studio.
-  if (isPlay && !isMobileLayout) {
+  // Under Play while the width isn't known (the server, hydration), nothing: a page
+  // mounted in one chrome and again in the other runs its effects twice (P260-FX-25, M69).
+  if (playLayout === 'pending') return null
+  if (playLayout === 'play') {
     return <PlayFrame fullBleed={fullBleed} autoWidget={autoWidget}>{children}</PlayFrame>
   }
 

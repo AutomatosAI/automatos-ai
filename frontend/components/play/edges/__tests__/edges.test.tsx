@@ -18,6 +18,10 @@
  * P260-FX-22 (M21): the swap moves keyboard focus (the asleep heading, then the
  * frame's <main> once it answers) and the gate's own live region, outside the
  * swap, says each change.
+ *
+ * P260-FX-25 (M69): the 404 reads Play's width from usePlayLayout (stood in for
+ * here); under Play while it isn't known (the server, hydration) it renders
+ * nothing, so neither the lost screen nor the plain page shows first.
  */
 import React, { useEffect, useState } from 'react'
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
@@ -34,9 +38,15 @@ import {
   connectionOf,
 } from '@/hooks/use-backend-health'
 
-const look = vi.hoisted(() => ({ play: true, narrow: false }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => look.play }))
-vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => look.narrow, useIsMobile: () => look.narrow }))
+const look = vi.hoisted(() => ({ play: true, narrow: false, widthUnknown: false }))
+vi.mock('@/hooks/use-studio-theme', () => ({
+  useIsStudio: () => true,
+  useIsPlay: () => look.play,
+  usePlayLayout: () => {
+    if (!look.play || look.narrow) return 'fallback'
+    return look.widthUnknown ? 'pending' : 'play'
+  },
+}))
 
 const api = vi.hoisted(() => ({ request: vi.fn(), getBaseUrl: () => 'http://localhost:8000' }))
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))
@@ -203,7 +213,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   api.request.mockReset()
-  Object.assign(look, { play: true, narrow: false })
+  Object.assign(look, { play: true, narrow: false, widthUnknown: false })
   health.up = false
   mounts.page = 0
 })
@@ -235,6 +245,17 @@ describe('the 404 (app/not-found.tsx)', () => {
     render(<NotFound />)
     expect(screen.getByText('This page could not be found.')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: LOST_TITLE })).not.toBeInTheDocument()
+  })
+
+  it('under Play while the width is not known: nothing yet, neither the lost screen nor the plain page (M69)', async () => {
+    look.widthUnknown = true
+    const { container } = render(<NotFound />)
+    // Let a lazy slot that had been asked for arrive: none was.
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByTestId('auto')).not.toBeInTheDocument()
   })
 
   it("keeps Next's own 404 title for every style, so the tab and screen readers say it (M68)", () => {

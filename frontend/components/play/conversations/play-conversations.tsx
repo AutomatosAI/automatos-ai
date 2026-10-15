@@ -6,9 +6,8 @@ import { useRouter } from 'next/navigation'
 import { AutoMascot } from '@/components/mascot/auto-mascot'
 import { MascotColumn, PageColumns } from '@/components/play/shell/page-columns'
 import { type ConversationListState, useConversationList } from '@/hooks/use-conversation-list'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useStartChat } from '@/hooks/use-start-chat'
-import { useIsPlay } from '@/hooks/use-studio-theme'
+import { usePlayLayout } from '@/hooks/use-studio-theme'
 import { type ConversationSummary, filterByTitle } from '@/lib/play/conversations'
 import { CHAT_HREF } from '@/lib/ticket-links'
 
@@ -33,7 +32,9 @@ import styles from './conversations.module.css'
  * app/conversations/page.tsx sends Classic and Studio to /chat on the server
  * (K10); PlayConversations does the same in the browser when the style leaves
  * Play on this page, and below 1024 px, where Play's pages don't render (D7)
- * and the core chat's own history is the list.
+ * and the core chat's own history is the list. Until the width is known (the
+ * server, hydration) it shows nothing and sends nowhere, so a phone never asks
+ * for the list (P260-FX-25, M69).
  */
 
 export const CONVERSATIONS_TITLE = 'Conversations'
@@ -65,14 +66,13 @@ export interface PlayConversationsProps {
 
 /** The page under Play at >= 1024 px; anywhere else, the chat. */
 export function PlayConversations({ now }: PlayConversationsProps) {
-  const isPlay = useIsPlay()
-  const narrow = useIsTabletOrBelow()
+  const layout = usePlayLayout()
   const router = useRouter()
-  const elsewhere = !isPlay || narrow
+  const elsewhere = layout === 'fallback'
   useEffect(() => {
     if (elsewhere) router.replace(CHAT_HREF)
   }, [elsewhere, router])
-  return elsewhere ? null : <ConversationsScreen now={now} />
+  return layout === 'play' ? <ConversationsScreen now={now} /> : null
 }
 
 export function ConversationsScreen({ now }: PlayConversationsProps) {

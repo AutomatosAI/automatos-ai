@@ -3,8 +3,7 @@
 import Link from 'next/link'
 
 import { LostScreen } from '@/components/play/edges/lost-screen-lazy'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsPlay } from '@/hooks/use-studio-theme'
+import { usePlayLayout } from '@/hooks/use-studio-theme'
 
 /**
  * PRD-260 §4 — the 404, for any address the app doesn't have. Under Play at
@@ -14,12 +13,14 @@ import { useIsPlay } from '@/hooks/use-studio-theme'
  * the width is known only in the browser, as for every Play page. app/not-found.tsx
  * renders it and sets the page's title (P260-FX-21, M68). Every route carries
  * the 404, so Play's lost screen comes through its lazy slot: Classic and
- * Studio never download it (P260-FX-23, M17).
+ * Studio never download it (P260-FX-23, M17). Under Play, nothing until the
+ * width is known (the server, hydration), so a phone never mounts the lost
+ * screen and a desktop never shows the plain page first (P260-FX-25, M69).
  */
 export function NotFoundView() {
-  const isPlay = useIsPlay()
-  const narrow = useIsTabletOrBelow()
-  return isPlay && !narrow ? <LostScreen /> : <PlainNotFound />
+  const layout = usePlayLayout()
+  if (layout === 'pending') return null
+  return layout === 'play' ? <LostScreen /> : <PlainNotFound />
 }
 
 /** Next's default 404 in the theme's own tokens, plus the way home. */

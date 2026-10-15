@@ -18,12 +18,14 @@
  * ('Something went wrong'); each slot's visible name says the state
  * (P260-FX-24, M74). Copy tokens twice, or refused twice, is announced twice:
  * a new node each time (M22).
+ * The width is a real window's (window-width.ts) read by Play's width source,
+ * usePlayLayout (P260-FX-25, M69): on a phone the sheet never mounts at all.
  * Roles, attributes, inline custom properties and text only: CSS modules are
  * proxies.
  */
 import React from 'react'
 import { renderToString } from 'react-dom/server'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('next/link', () => ({
@@ -32,11 +34,6 @@ vi.mock('next/link', () => ({
       {children}
     </a>
   ),
-}))
-const viewport = vi.hoisted(() => ({ narrow: false }))
-vi.mock('@/hooks/use-mobile', () => ({
-  useIsTabletOrBelow: () => viewport.narrow,
-  useIsMobile: () => viewport.narrow,
 }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (
@@ -55,6 +52,7 @@ import { REDUCED_MOTION_NOTE, StyleMotion } from '@/components/looks/style/style
 import { COPY_FAILED, COPY_TOKENS, STYLE_HEADING, STYLE_SHEET_NOTE } from '@/components/looks/style/style-screen'
 import { BADGE_DONE } from '@/components/play/chat/receipts'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
+import { LAPTOP_WIDTH_PX, PHONE_WIDTH_PX, stubWindowWidth } from '@/hooks/__tests__/window-width'
 import { clearRoot, rootVars } from '@/lib/looks/__tests__/helpers'
 import { ACCENTS, GROUNDS, LIGHTS } from '@/lib/looks/catalogue'
 import { lookToCssVars } from '@/lib/looks/css'
@@ -190,7 +188,6 @@ function restore(target: object, name: string, original: PropertyDescriptor | un
 }
 
 beforeEach(() => {
-  viewport.narrow = false
   window.localStorage.clear()
   // A browser already moved to the current defaults, so the provider keeps the given style.
   window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
@@ -482,7 +479,7 @@ describe('/looks/style after Switch to Play, by keyboard (P260-FX-22, M21)', () 
 
 describe('/looks/style under Play below 1024 px (D7), as /looks', () => {
   it('says it opens on a wider screen, with no sheet and no switch', () => {
-    viewport.narrow = true
+    stubWindowWidth(PHONE_WIDTH_PX)
     renderPage('play')
     const note = within(screen.getByRole('region', { name: STYLE_HEADING }))
     expect(note.getByText(WIDER_SCREEN_NOTE)).toBeInTheDocument()
@@ -495,11 +492,10 @@ describe('/looks/style under Play below 1024 px (D7), as /looks', () => {
   })
 
   it('shows the sheet once the window is wide enough', async () => {
-    viewport.narrow = true
-    const { rerender } = renderPage('play')
+    const window_ = stubWindowWidth(PHONE_WIDTH_PX)
+    renderPage('play')
     expect(screen.queryByRole('region', { name: 'Colour' })).toBeNull()
-    viewport.narrow = false
-    rerender(pageTree('play'))
+    act(() => window_.resize(LAPTOP_WIDTH_PX))
     expect(await screen.findByRole('region', { name: 'Colour' })).toBeInTheDocument()
     expect(screen.queryByText(WIDER_SCREEN_NOTE)).toBeNull()
     expect(layout()).toHaveAttribute('data-full-bleed', 'true')

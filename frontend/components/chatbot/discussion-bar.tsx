@@ -16,8 +16,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { MessagesSquare, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useBoardTask } from '@/hooks/use-board-tasks'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsPlay } from '@/hooks/use-studio-theme'
+import { usePlayLayout } from '@/hooks/use-studio-theme'
 import { CHAT_ROUTE, discussionHint, discussionLabel, discussionOf, type Discussion } from '@/lib/discussion'
 import { missionHref, ticketHref } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -85,11 +84,10 @@ function EndButton({ onEnd }: { onEnd: () => void }) {
 }
 
 /** Play's chat is what /chat shows: Play at >= 1024 px (PRD-260 D7, the PlayRouteSwitch in
- * app/chat/layout.tsx). Its message box has no agent picker, so the hint differs there. */
+ * app/chat/layout.tsx), read from the switch's own width source (P260-FX-25). Its message
+ * box has no agent picker, so the hint differs there. */
 function usePlayChatOnScreen(): boolean {
-  const isPlay = useIsPlay()
-  const narrow = useIsTabletOrBelow()
-  return isPlay && !narrow
+  return usePlayLayout() === 'play'
 }
 
 /** `/chat?ticket=<id>` without `repo` (with it, the link opens a session's canvas)

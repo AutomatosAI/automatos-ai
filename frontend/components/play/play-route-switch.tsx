@@ -3,8 +3,7 @@
 import { Suspense, type ReactNode } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsPlay } from '@/hooks/use-studio-theme'
+import { usePlayLayout } from '@/hooks/use-studio-theme'
 
 /**
  * PRD-260 K7 — the seam a Play-designed page mounts through. A route's
@@ -23,6 +22,13 @@ import { useIsPlay } from '@/hooks/use-studio-theme'
  * The choice reads the search params, so it sits inside its own Suspense
  * boundary whose fallback is the route's own page: a static prerender renders
  * the page, and both layouts are covered without a boundary of their own.
+ *
+ * Where the width decides (under Play, on one of `paths`, no page asked for),
+ * it renders nothing until the width is known (usePlayLayout 'pending': the
+ * server and hydration), so neither Play's screen nor the page mounts for a
+ * render the width then takes back (on a phone, Play's chat consuming a deep
+ * link and racing the cold start; on a desktop, the route's own page and its
+ * deep-link sheet): P260-FX-25, M69.
  */
 
 /** Values of a `keepPageFor` parameter that Play's screen still serves. Serializable: a server layout passes it. */
@@ -63,13 +69,12 @@ function PlayRouteChoice({
   playServes = NO_SERVED_VALUES,
   children,
 }: PlayRouteSwitchProps) {
-  const isPlay = useIsPlay()
-  const narrow = useIsTabletOrBelow()
+  const layout = usePlayLayout()
   const pathname = usePathname()
   const params = useSearchParams()
-  const showPlay =
-    isPlay && !narrow && pathname !== null && paths.includes(pathname) && !pageAsked(params, keepPageFor, playServes)
-  return <>{showPlay ? play : children}</>
+  const playsHere = pathname !== null && paths.includes(pathname) && !pageAsked(params, keepPageFor, playServes)
+  if (layout === 'fallback' || !playsHere) return <>{children}</>
+  return layout === 'play' ? <>{play}</> : null
 }
 
 export function PlayRouteSwitch(props: PlayRouteSwitchProps) {

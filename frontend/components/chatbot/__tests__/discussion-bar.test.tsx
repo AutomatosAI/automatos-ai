@@ -19,8 +19,12 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTask: () => ({ data: board.task, isError: board.isError }) }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => look.play }))
-vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => look.narrow, useIsMobile: () => look.narrow }))
+// Play's width source, the one PlayRouteSwitch reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
+vi.mock('@/hooks/use-studio-theme', () => ({
+  useIsStudio: () => true,
+  useIsPlay: () => look.play,
+  usePlayLayout: () => (look.play && !look.narrow ? 'play' : 'fallback'),
+}))
 // A small stand-in for the chat-session store: an open tab, and a draft Discuss opens.
 const { OPEN_TAB } = vi.hoisted(() => ({
   OPEN_TAB: { activeChatId: 'chat-old', openChatIds: ['chat-old'], titles: { 'chat-old': 'Rota questions' }, draftOpen: false },
