@@ -55,11 +55,11 @@ export function PlayConversations({ now }: PlayConversationsProps) {
 
 export function ConversationsScreen({ now }: PlayConversationsProps) {
   const list = useConversationList()
-  const startChat = useStartChat()
+  const { startChat, ready } = useStartChat()
   const [query, setQuery] = useState('')
   const onSearch = (event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)
   const newChat = (
-    <button type="button" className={styles.newChat} onClick={startChat}>
+    <button type="button" className={styles.newChat} onClick={startChat} disabled={!ready}>
       {NEW_CHAT}
     </button>
   )

@@ -59,6 +59,8 @@ vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connec
 vi.mock('@/stores/chat-session-store', () => ({
   useChatSessionStore: (select: (state: { newDraft: () => void }) => unknown) => select({ newDraft: vi.fn() }),
 }))
+// useStartChat binds the chat session store itself (P260-FX-03): hydrated here.
+vi.mock('@/hooks/use-chat-session', () => ({ useChatSessionHydration: () => ({ key: 'k', hydrated: true }) }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))

@@ -65,11 +65,11 @@ export function ShelfBody({ view, filter, paging, now }: ShelfBodyProps) {
 }
 
 function Empty({ filter }: { readonly filter: ShelfFilter }) {
-  const startChat = useStartChat()
+  const { startChat, ready } = useStartChat()
   return (
     <div className={styles.empty}>
       <p className={styles.status}>{emptyMessage(filter)}</p>
-      <button type="button" className={styles.button} onClick={startChat}>
+      <button type="button" className={styles.button} onClick={startChat} disabled={!ready}>
         {START_A_CHAT}
       </button>
     </div>

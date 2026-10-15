@@ -24,6 +24,8 @@ const store = vi.hoisted(() => ({ newDraft: vi.fn() }))
 vi.mock('@/stores/chat-session-store', () => ({
   useChatSessionStore: (select: (state: typeof store) => unknown) => select(store),
 }))
+// useStartChat binds the chat session store itself (P260-FX-03): hydrated here.
+vi.mock('@/hooks/use-chat-session', () => ({ useChatSessionHydration: () => ({ key: 'k', hydrated: true }) }))
 
 const chatApi = vi.hoisted(() => ({ getChatHistory: vi.fn() }))
 vi.mock('@/lib/chat/api', () => chatApi)

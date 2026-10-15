@@ -174,3 +174,8 @@
   cursor: progress;
   color: var(--pl-color-text-2);
 }
+
+/* Start a chat, until the chat session store is hydrated (useStartChat). */
+.button:disabled {
+  cursor: progress;
+}

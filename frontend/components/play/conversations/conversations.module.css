@@ -41,6 +41,11 @@
   color: var(--pl-color-bg);
 }
 
+/* Until the chat session store is hydrated (useStartChat). */
+.newChat:disabled {
+  cursor: progress;
+}
+
 .newChat:focus-visible,
 .retry:focus-visible {
   outline: none;

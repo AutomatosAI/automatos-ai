@@ -8,6 +8,7 @@ import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
 import { type ComposerFill, DRAFT_PARAM, draftFrom } from '@/lib/play/draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
+import { usePlayChatStore } from '@/stores/play-chat-store'
 import type { Chat, ChatMessage } from '@/types'
 
 /**
@@ -159,31 +160,51 @@ function loadConversation(chatId: string, handlers: LoadHandlers): () => void {
   }
 }
 
+/**
+ * New chat pressed while a new chat is already on screen (its first send
+ * failed, so it is still unnamed): the session store doesn't change, so the
+ * count in play-chat-store says so, and a fresh new chat is shown. Only
+ * presses after this mount count.
+ */
+function useFreshDraft(enabled: boolean, activeChatId: string | null, showDraft: () => void) {
+  const freshDrafts = usePlayChatStore((s) => s.freshDrafts)
+  const seen = useRef(freshDrafts)
+  useEffect(() => {
+    if (seen.current === freshDrafts) return
+    seen.current = freshDrafts
+    if (enabled && activeChatId === null) showDraft()
+  }, [freshDrafts, enabled, activeChatId, showDraft])
+}
+
 /** The active pointer's conversation on screen: a new chat, an adopted one, or one loaded from the server. */
 function useActiveView(enabled: boolean, activeChatId: string | null) {
   const closeTab = useChatSessionStore((s) => s.closeTab)
   const setTitles = useChatSessionStore((s) => s.setTitles)
   const [view, setView] = useState<PlayConversationView | null>(null)
-  // The chat id on screen (undefined: nothing yet), the id adopted mid-turn, the new chats shown so far.
+  // The chat id on screen (undefined: nothing yet), the id the new chat on screen was named, the new chats shown so far.
   const shown = useRef<string | null | undefined>(undefined)
   const adopted = useRef<string | null>(null)
   const drafts = useRef(0)
 
   const show = useCallback((next: PlayConversationView | null) => {
     shown.current = next ? next.chatId : undefined
+    adopted.current = null
     setView(next)
   }, [])
+  const showDraft = useCallback(() => show(draftView(++drafts.current)), [show])
+  useFreshDraft(enabled, activeChatId, showDraft)
 
   useEffect(() => {
     if (!enabled || activeChatId === shown.current) return
     if (activeChatId === null) {
-      drafts.current += 1
-      show(draftView(drafts.current))
+      showDraft()
       return
     }
     const chatId = activeChatId
     if (shown.current === null && chatId === adopted.current) {
+      // Once: any later move to this id loads it.
       shown.current = chatId
+      adopted.current = null
       setView((current) => (current ? { ...current, chatId } : current))
       return
     }
@@ -199,10 +220,11 @@ function useActiveView(enabled: boolean, activeChatId: string | null) {
         closeTab(chatId)
       },
     })
-  }, [enabled, activeChatId, show, setTitles, closeTab])
+  }, [enabled, activeChatId, show, showDraft, setTitles, closeTab])
 
+  // Only the new chat on screen is adopted: a stored conversation's later turns name it again.
   const adopt = useCallback((chatId: string) => {
-    adopted.current = chatId
+    if (shown.current === null) adopted.current = chatId
   }, [])
 
   return { view, adopt }

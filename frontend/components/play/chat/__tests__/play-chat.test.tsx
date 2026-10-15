@@ -20,6 +20,8 @@ const chat = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   stop: vi.fn(),
   reload: vi.fn(),
+  /** How many chat screens have mounted the hook (a new key mounts it again). */
+  mounts: 0,
 }))
 const api = vi.hoisted(() => ({ getChat: vi.fn(), getChatMessages: vi.fn(), getChatHistory: vi.fn() }))
 const toastError = vi.hoisted(() => vi.fn())
@@ -52,23 +54,28 @@ vi.mock('@/components/mascot/auto-mascot', () => ({
     </div>
   ),
 }))
-vi.mock('@/lib/chat/use-chat-with-receipts', () => ({
-  useChatWithReceipts: (options: Record<string, any>) => {
-    chat.options = options
-    return {
-      messages: chat.messages ?? options.initialMessages,
-      setMessages: vi.fn(),
-      sendMessage: chat.sendMessage,
-      reload: chat.reload,
-      stop: chat.stop,
-      status: chat.status,
-      isLoading: chat.isLoading,
-      awaitingReply: false,
-      usage: undefined,
-      errorCode: null,
-    }
-  },
-}))
+vi.mock('@/lib/chat/use-chat-with-receipts', async () => {
+  const { useState } = await import('react')
+  return {
+    useChatWithReceipts: (options: Record<string, any>) => {
+      // Counted once per chat screen: a new key mounts the hook again.
+      useState(() => (chat.mounts += 1))
+      chat.options = options
+      return {
+        messages: chat.messages ?? options.initialMessages,
+        setMessages: vi.fn(),
+        sendMessage: chat.sendMessage,
+        reload: chat.reload,
+        stop: chat.stop,
+        status: chat.status,
+        isLoading: chat.isLoading,
+        awaitingReply: false,
+        usage: undefined,
+        errorCode: null,
+      }
+    },
+  }
+})
 vi.mock('@/stores/chat-session-store', async () => {
   const { create } = await import('zustand')
   type Session = { activeChatId: string | null; draftOpen: boolean; openChatIds: string[] }
@@ -98,6 +105,7 @@ import { PlayChat } from '@/components/play/chat/play-chat'
 import { EXAMPLES, HELLO_TITLE } from '@/components/play/chat/first-open'
 import { PLACEHOLDER } from '@/components/play/chat/message-box'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
+import { useStartChat } from '@/hooks/use-start-chat'
 import { EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -128,6 +136,16 @@ function openStoredChat(messages: ChatMessage[] = STORED) {
   api.getChatMessages.mockResolvedValue(messages)
 }
 
+/** Play's New chat (the sidebar's, through useStartChat), beside the chat. */
+function NewChatButton() {
+  const { startChat, ready } = useStartChat()
+  return (
+    <button type="button" onClick={startChat} disabled={!ready}>
+      New chat
+    </button>
+  )
+}
+
 const auto = () => screen.getByTestId('auto')
 const box = () => screen.getByRole('textbox', { name: PLACEHOLDER })
 
@@ -141,7 +159,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks()
   window.sessionStorage.clear()
-  Object.assign(chat, { options: null, status: 'idle', isLoading: false, messages: null })
+  Object.assign(chat, { options: null, status: 'idle', isLoading: false, messages: null, mounts: 0 })
   nav.search = ''
 })
 
@@ -295,6 +313,53 @@ describe('sending and stopping', () => {
     expect(chat.options?.id).toBe('new-1')
     expect(api.getChat).not.toHaveBeenCalled()
     expect(screen.queryByText('Opening this conversation…')).toBeNull()
+  })
+})
+
+// P260-FX-03: the id a turn names is adopted once, for the new chat on screen; New chat always shows a fresh one.
+describe('New chat and reopening a conversation', () => {
+  const WEEK = [userMessage('m1', 'Plan my week, please'), autoMessage('m2', 'Here is your week.')]
+
+  it('after New chat, the conversation the new chat became opens from the server, not as an empty first open (M03)', async () => {
+    render(<PlayChat />)
+    act(() => chat.options?.onChatIdUpdate('new-1'))
+    act(() => useChatSessionStore.getState().newDraft())
+    expect(await screen.findByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    api.getChat.mockResolvedValue(storedChat('new-1', 'Weekly plan'))
+    api.getChatMessages.mockResolvedValue(WEEK)
+    act(() => useChatSessionStore.getState().openChat('new-1'))
+    const list = await screen.findByRole('list', { name: 'Conversation' })
+    expect(within(list).getByText('Plan my week, please')).toBeInTheDocument()
+    expect(api.getChat).toHaveBeenCalledWith('new-1')
+    expect(screen.queryByRole('heading', { name: HELLO_TITLE })).toBeNull()
+  })
+
+  it("reopening a stored conversation after New chat loads it again, though a later turn named it (M03)", async () => {
+    openStoredChat()
+    render(<PlayChat />)
+    await screen.findByRole('list', { name: 'Conversation' })
+    act(() => chat.options?.onChatIdUpdate('c1'))
+    act(() => useChatSessionStore.getState().newDraft())
+    expect(await screen.findByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    act(() => useChatSessionStore.getState().openChat('c1'))
+    const list = await screen.findByRole('list', { name: 'Conversation' })
+    expect(within(list).getByText('What should I look for in a laptop?')).toBeInTheDocument()
+    expect(api.getChat).toHaveBeenCalledTimes(2)
+  })
+
+  it('New chat over a new chat whose first send failed shows a fresh one (M12)', () => {
+    const view = render(<><PlayChat /><NewChatButton /></>)
+    chat.status = 'error'
+    chat.messages = [userMessage('m1', 'Plan my week')]
+    view.rerender(<><PlayChat /><NewChatButton /></>)
+    expect(screen.queryByRole('heading', { name: HELLO_TITLE })).toBeNull()
+    const mounted = chat.mounts
+    // What a fresh useChat starts with.
+    Object.assign(chat, { status: 'idle', messages: null })
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }))
+    expect(chat.mounts).toBe(mounted + 1)
+    expect(screen.getByRole('heading', { name: HELLO_TITLE })).toBeInTheDocument()
+    expect(nav.push).toHaveBeenCalledWith('/chat')
   })
 })
 

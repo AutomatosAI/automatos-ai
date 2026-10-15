@@ -71,11 +71,11 @@ export function PlaySidebar() {
   )
 }
 
-/** New chat: a fresh draft in the chat session store, then the chat. */
+/** New chat: a fresh draft in the chat session store, then the chat; pressable once the store is hydrated. */
 function NewChatButton() {
-  const startChat = useStartChat()
+  const { startChat, ready } = useStartChat()
   return (
-    <button type="button" className={styles.newChat} onClick={startChat}>
+    <button type="button" className={styles.newChat} onClick={startChat} disabled={!ready}>
       New chat
     </button>
   )

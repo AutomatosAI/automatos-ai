@@ -47,6 +47,11 @@
   cursor: pointer;
 }
 
+/* Until the chat session store is hydrated (useStartChat). */
+.newChat:disabled {
+  cursor: progress;
+}
+
 /* The grouped nav: the Studio menu's groups, then Look on its own. */
 .navGroups {
   display: flex;
