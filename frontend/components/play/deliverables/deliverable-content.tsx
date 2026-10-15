@@ -59,9 +59,11 @@ export function DeliverableContent({ view, kind, title, filename }: DeliverableC
     )
   }
   if (view.kind === 'empty') return <p className={page.note}>{EMPTY}</p>
-  if (view.kind === 'image' || view.kind === 'video') return <Media kind={view.kind} url={view.url} title={title} />
-  const message = view.reason === 'unreadable' ? UNREADABLE : unsupportedMessage(kind)
-  return <FileCard message={message} url={view.url} filename={filename} />
+  if (view.kind === 'file') {
+    const message = view.reason === 'unreadable' ? UNREADABLE : unsupportedMessage(kind)
+    return <FileCard message={message} url={view.url} filename={filename} />
+  }
+  return <Media kind={view.kind} url={view.url} title={title} />
 }
 
 interface MediaProps {

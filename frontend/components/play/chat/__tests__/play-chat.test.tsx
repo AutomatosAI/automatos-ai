@@ -111,7 +111,7 @@ vi.mock('@/stores/chat-session-store', async () => {
     draftOpen: false,
     openChatIds: session.openChatIds.includes(id) ? session.openChatIds : [...session.openChatIds, id],
   })
-  const store = create<any>((set, get) => ({
+  const store = create<any>((set: (partial: object) => void, get: () => any) => ({
     key: chatSessionKey(null, ids.user),
     hydrated: true,
     session: { activeChatId: null, draftOpen: true, openChatIds: [] },

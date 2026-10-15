@@ -116,6 +116,7 @@ import {
 import { AWAITING_ANSWER } from '@/components/play/chat/caption'
 import { PlayChat } from '@/components/play/chat/play-chat'
 import { TURN_END_LABEL } from '@/components/play/chat/turn-end'
+import { type ChatSession, EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { usePlayApprovalsStore } from '@/stores/play-approvals-store'
@@ -132,7 +133,9 @@ function autoMessage(id: string, text: string): ChatMessage {
 
 const STORED_CHAT: Chat = { id: 'c1', title: 'Tidy the shelf', userId: 'u1', createdAt: '', updatedAt: '', visibility: 'private', turnInFlight: false }
 const QUESTION = userMessage('m1', 'Delete the old brief?')
-const SESSION = { activeChatId: 'c1', draftOpen: false, openChatIds: ['c1'] }
+/** A whole ChatSession (the store's type) with these tabs. */
+const sessionOf = (tabs: Pick<ChatSession, 'activeChatId' | 'draftOpen' | 'openChatIds'>): ChatSession => ({ ...EMPTY_CHAT_SESSION, ...tabs })
+const SESSION = sessionOf({ activeChatId: 'c1', draftOpen: false, openChatIds: ['c1'] })
 /** The server's copy of the reply that raised the card: its own id, not the one useChat gave it while streaming. */
 const STORED_REPLY = autoMessage('m2-stored', 'That needs your OK first.')
 
@@ -211,7 +214,7 @@ afterEach(() => {
 async function openAgain(view: ReturnType<typeof render>, chatId: string, messages: ChatMessage[]) {
   view.unmount()
   Object.assign(chat, { status: 'idle', messages: null })
-  useChatSessionStore.setState({ session: { activeChatId: chatId, draftOpen: false, openChatIds: [chatId] } })
+  useChatSessionStore.setState({ session: sessionOf({ activeChatId: chatId, draftOpen: false, openChatIds: [chatId] }) })
   api.getChat.mockResolvedValue({ ...STORED_CHAT, id: chatId })
   api.getChatMessages.mockResolvedValue(messages)
   render(<PlayChat />)
@@ -377,7 +380,7 @@ describe('a card outlives the chat screen (P260-FX-08, M46)', () => {
   })
 
   it("a new chat's card goes with the name the backend gives it: that conversation shows it again, a new chat doesn't", async () => {
-    useChatSessionStore.setState({ session: { activeChatId: null, draftOpen: true, openChatIds: ['c1'] } })
+    useChatSessionStore.setState({ session: sessionOf({ activeChatId: null, draftOpen: true, openChatIds: ['c1'] }) })
     Object.assign(chat, { status: 'streaming', messages: [QUESTION, autoMessage('m2', '')] })
     const view = render(<PlayChat />)
     await screen.findAllByRole('article', { name: 'Auto said' })
@@ -389,7 +392,7 @@ describe('a card outlives the chat screen (P260-FX-08, M46)', () => {
     await openAgain(view, 'c9', [QUESTION, STORED_REPLY])
     expect(within(screen.getByRole('region', { name: LOOSE_APPROVALS_LABEL })).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
     cleanup()
-    useChatSessionStore.setState({ session: { activeChatId: null, draftOpen: true, openChatIds: ['c9'] } })
+    useChatSessionStore.setState({ session: sessionOf({ activeChatId: null, draftOpen: true, openChatIds: ['c9'] }) })
     Object.assign(chat, { status: 'streaming', messages: [QUESTION, autoMessage('m7', '')] })
     render(<PlayChat />)
     await screen.findAllByRole('article', { name: 'Auto said' })

@@ -92,7 +92,7 @@ vi.mock('@/lib/chat/use-chat-with-receipts', () => ({
 }))
 vi.mock('@/stores/chat-session-store', async () => {
   const { create } = await import('zustand')
-  const store = create<any>((set) => ({
+  const store = create<any>((set: (partial: object) => void) => ({
     hydrated: true,
     session: { activeChatId: 'c1', draftOpen: false, openChatIds: ['c1'] },
     openChat: vi.fn(),
@@ -132,7 +132,10 @@ function userMessage(id: string, text: string): ChatMessage {
   return { id, role: 'user', content: text, parts: [{ type: 'text', text }] } as unknown as ChatMessage
 }
 
-function autoMessage(id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage {
+/** Extra fields for a reply; parts may carry types the backend sends that ChatMessage's union doesn't list (receipts, task_card). */
+type ReplyExtra = Partial<Omit<ChatMessage, 'parts'>> & { readonly parts?: ReadonlyArray<Record<string, unknown>> }
+
+function autoMessage(id: string, text: string, extra: ReplyExtra = {}): ChatMessage {
   return { id, role: 'assistant', content: text, parts: [{ type: 'text', text }], ...extra } as unknown as ChatMessage
 }
 
@@ -175,7 +178,7 @@ const data = (part: unknown) => act(() => chat.options?.onData(part))
 
 beforeEach(() => {
   window.sessionStorage.setItem(HELLO_KEY, '1') // hello already played this session
-  ;(useChatSessionStore.getState() as { reset: () => void }).reset()
+  ;(useChatSessionStore.getState() as unknown as { reset: () => void }).reset()
   useMissionStore.setState({ activePlanningMissionId: null })
   Object.values(api).forEach((fn) => fn.mockReset())
   api.getChatHistory.mockResolvedValue([])

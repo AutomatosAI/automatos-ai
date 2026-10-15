@@ -127,8 +127,8 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
     if (pathname.startsWith('/team')) return 'team'
     if (pathname.startsWith('/chat')) return 'chat'
     // PRD-260 M70: Play's own pages (Conversations; Make it yours and its style sheet).
-    if (pathname.startsWith('/conversations')) return 'chat'
-    if (pathname.startsWith('/looks')) return 'looks'
+    if (pathname?.startsWith('/conversations')) return 'chat'
+    if (pathname?.startsWith('/looks')) return 'looks'
     return 'dashboard'
   }
 
