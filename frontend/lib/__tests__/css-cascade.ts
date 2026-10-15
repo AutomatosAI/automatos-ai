@@ -27,7 +27,7 @@ const TYPE: Specificity = [0, 0, 1]
 const ERASED_WRAPPERS = new Set(['global', 'local'])
 const MATCHES_ANY = new Set(['not', 'is', 'has', 'matches'])
 
-function withoutComments(css: string): string {
+export function withoutComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, ' ')
 }
 

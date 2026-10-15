@@ -2,17 +2,20 @@
 /**
  * PRD-260 K1, K2 — the Play guards.
  *
- * (a) Play is ported, never imported: no module specifier in the frontend
- *     reaches the read-only Play reference or the automatos-play repo. Read
- *     through the TypeScript compiler API, import syntax only, so a comment
- *     or a string that mentions those paths never counts (14 Oct: a docstring
- *     tripped PRD-259's text-grep guard).
+ * (a) Play is ported, never imported: no module specifier, next/font/local
+ *     file or stylesheet @import/url() in the frontend reaches the read-only
+ *     Play reference or the automatos-play repo (M96). Read through the
+ *     TypeScript compiler API and the stylesheet's syntax (module-references.ts),
+ *     so a comment or a string that mentions those paths never counts (14 Oct:
+ *     a docstring tripped PRD-259's text-grep guard).
  * (b) Play's CSS defines and reads only --pl-* variables, plus the core's font
  *     and radius ones: Play's --accent and --ring would clobber Studio's HSL
  *     tokens of the same names.
- * (c) Every visible colour comes from the look: no #hex and no rgb()/hsl()
- *     literal in Play's CSS or components. lib/looks/catalogue.ts is the one
- *     home for a literal colour.
+ * (c) Every visible colour comes from the look: no #hex, no colour function of
+ *     numbers (rgb() to oklch() and color(), in color-mix() too) and no named
+ *     colour in Play's CSS or components; a system colour only in forced
+ *     colours (M96, css-colours.ts). lib/looks/catalogue.ts is the one home
+ *     for a literal colour.
  * (d) M01, M16: Play's own type, inline code and sheet colours win over
  *     Studio's element rules, which reach Play's elements because <html>
  *     carries studio and play together. Proven statically (css: false).
@@ -35,7 +38,10 @@ import {
   namesClass,
   specificity,
   splitTopLevel,
+  withoutComments,
 } from './css-cascade'
+import { componentColours, literalColours, splitForcedColours, stylesheetColours } from './css-colours'
+import { cssReferences, localFontPaths, moduleSpecifiers, parseSource, specifierOf, stringArgument } from './module-references'
 
 const FRONTEND = path.resolve(__dirname, '../..')
 const SOURCE_DIRS = ['app', 'components', 'lib', 'hooks', 'contexts', 'stores']
@@ -45,7 +51,9 @@ const SOURCE_FILE = /\.(ts|tsx)$/
 const TEST_FILE = /(^|\/)__tests__\/|\.test\.tsx?$/
 /** Built by parts so no line of this file reads as an import of them to a text scanner. */
 const FORBIDDEN_PARTS = ['prd260-spec', 'play-ref', ['automatos', 'play'].join('-'), ['scripts', 'ralph'].join('/')]
-const MOCKING_CALLS = new Set(['mock', 'doMock', 'importActual', 'importMock'])
+/** Play's display faces: two Instrument Serif files, one Bricolage, one Fredoka. */
+const PLAY_FONTS = 'app/play-fonts.ts'
+const PLAY_FONT_FILES = 4
 
 const PLAY_COMPONENT_DIRS = ['components/play', 'components/looks', 'components/mascot']
 const PLAY_THEME_CSS = 'app/play-theme.css'
@@ -53,11 +61,6 @@ const CORE_VARS_PLAY_MAY_READ = new Set(['--font-geist-sans', '--font-geist-mono
 const PLAY_VAR = /^--pl-[\w-]+$/
 const CATALOGUE = 'lib/looks/catalogue.ts'
 const CATALOGUE_MIN_COLOURS = 20
-
-/** #rgb, #rgba, #rrggbb, #rrggbbaa; not an HTML entity such as &#39;. */
-const HEX_COLOUR = /(?<!&)#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b/gi
-/** rgb(), rgba(), hsl(), hsla() with literal numbers; hsl(var(--x)) is not a literal. */
-const COLOUR_FUNCTION = /\b(?:rgba?|hsla?)\(\s*[\d.]+/gi
 
 /** Parsing ~1,200 files takes a few seconds; the default 5 s is too tight on a busy runner. */
 const SCAN_TIMEOUT_MS = 120_000
@@ -75,45 +78,19 @@ function relative(file: string): string {
   return path.relative(FRONTEND, file).split(path.sep).join('/')
 }
 
-// --- (a) module specifiers -------------------------------------------------------------
+// --- (a) module specifiers, font files and stylesheet references ---------------------------
 
-function stringArgument(node: ts.Node | undefined): string | null {
-  return node !== undefined && ts.isStringLiteralLike(node) ? node.text : null
+function forbidden(references: readonly string[]): string[] {
+  return references.filter((reference) => FORBIDDEN_PARTS.some((part) => reference.includes(part)))
 }
 
-function isLoaderCall(callee: ts.Expression): boolean {
-  if (callee.kind === ts.SyntaxKind.ImportKeyword) return true
-  if (ts.isIdentifier(callee)) return callee.text === 'require'
-  return ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
-    callee.expression.text === 'vi' && MOCKING_CALLS.has(callee.name.text)
-}
-
-function specifierOf(node: ts.Node): string | null {
-  if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return stringArgument(node.moduleSpecifier)
-  if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
-    return stringArgument(node.moduleReference.expression)
-  }
-  if (ts.isCallExpression(node) && isLoaderCall(node.expression)) return stringArgument(node.arguments[0])
-  if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) return stringArgument(node.argument.literal)
-  return null
-}
-
-/** Every module specifier in the source: import/export declarations, import(), require(), vi.mock(), import types. */
-function moduleSpecifiers(fileName: string, source: string): string[] {
-  const kind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
-  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, kind)
-  const found: string[] = []
-  const visit = (node: ts.Node): void => {
-    const specifier = specifierOf(node)
-    if (specifier !== null) found.push(specifier)
-    ts.forEachChild(node, visit)
-  }
-  visit(file)
-  return found
-}
-
+/** The modules a source imports and the font files it loads that reach the reference. */
 function forbiddenIn(fileName: string, source: string): string[] {
-  return moduleSpecifiers(fileName, source).filter((specifier) => FORBIDDEN_PARTS.some((part) => specifier.includes(part)))
+  return forbidden([...moduleSpecifiers(fileName, source), ...localFontPaths(fileName, source)])
+}
+
+function forbiddenInCss(css: string): string[] {
+  return forbidden(cssReferences(css))
 }
 
 // --- (b) and (c) Play's stylesheets and components ---------------------------------------
@@ -129,13 +106,9 @@ function playComponentFiles(): string[] {
     .filter((file) => !TEST_FILE.test(relative(file)))
 }
 
-function withoutCssComments(css: string): string {
-  return css.replace(/\/\*[\s\S]*?\*\//g, ' ')
-}
-
 /** Every custom property the stylesheet defines (`--x:`) or reads (`var(--x`). */
 function customProperties(css: string): string[] {
-  const bare = withoutCssComments(css)
+  const bare = withoutComments(css)
   const defined = Array.from(bare.matchAll(/(?<![\w-])(--[\w-]+)\s*:/g), (match) => match[1] ?? '')
   const read = Array.from(bare.matchAll(/var\(\s*(--[\w-]+)/g), (match) => match[1] ?? '')
   return [...defined, ...read]
@@ -145,8 +118,10 @@ function isPlayVariable(name: string): boolean {
   return PLAY_VAR.test(name) || CORE_VARS_PLAY_MAY_READ.has(name)
 }
 
-function literalColours(text: string): string[] {
-  return [...Array.from(text.matchAll(HEX_COLOUR), (match) => match[0]), ...Array.from(text.matchAll(COLOUR_FUNCTION), (match) => match[0])]
+/** The literal colours in one of Play's stylesheets or components. */
+function playColours(file: string): string[] {
+  const text = fs.readFileSync(file, 'utf8')
+  return file.endsWith('.css') ? stylesheetColours(text) : componentColours(file, text)
 }
 
 describe('PRD-260 (a) — Play is ported, never imported', () => {
@@ -177,6 +152,25 @@ describe('PRD-260 (a) — Play is ported, never imported', () => {
     expect(forbiddenIn('sample.tsx', source)).toHaveLength(7)
   })
 
+  it("reads the files next/font/local loads and a stylesheet's @import and url(), never a comment (M96)", () => {
+    const folder = `${RALPH}/${SPEC}/play-fonts`
+    const fonts = [
+      "import localFont from 'next/font/local'",
+      `// The faces were copied from ${folder}`,
+      `const display = localFont({ src: [{ path: '../../${folder}/fredoka.woff2', weight: '600' }] })`,
+      "const body = localFont({ src: './fonts/play/bricolage.woff2' })",
+    ].join('\n')
+    const css = [`/* The faces were copied from ${folder} */`, `@import url('../${REF}/app/play-theme.css');`, '.auto { background: url(/auto/idle.png) }'].join('\n')
+    expect(localFontPaths('play-fonts.ts', fonts)).toEqual([`../../${folder}/fredoka.woff2`, './fonts/play/bricolage.woff2'])
+    expect(cssReferences(css)).toEqual([`../${REF}/app/play-theme.css`, '/auto/idle.png'])
+    expect([...forbiddenIn('play-fonts.ts', fonts), ...forbiddenInCss(css)]).toHaveLength(2)
+    expect([...forbiddenIn('note.ts', `// ${folder}`), ...forbiddenInCss(`/* ${folder} */`)]).toEqual([])
+    expect(cssReferences(`@import "./tokens.css"; .x { composes: chip from '../${REF}/chip.module.css' }`)).toEqual([
+      './tokens.css',
+      `../${REF}/chip.module.css`,
+    ])
+  })
+
   it('finds no import of the Play reference anywhere in the frontend', () => {
     const files = SOURCE_DIRS.flatMap((dir) => walk(path.join(FRONTEND, dir), (name) => SOURCE_FILE.test(name)))
     expect(files.length).toBeGreaterThan(0)
@@ -185,6 +179,16 @@ describe('PRD-260 (a) — Play is ported, never imported', () => {
     )
     expect(hits).toEqual([])
   }, SCAN_TIMEOUT_MS)
+
+  it("reads Play's own font files, and finds no stylesheet that loads a file of the reference (M96)", () => {
+    expect(localFontPaths(PLAY_FONTS, readFrontend(PLAY_FONTS))).toHaveLength(PLAY_FONT_FILES)
+    const sheets = SOURCE_DIRS.flatMap((dir) => walk(path.join(FRONTEND, dir), (name) => name.endsWith('.css')))
+    expect(sheets.length).toBeGreaterThan(0)
+    const hits = sheets.flatMap((file) =>
+      forbiddenInCss(fs.readFileSync(file, 'utf8')).map((reference) => `${relative(file)}: ${reference}`),
+    )
+    expect(hits).toEqual([])
+  })
 })
 
 describe("PRD-260 (b) — Play's CSS uses only --pl-* variables (K2)", () => {
@@ -221,11 +225,39 @@ describe('PRD-260 (c) — no literal colours outside the look catalogue', () => 
     expect(literalColours('a: hsl(var(--x)); b: rgba(var(--pl-y), .5)')).toEqual([])
   })
 
+  it('finds oklch(), lab(), color() and named colours, in color-mix() too; the look, transparent and currentColor pass (M96)', () => {
+    const functions = 'a: oklch(0.7 0.19 45); b: oklab(.5 .1 0); c: lab(50% 40 59); d: lch(52 72 50); e: hwb(20 10% 0%); f: color(display-p3 1 .4 .1)'
+    expect(literalColours(functions)).toHaveLength(6)
+    expect(literalColours('a: oklch(from var(--pl-accent) l c h / 50%); b: color(from var(--pl-x) srgb r g b)')).toEqual([])
+    const named = '.a { color: white; border: 1px solid RebeccaPurple; background: color-mix(in srgb, black 10%, transparent) }'
+    expect(stylesheetColours(named)).toEqual(['white', 'RebeccaPurple', 'black'])
+    const look = [
+      '.a { color: currentColor; background: color-mix(in srgb, var(--pl-accent) 30%, transparent);',
+      'font: 600 1rem/1.2 var(--font-geist-sans), sans-serif; transform: rotate(calc(tan(45deg) * 1turn)) }',
+      '.b::after { content: "red" } .c:hover { background: url(/auto/white.png) }',
+    ].join('\n')
+    expect(stylesheetColours(look)).toEqual([])
+  })
+
+  it('allows a system colour only inside @media (forced-colors: active) (M96, P260-FX-19)', () => {
+    const css = '.a { outline: 2px solid Highlight } @media (forced-colors: active) { .b { outline-color: CanvasText; color: white } }'
+    expect(splitForcedColours(css).inside).toHaveLength(1)
+    expect(stylesheetColours(css)).toEqual(['Highlight', 'white'])
+  })
+
+  it("reads a component's style values and paint attributes, never its copy (M96)", () => {
+    const source = [
+      "const ring = { color: 'white', borderColor: 'currentColor', '--pl-glow': 'gold' }",
+      "const mark = <svg><path fill=\"tomato\" stroke={'transparent'} /></svg>",
+      "const copy = <p title='Auto turned red'>Pick a black ground</p>",
+      "const look = { name: 'Gold', accent: 'molten' }",
+    ].join('\n')
+    expect(componentColours('sample.tsx', source)).toEqual(['white', 'gold', 'tomato'])
+  })
+
   it("has no literal colour in Play's stylesheets or components", () => {
     const files = [...playCssFiles(), ...playComponentFiles()]
-    const found = files.flatMap((file) =>
-      literalColours(fs.readFileSync(file, 'utf8')).map((colour) => `${relative(file)}: ${colour}`),
-    )
+    const found = files.flatMap((file) => playColours(file).map((colour) => `${relative(file)}: ${colour}`))
     expect(found).toEqual([])
   })
 
@@ -488,15 +520,13 @@ function loadKindOf(node: ts.Node): LoadKind | null {
 
 /** The module specifiers the source loads in that way. */
 function loadsOf(fileName: string, source: string, kind: LoadKind): string[] {
-  const scriptKind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
-  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, scriptKind)
   const found: string[] = []
   const visit = (node: ts.Node): void => {
     const specifier = loadKindOf(node) === kind ? specifierOf(node) : null
     if (specifier !== null) found.push(specifier)
     ts.forEachChild(node, visit)
   }
-  visit(file)
+  visit(parseSource(fileName, source))
   return found
 }
 
@@ -608,7 +638,6 @@ const STATE_SELECTOR = /\[aria-(?:pressed|current)\b/
 const RAW_ACCENT = /var\(\s*--pl-(?:color-)?accent\s*[,)]/
 /** Play's CSS held 8 rules on a pressed or current state on 15 Oct. */
 const STATE_RULES_MIN = 8
-const FORCED_COLOURS_BLOCK = /@media\s*\(\s*forced-colors\s*:\s*active\s*\)\s*\{/g
 /** `outline: none` or `0`, `outline-style: none`, `outline-width: 0`: no ring forced colours could draw. */
 const HIDDEN_OUTLINE: Readonly<Record<string, RegExp>> = {
   outline: /^(?:none|0(?:px)?)(?:\s*!important)?$/,
@@ -658,23 +687,9 @@ function declarations(body: string): ReadonlyMap<string, string> {
   return new Map(pairs)
 }
 
-/** The index of the brace that closes the block opened at `open`. */
-function blockEnd(css: string, open: number): number {
-  let depth = 0
-  for (let i = open; i < css.length; i++) {
-    if (css[i] === '{') depth++
-    else if (css[i] === '}' && --depth === 0) return i
-  }
-  return css.length
-}
-
 /** The rules inside the stylesheet's @media (forced-colors: active) blocks. */
 function forcedColoursRules(css: string): Rules {
-  const bare = withoutCssComments(css)
-  return Array.from(bare.matchAll(FORCED_COLOURS_BLOCK)).flatMap((match) => {
-    const open = (match.index ?? 0) + match[0].length - 1
-    return cssRules(bare.slice(open + 1, blockEnd(bare, open)))
-  })
+  return splitForcedColours(css).inside.flatMap((block) => cssRules(block))
 }
 
 function hidesOutline(body: string): boolean {
