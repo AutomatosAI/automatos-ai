@@ -1,11 +1,13 @@
 /**
  * PRD-260 §4 — a turn's details in Play's chat, on the core's data: the tool
  * lines from the reply's ToolCall entries, the receipts in receiptLine's words,
- * the Deliverable card, the snag box with Try again (the hook's reload()), the
- * core's TrialExhaustedBanner for a spent trial, the core's
- * MissionSuggestionCard for a mission-suggestion part, and the core's
- * WithdrawOfferCard and TaskCard a reply carries (P260-FX-29; Withdraw is
- * mocked at the core's useDenyApproval, as the core's own test does). The chat hook
+ * the Deliverable card, the snag box with Try again (the hook's reload()), a
+ * failed turn the server saved and a reply posted in the background, as the
+ * stored rows bring them (P260-FX-09), the core's TrialExhaustedBanner for a
+ * spent trial, the core's MissionSuggestionCard for a mission-suggestion part,
+ * and the core's WithdrawOfferCard and TaskCard a reply carries (P260-FX-29;
+ * Withdraw is mocked at the core's useDenyApproval, as the core's own test
+ * does). The chat hook
  * (useChatWithReceipts) and the session store are mocked; the conversation
  * loading, Auto's reducer (useAutoMascot) and the core's cards are real. Auto
  * himself is a stand-in that shows his state. Roles and text only (CSS
@@ -124,6 +126,17 @@ function userMessage(id: string, text: string): ChatMessage {
 function autoMessage(id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage {
   return { id, role: 'assistant', content: text, parts: [{ type: 'text', text }], ...extra } as unknown as ChatMessage
 }
+
+/**
+ * A reply as getChatMessages hands it over (api/chat.py get_chat_messages): parts and its
+ * persisted source, whose label the core maps into metadata.source; no content.
+ */
+function storedReply(id: string, text: string, source: { origin: string; label: string }): ChatMessage {
+  return { id, role: 'assistant', parts: [{ type: 'text', text }], source, metadata: { source: source.label } } as unknown as ChatMessage
+}
+
+const TURN_ERROR = { origin: 'turn_error', label: 'Error' }
+const BACKGROUND = { origin: 'watcher', label: 'Auto · background' }
 
 function receipt(fields: Partial<Receipt>): Receipt {
   return { action: 'platform_update_task', kind: 'write', status: 'done', subject: '', effect: '', link: null, reason: null, ...fields }
@@ -253,8 +266,12 @@ describe('the Deliverable card', () => {
     expect(within(odd).queryByRole('link')).toBeNull()
   })
 
-  it("a done receipt that links a Deliverable renders its card (the core's open_url shape)", async () => {
-    const linked = receipt({ action: 'generate_document', subject: 'Budget memo', effect: 'made', link: '/deliverables?deliverable=d-7' })
+  // Receipts don't link a Deliverable yet (receipts.py, decision F8); this is the frontend half, on the real
+  // open_url (deliverable_open_url: FRONTEND_URL + /deliverables?tab=outputs&deliverable=<id>). The card links
+  // the core's page relatively, never the receipt's own origin.
+  it("a done receipt that links a Deliverable renders its card (the core's absolute open_url)", async () => {
+    const link = 'https://app.example/deliverables?tab=outputs&deliverable=d-7'
+    const linked = receipt({ action: 'generate_document', subject: 'Budget memo', effect: 'made', link })
     await renderChat([QUESTION, autoMessage('m2', 'Made it.', { receipts: [linked] })])
     const card = within(reply()).getByRole('article', { name: 'Deliverable: Budget memo' })
     expect(within(card).getByRole('link', { name: 'Open Budget memo' })).toHaveAttribute('href', '/deliverables?deliverable=d-7')
@@ -285,6 +302,18 @@ describe('the snag box', () => {
     expect(auto()).toHaveAttribute('data-state', 'oops')
   })
 
+  it('a failed turn the server saved shows the snag box with its words and Try again, never as an answer (M29)', async () => {
+    await renderChat([QUESTION, storedReply('m2', '\u26a0\ufe0f The model is unavailable', TURN_ERROR)])
+    const saved = reply()
+    const snag = within(saved).getByRole('region', { name: SNAG_TITLE })
+    expect(snag).toHaveTextContent('The model is unavailable')
+    expect(within(saved).getAllByText(/The model is unavailable/)).toHaveLength(1)
+    expect(saved).not.toHaveTextContent('\u26a0')
+    expect(within(saved).queryByText(TURN_ERROR.label)).toBeNull()
+    fireEvent.click(within(snag).getByRole('button', { name: TRY_AGAIN }))
+    expect(chat.reload).toHaveBeenCalledTimes(1)
+  })
+
   it('only the newest reply gets Try again', async () => {
     const failed = (id: string) => autoMessage(id, '', { error: { message: 'It failed.' } })
     await renderChat([QUESTION, failed('m2'), userMessage('m3', 'Again?'), failed('m4')])
@@ -292,6 +321,22 @@ describe('the snag box', () => {
     expect(snags).toHaveLength(2)
     expect(within(snags[0]).queryByRole('button', { name: TRY_AGAIN })).toBeNull()
     expect(within(snags[1]).getByRole('button', { name: TRY_AGAIN })).toBeInTheDocument()
+  })
+})
+
+describe('a reply posted in the background (M29)', () => {
+  it("shows who wrote it under Auto's name, as Studio's badge does; a reply of the turn shows none", async () => {
+    await renderChat([
+      QUESTION,
+      autoMessage('m2', 'Here is the shortlist.'),
+      userMessage('m3', 'Watch the render for me?'),
+      storedReply('m4', 'Watched it. 8.4/10, passed.', BACKGROUND),
+    ])
+    const [turn, posted] = screen.getAllByRole('article', { name: 'Auto said' })
+    expect(within(posted).getByText(BACKGROUND.label)).toBeInTheDocument()
+    expect(posted).toHaveTextContent('Watched it. 8.4/10, passed.')
+    expect(within(posted).queryByRole('region', { name: SNAG_TITLE })).toBeNull()
+    expect(within(turn).queryByText(BACKGROUND.label)).toBeNull()
   })
 })
 

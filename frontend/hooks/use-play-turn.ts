@@ -72,7 +72,10 @@ export interface PlayTurn {
   /** Pass to useChatWithReceipts' onChatIdUpdate: the backend named the new chat, and its cards go with the name. */
   readonly onChatNamed: (chatId: string) => void
   readonly suggestion: MissionSuggestion | null
-  /** The Deliverables a reply made live this session (a stored reply's come from its receipts). */
+  /**
+   * The Deliverables a reply made live this session. A stored reply shows no Deliverable card:
+   * receipts don't link Deliverables yet (receipts.py, decision F8, backend).
+   */
   readonly deliverablesOf: (replyId: string) => readonly DeliverableRef[]
   /** The approvals the conversation's replies raised live this page session (chat.tsx's widgets are live-only too). */
   readonly approvals: PlayApprovals

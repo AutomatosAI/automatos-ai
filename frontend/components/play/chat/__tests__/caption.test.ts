@@ -2,8 +2,9 @@
  * PRD-260 §4 — the words around Play's chat, ported from Automatos Play's
  * tests/chat (caption and labels): what Auto's caption says, a tool call's
  * detail, and the core's ChatMessage read for the chat (text, title, the newest
- * reply, its activity and its running tool call, and the reply being written as
- * Auto reads it: T-003b).
+ * reply, its activity and its running tool call, a failed turn the server saved
+ * and who wrote a reply when the turn didn't (P260-FX-09), and the reply being
+ * written as Auto reads it: T-003b).
  */
 import { describe, expect, it } from 'vitest'
 
@@ -15,8 +16,11 @@ import {
   latestReply,
   messageText,
   NEW_CHAT,
+  provenanceOf,
   replyProgress,
   runningToolInput,
+  SAVED_ERROR,
+  savedTurnError,
 } from '@/components/play/chat/message-text'
 import { NO_REPLY } from '@/lib/mascot/events'
 import { captionFor } from '@/lib/mascot/media'
@@ -96,6 +100,27 @@ describe("the core's messages, read for Play", () => {
     expect(activityLines(reply)).toEqual(['Checking prices first.', '3 of 5 pages'])
     expect(runningToolInput(reply)).toEqual({ query: 'new' })
     expect(runningToolInput(undefined)).toBeUndefined()
+  })
+})
+
+describe('a failed turn the server saved, and who wrote a reply (M29)', () => {
+  const TURN_ERROR = { origin: 'turn_error', label: 'Error', code: 'model_unavailable' }
+  const BACKGROUND = { origin: 'watcher', label: 'Auto \u00b7 background' }
+  const said = (text: string) => [{ type: 'text', text }]
+
+  it("reads a saved turn error's words without the core's warning sign; any other message is none", () => {
+    expect(savedTurnError(message({ parts: said('\u26a0\ufe0f The model is unavailable'), source: TURN_ERROR }))).toBe('The model is unavailable')
+    expect(savedTurnError(message({ parts: said('\u26a0 Out of credit.'), source: TURN_ERROR }))).toBe('Out of credit.')
+    expect(savedTurnError(message({ parts: [], source: TURN_ERROR }))).toBe(SAVED_ERROR)
+    expect(savedTurnError(message({ parts: said('\u26a0\ufe0f careful') }))).toBeNull()
+    expect(savedTurnError(message({ parts: said('Watched it.'), source: BACKGROUND }))).toBeNull()
+  })
+
+  it("names who wrote a reply from metadata.source, never a saved turn error's label", () => {
+    expect(provenanceOf(message({ metadata: { source: BACKGROUND.label }, source: BACKGROUND }))).toBe(BACKGROUND.label)
+    expect(provenanceOf(message({ metadata: { source: TURN_ERROR.label }, source: TURN_ERROR }))).toBeNull()
+    expect(provenanceOf(message({ metadata: { source: '  ' } }))).toBeNull()
+    expect(provenanceOf(message({}))).toBeNull()
   })
 })
 

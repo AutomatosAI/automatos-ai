@@ -18,9 +18,29 @@ export interface LastTurn {
   readonly content: string
 }
 
+/** A message as it may arrive: useChat's own carry `content`; a stored row (getChatMessages) carries only parts. */
+type LooseMessage = {
+  readonly content?: unknown
+  readonly parts?: ReadonlyArray<{ readonly type?: unknown; readonly text?: unknown }>
+}
+
+/**
+ * What the owner said in a message: its content, else its text parts joined. A conversation loaded
+ * from the server has no content on its rows, so Try again on a reopened chat would send nothing.
+ * Local, because lib/ never imports Play's components/play/chat/message-text.
+ */
+function wordsOf(message: ChatMessage): string {
+  const loose = message as unknown as LooseMessage
+  if (typeof loose.content === 'string' && loose.content) return loose.content
+  return (loose.parts ?? [])
+    .map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
 /** The last turn to ask again, or null when the owner has said nothing yet. */
 export function lastTurn(messages: readonly ChatMessage[]): LastTurn | null {
   const index = messages.map((m) => m.role).lastIndexOf('user')
   if (index < 0) return null
-  return { kept: messages.slice(0, index), content: messages[index].content || '' }
+  return { kept: messages.slice(0, index), content: wordsOf(messages[index]) }
 }
