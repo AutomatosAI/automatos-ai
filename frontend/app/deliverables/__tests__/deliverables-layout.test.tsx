@@ -6,6 +6,11 @@
  * post, a type drill-down). DeliverableDeepLink is mounted beside the page
  * only: under Play the shelf switch opens a Deliverable as Play's own page
  * (T-007b, K8), so its sheet never opens over it.
+ *
+ * P260-FX-11 (M13): the Outputs tab IS Play's shelf, so every
+ * `?tab=outputs` link (the explorer's Back, Generate's 'Open Deliverables',
+ * the backend's own `?tab=outputs&deliverable=<id>`) keeps Play's screen;
+ * another tab, a post or a type drill-down still keeps the core's page.
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -81,7 +86,25 @@ describe('app/deliverables/layout.tsx', () => {
     showsShelf(false)
   })
 
-  it.each(['tab=brand', 'tab=socials&post=p1', 'artifact_type=code'])(
+  it("keeps Play's shelf for ?tab=outputs, the tab the shelf is (M13)", () => {
+    state.search = 'tab=outputs'
+    renderLayout()
+    showsShelf(true)
+  })
+
+  it("opens the backend's own Deliverable link (?tab=outputs&deliverable=<id>) as Play's page, the deep link not mounted (K8)", () => {
+    state.search = 'tab=outputs&deliverable=d-laptop'
+    renderLayout()
+    showsShelf(true)
+  })
+
+  it.each([
+    'tab=brand',
+    'tab=socials&post=p1',
+    'artifact_type=code',
+    'tab=outputs&artifact_type=code',
+    'tab=outputs&post=p1',
+  ])(
     "keeps the core's page for ?%s under Play (D8)",
     (search) => {
       state.search = search
