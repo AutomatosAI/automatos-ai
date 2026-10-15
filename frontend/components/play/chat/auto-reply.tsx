@@ -10,6 +10,7 @@ import { type DeliverableRef, deliverablesFromReceipts, mergeDeliverables } from
 import { activityLines, messageText } from './message-text'
 import { PlayMarkdown } from './play-markdown'
 import { Receipts } from './receipts'
+import { ReplyCards } from './reply-cards'
 import { SnagBox } from './snag-box'
 import { ToolLines } from './tool-lines'
 import styles from './chat.module.css'
@@ -21,8 +22,10 @@ import styles from './chat.module.css'
  * (a refused write, work not done), what he said before his tools and their
  * progress, his tool lines, the answer as markdown with a cursor while it
  * streams, the Deliverables the turn made, the approvals it raised (the core's
- * cards, T-005c), what he did (the receipts), a limit reached, then a failure:
- * in the snag box once the turn is over, as a plain line while he answers.
+ * cards, T-005c), the core's withdraw offer and ticket cards it carries
+ * (reply-cards.tsx, P260-FX-29), what he did (the receipts), a limit reached,
+ * then a failure: in the snag box once the turn is over, as a plain line while
+ * he answers.
  */
 
 export const SPEAKER = 'Auto'
@@ -112,6 +115,7 @@ export function AutoReply({
         <DeliverableCard key={deliverable.id} deliverable={deliverable} />
       ))}
       {approvals}
+      <ReplyCards message={message} />
       <Receipts receipts={receipts} />
       <Lines lines={notices} className={styles.notice} />
       <Failure message={message.error?.message} streaming={streaming} onRetry={onRetry} hidden={snagHidden} />

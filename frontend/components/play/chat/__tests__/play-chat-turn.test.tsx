@@ -2,8 +2,10 @@
  * PRD-260 §4 — a turn's details in Play's chat, on the core's data: the tool
  * lines from the reply's ToolCall entries, the receipts in receiptLine's words,
  * the Deliverable card, the snag box with Try again (the hook's reload()), the
- * core's TrialExhaustedBanner for a spent trial, and the core's
- * MissionSuggestionCard for a mission-suggestion part. The chat hook
+ * core's TrialExhaustedBanner for a spent trial, the core's
+ * MissionSuggestionCard for a mission-suggestion part, and the core's
+ * WithdrawOfferCard and TaskCard a reply carries (P260-FX-29; Withdraw is
+ * mocked at the core's useDenyApproval, as the core's own test does). The chat hook
  * (useChatWithReceipts) and the session store are mocked; the conversation
  * loading, Auto's reducer (useAutoMascot) and the core's cards are real. Auto
  * himself is a stand-in that shows his state. Roles and text only (CSS
@@ -13,7 +15,7 @@ import React from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Chat, ChatMessage, Receipt, ToolCall } from '@/types'
+import type { Chat, ChatMessage, Receipt, TaskCardData, ToolCall, WithdrawOffer } from '@/types'
 
 const chat = vi.hoisted(() => ({
   options: null as null | Record<string, any>,
@@ -26,11 +28,13 @@ const chat = vi.hoisted(() => ({
 }))
 const api = vi.hoisted(() => ({ getChat: vi.fn(), getChatMessages: vi.fn(), getChatHistory: vi.fn() }))
 const missions = vi.hoisted(() => ({ mutate: vi.fn() }))
+const grants = vi.hoisted(() => ({ deny: vi.fn() }))
+const router = vi.hoisted(() => ({ push: vi.fn() }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/chat',
   useSearchParams: () => new URLSearchParams(''),
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), push: router.push }),
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 vi.mock('@/lib/chat/api', () => api)
@@ -61,6 +65,10 @@ vi.mock('@/components/onboarding/power-up-card', () => ({ PowerUpCard: () => <di
 vi.mock('@/hooks/use-missions-api', () => ({
   useCreateMission: () => ({ mutate: missions.mutate, isLoading: false }),
   useMission: () => ({ data: undefined, isLoading: true }),
+}))
+// The core's WithdrawOfferCard calls this and nothing else, as its own test (withdraw-offer-card.test.tsx) mocks it.
+vi.mock('@/hooks/use-approval-grants', () => ({
+  useDenyApproval: () => ({ isLoading: false, mutateAsync: grants.deny }),
 }))
 vi.mock('@/lib/chat/use-chat-with-receipts', () => ({
   useChatWithReceipts: (options: Record<string, any>) => {
@@ -96,6 +104,7 @@ vi.mock('@/stores/chat-session-store', async () => {
 
 import { DeliverableCard } from '@/components/play/chat/deliverable-card'
 import { RECEIPTS_TITLE } from '@/components/play/chat/receipts'
+import { TICKETS_LABEL } from '@/components/play/chat/reply-cards'
 import { SNAG_TITLE, TRY_AGAIN, TURN_FAILED } from '@/components/play/chat/snag-box'
 import { MISSION_CREATED_LABEL, SUGGESTION_LABEL } from '@/components/play/chat/mission-suggestion'
 import { TOOL_LINES_LABEL } from '@/components/play/chat/tool-lines'
@@ -350,5 +359,65 @@ describe('a Mission suggestion', () => {
     fireEvent.keyDown(box, { key: 'Enter' })
     expect(chat.sendMessage).toHaveBeenCalledWith('No, just a quick answer')
     expect(screen.queryByRole('region', { name: SUGGESTION_LABEL })).toBeNull()
+  })
+})
+
+describe("the core's withdraw offer and ticket cards (P260-FX-29, F091-C2)", () => {
+  const OFFER: WithdrawOffer = {
+    message: 'You said no — withdraw the request still waiting for your yes?',
+    requests: [{ grant_id: 7, action: 'platform_delete_document', reason: "Delete 'christmas-box-2026.csv'" }],
+  }
+  const ticket = (fields: Partial<TaskCardData>): TaskCardData => ({
+    id: 92, number: '#0042', title: 'Write the landing page', status: 'in_progress', assigned_agent: 'Bob', ...fields,
+  })
+  const WITHDRAW_GROUP = { name: 'Withdraw request' }
+  const OPEN_ON_BOARD = { name: /Open on the board/ }
+
+  it("a live reply carrying a withdraw offer shows it; Withdraw calls the core's useDenyApproval and the offer reads withdrawn", async () => {
+    grants.deny.mockResolvedValue({})
+    chat.status = 'streaming'
+    const view = await renderChat([QUESTION, autoMessage('m2', '')])
+    chat.messages = [QUESTION, autoMessage('m2', "Understood, I won't delete it.", { withdrawOffer: OFFER })]
+    view.rerender(<PlayChat />)
+    const offer = within(reply()).getByRole('group', WITHDRAW_GROUP)
+    expect(offer).toHaveTextContent(OFFER.message)
+    expect(offer).toHaveTextContent("Delete 'christmas-box-2026.csv'")
+    fireEvent.click(within(offer).getByRole('button', { name: 'Withdraw' }))
+    expect(grants.deny).toHaveBeenCalledWith(7)
+    expect(await within(offer).findByText('Withdrawn.')).toBeInTheDocument()
+    expect(within(offer).queryByRole('button', { name: 'Withdraw' })).toBeNull()
+  })
+
+  it("a reply's live taskCards and a stored task_card part each render the core's TaskCard, opening the ticket on the board as Studio's does", async () => {
+    const stored = ticket({ id: 118, number: '#0043', title: 'Chat with Bob: Hey Bob', status: 'assigned' })
+    const live = ticket({})
+    await renderChat([
+      QUESTION,
+      autoMessage('m2', 'Bob has it.', { parts: [{ type: 'text', text: 'Bob has it.' }, { type: 'task_card', card: stored }] }),
+      userMessage('m3', 'And the landing page?'),
+      autoMessage('m4', 'Filed it.', { taskCards: [live] }),
+    ])
+    const [first, second] = screen.getAllByRole('region', { name: TICKETS_LABEL })
+    expect(first).toHaveTextContent('Ticket #0043')
+    expect(first).toHaveTextContent('Chat with Bob: Hey Bob')
+    expect(second).toHaveTextContent('Ticket #0042')
+    expect(second).toHaveTextContent('Write the landing page')
+    fireEvent.click(within(second).getByRole('button', OPEN_ON_BOARD))
+    expect(router.push).toHaveBeenCalledWith('/command-center?tab=board&task_id=92')
+  })
+
+  it('a reply without either shows neither, beside one that carries both (one card per ticket)', async () => {
+    const both = autoMessage('m4', 'Filed it.', {
+      parts: [{ type: 'text', text: 'Filed it.' }, { type: 'task_card', card: ticket({ status: 'assigned' }) }],
+      taskCards: [ticket({})],
+      withdrawOffer: OFFER,
+    })
+    await renderChat([QUESTION, autoMessage('m2', 'Hi.'), userMessage('m3', 'File the landing page?'), both])
+    const [plain, carrying] = screen.getAllByRole('article', { name: 'Auto said' })
+    expect(within(plain).queryByRole('group', WITHDRAW_GROUP)).toBeNull()
+    expect(within(plain).queryByRole('region', { name: TICKETS_LABEL })).toBeNull()
+    expect(within(plain).queryByRole('button', OPEN_ON_BOARD)).toBeNull()
+    expect(within(carrying).getByRole('group', WITHDRAW_GROUP)).toBeInTheDocument()
+    expect(within(carrying).getAllByRole('button', OPEN_ON_BOARD)).toHaveLength(1)
   })
 })
