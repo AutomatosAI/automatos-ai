@@ -2,16 +2,25 @@
 /**
  * PRD-260 D3 — a look as Studio's tokens: HSL triplets in Studio's own format
  * (tailwind.config.ts reads hsl(var(--x))), the pre-wrapped aliases wrapped as
- * globals.css writes them, the same names for every look, no semantic token,
- * and no name shared with Play's --pl-* set (K2).
+ * globals.css writes them, the same names for every look, Studio's consequence
+ * tokens in Play's coral (D-REVIEW F9) and no other semantic token, and no name
+ * shared with Play's --pl-* set (K2).
  */
 import { describe, expect, it } from 'vitest'
 
-import { ACCENTS, ACCENT_KEYS, GROUNDS, GROUND_KEYS, LIGHTS, SHELLS } from '@/lib/looks/catalogue'
-import { LOOK_VAR_NAMES } from '@/lib/looks/css'
+import { ACCENTS, ACCENT_KEYS, ERROR_COLOUR, GROUNDS, GROUND_KEYS, LIGHTS, SHELLS } from '@/lib/looks/catalogue'
+import { readableOn } from '@/lib/looks/contrast'
+import { LOOK_VAR_NAMES, isDarkGround } from '@/lib/looks/css'
 import { formatNumber, hexToTriplet, tripletToHex } from '@/lib/looks/hsl'
 import { DAYLIGHT, EMBER, PRESETS } from '@/lib/looks/presets'
-import { STUDIO_TOKEN_NAMES, lookToStudioTokens, overGround } from '@/lib/looks/studio-tokens'
+import {
+  ACCENT_TINT_ALPHA_DARK,
+  ACCENT_TINT_ALPHA_LIGHT,
+  STUDIO_TOKEN_NAMES,
+  lookToStudioTokens,
+  overGround,
+  studioAccent,
+} from '@/lib/looks/studio-tokens'
 
 const TRIPLET = /^\d{1,3}(\.\d{1,2})? \d{1,3}(\.\d{1,2})?% \d{1,3}(\.\d{1,2})?%$/
 const WRAPPED = /^hsl\((.+?)( \/ 0\.\d{2})?\)$/
@@ -19,10 +28,13 @@ const ALIASES = ['--paper', '--bg-1', '--bg-2', '--fg', '--fg-2', '--fg-3', '--b
 const TRIPLET_TOKENS = [
   '--background', '--foreground', '--card', '--card-foreground', '--popover', '--popover-foreground',
   '--primary', '--primary-foreground', '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',
-  '--accent', '--accent-foreground', '--border', '--input', '--ring',
+  '--accent', '--accent-foreground', '--destructive', '--destructive-foreground', '--border', '--input', '--ring',
   '--background-gradient-from', '--background-gradient-to', '--glass-border-hover', '--cc-hover', '--cc-hover-border',
 ]
-const SEMANTIC = ['--destructive', '--success', '--warning', '--info', '--agent', '--chart-1', '--stage-1', '--navy', '--olive']
+const CONSEQUENCE = ['--accent', '--destructive']
+const SEMANTIC = ['--success', '--warning', '--info', '--agent', '--chart-1', '--stage-1', '--navy', '--olive']
+/** Play's coral on Paper, darkened to read (readableOn of #FF6B6B on #F4EEE8 and #FFFFFF). */
+const PAPER_CORAL = '1.3 38.66% 46.67%' // #A54B49
 
 const EVERY_PAIR = GROUND_KEYS.flatMap((ground) => ACCENT_KEYS.map((accent) => ({ ...EMBER, ground, accent })))
 
@@ -48,24 +60,29 @@ describe('lookToStudioTokens', () => {
     }
   })
 
-  it("gives Ember's background, foreground and primary as hand-computed triplets", () => {
+  it("gives Ember's background, foreground, primary and consequence colour as hand-computed triplets", () => {
     const tokens = lookToStudioTokens(EMBER)
     expect(tokens['--background']).toBe('20 8.57% 6.86%') // #131110
     expect(tokens['--foreground']).toBe('30 35.29% 93.33%') // #F4EEE8
-    expect(tokens['--primary']).toBe('20.09 100% 56.08%') // #FF6A1F
-    expect(tokens['--primary-foreground']).toBe('20 85.71% 5.49%') // #1A0A02, Molten's ink
+    // Molten mixed 40% toward the text: raw #FF6A1F is 3.86:1 under a bg-primary/20 chip on --muted.
+    expect(tokens['--primary']).toBe('20.57 94.59% 70.98%') // #FB9F6F
+    expect(tokens['--primary-foreground']).toBe('20 8.57% 6.86%') // #131110, the ground's bg
     expect(tokens['--ring']).toBe(tokens['--primary'])
     expect(tokens['--bg-1']).toBe('hsl(20 8.57% 6.86%)')
-    expect(tokens['--accent-2']).toBe('hsl(20.09 100% 56.08% / 0.14)')
+    expect(tokens['--accent']).toBe('0 100% 70.98%') // #FF6B6B, Play's coral, readable on Graphite as it is
+    expect(tokens['--accent-foreground']).toBe('20 8.57% 6.86%')
+    expect(tokens['--accent-2']).toBe('hsl(0 100% 70.98% / 0.14)')
   })
 
-  it("uses the readable accent on Paper, with the ground's bg as its ink and Studio Light's tint", () => {
+  it("uses the readable accent and coral on Paper, with the ground's bg as their ink and Studio Light's tint", () => {
     const tokens = lookToStudioTokens(DAYLIGHT)
     expect(tokens['--background']).toBe('30 35.29% 93.33%')
-    expect(tokens['--primary']).toBe(hexToTriplet('#AA4C1C'))
-    expect(tokens['--accent']).toBe(tokens['--primary'])
+    expect(tokens['--primary']).toBe('20.21 64.63% 28.82%') // #793A1A
     expect(tokens['--primary-foreground']).toBe(hexToTriplet(GROUNDS.paper.bg))
-    expect(tokens['--accent-2']).toBe(`hsl(${hexToTriplet('#AA4C1C')} / 0.10)`)
+    expect(tokens['--accent']).toBe(PAPER_CORAL)
+    expect(tokens['--destructive']).toBe(PAPER_CORAL)
+    expect(tokens['--destructive-foreground']).toBe(hexToTriplet(GROUNDS.paper.bg))
+    expect(tokens['--accent-2']).toBe(`hsl(${PAPER_CORAL} / 0.10)`)
   })
 
   it('composites the rgba lines and chips over the ground before converting', () => {
@@ -77,7 +94,23 @@ describe('lookToStudioTokens', () => {
     expect(tokens['--input']).toBe(tokens['--border'])
   })
 
-  it('leaves the semantic tokens to Studio (the tone follows the ground)', () => {
+  it("draws --accent and --destructive in the ground's readable coral for all 24 pairs, never the look's accent", () => {
+    for (const look of EVERY_PAIR) {
+      const { bg, surface, text } = GROUNDS[look.ground]
+      const coral = hexToTriplet(readableOn(ERROR_COLOUR, bg, surface, text))
+      const tint = (isDarkGround(look.ground) ? ACCENT_TINT_ALPHA_DARK : ACCENT_TINT_ALPHA_LIGHT).toFixed(2)
+      const accentFill = hexToTriplet(studioAccent(look.ground, look.accent).fill)
+      const tokens = lookToStudioTokens(look)
+      const pair = `${look.ground} × ${look.accent}`
+      for (const name of CONSEQUENCE) expect({ pair, name, value: tokens[name] }).toEqual({ pair, name, value: coral })
+      expect({ pair, accent: tokens['--accent'] === accentFill }).toEqual({ pair, accent: false })
+      expect({ pair, primary: tokens['--primary'] }).toEqual({ pair, primary: accentFill })
+      expect({ pair, ink: tokens['--destructive-foreground'] }).toEqual({ pair, ink: tokens['--accent-foreground'] })
+      expect({ pair, tint: tokens['--accent-2'] }).toEqual({ pair, tint: `hsl(${coral} / ${tint})` })
+    }
+  })
+
+  it('leaves the other semantic tokens to Studio (the tone follows the ground)', () => {
     for (const look of PRESETS) {
       const names = Object.keys(lookToStudioTokens(look))
       for (const name of SEMANTIC) expect(names).not.toContain(name)

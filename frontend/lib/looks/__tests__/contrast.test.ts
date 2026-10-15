@@ -14,12 +14,15 @@ import {
   contrastRatio,
   mixHex,
   readableOn,
+  readableOnAll,
+  readableOnTinted,
+  readsOnAll,
   relativeLuminance,
 } from '@/lib/looks/contrast'
 import { lookToCssVars } from '@/lib/looks/css'
 import { tripletToHex } from '@/lib/looks/hsl'
 import { EMBER } from '@/lib/looks/presets'
-import { lookToStudioTokens } from '@/lib/looks/studio-tokens'
+import { PRIMARY_TINT_MAX, lookToStudioTokens, textFills } from '@/lib/looks/studio-tokens'
 
 const PAIRS = GROUND_KEYS.flatMap((ground) => ACCENT_KEYS.map((accent) => ({ ground, accent })))
 const CHANNEL_TOLERANCE = 4
@@ -107,6 +110,41 @@ describe('readableOn', () => {
   })
 })
 
+describe('readableOnAll and readableOnTinted', () => {
+  it('readableOn is readableOnAll on the bg and the surface', () => {
+    for (const { ground, accent } of PAIRS) {
+      const { bg, surface, text } = GROUNDS[ground]
+      const { hex } = ACCENTS[accent]
+      expect(readableOn(hex, bg, surface, text)).toBe(readableOnAll(hex, [bg, surface], text))
+    }
+  })
+
+  it("reads on every fill it is given, Studio's chips included", () => {
+    for (const { ground, accent } of PAIRS) {
+      const fills = textFills(ground)
+      const colour = readableOnAll(ACCENTS[accent].hex, fills, GROUNDS[ground].text)
+      expect({ ground, accent, reads: readsOnAll(colour, fills) }).toEqual({ ground, accent, reads: true })
+    }
+  })
+
+  it('also reads on each fill tinted by the result itself, where the flat answer does not', () => {
+    const { text } = GROUNDS.graphite
+    const fills = textFills('graphite')
+    const flat = readableOnAll(ACCENTS.molten.hex, fills, text)
+    const tinted = readableOnTinted(ACCENTS.molten.hex, fills, text, PRIMARY_TINT_MAX)
+    const tintedBy = (colour: string) => fills.map((fill) => mixHex(fill, colour, PRIMARY_TINT_MAX))
+    expect(flat).toBe('#FF6A1F')
+    expect(readsOnAll(flat, tintedBy(flat))).toBe(false)
+    expect(tinted).toBe('#FB9F6F')
+    expect(readsOnAll(tinted, [...fills, ...tintedBy(tinted)])).toBe(true)
+  })
+
+  it('falls back to the text when no mix reads', () => {
+    expect(readableOnAll('#777777', ['#777777'], '#787878')).toBe('#787878')
+    expect(readableOnTinted('#777777', ['#777777'], '#787878', PRIMARY_TINT_MAX)).toBe('#787878')
+  })
+})
+
 describe("every ground × accent pair reads at AA — Play's variables", () => {
   it('covers 24 pairs', () => {
     expect(PAIRS).toHaveLength(24)
@@ -143,18 +181,39 @@ describe("every ground × accent pair reads at AA — Studio's tokens", () => {
     ['--muted-foreground', '--background'],
     ['--muted-foreground', '--card'],
     ['--muted-foreground', '--muted'],
+    ['--muted-foreground', '--secondary'],
     ['--accent-foreground', '--accent'],
+    ['--destructive-foreground', '--destructive'],
     ['--primary', '--background'],
     ['--primary', '--card'],
+    ['--accent', '--background'],
+    ['--accent', '--card'],
+    ['--destructive', '--background'],
+    ['--destructive', '--card'],
     ['--fg-3', '--bg-1'],
     ['--fg-3', '--paper'],
+    ['--fg-3', '--bg-2'],
+    ['--fg-3', '--muted'],
   ]
+  /** Studio's text-primary chips: bg-primary/10, /15 and /20 over each fill Studio sets them on. */
+  const PRIMARY_TINTS = [0.1, 0.15, 0.2]
+  const TINTED_FILLS = ['--background', '--card', '--secondary', '--muted']
+
+  function expectPrimaryReadsOnItsTints(tokens: Readonly<Record<string, string>>): void {
+    const primary = drawn(tokens, '--primary')
+    for (const alpha of PRIMARY_TINTS) {
+      for (const fill of TINTED_FILLS) {
+        expectAa(`--primary on --primary/${alpha} over ${fill}`, primary, mixHex(drawn(tokens, fill), primary, alpha))
+      }
+    }
+  }
 
   it.each(PAIRS)('$ground with $accent', ({ ground, accent }) => {
     const tokens = lookToStudioTokens({ ...EMBER, ground, accent })
     for (const [foreground, background] of TEXT_PAIRS) {
       expectAa(`${foreground} on ${background}`, drawn(tokens, foreground), drawn(tokens, background))
     }
+    expectPrimaryReadsOnItsTints(tokens)
     expectRatio('--ring on --background', drawn(tokens, '--ring'), drawn(tokens, '--background'), AA_NON_TEXT)
   })
 })

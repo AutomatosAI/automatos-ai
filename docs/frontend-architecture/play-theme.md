@@ -244,12 +244,14 @@ A look becomes two sets of CSS custom properties, both set inline on `<html>` an
 | `--muted-foreground` | text2 |
 | `--border`, `--input` | the line composited over the bg |
 | `--glass-border-hover`, `--cc-hover-border` | the border mixed 15% toward the text |
-| `--paper`, `--bg-1`, `--bg-2`, `--fg`, `--fg-2`, `--fg-3`, `--border-2` (wrapped) | surface, bg, secondary, text, text2, faded text2 (toward bg while still readable), strong border |
-| `--primary`, `--accent`, `--ring` | the readable accent (`studioAccent`: `readableOn` of the accent on this ground) |
-| `--primary-foreground`, `--accent-foreground` | the accent's ink when the raw accent reads, else the ground's bg |
-| `--accent-2` (wrapped, with alpha) | the readable accent at 0.14 on a dark ground, 0.10 on Paper |
+| `--paper`, `--bg-1`, `--bg-2`, `--fg`, `--fg-2`, `--fg-3`, `--border-2` (wrapped) | surface, bg, secondary, text, text2, faded text2 (toward bg while it still reads on bg, surface, secondary and muted; text2 made readable on them when no fade does), strong border |
+| `--primary`, `--ring` | the readable accent (`studioAccent`: `readableOnTinted` of the accent on bg, surface, secondary and muted, flat and under a `PRIMARY_TINT_MAX` = 0.2 tint of itself, for Studio's `bg-primary/20 text-primary` chips) |
+| `--primary-foreground` | the accent's ink when the raw accent passes, else the ground's bg |
+| `--accent`, `--destructive` | Play's coral readable on this ground (`studioConsequence`: `readableOn` of `ERROR_COLOUR`, the same colour as `--pl-error-text`), never the look's accent: Studio draws errors and destructive actions in them (its own `--accent` and `--destructive` are one burnt orange) |
+| `--accent-foreground`, `--destructive-foreground` | the ground's bg when it reads at AA on that coral, else the surface |
+| `--accent-2` (wrapped, with alpha) | the readable coral at 0.14 on a dark ground, 0.10 on Paper |
 
-The semantic tokens (destructive, success, warning, info, agent, `chart-*`, `stage-*`) are **not** set: the tone follows the ground (below), so Studio's own Light or Dark values apply and match it.
+The other semantic tokens (success, warning, info, agent, `chart-*`, `stage-*`) are **not** set: the tone follows the ground (below), so Studio's own Light or Dark values apply and match it.
 
 ### On `<html>`, only under Play (K3)
 
@@ -263,7 +265,7 @@ The semantic tokens (destructive, success, warning, info, agent, `chart-*`, `sta
 
 ### The contrast guarantee
 
-`frontend/lib/looks/__tests__/contrast.test.ts` holds all 24 ground × accent pairs to WCAG AA. For Play's variables: text and text2 on bg and surface, the accent's ink on the accent, the derived accent and error text on bg and surface, and the sheet's text and accent on the sheet. For Studio's tokens: each `-foreground` on its background, `--muted-foreground` on the background, card and muted, `--primary` as text on the background and the card, `--fg-3` on `--bg-1` and `--paper`, and `--ring` at 3:1 (non-text) on the background. It also pins the ratios measured on 14 Oct (Graphite text on bg 16.36:1, text2 on bg 8.54:1, molten's ink on molten 6.74:1, Paper text2 on bg 5.12:1). `lib/looks/__tests__/studio-tokens.test.ts` checks every token is a valid triplet or wrapped alias for all 24 pairs and that no Studio token name is a `--pl-*` name.
+`frontend/lib/looks/__tests__/contrast.test.ts` holds all 24 ground × accent pairs to WCAG AA. For Play's variables: text and text2 on bg and surface, the accent's ink on the accent, the derived accent and error text on bg and surface, and the sheet's text and accent on the sheet. For Studio's tokens: each `-foreground` on its background, `--muted-foreground` on the background, card, secondary and muted, `--primary`, `--accent` and `--destructive` as text on the background and the card, `--primary` over its own 0.1, 0.15 and 0.2 tints on the background, card, secondary and muted, `--fg-3` on `--bg-1`, `--paper`, `--bg-2` and `--muted`, and `--ring` at 3:1 (non-text) on the background. It also pins the ratios measured on 14 Oct (Graphite text on bg 16.36:1, text2 on bg 8.54:1, molten's ink on molten 6.74:1, Paper text2 on bg 5.12:1). `lib/looks/__tests__/studio-tokens.test.ts` checks every token is a valid triplet or wrapped alias for all 24 pairs, that `--accent` and `--destructive` are the ground's readable coral and never the look's accent, and that no Studio token name is a `--pl-*` name.
 
 **Sources:** [frontend/lib/looks/css.ts](), [frontend/lib/looks/contrast.ts](), [frontend/lib/looks/studio-tokens.ts](), [frontend/lib/looks/hsl.ts](), [frontend/lib/looks/document.ts](), [frontend/components/looks/look-provider.tsx](), [frontend/app/play-theme.css]()
 
