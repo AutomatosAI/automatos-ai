@@ -123,9 +123,16 @@ const elapse = (ms: number) =>
     await vi.advanceTimersByTimeAsync(ms)
   })
 
-/** Let every retry of the ask in flight run: each fails or answers as `health.up` says. */
+/**
+ * Let react-query hand a settled ask to React. Its notify is a setTimeout(0), and a timer set
+ * during a fake tick fires 1 ms later, so the last retry's answer lands one fake ms after it.
+ */
+const settle = () => elapse(1)
+
+/** Let every retry of the ask in flight run, each failing or answering as `health.up` says, and settle. */
 async function throughRetries() {
   for (let retry = 0; retry < BACKEND_HEALTH_RETRIES; retry += 1) await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
+  await settle()
 }
 
 const asleepHeading = () => screen.queryByRole('heading', { level: 1, name: ASLEEP_TITLE })
@@ -191,6 +198,7 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
       expect(screen.getByText('The page')).toBeInTheDocument()
       await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
     }
+    await settle()
     expect(healthCalls()).toBe(1 + BACKEND_HEALTH_RETRIES)
     expect(api.request).toHaveBeenCalledWith('/health')
     expect(asleepHeading()).toBeInTheDocument()
@@ -231,6 +239,7 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
       expect(screen.getByText('The page')).toBeInTheDocument()
       await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
     }
+    await settle()
     expect(healthCalls()).toBe(2 + BACKEND_HEALTH_RETRIES)
     expect(asleepHeading()).toBeInTheDocument()
     expect(screen.queryByText('The page')).not.toBeInTheDocument()
@@ -259,6 +268,7 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
     health.up = true
     fireEvent.click(screen.getByRole('button', { name: CHECK_AGAIN }))
     await elapse(0)
+    await settle()
     expect(screen.getByText('The page')).toBeInTheDocument()
     expect(mounts.page).toBe(mountsWhileAsleep + 1)
     expect(asleepHeading()).not.toBeInTheDocument()
@@ -271,6 +281,7 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
     await elapse(ASLEEP_RECHECK_MS)
     // The countdown asks as React renders its last second; the answer reaches the gate on the next turn.
     await elapse(0)
+    await settle()
     expect(healthCalls()).toBe(2 + BACKEND_HEALTH_RETRIES)
     expect(screen.getByText('The page')).toBeInTheDocument()
     expect(asleepHeading()).not.toBeInTheDocument()

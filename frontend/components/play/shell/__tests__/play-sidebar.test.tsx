@@ -95,6 +95,12 @@ const elapse = (ms: number) =>
     await vi.advanceTimersByTimeAsync(ms)
   })
 
+/**
+ * Let react-query hand a settled ask to React. Its notify is a setTimeout(0), and a timer set
+ * during a fake tick fires 1 ms later, so the last retry's answer lands one fake ms after it.
+ */
+const settle = () => elapse(1)
+
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
@@ -258,6 +264,7 @@ describe('Play sidebar — the connection pill (GET /health)', () => {
       expect(pill).toHaveTextContent('Checking…')
       await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
     }
+    await settle()
     expect(healthCalls()).toBe(1 + BACKEND_HEALTH_RETRIES)
     expect(pill).toHaveTextContent('Not running')
   })
@@ -274,6 +281,7 @@ describe('Play sidebar — the connection pill (GET /health)', () => {
       expect(pill).toHaveTextContent('Connected · localhost')
       await elapse(BACKEND_HEALTH_RETRY_DELAY_MS)
     }
+    await settle()
     expect(healthCalls()).toBe(2 + BACKEND_HEALTH_RETRIES)
     expect(pill).toHaveTextContent('Not running')
   })

@@ -156,6 +156,9 @@ async function renderTurn() {
   chat.status = 'streaming'
   const view = render(<PlayChat />)
   await screen.findByRole('list', { name: 'Conversation' })
+  // The stored reply must be on screen (usePlayTurn files a card under the reply being written)
+  // before a test sends its tool-data part; the list can render before the messages land.
+  await screen.findAllByRole('article', { name: 'Auto said' })
   return view
 }
 
