@@ -273,8 +273,9 @@ describe('PlayDeliverable — the side panel', () => {
     const href = ask.getAttribute('href') ?? ''
     const url = new URL(href, 'http://play.invalid')
     expect(url.pathname).toBe('/chat')
-    expect(url.searchParams.get(DRAFT_PARAM)).toBe(askAboutText('Laptop shortlist'))
-    expect(url.searchParams.get(DRAFT_PARAM)).toBe('About my Deliverable "Laptop shortlist": ')
+    // One plain line (P260-FX-10): the words, their ends trimmed.
+    expect(url.searchParams.get(DRAFT_PARAM)).toBe(askAboutText('Laptop shortlist').trimEnd())
+    expect(url.searchParams.get(DRAFT_PARAM)).toBe('About my Deliverable "Laptop shortlist":')
   })
 
   it("Download hands over the file through the core's download", async () => {

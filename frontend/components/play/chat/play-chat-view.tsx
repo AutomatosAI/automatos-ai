@@ -8,13 +8,15 @@ import { type AutoMascotDriver, type BackendStatus, useAutoMascot } from '@/hook
 import { type BackendConnection, useBackendHealth } from '@/hooks/use-backend-health'
 import type { PlayConversationView } from '@/hooks/use-play-conversation'
 import { type PlayTurn, usePlayTurn } from '@/hooks/use-play-turn'
+import { useRefreshHistoryOnTurnEnd } from '@/hooks/use-refresh-history-on-turn-end'
+import { useStoppedReplies } from '@/hooks/use-stopped-reply'
 import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { usePageContext } from '@/lib/page-context'
 import type { ComposerFill } from '@/lib/play/draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { ChatMessage } from '@/types'
 
-import { ApprovalCards, LOOSE_APPROVALS_LABEL } from './approval-cards'
+import { ApprovalCards, LooseApprovalCards } from './approval-cards'
 import { chatCaption } from './caption'
 import { ExampleChips, FirstOpenHero } from './first-open'
 import { MessageBox } from './message-box'
@@ -32,13 +34,16 @@ import styles from './composer.module.css'
  * written (his thinking ends when the words start). The page lays out the
  * conversation and the message box, with Auto in the mascot column and his
  * caption saying what he is doing; an empty chat is the first open. Stop tells
- * Auto (no celebration for a stopped turn), then calls the hook's stop(), which
- * also cancels the turn on the server. A turn's
- * details (its Deliverables, a Mission suggestion, a failure, the approvals
- * it raised as the core's cards) come from usePlayTurn; Try again is the hook's
- * reload(); a spent trial shows the core's banner above the box. A card whose
- * reply left the conversation (Stop, Try again) shows under it until answered
- * or closed.
+ * Auto first (no celebration for a stopped turn), then keeps the reply Auto was
+ * writing, as stopped (useStoppedReplies, P260-FX-30), and calls the hook's
+ * stop(), which also cancels the turn on the server: the conversation on screen,
+ * and the one usePlayTurn reads, is useChat's with the stopped replies kept. A
+ * turn's details (its Deliverables, a Mission suggestion, a failure, the
+ * approvals it raised as the core's cards) come from usePlayTurn; Try again is
+ * the hook's reload(); a spent trial shows the core's banner above the box. A
+ * card whose reply left the conversation (Try again, a request failing
+ * mid-turn, the conversation shown again) shows after it, in its column, until
+ * answered or closed.
  */
 
 export interface PlayChatViewProps {
@@ -63,8 +68,9 @@ const BACKEND_OF: Readonly<Record<BackendConnection, BackendStatus | undefined>>
 function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
   const pageContext = usePageContext()
   const { connection } = useBackendHealth()
-  // useChat takes its data callback before Auto and the turn exist; the ref hands the parts on.
+  // useChat takes its callbacks before Auto and the turn exist; the refs hand the parts and the new chat's name on.
   const onPart = useRef<(part: unknown) => void>(() => undefined)
+  const onNamed = useRef<(chatId: string) => void>(() => undefined)
   const chat = useChatWithReceipts({
     id: view.chatId ?? '',
     initialMessages: view.messages,
@@ -72,11 +78,14 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
     pageContext,
     onData: (part: unknown) => onPart.current(part),
     onChatIdUpdate: (chatId: string) => {
+      onNamed.current(chatId)
       onChatIdAssigned(chatId)
       // PRD-237: the session store is the channel to the sidebar and the widget, as in chat.tsx.
       useChatSessionStore.getState().chatIdAssigned(chatId)
     },
   })
+  useRefreshHistoryOnTurnEnd(chat.status)
+  const shown = useStoppedReplies(chat)
   const auto = useAutoMascot({
     status: chat.status,
     errorCode: chat.errorCode,
@@ -84,20 +93,26 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
     backend: BACKEND_OF[connection],
     idleMs,
   })
-  const turn = usePlayTurn({ messages: chat.messages, streaming: chat.status === 'streaming', dispatch: auto.dispatch })
+  const turn = usePlayTurn({
+    chatId: view.chatId ?? '',
+    messages: shown.messages,
+    streaming: chat.status === 'streaming',
+    dispatch: auto.dispatch,
+  })
   const toAuto = auto.onData
-  const toTurn = turn.onData
+  const { onData: toTurn, onChatNamed } = turn
   useEffect(() => {
     onPart.current = (part: unknown) => {
       toAuto(part)
       toTurn(part)
     }
-  }, [toAuto, toTurn])
+    onNamed.current = onChatNamed
+  }, [toAuto, toTurn, onChatNamed])
   const { greet } = auto
   useEffect(() => {
     greet()
   }, [greet])
-  return { chat, auto, turn }
+  return { chat, auto, turn, shown }
 }
 
 /**
@@ -128,10 +143,11 @@ function newestKind(turn: PlayTurn, reply: ChatMessage | undefined): string | un
 /**
  * Send and Try again: each clears the turn's suggestion first, as chat.tsx does
  * on a new message. Stop tells Auto first (a done receipt no longer celebrates
- * the stopped turn), then stops the chat.
+ * the stopped turn), then runs `stop`: useStoppedReplies' stop, which keeps the
+ * reply being written and stops the chat.
  */
-function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn, auto: AutoMascotDriver) {
-  const { isLoading, sendMessage, reload, stop } = chat
+function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn, auto: AutoMascotDriver, stop: () => void) {
+  const { isLoading, sendMessage, reload } = chat
   const { onSend } = turn
   const { dispatch } = auto
   const send = useCallback(
@@ -162,16 +178,14 @@ function useApprovalSlots(turn: PlayTurn, chatId: string) {
     (replyId: string) => <ApprovalCards cards={of(replyId)} chatId={chatId} onAnswered={answered} onClosed={closed} />,
     [of, answered, closed, chatId],
   )
-  const looseCards = (
-    <ApprovalCards cards={loose} label={LOOSE_APPROVALS_LABEL} chatId={chatId} onAnswered={answered} onClosed={closed} />
-  )
+  const looseCards = <LooseApprovalCards cards={loose} chatId={chatId} onAnswered={answered} onClosed={closed} />
   return { approvalsOf, looseCards }
 }
 
 export function PlayChatView(props: PlayChatViewProps) {
-  const { chat, auto, turn } = usePlayChat(props)
+  const { chat, auto, turn, shown } = usePlayChat(props)
   const composer = useComposer(auto, props.draft ?? null, props.onDraftTaken)
-  const { send, retry, onStop } = useSending(chat, turn, auto)
+  const { send, retry, onStop } = useSending(chat, turn, auto, shown.stop)
   const { approvalsOf, looseCards } = useApprovalSlots(turn, props.view.chatId ?? '')
   const streaming = chat.status === 'streaming'
   const empty = chat.messages.length === 0
@@ -197,24 +211,23 @@ export function PlayChatView(props: PlayChatViewProps) {
           <FirstOpenHero state={auto.mascot} onClipEnded={auto.onClipEnded} {...caption} />
         ) : (
           <MessageList
-            messages={chat.messages}
+            messages={shown.messages}
             streaming={streaming}
             deliverablesOf={turn.deliverablesOf}
             onRetry={retry}
             trialBlocked={isTrialBlocked(chat.errorCode)}
             approvalsOf={approvalsOf}
+            isStopped={shown.isStopped}
             after={
-              <>
-                {looseCards}
-                <TurnEnd
-                  status={chat.status}
-                  errorCode={chat.errorCode}
-                  messages={chat.messages}
-                  onRetry={retry}
-                  suggestion={turn.suggestion}
-                  chatId={props.view.chatId ?? ''}
-                />
-              </>
+              <TurnEnd
+                status={chat.status}
+                errorCode={chat.errorCode}
+                messages={chat.messages}
+                onRetry={retry}
+                suggestion={turn.suggestion}
+                chatId={props.view.chatId ?? ''}
+                before={looseCards}
+              />
             }
           />
         )}

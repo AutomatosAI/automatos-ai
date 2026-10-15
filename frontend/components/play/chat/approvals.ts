@@ -15,7 +15,7 @@ import type {
  * is checked here, and the ids are checked before they reach a request path.
  * A filed card remembers the reply that raised it and whether the owner has
  * answered it or closed it; a card whose reply left the conversation is
- * loose, still open. Pure.
+ * loose, still open. Pure (stores/play-approvals-store.ts holds the cards).
  */
 
 /** chat.tsx's widget titles. */
@@ -162,17 +162,24 @@ export function withStatus(filed: readonly FiledApproval[], key: string, status:
   return filed.some(changes) ? filed.map((card) => (changes(card) ? { ...card, status } : card)) : filed
 }
 
+/** This card still waits for the owner (not answered, not closed). */
+export function isWaitingCard(card: FiledApproval): boolean {
+  return card.status === 'waiting'
+}
+
 /** Whether a card still waits for the owner. */
 export function isWaiting(filed: readonly FiledApproval[]): boolean {
-  return filed.some((card) => card.status === 'waiting')
+  return filed.some(isWaitingCard)
 }
 
 /**
  * The open cards whose reply is no longer in the conversation: useChat drops
- * the reply on Stop (and when the request fails mid-turn), and Try again
- * replaces it. The grant or Mission still waits on the server, so the card
- * stays on screen (as Studio's widget stays on its canvas) until the owner
- * answers or closes it. Never mutates.
+ * the reply when the request fails mid-turn (a reply you stopped Play keeps,
+ * hooks/use-stopped-reply.ts), and Try again replaces it; a conversation
+ * shown again (the chat screen mounted afresh) holds the server's copy of a
+ * reply, under its own id. The grant or Mission
+ * still waits on the server, so the card stays on screen (as Studio's widget
+ * stays on its canvas) until the owner answers or closes it. Never mutates.
  */
 export function looseApprovals(filed: readonly FiledApproval[], replyIds: ReadonlySet<string>): FiledApproval[] {
   return filed.filter((card) => card.status !== 'closed' && !replyIds.has(card.replyId))

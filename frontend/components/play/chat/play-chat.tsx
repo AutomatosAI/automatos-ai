@@ -20,6 +20,11 @@ import styles from './opening.module.css'
  * link's words go into the new chat's message box once. The page holds the
  * SSE lane open, as Studio's chat does, so chat_changed reaches useChat's
  * merge listener: an awaited (detached) reply and a background post land live.
+ *
+ * The conversation is held inside the frame (PlayChatScreen), never above it:
+ * when the frame mounts again ("Automatos is asleep" clearing, AsleepGate), the
+ * conversation mounts with it and loads the active one from the server, so
+ * what was said meanwhile shows instead of the snapshot it had.
  */
 
 export const OPENING = 'Opening this conversation…'
@@ -28,18 +33,20 @@ export const OPENING_TITLE = 'Conversation'
 export function PlayChat() {
   // The chat_changed lane, as components/chatbot/chat.tsx:247-251 opens it; here, not in the keyed view, so one connection.
   useBoardEventStream(true)
-  const { view, adopt, draft, takeDraft } = usePlayConversation()
   return (
     <MainLayout fullBleed>
       {/* PRD-233 S3: the local edition's first-run nudge (nothing in saas, or once a key exists). */}
       <FirstRunNudge />
-      {view ? (
-        <PlayChatView key={view.key} view={view} onChatIdAssigned={adopt} draft={draft} onDraftTaken={takeDraft} />
-      ) : (
-        <PlayChatOpening />
-      )}
+      <PlayChatScreen />
     </MainLayout>
   )
+}
+
+/** The conversation on screen, or Auto opening it: mounted (and so loaded afresh) with Play's frame. */
+function PlayChatScreen() {
+  const { view, adopt, draft, takeDraft } = usePlayConversation()
+  if (!view) return <PlayChatOpening />
+  return <PlayChatView key={view.key} view={view} onChatIdAssigned={adopt} draft={draft} onDraftTaken={takeDraft} />
 }
 
 /** A conversation on its way: Auto loading in his column, the words in the page. */

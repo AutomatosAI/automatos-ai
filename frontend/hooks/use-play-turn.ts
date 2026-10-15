@@ -2,19 +2,13 @@
 
 import { type Dispatch, type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import {
-  approvalsInPart,
-  type FiledApproval,
-  fileApprovals,
-  isWaiting,
-  looseApprovals,
-  withStatus,
-} from '@/components/play/chat/approvals'
+import { approvalsInPart, type FiledApproval, isWaiting, looseApprovals } from '@/components/play/chat/approvals'
 import { type DeliverableRef, deliverablesInPart, mergeDeliverables } from '@/components/play/chat/deliverables'
 import { latestReply } from '@/components/play/chat/message-text'
 import { type MissionSuggestion, suggestionFromData } from '@/components/play/chat/suggestion'
 import { FAILED_TURN } from '@/lib/mascot/events'
 import type { MascotEvent } from '@/lib/mascot/types'
+import { cardsOfChat, usePlayApprovalsStore } from '@/stores/play-approvals-store'
 import type { ChatMessage } from '@/types'
 
 /**
@@ -28,9 +22,15 @@ import type { ChatMessage } from '@/types'
  * approvals a reply raised (T-005c: tool_approval and mission_approval, the
  * core's widgets), each waiting for the owner until answered or closed, with
  * Auto listening meanwhile (approval-waiting, approval-settled). A card
- * outlives its reply: when useChat drops the reply (Stop, a request failing
+ * outlives its reply: when useChat drops the reply (a request failing
  * mid-turn) or Try again replaces it, the card is loose and stays on screen,
- * so it can still be answered or closed.
+ * so it can still be answered or closed; a reply you stopped stays in the
+ * conversation Play shows (use-stopped-reply.ts), and its cards stay in it.
+ * And it outlives the chat screen (M46): the cards live in
+ * play-approvals-store by conversation, so leaving
+ * the chat or switching conversation and coming back shows them again (loose
+ * when the server's copy of the reply has its own id), as Studio's widgets
+ * stay in the workspace store; a reload clears them, as it clears Studio's.
  */
 
 /** The live Deliverables by the id of the reply that made them. */
@@ -54,6 +54,12 @@ export interface PlayApprovals {
 }
 
 export interface PlayTurnOptions {
+  /**
+   * The conversation on screen ('' for a new chat), whose approval cards show: read when the chat screen
+   * mounts (it is keyed by the conversation); a new chat's name comes through onChatNamed.
+   */
+  readonly chatId: string
+  /** The conversation as Play shows it (useChat's, with the replies you stopped kept). */
   readonly messages: readonly ChatMessage[]
   /** The reply is still being written. */
   readonly streaming: boolean
@@ -66,10 +72,15 @@ export interface PlayTurn {
   readonly onData: (part: unknown) => void
   /** A new message or Try again: the turn's suggestion goes, as in chat.tsx. */
   readonly onSend: () => void
+  /** Pass to useChatWithReceipts' onChatIdUpdate: the backend named the new chat, and its cards go with the name. */
+  readonly onChatNamed: (chatId: string) => void
   readonly suggestion: MissionSuggestion | null
-  /** The Deliverables a reply made live this session (a stored reply's come from its receipts). */
+  /**
+   * The Deliverables a reply made live this session. A stored reply shows no Deliverable card:
+   * receipts don't link Deliverables yet (receipts.py, decision F8, backend).
+   */
   readonly deliverablesOf: (replyId: string) => readonly DeliverableRef[]
-  /** The approvals the turn's replies raised live (chat.tsx's widgets are live-only too). */
+  /** The approvals the conversation's replies raised live this page session (chat.tsx's widgets are live-only too). */
   readonly approvals: PlayApprovals
 }
 
@@ -120,11 +131,13 @@ function useLiveDeliverables(replyId: MutableRefObject<string | undefined>, disp
   return { onPart, deliverablesOf }
 }
 
-/** Auto stops listening for the owner once no card waits any more. */
-function useSettledEvent(waiting: boolean, dispatch: Dispatch<MascotEvent>): void {
-  const was = useRef(false)
+/** Auto listens while a card waits (one still waiting when the chat screen mounts again, too) and stops once none does. */
+function useWaitingEvents(waiting: boolean, dispatch: Dispatch<MascotEvent>): void {
+  // null until the first run: a card already waiting then was filed before this screen mounted.
+  const was = useRef<boolean | null>(null)
   useEffect(() => {
-    if (was.current && !waiting) dispatch({ type: 'approval-settled' })
+    if (was.current === null && waiting) dispatch({ type: 'approval-waiting' })
+    if (was.current === true && !waiting) dispatch({ type: 'approval-settled' })
     was.current = waiting
   }, [waiting, dispatch])
 }
@@ -137,47 +150,66 @@ function useLooseApprovals(filed: readonly FiledApproval[], messages: readonly C
   }, [filed, messages])
 }
 
+/**
+ * The conversation's cards in play-approvals-store, and the conversation they
+ * are filed under. A new chat's are filed under '' until the backend names it;
+ * then they go with the name, at once for the parts still to come in the same
+ * read of the stream (the ref) and for what the screen shows (the state). The
+ * screen is keyed by the conversation, so the name is the only change.
+ */
+function useFiledApprovals(initialChatId: string) {
+  const [chatId, setChatId] = useState(initialChatId)
+  const under = useRef(initialChatId)
+  const all = usePlayApprovalsStore((state) => state.filed)
+  const filed = useMemo(() => cardsOfChat(all, chatId), [all, chatId])
+  const named = useCallback((name: string) => {
+    usePlayApprovalsStore.getState().rename(under.current, name)
+    under.current = name
+    setChatId(name)
+  }, [])
+  return { filed, under, named }
+}
+
 /** The approvals a part raises, filed under the reply being written (once per grant or Mission); Auto listens. */
 function useLiveApprovals(
+  chatId: string,
   messages: readonly ChatMessage[],
   replyId: MutableRefObject<string | undefined>,
   dispatch: Dispatch<MascotEvent>,
 ) {
-  const [filed, setFiled] = useState<readonly FiledApproval[]>(NO_APPROVALS)
-  const seen = useRef<ReadonlySet<string>>(new Set())
+  const { filed, under, named } = useFiledApprovals(chatId)
   const onPart = useCallback(
     (part: unknown) => {
       const reply = replyId.current
-      const raised = approvalsInPart(part).filter((card) => !seen.current.has(card.key))
+      const raised = approvalsInPart(part)
       if (reply === undefined || raised.length === 0) return
-      seen.current = new Set([...Array.from(seen.current), ...raised.map((card) => card.key)])
-      const filedAt = new Date()
-      setFiled((prev) => fileApprovals(prev, raised, reply, filedAt))
-      dispatch({ type: 'approval-waiting' })
+      const fresh = usePlayApprovalsStore.getState().file(under.current, raised, reply, new Date())
+      if (fresh) dispatch({ type: 'approval-waiting' })
     },
-    [dispatch, replyId],
+    [dispatch, replyId, under],
   )
-  const answered = useCallback((key: string) => setFiled((prev) => withStatus(prev, key, 'answered')), [])
-  const closed = useCallback((key: string) => setFiled((prev) => withStatus(prev, key, 'closed')), [])
+  const setStatus = usePlayApprovalsStore((state) => state.setStatus)
+  const answered = useCallback((key: string) => setStatus(under.current, key, 'answered'), [setStatus, under])
+  const closed = useCallback((key: string) => setStatus(under.current, key, 'closed'), [setStatus, under])
   const of = useCallback(
     (id: string) => filed.filter((card) => card.replyId === id && card.status !== 'closed'),
     [filed],
   )
   const loose = useLooseApprovals(filed, messages)
   const waiting = isWaiting(filed)
-  useSettledEvent(waiting, dispatch)
+  useWaitingEvents(waiting, dispatch)
   const approvals = useMemo<PlayApprovals>(
     () => ({ of, loose, answered, closed, waiting }),
     [of, loose, answered, closed, waiting],
   )
-  return { onPart, approvals }
+  return { onPart, approvals, named }
 }
 
-export function usePlayTurn({ messages, streaming, dispatch }: PlayTurnOptions): PlayTurn {
+export function usePlayTurn({ chatId, messages, streaming, dispatch }: PlayTurnOptions): PlayTurn {
   const [suggestion, setSuggestion] = useState<MissionSuggestion | null>(null)
   const replyId = useReplyBeingWritten(messages)
   const { onPart, deliverablesOf } = useLiveDeliverables(replyId, dispatch)
-  const { onPart: onApprovalPart, approvals } = useLiveApprovals(messages, replyId, dispatch)
+  const { onPart: onApprovalPart, approvals, named } = useLiveApprovals(chatId, messages, replyId, dispatch)
   useFailureEvents(messages, streaming, dispatch)
 
   const onData = useCallback(
@@ -192,7 +224,7 @@ export function usePlayTurn({ messages, streaming, dispatch }: PlayTurnOptions):
   const onSend = useCallback(() => setSuggestion(null), [])
 
   return useMemo(
-    () => ({ onData, onSend, suggestion, deliverablesOf, approvals }),
-    [onData, onSend, suggestion, deliverablesOf, approvals],
+    () => ({ onData, onSend, onChatNamed: named, suggestion, deliverablesOf, approvals }),
+    [onData, onSend, named, suggestion, deliverablesOf, approvals],
   )
 }

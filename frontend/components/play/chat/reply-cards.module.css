@@ -1,0 +1,15 @@
+/*
+ * PRD-260 (P260-FX-29) — the core's withdraw offer and ticket cards inside
+ * Auto's reply. The cards draw on Studio's tokens (card, border, muted,
+ * primary), which the look writes under html.play (D3), so the look recolours
+ * them, as it does the approval cards (T-005c); this sheet only places them in
+ * Play's column.
+ */
+
+.cards {
+  width: 100%;
+  max-width: var(--pl-deliverable-card-max);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-3);
+}

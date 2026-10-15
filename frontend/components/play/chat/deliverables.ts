@@ -8,10 +8,17 @@ import type { Receipt } from '@/types'
  *   title, format, …}} (format_for_frontend in
  *   orchestrator/modules/tools/formatting/result_formatter.py);
  * - a done receipt whose link names a Deliverable (/deliverables/<id>, or the
- *   core's /deliverables?deliverable=<id>).
- * Both come off the wire, so an id is checked against DELIVERABLE_ID before it
- * goes into a link. A Deliverable's page is the core's
- * /deliverables?deliverable=<id> (DeliverableDeepLink's shape). Pure.
+ *   core's open_url, deliverable_open_url in generate_document_tool.py:
+ *   FRONTEND_URL + /deliverables?tab=outputs&deliverable=<id>, so absolute
+ *   wherever FRONTEND_URL is set). Receipts don't link a Deliverable yet
+ *   (consumers/chatbot/receipts.py _link names a card or an agent only:
+ *   decision F8, backend), so today only the live tool-data part brings a
+ *   card, and a reopened conversation's reply shows none.
+ * Both come off the wire, so only the id is kept, checked against
+ * DELIVERABLE_ID; the link is rebuilt on the core's own page, relative
+ * (deliverableHref), whatever origin the receipt named. A Deliverable's page
+ * is the core's /deliverables?deliverable=<id> (DeliverableDeepLink's shape).
+ * Pure.
  */
 
 export type DeliverableKind = 'document' | 'image' | 'video'
@@ -30,6 +37,8 @@ const DELIVERABLE_PAGE = /^\/deliverables\/([^/]+)\/?$/
 const DELIVERABLES_LIST = /^\/deliverables\/?$/
 /** Only for resolving relative links; never fetched. */
 const LINK_BASE = 'http://play.invalid'
+/** An absolute receipt link: the open_url with FRONTEND_URL in front. Any other scheme is no link. */
+const ABSOLUTE_LINK = /^https?:\/\//i
 const GENERATED_DOCUMENT = 'generated_document'
 
 const IMAGE_FORMATS: ReadonlySet<string> = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'])
@@ -113,16 +122,24 @@ function idOnPage(url: URL): string | null {
   }
 }
 
-/** The Deliverable id an internal receipt link names, else null. */
+/** A path in the app ("/…", not "//host"), or an absolute http(s) link. */
+function isReceiptLink(link: string): boolean {
+  return ABSOLUTE_LINK.test(link) || (link.startsWith('/') && !link.startsWith('//'))
+}
+
+/**
+ * The Deliverable id a receipt link names (a path, or the absolute open_url), else null. Only the
+ * checked id leaves here: the card links to deliverableHref(id), never to the receipt's own URL.
+ */
 export function deliverableIdFromLink(link: string | null): string | null {
-  if (!link || !link.startsWith('/') || link.startsWith('//')) return null
+  if (!link || !isReceiptLink(link)) return null
   const url = parseLink(link)
   if (url === null) return null
   const id = idOnPage(url) ?? (DELIVERABLES_LIST.test(url.pathname) ? url.searchParams.get(OPEN_PARAM) : null)
   return id && isDeliverableId(id) ? id : null
 }
 
-/** The Deliverables the done receipts link to. */
+/** The Deliverables the done receipts link to (none until receipts link Deliverables: decision F8). */
 export function deliverablesFromReceipts(receipts: readonly Receipt[] | undefined): DeliverableRef[] {
   return (receipts ?? []).flatMap((receipt) => {
     const id = receipt.status === 'done' ? deliverableIdFromLink(receipt.link) : null

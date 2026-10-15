@@ -1,3 +1,4 @@
+import { oneLine } from '@/lib/text/plain-line'
 import { CHAT_HREF } from '@/lib/ticket-links'
 
 /**
@@ -5,7 +6,9 @@ import { CHAT_HREF } from '@/lib/ticket-links'
  * Automatos Play's lib/chat/params.ts: /chat?draft=<text> (a Deliverable's "Ask
  * Auto about this"). Play's chat reads it once, opens a new chat with the words
  * in its box, and drops it from the URL (hooks/use-play-conversation.ts). The
- * core's own chat page has no such parameter and ignores it.
+ * core's own chat page has no such parameter and ignores it. Any link can carry
+ * one, so the words are always one plain line (lib/text/plain-line.ts): nothing
+ * hidden on a second line, which one Enter would send to Auto.
  */
 
 export const DRAFT_PARAM = 'draft'
@@ -29,12 +32,12 @@ function isLoneSurrogate(char: string): boolean {
 }
 
 /**
- * The first MAX_DRAFT_CHARS characters, never half an emoji. Array.from splits by
- * code point, so a lone surrogate (a Deliverable's title is backend text) stands
- * alone and is replaced.
+ * The words as one plain line, then its first MAX_DRAFT_CHARS characters, never
+ * half an emoji. Array.from splits by code point, so a lone surrogate (a
+ * Deliverable's title is backend text) stands alone and is replaced.
  */
 export function cutDraft(text: string): string {
-  return Array.from(text)
+  return Array.from(oneLine(text))
     .slice(0, MAX_DRAFT_CHARS)
     .map((char) => (isLoneSurrogate(char) ? REPLACEMENT_CHARACTER : char))
     .join('')
@@ -45,8 +48,8 @@ export function draftHref(text: string): string {
   return `${CHAT_HREF}?${DRAFT_PARAM}=${encodeURIComponent(cutDraft(text))}`
 }
 
-/** The words a link asks a new chat to start with, or null (none, or only spaces). */
+/** The words a link asks a new chat to start with, or null (none, or nothing but spaces and unsafe characters). */
 export function draftFrom(params: Pick<URLSearchParams, 'get'> | null): string | null {
-  const value = params?.get(DRAFT_PARAM)
-  return value && value.trim() ? cutDraft(value) : null
+  const words = cutDraft(params?.get(DRAFT_PARAM) ?? '')
+  return words === '' ? null : words
 }

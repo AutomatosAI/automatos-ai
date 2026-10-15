@@ -1,9 +1,13 @@
 /**
  * PRD-260 §4 — a turn's details in Play's chat, on the core's data: the tool
  * lines from the reply's ToolCall entries, the receipts in receiptLine's words,
- * the Deliverable card, the snag box with Try again (the hook's reload()), the
- * core's TrialExhaustedBanner for a spent trial, and the core's
- * MissionSuggestionCard for a mission-suggestion part. The chat hook
+ * the Deliverable card, the snag box with Try again (the hook's reload()), a
+ * failed turn the server saved and a reply posted in the background, as the
+ * stored rows bring them (P260-FX-09), the core's TrialExhaustedBanner for a
+ * spent trial, the core's MissionSuggestionCard for a mission-suggestion part,
+ * and the core's WithdrawOfferCard and TaskCard a reply carries (P260-FX-29;
+ * Withdraw is mocked at the core's useDenyApproval, as the core's own test
+ * does). The chat hook
  * (useChatWithReceipts) and the session store are mocked; the conversation
  * loading, Auto's reducer (useAutoMascot) and the core's cards are real. Auto
  * himself is a stand-in that shows his state. Roles and text only (CSS
@@ -13,7 +17,7 @@ import React from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Chat, ChatMessage, Receipt, ToolCall } from '@/types'
+import type { Chat, ChatMessage, Receipt, TaskCardData, ToolCall, WithdrawOffer } from '@/types'
 
 const chat = vi.hoisted(() => ({
   options: null as null | Record<string, any>,
@@ -26,11 +30,13 @@ const chat = vi.hoisted(() => ({
 }))
 const api = vi.hoisted(() => ({ getChat: vi.fn(), getChatMessages: vi.fn(), getChatHistory: vi.fn() }))
 const missions = vi.hoisted(() => ({ mutate: vi.fn() }))
+const grants = vi.hoisted(() => ({ deny: vi.fn() }))
+const router = vi.hoisted(() => ({ push: vi.fn() }))
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/chat',
   useSearchParams: () => new URLSearchParams(''),
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), push: router.push }),
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 vi.mock('@/lib/chat/api', () => api)
@@ -39,6 +45,8 @@ vi.mock('@/hooks/use-chat-session', () => ({ useChatSessionHydration: () => ({ k
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
 // PlayChat holds the chat_changed SSE lane open (P260-FX-02); no stream and no QueryClient here.
 vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: vi.fn() }))
+// It also asks the history again when a turn ends (P260-FX-10, proved in play-chat.test.tsx); no history list here.
+vi.mock('@/hooks/use-refresh-history-on-turn-end', () => ({ useRefreshHistoryOnTurnEnd: vi.fn() }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))
@@ -59,6 +67,10 @@ vi.mock('@/components/onboarding/power-up-card', () => ({ PowerUpCard: () => <di
 vi.mock('@/hooks/use-missions-api', () => ({
   useCreateMission: () => ({ mutate: missions.mutate, isLoading: false }),
   useMission: () => ({ data: undefined, isLoading: true }),
+}))
+// The core's WithdrawOfferCard calls this and nothing else, as its own test (withdraw-offer-card.test.tsx) mocks it.
+vi.mock('@/hooks/use-approval-grants', () => ({
+  useDenyApproval: () => ({ isLoading: false, mutateAsync: grants.deny }),
 }))
 vi.mock('@/lib/chat/use-chat-with-receipts', () => ({
   useChatWithReceipts: (options: Record<string, any>) => {
@@ -94,6 +106,7 @@ vi.mock('@/stores/chat-session-store', async () => {
 
 import { DeliverableCard } from '@/components/play/chat/deliverable-card'
 import { RECEIPTS_TITLE } from '@/components/play/chat/receipts'
+import { TICKETS_LABEL } from '@/components/play/chat/reply-cards'
 import { SNAG_TITLE, TRY_AGAIN, TURN_FAILED } from '@/components/play/chat/snag-box'
 import { MISSION_CREATED_LABEL, SUGGESTION_LABEL } from '@/components/play/chat/mission-suggestion'
 import { TOOL_LINES_LABEL } from '@/components/play/chat/tool-lines'
@@ -113,6 +126,17 @@ function userMessage(id: string, text: string): ChatMessage {
 function autoMessage(id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage {
   return { id, role: 'assistant', content: text, parts: [{ type: 'text', text }], ...extra } as unknown as ChatMessage
 }
+
+/**
+ * A reply as getChatMessages hands it over (api/chat.py get_chat_messages): parts and its
+ * persisted source, whose label the core maps into metadata.source; no content.
+ */
+function storedReply(id: string, text: string, source: { origin: string; label: string }): ChatMessage {
+  return { id, role: 'assistant', parts: [{ type: 'text', text }], source, metadata: { source: source.label } } as unknown as ChatMessage
+}
+
+const TURN_ERROR = { origin: 'turn_error', label: 'Error' }
+const BACKGROUND = { origin: 'watcher', label: 'Auto · background' }
 
 function receipt(fields: Partial<Receipt>): Receipt {
   return { action: 'platform_update_task', kind: 'write', status: 'done', subject: '', effect: '', link: null, reason: null, ...fields }
@@ -255,8 +279,12 @@ describe('the Deliverable card', () => {
     expect(within(odd).queryByRole('link')).toBeNull()
   })
 
-  it("a done receipt that links a Deliverable renders its card (the core's open_url shape)", async () => {
-    const linked = receipt({ action: 'generate_document', subject: 'Budget memo', effect: 'made', link: '/deliverables?deliverable=d-7' })
+  // Receipts don't link a Deliverable yet (receipts.py, decision F8); this is the frontend half, on the real
+  // open_url (deliverable_open_url: FRONTEND_URL + /deliverables?tab=outputs&deliverable=<id>). The card links
+  // the core's page relatively, never the receipt's own origin.
+  it("a done receipt that links a Deliverable renders its card (the core's absolute open_url)", async () => {
+    const link = 'https://app.example/deliverables?tab=outputs&deliverable=d-7'
+    const linked = receipt({ action: 'generate_document', subject: 'Budget memo', effect: 'made', link })
     await renderChat([QUESTION, autoMessage('m2', 'Made it.', { receipts: [linked] })])
     const card = within(reply()).getByRole('article', { name: 'Deliverable: Budget memo' })
     expect(within(card).getByRole('link', { name: 'Open Budget memo' })).toHaveAttribute('href', '/deliverables?deliverable=d-7')
@@ -287,6 +315,18 @@ describe('the snag box', () => {
     expect(auto()).toHaveAttribute('data-state', 'oops')
   })
 
+  it('a failed turn the server saved shows the snag box with its words and Try again, never as an answer (M29)', async () => {
+    await renderChat([QUESTION, storedReply('m2', '\u26a0\ufe0f The model is unavailable', TURN_ERROR)])
+    const saved = reply()
+    const snag = within(saved).getByRole('region', { name: SNAG_TITLE })
+    expect(snag).toHaveTextContent('The model is unavailable')
+    expect(within(saved).getAllByText(/The model is unavailable/)).toHaveLength(1)
+    expect(saved).not.toHaveTextContent('\u26a0')
+    expect(within(saved).queryByText(TURN_ERROR.label)).toBeNull()
+    fireEvent.click(within(snag).getByRole('button', { name: TRY_AGAIN }))
+    expect(chat.reload).toHaveBeenCalledTimes(1)
+  })
+
   it('only the newest reply gets Try again', async () => {
     const failed = (id: string) => autoMessage(id, '', { error: { message: 'It failed.' } })
     await renderChat([QUESTION, failed('m2'), userMessage('m3', 'Again?'), failed('m4')])
@@ -294,6 +334,22 @@ describe('the snag box', () => {
     expect(snags).toHaveLength(2)
     expect(within(snags[0]).queryByRole('button', { name: TRY_AGAIN })).toBeNull()
     expect(within(snags[1]).getByRole('button', { name: TRY_AGAIN })).toBeInTheDocument()
+  })
+})
+
+describe('a reply posted in the background (M29)', () => {
+  it("shows who wrote it under Auto's name, as Studio's badge does; a reply of the turn shows none", async () => {
+    await renderChat([
+      QUESTION,
+      autoMessage('m2', 'Here is the shortlist.'),
+      userMessage('m3', 'Watch the render for me?'),
+      storedReply('m4', 'Watched it. 8.4/10, passed.', BACKGROUND),
+    ])
+    const [turn, posted] = screen.getAllByRole('article', { name: 'Auto said' })
+    expect(within(posted).getByText(BACKGROUND.label)).toBeInTheDocument()
+    expect(posted).toHaveTextContent('Watched it. 8.4/10, passed.')
+    expect(within(posted).queryByRole('region', { name: SNAG_TITLE })).toBeNull()
+    expect(within(turn).queryByText(BACKGROUND.label)).toBeNull()
   })
 })
 
@@ -361,5 +417,65 @@ describe('a Mission suggestion', () => {
     fireEvent.keyDown(box, { key: 'Enter' })
     expect(chat.sendMessage).toHaveBeenCalledWith('No, just a quick answer')
     expect(screen.queryByRole('region', { name: SUGGESTION_LABEL })).toBeNull()
+  })
+})
+
+describe("the core's withdraw offer and ticket cards (P260-FX-29, F091-C2)", () => {
+  const OFFER: WithdrawOffer = {
+    message: 'You said no — withdraw the request still waiting for your yes?',
+    requests: [{ grant_id: 7, action: 'platform_delete_document', reason: "Delete 'christmas-box-2026.csv'" }],
+  }
+  const ticket = (fields: Partial<TaskCardData>): TaskCardData => ({
+    id: 92, number: '#0042', title: 'Write the landing page', status: 'in_progress', assigned_agent: 'Bob', ...fields,
+  })
+  const WITHDRAW_GROUP = { name: 'Withdraw request' }
+  const OPEN_ON_BOARD = { name: /Open on the board/ }
+
+  it("a live reply carrying a withdraw offer shows it; Withdraw calls the core's useDenyApproval and the offer reads withdrawn", async () => {
+    grants.deny.mockResolvedValue({})
+    chat.status = 'streaming'
+    const view = await renderChat([QUESTION, autoMessage('m2', '')])
+    chat.messages = [QUESTION, autoMessage('m2', "Understood, I won't delete it.", { withdrawOffer: OFFER })]
+    view.rerender(<PlayChat />)
+    const offer = within(reply()).getByRole('group', WITHDRAW_GROUP)
+    expect(offer).toHaveTextContent(OFFER.message)
+    expect(offer).toHaveTextContent("Delete 'christmas-box-2026.csv'")
+    fireEvent.click(within(offer).getByRole('button', { name: 'Withdraw' }))
+    expect(grants.deny).toHaveBeenCalledWith(7)
+    expect(await within(offer).findByText('Withdrawn.')).toBeInTheDocument()
+    expect(within(offer).queryByRole('button', { name: 'Withdraw' })).toBeNull()
+  })
+
+  it("a reply's live taskCards and a stored task_card part each render the core's TaskCard, opening the ticket on the board as Studio's does", async () => {
+    const stored = ticket({ id: 118, number: '#0043', title: 'Chat with Bob: Hey Bob', status: 'assigned' })
+    const live = ticket({})
+    await renderChat([
+      QUESTION,
+      autoMessage('m2', 'Bob has it.', { parts: [{ type: 'text', text: 'Bob has it.' }, { type: 'task_card', card: stored }] }),
+      userMessage('m3', 'And the landing page?'),
+      autoMessage('m4', 'Filed it.', { taskCards: [live] }),
+    ])
+    const [first, second] = screen.getAllByRole('region', { name: TICKETS_LABEL })
+    expect(first).toHaveTextContent('Ticket #0043')
+    expect(first).toHaveTextContent('Chat with Bob: Hey Bob')
+    expect(second).toHaveTextContent('Ticket #0042')
+    expect(second).toHaveTextContent('Write the landing page')
+    fireEvent.click(within(second).getByRole('button', OPEN_ON_BOARD))
+    expect(router.push).toHaveBeenCalledWith('/command-center?tab=board&task_id=92')
+  })
+
+  it('a reply without either shows neither, beside one that carries both (one card per ticket)', async () => {
+    const both = autoMessage('m4', 'Filed it.', {
+      parts: [{ type: 'text', text: 'Filed it.' }, { type: 'task_card', card: ticket({ status: 'assigned' }) }],
+      taskCards: [ticket({})],
+      withdrawOffer: OFFER,
+    })
+    await renderChat([QUESTION, autoMessage('m2', 'Hi.'), userMessage('m3', 'File the landing page?'), both])
+    const [plain, carrying] = screen.getAllByRole('article', { name: 'Auto said' })
+    expect(within(plain).queryByRole('group', WITHDRAW_GROUP)).toBeNull()
+    expect(within(plain).queryByRole('region', { name: TICKETS_LABEL })).toBeNull()
+    expect(within(plain).queryByRole('button', OPEN_ON_BOARD)).toBeNull()
+    expect(within(carrying).getByRole('group', WITHDRAW_GROUP)).toBeInTheDocument()
+    expect(within(carrying).getAllByRole('button', OPEN_ON_BOARD)).toHaveLength(1)
   })
 })

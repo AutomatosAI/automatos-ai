@@ -5,12 +5,15 @@
  * Auto's reply as the core's own ToolApprovalWidget and MissionApprovalWidget,
  * whose Approve & run, Deny and Reject call the core's hooks exactly as in
  * Studio (mocked here at the hook, as the core's widget tests do), and Auto
- * listens while a card waits for the owner. The chat hook (useChatWithReceipts)
- * and the session store are mocked; the conversation loading, Auto's reducer,
- * usePlayTurn and the core's widgets are real. Roles and text only.
+ * listens while a card waits for the owner. A card outlives the chat screen
+ * (P260-FX-08, M46): leaving the chat and opening the conversation again shows
+ * it, and a new chat's card goes with the name the backend gives it. The chat
+ * hook (useChatWithReceipts) and the session store are mocked; the conversation
+ * loading, Auto's reducer, usePlayTurn, the approvals store and the core's
+ * widgets are real. Roles and text only.
  */
 import React from 'react'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { toast } from 'sonner'
@@ -41,6 +44,8 @@ vi.mock('@/hooks/use-chat-session', () => ({ useChatSessionHydration: () => ({ k
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
 // PlayChat holds the chat_changed SSE lane open (P260-FX-02); no stream and no QueryClient here.
 vi.mock('@/hooks/use-board-event-stream', () => ({ useBoardEventStream: vi.fn() }))
+// It also asks the history again when a turn ends (P260-FX-10, proved in play-chat.test.tsx); no history list here.
+vi.mock('@/hooks/use-refresh-history-on-turn-end', () => ({ useRefreshHistoryOnTurnEnd: vi.fn() }))
 vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children?: React.ReactNode }) => <div data-testid="frame">{children}</div>,
 }))
@@ -99,7 +104,7 @@ vi.mock('@/stores/chat-session-store', async () => {
   return { useChatSessionStore: store }
 })
 
-import { APPROVALS_LABEL } from '@/components/play/chat/approval-cards'
+import { APPROVALS_LABEL, LOOSE_APPROVALS_LABEL } from '@/components/play/chat/approval-cards'
 import {
   approvalsInPart,
   fileApprovals,
@@ -110,7 +115,10 @@ import {
 } from '@/components/play/chat/approvals'
 import { AWAITING_ANSWER } from '@/components/play/chat/caption'
 import { PlayChat } from '@/components/play/chat/play-chat'
+import { TURN_END_LABEL } from '@/components/play/chat/turn-end'
 import { HELLO_KEY } from '@/lib/mascot/session'
+import { useChatSessionStore } from '@/stores/chat-session-store'
+import { usePlayApprovalsStore } from '@/stores/play-approvals-store'
 
 // --- core fixtures: the ChatMessage shape of types/chat.ts, the payloads of result_formatter.py ----------
 
@@ -124,6 +132,9 @@ function autoMessage(id: string, text: string): ChatMessage {
 
 const STORED_CHAT: Chat = { id: 'c1', title: 'Tidy the shelf', userId: 'u1', createdAt: '', updatedAt: '', visibility: 'private', turnInFlight: false }
 const QUESTION = userMessage('m1', 'Delete the old brief?')
+const SESSION = { activeChatId: 'c1', draftOpen: false, openChatIds: ['c1'] }
+/** The server's copy of the reply that raised the card: its own id, not the one useChat gave it while streaming. */
+const STORED_REPLY = autoMessage('m2-stored', 'That needs your OK first.')
 
 const TOOL_APPROVAL = {
   grant_id: 42,
@@ -186,13 +197,26 @@ beforeEach(() => {
   window.sessionStorage.setItem(HELLO_KEY, '1') // hello already played this session
   Object.values(api).forEach((fn) => fn.mockReset())
   api.getChatHistory.mockResolvedValue([])
+  usePlayApprovalsStore.setState({ filed: [] }) // the page session's cards: none yet
 })
 
 afterEach(() => {
   vi.clearAllMocks()
   window.sessionStorage.clear()
   Object.assign(chat, { options: null, status: 'idle', messages: null })
+  useChatSessionStore.setState({ session: SESSION })
 })
+
+/** Leave the chat, then open `chatId` again: the screen mounts afresh and loads the conversation from the server. */
+async function openAgain(view: ReturnType<typeof render>, chatId: string, messages: ChatMessage[]) {
+  view.unmount()
+  Object.assign(chat, { status: 'idle', messages: null })
+  useChatSessionStore.setState({ session: { activeChatId: chatId, draftOpen: false, openChatIds: [chatId] } })
+  api.getChat.mockResolvedValue({ ...STORED_CHAT, id: chatId })
+  api.getChatMessages.mockResolvedValue(messages)
+  render(<PlayChat />)
+  await screen.findAllByRole('article', { name: 'Auto said' })
+}
 
 describe('an action that needs approval (tool_approval)', () => {
   it("renders the core's 'Action approval needed' card inside the reply: the action, its oversight and its params", async () => {
@@ -306,6 +330,73 @@ describe('a Mission plan that needs approval (mission_approval)', () => {
   })
 })
 
+describe('a card outlives the chat screen (P260-FX-08, M46)', () => {
+  it('leaving the chat and opening the conversation again shows the waiting card: Approve & run still calls grant(42), Auto listens until then', async () => {
+    grants.grant.mockResolvedValue({ grant: { id: 42, status: 'revoked', details: { executed_result: { success: true } } } })
+    const view = await renderTurn()
+    data(toolData({ tool_approval: TOOL_APPROVAL }))
+    finishTurn(view)
+    await openAgain(view, 'c1', [QUESTION, STORED_REPLY])
+
+    const open = screen.getByRole('region', { name: LOOSE_APPROVALS_LABEL })
+    expect(within(screen.getByRole('group', { name: TURN_END_LABEL })).getByRole('region', { name: LOOSE_APPROVALS_LABEL })).toBe(open)
+    expect(within(open).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'listening'))
+    expect(auto()).toHaveTextContent(AWAITING_ANSWER)
+
+    await click(within(open).getByRole('button', { name: /approve & run/i }))
+    expect(grants.grant).toHaveBeenCalledWith(42)
+    await waitFor(() => expect(within(screen.getByRole('region', { name: APPROVALS_LABEL })).getByRole('status')).toHaveTextContent(/the action ran/i))
+    expect(screen.queryByRole('region', { name: LOOSE_APPROVALS_LABEL })).toBeNull()
+    await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
+  })
+
+  it('a reply that comes back with the same id holds its card again', async () => {
+    const view = await renderTurn()
+    data(toolData({ tool_approval: TOOL_APPROVAL }))
+    finishTurn(view)
+    await openAgain(view, 'c1', [QUESTION, autoMessage('m2', 'That needs your OK first.')])
+    expect(within(cards()).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: LOOSE_APPROVALS_LABEL })).toBeNull()
+  })
+
+  it('another conversation never shows it, and a closed card stays closed when its conversation is open again', async () => {
+    const view = await renderTurn()
+    data(toolData({ tool_approval: TOOL_APPROVAL }))
+    finishTurn(view)
+    await openAgain(view, 'c2', [userMessage('m5', 'Something else'), autoMessage('m6', 'Sure.')])
+    expect(screen.queryByText(TOOL_APPROVAL_TITLE)).toBeNull()
+    expect(auto()).not.toHaveAttribute('data-state', 'listening')
+    cleanup()
+    useChatSessionStore.setState({ session: SESSION })
+
+    const again = await renderTurn()
+    await click(within(cards()).getByRole('button', { name: 'Close' }))
+    await openAgain(again, 'c1', [QUESTION, STORED_REPLY])
+    expect(screen.queryByText(TOOL_APPROVAL_TITLE)).toBeNull()
+  })
+
+  it("a new chat's card goes with the name the backend gives it: that conversation shows it again, a new chat doesn't", async () => {
+    useChatSessionStore.setState({ session: { activeChatId: null, draftOpen: true, openChatIds: ['c1'] } })
+    Object.assign(chat, { status: 'streaming', messages: [QUESTION, autoMessage('m2', '')] })
+    const view = render(<PlayChat />)
+    await screen.findAllByRole('article', { name: 'Auto said' })
+    data(toolData({ tool_approval: TOOL_APPROVAL }))
+    act(() => chat.options?.onChatIdUpdate('c9'))
+    expect(within(cards()).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    finishTurn(view)
+
+    await openAgain(view, 'c9', [QUESTION, STORED_REPLY])
+    expect(within(screen.getByRole('region', { name: LOOSE_APPROVALS_LABEL })).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    cleanup()
+    useChatSessionStore.setState({ session: { activeChatId: null, draftOpen: true, openChatIds: ['c9'] } })
+    Object.assign(chat, { status: 'streaming', messages: [QUESTION, autoMessage('m7', '')] })
+    render(<PlayChat />)
+    await screen.findAllByRole('article', { name: 'Auto said' })
+    expect(screen.queryByText(TOOL_APPROVAL_TITLE)).toBeNull()
+  })
+})
+
 describe('parts that are not approvals', () => {
   it('render nothing and leave Auto as he was', async () => {
     await renderTurn()
@@ -341,7 +432,7 @@ describe('approvals.ts: the part read as chat.tsx reads it', () => {
     expect(withStatus(filed, 'tool-9', 'answered')).toBe(filed)
   })
 
-  it('a card whose reply left the conversation is loose until it is closed (play-chat-approvals-stream.test.tsx: Stop, Try again)', () => {
+  it('a card whose reply left the conversation is loose until it is closed (play-chat-approvals-stream.test.tsx: Try again)', () => {
     const filed = fileApprovals([], approvalsInPart(toolData({ tool_approval: TOOL_APPROVAL })), 'm2', new Date(0))
     expect(looseApprovals(filed, new Set(['m1', 'm2']))).toEqual([])
     expect(looseApprovals(filed, new Set(['m1']))).toEqual(filed)
