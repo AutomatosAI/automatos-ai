@@ -112,7 +112,7 @@ describe('Make it yours under Play', () => {
     expect(card('Aurora')).toHaveAttribute('aria-pressed', 'false')
 
     const editor = within(screen.getByRole('complementary', { name: 'Edit the look' }))
-    for (const name of ['Accent · Molten', 'Background', 'Type', "Auto's shell", "Auto's light · eyes + ring"]) {
+    for (const name of ['Accent · Molten', 'Background', 'Type', "Auto's shell", "Auto's light · ring"]) {
       expect(editor.getByRole('group', { name })).toBeInTheDocument()
     }
     expect(editor.getByRole('slider', { name: 'Glow' })).toHaveValue('24')

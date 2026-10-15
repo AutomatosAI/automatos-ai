@@ -30,6 +30,8 @@ import { colourStyle, typeStyle } from './swatch-style'
  */
 
 export const TYPE_SAMPLE = 'Laptop shortlist'
+/** The light colours Auto's ring (and the connected dot); his eyes are part of the clips, so the shell tints them (F12). */
+export const LIGHT_LABEL = "Auto's light · ring"
 const GLOW_STEP = 1
 
 export interface OptionsProps {
@@ -136,7 +138,7 @@ export function ShellOptions({ look, onChange }: OptionsProps) {
 
 export function LightOptions({ look, onChange }: OptionsProps) {
   return (
-    <OptionGroup label="Auto's light · eyes + ring" layout={styles.chips}>
+    <OptionGroup label={LIGHT_LABEL} layout={styles.chips}>
       {LIGHT_KEYS.map((key) => (
         <button
           key={key}

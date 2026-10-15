@@ -117,6 +117,13 @@ describe('Save as new look', () => {
     expect(validateLook(fresh)).toEqual({ ok: true, look: fresh })
     expect(edited.id).toBe('ember')
   })
+
+  it("says 'Your look' under its name, never a time stamp it would keep forever (F12)", () => {
+    const fresh = asNewLook(EMBER, [])
+    expect(SAVED_SUB).toBe('Your look')
+    expect(fresh.sub).toBe('Your look')
+    expect(fresh.sub).not.toMatch(/\b(saved|just|now|ago|today|minute|hour|second)\b/i)
+  })
 })
 
 describe('Duplicate, rename and delete', () => {

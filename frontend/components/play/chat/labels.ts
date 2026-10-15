@@ -1,4 +1,3 @@
-import { formatDuration } from '@/lib/chat/tool-calls'
 import { toolActivity, type ToolActivity } from '@/lib/mascot/tools'
 import type { ToolCall } from '@/types'
 
@@ -18,6 +17,10 @@ const DETAIL_CHARS = 80
 const SEP = ' · '
 const PLATFORM_PREFIX = /^platform_/
 const A_TOOL = 'a tool'
+const MS_PER_SECOND = 1000
+
+/** F12 (Gerard, 15 Oct): a done line's time reads '2.1 s', as in the approved design. */
+export const SECONDS_DECIMALS = 1
 
 /** The line's state: the core's ToolCall (running, completed, error) read with its waiting and skipped flags. */
 export type ToolStatus = 'running' | 'done' | 'failed' | 'waiting' | 'skipped' | 'stopped'
@@ -61,6 +64,16 @@ export function toolDetail(input: unknown): string | null {
     if (typeof value === 'string' && value.trim()) return clip(value, DETAIL_CHARS)
   }
   return null
+}
+
+/**
+ * A done call's time in seconds with SECONDS_DECIMALS places: '2.1 s' from
+ * 2140 ms (Play's formatter, as in the approved app; the core chat keeps
+ * lib/chat/tool-calls.ts formatDuration's '2 s'). '' with no usable time.
+ */
+export function toolSeconds(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 0) return ''
+  return `${(ms / MS_PER_SECOND).toFixed(SECONDS_DECIMALS)} s`
 }
 
 function readable(toolName: string): string {
@@ -123,7 +136,7 @@ function toolText(call: ToolCall, status: ToolStatus, said: Phrases): string {
       return detail ? `${said.running}: '${detail}'` : said.running
     }
     case 'done':
-      return joined([said.done, call.summary, formatDuration(call.durationMs)])
+      return joined([said.done, call.summary, toolSeconds(call.durationMs)])
     case 'failed':
       return joined([said.failed, call.error ?? call.summary])
     case 'waiting':

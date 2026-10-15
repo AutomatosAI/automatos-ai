@@ -4,12 +4,13 @@
  * detail, and the core's ChatMessage read for the chat (text, title, the newest
  * reply, its activity and its running tool call, a failed turn the server saved
  * and who wrote a reply when the turn didn't (P260-FX-09), and the reply being
- * written as Auto reads it: T-003b).
+ * written as Auto reads it: T-003b), and a done tool line's time in Play's
+ * one-decimal seconds (F12, P260-FX-31).
  */
 import { describe, expect, it } from 'vitest'
 
 import { chatCaption, NAPPING, ON_THE_SHELF, WAKE_HINT } from '@/components/play/chat/caption'
-import { clip, toolDetail } from '@/components/play/chat/labels'
+import { clip, SECONDS_DECIMALS, toolDetail, toolSeconds } from '@/components/play/chat/labels'
 import {
   activityLines,
   chatTitle,
@@ -22,6 +23,7 @@ import {
   SAVED_ERROR,
   savedTurnError,
 } from '@/components/play/chat/message-text'
+import { formatDuration } from '@/lib/chat/tool-calls'
 import { NO_REPLY } from '@/lib/mascot/events'
 import { captionFor } from '@/lib/mascot/media'
 import type { ChatMessage } from '@/types'
@@ -68,6 +70,26 @@ describe('toolDetail', () => {
     expect(toolDetail({ limit: 3, query: '   ' })).toBeNull()
     expect(toolDetail(undefined)).toBeNull()
     expect(toolDetail(['query'])).toBeNull()
+  })
+})
+
+describe('toolSeconds (F12)', () => {
+  it("reads a done call's time with one decimal, as the approved design: '2.1 s' from 2140 ms", () => {
+    expect(SECONDS_DECIMALS).toBe(1)
+    expect(toolSeconds(2140)).toBe('2.1 s')
+    expect(toolSeconds(200)).toBe('0.2 s')
+    expect(toolSeconds(12_400)).toBe('12.4 s')
+    expect(toolSeconds(0)).toBe('0.0 s')
+  })
+
+  it('is empty with no usable time', () => {
+    expect(toolSeconds(undefined)).toBe('')
+    expect(toolSeconds(-1)).toBe('')
+    expect(toolSeconds(Number.NaN)).toBe('')
+  })
+
+  it("leaves the core chat's own formatter as it was: whole seconds", () => {
+    expect(formatDuration(2140)).toBe('2 s')
   })
 })
 

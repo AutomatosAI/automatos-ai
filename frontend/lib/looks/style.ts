@@ -40,7 +40,7 @@ export const COLOUR_TOKENS: readonly ColourToken[] = [
   { name: '--pl-glow-snag', role: 'the page glow on a snag' },
   { name: '--pl-error', role: 'errors: fills, rings, icons' },
   { name: '--pl-error-text', role: 'the error as text' },
-  { name: '--pl-auto-light', role: "Auto's eyes, ring and connected only" },
+  { name: '--pl-auto-light', role: "Auto's ring and connected only" },
   { name: '--pl-auto-shell', role: "Auto's shell" },
   { name: '--pl-auto-dusk', role: "Auto's ring asleep or lost" },
   { name: '--pl-sheet-bg', role: "a Deliverable's page" },

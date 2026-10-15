@@ -13,8 +13,12 @@ export const EDITABLE_FIELDS = ['ground', 'accent', 'font', 'shell', 'light', 'g
 export type EditableField = (typeof EDITABLE_FIELDS)[number]
 export type LookValues = Pick<Look, EditableField>
 
-/** What a freshly saved look says under its name (the Looks prototype). */
-export const SAVED_SUB = 'Saved just now'
+/**
+ * What a look made with 'Save as new look' says under its name, in the Looks
+ * row and in its exported file. Not a time stamp: the sub is stored with the
+ * look and never updated, so 'Saved just now' would have read so forever (F12).
+ */
+export const SAVED_SUB = 'Your look'
 export const EDITED_MARK = 'edited'
 
 /** The preset or saved look the active look was picked from, as it was saved. */

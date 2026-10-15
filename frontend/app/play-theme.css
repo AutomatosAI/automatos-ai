@@ -32,7 +32,7 @@ html.play {
   --pl-color-error-text: var(--pl-error-text); /* the error as text */
 
   /* Colour: Auto, following the look */
-  --pl-color-light: var(--pl-auto-light); /* his eyes, ring and "connected" only */
+  --pl-color-light: var(--pl-auto-light); /* the light: his ring and the "connected" dot (the eyes are part of the clips) */
   --pl-color-shell: var(--pl-auto-shell); /* his stand-in's outline while the clips are missing */
   --pl-filter-shell: var(--pl-auto-shell-filter); /* tints his clip and still to the look's shell */
   --pl-color-dusk: var(--pl-auto-dusk); /* his ring asleep and lost: text2 45% into bg (lib/looks/css.ts duskOf) */

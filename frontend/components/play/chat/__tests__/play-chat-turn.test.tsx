@@ -200,7 +200,8 @@ describe('tool lines', () => {
     await renderChat([QUESTION, autoMessage('m2', '', { toolCalls: calls })])
     const lines = within(within(reply()).getByRole('list', { name: TOOL_LINES_LABEL })).getAllByRole('listitem')
     expect(lines.map((line) => line.textContent)).toEqual([
-      '✓Searched the web · 3 results · 2 s',
+      // F12: Play's own time, one decimal, as in the approved design ('2.1 s', not the core's '2 s').
+      '✓Searched the web · 3 results · 2.1 s',
       "✕Send email didn't work · the mail server timed out",
       '…Waiting for you · card raised',
       "Searching the web: 'budget laptops'",
