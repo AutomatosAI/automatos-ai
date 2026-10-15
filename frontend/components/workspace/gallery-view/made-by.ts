@@ -8,7 +8,7 @@
  * (`agent_output`, handlers_blog / generate_document_tool), a document generated from a
  * template in the app (`document`, api/document_generation) and a trigger's file (`trigger`).
  */
-const MADE_BY_SOURCE: Record<string, string> = {
+export const MADE_BY_SOURCE: Readonly<Record<string, string>> = {
   social_post: 'Socials',
   upload: 'Uploaded',
   mission: 'Mission',

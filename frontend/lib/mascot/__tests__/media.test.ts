@@ -104,4 +104,11 @@ describe('captionFor', () => {
     expect(captionFor('celebrate')).toBe('All done')
     expect(captionFor('idle', 'report')).toBe('Ready when you are')
   })
+
+  it("names a type id in words, for the chat and the shelf alike: never 'Your blog_post is ready' (P260-FX-13, M95)", () => {
+    expect(captionFor('celebrate', 'blog_post')).toBe('Your blog post is ready')
+    expect(captionFor('celebrate', ' Social__Post ')).toBe('Your social post is ready')
+    expect(captionFor('celebrate', 'report')).toBe('Your report is ready')
+    expect(captionFor('celebrate', '_')).toBe('All done')
+  })
 })

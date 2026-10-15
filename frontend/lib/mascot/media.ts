@@ -85,12 +85,17 @@ const CAPTIONS: Readonly<Record<MascotName, string>> = {
   loading: 'Loading',
 }
 
+/** A Deliverable's type id as words: "blog_post" → "blog post". */
+const TYPE_ID_SEPARATOR = /_+/g
+
 /**
  * The caption for a state. Pass the kind of Deliverable that just landed (for
- * example "report") to get "Your report is ready" while Auto celebrates.
+ * example "report", or a type id such as "blog_post") to get "Your report is
+ * ready" or "Your blog post is ready" while Auto celebrates. One place for the
+ * chat and the shelf.
  */
 export function captionFor(state: MascotName, deliverableKind?: string): string {
-  const kind = deliverableKind?.trim().toLowerCase()
+  const kind = deliverableKind?.replace(TYPE_ID_SEPARATOR, ' ').trim().toLowerCase()
   if (state === 'celebrate' && kind) return `Your ${kind} is ready`
   return CAPTIONS[state]
 }

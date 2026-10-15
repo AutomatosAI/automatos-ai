@@ -20,6 +20,8 @@ import {
   madeBy,
   madeLine,
   sourceLabel,
+  SOURCES_SHOWN_MAX,
+  sourcesOf,
   unsupportedMessage,
 } from '@/lib/play/detail'
 
@@ -137,6 +139,24 @@ describe("the page's words", () => {
     expect(madeBy('  ')).toBe('Auto')
   })
 
+  it("never credits Auto with the owner's uploads, Templates documents or Socials posts (P260-FX-13, M104)", () => {
+    expect(madeBy(null, 'upload')).not.toBe('Auto')
+    expect(madeBy(null, 'upload')).toBe('Uploaded')
+    expect(madeBy(null, 'document')).toBe('Templates')
+    expect(madeBy(null, 'social_post')).toBe('Socials')
+    expect(madeLine(null, 'document')).not.toBe('Made by Auto')
+    expect(madeLine(null, 'document')).toBe('Made in Templates')
+    expect(madeLine(null, 'upload')).toBe('Uploaded')
+    expect(madeLine(null, ' Social_Post ')).toBe('Made in Socials')
+    // An agent named on the row is still the maker; Auto stays for what Auto's turns made.
+    expect(madeBy('Researcher', 'upload')).toBe('Researcher')
+    expect(madeLine('Researcher', 'document')).toBe('Made by Auto with Researcher')
+    for (const source of ['chat', 'task', 'mission', null, '', 'constructor']) {
+      expect(madeBy(null, source)).toBe('Auto')
+      expect(madeLine(null, source)).toBe('Made by Auto')
+    }
+  })
+
   it('names where it came from in the canonical words', () => {
     expect(sourceLabel('chat')).toBe('A chat')
     expect(sourceLabel('mission')).toBe('A Mission')
@@ -145,6 +165,9 @@ describe("the page's words", () => {
     expect(sourceLabel('agent_run')).toBe('Agent run')
     expect(sourceLabel(null)).toBe('')
     expect(sourceLabel('constructor')).toBe('Constructor')
+    expect(sourceLabel('upload')).toBe('An upload')
+    expect(sourceLabel('document')).toBe('A template')
+    expect(sourceLabel('social_post')).toBe('A social post')
   })
 
   it('asks Auto about it by title, and names an untitled one', () => {
@@ -158,6 +181,31 @@ describe("the page's words", () => {
     expect(unsupportedMessage('spreadsheet')).toBe("Play can't preview this spreadsheet here.")
     expect(unsupportedMessage('slide')).toBe("Play can't preview this slide deck here.")
     expect(unsupportedMessage('toString')).toBe("Play can't preview this toString here.")
+  })
+})
+
+describe('sourcesOf (P260-FX-13, M81)', () => {
+  it("lists what it was made from as Play's side panel does: a web address as its host, else the title or the text", () => {
+    const extra = {
+      sources: ['https://www.which.co.uk/reviews/laptops', { url: 'https://rtings.com/x' }, { title: '  Asus spec sheet ' }],
+    }
+    expect(sourcesOf(deliverable({ extra }))).toEqual(['which.co.uk', 'rtings.com', 'Asus spec sheet'])
+  })
+
+  it('checks extra.sources off the wire: anything but a list, and any item that is no label, gives nothing', () => {
+    expect(sourcesOf(deliverable({ extra: {} }))).toEqual([])
+    expect(sourcesOf(deliverable({ extra: null as unknown as Deliverable['extra'] }))).toEqual([])
+    // A Socials post's plan keeps its sources as switches, not a list.
+    expect(sourcesOf(deliverable({ extra: { sources: { knowledge: true, website: false } } }))).toEqual([])
+    const sources = [null, 7, '  ', {}, { url: 42, title: 'Notes' }, ['nested'], 'http://[bad', 'Field notes']
+    expect(sourcesOf(deliverable({ extra: { sources } }))).toEqual(['Notes', 'http://[bad', 'Field notes'])
+  })
+
+  it('lists at most SOURCES_SHOWN_MAX', () => {
+    const sources = Array.from({ length: SOURCES_SHOWN_MAX + 5 }, (_, index) => `Source ${index + 1}`)
+    const shown = sourcesOf(deliverable({ extra: { sources } }))
+    expect(shown).toHaveLength(SOURCES_SHOWN_MAX)
+    expect(shown[0]).toBe('Source 1')
   })
 })
 

@@ -16,9 +16,10 @@ import page from './deliverable-detail.module.css'
  * PRD-260 §4 — a Deliverable's content on its page (Ember mock 05), ported
  * from Automatos Play's components/deliverables/DeliverableContent.tsx onto the
  * core's own renderers and file paths:
- * - text and markdown on the sheet through the core's MarkdownView (no raw
- *   HTML) with Play's rules for model output: links open in a new tab without
- *   this window, images show as their alt text;
+ * - text and markdown on the sheet through the core's MarkdownView with Play's
+ *   rules for model output: raw HTML dropped (skipHtml), links open in a new
+ *   tab without this window, images show as their alt text, a code block in
+ *   Play's own pre rules (PrintedPre) on the sheet's colours;
  * - a picture or a video through useAuthenticatedBlobUrl, the authenticated
  *   path the core's FilePreview loads them by (a blob: URL, so an SVG's
  *   scripts never run in its <img>);
@@ -50,7 +51,7 @@ export function DeliverableContent({ view, kind, title, filename }: DeliverableC
   if (view.kind === 'text') {
     return (
       <div className={styles.document}>
-        <MarkdownView components={PLAY_MARKDOWN_COMPONENTS} className={styles.prose}>
+        <MarkdownView components={PLAY_MARKDOWN_COMPONENTS} skipHtml className={styles.prose}>
           {view.markdown}
         </MarkdownView>
         {view.truncated && <p className={styles.sheetNote}>{TRUNCATED}</p>}

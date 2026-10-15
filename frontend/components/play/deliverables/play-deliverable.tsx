@@ -151,7 +151,7 @@ function DeliverableView({ deliverable, now }: DeliverableViewProps) {
             <TypeBadge kind={kind} />
             {date && <time dateTime={deliverable.created_at}>{date}</time>}
             {date && <span aria-hidden="true">·</span>}
-            <span>{madeLine(deliverable.agent_name)}</span>
+            <span>{madeLine(deliverable.agent_name, deliverable.source_type)}</span>
           </p>
         </header>
         <DeliverableContent
