@@ -367,6 +367,7 @@ describe("When this browser isn't keeping looks (M98)", () => {
       await user.click(manage().getByRole('button', { name: 'Export' }))
       // Exact text: Export changes no look, so it never adds LOOKS_NOT_KEPT.
       expect(manage().getByText(exportStarted('Ember.look.json'))).toHaveTextContent('Copy JSON')
+      await waitFor(() => expect(stub.revoke).toHaveBeenCalledWith(BLOB_URL), { timeout: 2000 })
     } finally {
       stub.restore()
     }
