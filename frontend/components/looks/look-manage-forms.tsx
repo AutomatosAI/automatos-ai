@@ -11,6 +11,8 @@ import styles from './manage.module.css'
  * Automatos Play's components/looks/LookManager.tsx (split out so the manager
  * stays small): renaming a saved look, and confirming its deletion. The name
  * typed here goes through validateLook (useLook().renameLook) before it is kept.
+ * Each takes focus as it opens: the name field, or Keep it, the safe choice, so
+ * the question is read out with it (P260-FX-22, M20).
  */
 
 export const NEW_NAME_LABEL = 'New name'
@@ -74,7 +76,7 @@ export function DeleteConfirm({ look, onDelete, onCancel }: DeleteConfirmProps) 
         <button type="button" className={styles.danger} onClick={onDelete}>
           {DELETE_LOOK_LABEL}
         </button>
-        <button type="button" className={styles.action} onClick={onCancel}>
+        <button type="button" className={styles.action} onClick={onCancel} autoFocus>
           {KEEP_IT_LABEL}
         </button>
       </div>

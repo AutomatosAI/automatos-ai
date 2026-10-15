@@ -8,6 +8,8 @@
  * rest of 'This look' and 'Import a look').
  * Under Classic or Studio the page is a short note with 'Switch to Play' (K9);
  * under Play below 1024 px, a note that it opens on a wider screen (D7).
+ * Switch to Play hands focus to the screen's heading as the note goes
+ * (P260-FX-22, M21).
  * Roles, attributes and text only (CSS modules are proxies under css: false).
  */
 import React from 'react'
@@ -344,6 +346,19 @@ describe('/looks outside Play (K9) and on a narrow screen (D7)', () => {
     expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=play`)
     expect(layout()).toHaveAttribute('data-full-bleed', 'true')
     expect(screen.queryByRole('button', { name: 'Switch to Play' })).not.toBeInTheDocument()
+    await lookOnPage(EMBER)
+  })
+
+  it("'Switch to Play' hands focus to the screen's heading as the note goes, never to <body> (M21)", async () => {
+    const user = userEvent.setup()
+    renderLooks('studio')
+    const switchToPlay = screen.getByRole('button', { name: 'Switch to Play' })
+    switchToPlay.focus()
+    await user.keyboard('{Enter}')
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Make it yours.' })
+    expect(heading).toHaveFocus()
+    expect(heading).toHaveAttribute('tabindex', '-1')
+    expect(document.activeElement).not.toBe(document.body)
     await lookOnPage(EMBER)
   })
 

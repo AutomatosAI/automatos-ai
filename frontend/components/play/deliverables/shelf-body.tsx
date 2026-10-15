@@ -1,6 +1,10 @@
 'use client'
 
+import { useCallback, useEffect, useRef } from 'react'
+
+import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { useStartChat } from '@/hooks/use-start-chat'
+import { refocus } from '@/lib/play/focus'
 import { emptyMessage, type ShelfFilter, type ShelfView } from '@/lib/play/shelf'
 
 import { ShelfCard } from './shelf-card'
@@ -12,7 +16,9 @@ import styles from './shelf.module.css'
  * components/deliverables/ShelfBody.tsx: loading, the error state (a failed
  * request, or the list's success: false — never "nothing here yet"), the
  * friendly empty state, or the grid with Load more. A later page that failed
- * keeps the grid and says so, with a way to ask again.
+ * keeps the grid and says so, with a way to ask again. When the last Load more
+ * goes with the page it asked for, focus moves to that page's first card, never
+ * to <body> (P260-FX-22, M20).
  */
 
 export const LOADING_SHELF = 'Loading your shelf…'
@@ -52,14 +58,50 @@ export function ShelfBody({ view, filter, paging, now }: ShelfBodyProps) {
   }
   if (view.status === 'failed') return <Failed message={SHELF_FAILED} retry={paging.retry} />
   if (view.items.length === 0) return <Empty filter={filter} />
+  return <Grid items={view.items} paging={{ ...paging, moreFailed: paging.moreFailed || view.moreFailed }} now={now} />
+}
+
+/**
+ * Load more remembers where its page starts. Once that page is in and no Load
+ * more is left (the button that had focus is gone), the first card it brought
+ * takes focus; a Load more that stays keeps it. Only when focus was dropped:
+ * a chip picked meanwhile keeps it.
+ */
+function useFocusFirstNewCard(count: number, paging: ShelfPaging) {
+  const list = useRef<HTMLUListElement>(null)
+  const firstNew = useRef<number | null>(null)
+  const { loadMore: askForMore, loadingMore } = paging
+  const showsMore = paging.hasMore || paging.moreFailed
+  const loadMore = useCallback(() => {
+    firstNew.current = count
+    askForMore()
+  }, [count, askForMore])
+  useEffect(() => {
+    const index = firstNew.current
+    if (index === null || loadingMore) return
+    firstNew.current = null
+    if (showsMore) return
+    refocus(list.current?.children.item(index)?.querySelector<HTMLElement>('a'))
+  }, [count, loadingMore, showsMore])
+  return { list, loadMore }
+}
+
+interface GridProps {
+  readonly items: readonly Deliverable[]
+  readonly paging: ShelfPaging
+  readonly now: Date
+}
+
+function Grid({ items, paging, now }: GridProps) {
+  const { list, loadMore } = useFocusFirstNewCard(items.length, paging)
   return (
     <>
-      <ul className={cardStyles.grid} aria-label={DELIVERABLES_LIST_LABEL}>
-        {view.items.map((deliverable, index) => (
+      <ul ref={list} className={cardStyles.grid} aria-label={DELIVERABLES_LIST_LABEL}>
+        {items.map((deliverable, index) => (
           <ShelfCard key={deliverable.id} deliverable={deliverable} now={now} newest={index === 0} />
         ))}
       </ul>
-      <More paging={{ ...paging, moreFailed: paging.moreFailed || view.moreFailed }} />
+      <More paging={{ ...paging, loadMore }} />
     </>
   )
 }

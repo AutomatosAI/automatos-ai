@@ -14,6 +14,10 @@
  * (M89); a check in flight says Checking… (M94); offline says so (M83); the
  * local start command is `make up` with its hint (M84); the 404 keeps Next's
  * title (M68).
+ *
+ * P260-FX-22 (M21): the swap moves keyboard focus (the asleep heading, then the
+ * frame's <main> once it answers) and the gate's own live region, outside the
+ * swap, says each change.
  */
 import React, { useEffect, useState } from 'react'
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
@@ -49,7 +53,7 @@ import NotFound, { metadata, NOT_FOUND_TITLE } from '@/app/not-found'
 import { PlayFrame } from '@/components/play/shell/play-frame'
 import { useBackendMascot } from '@/hooks/use-backend-mascot'
 import { SECOND_MS } from '@/hooks/use-recheck-countdown'
-import { ASLEEP_RECHECK_MS } from '../asleep-gate'
+import { ASLEEP_RECHECK_MS, AWAKE_LINE } from '../asleep-gate'
 import {
   ASLEEP_TITLE,
   AsleepScreen,
@@ -184,6 +188,9 @@ async function throughRetries() {
 
 const asleepHeading = () => screen.queryByRole('heading', { level: 1, name: ASLEEP_TITLE })
 
+/** Every live status on the page, in order: the asleep screen's pill, then the gate's own region. */
+const statusLines = () => screen.getAllByRole('status').map((status) => status.textContent)
+
 /** Play's frame with /health failing on the first ask and every retry: the asleep screen. */
 async function renderAsleepFrame() {
   renderFrame()
@@ -257,7 +264,7 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
     expect(screen.queryByText('The page')).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
     expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'sleeping')
-    expect(screen.getByRole('status')).toHaveTextContent(NOT_CONNECTED)
+    expect(statusLines()).toEqual([NOT_CONNECTED, ASLEEP_TITLE])
     expect(screen.getByText(asleepDetail('localhost'))).toBeInTheDocument()
     expect(screen.getByText(countdownLine(ASLEEP_RECHECK_MS / SECOND_MS))).toBeInTheDocument()
   })
@@ -397,6 +404,28 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
     expect(screen.queryByText(HOSTED_LINE)).not.toBeInTheDocument()
     expect(screen.queryByText(START_COMMAND)).not.toBeInTheDocument()
     expect(asleepHeading()).toBeInTheDocument()
+  })
+
+  it("moves focus with the swap and says so: the asleep heading, then the frame's main once it answers (M21)", async () => {
+    health.up = true
+    renderFrame()
+    await elapse(0)
+    expect(statusLines()).toEqual([''])
+    health.up = false
+    await elapse(BACKEND_HEALTH_POLL_MS)
+    await throughRetries()
+    expect(asleepHeading()).toHaveFocus()
+    expect(statusLines()).toEqual([NOT_CONNECTED, ASLEEP_TITLE])
+
+    health.up = true
+    fireEvent.click(screen.getByRole('button', { name: CHECK_AGAIN }))
+    await elapse(0)
+    await settle()
+    expect(screen.getByText('The page')).toBeInTheDocument()
+    expect(screen.getByRole('main')).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+    expect(statusLines()).toEqual([AWAKE_LINE])
+    expect(AWAKE_LINE).toBe('Automatos is back')
   })
 
   it('shows the frame and the page, never the asleep screen, while /health answers', async () => {

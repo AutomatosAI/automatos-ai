@@ -7,7 +7,8 @@
  * (useChatWithReceipts) and the session store are mocked; the conversation
  * loading, Auto's reducer (useAutoMascot) and the core's cards are real. Auto
  * himself is a stand-in that shows his state. Roles and text only (CSS
- * modules are proxies).
+ * modules are proxies). P260-FX-22 (M20): Try again hands focus to the message
+ * box as its snag box goes.
  */
 import React from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
@@ -93,6 +94,7 @@ vi.mock('@/stores/chat-session-store', async () => {
 })
 
 import { DeliverableCard } from '@/components/play/chat/deliverable-card'
+import { PLACEHOLDER } from '@/components/play/chat/message-box'
 import { RECEIPTS_TITLE } from '@/components/play/chat/receipts'
 import { SNAG_TITLE, TRY_AGAIN, TURN_FAILED } from '@/components/play/chat/snag-box'
 import { MISSION_CREATED_LABEL, SUGGESTION_LABEL } from '@/components/play/chat/mission-suggestion'
@@ -272,6 +274,21 @@ describe('the snag box', () => {
     fireEvent.click(within(snag).getByRole('button', { name: TRY_AGAIN }))
     expect(chat.reload).toHaveBeenCalledTimes(1)
     expect(auto()).toHaveAttribute('data-state', 'oops')
+  })
+
+  it('Try again by keyboard moves focus to the message box as the snag box goes, never to <body> (M20)', async () => {
+    chat.status = 'error'
+    const view = await renderChat([QUESTION])
+    const retry = within(screen.getByRole('region', { name: SNAG_TITLE })).getByRole('button', { name: TRY_AGAIN })
+    retry.focus()
+    fireEvent.click(retry)
+    expect(chat.reload).toHaveBeenCalledTimes(1)
+    // The hook answers again: the failed turn, and its snag box with Try again, are gone.
+    chat.status = 'streaming'
+    view.rerender(<PlayChat />)
+    expect(screen.queryByRole('region', { name: SNAG_TITLE })).toBeNull()
+    expect(screen.getByRole('textbox', { name: PLACEHOLDER })).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
   })
 
   it('only the newest reply gets Try again', async () => {

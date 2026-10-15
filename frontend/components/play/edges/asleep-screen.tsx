@@ -1,9 +1,12 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
+
 import { AutoMascot } from '@/components/mascot/auto-mascot'
 import { useOnline } from '@/hooks/use-online'
 import { useRecheckCountdown } from '@/hooks/use-recheck-countdown'
 import type { MascotName } from '@/lib/mascot/types'
+import { refocus } from '@/lib/play/focus'
 
 import styles from './edges.module.css'
 import { StartCommand } from './start-command'
@@ -17,7 +20,8 @@ import { EdgeWordmark } from './wordmark'
  * while GET /health fails (asleep-gate.tsx). In the local edition it names the
  * command that starts Automatos; the hosted edition has none to offer. While a
  * check is in flight it says Checking… (M94); while the browser is offline it
- * says so, in place of either (M83, P260-FX-21).
+ * says so, in place of either (M83, P260-FX-21). It focuses its heading as it
+ * opens, since the swap took focus away with the page (P260-FX-22, M21).
  */
 
 export const ASLEEP_TITLE = 'Automatos is asleep'
@@ -63,6 +67,10 @@ function WayBack({ local }: { readonly local: boolean }) {
 
 export function AsleepScreen({ mascot, onClipEnded, detail, onCheck, checking, recheckSeconds, local }: AsleepScreenProps) {
   const { remaining, checkNow } = useRecheckCountdown(recheckSeconds, onCheck, checking)
+  const title = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    refocus(title.current)
+  }, [])
   return (
     <div className={styles.screen}>
       <header className={styles.top}>
@@ -73,7 +81,9 @@ export function AsleepScreen({ mascot, onClipEnded, detail, onCheck, checking, r
       </header>
       <main className={styles.body}>
         <AutoMascot state={mascot} onClipEnded={onClipEnded} size="large" showCaption={false} />
-        <h1 className={styles.title}>{ASLEEP_TITLE}</h1>
+        <h1 ref={title} className={styles.title} tabIndex={-1}>
+          {ASLEEP_TITLE}
+        </h1>
         <WayBack local={local} />
         <div className={styles.actions}>
           <button type="button" className={styles.checkAgain} onClick={checkNow}>

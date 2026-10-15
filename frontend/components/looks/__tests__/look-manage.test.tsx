@@ -5,6 +5,10 @@
  * .look.json download, Copy JSON, and Import from pasted text or a file
  * through lib/looks/transfer.ts with its messages shown. Imports are untrusted:
  * nothing invalid is kept, and imported text is never read as HTML.
+ *
+ * P260-FX-22 (M20): by keyboard, focus never falls to <body> when the control
+ * just used goes (Save, Save name, Cancel, Keep it, Delete look), and Delete
+ * moves it into its question, on Keep it.
  */
 import React from 'react'
 import { cleanup, screen, waitFor, within } from '@testing-library/react'
@@ -191,6 +195,73 @@ describe('This look: managing looks', () => {
     expect(manage().getByText('Deleted My look 1. Play is back to Ember.')).toBeInTheDocument()
     expect(stored(SAVED_LOOKS_KEY)).toEqual([])
     await lookOnPage(EMBER)
+  })
+})
+
+describe('This look by keyboard: focus stays on a button that is there (P260-FX-22, M20)', () => {
+  const tool = (name: string) => manage().getByRole('button', { name })
+
+  /** Focus a control and press Enter on it, as a keyboard user does. */
+  async function press(user: User, control: HTMLElement): Promise<void> {
+    control.focus()
+    await user.keyboard('{Enter}')
+  }
+
+  function expectFocusOn(control: HTMLElement): void {
+    expect(control).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+  }
+
+  it('Save hands focus to Rename, since Save is gone once the look is saved', async () => {
+    const user = userEvent.setup()
+    await readyOnMyLook()
+    await user.click(group(/^Accent/).getByRole('button', { name: 'Gold' }))
+    await press(user, tool('Save'))
+    expect(status()).toHaveTextContent(/^My look 1$/)
+    expect(manage().queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+    expectFocusOn(tool('Rename'))
+  })
+
+  it('Save name and Cancel hand focus back to Rename as the form closes', async () => {
+    const user = userEvent.setup()
+    await readyOnMyLook()
+    await press(user, tool('Rename'))
+    const field = manage().getByRole('textbox', { name: 'New name' })
+    expect(field).toHaveFocus()
+    await user.clear(field)
+    await user.type(field, 'Sunset')
+    await press(user, tool('Save name'))
+    expect(status()).toHaveTextContent(/^Sunset$/)
+    expect(manage().queryByRole('textbox')).not.toBeInTheDocument()
+    expectFocusOn(tool('Rename'))
+
+    await press(user, tool('Rename'))
+    await press(user, tool('Cancel'))
+    expect(manage().queryByRole('textbox')).not.toBeInTheDocument()
+    expectFocusOn(tool('Rename'))
+  })
+
+  it('Delete moves focus into its question, on Keep it; Keep it hands it back to Delete', async () => {
+    const user = userEvent.setup()
+    await readyOnMyLook()
+    await press(user, tool('Delete'))
+    const question = screen.getByRole('group', { name: /^Delete My look 1\?/ })
+    expectFocusOn(within(question).getByRole('button', { name: 'Keep it' }))
+
+    await press(user, within(question).getByRole('button', { name: 'Keep it' }))
+    expect(screen.queryByRole('group', { name: /^Delete My look 1\?/ })).not.toBeInTheDocument()
+    expect(stored(SAVED_LOOKS_KEY)).toEqual([myLook()])
+    expectFocusOn(tool('Delete'))
+  })
+
+  it('Delete look hands focus to Duplicate, the one button every look has', async () => {
+    const user = userEvent.setup()
+    await readyOnMyLook()
+    await press(user, tool('Delete'))
+    await press(user, tool('Delete look'))
+    expect(status()).toHaveTextContent(/^Ember$/)
+    expect(manage().queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+    expectFocusOn(tool('Duplicate'))
   })
 })
 

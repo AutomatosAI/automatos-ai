@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 
 import { useLook } from '@/components/looks/look-provider'
+import { PLAY_ONLY_HEADING } from '@/components/looks/play-only-route'
 import { rootBlock } from '@/lib/looks/style'
 
 import { StyleColour } from './style-colour'
@@ -81,7 +82,9 @@ export function StyleScreen() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div className={styles.headingText}>
-          <h1 className={styles.heading}>{STYLE_HEADING}</h1>
+          <h1 className={styles.heading} tabIndex={-1} {...PLAY_ONLY_HEADING}>
+            {STYLE_HEADING}
+          </h1>
           <p className={styles.lead}>
             Every value here comes from {look.name}, the active look. Change the look and this page redraws.
           </p>

@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { type ReactNode, type RefObject, useRef } from 'react'
 import { Search } from 'lucide-react'
 
 import { StudioHeaderUtilities } from '@/components/layout/studio-header'
@@ -30,17 +30,24 @@ export interface PlayFrameProps {
 /**
  * PRD-260 T-009 — while GET /health fails, AsleepGate shows "Automatos is
  * asleep" in place of the frame and its page; they mount again, fresh, when the
- * backend answers (Ember mock 07, the whole window).
+ * backend answers (Ember mock 07, the whole window), and the page's <main>
+ * takes the focus the swap dropped (tabIndex={-1}: script focus only;
+ * P260-FX-22, M21).
  */
 export function PlayFrame(props: PlayFrameProps) {
+  const main = useRef<HTMLElement>(null)
   return (
-    <AsleepGate>
-      <FrameLayout {...props} />
+    <AsleepGate wakeFocus={main}>
+      <FrameLayout {...props} mainRef={main} />
     </AsleepGate>
   )
 }
 
-function FrameLayout({ children, fullBleed = false, autoWidget }: PlayFrameProps) {
+interface FrameLayoutProps extends PlayFrameProps {
+  readonly mainRef: RefObject<HTMLElement>
+}
+
+function FrameLayout({ children, fullBleed = false, autoWidget, mainRef }: FrameLayoutProps) {
   // `safe-bottom` (the one safe-area helper, globals.css) keeps the frame's
   // bottom edge clear of a home bar, as the Studio shell does.
   return (
@@ -49,9 +56,11 @@ function FrameLayout({ children, fullBleed = false, autoWidget }: PlayFrameProps
       <div className={styles.column}>
         <PlayHeader />
         {fullBleed ? (
-          <main className={styles.fullBleed}>{children}</main>
+          <main ref={mainRef} className={styles.fullBleed} tabIndex={-1}>
+            {children}
+          </main>
         ) : (
-          <main className={styles.page}>
+          <main ref={mainRef} className={styles.page} tabIndex={-1}>
             <div className={styles.pageInner}>{children}</div>
           </main>
         )}

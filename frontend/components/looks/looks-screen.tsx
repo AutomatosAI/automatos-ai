@@ -13,6 +13,7 @@ import { LookManager } from './look-manager'
 import { LookPreview } from './look-preview'
 import { useLook } from './look-provider'
 import { LooksRow } from './looks-row'
+import { PLAY_ONLY_HEADING } from './play-only-route'
 import styles from './looks.module.css'
 
 /**
@@ -73,7 +74,9 @@ export function LooksScreen() {
       <div className={styles.main}>
         <div className={styles.header}>
           <div className={styles.headingText}>
-            <h1 className={styles.heading}>{LOOKS_HEADING}</h1>
+            <h1 className={styles.heading} tabIndex={-1} {...PLAY_ONLY_HEADING}>
+              {LOOKS_HEADING}
+            </h1>
             <p className={styles.lead}>{LOOKS_LEAD}</p>
           </div>
           <div className={styles.headerSide}>
