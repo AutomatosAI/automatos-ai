@@ -48,7 +48,8 @@
 
 .newChat:focus-visible,
 .retry:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   box-shadow: var(--pl-focus-field);
 }
 
@@ -67,7 +68,8 @@
 }
 
 .search:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   border-color: var(--pl-color-accent-text); /* a focus edge: the readable accent, 3:1 on every ground */
   box-shadow: var(--pl-focus-field);
 }
@@ -114,7 +116,8 @@
 }
 
 .row:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   border-radius: var(--pl-radius-button);
   box-shadow: var(--pl-focus-field);
 }

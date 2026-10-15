@@ -210,6 +210,15 @@ The 15 Oct review's fixes that only a browser can show (`scripts/ralph/prd260-re
 53. [ ] **Play's type wins over Studio's (P260-FX-01).** Under Ember, open `/looks` and in DevTools select the "Make it yours." heading (an `h1`); then pick Workshop and look again. Then open an Ember Deliverable whose text has a link and `inline code` (ask Auto: `Write a short note as a document with a link to https://example.com and the command npm run build in backticks`), and press Tab until the link has focus.
     - *Expected:* the heading's computed `font-family` is the look's display face: Instrument Serif's next/font family (`__Instrument_Serif_…`), italic, under Ember; Fredoka's (`__Fredoka_…`) under Workshop; never Newsreader, at Studio's weight 500. On the cream sheet the link is the sheet's accent (dark molten, not Studio's light navy), the inline code sits on a faint line-coloured chip and reads clearly, and the focus ring is drawn in the same sheet accent, plainly visible on the cream.
 
+54. [ ] **Make it yours on Paper (P260-FX-19).** On `/looks` pick Daylight, then press each accent in turn, and pick a background, a type, a shell and a light.
+    - *Expected:* every accent swatch has a thin grey edge, so Cream, Mint and Gold show plainly on the Paper ground, and the chosen one has a dark ring round it. The chosen background, type, shell and light, and the Daylight card in the Looks row, have a 2px edge in the dark molten of the "See the style sheet" link, never the light orange, and the glow slider is the same dark molten. Pick Ember: the edges and the slider are molten, as before.
+
+55. [ ] **Forced colours (P260-FX-19).** Chrome DevTools > More tools > Rendering > "Emulate CSS media feature forced-colors: active" (on Windows: Settings > Accessibility > Contrast themes). Open `/looks` in Ember, then in Daylight, and Tab through it; then Tab through `/deliverables` (the type chips, a card, the "More in Deliverables" links, Load more), a Deliverable's page (the Shelf link, Download) and `/conversations` (New chat, the search box, a row); then open `/looks/style`.
+    - *Expected:* on `/looks` the six accent swatches, the ground squares, the shell and light dots and the tops of the look cards keep their own colours; the chosen accent, background, type, shell and light and the active look's card each carry a ring in the system's highlight colour (the options and the card a wider border too); every swatch shows a ring when Tab reaches it. Everywhere else every control Tab reaches shows an outline, and a pressed type chip with the focus has a thicker ring than without it. On `/looks/style` the colour chips and the spacing steps keep their colours.
+
+56. [ ] **A long look name (P260-FX-19).** Make the window 1024 px wide. On `/looks` use Save as, rename the new look to `abcdefghijklmnopqrstuvwxyz0123456789abcd` (40 characters, no space), then change one option so the status reads `<name> · edited`.
+    - *Expected:* "Make it yours." keeps its full size and reads on one or two lines, never a sliver one word wide; the status beside it wraps, right-aligned, within at most 40% of the row; the look's card in the Looks row shows the whole name, broken over lines, never cut off at its edge.
+
 ---
 
 ## Map: the owner's test to these steps
@@ -225,4 +234,4 @@ The 15 Oct review's fixes that only a browser can show (`scripts/ralph/prd260-re
 | 7. The visible changes cherry-picked from PRD-259 W1: rounded corners, `dark:` classes in Classic Dark and Studio Dark | 50–51 |
 | 8. §7.1: should Play become the default for new users? (not changed here) | 52 |
 
-The PRD's other pages, beyond the owner's list: Conversations (24), the shelf and Load more (25–28), the style sheet (38), the 404 (40, 46, 47) and "Automatos is asleep" (41–43); the review fixes (53).
+The PRD's other pages, beyond the owner's list: Conversations (24), the shelf and Load more (25–28), the style sheet (38), the 404 (40, 46, 47) and "Automatos is asleep" (41–43); the review fixes (53–56).

@@ -34,7 +34,8 @@
 }
 
 .back:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   border-radius: var(--pl-radius-paper);
   box-shadow: var(--pl-focus-field);
 }
@@ -134,7 +135,8 @@
 
 .primary:focus-visible,
 .secondary:focus-visible {
-  outline: none;
+  outline: 2px solid transparent; /* drawn in forced colours, which drop the box-shadow ring (M19) */
+  outline-offset: 2px;
   box-shadow: var(--pl-focus-field);
 }
 
