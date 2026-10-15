@@ -9,18 +9,24 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * down, calls `check` when they run out, and starts over; Check again calls it
  * at once and starts the count over too. The timer lives only while the
  * screen that uses it is mounted.
+ *
+ * While a check is in flight (`checking`: the ask and its retries, longer than
+ * the period against a frozen backend, see BACKEND_HEALTH_TIMEOUT_MS in
+ * use-backend-health.ts) the count holds at the full period and
+ * the screen says Checking… instead (P260-FX-21, M94); the next round counts
+ * from when the check ends, so the automatic recheck never cuts into one.
  */
 
 export const SECOND_MS = 1000
 
 export interface RecheckCountdown {
-  /** Whole seconds until the next automatic check; 0 while one is being asked. */
+  /** Whole seconds until the next automatic check; the full period while a check is in flight. */
   readonly remaining: number
   /** Check again now, and start the count over. */
   readonly checkNow: () => void
 }
 
-export function useRecheckCountdown(periodSeconds: number, check: () => void): RecheckCountdown {
+export function useRecheckCountdown(periodSeconds: number, check: () => void, checking = false): RecheckCountdown {
   const checkRef = useRef(check)
   const [round, setRound] = useState(0)
   const [remaining, setRemaining] = useState(periodSeconds)
@@ -29,12 +35,13 @@ export function useRecheckCountdown(periodSeconds: number, check: () => void): R
     checkRef.current = check
   }, [check])
 
-  // Each round counts down from the full period, one second at a time.
+  // Each round counts down from the full period, one second at a time; a check in flight holds it there.
   useEffect(() => {
     setRemaining(periodSeconds)
+    if (checking) return undefined
     const timer = window.setInterval(() => setRemaining((seconds) => seconds - 1), SECOND_MS)
     return () => window.clearInterval(timer)
-  }, [round, periodSeconds])
+  }, [round, periodSeconds, checking])
 
   // Exactly at zero (never again for a stray tick below it): ask, then start a new round.
   useEffect(() => {

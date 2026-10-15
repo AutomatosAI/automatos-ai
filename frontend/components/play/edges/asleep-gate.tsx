@@ -21,7 +21,10 @@ import { AsleepScreen, asleepDetail } from './asleep-screen'
  * answer: react-query reports a query that has never succeeded as loading
  * again while it asks, which must not flash the page back in between. Down is
  * /health failing on every retry, never one failed request (useBackendHealth,
- * P260-RVW-1): the swap unmounts the page and whatever was typed in it.
+ * P260-RVW-1): the swap unmounts the page and whatever was typed in it. A gate
+ * that mounts while the backend is down (browser Back) shows the screen on its
+ * first render, so the page never mounts in between (P260-FX-21, M89); while a
+ * check is in flight the screen says Checking… (M94).
  */
 
 /** How often the asleep screen asks again on its own (Automatos Play's RECHECK_MS). */
@@ -38,6 +41,7 @@ export function AsleepGate({ children }: { readonly children: ReactNode }) {
       onClipEnded={auto.onClipEnded}
       detail={asleepDetail(backend.host)}
       onCheck={backend.check}
+      checking={backend.checking}
       recheckSeconds={Math.round(ASLEEP_RECHECK_MS / MS_PER_SECOND)}
       local={isLocal}
     />

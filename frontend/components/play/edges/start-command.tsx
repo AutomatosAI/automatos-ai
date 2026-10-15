@@ -10,9 +10,15 @@ import styles from './edges.module.css'
  * Automatos on this computer, with Copy. The hosted edition has no command to
  * offer, so the asleep screen shows HOSTED_LINE there instead (AGENTS.md: both
  * editions keep working).
+ *
+ * The command is SETUP.md's day-to-day start, `make up` (P260-FX-21, M84): it
+ * starts Automatos in the background, where `docker compose up` held the
+ * terminal. START_HINT names the start for an install from the published
+ * images (`make up` would build from source there) and for a machine without make.
  */
 
-export const START_COMMAND = 'docker compose up'
+export const START_COMMAND = 'make up'
+export const START_HINT = 'Installed with the published images? Run make up-images. No make? docker compose up -d'
 export const COPY_LABEL = 'Copy'
 export const COPIED_LABEL = 'Copied'
 export const COPY_FAILED = "Couldn't copy it. Select the command and copy it yourself."
@@ -57,6 +63,7 @@ export function StartCommand() {
           {state === 'copied' ? COPIED_LABEL : COPY_LABEL}
         </button>
       </div>
+      <p className={styles.hint}>{START_HINT}</p>
       {state === 'failed' && (
         <p className={styles.hint} role="alert">
           {COPY_FAILED}
