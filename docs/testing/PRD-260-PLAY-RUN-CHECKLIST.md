@@ -156,18 +156,20 @@ How the theme works, with file paths: `docs/frontend-architecture/play-theme.md`
 ## I. The 404
 
 40. [ ] **Under Play.** Open `/nope`.
-    - *Expected:* Play's lost screen: Auto lost, "This page wandered off", and a way back to `/chat` that works.
+    - *Expected:* Play's lost screen: Auto lost, "This page wandered off", and a way back to `/chat` that works. The tab's title is "404: This page could not be found." (P260-FX-21), as it is for the plain 404 in steps 46 and 47.
 
 ## J. Automatos is asleep
 
 41. [ ] **Stop the backend.** With Play open on any page: `docker compose -p <your stack's project> stop backend`.
-    - *Expected:* not on the first failed `GET /health`: the health poll (up to 30 s) fails, it is asked again three times 2.5 s apart (DevTools > Network: four failed `/health` requests), and only then does the connection pill say "Not running" and Play's frame show the asleep screen in place of the page: Auto sleeping, "Automatos is asleep", the detail, Check again and the recheck countdown. Until then the page stays as it was, with anything typed in it.
+    - *Expected:* not on the first failed `GET /health`: the health poll (up to 30 s) fails, it is asked again three times 2.5 s apart (DevTools > Network: four failed `/health` requests), and only then does the connection pill say "Not running" and Play's frame show the asleep screen in place of the page: Auto sleeping, "Automatos is asleep", the detail, Check again and the recheck countdown. Until then the page stays as it was, with anything typed in it. Each ask gives up after 5 s, so a backend that takes the connection and never answers (`docker compose -p <your stack's project> pause backend`, then `unpause`) shows the asleep screen too, at worst 27.5 s after the poll (four asks of 5 s, three waits of 2.5 s; DevTools shows each `/health` cancelled at 5 s). In the local edition the screen offers `make up` with Copy (it copies exactly `make up`) and the line "Installed with the published images? Run make up-images. No make? docker compose up -d"; in the hosted edition, "Automatos isn't answering right now…".
+    - *Then:* if you opened another page in Play before stopping the backend, press the browser's Back button while the screen shows. The asleep screen is there at once; the earlier page never flashes in before it.
 
 42. [ ] **Check again, then start it.** Press Check again while it is still stopped; then `docker compose -p <your stack's project> start backend`.
-    - *Expected:* Check again makes a new `GET /health` (DevTools > Network), followed by its retries while the backend stays stopped, and the screen stays; once the backend answers, the page mounts again (on the countdown or Check again), the pill says "Connected · localhost" and Auto wakes to idle.
+    - *Expected:* Check again makes a new `GET /health` (DevTools > Network), followed by its retries while the backend stays stopped, and the screen stays; while they run the countdown reads "Checking…", and once they have failed it reads "Checking again in 10 seconds." and counts down again. Once the backend answers, the page mounts again (on the countdown or Check again), the pill says "Connected · localhost" and Auto wakes to idle.
+    - *Offline:* with the screen showing, set DevTools > Network to Offline. The line under the title reads "You're offline. Check your internet connection: this page comes back as soon as Automatos answers.", with no start command and no "Nothing's broken on your side"; back to No throttling, the edition's own line returns.
 
 43. [ ] **A snag mid-turn.** Send `Write a 2,000-word story about a lighthouse` and stop the backend while words stream; when the asleep screen shows, start it again; then press Try again.
-    - *Expected:* the reply ends in "I hit a snag" with Try again and Auto plays oops; the asleep screen follows once the health check has failed on every retry (the next poll plus about 7.5 s); after the backend is back, Try again answers the last message again.
+    - *Expected:* the reply ends in "I hit a snag" with Try again and Auto plays oops; the asleep screen follows once the health check has failed on every retry (the next poll plus about 7.5 s for a stopped backend, up to 27.5 s for one that never answers); after the backend is back, Try again answers the last message again.
 
 ## K. Back to Studio and Classic
 

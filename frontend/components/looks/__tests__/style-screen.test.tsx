@@ -9,6 +9,8 @@
  * Studio the page is the same note with Switch to Play (K9); under Play below
  * 1024 px, the same 'wider screen' note and no sheet (D7). MainLayout is a
  * pass-through here that records fullBleed (Play's frame has its own tests).
+ * Switch to Play hands focus to the sheet's heading as the note goes
+ * (P260-FX-22, M21).
  * Roles, attributes, inline custom properties and text only: CSS modules are
  * proxies.
  */
@@ -399,6 +401,21 @@ describe('/looks/style under Classic or Studio (K9), the same note as /looks', (
     expect(screen.queryByText(STYLE_SHEET_NOTE)).toBeNull()
     expect(layout()).toHaveAttribute('data-full-bleed', 'true')
     expect(document.documentElement.classList.contains(PLAY_HTML_CLASS)).toBe(true)
+    await ready()
+  })
+})
+
+describe('/looks/style after Switch to Play, by keyboard (P260-FX-22, M21)', () => {
+  it("hands focus to the sheet's heading as the note goes, never to <body>", async () => {
+    renderPage('studio')
+    const switchToPlay = screen.getByRole('button', { name: SWITCH_TO_PLAY })
+    switchToPlay.focus()
+    fireEvent.click(switchToPlay)
+    expect(await screen.findByRole('region', { name: 'Colour' })).toBeInTheDocument()
+    const heading = screen.getByRole('heading', { level: 1, name: STYLE_HEADING })
+    expect(heading).toHaveFocus()
+    expect(heading).toHaveAttribute('tabindex', '-1')
+    expect(document.activeElement).not.toBe(document.body)
     await ready()
   })
 })

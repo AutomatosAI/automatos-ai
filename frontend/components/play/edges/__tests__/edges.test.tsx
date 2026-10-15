@@ -8,6 +8,16 @@
  * (P260-RVW-1), answering mounts the page again, Check again asks again, the
  * automatic recheck counts down). Roles, attributes and text only (CSS modules
  * are proxies under css: false).
+ *
+ * P260-FX-21: a frozen /health times out into the asleep screen (M43); a frame
+ * mounted while it is down opens on the asleep screen, its page never mounted
+ * (M89); a check in flight says Checking… (M94); offline says so (M83); the
+ * local start command is `make up` with its hint (M84); the 404 keeps Next's
+ * title (M68).
+ *
+ * P260-FX-22 (M21): the swap moves keyboard focus (the asleep heading, then the
+ * frame's <main> once it answers) and the gate's own live region, outside the
+ * swap, says each change.
  */
 import React, { useEffect, useState } from 'react'
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
@@ -20,6 +30,8 @@ import {
   BACKEND_HEALTH_POLL_MS,
   BACKEND_HEALTH_RETRIES,
   BACKEND_HEALTH_RETRY_DELAY_MS,
+  BACKEND_HEALTH_TIMEOUT_MS,
+  connectionOf,
 } from '@/hooks/use-backend-health'
 
 const look = vi.hoisted(() => ({ play: true, narrow: false }))
@@ -37,11 +49,11 @@ vi.mock('@/components/mascot/auto-mascot', () => ({
   AutoMascot: ({ state }: { state: string }) => <div data-testid="auto" data-state={state} />,
 }))
 
-import NotFound from '@/app/not-found'
+import NotFound, { metadata, NOT_FOUND_TITLE } from '@/app/not-found'
 import { PlayFrame } from '@/components/play/shell/play-frame'
 import { useBackendMascot } from '@/hooks/use-backend-mascot'
 import { SECOND_MS } from '@/hooks/use-recheck-countdown'
-import { ASLEEP_RECHECK_MS } from '../asleep-gate'
+import { ASLEEP_RECHECK_MS, AWAKE_LINE } from '../asleep-gate'
 import {
   ASLEEP_TITLE,
   AsleepScreen,
@@ -51,9 +63,10 @@ import {
   countdownLine,
   HOSTED_LINE,
   NOT_CONNECTED,
+  OFFLINE_LINE,
 } from '../asleep-screen'
 import { BACK_TO_CHAT, LOST_LINE, LOST_TITLE } from '../lost-screen'
-import { COPIED_LABEL, COPY_LABEL, START_COMMAND } from '../start-command'
+import { COPIED_LABEL, COPY_LABEL, START_COMMAND, START_HINT } from '../start-command'
 
 /** Whether GET /health answers, and how often the page has mounted. */
 const health = { up: false }
@@ -83,34 +96,72 @@ function primeHealth() {
   })
 }
 
+/** A frozen backend: /health never answers, and an ask fails only when its signal gives up on it. */
+function freezeHealth() {
+  api.request.mockImplementation(
+    (_endpoint: string, options?: RequestInit) =>
+      new Promise((_answer, fail) => {
+        const signal = options?.signal
+        if (!signal) return
+        signal.addEventListener('abort', () => fail(signal.reason))
+      }),
+  )
+}
+
 const healthCalls = () => api.request.mock.calls.filter(([endpoint]) => endpoint === '/health').length
 
-/** Play's frame around the page; the hook's own retry options win over the client's default. */
-function renderFrame() {
-  primeHealth()
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
+const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+/**
+ * Play's frame around the page; the hook's own retry options win over the client's default.
+ * Pass the client of an earlier frame to mount a new one over its cache, as browser Back does.
+ */
+function renderFrame({ prime = primeHealth, client = newClient() } = {}) {
+  prime()
+  const { unmount } = render(
     <QueryClientProvider client={client}>
       <PlayFrame>
         <Page />
       </PlayFrame>
     </QueryClientProvider>,
   )
+  return { client, unmount }
 }
 
-function renderAsleep(props: { onCheck?: () => void; recheckSeconds?: number; local?: boolean } = {}) {
-  const { onCheck = vi.fn(), recheckSeconds = 3, local = false } = props
-  render(
+interface AsleepOptions {
+  readonly onCheck?: () => void
+  readonly recheckSeconds?: number
+  readonly local?: boolean
+  readonly checking?: boolean
+}
+
+function asleepScreen({ onCheck = vi.fn(), recheckSeconds = 3, local = false, checking = false }: AsleepOptions = {}) {
+  return (
     <AsleepScreen
       mascot="sleeping"
       detail={asleepDetail('localhost')}
       onCheck={onCheck}
+      checking={checking}
       recheckSeconds={recheckSeconds}
       local={local}
-    />,
+    />
   )
+}
+
+function renderAsleep(props: AsleepOptions = {}) {
+  const onCheck = props.onCheck ?? vi.fn()
+  render(asleepScreen({ ...props, onCheck }))
   return onCheck
 }
+
+/** The browser says it is offline (navigator.onLine) until the spy is restored. */
+const goOffline = () => vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false)
+
+/** Tell the page the connection changed, as the browser does. */
+const connectivityEvent = (name: 'online' | 'offline') =>
+  act(() => {
+    window.dispatchEvent(new Event(name))
+  })
 
 const tick = (ms: number) =>
   act(() => {
@@ -137,6 +188,9 @@ async function throughRetries() {
 
 const asleepHeading = () => screen.queryByRole('heading', { level: 1, name: ASLEEP_TITLE })
 
+/** Every live status on the page, in order: the asleep screen's pill, then the gate's own region. */
+const statusLines = () => screen.getAllByRole('status').map((status) => status.textContent)
+
 /** Play's frame with /health failing on the first ask and every retry: the asleep screen. */
 async function renderAsleepFrame() {
   renderFrame()
@@ -155,9 +209,10 @@ afterEach(() => {
 })
 
 describe('the 404 (app/not-found.tsx)', () => {
-  it("under Play at >= 1024 px: Auto lost, 'This page wandered off' and the way back to /chat", () => {
+  it("under Play at >= 1024 px: Auto lost, 'This page wandered off' and the way back to /chat", async () => {
     render(<NotFound />)
-    expect(screen.getByRole('heading', { level: 1, name: LOST_TITLE })).toBeInTheDocument()
+    // Play's lost screen loads through its lazy slot (P260-FX-23, M17).
+    expect(await screen.findByRole('heading', { level: 1, name: LOST_TITLE })).toBeInTheDocument()
     expect(LOST_TITLE).toBe('This page wandered off')
     expect(screen.getByText(LOST_LINE)).toBeInTheDocument()
     expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'lost')
@@ -181,6 +236,11 @@ describe('the 404 (app/not-found.tsx)', () => {
     expect(screen.getByText('This page could not be found.')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: LOST_TITLE })).not.toBeInTheDocument()
   })
+
+  it("keeps Next's own 404 title for every style, so the tab and screen readers say it (M68)", () => {
+    expect(metadata.title).toBe(NOT_FOUND_TITLE)
+    expect(NOT_FOUND_TITLE).toBe('404: This page could not be found.')
+  })
 })
 
 describe("Play's frame while Automatos is asleep (GET /health)", () => {
@@ -200,12 +260,12 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
     }
     await settle()
     expect(healthCalls()).toBe(1 + BACKEND_HEALTH_RETRIES)
-    expect(api.request).toHaveBeenCalledWith('/health')
+    expect(api.request).toHaveBeenCalledWith('/health', { signal: expect.any(AbortSignal) })
     expect(asleepHeading()).toBeInTheDocument()
     expect(screen.queryByText('The page')).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeInTheDocument()
     expect(screen.getByTestId('auto')).toHaveAttribute('data-state', 'sleeping')
-    expect(screen.getByRole('status')).toHaveTextContent(NOT_CONNECTED)
+    expect(statusLines()).toEqual([NOT_CONNECTED, ASLEEP_TITLE])
     expect(screen.getByText(asleepDetail('localhost'))).toBeInTheDocument()
     expect(screen.getByText(countdownLine(ASLEEP_RECHECK_MS / SECOND_MS))).toBeInTheDocument()
   })
@@ -291,6 +351,84 @@ describe("Play's frame while Automatos is asleep (GET /health)", () => {
     expect(BACKEND_HEALTH_RETRIES * BACKEND_HEALTH_RETRY_DELAY_MS).toBeLessThan(ASLEEP_RECHECK_MS)
   })
 
+  it('a frozen /health (it never answers) shows the asleep screen once every ask has timed out (M43)', async () => {
+    renderFrame({ prime: freezeHealth })
+    await elapse(0)
+    const frozenFor =
+      BACKEND_HEALTH_TIMEOUT_MS * (BACKEND_HEALTH_RETRIES + 1) + BACKEND_HEALTH_RETRY_DELAY_MS * BACKEND_HEALTH_RETRIES
+    await elapse(frozenFor - 1)
+    // The last ask has not given up yet: the page stays.
+    expect(asleepHeading()).not.toBeInTheDocument()
+    expect(screen.getByText('The page')).toBeInTheDocument()
+    await elapse(1)
+    await settle()
+    expect(asleepHeading()).toBeInTheDocument()
+    expect(healthCalls()).toBe(1 + BACKEND_HEALTH_RETRIES)
+    expect(screen.queryByText('The page')).not.toBeInTheDocument()
+  })
+
+  it('mounted again while /health is down (browser Back), it opens on the asleep screen and the page never mounts (M89)', async () => {
+    const earlier = renderFrame()
+    await elapse(0)
+    await throughRetries()
+    expect(asleepHeading()).toBeInTheDocument()
+    earlier.unmount()
+    mounts.page = 0
+    renderFrame({ client: earlier.client })
+    expect(asleepHeading()).toBeInTheDocument()
+    expect(mounts.page).toBe(0)
+    // The new frame asks again on mount; still down, the page still never mounts.
+    await elapse(0)
+    await throughRetries()
+    expect(asleepHeading()).toBeInTheDocument()
+    expect(mounts.page).toBe(0)
+  })
+
+  it('Check again says Checking… while /health is asked and retried, then counts the full period again (M94)', async () => {
+    await renderAsleepFrame()
+    fireEvent.click(screen.getByRole('button', { name: CHECK_AGAIN }))
+    await elapse(0)
+    await settle()
+    expect(screen.getByText(CHECKING)).toBeInTheDocument()
+    expect(screen.queryByText(/^Checking again in/)).not.toBeInTheDocument()
+    await throughRetries()
+    expect(asleepHeading()).toBeInTheDocument()
+    expect(screen.getByText('Checking again in 10 seconds.')).toBeInTheDocument()
+    expect(countdownLine(ASLEEP_RECHECK_MS / SECOND_MS)).toBe('Checking again in 10 seconds.')
+  })
+
+  it('offline while /health fails: says so, with neither the hosted line nor the start command (M83)', async () => {
+    await renderAsleepFrame()
+    goOffline()
+    connectivityEvent('offline')
+    expect(screen.getByText(OFFLINE_LINE)).toBeInTheDocument()
+    expect(screen.queryByText(HOSTED_LINE)).not.toBeInTheDocument()
+    expect(screen.queryByText(START_COMMAND)).not.toBeInTheDocument()
+    expect(asleepHeading()).toBeInTheDocument()
+  })
+
+  it("moves focus with the swap and says so: the asleep heading, then the frame's main once it answers (M21)", async () => {
+    health.up = true
+    renderFrame()
+    await elapse(0)
+    expect(statusLines()).toEqual([''])
+    health.up = false
+    await elapse(BACKEND_HEALTH_POLL_MS)
+    await throughRetries()
+    expect(asleepHeading()).toHaveFocus()
+    expect(statusLines()).toEqual([NOT_CONNECTED, ASLEEP_TITLE])
+
+    health.up = true
+    fireEvent.click(screen.getByRole('button', { name: CHECK_AGAIN }))
+    await elapse(0)
+    await settle()
+    expect(screen.getByText('The page')).toBeInTheDocument()
+    expect(screen.getByRole('main')).toHaveFocus()
+    expect(document.activeElement).not.toBe(document.body)
+    expect(statusLines()).toEqual([AWAKE_LINE])
+    expect(AWAKE_LINE).toBe('Automatos is back')
+  })
+
   it('shows the frame and the page, never the asleep screen, while /health answers', async () => {
     health.up = true
     renderFrame()
@@ -315,6 +453,28 @@ describe('Auto on the asleep screen (useBackendMascot)', () => {
     expect(result.current).toMatchObject({ mascot: 'sleeping', asleep: true })
     rerender({ connection: 'connected' })
     expect(result.current).toMatchObject({ mascot: 'idle', asleep: false })
+  })
+
+  it('mounted while the connection is down, Auto is asleep on the first render (M89)', () => {
+    const renders: ReturnType<typeof useBackendMascot>[] = []
+    const { result } = renderHook(() => {
+      const auto = useBackendMascot('down')
+      renders.push(auto)
+      return auto
+    })
+    expect(renders[0]).toMatchObject({ mascot: 'sleeping', asleep: true })
+    expect(result.current).toMatchObject({ mascot: 'sleeping', asleep: true })
+  })
+})
+
+describe('the connection (connectionOf)', () => {
+  it('stays down while a query that never answered is asked again, until the next answer (M89)', () => {
+    const never = { isError: false, isSuccess: false, dataUpdatedAt: 0 }
+    expect(connectionOf({ ...never, errorUpdatedAt: 0 })).toBe('checking')
+    expect(connectionOf({ ...never, isError: true, errorUpdatedAt: 5 })).toBe('down')
+    // react-query reads it as loading again while it asks: its last answer, a failure, still decides.
+    expect(connectionOf({ ...never, errorUpdatedAt: 5 })).toBe('down')
+    expect(connectionOf({ isError: false, isSuccess: true, errorUpdatedAt: 5, dataUpdatedAt: 9 })).toBe('connected')
   })
 })
 
@@ -348,11 +508,39 @@ describe('the asleep screen', () => {
     const user = userEvent.setup()
     renderAsleep({ local: true })
     expect(screen.getByText(START_COMMAND)).toBeInTheDocument()
-    expect(START_COMMAND).toBe('docker compose up')
+    expect(START_COMMAND).toBe('make up')
+    expect(screen.getByText(START_HINT)).toBeInTheDocument()
+    expect(START_HINT).toBe('Installed with the published images? Run make up-images. No make? docker compose up -d')
     expect(screen.getByText('automatos-ai')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: COPY_LABEL }))
     expect(await screen.findByRole('button', { name: COPIED_LABEL })).toBeInTheDocument()
     expect(await navigator.clipboard.readText()).toBe(START_COMMAND)
+  })
+
+  it('holds the count while a check is in flight, and counts the full period again once it ends (M94)', () => {
+    vi.useFakeTimers()
+    const onCheck = vi.fn()
+    const { rerender } = render(asleepScreen({ onCheck, checking: true, recheckSeconds: 3 }))
+    expect(screen.getByText(CHECKING)).toBeInTheDocument()
+    tick(5 * SECOND_MS)
+    expect(onCheck).not.toHaveBeenCalled()
+    expect(screen.getByText(CHECKING)).toBeInTheDocument()
+    rerender(asleepScreen({ onCheck, checking: false, recheckSeconds: 3 }))
+    expect(screen.getByText('Checking again in 3 seconds.')).toBeInTheDocument()
+    tick(SECOND_MS)
+    expect(screen.getByText('Checking again in 2 seconds.')).toBeInTheDocument()
+  })
+
+  it('offline in the local edition: no start command, until the browser is back online (M83)', () => {
+    const onLine = goOffline()
+    renderAsleep({ local: true })
+    expect(screen.getByText(OFFLINE_LINE)).toBeInTheDocument()
+    expect(screen.queryByText(START_COMMAND)).not.toBeInTheDocument()
+    expect(screen.queryByText(HOSTED_LINE)).not.toBeInTheDocument()
+    onLine.mockReturnValue(true)
+    connectivityEvent('online')
+    expect(screen.getByText(START_COMMAND)).toBeInTheDocument()
+    expect(screen.queryByText(OFFLINE_LINE)).not.toBeInTheDocument()
   })
 
   it('in the hosted edition offers no command, only that it will come back', () => {

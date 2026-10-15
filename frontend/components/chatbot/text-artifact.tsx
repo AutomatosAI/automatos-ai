@@ -72,7 +72,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
               </span>
             )}
             {metadata.model && (
-              <span className="inline-flex items-center rounded-full border border-info/40 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info dark:text-info/70">
+              <span className="inline-flex items-center rounded-full border border-info/40 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info">
                 {metadata.model}
               </span>
             )}

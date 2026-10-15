@@ -120,7 +120,7 @@ On `/deliverables`, the core's `DeliverableDeepLink` sheet is mounted inside the
 
 - **`PlaySidebar`**: the "Automatos Play" wordmark (to `/chat`); New chat (`useStartChat`: a new draft in the chat session store, then `/chat`; it hydrates the store itself and stays disabled until it is, so on any page the draft is never overwritten by the stored session and, in SaaS, no empty tab list is saved to the server; pressed over a new chat that is still unnamed, `stores/play-chat-store.ts` tells the chat to show a fresh one); the nav; Recent (`useRecentChats`: `getChatHistory`, at most 8, each to `/chat?chatId=<id>`); Docs and Settings at the foot; the connection pill.
 - **The nav** (`components/play/shell/play-nav.ts` `buildPlayNav`) is built from `lib/studio-menu.ts` (`STUDIO_MENU_PRIMARY`, `STUDIO_MENU_FOOTER`) with the filters `StudioSidebar` applies: the edition's route list (`filterNavForEdition`), the admin role gate, and the plan-tier exposure (`isNavItemVisible`). Play adds two items: Conversations right after Chat, and Look (`/looks`) last, on its own.
-- **The connection pill** reads `useBackendHealth` (`hooks/use-backend-health.ts`): `GET /health` through `apiClient`, polled every `BACKEND_HEALTH_POLL_MS` (30 s). A failed ask is repeated `BACKEND_HEALTH_RETRIES` times (3), `BACKEND_HEALTH_RETRY_DELAY_MS` apart (2.5 s), before the backend counts as down, so a blip (a wake from sleep, a Wi-Fi hand-over, one 502) never reads as down; while those retries run after an earlier answer the pill stays "Connected" (P260-RVW-1). It says "Connected · <host>", "Not running" or "Checking…".
+- **The connection pill** reads `useBackendHealth` (`hooks/use-backend-health.ts`): `GET /health` through `apiClient`, polled every `BACKEND_HEALTH_POLL_MS` (30 s). A failed ask is repeated `BACKEND_HEALTH_RETRIES` times (3), `BACKEND_HEALTH_RETRY_DELAY_MS` apart (2.5 s), before the backend counts as down, so a blip (a wake from sleep, a Wi-Fi hand-over, one 502) never reads as down; while those retries run after an earlier answer the pill stays "Connected" (P260-RVW-1). Each ask gives up after `BACKEND_HEALTH_TIMEOUT_MS` (5 s: apiClient's own wait of up to 2 s for a Clerk token runs inside it) and counts as a failure, so a frozen backend that takes the connection and never answers reads as down too, at worst 4 × 5 s + 3 × 2.5 s = 27.5 s after the ask began (P260-FX-21). Once every retry has failed it stays down until the next answer, also while it is asked again (react-query reads a query that never answered as loading again then) and on the first render of a hook that mounts then. It says "Connected · <host>", "Not running" or "Checking…".
 - **The header row**: a Search button that opens the ⌘K dialog (`openGlobalSearch`), and `StudioHeaderUtilities` (Help, notifications, the theme menu, the profile control for the edition).
 - **The page**: `fullBleed` (no padding, no width cap: the chat) or padded with the Studio shell's 1720 px cap. The floating Auto widget renders as in the Studio shell (every page except `/chat`).
 
@@ -416,8 +416,10 @@ Written from the acceptance criteria of T-008a and T-008b (built on parallel bra
 
 Written from the acceptance criteria of T-009 (built on a parallel branch); check against the code once merged.
 
-- **`frontend/app/not-found.tsx`** is new (the base had none, so Next's default 404 showed). Under Play at 1024 px and wider it renders `components/play/edges/lost-screen.tsx`: Auto lost, "This page wandered off", a way back to `/chat`. Under every other style or width it renders a plain page with Next's default words ("404", "This page could not be found.") and a link home, so Classic and Studio users see no new design.
-- **`components/play/edges/asleep-screen.tsx`**: Auto sleeping, "Automatos is asleep", the detail, a Check again button and an automatic recheck countdown. Play's frame (`components/play/edges/asleep-gate.tsx`) shows it in place of the page while the connection hook reports the backend down and mounts the page again when it answers; Auto gets `backend-down` and `backend-up`. Down means `GET /health` through `apiClient` failed on the first ask and on every one of its retries (about 7.5 s, see the connection pill above), never one failed request: the swap unmounts the page, so unsent words and unsaved form input go with it, and a blip must not cause it (P260-RVW-1). The retries finish inside the screen's 10 s recheck (`ASLEEP_RECHECK_MS`).
+- **`frontend/app/not-found.tsx`** is new (the base had none, so Next's default 404 showed). It is a server component that exports `metadata` with Next's own 404 title, `NOT_FOUND_TITLE` ("404: This page could not be found."), so every style's tab and screen reader say it, not the app's title (P260-FX-21), and renders the client `components/play/edges/not-found-view.tsx`. Under Play at 1024 px and wider that renders `components/play/edges/lost-screen.tsx`: Auto lost, "This page wandered off", a way back to `/chat`. Under every other style or width it renders a plain page with Next's default words ("404", "This page could not be found.") and a link home, so Classic and Studio users see no new design.
+- **`components/play/edges/asleep-screen.tsx`**: Auto sleeping, "Automatos is asleep", the detail, a Check again button and an automatic recheck countdown. Play's frame (`components/play/edges/asleep-gate.tsx`) shows it in place of the page while the connection hook reports the backend down and mounts the page again when it answers; Auto gets `backend-down` and `backend-up`. Down means `GET /health` through `apiClient` failed on the first ask and on every one of its retries (about 7.5 s, see the connection pill above; up to 27.5 s when every ask times out), never one failed request: the swap unmounts the page, so unsent words and unsaved form input go with it, and a blip must not cause it (P260-RVW-1). The gate starts Auto from the connection it mounts with (`useBackendMascot`): a frame that mounts while the backend is down (browser Back) shows the screen on its first render, and its page never mounts in between.
+- **The countdown** (`hooks/use-recheck-countdown.ts`) asks again every 10 s (`ASLEEP_RECHECK_MS`). While a check is in flight (the ask and its retries, `checking`: react-query's `isFetching`) it holds and the screen says "Checking…"; the next count starts from 10 when the check ends, so the recheck never cuts into a check.
+- **The way back**: in the local edition the command that starts Automatos, `make up` (`START_COMMAND`, SETUP.md's day-to-day start; Copy writes exactly it), with `START_HINT` under it ("Installed with the published images? Run make up-images. No make? docker compose up -d"); in the hosted edition `HOSTED_LINE`. While the browser is offline (`hooks/use-online.ts`: `navigator.onLine` and the `online`/`offline` events) both give way to `OFFLINE_LINE`, so an offline user is never told nothing is broken on their side.
 
 ---
 
@@ -435,7 +437,7 @@ frontend/
 │   ├── deliverables/layout.tsx    # PlayRouteSwitch → PlayShelf (and one Deliverable)
 │   ├── looks/page.tsx             # T-008a
 │   ├── looks/style/page.tsx       # T-008b
-│   └── not-found.tsx              # T-009
+│   └── not-found.tsx              # T-009: server component, Next's 404 title; NotFoundView picks the page
 ├── components/
 │   ├── looks/                     # LookProvider, useLookStore; looks-screen (T-008a), style/ (T-008b)
 │   ├── mascot/                    # AutoMascot and its CSS module
@@ -445,12 +447,13 @@ frontend/
 │   │   ├── chat/                  # Play's chat and turn details
 │   │   ├── conversations/         # Play's Conversations
 │   │   ├── deliverables/          # the shelf and a Deliverable
-│   │   └── edges/                 # lost and asleep screens (T-009)
+│   │   └── edges/                 # lost and asleep screens, not-found-view (T-009)
 │   ├── providers.tsx              # ThemeProvider forcedTheme, UiStyleProvider, LookProvider
 │   └── ui/theme-toggle.tsx        # Classic · Studio · Play, Customise look…, "Set by your look"
 ├── hooks/                         # use-auto-mascot, use-mascot-player, use-idle-timeout, use-media-preferences,
 │                                  # use-backend-health, use-play-conversation, use-play-turn, use-conversation-list,
-│                                  # use-recent-chats, use-start-chat, use-shelf-mascot, use-celebrate-new
+│                                  # use-recent-chats, use-start-chat, use-shelf-mascot, use-celebrate-new,
+│                                  # use-backend-mascot, use-recheck-countdown, use-online
 ├── lib/
 │   ├── ui-style.ts                # the Style axis
 │   ├── looks/                     # the look engine (catalogue … transfer), style.ts (T-008b)

@@ -1,35 +1,20 @@
-'use client'
+import type { Metadata } from 'next'
 
-import Link from 'next/link'
-
-import { LostScreen } from '@/components/play/edges/lost-screen'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsPlay } from '@/hooks/use-studio-theme'
+import { NotFoundView } from '@/components/play/edges/not-found-view'
 
 /**
- * PRD-260 §4 — the 404, for any address the app doesn't have. Under Play at
- * >= 1024 px (D7) it is Play's "This page wandered off" (Ember mock 09); under
- * Classic, Studio, or below 1024 px, a plain page with the words of Next's own
- * 404 and a link home, so those users see no new design. A client component:
- * the width is known only in the browser, as for every Play page.
+ * PRD-260 §4 — the 404, for any address the app doesn't have. A server
+ * component, so it can keep the document title Next's default 404 sets
+ * (P260-FX-21, M68): every style's tab and screen reader say it, never the
+ * app's own title. The page itself is the client NotFoundView, which picks
+ * Play's lost screen or the plain page by style and width.
  */
-export default function NotFound() {
-  const isPlay = useIsPlay()
-  const narrow = useIsTabletOrBelow()
-  return isPlay && !narrow ? <LostScreen /> : <PlainNotFound />
-}
 
-/** Next's default 404 in the theme's own tokens, plus the way home. */
-function PlainNotFound() {
-  return (
-    <main className="flex min-h-[100dvh] flex-col items-center justify-center gap-6 p-6 text-center text-foreground">
-      <div className="flex items-center gap-5">
-        <h1 className="border-r border-border pr-5 text-2xl font-medium">404</h1>
-        <h2 className="text-sm font-normal">This page could not be found.</h2>
-      </div>
-      <Link href="/" className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground">
-        Go home
-      </Link>
-    </main>
-  )
+/** Next's own 404 title. */
+export const NOT_FOUND_TITLE = '404: This page could not be found.'
+
+export const metadata: Metadata = { title: NOT_FOUND_TITLE }
+
+export default function NotFound() {
+  return <NotFoundView />
 }

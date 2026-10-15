@@ -256,7 +256,8 @@ describe('Play sidebar — the connection pill (GET /health)', () => {
     const pill = screen.getByRole('status')
     expect(pill).toHaveTextContent('Checking…')
     await waitFor(() => expect(pill).toHaveTextContent('Connected · localhost'))
-    expect(api.request).toHaveBeenCalledWith('/health')
+    // Each ask carries its timeout (P260-FX-21): a frozen backend fails like any other.
+    expect(api.request).toHaveBeenCalledWith('/health', { signal: expect.any(AbortSignal) })
   })
 
   it('reads Not running only once /health has failed on every retry', async () => {

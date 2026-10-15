@@ -62,8 +62,9 @@ all_exist() { local f; for f in "$@"; do [ -f "$f" ] || { echo "   missing: $f";
 raw_fetch_added()   { added_code frontend | grep -E "fetch\(\s*['\"\`]/api" | grep -q .; }
 orange_added()      { added_code frontend | grep -E '\b(bg|text|border|ring|from|to|via|fill|stroke)-orange-[0-9]' | grep -q .; }
 inner_html_added()  { added_code frontend ':!frontend/app/layout.tsx' | grep -E 'dangerouslySetInnerHTML|\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML|document\.write\(' | grep -q .; }
-# app/layout.tsx may add dangerouslySetInnerHTML only as the pre-paint constant.
-layout_html_ok() { ! git diff "$BASE"..HEAD -- frontend/app/layout.tsx | grep '^+' | grep 'dangerouslySetInnerHTML' | grep -vqE 'dangerouslySetInnerHTML=\{\{\s*__html:\s*LOOK_PREPAINT_SCRIPT\s*\}\}'; }
+# app/layout.tsx may add dangerouslySetInnerHTML only as the two pre-paint constants: the look's script and
+# (P260-FX-06, M07) the style's classes, a constant per parsed style from lib/ui-style.ts.
+layout_html_ok() { ! git diff "$BASE"..HEAD -- frontend/app/layout.tsx | grep '^+' | grep 'dangerouslySetInnerHTML' | grep -vqE 'dangerouslySetInnerHTML=\{\{\s*__html:\s*(LOOK_PREPAINT_SCRIPT|STYLE_CLASS_SCRIPT\[uiStyle\])\s*\}\}'; }
 # Mirrors .github/workflows/dco.yml, which checks `git rev-list --no-merges`: a merge commit is exempt.
 every_commit_signed() { [ -z "$(git log --no-merges --format='%H %(trailers:key=Signed-off-by,valueonly)' "$BASE"..HEAD | awk 'NF<2{print $1}')" ]; }
 file_sizes_ok() { local f n bad=0; for f in $(added_files frontend docs | grep -E '\.(ts|tsx|js|jsx|mjs|css|md|json)$'); do [ -f "$f" ] || continue; n=$(wc -l < "$f" | tr -d ' '); [ "$n" -le 800 ] || { echo "   $f: $n lines"; bad=1; }; done; [ $bad -eq 0 ]; }
@@ -301,7 +302,7 @@ check "N4 no raw fetch('/api…') added in the frontend" "! raw_fetch_added"
 check "N5 no new npm dependency (package.json and package-lock.json untouched)" "git diff --quiet $BASE..HEAD -- frontend/package.json frontend/package-lock.json"
 check "N6 no new Python dependency" "git diff --quiet $BASE..HEAD -- orchestrator/requirements.txt orchestrator/requirements-dev.txt orchestrator/pyproject.toml"
 check "N7 no innerHTML / dangerouslySetInnerHTML added outside app/layout.tsx" "! inner_html_added"
-check "N8 app/layout.tsx adds dangerouslySetInnerHTML only as {{ __html: LOOK_PREPAINT_SCRIPT }}" "layout_html_ok"
+check "N8 app/layout.tsx adds dangerouslySetInnerHTML only as {{ __html: LOOK_PREPAINT_SCRIPT }} or {{ __html: STYLE_CLASS_SCRIPT[uiStyle] }}" "layout_html_ok"
 check "N9 nothing imports from scripts/ralph/prd260-spec, play-ref or automatos-play (import syntax, comments ignored)" "! forbidden_import"
 check "N10 frontend/lib/api-client.ts did not grow" "not_grown frontend/lib/api-client.ts"
 check "N11 the Play reference is never committed (scripts/ralph/prd260-spec untracked)" "[ -z \"\$(git diff --name-only $BASE..HEAD -- scripts/ralph/prd260-spec)\" ] && [ -z \"\$(git ls-files scripts/ralph/prd260-spec)\" ]"

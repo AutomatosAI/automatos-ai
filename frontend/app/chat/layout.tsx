@@ -1,7 +1,7 @@
 import { Suspense, type ReactNode } from 'react'
 import { DiscussionBar } from '@/components/chatbot/discussion-bar'
 import { PlayRouteSwitch } from '@/components/play/play-route-switch'
-import { PlayChat } from '@/components/play/chat/play-chat'
+import { PlayChat } from '@/components/play/chat/play-chat-lazy'
 
 /** The chat page under Play at >= 1024 px: Play's chat instead of the page (PRD-260 K7). */
 const PLAY_CHAT_PATHS = ['/chat']

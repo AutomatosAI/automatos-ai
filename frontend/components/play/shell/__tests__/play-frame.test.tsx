@@ -5,10 +5,14 @@
  * (the theme menu among them), honours fullBleed as the Studio shell does, and
  * keeps the floating Auto widget. Roles, attributes and text only (CSS modules are
  * proxies under css: false).
+ *
+ * P260-FX-23 (M17): MainLayout loads the frame through its lazy slot, so a
+ * Classic or Studio page never downloads it; under Play the frame arrives a
+ * moment after the first render, so each test waits for it (findBy*).
  */
 import React from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({ play: true, studio: true, narrow: false, pathname: '/command-center' }))
 
@@ -57,60 +61,66 @@ function renderLayout(props: { fullBleed?: boolean } = {}) {
   )
 }
 
+// The frame's chunk, fetched once as a Play page's first render would, so each
+// findBy waits on MainLayout's render, not on the first transform of the module.
+beforeAll(async () => {
+  await import('@/components/play/shell/play-frame')
+})
+
 afterEach(() => {
   Object.assign(state, { play: true, studio: true, narrow: false, pathname: '/command-center' })
 })
 
 describe('MainLayout under Play at desktop width', () => {
-  it("renders Play's frame around the page, not the Studio shell", () => {
+  it("renders Play's frame around the page, not the Studio shell", async () => {
     const { container } = renderLayout()
-    expect(screen.getByTestId('play-sidebar')).toBeInTheDocument()
+    expect(await screen.findByTestId('play-sidebar')).toBeInTheDocument()
     expect(within(screen.getByRole('main')).getByTestId('page')).toHaveTextContent('The page')
     expect(screen.queryByTestId('studio-sidebar')).toBeNull()
     expect(container.querySelector('.sh-shell')).toBeNull()
     expect(screen.queryByTestId('fallback-header')).toBeNull()
   })
 
-  it("keeps the core's header utilities: the theme menu, notifications, profile and Help", () => {
+  it("keeps the core's header utilities: the theme menu, notifications, profile and Help", async () => {
     renderLayout()
-    const header = screen.getByRole('banner')
+    const header = await screen.findByRole('banner')
     expect(within(header).getByRole('button', { name: 'Toggle theme' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: 'Notifications' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: 'Profile' })).toBeInTheDocument()
     expect(within(header).getByRole('button', { name: 'Help & documentation' })).toBeInTheDocument()
   })
 
-  it('opens the global search from the header', () => {
+  it('opens the global search from the header', async () => {
     const opened = vi.fn()
     window.addEventListener(GLOBAL_SEARCH_OPEN_EVENT, opened)
     renderLayout()
-    fireEvent.click(screen.getByRole('button', { name: 'Open search (⌘K)' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open search (⌘K)' }))
     window.removeEventListener(GLOBAL_SEARCH_OPEN_EVENT, opened)
     expect(opened).toHaveBeenCalledTimes(1)
   })
 
-  it('fullBleed: the page fills the main column itself, unwrapped', () => {
+  it('fullBleed: the page fills the main column itself, unwrapped', async () => {
     renderLayout({ fullBleed: true })
-    expect(screen.getByTestId('page').parentElement).toBe(screen.getByRole('main'))
+    expect((await screen.findByTestId('page')).parentElement).toBe(screen.getByRole('main'))
   })
 
-  it('a framed page sits in a capped wrapper inside the scrolling main', () => {
+  it('a framed page sits in a capped wrapper inside the scrolling main', async () => {
     renderLayout()
-    const wrapper = screen.getByTestId('page').parentElement
+    const wrapper = (await screen.findByTestId('page')).parentElement
     expect(wrapper).not.toBe(screen.getByRole('main'))
     expect(wrapper?.parentElement).toBe(screen.getByRole('main'))
   })
 
-  it('keeps the floating Auto widget as the Studio shell has it: on every page but the chat', () => {
+  it('keeps the floating Auto widget as the Studio shell has it: on every page but the chat', async () => {
     renderLayout()
-    expect(screen.getByTestId('auto-widget')).toHaveAttribute('data-page', 'activity')
+    expect(await screen.findByTestId('auto-widget')).toHaveAttribute('data-page', 'activity')
     expect(screen.getByTestId('auto-widget')).toHaveAttribute('data-visible', 'true')
   })
 
-  it('hides the Auto widget on the chat', () => {
+  it('hides the Auto widget on the chat', async () => {
     state.pathname = '/chat'
     renderLayout({ fullBleed: true })
-    expect(screen.getByTestId('auto-widget')).toHaveAttribute('data-visible', 'false')
+    expect(await screen.findByTestId('auto-widget')).toHaveAttribute('data-visible', 'false')
   })
 })
 

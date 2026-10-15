@@ -1,7 +1,7 @@
 import { Suspense, type ReactNode } from 'react'
 import { DeliverableDeepLink } from '@/components/deliverables/deliverable-deep-link'
 import { PlayRouteSwitch } from '@/components/play/play-route-switch'
-import { PlayShelf } from '@/components/play/deliverables/play-shelf'
+import { PlayShelf } from '@/components/play/deliverables/play-shelf-lazy'
 import type { DeliverableTab } from '@/lib/deliverables/tabs'
 
 /** The Deliverables page under Play at >= 1024 px: Play's shelf (or one Deliverable) instead of the page (PRD-260 K7, K8). Not the explorer. */

@@ -36,13 +36,13 @@ function getTypeConfig(type: MemoryType) {
       return {
         icon: Info,
         label: 'fact',
-        className: 'bg-blue-100 text-info dark:bg-info/20 dark:text-info/80',
+        className: 'bg-blue-100 text-info dark:bg-info/20 dark:text-foreground',
       }
     case 'preference':
       return {
         icon: Lightbulb,
         label: 'preference',
-        className: 'bg-purple-100 text-purple-700 dark:bg-agent/20 dark:text-agent/80',
+        className: 'bg-purple-100 text-purple-700 dark:bg-agent/20 dark:text-foreground',
       }
     case 'context':
       return {

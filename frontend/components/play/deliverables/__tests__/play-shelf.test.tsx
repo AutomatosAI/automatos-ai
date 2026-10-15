@@ -12,6 +12,8 @@
  * asking again every SHELF_REFRESH_MS (P260-FX-12). Roles, attributes and text
  * only (CSS modules are proxies under css: false). "Now" is pinned to a local
  * date.
+ * P260-FX-22 (M20): when the last Load more goes with the page it brought,
+ * focus moves to that page's first card, never to <body>.
  */
 import React from 'react'
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
@@ -404,6 +406,40 @@ describe('ShelfScreen — Load more', () => {
     expect(last.get('source_type_exclude')).toBe('heartbeat')
     expect(cards()).toHaveLength(30)
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull())
+  })
+})
+
+describe('ShelfScreen — Load more by keyboard (P260-FX-22, M20)', () => {
+  /** The real hook over a mocked apiClient: 30 Deliverables, 24 a page. */
+  function renderPagedShelf() {
+    hook.real = true
+    const rows = Array.from({ length: 30 }, (_, index) => row(`d-${index}`, { title: `Deliverable number ${index}`, created_at: at(14) }))
+    api.request.mockImplementation(async (path: string) => {
+      const offset = Number(new URLSearchParams(path.split('?')[1]).get('offset'))
+      return page(rows.slice(offset, offset + 24), 30, offset)
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <ShelfScreen now={NOW} />
+      </QueryClientProvider>,
+    )
+  }
+
+  const cardLink = (title: string) => screen.getByRole('heading', { name: title }).closest('a')
+
+  it('the last Load more hands focus to the first card it brought', async () => {
+    const user = userEvent.setup()
+    renderPagedShelf()
+    await screen.findByRole('heading', { name: 'Deliverable number 0' })
+    const loadMore = screen.getByRole('button', { name: 'Load more' })
+    loadMore.focus()
+    await user.keyboard('{Enter}')
+    await screen.findByRole('heading', { name: 'Deliverable number 29' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull())
+    await waitFor(() => expect(cardLink('Deliverable number 24')).toHaveFocus())
+    expect(cardLink('Deliverable number 24')).toHaveAttribute('href', '/deliverables?deliverable=d-24')
+    expect(document.activeElement).not.toBe(document.body)
   })
 })
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type RefObject, useCallback, useEffect, useRef, useState } from 'react'
 
 import { AutoMascot } from '@/components/mascot/auto-mascot'
 import { MascotColumn, PageColumns, PageHeader } from '@/components/play/shell/page-columns'
@@ -142,11 +142,19 @@ function newestKind(turn: PlayTurn, reply: ChatMessage | undefined): string | un
 
 /**
  * Send and Try again: each clears the turn's suggestion first, as chat.tsx does
- * on a new message. Stop tells Auto first (a done receipt no longer celebrates
- * the stopped turn), then runs `stop`: useStoppedReplies' stop, which keeps the
- * reply being written and stops the chat.
+ * on a new message. Try again goes with the failed turn's snag box, so focus
+ * moves to the message box, never to <body> (P260-FX-22, M20). Stop tells Auto
+ * first (a done receipt no longer celebrates the stopped turn), then runs
+ * `stop`: useStoppedReplies' stop, which keeps the reply being written and
+ * stops the chat.
  */
-function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn, auto: AutoMascotDriver, stop: () => void) {
+function useSending(
+  chat: ReturnType<typeof useChatWithReceipts>,
+  turn: PlayTurn,
+  auto: AutoMascotDriver,
+  stop: () => void,
+  box: RefObject<HTMLTextAreaElement>,
+) {
   const { isLoading, sendMessage, reload } = chat
   const { onSend } = turn
   const { dispatch } = auto
@@ -163,7 +171,8 @@ function useSending(chat: ReturnType<typeof useChatWithReceipts>, turn: PlayTurn
     if (isLoading) return
     onSend()
     reload()
-  }, [isLoading, reload, onSend])
+    box.current?.focus()
+  }, [isLoading, reload, onSend, box])
   const onStop = useCallback(() => {
     dispatch({ type: 'stop' })
     stop()
@@ -185,7 +194,8 @@ function useApprovalSlots(turn: PlayTurn, chatId: string) {
 export function PlayChatView(props: PlayChatViewProps) {
   const { chat, auto, turn, shown } = usePlayChat(props)
   const composer = useComposer(auto, props.draft ?? null, props.onDraftTaken)
-  const { send, retry, onStop } = useSending(chat, turn, auto, shown.stop)
+  const box = useRef<HTMLTextAreaElement>(null)
+  const { send, retry, onStop } = useSending(chat, turn, auto, shown.stop, box)
   const { approvalsOf, looseCards } = useApprovalSlots(turn, props.view.chatId ?? '')
   const streaming = chat.status === 'streaming'
   const empty = chat.messages.length === 0
@@ -235,6 +245,7 @@ export function PlayChatView(props: PlayChatViewProps) {
           {empty && <ExampleChips onPick={composer.pick} />}
           <PlayTrialBanner errorCode={chat.errorCode} />
           <MessageBox
+            ref={box}
             key={composer.fill ? `fill-${composer.fill.serial}` : 'box'}
             streaming={streaming}
             onSend={send}

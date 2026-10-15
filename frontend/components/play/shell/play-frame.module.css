@@ -93,3 +93,10 @@
   max-width: var(--pl-page-max);
   margin: 0 auto;
 }
+
+/* The page's <main> takes focus only from script, as the frame mounts again after a nap
+   (tabIndex -1, P260-FX-22): it is no control, and a ring round the whole page says nothing. */
+.fullBleed:focus,
+.page:focus {
+  outline: none;
+}
