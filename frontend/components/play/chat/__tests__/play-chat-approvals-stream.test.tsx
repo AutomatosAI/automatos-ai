@@ -5,8 +5,9 @@
  * is exercised, not mocked. And a card outlives its reply: useChat drops the
  * reply on Stop (its catch removes the placeholder on an AbortError) and Try
  * again (reload) slices it off, yet the grant still waits on the server, so the
- * card stays on screen under "Approvals still open" until it is answered or
- * closed, and Auto stops listening then. Settling a card mid-turn returns Auto
+ * card stays on screen, in the conversation's column after it (P260-FX-08,
+ * M80), under "Approvals still open" while it waits and under "Approvals" once
+ * answered (M77), and Auto stops listening then. Settling a card mid-turn returns Auto
  * to the tool still running. And the page holds the core's SSE lane open
  * (useBoardEventStream, real, under a QueryClient as the root providers give
  * it): a reply the server finishes detached (the page opened mid-turn) merges
@@ -88,8 +89,10 @@ import { AWAITING_ANSWER } from '@/components/play/chat/caption'
 import { PLACEHOLDER } from '@/components/play/chat/message-box'
 import { PlayChat } from '@/components/play/chat/play-chat'
 import { TRY_AGAIN } from '@/components/play/chat/snag-box'
+import { TURN_END_LABEL } from '@/components/play/chat/turn-end'
 import { apiClient } from '@/lib/api-client'
 import { HELLO_KEY } from '@/lib/mascot/session'
+import { usePlayApprovalsStore } from '@/stores/play-approvals-store'
 
 // --- the wire: useChat's data stream (`0:` words, `d:` data, `e:` a failure), one stream per request -----------
 
@@ -184,6 +187,8 @@ const APPROVAL_LINE = dataLine('tool-data', { tool_approval: TOOL_APPROVAL })
 const auto = () => screen.getByTestId('auto')
 const replies = () => screen.getAllByRole('article', { name: 'Auto said' })
 const looseCards = () => screen.getByRole('region', { name: LOOSE_APPROVALS_LABEL })
+/** What follows the conversation, in its column (TurnEnd). */
+const turnEnd = () => screen.getByRole('group', { name: TURN_END_LABEL })
 const click = (button: HTMLElement) => act(async () => {
   fireEvent.click(button)
 })
@@ -216,6 +221,7 @@ beforeEach(() => {
   api.getChatHistory.mockResolvedValue([])
   api.cancelChatTurn.mockResolvedValue(undefined)
   vi.stubGlobal('fetch', network)
+  usePlayApprovalsStore.setState({ filed: [] }) // the page session's cards: none yet
 })
 
 afterEach(() => {
@@ -253,13 +259,38 @@ describe('a card outlives its reply', () => {
     await waitFor(() => expect(replies()).toHaveLength(1)) // the stopped reply is gone, as useChat drops it
     expect(screen.queryAllByRole('region', { name: APPROVALS_LABEL })).toHaveLength(0)
     expect(within(looseCards()).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    expect(within(turnEnd()).getByRole('region', { name: LOOSE_APPROVALS_LABEL })).toBe(looseCards())
     expect(auto()).toHaveAttribute('data-state', 'listening')
     expect(auto()).toHaveTextContent(AWAITING_ANSWER)
 
     await click(within(looseCards()).getByRole('button', { name: /approve & run/i }))
     expect(grants.grant).toHaveBeenCalledWith(42)
-    await waitFor(() => expect(within(looseCards()).getByRole('status')).toHaveTextContent(/the action ran/i))
+    // Answered, it is no longer "still open": the same card, its outcome showing, under "Approvals" (M77).
+    await waitFor(() => expect(screen.queryByRole('region', { name: LOOSE_APPROVALS_LABEL })).toBeNull())
+    const answered = within(turnEnd()).getByRole('region', { name: APPROVALS_LABEL })
+    expect(within(answered).getByRole('status')).toHaveTextContent(/the action ran/i)
+    expect(within(answered).queryByRole('button', { name: /approve & run/i })).toBeNull()
     await waitFor(() => expect(auto()).toHaveAttribute('data-state', 'idle'))
+  })
+
+  it('with two cards left open, answering one moves it under "Approvals"; the other waits under "Approvals still open"', async () => {
+    grants.deny.mockResolvedValue({ grant: { id: 42, status: 'denied' } })
+    await openAndSend()
+    await stream(APPROVAL_LINE, dataLine('tool-data', { mission_approval: MISSION_APPROVAL }))
+    await click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(replies()).toHaveLength(1))
+    const open = within(turnEnd()).getAllByRole('region', { name: LOOSE_APPROVALS_LABEL })
+    expect(open).toHaveLength(2)
+
+    const tool = open.find((region) => within(region).queryByText(TOOL_APPROVAL_TITLE) !== null) as HTMLElement
+    await click(within(tool).getByRole('button', { name: /deny/i }))
+    expect(grants.deny).toHaveBeenCalledWith(42)
+    await waitFor(() => expect(within(looseCards()).getByText(MISSION_APPROVAL_TITLE)).toBeInTheDocument())
+    expect(within(looseCards()).queryByText(TOOL_APPROVAL_TITLE)).toBeNull()
+    const answered = within(turnEnd()).getByRole('region', { name: APPROVALS_LABEL })
+    expect(within(answered).getByText(TOOL_APPROVAL_TITLE)).toBeInTheDocument()
+    expect(within(answered).getByRole('status')).toHaveTextContent(/will not run/i)
+    expect(auto()).toHaveAttribute('data-state', 'listening')
   })
 
   it('Try again replaces the failed reply; the card stays once, its X closes it and Auto idles', async () => {

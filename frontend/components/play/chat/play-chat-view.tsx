@@ -14,7 +14,7 @@ import type { ComposerFill } from '@/lib/play/draft'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import type { ChatMessage } from '@/types'
 
-import { ApprovalCards, LOOSE_APPROVALS_LABEL } from './approval-cards'
+import { ApprovalCards, LooseApprovalCards } from './approval-cards'
 import { chatCaption } from './caption'
 import { ExampleChips, FirstOpenHero } from './first-open'
 import { MessageBox } from './message-box'
@@ -36,8 +36,8 @@ import styles from './composer.module.css'
  * details (its Deliverables, a Mission suggestion, a failure, the approvals
  * it raised as the core's cards) come from usePlayTurn; Try again is the hook's
  * reload(); a spent trial shows the core's banner above the box. A card whose
- * reply left the conversation (Stop, Try again) shows under it until answered
- * or closed.
+ * reply left the conversation (Stop, Try again, the conversation shown again)
+ * shows after it, in its column, until answered or closed.
  */
 
 export interface PlayChatViewProps {
@@ -62,8 +62,9 @@ const BACKEND_OF: Readonly<Record<BackendConnection, BackendStatus | undefined>>
 function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
   const pageContext = usePageContext()
   const { connection } = useBackendHealth()
-  // useChat takes its data callback before Auto and the turn exist; the ref hands the parts on.
+  // useChat takes its callbacks before Auto and the turn exist; the refs hand the parts and the new chat's name on.
   const onPart = useRef<(part: unknown) => void>(() => undefined)
+  const onNamed = useRef<(chatId: string) => void>(() => undefined)
   const chat = useChatWithReceipts({
     id: view.chatId ?? '',
     initialMessages: view.messages,
@@ -71,6 +72,7 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
     pageContext,
     onData: (part: unknown) => onPart.current(part),
     onChatIdUpdate: (chatId: string) => {
+      onNamed.current(chatId)
       onChatIdAssigned(chatId)
       // PRD-237: the session store is the channel to the sidebar and the widget, as in chat.tsx.
       useChatSessionStore.getState().chatIdAssigned(chatId)
@@ -83,15 +85,21 @@ function usePlayChat({ view, onChatIdAssigned, idleMs }: PlayChatViewProps) {
     backend: BACKEND_OF[connection],
     idleMs,
   })
-  const turn = usePlayTurn({ messages: chat.messages, streaming: chat.status === 'streaming', dispatch: auto.dispatch })
+  const turn = usePlayTurn({
+    chatId: view.chatId ?? '',
+    messages: chat.messages,
+    streaming: chat.status === 'streaming',
+    dispatch: auto.dispatch,
+  })
   const toAuto = auto.onData
-  const toTurn = turn.onData
+  const { onData: toTurn, onChatNamed } = turn
   useEffect(() => {
     onPart.current = (part: unknown) => {
       toAuto(part)
       toTurn(part)
     }
-  }, [toAuto, toTurn])
+    onNamed.current = onChatNamed
+  }, [toAuto, toTurn, onChatNamed])
   const { greet } = auto
   useEffect(() => {
     greet()
@@ -152,9 +160,7 @@ function useApprovalSlots(turn: PlayTurn, chatId: string) {
     (replyId: string) => <ApprovalCards cards={of(replyId)} chatId={chatId} onAnswered={answered} onClosed={closed} />,
     [of, answered, closed, chatId],
   )
-  const looseCards = (
-    <ApprovalCards cards={loose} label={LOOSE_APPROVALS_LABEL} chatId={chatId} onAnswered={answered} onClosed={closed} />
-  )
+  const looseCards = <LooseApprovalCards cards={loose} chatId={chatId} onAnswered={answered} onClosed={closed} />
   return { approvalsOf, looseCards }
 }
 
@@ -194,17 +200,15 @@ export function PlayChatView(props: PlayChatViewProps) {
             trialBlocked={isTrialBlocked(chat.errorCode)}
             approvalsOf={approvalsOf}
             after={
-              <>
-                {looseCards}
-                <TurnEnd
-                  status={chat.status}
-                  errorCode={chat.errorCode}
-                  messages={chat.messages}
-                  onRetry={retry}
-                  suggestion={turn.suggestion}
-                  chatId={props.view.chatId ?? ''}
-                />
-              </>
+              <TurnEnd
+                status={chat.status}
+                errorCode={chat.errorCode}
+                messages={chat.messages}
+                onRetry={retry}
+                suggestion={turn.suggestion}
+                chatId={props.view.chatId ?? ''}
+                before={looseCards}
+              />
             }
           />
         )}

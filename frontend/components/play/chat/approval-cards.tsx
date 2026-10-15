@@ -4,7 +4,7 @@ import { MissionApprovalWidget } from '@/components/widgets/MissionApprovalWidge
 import { ToolApprovalWidget } from '@/components/widgets/ToolApprovalWidget'
 import type { WidgetMetadata } from '@/components/widgets/types'
 
-import { type FiledApproval, MISSION_APPROVAL_TITLE, sourceName, TOOL_APPROVAL_TITLE } from './approvals'
+import { type FiledApproval, isWaitingCard, MISSION_APPROVAL_TITLE, sourceName, TOOL_APPROVAL_TITLE } from './approvals'
 import styles from './approval-cards.module.css'
 
 /**
@@ -16,12 +16,13 @@ import styles from './approval-cards.module.css'
  * which the look writes under Play (D3); Play only frames them. A tool card
  * tells the chat once it is answered (it then shows its outcome); the Mission
  * card closes itself after a decision, as it leaves Studio's canvas. A card
- * whose reply left the conversation (Stop, Try again) shows after it, under
- * its own label, until it is answered or closed.
+ * whose reply left the conversation (Stop, Try again, the conversation shown
+ * again) shows after it until it is answered or closed: under "Approvals
+ * still open" while it waits, under "Approvals" once answered.
  */
 
 export const APPROVALS_LABEL = 'Approvals'
-/** The cards whose reply is no longer in the conversation. */
+/** The cards whose reply is no longer in the conversation and that still wait for the owner. */
 export const LOOSE_APPROVALS_LABEL = 'Approvals still open'
 
 interface CardProps {
@@ -60,19 +61,42 @@ function ApprovalCard({ card, chatId, onAnswered, onClosed }: CardProps) {
 
 export interface ApprovalCardsProps extends Omit<CardProps, 'card'> {
   readonly cards: readonly FiledApproval[]
-  /** The section's name: APPROVALS_LABEL inside a reply, LOOSE_APPROVALS_LABEL after the conversation. */
-  readonly label?: string
 }
 
-export function ApprovalCards({ cards, label = APPROVALS_LABEL, ...actions }: ApprovalCardsProps) {
+/** The cards a reply raised, inside that reply. */
+export function ApprovalCards({ cards, ...actions }: ApprovalCardsProps) {
   if (cards.length === 0) return null
   return (
-    <section className={styles.approvals} aria-label={label}>
+    <section className={styles.approvals} aria-label={APPROVALS_LABEL}>
       {cards.map((card) => (
         <div key={card.key} className={styles.card}>
           <ApprovalCard card={card} {...actions} />
         </div>
       ))}
     </section>
+  )
+}
+
+/**
+ * The cards whose reply left the conversation, after it (M77): one waiting is
+ * under LOOSE_APPROVALS_LABEL, one answered under APPROVALS_LABEL. Each card
+ * is its own section, so answering renames the section around the card in
+ * place: a card moved into another section would mount afresh, and the tool
+ * card would drop the outcome it shows and offer Approve & run again.
+ */
+export function LooseApprovalCards({ cards, ...actions }: ApprovalCardsProps) {
+  if (cards.length === 0) return null
+  return (
+    <div className={styles.approvals}>
+      {cards.map((card) => (
+        <section
+          key={card.key}
+          className={styles.card}
+          aria-label={isWaitingCard(card) ? LOOSE_APPROVALS_LABEL : APPROVALS_LABEL}
+        >
+          <ApprovalCard card={card} {...actions} />
+        </section>
+      ))}
+    </div>
   )
 }
