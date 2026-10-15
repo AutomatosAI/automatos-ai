@@ -26,7 +26,8 @@
     "K9 (kit): 'Customise look…' shows in the theme menu only while Play is the style (it never switches style by surprise). /looks and /looks/style under Classic or Studio render a short note with a 'Switch to Play' button (the menu's Play choice), never a redirect loop.",
     "K10 (kit): /conversations is a new route; under Classic or Studio its server component redirects to /chat (reads the style cookie, no flash).",
     "K11 (kit): the wave is frontend only — orchestrator/ and services/ untouched (gate N3), no migration (N1), no new dependency (N5, N6). Every route Play needs is already in route-manifest.json (/api/chat*, /api/deliverables*, /health, read 14 Oct). A story that cannot be built without a backend change replies RALPH_BLOCKED with the reason (Gerard decides).",
-    "One PR per wave: story commits end ' [skip ci]'; the runner opens the draft PR once when the build is COMPLETE; ONE CI run. Cut from origin/main; never merge anything into the branch."
+    "One PR per wave: story commits end ' [skip ci]'; the runner opens the draft PR once when the build is COMPLETE; ONE CI run. Cut from origin/main; never merge anything into the branch.",
+    "D-REVIEW (Gerard, 15 Oct, on the ultra-review fix plan scripts/ralph/prd260-review-fix-plan.md): ALL 28 fix stories land before #1138 merges, plus P260-FX-29 (F1: Play renders the withdraw offer and task cards), P260-FX-30 (F4: Stop keeps the partial answer) and P260-FX-31 (docs + F12 copy). F5: looks and the seen record per signed-in user and workspace in the browser (inside P260-FX-20). F9: Studio's consequence tokens follow Play's coral under Play (P260-FX-17). F14: ?artifact_type= links keep today's routing. Still OPEN, not in this wave: F2 (onboarding/trial surfaces in Play's chat), F3 (tool results + Discuss agent picker), F6 (FilePreview for PDF/DOCX/XLSX), F7/F8 (backend: retract the last turn; receipts link Deliverables), F10 (a Pause Auto control), F11 (step-2 refactors), F13 (pre-existing main defects as their own PRs)."
   ],
   "ownerTest": [
     "TESTER first: build the frontend image from this branch's tip (one Docker build at a time) — NO CI lane runs `next build` for a frontend-only PR (the image lanes are path-gated), so this is the build proof; then the local stack from the tip.",
@@ -303,6 +304,413 @@
       "priority": 15,
       "passes": true,
       "notes": "Found by the fresh-context review of 14 Oct (code-reviewer agent, verified against the code: use-backend-health.ts retry: false and the 30 s poll; use-backend-mascot.ts dispatches backend-down on the first 'down'; asleep-gate.tsx swaps the subtree; providers.tsx staleTime 60 s with react-query's default refetchOnWindowFocus; apiClient.request has no retry of its own). The pill's one-failure rule came from T-004 ('One failed ask is the answer'), which suits a status pill; T-009 reused the hook for a gate that unmounts the page. Open for Gerard (not decided by this story): keeping the page mounted behind the asleep screen (an overlay) instead of swapping the subtree would also keep unsaved input through a real outage, but it changes Play's LiveShell design (Ember mock 07: the whole window). Other review notes, LOW, not filed as stories: the ?chatId= value reaches lib/chat/api.ts paths unvalidated (the core page does the same) and storedView keeps the URL's id rather than chat.id; a second ?draft= link while an empty draft is on screen replaces typed words; PlayRouteSwitch's useSearchParams relies on the root layout's force-dynamic rather than the Suspense its comment describes; lib/play/seen.ts is one key per browser, not per workspace; the guard test's colour regex misses oklch()/color-mix() literals and named colours (none in the code today); a Stop after a done receipt lets Auto celebrate."
+    },
+    {
+      "id": "P260-FX-01",
+      "title": "Play's own type, inline code and sheet colours win over Studio's element rules",
+      "description": "Review fix (high) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M01, M16. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-01 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-01 — …'): every change listed there, closing M01, M16. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-02",
+      "title": "Play's chat listens on the chat_changed lane",
+      "description": "Review fix (high) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M02. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-02 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-02 — …'): every change listed there, closing M02. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-03",
+      "title": "New chat and adopted conversations open what the owner picked",
+      "description": "Review fix (high) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M03, M04, M12. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-03 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-03 — …'): every change listed there, closing M03, M04, M12. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-04",
+      "title": "Auto's reducer: one celebration per turn, never stuck on a one-shot",
+      "description": "Review fix (high) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M05, M101, M102, M47. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-04 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-04 — …'): every change listed there, closing M05, M101, M102, M47. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-29",
+      "title": "Play's reply renders the core's withdraw offer (F091-C2) and task cards",
+      "description": "Review fix (high), merged finding M06 in scripts/ralph/prd260-review-fix-plan.md (#25, #10): Play's AutoReply (frontend/components/play/chat/auto-reply.tsx) never reads message.withdrawOffer or message.taskCards, so under Play a pending request cannot be withdrawn and a task card never shows; with M46 a pending grant has no way to be denied from Play once its card is gone, defeating the F091-C2 safety fix for Play users. Decision F1 (Gerard, 15 Oct): yes, before merge. Depends on: P260-FX-08 for the cards that outlive the chat screen; this story is the reply's own rendering.",
+      "acceptanceCriteria": [
+        "Play's reply renders the withdraw offer and the task cards for any message that carries them (live and stored), using the core's own components and handlers exactly as Studio's chat does (find where components/chatbot renders message.withdrawOffer and message.taskCards and reuse them; no second implementation), styled by the look through Studio's tokens inside Play's reply like the approval cards (T-005c).",
+        "Withdrawing from Play calls the same core hook/route as Studio and the offer then reads withdrawn; a task card links where Studio's does.",
+        "Tests in frontend/components/play/chat/__tests__/ (a new file or play-chat-turn.test.tsx): a reply carrying a withdrawOffer shows it and its action calls the core handler (mocked at the hook, as the core's own tests do); a reply carrying taskCards shows them; a reply without either shows neither. Each fails before the change.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-05",
+      "title": "Now-live dark: classes stop regressing Classic and Studio",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M41, M107. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-05 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-05 — …'): every change listed there, closing M41, M107. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-06",
+      "title": "Theme plumbing: <html> classes survive root re-renders, Play survives blocked storage, the Tone items behave",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M07, M87, M85. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-06 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-06 — …'): every change listed there, closing M07, M87, M85. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-07",
+      "title": "The conversation on screen survives remounts and races",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M09, M10, M11. Depends on: P260-FX-02, P260-FX-03.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-07 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-07 — …'): every change listed there, closing M09, M10, M11. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-08",
+      "title": "Approval cards outlive the chat screen (T-005c: 'exactly as in Studio')",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M46, M77, M80. Depends on: P260-FX-07.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-08 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-08 — …'): every change listed there, closing M46, M77, M80. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-09",
+      "title": "Stored replies: saved turn errors, background posts, Try again, Deliverable links",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M29, M30, M76. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-09 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-09 — …'): every change listed there, closing M29, M30, M76. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-30",
+      "title": "Stop keeps Auto's partial answer with 'You stopped this answer.' and Stopped tool lines",
+      "description": "Review fix (medium), merged finding M33 in scripts/ralph/prd260-review-fix-plan.md (#23, #138): Stop erases Auto's partial answer and its tool lines (useChat drops the placeholder on AbortError); the approved Play app kept them with 'You stopped this answer.'. Decision F4 (Gerard, 15 Oct): keep, as the approved Play app does. Play-side only: useChat (lib/chat/hooks.ts) is over the function-length limit and must not be edited.",
+      "acceptanceCriteria": [
+        "Under Play, pressing Stop leaves the words written so far in Auto's reply with 'You stopped this answer.' under them, and each tool line that was running reads as stopped ('Stopped: …' in Play's tool-line words); Auto leaves thinking; the next message streams normally. Implemented Play-side (e.g. Play keeps a snapshot of the reply being written and restores it when useChat drops it on abort), without editing lib/chat/hooks.ts; Studio's Stop is unchanged.",
+        "Tests (Play chat tests with a stubbed stream, like play-chat-approvals-stream.test.tsx): words then Stop keep the words and the stopped note; a running tool line reads stopped; a following send streams a new reply; Studio's chat behaviour is untouched. Each fails before the change.",
+        "docs/testing/PRD-260-PLAY-RUN-CHECKLIST.md step 18 (and step 20, docs/frontend-architecture/play-theme.md where it describes Stop) say what the code now does.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-10",
+      "title": "History caches are per account and fresh; ?draft= is one plain line",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M45, M44, M56. Depends on: P260-FX-07.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-10 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-10 — …'): every change listed there, closing M45, M44, M56. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-11",
+      "title": "Deliverables routing under Play follows K8",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M13, M14. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-11 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-11 — …'): every change listed there, closing M13, M14. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-12",
+      "title": "Deliverables data stays on screen and Download gets the file",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M37, M57, M38, M49, M82. Depends on: P260-FX-11.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-12 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-12 — …'): every change listed there, closing M37, M57, M38, M49, M82. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-13",
+      "title": "Deliverable content and labels: code blocks, raw HTML, provenance, captions, sources",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M36, M39, M104, M95, M81. Depends on: P260-FX-01.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-13 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-13 — …'): every change listed there, closing M36, M39, M104, M95, M81. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-14",
+      "title": "Chat layout fidelity: first open on laptop heights, the Conversations header, receipts' Done tag",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M31, M35, M34. Depends on: P260-FX-01.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-14 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-14 — …'): every change listed there, closing M31, M35, M34. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-15",
+      "title": "Auto's player: blocked autoplay, the boundary race, the style sheet's 12 clips, clip caching",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M26, M27, M23, M75. Depends on: P260-FX-04.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-15 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-15 — …'): every change listed there, closing M26, M27, M23, M75. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-16",
+      "title": "Auto follows the model's reasoning, turn caps and the right tool kind",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M54, M100, M103. Depends on: P260-FX-04.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-16 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-16 — …'): every change listed there, closing M54, M100, M103. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-17",
+      "title": "Studio tokens under a look keep their meaning and reach AA on Studio's own fills",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M52, M53. Depends on: —; blocked: F9 for M52 (M53 can land alone)..",
+      "acceptanceCriteria": [
+        "Implement P260-FX-17 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-17 — …'): every change listed there, closing M52, M53. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "Decision F9 (Gerard, 15 Oct: the plan's recommendation, applied): under Play, Studio's consequence tokens (--accent, --destructive, their foregrounds and tint) follow Play's coral, not the look's accent, so part 1 (M52) is in scope with M53.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-18",
+      "title": "Play's accent tints and page glow are inside the AA proof",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M50. Depends on: P260-FX-17.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-18 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-18 — …'): every change listed there, closing M50. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-19",
+      "title": "Make it yours: selection and colour samples readable on Paper and in forced colours; long names",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M18, M19, M73. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-19 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-19 — …'): every change listed there, closing M18, M19, M73. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-20",
+      "title": "Looks: tabs stay in sync, failed writes are told, the editor waits for the stored look, exports are honest",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M25, M98, M72, M71, M99. Depends on: —; blocked: If F5 makes looks per user, the key scoping lands in this story (same files)..",
+      "acceptanceCriteria": [
+        "Implement P260-FX-20 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-20 — …'): every change listed there, closing M25, M98, M72, M71, M99. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "Decision F5 (Gerard, 15 Oct): looks, the active look and the seen-Deliverables record are kept per signed-in user and workspace IN THIS BROWSER: the storage keys are scoped by user id and workspace id (no backend change); the local edition's single user keeps working; data already stored under the old unscoped keys moves to the current user once and is never deleted; a test shows a second account in the same browser does not see the first account's looks or seen record.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-21",
+      "title": "Asleep and 404 edges: /health timeout, first render, countdown, offline, start command, 404 title",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M43, M89, M94, M83, M84, M68. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-21 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-21 — …'): every change listed there, closing M43, M89, M94, M83, M84, M68. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-22",
+      "title": "Keyboard focus survives unmounts and frame swaps",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M20, M21. Depends on: P260-FX-21.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-22 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-22 — …'): every change listed there, closing M20, M21. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-23",
+      "title": "Load Play's code only when Play renders",
+      "description": "Review fix (medium) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M17. Depends on: P260-FX-11, P260-FX-21.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-23 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-23 — …'): every change listed there, closing M17. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-24",
+      "title": "Announcements and accessible names",
+      "description": "Review fix (low) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M22, M74. Depends on: P260-FX-22.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-24 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-24 — …'): every change listed there, closing M22, M74. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-25",
+      "title": "One width source for Play",
+      "description": "Review fix (low) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M69. Depends on: P260-FX-11, P260-FX-21, P260-FX-23.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-25 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-25 — …'): every change listed there, closing M69. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-26",
+      "title": "Small wiring: the Discuss hint, the widget's page, ⌘K's Play pages",
+      "description": "Review fix (low) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M67, M70, M90. Depends on: —.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-26 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-26 — …'): every change listed there, closing M67, M70, M90. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-27",
+      "title": "Hygiene: one /health poll owner, shared helpers and route constants, dead code",
+      "description": "Review fix (low) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M88, M93, M105. Depends on: P260-FX-21.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-27 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-27 — …'): every change listed there, closing M88, M93, M105. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-28",
+      "title": "Guard and regression tests",
+      "description": "Review fix (low) from the 15 Oct ultra review of PRD-260 (166 confirmed findings merged into scripts/ralph/prd260-review-fix-plan.md). Closes M96, M91. Depends on: P260-FX-19.",
+      "acceptanceCriteria": [
+        "Implement P260-FX-28 exactly as the review fix plan specifies (scripts/ralph/prd260-review-fix-plan.md, section '### P260-FX-28 — …'): every change listed there, closing M96, M91. The plan was written on 57e5cbe35: re-verify every cited path and line by grep before editing, and say in the commit message where the code had moved.",
+        "The tests that section names exist, each fails without the change and passes with it (the commit message says which assertion failed before); no existing test is weakened, skipped or deleted.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "P260-FX-31",
+      "title": "Docs and copy: the plan's docs-only fixes and the F12 copy choices",
+      "description": "Review fix (low/medium docs): section 'B. Docs-only fixes' of scripts/ralph/prd260-review-fix-plan.md (9 entries, mostly RUN checklist steps) plus decision F12 (the plan's recommendation, applied 15 Oct).",
+      "acceptanceCriteria": [
+        "Every entry in section 'B. Docs-only fixes' of scripts/ralph/prd260-review-fix-plan.md is applied to the docs it names (docs/testing/PRD-260-PLAY-RUN-CHECKLIST.md, docs/frontend-architecture/play-theme.md, docs/PRDS/PRD-260-PLAY-THEME.md as listed), re-verified against the code as it stands after the earlier fix stories; checklist step 18 follows F4 = keep (P260-FX-30); step 15 stays as the AC's file card (F6 is open).",
+        "F12 copy: tool-line durations show one decimal ('2.1 s') through a Play-only formatter with a named constant (SECONDS_DECIMALS = 1), the core's formatter unchanged; a saved look's sub-line is 'Your look' (SAVED_SUB) instead of a 'Saved just now' stamp; the editor label reads \"Auto's light · ring\". Tests updated or added for each.",
+        "cd frontend && node scripts/check-changed-lines-eslint.js origin/main → 0 errors; the PRD-260 gates hold (N3 frontend only, N8, N16 globals.css does not grow, N19 Play's CSS reads only --pl-* variables); no new dependency; bash scripts/ralph/acceptance-prd260.sh --no-ci passes."
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
