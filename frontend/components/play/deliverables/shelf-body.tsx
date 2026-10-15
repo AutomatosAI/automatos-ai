@@ -58,7 +58,7 @@ export function ShelfBody({ view, filter, paging, now }: ShelfBodyProps) {
   }
   if (view.status === 'failed') return <Failed message={SHELF_FAILED} retry={paging.retry} />
   if (view.items.length === 0) return <Empty filter={filter} />
-  return <Grid items={view.items} paging={{ ...paging, moreFailed: paging.moreFailed || view.moreFailed }} now={now} />
+  return <Grid items={view.items} paging={paging} now={now} />
 }
 
 /**

@@ -11,7 +11,6 @@ import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
 import { UiStyleProvider } from '../contexts/ui-style-context'
 import { LookProvider } from './looks/look-provider'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { AccountLookScope } from './looks/account-look-scope'
 import type { UiStyle } from '@/lib/ui-style'
 import type { PlayTone } from '@/lib/looks/tone'
@@ -88,11 +87,9 @@ export function Providers({ children, initialUiStyle, initialPlayTone }: Provide
   // PRD-260 K4: under Play the look's ground sets the tone (LookProvider hands it up).
   // forcedTheme forces it without overwriting the user's stored tone, which returns when
   // they leave Play; it starts from the server's tone cookie, so next-themes' script
-  // forces it before paint.
+  // forces it before paint. Forced at every width: the look paints <html> under Play below
+  // 1024 px too, and Studio's semantic tokens and dark: classes must match its ground there.
   const [playTone, setPlayTone] = useState<PlayTone | undefined>(initialPlayTone)
-  // PRD-260 D7, M85: Play is desktop-only, so the look forces its tone only from 1024 px up;
-  // below, the user's own tone applies and the theme menu's Tone items change it.
-  const narrow = useIsTabletOrBelow()
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -112,7 +109,7 @@ export function Providers({ children, initialUiStyle, initialPlayTone }: Provide
           themes={['light', 'dark']}
           storageKey="automatos-theme"
           disableTransitionOnChange
-          forcedTheme={narrow ? undefined : playTone}
+          forcedTheme={playTone}
         >
           <UiStyleProvider initialStyle={initialUiStyle}>
           <QueryClientProvider client={queryClient}>

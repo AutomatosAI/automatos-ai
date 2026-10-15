@@ -6,8 +6,12 @@
  * true only there.
  *
  * P260-FX-06: Play survives a browser whose localStorage is unreadable (M87);
- * the look's tone is forced only from 1024 px up, and under it the Tone items
- * stay in the keyboard's reach, described by 'Set by your look' (M85).
+ * under the look's tone the Tone items stay in the keyboard's reach, described
+ * by 'Set by your look' (M85).
+ *
+ * P260-SEAM (K4 over FX-06 and FX-17): the look paints <html> at every width,
+ * so its tone is forced at every width too; below 1024 px only 'Customise
+ * look…' goes, since /looks opens from 1024 px up (D7).
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -51,11 +55,11 @@ import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { LookProvider } from '@/components/looks/look-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsPlay, useIsStudio } from '@/hooks/use-studio-theme'
 import { clearRoot } from '@/lib/looks/__tests__/helpers'
 import { DAYLIGHT } from '@/lib/looks/presets'
-import { ACTIVE_LOOK_KEY } from '@/lib/looks/storage'
+import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
+import { lookKeys } from '@/lib/looks/storage'
 import { PLAY_TONE_COOKIE, type PlayTone } from '@/lib/looks/tone'
 import {
   APPEARANCE_DEFAULTS_KEY,
@@ -106,10 +110,9 @@ async function arrowDownTo(target: HTMLElement) {
   }
 }
 
-/** The appearance providers as components/providers.tsx wires them: the look's tone is forced only from 1024 px up. */
+/** The appearance providers as components/providers.tsx wires them: the look's tone is forced at every width. */
 function Appearance({ style, playTone: serverTone, children }: { style: UiStyle; playTone?: PlayTone; children: ReactNode }) {
   const [playTone, setPlayTone] = useState<PlayTone | undefined>(serverTone)
-  const narrow = useIsTabletOrBelow()
   return (
     <ThemeProvider
       attribute="class"
@@ -118,7 +121,7 @@ function Appearance({ style, playTone: serverTone, children }: { style: UiStyle;
       themes={['light', 'dark']}
       storageKey={TONE_STORAGE_KEY}
       disableTransitionOnChange
-      forcedTheme={narrow ? undefined : playTone}
+      forcedTheme={playTone}
     >
       <UiStyleProvider initialStyle={style}>
         <LookProvider onToneChange={setPlayTone}>{children}</LookProvider>
@@ -318,29 +321,33 @@ describe('PRD-260 M85 — at desktop width the resting Tone items stay in reach'
   })
 })
 
-describe('PRD-260 D7, M85 — below 1024 px Play forces no tone', () => {
-  it('the Tone items work, with no note and no "Customise look…", and choosing Dark sets the stored tone', async () => {
+describe('PRD-260 K4, D7 — below 1024 px the look still sets the tone (P260-SEAM)', () => {
+  it("keeps Daylight's Light over a stored Dark: the Tone items rest under the note, and 'Customise look…' waits for 1024 px", async () => {
     width.narrow = true
-    // Daylight's Paper ground forces Light from 1024 px up.
-    window.localStorage.setItem(ACTIVE_LOOK_KEY, JSON.stringify(DAYLIGHT))
-    window.localStorage.setItem(TONE_STORAGE_KEY, 'light')
+    // Daylight's Paper ground forces Light; the user's own tone, kept for when they leave Play, is Dark.
+    window.localStorage.setItem(lookKeys(DEFAULT_LOOK_SCOPE).active, JSON.stringify(DAYLIGHT))
+    window.localStorage.setItem(TONE_STORAGE_KEY, 'dark')
     renderApp('play', 'light')
     await openMenu()
-    expect(screen.queryByText(TONE_NOTE)).toBeNull()
+    await settle()
+    expect(htmlTone()).toBe('light')
+    expect(screen.getByText(TONE_NOTE)).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: 'Customise look…' })).toBeNull()
     for (const name of ['Light', 'Dark', 'System']) {
-      expect(screen.getByRole('menuitemradio', { name }), name).not.toHaveAttribute('aria-disabled')
+      expect(screen.getByRole('menuitemradio', { name }), name).toHaveAttribute('aria-disabled', 'true')
     }
     choose('Dark')
     await settle()
+    expect(htmlTone()).toBe('light')
+    choose('Light')
+    await settle()
     expect(window.localStorage.getItem(TONE_STORAGE_KEY)).toBe('dark')
-    expect(htmlTone()).toBe('dark')
   })
 
-  it('is wired that way in components/providers.tsx', () => {
+  it('is wired that way in components/providers.tsx: the tone is forced whatever the width', () => {
     const src = readFileSync(PROVIDERS, 'utf8')
-    expect(src).toContain('const narrow = useIsTabletOrBelow()')
-    expect(src).toContain('forcedTheme={narrow ? undefined : playTone}')
+    expect(src).toContain('forcedTheme={playTone}')
+    expect(src).not.toMatch(/forcedTheme=\{[^}]*narrow/)
   })
 })
 

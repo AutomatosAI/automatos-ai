@@ -254,7 +254,7 @@ describe('This look by keyboard: focus stays on a button that is there (P260-FX-
 
     await press(user, within(question).getByRole('button', { name: 'Keep it' }))
     expect(screen.queryByRole('group', { name: /^Delete My look 1\?/ })).not.toBeInTheDocument()
-    expect(stored(SAVED_LOOKS_KEY)).toEqual([myLook()])
+    expect(stored(KEYS.saved)).toEqual([myLook()])
     expectFocusOn(tool('Delete'))
   })
 

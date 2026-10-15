@@ -587,6 +587,8 @@ describe("PRD-260 (e) — the core's seams load Play's screens only when Play re
       expect(localLoads(slot, 'static').filter((rel) => rel.startsWith(PLAY_DIR)), slot).toEqual([])
       expect(localLoads(slot, 'dynamic').filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel)), slot).toHaveLength(1)
     }
+  })
+})
 
 // --- (e) Make it yours on Paper, in forced colours and with a long name ---------------------
 //

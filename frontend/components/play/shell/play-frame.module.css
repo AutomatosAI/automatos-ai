@@ -95,8 +95,9 @@
 }
 
 /* The page's <main> takes focus only from script, as the frame mounts again after a nap
-   (tabIndex -1, P260-FX-22): it is no control, and a ring round the whole page says nothing. */
+   (tabIndex -1, P260-FX-22): it is no control, and a ring round the whole page says nothing.
+   A transparent outline, never none (M19): unseen here, and forced colours still draw it. */
 .fullBleed:focus,
 .page:focus {
-  outline: none;
+  outline: 2px solid transparent;
 }

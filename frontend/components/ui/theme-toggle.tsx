@@ -44,7 +44,7 @@ function restingToneItem(noteId: string) {
 
 /**
  * PRD-260 K9: the look editor, offered only while Play is the style — the
- * menu never switches style by surprise.
+ * menu never switches style by surprise — and from 1024 px up, where /looks opens (D7).
  */
 function CustomiseLookItem() {
   return (
@@ -66,10 +66,11 @@ export function ThemeToggle() {
   // The tone in effect: under Play the look forces one and keeps the stored one for later.
   const theme = forcedTheme ?? storedTone
   const { style, setStyle, isPlay } = useUiStyle()
-  // PRD-260 D7: Play (its look's tone, its /looks editor) is desktop-only; below 1024 px the
-  // look forces no tone, so the Tone items work as under Studio.
+  // PRD-260 K4: the look paints at every width, so it sets the tone at every width; its
+  // editor, /looks, opens only from 1024 px up (D7), so 'Customise look…' shows only there.
   const narrow = useIsTabletOrBelow()
-  const toneLocked = isPlay && !narrow
+  const toneLocked = isPlay
+  const offersLookEditor = isPlay && !narrow
   const [mounted, setMounted] = useState(false)
   const toneNoteId = useId()
   // Under the lock the Tone group has no handler at all, so no pick reaches the stored tone.
@@ -113,7 +114,7 @@ export function ThemeToggle() {
             Play
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
-        {toneLocked && <CustomiseLookItem />}
+        {offersLookEditor && <CustomiseLookItem />}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Tone</DropdownMenuLabel>
         {toneLocked && <p id={toneNoteId} className="px-2 pb-1.5 text-xs text-muted-foreground">{TONE_SET_BY_LOOK}</p>}

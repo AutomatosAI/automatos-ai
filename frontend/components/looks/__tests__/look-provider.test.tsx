@@ -211,8 +211,8 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
 
   it('is wired the same way in components/providers.tsx', () => {
     const src = readFileSync(PROVIDERS, 'utf8')
-    // P260-FX-06 (M85, D7): from 1024 px up, as this file's harness renders it; below, nothing is forced.
-    expect(src).toContain('forcedTheme={narrow ? undefined : playTone}')
+    // At every width, as this file's harness renders it: the look paints below 1024 px too (K4, P260-SEAM).
+    expect(src).toContain('forcedTheme={playTone}')
     expect(src).toContain('<LookProvider onToneChange={setPlayTone}>')
     expect(src).toContain('useState<PlayTone | undefined>(initialPlayTone)')
   })

@@ -88,16 +88,16 @@ describe('app/deliverables/layout.tsx', () => {
     await showsShelf(false)
   })
 
-  it("keeps Play's shelf for ?tab=outputs, the tab the shelf is (M13)", () => {
+  it("keeps Play's shelf for ?tab=outputs, the tab the shelf is (M13)", async () => {
     state.search = 'tab=outputs'
     renderLayout()
-    showsShelf(true)
+    await showsShelf(true)
   })
 
-  it("opens the backend's own Deliverable link (?tab=outputs&deliverable=<id>) as Play's page, the deep link not mounted (K8)", () => {
+  it("opens the backend's own Deliverable link (?tab=outputs&deliverable=<id>) as Play's page, the deep link not mounted (K8)", async () => {
     state.search = 'tab=outputs&deliverable=d-laptop'
     renderLayout()
-    showsShelf(true)
+    await showsShelf(true)
   })
 
   it.each([

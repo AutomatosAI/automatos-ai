@@ -268,7 +268,8 @@ describe('a stored conversation', () => {
   it('renders its messages, loaded through getChat and getChatMessages', async () => {
     openStoredChat()
     render(<PlayChat />)
-    expect(screen.getByRole('status')).toHaveTextContent('Opening this conversation…')
+    // The asleep gate keeps its own live region in the page from the start (P260-FX-22), so ask for this line by its text.
+    expect(screen.getByText(OPENING)).toHaveAttribute('role', 'status')
     const list = await screen.findByRole('list', { name: 'Conversation' })
     expect(within(list).getByText('What should I look for in a laptop?')).toBeInTheDocument()
     expect(within(list).getByRole('article', { name: 'Auto said' })).toBeInTheDocument()
