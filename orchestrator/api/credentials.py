@@ -369,8 +369,7 @@ async def credentials_health(ctx: RequestContext = Depends(get_request_context_h
     from core.credentials.encryption import get_encryption_service
 
     try:
-        encryption_service = get_encryption_service()
-        key_info = encryption_service.get_key_info()
+        get_encryption_service()
 
         return {
             "status": "healthy",
@@ -380,8 +379,8 @@ async def credentials_health(ctx: RequestContext = Depends(get_request_context_h
             },
             "timestamp": datetime.utcnow().isoformat()
         }
-    except Exception as e:
-        logger.error(f"Credentials health check failed: {e}")
+    except Exception:
+        logger.exception("Credentials health check failed")
         return {
             "status": "unhealthy",
             "timestamp": datetime.utcnow().isoformat()
@@ -441,8 +440,8 @@ async def get_credential_stats(
         }
     
     except Exception as e:
-        logger.error(f"Failed to get credential stats: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception("Failed to get credential stats")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/{credential_id}", response_model=CredentialResponse)
