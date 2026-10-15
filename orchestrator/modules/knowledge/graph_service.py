@@ -316,17 +316,41 @@ class GraphifyService:
         from modules.knowledge.community_reports import generate_community_reports
         community_reports = await generate_community_reports(graph, communities)
 
+        # 6-11. Export, meta, cache, snapshot + diff, build report, prune
+        meta = await self._publish_graph(
+            workspace_id, ws, graph, communities, top_gods,
+            community_reports=community_reports,
+        )
+
+        logger.info("build_graph: completed for workspace %s", workspace_id)
+        return meta
+
+    async def _publish_graph(
+        self,
+        workspace_id: str,
+        ws: DbWorkspaceClient,
+        graph: nx.Graph,
+        communities: Dict[int, List[str]],
+        top_gods: List[Any],
+        *,
+        community_reports: Optional[Dict[int, Dict[str, Any]]] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build steps 6-11, shared by the full, import and incremental builds."""
         # 6. Export artefacts
         await self._export_graph(ws, graph, communities, top_gods, community_reports)
 
         # 7. Build and save meta
         meta = self._build_meta(graph, communities, top_gods)
+        if source is not None:
+            meta["source"] = source
         await self._write_json(ws, _META_JSON_PATH, meta)
 
         # 8. Cache the built graph
         self._cache[workspace_id] = graph
 
         # 9. Save history snapshot + compute diff (US-010)
+        loop = asyncio.get_running_loop()
         graph_data = await loop.run_in_executor(
             None, partial(nx.node_link_data, graph)
         )
@@ -340,8 +364,6 @@ class GraphifyService:
 
         # 11. Prune old history snapshots
         await self._prune_history(ws)
-
-        logger.info("build_graph: completed for workspace %s", workspace_id)
         return meta
 
     async def load_graph(self, workspace_id: str) -> Optional[nx.Graph]:
@@ -473,26 +495,9 @@ class GraphifyService:
         communities = await loop.run_in_executor(None, partial(cluster, graph))
         await loop.run_in_executor(None, partial(score_all, graph, communities))
         top_gods = await loop.run_in_executor(None, partial(god_nodes, graph))
-
-        await self._export_graph(ws, graph, communities, top_gods)
-
-        meta = self._build_meta(graph, communities, top_gods)
-        meta["source"] = "import"
-        await self._write_json(ws, _META_JSON_PATH, meta)
-
-        self._cache[workspace_id] = graph
-
-        # Snapshot + diff
-        exported_data = await loop.run_in_executor(
-            None, partial(nx.node_link_data, graph)
+        meta = await self._publish_graph(
+            workspace_id, ws, graph, communities, top_gods, source="import"
         )
-        diff_result = await self._snapshot_and_diff(ws, graph, exported_data, loop)
-        if diff_result is not None:
-            meta["diff_summary"] = diff_result.get("summary", "")
-
-        today = date.today().isoformat()
-        await self._write_build_report(ws, today, meta, diff_result)
-        await self._prune_history(ws)
 
         logger.info("import_graph: completed for workspace %s", workspace_id)
         return meta
@@ -1438,7 +1443,37 @@ class GraphifyService:
         # Extract and merge new nodes/edges
         extractions = await self._extract_all(workspace_id, sources)
         merged = self._merge_extractions(extractions)
+        self._apply_extractions(existing_graph, sources, extractions, merged)
 
+        # Re-cluster and re-export (same as full build steps 4-11)
+        loop = asyncio.get_running_loop()
+        communities = await loop.run_in_executor(
+            None, partial(cluster, existing_graph)
+        )
+        top_gods = await loop.run_in_executor(
+            None, partial(god_nodes, existing_graph)
+        )
+        meta = await self._publish_graph(
+            workspace_id, ws, existing_graph, communities, top_gods
+        )
+
+        logger.info(
+            "_incremental_build: completed for workspace %s "
+            "(+%d sources, %d total nodes)",
+            workspace_id,
+            len(sources),
+            existing_graph.number_of_nodes(),
+        )
+        return meta
+
+    @staticmethod
+    def _apply_extractions(
+        existing_graph: nx.Graph,
+        sources: List[Dict[str, Any]],
+        extractions: List[Dict[str, Any]],
+        merged: Dict[str, Any],
+    ) -> None:
+        """Fold an incremental extraction into *existing_graph*, in place."""
         # F104: a changed document's earlier facts come out before its new
         # ones go in — only for a document whose extraction came back.
         replaced_names = {s["id"]: s["path"] for s in sources if s.get("type") == "document" and s.get("replaced")}
@@ -1471,44 +1506,6 @@ class GraphifyService:
             existing_graph.number_of_nodes(),
             existing_graph.number_of_edges(),
         )
-
-        # Re-cluster and re-export (same as full build steps 4-11)
-        loop = asyncio.get_running_loop()
-        communities = await loop.run_in_executor(
-            None, partial(cluster, existing_graph)
-        )
-        top_gods = await loop.run_in_executor(
-            None, partial(god_nodes, existing_graph)
-        )
-
-        await self._export_graph(ws, existing_graph, communities, top_gods)
-
-        meta = self._build_meta(existing_graph, communities, top_gods)
-        await self._write_json(ws, _META_JSON_PATH, meta)
-
-        self._cache[workspace_id] = existing_graph
-
-        graph_data = await loop.run_in_executor(
-            None, partial(nx.node_link_data, existing_graph)
-        )
-        diff_result = await self._snapshot_and_diff(
-            ws, existing_graph, graph_data, loop
-        )
-        if diff_result is not None:
-            meta["diff_summary"] = diff_result.get("summary", "")
-
-        today = date.today().isoformat()
-        await self._write_build_report(ws, today, meta, diff_result)
-        await self._prune_history(ws)
-
-        logger.info(
-            "_incremental_build: completed for workspace %s "
-            "(+%d sources, %d total nodes)",
-            workspace_id,
-            len(sources),
-            existing_graph.number_of_nodes(),
-        )
-        return meta
 
     @staticmethod
     async def _write_json(
