@@ -55,8 +55,7 @@ interface AutoWidgetProps {
 }
 
 type FormState = 'form' | 'loading' | 'success' | 'error'
-
-// Page labels for context hint
+// The page the widget names in its greeting ("Ask me anything about …"), by MainLayout's page key.
 const PAGE_LABELS: Record<string, string> = {
   dashboard: 'Dashboard',
   agents: 'Agent Management',
@@ -69,6 +68,7 @@ const PAGE_LABELS: Record<string, string> = {
   settings: 'Settings',
   team: 'Team Management',
   chat: 'Chat',
+  looks: 'Make it yours',
 }
 
 // =============================================================================

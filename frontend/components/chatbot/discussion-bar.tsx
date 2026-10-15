@@ -16,7 +16,9 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { MessagesSquare, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useBoardTask } from '@/hooks/use-board-tasks'
-import { CHAT_ROUTE, discussionLabel, discussionOf, type Discussion } from '@/lib/discussion'
+import { useIsTabletOrBelow } from '@/hooks/use-mobile'
+import { useIsPlay } from '@/hooks/use-studio-theme'
+import { CHAT_ROUTE, discussionHint, discussionLabel, discussionOf, type Discussion } from '@/lib/discussion'
 import { missionHref, ticketHref } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useDiscussionStore } from '@/stores/discussion-store'
@@ -28,6 +30,7 @@ const BAR_CLASS =
 
 export function DiscussionBar() {
   const { discussion, missing } = useDiscussionFromLink()
+  const inPlayChat = usePlayChatOnScreen()
   const end = useEndDiscussion()
   useEndOnAnotherConversation(end)
   const [rebriefing, setRebriefing] = useState(false)
@@ -41,6 +44,7 @@ export function DiscussionBar() {
   }
   if (!discussion) return null
   const label = discussionLabel(discussion)
+  const hint = discussionHint(discussion, inPlayChat)
   return (
     <div role="region" aria-label="Discussion" className={BAR_CLASS} data-testid="discussion-bar">
       <MessagesSquare className="h-4 w-4 shrink-0 text-primary" />
@@ -61,11 +65,7 @@ export function DiscussionBar() {
         </Button>
       )}
       <EndButton onEnd={end} />
-      {discussion.agentName && !discussion.missionId && (
-        <span className="basis-full text-muted-foreground">
-          You are talking to Auto. To ask {discussion.agentName} instead, pick them in the message box.
-        </span>
-      )}
+      {hint && <span className="basis-full text-muted-foreground">{hint}</span>}
       {rebriefing && <RebriefDialog discussion={discussion} open onOpenChange={setRebriefing} onDone={end} />}
     </div>
   )
@@ -82,6 +82,14 @@ function EndButton({ onEnd }: { onEnd: () => void }) {
       <X className="h-3.5 w-3.5" />
     </button>
   )
+}
+
+/** Play's chat is what /chat shows: Play at >= 1024 px (PRD-260 D7, the PlayRouteSwitch in
+ * app/chat/layout.tsx). Its message box has no agent picker, so the hint differs there. */
+function usePlayChatOnScreen(): boolean {
+  const isPlay = useIsPlay()
+  const narrow = useIsTabletOrBelow()
+  return isPlay && !narrow
 }
 
 /** `/chat?ticket=<id>` without `repo` (with it, the link opens a session's canvas)
