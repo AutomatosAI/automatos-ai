@@ -1,12 +1,12 @@
 'use client'
 
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { applyLook, applyMotion, clearLook } from '@/lib/looks/document'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
-import { browserStorage, rememberLookScope, type StorageSource } from '@/lib/looks/storage'
+import { browserStorage, readPrepaintLook, rememberLookScope, type StorageSource } from '@/lib/looks/storage'
 import { clearPlayToneCookie, toneOfGround, writePlayToneCookie, type PlayTone } from '@/lib/looks/tone'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 
@@ -18,6 +18,11 @@ import { useLookStore, type LookStore } from './use-look-store'
  * style is play. Its variables live on <html>, so every screen follows a
  * change at once; the pre-paint script (lib/looks/prepaint.ts) has already
  * set them before first paint, and this takes over once storage is read.
+ * Until then, under Play, it paints what the pre-paint script paints
+ * (readPrepaintLook), so Play is never without its variables: the account's
+ * looks wait for the account and its workspace, which can take a while (the
+ * backend asleep: account-look-scope.tsx), and a switch to Play from Studio
+ * or Classic ran no pre-paint.
  * Under Play the look's ground sets the tone (written to its cookie and
  * handed up to ThemeProvider's forcedTheme); leaving Play takes every
  * property, the motion marks and the tone cookie off again, and drops the
@@ -33,7 +38,7 @@ import { useLookStore, type LookStore } from './use-look-store'
 export interface LookContextValue extends Omit<LookStore, 'scope'> {
   /** The user asks for reduced motion: no loops, no glow crossfade, no rise. */
   readonly reducedMotion: boolean
-  /** Under Play, once storage is read: the tone the look's ground sets. Undefined otherwise. */
+  /** Under Play: the tone the ground of the look on <html> sets (the pre-paint's until storage is read). Undefined otherwise. */
   readonly tone: PlayTone | undefined
 }
 
@@ -70,13 +75,25 @@ export function useLook(): LookContextValue {
 
 interface DocumentLook {
   readonly active: boolean
-  readonly loaded: boolean
-  readonly look: Look
+  /** The look to paint; null leaves what is on <html> (the first render, before the pre-paint look is read). */
+  readonly look: Look | null
   readonly reducedMotion: boolean
 }
 
-/** Until storage is read the pre-paint values stand: applying the default first would flash it. */
-function useLookOnDocument({ active, loaded, look, reducedMotion }: DocumentLook): void {
+/**
+ * Under Play, while storage isn't read yet, the look the pre-paint script
+ * paints, read after mount (so the server's render and the first one agree);
+ * null otherwise. Never the default over a stored look: that would flash it.
+ */
+function usePrepaintLook(storage: StorageSource, waiting: boolean): Look | null {
+  const [prepaint, setPrepaint] = useState<Look | null>(null)
+  useEffect(() => {
+    setPrepaint(waiting ? readPrepaintLook(storage) : null)
+  }, [storage, waiting])
+  return prepaint
+}
+
+function useLookOnDocument({ active, look, reducedMotion }: DocumentLook): void {
   useEffect(() => {
     const root = document.documentElement
     if (!active) {
@@ -84,8 +101,8 @@ function useLookOnDocument({ active, loaded, look, reducedMotion }: DocumentLook
       return
     }
     applyMotion(root, reducedMotion)
-    if (loaded) applyLook(root, look)
-  }, [active, loaded, look, reducedMotion])
+    if (look !== null) applyLook(root, look)
+  }, [active, look, reducedMotion])
 
   useEffect(() => () => clearLook(document.documentElement), [])
 }
@@ -97,7 +114,7 @@ function useLookPointer(storage: StorageSource, active: boolean, scope: string |
   }, [storage, active, scope])
 }
 
-/** Until storage is read the server's tone (from its cookie) stands, so a reload never flips it. */
+/** Until a look is painted the server's tone (from its cookie) stands, so a reload never flips it. */
 function useLookTone(active: boolean, tone: PlayTone | undefined, onToneChange?: (tone: PlayTone | undefined) => void): void {
   useEffect(() => {
     if (!active) {
@@ -124,9 +141,11 @@ export function LookProvider({ children, storage = browserStorage, onToneChange 
   const { scope, loaded, persisted, look, saved, setLook, saveLook, deleteLook, renameLook } = store
   const reducedMotion = usePrefersReducedMotion()
   const active = useUiStyleOptional()?.isPlay ?? false
-  const tone = active && loaded ? toneOfGround(look.ground) : undefined
+  const prepaint = usePrepaintLook(storage, active && !loaded)
+  const painted = loaded ? look : prepaint
+  const tone = active && painted !== null ? toneOfGround(painted.ground) : undefined
 
-  useLookOnDocument({ active, loaded, look, reducedMotion })
+  useLookOnDocument({ active, look: painted, reducedMotion })
   useLookTone(active, tone, onToneChange)
   useLookPointer(storage, active, scope)
 

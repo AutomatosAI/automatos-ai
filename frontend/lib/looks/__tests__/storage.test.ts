@@ -18,6 +18,7 @@ import {
   lookKeys,
   parseActiveLook,
   parseSavedLooks,
+  readPrepaintLook,
   readStoredLooks,
   rememberLookScope,
   writeActiveLook,
@@ -181,5 +182,33 @@ describe('the pre-paint pointer', () => {
     expect(rememberLookScope(() => store, A)).toBe(true)
     expect(store.getItem(LOOK_SCOPE_KEY)).toBe(A)
     expect(rememberLookScope(blockedStorage, A)).toBe(false)
+  })
+})
+
+describe('the pre-paint look (painted under Play until the account is known)', () => {
+  it("is the pointer scope's active look, else the one kept before F5, else the default", () => {
+    const store = memoryStorage({
+      [ACTIVE_LOOK_KEY]: JSON.stringify(myLook()),
+      [lookKeys(A).active]: JSON.stringify(DAYLIGHT),
+    })
+    expect(readPrepaintLook(() => store)).toEqual(myLook())
+    store.setItem(LOOK_SCOPE_KEY, A)
+    expect(readPrepaintLook(() => store)).toEqual(DAYLIGHT)
+    store.setItem(LOOK_SCOPE_KEY, B)
+    expect(readPrepaintLook(() => store)).toEqual(EMBER)
+    expect(readPrepaintLook(() => memoryStorage())).toEqual(EMBER)
+    expect(readPrepaintLook(() => memoryStorage({ [ACTIVE_LOOK_KEY]: '{not json' }))).toEqual(EMBER)
+    expect(readPrepaintLook(blockedStorage)).toEqual(EMBER)
+  })
+
+  it('only reads: nothing moves and nothing is written', () => {
+    const store = memoryStorage({
+      [SAVED_LOOKS_KEY]: JSON.stringify([myLook()]),
+      [ACTIVE_LOOK_KEY]: JSON.stringify(myLook()),
+    })
+    const setItem = vi.spyOn(store, 'setItem')
+    readPrepaintLook(() => store)
+    expect(setItem).not.toHaveBeenCalled()
+    expect(store.getItem(UNSCOPED_LOOKS_MOVED_KEY)).toBeNull()
   })
 })

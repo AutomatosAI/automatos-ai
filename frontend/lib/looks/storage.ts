@@ -1,4 +1,4 @@
-import { isPresetId } from './presets'
+import { DEFAULT_LOOK, isPresetId } from './presets'
 import { moveUnscopedOnce, scopedKey } from './scope'
 import type { Look } from './types'
 import { validateLook } from './validate'
@@ -139,6 +139,26 @@ export function writeActiveLook(storage: StorageSource, scope: string, look: Loo
 
 export function writeSavedLooks(storage: StorageSource, scope: string, looks: readonly Look[]): boolean {
   return write(storage, lookKeys(scope).saved, looks, 'the saved Looks')
+}
+
+/**
+ * The look the pre-paint script paints (lib/looks/prepaint.ts): the active
+ * look of the scope LOOK_SCOPE_KEY names, else the one this browser kept
+ * before F5, else the default. It only reads: nothing moves, nothing is
+ * written. The LookProvider paints it under Play until the account's own
+ * looks are read, so Play always has its variables, also when the account or
+ * its workspace isn't known yet and the style was switched to Play after the
+ * page loaded (no pre-paint ran).
+ */
+export function readPrepaintLook(storage: StorageSource): Look {
+  try {
+    const store = storage()
+    const pointer = store.getItem(LOOK_SCOPE_KEY)
+    return parseActiveLook(store.getItem(pointer ? lookKeys(pointer).active : ACTIVE_LOOK_KEY)) ?? DEFAULT_LOOK
+  } catch (error) {
+    console.warn("[looks] can't read localStorage, so Play paints Ember until the account's Looks are read:", error)
+    return DEFAULT_LOOK
+  }
 }
 
 /** Points the pre-paint script at this scope's active look (lib/looks/prepaint.ts). */

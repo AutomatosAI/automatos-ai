@@ -7,8 +7,13 @@
  * neither the first account's looks nor its seen record; the local edition's
  * one user (no user id) keeps its looks; what a browser kept before F5 moves
  * to the first account once and is never deleted.
+ * A workspace that failed to load (the backend asleep when the page opened)
+ * is asked for again once the backend answers GET /health, and until the
+ * looks are read Play still paints the pre-paint script's look.
  */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const account = vi.hoisted(() => ({
@@ -17,6 +22,8 @@ const account = vi.hoisted(() => ({
   userId: 'user_a' as string | null,
   workspaceId: 'ws-1' as string | null,
   workspaceLoading: false,
+  workspaceError: null as Error | null,
+  refreshWorkspace: vi.fn(async (): Promise<void> => undefined),
 }))
 
 vi.mock('@/lib/auth-hooks', () => ({
@@ -30,16 +37,21 @@ vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => ({
     workspace: account.workspaceId === null ? null : { id: account.workspaceId },
     isLoading: account.workspaceLoading,
+    error: account.workspaceError,
+    refreshWorkspace: account.refreshWorkspace,
   }),
 }))
 
 import { AccountLookScope } from '@/components/looks/account-look-scope'
 import { LookProvider, useLook } from '@/components/looks/look-provider'
-import { UiStyleProvider } from '@/contexts/ui-style-context'
+import { LOOKS_HEADING, LooksScreen } from '@/components/looks/looks-screen'
+import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
+import { BACKEND_HEALTH_QUERY_KEY } from '@/hooks/use-backend-health'
 import { useCelebrateNew } from '@/hooks/use-celebrate-new'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
-import { clearRoot, myLook } from '@/lib/looks/__tests__/helpers'
-import { DAYLIGHT } from '@/lib/looks/presets'
+import { clearRoot, lookNamesLeft, myLook, rootVars } from '@/lib/looks/__tests__/helpers'
+import { lookDocumentVars } from '@/lib/looks/document'
+import { DAYLIGHT, DEFAULT_LOOK } from '@/lib/looks/presets'
 import { lookScope } from '@/lib/looks/scope'
 import {
   ACTIVE_LOOK_KEY,
@@ -50,7 +62,7 @@ import {
 } from '@/lib/looks/storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { SEEN_KEY, seenKey } from '@/lib/play/seen'
-import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION } from '@/lib/ui-style'
+import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
 
 const A = lookScope('ws-1', 'user_a')
 const B = lookScope('ws-1', 'user_b')
@@ -67,8 +79,20 @@ const OLD_SEEN = { ids: ['d-old'], newest: OLD.created_at }
 
 const celebrate = vi.fn()
 
+/** A fresh cache per test, as components/providers.tsx has one per page; no retries, no logging. */
+function quietQueryClient(): QueryClient {
+  const quiet = () => undefined
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+    logger: { log: quiet, warn: quiet, error: quiet },
+  })
+}
+
+let queryClient = quietQueryClient()
+
 function Probe() {
   const { look, saved, loaded, setLook, saveLook } = useLook()
+  const { setStyle } = useUiStyle()
   return (
     <div>
       <p>Loaded: {loaded ? 'yes' : 'no'}</p>
@@ -79,6 +103,9 @@ function Probe() {
       </button>
       <button type="button" onClick={() => setLook(DAYLIGHT)}>
         Use Daylight
+      </button>
+      <button type="button" onClick={() => setStyle('play')}>
+        Go Play
       </button>
     </div>
   )
@@ -91,16 +118,24 @@ function Shelf({ items }: { readonly items: readonly Deliverable[] }) {
 }
 
 /** The providers as components/providers.tsx nests them: the account's scope above the LookProvider. */
-function App({ items }: { readonly items: readonly Deliverable[] }) {
+function Providers({ style = 'play', children }: { readonly style?: UiStyle; readonly children: ReactNode }) {
   return (
-    <UiStyleProvider initialStyle="play">
-      <AccountLookScope>
-        <LookProvider>
-          <Probe />
-          <Shelf items={items} />
-        </LookProvider>
-      </AccountLookScope>
+    <UiStyleProvider initialStyle={style}>
+      <QueryClientProvider client={queryClient}>
+        <AccountLookScope>
+          <LookProvider>{children}</LookProvider>
+        </AccountLookScope>
+      </QueryClientProvider>
     </UiStyleProvider>
+  )
+}
+
+function App({ items, style }: { readonly items: readonly Deliverable[]; readonly style?: UiStyle }) {
+  return (
+    <Providers style={style}>
+      <Probe />
+      <Shelf items={items} />
+    </Providers>
   )
 }
 
@@ -118,8 +153,34 @@ function signInAs(userId: string | null, workspaceId: string | null = 'ws-1'): v
   account.workspaceId = workspaceId
 }
 
+function toneCookie(): string | undefined {
+  return document.cookie.split('; ').find((entry) => entry.startsWith(`${PLAY_TONE_COOKIE}=`))?.split('=')[1]
+}
+
+/** Play's frame asks GET /health (useBackendHealth's query) and the backend answers, or doesn't. */
+async function backendAnswers(answered: boolean): Promise<void> {
+  await act(async () => {
+    await queryClient
+      .fetchQuery({
+        queryKey: BACKEND_HEALTH_QUERY_KEY,
+        queryFn: () => (answered ? Promise.resolve({ status: 'ok' }) : Promise.reject(new Error('Network error'))),
+      })
+      .catch(() => undefined)
+  })
+}
+
 beforeEach(() => {
-  Object.assign(account, { isLoaded: true, isSignedIn: true, userId: 'user_a', workspaceId: 'ws-1', workspaceLoading: false })
+  Object.assign(account, {
+    isLoaded: true,
+    isSignedIn: true,
+    userId: 'user_a',
+    workspaceId: 'ws-1',
+    workspaceLoading: false,
+    workspaceError: null,
+  })
+  account.refreshWorkspace.mockReset()
+  account.refreshWorkspace.mockResolvedValue(undefined)
+  queryClient = quietQueryClient()
   window.localStorage.clear()
   window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
   document.cookie = `${PLAY_TONE_COOKIE}=; Max-Age=0; Path=/`
@@ -130,6 +191,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  queryClient.clear()
   vi.restoreAllMocks()
   window.localStorage.clear()
   clearRoot()
@@ -229,7 +291,7 @@ describe('the local edition', () => {
 })
 
 describe('before the account is known', () => {
-  it('reads, moves and writes nothing while Clerk or the workspace loads, while signed out, or without a workspace', async () => {
+  it("loads, moves and writes none of the account's looks while Clerk or the workspace loads, while signed out, or without a workspace", async () => {
     window.localStorage.setItem(SAVED_LOOKS_KEY, JSON.stringify([myLook()]))
     account.isLoaded = false
     const { rerender } = render(<App items={BOTH} />)
@@ -252,5 +314,74 @@ describe('before the account is known', () => {
     rerender(<App items={BOTH} />)
     expect(await screen.findByText('Saved: My look 1')).toBeInTheDocument()
     expect(screen.getByText('Loaded: yes')).toBeInTheDocument()
+  })
+})
+
+describe('a workspace that failed to load (the backend asleep when the page opened)', () => {
+  beforeEach(() => {
+    Object.assign(account, { workspaceId: null, workspaceError: new Error('Failed to fetch workspace') })
+  })
+
+  it("still paints Play when it is switched on before the account's looks are read: the pre-paint script's look", async () => {
+    window.localStorage.setItem(LOOK_SCOPE_KEY, A)
+    window.localStorage.setItem(lookKeys(A).active, JSON.stringify(DAYLIGHT))
+    render(<App items={OLD_ONLY} style="studio" />)
+    expect(screen.getByText('Loaded: no')).toBeInTheDocument()
+    expect(lookNamesLeft()).toEqual([])
+
+    click('Go Play')
+    await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DAYLIGHT)))
+    expect(toneCookie()).toBe('light')
+    expect(screen.getByText('Loaded: no')).toBeInTheDocument()
+    // Painting only reads: nothing moved, the pointer is unchanged.
+    expect(window.localStorage.getItem(UNSCOPED_LOOKS_MOVED_KEY)).toBeNull()
+    expect(window.localStorage.getItem(LOOK_SCOPE_KEY)).toBe(A)
+  })
+
+  it('paints the default look when nothing is stored', async () => {
+    render(<App items={OLD_ONLY} style="studio" />)
+    click('Go Play')
+    await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK)))
+    expect(screen.getByText('Loaded: no')).toBeInTheDocument()
+    expect(window.localStorage.getItem(LOOK_SCOPE_KEY)).toBeNull()
+  })
+
+  it('asks for the workspace again once the backend answers, and /looks then loads', async () => {
+    window.localStorage.setItem(lookKeys(A).active, JSON.stringify(DAYLIGHT))
+    account.refreshWorkspace.mockImplementation(async () => {
+      Object.assign(account, { workspaceId: 'ws-1', workspaceError: null })
+    })
+    const looks = () => (
+      <Providers>
+        <LooksScreen />
+      </Providers>
+    )
+    const busy = () => screen.getByRole('heading', { level: 1, name: LOOKS_HEADING }).closest('[aria-busy]')
+    const { rerender } = render(looks())
+    expect(busy()).not.toBeNull()
+
+    await backendAnswers(false)
+    expect(account.refreshWorkspace).not.toHaveBeenCalled()
+
+    await backendAnswers(true)
+    // A second answer before the workspace arrives asks nothing more: once per failure.
+    await backendAnswers(true)
+    expect(account.refreshWorkspace).toHaveBeenCalledTimes(1)
+
+    // The WorkspaceProvider renders again with the workspace it just loaded.
+    rerender(looks())
+    await waitFor(() => expect(busy()).toBeNull())
+    await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DAYLIGHT)))
+
+    await backendAnswers(true)
+    expect(account.refreshWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('a workspace that loaded is never asked for again when the backend answers', async () => {
+    Object.assign(account, { workspaceId: 'ws-1', workspaceError: null })
+    render(<App items={OLD_ONLY} />)
+    expect(await screen.findByText('Loaded: yes')).toBeInTheDocument()
+    await backendAnswers(true)
+    expect(account.refreshWorkspace).not.toHaveBeenCalled()
   })
 })
