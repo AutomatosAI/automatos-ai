@@ -107,6 +107,12 @@ jobs:
             grep: "@smoke|@off"
             browsers: "chromium webkit"
             project_flags: "--project=chromium --project=webkit"
+          # The theme-host spike on (PRD-261 A-01). Only this lane ever builds with '1'.
+          - build: spike
+            spike_flag: "1"
+            grep: "@smoke|@spike|@record"
+            browsers: "chromium webkit"
+            project_flags: "--project=chromium --project=webkit"
 
     # Job level, not step level: docker-compose.yml interpolates its `:?` variables
     # on every subcommand (up, logs and down alike). Throwaway values for an
@@ -150,6 +156,13 @@ jobs:
           echo "EXPECTED_REACT_VERSION=$(node -p "require('next/dist/compiled/react').version")" >> "$GITHUB_ENV"
           echo "NEXT_VERSION=$(node -p "require('next/package.json').version")" >> "$GITHUB_ENV"
 
+      # The theme-sdk shims, generated from the React this install vendors, right before the
+      # build that serves them (PRD-261 A-01). Never committed; the default build has none.
+      - name: Generate theme-sdk shims
+        if: matrix.build == 'spike'
+        working-directory: frontend
+        run: node scripts/theme-sdk/generate-shims.js
+
       - name: Build the frontend (local edition)
         working-directory: frontend
         env:
@@ -187,6 +200,11 @@ jobs:
       - name: Type-check the specs
         working-directory: e2e/browser
         run: npx tsc -p tsconfig.json
+
+      # The hello theme against @types/react 19 and the spike SDK's types (PRD-261 A-01).
+      - name: Type-check the hello theme
+        working-directory: e2e/browser
+        run: npx tsc -p fixtures/hello-theme/tsconfig.json
 
       # EXPECTED_REACT_VERSION and NEXT_VERSION come from $GITHUB_ENV (set above).
       - name: Run the browser specs
