@@ -3,5 +3,5 @@ node_modules/
 test-results/
 playwright-report/
 records/
-# Installed with --no-package-lock on purpose: the pins in package.json are exact.
+# CI writes a lockfile on install and uploads it; it is committed once reviewed (PRD-261 wave A1).
 package-lock.json

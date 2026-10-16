@@ -190,9 +190,19 @@ jobs:
       - name: Wait for the frontend
         run: bash e2e/browser/scripts/wait-for-url.sh http://localhost:3000/agents 120
 
-      - name: Install Playwright (isolated package, exact pins, no lockfile)
+      # Exact pins, no committed lockfile yet. The install writes one here so the default job can
+      # upload what it resolved; the next wave commits that file and switches this step to npm ci.
+      - name: Install Playwright (isolated package, exact pins)
         working-directory: e2e/browser
-        run: npm install --no-audit --no-fund --no-package-lock
+        run: npm install --no-audit --no-fund
+
+      - name: Upload the resolved e2e lockfile
+        if: matrix.build == 'default'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-browser-lockfile
+          path: e2e/browser/package-lock.json
+          if-no-files-found: error
 
       - name: Install the browsers and their system packages
         working-directory: e2e/browser
