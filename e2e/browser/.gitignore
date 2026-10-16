@@ -1,0 +1,7 @@
+# PRD-261 A-00: what the browser lane writes. Installed and run in CI only.
+node_modules/
+test-results/
+playwright-report/
+records/
+# Installed with --no-package-lock on purpose: the pins in package.json are exact.
+package-lock.json

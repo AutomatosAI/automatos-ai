@@ -1,0 +1,14 @@
+{
+  "name": "automatos-browser-e2e",
+  "private": true,
+  "description": "PRD-261 A-00: the browser lane (Playwright on Chromium and WebKit). Installed only in CI with npm install --no-package-lock; see README.md.",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.57.0",
+    "@types/node": "20.19.43",
+    "typescript": "5.9.3"
+  }
+}
