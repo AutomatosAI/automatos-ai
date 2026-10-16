@@ -110,7 +110,11 @@ async function importDefinition(manifest: SpikeManifest, deps: LoaderDeps): Prom
   return definition
 }
 
-/** Runs register(host) and returns the frame it registered; the host accepts only the frame slot. */
+/**
+ * Runs register(host) and returns the frame it registered; the host accepts only the frame slot.
+ * A register that throws, or registers no frame, is unregistered before the failure goes on, so
+ * whatever it set up before failing does not outlive the load.
+ */
 function registerFrame(definition: ThemeDefinition, sdkVersion: string): FrameComponent {
   const slots = new Map<string, FrameComponent>()
   const host: ThemeRegistrationHost = Object.freeze({
@@ -122,10 +126,15 @@ function registerFrame(definition: ThemeDefinition, sdkVersion: string): FrameCo
       slots.set(slot, component as FrameComponent)
     },
   })
-  definition.register(host)
-  const frame = slots.get(FRAME_SLOT)
-  if (frame === undefined) throw new Error(`the theme registered no "${FRAME_SLOT}" component`)
-  return frame
+  try {
+    definition.register(host)
+    const frame = slots.get(FRAME_SLOT)
+    if (frame === undefined) throw new Error(`the theme registered no "${FRAME_SLOT}" component`)
+    return frame
+  } catch (error) {
+    runLogged(() => definition.unregister?.())
+    throw error
+  }
 }
 
 async function applyPresetLook(manifest: SpikeManifest, deps: LoaderDeps): Promise<() => void> {

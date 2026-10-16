@@ -156,6 +156,18 @@ describe('PRD-261 A-01 — loadSpikeTheme fails with a reason, in order', () => 
     expect(reasonOf(await loadSpikeTheme(depsWith({ importModule: vi.fn(async () => otherSlot) })))).toBe('register')
   })
 
+  it('unregisters a theme whose register throws, or registers no frame', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const unregisterThrown = vi.fn()
+    const throws = { default: { register() { throw new Error('deliberate register failure') }, unregister: unregisterThrown } }
+    expect(reasonOf(await loadSpikeTheme(depsWith({ importModule: vi.fn(async () => throws) })))).toBe('register')
+    expect(unregisterThrown).toHaveBeenCalledTimes(1)
+    const unregisterNoFrame = vi.fn()
+    const noFrame = { default: { register() {}, unregister: unregisterNoFrame } }
+    expect(reasonOf(await loadSpikeTheme(depsWith({ importModule: vi.fn(async () => noFrame) })))).toBe('register')
+    expect(unregisterNoFrame).toHaveBeenCalledTimes(1)
+  })
+
   it("maps a stylesheet that fails to 'look', unregisters the theme and leaves nothing on <html>", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     observer = settleStylesheets('error')
