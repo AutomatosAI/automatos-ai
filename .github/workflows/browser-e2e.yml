@@ -108,11 +108,12 @@ jobs:
             browsers: "chromium webkit"
             project_flags: "--project=chromium --project=webkit"
           # The theme-host spike on (PRD-261 A-01). Only this lane ever builds with '1'.
+          # Firefox runs the @record specs only (playwright.config.ts gives it grep /@record/).
           - build: spike
             spike_flag: "1"
             grep: "@smoke|@spike|@record"
-            browsers: "chromium webkit"
-            project_flags: "--project=chromium --project=webkit"
+            browsers: "chromium webkit firefox"
+            project_flags: "--project=chromium --project=webkit --project=firefox"
 
     # Job level, not step level: docker-compose.yml interpolates its `:?` variables
     # on every subcommand (up, logs and down alike). Throwaway values for an
@@ -213,6 +214,20 @@ jobs:
           E2E_APP_URL: http://localhost:3000
           RECORD_DIR: records
         run: npx playwright test --grep "${{ matrix.grep }}" ${{ matrix.project_flags }}
+
+      # The theme-host record (React version, import-map integrity support), pass or fail.
+      - name: Summarise the theme-host record
+        if: always() && matrix.build == 'spike'
+        working-directory: e2e/browser
+        run: node scripts/summarise-records.mjs records >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the theme-host record
+        if: always() && matrix.build == 'spike'
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-host-record
+          path: e2e/browser/records
+          if-no-files-found: ignore
 
       # The folder may not exist when the job failed before Playwright ran.
       - name: Collect server logs

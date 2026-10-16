@@ -36,5 +36,12 @@ export default defineConfig({
       name: 'webkit',
       use: { ...devices['Desktop Safari'], viewport: DESKTOP_VIEWPORT },
     },
+    // PRD-261 A-01: Firefox runs the @record specs only (the React version and import-map
+    // integrity support); the lane itself is Chromium and WebKit.
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'], viewport: DESKTOP_VIEWPORT },
+      grep: /@record/,
+    },
   ],
 })

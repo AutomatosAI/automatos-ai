@@ -56,7 +56,10 @@ Every test carries one tag through the `tag` option, for example
 - `@smoke` — the lane itself works: the app loads, reaches the backend and draws the Studio shell. Both builds.
 - `@off` — with the spike off, none of the theme host is on the page. Default build only.
 - `@spike` — the theme host loads, falls back and stays off where it should. Spike build only.
-- `@record` — writes measured facts (React version, import-map support) to `records/`. Spike build only.
+- `@record` — writes measured facts (React version, import-map support and integrity) to `records/`.
+  Spike build only, and the only tag Firefox runs (the `firefox` project has `grep: /@record/`).
+  `scripts/summarise-records.mjs` turns the folder into the job summary's table; the folder is
+  uploaded as `theme-host-record`.
 
 Specs live in `specs/`, shared helpers in `support/`.
 
