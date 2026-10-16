@@ -6,6 +6,8 @@ import { Providers } from '../components/providers'
 import { LOOK_PREPAINT_SCRIPT } from '@/lib/looks/prepaint'
 import { PLAY_TONE_COOKIE, playToneFor } from '@/lib/looks/tone'
 import { parseUiStyle, STYLE_CLASS_SCRIPT, UI_STYLE_COOKIE } from '@/lib/ui-style'
+import { isThemeHostSpikeOn } from '@/lib/theme-host/spike-flag'
+import { ThemeImportMap } from '@/components/theme-host/theme-import-map'
 import { PLAY_FONT_VARIABLE_CLASSES } from './play-fonts'
 import './globals.css'
 import './play-theme.css'
@@ -70,6 +72,9 @@ export default async function RootLayout({
       className={HTML_FONT_CLASSES}
     >
       <head>
+        {/* PRD-261 A-01: the theme import map, rendered only by a build with the spike on (off in
+            every shipped build). It must precede every module script, so it is the first child. */}
+        {isThemeHostSpikeOn() && <ThemeImportMap />}
         {/* PRD-260 M07: the style's classes go on <html> before first paint, ahead of the look
             script below, which needs 'play'. A constant per style from lib/ui-style.ts; the
             parsed style only picks it, no cookie text goes into it. React doesn't own these

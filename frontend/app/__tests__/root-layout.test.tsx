@@ -36,6 +36,9 @@ import {
   UI_STYLES,
   type UiStyle,
 } from '@/lib/ui-style'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { ThemeImportMap } from '@/components/theme-host/theme-import-map'
+import { IMPORT_MAP_SCRIPT_BODY } from '@/lib/theme-host/import-map'
 
 interface ElementProps {
   readonly children?: ReactNode
@@ -94,5 +97,53 @@ describe('PRD-260 M07 — the root layout leaves the style classes to a <head> s
     const missing = headScripts((await RootLayout({ children: null })) as LayoutElement)
     expect(tampered).toEqual([STYLE_CLASS_SCRIPT[DEFAULT_UI_STYLE]])
     expect(missing).toEqual([STYLE_CLASS_SCRIPT[DEFAULT_UI_STYLE]])
+  })
+})
+
+// PRD-261 A-01: with the spike built in, the theme import map is the head's first child, ahead
+// of every script above; without it (every shipped build) the head is exactly as before.
+const SPIKE_FLAG = 'AUTOMATOS_THEME_HOST_SPIKE'
+const IMPORT_MAP_OPEN = '<script type="importmap">'
+const SCRIPT_CLOSE = '</script>'
+
+function headChildren(html: LayoutElement): LayoutElement[] {
+  const head = childElements(html).find((child) => child.type === 'head')
+  expect(head, '<head>').toBeDefined()
+  return childElements(head as LayoutElement)
+}
+
+function scriptBodies(children: readonly LayoutElement[]): string[] {
+  return children.map((script) => script.props.dangerouslySetInnerHTML?.__html ?? '')
+}
+
+describe('PRD-261 A-01 — the theme import map', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('is not in <head> when the spike is off, for every style', async () => {
+    vi.stubEnv(SPIKE_FLAG, '0')
+    for (const style of UI_STYLES) {
+      const types = headChildren(await layoutFor(style)).map((child) => child.type)
+      expect({ style, hasMap: types.includes(ThemeImportMap) }).toEqual({ style, hasMap: false })
+    }
+  })
+
+  it('is the first child of <head> when the spike is on, ahead of the same scripts, for every style', async () => {
+    for (const style of UI_STYLES) {
+      vi.stubEnv(SPIKE_FLAG, '0')
+      const off = scriptBodies(headChildren(await layoutFor(style)))
+      vi.stubEnv(SPIKE_FLAG, '1')
+      const [first, ...rest] = headChildren(await layoutFor(style))
+      expect({ style, first: first?.type === ThemeImportMap }).toEqual({ style, first: true })
+      expect({ style, scripts: scriptBodies(rest) }).toEqual({ style, scripts: off })
+    }
+  })
+
+  it('renders as one inline import map holding the constant body', () => {
+    const markup = renderToStaticMarkup(<ThemeImportMap />)
+    expect(markup.startsWith(IMPORT_MAP_OPEN)).toBe(true)
+    expect(markup.endsWith(SCRIPT_CLOSE)).toBe(true)
+    expect(markup.slice(IMPORT_MAP_OPEN.length, markup.length - SCRIPT_CLOSE.length)).toBe(IMPORT_MAP_SCRIPT_BODY)
   })
 })
