@@ -26,7 +26,8 @@ function readRecords(dir) {
 
 function cell(value) {
   if (value === undefined || value === null || value === '') return 'n/a'
-  return String(value).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+  // Backslashes first, so a value's own backslash cannot cancel the escape on a pipe after it.
+  return String(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
 }
 
 function row(project, { app = {}, integrity = {} }) {
