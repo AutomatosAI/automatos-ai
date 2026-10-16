@@ -81,12 +81,17 @@ function withTimeout<T>(pending: Promise<T>, timeoutMs: number, message: string)
   return Promise.race([pending, timeout]).finally(() => clearTimeout(timer))
 }
 
+/** Every request the load makes is bounded, so a stalled one becomes a failure, not a hang. */
+function fetchJsonWithin(deps: LoaderDeps, url: string): Promise<unknown> {
+  return withTimeout(deps.fetchJson(url), deps.timeoutMs, `GET ${url} did not answer within ${deps.timeoutMs} ms`)
+}
+
 function isThemeDefinition(value: unknown): value is ThemeDefinition {
   return typeof value === 'object' && value !== null && typeof (value as { register?: unknown }).register === 'function'
 }
 
 async function readManifest(deps: LoaderDeps): Promise<SpikeManifest> {
-  const parsed = parseSpikeManifest(await deps.fetchJson(THEME_SPIKE_MANIFEST_PATH))
+  const parsed = parseSpikeManifest(await fetchJsonWithin(deps, THEME_SPIKE_MANIFEST_PATH))
   if (!parsed.ok) throw new Error(parsed.detail)
   return parsed.manifest
 }
@@ -124,7 +129,7 @@ function registerFrame(definition: ThemeDefinition, sdkVersion: string): FrameCo
 }
 
 async function applyPresetLook(manifest: SpikeManifest, deps: LoaderDeps): Promise<() => void> {
-  const parsed = parseLookPreset(await deps.fetchJson(manifest.preset))
+  const parsed = parseLookPreset(await fetchJsonWithin(deps, manifest.preset))
   if (!parsed.ok) throw new Error(parsed.detail)
   return applyLook(manifest, parsed.preset, deps.doc, deps.timeoutMs)
 }

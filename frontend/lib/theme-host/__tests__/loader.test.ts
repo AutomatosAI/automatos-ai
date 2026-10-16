@@ -1,7 +1,8 @@
 /**
  * PRD-261 A-01 — the loader, with every outside call injected. Each step that fails returns its
- * reason and stops the load (an SDK mismatch never requests the entry), a look failure undoes the
- * theme's registration, and the ok result's cleanup removes the look and unregisters, once.
+ * reason and stops the load (an SDK mismatch never requests the entry), a request or import that
+ * never answers fails once the timeout passes, a look failure undoes the theme's registration,
+ * and the ok result's cleanup removes the look and unregisters, once.
  * jsdom loads no stylesheets, so each test settles the theme's <link> itself.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -121,6 +122,28 @@ describe('PRD-261 A-01 — loadSpikeTheme fails with a reason, in order', () => 
     const pending = loadSpikeTheme(depsWith({ importModule: () => new Promise<unknown>(() => undefined) }))
     await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1)
     expect(reasonOf(await pending)).toBe('load')
+  })
+
+  it("maps a theme.json request that never answers to 'manifest' once the timeout passes", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.useFakeTimers()
+    const deps = depsWith({ fetchJson: () => new Promise<unknown>(() => undefined) })
+    const pending = loadSpikeTheme(deps)
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1)
+    expect(reasonOf(await pending)).toBe('manifest')
+    expect(deps.importModule).not.toHaveBeenCalled()
+  })
+
+  it("maps a preset request that never answers to 'look' and unregisters the theme", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.useFakeTimers()
+    const theme = themeModule()
+    const stalledPreset = (url: string) => (url === THEME_SPIKE_MANIFEST_PATH ? Promise.resolve(MANIFEST) : new Promise<unknown>(() => undefined))
+    const pending = loadSpikeTheme(depsWith({ fetchJson: stalledPreset, importModule: vi.fn(async () => theme.module) }))
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS + 1)
+    expect(reasonOf(await pending)).toBe('look')
+    expect(theme.unregister).toHaveBeenCalledTimes(1)
+    expect(lookIsGone()).toBe(true)
   })
 
   it("maps a register that throws, or registers no frame, to 'register'", async () => {
