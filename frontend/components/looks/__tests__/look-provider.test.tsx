@@ -22,6 +22,7 @@ import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
 import { LOOK_SCOPE_KEY, lookKeys, type StorageSource } from '@/lib/looks/storage'
 import { PLAY_TONE_COOKIE, type PlayTone } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
+import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
 import { blockedStorage, clearRoot, lookNamesLeft, myLook, rootVars } from '@/lib/looks/__tests__/helpers'
 
@@ -70,7 +71,7 @@ function Probe() {
       <button type="button" onClick={() => saveLook(myLook())}>Save mine</button>
       <button type="button" onClick={() => deleteLook(myLook().id)}>Delete mine</button>
       <button type="button" onClick={saveAsNew}>Save as new look</button>
-      <button type="button" onClick={() => setStyle('play')}>Go Play</button>
+      <button type="button" onClick={() => setStyle(BUILTIN_PLAY_STYLE)}>Go Play</button>
       <button type="button" onClick={() => setStyle('studio')}>Go Studio</button>
       <button type="button" onClick={() => setStyle('classic')}>Go Classic</button>
     </div>
@@ -141,26 +142,26 @@ afterEach(() => {
 describe('LookProvider under Play', () => {
   it('puts the stored look on <html>: Play variables and Studio tokens', async () => {
     storeActive(myLook())
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     expect(await screen.findByText('Active: My look 1')).toBeInTheDocument()
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(myLook())))
   })
 
   it('applies the default look when nothing is stored, and writes nothing', async () => {
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK)))
     expect(window.localStorage.getItem(KEYS.active)).toBeNull()
   })
 
   it('switches the variables at once and keeps the choice', async () => {
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     click('Use Daylight')
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DAYLIGHT)))
     expect(JSON.parse(window.localStorage.getItem(KEYS.active) ?? 'null')).toEqual(DAYLIGHT)
   })
 
   it('works on the default look with storage blocked, and still switches looks', async () => {
-    renderApp('play', blockedStorage)
+    renderApp(BUILTIN_PLAY_STYLE, blockedStorage)
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK)))
     click('Use Obsidian')
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(OBSIDIAN)))
@@ -168,7 +169,7 @@ describe('LookProvider under Play', () => {
   })
 
   it('saves and deletes the user\'s looks', async () => {
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     click('Save mine')
     expect(screen.getByText('Saved: My look 1')).toBeInTheDocument()
     expect(JSON.parse(window.localStorage.getItem(KEYS.saved) ?? 'null')).toEqual([myLook()])
@@ -181,7 +182,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
   it('a Paper look forces light, Obsidian forces dark, and back on Studio the stored tone returns', async () => {
     window.localStorage.setItem(TONE_STORAGE_KEY, 'dark')
     storeActive(DAYLIGHT)
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(htmlTone()).toBe('light'))
     expect(screen.getByText('Tone: light')).toBeInTheDocument()
     expect(toneCookie()).toBe('light')
@@ -202,7 +203,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
   it('never overwrites the user\'s stored tone while it forces one', async () => {
     window.localStorage.setItem(TONE_STORAGE_KEY, 'light')
     storeActive(OBSIDIAN)
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(htmlTone()).toBe('dark'))
     expect(window.localStorage.getItem(TONE_STORAGE_KEY)).toBe('light')
     click('Go Classic')
@@ -237,7 +238,7 @@ describe('LookProvider — another tab (M25)', () => {
   const theirs = myLook({ id: 'look-1', name: 'My look 1', sub: SAVED_SUB })
 
   it("takes the saved looks another tab stored, so Save as new look keeps both under different ids", async () => {
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK)))
     storeFromAnotherTab(KEYS.saved, [theirs])
     expect(screen.getByText('Saved: My look 1')).toBeInTheDocument()
@@ -250,7 +251,7 @@ describe('LookProvider — another tab (M25)', () => {
   })
 
   it('follows the active look another tab stored, and the tone cookie with it', async () => {
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(toneCookie()).toBe('dark'))
     storeFromAnotherTab(KEYS.active, DAYLIGHT)
     expect(screen.getByText('Active: Daylight')).toBeInTheDocument()
@@ -260,7 +261,7 @@ describe('LookProvider — another tab (M25)', () => {
   })
 
   it('never writes back what it took, so two tabs cannot ping-pong', async () => {
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK)))
     const setItem = vi.spyOn(Storage.prototype, 'setItem')
     storeFromAnotherTab(KEYS.active, OBSIDIAN)
@@ -272,7 +273,7 @@ describe('LookProvider — another tab (M25)', () => {
 
   it("ignores another key's event, and takes a cleared storage as nothing stored", async () => {
     storeActive(DAYLIGHT)
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     expect(await screen.findByText('Active: Daylight')).toBeInTheDocument()
     storeFromAnotherTab(lookKeys('ws-2:user-b').active, OBSIDIAN)
     expect(screen.getByText('Active: Daylight')).toBeInTheDocument()
@@ -298,7 +299,7 @@ describe('LookProvider — the pre-paint pointer (F5)', () => {
 describe('LookProvider — leaving Play leaves nothing behind (K3)', () => {
   it('play → studio removes every look property, the motion mark and the tone cookie', async () => {
     storeActive(myLook())
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(myLook())))
     expect(document.documentElement).toHaveAttribute(MOTION_ATTRIBUTE)
     expect(toneCookie()).toBe('dark')
@@ -332,7 +333,7 @@ describe('LookProvider — leaving Play leaves nothing behind (K3)', () => {
   })
 
   it('takes its variables off <html> when it unmounts', async () => {
-    const { unmount } = renderApp('play')
+    const { unmount } = renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(rootVars()).toEqual(lookDocumentVars(DEFAULT_LOOK)))
     unmount()
     expect(lookNamesLeft()).toEqual([])
@@ -343,7 +344,7 @@ describe('LookProvider — leaving Play leaves nothing behind (K3)', () => {
 describe('LookProvider — motion', () => {
   it("reduced motion sets data-pl-motion='reduce' and --pl-motion 0", async () => {
     stubReducedMotion(true)
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     expect(screen.getByText('Motion: reduced')).toBeInTheDocument()
     await waitFor(() => expect(document.documentElement).toHaveAttribute(MOTION_ATTRIBUTE, 'reduce'))
     expect(document.documentElement.style.getPropertyValue(MOTION_VAR)).toBe('0')
@@ -351,7 +352,7 @@ describe('LookProvider — motion', () => {
 
   it("full motion sets data-pl-motion='full' and --pl-motion 1", async () => {
     stubReducedMotion(false)
-    renderApp('play')
+    renderApp(BUILTIN_PLAY_STYLE)
     await waitFor(() => expect(document.documentElement).toHaveAttribute(MOTION_ATTRIBUTE, 'full'))
     expect(document.documentElement.style.getPropertyValue(MOTION_VAR)).toBe('1')
   })

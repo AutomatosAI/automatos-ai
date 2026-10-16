@@ -14,6 +14,7 @@ import {
   toneOfGround,
   writePlayToneCookie,
 } from '@/lib/looks/tone'
+import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 
 function toneCookie(): string | undefined {
   return document.cookie.split('; ').find((entry) => entry.startsWith(`${PLAY_TONE_COOKIE}=`))?.split('=')[1]
@@ -45,8 +46,8 @@ describe('the tone cookie', () => {
   })
 
   it('is read for the server only while the style is play', () => {
-    expect(playToneFor('play', 'light')).toBe('light')
-    expect(playToneFor('play', 'bogus')).toBeUndefined()
+    expect(playToneFor(BUILTIN_PLAY_STYLE, 'light')).toBe('light')
+    expect(playToneFor(BUILTIN_PLAY_STYLE, 'bogus')).toBeUndefined()
     expect(playToneFor('studio', 'light')).toBeUndefined()
     expect(playToneFor('classic', 'dark')).toBeUndefined()
   })

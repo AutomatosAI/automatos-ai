@@ -4,6 +4,9 @@
  * <html class="studio play">, and the appearance defaults are untouched
  * (Play is opt-in). M07: the classes reach <html> through STYLE_CLASS_SCRIPT,
  * which leaves every other class (the tone, the font variables) alone.
+ *
+ * PRD-261 A-02a: Play is now builtin Play on the axis, `theme:builtin:play`;
+ * the legacy 'play' cookie parses to it, and its <html> classes are unchanged.
  */
 import { afterEach, describe, it, expect } from 'vitest'
 import {
@@ -11,7 +14,6 @@ import {
   APPEARANCE_DEFAULTS_VERSION,
   DEFAULT_TONE,
   DEFAULT_UI_STYLE,
-  PLAY_HTML_CLASS,
   STUDIO_HTML_CLASS,
   STYLE_CLASS_SCRIPT,
   STYLE_HTML_CLASS_NAMES,
@@ -22,21 +24,26 @@ import {
   styleHtmlClasses,
   type UiStyle,
 } from '@/lib/ui-style'
+import {
+  BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS,
+  BUILTIN_PLAY_STYLE as PLAY,
+} from '@/lib/theme-host/builtin/play-entry'
 
 describe('PRD-260 — the Style axis with Play', () => {
   it('lists Classic, Studio and Play in that order', () => {
-    expect(UI_STYLES).toEqual(['classic', 'studio', 'play'])
+    expect(UI_STYLES).toEqual(['classic', 'studio', 'theme:builtin:play'])
   })
 
-  it('accepts play from the cookie', () => {
-    expect(isUiStyle('play')).toBe(true)
-    expect(parseUiStyle('play')).toBe('play')
+  it('accepts play from the cookie, legacy and current, as builtin Play', () => {
+    expect(isUiStyle(PLAY)).toBe(true)
+    expect(parseUiStyle('play')).toBe(PLAY)
+    expect(parseUiStyle(PLAY)).toBe(PLAY)
     expect(parseUiStyle('studio')).toBe('studio')
     expect(parseUiStyle('classic')).toBe('classic')
   })
 
   it('falls back to the default for a tampered or missing cookie', () => {
-    for (const raw of ['PLAY', ' play', 'play ', 'play;studio', 'studio play', '<script>', 'dark', '']) {
+    for (const raw of ['PLAY', ' play', 'play ', 'play;studio', 'studio play', '<script>', 'dark', '', 'theme:builtin:play ', 'theme:install:x']) {
       expect(parseUiStyle(raw), JSON.stringify(raw)).toBe(DEFAULT_UI_STYLE)
     }
     expect(parseUiStyle(null)).toBe(DEFAULT_UI_STYLE)
@@ -49,13 +56,13 @@ describe('PRD-260 — the Style axis with Play', () => {
     expect(STUDIO_HTML_CLASS).toBe('studio')
     expect(styleHtmlClasses('classic')).toEqual([])
     expect(styleHtmlClasses('studio')).toEqual([STUDIO_HTML_CLASS])
-    expect(styleHtmlClasses('play')).toEqual([STUDIO_HTML_CLASS, PLAY_HTML_CLASS])
+    expect(styleHtmlClasses(PLAY)).toEqual([STUDIO_HTML_CLASS, PLAY_HTML_CLASS])
   })
 
   it('returns a fresh array each call, so a caller cannot change the table', () => {
-    const first = styleHtmlClasses('play')
+    const first = styleHtmlClasses(PLAY)
     first.push('tampered')
-    expect(styleHtmlClasses('play')).toEqual(['studio', 'play'])
+    expect(styleHtmlClasses(PLAY)).toEqual(['studio', 'play'])
   })
 
   it('toggles every class any style can emit', () => {
@@ -65,7 +72,7 @@ describe('PRD-260 — the Style axis with Play', () => {
 
   it('renders Studio for Studio and Play, never for Classic (D2)', () => {
     expect(rendersStudio('studio')).toBe(true)
-    expect(rendersStudio('play')).toBe(true)
+    expect(rendersStudio(PLAY)).toBe(true)
     expect(rendersStudio('classic')).toBe(false)
   })
 
@@ -92,7 +99,7 @@ describe('PRD-260 M07 — the style classes come from a <head> script, not from 
 
   it("adds Play's classes after the tone next-themes put there", () => {
     document.documentElement.className = 'dark'
-    runStyleScript('play')
+    runStyleScript(PLAY)
     expect(htmlClasses()).toEqual(['dark', STUDIO_HTML_CLASS, PLAY_HTML_CLASS])
   })
 

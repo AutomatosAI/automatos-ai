@@ -1,4 +1,5 @@
 import { writeCookie } from '@/lib/cookies'
+import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { UI_STYLE_COOKIE_MAX_AGE_S, type UiStyle } from '@/lib/ui-style'
 
 import type { GroundKey } from './catalogue'
@@ -30,7 +31,7 @@ export function parsePlayTone(value: string | null | undefined): PlayTone | unde
 
 /** The tone the server forces: the cookie's, and only while the style is play. */
 export function playToneFor(style: UiStyle, toneCookie: string | null | undefined): PlayTone | undefined {
-  return style === 'play' ? parsePlayTone(toneCookie) : undefined
+  return style === BUILTIN_PLAY_STYLE ? parsePlayTone(toneCookie) : undefined
 }
 
 export function writePlayToneCookie(tone: PlayTone): void {

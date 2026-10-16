@@ -1,4 +1,4 @@
-import { PLAY_HTML_CLASS } from '@/lib/ui-style'
+import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS } from '@/lib/theme-host/builtin/play-entry'
 
 import {
   ACCENTS,
