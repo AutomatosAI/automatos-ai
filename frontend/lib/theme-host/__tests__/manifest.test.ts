@@ -3,26 +3,18 @@
  * the core's own <html> classes are refused, every file must resolve under the theme's folder on
  * this origin, and a preset value is a colour, a length or a number.
  */
+import { readFileSync } from 'fs'
+import path from 'path'
 import { describe, expect, it } from 'vitest'
 
 import { RESERVED_HTML_CLASSES, THEME_SPIKE_ROOT } from '../constants'
 import { parseLookPreset, parseSpikeManifest, resolveUnderRoot } from '../manifest'
 import { STYLE_HTML_CLASS_NAMES } from '@/lib/ui-style'
 
-/** The hello theme's manifest (plan §3.3); A-01e reads the fixture file instead. */
-const HELLO_MANIFEST: Readonly<Record<string, unknown>> = {
-  schema: 'automatos-theme-spike/v1',
-  id: 'automatos-e2e/hello',
-  name: 'Hello theme',
-  version: '0.0.1',
-  engines: { sdk: '^1.0.0' },
-  base: 'studio',
-  htmlClass: 'hello-spike',
-  entry: 'entry.js',
-  styleSheet: 'theme.css',
-  preset: 'presets/default.look.json',
-  slots: ['frame@1'],
-}
+/** The hello theme's manifest, as the browser lane serves it. */
+const FIXTURES = path.resolve(__dirname, '../../../../e2e/browser/fixtures/hello-theme')
+const HELLO_MANIFEST = JSON.parse(readFileSync(path.join(FIXTURES, 'theme.json'), 'utf8')) as Readonly<Record<string, unknown>>
+const MISMATCHED_MANIFEST: unknown = JSON.parse(readFileSync(path.join(FIXTURES, 'theme.engines-mismatch.json'), 'utf8'))
 
 function withField(field: string, value: unknown): Record<string, unknown> {
   return { ...HELLO_MANIFEST, [field]: value }
@@ -43,6 +35,11 @@ describe('PRD-261 A-01 — parseSpikeManifest', () => {
     expect(parsed.manifest.entry).toBe(`${root}entry.js`)
     expect(parsed.manifest.styleSheet).toBe(`${root}theme.css`)
     expect(parsed.manifest.preset).toBe(`${root}presets/default.look.json`)
+  })
+
+  it('reads the engines-mismatch manifest too: the range is checked by the loader, not here', () => {
+    const parsed = parseSpikeManifest(MISMATCHED_MANIFEST)
+    expect(parsed.ok && parsed.manifest.sdkRange).toBe('^2.0.0')
   })
 
   it("refuses every class the core owns on <html> as the theme's class", () => {

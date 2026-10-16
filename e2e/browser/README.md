@@ -22,8 +22,9 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 4. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
    frontend server logs as `browser-e2e-<build>-report` (kept 7 days).
 
-The package pins `@playwright/test`, `typescript` and `@types/node` exactly and commits no
-lockfile, so `frontend/package-lock.json` never changes for it.
+The package pins `@playwright/test`, `typescript`, `@types/node`, `@types/react` and
+`@types/react-dom` exactly and commits no lockfile, so `frontend/package-lock.json` never changes
+for it.
 
 ## The two builds
 
@@ -32,8 +33,19 @@ lockfile, so `frontend/package-lock.json` never changes for it.
 | `default` | `AUTOMATOS_THEME_HOST_SPIKE=0`, as every shipped image | `@smoke`, `@off` |
 | `spike` | `AUTOMATOS_THEME_HOST_SPIKE=1`, this lane only | `@smoke`, `@spike`, `@record` |
 
-The `spike` build joins the matrix with the theme-host spike (PRD-261 A-01). Until then the lane
-runs the `default` build only.
+The `spike` build also runs `node scripts/theme-sdk/generate-shims.js` in `frontend/` before
+`npm run build`, so the shims under `public/theme-sdk/v1/` are generated from the React that install
+vendors. They are never committed, and the `default` build has none.
+
+## The hello theme
+
+`fixtures/hello-theme/` is the spike's theme: `theme.json`, an entry with a frame, one stylesheet
+and one preset, plus the variants the specs need (`entry.throws.js`, `entry.render-throws.js`,
+`theme.engines-mismatch.json`). It reaches the browser only through route interception
+(`support/hello-theme.ts`) at the host's fixed path `/theme-spike/hello/`; nothing under
+`frontend/` serves that path, so no image can carry it. The lane type-checks it against
+`@types/react` 19 and the spike SDK's types (`types/theme-sdk.d.ts`) with
+`npx tsc -p fixtures/hello-theme/tsconfig.json`.
 
 ## Tags
 
