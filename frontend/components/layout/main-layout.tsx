@@ -12,6 +12,7 @@ import { StudioHeader } from './studio-header'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { PlayFrame } from '@/components/play/shell/play-frame-lazy'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { ThemeFrameSlot } from '@/components/theme-host/theme-frame-slot'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsStudio, usePlayLayout } from '@/hooks/use-studio-theme'
 
@@ -156,7 +157,8 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   }
 
   if (isStudio && !isMobileLayout) {
-    return <StudioDesktopShell fullBleed={fullBleed} autoWidget={autoWidget}>{children}</StudioDesktopShell>
+    const shell = <StudioDesktopShell fullBleed={fullBleed} autoWidget={autoWidget}>{children}</StudioDesktopShell>
+    return <ThemeFrameSlot fallback={shell}>{children}</ThemeFrameSlot>
   }
 
   // PRD-246: below 1024 the Studio pages render inside this chrome, and they are
