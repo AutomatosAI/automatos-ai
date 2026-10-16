@@ -16,6 +16,7 @@ import type { UiStyle } from '@/lib/ui-style'
 import type { PlayTone } from '@/lib/looks/tone'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
+import { ThemeHostProvider } from './theme-host/theme-host-provider'
 import { isSaaS } from '@/lib/auth-edition'
 
 // PRD-244 W0: the `?theme=studio-preview` URL flag is gone — Studio is a
@@ -121,7 +122,7 @@ export function Providers({ children, initialUiStyle, initialPlayTone }: Provide
               {/* PRD-222: a new workspace lands directly in the conversation
                   where Auto opens (OnboardingOpener) — no first-login modal or
                   guided tour (both retired in W2·S5). */}
-              {children}
+              <ThemeHostProvider>{children}</ThemeHostProvider>
               <GlobalSearch />
               <Toaster position="top-right" richColors closeButton />
               </LookProvider>

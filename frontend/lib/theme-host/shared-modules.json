@@ -1,0 +1,30 @@
+{
+  "_comment": "PRD-261 A-01: the modules a theme shares with the host. Read by lib/theme-host/* and scripts/theme-sdk/generate-shims.js.",
+  "sdkVersion": "1.0.0",
+  "hostGlobal": "__AUTOMATOS_THEME_HOST__",
+  "publicPath": "/theme-sdk/v1/",
+  "publicDir": "public/theme-sdk/v1",
+  "modules": [
+    {
+      "specifier": "react",
+      "file": "react.js",
+      "from": ["next/dist/compiled/react/cjs/react.production.js", "next/dist/compiled/react/cjs/react.development.js"]
+    },
+    {
+      "specifier": "react/jsx-runtime",
+      "file": "react-jsx-runtime.js",
+      "from": ["next/dist/compiled/react/cjs/react-jsx-runtime.production.js", "next/dist/compiled/react/cjs/react-jsx-runtime.development.js"]
+    },
+    {
+      "specifier": "react-dom",
+      "file": "react-dom.js",
+      "from": ["next/dist/compiled/react-dom/cjs/react-dom.production.js", "next/dist/compiled/react-dom/cjs/react-dom.development.js"]
+    },
+    {
+      "specifier": "react-dom/client",
+      "file": "react-dom-client.js",
+      "from": ["next/dist/compiled/react-dom/cjs/react-dom-client.production.js", "next/dist/compiled/react-dom/cjs/react-dom-client.development.js"]
+    },
+    { "specifier": "@automatos/theme-sdk", "file": "sdk.js", "exports": ["SDK_VERSION", "defineTheme"] }
+  ]
+}
