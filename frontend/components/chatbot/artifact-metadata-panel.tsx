@@ -23,7 +23,7 @@ export function ArtifactMetadataPanel({ metadata }: { metadata: Record<string, u
         <Button
           variant="ghost"
           size="sm"
-          className="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-white"
+          className="text-muted-foreground hover:text-foreground"
           onClick={() => setShowMetadata((prev) => !prev)}
         >
           {showMetadata ? (

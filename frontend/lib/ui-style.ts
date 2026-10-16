@@ -8,9 +8,20 @@
  * setting: a cookie the server reads (app/layout.tsx) so the Studio chrome
  * renders on first paint with no classic flash, mirrored to localStorage.
  */
-export type UiStyle = 'classic' | 'studio'
+import { SKIN_ID_PATTERN, SKIN_TONES, type SkinTone } from '@/lib/skins/schema'
 
-export const UI_STYLES: readonly UiStyle[] = ['classic', 'studio'] as const
+/** The two design systems. A skin sits on one of them (its `base`), never a third layout. */
+export type BaseStyle = 'classic' | 'studio'
+
+/**
+ * PRD-259 §4: a workspace's installed skin is a third kind of style, `skin:<id>`. It
+ * restyles its base (colours, fonts, shape) and never changes a layout.
+ */
+export type SkinStyle = `skin:${string}`
+export type UiStyle = BaseStyle | SkinStyle
+
+export const UI_STYLES: readonly BaseStyle[] = ['classic', 'studio'] as const
+export const SKIN_STYLE_PREFIX = 'skin:'
 
 /**
  * The defaults (Gerard, 2026-09-17): Studio in the Dark tone. A browser with
@@ -18,7 +29,7 @@ export const UI_STYLES: readonly UiStyle[] = ['classic', 'studio'] as const
  * (the tone); every browser is moved to them ONCE — see
  * APPEARANCE_DEFAULTS_VERSION — and picks freely afterwards.
  */
-export const DEFAULT_UI_STYLE: UiStyle = 'studio'
+export const DEFAULT_UI_STYLE: BaseStyle = 'studio'
 export const DEFAULT_TONE = 'dark'
 
 /**
@@ -34,14 +45,84 @@ export const UI_STYLE_COOKIE = 'automatos-style'
 export const UI_STYLE_STORAGE_KEY = 'automatos-style'
 export const UI_STYLE_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 365
 
+/**
+ * PRD-259 decision K1: the server sets the base class without a database call, so the
+ * active skin's base rides in its own cookie beside `automatos-style=skin:<id>`.
+ */
+export const UI_SKIN_BASE_COOKIE = 'automatos-skin-base'
+export const DEFAULT_SKIN_BASE: BaseStyle = 'studio'
+
+/**
+ * The tone a single-tone skin locks rides in a third cookie, on K1's pattern, so the server
+ * renders ThemeProvider with forcedTheme and the first paint is already that tone. Cleared
+ * for Classic, Studio, a two-tone skin and every fallback.
+ */
+export const UI_SKIN_TONE_COOKIE = 'automatos-skin-tone'
+
 /** The class the Studio stylesheet hangs off (`.studio {}` in globals.css). */
 export const STUDIO_HTML_CLASS = 'studio'
 
-export function isUiStyle(value: unknown): value is UiStyle {
+export function isBaseStyle(value: unknown): value is BaseStyle {
   return value === 'classic' || value === 'studio'
 }
 
-/** Unknown, missing or tampered → the default style. */
+export function isSkinStyle(value: unknown): value is SkinStyle {
+  return typeof value === 'string'
+    && value.startsWith(SKIN_STYLE_PREFIX)
+    && SKIN_ID_PATTERN.test(value.slice(SKIN_STYLE_PREFIX.length))
+}
+
+export function isUiStyle(value: unknown): value is UiStyle {
+  return isBaseStyle(value) || isSkinStyle(value)
+}
+
+/** Unknown, missing or tampered → the default style. A skin id must be a UUID. */
 export function parseUiStyle(value: string | null | undefined): UiStyle {
   return isUiStyle(value) ? value : DEFAULT_UI_STYLE
+}
+
+/** The base cookie, strictly: 'studio' or 'classic', anything else → Studio. */
+export function parseSkinBase(value: string | null | undefined): BaseStyle {
+  return isBaseStyle(value) ? value : DEFAULT_SKIN_BASE
+}
+
+/** The tone cookie, strictly: 'light' or 'dark', anything else → no lock. */
+export function parseSkinTone(value: string | null | undefined): SkinTone | undefined {
+  return SKIN_TONES.find((tone) => tone === value)
+}
+
+export function skinStyle(skinId: string): SkinStyle {
+  return `${SKIN_STYLE_PREFIX}${skinId}`
+}
+
+/** The skin id a style names, or null for Classic and Studio. */
+export function skinIdOf(style: UiStyle): string | null {
+  return isSkinStyle(style) ? style.slice(SKIN_STYLE_PREFIX.length) : null
+}
+
+/** The design system a style draws on: itself, or a skin's base (from its cookie). */
+export function baseOf(style: UiStyle, baseCookie: string | null | undefined): BaseStyle {
+  return isSkinStyle(style) ? parseSkinBase(baseCookie) : style
+}
+
+export interface HtmlStyleAttrs {
+  readonly style: UiStyle
+  readonly base: BaseStyle
+  readonly studioClass: boolean
+  readonly skinId: string | null
+}
+
+/**
+ * What app/layout.tsx puts on <html> from the two cookies: the studio class when the base
+ * is Studio, and data-skin when a skin is chosen. Tampered values fall back to the default.
+ */
+export function htmlAttrsFor(styleCookie: string | null | undefined, baseCookie: string | null | undefined): HtmlStyleAttrs {
+  const style = parseUiStyle(styleCookie)
+  const base = baseOf(style, baseCookie)
+  return { style, base, studioClass: base === 'studio', skinId: skinIdOf(style) }
+}
+
+/** The tone the server forces from the two cookies: only when the style is a valid skin. */
+export function lockedToneFor(styleCookie: string | null | undefined, toneCookie: string | null | undefined): SkinTone | undefined {
+  return isSkinStyle(parseUiStyle(styleCookie)) ? parseSkinTone(toneCookie) : undefined
 }

@@ -267,7 +267,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the voice-measure wave (voice_turns timings, voice_calls.vendor_latency); the guard follows it.
     timings = (versions / "prd258_voice_timings.py").read_text()
     assert 'down_revision = "user_api_keys_provider_workspace_id"' in timings
-    assert 'EXPECTED_HEAD = "prd258_voice_timings"' in guard
+    # 2026-10-14 (PRD-259 Wave 1): prd259_skins chains onto it — the ONE migration of the
+    # skins wave (marketplace_skins, skin_installations); the guard follows it.
+    skins = (versions / "prd259_skins.py").read_text()
+    assert 'down_revision = "prd258_voice_timings"' in skins
+    assert 'EXPECTED_HEAD = "prd259_skins"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

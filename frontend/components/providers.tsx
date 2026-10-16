@@ -10,7 +10,8 @@ import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
 import { UiStyleProvider } from '../contexts/ui-style-context'
-import type { UiStyle } from '@/lib/ui-style'
+import type { BaseStyle, UiStyle } from '@/lib/ui-style'
+import type { SkinTone } from '@/lib/skins/schema'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { isSaaS } from '@/lib/auth-edition'
@@ -76,9 +77,17 @@ interface ProvidersProps {
   children: React.ReactNode
   /** PRD-244 D1: the Style axis, read from its cookie by app/layout.tsx. */
   initialUiStyle?: UiStyle
+  /** PRD-259 decision K1: the active skin's base, read from its own cookie. */
+  initialSkinBase?: BaseStyle
+  /** PRD-259: a single-tone skin's locked tone, read from its cookie, so the lock holds from the first paint. */
+  initialLockedTone?: SkinTone
 }
 
-export function Providers({ children, initialUiStyle }: ProvidersProps) {
+export function Providers({ children, initialUiStyle, initialSkinBase, initialLockedTone }: ProvidersProps) {
+  // PRD-259 §4: a single-tone skin locks the tone. forcedTheme forces it without
+  // overwriting the user's stored tone, which returns when they leave the skin. It
+  // starts from the server's tone cookie, so next-themes' script forces it before paint.
+  const [lockedTone, setLockedTone] = useState<SkinTone | undefined>(initialLockedTone)
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -98,8 +107,14 @@ export function Providers({ children, initialUiStyle }: ProvidersProps) {
           themes={['light', 'dark']}
           storageKey="automatos-theme"
           disableTransitionOnChange
+          forcedTheme={lockedTone}
         >
-          <UiStyleProvider initialStyle={initialUiStyle}>
+          <UiStyleProvider
+            initialStyle={initialUiStyle}
+            initialSkinBase={initialSkinBase}
+            initialLockedTone={initialLockedTone}
+            onToneLock={setLockedTone}
+          >
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
               {/* PRD-222: a new workspace lands directly in the conversation

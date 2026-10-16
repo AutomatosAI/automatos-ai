@@ -23,7 +23,11 @@ describe('PRD-244 W0 honesty', () => {
   it('providers list the two tones only, mount the style provider, and mount no URL flag', () => {
     const src = read('components/providers.tsx')
     expect(src).toContain("themes={['light', 'dark']}")
-    expect(src).toContain('<UiStyleProvider initialStyle={initialUiStyle}>')
+    // PRD-259 S-004b: the provider also takes the skin's base and the tone lock, so the
+    // mount is matched as one tag that carries the server-read style.
+    expect(src).toMatch(/<UiStyleProvider\b[^>]*\sinitialStyle=\{initialUiStyle\}[^>]*>/)
+    expect(src).toContain('forcedTheme={lockedTone}')
+    expect(src).toContain('onToneLock={setLockedTone}')
     expect(src).not.toContain('StudioThemeFlag')
     expect(src).toContain('defaultTheme="dark"') // PRD-244 D1: Studio + Dark are the defaults (Gerard, 09-17)
   })

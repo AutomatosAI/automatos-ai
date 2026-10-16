@@ -42,7 +42,7 @@ export function Header({ onMenuClick }: HeaderProps) {
               className="h-7 w-auto md:h-8 opacity-95"
               draggable={false}
             />
-            <span className="hidden sm:inline ml-3 text-lg font-semibold tracking-wide text-foreground dark:text-white">
+            <span className="hidden sm:inline ml-3 text-lg font-semibold tracking-wide text-foreground">
               AUTOMATOS A.I.
             </span>
           </div>

@@ -3,7 +3,15 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono, Newsreader } from 'next/font/google'
 import { cookies } from 'next/headers'
 import { Providers } from '../components/providers'
-import { parseUiStyle, STUDIO_HTML_CLASS, UI_STYLE_COOKIE } from '@/lib/ui-style'
+import { SKIN_PREPAINT_SCRIPT } from '@/lib/skins/prepaint'
+import {
+  htmlAttrsFor,
+  lockedToneFor,
+  STUDIO_HTML_CLASS,
+  UI_SKIN_BASE_COOKIE,
+  UI_SKIN_TONE_COOKIE,
+  UI_STYLE_COOKIE,
+} from '@/lib/ui-style'
 import './globals.css'
 
 // Force dynamic rendering to prevent build-time Clerk errors
@@ -43,12 +51,21 @@ export default async function RootLayout({
   // PRD-244 D1: the Style axis (Classic | Studio) is read from its cookie here,
   // so the Studio chrome renders on first paint with no classic flash. The Tone
   // axis (Light | Dark | System) stays with next-themes in the browser.
-  const uiStyle = parseUiStyle((await cookies()).get(UI_STYLE_COOKIE)?.value)
+  // PRD-259 §4: a skin (`skin:<id>`) carries its base in a second cookie
+  // (decision K1), so the studio class follows the base with no database call,
+  // and <html data-skin> tells the pre-paint script which cached skin to apply.
+  // A single-tone skin's lock rides in a third cookie: ThemeProvider renders with
+  // forcedTheme, so next-themes' script forces that tone before paint.
+  const store = await cookies()
+  const styleCookie = store.get(UI_STYLE_COOKIE)?.value
+  const attrs = htmlAttrsFor(styleCookie, store.get(UI_SKIN_BASE_COOKIE)?.value)
+  const lockedTone = lockedToneFor(styleCookie, store.get(UI_SKIN_TONE_COOKIE)?.value)
+  const uiStyle = attrs.style
   const htmlClass = [
     geistSans.variable,
     geistMono.variable,
     newsreader.variable,
-    uiStyle === 'studio' ? STUDIO_HTML_CLASS : '',
+    attrs.studioClass ? STUDIO_HTML_CLASS : '',
   ].filter(Boolean).join(' ')
 
   return (
@@ -56,9 +73,14 @@ export default async function RootLayout({
       lang="en"
       suppressHydrationWarning
       className={htmlClass}
+      data-skin={attrs.skinId ?? undefined}
     >
+      <head>
+        {/* A constant built from constants only (lib/skins/prepaint.ts): nothing from the request. */}
+        <script dangerouslySetInnerHTML={{ __html: SKIN_PREPAINT_SCRIPT }} />
+      </head>
       <body>
-        <Providers initialUiStyle={uiStyle}>
+        <Providers initialUiStyle={uiStyle} initialSkinBase={attrs.base} initialLockedTone={lockedTone}>
           {children}
         </Providers>
       </body>

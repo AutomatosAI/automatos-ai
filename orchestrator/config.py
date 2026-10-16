@@ -1498,6 +1498,13 @@ class Config:
     PLUGIN_MAX_UPLOAD_SIZE_MB: int = int(os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "10"))
     PLUGIN_LLM_SCAN_MODEL: str = os.getenv("PLUGIN_LLM_SCAN_MODEL", "claude-haiku-4-5")
     PLUGIN_CACHE_TTL_SECONDS: int = int(os.getenv("PLUGIN_CACHE_TTL_SECONDS", "3600"))
+    # PRD-259: skin packages (.autoskin) — the package, each font, the mascot media in
+    # total and the preview; served assets are immutable per version.
+    SKIN_MAX_PACKAGE_MB: int = int(os.getenv("SKIN_MAX_PACKAGE_MB", "15"))
+    SKIN_MAX_FONT_KB: int = int(os.getenv("SKIN_MAX_FONT_KB", "400"))
+    SKIN_MAX_MASCOT_MB: int = int(os.getenv("SKIN_MAX_MASCOT_MB", "8"))
+    SKIN_MAX_PREVIEW_KB: int = int(os.getenv("SKIN_MAX_PREVIEW_KB", "1024"))
+    SKIN_ASSET_CACHE_SECONDS: int = int(os.getenv("SKIN_ASSET_CACHE_SECONDS", "31536000"))
 
     # =============================================================================
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)
