@@ -2,7 +2,8 @@
  * PRD-261 A-01 — the theme host provider. With the spike off it renders its children and does
  * nothing else. With it on, it loads the theme only while the style is exactly Studio, never in
  * safe mode, falls back with a notice, keeps the loaded result as an object (a frame that uses
- * hooks renders cleanly), and cleans the theme up when the style changes or it unmounts.
+ * hooks renders cleanly), cleans the theme up when the style changes or it unmounts, and runs
+ * loads one after another so a cancelled load cannot strip the live one's look.
  */
 import React, { useState } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
@@ -55,6 +56,31 @@ function FrameConsumer() {
 
 function okResult(cleanup = vi.fn()): ThemeLoadResult {
   return { ok: true, manifest: MANIFEST, frame: StatefulFrame, cleanup }
+}
+
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve: (value: T) => void = () => undefined
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+/** A load that puts the theme's class on <html> when it starts, as applyLook does; its cleanup removes it. */
+function loadThatMarksHtml(pending: Promise<ThemeLoadResult>): () => Promise<ThemeLoadResult> {
+  return () => {
+    document.documentElement.classList.add(MANIFEST.htmlClass)
+    return pending
+  }
+}
+
+function cleanupThatUnmarksHtml() {
+  return vi.fn().mockImplementation(() => document.documentElement.classList.remove(MANIFEST.htmlClass))
 }
 
 function app() {
@@ -156,6 +182,36 @@ describe('PRD-261 A-01 — ThemeHostProvider with the spike on', () => {
     await waitFor(() => expect(hostStatus()).toBe('off'))
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(screen.getByText('no frame')).toBeInTheDocument()
+  })
+
+  it('lets a cancelled load settle and clean up before the next load starts', async () => {
+    const first = deferred<ThemeLoadResult>()
+    const second = deferred<ThemeLoadResult>()
+    mocks.loadSpikeTheme.mockImplementationOnce(loadThatMarksHtml(first.promise)).mockImplementationOnce(loadThatMarksHtml(second.promise))
+    const { rerender, unmount } = render(app())
+    await waitFor(() => expect(mocks.loadSpikeTheme).toHaveBeenCalledTimes(1))
+    mocks.style.current = UI_STYLES.find((style) => style !== SPIKE_BASE_STYLE) ?? 'classic'
+    rerender(app())
+    await waitFor(() => expect(hostStatus()).toBe('off'))
+    mocks.style.current = SPIKE_BASE_STYLE
+    rerender(app())
+    await waitFor(() => expect(hostStatus()).toBe('loading'))
+    await act(async () => undefined)
+    expect(mocks.loadSpikeTheme).toHaveBeenCalledTimes(1)
+
+    const firstCleanup = cleanupThatUnmarksHtml()
+    await act(async () => first.resolve(okResult(firstCleanup)))
+    await waitFor(() => expect(firstCleanup).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.loadSpikeTheme).toHaveBeenCalledTimes(2))
+    const secondCleanup = cleanupThatUnmarksHtml()
+    await act(async () => second.resolve(okResult(secondCleanup)))
+    await waitFor(() => expect(hostStatus()).toBe('active'))
+    expect(document.documentElement.classList.contains(MANIFEST.htmlClass)).toBe(true)
+    expect(secondCleanup).not.toHaveBeenCalled()
+
+    unmount()
+    expect(secondCleanup).toHaveBeenCalledTimes(1)
+    expect(document.documentElement.classList.contains(MANIFEST.htmlClass)).toBe(false)
   })
 
   it('cleans the theme up once when it unmounts while active', async () => {

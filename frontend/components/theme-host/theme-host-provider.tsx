@@ -52,6 +52,18 @@ async function startSpikeTheme(): Promise<ThemeLoadResult> {
   }
 }
 
+/**
+ * Loads run one after another. Every load writes the same class, stylesheet and variables on
+ * <html>, so a cancelled load must settle and clean up before the next one starts; otherwise its
+ * late cleanup would remove the live load's look and undo its registration. A load cancelled
+ * while it waits its turn never starts.
+ */
+let loadQueue: Promise<void> = Promise.resolve()
+
+function enqueueLoad(run: () => Promise<void>): void {
+  loadQueue = loadQueue.then(run).catch((error: unknown) => console.error(LOG_PREFIX, 'load', error))
+}
+
 function useSpikeThemeLoad(onBase: boolean) {
   const [state, setState] = useState<SpikeState>(OFF_STATE)
   const activeRef = useRef<ThemeLoadOk | null>(null)
@@ -67,7 +79,9 @@ function useSpikeThemeLoad(onBase: boolean) {
     }
     let cancelled = false
     setState({ status: 'loading', reason: null, active: null })
-    void startSpikeTheme().then((result) => {
+    enqueueLoad(async () => {
+      if (cancelled) return
+      const result = await startSpikeTheme()
       if (cancelled) {
         if (result.ok) result.cleanup()
         return
