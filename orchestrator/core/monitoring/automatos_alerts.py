@@ -188,7 +188,7 @@ def create_alerts_router(get_db_dependency) -> APIRouter:
                         "ends_at": _parse_timestamp(alert.endsAt),
                         "generator_url": alert.generatorURL,
                         "receiver": payload.receiver,
-                        "raw_payload": json.dumps(alert.dict()),
+                        "raw_payload": json.dumps(alert.model_dump()),
                     },
                 )
                 processed += 1

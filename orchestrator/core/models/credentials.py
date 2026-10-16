@@ -10,7 +10,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, F
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from enum import Enum
@@ -162,8 +162,7 @@ class CredentialFieldDefinition(BaseModel):
     # Conditional display
     displayOptions: Optional[Dict[str, Any]] = Field(None, description="When to show this field")
     
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class CredentialTestEndpoint(BaseModel):
@@ -239,8 +238,7 @@ class CredentialTypeResponse(BaseModel):
         
         return v
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class CredentialCreate(BaseModel):
@@ -298,8 +296,7 @@ class CredentialResponse(BaseModel):
     oauth_redirect_url: Optional[str] = Field(default=None, description="If status=pending_oauth, open in popup")
     connection_error: Optional[str] = Field(default=None)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class CredentialTestRequest(BaseModel):
@@ -328,9 +325,7 @@ class CredentialAuditLogResponse(BaseModel):
     details: Optional[Dict[str, Any]] = Field(None, alias='metadata')
     created_at: datetime = Field(alias='timestamp')
     
-    class Config:
-        from_attributes = True
-        populate_by_name = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class CredentialResolveRequest(BaseModel):

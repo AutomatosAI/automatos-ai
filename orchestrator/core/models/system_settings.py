@@ -8,7 +8,7 @@ Replaces .env file with database-backed settings.
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, Float
 from sqlalchemy.sql import func
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
@@ -122,8 +122,7 @@ class SystemSettingResponse(BaseModel):
     def _creator_none_is_system(cls, v):
         return "system" if v is None else v
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SystemSettingUpdate(BaseModel):

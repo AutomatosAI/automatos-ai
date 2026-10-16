@@ -7,7 +7,7 @@ Data models for Composio integration.
 
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID
 from enum import Enum
 
@@ -33,8 +33,7 @@ class ComposioApp(BaseModel):
     is_connected: bool = False
     action_count: int = 0
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ComposioAction(BaseModel):
@@ -46,8 +45,7 @@ class ComposioAction(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Action parameters schema")
     enabled: bool = True
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ComposioEntity(BaseModel):
@@ -57,8 +55,7 @@ class ComposioEntity(BaseModel):
     composio_entity_id: str = Field(..., description="Composio's entity identifier")
     created_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ComposioConnection(BaseModel):
@@ -72,8 +69,7 @@ class ComposioConnection(BaseModel):
     expires_at: Optional[datetime] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ToolRouterSession(BaseModel):
@@ -84,8 +80,7 @@ class ToolRouterSession(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     expires_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgentAppFeature(BaseModel):
@@ -96,8 +91,7 @@ class AgentAppFeature(BaseModel):
     action_name: str
     enabled: bool = True
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TriggerSubscription(BaseModel):
@@ -111,8 +105,7 @@ class TriggerSubscription(BaseModel):
     is_active: bool = True
     created_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Request/Response models for API
