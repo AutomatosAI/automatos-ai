@@ -4,7 +4,8 @@ Two writers build these tables: the model layer (``create_all``: the fresh path 
 the unit tests) and the ``prd261_themes`` migration (existing databases). A table that
 differs between them is how a column goes missing on one path, so this file pins:
 
-* one Alembic head, ``prd261_themes``, on the head pinned before the wave;
+* ``prd261_themes`` chains onto the head pinned before the wave and sits under the one
+  Alembic head (which revision IS the head stays with the two pins AGENTS.md names);
 * model columns equal DDL columns, table by table: type, nullability, primary key,
   server default, foreign key and ON DELETE; the CHECKs and the indexes too, read
   from the migration's constants with ast (the migration is never imported here);
@@ -144,12 +145,29 @@ def _revisions() -> dict:
     return revisions
 
 
-def test_one_head_and_it_is_prd261_themes_on_the_head_before_the_wave():
+def _down_revisions(down) -> list:
+    return list(down) if isinstance(down, (list, tuple)) else [down] if down else []
+
+
+def _ancestors_and_self(revisions: dict, rev: str) -> set:
+    seen, todo = set(), [rev]
+    while todo:
+        current = todo.pop()
+        if current not in seen:
+            seen.add(current)
+            todo.extend(_down_revisions(revisions.get(current)))
+    return seen
+
+
+def test_one_head_and_prd261_themes_chains_onto_the_head_before_the_wave():
+    # Which revision is the head is pinned only by the two pins AGENTS.md names
+    # (test_prd209 EXPECTED_HEAD, test_prd236), so a later migration moves those two
+    # and this test keeps passing while prd261_themes stays under the one head.
     revisions = _revisions()
-    parents = set()
-    for down in revisions.values():
-        parents.update(down if isinstance(down, (list, tuple)) else [down] if down else [])
-    assert [rev for rev in revisions if rev not in parents] == ["prd261_themes"]
+    parents = {down for downs in revisions.values() for down in _down_revisions(downs)}
+    heads = [rev for rev in revisions if rev not in parents]
+    assert len(heads) == 1, heads
+    assert "prd261_themes" in _ancestors_and_self(revisions, heads[0])
     assert revisions["prd261_themes"] == HEAD_BEFORE_WAVE
     assert [rev for rev, down in revisions.items() if down == HEAD_BEFORE_WAVE] == ["prd261_themes"]
 
