@@ -41,7 +41,7 @@ function rules(css: string): { selector: string; body: string }[] {
 }
 
 function declared(body: string, property: string): string | undefined {
-  const escaped = property.replace(/[-]/g, '\\-')
+  const escaped = property.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')
   return new RegExp(`(?<![\\w-])${escaped}\\s*:\\s*([^;]+);`).exec(body)?.[1]?.trim()
 }
 

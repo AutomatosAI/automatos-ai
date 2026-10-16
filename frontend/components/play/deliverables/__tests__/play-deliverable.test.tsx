@@ -242,7 +242,7 @@ describe('PlayDeliverable — the page', () => {
     found({ content: `a<br>b\n\n${TABLE}` })
     renderDetail()
     const article = screen.getByRole('article', { name: 'Laptop shortlist' })
-    expect(article.textContent).not.toMatch(/<br>|<script>|<\/script>/)
+    expect(article.textContent).not.toMatch(/<\/?(?:br|script)\b/i)
     expect(within(article).getByText('ab')).toBeInTheDocument()
     expect(article.querySelector('br, script')).toBeNull()
   })

@@ -57,12 +57,6 @@ export function styleHtmlClasses(style: UiStyle): string[] {
   return [...HTML_CLASSES_BY_STYLE[style]]
 }
 
-function styleClassScript(style: UiStyle): string {
-  const wanted = styleHtmlClasses(style)
-  const unwanted = STYLE_HTML_CLASS_NAMES.filter((name) => !wanted.includes(name))
-  return `(function(){var c=document.documentElement.classList;${JSON.stringify(unwanted)}.forEach(function(n){c.remove(n);});${JSON.stringify(wanted)}.forEach(function(n){c.add(n);});})();`
-}
-
 /**
  * PRD-260 M07 — the inline <head> script, per style, that puts exactly that
  * style's classes on <html> before first paint (app/layout.tsx), ahead of the
@@ -71,14 +65,15 @@ function styleClassScript(style: UiStyle): string {
  * (next-themes' tone, the font variables) alone. React never owns these
  * classes: <html className> carries only the font variables, the same on every
  * render, so a server re-render (router.refresh) never rewrites the attribute
- * and drops the tone. Each body is a constant built here at module load from
- * the class table above; the parsed style only picks the entry, and no cookie
- * text ever goes into it.
+ * and drops the tone. Each body is a literal: nothing is built into script
+ * text, and the parsed style only picks the entry, so no cookie text ever goes
+ * into it. ui-style-play.test.ts runs each one against the class table above,
+ * so the literals cannot drift from it.
  */
 export const STYLE_CLASS_SCRIPT: Readonly<Record<UiStyle, string>> = {
-  classic: styleClassScript('classic'),
-  studio: styleClassScript('studio'),
-  play: styleClassScript('play'),
+  classic: "(function(){var c=document.documentElement.classList;c.remove('studio');c.remove('play');})();",
+  studio: "(function(){var c=document.documentElement.classList;c.remove('play');c.add('studio');})();",
+  play: "(function(){var c=document.documentElement.classList;c.add('studio');c.add('play');})();",
 }
 
 /** PRD-260 D2: Studio and Play both render Studio's layout where Play has no design of its own. */

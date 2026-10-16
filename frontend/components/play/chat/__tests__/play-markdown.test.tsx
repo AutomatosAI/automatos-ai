@@ -26,7 +26,7 @@ describe("PlayMarkdown — Auto's reply", () => {
 
   it('drops raw HTML instead of printing its tags, and keeps the words around them', () => {
     const { container } = render(<PlayMarkdown text={'a<br>b and <script>alert(1)</script> done'} />)
-    expect(container.textContent).not.toMatch(/<br>|<script>|<\/script>/)
+    expect(container.textContent).not.toMatch(/<\/?(?:br|script)\b/i)
     expect(container.querySelector('br, script')).toBeNull()
     expect(container).toHaveTextContent('ab and alert(1) done')
   })
