@@ -24,8 +24,8 @@ const STYLE_COOKIE = 'automatos-style'
 const APPEARANCE_DEFAULTS = { key: 'automatos-appearance-defaults', value: '2026-09-17-studio-dark' }
 const IMPORT_MAP_OPEN = '<script type="importmap">'
 const SCRIPT_CLOSE = '</script>'
-const MODULE_SCRIPT_TAG = /<script\b[^>]*\btype="module"[^>]*>/g
-const SCRIPT_TAG = /<script\b[^>]*>/g
+const MODULE_SCRIPT_TAG = /<script\b[^>]*\btype="module"[^>]*>/gi
+const SCRIPT_TAG = /<script\b[^>]*>/gi
 
 /**
  * Runs in the page as a module script. For each shared specifier, imports the shim by its bare
