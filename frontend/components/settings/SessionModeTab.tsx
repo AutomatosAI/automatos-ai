@@ -13,6 +13,8 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { TerminalSquare } from 'lucide-react'
 import { toast } from 'sonner'
+import { useBackendHealthQuery } from '@/hooks/use-backend-health'
+import { usePlayLayout } from '@/hooks/use-studio-theme'
 import { apiClient } from '@/lib/api-client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -73,13 +75,21 @@ export function describeProjectsFolder(s: SessionModeSettings | undefined): { to
   return { tone: 'ok', text: `${s.local_projects_dir} — mounted, ${mount}, and your CLI host may run sessions anywhere inside it.` }
 }
 
+/** What the tab reads from GET /health. */
+interface SessionModeHealth {
+  edition?: string
+  cli_runtime_enabled?: boolean
+}
+
+/**
+ * GET /health through the one shared query (hooks/use-backend-health.ts, P260-FX-27 M88), so
+ * Play's connection and this tab share one cache and one request. Inside Play's frame its
+ * AsleepGate owns the poll; anywhere else (Classic, Studio, Play below its width) the tab polls
+ * it, as it always has.
+ */
 function useSessionModeHealth() {
-  return useQuery({
-    queryKey: ['health', 'session-mode'],
-    queryFn: () => apiClient.request<{ edition?: string; cli_runtime_enabled?: boolean }>('/health'),
-    staleTime: 10_000,
-    refetchInterval: 30_000,
-  })
+  const framePolls = usePlayLayout() === 'play'
+  return useBackendHealthQuery<SessionModeHealth>({ poll: !framePolls })
 }
 
 function useSessionModeSettings(enabled: boolean) {

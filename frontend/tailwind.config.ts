@@ -3,7 +3,10 @@ import type { Config } from 'tailwindcss';
 const config: Config = {
   // `dark:` prefixes key off the `.dark` class next-themes sets for the Dark
   // tone — in both styles (PRD-244: Classic and Studio each have Light/Dark).
-  darkMode: ['variant', ['&:is(.dark *)']],
+  // The 'class' form, not ['variant', …]: Tailwind 3.3.3's darkVariants knows
+  // only 'class' and 'media' (the 'variant' form is 3.4.1+), so ['variant', …]
+  // added no dark variant and every dark: class was dead (PRD-259 S-010a).
+  darkMode: ['class', '.dark'],
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',

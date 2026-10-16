@@ -154,10 +154,10 @@ export function StepDetail({ step, open, onOpenChange }: StepDetailProps) {
           {/* Error message */}
           {step.error && (
             <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md">
-              <h4 className="text-sm font-medium text-destructive dark:text-destructive/70 mb-1">
+              <h4 className="text-sm font-medium text-destructive dark:text-foreground mb-1">
                 Error
               </h4>
-              <pre className="text-xs text-destructive dark:text-destructive/80 whitespace-pre-wrap overflow-auto max-h-32">
+              <pre className="text-xs text-destructive dark:text-foreground whitespace-pre-wrap overflow-auto max-h-32">
                 {step.error}
               </pre>
             </div>

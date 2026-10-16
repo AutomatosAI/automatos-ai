@@ -43,9 +43,6 @@ function toCSV(columns: string[], rows: any[]): string {
 
 export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
   const pandasAI = (metadata?.pandas_ai ?? null) as PandasAIInsight | null
-  const status = metadata?.status as string | undefined
-  const clarifications = metadata?.clarifications as string[] | undefined
-  const infoMessage = metadata?.message as string | undefined
 
   const rawColumns = (metadata?.columns ?? []) as string[]
   const rawRows = (metadata?.data ?? []) as any[]
@@ -84,40 +81,6 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
 
   return (
     <div className="space-y-6">
-      {/* Clarification flow */} 
-      {status === 'needs_clarification' && clarifications && clarifications.length > 0 && (
-        <div className="rounded-xl border border-warning/30 bg-warning/10 p-4">
-          <div className="text-sm font-semibold text-warning dark:text-warning">Clarification needed</div>
-          {infoMessage && <div className="mt-1 text-sm text-warning/80">{infoMessage}</div>}
-          <div className="mt-3 space-y-2">
-            {clarifications.map((q, idx) => (
-              <button
-                key={idx}
-                className="w-full rounded-xl border border-border/60 bg-card/50 px-3 py-2 text-left text-sm text-foreground hover:border-warning/40 hover:bg-warning/5 dark:border-gray-800/60 dark:bg-background/40 dark:text-gray-200"
-                onClick={async () => {
-                  if (!navigator.clipboard) {
-                    toast.error('Clipboard API is not available')
-                    return
-                  }
-                  try {
-                    await navigator.clipboard.writeText(q)
-                    toast.success('Question copied (paste into chat to answer)')
-                  } catch {
-                    toast.error('Failed to copy')
-                  }
-                }}
-                type="button"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-          <div className="mt-3 text-xs text-warning/70">
-            Tip: answer these in chat (you can paste), then re-run the query.
-          </div>
-        </div>
-      )}
-
       {/* Summary markdown (optional) */}
       {content && (
         <MarkdownView density="compact">{content}</MarkdownView>

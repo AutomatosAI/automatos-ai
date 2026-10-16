@@ -23,7 +23,8 @@ vi.mock('@/components/ui/sheet', () => ({
   SheetContent: () => null,
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => true, useIsMobile: () => true }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true }))
+// Not Play, so the core's chrome (P260-FX-25: usePlayLayout is MainLayout's width source for Play).
+vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => false, usePlayLayout: () => 'fallback' }))
 
 import { MainLayout } from '../main-layout'
 

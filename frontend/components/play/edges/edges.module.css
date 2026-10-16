@@ -1,0 +1,198 @@
+/*
+ * PRD-260 §4 — the edges of the app under Play (Ember): Automatos asleep (mock
+ * 07, the whole window, the glow out) and the 404 (mock 09, Auto in front of a
+ * huge hollow serif "404"), ported from Automatos Play's
+ * components/edges/edges.module.css. Play's pages render only at >= 1024 px
+ * (D7), so Play's phone rules are not ported. Every variable is --pl-* (K2).
+ */
+
+.screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  color: var(--pl-color-text);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pl-space-3);
+  padding: var(--pl-space-5) var(--pl-space-6);
+}
+
+.wordmark {
+  font: var(--pl-text-brand);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
+}
+
+.wordmarkPlay {
+  color: var(--pl-color-accent-text);
+}
+
+/* Asleep, the wordmark is quiet: no accent while nothing is running. */
+.wordmark[data-quiet="true"],
+.wordmark[data-quiet="true"] .wordmarkPlay {
+  color: var(--pl-color-text-2);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: var(--pl-space-2);
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-2);
+}
+
+/* A hollow dot: "not connected" in shape and words, not colour. */
+.status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--pl-radius-round);
+  border: 1.5px solid var(--pl-color-text-3);
+}
+
+.body,
+.lost {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pl-space-6);
+  text-align: center;
+}
+
+.body {
+  gap: var(--pl-space-5);
+}
+
+.lost {
+  gap: var(--pl-space-4);
+}
+
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .title {
+  margin: 0;
+  font: var(--pl-text-hero);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
+}
+
+.text {
+  max-width: var(--pl-content-max);
+  margin: 0;
+  font: var(--pl-text-lead);
+  color: var(--pl-color-text-2);
+}
+
+/* html.play outranks Studio's kbd/code chip (globals.css .studio code, kbd), which sets the
+   background, padding, radius and size: each is set here. */
+:global(html.play) .inline {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--pl-font-mono);
+  font-size: 1em;
+  color: var(--pl-color-text);
+}
+
+.command {
+  display: flex;
+  align-items: center;
+  gap: var(--pl-space-3);
+  max-width: 100%;
+  padding: var(--pl-space-2) var(--pl-space-2) var(--pl-space-2) var(--pl-space-5);
+  border: 1px solid var(--pl-line-strong);
+  border-radius: var(--pl-radius-card);
+  background: var(--pl-color-bg);
+}
+
+.prompt {
+  font: var(--pl-text-mono);
+  color: var(--pl-color-text-3);
+}
+
+/* As .inline: Studio's code chip is overruled property by property. */
+:global(html.play) .commandText {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font: var(--pl-text-mono);
+  color: var(--pl-color-text);
+  user-select: all;
+}
+
+.copy {
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--pl-space-4);
+  border: 1px solid var(--pl-line-button);
+  border-radius: var(--pl-radius-button);
+  background: var(--pl-color-surface);
+  color: var(--pl-color-text);
+  font: var(--pl-text-button-sm);
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pl-space-4);
+}
+
+/* Check again is the secondary (cream) button: nothing on the asleep screen is lit. */
+.checkAgain,
+.primary {
+  min-height: var(--pl-tap-min);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--pl-space-5);
+  border: 0;
+  border-radius: var(--pl-radius-button);
+  font: var(--pl-text-button);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.checkAgain {
+  background: var(--pl-color-text);
+  color: var(--pl-color-bg);
+}
+
+.primary {
+  background: var(--pl-color-accent);
+  color: var(--pl-color-accent-ink);
+  box-shadow: var(--pl-shadow-primary);
+}
+
+.hint {
+  margin: 0;
+  font: var(--pl-text-small);
+  color: var(--pl-color-text-3);
+}
+
+/* The 404: Auto in front of a giant hollow "404". */
+.stage404 {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.big404 {
+  font: var(--pl-text-404);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: transparent;
+  -webkit-text-stroke: var(--pl-stroke-404) var(--pl-line-strong);
+  user-select: none;
+}
+
+.lostAuto {
+  position: absolute;
+  bottom: 0;
+}

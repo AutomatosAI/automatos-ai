@@ -46,6 +46,23 @@ function clearLegacyOnboardingStorage(userId: string) {
   }
   remove.forEach((k) => localStorage.removeItem(k))
 }
+/** Wiping credentials without a trial reset leaves a converted workspace keyless. */
+function CredentialsWarning() {
+  return (
+    <div
+      className="mt-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-warning"
+      data-testid="reset-credentials-warning"
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>
+        Wiping credentials without resetting the trial leaves a converted
+        workspace with no key — requests fall through to unmetered platform
+        resolution. Turn on “Reset trial” too, or leave credentials in place.
+      </span>
+    </div>
+  )
+}
+
 function ResetOnboardingConsole() {
   const { user } = useUser()
   const router = useRouter()
@@ -183,22 +200,10 @@ function ResetOnboardingConsole() {
         </div>
       </div>
 
-      {credentialsWarning && (
-        <div
-          className="mt-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300"
-          data-testid="reset-credentials-warning"
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            Wiping credentials without resetting the trial leaves a converted
-            workspace with no key — requests fall through to unmetered platform
-            resolution. Turn on “Reset trial” too, or leave credentials in place.
-          </span>
-        </div>
-      )}
+      {credentialsWarning && <CredentialsWarning />}
 
       {error && (
-        <div className="mt-4 text-sm text-red-600 dark:text-red-400" data-testid="reset-error">
+        <div className="mt-4 text-sm text-red-600 dark:text-destructive" data-testid="reset-error">
           {error}
         </div>
       )}

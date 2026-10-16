@@ -38,7 +38,7 @@ export function TrialBalancePill({ className = '' }: { className?: string }) {
       className={[
         'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap',
         warn
-          ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-500'
+          ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-warning'
           : 'border-border bg-muted/40 text-muted-foreground',
         className,
       ].join(' ')}

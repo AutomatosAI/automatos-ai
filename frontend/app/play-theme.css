@@ -1,0 +1,293 @@
+/*
+ * PRD-260 K2, K5 — Play's theme: its tokens and base rules, ported from
+ * Automatos Play's app/theme.css and app/globals.css. Every rule is under
+ * html.play and every variable is --pl-* (Play's own --accent and --ring
+ * would clobber Studio's HSL tokens of the same names), so Classic and
+ * Studio never see any of it. Imported once, by app/layout.tsx.
+ *
+ * The colour and display-type values are the look's variables
+ * (lib/looks/css.ts), set on <html> by the pre-paint script and the
+ * LookProvider. No literal colour lives here: lib/looks/catalogue.ts is the
+ * only home for those (the PRD-260 guard test); the forced-colours block names
+ * CSS system colours, which the OS sets, not the look. Spacing, radii and motion
+ * stay static (the Ember README and style sheet). Body and mono text use the
+ * core's Geist variables; Play's display faces come from app/play-fonts.ts.
+ */
+
+html.play {
+  /* Colour: the ground */
+  --pl-color-bg: var(--pl-ground-bg); /* page */
+  --pl-color-surface: var(--pl-ground-surface); /* inputs, cards */
+  --pl-color-text: var(--pl-ground-text); /* text; the secondary (cream) button's fill */
+  --pl-color-text-2: var(--pl-ground-text-2); /* secondary text */
+  --pl-color-text-3: var(--pl-ground-text-2); /* tertiary text: the catalogue's text2, so it reads on every ground */
+
+  /* Colour: the accent, the one primary action per screen and "fresh" things */
+  --pl-color-accent: var(--pl-accent); /* fills, rings, icons */
+  --pl-color-accent-ink: var(--pl-accent-ink); /* text on an accent fill */
+  --pl-color-accent-text: var(--pl-accent-text); /* the accent as text: links, serif highlights, "new", "done" */
+
+  /* Colour: errors stay coral in every look, always with a cross and words */
+  --pl-color-error: var(--pl-error); /* fills, rings, icons */
+  --pl-color-error-text: var(--pl-error-text); /* the error as text */
+
+  /* Colour: Auto, following the look */
+  --pl-color-light: var(--pl-auto-light); /* the light: his ring and the "connected" dot (the eyes are part of the clips) */
+  --pl-color-shell: var(--pl-auto-shell); /* his stand-in's outline while the clips are missing */
+  --pl-filter-shell: var(--pl-auto-shell-filter); /* tints his clip and still to the look's shell */
+  --pl-color-dusk: var(--pl-auto-dusk); /* his ring asleep and lost: text2 45% into bg (lib/looks/css.ts duskOf) */
+
+  /* Colour: a Deliverable's page, printed on a sheet (Ember mock 05) */
+  --pl-color-sheet: var(--pl-sheet-bg);
+  --pl-color-sheet-text: var(--pl-sheet-text);
+  --pl-color-sheet-accent: var(--pl-sheet-accent);
+  --pl-tint-sheet-line: color-mix(in srgb, var(--pl-sheet-text) 18%, var(--pl-sheet-bg));
+
+  /* Colour: lines, from the ground's text so they suit dark and light grounds */
+  --pl-line-faint: color-mix(in srgb, var(--pl-ground-text) 8%, transparent);
+  --pl-line: var(--pl-ground-line);
+  --pl-line-strong: color-mix(in srgb, var(--pl-ground-text) 16%, transparent); /* your message, chips */
+  --pl-line-button: color-mix(in srgb, var(--pl-ground-text) 24%, transparent); /* outlined buttons */
+
+  /* Colour: tints. The accent text reads on the fill, the halo and the faint tint: their alphas are
+     lib/looks/css.ts ACCENT_TEXT_TINTS (contrast.test.ts holds these literals to them). */
+  --pl-tint-hover: var(--pl-ground-chip);
+  --pl-tint-panel: var(--pl-ground-panel);
+  --pl-tint-tool: var(--pl-ground-chip); /* a finished tool line */
+  --pl-tint-selected: var(--pl-ground-chip);
+  --pl-tint-bar: color-mix(in srgb, var(--pl-ground-bg) 90%, transparent); /* phone bars */
+  --pl-tint-accent: var(--pl-accent-fill); /* a running tool line */
+  --pl-tint-accent-line: var(--pl-accent-line); /* its edge, the new Deliverable's edge */
+  --pl-tint-accent-track: color-mix(in srgb, var(--pl-accent) 30%, transparent); /* the spinner's track */
+  --pl-tint-accent-halo: color-mix(in srgb, var(--pl-accent) 18%, transparent); /* the focus halo (ACCENT_HALO_ALPHA) */
+  --pl-tint-accent-strong: color-mix(in srgb, var(--pl-accent) 28%, transparent); /* the newest shelf card */
+  --pl-tint-accent-faint: color-mix(in srgb, var(--pl-accent) 4%, transparent); /* a card's faint end (ACCENT_FAINT_ALPHA) */
+  --pl-tint-error: color-mix(in srgb, var(--pl-error) 10%, transparent);
+  --pl-tint-error-line: color-mix(in srgb, var(--pl-error) 45%, transparent);
+  --pl-tint-placeholder: color-mix(in srgb, var(--pl-auto-shell) 30%, transparent); /* Auto's stand-in */
+  --pl-tint-visor: color-mix(in srgb, var(--pl-ground-bg) 60%, transparent);
+  --pl-tint-scrim: color-mix(in srgb, var(--pl-ground-bg) 72%, transparent); /* the page behind the phone More sheet */
+
+  /* Page ground and its glow (the base rules below). --pl-glow is the look's accent at its glow level and
+     --pl-glow-snag the coral at the ground's snag level, each capped where the page's text still reads at AA
+     (lib/looks/css.ts safeGlow, snagGlowAlpha). */
+  --pl-page-background: var(--pl-color-bg);
+  --pl-page-glow: radial-gradient(760px 520px at 82% 62%, var(--pl-glow), transparent 65%);
+  --pl-page-glow-snag: radial-gradient(760px 520px at 82% 62%, var(--pl-glow-snag), transparent 65%);
+
+  /* Type: families. Display comes from the look (Instrument Serif italic in Ember). */
+  --pl-font-display: var(--pl-display-family);
+  --pl-font-text: var(--font-geist-sans), system-ui, sans-serif; /* reading (400-700) */
+  --pl-font-mono: var(--font-geist-mono), ui-monospace, monospace; /* tool lines, code */
+  --pl-font-display-style: var(--pl-display-style);
+  --pl-font-display-weight: var(--pl-display-weight);
+  --pl-display-letter-spacing: var(--pl-display-tracking);
+
+  /* Type: display, from the look's sizes. Serif display is never below 19px
+     (the catalogue's Editorial sizes). */
+  --pl-text-hero: var(--pl-display-style) var(--pl-display-weight) var(--pl-display-hero) / 0.92 var(--pl-display-family);
+  --pl-text-hero-phone: var(--pl-display-style) var(--pl-display-weight) calc(var(--pl-display-hero) * 0.7) / 0.92
+    var(--pl-display-family);
+  --pl-text-status: var(--pl-display-style) var(--pl-display-weight) var(--pl-display-status) / 1 var(--pl-display-family);
+  --pl-text-status-phone: var(--pl-display-style) var(--pl-display-weight) calc(var(--pl-display-status) * 0.65) / 1
+    var(--pl-display-family);
+  --pl-text-title-lg: var(--pl-display-style) var(--pl-display-weight) calc(var(--pl-display-card) * 1.35) / 1.05
+    var(--pl-display-family); /* the Deliverable card in a reply, the snag box */
+  --pl-text-title: var(--pl-display-style) var(--pl-display-weight) var(--pl-display-card) / 1.1 var(--pl-display-family);
+  --pl-text-brand: var(--pl-display-style) var(--pl-display-weight) var(--pl-display-brand) / 1 var(--pl-display-family);
+  --pl-text-document-title: var(--pl-display-style) var(--pl-display-weight) calc(var(--pl-display-hero) * 0.9) / 0.95
+    var(--pl-display-family);
+  --pl-text-document-title-phone: var(--pl-display-style) var(--pl-display-weight) calc(var(--pl-display-hero) * 0.6) / 0.95
+    var(--pl-display-family);
+  --pl-text-404: var(--pl-display-style) var(--pl-display-weight) calc(var(--pl-display-hero) * 4.5) / 0.8 var(--pl-display-family);
+  --pl-text-404-phone: var(--pl-display-style) var(--pl-display-weight) calc(var(--pl-display-hero) * 2.6) / 0.8
+    var(--pl-display-family);
+  --pl-text-highlight-size: max(19px, 1.17em); /* a serif highlight inside reading text */
+
+  /* Type: text (Geist) */
+  --pl-text-lead: 400 19px/1.5 var(--pl-font-text); /* the line under a big headline */
+  --pl-text-reply: 400 18px/1.6 var(--pl-font-text); /* Auto's answer */
+  --pl-text-body: 400 16px/1.6 var(--pl-font-text);
+  --pl-text-document-body: 400 17px/1.6 var(--pl-font-text);
+  --pl-text-button: 600 15px/1 var(--pl-font-text);
+  --pl-text-button-sm: 600 14px/1 var(--pl-font-text);
+  --pl-text-nav: 500 14px/1.2 var(--pl-font-text);
+  --pl-text-bar-link: 500 15px/1 var(--pl-font-text);
+  --pl-text-small: 400 14px/1.45 var(--pl-font-text);
+  --pl-text-meta: 500 13px/1.4 var(--pl-font-text);
+  --pl-text-label: 500 11px/1.2 var(--pl-font-text);
+  --pl-text-mono: 400 13px/1.5 var(--pl-font-mono);
+  --pl-text-mono-sm: 400 12px/1.4 var(--pl-font-mono);
+  --pl-label-tracking: 0.14em;
+  --pl-stroke-404: 2px; /* the hollow "404" outline */
+
+  /* Spacing: 4px base */
+  --pl-space-1: 4px;
+  --pl-space-2: 8px;
+  --pl-space-3: 12px;
+  --pl-space-4: 16px;
+  --pl-space-5: 24px;
+  --pl-space-6: 40px;
+  --pl-space-7: 56px;
+
+  /* Radii (Ember): 6 paper, 8 tool line, 10 button, 14 card, pill chips */
+  --pl-radius-paper: 6px;
+  --pl-radius-tool: 8px;
+  --pl-radius-button: 10px;
+  --pl-radius-card: 14px;
+  --pl-radius-pill: 999px;
+  --pl-radius-round: 50%; /* dots, the ring, eyes */
+  --pl-radius-icon: 2px; /* the Stop square and the cursor */
+
+  /* Shadows: light, never black, so they suit every ground */
+  --pl-shadow-primary: 0 10px 30px -12px var(--pl-tint-accent-line);
+  --pl-shadow-light-glow: 0 0 8px var(--pl-color-light);
+  --pl-shadow-deliverable: 0 18px 40px -18px var(--pl-tint-accent-line);
+  --pl-shadow-sheet: 0 -10px 60px var(--pl-tint-accent); /* the printed sheet on the desk */
+  --pl-shadow-ledge: 0 10px 14px -10px var(--pl-tint-accent-line); /* the newest shelf card's ledge */
+  --pl-focus-ring: 0 0 0 1px var(--pl-color-accent-text), 0 0 0 4px var(--pl-tint-accent-halo); /* the message box */
+  --pl-focus-field: 0 0 0 1px var(--pl-color-accent-text), 0 0 0 4px var(--pl-tint-accent-halo); /* the search box */
+
+  /* Focus: every interactive element (the base rules below). An outline, so a button's own
+     box-shadow can't hide it; the accent as text, so it reads on every ground. */
+  --pl-focus-outline: 2px solid var(--pl-color-accent-text);
+  --pl-focus-offset: 2px;
+
+  /* Motion (Ember README) */
+  --pl-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --pl-duration-message: 180ms; /* a message rises 12px and fades in */
+  --pl-rise-distance: 12px;
+  --pl-duration-card: 420ms; /* a Deliverable card lands with a 1.04 overshoot */
+  --pl-duration-ring: 2.4s; /* the ring pulses */
+  --pl-duration-glow: 600ms; /* the page glow crossfades with Auto's state */
+
+  /* Layout */
+  --pl-sidebar-width: 232px;
+  --pl-mascot-column-width: 340px;
+  --pl-mascot-size: 220px; /* Auto's stage height in the mascot column */
+  --pl-mascot-size-large: 380px; /* first open (mock 06) */
+  --pl-mascot-size-small: 84px; /* beside the caption above the message box on phones */
+  --pl-bubble-max: 480px; /* your messages */
+  --pl-deliverable-card-max: 520px; /* the Deliverable card in a reply */
+  --pl-composer-max-height: 200px; /* the message box grows to this, then scrolls */
+  --pl-header-height: 80px;
+  --pl-phone-bar-height: 56px;
+  --pl-content-max: 700px;
+  --pl-shelf-max: 1120px; /* the Deliverables shelf (mock 04) */
+  --pl-shelf-card-min: 200px; /* the narrowest shelf card before the grid drops a column */
+  --pl-mission-card-min: 260px; /* the narrowest Mission card: room for two lines of goal */
+  --pl-agent-card-min: 260px; /* the narrowest agent card: name, role and the switch */
+  --pl-agent-figure-min: 128px; /* the narrowest performance figure on an agent's page */
+  --pl-document-max: 760px; /* a Deliverable's page (mock 05) */
+  --pl-detail-panel-width: 300px; /* its side panel: Ask Auto, About, Sources */
+  --pl-tap-min: 44px; /* the smallest tap target */
+  --pl-look-editor-width: 360px; /* the Looks page's editor panel (Ember looks-01) */
+  --pl-look-card-width: 136px; /* a look's mini swatch card in the Looks row */
+  --pl-look-card-top: 84px; /* its swatch: the look's ground, type, light and accent */
+  --pl-page-max: 1720px; /* a Studio page inside Play's frame: the Studio shell's own cap */
+  --pl-search-min-width: 240px; /* the frame's search button, as wide as Studio's */
+  --pl-control-height: 32px; /* the frame's header row controls, beside the core's 30px utilities */
+}
+
+/*
+ * Base rules. :where(html.play) keeps each at the specificity Play gave it
+ * (an element selector), so a Studio page's own classes still win under
+ * Play. Ported with three judgement calls:
+ *   - box-sizing, margins and button fonts are Tailwind's preflight already;
+ *   - body takes Play's ground, colour and glow, not its font shorthand, so
+ *     a Studio page under Play is recoloured, never re-typeset (Play's own
+ *     screens set their type from the --pl-text-* tokens);
+ *   - the accent link colour reaches only links with no class (prose, a
+ *     reply's markdown): a classed link styles itself, so a Studio card that
+ *     is a link keeps its own colours.
+ */
+:where(html.play) body {
+  min-height: 100dvh;
+  background: var(--pl-page-background);
+  color: var(--pl-color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The page glow (Ember): the accent's light behind everything, following Auto's state
+   (data-glow on his stage) with a crossfade. Two fixed layers, because gradients can't be
+   transitioned: the accent one and the coral snag one. */
+:where(html.play) body::before,
+:where(html.play) body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  transition: opacity var(--pl-duration-glow) var(--pl-ease-out);
+}
+
+:where(html.play) body::before {
+  background: var(--pl-page-glow);
+  opacity: 0.45;
+}
+
+:where(html.play) body::after {
+  background: var(--pl-page-glow-snag);
+  opacity: 0;
+}
+
+:where(html.play) body:has([data-glow="busy"])::before {
+  opacity: 0.7;
+}
+
+:where(html.play) body:has([data-glow="bright"])::before {
+  opacity: 1;
+}
+
+:where(html.play) body:has([data-glow="snag"])::before,
+:where(html.play) body:has([data-glow="off"])::before {
+  opacity: 0;
+}
+
+:where(html.play) body:has([data-glow="snag"])::after {
+  opacity: 1;
+}
+
+:where(html.play) a:not([class]) {
+  color: var(--pl-color-accent-text);
+}
+
+/* The keyboard focus ring wherever nothing draws its own: no specificity at all, so any
+   focus style of a Studio component (or of Play's own modules) wins. */
+:where(html.play :focus-visible) {
+  outline: var(--pl-focus-outline);
+  outline-offset: var(--pl-focus-offset);
+}
+
+/* Forced colours (Windows High Contrast) drop box-shadows and background-only marks, so a pressed
+   control (M19) is ringed by an outline in the system's Highlight: a system colour, never a look's.
+   A pressed control with the keyboard focus gets a wider ring, so the focus still shows on it. */
+@media (forced-colors: active) {
+  html.play [aria-pressed="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  html.play [aria-pressed="true"]:focus-visible {
+    outline-width: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(html.play) *,
+  :where(html.play) *::before,
+  :where(html.play) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* The same stop, set by the LookProvider (data-pl-motion on <html>, plus --pl-motion: 0 for calc()). */
+html.play[data-pl-motion="reduce"] *,
+html.play[data-pl-motion="reduce"] *::before,
+html.play[data-pl-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}

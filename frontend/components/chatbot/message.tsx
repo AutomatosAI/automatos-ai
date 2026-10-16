@@ -42,6 +42,11 @@ function extractImages(content: string): { text: string; images: ChatImage[] } {
   return { text: text.trim(), images }
 }
 
+// The answer body's classes, at module scope so `Message` (over the function limit)
+// shrinks rather than changes. Its dark-tone prose variants were dropped (PRD-259 S-010a):
+// @tailwindcss/typography is not installed, so they never generated a rule.
+const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 break-words [overflow-wrap:anywhere] prose-headings:text-foreground prose-p:text-foreground prose-a:text-primary"
+
 export function Message({
   chatId,
   message,
@@ -71,7 +76,6 @@ export function Message({
   }, [message.reasoning, message.parts])
   const answerStarted = plainContent.trim().length > 0
 
-  const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 break-words [overflow-wrap:anywhere] dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-primary dark:prose-a:text-primary"
 
   const renderMarkdownWithImages = (text: string, keyPrefix = '') => {
     const { text: cleanText, images } = extractImages(text)

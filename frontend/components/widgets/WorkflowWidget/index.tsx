@@ -142,7 +142,7 @@ export function WorkflowWidget({
         {/* Error display */}
         {data.error && (
           <div className="px-3 py-2 bg-destructive/10 border-b border-destructive/20">
-            <p className="text-sm text-destructive dark:text-destructive/80">
+            <p className="text-sm text-destructive dark:text-foreground">
               {data.error}
             </p>
           </div>

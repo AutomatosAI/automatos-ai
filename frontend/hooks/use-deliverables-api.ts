@@ -75,6 +75,8 @@ export interface Deliverable {
   content?: string | null
   content_url?: string | null
   content_error?: string
+  /** True when the file is over the inline cap (1 MB) and `content` is its first part only. */
+  content_truncated?: boolean
   /** F354: the owner's document this Deliverable was added to knowledge as, or null. */
   knowledge_document_id?: number | null
   /** 7 Oct: the Deliverable's tags (lowercase, at most 10); a board card's tags included. */
@@ -146,6 +148,9 @@ export const FEED_DEFAULT_FILTERS: FilterState = {
 
 const PAGE_SIZE = 24
 
+/** The error a list page that answered success: false throws when it carries no words of its own. */
+export const LIST_FAILED = 'The Deliverables list answered success: false.'
+
 /**
  * Translate a DateRange into an ISO timestamp for `date_from`.
  * Returns null for 'all'.
@@ -197,10 +202,29 @@ export const deliverableQueryKeys = {
 // ============= QUERY HOOKS =============
 
 /**
+ * One page of the list. The endpoint answers 200 with success: false when it
+ * fails (DeliverableService.list_deliverables), so that answer throws, with the
+ * backend's words as the message: react-query then reports the error and keeps
+ * the last good pages, instead of caching the failure as the list (P260-FX-12, M57).
+ */
+async function fetchListPage(filters: FilterState, offset: number): Promise<DeliverableListResponse> {
+  const page = await apiClient.request<DeliverableListResponse>(
+    `/api/deliverables?${buildListQuery(filters, offset)}`,
+  )
+  if (page.success === false) throw new Error(page.error || LIST_FAILED)
+  return page
+}
+
+export interface DeliverablesOptions {
+  /** Ask for the loaded pages again every so many ms while the tab is visible; never when unset. */
+  refetchInterval?: number
+}
+
+/**
  * Fetch a paginated (infinite) list of deliverables for the current workspace.
  * Use `fetchNextPage()` / `hasNextPage` for Load More UX.
  */
-export function useDeliverables(filters: FilterState = DEFAULT_FILTERS) {
+export function useDeliverables(filters: FilterState = DEFAULT_FILTERS, options?: DeliverablesOptions) {
   const { workspaceId } = useWorkspace()
 
   // React Query v4: pageParam defaults to undefined; seed with 0 via destructuring.
@@ -209,17 +233,14 @@ export function useDeliverables(filters: FilterState = DEFAULT_FILTERS) {
     queryKey: deliverableQueryKeys.list(workspaceId, filters),
     enabled: !!workspaceId,
     keepPreviousData: false,
-    queryFn: ({ pageParam = 0 }) => {
-      const qs = buildListQuery(filters, pageParam as number)
-      return apiClient.request<DeliverableListResponse>(
-        `/api/deliverables?${qs}`,
-      )
-    },
+    queryFn: ({ pageParam = 0 }) => fetchListPage(filters, pageParam as number),
     getNextPageParam: (lastPage) => {
       const fetchedSoFar = lastPage.offset + lastPage.deliverables.length
       return fetchedSoFar < lastPage.total ? fetchedSoFar : undefined
     },
     staleTime: 15_000,
+    refetchInterval: options?.refetchInterval ?? false,
+    refetchIntervalInBackground: false,
   })
 }
 

@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
@@ -10,9 +10,10 @@ import { Header } from './header'
 import { StudioSidebar } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
 import { AutoWidget } from '../chatbot/chat-widget'
+import { PlayFrame } from '@/components/play/shell/play-frame-lazy'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsStudio } from '@/hooks/use-studio-theme'
+import { useIsStudio, usePlayLayout } from '@/hooks/use-studio-theme'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -25,30 +26,87 @@ interface MainLayoutProps {
   fullBleed?: boolean
 }
 
-export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [studioSidebarCollapsed, setStudioSidebarCollapsed] = useState(false)
-  const isMobileLayout = useIsTabletOrBelow()
-  const isStudio = useIsStudio()
-  const pathname = usePathname()
+interface DesktopShellProps {
+  children: React.ReactNode
+  fullBleed: boolean
+  /** The floating Auto widget, built once by MainLayout for every shell. */
+  autoWidget: React.ReactNode
+}
+
+const STUDIO_SIDEBAR_COLLAPSED_KEY = 'studioSidebarCollapsed'
+
+/** The Studio rail's collapsed state, remembered per browser. */
+function useStudioSidebarCollapsed(): [boolean, () => void] {
+  const [collapsed, setCollapsed] = useState(false)
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('studioSidebarCollapsed')
-      if (stored === '1') setStudioSidebarCollapsed(true)
-    } catch {}
+      if (localStorage.getItem(STUDIO_SIDEBAR_COLLAPSED_KEY) === '1') setCollapsed(true)
+    } catch {
+      // Storage blocked (a private window): the rail opens expanded.
+    }
   }, [])
 
-  const toggleStudioSidebar = () => {
-    setStudioSidebarCollapsed((prev) => {
+  const toggle = useCallback(() => {
+    setCollapsed((prev) => {
       const next = !prev
       try {
-        localStorage.setItem('studioSidebarCollapsed', next ? '1' : '0')
-      } catch {}
+        localStorage.setItem(STUDIO_SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
+      } catch {
+        // Storage blocked: the rail still toggles, it just isn't remembered.
+      }
       return next
     })
-  }
+  }, [])
+
+  return [collapsed, toggle]
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Studio shell — render the CD round-4 chrome (sidebar + header)
+// when .studio is active and we're on desktop. Mobile keeps the existing
+// sheet pattern for now; MainLayout falls through to the classic layout.
+// ────────────────────────────────────────────────────────────────────
+function StudioDesktopShell({ children, fullBleed, autoWidget }: DesktopShellProps) {
+  const [collapsed, toggleCollapsed] = useStudioSidebarCollapsed()
+  // `safe-bottom` (the one safe-area helper, globals.css) keeps the shell's
+  // bottom edge — the scrolling main and the rail alike — clear of a
+  // notched phone's home bar. The shell is 100dvh with border-box sizing,
+  // so the inset comes out of its height.
+  return (
+    <div className="sh-shell safe-bottom">
+      <StudioSidebar collapsed={collapsed} onToggle={toggleCollapsed} />
+      <div className="sh-main">
+        <StudioHeader />
+        {fullBleed ? (
+          <main className="sh-fullbleed flex-1 min-h-0 flex flex-col">
+            {children}
+          </main>
+        ) : (
+          <main className="px-4 py-4 md:px-6 md:py-6 lg:px-12 lg:py-8 2xl:px-16">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="max-w-[1720px] mx-auto"
+            >
+              {children}
+            </motion.div>
+          </main>
+        )}
+      </div>
+      {autoWidget}
+    </div>
+  )
+}
+
+export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const isMobileLayout = useIsTabletOrBelow()
+  const isStudio = useIsStudio()
+  const playLayout = usePlayLayout()
+  const pathname = usePathname()
 
   // Get current page context for the chat
   const getCurrentPage = () => {
@@ -68,11 +126,18 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
     if (pathname.startsWith('/settings')) return 'settings'
     if (pathname.startsWith('/team')) return 'team'
     if (pathname.startsWith('/chat')) return 'chat'
+    // PRD-260 M70: Play's own pages (Conversations; Make it yours and its style sheet).
+    if (pathname?.startsWith('/conversations')) return 'chat'
+    if (pathname?.startsWith('/looks')) return 'looks'
     return 'dashboard'
   }
 
   const currentPage = getCurrentPage()
   const showAutoWidget = !pathname?.startsWith('/chat')
+  // Auto Widget — floating assistant on every page except /chat, in every shell
+  const autoWidget = (
+    <AutoWidget position="bottom-right" currentPage={currentPage} visible={showAutoWidget} />
+  )
 
   const handleMenuClick = () => {
     if (isMobileLayout) {
@@ -82,48 +147,16 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────
-  // Studio shell — render the CD round-4 chrome (sidebar + header)
-  // when .studio is active and we're on desktop. Mobile keeps the existing
-  // sheet pattern for now. Falls through to classic layout below.
-  // ────────────────────────────────────────────────────────────────────
+  // PRD-260 D7: Play's frame at >= 1024 px; below it, the fallback chrome as for Studio.
+  // Under Play while the width isn't known (the server, hydration), nothing: a page
+  // mounted in one chrome and again in the other runs its effects twice (P260-FX-25, M69).
+  if (playLayout === 'pending') return null
+  if (playLayout === 'play') {
+    return <PlayFrame fullBleed={fullBleed} autoWidget={autoWidget}>{children}</PlayFrame>
+  }
+
   if (isStudio && !isMobileLayout) {
-    // `safe-bottom` (the one safe-area helper, globals.css) keeps the shell's
-    // bottom edge — the scrolling main and the rail alike — clear of a
-    // notched phone's home bar. The shell is 100dvh with border-box sizing,
-    // so the inset comes out of its height.
-    return (
-      <div className="sh-shell safe-bottom">
-        <StudioSidebar
-          collapsed={studioSidebarCollapsed}
-          onToggle={toggleStudioSidebar}
-        />
-        <div className="sh-main">
-          <StudioHeader />
-          {fullBleed ? (
-            <main className="sh-fullbleed flex-1 min-h-0 flex flex-col">
-              {children}
-            </main>
-          ) : (
-            <main className="px-4 py-4 md:px-6 md:py-6 lg:px-12 lg:py-8 2xl:px-16">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="max-w-[1720px] mx-auto"
-              >
-                {children}
-              </motion.div>
-            </main>
-          )}
-        </div>
-        <AutoWidget
-          position="bottom-right"
-          currentPage={currentPage}
-          visible={showAutoWidget}
-        />
-      </div>
-    )
+    return <StudioDesktopShell fullBleed={fullBleed} autoWidget={autoWidget}>{children}</StudioDesktopShell>
   }
 
   // PRD-246: below 1024 the Studio pages render inside this chrome, and they are
@@ -197,12 +230,7 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
         </main>
       </div>
 
-      {/* Auto Widget — floating assistant on every page except /chat */}
-      <AutoWidget
-        position="bottom-right"
-        currentPage={currentPage}
-        visible={showAutoWidget}
-      />
+      {autoWidget}
     </div>
   )
 }

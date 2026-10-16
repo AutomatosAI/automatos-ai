@@ -14,17 +14,29 @@ import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { chatSessionKey } from '@/lib/chat/chat-session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 
-export function useChatSessionHydration(): { key: string | null; hydrated: boolean } {
+/**
+ * Whose conversations these are: the session key (the workspace and the
+ * signed-in user) once both have settled, else null. The session binds under it
+ * and Play's history caches are keyed by it (P260-FX-10), so the next account on
+ * this browser never sees the last one's conversations.
+ */
+export function useChatScope(): string | null {
   const workspaceCtx = useWorkspaceOptional()
   const { user, isLoaded } = useUser()
+  // Wait for both scopes to settle — hydrating under a provisional key would
+  // write the session where later reads never look. A workspace already known
+  // keeps its key while it refetches (saving a key from the trial banner
+  // refreshes it), so the conversation on screen never blinks out; a different
+  // workspace still rehydrates under its own key once it arrives.
+  const ready = isLoaded && (workspaceCtx === null || !workspaceCtx.isLoading || workspaceCtx.workspace != null)
+  return ready ? chatSessionKey(workspaceCtx?.workspace?.id ?? null, user?.id ?? null) : null
+}
+
+export function useChatSessionHydration(): { key: string | null; hydrated: boolean } {
+  const key = useChatScope()
   const hydrate = useChatSessionStore((s) => s.hydrate)
   const reload = useChatSessionStore((s) => s.reload)
   const touchChat = useChatSessionStore((s) => s.touchChat)
-
-  // Wait for both scopes to settle — hydrating under a provisional key would
-  // write the session where later reads never look.
-  const ready = isLoaded && (workspaceCtx === null || !workspaceCtx.isLoading)
-  const key = ready ? chatSessionKey(workspaceCtx?.workspace?.id ?? null, user?.id ?? null) : null
 
   useEffect(() => {
     if (key) void hydrate(key)

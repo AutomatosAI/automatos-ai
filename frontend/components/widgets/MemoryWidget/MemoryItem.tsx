@@ -36,25 +36,25 @@ function getTypeConfig(type: MemoryType) {
       return {
         icon: Info,
         label: 'fact',
-        className: 'bg-blue-100 text-info dark:bg-blue-900 dark:text-info/80',
+        className: 'bg-blue-100 text-info dark:bg-info/20 dark:text-foreground',
       }
     case 'preference':
       return {
         icon: Lightbulb,
         label: 'preference',
-        className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-agent/80',
+        className: 'bg-purple-100 text-purple-700 dark:bg-agent/20 dark:text-foreground',
       }
     case 'context':
       return {
         icon: MessageSquare,
         label: 'context',
-        className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+        className: 'bg-green-100 text-green-700 dark:bg-success/20 dark:text-success',
       }
     case 'instruction':
       return {
         icon: FileText,
         label: 'instruction',
-        className: 'bg-warning text-warning dark:bg-warning dark:text-warning',
+        className: 'bg-warning text-warning',
       }
     default:
       return {

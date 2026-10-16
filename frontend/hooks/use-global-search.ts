@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { apiClient, type WorkspaceSocialsState } from '@/lib/api-client'
-import { feedItemHref } from '@/lib/ticket-links'
+import { feedItemHref, LOOK_STYLE_HREF, LOOKS_HREF } from '@/lib/ticket-links'
 import { SOCIAL_STATUS_LABELS } from '@/components/deliverables/socials/socials-status'
+import { GLOBAL_SEARCH_OPEN_EVENT } from '@/lib/global-search-event'
 
 const ACTIVITY_HREF = '/command-center?tab=activity'
 
@@ -42,14 +43,22 @@ const NAVIGATION_PAGES: SearchResult[] = [
   { id: 'nav-explorer', label: 'Explorer', category: 'pages', path: '/deliverables/explorer' },
 ]
 
+/** PRD-260 M90: Play's own pages, listed only while Play is the style (elsewhere they show a note). */
+const PLAY_PAGES: SearchResult[] = [
+  { id: 'nav-play-conversations', label: 'Conversations', category: 'pages', path: '/conversations' },
+  { id: 'nav-play-looks', label: 'Make it yours', category: 'pages', path: LOOKS_HREF },
+  { id: 'nav-play-style-sheet', label: 'Style sheet', category: 'pages', path: LOOK_STYLE_HREF },
+]
+
 /** The query waits this long after the last keystroke, and needs this many characters. */
 const SEARCH_DEBOUNCE_MS = 300
 const MIN_QUERY_CHARS = 2
 /** Posts listed per search, as the other sources ask for `limit=5`. */
 const SOCIAL_POSTS_SHOWN = 5
 
-function filterPages(query: string, socialsAvailable: boolean): SearchResult[] {
-  const pages = socialsAvailable ? NAVIGATION_PAGES : NAVIGATION_PAGES.filter((p) => p.id !== SOCIALS_PAGE_ID)
+function filterPages(query: string, socialsAvailable: boolean, isPlay: boolean): SearchResult[] {
+  const core = socialsAvailable ? NAVIGATION_PAGES : NAVIGATION_PAGES.filter((p) => p.id !== SOCIALS_PAGE_ID)
+  const pages = isPlay ? [...core, ...PLAY_PAGES] : core
   if (!query) return pages
   const lower = query.toLowerCase()
   return pages.filter((p) => p.label.toLowerCase().includes(lower))
@@ -180,10 +189,10 @@ function useSearchShortcut(setOpen: Dispatch<SetStateAction<boolean>>) {
     }
     const openHandler = () => setOpen(true)
     window.addEventListener('keydown', handler)
-    window.addEventListener('automatos:global-search-open', openHandler)
+    window.addEventListener(GLOBAL_SEARCH_OPEN_EVENT, openHandler)
     return () => {
       window.removeEventListener('keydown', handler)
-      window.removeEventListener('automatos:global-search-open', openHandler)
+      window.removeEventListener(GLOBAL_SEARCH_OPEN_EVENT, openHandler)
     }
   }, [setOpen])
 }
@@ -191,14 +200,15 @@ function useSearchShortcut(setOpen: Dispatch<SetStateAction<boolean>>) {
 /**
  * The global search. `socials` is the workspace's Socials state (PRD-251 D1): the
  * Socials page is listed while the platform offers it, and posts are searched while
- * this workspace has it on too. Without it (outside a workspace), neither.
+ * this workspace has it on too. Without it (outside a workspace), neither. `isPlay`
+ * (PRD-260 M90) lists Play's own pages too.
  */
-export function useGlobalSearch(socials?: WorkspaceSocialsState | null) {
+export function useGlobalSearch(socials?: WorkspaceSocialsState | null, isPlay = false) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const socialsAvailable = socials?.available === true
   const socialsOn = socialsAvailable && socials?.enabled === true
-  const pages = useMemo(() => filterPages(query, socialsAvailable), [query, socialsAvailable])
+  const pages = useMemo(() => filterPages(query, socialsAvailable, isPlay), [query, socialsAvailable, isPlay])
   const { results, loading, error } = useSourceResults(query, socialsOn)
   useSearchShortcut(setOpen)
 

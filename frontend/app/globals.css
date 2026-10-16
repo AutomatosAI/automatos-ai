@@ -16,6 +16,7 @@
     --card-foreground: 0 0% 10%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 10%;
+    --radius: 0.5rem;
     --primary: 16 100% 50%;
     --primary-foreground: 0 0% 98%;
     --secondary: 0 0% 94%;
@@ -165,6 +166,7 @@
     --card-foreground: 30 12% 9%;
     --popover: 0 0% 100%;
     --popover-foreground: 30 12% 9%;
+    --radius: 8px;
 
     /* Brand — POSITIVE PRIMARY IS NEAR-BLACK (locked semantic) */
     --primary: 30 12% 9%;            /* #1a1814 — default CTA */

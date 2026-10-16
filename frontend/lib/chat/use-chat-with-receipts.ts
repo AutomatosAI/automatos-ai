@@ -12,16 +12,38 @@
  *
  * P256-FIX-RVW-22: `useChat` closes a `tool-end` with `success: false` as an error; an ask for the
  * owner's click carries `waiting: true` beside it, and this hook marks that call's line waiting.
+ *
+ * PRD-260: `reload` (Studio's regenerate, Play's Try again) is built here on each render's own
+ * `sendMessage` (./retry), so a turn that failed can be asked again.
  */
-import { useRef } from 'react'
+import { useCallback, useRef } from 'react'
 import { useChat } from '@/lib/chat/hooks'
 import { liveReceiptsFromToolData, withReceiptsOnTheReply } from '@/lib/chat/receipts'
+import { lastTurn } from '@/lib/chat/retry'
 import { waitingToolCallId, withWaitingToolCall } from '@/lib/chat/tool-calls'
 
 type ChatOptions = Parameters<typeof useChat>[0]
 type Chat = ReturnType<typeof useChat>
 
-export function useChatWithReceipts(options: ChatOptions): Chat {
+export type ChatWithReceipts = Chat & {
+  /** Ask the owner's last message again; nothing happens while a turn is running. */
+  readonly reload: () => void
+}
+
+/**
+ * The owner's last message sent again, through this render's `sendMessage`. While a turn runs
+ * it does nothing: `sendMessage` would refuse, and the message must not leave the list unsent.
+ */
+function useAskAgain({ messages, setMessages, sendMessage, isLoading }: Chat): () => void {
+  return useCallback(() => {
+    const turn = lastTurn(messages)
+    if (isLoading || !turn) return
+    setMessages(turn.kept)
+    void sendMessage(turn.content)
+  }, [messages, setMessages, sendMessage, isLoading])
+}
+
+export function useChatWithReceipts(options: ChatOptions): ChatWithReceipts {
   const setMessagesRef = useRef<Chat['setMessages'] | null>(null)
   const { onData } = options
   const chat = useChat({
@@ -35,5 +57,6 @@ export function useChatWithReceipts(options: ChatOptions): Chat {
     },
   })
   setMessagesRef.current = chat.setMessages
-  return chat
+  const reload = useAskAgain(chat)
+  return { ...chat, reload }
 }

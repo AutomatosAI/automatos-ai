@@ -1,0 +1,154 @@
+/*
+ * PRD-260 T-004 — Play's sidebar (Ember mock 01), ported from Automatos Play's
+ * components/shell/shell.module.css. Desktop only: PlayFrame renders at >= 1024 px
+ * (D7), so Play's phone bars are not ported. Every variable is --pl-* (K2).
+ */
+
+.sidebar {
+  width: var(--pl-sidebar-width);
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-5);
+  padding: var(--pl-space-5) var(--pl-space-4);
+  border-right: 1px solid var(--pl-line-faint);
+  overflow-y: auto;
+}
+
+.wordmark {
+  min-height: var(--pl-tap-min);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--pl-space-1);
+  font: var(--pl-text-brand);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
+  text-decoration: none;
+}
+
+.wordmarkAccent {
+  color: var(--pl-color-accent-text);
+}
+
+/* New chat is the secondary (cream) button: the accent is kept for each screen's one primary. */
+.newChat {
+  width: 100%;
+  min-height: var(--pl-tap-min);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--pl-space-4);
+  border: 0;
+  border-radius: var(--pl-radius-button);
+  background: var(--pl-color-text);
+  color: var(--pl-color-bg);
+  font: var(--pl-text-button-sm);
+  cursor: pointer;
+}
+
+/* Until the chat session store is hydrated (useStartChat). */
+.newChat:disabled {
+  cursor: progress;
+}
+
+/* The grouped nav: the Studio menu's groups, then Look on its own. */
+.navGroups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-4);
+}
+
+.groupLabel {
+  display: block;
+  padding: 0 var(--pl-space-2) var(--pl-space-1) var(--pl-space-5);
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-3);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-1);
+}
+
+/* The current page gets an accent dot; the others line up after it. */
+.navLink {
+  min-height: var(--pl-tap-min);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pl-space-2);
+  padding: 0 var(--pl-space-2) 0 var(--pl-space-5);
+  border-radius: var(--pl-radius-tool);
+  color: var(--pl-color-text-2);
+  font: var(--pl-text-nav);
+  text-decoration: none;
+}
+
+.navLink:hover {
+  background: var(--pl-tint-hover);
+}
+
+.navLink[aria-current="page"] {
+  position: relative;
+  color: var(--pl-color-text);
+  font-weight: 600;
+}
+
+.navLink[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: var(--pl-space-2);
+  width: 6px;
+  height: 6px;
+  border-radius: var(--pl-radius-round);
+  background: var(--pl-color-accent-text); /* the readable accent: the raw one is under 3:1 on Paper (M18) */
+}
+
+.externalIcon {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  color: var(--pl-color-text-3);
+}
+
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .sectionLabel {
+  margin: 0;
+  padding: 0 var(--pl-space-2) var(--pl-space-2);
+  font: var(--pl-text-label);
+  letter-spacing: var(--pl-label-tracking);
+  text-transform: uppercase;
+  color: var(--pl-color-text-3);
+}
+
+.recentLink {
+  min-height: var(--pl-tap-min);
+  display: flex;
+  align-items: center;
+  padding: var(--pl-space-2);
+  border-radius: var(--pl-radius-tool);
+  color: var(--pl-color-text-2);
+  font: var(--pl-text-small);
+  text-decoration: none;
+}
+
+.recentLink:hover,
+.recentLink[aria-current] {
+  background: var(--pl-tint-hover);
+  color: var(--pl-color-text);
+}
+
+/* Docs, Settings and the connection pill sit at the foot, where Studio keeps its footer. */
+.foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pl-space-2);
+}

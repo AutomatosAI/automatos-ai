@@ -10,7 +10,7 @@ const alertVariants = cva(
       variant: {
         default: 'bg-background text-foreground',
         destructive:
-          'border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive',
+          'border-destructive/50 text-destructive [&>svg]:text-destructive',
         // Theme tokens, not amber-50: readable in every style and tone (#1045).
         warning: 'border-warning/50 bg-warning/10 text-foreground [&>svg]:text-warning',
       },

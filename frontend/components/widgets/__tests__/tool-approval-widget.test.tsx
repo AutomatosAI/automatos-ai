@@ -159,4 +159,33 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
     expect(screen.getByText(/Change an agent 'CLUB DESK'/)).toBeInTheDocument()
     expect(screen.queryByText('Waiting for the owner')).not.toBeInTheDocument()
   })
+
+  // PRD-260 T-005c: Play's chat renders this card and stops waiting once it is answered.
+  it('tells onDecided once an approve or a deny went through, and never after a failed call', async () => {
+    const user = userEvent.setup()
+    const onDecided = vi.fn()
+    grantMutateAsync.mockResolvedValue({ grant: { id: 42, status: 'revoked', details: {} } })
+    const approved = render(
+      <ToolApprovalWidget id="w6" title="Action approval needed" data={data()} metadata={metadata} onDecided={onDecided} />,
+    )
+    await user.click(screen.getByRole('button', { name: /approve & run/i }))
+    await waitFor(() => expect(onDecided).toHaveBeenCalledWith('approved'))
+    approved.unmount()
+
+    denyMutateAsync.mockResolvedValue({ grant: { id: 42, status: 'denied' } })
+    const denied = render(
+      <ToolApprovalWidget id="w7" title="Action approval needed" data={data()} metadata={metadata} onDecided={onDecided} />,
+    )
+    await user.click(screen.getByRole('button', { name: /deny/i }))
+    await waitFor(() => expect(onDecided).toHaveBeenCalledWith('denied'))
+    denied.unmount()
+
+    onDecided.mockReset()
+    grantMutateAsync.mockRejectedValue(new Error('403'))
+    render(<ToolApprovalWidget id="w8" title="Action approval needed" data={data()} metadata={metadata} onDecided={onDecided} />)
+    await user.click(screen.getByRole('button', { name: /approve & run/i }))
+    await waitFor(() => expect(grantMutateAsync).toHaveBeenCalledTimes(2))
+    expect(onDecided).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /approve & run/i })).toBeInTheDocument()
+  })
 })
