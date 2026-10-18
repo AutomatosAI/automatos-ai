@@ -45,6 +45,10 @@ name: images
 #   as any manual run there does. Railway builds from source with its own
 #   layer cache, so it gets these fixes only once it deploys the published
 #   images (PRD-262 D2, held until after WebSummit).
+# - The media assets image (PRD-262 US-053): a manual run on main with
+#   `media_assets` publishes ghcr.io/<owner>/automatos-media-assets, the Kokoro
+#   model files and the music library media-render builds from, and nothing else.
+#   The image jobs skip; the run's title says so, and smoke-images skips it too.
 #
 # Build args match docker-compose.yml, i.e. the local edition: no graph extras,
 # no bundled Chromium, and the frontend built for AUTH_EDITION=local against
@@ -64,6 +68,10 @@ name: images
 # namespace. New packages are private until an org owner makes them public.
 #
 # Third-party actions are pinned to a commit; the comment names the release.
+
+# A media-assets run (PRD-262 US-053) is titled so, which is how smoke-images knows
+# it published no app image; every other run keeps its default title.
+run-name: ${{ inputs.media_assets && 'Publish the media assets image' || '' }}
 
 on:
   push:
@@ -103,9 +111,15 @@ on:
         description: "Rebuild the OS-package stages from fresh packages, as the weekly run does (on a branch: never publishes)"
         type: boolean
         default: false
+      media_assets:
+        description: "Publish only the media assets image, automatos-media-assets (main only; PRD-262 US-053)"
+        type: boolean
+        default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A media-assets run has its own group: GitHub keeps one pending run per group,
+  # so sharing main's would let it replace a queued publish, or be replaced by one.
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.media_assets && '-media-assets' || '' }}
   # Supersede stale PR builds; never cancel a publish half-way.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -129,6 +143,9 @@ jobs:
   # created_at (actions: read), which smoke-images.yml reads too.
   changes:
     name: Which images this change builds
+    # A media-assets run builds no image here; build, report and merge need this
+    # job, so they skip with it.
+    if: inputs.media_assets != true
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -587,3 +604,153 @@ jobs:
         env:
           DIGEST: ${{ steps.index.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+  # PRD-262 US-053: the media assets image, ghcr.io/<owner>/automatos-media-assets.
+  # media-render's build is to copy the Kokoro model and voices and the music tracks
+  # from it, pinned as its own stage (`FROM …automatos-media-assets:<tag>@sha256:…
+  # AS assets`, FR-9), instead of fetching them from GitHub releases and ende.app on
+  # every build. PR builds never push to GHCR, so this job publishes it, and only on a
+  # manual run on main with `media_assets`.
+  # - scripts/ci/media_assets.py fetches every file services/media-render/kokoro/
+  #   assets.json and music/manifest.json name and checks each sha256 before the
+  #   build; after the push it reads the image back, per platform, and checks every
+  #   file again, and only then is the image signed.
+  # - Until Gerard picks the D4 model by ear (US-050), every candidate is in it: the
+  #   fp32 model media-render runs today, the v1.1 release's fp16 and the v1.0
+  #   release's fp16, with the voices file and the music tracks.
+  # - Its licence label is the stage step's expression, `Apache-2.0 AND CC-BY-4.0`
+  #   (the Kokoro weights; the CC BY tracks), not the Apache-2.0 the image jobs stamp.
+  #   /NOTICE carries the Kokoro notice and every track's attribution line. It holds
+  #   data only, no GPL code, so publishing it is separate from §9-Q6.
+  # - FROM scratch, one layer per file, timestamps at SOURCE_DATE_EPOCH=0: a file that
+  #   did not change keeps its layer digest when the image is published again.
+  # - A new GHCR package is private. An org owner makes it public once (PRD-262 §10),
+  #   so Railway and self-hosters' `--profile media` builds pull it with no login; the
+  #   last step reports whether an anonymous pull works yet.
+  media-assets:
+    name: publish media-assets
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.media_assets == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      # cosign keyless signing exchanges the job's OIDC token for a certificate.
+      id-token: write
+    env:
+      DESCRIPTION: Data only, the Kokoro voice model files and the music library that Automatos media-render builds from. Licences and attributions are in /NOTICE.
+    steps:
+      - name: Checkout (the tool and the lists)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Cone mode keeps the root files, so LICENSE comes too.
+          sparse-checkout: |
+            scripts/ci
+            services/media-render
+
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-media-assets" >> "$GITHUB_ENV"
+
+      - name: Fetch every file and check its sha256
+        id: stage
+        run: |
+          python3 scripts/ci/media_assets.py stage --out "${RUNNER_TEMP}/media-assets" \
+            --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action adds the revision, source and created labels every image
+      # carries; the title, description and licences are this image's own.
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          labels: |
+            org.opencontainers.image.title=automatos-media-assets
+            org.opencontainers.image.description=${{ env.DESCRIPTION }}
+            org.opencontainers.image.licenses=${{ steps.stage.outputs.licences }}
+          annotations: |
+            org.opencontainers.image.title=automatos-media-assets
+            org.opencontainers.image.description=${{ env.DESCRIPTION }}
+            org.opencontainers.image.licenses=${{ steps.stage.outputs.licences }}
+          flavor: |
+            latest=false
+          tags: |
+            type=sha
+
+      # Data only, so both platforms build on this runner with no emulation and share
+      # every layer.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          SOURCE_DATE_EPOCH: "0"
+        with:
+          context: ${{ runner.temp }}/media-assets
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          outputs: type=image,push=true,rewrite-timestamp=true
+          provenance: mode=max
+          sbom: false
+
+      # What was published, not what was staged: each platform's files, exported from
+      # the registry by digest, against the same lists.
+      - name: Check the published files again
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for arch in amd64 arm64; do
+            dest="${RUNNER_TEMP}/published-${arch}"
+            printf 'FROM %s@%s\n' "$IMAGE" "$DIGEST" \
+              | docker buildx build --platform "linux/${arch}" --provenance=false --sbom=false \
+                  --output "type=local,dest=${dest}" -
+            python3 scripts/ci/media_assets.py verify --dir "$dest" --summary "$GITHUB_STEP_SUMMARY"
+            rm -rf "$dest"
+          done
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # The line media-render's Dockerfile pins (FR-9: name:tag@sha256), and whether
+      # the package is public yet. Report only: the first publish is always private.
+      - name: Pin line and anonymous pull
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          {
+            echo "Published \`${tag}@${DIGEST}\`. media-render's Dockerfile pins it as its own stage:"
+            echo
+            echo '```dockerfile'
+            echo "FROM ${tag}@${DIGEST} AS assets"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          repository="${IMAGE#ghcr.io/}"
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repository}:pull" | jq -r '.token // empty') || token=""
+          if [ -n "$token" ] && curl -fsS -o /dev/null -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json" "https://ghcr.io/v2/${repository}/manifests/${DIGEST}"; then
+            echo "An anonymous pull of the digest works: the package is public." >> "$GITHUB_STEP_SUMMARY"
+          else
+            message="${IMAGE} is private, so Railway's media-render build and --profile media builds cannot pull it. An org owner makes it public once (PRD-262 §10): https://github.com/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/automatos-media-assets/settings"
+            echo "::warning title=media-assets is private::${message}"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+          fi
