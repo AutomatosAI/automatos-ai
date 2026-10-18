@@ -69,6 +69,11 @@ SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
 _NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
 _PIN = re.compile(r"^([A-Za-z0-9._-]+)(\[[^\]]+\])?==(\d+)(\.\d+)+$")
+# An import names its module, so a file that never mentions a forbidden name as a whole
+# word cannot import it: only the files that do are parsed (about 45 of 3,000).
+_MENTION = re.compile(
+    r"\b(?:{})\b".format("|".join(re.escape(name.split(".")[0]) for name in FORBIDDEN_IMPORTS)).encode()
+)
 
 
 @dataclass(frozen=True)
@@ -155,6 +160,20 @@ def test_the_walk_sees_every_import_form_at_any_depth():
         (12, "pgvector", "lazy"),
         (15, "nltk", "Holder.method"),
     }, "a relative `from . import fi`, `fine` and `sklearnish` are not the removed packages"
+    lines = SAMPLE.splitlines()
+    assert all(_MENTION.search(lines[line - 1].encode()) for line, _, _ in hits), "the pre-filter keeps them"
+
+
+def _offenders(files: list[Path]) -> list[str]:
+    offenders = []
+    for path in files:
+        source = path.read_bytes()
+        if not _MENTION.search(source):
+            continue
+        rel = path.relative_to(ORCH).as_posix()
+        offenders += [f"{rel}:{site.line}: {site.module} ({FORBIDDEN_IMPORTS[forbidden(site)]})"
+                      for site in import_sites(source, rel) if forbidden(site)]
+    return offenders
 
 
 def test_no_module_under_orchestrator_imports_a_removed_package():
@@ -162,12 +181,7 @@ def test_no_module_under_orchestrator_imports_a_removed_package():
     relative = {path.relative_to(ORCH).as_posix() for path in files}
     assert "tests/test_prd262_unused_packages_go.py" in relative, "the walk covers tests/"
     assert len(files) > 1000, f"the walk found only {len(files)} files"
-    offenders = [
-        f"{site.path}:{site.line}: {site.module} ({FORBIDDEN_IMPORTS[forbidden(site)]})"
-        for path in files
-        for site in import_sites(path.read_bytes(), path.relative_to(ORCH).as_posix())
-        if forbidden(site)
-    ]
+    offenders = _offenders(files)
     assert not offenders, "the image no longer installs these:\n" + "\n".join(offenders)
 
 
