@@ -955,6 +955,28 @@ class Config:
     # where F408, F409 and F416 happened. It becomes a trigger only through
     # services.schedule_util.scheduler_cron_trigger (F240: weekday as day names).
     HARNESS_SWEEP_CRON: str = os.getenv("HARNESS_SWEEP_CRON", "0 10 * * 1")
+    # PRD-263 US-014a/US-014b: how DIAGNOSE judges each agent x metric (design section
+    # 5.1 ORG-4; services.harness_diagnose passes each to core.stats.harness_verdicts).
+    # Below HARNESS_MIN_SAMPLES in the judged week or its reference a pair is
+    # INSUFFICIENT_DATA. The reference is the HARNESS_REF_DAYS before the judged week,
+    # in whole ISO weeks, less weeks already flagged and weeks after an applied change.
+    # A rate flags only when it worsens by both HARNESS_ABS_DROP and HARNESS_REL_DROP
+    # (fractions) with a one-sided p below HARNESS_ALPHA; cost or tokens per run only
+    # when the median rises by both HARNESS_COST_REL_RISE and HARNESS_COST_ABS_RISE ($)
+    # with a Mann-Whitney p below HARNESS_ALPHA. Benjamini-Hochberg at HARNESS_FDR_Q
+    # runs across every test of a run. A first flag is WATCH; REGRESSION needs a flag
+    # in the previous ISO week too, or p below HARNESS_STRONG_P. Below
+    # HARNESS_MIN_COVERAGE (judged over active agents) convergence reads insufficient_data.
+    HARNESS_MIN_SAMPLES: int = int(os.getenv("HARNESS_MIN_SAMPLES", "20"))
+    HARNESS_REF_DAYS: int = int(os.getenv("HARNESS_REF_DAYS", "28"))
+    HARNESS_ABS_DROP: float = float(os.getenv("HARNESS_ABS_DROP", "0.15"))
+    HARNESS_REL_DROP: float = float(os.getenv("HARNESS_REL_DROP", "0.20"))
+    HARNESS_ALPHA: float = float(os.getenv("HARNESS_ALPHA", "0.05"))
+    HARNESS_FDR_Q: float = float(os.getenv("HARNESS_FDR_Q", "0.10"))
+    HARNESS_COST_REL_RISE: float = float(os.getenv("HARNESS_COST_REL_RISE", "0.25"))
+    HARNESS_COST_ABS_RISE: float = float(os.getenv("HARNESS_COST_ABS_RISE", "0.005"))
+    HARNESS_STRONG_P: float = float(os.getenv("HARNESS_STRONG_P", "0.001"))
+    HARNESS_MIN_COVERAGE: float = float(os.getenv("HARNESS_MIN_COVERAGE", "0.5"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:

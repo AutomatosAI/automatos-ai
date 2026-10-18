@@ -3,10 +3,10 @@ HARNESS Service (PRD-121)
 ==========================
 
 Self-Optimizing Organization Loop.  Runs weekly, invisible to users.
-Collects org-wide metrics, diagnoses regressions, prescribes configuration
-changes with risk scores, auto-applies safe ones (risk ≤ 2), queues risky
-ones (risk ≥ 3) as board tasks for human review, and snapshots a new
-baseline for next week's comparison.
+Reads each agent's real weekly counts, judges them against a clean reference
+(services.harness_diagnose, PRD-263), prescribes configuration changes with
+risk scores, auto-applies safe ones (risk ≤ 2), queues risky ones (risk ≥ 3)
+as board tasks for human review, and submits the audit report.
 
 Registered at server startup alongside HeartbeatService / CoordinatorService.
 """
@@ -26,10 +26,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 from sqlalchemy import text
 
-from core.models.harness import RUN_COMPLETED, RUN_DORMANT_AGENTS, RUN_DORMANT_DATA, RUN_FAILED, RUN_RUNNING, HarnessRun
+from core.models.harness import RUN_COMPLETED, RUN_DORMANT_AGENTS, RUN_FAILED, RUN_RUNNING, HarnessRun
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+    from services.harness_metrics import HarnessMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +41,16 @@ logger = logging.getLogger(__name__)
 
 # The sweep's schedule is config.HARNESS_SWEEP_CRON, read in UTC (services.harness_runs).
 _MIN_AGENTS = 3
-_MIN_DATA_DAYS = 7
 
 # Risk thresholds live in config (Railway-overridable env vars), read at use:
 #   HARNESS_AUTO_APPLY_MAX_RISK_STANDARD / _FULL — auto-apply ceilings (§12.3)
 #   HARNESS_HIGH_PRIORITY_RISK — escalation / high-priority threshold
+# DIAGNOSE's thresholds are the HARNESS_* statistics settings (services.harness_diagnose).
 
-# Sentinel proposed_value meaning "a human must supply the real value" — emitted
-# by _phase_prescribe for changes it can detect but not safely decide (model,
-# description). The apply layer MUST refuse it: writing it literally would set an
-# agent's model/description to the string "review_needed".
+# Sentinel proposed_value meaning "a human must supply the real value". PRESCRIBE
+# emitted it (model, description) until PRD-263 PR-1D, so [HARNESS] cards filed
+# before then can still carry it. The apply layer MUST refuse it: writing it
+# literally would set an agent's model/description to the string "review_needed".
 _PLACEHOLDER_PROPOSED_VALUE = "review_needed"
 # W4-S10: a fails_for_intent affinity must reach this many samples before HARNESS
 # treats it as a *sustained* tool failure worth surfacing (not a one-off).
@@ -70,19 +72,6 @@ UNREADABLE_LEDGER_TEXT = (
     "/approve). Deleting the file restarts HARNESS too, but then every done [HARNESS] task counts as not "
     "yet applied, and the changes they describe can be applied again."
 )
-
-# Convergence thresholds
-_CONVERGED_DELTA = 2.0
-_CONVERGED_VARIANCE = 0.02
-_CONVERGED_MIN_RUNS = 2
-_EXPLORING_MAX_ITERATION = 3
-
-# Delta classification thresholds (percentage)
-_REGRESSION_THRESHOLD = 10.0
-_IMPROVEMENT_THRESHOLD = 10.0
-
-# Pareto: don't optimise cost when quality is poor
-_MIN_SUCCESS_RATE_FOR_COST_OPT = 85.0
 
 
 class HarnessService:
@@ -169,9 +158,9 @@ class HarnessService:
           - failed                        — the latest run failed, or was left
                                             unfinished with no lock holder (interrupted)
           - dormant_insufficient_agents   — fewer than _MIN_AGENTS active
-          - dormant_insufficient_data     — heartbeat history < _MIN_DATA_DAYS
           - scheduled_not_run_yet         — eligible but cron hasn't fired
-          - completed                     — the latest run completed
+          - completed                     — the latest run completed; with its
+                                            coverage, convergence and verdict counts
 
         Runs are read from harness_runs (US-010); ``running`` from pg_locks (US-011).
         """
@@ -187,7 +176,7 @@ class HarnessService:
 
     def _status(self, db: "Session", workspace_id: UUID) -> Dict[str, Any]:
         from core.models.workspaces import Workspace as WsModel
-        from services import harness_runs
+        from services import harness_diagnose, harness_runs
 
         next_scheduled = harness_runs.next_sweep_run()
         latest = harness_runs.latest_run(db, workspace_id)
@@ -213,13 +202,12 @@ class HarnessService:
             }
 
         if latest is not None and latest.status == RUN_COMPLETED:
-            conv = (self._read_baseline(db, workspace_id) or {}).get("convergence", {})
             return {
                 "status": RUN_COMPLETED,
                 "iteration_count": latest.iteration,
-                "convergence": conv.get("status", "unknown"),
+                "cur_window": latest.cur_window,
+                **harness_diagnose.status_fields(latest.coverage, latest.counts, latest.verdicts),
                 "last_run_at": _iso(latest.finished_at),
-                "total_delta_magnitude": conv.get("total_delta_magnitude"),
                 "next_scheduled_run": next_scheduled,
                 "artifacts": {"audit_report": latest.report_status},
             }
@@ -298,18 +286,18 @@ class HarnessService:
                 logger.info("[HARNESS] %s already has a run for %s, skipping", workspace_id, cur_window)
                 return
             run_id = harness_runs.open_run(db, workspace_id, cur_window)
-            await self._run_recorded(db, workspace_id, run_id)
+            await self._run_recorded(db, workspace_id, run_id, cur_window)
         finally:
             db.close()
 
-    async def _run_recorded(self, db: "Session", workspace_id: UUID, run_id: int) -> None:
-        """Run the pipeline and close its row as completed, dormant or failed."""
+    async def _run_recorded(self, db: "Session", workspace_id: UUID, run_id: int, cur_window: str) -> None:
+        """Run the pipeline for the judged week and close its row as completed, dormant or failed."""
         from services import harness_runs
 
         t0 = time.monotonic()
-        logger.info("[HARNESS] Tick started for workspace %s (run %s)", workspace_id, run_id)
+        logger.info("[HARNESS] Tick started for workspace %s (run %s, week %s)", workspace_id, run_id, cur_window)
         try:
-            outcome = await self._run_pipeline(db, workspace_id)
+            outcome = await self._run_pipeline(db, workspace_id, cur_window)
             harness_runs.close_run(db, run_id, **outcome)
         except Exception as exc:
             logger.exception("[HARNESS] Tick failed for %s", workspace_id)
@@ -332,11 +320,11 @@ class HarnessService:
         except Exception:
             logger.exception("[HARNESS] Could not record run %s as failed", run_id)
 
-    async def _run_pipeline(self, db: "Session", workspace_id: UUID) -> Dict[str, Any]:
+    async def _run_pipeline(self, db: "Session", workspace_id: UUID, cur_window: str) -> Dict[str, Any]:
         """The dormancy check, then the five phases; returns the row's closing fields."""
         from core.database.database import end_open_transaction
         from core.models.workspaces import Workspace as WsModel
-        from services import harness_runs
+        from services import harness_diagnose, harness_runs
 
         sufficiency = self._sufficiency_breakdown(db, workspace_id)
         dormant = self._dormancy(sufficiency)
@@ -355,34 +343,34 @@ class HarnessService:
         # state persist through their own commits; these only release the
         # connection.
         end_open_transaction(db)
-        metrics = await self._phase_collect(workspace_id, db)
+        metrics = await self._phase_collect(workspace_id, db, cur_window)
         end_open_transaction(db)
         diagnosis = await self._phase_diagnose(workspace_id, metrics, db)
         end_open_transaction(db)
-        prescriptions = await self._phase_prescribe(workspace_id, diagnosis, metrics, db)
+        prescriptions = await self._phase_prescribe(workspace_id, diagnosis)
         end_open_transaction(db)
         changelog = await self._phase_apply(
             workspace_id, prescriptions, db,
             allow_auto_apply=allow_auto, max_risk=max_risk,
         )
         end_open_transaction(db)
-        report_md, report_status = await self._phase_baseline(
-            workspace_id, metrics, diagnosis, prescriptions, changelog, db, iteration,
+        report_md, report_status = await self._phase_report(
+            workspace_id, diagnosis, changelog, db, iteration,
         )
-        counts = {"prescriptions": len(prescriptions), **{key: len(rows) for key, rows in changelog.items()}}
+        counts = {
+            **diagnosis["counts"], "prescriptions": len(prescriptions),
+            **{key: len(rows) for key, rows in changelog.items()},
+        }
         return {
-            "status": RUN_COMPLETED, "iteration": iteration, "counts": counts,
-            "prescriptions": prescriptions, "report_md": report_md, "report_status": report_status,
+            "status": RUN_COMPLETED, "iteration": iteration, "coverage": diagnosis["coverage"], "counts": counts,
+            "verdicts": harness_diagnose.stored_verdicts(diagnosis), "prescriptions": prescriptions,
+            "report_md": report_md, "report_status": report_status,
         }
 
     @staticmethod
     def _dormancy(sufficiency: Dict[str, Any]) -> Optional[str]:
         """The dormant status the sufficiency breakdown calls for, or None."""
-        if not sufficiency["agents_ok"]:
-            return RUN_DORMANT_AGENTS
-        if not sufficiency["data_ok"]:
-            return RUN_DORMANT_DATA
-        return None
+        return None if sufficiency["agents_ok"] else RUN_DORMANT_AGENTS
 
     # ------------------------------------------------------------------
     # Workspace opt-in / settings
@@ -459,9 +447,12 @@ class HarnessService:
     def _sufficiency_breakdown(
         self, db: "Session", workspace_id: UUID
     ) -> Dict[str, Any]:
-        """Return per-criterion dormancy detail used by status + tick."""
+        """Return the dormancy detail used by status + tick: the active-agent count.
+
+        Coverage (judged agents over active ones) replaced the heartbeat-age check
+        (PRD-263 US-014a); this count still includes Auto, as it always has.
+        """
         from core.models import Agent
-        from sqlalchemy import text
 
         # Agent has no `is_active` column — use the canonical `status` field
         # (matches semantic_indexer + AgentService throughout the codebase).
@@ -470,90 +461,29 @@ class HarnessService:
             .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
             .count()
         )
-
-        row = db.execute(
-            text(
-                "SELECT MIN(created_at) FROM heartbeat_results "
-                "WHERE workspace_id = :ws_id"
-            ),
-            {"ws_id": str(workspace_id)},
-        ).fetchone()
-
-        if row is None or row[0] is None:
-            days_of_data = 0
-        else:
-            earliest_dt = row[0]
-            if earliest_dt.tzinfo is None:
-                earliest_dt = earliest_dt.replace(tzinfo=timezone.utc)
-            days_of_data = (datetime.now(timezone.utc) - earliest_dt).days
-
         return {
             "active_agents": agent_count,
             "min_required_agents": _MIN_AGENTS,
             "agents_ok": agent_count >= _MIN_AGENTS,
-            "heartbeat_days_available": days_of_data,
-            "min_required_days": _MIN_DATA_DAYS,
-            "data_ok": days_of_data >= _MIN_DATA_DAYS,
         }
-
-    def _has_sufficient_data(self, db: "Session", workspace_id: UUID) -> bool:
-        sb = self._sufficiency_breakdown(db, workspace_id)
-        return sb["agents_ok"] and sb["data_ok"]
 
     # ------------------------------------------------------------------
     # Phase 1: COLLECT
     # ------------------------------------------------------------------
 
-    async def _phase_collect(self, workspace_id: UUID, db: "Session") -> Dict[str, Any]:
-        """Gather comprehensive raw metrics across all agents and systems."""
-        logger.info("[HARNESS] Phase 1 COLLECT — workspace %s", workspace_id)
-        from modules.tools.discovery.platform_executor import PlatformActionExecutor
+    async def _phase_collect(self, workspace_id: UUID, db: "Session", cur_window: str) -> "HarnessMetrics":
+        """Read each agent's real counts for the judged week and its reference (US-013).
 
-        executor = PlatformActionExecutor(db=db, workspace_id=workspace_id)
+        One workspace-bound SQL read on a worker thread (services.harness_metrics);
+        no platform action. The reference is HARNESS_REF_DAYS in whole ISO weeks.
+        """
+        from services import harness_diagnose, harness_metrics
 
-        tool_calls = {
-            "agents": ("platform_list_agents", {}),
-            "ranking": ("platform_get_agent_ranking", {}),
-            "success_rate": ("platform_get_success_rate", {}),
-            "error_rates": ("platform_get_error_rates", {}),
-            "cost_breakdown": ("platform_get_cost_breakdown", {}),
-            "sla": ("platform_get_sla_compliance", {}),
-            "efficiency": ("platform_get_efficiency_score", {}),
-            "bottlenecks": ("platform_get_bottlenecks", {}),
-            "llm_usage": ("platform_get_llm_usage", {}),
-            "board_summary": ("platform_board_summary", {}),
-        }
-
-        metrics: Dict[str, Any] = {}
-
-        async def _call(key: str, action: str, params: dict) -> None:
-            try:
-                result = await executor.execute(action, params)
-                metrics[key] = result
-            except Exception as exc:
-                logger.warning("[HARNESS] COLLECT %s failed: %s", action, exc)
-                metrics[key] = None
-
-        # Run all independent calls concurrently
-        await asyncio.gather(*[
-            _call(k, action, params) for k, (action, params) in tool_calls.items()
-        ])
-
-        # Read previous baseline (sequential — needs result for later phases)
-        metrics["previous_baseline"] = self._read_baseline(db, workspace_id)
-
-        # Prior HARNESS board tasks
-        try:
-            tasks_result = await executor.execute("platform_list_tasks", {"tags": ["harness"]})
-            metrics["prior_harness_tasks"] = tasks_result
-        except Exception:
-            metrics["prior_harness_tasks"] = None
-
-        agent_count = 0
-        if metrics.get("agents") and isinstance(metrics["agents"], dict):
-            agent_count = len(metrics["agents"].get("data", metrics["agents"].get("agents", [])))
-        logger.info("[HARNESS] COLLECT done — %d agents found", agent_count)
-
+        logger.info("[HARNESS] Phase 1 COLLECT — workspace %s, week %s", workspace_id, cur_window)
+        metrics = await harness_metrics.read(
+            db, workspace_id, cur_window, ref_weeks=harness_diagnose.reference_weeks(),
+        )
+        logger.info("[HARNESS] COLLECT done — %d agent-weeks", len(metrics.agent_rows))
         return metrics
 
     # ------------------------------------------------------------------
@@ -561,112 +491,28 @@ class HarnessService:
     # ------------------------------------------------------------------
 
     async def _phase_diagnose(
-        self, workspace_id: UUID, metrics: Dict[str, Any], db: "Session"
+        self, workspace_id: UUID, metrics: "HarnessMetrics", db: "Session"
     ) -> Dict[str, Any]:
-        """Compare current metrics against previous baseline, produce health cards."""
-        logger.info("[HARNESS] Phase 2 DIAGNOSE — workspace %s", workspace_id)
+        """Judge each agent x metric on its real counts (US-014a) against the clean
+        reference, with the week-by-week verdict history (US-014b).
 
-        baseline = metrics.get("previous_baseline")
-        is_first_run = baseline is None
+        The history is the workspace's completed harness_runs rows; post-change
+        weeks come from harness_task_ledger. Sustained tool failures are surfaced
+        as issues (W4-S10).
+        """
+        from services import harness_diagnose, harness_runs
 
-        # Extract agents list from metrics
-        agents_data = self._extract_agents_list(metrics)
-
-        health_cards: Dict[str, Dict[str, Any]] = {}
-        issues: List[Dict[str, Any]] = []
-        total_delta_magnitude = 0.0
-
-        baseline_agents = {}
-        if not is_first_run:
-            baseline_agents = baseline.get("per_agent", {})
-
-        for agent in agents_data:
-            agent_id = str(agent.get("id", ""))
-            agent_name = agent.get("name", "unknown")
-            prev = baseline_agents.get(agent_id, {})
-
-            card = {
-                "agent_id": agent_id,
-                "agent_name": agent_name,
-                "model": agent.get("model", "unknown"),
-            }
-
-            if is_first_run:
-                card["classification"] = "NEW"
-                card["success_rate_delta"] = 0
-                card["cost_delta"] = 0
-                card["efficiency_delta"] = 0
-                card["error_rate_delta"] = 0
-            else:
-                deltas = self._compute_deltas(agent, prev)
-                card.update(deltas)
-
-                # Classify
-                classification = "STABLE"
-                worst_regression = max(
-                    deltas.get("cost_delta", 0),        # higher cost = bad
-                    -deltas.get("success_rate_delta", 0),  # lower success = bad
-                    -deltas.get("efficiency_delta", 0),    # lower efficiency = bad
-                    deltas.get("error_rate_delta", 0),     # higher errors = bad
-                )
-                best_improvement = max(
-                    deltas.get("success_rate_delta", 0),
-                    deltas.get("efficiency_delta", 0),
-                    -deltas.get("cost_delta", 0),
-                    -deltas.get("error_rate_delta", 0),
-                )
-
-                if worst_regression > _REGRESSION_THRESHOLD:
-                    classification = "REGRESSION"
-                elif best_improvement > _IMPROVEMENT_THRESHOLD:
-                    classification = "IMPROVEMENT"
-
-                card["classification"] = classification
-
-                # Track issues
-                if classification == "REGRESSION":
-                    root_cause = self._infer_root_cause(deltas, agent)
-                    issues.append({
-                        "agent_id": agent_id,
-                        "agent_name": agent_name,
-                        "root_cause": root_cause,
-                        "severity": "high" if worst_regression > 25 else "medium",
-                        "detail": f"{agent_name}: {classification} — worst delta {worst_regression:.1f}%",
-                    })
-
-                # Sum of absolute deltas for convergence tracking
-                for d_key in ("success_rate_delta", "cost_delta", "efficiency_delta", "error_rate_delta"):
-                    total_delta_magnitude += abs(deltas.get(d_key, 0))
-
-            health_cards[agent_id] = card
-
-        # US-022: queue rollbacks for auto-applied changes whose target agent
-        # has now regressed (skipped on first run — no prior changes exist).
-        if not is_first_run:
-            issues.extend(
-                self._detect_auto_applied_regressions(baseline, health_cards)
-            )
-
-        # W4-S10: surface sustained tool failures from the tool-routing learning
-        # graph (fails_for_intent) as inefficiency issues HARNESS can act on.
-        issues.extend(self._diagnose_tool_failures(workspace_id, db, agents_data))
-
-        # Org-level diagnosis
-        org_diagnosis = self._compute_org_diagnosis(metrics, baseline)
-
-        diagnosis = {
-            "health_cards": health_cards,
-            "org_diagnosis": org_diagnosis,
-            "total_delta_magnitude": total_delta_magnitude,
-            "issues": issues,
-            "is_first_run": is_first_run,
-        }
-
+        window = metrics.window
+        logger.info("[HARNESS] Phase 2 DIAGNOSE — workspace %s, week %s", workspace_id, window.cur_week)
+        history = harness_diagnose.verdict_history(harness_runs.judged_verdicts(db, workspace_id, window.weeks))
+        changes = harness_diagnose.applied_change_weeks(db, workspace_id, window)
+        diagnosis = harness_diagnose.diagnose(metrics, history, changes, harness_diagnose.settings_from_config())
+        issues = self._diagnose_tool_failures(workspace_id, db, harness_diagnose.agent_names(metrics))
         logger.info(
-            "[HARNESS] DIAGNOSE done — %d agents, %d issues, delta_magnitude=%.1f, first_run=%s",
-            len(health_cards), len(issues), total_delta_magnitude, is_first_run,
+            "[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
+            diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues),
         )
-        return diagnosis
+        return {**diagnosis, "issues": issues}
 
     @staticmethod
     def _derive_app_name(action_name: str) -> Optional[str]:
@@ -683,18 +529,18 @@ class HarnessService:
         return action_name.split("_", 1)[0]
 
     def _diagnose_tool_failures(
-        self, workspace_id: UUID, db: "Session", agents_data: List[Dict[str, Any]]
+        self, workspace_id: UUID, db: "Session", name_by_id: Dict[str, str]
     ) -> List[Dict[str, Any]]:
         """Surface SUSTAINED tool failures from the tool-routing learning graph
         (PRD-138/139 fails_for_intent) as inefficiency issues HARNESS can act on
         (W4-S10 — the learning cross-link). Learning-only: reads ONLY
         tool_routing_affinities, never a business entity. Workspace-scoped.
+        ``name_by_id`` maps agent ids (as strings) to names.
         Best-effort — never raises (telemetry must not break the weekly tick)."""
         issues: List[Dict[str, Any]] = []
         try:
             from core.models.tool_routing import ToolRoutingAffinity
 
-            name_by_id = {str(a.get("id")): a.get("name", "unknown") for a in agents_data}
             rows = (
                 db.query(ToolRoutingAffinity)
                 .filter(
@@ -726,9 +572,7 @@ class HarnessService:
             logger.warning("[HARNESS] tool-failure diagnosis skipped: %s", exc)
         return issues
 
-    def _prescribe_tool_removals(
-        self, issues, rejected_signatures, today, start_seq
-    ):
+    def _prescribe_tool_removals(self, issues, today, start_seq):
         """Turn tool_failure issues (W4-S10) into risk-3 tool_assignment_remove
         prescriptions — only when the failing action cleanly maps to a removable
         Composio app. Removing a tool is consequential: at standard autonomy it is
@@ -745,9 +589,6 @@ class HarnessService:
             app_name = spec.get("app_name")
             if not app_name or spec.get("agent_id") is None:
                 continue  # surfaced as a diagnosis, but not a clean removable assignment
-            sig = f"tool_remove:{issue.get('agent_name')}:{app_name}"
-            if sig in rejected_signatures:
-                continue
             seq += 1
             out.append({
                 "prescription_id": f"rx-{today}-{seq:03d}",
@@ -767,158 +608,19 @@ class HarnessService:
     # Phase 3: PRESCRIBE
     # ------------------------------------------------------------------
 
-    async def _phase_prescribe(
-        self,
-        workspace_id: UUID,
-        diagnosis: Dict[str, Any],
-        metrics: Dict[str, Any],
-        db: "Session",
-    ) -> List[Dict[str, Any]]:
-        """Generate prioritized, risk-scored configuration change proposals."""
+    async def _phase_prescribe(self, workspace_id: UUID, diagnosis: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate prioritized, risk-scored configuration change proposals.
+
+        Sustained tool failures are the one input left (W4-S10). The heartbeat,
+        cost and description rules read list_agents fields and week-over-week
+        deltas that never existed; they went with those inputs (PRD-263 PR-1D),
+        and the change-kind registry brings real detectors (US-049, US-050).
+        """
         logger.info("[HARNESS] Phase 3 PRESCRIBE — workspace %s", workspace_id)
-
-        if diagnosis.get("is_first_run"):
-            logger.info("[HARNESS] PRESCRIBE skipped — first run, no baseline to compare against")
-            return []
-
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        prescriptions: List[Dict[str, Any]] = []
-        seq = 0
-
-        # Collect rejected prescription signatures from prior board tasks
-        rejected_signatures = self._get_rejected_signatures(metrics)
-
-        agents_data = self._extract_agents_list(metrics)
-        health_cards = diagnosis.get("health_cards", {})
-
-        # Compute workspace averages for comparison
-        heartbeat_costs = [a.get("heartbeat_cost_7d", 0) for a in agents_data if a.get("heartbeat_cost_7d")]
-        avg_heartbeat_cost = sum(heartbeat_costs) / len(heartbeat_costs) if heartbeat_costs else 0
-
-        for agent in agents_data:
-            agent_id = str(agent.get("id", ""))
-            agent_name = agent.get("name", "unknown")
-            card = health_cards.get(agent_id, {})
-            success_rate = agent.get("success_rate", card.get("success_rate", 100))
-
-            # --- Heartbeat tuning ---
-            hb_cost = agent.get("heartbeat_cost_7d", 0)
-            hb_interval = agent.get("heartbeat_interval", agent.get("heartbeat_interval_minutes", 0))
-            task_volume_delta = card.get("task_volume_delta", 0)
-
-            if (
-                hb_cost > avg_heartbeat_cost * 2
-                and task_volume_delta < -25
-                and hb_interval > 0
-                and hb_interval < 360
-            ):
-                new_interval = min(hb_interval + 60, 360)
-                sig = f"heartbeat_tune:{agent_name}"
-                if sig not in rejected_signatures:
-                    seq += 1
-                    prescriptions.append({
-                        "prescription_id": f"rx-{today}-{seq:03d}",
-                        "target_type": "agent",
-                        "target_id": agent.get("id"),
-                        "target_name": agent_name,
-                        "change_type": "heartbeat_tune",
-                        "current_value": {"interval_minutes": hb_interval},
-                        "proposed_value": {"interval_minutes": new_interval},
-                        "risk_score": 2,
-                        "expected_improvement": f"Save heartbeat token costs by extending interval from {hb_interval}min to {new_interval}min",
-                        "rationale": (
-                            f"{agent_name}'s heartbeat cost is {hb_cost:.2f} (>{avg_heartbeat_cost*2:.2f} = 2x avg) "
-                            f"while task volume dropped {abs(task_volume_delta):.0f}%. "
-                            f"Extending interval reduces cost without impacting low activity."
-                        ),
-                    })
-
-            # --- Cost optimisation (only if quality is healthy) ---
-            if success_rate >= _MIN_SUCCESS_RATE_FOR_COST_OPT:
-                cost_delta = card.get("cost_delta", 0)
-                if cost_delta > 20:  # cost increased >20%
-                    sig = f"cost_review:{agent_name}"
-                    if sig not in rejected_signatures:
-                        seq += 1
-                        prescriptions.append({
-                            "prescription_id": f"rx-{today}-{seq:03d}",
-                            "target_type": "agent",
-                            "target_id": agent.get("id"),
-                            "target_name": agent_name,
-                            "change_type": "model_change_same_tier",
-                            "current_value": {"model": agent.get("model", "unknown")},
-                            "proposed_value": {"model": _PLACEHOLDER_PROPOSED_VALUE},
-                            "risk_score": 3,
-                            "expected_improvement": f"Potential cost reduction — cost up {cost_delta:.0f}% while success rate is healthy at {success_rate:.0f}%",
-                            "rationale": (
-                                f"{agent_name} cost increased {cost_delta:.0f}% week-over-week "
-                                f"with success_rate at {success_rate:.0f}%. "
-                                f"Consider a cheaper model in the same capability tier."
-                            ),
-                        })
-
-            # --- Description/tag staleness ---
-            if card.get("classification") == "REGRESSION" and card.get("error_rate_delta", 0) > 15:
-                root_cause = self._infer_root_cause(card, agent)
-                if root_cause == "config_stale":
-                    sig = f"config_review:{agent_name}"
-                    if sig not in rejected_signatures:
-                        seq += 1
-                        prescriptions.append({
-                            "prescription_id": f"rx-{today}-{seq:03d}",
-                            "target_type": "agent",
-                            "target_id": agent.get("id"),
-                            "target_name": agent_name,
-                            "change_type": "description_update",
-                            "current_value": {"description": agent.get("description", "")[:100]},
-                            "proposed_value": {"description": _PLACEHOLDER_PROPOSED_VALUE},
-                            "risk_score": 1,
-                            "expected_improvement": "Align agent description with actual workload to improve routing",
-                            "rationale": (
-                                f"{agent_name} shows regression with error_rate up {card.get('error_rate_delta', 0):.0f}%. "
-                                f"Root cause: config_stale — description may not match current responsibilities."
-                            ),
-                        })
-
-        # US-022: emit risk-1 rollback prescriptions for any auto-applied change
-        # whose target regressed (flagged by _phase_diagnose). These revert to the
-        # snapshot and bypass the rejected-signature filter — a rollback is a
-        # safety action, not a new proposal. current_value is left empty so the
-        # rollback is not itself snapshotted, which prevents rollback-of-rollback
-        # oscillation (a rollback can never become a rollback target).
-        for issue in diagnosis.get("issues", []):
-            if issue.get("root_cause") != "auto_applied_regression":
-                continue
-            spec = issue.get("rollback_spec") or {}
-            if not spec.get("change_type") or not spec.get("revert_to"):
-                continue
-            seq += 1
-            prescriptions.append({
-                "prescription_id": f"rx-{today}-{seq:03d}",
-                "target_type": "agent",
-                "target_id": spec.get("target_id"),
-                "target_name": issue.get("agent_name", "unknown"),
-                "change_type": spec["change_type"],
-                "current_value": {},
-                "proposed_value": spec["revert_to"],
-                "risk_score": 1,
-                "expected_improvement": "Revert auto-applied change that preceded a regression",
-                "rationale": issue.get(
-                    "detail", "Auto-applied change regressed; reverting to prior value."
-                ),
-            })
-
-        # W4-S10: sustained tool failures (from the tool-routing graph) become
-        # QUEUED tool_assignment_remove prescriptions — human-reviewed (risk 3),
-        # never auto-applied, and only when the action cleanly maps to an app.
-        tool_rxs, seq = self._prescribe_tool_removals(
-            diagnosis.get("issues", []), rejected_signatures, today, seq
-        )
-        prescriptions.extend(tool_rxs)
-
+        tool_rxs, _seq = self._prescribe_tool_removals(diagnosis.get("issues", []), today, 0)
         # Sort: risk ascending, then by prescription_id
-        prescriptions.sort(key=lambda p: (p["risk_score"], p["prescription_id"]))
-
+        prescriptions = sorted(tool_rxs, key=lambda p: (p["risk_score"], p["prescription_id"]))
         logger.info("[HARNESS] PRESCRIBE done — %d prescriptions generated", len(prescriptions))
         return prescriptions
 
@@ -1111,101 +813,39 @@ class HarnessService:
             return False
 
     # ------------------------------------------------------------------
-    # Phase 5: BASELINE
+    # Phase 5: REPORT
     # ------------------------------------------------------------------
 
-    async def _phase_baseline(
+    async def _phase_report(
         self,
         workspace_id: UUID,
-        metrics: Dict[str, Any],
         diagnosis: Dict[str, Any],
-        prescriptions: List[Dict[str, Any]],
         changelog: Dict[str, Any],
         db: "Session",
         iteration: int,
     ) -> "tuple[str, str]":
-        """Snapshot new org state, write the baseline files, submit the audit report.
+        """Build the audit report and submit it, attributed to Auto.
 
         ``iteration`` is the run's harness_runs iteration (US-010). Returns
         ``(report_md, report_status)``: the audit report and "ok" or
-        "failed: <reason>", both stored on the run's row. A baseline file that
-        cannot be written is logged and does NOT abort the phase.
+        "failed: <reason>", both stored on the run's row. Nothing is written to
+        the workspace volume: the run's row is its record (PRD-263 FR-2).
         """
-        logger.info("[HARNESS] Phase 5 BASELINE — workspace %s", workspace_id)
-
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
+        from services import harness_diagnose
 
+        logger.info("[HARNESS] Phase 5 REPORT — workspace %s", workspace_id)
         executor = PlatformActionExecutor(db=db, workspace_id=workspace_id)
-
-        prev_baseline = metrics.get("previous_baseline")
-        prev_delta = (prev_baseline or {}).get("convergence", {}).get("total_delta_magnitude", 0)
-        current_delta = diagnosis.get("total_delta_magnitude", 0)
-
-        # Determine convergence status
-        convergence_status = self._compute_convergence_status(
-            iteration, current_delta, prev_delta, prev_baseline
-        )
-
-        baseline = {
-            "version": 1,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "iteration": iteration,
-            "per_agent": self._build_per_agent_snapshot(metrics, diagnosis),
-            "org_level": diagnosis.get("org_diagnosis", {}),
-            "convergence": {
-                "iteration_count": iteration,
-                "total_delta_magnitude": current_delta,
-                "prev_delta_magnitude": prev_delta,
-                "status": convergence_status,
-            },
-            # Persist approved-task applications alongside low-risk auto-applies
-            # so the next tick's DIAGNOSE can roll back either kind on regression.
-            "applied_changes": (
-                changelog.get("applied", []) + changelog.get("applied_from_approved", [])
-            ),
-            "queued_changes": changelog.get("queued", []),
-        }
-
-        report_content = self._build_changelog_markdown(
-            iteration, diagnosis, prescriptions, changelog, convergence_status
-        )
-        self._write_baseline_files(workspace_id, baseline, report_content)
-
-        # Submit audit report — Patch C: resolve Auto agent + attribute report
+        report_content = self._build_changelog_markdown(iteration, diagnosis, changelog)
         report_status = await self._submit_audit_report(
             executor, db, workspace_id, iteration, report_content,
-            warning=bool(diagnosis.get("issues")),
+            warning=harness_diagnose.needs_attention(diagnosis) or bool(diagnosis.get("issues")),
         )
-
         logger.info(
-            "[HARNESS] BASELINE done — iteration %d, status=%s, audit_report=%s",
-            iteration, convergence_status, report_status,
+            "[HARNESS] REPORT done — iteration %d, convergence=%s, audit_report=%s",
+            iteration, diagnosis.get("convergence"), report_status,
         )
         return report_content, report_status
-
-    def _write_baseline_files(
-        self,
-        workspace_id: UUID,
-        baseline: Dict[str, Any],
-        report_content: str,
-    ) -> None:
-        """Write the baseline and changelog files under /harness.
-
-        The run's record, its prescriptions included, is its harness_runs row;
-        DIAGNOSE still reads baseline_latest.json until PR-1D. A file that cannot
-        be written is logged and skipped.
-        """
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        files_to_write = [
-            ("baseline_latest", "/harness/baseline_latest.json", json.dumps(baseline, indent=2)),
-            ("baseline_archive", f"/harness/baselines/{today}.json", json.dumps(baseline, indent=2)),
-            ("changelog", f"/harness/changelog/{today}.md", report_content),
-        ]
-        for label, path, content in files_to_write:
-            try:
-                self._write_workspace_file(workspace_id, path, content)
-            except Exception:
-                logger.exception("[HARNESS] Failed to write %s (%s)", label, path)
 
     async def _submit_audit_report(
         self,
@@ -1255,48 +895,6 @@ class HarnessService:
     # Private helpers
     # ==================================================================
 
-    def _read_baseline(self, db: "Session", workspace_id: UUID) -> Optional[Dict[str, Any]]:
-        """Read /harness/baseline_latest.json from workspace file storage."""
-        try:
-            from config import config
-            import os
-
-            baseline_path = os.path.join(
-                config.WORKSPACE_VOLUME_PATH,
-                str(workspace_id),
-                "harness",
-                "baseline_latest.json",
-            )
-            if os.path.exists(baseline_path):
-                with open(baseline_path, "r") as f:
-                    return json.load(f)
-        except Exception:
-            logger.warning("[HARNESS] Failed to read baseline for %s", workspace_id, exc_info=True)
-        return None
-
-    def _write_workspace_file(self, workspace_id: UUID, rel_path: str, content: str) -> None:
-        """Persist a HARNESS artifact directly under the workspace volume.
-
-        HARNESS reads (_read_baseline) go straight to the workspace volume on
-        disk, so writes MUST hit the same store. ``workspace_write_file`` is an
-        agent tool-execution primitive, not a registered platform action, so
-        routing harness writes through ``executor.execute("workspace_write_file",
-        ...)`` silently returns an "unknown action" error and the baseline never
-        persists. Writing directly keeps reads and writes on one store and raises
-        on a real I/O error so callers log the failure, never mask it.
-        """
-        from config import config
-        import os
-
-        abs_path = os.path.join(
-            config.WORKSPACE_VOLUME_PATH,
-            str(workspace_id),
-            rel_path.lstrip("/"),
-        )
-        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        with open(abs_path, "w") as f:
-            f.write(content)
-
     @staticmethod
     def _resolve_auto_agent(
         db: "Session", workspace_id: UUID
@@ -1339,144 +937,6 @@ class HarnessService:
         if isinstance(agents_raw, list):
             return agents_raw
         return []
-
-    def _compute_deltas(self, current: Dict[str, Any], previous: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute percentage deltas between current and previous agent metrics."""
-        def _pct_delta(curr_val: float, prev_val: float) -> float:
-            if prev_val == 0:
-                return 0 if curr_val == 0 else 100.0
-            return ((curr_val - prev_val) / abs(prev_val)) * 100
-
-        return {
-            "success_rate_delta": _pct_delta(
-                current.get("success_rate", 0), previous.get("success_rate", 0)
-            ),
-            "cost_delta": _pct_delta(
-                current.get("cost_7d", 0), previous.get("cost_7d", 0)
-            ),
-            "efficiency_delta": _pct_delta(
-                current.get("efficiency_score", 0), previous.get("efficiency_score", 0)
-            ),
-            "error_rate_delta": _pct_delta(
-                current.get("error_rate", 0), previous.get("error_rate", 0)
-            ),
-        }
-
-    def _infer_root_cause(self, deltas: Dict[str, Any], agent: Dict[str, Any]) -> str:
-        """Classify root cause from deltas and agent config."""
-        cost_up = deltas.get("cost_delta", 0) > 20
-        success_down = deltas.get("success_rate_delta", 0) < -10
-        error_up = deltas.get("error_rate_delta", 0) > 15
-
-        if cost_up and not success_down:
-            return "cost_inefficient"
-        if success_down and error_up:
-            return "model_mismatch"
-        if error_up:
-            return "config_stale"
-        if cost_up:
-            return "overload"
-        return "config_stale"
-
-    def _compute_org_diagnosis(
-        self, metrics: Dict[str, Any], baseline: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Compute org-level aggregate metrics."""
-        agents_data = self._extract_agents_list(metrics)
-        total_cost = sum(a.get("cost_7d", 0) for a in agents_data)
-        avg_success = (
-            sum(a.get("success_rate", 0) for a in agents_data) / len(agents_data)
-            if agents_data
-            else 0
-        )
-        return {
-            "total_cost_7d": total_cost,
-            "avg_success_rate": avg_success,
-            "active_agents": len(agents_data),
-        }
-
-    def _get_rejected_signatures(self, metrics: Dict[str, Any]) -> set:
-        """Extract signatures of previously rejected HARNESS prescriptions.
-
-        Signatures use agent_name (matching board task title format) because
-        prescriptions in _phase_prescribe also build signatures with agent_name.
-        """
-        rejected = set()
-        tasks_data = metrics.get("prior_harness_tasks")
-        if not tasks_data or not isinstance(tasks_data, dict):
-            return rejected
-        tasks = tasks_data.get("data", tasks_data.get("tasks", []))
-        if not isinstance(tasks, list):
-            return rejected
-        for task in tasks:
-            if task.get("status") in ("blocked", "rejected"):
-                title = task.get("title", "")
-                # Extract signature from title pattern: [HARNESS] {change_type} for {agent_name}
-                if "[HARNESS]" in title:
-                    parts = title.replace("[HARNESS] ", "").split(" for ")
-                    if len(parts) == 2:
-                        rejected.add(f"{parts[0].strip()}:{parts[1].strip()}")
-        return rejected
-
-    def _detect_auto_applied_regressions(
-        self,
-        baseline: Optional[Dict[str, Any]],
-        health_cards: Dict[str, Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        """Find auto-applied changes whose target agent is now REGRESSION.
-
-        Reads the previous tick's applied_changes (low-risk auto-applies plus
-        approved-task applications — both carry current_value_before). For each
-        whose target agent's current card is REGRESSION, emit an
-        'auto_applied_regression' issue carrying a rollback_spec that
-        _phase_prescribe turns into a risk-1 revert. Entries without a target_id
-        or a non-empty snapshot are skipped — there is nothing safe to revert to
-        (this also tolerates pre-US-022 baselines that lack the snapshot).
-        """
-        issues: List[Dict[str, Any]] = []
-        if not baseline:
-            return issues
-        # Dedupe by (target_id, change_type): one tick can apply the same field
-        # twice (a low-risk auto-apply plus an approved-task apply both land in
-        # applied_changes), and we must revert each field once — not emit a
-        # duplicate rollback for the same field.
-        seen: set = set()
-        for change in baseline.get("applied_changes", []):
-            if not isinstance(change, dict):
-                continue
-            target_id = change.get("target_id")
-            revert_to = change.get("current_value_before")
-            change_type = change.get("change_type")
-            # An empty snapshot ({}/None) is how a rollback prescription marks
-            # itself ineligible for further rollback (it is written with
-            # current_value={}); skipping it here is what prevents
-            # rollback-of-rollback oscillation.
-            if target_id is None or not revert_to or not change_type:
-                continue
-            dedupe_key = (str(target_id), change_type)
-            if dedupe_key in seen:
-                continue
-            card = health_cards.get(str(target_id))
-            if not card or card.get("classification") != "REGRESSION":
-                continue
-            seen.add(dedupe_key)
-            target_name = change.get("target_name", card.get("agent_name", "unknown"))
-            issues.append({
-                "agent_id": str(target_id),
-                "agent_name": target_name,
-                "root_cause": "auto_applied_regression",
-                "severity": "high",
-                "detail": (
-                    f"{target_name} regressed after HARNESS auto-applied "
-                    f"{change_type} — reverting to prior value"
-                ),
-                "rollback_spec": {
-                    "change_type": change_type,
-                    "target_id": target_id,
-                    "revert_to": revert_to,
-                },
-            })
-        return issues
 
     async def _auto_apply_prescription(
         self,
@@ -1977,73 +1437,21 @@ class HarnessService:
                     continue
         return 5
 
-    def _compute_convergence_status(
-        self,
-        iteration: int,
-        current_delta: float,
-        prev_delta: float,
-        prev_baseline: Optional[Dict[str, Any]],
-    ) -> str:
-        """Determine convergence state."""
-        if iteration < _EXPLORING_MAX_ITERATION:
-            return "exploring"
-
-        if current_delta < _CONVERGED_DELTA:
-            # Check if we've been below threshold for consecutive runs
-            if prev_baseline:
-                prev_status = prev_baseline.get("convergence", {}).get("status", "")
-                if prev_status in ("converged", "converging") and prev_delta < _CONVERGED_DELTA:
-                    return "converged"
-            return "converging"
-
-        if prev_delta > 0 and current_delta > prev_delta:
-            return "diverging"
-
-        if prev_delta > 0 and current_delta < prev_delta:
-            return "converging"
-
-        return "exploring"
-
-    def _build_per_agent_snapshot(
-        self, metrics: Dict[str, Any], diagnosis: Dict[str, Any]
-    ) -> Dict[str, Dict[str, Any]]:
-        """Build per-agent baseline snapshot."""
-        agents_data = self._extract_agents_list(metrics)
-        health_cards = diagnosis.get("health_cards", {})
-        snapshot: Dict[str, Dict[str, Any]] = {}
-
-        for agent in agents_data:
-            agent_id = str(agent.get("id", ""))
-            card = health_cards.get(agent_id, {})
-            snapshot[agent_id] = {
-                "name": agent.get("name", "unknown"),
-                "model": agent.get("model", card.get("model", "unknown")),
-                "success_rate": agent.get("success_rate", 0),
-                "cost_7d": agent.get("cost_7d", 0),
-                "efficiency_score": agent.get("efficiency_score", 0),
-                "error_rate": agent.get("error_rate", 0),
-                "token_usage_7d": agent.get("token_usage_7d", 0),
-                "heartbeat_interval": agent.get("heartbeat_interval", 0),
-                "tools_assigned": agent.get("tools_assigned", 0),
-                "tools_used_7d": agent.get("tools_used_7d", 0),
-            }
-
-        return snapshot
-
     def _build_changelog_markdown(
         self,
         iteration: int,
         diagnosis: Dict[str, Any],
-        prescriptions: List[Dict[str, Any]],
         changelog: Dict[str, Any],
-        convergence_status: str,
     ) -> str:
-        """Build human-readable changelog markdown."""
+        """Build the human-readable audit report: coverage and every agent's verdict
+        with its n first (services.harness_diagnose.report_lines), then the issues
+        and the changes. It never calls an unjudged agent stable (PRD-263 FR-7)."""
+        from services import harness_diagnose
+
         lines = [
             f"# HARNESS Weekly Org Review — Run #{iteration}",
             f"**Date:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
-            f"**Convergence:** {convergence_status}",
-            f"**Delta Magnitude:** {diagnosis.get('total_delta_magnitude', 0):.1f}",
+            *harness_diagnose.report_lines(diagnosis),
             "",
         ]
 
@@ -2077,10 +1485,6 @@ class HarnessService:
             lines.append("## Failed")
             for f_item in failed:
                 lines.append(f"- {f_item.get('prescription_id', '?')}: {f_item.get('error', 'unknown')}")
-            lines.append("")
-
-        if not issues and not applied and not queued:
-            lines.append("No changes needed — organization is stable.")
             lines.append("")
 
         return "\n".join(lines)

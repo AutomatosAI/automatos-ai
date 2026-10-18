@@ -110,7 +110,7 @@ def test_derive_app_name_none_for_meta_and_platform_tools():
 def test_diagnose_surfaces_sustained_tool_failure():
     svc = HarnessService()
     db = _FakeDB([_FakeAffinity(7, "GMAIL_SEND_EMAIL", 9)])
-    issues = svc._diagnose_tool_failures(_WS, db, [{"id": 7, "name": "SCOUT"}])
+    issues = svc._diagnose_tool_failures(_WS, db, {"7": "SCOUT"})
     assert len(issues) == 1
     iss = issues[0]
     assert iss["root_cause"] == "tool_failure"
@@ -127,7 +127,7 @@ def test_diagnose_is_best_effort_never_raises():
             raise RuntimeError("db down")
 
     # A telemetry read must never break the weekly tick.
-    assert svc._diagnose_tool_failures(_WS, _BoomDB(), []) == []
+    assert svc._diagnose_tool_failures(_WS, _BoomDB(), {}) == []
 
 
 # --- the prescribe side (queued, guarded) -----------------------------------
@@ -135,7 +135,7 @@ def test_diagnose_is_best_effort_never_raises():
 def test_prescribe_queues_removal_for_clean_app():
     svc = HarnessService()
     rxs, seq = svc._prescribe_tool_removals(
-        [_tool_failure_issue("GMAIL_SEND_EMAIL", "GMAIL")], set(), "2026-06-09", 0
+        [_tool_failure_issue("GMAIL_SEND_EMAIL", "GMAIL")], "2026-06-09", 0
     )
     assert len(rxs) == 1
     rx = rxs[0]
@@ -149,25 +149,16 @@ def test_prescribe_queues_removal_for_clean_app():
 def test_prescribe_skips_when_no_clean_app_mapping():
     svc = HarnessService()
     rxs, seq = svc._prescribe_tool_removals(
-        [_tool_failure_issue("composio_execute", None)], set(), "2026-06-09", 0
+        [_tool_failure_issue("composio_execute", None)], "2026-06-09", 0
     )
     assert rxs == []   # surfaced as a diagnosis, but never an auto-removal on a fuzzy signal
     assert seq == 0
 
 
-def test_prescribe_respects_rejected_signature():
-    svc = HarnessService()
-    rxs, _seq = svc._prescribe_tool_removals(
-        [_tool_failure_issue("GMAIL_SEND_EMAIL", "GMAIL")],
-        {"tool_remove:SCOUT:GMAIL"}, "2026-06-09", 0,
-    )
-    assert rxs == []   # a previously-rejected removal is not re-proposed
-
-
 def test_prescribe_ignores_non_tool_failure_issues():
     svc = HarnessService()
     rxs, seq = svc._prescribe_tool_removals(
-        [{"root_cause": "auto_applied_regression"}], set(), "2026-06-09", 5
+        [{"root_cause": "auto_applied_regression"}], "2026-06-09", 5
     )
     assert rxs == []
     assert seq == 5
