@@ -62,6 +62,7 @@ from core.models.themes import (  # noqa: E402
     ThemeRevocation,
     ThemeWorkspaceSettings,
 )
+import services.themes.choices as choices_mod  # noqa: E402
 from services.themes.contract import core_page_hashes  # noqa: E402
 from services.themes.optin import OPT_IN_WORDING  # noqa: E402
 
@@ -236,6 +237,24 @@ def test_active_answers_what_parse_active_install_reads(api):
     assert theme["optIn"] == {"required": False, "wording": OPT_IN_WORDING, "packageId": str(package.id)}
     url = f"/api/themes/files/{package.digest}/dist/entry.js"
     assert theme["integrity"] == {url: "sha256-" + base64.b64encode(bytes.fromhex(ENTRY_SHA)).decode()}
+
+
+def test_a_concurrent_first_choice_ends_stored_not_500(api, monkeypatch):
+    # Another tab saved this member's first choice between our read and our insert.
+    api.db.add(ThemeChoice(workspace_id=WS_A, user_id=MEMBER_PK, choice="classic"))
+    api.db.commit()
+    real_row, calls = choices_mod._choice_row, []
+
+    def first_read_misses(*args):
+        calls.append(args)
+        return None if len(calls) == 1 else real_row(*args)
+
+    monkeypatch.setattr(choices_mod, "_choice_row", first_read_misses)
+    resp = _choose(api, "builtin:play")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["choice"] == "builtin:play"
+    assert len(calls) >= 2  # the insert collided, then the row the other tab wrote was updated
+    assert api.db.query(ThemeChoice).filter_by(workspace_id=WS_A, user_id=MEMBER_PK).count() == 1
 
 
 def test_members_may_not_choose_answers_403_and_active_shows_the_default(api):

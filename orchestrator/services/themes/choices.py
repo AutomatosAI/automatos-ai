@@ -21,6 +21,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.models.themes import ThemeChoice, ThemeInstallation, ThemePackage, ThemeRevocation, ThemeWorkspaceSettings
@@ -131,7 +132,7 @@ def stored_choice(db: Session, workspace_id: UUID, user_pk: Optional[int]) -> Op
     """The member's stored choice in this workspace, or None."""
     if user_pk is None:
         return None
-    row = db.query(ThemeChoice).filter_by(workspace_id=workspace_id, user_id=user_pk).one_or_none()
+    row = _choice_row(db, workspace_id, user_pk)
     return None if row is None else row.choice
 
 
@@ -152,13 +153,35 @@ def set_choice(db: Session, workspace_id: UUID, user_pk: Optional[int], choice: 
     if not members_may_choose(db, workspace_id):
         raise ThemeInstallError(FORBIDDEN, CHOICE_LOCKED)
     checked = _checked_choice(db, workspace_id, choice)
-    row = db.query(ThemeChoice).filter_by(workspace_id=workspace_id, user_id=user_pk).one_or_none()
+    row = _choice_row(db, workspace_id, user_pk)
     if row is None:
-        db.add(ThemeChoice(workspace_id=workspace_id, user_id=user_pk, choice=checked))
-    else:
-        row.choice = checked
+        if _inserted_choice(db, workspace_id, user_pk, checked):
+            return checked
+        # A concurrent save (two tabs, a double click) wrote the row between our read and
+        # our insert: re-check the choice in the fresh transaction, then update that row.
+        checked = _checked_choice(db, workspace_id, choice)
+        row = _choice_row(db, workspace_id, user_pk)
+    row.choice = checked
     db.flush()
     return checked
+
+
+def _choice_row(db: Session, workspace_id: UUID, user_pk: int) -> Optional[ThemeChoice]:
+    return db.query(ThemeChoice).filter_by(workspace_id=workspace_id, user_id=user_pk).one_or_none()
+
+
+def _inserted_choice(db: Session, workspace_id: UUID, user_pk: int, checked: str) -> bool:
+    """Insert the member's first choice; False when another request inserted it first."""
+    db.add(ThemeChoice(workspace_id=workspace_id, user_id=user_pk, choice=checked))
+    try:
+        db.flush()
+    except IntegrityError:
+        # uq_theme_choices_workspace_user holds one row per member. This request has only
+        # read so far, so rolling back loses nothing (the optin.py pattern).
+        db.rollback()
+        logger.info("theme choice for workspace %s was saved concurrently; updating it", workspace_id)
+        return False
+    return True
 
 
 def forget_choices_of(db: Session, workspace_id: UUID, install_id: UUID) -> None:
