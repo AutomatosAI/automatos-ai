@@ -26,6 +26,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKER = ROOT / "services" / "agent-opt-worker"
 DOCKERFILE = (WORKER / "Dockerfile").read_text()
+# The build instructions alone: a comment may name what the file no longer does.
+INSTRUCTIONS = "\n".join(line for line in DOCKERFILE.splitlines() if not line.lstrip().startswith("#"))
 MAIN = (WORKER / "main.py").read_text()
 LOCK = (WORKER / "requirements.lock").read_text()
 REQUIREMENTS_IN = (WORKER / "requirements.in").read_text()
@@ -87,11 +89,11 @@ def test_the_lock_is_installed_with_hashes_and_no_resolution():
 
 
 def test_the_user_exists_before_the_code_is_copied_in_its_name():
-    assert "chown -R" not in DOCKERFILE
-    useradd = DOCKERFILE.index("useradd -m -u 1000 worker")
-    copy = DOCKERFILE.index("COPY --chown=1000:1000 . .")
+    assert "chown -R" not in INSTRUCTIONS
+    useradd = INSTRUCTIONS.index("useradd -m -u 1000 worker")
+    copy = INSTRUCTIONS.index("COPY --chown=1000:1000 . .")
     assert useradd < copy
-    assert DOCKERFILE.index("USER worker") > copy
+    assert INSTRUCTIONS.index("USER worker") > copy
 
 
 def test_newer_dockerfile_flags_carry_the_syntax_line():
