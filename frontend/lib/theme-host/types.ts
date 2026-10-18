@@ -1,8 +1,11 @@
 /**
- * PRD-261 A-01 — the theme host's types: the global a theme's shims read, what a theme
- * registers with the host, the spike's manifest and preset, and what a load returns.
+ * PRD-261 A-01, A-04a — the theme host's types: the global a theme's shims read, what a theme
+ * registers with the host, a theme's checked manifest and preset, where a theme comes from (its
+ * source) and what a load returns.
  */
 import type { ComponentType, ReactNode } from 'react'
+
+import type { SlotId, ThemeRef } from './registry-types'
 
 /** The frozen global the host puts its shared modules on (lib/theme-host/host-modules.ts). */
 export interface ThemeHostGlobal {
@@ -11,10 +14,18 @@ export interface ThemeHostGlobal {
   readonly modules: Readonly<Record<string, unknown>>
 }
 
-/** What register(host) receives: the SDK version and the one way to hand the host a slot. */
+/**
+ * What register(host) receives: the two versions and the three ways to hand the host a
+ * component. Pages and routes are accepted and kept; A-04b renders them.
+ */
 export interface ThemeRegistrationHost {
   readonly sdkVersion: string
-  registerSlot(slot: string, component: unknown): void
+  readonly hostVersion: string
+  registerSlot(slot: SlotId, component: unknown): void
+  /** Only the routes of THEME_PAGE_ROUTES (the Q3 page list). */
+  registerPage(route: string, component: unknown): void
+  /** Served at /x/<path> (A-04b). */
+  registerRoute(path: string, component: unknown): void
 }
 
 /** A theme's default export, as defineTheme returns it. */
@@ -29,10 +40,20 @@ export type ThemeFailureReason = 'manifest' | 'engines' | 'load' | 'register' | 
 /** What the host is doing: no theme here, loading one, showing one, fell back, or safe mode. */
 export type ThemeHostStatus = 'off' | 'loading' | 'active' | 'failed' | 'safe-mode'
 
-/** The component a theme registers for the frame slot; it draws its frame around `children`. */
-export type FrameComponent = ComponentType<{ children?: ReactNode }>
+/** The props of slot 'frame@1': the page, and the two things MainLayout hands every chrome. */
+export interface FrameProps {
+  readonly children?: ReactNode
+  readonly fullBleed?: boolean
+  readonly autoWidget?: ReactNode
+}
 
-/** A checked theme.json. The three file fields are absolute URLs under the theme's folder. */
+/** The component a theme registers for the frame slot; it draws its frame around `children`. */
+export type FrameComponent = ComponentType<FrameProps>
+
+/**
+ * A checked theme.json (the spike's format, `automatos-theme-spike/v1`, until A-06b's package
+ * manifest replaces it). The three file fields are absolute URLs under the theme's files folder.
+ */
 export interface SpikeManifest {
   readonly id: string
   readonly name: string
@@ -50,10 +71,19 @@ export interface LookPreset {
   readonly vars: Readonly<Record<string, string>>
 }
 
-export interface ThemeLoadOk {
-  readonly ok: true
-  readonly manifest: SpikeManifest
+/** Everything a theme's register(host) handed over. The frame is required; the rest may be empty. */
+export interface ThemeRegistrations {
   readonly frame: FrameComponent
+  readonly slots: ReadonlyMap<SlotId, unknown>
+  readonly pages: ReadonlyMap<string, unknown>
+  readonly routes: ReadonlyMap<string, unknown>
+}
+
+export interface ThemeLoadOk extends ThemeRegistrations {
+  readonly ok: true
+  readonly ref: ThemeRef
+  /** The installed theme's checked manifest; null for a builtin theme, which has a registry entry instead. */
+  readonly manifest: SpikeManifest | null
   /** Removes the theme's class, stylesheet and variables, then runs its unregister; safe to call twice. */
   readonly cleanup: () => void
 }
@@ -65,6 +95,25 @@ export interface ThemeLoadFailure {
 }
 
 export type ThemeLoadResult = ThemeLoadOk | ThemeLoadFailure
+
+/** Everything a load reaches outside itself, injected so tests can replace each one. */
+export interface LoaderDeps {
+  readonly exposeHost: () => ThemeHostGlobal
+  /** GET /api/themes/active through the backend client (A-07b's route). */
+  readonly fetchActive: () => Promise<unknown>
+  /** A same-origin JSON file under the theme's files folder (its preset). */
+  readonly fetchJson: (url: string) => Promise<unknown>
+  /** The browser's own import(), for an installed theme's entry. */
+  readonly importModule: (url: string) => Promise<unknown>
+  readonly doc: Document
+  readonly timeoutMs: number
+}
+
+/** Where a theme comes from: compiled into the app (`builtin:`) or installed in the workspace (`install:`). */
+export interface ThemeSource {
+  readonly ref: ThemeRef
+  load(deps: LoaderDeps): Promise<ThemeLoadResult>
+}
 
 declare global {
   interface Window {
