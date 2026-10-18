@@ -181,7 +181,7 @@ Automatos AI uses multi-stage Docker builds to decouple build-time compilers and
 
 ### Backend Multi-Stage Pipeline (`orchestrator/Dockerfile`)
 1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed to build Python wheels from `requirements.txt` into `/install`. Handles conditional graph extra compilation (`INSTALL_GRAPH_EXTRAS` build arg) [orchestrator/Dockerfile:20-59](../../orchestrator/Dockerfile#L20-L59).
-2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `ghostscript`, `libmagic1`, `libpango-1.0-0`, `libcairo2`) [orchestrator/Dockerfile:64-87](../../orchestrator/Dockerfile#L64-L87).
+2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `libmagic1`, `libpango-1.0-0`, `libcairo2`, `fonts-urw-base35`) [orchestrator/Dockerfile:64-109](../../orchestrator/Dockerfile#L64-L109).
 3. **`development` & `production` Stages**: Installs application code, creates non-root user `automatos`, and exposes port `8000` running Uvicorn with reload in development or multiple workers in production [orchestrator/Dockerfile:95-189](../../orchestrator/Dockerfile#L95-L189).
 
 ### Frontend Container (`frontend/Dockerfile`)
