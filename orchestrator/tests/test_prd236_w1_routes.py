@@ -267,7 +267,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # the voice-measure wave (voice_turns timings, voice_calls.vendor_latency); the guard follows it.
     timings = (versions / "prd258_voice_timings.py").read_text()
     assert 'down_revision = "user_api_keys_provider_workspace_id"' in timings
-    assert 'EXPECTED_HEAD = "prd258_voice_timings"' in guard
+    # 2026-10-18 (PRD-263 PR-1B): prd263_harness_runs chains onto it — the HARNESS run
+    # table (harness_runs), a new table only; the guard follows it.
+    harness_runs = (versions / "prd263_harness_runs.py").read_text()
+    assert 'down_revision = "prd258_voice_timings"' in harness_runs
+    assert 'EXPECTED_HEAD = "prd263_harness_runs"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

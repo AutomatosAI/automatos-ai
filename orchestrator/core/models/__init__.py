@@ -81,7 +81,7 @@ from .socials import (  # noqa: F401
     SocialTopic,
     SocialVoiceExample,
 )
-from .harness import HarnessTaskLedger  # noqa: F401  # F156: the HARNESS task ledger
+from .harness import HarnessRun, HarnessTaskLedger  # noqa: F401  # F156 ledger; PRD-263 run table
 from .ticket_numbers import WorkspaceTicketCounter  # noqa: F401  # PRD-252 R4: numbers tickets on insert
 
 # PRD-38.4: SDK API Keys (safe — standalone table, no FK deps on workspaces)
