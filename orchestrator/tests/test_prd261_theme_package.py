@@ -3,7 +3,8 @@
 ``tests/fixtures/themes/cases.json`` is the corpus both validators run (A-06b runs the
 TypeScript half): a case's ``code`` is null for a valid input, otherwise the check returns at
 least one error and every error carries that code. The zip-level refusals a JSON corpus can't
-carry (a symlink, zip64, an over-cap clip, encrypted or duplicate members) are written here.
+carry (a symlink, zip64, an over-cap clip, encrypted or duplicate members) are written here, and
+so is the check that the frontend's shared-modules.json carries the contract's versions (PA-2).
 """
 from __future__ import annotations
 
@@ -41,6 +42,9 @@ MB = 1024 * KB
 CENTRAL_FIXED = 46  # a central directory entry's fixed bytes, before the name
 FLAG_BITS_AT = 8  # its general purpose bit flag (bit 0: encrypted)
 EOCD = b"PK\x05\x06"
+# PA-2: the browser's copy of the host and SDK versions. This path, named here literally, is what
+# makes the backend planner (scripts/ci/backend_test_plan.py) select this file on a frontend change.
+SHARED_MODULES = ORCH_ROOT.parent / "frontend/lib/theme-host/shared-modules.json"
 
 
 def _patched(base: Mapping[str, Any], case: Mapping[str, Any]) -> Any:
@@ -316,6 +320,12 @@ def test_the_contract_pins_the_versions_and_the_reserved_names():
     assert {"studio", "classic", "play", "dark", "light"} <= set(contract.RESERVED_HTML_CLASSES)
     assert contract.HTML_CLASS_OWNERS == {"play": "automatos/play"}
     assert set(contract.REQUIRED_SLOTS) == {"lookEditor@1", "styleSheet@1"} <= set(contract.KNOWN_SLOTS)
+
+
+def test_the_frontend_carries_the_same_host_and_sdk_versions():
+    table = json.loads(SHARED_MODULES.read_text(encoding="utf-8"))
+    assert table["hostVersion"] == contract.THEME_HOST_VERSION
+    assert table["sdkVersion"] == contract.SDK_VERSION
 
 
 def test_every_page_in_scope_has_sources_and_no_host_route_is_in_scope():
