@@ -1,38 +1,31 @@
 /**
- * PRD-261 A-01 — loads the spike's one theme, in the order PRD-261 §4.3 item 4 sets: share the
- * host's modules, read and check theme.json, check its SDK range (a mismatch is refused and the
- * entry is never requested), import the entry with the browser's own import(), call
- * register(host), then apply the stylesheet and preset.
+ * PRD-261 A-01, A-04a — the steps every theme load shares, in the order PRD-261 §4.3 item 4 sets:
+ * check the manifest's SDK range (a mismatch is refused and the entry is never requested),
+ * import the entry, call register(host), then apply the stylesheet and preset. Where a theme comes
+ * from (the active install, or a module compiled into the app) is sources.ts.
  *
- * It never throws: every failure is logged with its reason and returned as a result, so the
- * provider can fall back to Studio. The manifest URL is a constant, and the files it names must
- * resolve under the theme's fixed folder (manifest.ts). This fetches fixed same-origin static
- * files, not the backend, so it does not go through apiClient.
+ * A load never throws to its caller: settleLoad turns every failure into a result with its
+ * reason, logged, so the provider can fall back to Studio.
  */
-import { FRAME_SLOT, THEME_LOAD_TIMEOUT_MS, THEME_SPIKE_MANIFEST_PATH } from './constants'
+import { FRAME_SLOT, THEME_HOST_VERSION, THEME_PAGE_ROUTES, THEME_ROUTE_PATTERN, THEME_SLOT_IDS } from './constants'
 import { satisfiesSdkRange } from './engines'
-import { exposeHostModules } from './host-modules'
 import { applyLook } from './look'
-import { parseLookPreset, parseSpikeManifest } from './manifest'
-import { importThemeModule } from './native-import'
+import { parseLookPreset } from './manifest'
+import type { SlotId, ThemeRef } from './registry-types'
 import type {
   FrameComponent,
+  LoaderDeps,
   SpikeManifest,
   ThemeDefinition,
   ThemeFailureReason,
-  ThemeHostGlobal,
+  ThemeLoadAbsent,
   ThemeLoadOk,
   ThemeLoadResult,
   ThemeRegistrationHost,
+  ThemeRegistrations,
 } from './types'
 
-export interface LoaderDeps {
-  readonly exposeHost: () => ThemeHostGlobal
-  readonly fetchJson: (url: string) => Promise<unknown>
-  readonly importModule: (url: string) => Promise<unknown>
-  readonly doc: Document
-  readonly timeoutMs: number
-}
+export type { LoaderDeps } from './types'
 
 const LOG_PREFIX = '[theme-host]'
 
@@ -49,7 +42,8 @@ class ThemeStepError extends Error {
   }
 }
 
-async function step<T>(reason: ThemeFailureReason, run: () => T | Promise<T>): Promise<T> {
+/** Runs one step; whatever it throws becomes a failure with `reason`, unless it already has one. */
+export async function step<T>(reason: ThemeFailureReason, run: () => T | Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error) {
@@ -57,23 +51,8 @@ async function step<T>(reason: ThemeFailureReason, run: () => T | Promise<T>): P
   }
 }
 
-async function fetchSameOriginJson(url: string): Promise<unknown> {
-  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
-  if (!response.ok) throw new Error(`GET ${url} answered ${response.status}`)
-  return response.json()
-}
-
-export function defaultLoaderDeps(): LoaderDeps {
-  return {
-    exposeHost: exposeHostModules,
-    fetchJson: fetchSameOriginJson,
-    importModule: importThemeModule,
-    doc: document,
-    timeoutMs: THEME_LOAD_TIMEOUT_MS,
-  }
-}
-
-function withTimeout<T>(pending: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+/** Every request and import a load makes is bounded, so a stalled one becomes a failure, not a hang. */
+export function withTimeout<T>(pending: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(message)), timeoutMs)
@@ -81,19 +60,69 @@ function withTimeout<T>(pending: Promise<T>, timeoutMs: number, message: string)
   return Promise.race([pending, timeout]).finally(() => clearTimeout(timer))
 }
 
-/** Every request the load makes is bounded, so a stalled one becomes a failure, not a hang. */
-function fetchJsonWithin(deps: LoaderDeps, url: string): Promise<unknown> {
-  return withTimeout(deps.fetchJson(url), deps.timeoutMs, `GET ${url} did not answer within ${deps.timeoutMs} ms`)
-}
-
 function isThemeDefinition(value: unknown): value is ThemeDefinition {
   return typeof value === 'object' && value !== null && typeof (value as { register?: unknown }).register === 'function'
 }
 
-async function readManifest(deps: LoaderDeps): Promise<SpikeManifest> {
-  const parsed = parseSpikeManifest(await fetchJsonWithin(deps, THEME_SPIKE_MANIFEST_PATH))
-  if (!parsed.ok) throw new Error(parsed.detail)
-  return parsed.manifest
+/** The theme definition a loaded module exports as its default, or a throw saying what is missing. */
+export function definitionOf(loaded: unknown): ThemeDefinition {
+  const definition = (loaded as { default?: unknown } | null | undefined)?.default
+  if (!isThemeDefinition(definition)) throw new Error('the theme entry has no default export with a register(host) function')
+  return definition
+}
+
+/** A component React can render: a function (or class), or an exotic one such as lazy, memo or forwardRef. */
+function isComponent(value: unknown): boolean {
+  if (typeof value === 'function') return true
+  return typeof value === 'object' && value !== null && '$$typeof' in value
+}
+
+interface Collected {
+  readonly slots: Map<SlotId, unknown>
+  readonly pages: Map<string, unknown>
+  readonly routes: Map<string, unknown>
+}
+
+/** Keeps one registration, refusing an unknown key, a non-component or a second one for the same key. */
+function keep<K extends string>(into: Map<K, unknown>, key: K, component: unknown, allowed: (key: string) => boolean, what: string): void {
+  if (!allowed(key)) throw new Error(`${what} "${String(key)}" is not one this host serves`)
+  if (!isComponent(component)) throw new Error(`${what} "${key}" needs a component`)
+  if (into.has(key)) throw new Error(`${what} "${key}" was registered twice`)
+  into.set(key, component)
+}
+
+function collectingHost(sdkVersion: string, collected: Collected): ThemeRegistrationHost {
+  return Object.freeze({
+    sdkVersion,
+    hostVersion: THEME_HOST_VERSION,
+    registerSlot(slot: SlotId, component: unknown): void {
+      keep(collected.slots, slot, component, (key) => (THEME_SLOT_IDS as readonly string[]).includes(key), 'slot')
+    },
+    registerPage(route: string, component: unknown): void {
+      keep(collected.pages, route, component, (key) => THEME_PAGE_ROUTES.includes(key), 'page')
+    },
+    registerRoute(path: string, component: unknown): void {
+      keep(collected.routes, path, component, (key) => THEME_ROUTE_PATTERN.test(key), 'route')
+    },
+  })
+}
+
+/**
+ * Runs register(host) and returns what it registered; a frame is required. A register that
+ * throws, or registers no frame, is unregistered before the failure goes on, so whatever it set
+ * up before failing does not outlive the load.
+ */
+export function registerTheme(definition: ThemeDefinition, sdkVersion: string): ThemeRegistrations {
+  const collected: Collected = { slots: new Map(), pages: new Map(), routes: new Map() }
+  try {
+    definition.register(collectingHost(sdkVersion, collected))
+    const frame = collected.slots.get(FRAME_SLOT)
+    if (frame === undefined) throw new Error(`the theme registered no "${FRAME_SLOT}" component`)
+    return { frame: frame as FrameComponent, slots: collected.slots, pages: collected.pages, routes: collected.routes }
+  } catch (error) {
+    runLogged(() => definition.unregister?.())
+    throw error
+  }
 }
 
 function checkEngines(manifest: SpikeManifest, sdkVersion: string): void {
@@ -102,48 +131,19 @@ function checkEngines(manifest: SpikeManifest, sdkVersion: string): void {
   }
 }
 
-async function importDefinition(manifest: SpikeManifest, deps: LoaderDeps): Promise<ThemeDefinition> {
+async function importEntry(manifest: SpikeManifest, deps: LoaderDeps): Promise<ThemeDefinition> {
   const timedOut = `the theme entry did not load within ${deps.timeoutMs} ms`
-  const loaded = await withTimeout(deps.importModule(manifest.entry), deps.timeoutMs, timedOut)
-  const definition = (loaded as { default?: unknown } | null | undefined)?.default
-  if (!isThemeDefinition(definition)) throw new Error('the theme entry has no default export with a register(host) function')
-  return definition
-}
-
-/**
- * Runs register(host) and returns the frame it registered; the host accepts only the frame slot.
- * A register that throws, or registers no frame, is unregistered before the failure goes on, so
- * whatever it set up before failing does not outlive the load.
- */
-function registerFrame(definition: ThemeDefinition, sdkVersion: string): FrameComponent {
-  const slots = new Map<string, FrameComponent>()
-  const host: ThemeRegistrationHost = Object.freeze({
-    sdkVersion,
-    registerSlot(slot: string, component: unknown): void {
-      if (slot !== FRAME_SLOT || typeof component !== 'function') {
-        throw new Error(`registerSlot accepts only "${FRAME_SLOT}" with a component function`)
-      }
-      slots.set(slot, component as FrameComponent)
-    },
-  })
-  try {
-    definition.register(host)
-    const frame = slots.get(FRAME_SLOT)
-    if (frame === undefined) throw new Error(`the theme registered no "${FRAME_SLOT}" component`)
-    return frame
-  } catch (error) {
-    runLogged(() => definition.unregister?.())
-    throw error
-  }
+  return definitionOf(await withTimeout(deps.importModule(manifest.entry), deps.timeoutMs, timedOut))
 }
 
 async function applyPresetLook(manifest: SpikeManifest, deps: LoaderDeps): Promise<() => void> {
-  const parsed = parseLookPreset(await fetchJsonWithin(deps, manifest.preset))
+  const timedOut = `GET ${manifest.preset} did not answer within ${deps.timeoutMs} ms`
+  const parsed = parseLookPreset(await withTimeout(deps.fetchJson(manifest.preset), deps.timeoutMs, timedOut))
   if (!parsed.ok) throw new Error(parsed.detail)
   return applyLook(manifest, parsed.preset, deps.doc, deps.timeoutMs)
 }
 
-function runLogged(task: () => void): void {
+export function runLogged(task: () => void): void {
   try {
     task()
   } catch (error) {
@@ -152,7 +152,7 @@ function runLogged(task: () => void): void {
 }
 
 /** The ok result's cleanup: the look's, then the theme's unregister, once. */
-function cleanupOnce(lookCleanup: () => void, definition: ThemeDefinition): () => void {
+export function cleanupOnce(lookCleanup: () => void, definition: ThemeDefinition): () => void {
   let done = false
   return () => {
     if (done) return
@@ -162,12 +162,16 @@ function cleanupOnce(lookCleanup: () => void, definition: ThemeDefinition): () =
   }
 }
 
-async function runLoad(deps: LoaderDeps): Promise<ThemeLoadOk> {
-  const host = await step('load', () => deps.exposeHost())
-  const manifest = await step('manifest', () => readManifest(deps))
-  await step('engines', () => checkEngines(manifest, host.sdkVersion))
-  const definition = await step('load', () => importDefinition(manifest, deps))
-  const frame = await step('register', () => registerFrame(definition, host.sdkVersion))
+/** The steps after a checked manifest: engines, entry, register, look. */
+export async function loadFromManifest(
+  ref: ThemeRef,
+  manifest: SpikeManifest,
+  sdkVersion: string,
+  deps: LoaderDeps,
+): Promise<ThemeLoadOk> {
+  await step('engines', () => checkEngines(manifest, sdkVersion))
+  const definition = await step('load', () => importEntry(manifest, deps))
+  const registrations = await step('register', () => registerTheme(definition, sdkVersion))
   let lookCleanup: () => void
   try {
     lookCleanup = await step('look', () => applyPresetLook(manifest, deps))
@@ -175,13 +179,13 @@ async function runLoad(deps: LoaderDeps): Promise<ThemeLoadOk> {
     runLogged(() => definition.unregister?.())
     throw error
   }
-  return { ok: true, manifest, frame, cleanup: cleanupOnce(lookCleanup, definition) }
+  return { ok: true, ref, manifest, ...registrations, cleanup: cleanupOnce(lookCleanup, definition) }
 }
 
-/** Loads the spike's theme. Never throws: a failure is logged and returned with its reason. */
-export async function loadSpikeTheme(deps: LoaderDeps = defaultLoaderDeps()): Promise<ThemeLoadResult> {
+/** Runs a load to its result. Never throws: a failure is logged and returned with its reason; no theme to load is returned as it is. */
+export async function settleLoad(run: () => Promise<ThemeLoadOk | ThemeLoadAbsent>): Promise<ThemeLoadResult> {
   try {
-    return await runLoad(deps)
+    return await run()
   } catch (error) {
     const reason: ThemeFailureReason = error instanceof ThemeStepError ? error.reason : 'load'
     const original = error instanceof ThemeStepError ? error.original : error

@@ -16,12 +16,22 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useUiStyle } from '@/contexts/ui-style-context'
-import { useIsTabletOrBelow } from '@/hooks/use-mobile'
+import { useThemeLayout } from '@/hooks/use-studio-theme'
+import { BUILTIN_THEMES, themeStyleOf } from '@/lib/theme-host/registry'
+import type { ThemeTonePolicy } from '@/lib/theme-host/registry-types'
 import { LOOKS_HREF } from '@/lib/ticket-links'
 import { isUiStyle } from '@/lib/ui-style'
 
-/** PRD-260 K4: under Play the look's ground sets the tone, so the Tone items rest. */
+/** PRD-260 K4: under a theme whose look's ground sets the tone, the Tone items rest. */
 const TONE_SET_BY_LOOK = 'Set by your look'
+/** PRD-261: under a theme that always paints one tone, the Tone items rest too. */
+const TONE_SET_BY_THEME = 'Set by your theme'
+
+/** The note over resting Tone items, or null when the user sets the tone (no theme, or a 'user' policy). */
+function toneNoteFor(policy: ThemeTonePolicy | null): string | null {
+  if (policy === null || policy === 'user') return null
+  return policy === 'from-look' ? TONE_SET_BY_LOOK : TONE_SET_BY_THEME
+}
 
 /** A resting Tone item reads as unavailable; it keeps its focus highlight. */
 const TONE_ITEM_CLASS = 'aria-disabled:opacity-50'
@@ -41,8 +51,9 @@ function restingToneItem(noteId: string) {
 }
 
 /**
- * PRD-260 K9: the look editor, offered only while Play is the style — the
- * menu never switches style by surprise — and from 1024 px up, where /looks opens (D7).
+ * PRD-260 K9, PRD-261 PA-14: the look editor, offered only while a theme is the style (every
+ * theme ships one) — the menu never switches style by surprise — and only where the theme's
+ * layout renders (its entry's minWidth, D7), which is where /looks opens.
  */
 function CustomiseLookItem() {
   return (
@@ -55,20 +66,35 @@ function CustomiseLookItem() {
   )
 }
 
+/** PRD-261 A-02b: the theme registry's entries, after Classic and Studio, in the registry's order. */
+function ThemeStyleItems() {
+  return (
+    <>
+      {BUILTIN_THEMES.map((entry) => (
+        <DropdownMenuRadioItem key={entry.ref} value={themeStyleOf(entry.ref)}>
+          <Sparkles className="mr-2 h-4 w-4" />
+          {entry.name}
+        </DropdownMenuRadioItem>
+      ))}
+    </>
+  )
+}
+
 /**
- * PRD-244 D1 — two axes in one menu: Style (Classic | Studio | Play) and Tone
- * (Light | Dark | System). Picking on one axis never changes the other.
+ * PRD-244 D1 — two axes in one menu: Style (Classic | Studio | the registry's themes, PRD-261
+ * A-02b) and Tone (Light | Dark | System). Picking on one axis never changes the other.
  */
 export function ThemeToggle() {
   const { setTheme: setStoredTone, theme: storedTone, forcedTheme } = useTheme()
-  // The tone in effect: under Play the look forces one and keeps the stored one for later.
+  // The tone in effect: under a theme's look the look forces one and keeps the stored one for later.
   const theme = forcedTheme ?? storedTone
-  const { style, setStyle, isPlay } = useUiStyle()
+  const { style, setStyle, activeTheme } = useUiStyle()
   // PRD-260 K4: the look paints at every width, so it sets the tone at every width; its
-  // editor, /looks, opens only from 1024 px up (D7), so 'Customise look…' shows only there.
-  const narrow = useIsTabletOrBelow()
-  const toneLocked = isPlay
-  const offersLookEditor = isPlay && !narrow
+  // editor, /looks, opens only where the theme's layout renders (D7), so 'Customise look…' shows only there.
+  const layout = useThemeLayout()
+  const toneNote = toneNoteFor(activeTheme?.tone ?? null)
+  const toneLocked = toneNote !== null
+  const offersLookEditor = activeTheme !== null && layout === 'theme'
   const [mounted, setMounted] = useState(false)
   const toneNoteId = useId()
   // Under the lock the Tone group has no handler at all, so no pick reaches the stored tone.
@@ -107,15 +133,12 @@ export function ThemeToggle() {
             <BookOpen className="mr-2 h-4 w-4" />
             Studio
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="play">
-            <Sparkles className="mr-2 h-4 w-4" />
-            Play
-          </DropdownMenuRadioItem>
+          <ThemeStyleItems />
         </DropdownMenuRadioGroup>
         {offersLookEditor && <CustomiseLookItem />}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Tone</DropdownMenuLabel>
-        {toneLocked && <p id={toneNoteId} className="px-2 pb-1.5 text-xs text-muted-foreground">{TONE_SET_BY_LOOK}</p>}
+        {toneLocked && <p id={toneNoteId} className="px-2 pb-1.5 text-xs text-muted-foreground">{toneNote}</p>}
         <DropdownMenuRadioGroup value={theme ?? 'system'} onValueChange={setTheme}>
           <DropdownMenuRadioItem value="light" className={TONE_ITEM_CLASS} {...toneItemLock}>
             <Sun className="mr-2 h-4 w-4" />

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 
 import { LostScreen } from '@/components/play/edges/lost-screen-lazy'
-import { usePlayLayout } from '@/hooks/use-studio-theme'
+import { useThemeLayout } from '@/hooks/use-studio-theme'
 
 /**
  * PRD-260 §4 — the 404, for any address the app doesn't have. Under Play at
@@ -18,9 +18,9 @@ import { usePlayLayout } from '@/hooks/use-studio-theme'
  * screen and a desktop never shows the plain page first (P260-FX-25, M69).
  */
 export function NotFoundView() {
-  const layout = usePlayLayout()
+  const layout = useThemeLayout()
   if (layout === 'pending') return null
-  return layout === 'play' ? <LostScreen /> : <PlainNotFound />
+  return layout === 'theme' ? <LostScreen /> : <PlainNotFound />
 }
 
 /** Next's default 404 in the theme's own tokens, plus the way home. */
