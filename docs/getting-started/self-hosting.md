@@ -752,7 +752,10 @@ order they expect: migrations first, then the code that uses them.
 with `make up-images` again: it pulls the newer `edge` (or the
 `AUTOMATOS_IMAGE_TAG` you pin) and recreates the containers. Nothing is
 bind-mounted from your checkout, so there's no reload-mode ordering to worry
-about; migrations run as the new backend boots.
+about; migrations run as the new backend boots. Every Monday CI also rebuilds
+the images with fresh Debian and Alpine packages and moves `edge` to that
+rebuild (`weekly-<yyyymmdd>`) once it boots, so updating on `edge` picks up
+OS security fixes; a pinned `sha-<7>` keeps the packages it was built with.
 Database migrations run on every backend boot (`alembic upgrade heads`,
 fail-closed — a failing migration stops the backend rather than serving a
 half-built schema), and the seeds are idempotent. If you use media

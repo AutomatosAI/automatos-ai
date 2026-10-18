@@ -20,6 +20,10 @@ name: smoke-images
 #   `edge` at that `sha-<7>` (`docker buildx imagetools create`, which keeps the signed
 #   digest). images.yml no longer moves `edge`, so an image that cannot boot never
 #   reaches it. A manual run never promotes; re-run a failed main run instead.
+# - The weekly OS rebuild (PRD-262 US-011): images.yml's Monday schedule run publishes
+#   `weekly-<yyyymmdd>` instead of `sha-<7>`. smoke-images boots that tag, worked out
+#   from the run's created_at as images.yml does, and promote-edge moves `edge` to it
+#   only after it boots, so OS fixes reach `edge` the same way code does.
 # - smoke-images-pr: on pull requests that touch compose, the Makefile, envs/ or an
 #   image input (images.yml's pull_request paths, plus the backend's entrypoint and
 #   healthcheck and this lane's own files), it builds the three amd64 images in the job
@@ -103,7 +107,8 @@ jobs:
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
-       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'schedule' ||
+        github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -125,13 +130,18 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
+      # A schedule-triggered images run published `weekly-<yyyymmdd>` of its created_at.
       - name: The tag to boot
         id: target
         env:
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           TAG: ${{ inputs.tag }}
-        run: python3 scripts/ci/smoke_images.py target --event "$EVENT" --sha "$SHA" --tag "$TAG" --outputs "$GITHUB_OUTPUT"
+          TRIGGER: ${{ github.event.workflow_run.event }}
+          CREATED: ${{ github.event.workflow_run.created_at }}
+        run: |
+          python3 scripts/ci/smoke_images.py target --event "$EVENT" --sha "$SHA" --tag "$TAG" \
+            --trigger "$TRIGGER" --created "$CREATED" --outputs "$GITHUB_OUTPUT"
 
       # The same throwaway local-only secrets as smoke-fresh-clone.yml; no external
       # SaaS credential is set.
