@@ -1169,7 +1169,7 @@ class HarnessService:
         report_content = self._build_changelog_markdown(
             iteration, diagnosis, prescriptions, changelog, convergence_status
         )
-        self._write_baseline_files(workspace_id, baseline, prescriptions, report_content)
+        self._write_baseline_files(workspace_id, baseline, report_content)
 
         # Submit audit report — Patch C: resolve Auto agent + attribute report
         report_status = await self._submit_audit_report(
@@ -1187,19 +1187,18 @@ class HarnessService:
         self,
         workspace_id: UUID,
         baseline: Dict[str, Any],
-        prescriptions: List[Dict[str, Any]],
         report_content: str,
     ) -> None:
-        """Write the baseline, prescriptions and changelog files under /harness.
+        """Write the baseline and changelog files under /harness.
 
-        The run's record is its harness_runs row; a file that cannot be written
-        is logged and skipped.
+        The run's record, its prescriptions included, is its harness_runs row;
+        DIAGNOSE still reads baseline_latest.json until PR-1D. A file that cannot
+        be written is logged and skipped.
         """
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         files_to_write = [
             ("baseline_latest", "/harness/baseline_latest.json", json.dumps(baseline, indent=2)),
             ("baseline_archive", f"/harness/baselines/{today}.json", json.dumps(baseline, indent=2)),
-            ("prescriptions", f"/harness/prescriptions/{today}_rx.json", json.dumps(prescriptions, indent=2)),
             ("changelog", f"/harness/changelog/{today}.md", report_content),
         ]
         for label, path, content in files_to_write:

@@ -75,6 +75,9 @@ async def test_a_tick_writes_one_run_row_and_no_run_file(workspace, calls, new_s
     assert not list(tmp_path.rglob("last_run.json"))
     assert not list(tmp_path.rglob("*_trace.json"))
     assert not (tmp_path / str(workspace) / "harness" / "traces").exists()
+    # The prescriptions live in the run row (above); no second copy goes to the volume.
+    assert not list(tmp_path.rglob("*_rx.json"))
+    assert not (tmp_path / str(workspace) / "harness" / "prescriptions").exists()
 
 
 @pytest.mark.asyncio
@@ -144,5 +147,5 @@ def test_the_last_run_file_and_the_trace_writer_are_gone():
 
     src = (Path(__file__).resolve().parents[1] / "services" / "harness_service.py").read_text()
     for name in ("_last_run_path", "_read_last_run", "_write_last_run", "last_run.json", "_trace.json",
-                 "_make_serializable"):
+                 "_make_serializable", "_rx.json"):
         assert name not in src, name
