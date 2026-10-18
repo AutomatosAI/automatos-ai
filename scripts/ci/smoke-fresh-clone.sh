@@ -74,9 +74,16 @@
 # The workflow first seeds dummy uploads and caches where a self-hoster's checkout
 # collects them, each as large as the budget, so one that reaches the context fails it.
 #
-# Exit 0 = every boot answered 200 with no external creds and every published port is
-# on loopback. Exit 1 = a boot failed, a port listens beyond this machine, or the
-# backend's build context is over its budget.
+# PRD-262 US-021, in every mode: the API image keeps only the botocore models of the
+# services we call. Once the frontend and the images check out, and before the warm
+# restarts, scripts/ci/smoke_document_presign.py uploads a document through the backend,
+# which puts it in MinIO through that botocore, and the host fetches it back by the
+# presigned URL the Documents page's download call answers with.
+#
+# Exit 0 = every boot answered 200 with no external creds, every published port is on
+# loopback, and the document came back. Exit 1 = a boot failed, a port listens beyond
+# this machine, the backend's build context is over its budget, or the document did not
+# come back from object storage.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -112,6 +119,7 @@ REPORT_TOOL="scripts/ci/smoke_report.py"
 IMAGES_TOOL="scripts/ci/smoke_images.py"
 RESTART_TOOL="scripts/ci/smoke_worker_restart.py"
 CONTEXT_TOOL="scripts/ci/build_context.py"
+DOCUMENT_TOOL="scripts/ci/smoke_document_presign.py"
 BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
 # smoke_images.py's records (it reads them back from OUT_DIR for the report).
@@ -122,6 +130,11 @@ IMAGES_FILE="${OUT_DIR}/images.json"
 WORKER_RESTART_FILE="${OUT_DIR}/worker-restart.json"
 # The source build's log (PRD-262 US-017: build_context.py reads the context transfer off it).
 BUILD_LOG="${OUT_DIR}/build.log"
+# smoke_document_presign.py's record (PRD-262 US-021).
+DOCUMENT_FILE="${OUT_DIR}/document-presign.json"
+# Where compose publishes MinIO on this host: presigned links must point here
+# (S3_PUBLIC_ENDPOINT_URL in envs/api.defaults).
+STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
 # The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
@@ -331,6 +344,14 @@ check_images() {
     || fail "an app container does not run the image this smoke expects, or an image was built locally"
 }
 
+# PRD-262 US-021: a document uploaded to the backend lands in MinIO through the pruned
+# botocore, and the host fetches it back by its presigned URL.
+check_document_storage() {
+  python3 "$DOCUMENT_TOOL" --api "$API_BASE" --storage "$STORAGE_URL" \
+    --out "$DOCUMENT_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a document uploaded to the backend did not come back from object storage by its presigned URL"
+}
+
 warm_restarts() {
   local i
   for i in $(seq 1 "$WARM_RESTARTS"); do
@@ -404,14 +425,13 @@ main() {
   boot_frontend
   check_loopback_ports
   check_images
-  # Further checks against the running stack go here, before the warm restarts
-  # (PRD-262 US-021: upload a document and fetch its presigned URL).
+  check_document_storage
   warm_restarts
   outcome="pass"
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot and" \
-    "${WARM_RESTARTS} warm restarts, and :3000 answered 200 — the local edition serves" \
-    "with NO external credentials"
+    "${WARM_RESTARTS} warm restarts, :3000 answered 200 and a document came back from" \
+    "object storage — the local edition serves with NO external credentials"
 }
 
 main "$@"

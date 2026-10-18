@@ -34,6 +34,9 @@ name: smoke-images
 #   numbers (bytes, seconds, nothing built) come from the main runs alone. Before the
 #   boot, it checks that the api image installs no package the code never imports
 #   (PRD-262 US-015).
+# - Both jobs, before the warm restarts: a document uploaded to the backend goes into
+#   MinIO through the image's pruned botocore, and the host fetches it back by its
+#   presigned URL (scripts/ci/smoke_document_presign.py, PRD-262 US-021).
 #
 # Report only until PRD-262 US-004 sets the bars: no time or size fails a job. A boot
 # that never answers 200, an image built instead of pulled, a missing or wrong revision
@@ -75,6 +78,7 @@ on:
       - "scripts/ci/smoke_images.py"
       - "scripts/ci/smoke_images_report.py"
       - "scripts/ci/smoke_worker_restart.py"
+      - "scripts/ci/smoke_document_presign.py"
       - "docker-compose*.yml"
       - "Makefile"
       - "envs/**"

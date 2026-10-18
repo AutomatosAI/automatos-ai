@@ -14,6 +14,11 @@ name: smoke-fresh-clone
 # self-hoster's checkout collects them (scripts/ci/build_context.py seed), and the
 # smoke fails if the backend's build sent more than the context budget.
 #
+# PRD-262 US-021 — the image keeps only botocore's models for the services we call.
+# Before the warm restarts the smoke uploads a document, which the backend puts in
+# MinIO through that botocore, and fetches it back from the host by its presigned URL
+# (scripts/ci/smoke_document_presign.py).
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -63,6 +68,7 @@ on:
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
+      - "scripts/ci/smoke_document_presign.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -94,6 +100,7 @@ on:
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
+      - "scripts/ci/smoke_document_presign.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual
