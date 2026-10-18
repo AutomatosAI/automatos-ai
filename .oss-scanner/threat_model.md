@@ -71,7 +71,7 @@ port on the local edition (it is the owner's UI).
 
 ## How to exercise it
 
-Everything is at `/src`. Python 3.11 and Node 20 are installed with every
+Everything is at `/src`. Python 3.11 and Node 24 are installed with every
 dependency; no service is running.
 
 - Start the database: `.oss-scanner/start-db.sh` (PostgreSQL 15 on 127.0.0.1:5432,

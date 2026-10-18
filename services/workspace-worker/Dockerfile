@@ -1,4 +1,10 @@
-FROM python:3.12-slim
+# PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
+# It gets its own stage so the tag@digest pin sits on a FROM line, which is the
+# only place an updater reads (it never reads a bare `COPY --from=<image>`).
+FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
+
+# Railway builds no target, so the last stage is what it ships: keep it last.
+FROM python:3.12-slim AS production
 
 WORKDIR /app
 
@@ -9,11 +15,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq tree gosu \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js LTS (v20.x)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g pnpm \
-    && rm -rf /var/lib/apt/lists/*
+# Node.js 24 with npm and corepack, from the `node` stage: no NodeSource, so no
+# extra apt updates, Debian python3.13 or gnupg. Not /usr/local/include: node-gyp
+# downloads the headers on its first native build. The binary's libraries beyond
+# glibc (libstdc++6, libgcc-s1) come with build-essential above.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=node /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
+# pnpm pinned exactly (PRD-262 §9-Q9: the current 12.x), and the npm cache the
+# install leaves in /root/.npm cleaned in the same layer.
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+    && npm install -g --no-fund --no-audit pnpm@12.14.0 \
+    && npm cache clean --force
 
 # The Claude Code CLI is NOT installed here: claude-agent-sdk ships its own copy
 # (site-packages/claude_agent_sdk/_bundled/claude) and resolves it FIRST —

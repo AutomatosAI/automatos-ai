@@ -4,6 +4,11 @@
 # a local PostgreSQL for the backend tests) is fetched here.
 # Mirrors the CI lanes in .github/workflows/test.yml: orchestrator-tests,
 # frontend-ci and cli-host-tests.
+
+# Node 24, the version the frontend CI lane runs, from the official image. It gets
+# its own stage so the tag@digest pin sits on a FROM line (PRD-262 US-007).
+FROM node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0 AS node
+
 FROM python:3.11-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -20,9 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       postgresql-15 postgresql-client-15 \
     && rm -rf /var/lib/apt/lists/*
 
-# Node 20, the version the frontend CI lane runs.
-COPY --from=node:20-bookworm /usr/local/bin/node /usr/local/bin/node
-COPY --from=node:20-bookworm /usr/local/lib/node_modules /usr/local/lib/node_modules
+# Node 24 from the `node` stage above, with npm.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 

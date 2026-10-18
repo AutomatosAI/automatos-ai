@@ -180,10 +180,10 @@ Sources: [orchestrator/modules/tools/discovery/canvas_git.py:1-185](), [orchestr
 The `WorkspaceManager` and worker configuration enforce resource limits and access control.
 
 *   **Storage Quotas**: Each workspace has a default quota (typically 5GB) [services/workspace-worker/workspace_manager.py:37-37](). The worker calculates usage via `get_usage_bytes()` [services/workspace-worker/workspace_manager.py:97-109]().
-*   **Container Security**: The worker runs as a non-root `worker` user (UID 1000) [services/workspace-worker/Dockerfile:37-39](). The `entrypoint.sh` script fixes volume ownership at runtime to ensure the worker can write to persistent mounts [services/workspace-worker/entrypoint.sh:4-9]().
+*   **Container Security**: The worker runs as a non-root `worker` user (UID 1000) [services/workspace-worker/Dockerfile:52-54](). The `entrypoint.sh` script fixes volume ownership at runtime to ensure the worker can write to persistent mounts [services/workspace-worker/entrypoint.sh:4-9]().
 *   **Authentication**: Internal communication between the orchestrator and worker is secured via an internal token [orchestrator/core/workspace_client.py:33-34]().
 
-Sources: [services/workspace-worker/workspace_manager.py:37-109](), [services/workspace-worker/Dockerfile:36-39](), [services/workspace-worker/entrypoint.sh:1-12](), [orchestrator/core/workspace_client.py:28-39]()
+Sources: [services/workspace-worker/workspace_manager.py:37-109](), [services/workspace-worker/Dockerfile:51-54](), [services/workspace-worker/entrypoint.sh:1-12](), [orchestrator/core/workspace_client.py:28-39]()
 
 ## API Reference Summary
 
