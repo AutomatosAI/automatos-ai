@@ -16,7 +16,10 @@ in the required orchestrator job and pins the definition a later edit could undo
   kept), installed with `npm ci` and `uv pip install --require-hashes --no-deps`;
 - versions.py reads the js tree, Node's compile cache is seeded as the runtime
   user, and the Chrome launch at build is called a smoke test, which it is;
-- Dependabot: pip for services/media-render, npm for services/media-render/js.
+- Dependabot: pip for services/media-render, npm for services/media-render/js;
+- the proof run's steps: the build time against 93 s (report only), the Kokoro
+  layer kept across a Hyperframes bump, the background Kokoro load finished before
+  the first POST, the first voice step under 2.394 s, check_seconds reported.
 
 Pure file reads: no Docker, no network.
 """
@@ -290,3 +293,45 @@ def test_dependabot_updates_the_media_render_locks_weekly_and_grouped(ecosystem,
     (entry,) = entries
     assert entry["schedule"]["interval"] == "weekly"
     assert any("*" in group["patterns"] for group in entry["groups"].values())
+
+
+# ── the proof run ───────────────────────────────────────────────────────────
+
+
+def test_the_build_time_is_reported_against_93_seconds_and_never_fails():
+    build = _step("media-render", 'docker build -t "$IMAGE" services/media-render/')
+    assert 'echo "image build: $(( $(date +%s) - start )) s (93 s in run 37612086159' in build
+    assert "report only" in build and "exit 1" not in build
+
+
+def test_a_hyperframes_bump_keeps_the_kokoro_layer():
+    step = _step("media-render", "image_layer_digest.py")
+    assert 'cp -r services/media-render "$pin"' in step
+    bump = re.search(r"npm install --package-lock-only --ignore-scripts --no-fund --no-audit --save-exact hyperframes@(\S+)\)", step)
+    assert bump and bump.group(1) != PACKAGE["dependencies"]["hyperframes"]
+    assert 'docker build -t media-render:pin "$pin"' in step
+    assert (
+        'python3 scripts/ci/image_layer_digest.py "$IMAGE" media-render:pin --same /opt/kokoro --differ /opt/media-render/js'
+        in step
+    )
+    names = [step.get("name", "") for step in _steps("media-render")]
+    builds = [i for i, step in enumerate(_steps("media-render")) if 'docker build -t "$IMAGE"' in step.get("run", "")]
+    assert builds and builds[0] < names.index("Two builds that differ only in the Hyperframes pin share the Kokoro layer")
+
+
+def test_the_first_post_waits_for_the_background_kokoro_load_and_the_voice_step_is_timed():
+    api = _step("media-render", "media-render-api")
+    waited = api.index("kokoro: the voice model loaded in the background")
+    assert waited < api.index("-X POST http://127.0.0.1:8090/render") < api.index("--data-binary @")
+    assert "the background Kokoro load did not finish before the first POST" in api
+    asserted = _step("media-render", "--max-voice-seconds")
+    assert "--duration 3.0" in asserted and "--max-voice-seconds 2.394" in asserted
+    assert 'print("check_seconds:", t.get("check_seconds"), "s (5.009 s in run 37612086159; report only)")' in asserted
+    log = (MEDIA_RENDER / "media_render" / "server.py").read_text()
+    assert '"kokoro: the voice model loaded in the background in %.2f s"' in log
+
+
+def test_the_compile_cache_is_checked_in_the_image():
+    step = _step("media-render", "NODE_COMPILE_CACHE")
+    assert 'test "$(id -u)" = 1000' in step and 'test "$files" -gt 0' in step
+    assert '! -readable' in step and 'test "$unreadable" -eq 0' in step

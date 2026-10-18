@@ -49,14 +49,48 @@ jobs:
             || { echo "::error::the backend's SOCIALS_RENDER_URL does not point at media-render"; exit 1; }
           sed -n '/^  media-render:/,/^  [a-z]/p' "$RUNNER_TEMP/compose-media.yml" | head -60
           echo "docker compose --profile media config includes media-render; the default profile does not: PASS"
+      # PRD-262 US-053: the build time is reported against run 37612086159's 93 s,
+      # the last build before the parallel stages. Report only (§7, §9-Q13).
       - name: Build the image (default target, as Railway builds it)
         run: |
           start=$(date +%s)
           docker build -t "$IMAGE" services/media-render/
-          echo "image build: $(( $(date +%s) - start )) s"
+          echo "image build: $(( $(date +%s) - start )) s (93 s in run 37612086159, before PRD-262 US-053; report only)"
           docker image ls "$IMAGE"
       - name: The versions baked into the image
         run: docker run --rm --entrypoint cat "$IMAGE" /opt/media-render/versions.json
+      # PRD-262 US-053: each part is built in its own stage and COPY --link'ed into the
+      # runtime, so a Hyperframes bump leaves the 354 MB Kokoro layer as it was. The
+      # image is built again from a copy whose only change is the Hyperframes pin (one
+      # release back, lock re-resolved by npm); the Kokoro layer must keep its digest,
+      # and the js layer must change, or the second build proved nothing.
+      - name: Two builds that differ only in the Hyperframes pin share the Kokoro layer
+        run: |
+          pin="$RUNNER_TEMP/media-render-pin"
+          rm -rf "$pin"
+          cp -r services/media-render "$pin"
+          (cd "$pin/js" && npm install --package-lock-only --ignore-scripts --no-fund --no-audit --save-exact hyperframes@0.8.61)
+          git diff --no-index --stat services/media-render "$pin" || true
+          start=$(date +%s)
+          docker build -t media-render:pin "$pin"
+          echo "the build with the other Hyperframes pin: $(( $(date +%s) - start )) s"
+          python3 scripts/ci/image_layer_digest.py "$IMAGE" media-render:pin --same /opt/kokoro --differ /opt/media-render/js
+          docker rmi media-render:pin > /dev/null
+      # PRD-262 US-053: the build seeds Node's compile cache as the runtime user, so a
+      # render's Hyperframes calls start from compiled code.
+      - name: Node's compile cache is seeded and readable by uid 1000
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" -c '
+            set -eu
+            echo "uid $(id -u), NODE_COMPILE_CACHE=${NODE_COMPILE_CACHE:-unset}"
+            test "$(id -u)" = 1000
+            test -n "${NODE_COMPILE_CACHE:-}"
+            files=$(find "$NODE_COMPILE_CACHE" -type f | wc -l)
+            echo "$files files, $(du -sh "$NODE_COMPILE_CACHE" | cut -f1)"
+            test "$files" -gt 0
+            unreadable=$(find "$NODE_COMPILE_CACHE" ! -readable | wc -l)
+            test "$unreadable" -eq 0
+          ' || { echo "::error::NODE_COMPILE_CACHE is unset, empty or not readable by uid 1000"; exit 1; }
       # PRD-262 US-007: Node 24 copied from the official image; nothing NodeSource
       # brought (one Debian package per check).
       - name: Node 24 from the official image, with no NodeSource leftovers
@@ -149,6 +183,17 @@ jobs:
             sleep 2
           done
           if [ -z "$up" ]; then docker logs media-render-api; echo "::error::the API never answered /health"; exit 1; fi
+          # PRD-262 US-053: Kokoro loads in the background once the service listens; it
+          # must have finished before the first POST, so the first render's voice step
+          # no longer carries the model load.
+          loaded=""
+          for i in $(seq 1 60); do
+            if docker logs media-render-api 2>&1 | grep -q 'kokoro: the voice model loaded in the background'; then loaded=1; break; fi
+            sleep 1
+          done
+          docker logs media-render-api 2>&1 | grep 'kokoro: ' || true
+          if [ -z "$loaded" ]; then docker logs media-render-api; echo "::error::the background Kokoro load did not finish before the first POST"; exit 1; fi
+          echo "the background Kokoro load finished before the first POST: PASS"
           code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8090/render)
           echo "POST /render without the token answered $code"
           if [ "$code" != 401 ]; then echo "::error::the render API is open without its token"; exit 1; fi
@@ -182,11 +227,16 @@ jobs:
           docker run --rm -v "$out:/out" --entrypoint ffmpeg "$IMAGE" -hide_banner -nostats \
             -i /out/fixture.mp4 -map 0:a:0 -af ebur128=peak=true -f null - 2> "$out/ebur128.log"
           sed -n '/Summary:/,$p' "$out/ebur128.log"
+          # PRD-262 US-053: the first render's voice step, with the model loaded at boot,
+          # is under run 37612086159's 2.394 s, which included the load. check_seconds is
+          # reported against that run's 5.009 s and never fails: the compile cache's
+          # 0.1-0.3 s is within run-to-run noise.
           python3 services/media-render/ci/assert_output.py "$out/probe.json" \
             --video-codec h264 --width 1080 --height 1920 --fps 30 \
             --audio-codec aac --duration 3.0 --tolerance 0.1 \
-            --job "$out/job.json" --min-line-seconds 0.5 \
+            --job "$out/job.json" --min-line-seconds 0.5 --max-voice-seconds 2.394 \
             --ebur128 "$out/ebur128.log" --lufs -14 --lufs-tolerance 1
+          python3 -c 'import json, sys; t = json.load(open(sys.argv[1]))["report"]["timings"]; print("check_seconds:", t.get("check_seconds"), "s (5.009 s in run 37612086159; report only)")' "$out/job.json"
       - name: The render job's report (check, mix, timings)
         if: always()
         run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"
