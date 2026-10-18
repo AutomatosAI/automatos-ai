@@ -20,7 +20,12 @@
 # (no continue-on-error, PRD-209 US-004); still non-required in branch protection
 # until the owner flips it (Q2).
 #
-# Exit 0 = /health returned 200 with no external creds. Exit 1 = boot failed.
+# PRD-262 US-005: once the backend is ready, scripts/ci/smoke-loopback-ports.sh starts
+# the frontend and asserts that it, and every other published port, listens on
+# 127.0.0.1 (`docker compose port frontend 3000` prints 127.0.0.1:3000).
+#
+# Exit 0 = /health/ready returned 200 with no external creds and every published port
+# is on loopback. Exit 1 = boot failed, or a port listens beyond this machine.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -100,8 +105,11 @@ if [ "$status" = "200" ]; then
     ready="$(curl -s -o /dev/null -w '%{http_code}' "$READY_URL" 2>/dev/null || echo '000')"
     if [ "$ready" = "200" ]; then
       echo "OK: /health/ready returned 200 (ready) after ${elapsed}s — the local edition serves with NO external credentials"
+      # PRD-262 US-005: the frontend, and every other published port, listens on 127.0.0.1.
+      loopback_rc=0
+      bash scripts/ci/smoke-loopback-ports.sh "$COMPOSE_FILE" || loopback_rc=1
       docker compose -f "$COMPOSE_FILE" down -v || true
-      exit 0
+      exit "$loopback_rc"
     fi
     echo "  ...${elapsed}s: /health/ready -> ${ready}"
     sleep "$POLL_INTERVAL_SECONDS"

@@ -27,6 +27,7 @@ on:
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke-loopback-ports.sh"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -39,6 +40,7 @@ on:
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke-loopback-ports.sh"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 concurrency:
