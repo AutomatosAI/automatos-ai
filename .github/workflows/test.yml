@@ -1056,20 +1056,26 @@ jobs:
           '
       # PRD-262 US-019: fonts-urw-base35 came with ghostscript and is now named. A brand kit
       # naming Helvetica, with no font file, prints the same pages and line breaks as in the
-      # published `edge` image, set in Nimbus Sans (scripts/ci/image_pdf_fixture.py). Both
-      # renders run on their own image's code, off the network.
+      # published `edge` image, set in Nimbus Sans (scripts/ci/image_pdf_fixture.py). The new
+      # image writes the page once; each image lays it out with its own WeasyPrint and fonts,
+      # off the network, so only the fonts and libraries can move a line. Pull requests only:
+      # on main, `edge` is still the image this push replaces until smoke-images promotes it.
       - name: Backend — a Helvetica brand font prints as it does in edge
+        if: github.event_name == 'pull_request'
         env:
           EDGE: ghcr.io/automatosai/automatos-api:edge
         run: |
+          out="$RUNNER_TEMP/helvetica"
+          mkdir -p "$out"
           docker pull --quiet "$EDGE"
-          render() {
-            docker run --rm -i --network none -w /app --entrypoint python "$1" - render < scripts/ci/image_pdf_fixture.py
+          docker run --rm -i --network none -w /app --entrypoint python parity-be - html < scripts/ci/image_pdf_fixture.py > "$out/page.txt"
+          layout() {
+            docker run --rm -i --network none -v "$out/page.txt:/tmp/page.txt:ro" --entrypoint python "$1" - layout /tmp/page.txt < scripts/ci/image_pdf_fixture.py
           }
-          render "$EDGE" > "$RUNNER_TEMP/pdf-edge.txt"
-          render parity-be > "$RUNNER_TEMP/pdf-new.txt"
+          layout "$EDGE" > "$out/edge.txt"
+          layout parity-be > "$out/new.txt"
           docker image rm "$EDGE" > /dev/null
-          python3 scripts/ci/image_pdf_fixture.py compare "$RUNNER_TEMP/pdf-edge.txt" "$RUNNER_TEMP/pdf-new.txt"
+          python3 scripts/ci/image_pdf_fixture.py compare "$out/edge.txt" "$out/new.txt"
       # PRD-262 US-019: pytest inside the image runs in a throwaway image built FROM it with
       # requirements-dev.txt installed as its user (scripts/ci/image_test_image.py). It is
       # never pushed, and orchestrator/Dockerfile has no stage for it. The clone tests run

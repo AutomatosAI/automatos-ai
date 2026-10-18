@@ -5,21 +5,28 @@ Debian's ghostscript brought fonts-urw-base35 into the API image, and with it th
 fontconfig gives a stack naming Helvetica, Times, Courier, Palatino or Bookman (Nimbus
 Sans, Nimbus Roman, Nimbus Mono PS, P052, URW Bookman). US-019 removes ghostscript and
 names the font package itself, so a brand kit that names Helvetica with no font file
-keeps those metrics instead of falling back to DejaVu. CI proves it on a real render in
-the published ``edge`` image and in the image the change builds:
+keeps those metrics instead of falling back to DejaVu. CI proves it on a real layout in
+the published ``edge`` image and in the image the change builds. Both lay out the same
+page, so only what US-019 changes, the fonts and libraries, can move a line:
 
-    render                       inside an image, on its own code and libraries:
-        docker run --rm -i -w /app --entrypoint python IMAGE - render < scripts/ci/image_pdf_fixture.py
-        Prints one line, ``PDF_FIXTURE <json>``: each page's printed lines and the fonts
-        its text is set in. The document is rendered as generation_service renders a
-        Branded PDF: the kit made render-ready, the block renderer's HTML, WeasyPrint,
-        read back with pdfplumber.
+    html                         inside the new image, on its code:
+        docker run --rm -i -w /app --entrypoint python IMAGE - html < scripts/ci/image_pdf_fixture.py
+        Prints ``FIXTURE_HTML <json>``: a block template whose brand kit names Helvetica,
+        written the way generation_service writes a Branded PDF's page (the kit made
+        render-ready, then the block renderer).
+
+    layout FILE                  inside each image, FILE being html's output mounted in:
+        docker run --rm -i -v OUT:/tmp/page.txt:ro --entrypoint python IMAGE - layout /tmp/page.txt < …
+        Lays the page out with the image's WeasyPrint and fonts, reads it back with
+        pdfplumber, and prints ``FIXTURE_PDF <json>``: each page's lines and the fonts
+        its text is set in.
 
     compare EDGE_OUT NEW_OUT     on the runner:
         Fails unless the new image printed the same pages and lines in the same fonts as
         ``edge``, and set the text in Nimbus Sans.
 
-Standard library only outside ``render``, which imports the image's app modules.
+Standard library only outside ``html`` (the image's app modules) and ``layout``
+(WeasyPrint and pdfplumber).
 """
 from __future__ import annotations
 
@@ -30,7 +37,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-MARKER = "PDF_FIXTURE "
+HTML_MARKER = "FIXTURE_HTML "
+PDF_MARKER = "FIXTURE_PDF "
 BRAND_FONT = "Helvetica"
 # fonts-urw-base35's Helvetica, as a PDF names it once ``flat`` has run.
 EXPECTED_FACE = "NimbusSans"
@@ -45,6 +53,7 @@ SENTENCES = (
 # Enough text for two pages or more, so the page count is a real check too.
 PARAGRAPHS = 18
 MAX_DIFF_LINES = 40
+USAGE = "usage: image_pdf_fixture.py html | layout FILE | compare EDGE_OUT NEW_OUT"
 
 
 def paragraph(number: int) -> str:
@@ -83,7 +92,7 @@ def fixture_html() -> str:
 
 
 def render_pdf(html: str) -> bytes:
-    """``html`` as a PDF, laid out by the image's WeasyPrint and fonts."""
+    """``html`` laid out as a PDF by the image's WeasyPrint and fonts, as generation_service does."""
     from weasyprint import HTML
 
     return HTML(string=html).render().write_pdf()
@@ -99,11 +108,11 @@ def read_pdf(data: bytes) -> Dict[str, Any]:
     return {"pages": pages, "fonts": fonts}
 
 
-def parse(output: str) -> Dict[str, Any]:
-    """The facts a ``render`` printed: its last ``MARKER`` line. Pure; ValueError without one."""
-    found = [line[len(MARKER):] for line in output.splitlines() if line.startswith(MARKER)]
+def marked(output: str, marker: str) -> Any:
+    """The JSON on the last line of ``output`` that starts with ``marker``. Pure; ValueError without one."""
+    found = [line[len(marker):] for line in output.splitlines() if line.startswith(marker)]
     if not found:
-        raise ValueError(f"no {MARKER.strip()} line in the render's output")
+        raise ValueError(f"no {marker.strip()} line in the output")
     return json.loads(found[-1])
 
 
@@ -134,8 +143,8 @@ def summary(name: str, facts: Dict[str, Any]) -> str:
 
 
 def compare(edge_path: str, new_path: str) -> int:
-    edge = parse(Path(edge_path).read_text(encoding="utf-8"))
-    new = parse(Path(new_path).read_text(encoding="utf-8"))
+    edge = marked(Path(edge_path).read_text(encoding="utf-8"), PDF_MARKER)
+    new = marked(Path(new_path).read_text(encoding="utf-8"), PDF_MARKER)
     print(summary("edge", edge))
     print(summary("new", new))
     found = problems(edge, new)
@@ -148,12 +157,16 @@ def compare(edge_path: str, new_path: str) -> int:
 
 
 def main(argv: List[str]) -> int:
-    if argv[:1] == ["render"]:
-        print(MARKER + json.dumps(read_pdf(render_pdf(fixture_html()))))
+    if argv == ["html"]:
+        print(HTML_MARKER + json.dumps(fixture_html()))
+        return 0
+    if argv[:1] == ["layout"] and len(argv) == 2:
+        page = marked(Path(argv[1]).read_text(encoding="utf-8"), HTML_MARKER)
+        print(PDF_MARKER + json.dumps(read_pdf(render_pdf(page))))
         return 0
     if argv[:1] == ["compare"] and len(argv) == 3:
         return compare(argv[1], argv[2])
-    print("usage: image_pdf_fixture.py render | compare EDGE_OUT NEW_OUT", file=sys.stderr)
+    print(USAGE, file=sys.stderr)
     return 2
 
 

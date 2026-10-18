@@ -190,16 +190,18 @@ def test_ci_clones_a_public_repository_over_https_in_the_image():
     assert re.search(r"git clone --depth 1 https://github\.com/\S+", step["run"])
 
 
-def test_ci_renders_the_helvetica_fixture_in_edge_and_in_the_new_image():
+def test_ci_lays_out_the_helvetica_fixture_in_edge_and_in_the_new_image():
     step = _after_the_api_build(lambda step: "image_pdf_fixture.py" in step.get("run", ""))
     run = step["run"]
     assert step["env"]["EDGE"] == EDGE
+    assert step["if"] == "github.event_name == 'pull_request'", "on main, edge is the image the push replaces"
     assert 'docker pull --quiet "$EDGE"' in run
-    assert re.search(r"docker run --rm -i --network none -w /app --entrypoint python \"\$1\" - render "
-                     r"< scripts/ci/image_pdf_fixture\.py", run)
-    assert re.search(r'render "\$EDGE" > "\$RUNNER_TEMP/pdf-edge\.txt"', run)
-    assert re.search(r'render parity-be > "\$RUNNER_TEMP/pdf-new\.txt"', run)
-    assert 'image_pdf_fixture.py compare "$RUNNER_TEMP/pdf-edge.txt" "$RUNNER_TEMP/pdf-new.txt"' in run
+    assert ("docker run --rm -i --network none -w /app --entrypoint python parity-be - html "
+            '< scripts/ci/image_pdf_fixture.py > "$out/page.txt"') in run, "the new image writes the page once"
+    assert ('docker run --rm -i --network none -v "$out/page.txt:/tmp/page.txt:ro" --entrypoint python "$1" '
+            "- layout /tmp/page.txt < scripts/ci/image_pdf_fixture.py") in run
+    assert 'layout "$EDGE" > "$out/edge.txt"' in run and 'layout parity-be > "$out/new.txt"' in run
+    assert 'image_pdf_fixture.py compare "$out/edge.txt" "$out/new.txt"' in run
 
 
 def test_ci_runs_the_clone_tests_in_the_test_image_off_the_network():
@@ -305,11 +307,13 @@ def test_other_fonts_than_edges_fail():
     assert any(problem.startswith("the text is set in") for problem in pdf_fixture.problems(EDGE_FACTS, other))
 
 
-def test_the_last_marker_line_is_the_render():
-    output = "a warning on stdout\nPDF_FIXTURE {\"pages\": [], \"fonts\": []}\nPDF_FIXTURE {\"pages\": [[\"x\"]], \"fonts\": [\"f\"]}\n"
-    assert pdf_fixture.parse(output) == {"pages": [["x"]], "fonts": ["f"]}
-    with pytest.raises(ValueError, match="no PDF_FIXTURE line"):
-        pdf_fixture.parse("Traceback (most recent call last):\n")
+def test_the_last_marked_line_is_the_one_read():
+    output = ('a warning on stdout\nFIXTURE_PDF {"pages": [], "fonts": []}\n'
+              'FIXTURE_HTML "<p>x</p>"\nFIXTURE_PDF {"pages": [["x"]], "fonts": ["f"]}\n')
+    assert pdf_fixture.marked(output, pdf_fixture.PDF_MARKER) == {"pages": [["x"]], "fonts": ["f"]}
+    assert pdf_fixture.marked(output, pdf_fixture.HTML_MARKER) == "<p>x</p>"
+    with pytest.raises(ValueError, match="no FIXTURE_PDF line"):
+        pdf_fixture.marked("Traceback (most recent call last):\n", pdf_fixture.PDF_MARKER)
 
 
 def test_pdf_font_names_lose_their_subset_prefix():
