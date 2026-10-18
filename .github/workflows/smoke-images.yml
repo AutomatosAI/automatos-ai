@@ -31,7 +31,9 @@ name: smoke-images
 #   healthcheck and this lane's own files), it builds the three amd64 images in the job
 #   with images.yml's GHA cache (read only), build args and labels, tags them with the
 #   GHCR names and `pr-<7>`, and boots them the same way. It measures the boot; the pull
-#   numbers (bytes, seconds, nothing built) come from the main runs alone.
+#   numbers (bytes, seconds, nothing built) come from the main runs alone. Before the
+#   boot, it checks that the api image installs no package the code never imports
+#   (PRD-262 US-015).
 #
 # Report only until PRD-262 US-004 sets the bars: no time or size fails a job. A boot
 # that never answers 200, an image built instead of pulled, a missing or wrong revision
@@ -271,6 +273,17 @@ jobs:
           provenance: false
           sbom: false
           cache-from: type=gha,scope=api-amd64
+
+      # PRD-262 US-015: the GHCR build (no [leiden] extra) installs no package the
+      # code never imports, scikit-learn included. test.yml's prod-image-parity
+      # checks the Railway build, which keeps scikit-learn until US-027.
+      - name: The api image has no package the code never imports
+        env:
+          IMAGE: ghcr.io/automatosai/automatos-api:${{ steps.target.outputs.tag }}
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi
+        run: |
+          read -ra names <<< "$REMOVED"
+          docker run --rm -i --entrypoint python "$IMAGE" - "${names[@]}" < scripts/ci/image_dists_absent.py
 
       - name: Metadata (frontend)
         id: meta-frontend

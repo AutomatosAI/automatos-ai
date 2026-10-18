@@ -85,9 +85,10 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
-          # manifests, the frontend edition literal, the worker image.
+          # manifests, the frontend edition literal, the worker image; and the
+          # script that looks for packages inside them.
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/image_dists_absent\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -979,21 +980,9 @@ jobs:
           docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
       # PRD-262 US-014: the test tools are in requirements-dev.txt, which only CI
       # installs, so `import pytest` fails in the image and no distribution that
-      # file names is installed there.
+      # file names is installed there (scripts/ci/image_dists_absent.py reads the
+      # image's package metadata with the image's own Python).
       - name: Backend — no test tools in the production image
-        env:
-          INSTALLED: |
-            import sys
-            from importlib import metadata
-            found = []
-            for name in sys.argv[1:]:
-                try:
-                    found.append(f"{name} {metadata.version(name)}")
-                except metadata.PackageNotFoundError:
-                    print(f"{name}: not installed")
-            for item in found:
-                print(f"::error::the production backend image has {item}")
-            sys.exit(1 if found else 0)
         run: |
           if docker run --rm parity-be python -c 'import pytest'; then
             echo "::error::the production backend image imports pytest"; exit 1
@@ -1002,7 +991,17 @@ jobs:
           mapfile -t tools < <(sed -E 's/#.*//; s/[[:space:]]+//g; s/[][<>=!~;].*//' orchestrator/requirements-dev.txt | grep -v '^$')
           echo "requirements-dev.txt names: ${tools[*]}"
           if [ "${#tools[@]}" -eq 0 ]; then echo "::error::no tool read from orchestrator/requirements-dev.txt"; exit 1; fi
-          docker run --rm parity-be python -c "$INSTALLED" "${tools[@]}"
+          docker run --rm -i --entrypoint python parity-be - "${tools[@]}" < scripts/ci/image_dists_absent.py
+      # PRD-262 US-015: no package the code never imports is installed. This is the
+      # Railway build ([leiden]), which keeps scikit-learn through graspologic until
+      # US-027; smoke-images.yml's smoke-images-pr checks the GHCR build, which has
+      # none of them.
+      - name: Backend — no package the code never imports
+        env:
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector futureagi
+        run: |
+          read -ra names <<< "$REMOVED"
+          docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
       - name: Worker — headless browser present with no args
         run: |
           docker build -t parity-wk services/workspace-worker/

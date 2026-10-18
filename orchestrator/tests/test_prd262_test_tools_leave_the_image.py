@@ -176,7 +176,10 @@ def test_ci_finds_no_test_tool_in_the_built_image():
     assert built < check
     assert re.search(r"if docker run --rm parity-be python -c 'import pytest'; then\n.*exit 1", run)
     assert f"orchestrator/{DEV_FILE}" in run, "every tool the dev file names is looked for"
-    assert "metadata.version(name)" in steps[check]["env"]["INSTALLED"]
+    assert re.search(
+        r'docker run --rm -i --entrypoint python parity-be - "\$\{tools\[@\]\}" < scripts/ci/image_dists_absent\.py',
+        run,
+    ), "the image's own Python looks each tool up (PRD-262 US-015 shares the script)"
 
 
 @pytest.mark.parametrize("flag,value", [

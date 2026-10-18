@@ -15,7 +15,9 @@ US-027. This suite checks:
 - graphifyy is pinned exactly, with and without the Dockerfile's [leiden] sed, and
   psutil is pinned at 6 or later, the first release with aarch64 wheels;
 - pybuild installs wheels only, with `--no-binary pysher,graspologic` after
-  `--only-binary :all:`, because pip's `:all:` clears an exception named before it.
+  `--only-binary :all:`, because pip's `:all:` clears an exception named before it;
+- CI looks inside both built variants (scripts/ci/image_dists_absent.py): test.yml's
+  prod-image-parity checks the Railway build, smoke-images-pr the GHCR build.
 
 FORBIDDEN_IMPORTS is meant to grow: W3 adds camelot and cv2 (US-023),
 google.generativeai (US-024), pandas outside pandas_ai_service.py's methods (US-025,
@@ -23,20 +25,28 @@ which can filter on ImportSite.scope), langchain_text_splitters and langchain_co
 (US-026) and tree_sitter_language_pack (US-028). A dotted name forbids that module
 and everything under it.
 
-Pure file reads: no Docker, no network.
+Pure file reads, plus the check script run with this Python: no Docker, no network.
 """
 from __future__ import annotations
 
 import ast
+import importlib.util
 import os
 import re
 import shlex
+import subprocess
+import sys
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 ORCH = ROOT / "orchestrator"
+WORKFLOWS = ROOT / ".github" / "workflows"
 DOCKERFILE = (ORCH / "Dockerfile").read_text(encoding="utf-8")
+DISTS_SCRIPT = ROOT / "scripts" / "ci" / "image_dists_absent.py"
 
 # Import name -> the distribution it came from.
 FORBIDDEN_IMPORTS = {
@@ -49,6 +59,8 @@ FORBIDDEN_IMPORTS = {
 }
 # Distributions no image installs: the ones above plus python-jose's closure.
 REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa"}
+# Railway's [leiden] build keeps this one, through graspologic, until US-027.
+RAILWAY_KEEPS = frozenset({"scikit-learn"})
 WHEEL_EXCEPTIONS = "pysher,graspologic"
 
 SKIP_DIRS = frozenset({"venv", ".venv", "node_modules", "__pycache__", "site-packages"})
@@ -222,3 +234,77 @@ def test_pybuild_installs_wheels_only_with_the_pure_python_exceptions_last():
 
 def test_start_sh_no_longer_downloads_nltk_data():
     assert "nltk" not in (ORCH / "start.sh").read_text(encoding="utf-8").lower()
+
+
+# --------------------------------------------------------------------------- the check script
+
+
+def _dists_script():
+    spec = importlib.util.spec_from_file_location("image_dists_absent", DISTS_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_check_script_reports_installed_distributions_only():
+    script = _dists_script()
+    assert script.installed(["no-such-dist-prd262", "PyYAML"]) == [f"PyYAML {metadata.version('PyYAML')}"]
+    assert script.main([]) == 2
+    assert script.main(["no-such-dist-prd262"]) == 0
+    assert script.main(["pyyaml", "no-such-dist-prd262"]) == 1
+
+
+def _run_like_ci(*names: str) -> subprocess.CompletedProcess:
+    """`python - NAME... < image_dists_absent.py`, as CI runs it inside an image."""
+    return subprocess.run([sys.executable, "-", *names], input=DISTS_SCRIPT.read_text(encoding="utf-8"),
+                          capture_output=True, text=True, check=False, timeout=60)
+
+
+def test_the_check_script_runs_from_stdin_as_ci_runs_it():
+    clean = _run_like_ci("no-such-dist-prd262")
+    assert clean.returncode == 0, clean.stdout + clean.stderr
+    dirty = _run_like_ci("no-such-dist-prd262", "PyYAML")
+    assert dirty.returncode == 1 and "::error::the image has PyYAML" in dirty.stdout, dirty.stdout
+
+
+# --------------------------------------------------------------------------- CI looks inside the images
+
+
+def _step(workflow: str, job: str, predicate) -> tuple[int, dict]:
+    steps = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"][job]["steps"]
+    return next((i, step) for i, step in enumerate(steps) if predicate(step))
+
+
+def _checks_the_image(step: dict, image: str) -> bool:
+    return bool(re.search(
+        rf'docker run --rm -i --entrypoint python {re.escape(image)} - "\$\{{names\[@\]\}}" '
+        r"< scripts/ci/image_dists_absent\.py",
+        step["run"],
+    ))
+
+
+def test_prod_image_parity_checks_the_railway_build():
+    built, _ = _step("test.yml", "prod-image-parity",
+                     lambda step: "docker build --target production -t parity-be orchestrator/" in step.get("run", ""))
+    at, check = _step("test.yml", "prod-image-parity", lambda step: "REMOVED" in (step.get("env") or {}))
+    assert built < at
+    assert set(check["env"]["REMOVED"].split()) == REMOVED_DISTS - RAILWAY_KEEPS
+    assert _checks_the_image(check, "parity-be"), check["run"]
+
+
+def test_smoke_images_pr_checks_the_ghcr_build():
+    built, build = _step("smoke-images.yml", "smoke-images-pr", lambda step: step.get("name") == "Build api (amd64)")
+    assert build["with"]["build-args"].split() == ["INSTALL_GRAPH_EXTRAS=false"], "the GHCR variant"
+    at, check = _step("smoke-images.yml", "smoke-images-pr", lambda step: "REMOVED" in (step.get("env") or {}))
+    assert built < at
+    assert set(check["env"]["REMOVED"].split()) == REMOVED_DISTS
+    assert check["env"]["IMAGE"] == build["with"]["tags"]
+    assert _checks_the_image(check, '"$IMAGE"'), check["run"]
+
+
+def test_a_change_to_the_check_script_runs_both_checks():
+    changes = _step("test.yml", "changes", lambda step: "PROD_IMAGE_PATHS" in (step.get("env") or {}))[1]
+    assert re.search(changes["env"]["PROD_IMAGE_PATHS"], "scripts/ci/image_dists_absent.py")
+    smoke = yaml.safe_load((WORKFLOWS / "smoke-images.yml").read_text(encoding="utf-8"))
+    paths = smoke.get("on", smoke.get(True))["pull_request"]["paths"]  # PyYAML reads `on` as True
+    assert "scripts/ci/image_*.py" in paths
