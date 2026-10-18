@@ -142,17 +142,23 @@ CMD sh -c "alembic upgrade heads && exec uvicorn main:app --host 0.0.0.0 --port 
 # =============================================================================
 FROM base as production
 
+# The runtime user first, then /app and the directories the app writes, owned by
+# it (no -R: they are empty), so a fresh backend_logs or backend_data named volume
+# mounted on one starts writable (PRD-209: the credential key lives in /app/data).
+# The code arrives already owned by the user (the last COPY below), so no
+# `chown -R /app` layer stores every file a second time (PRD-262 US-016).
+# useradd gives the automatos group the user's id, 1000.
+RUN useradd -m -u 1000 automatos && \
+    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
+    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
+
 # The stdlib's bytecode, compiled once as root (PRD-262 US-014): the python base
 # ships none, and the automatos user can't write to /usr/local, so without it
 # every process compiles each stdlib module it imports, every time. site-packages
 # is excluded: its bytecode comes only from pybuild. unchecked-hash .pyc stay
-# valid whatever the build clamps file mtimes to. Before the COPY, so a code-only
-# change reuses this layer.
+# valid whatever the build clamps file mtimes to. Before the COPYs, so neither a
+# code change nor an entrypoint edit rebuilds this layer.
 RUN python -m compileall -q -x '/site-packages/' --invalidation-mode unchecked-hash /usr/local/lib/python3.11
-
-# Copy application code only. The test tools are in requirements-dev.txt, which
-# only CI installs. .dockerignore will exclude unnecessary files.
-COPY . .
 
 # The wait-migrate-seed entrypoint. By default it runs the CMD directly, so
 # Railway boots exactly as before (the CMD migrates). `docker-entrypoint.sh
@@ -162,16 +168,13 @@ COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
-
-# Create non-root user for security
-RUN useradd -m -u 1000 automatos && \
-    chown -R automatos:automatos /app
-
-# PRD-209: persisted credential-encryption key dir (compose mounts the backend_data
-# volume here; ownership set BEFORE the USER switch so a fresh named volume inherits it).
-RUN mkdir -p /app/data && chown -R automatos:automatos /app/data
+# The application code: the stage's last filesystem layer, so a code-only update
+# downloads this one layer (PRD-262 US-016; images.yml judges it against
+# .github/image-budgets.json's update bar). Owned by the user created above, by
+# its numeric id. Everything after it only sets image metadata. The test tools
+# are in requirements-dev.txt, which only CI installs; .dockerignore keeps the
+# rest of the context out.
+COPY --chown=1000:1000 . .
 USER automatos
 
 # Expose port

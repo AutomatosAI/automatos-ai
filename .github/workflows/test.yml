@@ -1002,6 +1002,23 @@ jobs:
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
+      # PRD-262 US-016: the code is copied in owned by the automatos user (uid and
+      # gid 1000) instead of through a `chown -R /app` layer, and /app and the
+      # directories the named volumes mount on are the user's own, so the app writes
+      # there as before. Runs as the image's own user.
+      - name: Backend — the app and its writable directories belong to the automatos user
+        run: |
+          docker run --rm --entrypoint sh parity-be -c '
+            set -eu
+            echo "runs as $(id -un) ($(id -u):$(id -g))"
+            if [ "$(id -u):$(id -g)" != "1000:1000" ]; then echo "::error::the image runs as $(id -u):$(id -g), not 1000:1000"; exit 1; fi
+            for dir in /app /app/logs /app/vector_stores /app/projects /app/exports /app/data; do
+              if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then echo "::error::$dir is not a directory the automatos user can write"; exit 1; fi
+            done
+            others=$(find /app \( ! -user 1000 -o ! -group 1000 \) -print | head -n 5 | tr "\n" " ")
+            if [ -n "$others" ]; then echo "::error::not owned by 1000:1000 under /app: $others"; exit 1; fi
+            echo "every path under /app is owned by 1000:1000, and the writable directories are writable"
+          '
       - name: Worker — headless browser present with no args
         run: |
           docker build -t parity-wk services/workspace-worker/
