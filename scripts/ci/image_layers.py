@@ -42,7 +42,9 @@ KIND_PATTERNS = (
         r"|\bplaywright install\b"
         r"|^COPY (?:--\S+ )*\S*(?:/install|requirements|package(?:-lock)?\.json|node_modules)\b")),
 )
-RUN_PREFIX = re.compile(r"^RUN (?:\|\d+ (?:\S+=\S* )*)?/bin/(?:ba)?sh -c ")
+# ``RUN |<n> NAME=value ... /bin/sh -c ``: a build-arg name stops at its first
+# ``=``, so each ``NAME=value `` token matches one way only (no backtracking blow-up).
+RUN_PREFIX = re.compile(r"^RUN (?:\|\d+ (?:[^\s=]+=\S* )*)?/bin/(?:ba)?sh -c ")
 TAR_MODES = {"gzip": "r|gz", "tar": "r|"}
 
 

@@ -85,6 +85,18 @@ def test_each_layer_names_its_instruction_and_kind():
     assert frontend[0]["kind"] == "system" and frontend[-1]["instruction"].endswith("/app/public ./public")
 
 
+def test_the_shell_prefix_and_build_args_are_stripped_from_a_run():
+    entry = {"created_by": "RUN |2 INSTALL_BROWSER=false OPTS=a=b=c /bin/sh -c pip install x # buildkit"}
+    assert layers.instruction(entry) == "RUN pip install x"
+    assert layers.instruction({"created_by": "RUN /bin/bash -c echo hi"}) == "RUN echo hi"
+
+
+def test_a_run_line_that_is_not_a_shell_prefix_is_left_alone_quickly():
+    """The CodeQL 'exponential backtracking' input: ``RUN |0 `` then many ``!== ``, and no shell."""
+    text = "RUN |0 " + "!== " * 60 + "x"
+    assert layers.instruction({"created_by": text}) == text
+
+
 def test_a_history_that_does_not_match_the_layers_is_unclassified():
     manifest, config = EDGE["api"]["manifest"], {"history": []}
     rows = layers.layer_rows(manifest, config)
