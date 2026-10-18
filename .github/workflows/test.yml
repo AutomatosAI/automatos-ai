@@ -85,11 +85,12 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
-          # manifests, the frontend edition literal, the worker image; the script
-          # that looks for packages inside them, and the one that reads the API's
-          # build context off its log.
+          # manifests, the frontend edition literal, the worker image; the scripts
+          # that look inside them (packages, system tools, the Helvetica render, the
+          # test image), the one that reads the API's build context off its log, and
+          # the clone tests the test image runs.
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context)\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -1033,6 +1034,53 @@ jobs:
             if [ -n "$others" ]; then echo "::error::not owned by 1000:1000 under /app: $others"; exit 1; fi
             echo "every path under /app is owned by 1000:1000, and the writable directories are writable"
           '
+      # PRD-262 US-019: Debian ghostscript left the image; nothing called gs.
+      - name: Backend — no ghostscript
+        run: |
+          if ! docker run --rm --entrypoint sh parity-be -c '! command -v gs'; then
+            echo "::error::the production backend image has gs on its PATH"; exit 1
+          fi
+          echo "gs: absent"
+      # PRD-262 US-019: the packages the apt layer drops are gone and the ones it names are
+      # installed, tesseract reads an OCR fixture without its orientation model, and git's
+      # trim left its builtins and HTTPS helper working (scripts/ci/image_system_tools.py).
+      - name: Backend — the system packages the code calls work, and the rest are gone
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_system_tools.py
+      - name: Backend — git clones a public repository over HTTPS
+        run: |
+          docker run --rm --entrypoint sh parity-be -c '
+            set -eu
+            git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/hello
+            test "$(git -C /tmp/hello rev-list --count HEAD)" = 1
+            echo "cloned $(git -C /tmp/hello rev-parse --short HEAD), one commit deep"
+          '
+      # PRD-262 US-019: fonts-urw-base35 came with ghostscript and is now named. A brand kit
+      # naming Helvetica, with no font file, prints the same pages and line breaks as in the
+      # published `edge` image, set in Nimbus Sans (scripts/ci/image_pdf_fixture.py). Both
+      # renders run on their own image's code, off the network.
+      - name: Backend — a Helvetica brand font prints as it does in edge
+        env:
+          EDGE: ghcr.io/automatosai/automatos-api:edge
+        run: |
+          docker pull --quiet "$EDGE"
+          render() {
+            docker run --rm -i --network none -w /app --entrypoint python "$1" - render < scripts/ci/image_pdf_fixture.py
+          }
+          render "$EDGE" > "$RUNNER_TEMP/pdf-edge.txt"
+          render parity-be > "$RUNNER_TEMP/pdf-new.txt"
+          docker image rm "$EDGE" > /dev/null
+          python3 scripts/ci/image_pdf_fixture.py compare "$RUNNER_TEMP/pdf-edge.txt" "$RUNNER_TEMP/pdf-new.txt"
+      # PRD-262 US-019: pytest inside the image runs in a throwaway image built FROM it with
+      # requirements-dev.txt installed as its user (scripts/ci/image_test_image.py). It is
+      # never pushed, and orchestrator/Dockerfile has no stage for it. The clone tests run
+      # there, with the tests mounted read-only and no network: git's trim must leave the
+      # code graph's and the skill loader's clones working.
+      - name: Backend — the clone tests pass in the test image
+        run: |
+          python3 scripts/ci/image_test_image.py build parity-be parity-be-test
+          python3 scripts/ci/image_test_image.py pytest parity-be-test --network none \
+            -q --timeout=120 tests/test_prd262_codegraph_clone.py
+          docker image rm parity-be-test > /dev/null
       - name: Worker — headless browser present with no args
         run: |
           docker build -t parity-wk services/workspace-worker/
