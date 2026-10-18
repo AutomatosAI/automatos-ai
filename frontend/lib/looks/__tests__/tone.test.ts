@@ -1,7 +1,7 @@
 /**
  * PRD-260 K4 — the tone a look's ground sets, and its cookie: parsed
- * strictly, read by the server only under Play, written and cleared by the
- * LookProvider.
+ * strictly, written and cleared by the LookProvider. PRD-261 A-03: the server
+ * reads it into the theme boot under Play only (lib/theme-host/__tests__/boot.test.ts).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -10,11 +10,9 @@ import {
   PLAY_TONE_COOKIE,
   clearPlayToneCookie,
   parsePlayTone,
-  playToneFor,
   toneOfGround,
   writePlayToneCookie,
 } from '@/lib/looks/tone'
-import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 
 function toneCookie(): string | undefined {
   return document.cookie.split('; ').find((entry) => entry.startsWith(`${PLAY_TONE_COOKIE}=`))?.split('=')[1]
@@ -43,13 +41,6 @@ describe('the tone cookie', () => {
     for (const value of ['Dark', 'system', '', ' dark', 'dark; Path=/', 'toString', null, undefined]) {
       expect({ value, tone: parsePlayTone(value) }).toEqual({ value, tone: undefined })
     }
-  })
-
-  it('is read for the server only while the style is play', () => {
-    expect(playToneFor(BUILTIN_PLAY_STYLE, 'light')).toBe('light')
-    expect(playToneFor(BUILTIN_PLAY_STYLE, 'bogus')).toBeUndefined()
-    expect(playToneFor('studio', 'light')).toBeUndefined()
-    expect(playToneFor('classic', 'dark')).toBeUndefined()
   })
 
   it('is written and cleared on the whole site', () => {

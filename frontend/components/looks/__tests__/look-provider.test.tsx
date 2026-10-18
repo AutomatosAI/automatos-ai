@@ -215,7 +215,7 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     // At every width, as this file's harness renders it: the look paints below 1024 px too (K4, P260-SEAM).
     expect(src).toContain('forcedTheme={playTone}')
     expect(src).toContain('<LookProvider onToneChange={setPlayTone}>')
-    expect(src).toContain('useState<PlayTone | undefined>(initialPlayTone)')
+    expect(src).toContain('useState<ThemeTone | undefined>(initialTone)')
   })
 
   it('reads the account inside the WorkspaceProvider in components/providers.tsx (F5)', () => {

@@ -4,8 +4,8 @@
  * PRD-244 D1 — the Style axis (Classic | Studio | a theme, PRD-261 A-02a) as React context.
  *
  * The server reads the style cookie and puts the style's classes on <html> before first paint
- * with STYLE_CLASS_SCRIPT, plus `initialStyle`, so the first paint is already the right design
- * system. Switching writes the cookie (for the next request), the html classes (for this
+ * with the theme boot (lib/theme-host/boot.ts), plus `initialStyle`, so the first paint is
+ * already the right design system. Switching writes the cookie (for the next request), the html classes (for this
  * document) and localStorage (a mirror), and never touches the tone. A switch to an installed
  * theme writes the cookie and reloads instead (PA-13): its first paint comes from the server.
  */
