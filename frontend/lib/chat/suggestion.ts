@@ -3,10 +3,11 @@ import type { ChatMessage } from '@/types'
 import { messageText } from './message-text'
 
 /**
- * PRD-260 §4 — a Mission Auto suggests (a 'mission-suggestion' data part from
- * useChat's onData), read as components/chatbot/chat.tsx reads it, checked
- * field by field because it comes off the wire, and the recent messages the
- * core's MissionSuggestionCard sends as the Mission's context. Pure.
+ * PRD-260 §4, PRD-261 A-11a (M28) — a Mission Auto suggests (a
+ * 'mission-suggestion' data part from useChat's onData), read as
+ * components/chatbot/chat.tsx reads it, checked field by field because it
+ * comes off the wire, and the recent messages the core's
+ * MissionSuggestionCard sends as the Mission's context. Pure.
  */
 
 /** chat.tsx sends the newest five messages as the Mission's context. */

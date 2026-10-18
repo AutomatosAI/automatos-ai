@@ -2,12 +2,12 @@
 
 import type { ReactNode } from 'react'
 
+import { type DeliverableRef, deliverablesFromReceipts, mergeDeliverables } from '@/lib/chat/deliverables'
+import { activityLines, messageText, provenanceOf, savedTurnError } from '@/lib/chat/message-text'
 import { receiptsOf } from '@/lib/chat/receipts'
 import type { ChatMessage } from '@/types'
 
 import { DeliverableCard } from './deliverable-card'
-import { type DeliverableRef, deliverablesFromReceipts, mergeDeliverables } from './deliverables'
-import { activityLines, messageText, provenanceOf, savedTurnError } from './message-text'
 import { PlayMarkdown } from './play-markdown'
 import { Receipts } from './receipts'
 import { ReplyCards } from './reply-cards'
