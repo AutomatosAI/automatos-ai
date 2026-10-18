@@ -87,9 +87,10 @@ on:
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual
-# runs are measurements, so they finish instead of cancelling each other.
+# runs are measurements, so each gets a group of its own: GitHub keeps one pending
+# run per group and cancels the older one, which would lose a run US-004 needs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

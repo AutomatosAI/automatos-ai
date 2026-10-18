@@ -559,6 +559,19 @@ def test_workflow_runs_every_night():
     assert "workflow_dispatch" in _triggers()
 
 
+def test_workflow_never_cancels_a_measurement_run():
+    """Only a pull request's runs share a group; every other run gets its own.
+
+    GitHub keeps one pending run per concurrency group and cancels the older one, even
+    with cancel-in-progress off, so a shared main group would drop the boot records of
+    a queued nightly or main run (US-004 needs five).
+    """
+    concurrency = _workflow()["concurrency"]
+    group = concurrency["group"]
+    assert "github.event_name == 'pull_request' && github.ref || github.run_id" in group, group
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+
+
 def test_workflow_pins_every_action_by_sha():
     pinned = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
     steps = [step for job in _workflow()["jobs"].values() for step in job["steps"]]
