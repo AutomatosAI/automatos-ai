@@ -197,6 +197,17 @@ def test_the_lock_carries_the_native_packages_of_both_architectures(package):
     assert f"node_modules/{package}" in LOCK["packages"]
 
 
+def test_the_lock_records_each_sharp_builds_libc_so_npm_ci_skips_the_musl_ones():
+    # npm ci checks a package's libc only when the lock records it. npm 10 never
+    # does; the image's npm 11.19 does, and without it npm ci on glibc also installs
+    # sharp's musl builds, about 19 MB per arch.
+    linux = {path: entry for path, entry in LOCK["packages"].items() if re.search(r"/@img/sharp-(?:libvips-)?linux", path)}
+    assert any("linuxmusl" in path for path in linux) and any("linux-x64" in path for path in linux)
+    for path, entry in linux.items():
+        expected = ["musl"] if "linuxmusl" in path else ["glibc"]
+        assert entry.get("libc") == expected, f"{path}: refresh the lock with npm 11.19 or later, the image's npm"
+
+
 def test_the_js_stage_installs_exactly_the_lock():
     js = _stage("js")
     assert "COPY js/package.json js/package-lock.json ./" in js
