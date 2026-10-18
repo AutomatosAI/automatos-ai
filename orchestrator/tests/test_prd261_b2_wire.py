@@ -14,7 +14,8 @@ Pins (plan §2.4 W-B2 row, §2.6 B2-wire; Gerard D1-a/d/e):
 * every W-B2 mutating route carries ``require_workspace_permission`` (authZ-sweep bucket a);
   the files and boot routes carry none: they authorise by membership, never by
   ``ctx.workspace_id``;
-* the import route's body limit is sized from ``THEME_MAX_PACKAGE_MB``.
+* the import route's body limit is sized from ``THEME_MAX_PACKAGE_MB``;
+* the app's security-headers middleware keeps the files route's ``sandbox`` CSP.
 
 The refusals themselves, on the real routes and on the role change, are
 ``test_prd261_b2_step_up_routes.py``.
@@ -218,8 +219,10 @@ def test_the_files_and_boot_code_never_reads_ctx_workspace_id():
 # ---------------------------------------------------------------------------
 
 _PROBE = """
-import collections, json
+import asyncio, collections, json
+from fastapi import Response
 from fastapi.routing import APIRoute
+from api import themes_files
 from core.auth import step_up
 from core.auth.workspace_permission import PERMISSION_MARKER_ATTR
 import main
@@ -229,6 +232,12 @@ def calls(dependant):
     for sub in dependant.dependencies:
         out += [sub.call] + calls(sub)
     return out
+
+def csp_after_app_headers(route_headers):
+    async def route(_request):
+        return Response(b"x", headers=route_headers)
+    response = asyncio.run(main.add_security_headers(None, route))
+    return response.headers.get("content-security-policy")
 
 served = collections.Counter()
 step_up_routes, gated = [], []
@@ -246,6 +255,8 @@ print(json.dumps({
     "served": dict(served), "step_up": sorted(step_up_routes), "gated": sorted(gated),
     "handler": step_up.StepUpRequired in main.app.exception_handlers,
     "import_limit": main._body_limit_for("/api/themes/import"),
+    "file_csp": csp_after_app_headers(themes_files.SERVING_HEADERS),
+    "default_csp": csp_after_app_headers({}),
 }))
 """
 
@@ -289,3 +300,17 @@ def test_the_app_classifies_every_w_b2_mutating_route_in_bucket_a(live_app):
 
 def test_the_import_body_limit_is_sized_from_the_package_cap(live_app):
     assert live_app["import_limit"] == config.THEME_MAX_PACKAGE_MB * MB + MULTIPART_ENVELOPE
+
+
+def test_the_app_keeps_the_theme_files_sandbox_csp(live_app):
+    # The app's security-headers middleware runs after every route; it must keep the
+    # files route's ``sandbox`` (a theme file opened as a page runs nothing) and still
+    # refuse framing.
+    directives = [part.strip() for part in live_app["file_csp"].split(";")]
+    assert "sandbox" in directives
+    assert "default-src 'none'" in directives
+    assert "frame-ancestors 'none'" in directives
+
+
+def test_the_app_default_csp_is_unchanged_for_routes_without_one(live_app):
+    assert live_app["default_csp"] == "default-src 'none'; frame-ancestors 'none'"

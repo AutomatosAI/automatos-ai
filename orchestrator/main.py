@@ -1077,6 +1077,24 @@ async def limit_request_body(request, call_next):
     return await call_next(request)
 
 # Security headers middleware
+DEFAULT_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'"
+FRAME_ANCESTORS_NONE = "frame-ancestors 'none'"
+
+
+def content_security_policy(route_policy: Optional[str]) -> str:
+    """The app's CSP for a response: a route's own policy is kept, never overwritten.
+
+    Routes that serve stored files (theme files, generated images, widget attachments) set
+    ``sandbox`` so a file opened as a page runs nothing; the app only adds
+    ``frame-ancestors 'none'`` when the route's policy does not already say who may frame it.
+    """
+    if not route_policy:
+        return DEFAULT_CONTENT_SECURITY_POLICY
+    if "frame-ancestors" in route_policy:
+        return route_policy
+    return f"{route_policy.rstrip('; ')}; {FRAME_ANCESTORS_NONE}"
+
+
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
@@ -1084,7 +1102,8 @@ async def add_security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    response.headers["Content-Security-Policy"] = content_security_policy(
+        response.headers.get("Content-Security-Policy"))
     if config.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
