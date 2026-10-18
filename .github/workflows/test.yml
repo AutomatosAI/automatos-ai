@@ -87,11 +87,11 @@ jobs:
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests, the frontend edition literal, the worker image; the scripts
           # that look inside them (packages, system tools, the Helvetica render, the
-          # test image, site-packages' native libraries), the one that reads the API's
-          # build context off its log, and
-          # the clone tests the test image runs.
+          # test image, site-packages' native libraries, botocore's services), the one
+          # that reads the API's build context off its log, and the clone tests the
+          # test image runs.
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -1027,6 +1027,15 @@ jobs:
       # ([leiden]); images.yml runs the same check on the GHCR build, on both arches.
       - name: Backend — every native library in site-packages loads, without debug info
         run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_site_packages.py
+      # PRD-262 US-021: pybuild keeps botocore's models for the services we call (s3,
+      # s3vectors, bedrock-runtime, sts, sso, sso-oidc) and its top-level files, and
+      # deletes the rest. boto3 builds a client for each kept service, the s3 one presigns
+      # a GET, and any other service is unknown (scripts/ci/image_botocore.py). This is
+      # the Railway build; images.yml runs the same check on the GHCR build, on both
+      # arches, and the fresh-clone smoke stores a document in MinIO through the pruned
+      # botocore and fetches it back by its presigned URL.
+      - name: Backend — botocore keeps the services we call, and builds a client for each
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_botocore.py
       # PRD-262 US-016: the code is copied in owned by the automatos user (uid and
       # gid 1000) instead of through a `chown -R /app` layer, and /app and the
       # directories the named volumes mount on are the user's own, so the app writes

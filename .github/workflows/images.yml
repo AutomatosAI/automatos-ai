@@ -36,7 +36,9 @@ name: images
 #   images' first pull.
 # - Each API build is pulled back by digest, and every native library in its
 #   site-packages must load and `import main` must work, on both arches
-#   (scripts/ci/image_site_packages.py, PRD-262 US-020).
+#   (scripts/ci/image_site_packages.py, PRD-262 US-020), and botocore must hold
+#   the models of the services we call, and only those, with boto3 building a
+#   client for each (scripts/ci/image_botocore.py, PRD-262 US-021).
 # - The weekly OS rebuild (PRD-262 US-011): every Monday at 05:00 UTC a schedule
 #   run rebuilds each image's `no_cache_filters` stages (those whose apt or apk
 #   packages ship) without the cache, so Debian and Alpine fixes reach the
@@ -481,6 +483,21 @@ jobs:
         run: |
           docker pull --quiet "${IMAGE}@${DIGEST}"
           docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_site_packages.py
+
+      # PRD-262 US-021: pybuild keeps botocore's models for the services we call (s3,
+      # s3vectors, bedrock-runtime, sts, sso, sso-oidc) and its top-level files. In the
+      # same image, boto3 builds a client for each kept service, the s3 one presigns a
+      # GET, and any other service is unknown (scripts/ci/image_botocore.py). Same
+      # conditions as the step above; test.yml's prod-image-parity runs it on the
+      # Railway build.
+      - name: botocore keeps the services we call, and builds a client for each
+        if: ${{ !cancelled() && matrix.name == 'api' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_botocore.py
 
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build
