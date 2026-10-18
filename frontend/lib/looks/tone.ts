@@ -1,4 +1,5 @@
 import { writeCookie } from '@/lib/cookies'
+import { parseThemeTone } from '@/lib/theme-host/boot-sanitize'
 import { UI_STYLE_COOKIE_MAX_AGE_S } from '@/lib/ui-style'
 
 import type { GroundKey } from './catalogue'
@@ -25,9 +26,9 @@ export function toneOfGround(key: GroundKey): PlayTone {
   return isDarkGround(key) ? 'dark' : 'light'
 }
 
-/** The tone cookie, strictly: 'dark' or 'light', anything else → none. */
+/** The tone cookie, strictly: 'dark' or 'light', anything else → none (the theme host's one tone parser). */
 export function parsePlayTone(value: string | null | undefined): PlayTone | undefined {
-  return PLAY_TONES.find((tone) => tone === value)
+  return parseThemeTone(value) ?? undefined
 }
 
 export function writePlayToneCookie(tone: PlayTone): void {

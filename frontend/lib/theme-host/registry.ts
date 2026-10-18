@@ -35,10 +35,6 @@ export function themeRefOf(style: UiStyle): ThemeRef | null {
 /** The styles of the builtin themes. */
 export const BUILTIN_THEME_STYLES: readonly UiStyle[] = BUILTIN_THEMES.map((entry) => themeStyleOf(entry.ref))
 
-export function isBuiltinThemeStyle(value: string): boolean {
-  return BUILTIN_THEME_STYLES.includes(value as UiStyle)
-}
-
 export function isInstalledThemeStyle(value: string): value is `theme:install:${string}` {
   return INSTALLED_THEME_STYLE_PATTERN.test(value)
 }

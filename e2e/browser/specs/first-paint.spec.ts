@@ -1,11 +1,12 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { THEME_E2E_PATH } from '../support/hello-theme'
 
 // PRD-261 A-03 (@smoke, so it runs in every build of the lane): first paint from data. A Studio
 // page requests none of builtin Play's stylesheet and none of its face files; under the Play
 // cookie (legacy and current) <html> carries 'studio play' and the look's variables before the
-// first animation frame; and the theme import map is on a Studio page, ahead of every module
-// script. Each test opens its own page.
+// first animation frame, and the server's own response links Play's stylesheet (render-blocking,
+// so the first paint is styled); and the theme import map is on a Studio page, ahead of every
+// module script. Each test opens its own page.
 
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const STYLE_COOKIE = 'automatos-style'
@@ -19,6 +20,10 @@ const PLAY_FONT_VARS = ['--pl-font-instrument-serif', '--pl-font-bricolage', '--
 const LOOK_VARS = ['--pl-ground-bg', '--background', '--pl-glow']
 const STUDIO_AND_PLAY = ['studio', 'play']
 const IMPORT_MAP_TAG = '<script type="importmap">'
+const LINK_TAG = /<link\b[^>]*>/gi
+const STYLESHEET_REL = /\brel="stylesheet"/i
+const HREF_ATTR = /\bhref="([^"]+)"/i
+const ESCAPED_AMPERSAND = /&amp;/g
 const MODULE_SCRIPT_TAG = /<script\b[^>]*\btype="module"[^>]*>/gi
 
 interface FirstFrame {
@@ -55,6 +60,24 @@ async function playFontUrls(page: Page): Promise<string[]> {
   }, PLAY_FONT_VARS)
 }
 
+/** The stylesheets a server response links in its HTML, as the hrefs it wrote. */
+function linkedStylesheets(html: string): string[] {
+  return Array.from(html.matchAll(LINK_TAG), (match) => match[0])
+    .filter((tag) => STYLESHEET_REL.test(tag))
+    .flatMap((tag) => {
+      const href = HREF_ATTR.exec(tag)?.[1]
+      return href === undefined ? [] : [href.replace(ESCAPED_AMPERSAND, '&')]
+    })
+}
+
+/** The text of every stylesheet the server's HTML for the page links, under the style cookie. */
+async function serverLinkedCss(request: APIRequestContext, cookie: string): Promise<string[]> {
+  const response = await request.get(THEME_E2E_PATH, { headers: { cookie: `${STYLE_COOKIE}=${cookie}` } })
+  expect(response.ok()).toBe(true)
+  const hrefs = linkedStylesheets(await response.text())
+  return Promise.all(hrefs.map(async (href) => (await request.get(href)).text()))
+}
+
 async function keepTheChosenStyle(page: Page): Promise<void> {
   // Without the defaults marker, a fresh browser is moved to Studio once (ui-style-context.tsx).
   await page.addInitScript(({ key, value }) => {
@@ -80,7 +103,7 @@ test('a Studio page requests none of Play: no stylesheet chunk, no face file', {
 })
 
 for (const cookie of PLAY_COOKIES) {
-  test(`under the '${cookie}' cookie, <html> has 'studio play' and the look before the first frame`, { tag: ['@smoke', '@first-paint'] }, async ({ page }) => {
+  test(`under the '${cookie}' cookie, <html> has 'studio play' and the look before the first frame`, { tag: ['@smoke', '@first-paint'] }, async ({ page, request }) => {
     await keepTheChosenStyle(page)
     await page.addInitScript((vars) => {
       requestAnimationFrame(() => {
@@ -90,7 +113,6 @@ for (const cookie of PLAY_COOKIES) {
       })
     }, LOOK_VARS)
     await page.context().addCookies([{ name: STYLE_COOKIE, value: cookie, url: APP_URL }])
-    const stylesheets = watchStylesheets(page)
     await page.goto(THEME_E2E_PATH)
     await page.waitForFunction(() => (window as FirstFrameWindow).__firstFrame !== undefined)
 
@@ -98,8 +120,11 @@ for (const cookie of PLAY_COOKIES) {
     expect(frame?.classes).toEqual(expect.arrayContaining(STUDIO_AND_PLAY))
     for (const name of LOOK_VARS) expect({ name, set: (frame?.vars[name] ?? '') !== '' }).toEqual({ name, set: true })
 
-    await page.waitForLoadState('load')
-    expect((await stylesheets()).some((css) => css.includes(PLAY_THEME_MARKER))).toBe(true)
+    // Linked in the server's response, not added once scripts run: a <link rel="stylesheet"> in the
+    // first HTML blocks the first paint until it loads.
+    const linked = await serverLinkedCss(request, cookie)
+    expect(linked.length).toBeGreaterThan(0)
+    expect(linked.some((css) => css.includes(PLAY_THEME_MARKER))).toBe(true)
   })
 }
 
