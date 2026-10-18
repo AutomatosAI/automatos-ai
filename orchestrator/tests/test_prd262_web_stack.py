@@ -13,7 +13,9 @@ flattens them with ``iter_route_contexts``.
   router_manifest.py is mounted: the app serves each of its endpoints, and the app's
   routing answers each of its HTTP paths (405 to a method no route takes, never 404);
 - no route of the committed reports/route-manifest.json is lost: scripts/dump_routes.py
-  still collects each one, and the routing answers each HTTP one.
+  still collects each one, and the routing answers each HTTP one;
+- FastAPI's strict_content_type (on by default since 0.132) stays on: a JSON body sent
+  with no Content-Type is not parsed.
 """
 from __future__ import annotations
 
@@ -26,6 +28,9 @@ from importlib.metadata import version
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 ORCH_ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = ORCH_ROOT / "requirements.txt"
@@ -124,3 +129,25 @@ def test_no_route_of_the_committed_manifest_is_lost(fresh_process):
     answers = fresh_process["answers"]
     silent = {path: answers[path] for method, path in committed if method and answers[path] != SERVED}
     assert not silent, f"committed routes the app's routing does not answer on a fresh process: {silent}"
+
+
+class _Thing(BaseModel):
+    name: str
+
+
+def test_a_json_body_with_no_content_type_is_not_parsed():
+    """A browser sends a Blob body with no Content-Type without a CORS preflight, so a
+    JSON endpoint that parsed such a body could be called from any web page the owner of
+    a local edition (no login) opened. FastAPI 0.132+ refuses it by default, and the API
+    keeps that default: its clients send application/json, and its webhooks read the
+    raw request, which this setting does not touch."""
+    app = FastAPI()
+
+    @app.post("/things")
+    def create(thing: _Thing):
+        return {"name": thing.name}
+
+    client = TestClient(app)
+    assert client.post("/things", content=b'{"name": "a"}').status_code == 422
+    assert client.post("/things", content=b'{"name": "a"}', headers={"Content-Type": "application/json"}).json() == {"name": "a"}
+    assert "strict_content_type" not in (ORCH_ROOT / "main.py").read_text(encoding="utf-8")
