@@ -296,12 +296,11 @@ Composio, if you add a key).
 | `frontend` | `automatos_frontend` | built from `./frontend` (`development` target) | 3000 (`FRONTEND_PORT`) | The Next.js UI (`npm run dev`, source bind-mounted). Starts once the backend health check passes. |
 | `workspace-worker` | `automatos_workspace_worker` | built from `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
 
-`docker compose --profile all up` adds two more:
+`docker compose --profile all up` adds one more:
 
 | Service | Host port (variable) | What it does |
 |---|---|---|
 | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
-| `gotenberg` | 3001 (`GOTENBERG_PORT`) | DOCX/XLSX → PDF conversion. The backend reaches it at `http://gotenberg:3000`; without the profile, document conversions that need it fail, everything else is unaffected. |
 
 `docker compose --profile media up -d media-render` adds the Socials renderer:
 

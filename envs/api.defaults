@@ -44,9 +44,6 @@ AUTOMATOS_MIGRATE_ON_BOOT=true
 # restarts a container that is only unhealthy. Off in the image (Railway).
 AUTOMATOS_LIVENESS_WATCHDOG=true
 
-# Document conversion sidecar (compose profile: all) [ACTIVE]
-GOTENBERG_URL=http://gotenberg:3000
-
 # -----------------------------------------------------------------------------
 # Edition & auth [ACTIVE] — the ONE shipped flag (PRD-175)
 # -----------------------------------------------------------------------------

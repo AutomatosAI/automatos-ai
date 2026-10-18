@@ -190,8 +190,7 @@ finished and 200 once the instance is usable.
   Canvas** for session agents (below) needs no key at all: it is your own
   Claude Code, launched by the host on your machine. On a Linux host the files
   under `./workspaces` end up owned by uid 1000, the worker's user.
-  `docker compose --profile all up` adds Gotenberg document rendering (3001)
-  and Adminer (8080).
+  `docker compose --profile all up` adds Adminer, a database GUI (8080).
 
 ## Optional: your own Claude Code as an agent (session mode)
 

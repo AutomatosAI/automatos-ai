@@ -20,7 +20,7 @@ The following files were used as context for generating this wiki page:
 
 
 
-This section documents the document generation and deliverables rendering subsystem of Automatos AI. It covers the core generation service (`DocumentGenerationService`), template CRUD operations (`DocumentTemplateService`), built-in professional HTML/CSS templates, rendering engines (WeasyPrint/Gotenberg), security hardening against SSTI, SSRF, and IDOR vulnerabilities, and the strict finalization gates that prevent unresolved deliverables from reaching users.
+This section documents the document generation and deliverables rendering subsystem of Automatos AI. It covers the core generation service (`DocumentGenerationService`), template CRUD operations (`DocumentTemplateService`), built-in professional HTML/CSS templates, rendering engines (WeasyPrint for PDF, docxtpl for DOCX, XlsxWriter for XLSX), security hardening against SSTI, SSRF, and IDOR vulnerabilities, and the strict finalization gates that prevent unresolved deliverables from reaching users.
 
 ---
 

@@ -67,8 +67,8 @@ updates:
       base-images:
         patterns: ["*"]
 
-  # docker-compose*.yml: pgvector, redis, minio, qdrant, adminer, gotenberg and
-  # searxng. The published-images override's own images follow AUTOMATOS_IMAGE_TAG.
+  # docker-compose*.yml: pgvector, redis, minio, qdrant, adminer and searxng.
+  # The published-images override's own images follow AUTOMATOS_IMAGE_TAG.
   - package-ecosystem: docker-compose
     directory: /
     schedule:

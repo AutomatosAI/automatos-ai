@@ -70,7 +70,7 @@ It provides a detailed walkthrough of running Automatos AI locally with Docker C
   - **Backend (port 8000):** FastAPI application serving API endpoints.
   - **Frontend (port 3000):** Next.js SPA for user interaction.
   - **Workspace Worker (no external port):** Containerized sandbox for code canvas, agent execution, and command runs.
-  - Additional optional services: adminer for DB GUI, Gotenberg for document rendering.
+  - Additional optional services: adminer for DB GUI (`--profile all`).
 - Configuration files and layering:
   - `.env` for secrets substituted by Compose.
   - `envs/api.defaults` and `envs/frontend.defaults` for code defaults.
