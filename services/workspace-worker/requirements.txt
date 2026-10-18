@@ -23,9 +23,6 @@ opentelemetry-api==1.45.1
 opentelemetry-sdk==1.45.1
 opentelemetry-exporter-otlp-proto-http==1.45.1
 
-# Headless browser rendering (workspace_html_to_png tool)
-playwright>=1.45.0,<1.53.0
-
 # Claude Agent SDK — headless canvas sessions (PRD-170 S1).
 # Drives the `claude` CLI installed in the image (see Dockerfile).
 claude-agent-sdk>=0.1.0,<1.0.0
