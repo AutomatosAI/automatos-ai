@@ -94,8 +94,25 @@ const MASCOT_CACHE_RULE = {
   ],
 }
 
+// PRD-262 US-046: what the standalone server never loads stays out of its trace, and so out of
+// the image: sharp and its libvips builds (image optimisation is off, below), TypeScript (this
+// config is .js and only `next build` reads TypeScript) and Next's AMP validator (no page is AMP).
+// test.yml's prod-image-parity job checks both built editions for each path.
+const STANDALONE_TRACE_EXCLUDES = [
+  'node_modules/@img/**',
+  'node_modules/sharp/**',
+  'node_modules/typescript/**',
+  'node_modules/next/dist/compiled/amphtml-validator/**',
+]
+
 const nextConfig = {
   output: 'standalone',
+  // PRD-262 US-046 (§9-Q12): no image optimisation, so the server never loads sharp and
+  // /_next/image answers 404. The only optimised image was the 48 px brand mark on the hosted
+  // sign-in pages, which public/brand/ now holds at that size (96 px wide, for 2x screens).
+  images: { unoptimized: true },
+  // '*' matches every route and the server's own trace ('next-server').
+  outputFileTracingExcludes: { '*': STANDALONE_TRACE_EXCLUDES },
   reactStrictMode: false,
   // SECURITY: Disable X-Powered-By header to reduce information leakage (OWASP A05:2021)
   poweredByHeader: false,
