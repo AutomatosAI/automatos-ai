@@ -34,7 +34,6 @@ The rules, from the issue:
 from __future__ import annotations
 
 import logging
-import re
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
@@ -58,9 +57,9 @@ URL_ATTRIBUTES = ("http.url", "http.target", "url.full", "url.query")
 REDACTED = "REDACTED"
 # When OTEL_TRACES_SAMPLER_RATIO is not a number: keep every trace, and say so.
 DEFAULT_SAMPLER_RATIO = 1.0
-# An exception event's text, which never leaves on a span (#1107); its type does.
-EXCEPTION_TEXT = ("exception.message", "exception.stacktrace")
-_TYPE_NAME = re.compile(r"[A-Za-z_][\w.]*")
+# All an exception event keeps on a span (#1107): its type, never its text, nor any
+# attribute a caller passed to record_exception.
+EXCEPTION_KEPT = ("exception.type", "exception.escaped")
 
 
 class _State:
@@ -230,14 +229,15 @@ def resource() -> Any:
     })
 
 
-def _failed_type(events: Any, description: str) -> str:
+def _failed_type(events: Any, attributes: Any, description: str) -> str:
     """What an ERROR status may say: the recorded exception's type, or the description
-    when it already is just a type name ("RuntimeError", "agent_error"); else nothing."""
+    when it is the span's own ``error.type`` (as our GenAI spans set "agent_error");
+    else nothing. A word that merely looks like a type ("report_q3.xlsx") is not one."""
     for event in events:
         if event.name == "exception" and (event.attributes or {}).get("exception.type"):
             return str(event.attributes["exception.type"])
-    head = description.split(":", 1)[0].strip()
-    return head if _TYPE_NAME.fullmatch(head) else ""
+    error_type = (attributes or {}).get("error.type")
+    return description if error_type and description == str(error_type) else ""
 
 
 def error_type_only(span: Any) -> Any:
@@ -254,12 +254,12 @@ def error_type_only(span: Any) -> Any:
     from opentelemetry.trace import Status
 
     events = tuple(
-        Event(event.name, {k: v for k, v in (event.attributes or {}).items() if k not in EXCEPTION_TEXT},
+        Event(event.name, {k: v for k, v in (event.attributes or {}).items() if k in EXCEPTION_KEPT},
               event.timestamp) if event.name == "exception" else event
         for event in span.events)
     status = span.status
     if status.description:
-        status = Status(status.status_code, _failed_type(events, status.description) or None)
+        status = Status(status.status_code, _failed_type(events, span.attributes, status.description) or None)
     return ReadableSpan(name=span.name, context=span.context, parent=span.parent, resource=span.resource,
                         attributes=span.attributes, events=events, links=span.links, kind=span.kind,
                         status=status, start_time=span.start_time, end_time=span.end_time,
