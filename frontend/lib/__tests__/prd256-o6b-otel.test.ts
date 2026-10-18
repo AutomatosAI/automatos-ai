@@ -130,13 +130,17 @@ describe('the provider', () => {
     expect(span.events[0].attributes).toEqual({ 'exception.type': 'TypeError', 'exception.escaped': false })
   })
 
-  it('drops a span it cannot redact, never sends it as it was', async () => {
+  it('drops a span it cannot redact, never sends it as it was, and still sends the rest', async () => {
+    const [good] = await exported({}, (tracer) => tracer.startSpan('GET /chat'))
     const memory = new InMemorySpanExporter()
-    const broken = { get name(): string { throw new Error('unreadable') } } as unknown as Parameters<typeof memory.export>[0][number]
+    const broken = {
+      events: [], attributes: {}, status: { code: SpanStatusCode.UNSET },
+      get name(): string { throw new Error('unreadable') },   // the redaction itself fails, nothing earlier
+    } as unknown as typeof good
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const result = await new Promise((done) => new RedactingExporter(memory).export([broken], done))
+    const result = await new Promise((done) => new RedactingExporter(memory).export([broken, good], done))
     expect(result).toEqual({ code: 0 })
-    expect(memory.getFinishedSpans()).toEqual([])
+    expect(memory.getFinishedSpans().map((span) => span.name)).toEqual(['GET /chat'])
     expect(warn).toHaveBeenCalledOnce()
     warn.mockRestore()
   })
