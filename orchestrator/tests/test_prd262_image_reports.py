@@ -9,12 +9,14 @@ and configs recorded from the published ``edge`` images
 * ``edge`` plus a 10 MB ``public/`` layer is a +10 MB code-only update, and the
   budget check (the committed ``.github/image-budgets.json``) warns on it;
 * a requirements change is reported apart from a code change;
-* the API and the worker share only the Debian layer today.
+* the API and the worker share only the Debian layer today;
+* a layer download cut short is a warning in the report, never a failed build.
 """
 from __future__ import annotations
 
 import copy
 import gzip
+import http.client
 import importlib.util
 import io
 import json
@@ -176,6 +178,22 @@ def test_a_layers_paths_are_summed_by_prefix():
 def test_a_zstd_layer_is_refused_not_misread():
     with pytest.raises(ValueError):
         layers.list_paths(io.BytesIO(b""), "application/vnd.oci.image.layer.v1.tar+zstd")
+
+
+class _CutShort(io.BytesIO):
+    """A blob download that breaks off mid-body, the way http.client reports it."""
+
+    def read(self, *args):
+        raise http.client.IncompleteRead(b"")
+
+
+def test_a_layer_download_cut_short_is_warned_not_fatal(monkeypatch, capsys):
+    """IncompleteRead is neither a URLError nor an OSError; it must not fail the build job."""
+    assert issubclass(http.client.IncompleteRead, report.READ_ERRORS)
+    monkeypatch.setattr(report.registry, "blob", lambda session, digest: _CutShort())
+    row = {"digest": NEW_DIGEST, "media_type": "application/vnd.oci.image.layer.v1.tar+gzip"}
+    assert set(report._listing(None, row)) == {"error"}
+    assert "Layer not listed" in capsys.readouterr().out
 
 
 def _fake_registry(monkeypatch, pushed: tuple[dict, dict], blobs: dict[str, bytes]):

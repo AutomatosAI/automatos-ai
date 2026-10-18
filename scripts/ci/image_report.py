@@ -23,7 +23,6 @@ import importlib.util
 import json
 import sys
 import tarfile
-import urllib.error
 import zlib
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -42,7 +41,7 @@ layers = _sibling("image_layers")
 registry = _sibling("image_registry")
 
 REVISION_LABEL = "org.opencontainers.image.revision"
-READ_ERRORS = (urllib.error.URLError, LookupError, ValueError, OSError)
+READ_ERRORS = registry.READ_ERRORS
 LIST_ERRORS = READ_ERRORS + (tarfile.TarError, zlib.error, EOFError)
 SHARED_PAIR = ("api", "workspace-worker")
 # The app images `make up` runs from this repository (the datastores are not ours).

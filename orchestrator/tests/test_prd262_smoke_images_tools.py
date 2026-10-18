@@ -18,6 +18,7 @@ tests feed it recorded shapes instead of Docker:
 from __future__ import annotations
 
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
@@ -262,6 +263,15 @@ def test_pulled_images_pass_and_their_layers_are_counted_once(monkeypatch):
     assert [row["index_digest"] for row in found["services"]] == [INDEX[s] for s in tool.APP_SERVICES]
     # api 520.5 + frontend 93.9 + worker 506.6 MB, the Debian layer the API and worker share counted once
     assert found["app_layer_bytes"] == 1_091_050_360
+
+
+def test_layer_sizes_cut_short_are_warned_not_fatal(monkeypatch, capsys):
+    def cut_short(ref, arch):
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(tool.registry, "image", cut_short)
+    assert tool.app_layer_bytes([_ref("backend")], "amd64") is None
+    assert "::warning title=smoke-images::" in capsys.readouterr().out
 
 
 def test_a_locally_built_image_has_no_repo_digest_and_fails(monkeypatch):

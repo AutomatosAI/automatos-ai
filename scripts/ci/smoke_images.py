@@ -36,7 +36,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -73,7 +72,7 @@ RELOAD_FLAG = "--reload"
 ARCH_NAMES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 PULL_FILE, PROCESSES_FILE, IMAGES_FILE = "pull.json", "processes.json", "images.json"
 NS_PER_SECOND = smoke_boot.NS_PER_SECOND
-READ_ERRORS = (urllib.error.URLError, LookupError, ValueError, OSError)
+READ_ERRORS = registry.READ_ERRORS
 
 
 # --------------------------------------------------------------------------- target

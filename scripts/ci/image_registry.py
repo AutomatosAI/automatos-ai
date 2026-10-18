@@ -19,11 +19,14 @@ API with the standard library only, because the arm64 runner image has no
   multi-arch index (smoke-images, PRD-262 US-003, checks that a pulled image's
   ``RepoDigests`` holds it, and promote-edge that ``edge`` lands on it).
 * Reads retry three times on a network error, a 5xx or a 429.
+* ``READ_ERRORS`` is what a read here can raise, for the callers that report a
+  failed read instead of crashing on it.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -43,6 +46,10 @@ ATTEMPTS = 3
 TIMEOUT_SECONDS = 120
 LOCAL_HOSTS = ("localhost", "127.0.0.1")
 CHALLENGE_PARAM = re.compile(r'(\w+)="([^"]*)"')
+# A failed request (URLError, HTTPError included), a body cut short mid-read
+# (http.client.IncompleteRead is an HTTPException, neither a URLError nor an OSError),
+# a platform the index lacks (LookupError), or a reference or JSON that does not parse.
+READ_ERRORS = (urllib.error.URLError, http.client.HTTPException, LookupError, ValueError, OSError)
 
 
 class Ref(NamedTuple):

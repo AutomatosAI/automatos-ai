@@ -13,6 +13,7 @@ fake the registry, GitHub's compare API and ``docker buildx``:
 """
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import io
 import json
@@ -131,6 +132,19 @@ def test_one_unreadable_image_moves_none(monkeypatch, tmp_path):
     _install(monkeypatch, ghcr)
     assert promote.promote(_args(tmp_path), run=ghcr.run) == 1
     assert ghcr.commands == [], "api and frontend must not move while the worker's tag is missing"
+
+
+def test_a_registry_read_cut_short_leaves_edge_alone(monkeypatch, tmp_path, capsys):
+    ghcr = FakeGHCR()
+    _install(monkeypatch, ghcr)
+
+    def cut_short(ref):
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(promote.registry, "resolve", cut_short)
+    assert promote.promote(_args(tmp_path), run=ghcr.run) == 1
+    assert ghcr.commands == []
+    assert "::error title=promote-edge::edge stays where it is" in capsys.readouterr().out
 
 
 def test_a_move_that_lands_on_another_digest_fails(monkeypatch):

@@ -126,7 +126,7 @@ def promote(args: argparse.Namespace, run: Run = subprocess.run) -> int:
     """Plan every image, then move each ``edge`` the plan allows."""
     try:
         steps = [plan(name, args.prefix, args.tag, args.sha, args.repo) for name in args.image]
-    except (urllib.error.URLError, LookupError, ValueError, OSError) as error:
+    except registry.READ_ERRORS as error:
         print(f"::error title=promote-edge::edge stays where it is: {error}")
         return 1
     moved = [move(step, run) for step in steps]
