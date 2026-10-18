@@ -18,14 +18,34 @@ voice lines are spoken here with Kokoro, and the mix is made here with ffmpeg.
 
 Every version is pinned. The build records them in `/opt/media-render/versions.json`, and `/health` serves them.
 
-- **Hyperframes 0.8.62** (Apache-2.0) runs on Node 24, copied from the official `node:24-trixie-slim` image (pinned by tag and digest in the Dockerfile's `node` stage).
+- **Hyperframes 0.8.62** (Apache-2.0) runs on Node 24, copied from the official `node:24-trixie-slim` image (pinned by tag and digest in the Dockerfile's `node` stage). It is installed with `npm ci` from `js/package-lock.json`, so its own dependencies are locked too, and its `node_modules/.bin` is on `PATH`. The runtime carries the node binary alone, without npm.
 - **chrome-headless-shell** is installed at build time at `/opt/chrome`, so a render never downloads it:
   - on amd64, the build Hyperframes manages;
-  - on arm64, Playwright's pinned headless shell.
+  - on arm64, the headless shell of the `playwright-core` that `js/package-lock.json` pins.
 - **ffmpeg** encodes the video and makes the mix.
-- **Kokoro v1.0** runs through `kokoro-onnx`. The model and voices files are fetched at build and checked against `kokoro/SHA256SUMS`.
+- **Kokoro v1.0** runs through `kokoro-onnx`. The model and voices files come from the media assets (see below) and are checked against `kokoro/SHA256SUMS`. The service loads the model in a background thread once it is listening, so `/health` answers at once and the first render does not wait for the load.
+- **The Python packages** are installed into `/opt/venv` from `requirements.lock`, every one hash-checked.
 - **GSAP 3.14.2** drives each composition's single paused timeline. It is staged into every render from `/opt/media-render/vendor`.
-- **The music library** (S1.6, US-112) at `/opt/media-render/music`: every track named in `music/manifest.json`, fetched at build and checked against its sha256 (see below).
+- **The music library** (S1.6, US-112) at `/opt/media-render/music`: every track named in `music/manifest.json`, checked against its sha256 at build (see below).
+
+### How the image is built
+
+The Dockerfile builds each part in its own stage, and BuildKit runs the stages side by side (PRD-262 US-053). The runtime stage `COPY --link`s each one, so a change to one part rebuilds that part alone, and the other parts' layers keep their digests. A Hyperframes bump, for one, leaves the 354 MB Kokoro layer as it was.
+
+| Stage | What it makes | From |
+|---|---|---|
+| `assets` | the Kokoro files and the music tracks, at `/kokoro/<release>/<file>` and `/music/<id>.<ext>` | `assets-fetch` (see below) |
+| `kokoro` | `/opt/kokoro`, every file checked against `kokoro/SHA256SUMS` | `assets` |
+| `js` | `/opt/media-render/js`: `npm ci --omit=dev` from `js/package-lock.json` | `node` |
+| `chrome` | `/opt/chrome` | `js` (both ways of fetching it run on Node) |
+| `py` | `/opt/venv` and `/opt/espeak`: `uv pip install --require-hashes --no-deps` from `requirements.lock` | `python:3.12-slim`, `uv` |
+| `music` | `/opt/media-render/music`: every track checked against `music/manifest.json` again, then analysed | `py` plus ffmpeg |
+
+**Where the media assets come from.** The `MEDIA_ASSETS` build argument picks the `assets` stage. Its default, `fetch`, is what Railway, compose and CI build: the `assets-fetch` stage downloads the Kokoro files from their GitHub release and the tracks from their source URLs (`media_render/music_build.py --fetch-only`, which checks each sha256), into the same layout the media assets image has. Once that image is published and public, its pinned `FROM ghcr.io/automatosai/automatos-media-assets:<tag>@sha256:<digest> AS assets-image` stage goes in, and `image` becomes the default. Either way the `kokoro` and `music` stages check every file, so a wrong sha256 still fails the build.
+
+**The locks.** `requirements.in` lists the direct Python dependencies, and `requirements.lock` is compiled from it with hashes; the command is at the top of `requirements.in`. `js/package.json` pins Hyperframes, GSAP and `playwright-core` exactly, and `js/package-lock.json` is what `npm ci` installs; refresh it with `npm install --package-lock-only --ignore-scripts` in `js/`. Dependabot proposes updates to both every week (`.github/dependabot.yml`). It rewrites the npm lock itself; for Python it moves the pins in `requirements.in`, and the lock is compiled again by hand on its branch.
+
+**Node's compile cache.** `NODE_COMPILE_CACHE` is `/opt/media-render/node-cache`. The build seeds it by running `hyperframes --version` as the runtime user, so each check, render and snapshot starts the CLI's 10 MB bundle from compiled code.
 
 These Hyperframes settings are switched off in the image. Boot refuses to start without them:
 - `HYPERFRAMES_NO_TELEMETRY`
@@ -93,7 +113,7 @@ loudnorm runs in two passes, and the mix is padded past 3 s for it; `audio.py` s
 
 The image build runs `media_render/music_build.py`:
 1. it checks every track's fields: an attribution must name the title and the artist, and a CC BY track's must name its licence;
-2. it fetches each track from its `url` and compares its sha256 with the manifest's. **A mismatch fails the build**;
+2. it takes each track from the media assets (`--tracks`; the `assets-fetch` stage fetched it from its `url` and checked it first) and compares its sha256 with the manifest's. **A mismatch fails the build**;
 3. it decodes each track with ffmpeg and analyses it with numpy in 0.1 s frames: loudness, the energy below 150 Hz and the 300-3,000 Hz share (PRD-251A stage 3). From them come the cue windows, in track seconds:
    - `breaks`: the bass drops out for 1 s or more, then comes back (a cut lands there);
    - `breakdowns`: the same for 4 s or more;
@@ -122,7 +142,7 @@ Staging and the check run in their own lane, `MEDIA_RENDER_MAX_CONCURRENT_CHECKS
 
 ## The media assets image
 
-`ghcr.io/automatosai/automatos-media-assets` mirrors the Kokoro files and the music tracks in one small image, so a build can copy them from one registry instead of fetching them from GitHub releases and ende.app (PRD-262 US-053). This image's build moves to it in PRD-262 W8, pinned as its own stage (`FROM …automatos-media-assets:<tag>@sha256:… AS assets`). It holds data only, one layer per file:
+`ghcr.io/automatosai/automatos-media-assets` mirrors the Kokoro files and the music tracks in one small image, so a build can copy them from one registry instead of fetching them from GitHub releases and ende.app (PRD-262 US-053). The Dockerfile already reads the files through its `assets` stage, in this image's layout. It moves to the image, pinned as its own stage, once the image is published and public (see "Where the media assets come from" above). It holds data only, one layer per file:
 
 - `/kokoro/<release>/<file>`: the files `kokoro/assets.json` lists, each with its URL, size and sha256. Until the D4 model is picked by ear (PRD-262 US-050), every candidate is there: today's fp32 model, the v1.1 release's fp16 and the v1.0 release's fp16, with `voices-v1.0.bin`;
 - `/music/<id>.<ext>`: every track in `music/manifest.json`, under the name the library gives it;
@@ -181,14 +201,14 @@ All of them are read in `media_render/config.py`.
 ## Tests
 
 Nothing runs on a developer machine. The `media-render` CI job:
-1. builds the image;
+1. builds the image, and reports how long it took. It builds it again from a copy whose only change is the Hyperframes pin, and requires the Kokoro layer to keep its digest and the js layer to change (`scripts/ci/image_layer_digest.py`). It checks that Node's compile cache is seeded and readable by uid 1000;
 2. checks the music library the build wrote against `music/manifest.json` (every track as committed, with cue windows, and Deep House 003's break at 34.0-35.8 s), then builds the image again from a manifest with one wrong sha256 and requires that build to fail (`ci/assert_music.py`);
 3. runs `tests/` inside it: the bundle rules, the queue, the music library and its analysis, and the real `hyperframes check`, ffmpeg mix and Kokoro;
 4. proves the boot assertion and `/health`;
-5. posts the fixture bundle to `POST /render` with the token, timed;
-6. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`);
+5. waits for the background Kokoro load to finish, then posts the fixture bundle to `POST /render` with the token, timed;
+6. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`), and that the voice step, with the model already loaded, took less than 2.394 s; `check_seconds` is reported;
 7. renders the fixture script (`fixtures/script`, US-111) through the API (`ci/render_bundle.py`): its first line is longer than its window and must be fitted, and every script window must carry speech well above the quiet between the lines (`ci/assert_script_windows.py`, on the MP4's audio decoded by the image's ffmpeg);
 8. renders the music fixture (`fixtures/music`, US-112): the MP4's integrated loudness must be -14 ± 1 LUFS, and its report must name Deep House 003 with its CC BY credit line;
 9. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, with its reference track mixed in (the report names it, and the mix measures -14 ± 1 LUFS), and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
 
-The fixture commits no media. Its HTML and its bundle are authored here. GSAP comes from npm at build time, and the voice line is spoken at render time.
+The fixture commits no media. Its HTML and its bundle are authored here. GSAP comes from the `js` stage's locked `npm ci` at build time, and the voice line is spoken at render time.
