@@ -264,7 +264,16 @@ def test_a_look_that_cant_be_carried_is_left_out_and_active_falls_back(db, ink):
     db.add(ThemeLook(workspace_id=WS_A, user_id=ANN[0], theme_id=INK, looks=[MINE, broken, "junk"], active=broken))
     db.commit()
     body = _client(db, _saas(ANN)).get(URL).json()
-    assert (body["looks"], body["active"], body["dropped"], body["defaultLook"]) == ([MINE], None, 3, "plain")
+    # Two looks are lost ("broken" and "junk"); the active one is "broken" again, so it counts once.
+    assert (body["looks"], body["active"], body["dropped"], body["defaultLook"]) == ([MINE], None, 2, "plain")
+
+
+def test_an_active_look_that_isnt_saved_counts_as_its_own_loss(db, ink):
+    lost = {**NIGHT, "id": "lost one"}
+    db.add(ThemeLook(workspace_id=WS_A, user_id=ANN[0], theme_id=INK, looks=[MINE], active=lost))
+    db.commit()
+    body = _client(db, _saas(ANN)).get(URL).json()
+    assert (body["looks"], body["active"], body["dropped"]) == ([MINE], None, 1)
 
 
 def test_a_stored_schema_that_doesnt_match_its_manifest_is_503(db, storage):

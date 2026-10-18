@@ -282,16 +282,30 @@ def carry_look(schema: LookSchema, stored: Any) -> Optional[Dict[str, Any]]:
     return carried if not validate_look(schema, carried) else None
 
 
+def _look_id(look: Any) -> Optional[str]:
+    look_id = look.get("id") if isinstance(look, dict) else None
+    return look_id if isinstance(look_id, str) else None
+
+
 def carry_looks(schema: LookSchema, looks: Any, active: Any) -> StoredLooks:
-    """A stored row's looks as ``schema`` reads them; ``dropped`` counts what couldn't be carried."""
+    """A stored row's looks as ``schema`` reads them; ``dropped`` counts the looks that couldn't be carried.
+
+    Each look counts once: an active look that couldn't be carried and has the id of a saved look
+    already counted is the same look, so it adds nothing.
+    """
     saved = looks if isinstance(looks, list) else []
     kept: List[Dict[str, Any]] = []
+    lost_ids: set = set()
     for look in saved:
         carried = carry_look(schema, look)
         if carried is not None and all(carried["id"] != other["id"] for other in kept):
             kept.append(carried)
+        else:
+            lost_ids.add(_look_id(look))
     carried_active = carry_look(schema, active) if active is not None else None
-    dropped = len(saved) - len(kept) + (1 if active is not None and carried_active is None else 0)
+    active_lost = active is not None and carried_active is None
+    counted = _look_id(active) is not None and _look_id(active) in lost_ids
+    dropped = len(saved) - len(kept) + (1 if active_lost and not counted else 0)
     return StoredLooks(kept, carried_active, dropped)
 
 
