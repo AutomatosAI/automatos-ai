@@ -1,13 +1,15 @@
 /**
  * PRD-261 A-04a (A0 plan §7 Q7) — the page boundary inside a theme's frame: a page that throws
  * draws the core's error UI in its place, with a plain message that never shows the error's text,
- * logs the error, and draws the page again on "Try again".
+ * logs the error, and draws the page again on "Try again". Next's notFound() and redirect() pass
+ * through it to the boundary above, as they do through Next's own.
  */
 import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PAGE_ERROR_TEST_ID, PAGE_ERROR_TEXT, PAGE_ERROR_TITLE, PageBoundary } from '../page-boundary'
+import { OUTER_CAUGHT_TEST_ID, OuterBoundary, ROUTER_ERROR_PAGES } from './next-router-errors'
 
 const SECRET_DETAIL = 'internal detail that must not reach the screen'
 
@@ -49,5 +51,21 @@ describe('PRD-261 A-04a — PageBoundary', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(screen.getByText('page drawn')).toBeInTheDocument()
     expect(screen.queryByTestId(PAGE_ERROR_TEST_ID)).toBeNull()
+  })
+
+  it.each(ROUTER_ERROR_PAGES)("rethrows Next's %s to the boundary above, never drawing its error UI", (_name, Page) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const onCaught = vi.fn()
+    render(
+      <OuterBoundary onCaught={onCaught}>
+        <PageBoundary>
+          <Page />
+        </PageBoundary>
+      </OuterBoundary>,
+    )
+    expect(screen.getByTestId(OUTER_CAUGHT_TEST_ID)).toBeInTheDocument()
+    expect(screen.queryByTestId(PAGE_ERROR_TEST_ID)).toBeNull()
+    expect(onCaught).toHaveBeenCalledWith(expect.objectContaining({ digest: expect.stringMatching(/^NEXT_/) }))
+    expect(error).not.toHaveBeenCalledWith('[theme-host]', 'page', expect.anything())
   })
 })

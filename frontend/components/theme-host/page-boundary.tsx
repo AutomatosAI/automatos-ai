@@ -1,5 +1,6 @@
 'use client'
 
+import { unstable_rethrow } from 'next/navigation'
 import React from 'react'
 
 import { ErrorState } from '@/components/shared/error-state'
@@ -24,7 +25,9 @@ interface State {
  * that throws is the page's failure, not the theme's: the core's error UI draws in the page's
  * place, the frame stays, and the host is never told (no reportRenderFailure), so a broken page
  * never takes the theme down or counts toward the three-failure revert (A-04c). The error goes to
- * the console only; the UI shows a plain message, never the error's text.
+ * the console only; the UI shows a plain message, never the error's text. Next's own control-flow
+ * errors (notFound(), redirect(), a bailout to client rendering) are not the page's failure: they
+ * are rethrown to Next's boundaries above, as Next's own error boundary does.
  */
 export class PageBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
@@ -33,7 +36,8 @@ export class PageBoundary extends React.Component<Props, State> {
     this.retry = this.retry.bind(this)
   }
 
-  static getDerivedStateFromError(): State {
+  static getDerivedStateFromError(error: unknown): State {
+    unstable_rethrow(error)
     return { hasError: true }
   }
 
