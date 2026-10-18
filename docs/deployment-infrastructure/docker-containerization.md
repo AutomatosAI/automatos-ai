@@ -31,6 +31,7 @@ Automatos AI utilizes a distributed container architecture to isolate core platf
 **Key Design Principles:**
 - **Multi-stage builds** to minimize final image size by separating build tools from runtimes [orchestrator/Dockerfile:4-8]().
 - **Production is the last stage.** Railway's config has no target key, so Railway builds each Dockerfile's last stage. `orchestrator/tests/test_prd262_production_last_stage.py` fails CI when a stage follows `production` in any Dockerfile Railway builds.
+- **Pinned, and kept current.** Every `FROM` image and every third-party compose image is pinned as `name:tag@sha256:<digest>`, and every workflow `uses:` as a 40-hex commit. Node reaches an image through a named `FROM … AS node` stage, never a bare `COPY --from=<image>`. Dependabot (`.github/dependabot.yml`) opens one grouped pull request a week per ecosystem. It moves image digests along their tag, so a tag move such as Python 3.12 or Postgres 17 is made by hand. `orchestrator/tests/test_prd262_dependabot.py` and the `action-pins` workflow enforce both.
 - **Service Isolation**: Distinct containers for the Next.js frontend, FastAPI orchestrator, and specialized workers [docker-compose.yml:18-200]().
 - **Non-root execution**: All production images switch to low-privilege users (`automatos` or `nextjs`) [orchestrator/Dockerfile:103-109](), [frontend/Dockerfile:110-112]().
 - **Health Monitoring**: Integrated Docker health checks for automated service recovery [orchestrator/Dockerfile:115-117](), [frontend/Dockerfile:43-45]().
