@@ -371,7 +371,8 @@ def setup_logging(
     # every poll (prod, 23 Sep). The request lines are noise; warnings still show.
     # openai 3.x sends through httpx's fork, httpx2 (with httpcore2), which logs
     # the same request line under its own name: every model call's URL (#1051).
-    for noisy in ("httpx", "httpcore", "httpx2", "httpcore2"):
+    # urllib3 (requests) logs a redirect's full URL at INFO, so it is held too.
+    for noisy in ("httpx", "httpcore", "httpx2", "httpcore2", "urllib3"):
         logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
 
     # Console handler (always present)

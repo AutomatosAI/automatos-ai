@@ -8,7 +8,9 @@ and httpcore at WARNING: request lines are dropped, and warnings still show.
 
 #1051: openai 3.x sends through httpx's fork, httpx2 (with httpcore2), which logs
 the same request line under its own name, so every model call's URL reached the
-logs. Both services' setup_logging now hold the forks at WARNING too.
+logs. Every service's setup_logging (the backend's, and each copy under
+services/) now holds the forks at WARNING too, and urllib3, which logs a
+redirect's full URL at INFO.
 """
 from __future__ import annotations
 
@@ -21,15 +23,24 @@ import pytest
 from core.monitoring.automatos_logging import setup_logging
 
 LINE = 'HTTP Request: POST https://api.telegram.org/bot8300000000:AAtestTOKENvalue/getUpdates "HTTP/1.1 200 OK"'
-GUARDED = ("httpx", "httpcore", "httpx2", "httpcore2")
-WORKER_LOGGING = Path(__file__).resolve().parents[2] / "services" / "workspace-worker" / "automatos_logging.py"
+GUARDED = ("httpx", "httpcore", "httpx2", "httpcore2", "urllib3")
+# Every service's own copy of the logging setup: a new copy is covered without a change here.
+SERVICE_COPIES = sorted((Path(__file__).resolve().parents[2] / "services").glob("*/automatos_logging.py"))
 
 
-def _worker_setup_logging():
-    spec = importlib.util.spec_from_file_location("worker_automatos_logging", WORKER_LOGGING)
+def _setup_logging_of(service: str):
+    """The backend's setup_logging, or the one in services/<service>/automatos_logging.py."""
+    if service == "backend":
+        return setup_logging
+    path = next(p for p in SERVICE_COPIES if p.parent.name == service)
+    spec = importlib.util.spec_from_file_location(f"{service}_automatos_logging", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.setup_logging
+
+
+def test_every_service_copy_is_covered():
+    assert {"workspace-worker", "shared", "media-render", "agent-opt-worker"} <= {p.parent.name for p in SERVICE_COPIES}
 
 
 @pytest.fixture(autouse=True)
@@ -38,11 +49,10 @@ def _fresh_loggers(monkeypatch):
         monkeypatch.setattr(logging.getLogger(name), "level", logging.NOTSET)
 
 
-@pytest.mark.parametrize("service", ["backend", "workspace-worker"])
+@pytest.mark.parametrize("service", ["backend", *(p.parent.name for p in SERVICE_COPIES)])
 @pytest.mark.parametrize("name", GUARDED)
 def test_a_request_line_with_a_token_in_its_url_is_not_logged(caplog, service, name):
-    setup = setup_logging if service == "backend" else _worker_setup_logging()
-    setup(service="test", level=logging.INFO, enable_relay=False)
+    _setup_logging_of(service)(service="test", level=logging.INFO, enable_relay=False)
     with caplog.at_level(logging.INFO):
         logging.getLogger(name).info(LINE)
     assert "AAtestTOKENvalue" not in caplog.text

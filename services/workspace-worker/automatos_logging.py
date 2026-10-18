@@ -290,7 +290,8 @@ def setup_logging(
     # and httpcore at WARNING, as the backend does (orchestrator/core/monitoring/
     # automatos_logging.py, 23 Sep), and their forks httpx2 and httpcore2, which
     # openai 3.x sends through and which log the same request line (#1051).
-    for noisy in ("httpx", "httpcore", "httpx2", "httpcore2"):
+    # urllib3 logs a redirect's full URL at INFO, so it is held too.
+    for noisy in ("httpx", "httpcore", "httpx2", "httpcore2", "urllib3"):
         logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
 
     # Console handler (always)
