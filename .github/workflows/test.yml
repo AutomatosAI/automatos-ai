@@ -86,10 +86,10 @@ jobs:
           BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests and the frontend's install config (.npmrc, PRD-262 US-047), the
-          # frontend edition literal, the worker image; and the script that boots the
-          # frontend builds (PRD-262 US-046).
+          # frontend edition literal, the worker image; and the scripts that check the
+          # frontend builds (PRD-262 US-046, US-048).
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|\.npmrc|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts|scripts/check-standalone-image\.sh)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|\.npmrc|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts|scripts/check-(standalone-image|layer-reuse)\.sh)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -1012,6 +1012,24 @@ jobs:
             echo "::error::npm ci ran again for a build that changed only build args"; exit 1
           fi
           echo "npm ci: CACHED ($step)"
+      # PRD-262 US-048: the runtime's app layers go node_modules, public, .next/static, server,
+      # and BuildKit keys a COPY on its files' content. The local build has the SaaS build's lock
+      # and public/ files and a different bundle, so it reuses every layer up to public and makes
+      # its own server layer (frontend/scripts/check-layer-reuse.sh).
+      - name: Frontend — the local build reuses the SaaS build's node_modules and public layers
+        run: bash frontend/scripts/check-layer-reuse.sh parity-fe parity-fe-local
+      # PRD-262 US-048: frontend/.dockerignore keeps tests, docs and tsconfig.tsbuildinfo out of
+      # the build context. The development stage is the install plus `COPY . .`, so its /app
+      # outside node_modules is the context exactly as the builder copies it.
+      - name: Frontend — the build context leaves out tests, docs and tsconfig.tsbuildinfo
+        run: |
+          docker build --target development -t parity-fe-context frontend/
+          found=$(docker run --rm parity-fe-context sh -c 'find /app -path /app/node_modules -prune -o \( -name __tests__ -o -name "*.test.*" -o -name "*.md" -o -name tsconfig.tsbuildinfo \) -print')
+          if [ -n "$found" ]; then
+            echo "$found" | head -n 20
+            echo "::error::the frontend build context carries files frontend/.dockerignore leaves out"; exit 1
+          fi
+          echo "no tests, docs or tsconfig.tsbuildinfo in the build context"
       - name: Backend — graph extras present with no args
         run: |
           docker build --target production -t parity-be orchestrator/
