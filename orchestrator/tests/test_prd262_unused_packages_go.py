@@ -5,7 +5,8 @@ package; the Postgres extension stays) and scikit-learn left requirements.txt. T
 Dockerfile's separate `--no-deps futureagi==0.6.0` install, a PRD-58 leftover, went
 too: the API calls agent-opt-worker over HTTP and never imports futureagi (its module
 is `fi`). Railway's [leiden] build still gets scikit-learn through graspologic until
-US-027. This suite checks:
+US-027. US-018 removed gotenberg-client with the Gotenberg sidecar and its only client,
+ConversionService, which nothing called. This suite checks:
 
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
@@ -56,6 +57,7 @@ FORBIDDEN_IMPORTS = {
     "pgvector": "pgvector",
     "sklearn": "scikit-learn",
     "fi": "futureagi",
+    "gotenberg_client": "gotenberg-client",  # US-018
 }
 # Distributions no image installs: the ones above plus python-jose's closure.
 REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa"}
