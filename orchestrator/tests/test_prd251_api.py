@@ -183,8 +183,7 @@ def _approved(api, **body):
 
 def _router_routes():
     out = []
-    # The routes of the routers included in this one too (FastAPI 0.137+ keeps those as tree nodes).
-    for route in iter_route_contexts(socials_api.router.routes):
+    for route in iter_route_contexts(socials_api.router.routes):  # with the routers it includes (FastAPI 0.137+)
         if isinstance(route.original_route, APIRoute):
             for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
                 out.append((method, route.path))
