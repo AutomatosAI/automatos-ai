@@ -75,6 +75,25 @@ RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then \
 RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-debug {} + && \
     find /install -type d -name tests -path '*/site-packages/*' -prune -exec rm -rf {} +
 
+# botocore keeps the models of the services we call, and no others (PRD-262 US-021).
+# botocore/data holds one for every AWS service, 437 directories and about 18.6 MB.
+# The app builds s3, s3vectors and bedrock-runtime clients; botocore's credential
+# providers build sts (assumed roles, web identity), sso and sso-oidc (an SSO profile).
+# The top-level files (endpoints, partitions, retry and default configuration) stay.
+# A kept service missing from the install fails the build before anything goes. Any
+# other client raises UnknownServiceError: test_prd262_botocore_services.py fails when
+# code in orchestrator/ names one, and CI builds each kept client inside the image
+# (scripts/ci/image_botocore.py).
+RUN keep="s3 s3vectors bedrock-runtime sts sso sso-oidc" && \
+    data=/install/lib/python3.11/site-packages/botocore/data && \
+    for service in $keep; do \
+        test -d "$data/$service" || { echo "botocore/data has no $service" >&2; exit 1; }; \
+    done && \
+    for dir in "$data"/*/; do \
+        name=$(basename "$dir"); \
+        case " $keep " in *" $name "*) ;; *) rm -rf "$dir" || exit 1 ;; esac; \
+    done
+
 # -----------------------------------------------------------------------------
 # Base — RUNTIME dependencies only
 # -----------------------------------------------------------------------------
