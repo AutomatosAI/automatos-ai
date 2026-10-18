@@ -100,18 +100,18 @@ The frontend utilizes a 4-stage build process to handle Next.js static generatio
 
 | Stage | Description | Key Files / Commands |
 | :--- | :--- | :--- |
-| **base** | `node:24-alpine3.24`, pinned by tag and digest. No apk build tools: every native package ships a prebuilt binary | `package.json` [frontend/Dockerfile:11-25]() |
-| **development** | Hot-reload dev server, installs all dependencies including devDependencies | `npm install --legacy-peer-deps`, `npm run dev` [frontend/Dockerfile:27-47]() |
-| **builder** | Production build stage, installs all dependencies, copies source, runs `npm run build` | `npm install --legacy-peer-deps`, `npm run build` [frontend/Dockerfile:49-101]() |
-| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. `apk upgrade` runs in the same layer, so the weekly uncached rebuild takes Alpine's fixes. Copies the standalone build, creates the `nextjs` user, runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:103-145]() |
+| **base** | `node:24-alpine3.24`, pinned by tag and digest. No apk build tools: every native package ships a prebuilt binary. Installs every dependency once with `npm ci`, from `package.json`, `package-lock.json` and `.npmrc` alone (`.npmrc` sets `legacy-peer-deps`, as it does for frontend-ci) | `npm ci --no-audit --no-fund` [frontend/Dockerfile:11-32]() |
+| **development** | Hot-reload dev server on base's install | `npm run dev` [frontend/Dockerfile:34-50]() |
+| **builder** | Production build stage on base's install: copies the source, then reads the `NEXT_PUBLIC_*` build args, then runs `npm run build` and deletes `.next/cache` in the same layer | `npm run build` [frontend/Dockerfile:52-104]() |
+| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. `apk upgrade` runs in the same layer, so the weekly uncached rebuild takes Alpine's fixes. Copies the standalone build, creates the `nextjs` user, runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:106-149]() |
 
 ### Build-time Environment Variables
-Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:57-70](). The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:58-65]().
+Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:67-99](). They are declared after the dependency install and the source copy, so changing one rebuilds only the bundle and reuses the `npm ci` layer. The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:71-88]().
 
 ### Cache Invalidation
-A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:90-95]().
+A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:57-62](). The Dockerfile has no BuildKit cache mount: Railway fails a cache mount whose id lacks the service's id, and the frontend service's id is not known yet.
 
-Sources: [frontend/Dockerfile:1-145]()
+Sources: [frontend/Dockerfile:1-149]()
 
 ## 3. Worker Services & Auth (PRD-203)
 

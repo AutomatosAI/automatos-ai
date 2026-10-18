@@ -2,7 +2,7 @@
 # Automatos AI - Frontend Dockerfile (Multi-stage)
 # =============================================================================
 # Stages:
-#   - base: Node 24 on Alpine, with the package files
+#   - base: Node 24 on Alpine, with the locked dependencies installed (npm ci)
 #   - development: Hot-reload development server
 #   - builder: Production build
 #   - production: Alpine, the node binary and the standalone build
@@ -21,17 +21,20 @@ FROM node:24-alpine3.24@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba
 
 WORKDIR /app
 
-# Copy package files (Dockerfile is in frontend/, so copy from current dir)
-COPY package*.json ./
+# No Next.js usage telemetry from the build or the dev server.
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# PRD-262 US-047: install once, from the lock and the install config alone (.npmrc sets
+# legacy-peer-deps, as it does for frontend-ci), so no source or public-setting change
+# reinstalls the dependencies. No BuildKit cache mount: Railway builds this file and
+# fails a cache mount whose id lacks the frontend service's id, which is not known yet.
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --no-audit --no-fund
 
 # =============================================================================
 # Development Stage - Hot Reload
 # =============================================================================
 FROM base AS development
-
-# Install all dependencies (including devDependencies)
-# Use npm install instead of npm ci for development (more forgiving with lock file)
-RUN npm install --legacy-peer-deps
 
 # Copy source code (Dockerfile is in frontend/, so copy from current dir)
 COPY . .
@@ -51,7 +54,18 @@ CMD ["npm", "run", "dev"]
 # =============================================================================
 FROM base AS builder
 
-# Accept build arguments for environment variables
+# Cache bust marker — bump this value (or pass --build-arg FRONTEND_CACHE_BUST=...)
+# to force a clean rebuild of the COPY + npm run build layers. Used when
+# Railway's Docker layer cache produces stale or inconsistent output, e.g.
+# .next/static missing chunks the standalone server HTML references.
+ARG FRONTEND_CACHE_BUST=2026-05-28T13-00-00Z
+RUN echo "Frontend cache bust: $FRONTEND_CACHE_BUST"
+
+# Copy source code (Dockerfile is in frontend/, so copy from current dir)
+COPY . .
+
+# Accept build arguments for environment variables. PRD-262 US-047: they come after the
+# install and the source copy, so changing one rebuilds only the bundle.
 # NOTE: NEXT_PUBLIC_* variables are embedded in the client bundle and must NOT contain secrets
 # API keys should be handled server-side only (see frontend/app/api/chat/route.ts)
 ARG NEXT_PUBLIC_API_URL
@@ -84,21 +98,10 @@ ENV NEXT_PUBLIC_MEDIA_ORIGINS=${NEXT_PUBLIC_MEDIA_ORIGINS}
 ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL}
 ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL}
 
-# Install ALL dependencies (including devDependencies for build)
-RUN npm install --legacy-peer-deps
-
-# Cache bust marker — bump this value (or pass --build-arg FRONTEND_CACHE_BUST=...)
-# to force a clean rebuild of the COPY + npm run build layers. Used when
-# Railway's Docker layer cache produces stale or inconsistent output, e.g.
-# .next/static missing chunks the standalone server HTML references.
-ARG FRONTEND_CACHE_BUST=2026-05-28T13-00-00Z
-RUN echo "Frontend cache bust: $FRONTEND_CACHE_BUST"
-
-# Copy source code (Dockerfile is in frontend/, so copy from current dir)
-COPY . .
-
-# Build application (NEXT_PUBLIC_* vars will be baked into the bundle)
-RUN npm run build
+# Build application (NEXT_PUBLIC_* vars will be baked into the bundle). The same RUN deletes
+# webpack's cache, which would otherwise ride in this layer (and the CI layer cache) until a
+# .next/cache mount can replace it, once Railway's frontend service id is known.
+RUN npm run build && rm -rf .next/cache
 
 # =============================================================================
 # Production Stage - Optimized (Next.js standalone)
