@@ -29,8 +29,9 @@ Commands:
                                  speak the script with one model (INSIDE the image)
   summary --out DIR              the job summary's table, in Markdown (runner, stdlib)
 
-ci/ is not in the image (.dockerignore). The job mounts it read-only, so the image
-it measures is exactly the one Railway builds.
+ci/ is not in the image (.dockerignore). listening_test.sh, which media-render.yml
+runs and a machine that builds locally runs the same way, mounts it read-only, so
+the image it measures is exactly the one Railway builds.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
 import sys
 import time
 from pathlib import Path
@@ -175,6 +177,8 @@ def _report(chosen: Candidate, path: Path, script: Script, timings: Mapping[str,
         "bytes": path.stat().st_size,
         "sha256": chosen.sha256,
         "pauses": dict(chosen.pauses),
+        # A laptop's arm64 run times fp16 on other kernels than Railway's x86_64.
+        "machine": platform.machine(),
         "script": {
             "lines": [line_id for line_id, _ in script.lines],
             "voice": script.voice,
@@ -249,7 +253,8 @@ def summary(reports: Sequence[Mapping[str, Any]]) -> str:
         "### US-050 listening test (PRD-262 D4): fp32 against the two fp16 Kokoro models",
         "",
         f"The script-window step's script (`fixture-bundle script`): lines {', '.join(script['lines'])}, "
-        f"voice {script['voice']}, speed {script['speed']:g}, {script['lang']}.",
+        f"voice {script['voice']}, speed {script['speed']:g}, {script['lang']}. Spoken on {fp32['machine']} "
+        "(Railway runs x86_64: timings from another machine are not production's).",
         "",
         "| Model | Release file | MB | sha256 | `create()` pauses | Load s | voice_seconds | vs fp32 "
         "| Warm s | Spoken s (vs fp32) |",
