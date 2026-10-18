@@ -116,12 +116,13 @@ def test_a_postgres_detail_never_leaves_in_a_status(provider):
     assert _leaks(finished()) == []
 
 
-def test_a_short_type_status_and_other_events_are_kept(provider):
+def test_a_status_naming_the_spans_error_type_and_other_events_are_kept(provider):
     from opentelemetry.trace import Status, StatusCode
 
     built, finished = provider
     tracer = built.get_tracer("t")
-    with tracer.start_as_current_span("invoke_agent Auto") as span:
+    with tracer.start_as_current_span("invoke_agent Auto") as span:   # as genai.py marks a failed run
+        span.set_attribute("error.type", "agent_error")
         span.set_status(Status(StatusCode.ERROR, "agent_error"))
         span.add_event("retry", {"attempt": 2})
     with tracer.start_as_current_span("chat gpt-test") as span:
@@ -130,6 +131,25 @@ def test_a_short_type_status_and_other_events_are_kept(provider):
     assert agent.status.description == "agent_error"
     assert [(e.name, dict(e.attributes)) for e in agent.events] == [("retry", {"attempt": 2})]
     assert chat.status.status_code == StatusCode.UNSET and chat.attributes["gen_ai.usage.input_tokens"] == 120
+
+
+def test_a_status_that_only_looks_like_a_type_never_leaves(provider):
+    from opentelemetry.trace import Status, StatusCode
+
+    built, finished = provider
+    with built.get_tracer("t").start_as_current_span("GET /files", record_exception=False) as span:
+        span.set_status(Status(StatusCode.ERROR, f"{SECRET}.xlsx"))
+    [exported] = finished()
+    assert exported.status.status_code == StatusCode.ERROR and exported.status.description is None
+
+
+def test_an_exception_event_keeps_only_its_type_whatever_the_caller_added(provider):
+    built, finished = provider
+    with built.get_tracer("t").start_as_current_span("POST /api/chat", record_exception=False) as span:
+        span.record_exception(ValueError(SECRET), attributes={"detail": SECRET, "user": f"{SECRET}@bank.example"})
+    [exception] = finished()[0].events
+    assert set(exception.attributes) == {"exception.type", "exception.escaped"}
+    assert _leaks(finished()) == []
 
 
 def test_a_span_that_cannot_be_rewritten_is_dropped_not_sent(provider, monkeypatch):
