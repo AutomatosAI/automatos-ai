@@ -19,7 +19,28 @@ import { buildCoreNav } from '../internal/core-nav'
 import { isExternalHref, isInternalHref } from '../internal/href'
 import { HostLink, resolveActiveNavId, useHostPathname, useHostRouter } from '../navigation'
 
-const REFUSED = ['//evil.example', '/\\evil.example', 'javascript:alert(1)', 'http://plain.example', 'chat', '', ' /chat']
+const REFUSED = [
+  '//evil.example',
+  '/\\evil.example',
+  'javascript:alert(1)',
+  'http://plain.example',
+  'chat',
+  '',
+  ' /chat',
+  // A browser strips tab/LF/CR, so '/\t/evil.com' is '//evil.com'; backslash or space anywhere too.
+  '/\t/evil.com',
+  '/\n/evil.com',
+  '/\r\\evil.com',
+  '/ /x',
+  '/a\\b',
+  '/chat\u0000',
+  '/chat\u007f',
+]
+const REFUSED_EXTERNAL = [
+  'https://docs.automatos.app/\tx',
+  'https://docs.automatos.app/ x',
+  'https://docs\u007f.app',
+]
 
 afterEach(() => {
   Object.values(nav.router).forEach((fn) => fn.mockClear())
@@ -34,6 +55,10 @@ describe('PRD-261 A-10a — hrefs', () => {
 
   it.each(REFUSED)('refuses %j as a path inside the app', (href) => {
     expect(isInternalHref(href)).toBe(false)
+  })
+
+  it.each(REFUSED_EXTERNAL)('refuses %j as an https link out', (href) => {
+    expect(isExternalHref(href)).toBe(false)
   })
 })
 
