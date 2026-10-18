@@ -34,6 +34,9 @@ name: images
 #   .github/image-budgets.json (scripts/ci/image_report.py, PRD-262 US-001).
 #   The report job adds the layers the API and the worker share and the app
 #   images' first pull.
+# - Each API build is pulled back by digest, and every native library in its
+#   site-packages must load and `import main` must work, on both arches
+#   (scripts/ci/image_site_packages.py, PRD-262 US-020).
 # - The weekly OS rebuild (PRD-262 US-011): every Monday at 05:00 UTC a schedule
 #   run rebuilds each image's `no_cache_filters` stages (those whose apt or apk
 #   packages ship) without the cache, so Debian and Alpine fixes reach the
@@ -448,7 +451,7 @@ jobs:
       # PRD-262 US-014: the API's production stage compiles the stdlib once, as
       # root. In the layer listing above, the layer that RUN made holds stdlib
       # .pyc files and no path under site-packages, whose bytecode comes only
-      # from pybuild. Last in the job, so the reports and the scan run first.
+      # from pybuild. After the reports and the scan, so they run first.
       - name: The stdlib bytecode layer
         if: matrix.name == 'api'
         env:
@@ -457,6 +460,27 @@ jobs:
           python3 scripts/ci/image_report.py layer --report "$REPORT" --instruction compileall \
             --under usr/local/lib/python3.11/ --not-under usr/local/lib/python3.11/site-packages/ \
             --suffix .pyc --summary "$GITHUB_STEP_SUMMARY"
+
+      # PRD-262 US-020: pybuild strips the debug sections from site-packages'
+      # compiled libraries and deletes its tests/ directories. In the image this
+      # job pushed, on this arch, every file the strip touched still loads (an
+      # extension module is imported, any other library opened with ctypes), none
+      # keeps a .debug_* section, numpy's, SQLAlchemy's and alembic's testing
+      # packages stay, and `import main` works (scripts/ci/image_site_packages.py,
+      # which lists the failures the image has always had, each with its reason).
+      # It pulls the digest, from the job's registry on a pull request, and runs
+      # whenever the build pushed one, even after a failed check above, so one red
+      # step never hides this one. On main a failure leaves the digest untagged and
+      # unsigned, as a failed scan does. test.yml's prod-image-parity runs the same
+      # check on the Railway build.
+      - name: Every native library in site-packages loads, without debug info
+        if: ${{ !cancelled() && matrix.name == 'api' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_site_packages.py
 
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build

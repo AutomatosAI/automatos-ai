@@ -87,10 +87,11 @@ jobs:
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests, the frontend edition literal, the worker image; the scripts
           # that look inside them (packages, system tools, the Helvetica render, the
-          # test image), the one that reads the API's build context off its log, and
+          # test image, site-packages' native libraries), the one that reads the API's
+          # build context off its log, and
           # the clone tests the test image runs.
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -1017,6 +1018,15 @@ jobs:
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
+      # PRD-262 US-020: pybuild strips the debug sections from site-packages' compiled
+      # libraries and deletes its tests/ directories. Every file the strip touched still
+      # loads (an extension module is imported, any other library opened with ctypes), none
+      # keeps a .debug_* section, numpy's, SQLAlchemy's and alembic's testing packages stay,
+      # and `import main` works (scripts/ci/image_site_packages.py, which lists the failures
+      # this build has always had, each with its reason). This is the Railway build
+      # ([leiden]); images.yml runs the same check on the GHCR build, on both arches.
+      - name: Backend — every native library in site-packages loads, without debug info
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_site_packages.py
       # PRD-262 US-016: the code is copied in owned by the automatos user (uid and
       # gid 1000) instead of through a `chown -R /app` layer, and /app and the
       # directories the named volumes mount on are the user's own, so the app writes
