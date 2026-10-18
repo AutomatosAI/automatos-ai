@@ -152,6 +152,25 @@ def test_an_exception_event_keeps_only_its_type_whatever_the_caller_added(provid
     assert _leaks(finished()) == []
 
 
+def test_a_rewritten_span_still_reports_what_the_sdk_dropped():
+    from opentelemetry.sdk.trace import SpanLimits, TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.trace import Link, SpanContext
+
+    memory = InMemorySpanExporter()
+    limits = SpanLimits(max_span_attributes=1, max_events=1, max_links=1)
+    built = TracerProvider(span_limits=limits)
+    built.add_span_processor(SimpleSpanProcessor(otel.type_only_exporter(memory)))
+    linked = [Link(SpanContext(1, n, False)) for n in (1, 2)]
+    with built.get_tracer("t").start_as_current_span("GET /x", attributes={"a": 1, "b": 2}, links=linked) as span:
+        for n in range(3):
+            span.add_event(f"e{n}")
+    [exported] = memory.get_finished_spans()
+    assert (exported.dropped_attributes, exported.dropped_events, exported.dropped_links) == (1, 2, 1)
+    built.shutdown()
+
+
 def test_a_span_that_cannot_be_rewritten_is_dropped_not_sent(provider, monkeypatch):
     built, finished = provider
 

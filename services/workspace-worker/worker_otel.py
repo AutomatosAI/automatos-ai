@@ -60,7 +60,9 @@ def otlp_headers(raw: str) -> Dict[str, str]:
 
 
 def build_provider(exporter: Any) -> Any:
-    """This service's provider: its resource, a parent-based ratio sampler, batched export."""
+    """This service's provider: its resource, a parent-based ratio sampler, batched export.
+    There is no export-time rewrite as the API has (#1107): ``_traced`` is the only source
+    of spans here and records an error as its type. Add an instrumentation, add the rewrite."""
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor

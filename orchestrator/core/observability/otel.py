@@ -33,6 +33,7 @@ The rules, from the issue:
 """
 from __future__ import annotations
 
+import functools
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
@@ -240,6 +241,42 @@ def _failed_type(events: Any, attributes: Any, description: str) -> str:
     return description if error_type and description == str(error_type) else ""
 
 
+@functools.cache
+def _rewritten_span_type() -> Any:
+    """A ``ReadableSpan`` that still reports what the SDK dropped from the original (its
+    span limits): a span built from plain values would claim nothing was dropped."""
+    from opentelemetry.sdk.trace import ReadableSpan
+
+    class RewrittenSpan(ReadableSpan):
+        def __init__(self, original: Any, **fields: Any) -> None:
+            super().__init__(**fields)
+            self._original = original
+
+        @property
+        def dropped_attributes(self) -> int:
+            return self._original.dropped_attributes
+
+        @property
+        def dropped_events(self) -> int:
+            return self._original.dropped_events
+
+        @property
+        def dropped_links(self) -> int:
+            return self._original.dropped_links
+
+    return RewrittenSpan
+
+
+def _type_only_event(event: Any) -> Any:
+    """An ``exception`` event with only its type (``EXCEPTION_KEPT``); any other event as is."""
+    from opentelemetry.sdk.trace import Event
+
+    if event.name != "exception":
+        return event
+    kept = {key: value for key, value in (event.attributes or {}).items() if key in EXCEPTION_KEPT}
+    return Event(event.name, kept, event.timestamp)
+
+
 def error_type_only(span: Any) -> Any:
     """``span`` as exported: an error keeps its type, never its text (#1107).
 
@@ -250,20 +287,16 @@ def error_type_only(span: Any) -> Any:
     customer's data or a file name, so no span carries it (Principle 5): exception
     events keep ``exception.type``, and an ERROR status names only the type. The whole
     exception is in the logs, which carry the same ``trace_id`` (O5)."""
-    from opentelemetry.sdk.trace import Event, ReadableSpan
     from opentelemetry.trace import Status
 
-    events = tuple(
-        Event(event.name, {k: v for k, v in (event.attributes or {}).items() if k in EXCEPTION_KEPT},
-              event.timestamp) if event.name == "exception" else event
-        for event in span.events)
+    events = tuple(_type_only_event(event) for event in span.events)
     status = span.status
     if status.description:
         status = Status(status.status_code, _failed_type(events, span.attributes, status.description) or None)
-    return ReadableSpan(name=span.name, context=span.context, parent=span.parent, resource=span.resource,
-                        attributes=span.attributes, events=events, links=span.links, kind=span.kind,
-                        status=status, start_time=span.start_time, end_time=span.end_time,
-                        instrumentation_scope=span.instrumentation_scope)
+    return _rewritten_span_type()(span, name=span.name, context=span.context, parent=span.parent, resource=span.resource,
+                                  attributes=span.attributes, events=events, links=span.links, kind=span.kind,
+                                  status=status, start_time=span.start_time, end_time=span.end_time,
+                                  instrumentation_scope=span.instrumentation_scope)
 
 
 def type_only_exporter(exporter: Any) -> Any:
