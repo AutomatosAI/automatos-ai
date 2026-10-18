@@ -1,3 +1,7 @@
+# syntax=docker/dockerfile:1
+# PRD-262 US-045: the syntax line builds this file with the current 1.x Dockerfile
+# frontend, which knows HEALTHCHECK --start-interval (below). Docker Engine 24's
+# built-in frontend (BuildKit 0.11) rejects that flag.
 # PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
 # It gets its own stage so the tag@digest pin sits on a FROM line, which is the
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
@@ -158,9 +162,10 @@ COPY --from=locks /locks/sdk.lock /opt/worker-locks/
 RUN uv pip install --system --no-cache --compile-bytecode --require-hashes --no-deps \
     -r /opt/worker-locks/sdk.lock
 
-# Entrypoint fixes volume ownership then drops to worker user
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# Entrypoint fixes volume ownership then drops to worker user. --chmod sets the mode
+# in the copy itself; a separate chmod RUN published an empty layer, since git already
+# carries the exec bit (PRD-262 US-045).
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Environment defaults
 ENV WORKSPACE_VOLUME_PATH=/workspaces
@@ -174,7 +179,11 @@ ENV PYTHONPATH=/app
 # observability), last and worker-owned: a code change rebuilds only this layer.
 COPY --chown=1000:1000 . .
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# While the worker starts, Docker probes every 2 s instead of waiting a whole interval,
+# so it reports healthy within seconds of the health server listening (PRD-262
+# US-045). A compose healthcheck that sets no start_interval keeps this one: Docker
+# fills each unset field from the image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=2s --retries=3 \
     CMD curl -f http://localhost:8081/health || exit 1
 
 EXPOSE 8081
