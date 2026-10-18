@@ -1481,6 +1481,9 @@ class Config:
     FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
     # PRD-176 F068: local-safe default (SaaS sets the railway worker host via env).
     AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://localhost:8080")
+    # PRD-262 US-006: sent as X-Internal-Token on every worker call. It must match the
+    # worker's own AGENT_OPT_WORKER_TOKEN, which the worker refuses to start without.
+    AGENT_OPT_WORKER_TOKEN: str = os.getenv("AGENT_OPT_WORKER_TOKEN", "").strip()
 
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
