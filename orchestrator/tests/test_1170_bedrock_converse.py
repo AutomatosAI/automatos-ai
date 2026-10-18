@@ -23,7 +23,7 @@ from core.llm.clients.bedrock_client import BedrockProvider
 
 NOVA = "amazon.nova-pro-v1:0"
 OPUS = "anthropic.claude-opus-5-5"
-API_KEY = "ABSKQmVkcm9ja0FQSUtleS1leGFtcGxlLWtleQ=="   # the shape of a long-term Bedrock API key; not a real one
+API_KEY = "ABSK-fake-long-term"   # a fake long-term Bedrock API key (real ones start ABSK)
 
 
 class _Raw:
@@ -158,12 +158,12 @@ def test_a_newer_claude_gets_no_temperature_and_a_cut_off_answer_is_length():
 
 def test_a_bedrock_api_key_is_a_bearer_token_of_this_provider_alone():
     first, seen_first = _bedrock(api_key=API_KEY)
-    second, seen_second = _bedrock(api_key="bedrock-api-key-c2hvcnQtdGVybQ==")
+    second, seen_second = _bedrock(api_key="bedrock-api-key-fake")
     first.generate_response_sync([{"role": "user", "content": "hi"}])
     second.generate_response_sync([{"role": "user", "content": "hi"}])
     first.generate_response_sync([{"role": "user", "content": "hi"}])
     assert [r.headers["Authorization"].decode() for r in seen_first + seen_second] == [
-        f"Bearer {API_KEY}", f"Bearer {API_KEY}", "Bearer bedrock-api-key-c2hvcnQtdGVybQ=="]
+        f"Bearer {API_KEY}", f"Bearer {API_KEY}", "Bearer bedrock-api-key-fake"]
     assert "X-Amz-Date" not in seen_first[0].headers   # not SigV4
 
 
