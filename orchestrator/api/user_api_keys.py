@@ -166,7 +166,8 @@ def _check_google(_provider: str, raw_key: str, _base_url: Optional[str], _works
     """A models-list call with this key's own client, never a process-wide one (#1169)."""
     from core.llm.clients.google_client import gemini_client
 
-    gemini_client(raw_key).models.list()
+    with gemini_client(raw_key) as client:
+        client.models.list()
     return KEY_VALID
 
 

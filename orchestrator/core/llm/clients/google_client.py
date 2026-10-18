@@ -26,8 +26,13 @@ logger = logging.getLogger(__name__)
 
 # Gemini's turn roles; a tool turn has no Gemini equivalent here and is left out, as before.
 _ROLES = {"user": "user", "assistant": "model"}
-# Gemini's finish reasons, named as the other providers name them (the tool loop reads "length").
-_FINISH_REASONS = {"STOP": "stop", "MAX_TOKENS": "length"}
+# Gemini's finish reasons, named as the other providers name them (the tool loop reads "length";
+# an answer withheld for its content is OpenAI's "content_filter", not an empty "stop").
+_CONTENT_FILTER = "content_filter"
+_FINISH_REASONS = {
+    "STOP": "stop", "MAX_TOKENS": "length",
+    **dict.fromkeys(("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"), _CONTENT_FILTER),
+}
 _NOT_CONFIGURED = (
     "Google API key not configured. Cannot generate response. "
     "Please configure 'development_google' credential or set GOOGLE_API_KEY env var."
@@ -72,10 +77,18 @@ def _finish_reason(reason: Any) -> Optional[str]:
     return _FINISH_REASONS.get(name, str(name).lower()) if name else None
 
 
+def _why_it_stopped(response: Any) -> Optional[str]:
+    """Why Gemini stopped: its candidate's finish reason, or "content_filter" when it
+    refused the prompt itself (no candidate, a ``block_reason`` instead)."""
+    if response.prompt_feedback and response.prompt_feedback.block_reason:
+        return _CONTENT_FILTER
+    candidates = response.candidates or []
+    return _finish_reason(candidates[0].finish_reason) if candidates else None
+
+
 def _llm_response(response: Any, model: str) -> LLMResponse:
     """The platform's response from Gemini's: text, token usage and why it stopped."""
     usage = response.usage_metadata
-    candidates = response.candidates or []
     return LLMResponse(
         content=response.text or "",
         usage={
@@ -85,7 +98,7 @@ def _llm_response(response: Any, model: str) -> LLMResponse:
         } if usage else None,
         model=model,
         provider="google",
-        finish_reason=_finish_reason(candidates[0].finish_reason) if candidates else None,
+        finish_reason=_why_it_stopped(response),
     )
 
 

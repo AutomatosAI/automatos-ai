@@ -79,6 +79,24 @@ def test_a_truncated_answer_is_length_as_the_tool_loop_reads_it(gemini):
     assert _provider("key-a").generate_response_sync([{"role": "user", "content": "Go on"}]).finish_reason == "length"
 
 
+def test_a_withheld_answer_is_content_filter_not_an_empty_stop(gemini):
+    _, reply = gemini
+    reply["body"] = {"promptFeedback": {"blockReason": "SAFETY"}}
+    blocked = _provider("key-a").generate_response_sync([{"role": "user", "content": "…"}])
+    assert (blocked.content, blocked.finish_reason) == ("", "content_filter")
+    reply["body"] = _answer("SAFETY")
+    assert _provider("key-a").generate_response_sync([{"role": "user", "content": "…"}]).finish_reason == "content_filter"
+
+
+def test_the_key_given_wins_over_the_environment(gemini, monkeypatch):
+    seen, _ = gemini
+    monkeypatch.setenv("GOOGLE_API_KEY", "key-from-env")
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    _provider("key-a").generate_response_sync([{"role": "user", "content": "hi"}])
+    assert seen[0].url.host == "generativelanguage.googleapis.com"
+    assert seen[0].headers["x-goog-api-key"] == "key-a"
+
+
 def test_each_workspaces_key_goes_out_on_its_own_calls(gemini):
     seen, _ = gemini
     first, second = _provider("key-workspace-a"), _provider("key-workspace-b")
