@@ -23,22 +23,22 @@ Every version is pinned. The build records them in `/opt/media-render/versions.j
   - on amd64, the build Hyperframes manages;
   - on arm64, the headless shell of the `playwright-core` that `js/package-lock.json` pins.
 - **ffmpeg** encodes the video and makes the mix.
-- **Kokoro v1.0** runs through `kokoro-onnx`. The model and voices files come from the media assets (see below) and are checked against `kokoro/SHA256SUMS`. The service loads the model in a background thread once it is listening, so `/health` answers at once and the first render does not wait for the load.
+- **Kokoro v1.0** runs through `kokoro-onnx`. The model and voices files come from the media assets (see below) and are checked against `kokoro/SHA256SUMS`. The voices file then keeps the 27 English voices the platform offers, and espeak-ng keeps its English dictionary alone (see "The voices and languages" below). The service loads the model in a background thread once it is listening, so `/health` answers at once and the first render does not wait for the load.
 - **The Python packages** are installed into `/opt/venv` from `requirements.lock`, every one hash-checked.
 - **GSAP 3.14.2** drives each composition's single paused timeline. It is staged into every render from `/opt/media-render/vendor`.
 - **The music library** (S1.6, US-112) at `/opt/media-render/music`: every track named in `music/manifest.json`, checked against its sha256 at build (see below).
 
 ### How the image is built
 
-The Dockerfile builds each part in its own stage, and BuildKit runs the stages side by side (PRD-262 US-053). The runtime stage `COPY --link`s each one, so a change to one part rebuilds that part alone, and the other parts' layers keep their digests. A Hyperframes bump, for one, leaves the 354 MB Kokoro layer as it was.
+The Dockerfile builds each part in its own stage, and BuildKit runs the stages side by side (PRD-262 US-053). The runtime stage `COPY --link`s each one, so a change to one part rebuilds that part alone, and the other parts' layers keep their digests. A Hyperframes bump, for one, leaves the 340 MB Kokoro layer (the model and the cut voices file) as it was.
 
 | Stage | What it makes | From |
 |---|---|---|
 | `assets` | the Kokoro files and the music tracks, at `/kokoro/<release>/<file>` and `/music/<id>.<ext>` | `assets-fetch` (see below) |
-| `kokoro` | `/opt/kokoro`, every file checked against `kokoro/SHA256SUMS` | `assets` |
+| `kokoro` | `/opt/kokoro`: every file checked against `kokoro/SHA256SUMS`, then the voices file cut to the catalogue's 27 voices (`media_render/voices_build.py`) | `assets` |
 | `js` | `/opt/media-render/js`: `npm ci --omit=dev` from `js/package-lock.json` | `node` |
 | `chrome` | `/opt/chrome`: the arm64 headless shell stripped, only `en-US.pak` among the locales | `js` (both ways of fetching it run on Node) |
-| `py` | `/opt/venv` and `/opt/espeak`: `uv pip install --require-hashes --no-deps` from `requirements.lock`, the espeak data moved out of its package, onnxruntime's unlinked library and numpy's tests deleted | `python:3.12-slim`, `uv` |
+| `py` | `/opt/venv` and `/opt/espeak`: `uv pip install --require-hashes --no-deps` from `requirements.lock`, the espeak data moved out of its package and cut to `en_dict` among the dictionaries (`media_render/espeak_build.py`), onnxruntime's unlinked library and numpy's tests deleted | `python:3.12-slim`, `uv` |
 | `music` | `/opt/media-render/music`: every track checked against `music/manifest.json` again, then analysed | `py` plus ffmpeg |
 
 **What renders never load stays out** (PRD-262 US-051). Each cut is made in the RUN that brings the files in, because a file deleted in a later layer would still be in the earlier one:
@@ -49,6 +49,11 @@ The Dockerfile builds each part in its own stage, and BuildKit runs the stages s
 - curl and unzip: downloads happen in the builder stages, and the image's `HEALTHCHECK` and compose's probe are Python's `urllib`. The image's probe runs every 2 s while the container starts (`--start-interval`, Docker Engine 25 or later); compose's `start_interval` comes with PRD-262 US-038.
 
 `media-render.yml` fails when the amd64 image is over 1.30 GB on disk (PRD-262 §8).
+
+**The voices and languages** (PRD-262 US-052). The image carries what the platform speaks, not all of upstream's:
+- **the voices.** Upstream's `voices-v1.0.bin` holds 54 voices in nine languages. The platform offers the 27 English ones in its catalogue (`orchestrator/modules/socials/kokoro_voices.py`), and `media_render/voices.json` copies their ids, because this build context cannot read the orchestrator; `orchestrator/tests/test_prd262_media_render_voices.py` keeps the two equal. After the sha256 check, the `kokoro` stage rewrites the voices file to those voices alone, each copied byte for byte (about 14 MB less), and fails if the catalogue names a voice upstream's file lacks. `kokoro/SHA256SUMS` describes upstream's file, not the rewritten one, so it stays in the build stage. Adding a voice to the catalogue means adding its id to `voices.json`;
+- **the languages.** The orchestrator sends `en-us` for an American voice and `en-gb` for a British one, and espeak-ng reads both from one dictionary, `en_dict`. The `py` stage deletes the other 113 dictionaries (17.46 MB) and keeps the phoneme, intonation, language and voice data. `media_render/espeak_build.py` takes Kokoro's phonemes for a fixed English sentence in both languages with the full data, again after the cut, and fails the build unless they match. A word in another alphabet inside a line (Cyrillic, Greek, Chinese) no longer has its language's dictionary;
+- **validation follows the data.** A bundle or `/tts` may name only a voice the image's voices file holds (its names are read at boot) and only `en-us` or `en-gb`; anything else is a 400 that names the field.
 
 **Where the media assets come from.** The `MEDIA_ASSETS` build argument picks the `assets` stage. Its default, `fetch`, is what Railway, compose and CI build: the `assets-fetch` stage downloads the Kokoro files from their GitHub release and the tracks from their source URLs (`media_render/music_build.py --fetch-only`, which checks each sha256), into the same layout the media assets image has. Once that image is published and public, its pinned `FROM ghcr.io/automatosai/automatos-media-assets:<tag>@sha256:<digest> AS assets-image` stage goes in, and `image` becomes the default. Either way the `kokoro` and `music` stages check every file, so a wrong sha256 still fails the build.
 
@@ -74,7 +79,7 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 | `POST /render` | a composition bundle. **202** with the job once it is staged, spoken, mixed and checked; **422** with the `hyperframes check` findings (nothing renders); **400** for a bundle it cannot accept; **502** when storage will not hand over a media file; **429** `workspace_busy` when this workspace already has `MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE` jobs in progress (other workspaces are still admitted); **503** `busy` when the service as a whole has `MEDIA_RENDER_MAX_ACTIVE_JOBS` in progress. Both carry `Retry-After`. With `"preview": {"at": [seconds…]}` the job takes snapshot frames at those moments instead of the full render, and with `"still": {"at": [seconds…]}` it is an image (see below) |
 | `GET /render/{id}` | the job: `status` (`preparing`, `rejected`, `queued`, `rendering`, `done`, `failed`), `queue_position`, `outputs[{name, aspect, width, height, bytes, duration, path}]`, `report{lint, check, findings, voice, audio, timings}`, `error` |
 | `GET /render/{id}/output/{name}` | the file (Range requests work), until the job expires |
-| `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 |
+| `POST /tts` | `{lines: [{id, text}], voice?, speed?, lang?, include_audio?}`: each line's `seconds`, its voiced `segments` (where the words land), and the WAV as base64 on request. Defaults: `af_heart` at 0.95 in `en-us`. **400** `invalid_request` naming `voice` for a voice the image's voices file does not hold, or `lang` for a language other than `en-us` or `en-gb` |
 | `POST /jpeg` | The image's bytes (a PNG still): the same picture as a JPEG, transparency over white (PRD-251 US-303: Instagram takes JPEG only). 400 `not_an_image` when ffmpeg cannot read it |
 
 **The bundle** is described at the top of `media_render/bundle.py`:
@@ -89,7 +94,8 @@ Every route but `/health` needs `X-Internal-Token` (`SOCIALS_RENDER_TOKEN`).
 - a file it does not provide;
 - an `<iframe>`, `<object>` or `<form>`;
 - a placeholder with no variable;
-- a text variable inside a `<script>` or an `on*` event handler (only numbers and true/false go there).
+- a text variable inside a `<script>` or an `on*` event handler (only numbers and true/false go there);
+- a Kokoro voice the image's voices file does not hold (`audio.voice.voice`), or a `lang` other than `en-us` or `en-gb` (`audio.voice.lang`).
 
 **A preview** (US-106) goes through the same stage, voice, mix and check as a render, and the same render slots. Instead of `hyperframes render` it runs `hyperframes snapshot --at …` and returns:
 - `preview-01.png`, `preview-02.png`, …: one frame per moment, in time order, scaled to `MEDIA_RENDER_PREVIEW_WIDTH`, each with its `at`;
@@ -167,7 +173,9 @@ To publish it, run images.yml by hand on main with `media_assets` (`gh workflow 
 - the espeak-ng data path is 160 characters or longer, measured after symlinks are resolved. espeak-ng truncates longer paths. The image moves the data to `/opt/espeak`;
 - any of the four Hyperframes switches is not `1`;
 - `ENVIRONMENT=production` and `SOCIALS_RENDER_TOKEN` is unset. Outside production, a missing token leaves every route open, and a warning is logged;
-- the music library's manifest names a track that is missing or outside the library, or one with an unknown licence or no attribution.
+- the music library's manifest names a track that is missing or outside the library, or one with an unknown licence or no attribution;
+- the Kokoro voices file cannot be read or holds no voices, or `MEDIA_RENDER_KOKORO_VOICE` is not one of its voices;
+- `MEDIA_RENDER_KOKORO_LANG` is not `en-us` or `en-gb` (the message names the variable).
 
 ## Commands
 
@@ -202,7 +210,7 @@ All of them are read in `media_render/config.py`.
 | `MEDIA_RENDER_WORK_DIR` / `MEDIA_RENDER_MUSIC_DIR` | `/tmp/media-render` / `/opt/media-render/music` |
 | `MEDIA_RENDER_ESPEAK_DATA_PATH` | `/opt/espeak` |
 | `MEDIA_RENDER_KOKORO_MODEL` / `_VOICES` | `/opt/kokoro/kokoro-v1.0.onnx` / `voices-v1.0.bin` |
-| `MEDIA_RENDER_KOKORO_VOICE` / `_SPEED` / `_LANG` | `af_heart` / `0.95` / `en-us` |
+| `MEDIA_RENDER_KOKORO_VOICE` / `_SPEED` / `_LANG` | `af_heart` / `0.95` / `en-us`: a voice the voices file holds, and `en-us` or `en-gb` |
 | `MEDIA_RENDER_QUALITY` / `MEDIA_RENDER_FPS` / `MEDIA_RENDER_WORKERS` | `delivery` / `30` / `auto` |
 | `MEDIA_RENDER_PREVIEW_WIDTH` / `_PREVIEW_MAX_FRAMES` / `_PREVIEW_REEL_FPS` / `_PREVIEW_TIMEOUT_SECONDS` | `540` / `12` / `2` / `120` (the frames' and the reel's ffmpeg steps, and a still's) |
 | `MEDIA_RENDER_STILL_MAX_FRAMES` | `10`: the most PNGs one still takes (a carousel's slides) |
@@ -212,12 +220,13 @@ All of them are read in `media_render/config.py`.
 Nothing runs on a developer machine. The `media-render` CI job:
 1. builds the image, and reports how long it took. It builds it again from a copy whose only change is the Hyperframes pin, and requires the Kokoro layer to keep its digest and the js layer to change (`scripts/ci/image_layer_digest.py`). It checks that Node's compile cache is seeded and readable by uid 1000;
 2. checks the music library the build wrote against `music/manifest.json` (every track as committed, with cue windows, and Deep House 003's break at 34.0-35.8 s), then builds the image again from a manifest with one wrong sha256 and requires that build to fail (`ci/assert_music.py`);
-3. runs `tests/` inside it: the bundle rules, the queue, the music library and its analysis, and the real `hyperframes check`, ffmpeg mix and Kokoro;
+3. runs `tests/` inside it: the bundle rules, the queue, the music library and its analysis, and the real `hyperframes check`, ffmpeg mix and Kokoro, which speaks a line in every catalogue voice and gives the phonemes the build took with espeak-ng's full data (PRD-262 US-052);
 4. proves the boot assertion and `/health`;
 5. waits for the background Kokoro load to finish, then posts the fixture bundle to `POST /render` with the token, timed;
 6. asserts the MP4 with `ffprobe` and its loudness with `ebur128` (`ci/assert_output.py`), and that the voice step, with the model already loaded, took less than 2.394 s; `check_seconds` is reported;
 7. renders the fixture script (`fixtures/script`, US-111) through the API (`ci/render_bundle.py`): its first line is longer than its window and must be fitted, and every script window must carry speech well above the quiet between the lines (`ci/assert_script_windows.py`, on the MP4's audio decoded by the image's ffmpeg);
 8. renders the music fixture (`fixtures/music`, US-112): the MP4's integrated loudness must be -14 ± 1 LUFS, and its report must name Deep House 003 with its CC BY credit line;
-9. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, with its reference track mixed in (the report names it, and the mix measures -14 ± 1 LUFS), and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
+9. posts a voice outside `voices.json` and a language other than `en-us` or `en-gb` to `/tts` and `/render`, and requires a 400 naming the field each time (`ci/assert_voice_refusals.py`);
+10. checks and previews every seeded social video template, built by the orchestrator's own seed loader and bundle builder, with its reference track mixed in (the report names it, and the mix measures -14 ± 1 LUFS), and probes a pixel with the brand kit's primary colour swapped (`scripts/ci/social_template_previews.py`).
 
 The fixture commits no media. Its HTML and its bundle are authored here. GSAP comes from the `js` stage's locked `npm ci` at build time, and the voice line is spoken at render time.
