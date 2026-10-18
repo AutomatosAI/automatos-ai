@@ -54,27 +54,12 @@ export const UI_STYLE_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 365
 /** The class the Studio stylesheet hangs off (`.studio {}` in globals.css). */
 export const STUDIO_HTML_CLASS = 'studio'
 
-/** Every class the Style axis may put on <html>; switching style toggles each. */
-export const STYLE_HTML_CLASS_NAMES: readonly string[] = [STUDIO_HTML_CLASS, ...BUILTIN_THEME_HTML_CLASSES]
-
 /**
- * PRD-260 M07 — the inline <head> script, per style, that puts exactly that
- * style's classes on <html> before first paint (app/layout.tsx), ahead of the
- * look's pre-paint script, which needs the theme's class. It adds the style's
- * classes, removes the rest of STYLE_HTML_CLASS_NAMES and leaves every other
- * class (next-themes' tone, the font variables) alone. React never owns these
- * classes: <html className> carries only the font variables, the same on every
- * render, so a server re-render (router.refresh) never rewrites the attribute
- * and drops the tone. Each body is a literal: nothing is built into script
- * text, and the parsed style only picks the entry, so no cookie text ever goes
- * into it. ui-style-play.test.ts runs each one against styleHtmlClasses, so the
- * literals cannot drift from it. PRD-261 A-03 replaces it with the boot script.
+ * Every class the Style axis may put on <html>; switching style toggles each, and a style's
+ * theme boot (lib/theme-host/boot.ts) removes the ones its style does not carry before first
+ * paint (PRD-260 M07, PRD-261 A-03).
  */
-export const STYLE_CLASS_SCRIPT: Readonly<Record<UiStyle, string>> = {
-  classic: "(function(){var c=document.documentElement.classList;c.remove('studio');c.remove('play');})();",
-  studio: "(function(){var c=document.documentElement.classList;c.remove('play');c.add('studio');})();",
-  'theme:builtin:play': "(function(){var c=document.documentElement.classList;c.add('studio');c.add('play');})();",
-}
+export const STYLE_HTML_CLASS_NAMES: readonly string[] = [STUDIO_HTML_CLASS, ...BUILTIN_THEME_HTML_CLASSES]
 
 /**
  * PRD-260 D2: whether the Studio layout renders: Studio, and every theme drawn on Studio, where

@@ -3,17 +3,19 @@
 
 import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import dynamic from 'next/dynamic'
+import { useState, type ComponentType } from 'react'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
-import { UiStyleProvider } from '../contexts/ui-style-context'
+import { UiStyleProvider, useUiStyle } from '../contexts/ui-style-context'
 import { LookProvider } from './looks/look-provider'
 import { AccountLookScope } from './looks/account-look-scope'
 import type { UiStyle } from '@/lib/ui-style'
-import type { PlayTone } from '@/lib/looks/tone'
+import type { ThemeTone } from '@/lib/theme-host/boot'
+import { BUILTIN_PLAY_REF } from '@/lib/theme-host/builtin/play-entry'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
@@ -76,21 +78,38 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * PRD-261 A-03 — each builtin theme's client module (its stylesheet), by the theme's ref. Each is
+ * its own chunk, fetched only while that theme is the style: rendered on the server, next/dynamic
+ * writes the chunk's stylesheet link into the first response, so the theme's first paint is
+ * styled, and a Studio or Classic page requests none of it.
+ */
+const BUILTIN_THEME_CLIENTS: ReadonlyMap<string, ComponentType> = new Map([
+  [BUILTIN_PLAY_REF, dynamic(() => import('@/lib/theme-host/builtin/play-client'))],
+])
+
+/** The active builtin theme's client module, or nothing. */
+function BuiltinThemeClient() {
+  const { activeTheme } = useUiStyle()
+  const Client = activeTheme === null ? undefined : BUILTIN_THEME_CLIENTS.get(activeTheme.ref)
+  return Client === undefined ? null : <Client />
+}
+
 interface ProvidersProps {
   children: React.ReactNode
   /** PRD-244 D1: the Style axis, read from its cookie by app/layout.tsx. */
   initialUiStyle?: UiStyle
-  /** PRD-260 K4: under Play, the look's tone, read from its cookie, so it is forced from the first paint. */
-  initialPlayTone?: PlayTone
+  /** PRD-260 K4, PRD-261 A-03: the boot's tone (a theme whose tone follows its look), forced from the first paint. */
+  initialTone?: ThemeTone
 }
 
-export function Providers({ children, initialUiStyle, initialPlayTone }: ProvidersProps) {
+export function Providers({ children, initialUiStyle, initialTone }: ProvidersProps) {
   // PRD-260 K4: under Play the look's ground sets the tone (LookProvider hands it up).
   // forcedTheme forces it without overwriting the user's stored tone, which returns when
   // they leave Play; it starts from the server's tone cookie, so next-themes' script
   // forces it before paint. Forced at every width: the look paints <html> under Play below
   // 1024 px too, and Studio's semantic tokens and dark: classes must match its ground there.
-  const [playTone, setPlayTone] = useState<PlayTone | undefined>(initialPlayTone)
+  const [playTone, setPlayTone] = useState<ThemeTone | undefined>(initialTone)
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -113,6 +132,7 @@ export function Providers({ children, initialUiStyle, initialPlayTone }: Provide
           forcedTheme={playTone}
         >
           <UiStyleProvider initialStyle={initialUiStyle}>
+          <BuiltinThemeClient />
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
               {/* PRD-260 F5: looks are the signed-in user's in this workspace,
