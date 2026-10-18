@@ -165,6 +165,7 @@ class ThemePackage(Base):
         Index("ix_theme_packages_theme_id", "theme_id"),
         Index("ix_theme_packages_digest", "digest"),
         Index("ix_theme_packages_status", "status"),
+        Index("ix_theme_packages_submitted_by", "submitted_by"),
         _partial_unique(
             "uq_theme_packages_workspace_version", WORKSPACE_OWNED, "workspace_id", "theme_id", "version",
         ),
@@ -208,6 +209,7 @@ class ThemePublisher(Base):
     __tablename__ = "theme_publishers"
     __table_args__ = (
         Index("uq_theme_publishers_publisher", "publisher", unique=True),
+        Index("ix_theme_publishers_owner_user_id", "owner_user_id"),
         {"extend_existing": True},
     )
 
@@ -226,6 +228,9 @@ class ThemeInstallation(Base):
     __table_args__ = (
         Index("ix_theme_installations_workspace_id", "workspace_id"),
         Index("ix_theme_installations_package_id", "package_id"),
+        Index("ix_theme_installations_previous_package_id", "previous_package_id"),
+        Index("ix_theme_installations_pending_package_id", "pending_package_id"),
+        Index("ix_theme_installations_installed_by", "installed_by"),
         _partial_unique("uq_theme_installations_active", ACTIVE_INSTALLATION, "workspace_id", "theme_id"),
         _partial_unique("uq_theme_installations_default", ACTIVE_DEFAULT, "workspace_id"),
         {"extend_existing": True},
@@ -254,6 +259,7 @@ class ThemeChoice(Base):
     __tablename__ = "theme_choices"
     __table_args__ = (
         Index("uq_theme_choices_workspace_user", "workspace_id", "user_id", unique=True),
+        Index("ix_theme_choices_user_id", "user_id"),
         {"extend_existing": True},
     )
 
@@ -271,6 +277,7 @@ class ThemeLook(Base):
     __tablename__ = "theme_looks"
     __table_args__ = (
         Index("uq_theme_looks_workspace_user_theme", "workspace_id", "user_id", "theme_id", unique=True),
+        Index("ix_theme_looks_user_id", "user_id"),
         {"extend_existing": True},
     )
 
@@ -293,6 +300,7 @@ class ThemeOptIn(Base):
             "uq_theme_opt_ins_workspace_user_package", "workspace_id", "user_id", "package_id", unique=True,
         ),
         Index("ix_theme_opt_ins_package_id", "package_id"),
+        Index("ix_theme_opt_ins_user_id", "user_id"),
         {"extend_existing": True},
     )
 
@@ -309,6 +317,7 @@ class ThemeWorkspaceSettings(Base):
     __tablename__ = "theme_workspace_settings"
     __table_args__ = (
         CheckConstraint(PRIVATE_UPLOADS_CHECK, name="ck_theme_workspace_settings_private_uploads"),
+        Index("ix_theme_workspace_settings_updated_by", "updated_by"),
         {"extend_existing": True},
     )
 
@@ -335,6 +344,7 @@ class ThemeRevocation(Base):
         CheckConstraint(REVOCATION_TARGET, name="ck_theme_revocations_target"),
         Index("ix_theme_revocations_digest", "digest"),
         Index("ix_theme_revocations_theme_id", "theme_id"),
+        Index("ix_theme_revocations_created_by", "created_by"),
         {"extend_existing": True},
     )
 
@@ -355,6 +365,7 @@ class ThemeReviewEvent(Base):
     __tablename__ = "theme_review_events"
     __table_args__ = (
         Index("ix_theme_review_events_package_id", "package_id"),
+        Index("ix_theme_review_events_actor_user_id", "actor_user_id"),
         {"extend_existing": True},
     )
 

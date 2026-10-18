@@ -15,6 +15,10 @@ Every table the theme routes need, created once (PA-4), so later stories add no 
 * ``theme_workspace_settings``: one row per workspace.
 * ``theme_revocations`` and ``theme_review_events``.
 
+Every foreign key has an index, so deleting a user, a workspace or a package never
+scans these tables: the ON DELETE SET NULL ones included, and ``user_id`` on the
+three per-member tables, where it is second in the composite unique.
+
 No existing table is altered. ``core/models/themes.py`` declares the same shape, and
 ``tests/test_prd261_theme_models.py`` holds the two together.
 
@@ -166,6 +170,7 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS ix_theme_packages_theme_id ON theme_packages (theme_id);",
     "CREATE INDEX IF NOT EXISTS ix_theme_packages_digest ON theme_packages (digest);",
     "CREATE INDEX IF NOT EXISTS ix_theme_packages_status ON theme_packages (status);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_packages_submitted_by ON theme_packages (submitted_by);",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_packages_workspace_version "
     "ON theme_packages (workspace_id, theme_id, version) WHERE owner_type = 'workspace';",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_packages_workspace_digest "
@@ -175,21 +180,31 @@ _INDEXES = (
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_packages_marketplace_digest "
     "ON theme_packages (digest) WHERE owner_type = 'marketplace';",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_publishers_publisher ON theme_publishers (publisher);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_publishers_owner_user_id ON theme_publishers (owner_user_id);",
     "CREATE INDEX IF NOT EXISTS ix_theme_installations_workspace_id ON theme_installations (workspace_id);",
     "CREATE INDEX IF NOT EXISTS ix_theme_installations_package_id ON theme_installations (package_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_installations_previous_package_id ON theme_installations (previous_package_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_installations_pending_package_id ON theme_installations (pending_package_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_installations_installed_by ON theme_installations (installed_by);",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_installations_active "
     "ON theme_installations (workspace_id, theme_id) WHERE uninstalled_at IS NULL;",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_installations_default "
     "ON theme_installations (workspace_id) WHERE is_default AND uninstalled_at IS NULL;",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_choices_workspace_user ON theme_choices (workspace_id, user_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_choices_user_id ON theme_choices (user_id);",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_looks_workspace_user_theme "
     "ON theme_looks (workspace_id, user_id, theme_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_looks_user_id ON theme_looks (user_id);",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_theme_opt_ins_workspace_user_package "
     "ON theme_opt_ins (workspace_id, user_id, package_id);",
     "CREATE INDEX IF NOT EXISTS ix_theme_opt_ins_package_id ON theme_opt_ins (package_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_opt_ins_user_id ON theme_opt_ins (user_id);",
     "CREATE INDEX IF NOT EXISTS ix_theme_revocations_digest ON theme_revocations (digest);",
     "CREATE INDEX IF NOT EXISTS ix_theme_revocations_theme_id ON theme_revocations (theme_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_revocations_created_by ON theme_revocations (created_by);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_workspace_settings_updated_by ON theme_workspace_settings (updated_by);",
     "CREATE INDEX IF NOT EXISTS ix_theme_review_events_package_id ON theme_review_events (package_id);",
+    "CREATE INDEX IF NOT EXISTS ix_theme_review_events_actor_user_id ON theme_review_events (actor_user_id);",
 )
 
 
