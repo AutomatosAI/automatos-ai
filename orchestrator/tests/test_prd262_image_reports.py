@@ -271,6 +271,32 @@ def test_the_report_job_uses_edge_for_an_image_it_did_not_build(monkeypatch, tmp
     assert "shared_layers_amd64=1" in outputs.read_text().splitlines()
 
 
+def test_an_edge_the_report_job_cannot_read_leaves_the_arch_unmeasured(monkeypatch, tmp_path, capsys):
+    """Report only: a failed edge read (here the API's arm64) is a warning, never a failed job."""
+    def image(ref, arch):
+        if arch == "arm64" and ref.endswith("automatos-api:edge"):
+            raise http.client.IncompleteRead(b"")
+        name = ref.rsplit("/automatos-", 1)[1].removesuffix(":edge")
+        return EDGE[name]["manifest"], EDGE[name]["config"], None
+
+    monkeypatch.setattr(report.registry, "image", image)
+    built = {"name": "frontend", "arch": "amd64", "bytes": 1, "unpacked_bytes": None, "revision": "", "delta": None,
+             "layers": [{"digest": NEW_DIGEST, "size": TEN_MB}]}
+    (tmp_path / "frontend-amd64.json").write_text(json.dumps(built))
+    outputs, summary = tmp_path / "outputs", tmp_path / "summary.md"
+    args = ["report", "--dir", str(tmp_path), "--edge-prefix", "ghcr.io/o/automatos-",
+            "--out", str(tmp_path / "out.json"), "--summary", str(summary), "--outputs", str(outputs)]
+    assert report.main(args) == 0
+    stack = json.loads((tmp_path / "out.json").read_text())["stack"]
+    assert stack["amd64"]["shared"]["layers"] == 1
+    assert set(stack["arm64"]) == {"error"}
+    written = outputs.read_text().splitlines()
+    assert "shared_layers_amd64=1" in written
+    assert not any("_arm64=" in line for line in written), written
+    assert "::warning title=Stack not measured::arm64" in capsys.readouterr().out
+    assert "| arm64 | – | – | – | not measured:" in summary.read_text()
+
+
 def test_markdown_cells_survive_pipes_in_an_instruction():
     rows = [{"size": 1, "kind": "system", "new": None, "listing": {}, "instruction": "RUN curl x | bash -"}]
     table = report._layer_table({"layers": rows})

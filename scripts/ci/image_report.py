@@ -199,10 +199,20 @@ def _stack_layers(name: str, arch: str, built: dict, edge_prefix: str) -> Tuple[
 
 
 def stack_report(built: dict, edge_prefix: str) -> dict:
-    """Per arch: the API/worker shared layers and the default stack's first pull."""
+    """Per arch: the API/worker shared layers and the default stack's first pull.
+
+    The report is report only, so an ``edge`` it cannot read (a registry hiccup, or an
+    image never published) leaves that arch unmeasured, with a warning and its
+    ``error``, instead of failing the job.
+    """
     result = {}
     for arch in ARCHES:
-        stack = {name: _stack_layers(name, arch, built, edge_prefix) for name in DEFAULT_STACK}
+        try:
+            stack = {name: _stack_layers(name, arch, built, edge_prefix) for name in DEFAULT_STACK}
+        except READ_ERRORS as error:
+            _warn("Stack not measured", f"{arch}: an image's `edge` could not be read ({error})")
+            result[arch] = {"error": str(error)}
+            continue
         first, second = (stack[name][0] for name in SHARED_PAIR)
         result[arch] = {
             "sources": {name: source for name, (_, source) in stack.items()},
@@ -223,6 +233,9 @@ def stack_markdown(built: dict, stack: dict) -> str:
               "| Arch | Shared layers | Shared | App images' first pull (unique layers) | From |",
               "|---|--:|--:|--:|---|"]
     for arch, numbers in stack.items():
+        if "error" in numbers:
+            lines.append(f"| {arch} | – | – | – | not measured: {_cell(numbers['error'])} |")
+            continue
         shared = numbers["shared"]
         sources = ", ".join(f"{name}: {source}" for name, source in numbers["sources"].items())
         lines.append(f"| {arch} | {shared['layers']} | {layers.mb(shared['bytes'])} | "
@@ -243,8 +256,11 @@ def report(args: argparse.Namespace) -> int:
     Path(args.out).write_text(json.dumps({"images": sizes, "stack": stack}, indent=1), encoding="utf-8")
     _append(args.summary, stack_markdown(built, stack))
     if args.outputs:
+        # An unmeasured arch writes no outputs, so a reader sees them empty: not measured.
         with open(args.outputs, "a", encoding="utf-8") as outputs:
             for arch, numbers in stack.items():
+                if "error" in numbers:
+                    continue
                 outputs.write(f"shared_layers_{arch}={numbers['shared']['layers']}\n")
                 outputs.write(f"first_pull_bytes_{arch}={numbers['first_pull_bytes']}\n")
     return 0
