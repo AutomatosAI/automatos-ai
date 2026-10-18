@@ -41,7 +41,8 @@ import { SAVED_SUB } from '@/lib/looks/editor'
 import { AURORA, DAYLIGHT, EMBER, OBSIDIAN, PRESETS, WORKSHOP } from '@/lib/looks/presets'
 import { LOOK_SCOPE_KEY } from '@/lib/looks/storage'
 import { LOOK_FILE_MAX_BYTES, LOOK_FILE_TYPE, TOO_BIG, lookJson } from '@/lib/looks/transfer'
-import { PLAY_HTML_CLASS, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
+import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
+import { UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
 
 import {
   BLOB_URL,
@@ -264,7 +265,7 @@ describe('Make it yours under Play', () => {
 describe('Make it yours before the stored look is read (M72)', () => {
   it('renders on the server as a busy frame with the heading, and no Ember card or option pressed', () => {
     window.localStorage.setItem(KEYS.active, JSON.stringify(DAYLIGHT))
-    const html = renderToString(looksTree('play'))
+    const html = renderToString(looksTree(BUILTIN_PLAY_STYLE))
     expect(html).toContain('aria-busy="true"')
     expect(html).toContain('Make it yours.')
     expect(html).not.toContain('aria-pressed="true"')
@@ -384,7 +385,7 @@ describe('/looks outside Play (K9) and on a narrow screen (D7)', () => {
     await user.click(screen.getByRole('button', { name: 'Switch to Play' }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Make it yours.' })).toBeInTheDocument()
     expect(document.documentElement.classList.contains(PLAY_HTML_CLASS)).toBe(true)
-    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=play`)
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${BUILTIN_PLAY_STYLE}`)
     expect(layout()).toHaveAttribute('data-full-bleed', 'true')
     expect(screen.queryByRole('button', { name: 'Switch to Play' })).not.toBeInTheDocument()
     await lookOnPage(EMBER)
@@ -405,7 +406,7 @@ describe('/looks outside Play (K9) and on a narrow screen (D7)', () => {
 
   it('under Play below 1024 px says it opens on a wider screen, with no editor and no switch', () => {
     phone = stubWindowWidth(PHONE_WIDTH_PX)
-    renderLooks('play')
+    renderLooks(BUILTIN_PLAY_STYLE)
     expect(screen.getByTestId('page-title')).toHaveTextContent('Make it yours')
     expect(screen.getByText(/opens on a laptop or desktop screen/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Switch to Play' })).not.toBeInTheDocument()

@@ -81,7 +81,7 @@ def test_the_model_and_the_migration_declare_one_shape():
 
     src = MIGRATION.read_text()
     assert 'revision = "prd263_harness_runs"' in src
-    assert 'down_revision = "prd258_voice_timings"' in src
+    assert 'down_revision = "prd261_themes"' in src
     (ddl,) = re.findall(r"CREATE TABLE IF NOT EXISTS harness_runs \((.*?)\n\s*\)", src, re.S)
     columns, constraint = ddl.split(f"CONSTRAINT {CHECK} CHECK")
     assert tuple(line.split()[0] for line in columns.strip().splitlines()) == COLUMNS

@@ -9,15 +9,17 @@ name: browser-e2e
 #   backend through docker compose, no external credentials), so the app has a
 #   real local workspace.
 # - The frontend is built and served on the runner from its standalone output,
-#   never from its container image: an image could take a build flag only
-#   through a Dockerfile ARG, and Railway passes service variables to declared
-#   ARGs. The page origin is http://localhost:3000, the backend's CORS default.
-# - Playwright lives in its own package (e2e/browser/package.json, exact pins, no
-#   lockfile), so frontend/package-lock.json never changes for it.
+#   the same build every image ships (PRD-261 A-04a: the theme host has no build
+#   flag; `npm run build` generates the theme-sdk shims in its prebuild step).
+#   The page origin is http://localhost:3000, the backend's CORS default.
+# - Playwright lives in its own package (e2e/browser/package.json, exact pins and
+#   its own committed lockfile, installed with npm ci), so frontend/package-lock.json
+#   never changes for it.
 #
-# It watches only the paths below (the app shell, the theme host, the boot
-# substrate and itself). A change to the rest of the backend or to other pages
-# can break it without running it. See e2e/browser/README.md.
+# It watches only the paths below (the app shell, the theme host and every folder
+# PRD-261 Phase A touches (PA-6), the boot substrate and itself). A change to the
+# rest of the backend or to other pages can break it without running it. See
+# e2e/browser/README.md.
 #
 # workflow_dispatch works only once this file is on main: GitHub dispatches only
 # workflows that exist on the default branch. Before that, the lane runs on a
@@ -32,23 +34,62 @@ on:
       - main
     paths:
       - "frontend/app/layout.tsx"
+      - "frontend/app/page.tsx"
+      - "frontend/app/not-found.tsx"
+      - "frontend/app/play-theme.css"
+      - "frontend/app/play-fonts.ts"
       - "frontend/app/agents/**"
+      - "frontend/app/assignments/**"
+      - "frontend/app/chat/**"
+      - "frontend/app/command-center/**"
+      - "frontend/app/conversations/**"
+      - "frontend/app/deliverables/**"
+      - "frontend/app/documents/**"
+      - "frontend/app/looks/**"
+      - "frontend/app/missions/**"
+      - "frontend/app/playbooks/**"
+      - "frontend/app/safe-mode/**"
+      - "frontend/app/x/**"
+      - "frontend/app/api/themes/**"
+      - "frontend/app/admin/themes/**"
       - "frontend/components/providers.tsx"
       - "frontend/components/workspace-provider.tsx"
       - "frontend/components/layout/**"
       - "frontend/components/theme-host/**"
+      - "frontend/components/play/**"
+      - "frontend/components/looks/**"
+      - "frontend/components/mascot/**"
+      - "frontend/components/settings/themes/**"
+      - "frontend/components/marketplace/themes/**"
+      - "frontend/components/admin/themes/**"
+      - "frontend/components/ui/theme-toggle.tsx"
+      - "frontend/components/shared/**"
       - "frontend/lib/theme-host/**"
-      - "frontend/lib/looks/prepaint.ts"
+      - "frontend/lib/theme-sdk/**"
+      - "frontend/lib/look-kit/**"
+      - "frontend/lib/looks/**"
       - "frontend/lib/ui-style.ts"
+      - "frontend/lib/api-client.ts"
       - "frontend/lib/auth-edition.ts"
+      - "frontend/packages/theme-sdk/**"
       - "frontend/contexts/ui-style-context.tsx"
       - "frontend/hooks/use-studio-theme.ts"
       - "frontend/hooks/use-mobile.ts"
+      - "frontend/hooks/use-global-search.ts"
+      - "frontend/hooks/use-installed-themes.ts"
       - "frontend/scripts/theme-sdk/**"
       - "frontend/next.config.js"
       - "frontend/middleware.ts"
       - "frontend/package.json"
       - "frontend/package-lock.json"
+      - "orchestrator/api/themes_*.py"
+      - "orchestrator/api/marketplace_themes*.py"
+      - "orchestrator/api/admin_themes.py"
+      - "orchestrator/services/themes/**"
+      - "orchestrator/core/models/themes.py"
+      - "orchestrator/core/auth/step_up.py"
+      - "orchestrator/alembic/versions/prd261_*.py"
+      - "orchestrator/tests/fixtures/themes/**"
       - "docker-compose.yml"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/Dockerfile"
@@ -59,23 +100,62 @@ on:
   pull_request:
     paths:
       - "frontend/app/layout.tsx"
+      - "frontend/app/page.tsx"
+      - "frontend/app/not-found.tsx"
+      - "frontend/app/play-theme.css"
+      - "frontend/app/play-fonts.ts"
       - "frontend/app/agents/**"
+      - "frontend/app/assignments/**"
+      - "frontend/app/chat/**"
+      - "frontend/app/command-center/**"
+      - "frontend/app/conversations/**"
+      - "frontend/app/deliverables/**"
+      - "frontend/app/documents/**"
+      - "frontend/app/looks/**"
+      - "frontend/app/missions/**"
+      - "frontend/app/playbooks/**"
+      - "frontend/app/safe-mode/**"
+      - "frontend/app/x/**"
+      - "frontend/app/api/themes/**"
+      - "frontend/app/admin/themes/**"
       - "frontend/components/providers.tsx"
       - "frontend/components/workspace-provider.tsx"
       - "frontend/components/layout/**"
       - "frontend/components/theme-host/**"
+      - "frontend/components/play/**"
+      - "frontend/components/looks/**"
+      - "frontend/components/mascot/**"
+      - "frontend/components/settings/themes/**"
+      - "frontend/components/marketplace/themes/**"
+      - "frontend/components/admin/themes/**"
+      - "frontend/components/ui/theme-toggle.tsx"
+      - "frontend/components/shared/**"
       - "frontend/lib/theme-host/**"
-      - "frontend/lib/looks/prepaint.ts"
+      - "frontend/lib/theme-sdk/**"
+      - "frontend/lib/look-kit/**"
+      - "frontend/lib/looks/**"
       - "frontend/lib/ui-style.ts"
+      - "frontend/lib/api-client.ts"
       - "frontend/lib/auth-edition.ts"
+      - "frontend/packages/theme-sdk/**"
       - "frontend/contexts/ui-style-context.tsx"
       - "frontend/hooks/use-studio-theme.ts"
       - "frontend/hooks/use-mobile.ts"
+      - "frontend/hooks/use-global-search.ts"
+      - "frontend/hooks/use-installed-themes.ts"
       - "frontend/scripts/theme-sdk/**"
       - "frontend/next.config.js"
       - "frontend/middleware.ts"
       - "frontend/package.json"
       - "frontend/package-lock.json"
+      - "orchestrator/api/themes_*.py"
+      - "orchestrator/api/marketplace_themes*.py"
+      - "orchestrator/api/admin_themes.py"
+      - "orchestrator/services/themes/**"
+      - "orchestrator/core/models/themes.py"
+      - "orchestrator/core/auth/step_up.py"
+      - "orchestrator/alembic/versions/prd261_*.py"
+      - "orchestrator/tests/fixtures/themes/**"
       - "docker-compose.yml"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/Dockerfile"
@@ -92,28 +172,10 @@ permissions:
 
 jobs:
   browser-e2e:
-    name: Browser e2e — ${{ matrix.build }} build (non-required)
+    name: Browser e2e (non-required)
     # Pinned, not -latest: the browsers' system packages are installed for this image.
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # The build every image ships: the theme-host spike flag off.
-          - build: default
-            spike_flag: "0"
-            grep: "@smoke|@off"
-            browsers: "chromium webkit"
-            project_flags: "--project=chromium --project=webkit"
-          # The theme-host spike on (PRD-261 A-01). Only this lane ever builds with '1'.
-          # Firefox runs the @record specs only (playwright.config.ts gives it grep /@record/).
-          - build: spike
-            spike_flag: "1"
-            grep: "@smoke|@spike|@record"
-            browsers: "chromium webkit firefox"
-            project_flags: "--project=chromium --project=webkit --project=firefox"
 
     # Job level, not step level: docker-compose.yml interpolates its `:?` variables
     # on every subcommand (up, logs and down alike). Throwaway values for an
@@ -142,7 +204,9 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/browser/package-lock.json
 
       # The same install as test.yml's frontend-ci (the lockfile is reconciled, not enforced).
       - name: Install frontend dependencies
@@ -157,13 +221,8 @@ jobs:
           echo "EXPECTED_REACT_VERSION=$(node -p "require('next/dist/compiled/react').version")" >> "$GITHUB_ENV"
           echo "NEXT_VERSION=$(node -p "require('next/package.json').version")" >> "$GITHUB_ENV"
 
-      # The theme-sdk shims, generated from the React this install vendors, right before the
-      # build that serves them (PRD-261 A-01). Never committed; the default build has none.
-      - name: Generate theme-sdk shims
-        if: matrix.build == 'spike'
-        working-directory: frontend
-        run: node scripts/theme-sdk/generate-shims.js
-
+      # `npm run build` runs `prebuild` first, which generates the theme-sdk shims from the React
+      # this install vendors (PRD-261 PA-3), as every image build does.
       - name: Build the frontend (local edition)
         working-directory: frontend
         env:
@@ -173,7 +232,6 @@ jobs:
           NEXT_PUBLIC_MEDIA_ORIGINS: http://localhost:9000
           NEXT_TELEMETRY_DISABLED: "1"
           NODE_OPTIONS: --max-old-space-size=6144
-          AUTOMATOS_THEME_HOST_SPIKE: ${{ matrix.spike_flag }}
         run: npm run build
 
       # Staged the way frontend/Dockerfile's production stage lays it out.
@@ -190,29 +248,22 @@ jobs:
       - name: Wait for the frontend
         run: bash e2e/browser/scripts/wait-for-url.sh http://localhost:3000/agents 120
 
-      # Exact pins, no committed lockfile yet. The install writes one here so the default job can
-      # upload what it resolved; the next wave commits that file and switches this step to npm ci.
-      - name: Install Playwright (isolated package, exact pins)
+      # Exact pins and the committed lockfile (PRD-261 A-04a: the one #1143's run resolved,
+      # every package from registry.npmjs.org with its integrity hash).
+      - name: Install Playwright (isolated package, npm ci)
         working-directory: e2e/browser
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
-      - name: Upload the resolved e2e lockfile
-        if: matrix.build == 'default'
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-browser-lockfile
-          path: e2e/browser/package-lock.json
-          if-no-files-found: error
-
+      # Firefox runs the @record specs only (playwright.config.ts gives it grep /@record/).
       - name: Install the browsers and their system packages
         working-directory: e2e/browser
-        run: npx playwright install --with-deps ${{ matrix.browsers }}
+        run: npx playwright install --with-deps chromium webkit firefox
 
       - name: Type-check the specs
         working-directory: e2e/browser
         run: npx tsc -p tsconfig.json
 
-      # The hello theme against @types/react 19 and the spike SDK's types (PRD-261 A-01).
+      # The hello theme against @types/react 19 and the test SDK's types (PRD-261 A-01).
       - name: Type-check the hello theme
         working-directory: e2e/browser
         run: npx tsc -p fixtures/hello-theme/tsconfig.json
@@ -223,16 +274,16 @@ jobs:
         env:
           E2E_APP_URL: http://localhost:3000
           RECORD_DIR: records
-        run: npx playwright test --grep "${{ matrix.grep }}" ${{ matrix.project_flags }}
+        run: npx playwright test --grep "@smoke|@off|@host|@record" --project=chromium --project=webkit --project=firefox
 
       # The theme-host record (React version, import-map integrity support), pass or fail.
       - name: Summarise the theme-host record
-        if: always() && matrix.build == 'spike'
+        if: always()
         working-directory: e2e/browser
         run: node scripts/summarise-records.mjs records >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the theme-host record
-        if: always() && matrix.build == 'spike'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: theme-host-record
@@ -251,7 +302,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-e2e-${{ matrix.build }}-report
+          name: browser-e2e-report
           path: |
             e2e/browser/playwright-report
             e2e/browser/test-results

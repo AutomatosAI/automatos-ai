@@ -3,7 +3,8 @@ import { MOTION_ATTRIBUTE } from '@/lib/looks/document'
 import { EMBER } from '@/lib/looks/presets'
 import { STUDIO_TOKEN_NAMES } from '@/lib/looks/studio-tokens'
 import type { Look } from '@/lib/looks/types'
-import { PLAY_HTML_CLASS, STUDIO_HTML_CLASS } from '@/lib/ui-style'
+import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS } from '@/lib/theme-host/builtin/play-entry'
+import { STUDIO_HTML_CLASS } from '@/lib/ui-style'
 
 /** A Storage kept in memory, for tests that shouldn't share jsdom's localStorage. */
 export function memoryStorage(initial: Readonly<Record<string, string>> = {}): Storage {

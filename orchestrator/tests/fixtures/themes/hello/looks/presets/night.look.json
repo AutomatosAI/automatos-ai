@@ -1,0 +1,9 @@
+{
+  "schema": "automatos-e2e-hello-look/v1",
+  "id": "night",
+  "name": "Night",
+  "sub": "",
+  "accent": "green",
+  "ground": "ink",
+  "radius": 0
+}

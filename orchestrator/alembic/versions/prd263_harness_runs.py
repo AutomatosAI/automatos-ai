@@ -12,13 +12,13 @@ upgrade a no-op on a database that ``create_all`` built from the models, which
 then gains only a missing index.
 
 Revision ID: prd263_harness_runs
-Revises: prd258_voice_timings
+Revises: prd261_themes
 Create Date: 2026-10-18
 """
 from alembic import op
 
 revision = "prd263_harness_runs"
-down_revision = "prd258_voice_timings"
+down_revision = "prd261_themes"
 branch_labels = None
 depends_on = None
 

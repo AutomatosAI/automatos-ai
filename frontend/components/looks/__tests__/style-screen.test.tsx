@@ -65,10 +65,10 @@ import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import type { Look } from '@/lib/looks/types'
 import { ringTone } from '@/lib/mascot/ring'
 import { MASCOT_STATES } from '@/lib/mascot/types'
+import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import {
   APPEARANCE_DEFAULTS_KEY,
   APPEARANCE_DEFAULTS_VERSION,
-  PLAY_HTML_CLASS,
   UI_STYLE_COOKIE,
   type UiStyle,
 } from '@/lib/ui-style'
@@ -98,7 +98,7 @@ function pageTree(style: UiStyle) {
   )
 }
 
-function renderPage(style: UiStyle = 'play') {
+function renderPage(style: UiStyle = BUILTIN_PLAY_STYLE) {
   return render(pageTree(style))
 }
 
@@ -480,7 +480,7 @@ describe('/looks/style after Switch to Play, by keyboard (P260-FX-22, M21)', () 
 describe('/looks/style under Play below 1024 px (D7), as /looks', () => {
   it('says it opens on a wider screen, with no sheet and no switch', () => {
     stubWindowWidth(PHONE_WIDTH_PX)
-    renderPage('play')
+    renderPage(BUILTIN_PLAY_STYLE)
     const note = within(screen.getByRole('region', { name: STYLE_HEADING }))
     expect(note.getByText(WIDER_SCREEN_NOTE)).toBeInTheDocument()
     expect(screen.queryByText(STYLE_SHEET_NOTE)).toBeNull()
@@ -493,7 +493,7 @@ describe('/looks/style under Play below 1024 px (D7), as /looks', () => {
 
   it('shows the sheet once the window is wide enough', async () => {
     const window_ = stubWindowWidth(PHONE_WIDTH_PX)
-    renderPage('play')
+    renderPage(BUILTIN_PLAY_STYLE)
     expect(screen.queryByRole('region', { name: 'Colour' })).toBeNull()
     act(() => window_.resize(LAPTOP_WIDTH_PX))
     expect(await screen.findByRole('region', { name: 'Colour' })).toBeInTheDocument()
@@ -506,7 +506,7 @@ describe('/looks/style under Play below 1024 px (D7), as /looks', () => {
 describe('/looks/style before the stored look is read (M72)', () => {
   it('renders on the server as a busy frame with the heading: no sheet, no look named, no reduced-motion note', () => {
     window.localStorage.setItem(lookKeys(DEFAULT_LOOK_SCOPE).active, JSON.stringify(DAYLIGHT))
-    const html = renderToString(pageTree('play'))
+    const html = renderToString(pageTree(BUILTIN_PLAY_STYLE))
     expect(html).toContain('aria-busy="true"')
     expect(html).toContain(STYLE_HEADING)
     expect(html).not.toContain(COPY_TOKENS)
