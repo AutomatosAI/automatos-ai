@@ -1,0 +1,9 @@
+{
+  "schema": "automatos-e2e-hello-look/v1",
+  "id": "default",
+  "name": "Hello",
+  "sub": "Paper and blue",
+  "accent": "blue",
+  "ground": "paper",
+  "radius": 6
+}
