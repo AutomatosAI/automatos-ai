@@ -13,6 +13,7 @@ from __future__ import annotations
 import inspect
 import io
 import sys
+import time
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -33,6 +34,7 @@ from core.models.themes import (  # noqa: E402
 )
 from core.workspaces.models import WorkspaceMember  # noqa: E402
 from services.themes import records, storage  # noqa: E402
+from services.themes import settings as theme_settings  # noqa: E402
 from services.themes.package import THEME_IMPORT_ROUTE  # noqa: E402
 from services.themes.scan import CONTRAST_NOT_RUN, VERDICT_NOT_RUN  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
@@ -95,9 +97,12 @@ def _local_ctx(workspace_id):
 
 
 def _saas_ctx(workspace_id, system_role="user"):
+    """A Clerk caller who signed in a minute ago, so the route's step-up (A-07c) passes."""
     from core.auth.dependencies import RequestContext, UserContext
 
-    user = UserContext(id="user_1", email="a@example.com", system_role=system_role, clerk_user_id="user_1")
+    claims = {"sub": "user_1", "fva": [1, -1], "iat": int(time.time())}
+    user = UserContext(id="user_1", email="a@example.com", system_role=system_role, clerk_user_id="user_1",
+                       raw_claims=claims)
     return RequestContext(workspace_id=workspace_id, user=user, auth_type="clerk")
 
 
@@ -125,9 +130,10 @@ def _client(env, ctx):
 
 
 def _saas(env, monkeypatch, workspace_id, system_role="user"):
-    """A SaaS client whose caller holds workspace:manage in ``workspace_id``."""
+    """A SaaS client whose caller holds workspace:manage in ``workspace_id`` (and so, by default, may install)."""
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
     monkeypatch.setattr(workspace_permission, "workspace_permission_granted", lambda db, ctx, permission: True)
+    monkeypatch.setattr(theme_settings, "workspace_permission_granted", lambda db, ctx, permission: True)
     return _client(env, _saas_ctx(workspace_id, system_role))
 
 

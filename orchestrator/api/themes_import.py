@@ -16,8 +16,10 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
 201 with the package and the install; 200 with the existing ones when these exact bytes are
 already in this workspace (never a misleading 409); 409 for a version clash.
 
-The router is registered by B2-wire (``main.py``, the route manifest, the body-size limit and
-the step-up dependency); tests mount it on a test app. A plain ``def`` (a synchronous session
+Gates, in order: ``workspace:manage``, the workspace's "who may install" setting (A-07e's
+``require_install_role``) and a fresh step-up (A-07c, ``THEME_STEP_UP_MAX_AGE_MINUTES``). B2-wire
+registers the router in ``main.py`` with a body-size limit for ``THEME_IMPORT_ROUTE``
+(``services/themes/package.py``); tests mount it on a test app. A plain ``def`` (a synchronous session
 and S3 client, run in the threadpool).
 """
 
@@ -30,9 +32,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
+from core.auth.step_up import require_step_up
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.themes import ThemeInstallation, ThemePackage
@@ -43,6 +47,7 @@ from services.themes.records import (
     reserved_publisher_refusal, save_private_upload,
 )
 from services.themes.scan import build_scan_report
+from services.themes.settings import require_install_role
 from services.themes.storage import theme_prefix, write_theme_files
 
 logger = logging.getLogger(__name__)
@@ -51,6 +56,8 @@ router = APIRouter(prefix="/api/themes", tags=["Themes"])
 
 THEME_IMPORT_PERMISSION = "workspace:manage"
 MANAGE_GATE = require_workspace_permission(THEME_IMPORT_PERMISSION)
+INSTALL_ROLE_GATE = require_install_role()
+STEP_UP = require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES)
 
 IMPORT_REFUSED = "This theme can't be installed."
 STORE_FAILED = "The theme's files couldn't be stored. Try again."
@@ -147,7 +154,10 @@ def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, packag
         return _after_integrity_error(db, ctx, checked, exc)
 
 
-@router.post("/import", status_code=201, dependencies=[Depends(MANAGE_GATE)])
+@router.post(
+    "/import", status_code=201,
+    dependencies=[Depends(MANAGE_GATE), Depends(INSTALL_ROLE_GATE), Depends(STEP_UP)],
+)
 def import_theme(
     response: Response,
     file: UploadFile = File(...),

@@ -1,7 +1,7 @@
 """PRD-261 A-07b — installed themes, the active theme, the member's choice and the install's versions.
 
-Routes (plan §2.2; B2-wire registers the router, adds the step-up dependency to opt-in,
-default and update, and lists the routes in ``reports/route-manifest.json``):
+Routes (plan §2.2; B2-wire registers the router and lists the routes in
+``reports/route-manifest.json``):
 
 ==========================================================  ==================
 ``GET    /api/themes/installed``                            member
@@ -10,13 +10,15 @@ default and update, and lists the routes in ``reports/route-manifest.json``):
 ``POST   /api/themes/installs/{id}/opt-in``  ``{packageId}``  member (+ step-up)
 ``PUT    /api/themes/default``         ``{installId|null}``  manage (+ step-up)
 ``GET    /api/themes/installs/{id}/compare/{packageId}``    manage
-``POST   /api/themes/installs/{id}/update``  ``{packageId}``  manage (+ step-up)
-``POST   /api/themes/installs/{id}/rollback``               manage
+``POST   /api/themes/installs/{id}/update``  ``{packageId}``  manage (+ who installs, step-up)
+``POST   /api/themes/installs/{id}/rollback``               manage (+ who installs)
 ``DELETE /api/themes/installs/{id}``                        manage
 ==========================================================  ==================
 
 "Member" is ``require_workspace_permission("members:read")``, "manage" is
-``"workspace:manage"``. Every route is scoped to the caller's workspace and answers 404,
+``"workspace:manage"``; "step-up" is A-07c's ``require_step_up`` at
+``THEME_STEP_UP_MAX_AGE_MINUTES``, layered after the gate so a non-member is refused before
+any reverification prompt; "who installs" is A-07e's ``require_install_role``. Every route is scoped to the caller's workspace and answers 404,
 never 403, for another workspace's install or package. Users are resolved with
 ``resolve_user_pk``, so the local edition's anonymous owner and a Clerk member both work.
 Every handler is a plain ``def`` over the synchronous session (AGENTS.md).
@@ -32,8 +34,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.dependencies import RequestContext
+from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
+from core.auth.step_up import require_step_up
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.themes import THEME_CHOICE_LENGTH
@@ -41,6 +46,7 @@ from services.themes import updates
 from services.themes.choices import NOT_FOUND, ThemeInstallError, set_choice
 from services.themes.defaults import resolve_active, set_default
 from services.themes.optin import record_opt_in
+from services.themes.settings import require_install_role
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +54,12 @@ router = APIRouter(prefix="/api/themes", tags=["themes"])
 
 MEMBER = require_workspace_permission("members:read")
 MANAGE = require_workspace_permission("workspace:manage")
+INSTALL_ROLE = require_install_role()
+STEP_UP = require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES)
+# A route with more than one gate lists them in order in ``dependencies`` (the permission
+# first, so a non-member is refused before any reverification prompt) and reads the caller
+# with the shared hybrid dependency, so each gate appears once in the route's tree.
+CALLER = get_request_context_hybrid
 NO_WORKSPACE = "Choose a workspace first."
 
 T = TypeVar("T")
@@ -120,9 +132,9 @@ def put_theme_choice(
     return resolve_active(db, workspace_id, user_pk)
 
 
-@router.post("/installs/{install_id}/opt-in")
+@router.post("/installs/{install_id}/opt-in", dependencies=[Depends(MEMBER), Depends(STEP_UP)])
 def opt_in_to_theme(
-    install_id: UUID, body: PackageBody, ctx: RequestContext = Depends(MEMBER), db: Session = Depends(get_db),
+    install_id: UUID, body: PackageBody, ctx: RequestContext = Depends(CALLER), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Opt the member in to the install's current private package (409 for any other)."""
     workspace_id, user_pk = _workspace_of(ctx), resolve_user_pk(db, ctx)
@@ -130,9 +142,9 @@ def opt_in_to_theme(
     return {"installId": str(install_id), "optIn": state}
 
 
-@router.put("/default")
+@router.put("/default", dependencies=[Depends(MANAGE), Depends(STEP_UP)])
 def put_default_theme(
-    body: DefaultBody, ctx: RequestContext = Depends(MANAGE), db: Session = Depends(get_db),
+    body: DefaultBody, ctx: RequestContext = Depends(CALLER), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Set or clear the workspace default; an unreviewed theme answers 409 (Q6)."""
     workspace_id = _workspace_of(ctx)
@@ -149,9 +161,11 @@ def compare_theme_update(
     return _run(db, lambda: updates.compare(db, workspace_id, install_id, package_id), commit=False)
 
 
-@router.post("/installs/{install_id}/update")
+@router.post(
+    "/installs/{install_id}/update", dependencies=[Depends(MANAGE), Depends(INSTALL_ROLE), Depends(STEP_UP)],
+)
 def update_theme_install(
-    install_id: UUID, body: PackageBody, ctx: RequestContext = Depends(MANAGE), db: Session = Depends(get_db),
+    install_id: UUID, body: PackageBody, ctx: RequestContext = Depends(CALLER), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Move the install to a newer package; the old one becomes the rollback target."""
     workspace_id = _workspace_of(ctx)
@@ -159,9 +173,9 @@ def update_theme_install(
     return _install_answer(db, ctx, install)
 
 
-@router.post("/installs/{install_id}/rollback")
+@router.post("/installs/{install_id}/rollback", dependencies=[Depends(MANAGE), Depends(INSTALL_ROLE)])
 def rollback_theme_install(
-    install_id: UUID, ctx: RequestContext = Depends(MANAGE), db: Session = Depends(get_db),
+    install_id: UUID, ctx: RequestContext = Depends(CALLER), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Swap the install back to its previous package."""
     workspace_id = _workspace_of(ctx)

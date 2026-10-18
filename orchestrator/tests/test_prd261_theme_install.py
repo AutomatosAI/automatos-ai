@@ -23,6 +23,7 @@ import base64
 import inspect
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,8 +78,11 @@ WORDING = "runs with your access to all your workspaces"
 
 
 def _ctx(workspace_id=WS_A, clerk="clerk-7"):
+    """A Clerk member who signed in a minute ago, so the step-up routes (A-07c) pass in SaaS."""
+    claims = {"sub": clerk, "fva": [1, -1], "iat": int(time.time())}
     return RequestContext(
-        workspace_id=workspace_id, user=UserContext(id=clerk, clerk_user_id=clerk, system_role="user"), auth_type="clerk",
+        workspace_id=workspace_id, user=UserContext(id=clerk, clerk_user_id=clerk, system_role="user", raw_claims=claims),
+        auth_type="clerk",
     )
 
 

@@ -10,6 +10,8 @@ from core.auth.actor import resolve_internal_user_id
 from core.auth.clerk import get_clerk_auth
 from core.database.database import get_db
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
+from core.auth.step_up import require_step_up
+from config import config
 from modules.policy.roles import WorkspaceRole
 from core.workspaces.invitations import WorkspaceInvitation, invite_member_to_workspace
 from core.workspaces.audit import AuditService
@@ -231,9 +233,17 @@ async def invite_member(
         created_at=invitation.created_at.isoformat()
     )
 
+# PRD-261 D1-d (#1157): a role change is an auth change, so it also needs a fresh
+# step-up (Clerk reverification) in SaaS; the local edition's one owner passes.
+ROLE_CHANGE_STEP_UP = require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES)
+
+
 @router.patch(
     "/members/{member_id}/role",
-    dependencies=[Depends(require_workspace_permission("members:change_role"))],
+    dependencies=[
+        Depends(require_workspace_permission("members:change_role")),
+        Depends(ROLE_CHANGE_STEP_UP),
+    ],
 )
 async def update_member_role(
     workspace_id: str,

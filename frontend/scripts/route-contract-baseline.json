@@ -35,7 +35,6 @@
     "/api/skills/single",
     "/api/system/activities",
     "/api/teams",
-    "/api/themes/active",
     "/api/usage/analytics",
     "/api/workflows/*/execute",
     "/api/workflows/execute"
@@ -75,12 +74,9 @@
     "/api/skills/single": "/api/skills/single",
     "/api/system/activities": "/api/system/activities?limit=${limit}",
     "/api/teams": "/api/teams",
-    "/api/themes/active": "/api/themes/active",
     "/api/usage/analytics": "/api/usage/analytics?timeRange=${timeRange}",
     "/api/workflows/*/execute": "/api/workflows/${workflowId}/execute",
     "/api/workflows/execute": "/api/workflows/execute"
   },
-  "_notes": {
-    "/api/themes/active": "PRD-261 W-A1: lib/api-client.ts getActiveTheme calls this ahead of its backend route. Remove this entry when A-07b (W-B2, api/themes_install.py) mounts GET /api/themes/active and the manifest is regenerated."
-  }
+  "_notes": {}
 }

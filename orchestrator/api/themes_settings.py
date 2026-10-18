@@ -1,7 +1,7 @@
 """PRD-261 A-07e — a workspace's theme settings (PRD §5 admin controls, D1-b).
 
-Routes (plan §2.2; B2-wire registers the router, adds the step-up dependency to the PUT and
-lists both routes in ``reports/route-manifest.json``):
+Routes (plan §2.2; B2-wire registers the router and lists both routes in
+``reports/route-manifest.json``):
 
 ==============================  ==========================================================
 ``GET /api/themes/settings``    member: every setting with its default, the platform
@@ -15,7 +15,8 @@ lists both routes in ``reports/route-manifest.json``):
 ==============================  ==========================================================
 
 "Member" is ``require_workspace_permission("members:read")``, "manage" is
-``"workspace:manage"``. Changing who may install also needs the old and the new install
+``"workspace:manage"``; "step-up" is A-07c's ``require_step_up`` at
+``THEME_STEP_UP_MAX_AGE_MINUTES``, after the gate. Changing who may install also needs the old and the new install
 permission, and a pin needs the install permission (``services/themes/settings.py``). An
 install of another workspace answers 404. The workspace default is set by
 ``PUT /api/themes/default`` (A-07b), never here. Users are resolved with
@@ -32,8 +33,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.dependencies import RequestContext
+from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
+from core.auth.step_up import require_step_up
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.themes import THEME_ROLE_LENGTH, THEME_STATUS_LENGTH, THEME_VERSION_LENGTH
@@ -53,6 +57,7 @@ router = APIRouter(prefix="/api/themes", tags=["themes"])
 
 MEMBER = require_workspace_permission("members:read")
 MANAGE = require_workspace_permission("workspace:manage")
+STEP_UP = require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES)
 
 # The wire names of plan §2.2 -> the keys ``apply_settings`` reads.
 SCALAR_FIELDS = {
@@ -106,9 +111,9 @@ def get_theme_settings(ctx: RequestContext = Depends(MEMBER), db: Session = Depe
     return read_settings(db, _workspace_of(ctx), ctx)
 
 
-@router.put("/settings")
+@router.put("/settings", dependencies=[Depends(MANAGE), Depends(STEP_UP)])
 def put_theme_settings(
-    body: SettingsBody, ctx: RequestContext = Depends(MANAGE), db: Session = Depends(get_db),
+    body: SettingsBody, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Change the workspace's theme settings, all or none, and answer the new settings."""
     workspace_id = _workspace_of(ctx)

@@ -80,6 +80,14 @@ from api.notifications import (  # PRD-128: Unified notification system
     router as notifications_router,
     preferences_router as notification_preferences_router,
 )
+# PRD-261 W-B2: installable themes (import, install/choice, files/boot, looks, settings).
+from api.themes_import import router as themes_import_router
+from api.themes_install import router as themes_install_router
+from api.themes_files import router as themes_files_router
+from api.themes_looks import router as themes_looks_router
+from api.themes_settings import router as themes_settings_router
+from core.auth.step_up import install_step_up_handler  # PRD-261 A-07c: the reverification 403 body
+from services.themes.package import THEME_IMPORT_ROUTE, cap_bytes as theme_cap_bytes
 
 # PRD-56's /api/tasks direct-step router was DELETED (PRD-192 S6, locked #5):
 # an ungoverned side-effecting ingress with zero product callers (grep-proven
@@ -1021,6 +1029,8 @@ limiter = Limiter(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# PRD-261 A-07c: StepUpRequired renders Clerk's reverification body with clerk_error at the top level.
+install_step_up_handler(app)
 # F040: actually enforce the limits — without this middleware the limiter above
 # is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
 # today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
@@ -1041,6 +1051,8 @@ from modules.documents.brand_logo import BRAND_LOGO_ROUTE, MAX_LOGO_BYTES
 PATH_BODY_LIMITS = {
     BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024,
     BRAND_FONTS_ROUTE: MAX_FONT_BYTES + 512 * 1024,
+    # PRD-261 A-07a: a .autotheme up to THEME_MAX_PACKAGE_MB, plus the multipart envelope.
+    THEME_IMPORT_ROUTE: theme_cap_bytes("package") + 512 * 1024,
 }
 
 
@@ -1233,6 +1245,11 @@ app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
 app.include_router(notifications_router)  # PRD-128: Unified notification system
 app.include_router(notification_preferences_router)  # PRD-128: Notification preferences
+app.include_router(themes_import_router)  # PRD-261 A-07a: POST /api/themes/import (private upload)
+app.include_router(themes_install_router)  # PRD-261 A-07b: installed, active, choice, opt-in, default, versions
+app.include_router(themes_files_router)  # PRD-261 A-08a: files by digest + boot data (membership, not ctx.workspace_id)
+app.include_router(themes_looks_router)  # PRD-261 A-09a: a member's own looks per theme
+app.include_router(themes_settings_router)  # PRD-261 A-07e: workspace theme settings
 
 # PRD-155 S3: conditionally-mounted routers — previously a wall of silent
 # import guards that swallowed failures into `x_router = None` (two of which,
