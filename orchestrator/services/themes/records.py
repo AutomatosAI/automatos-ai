@@ -207,6 +207,20 @@ def _check_new_version(db: Session, ws: UUID, manifest: Dict[str, Any], install:
         )
 
 
+def conflict_after_race(db: Session, workspace_id: Any, manifest: Dict[str, Any]) -> Optional[str]:
+    """After a concurrent upload won a unique index: the clash it left (``UploadConflict``'s message), or None.
+
+    The losing upload's own pre-insert check ran before the winner committed; run again, it sees the
+    winner's rows, so a same-version-other-files race is reported as that, not as "try again".
+    """
+    ws = _workspace(workspace_id)
+    try:
+        _check_new_version(db, ws, manifest, active_installation(db, ws, manifest["id"]))
+    except UploadConflict as exc:
+        return str(exc)
+    return None
+
+
 def _new_package(ws: UUID, user_pk: Optional[int], checked: CheckedThemePackage, prefix: str,
                  scan_report: Dict[str, Any]) -> ThemePackage:
     manifest = checked.manifest
@@ -235,6 +249,7 @@ def _commit_after_store(db: Session, store: Callable[[], None]) -> None:
     try:
         store()
     except Exception:
+        logger.exception("[Themes] Storing an upload's files failed: rolling its rows back")
         db.rollback()
         raise
     db.commit()

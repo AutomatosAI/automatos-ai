@@ -39,8 +39,8 @@ from core.models.themes import ThemeInstallation, ThemePackage
 from services.themes.package import ThemePackage as CheckedThemePackage
 from services.themes.package import ThemePackageError, cap_bytes, read_theme_package
 from services.themes.records import (
-    SavedUpload, UploadConflict, active_installation, package_by_digest, private_upload_refusal, reserved_publisher_refusal,
-    save_private_upload,
+    SavedUpload, UploadConflict, active_installation, conflict_after_race, package_by_digest, private_upload_refusal,
+    reserved_publisher_refusal, save_private_upload,
 )
 from services.themes.scan import build_scan_report
 from services.themes.storage import theme_prefix, write_theme_files
@@ -118,12 +118,16 @@ def _refuse(status: int, message: str) -> HTTPException:
 
 
 def _after_integrity_error(db: Session, ctx: RequestContext, checked: CheckedThemePackage, exc: IntegrityError) -> SavedUpload:
-    """A concurrent upload won the unique index: its package when it holds these bytes, else 409."""
+    """A concurrent upload won the unique index: its package when it holds these bytes, else 409.
+
+    The 409 names the clash the winner left (same version, other files; or not newer) when there is
+    one, and asks to try again only when a retry could succeed.
+    """
     db.rollback()
     existing = package_by_digest(db, ctx.workspace_id, checked.digest)
     if existing is None:
         logger.warning("[Themes] Concurrent upload of %s in workspace %s", checked.manifest["id"], ctx.workspace_id)
-        raise _refuse(409, BUSY) from exc
+        raise _refuse(409, conflict_after_race(db, ctx.workspace_id, checked.manifest) or BUSY) from exc
     return SavedUpload(existing, active_installation(db, ctx.workspace_id, existing.theme_id), created=False)
 
 

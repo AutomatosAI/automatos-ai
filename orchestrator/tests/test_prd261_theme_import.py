@@ -257,7 +257,7 @@ def test_a_package_over_the_cap_is_413(env, monkeypatch):
     assert _rows(env, ThemePackage) == []
 
 
-def test_a_store_failure_is_503_and_leaves_no_row_and_no_file(env):
+def test_a_store_failure_is_503_and_leaves_no_row_and_no_file(env, caplog):
     env.s3.fail_after = 2
     response = _upload(_client(env, _local_ctx(uuid4())), _hello())
 
@@ -265,6 +265,7 @@ def test_a_store_failure_is_503_and_leaves_no_row_and_no_file(env):
     assert "Traceback" not in response.text and response.json()["detail"] == "The theme's files couldn't be stored. Try again."
     assert _rows(env, ThemePackage) == [] and _rows(env, ThemeInstallation) == []
     assert env.s3.objects == {}  # the two files written before the failure were removed
+    assert "rolling its rows back" in caplog.text  # the records layer logs before it rolls back
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +357,39 @@ def test_a_version_not_newer_than_the_installed_one_is_409(env):
     response = _upload(client, _hello(version="1.1.0"))
 
     assert response.status_code == 409 and "higher version" in response.json()["detail"]
+    assert len(_rows(env, ThemePackage)) == 1
+
+
+def _stale_first_check(monkeypatch):
+    """The losing upload's pre-insert check ran before the winner committed: it saw nothing."""
+    real, calls = records._check_new_version, []
+
+    def check(*args):
+        calls.append(args)
+        return None if len(calls) == 1 else real(*args)
+
+    monkeypatch.setattr(records, "_check_new_version", check)
+
+
+def test_a_race_on_the_same_version_with_other_files_names_the_clash_not_busy(env, monkeypatch):
+    client = _client(env, _local_ctx(uuid4()))
+    assert _upload(client, _hello()).status_code == 201  # the winner, committed first
+    _stale_first_check(monkeypatch)
+    response = _upload(client, _hello(name="Hello, changed"))  # the loser hits the version index
+
+    assert response.status_code == 409 and "Raise the version" in response.json()["detail"]
+    assert len(_rows(env, ThemePackage)) == 1 and len(_rows(env, ThemeInstallation)) == 1
+
+
+def test_a_race_that_leaves_no_clash_still_asks_to_try_again(env, monkeypatch):
+    import api.themes_import as themes_import
+
+    client = _client(env, _local_ctx(uuid4()))
+    assert _upload(client, _hello()).status_code == 201
+    monkeypatch.setattr(records, "active_installation", lambda *args, **kwargs: None)  # read before the winner's install
+    response = _upload(client, _hello(version="1.1.0"))  # the loser hits the active-install index
+
+    assert response.status_code == 409 and response.json()["detail"] == themes_import.BUSY
     assert len(_rows(env, ThemePackage)) == 1
 
 
