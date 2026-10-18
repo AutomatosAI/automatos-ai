@@ -96,7 +96,10 @@ request:
 | eval lanes | NL2SQL, retrieval-recall, memory-recall and graph-uplift harness self-tests (informational). |
 
 Alongside it: `smoke-fresh-clone` (a real `docker compose up` from an empty
-checkout must reach a green `/health` and `/health/ready`), `import-linter`
+checkout must reach a green `/health` and `/health/ready` and a frontend that
+answers on `:3000`, and the boots are timed; `scripts/ci/smoke-fresh-clone.sh`
+refuses to run on a Docker host with its own Automatos containers or volumes,
+because its teardown deletes the stack's volumes), `import-linter`
 (module-boundary contracts in `orchestrator/.importlinter`), `dco`,
 `gitleaks`, `CodeQL`, `malware-scan` and `check-shopify-isolation`.
 

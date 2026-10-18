@@ -17,7 +17,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
+import shutil
+import stat
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -240,6 +244,8 @@ EVENTS = [  # out of order on purpose: the report sorts by time
     _event("postgres", "health_status: healthy", 5.5),
     _event("redis", "start", 0.0),
     _event("redis", "health_status: healthy", 5.6),
+    _event("minio", "start", 0.2),
+    _event("minio", "health_status: healthy", 6.1),
     _event("backend", "start", 6.0),
     _event("backend", "exec_start: docker-healthcheck.sh", 30.0),
     _event("backend", "health_status: healthy", 41.0),
@@ -305,8 +311,10 @@ def test_report_writes_the_summary_and_the_json(tmp_path, monkeypatch):
     assert data["frontend"]["address"] == "0.0.0.0:3000"
     assert data["frontend"]["ui_s"] == 3.2
     healthy = {(row["service"], row["start"]): row["healthy_s"] for row in data["services"]}
-    assert healthy == {("postgres", 1): 5.5, ("redis", 1): 5.6, ("backend", 1): 35.0,
+    assert healthy == {("postgres", 1): 5.5, ("redis", 1): 5.6, ("minio", 1): 5.9, ("backend", 1): 35.0,
                        ("frontend", 1): 3.0, ("backend", 2): 18.0, ("backend", 3): None}
+    # First datastore start (0.0) to the last one healthy (minio, 6.1).
+    assert data["datastores"] == {"services": ["postgres", "redis", "minio"], "healthy_s": 6.1, "missing": []}
     assert (data["commit"], data["run_id"], data["build_seconds"], data["outcome"]) == (
         "0123456789abcdef", "42", 312, "pass")
 
@@ -319,6 +327,7 @@ def test_report_writes_the_summary_and_the_json(tmp_path, monkeypatch):
         "`:3000` answered 200 3.2 s after `automatos_frontend` started (final URL http://localhost:3000/chat)",
         "`docker compose port frontend 3000`: `0.0.0.0:3000`",
         "| postgres | 1 |", "| 5.5 s |", "never healthy",
+        "Datastores (postgres, redis, minio): all healthy 6.1 s after the first of them started",
         "| Stage | fresh | warm-1 |", "| database_init | 3545 | 1200 |", "| scheduler_init | failed 12 | failed 12 |",
         "| **total** | 3557 | 1212 |", "Not available: warm-2: HTTP 404",
     ):
@@ -345,6 +354,25 @@ def test_report_still_writes_a_summary_when_the_run_failed_early(tmp_path):
     data = json.loads(out.read_text())
     assert data["build_seconds"] is None
     assert data["backend"] == [] and data["frontend"] is None
+    assert data["datastores"]["healthy_s"] is None
+    assert "Datastores (postgres, redis, minio): not all healthy; missing postgres, redis, minio." in text
+
+
+def test_the_datastore_gate_uses_first_starts_and_waits_for_every_datastore():
+    spans = report.service_spans([
+        _event("postgres", "start", 0.0), _event("postgres", "health_status: healthy", 5.5),
+        _event("redis", "start", 0.1), _event("redis", "health_status: healthy", 4.0),
+        _event("minio", "start", 0.3), _event("minio", "health_status: healthy", 6.3),
+        _event("postgres", "start", 50.0), _event("postgres", "health_status: healthy", 70.0),  # a later restart
+        _event("backend", "start", 6.4),
+    ])
+    assert report.datastore_gate(spans) == {"services": ["postgres", "redis", "minio"], "healthy_s": 6.3, "missing": []}
+
+    never = report.service_spans([_event("postgres", "start", 0.0), _event("postgres", "health_status: healthy", 5.5),
+                                  _event("redis", "start", 0.0), _event("minio", "start", 0.0),
+                                  _event("minio", "health_status: healthy", 2.0)])
+    assert report.datastore_gate(never) == {"services": ["postgres", "redis", "minio"], "healthy_s": None,
+                                            "missing": ["redis"]}
 
 
 def test_a_backend_that_restarted_mid_boot_is_flagged(tmp_path):
@@ -408,6 +436,84 @@ def test_script_writes_the_report_on_every_exit():
     assert '--summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}"' in writer
     assert 'docker logs -t "$BACKEND_CONTAINER"' in writer
     assert 'REPORT_TOOL="scripts/ci/smoke_report.py"' in text
+
+
+def _call_at(body: str, call: str) -> int:
+    match = re.search(rf"^[ \t]+{re.escape(call)}$", body, re.M)
+    assert match, f"main() does not run `{call}` on a line of its own"
+    return match.start()
+
+
+def test_script_checks_the_host_before_it_sets_the_teardown_trap():
+    main = _function(_script(), "main")
+    order = [_call_at(main, call) for call in ("refuse_existing_stack", "trap finish EXIT", "prepare_images")]
+    assert order == sorted(order)
+    assert re.search(r"^STACK_NAME_PATTERN='\^automatos_'$", _script(), re.M)
+
+
+# A docker that records its calls, lists FAKE_CONTAINERS and FAKE_VOLUMES, and fails
+# every compose build; python3 is the interpreter running these tests.
+_FAKE_DOCKER = """#!/bin/bash
+echo "docker $*" >> "$CALL_LOG"
+case "$*" in
+  "ps -a --format"*) [ -z "${FAKE_CONTAINERS:-}" ] || printf '%s\\n' $FAKE_CONTAINERS ;;
+  "volume ls --format"*) [ -z "${FAKE_VOLUMES:-}" ] || printf '%s\\n' $FAKE_VOLUMES ;;
+  "compose "*" build "*) exit 1 ;;
+esac
+exit 0
+"""
+
+
+def _run_script(tmp_path: Path, **fake: str) -> tuple[int, list[str], str]:
+    """Run smoke-fresh-clone.sh against the fake docker; (exit code, docker calls, output)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {"docker": _FAKE_DOCKER, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}
+    for name, body in stubs.items():
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod((bin_dir / name).stat().st_mode | stat.S_IXUSR)
+    log = tmp_path / "calls.log"
+    log.touch()
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+        "CALL_LOG": str(log),
+        "SMOKE_OUT_DIR": str(tmp_path / "out"),
+        "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+        **fake,
+    }
+    proc = subprocess.run(["bash", str(_SCRIPT)], env=env, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=60)
+    return proc.returncode, log.read_text(encoding="utf-8").splitlines(), proc.stdout + proc.stderr
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize("fake", [
+    {"FAKE_VOLUMES": "other_volume automatos_postgres_data"},
+    {"FAKE_CONTAINERS": "automatos_backend"},
+])
+def test_script_refuses_a_host_with_its_own_automatos_stack(tmp_path, fake):
+    code, calls, out = _run_script(tmp_path, **fake)
+    assert code == 1, out
+    found = [name for name in " ".join(fake.values()).split() if name.startswith("automatos_")]
+    assert f"already has Automatos containers or volumes ({found[0]})" in out
+    # It stops before building, pulling or tearing anything down, and writes no report.
+    assert calls == ["docker ps -a --format {{.Names}}", "docker volume ls --format {{.Name}}"]
+    assert not (tmp_path / "summary.md").exists()
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_script_reports_and_tears_down_when_the_build_fails(tmp_path):
+    code, calls, out = _run_script(tmp_path)
+    assert code == 1, out
+    assert "docker compose -f docker-compose.yml build backend workspace-worker frontend" in calls
+    assert not any(" up " in call for call in calls), "nothing boots after a failed build"
+    assert calls[-1] == "docker compose -f docker-compose.yml down -v"
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "**FAIL**: docker compose build failed" in summary
+    assert "No backend boot was timed." in summary
+    report_json = json.loads((tmp_path / "out" / "smoke-report.json").read_text(encoding="utf-8"))
+    assert (report_json["outcome"], report_json["failure"]) == ("fail", "docker compose build failed")
 
 
 # --------------------------------------------------------------------------- the workflow

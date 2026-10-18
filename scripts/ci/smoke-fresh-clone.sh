@@ -51,6 +51,12 @@
 # carry a local-* tag or compose's own <project>-<service> name. The step summary
 # adds the pull, the first run from its start to :3000 200, and those checks.
 #
+# It is built for a throwaway Docker host, such as a CI runner: its teardown removes the
+# stack together with its volumes, and the compose file names those volumes
+# (automatos_postgres_data, ...), so on a machine running its own Automatos stack it
+# would delete that stack's database. It refuses to start on a host that already has
+# Automatos containers or volumes, before it builds, pulls or tears anything down.
+#
 # Exit 0 = every boot answered 200 with no external creds. Exit 1 = a boot failed.
 set -uo pipefail
 
@@ -95,6 +101,8 @@ IMAGES_FILE="${OUT_DIR}/images.json"
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
 # The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
 BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-4}"
+# docker-compose.yml's container_name values and named volumes all start with this.
+STACK_NAME_PATTERN='^automatos_'
 
 # ---------------------------------------------------------------------------
 # Local-only secrets. These are throwaway values for an ephemeral local stack —
@@ -138,6 +146,14 @@ check_mode() {
       [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=${SMOKE_IMAGES} needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
     *) fail "SMOKE_IMAGES must be unset, pull or prebuilt, not '${SMOKE_IMAGES}'" ;;
   esac
+}
+
+# Runs before the exit trap is set, so a refusal tears nothing down.
+refuse_existing_stack() {
+  local found
+  found="$( { docker ps -a --format '{{.Names}}'; docker volume ls --format '{{.Name}}'; } 2>/dev/null \
+    | grep -E "$STACK_NAME_PATTERN" | sort -u | tr '\n' ' ')"
+  [ -z "$found" ] || fail "this Docker host already has Automatos containers or volumes (${found% }). The smoke's teardown would delete them, with their data: run it on a clean Docker host, as CI does"
 }
 
 print_banner() {
@@ -319,6 +335,7 @@ main() {
   : > "$BOOTS_FILE"
   check_mode
   print_banner
+  refuse_existing_stack
   trap finish EXIT
   prepare_images
   start_event_log
