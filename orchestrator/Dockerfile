@@ -67,22 +67,42 @@ FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e57
 
 WORKDIR /app
 
-# Runtime-only system deps. git: repo tooling; postgresql-client: the compose
-# entrypoint's psql checks; libmagic1: python-magic; tesseract/ghostscript: OCR
-# and PDF; pango/cairo/gdk-pixbuf: WeasyPrint (PRD-63); fonts-dejavu-core: the
-# ballot boxes (U+2610/U+2611) a printed checklist carries (F298), named rather than left to
-# whichever font fontconfig happens to pull in. No compilers.
+# Runtime-only system deps, each one something the code calls (PRD-262 US-019). No
+# compilers.
+# - git: repo tooling (the code graph clones through GitPython, the skill loader
+#   runs the CLI); postgresql-client: the compose entrypoint's psql checks;
+#   libmagic1: python-magic; tesseract-ocr: OCR (processors.py).
+# - pango, pangoft2 and harfbuzz-subset: the libraries WeasyPrint opens (PRD-63),
+#   named because only tesseract brought the last two. libcairo2: tesseract needs it.
+# - fonts-dejavu-core: the ballot boxes (U+2610/U+2611) a printed checklist carries
+#   (F298), named rather than left to whichever font fontconfig pulls in.
+# - fonts-urw-base35: the faces fontconfig gives a brand kit that names Helvetica,
+#   Times, Courier, Palatino or Bookman with no font file (Nimbus, C059, P052, all
+#   metric-compatible), so its PDF keeps those metrics instead of DejaVu's. It came
+#   with ghostscript, which nothing called.
+# Then, in the same layer: tesseract's orientation model (the one OCR call uses the
+# default page mode, which never loads it; tesseract-ocr depends on the package), and
+# git's server-side and mail binaries, both copies. git-core's second copy of git
+# becomes a link to /usr/bin/git, which every builtin in git-core already links to.
+# git-remote-http, which clones over HTTPS, stays.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     postgresql-client \
     libmagic1 \
     tesseract-ocr \
-    ghostscript \
     libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz-subset0 \
     libcairo2 \
-    libgdk-pixbuf-2.0-0 \
     fonts-dejavu-core \
+    fonts-urw-base35 \
+    && rm -f /usr/share/tesseract-ocr/5/tessdata/osd.traineddata \
+    && rm -f /usr/bin/git-shell /usr/bin/scalar \
+        /usr/lib/git-core/git-daemon /usr/lib/git-core/git-http-backend \
+        /usr/lib/git-core/git-http-push /usr/lib/git-core/git-imap-send \
+        /usr/lib/git-core/git-shell /usr/lib/git-core/scalar \
+    && ln -sf /usr/bin/git /usr/lib/git-core/git \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

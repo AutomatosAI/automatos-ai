@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git \
       libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev \
-      libmagic1 ghostscript tesseract-ocr fonts-dejavu-core \
+      libmagic1 tesseract-ocr fonts-dejavu-core fonts-urw-base35 \
       postgresql-15 postgresql-client-15 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -189,7 +189,7 @@ jobs:
       DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
       SHARD: ${{ matrix.shard }}/${{ needs.changes.outputs.backend_shard_count }}
       KEYWORDS: ${{ needs.changes.outputs.backend_keywords }}
-      SYSTEM_PACKAGES: libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev libmagic1 ghostscript fonts-dejavu-core
+      SYSTEM_PACKAGES: libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev libmagic1 fonts-dejavu-core fonts-urw-base35
 
     defaults:
       run:
@@ -210,7 +210,8 @@ jobs:
 
       # The downloaded .debs, kept a week: on 7 Oct (run 37689615384) the Azure
       # Ubuntu mirror served ghostscript and its libraries at 58 kB/s, 5 min 18 s
-      # for 18.5 MB, and the job hit its timeout. The week in the key refreshes them.
+      # for 18.5 MB, and the job hit its timeout (ghostscript has since left the list,
+      # PRD-262 US-019). The week in the key refreshes them.
       - name: The week, for the system-library cache key
         id: week
         run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
@@ -235,6 +236,8 @@ jobs:
           # partial update is fine — install fails loudly if THAT index is stale.
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           # fonts-dejavu-core: the image's PDF font, so F298's checklist boxes print here too.
+          # fonts-urw-base35: the faces the image gives a brand kit naming Helvetica, Times,
+          # Courier, Palatino or Bookman (PRD-262 US-019), so its PDFs lay out here as there.
           # A .deb already in ~/apt-archives at the wanted version is not downloaded again.
           mkdir -p ~/apt-archives/partial
           # shellcheck disable=SC2086 # the package list splits on spaces on purpose
@@ -488,7 +491,7 @@ jobs:
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript
+            libcairo2 libffi-dev libmagic1 fonts-urw-base35
 
       - name: Install Python dependencies
         run: |
@@ -774,7 +777,7 @@ jobs:
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript
+            libcairo2 libffi-dev libmagic1 fonts-urw-base35
 
       - name: Install Python dependencies
         run: |
@@ -1248,7 +1251,7 @@ jobs:
           sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
-            libcairo2 libffi-dev libmagic1 ghostscript
+            libcairo2 libffi-dev libmagic1 fonts-urw-base35
 
       - name: Install Python dependencies
         run: |
