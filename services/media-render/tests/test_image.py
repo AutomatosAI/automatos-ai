@@ -17,6 +17,7 @@ import pytest
 from media_render import boot
 from media_render.config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, load_settings
 from media_render.versions import read_versions
+from media_render.voices_build import load_catalogue, voice_names
 
 HYPERFRAMES_PIN = "0.8.62"
 # PRD-262 US-053: the js stage's locked tree, and the py stage's venv.
@@ -27,6 +28,11 @@ VENV = "/opt/venv"
 MESA_ONLY = ("mesa-libgallium", "libllvm19")
 LINKED = ("/usr/bin/ffmpeg", "/usr/bin/ffprobe", "/opt/chrome/chrome-headless-shell")
 CHROME_LOCALES = Path("/opt/chrome/locales")
+# PRD-262 US-052: 27 of upstream's 54 voices, each a 522,368-byte member: about
+# 14.1 MB of the 28.2 MB file.
+VOICES_FILE_MAX_BYTES = 15_000_000
+ESPEAK_KEPT_FILES = ("phontab", "phondata", "phonindex", "phondata-manifest", "intonations")
+ESPEAK_KEPT_DIRS = ("lang", "voices")
 
 
 def test_the_hyperframes_switches_are_set_in_the_image():
@@ -157,3 +163,24 @@ def test_the_runtime_has_no_curl_or_unzip():
     # Downloads happen in the builder stages; the HEALTHCHECK is Python's urllib.
     for tool in ("curl", "unzip"):
         assert shutil.which(tool) is None, tool
+
+
+# ── PRD-262 US-052: the voices and dictionaries the product speaks ───────────
+
+
+def test_the_voices_file_holds_the_catalogue_alone():
+    settings = load_settings()
+    assert voice_names(settings.kokoro_voices_path) == frozenset(load_catalogue())
+    assert Path(settings.kokoro_voices_path).stat().st_size < VOICES_FILE_MAX_BYTES
+    # kokoro/SHA256SUMS describes upstream's file, not the rewritten one: it stays in the build stage.
+    shipped = sorted(path.name for path in Path(settings.kokoro_voices_path).parent.iterdir())
+    assert shipped == sorted({Path(settings.kokoro_model_path).name, Path(settings.kokoro_voices_path).name})
+
+
+def test_the_espeak_data_keeps_en_dict_alone_among_the_dictionaries():
+    data = Path(load_settings().espeak_data_path)
+    assert sorted(path.name for path in data.glob("*_dict")) == ["en_dict"]
+    for name in ESPEAK_KEPT_FILES:
+        assert (data / name).is_file(), name
+    for name in ESPEAK_KEPT_DIRS:
+        assert (data / name).is_dir() and any((data / name).iterdir()), name

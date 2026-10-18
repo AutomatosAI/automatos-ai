@@ -15,10 +15,12 @@
 # one. A change to one part (a Hyperframes bump) rebuilds that part alone, and the
 # other parts' layers keep their digests:
 #   assets  the Kokoro files and the music tracks, in the media assets image's layout
-#   kokoro  the model and voices, checked against kokoro/SHA256SUMS
+#   kokoro  the model and voices, checked against kokoro/SHA256SUMS; the voices
+#           cut to the catalogue's (PRD-262 US-052)
 #   js      Hyperframes and GSAP, `npm ci` from js/package-lock.json
 #   chrome  chrome-headless-shell, built FROM js
-#   py      the Python packages, from requirements.lock with every hash checked
+#   py      the Python packages, from requirements.lock with every hash checked;
+#           the espeak-ng data cut to the languages Kokoro speaks (US-052)
 #   music   the music library, checked against music/manifest.json and analysed
 #
 # Railway builds this file with no build args and no target, so the LAST stage
@@ -65,10 +67,20 @@ FROM assets-${MEDIA_ASSETS} AS assets
 
 # Kokoro: the model and voices from the assets. The build fails unless each
 # matches kokoro/SHA256SUMS.
+#
+# PRD-262 US-052: then voices-v1.0.bin, which holds 54 voices in nine languages,
+# is rewritten to the 27 English voices the platform offers, the ids
+# media_render/voices.json copies from the orchestrator's catalogue
+# (media_render/voices_build.py; about 14 MB less). The build fails if the
+# catalogue names a voice the upstream file lacks. SHA256SUMS describes the
+# upstream file, not the rewritten one, so it does not ship.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS kokoro
 COPY --link --from=assets /kokoro/model-files-v1.0/kokoro-v1.0.onnx /kokoro/model-files-v1.0/voices-v1.0.bin /opt/kokoro/
 COPY --link kokoro/SHA256SUMS /opt/kokoro/SHA256SUMS
-RUN cd /opt/kokoro && sha256sum -c SHA256SUMS
+COPY --link media_render/voices.json media_render/voices_build.py /build/voices/
+RUN cd /opt/kokoro && sha256sum -c SHA256SUMS \
+    && python /build/voices/voices_build.py /build/voices/voices.json voices-v1.0.bin \
+    && rm SHA256SUMS
 
 # Hyperframes pinned EXACTLY (Apache-2.0), and GSAP for each composition's one
 # paused timeline, from js/package-lock.json: `npm ci` installs exactly the locked
@@ -153,12 +165,19 @@ RUN set -eux; \
 #   a short real path (PRD-251 Traps). Kokoro gets the path from config
 #   (MEDIA_RENDER_ESPEAK_DATA_PATH), never from espeakng_loader. Boot refuses a
 #   path of 160 characters or more (media_render/boot.py).
+# - PRD-262 US-052: of espeak-ng's 114 dictionaries, only en_dict stays (the
+#   other 113 are 17.46 MB). Kokoro speaks en-us and en-gb alone, and espeak-ng
+#   reads both from en_dict; the phoneme, intonation, language and voice data
+#   stay. media_render/espeak_build.py takes Kokoro's phonemes for a fixed English
+#   sentence before and after the cut, fails the build unless they match, and
+#   writes them to /opt/media-render/espeak-phonemes.json for the test stage.
 # - onnxruntime's libonnxruntime.so.* (29 MB) is a library its Python module
 #   does not link; onnxruntime is imported before the layer is kept, so a release
 #   that starts linking it fails the build here. numpy's tests go too.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS py
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements.lock /opt/media-render/requirements.lock
+COPY media_render/espeak_build.py /opt/media-render/build/espeak_build.py
 RUN set -eux; \
     uv venv --python /usr/local/bin/python3.12 /opt/venv; \
     uv pip install --python /opt/venv/bin/python --no-cache --compile-bytecode --require-hashes --no-deps \
@@ -167,6 +186,7 @@ RUN set -eux; \
     mv "$(/opt/venv/bin/python -c 'import espeakng_loader; print(espeakng_loader.get_data_path())')" /opt/espeak; \
     test -f /opt/espeak/phontab; \
     test ! -L /opt/espeak; \
+    /opt/venv/bin/python /opt/media-render/build/espeak_build.py /opt/espeak /opt/media-render/espeak-phonemes.json; \
     chmod -R a+rX /opt/espeak; \
     rm "$site"/onnxruntime/capi/libonnxruntime.so.*; \
     find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +; \
@@ -295,10 +315,12 @@ ENTRYPOINT ["tini", "--", "python", "-m", "media_render"]
 CMD ["serve"]
 
 # The service's own suite runs inside the image (the media-render CI job), with
-# pytest installed into the same venv.
+# pytest installed into the same venv, and the phonemes the py stage took before
+# and after it cut the espeak-ng data (PRD-262 US-052; tests/test_kokoro.py).
 FROM runtime AS test
 USER root
 COPY --from=uv /uv /usr/local/bin/uv
+COPY --from=py /opt/media-render/espeak-phonemes.json /opt/media-render/espeak-phonemes.json
 RUN uv pip install --python /opt/venv/bin/python --no-cache -r /app/requirements-test.txt
 USER render
 
