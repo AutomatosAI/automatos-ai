@@ -14,7 +14,8 @@ This suite checks:
 - the script's ELF reader, on ELF files built here (32- and 64-bit, both byte orders)
   and, on Linux, on this interpreter's own extension modules;
 - how the script names, finds, loads and judges files, including an extension its
-  package loads under another name (opencv's cv2), and the tree check;
+  package loads under another name (opencv's cv2), the tree check, and the throwaway
+  settings it imports the app with;
 - the script runs on the image's bare Python: it imports the standard library only;
 - both workflows run it inside the image they built.
 
@@ -250,6 +251,18 @@ def test_every_expected_failure_says_why():
     for key, reason in site_packages.EXPECTED_FAILURES.items():
         assert re.fullmatch(r"[A-Za-z_][\w.]*|[\w./-]+\.so[\w.]*", key), key
         assert len(reason.split()) >= 8, f"{key}: say why it fails and why that is fine"
+
+
+def test_the_app_is_imported_with_the_backend_test_jobs_kind_of_settings():
+    """Throwaway database settings with nothing listening, in the local edition, as the shards set them."""
+    shard = _workflow("test.yml")["jobs"]["orchestrator-tests-shard"]["env"]
+    settings = site_packages.APP_IMPORT_ENV
+    assert set(settings) <= set(shard)
+    assert {key: settings[key] for key in ("AUTH_EDITION", "DEFAULT_WORKSPACE_ID", "POSTGRES_HOST")} == {
+        key: shard[key] for key in ("AUTH_EDITION", "DEFAULT_WORKSPACE_ID", "POSTGRES_HOST")}
+    assert {"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_PORT", "POSTGRES_DB"} <= set(settings), (
+        "core/database/database.py builds its URL from these when imported")
+    assert site_packages.APP_DIR == "/app" and site_packages.APP_IMPORT == "import main"
 
 
 def test_a_failed_import_is_reported_on_one_line(tmp_path, monkeypatch):

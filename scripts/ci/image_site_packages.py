@@ -22,8 +22,9 @@ The failures must be exactly the ``EXPECTED_FAILURES`` whose files this image ha
 other ImportError or OSError fails, and so does a listed one that now loads, so the
 list stays true. It also checks that no ``tests`` directory is left and that the
 ``testing`` packages other code imports (numpy, SQLAlchemy, alembic) are still there,
-then runs ``import main`` in a fresh interpreter in /app. The probe's own imports read
-site-packages only, so the app's directories (``alembic/``) shadow nothing.
+then runs ``import main`` in a fresh interpreter in /app, with throwaway database
+settings (nothing connects on import). The probe's own imports read site-packages only,
+so the app's directories (``alembic/``) shadow nothing.
 
 Standard library only. Exit 0 when every check passes, 1 otherwise.
 """
@@ -70,6 +71,19 @@ TESTS_DIR = "tests"
 KEPT_TESTING = ("numpy/testing", "sqlalchemy/testing", "alembic/testing")
 APP_DIR = "/app"
 APP_IMPORT = "import main"
+# Importing the app builds its database engine (core/database/database.py), which needs
+# the database settings, but connects only on a first query. These are throwaway values
+# with nothing listening, the local edition's as the backend test job sets them; the
+# image itself sets none (compose and Railway do).
+APP_IMPORT_ENV = {
+    "POSTGRES_USER": "probe",
+    "POSTGRES_PASSWORD": "probe",
+    "POSTGRES_HOST": "127.0.0.1",
+    "POSTGRES_PORT": "5432",
+    "POSTGRES_DB": "probe",
+    "AUTH_EDITION": "local",
+    "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000000c1",
+}
 APP_IMPORT_TIMEOUT_S = 600
 STDERR_TAIL_LINES = 15
 MAPS = Path("/proc/self/maps")
@@ -319,8 +333,8 @@ def tree_problems(site: Path) -> List[str]:
 def app_problems() -> List[str]:
     """``import main`` in a fresh interpreter in /app, so the probe's imports can't help or hurt it."""
     try:
-        done = subprocess.run([sys.executable, "-c", APP_IMPORT], cwd=APP_DIR, capture_output=True,
-                              text=True, timeout=APP_IMPORT_TIMEOUT_S, check=False)
+        done = subprocess.run([sys.executable, "-c", APP_IMPORT], cwd=APP_DIR, capture_output=True, text=True,
+                              env={**os.environ, **APP_IMPORT_ENV}, timeout=APP_IMPORT_TIMEOUT_S, check=False)
     except subprocess.TimeoutExpired:
         return [f"`{APP_IMPORT}` did not finish in {APP_IMPORT_TIMEOUT_S} s"]
     if done.returncode == 0:
