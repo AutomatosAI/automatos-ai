@@ -1,0 +1,177 @@
+{
+ "matches": [
+  {
+   "vulnerability": {
+    "id": "CVE-2026-8924",
+    "dataSource": "https://security-tracker.debian.org/tracker/CVE-2026-8924",
+    "namespace": "debian:distro:debian:13",
+    "severity": "Critical",
+    "urls": [],
+    "cvss": [],
+    "fix": {"versions": ["8.14.1-2+deb13u7"], "state": "fixed"},
+    "advisories": [],
+    "risk": 0.9
+   },
+   "relatedVulnerabilities": [
+    {"id": "CVE-2026-8924", "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2026-8924", "namespace": "nvd:cpe",
+     "severity": "Critical", "urls": [], "cvss": []}
+   ],
+   "matchDetails": [
+    {"type": "exact-indirect-match", "matcher": "dpkg-matcher",
+     "searchedBy": {"distro": {"type": "debian", "version": "13"}, "namespace": "debian:distro:debian:13",
+                    "package": {"name": "curl", "version": "8.14.1-2+deb13u5"}},
+     "found": {"vulnerabilityID": "CVE-2026-8924", "versionConstraint": "< 8.14.1-2+deb13u7 (deb)"},
+     "fix": {"suggestedVersion": "8.14.1-2+deb13u7"}}
+   ],
+   "artifact": {
+    "id": "a1c0de0000000001", "name": "curl", "version": "8.14.1-2+deb13u5", "type": "deb",
+    "locations": [{"path": "/usr/share/doc/curl/copyright"}, {"path": "/var/lib/dpkg/status"}],
+    "language": "", "licenses": ["curl"], "cpes": [], "purl": "pkg:deb/debian/curl@8.14.1-2%2Bdeb13u5?distro=debian-13",
+    "upstreams": []
+   }
+  },
+  {
+   "vulnerability": {
+    "id": "CVE-2026-8927",
+    "dataSource": "https://security-tracker.debian.org/tracker/CVE-2026-8927",
+    "namespace": "debian:distro:debian:13",
+    "severity": "Critical",
+    "urls": [],
+    "cvss": [],
+    "fix": {"versions": ["8.14.1-2+deb13u7"], "state": "fixed"},
+    "advisories": [],
+    "risk": 0.9
+   },
+   "relatedVulnerabilities": [
+    {"id": "CVE-2026-8927", "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2026-8927", "namespace": "nvd:cpe",
+     "severity": "Critical", "urls": [], "cvss": []}
+   ],
+   "matchDetails": [
+    {"type": "exact-indirect-match", "matcher": "dpkg-matcher",
+     "searchedBy": {"distro": {"type": "debian", "version": "13"}, "namespace": "debian:distro:debian:13",
+                    "package": {"name": "curl", "version": "8.14.1-2+deb13u5"}},
+     "found": {"vulnerabilityID": "CVE-2026-8927", "versionConstraint": "< 8.14.1-2+deb13u7 (deb)"},
+     "fix": {"suggestedVersion": "8.14.1-2+deb13u7"}}
+   ],
+   "artifact": {
+    "id": "a1c0de0000000002", "name": "libcurl4t64", "version": "8.14.1-2+deb13u5", "type": "deb",
+    "locations": [{"path": "/usr/share/doc/libcurl4t64/copyright"}, {"path": "/var/lib/dpkg/status"}],
+    "language": "", "licenses": ["curl"], "cpes": [],
+    "purl": "pkg:deb/debian/libcurl4t64@8.14.1-2%2Bdeb13u5?distro=debian-13&upstream=curl",
+    "upstreams": [{"name": "curl"}]
+   }
+  },
+  {
+   "vulnerability": {
+    "id": "GHSA-86qp-5c8j-p5mr",
+    "dataSource": "https://github.com/advisories/GHSA-86qp-5c8j-p5mr",
+    "namespace": "github:language:python",
+    "severity": "Medium",
+    "urls": [],
+    "description": "Starlette has missing Host header validation that poisons request.url.path, bypassing path-based security checks",
+    "cvss": [],
+    "knownExploited": [
+     {"cve": "CVE-2026-48710", "knownRansomwareCampaignUse": "Unknown"}
+    ],
+    "fix": {"versions": ["1.0.1"], "state": "fixed"},
+    "advisories": [],
+    "risk": 12.5
+   },
+   "relatedVulnerabilities": [
+    {"id": "CVE-2026-48710", "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2026-48710", "namespace": "nvd:cpe",
+     "severity": "Medium", "urls": [], "cvss": []}
+   ],
+   "matchDetails": [
+    {"type": "exact-direct-match", "matcher": "python-matcher",
+     "searchedBy": {"language": "python", "namespace": "github:language:python",
+                    "package": {"name": "starlette", "version": "0.41.3"}},
+     "found": {"vulnerabilityID": "GHSA-86qp-5c8j-p5mr", "versionConstraint": "<=1.0.0 (python)"},
+     "fix": {"suggestedVersion": "1.0.1"}}
+   ],
+   "artifact": {
+    "id": "a1c0de0000000003", "name": "starlette", "version": "0.41.3", "type": "python",
+    "locations": [{"path": "/usr/local/lib/python3.11/site-packages/starlette-0.41.3.dist-info/METADATA"}],
+    "language": "python", "licenses": ["BSD-3-Clause"], "cpes": [], "purl": "pkg:pypi/starlette@0.41.3",
+    "upstreams": []
+   }
+  },
+  {
+   "vulnerability": {
+    "id": "GHSA-7f5h-v6xp-fcq8",
+    "dataSource": "https://github.com/advisories/GHSA-7f5h-v6xp-fcq8",
+    "namespace": "github:language:python",
+    "severity": "High",
+    "urls": [],
+    "cvss": [],
+    "fix": {"versions": ["0.49.1"], "state": "fixed"},
+    "advisories": [],
+    "risk": 0.4
+   },
+   "relatedVulnerabilities": [
+    {"id": "CVE-2025-62727", "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2025-62727", "namespace": "nvd:cpe",
+     "severity": "High", "urls": [], "cvss": []}
+   ],
+   "matchDetails": [
+    {"type": "exact-direct-match", "matcher": "python-matcher",
+     "searchedBy": {"language": "python", "namespace": "github:language:python",
+                    "package": {"name": "starlette", "version": "0.41.3"}},
+     "found": {"vulnerabilityID": "GHSA-7f5h-v6xp-fcq8", "versionConstraint": ">=0.39.0,<=0.49.0 (python)"},
+     "fix": {"suggestedVersion": "0.49.1"}}
+   ],
+   "artifact": {
+    "id": "a1c0de0000000003", "name": "starlette", "version": "0.41.3", "type": "python",
+    "locations": [{"path": "/usr/local/lib/python3.11/site-packages/starlette-0.41.3.dist-info/METADATA"}],
+    "language": "python", "licenses": ["BSD-3-Clause"], "cpes": [], "purl": "pkg:pypi/starlette@0.41.3",
+    "upstreams": []
+   }
+  },
+  {
+   "vulnerability": {
+    "id": "CVE-2023-45853",
+    "dataSource": "https://security-tracker.debian.org/tracker/CVE-2023-45853",
+    "namespace": "debian:distro:debian:13",
+    "severity": "Critical",
+    "urls": [],
+    "cvss": [],
+    "fix": {"versions": [], "state": "wont-fix"},
+    "advisories": [],
+    "risk": 0.3
+   },
+   "relatedVulnerabilities": [
+    {"id": "CVE-2023-45853", "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2023-45853", "namespace": "nvd:cpe",
+     "severity": "Critical", "urls": [], "cvss": []}
+   ],
+   "matchDetails": [
+    {"type": "exact-indirect-match", "matcher": "dpkg-matcher",
+     "searchedBy": {"distro": {"type": "debian", "version": "13"}, "namespace": "debian:distro:debian:13",
+                    "package": {"name": "zlib", "version": "1:1.3.dfsg+really1.3.1-1"}},
+     "found": {"vulnerabilityID": "CVE-2023-45853", "versionConstraint": "none (deb)"}}
+   ],
+   "artifact": {
+    "id": "a1c0de0000000004", "name": "zlib1g", "version": "1:1.3.dfsg+really1.3.1-1+b1", "type": "deb",
+    "locations": [{"path": "/var/lib/dpkg/status"}],
+    "language": "", "licenses": ["Zlib"], "cpes": [], "purl": "pkg:deb/debian/zlib1g@1%3A1.3.dfsg%2Breally1.3.1-1%2Bb1?distro=debian-13",
+    "upstreams": [{"name": "zlib"}]
+   }
+  }
+ ],
+ "source": {
+  "type": "image",
+  "target": {
+   "userInput": "registry:localhost:5000/automatos-api@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "imageID": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "manifestDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+   "mediaType": "application/vnd.oci.image.manifest.v1+json",
+   "tags": [],
+   "imageSize": 0,
+   "layers": [],
+   "manifest": null,
+   "config": null,
+   "repoDigests": [],
+   "architecture": "amd64",
+   "os": "linux"
+  }
+ },
+ "distro": {"name": "debian", "version": "13", "idLike": []},
+ "descriptor": {"name": "grype", "version": "0.118.0"}
+}

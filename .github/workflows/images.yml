@@ -14,9 +14,15 @@ name: images
 #   `edge` at that `sha-<short>` (PRD-262 US-003). An image that cannot boot
 #   never reaches `edge`, the tag plain compose and the Helm chart pull.
 # - Each architecture builds on its own native runner (no QEMU), pushes by
-#   digest and scans that digest (report only), so amd64 and arm64 are both
-#   scanned. The merge job joins the digests into one multi-arch index and
-#   signs it with cosign (keyless, through GitHub OIDC).
+#   digest and scans that digest with Grype, straight from the registry it was
+#   pushed to, so amd64 and arm64 are both scanned, on pull requests as on main.
+#   The scan policy (scripts/ci/image_scan_policy.py, PRD-262 US-013) blocks a
+#   fixable Critical, or a match on CISA's Known Exploited Vulnerabilities list
+#   at any severity, that .grype.yaml does not allowlist with a reason and an
+#   expiry. The merge job needs every build job, so on main a failing scan
+#   leaves the digest untagged and unsigned. The merge job joins the digests
+#   into one multi-arch index and signs it with cosign (keyless, through
+#   GitHub OIDC).
 # - Every build reports its size, its layers (with the Dockerfile instruction
 #   and the heaviest paths of each) and its update delta, the MB an existing
 #   user downloads to move from `edge` to it, in the step summary and as a
@@ -231,6 +237,26 @@ jobs:
         with:
           persist-credentials: false
 
+      # PRD-262 US-013: Grype comes first, so its database download and load (73
+      # to 120 s on 16 Oct) overlap the build instead of following it. Pinned to
+      # 0.118.0, whose JSON the scan policy reads (`knownExploited` on a match).
+      - name: Install Grype
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.118.0
+
+      # In the background, outside the checkout (Grype reads a .grype.yaml in its
+      # working directory). The scan step waits for db.status.
+      - name: Download the Grype database (background)
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/grype"
+          cd "${RUNNER_TEMP}/grype"
+          nohup bash -c '"$GRYPE" db update > db.log 2>&1; echo "$?" > db.status.tmp && mv db.status.tmp db.status' \
+            > /dev/null 2>&1 < /dev/null &
+
       - name: Metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -338,18 +364,72 @@ jobs:
 
       # Scans this architecture's image on its own runner: Grype picks one
       # platform from a multi-arch index, so scanning the merged index would
-      # miss arm64. Report only: findings go to the log, and even a scanner
-      # error never blocks the publish.
-      - name: Vulnerability scan (report only)
-        if: matrix.publish
-        continue-on-error: true
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+      # miss arm64. Every build is scanned, read straight from the registry it
+      # pushed to: the job's registry:2 over plain HTTP on a PR or branch, GHCR
+      # (with the login above) when publishing. No docker pull or save. It runs
+      # outside the checkout, so Grype applies no allowlist: its table shows
+      # every row, and the policy step below applies .grype.yaml. A scanner
+      # error fails the job; on main the merge job then never runs (PRD-262
+      # US-013).
+      - name: Vulnerability scan
+        working-directory: ${{ runner.temp }}/grype
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+          GRYPE_REGISTRY_INSECURE_USE_HTTP: ${{ matrix.registry != '' }}
+          GRYPE_DB_AUTO_UPDATE: "false"
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+          DB_WAIT_SECONDS: "600"
+        run: |
+          waited=0
+          until [ -f db.status ]; do
+            if [ "$waited" -ge "$DB_WAIT_SECONDS" ]; then
+              cat db.log
+              echo "::error title=Grype database::not downloaded after ${DB_WAIT_SECONDS} s"
+              exit 1
+            fi
+            sleep 5
+            waited=$((waited + 5))
+          done
+          if [ "$(cat db.status)" != "0" ]; then
+            cat db.log
+            echo "::error title=Grype database::the download failed"
+            exit 1
+          fi
+          echo "The Grype database was ready after ${waited} s of waiting."
+          "$GRYPE" "registry:${IMAGE}@${DIGEST}" --platform "linux/${ARCH}" -o table -o json=report.json
+
+      - name: Upload the scan report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          image: ${{ matrix.image }}@${{ steps.build.outputs.digest }}
-          fail-build: false
-          severity-cutoff: high
-          only-fixed: true
-          output-format: table
+          name: grype-${{ matrix.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/grype/report.json
+          if-no-files-found: error
+          retention-days: 30
+
+      # The policy reads .grype.yaml, so it needs PyYAML.
+      - name: Set up Python (the scan policy)
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # PRD-262 US-013 (D1, FR-3): fails on a fixable Critical, or a KEV match of
+      # any severity, that no unexpired .grype.yaml entry covers. POLICY_MODE is
+      # `report` (warnings only) until the W1 wave's last commit sets `fail`, once
+      # every current finding is fixed or allowlisted. An allowlist entry without
+      # a reason or an expiry, or one more than 90 days out, fails in either mode.
+      - name: Scan policy
+        env:
+          POLICY_MODE: report
+          REPORT: ${{ runner.temp }}/grype/report.json
+          NAME: ${{ matrix.name }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
+          python scripts/ci/image_scan_policy.py check --report "$REPORT" --allowlist .grype.yaml \
+            --mode "$POLICY_MODE" --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
 
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build

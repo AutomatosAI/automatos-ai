@@ -1,0 +1,34 @@
+# The vulnerability scan allowlist (PRD-262 US-013, D1, FR-3).
+#
+# images.yml scans every image it builds with Grype. A row blocks the image when it is
+# a fixable Critical, or when it is on CISA's Known Exploited Vulnerabilities list,
+# whatever its severity, unless an entry below matches it.
+# scripts/ci/image_scan_policy.py applies this file. images.yml runs Grype outside the
+# checkout, so Grype never reads it itself, and its table in the log shows every row.
+#
+# Each entry names the vulnerability, says why it is accepted (`reason`) and until
+# when (`expires`: the last day it applies, at most 90 days out). Narrow it with
+# `package` (name, version, type) so it covers only the rows it was written for.
+# `include-aliases: true` also matches a row whose related ids hold the vulnerability
+# (a GHSA row, for a CVE entry), and `fix-state` narrows it to one fix state. Any
+# other key fails the policy. The scan-allowlist workflow fails every day once an
+# entry has expired: fix the image, or renew the entry with a current reason.
+
+ignore:
+  # API and workspace worker. PR builds take the apt layer from the GHA cache written
+  # on 6 Oct, which holds curl 8.14.1-2+deb13u5. Only the weekly uncached rebuild
+  # (PRD-262 US-011) installs deb13u7, which fixes both CVEs (DSA-6558-1). Remove
+  # these after the first schedule run.
+  - vulnerability: CVE-2026-8924
+    package: {version: 8.14.1-2+deb13u5, type: deb}
+    reason: >-
+      curl 8.14.1-2+deb13u5 comes from the apt layer PR builds read from the 6 Oct GHA
+      cache; only the weekly uncached rebuild (PRD-262 US-011) installs the fixed deb13u7.
+    expires: 2026-11-17
+  - vulnerability: CVE-2026-8927
+    package: {version: 8.14.1-2+deb13u5, type: deb}
+    reason: >-
+      curl 8.14.1-2+deb13u5 comes from the apt layer PR builds read from the 6 Oct GHA
+      cache; only the weekly uncached rebuild (PRD-262 US-011) installs the fixed deb13u7.
+    expires: 2026-11-17
+
