@@ -80,10 +80,10 @@ WORKDIR /app
 #   Times, Courier, Palatino or Bookman with no font file (Nimbus, C059, P052, all
 #   metric-compatible), so its PDF keeps those metrics instead of DejaVu's. It came
 #   with ghostscript, which nothing called.
-# Then, in the same layer: tesseract's orientation model (the one OCR call uses the
-# default page mode, which never loads it; tesseract-ocr depends on the package), and
-# git's server-side and mail binaries, both copies. git-core's second copy of git
-# becomes a link to /usr/bin/git, which every builtin in git-core already links to.
+# The same layer deletes tesseract's orientation model (the one OCR call uses the
+# default page mode, which never loads it; tesseract-ocr depends on the package) and
+# git's server-side and mail binaries, both copies. git-core's second copy of git,
+# which every builtin there links to, becomes a link to /usr/bin/git.
 # git-remote-http, which clones over HTTPS, stays.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
