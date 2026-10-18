@@ -1,6 +1,7 @@
 /**
- * PRD-261 A-01 — the global handoff: the host's own React, ReactDOM, jsx runtime and theme SDK
- * on one frozen global, which the shims under public/theme-sdk/v1 re-export to a theme.
+ * PRD-261 A-01, A-10a — the global handoff: the host's own React, ReactDOM, jsx runtime and theme
+ * SDK (lib/theme-sdk, by its alias '@automatos/theme-sdk') on one frozen global, which the shims
+ * under public/theme-sdk/v1 re-export to a theme.
  *
  * Next's React lives inside webpack chunks, not as an ES module a browser can import. In the
  * App Router's client bundle these imports resolve to next/dist/compiled/react…, the same
@@ -12,7 +13,7 @@ import * as React from 'react'
 import * as ReactDOM from 'react-dom'
 import * as ReactDOMClient from 'react-dom/client'
 import * as JsxRuntime from 'react/jsx-runtime'
-import * as ThemeSdk from './sdk'
+import * as ThemeSdk from '@automatos/theme-sdk'
 import sharedModules from './shared-modules.json'
 import type { ThemeHostGlobal } from './types'
 
