@@ -10,8 +10,9 @@ connected accounts.
 One codebase ships two editions behind one setting:
 
 - **local** (`AUTH_EDITION=local`): `docker compose up` on the owner's own machine,
-  no accounts. Every port except the frontend binds to `127.0.0.1` by default
-  (`BIND_ADDRESS`). Whoever can reach the API is the owner, by design.
+  no accounts. Every published port, the frontend's included, binds to `127.0.0.1`
+  by default (`BIND_ADDRESS`). Whoever can reach the API or the frontend is the
+  owner, by design.
 - **hosted** (`AUTH_EDITION=saas`): multi-tenant, Clerk sign-in, many workspaces
   on one database.
 

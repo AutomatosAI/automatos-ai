@@ -1143,9 +1143,11 @@ choice; the phrase above is the ceiling to keep in mind.
 
 ## Network exposure (`BIND_ADDRESS`)
 
-The API (8000), Postgres, Redis and MinIO publish on `127.0.0.1` by default, so
-they are reachable from this machine only. To reach them from another device on
-your network, set `BIND_ADDRESS=0.0.0.0` in `.env` deliberately. In the local
-edition an anonymous request is the operator, and with session mode (PRD-234)
-the API can start Claude Code sessions that run commands on this machine — do
-not expose it to a network you do not control.
+Every port the stack publishes listens on `127.0.0.1` by default: the web app
+(3000), the API (8000), Postgres, Redis, MinIO and the services of the optional
+profiles. They are reachable from this machine only. To reach them from another
+device on your network, set `BIND_ADDRESS=0.0.0.0` in `.env` deliberately. In the
+local edition an anonymous request is the operator (through the web app's chat as
+much as through the API), and with session mode (PRD-234) the API can start
+Claude Code sessions that run commands on this machine — do not expose it to a
+network you do not control.
