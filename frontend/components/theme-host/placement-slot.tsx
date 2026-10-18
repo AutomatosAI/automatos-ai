@@ -12,8 +12,11 @@
  * `data-theme-slot`, inside a boundary: if it throws, the fallback draws again and the host is
  * told, as the frame slot does (theme-frame-slot.tsx).
  *
- * The registrations come from PlacementSlotsProvider, which the theme host renders around the
- * app with the active theme's slots (ThemeRegistrations.slots, lib/theme-host/types.ts).
+ * The registrations come from PlacementSlotsProvider, given the active theme's slots
+ * (ThemeRegistrations.slots, lib/theme-host/types.ts). Nothing in the app mounts it yet: the theme
+ * host provider (theme-host-provider.tsx, A-04c in W-A2) is to render it with
+ * `state.active?.slots ?? null` around its children. Until then every slot draws its fallback in
+ * the running app (docs/theme-host/placement-reach.md).
  */
 import { createContext, useContext, type ComponentType, type ReactNode } from 'react'
 

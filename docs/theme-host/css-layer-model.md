@@ -99,7 +99,10 @@ is the fallback, and this page changes with it.
 
 - **Ancestors.** `display: none`, `opacity: 0` or an off-screen move on an element around the card
   hides the card with it, and nothing inside the card can undo that. Core or the theme's frame
-  draws that region, and the frame is reviewed.
+  draws that region, and the frame is reviewed. This narrows the A-12c proof line in the phase A
+  plan (§2.6), which lists `display`, `opacity` and off-screen on the parents too. The spec takes
+  only `visibility` and `pointer-events` from ancestors, because neither PA-15 option can beat the
+  other three there. The narrowing waits for Gerard's acceptance in the W-A3 PR.
 - **The card's own elements.** A scoped rule can still reach the card's buttons and text, under
   option (2).
 - **In-page code.** A theme's JavaScript runs in the same page. It can remove the guard, the
