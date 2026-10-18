@@ -203,6 +203,8 @@ def _register_list_tasks(registry: ActionRegistry) -> None:
             "The result's 'total' is how many tasks match the filter, on every page: that is "
             "the count to give. When 'next_offset' is not null there are more: call again with "
             "offset=next_offset (same filters) until it is null before listing every one. "
+            "A page lists as many cards as fit; while next_offset is not null, call again with "
+            "offset=next_offset, never with offsets worked out ahead from limit. "
             "Each ticket has a number (#0042): name tickets by it, never by their place in a list. "
             "When the owner names a piece of work without its number ('the Guji blog draft', "
             "'the Westmoor invoice'), pass search with its name: work waiting on the owner is "

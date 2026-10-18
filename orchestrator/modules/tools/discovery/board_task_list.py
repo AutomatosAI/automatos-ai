@@ -46,8 +46,9 @@ def _page(params: Dict[str, Any]) -> Tuple[int, int]:
 def _envelope(rows: List[Dict[str, Any]], total: int, offset: int, limit: int) -> Dict[str, Any]:
     """One page and where it sits: ``total`` is the filter's, never the page's."""
     after = offset + len(rows)
-    return {"success": True, "tasks": rows, "total": total, "offset": offset, "limit": limit,
-            "returned": len(rows), "next_offset": after if after < total else None}
+    # F442: where the page sits before its rows, so a cut answer never loses total and next_offset.
+    return {"success": True, "total": total, "offset": offset, "limit": limit, "returned": len(rows),
+            "next_offset": after if after < total else None, "tasks": rows}
 
 
 def _agent_filter(db: Session, workspace_id: UUID, name: str) -> Optional[int]:
