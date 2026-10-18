@@ -155,6 +155,54 @@ def test_a_dropped_transfer_is_retried_and_one_that_never_arrives_fails(tmp_path
         music_build.fetch(url, target, opener=_serving({url: b"x"}, failures=3), attempts=3, backoff=0)
 
 
+# ── the media assets (PRD-262 US-053) ───────────────────────────────────────
+def test_fetch_only_lays_the_tracks_out_as_the_media_assets_image_does(tmp_path, capsys, monkeypatch):
+    data = b"ID3 a track"
+    source = _one_track_source(tmp_path, data, hashlib.sha256(data).hexdigest())
+    opener = _serving({"https://music.example.test/test-groove.wav": data})
+    monkeypatch.setattr(music_build.urllib.request, "urlopen", opener)
+    assert music_build.main([str(source), str(tmp_path / "music"), "--fetch-only"]) == 0
+    # /music/<id>.<ext>, and nothing else: no analysis (no numpy or ffmpeg there), no manifest.
+    assert sorted(p.name for p in (tmp_path / "music").iterdir()) == ["test-groove.wav"]
+    assert (tmp_path / "music" / "test-groove.wav").read_bytes() == data
+    assert "music library: 1 tracks" in capsys.readouterr().out
+
+
+def test_fetch_only_fails_on_a_changed_track(tmp_path, capsys, monkeypatch):
+    source = _one_track_source(tmp_path, b"ID3 a track", hashlib.sha256(b"another file").hexdigest())
+    monkeypatch.setattr(music_build.urllib.request, "urlopen", _serving({"https://music.example.test/test-groove.wav": b"ID3 a track"}))
+    assert music_build.main([str(source), str(tmp_path / "music"), "--fetch-only"]) == 1
+    assert "test-groove: sha256 mismatch" in capsys.readouterr().err
+
+
+def test_a_library_built_from_the_assets_checks_every_track_again_and_fetches_nothing(tmp_path):
+    data = _wav_bytes(_synthetic_track())
+    source = _one_track_source(tmp_path, data, hashlib.sha256(data).hexdigest())
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "test-groove.wav").write_bytes(data)
+    nothing = _serving({})
+    manifest = music_build.build(source, tmp_path / "library", opener=nothing, tracks_dir=assets)
+    assert nothing.calls == [] and (tmp_path / "library" / "test-groove.wav").read_bytes() == data
+    _assert_known_structure(manifest["tracks"][0]["cues"])
+    (assets / "test-groove.wav").write_bytes(data[:-1] + bytes([data[-1] ^ 0xFF]))
+    with pytest.raises(MusicBuildError, match="test-groove: sha256 mismatch"):
+        music_build.build(source, tmp_path / "again", tracks_dir=assets)
+
+
+def test_a_track_missing_from_the_assets_fails_the_build(tmp_path):
+    source = _one_track_source(tmp_path, b"x", hashlib.sha256(b"x").hexdigest())
+    with pytest.raises(MusicBuildError, match="no such track"):
+        music_build.build(source, tmp_path / "library", tracks_dir=tmp_path / "empty")
+
+
+def test_a_track_that_already_is_the_target_is_only_read(tmp_path):
+    track = tmp_path / "t.mp3"
+    track.write_bytes(b"ID3 some audio")
+    assert music_build.copy_track(track, track) == hashlib.sha256(b"ID3 some audio").hexdigest()
+    assert track.read_bytes() == b"ID3 some audio"
+
+
 # ── the analysis, on a track whose structure is known ───────────────────────
 def _synthetic_track() -> np.ndarray:
     """30 s at 22.05 kHz: a hi-hat throughout; the bass in from 3.0 s, out 10.0-12.0 s (a break),
