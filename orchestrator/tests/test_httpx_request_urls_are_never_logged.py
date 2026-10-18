@@ -67,7 +67,8 @@ def test_an_httpx_warning_still_shows(caplog):
 
 
 def test_a_model_call_through_the_openai_sdk_logs_no_request_line(caplog):
-    import httpx2
+    # openai 3.x brings httpx2; without it nothing sends through httpx2, so nothing to check.
+    httpx2 = pytest.importorskip("httpx2")
     import openai
 
     def answer(request):
