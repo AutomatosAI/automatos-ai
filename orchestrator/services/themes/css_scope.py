@@ -32,6 +32,8 @@ STYLE_PATH = "dist/theme.css"
 CSS_ERROR_CODES = ("CSS_UNSCOPED", "CSS_IMPORTANT", "CSS_IMPORT", "CSS_AT_RULE", "CSS_SYNTAX")
 MAX_ERRORS = 20
 MAX_WRAP_DEPTH = 3
+# Brackets and blocks nest at most this deep; deeper is refused, so the scan stays linear.
+MAX_NESTING = 64
 
 GROUP_AT_RULES = frozenset({"media", "supports", "layer", "container"})
 CONTAINED_AT_RULES = frozenset({"font-face", "keyframes", "-webkit-keyframes"})
@@ -49,7 +51,9 @@ IDENT_CHAR = re.compile(r"[A-Za-z0-9_\-\u0080-\U0010ffff\\]")
 AT_NAME = re.compile(r"@(-?[A-Za-z][A-Za-z0-9-]*)")
 URL_NAME = "url"
 QUOTED_URL = re.compile(r"\([ \t\n\r\f]*[\"']")
-PLAIN_URL = re.compile(r"\([ \t\n\r\f]*[^ \t\n\r\f\"'()\\\x00-\x08\x0b\x0e-\x1f\x7f]*[ \t\n\r\f]*\)")
+# Written so no two runs can match the same characters: the match is linear, never backtracking
+# over a long whitespace run (a ReDoS shape the plain "ws* body* ws*" form had).
+PLAIN_URL = re.compile(r"\([ \t\n\r\f]*(?:[^ \t\n\r\f\"'()\\\x00-\x08\x0b\x0e-\x1f\x7f]+[ \t\n\r\f]*)?\)")
 
 TOKEN = re.compile(
     r"(?P<comment>/\*.*?\*/)"
@@ -223,13 +227,16 @@ class _Scanner:
         """Brackets nest by kind, as a browser reads them: '( ]' is not a closed pair."""
         self.prelude.append(char)
         if char not in OPENING_BRACKET:
-            self.brackets = [*self.brackets, char]
+            if len(self.brackets) >= MAX_NESTING:
+                self.error("CSS_SYNTAX", at, f"brackets nest deeper than {MAX_NESTING}.")
+                return
+            self.brackets.append(char)
             return
         if not self.brackets or self.brackets[-1] != OPENING_BRACKET[char]:
             self.error("CSS_SYNTAX", at, f"a {char} closes nothing.")
             self.brackets = []
             return
-        self.brackets = self.brackets[:-1]
+        self.brackets.pop()
 
     def take_block_punct(self, char: str, at: int) -> None:
         if self.brackets:
@@ -240,6 +247,9 @@ class _Scanner:
 
     def open_block(self, at: int) -> None:
         prelude, parent = self.take_prelude(), self.stack[-1]
+        if len(self.stack) > MAX_NESTING:  # the stack also holds the top frame
+            self.error("CSS_SYNTAX", at, f"blocks nest deeper than {MAX_NESTING}.")
+            return
         frame = self.at_rule_frame(prelude, parent, at) if prelude.startswith("@") else self.rule_frame(prelude, parent, at)
         self.stack.append(frame)
 
@@ -279,7 +289,7 @@ class _Scanner:
             return
         if leftover and frame.kind == "group":
             self.error("CSS_SYNTAX", at, f'"{echo(leftover)}" has no block.')
-        self.stack = self.stack[:-1]
+        self.stack.pop()
 
     def end_statement(self, at: int) -> None:
         prelude = self.take_prelude()

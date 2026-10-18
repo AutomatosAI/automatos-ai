@@ -27,7 +27,7 @@ if str(ORCH_ROOT) not in sys.path:
 
 from config import config  # noqa: E402
 from services.themes import contract  # noqa: E402
-from services.themes.css_scope import CSS_ERROR_CODES, css_scope_errors  # noqa: E402
+from services.themes.css_scope import CSS_ERROR_CODES, MAX_NESTING, css_scope_errors  # noqa: E402
 from services.themes.css_value import PREPAINT_ERROR_CODES, css_value_problem, prepaint_errors  # noqa: E402
 from services.themes.digest import package_digest, sha256_hex  # noqa: E402
 from services.themes.look_schema import LOOK_ERROR_CODES, validate_look, validate_look_schema  # noqa: E402
@@ -148,6 +148,33 @@ def test_every_prepaint_case_gives_its_code(case):
 @pytest.mark.parametrize("case", CASES["cssScope"]["cases"], ids=_ids(CASES["cssScope"]))
 def test_every_css_scope_case_gives_its_code(case):
     _assert_verdict(css_scope_errors(case["css"], CASES["cssScope"]["htmlClass"]), case["code"])
+
+
+# The scope check is one linear pass, whatever the stylesheet holds: a long run inside an unquoted
+# url( or very deep nesting is refused without backtracking or copying (18 Oct review). With the old
+# forms these inputs took quadratic time, so a regression shows up as a hung test.
+LONG_RUN = 200_000
+SCOPE_CLASS = CASES["cssScope"]["htmlClass"]
+
+
+def test_a_long_whitespace_run_in_an_unclosed_plain_url_is_refused_in_one_pass():
+    css = f"html.{SCOPE_CLASS}{{a:url(" + " " * LONG_RUN
+    _assert_verdict(css_scope_errors(css, SCOPE_CLASS), "CSS_SYNTAX")
+
+
+def test_brackets_nested_deeper_than_the_cap_are_refused():
+    css = f"html.{SCOPE_CLASS}{{a:" + "(" * LONG_RUN + "}"
+    _assert_verdict(css_scope_errors(css, SCOPE_CLASS), "CSS_SYNTAX")
+
+
+def test_blocks_nested_deeper_than_the_cap_are_refused():
+    css = f"html.{SCOPE_CLASS}{{" + "&.a{" * MAX_NESTING + "}" * (MAX_NESTING + 1)
+    _assert_verdict(css_scope_errors(css, SCOPE_CLASS), "CSS_SYNTAX")
+
+
+def test_blocks_nested_up_to_the_cap_are_read():
+    css = f"html.{SCOPE_CLASS}{{" + "&.a{" * (MAX_NESTING - 1) + "}" * MAX_NESTING
+    _assert_verdict(css_scope_errors(css, SCOPE_CLASS), None)
 
 
 def _corpus_package(case: Mapping[str, Any]) -> bytes:
