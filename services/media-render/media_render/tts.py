@@ -7,7 +7,9 @@ Kokoro lines again from the same text and settings, so they time the same.
 
 Kokoro is CPU-bound and loads a 310 MB model once. ``Speaker`` runs synthesis
 off the event loop and one line at a time, whether the call came from /tts or
-from a render job.
+from a render job. ``Speaker.warm`` loads the model the same way, off the event
+loop and under the same lock, so a line that arrives during the load waits for
+it instead of loading the model a second time (PRD-262 US-053).
 """
 
 from __future__ import annotations
@@ -20,10 +22,11 @@ from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
 from . import validate
 from .config import Settings
-from .kokoro_tts import SpokenLine, synthesize_line
+from .kokoro_tts import SpokenLine, load_model, synthesize_line
 from .validate import BundleError
 
 Synthesize = Callable[..., SpokenLine]
+Load = Callable[[Settings], float]
 
 
 @dataclass(frozen=True)
@@ -63,10 +66,16 @@ def parse_tts_request(payload: Any, settings: Settings) -> TtsRequest:
 class Speaker:
     """Every Kokoro synthesis goes through here: one line at a time, off the event loop."""
 
-    def __init__(self, settings: Settings, synthesize: Synthesize = synthesize_line) -> None:
+    def __init__(self, settings: Settings, synthesize: Synthesize = synthesize_line, load: Load = load_model) -> None:
         self._settings = settings
         self._synthesize = synthesize
+        self._load = load
         self._lock = asyncio.Lock()
+
+    async def warm(self) -> float:
+        """Load the voice model off the event loop, holding the lock: the seconds the load took."""
+        async with self._lock:
+            return await asyncio.to_thread(self._load, self._settings)
 
     async def speak(
         self, lines: Sequence[Tuple[str, str]], out_dir: Path, *, voice: str, speed: float, lang: str

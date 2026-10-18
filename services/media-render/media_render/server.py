@@ -24,6 +24,10 @@ across the service (past it, 503 ``busy``) and at most
 MEDIA_RENDER_MAX_ACTIVE_JOBS_PER_WORKSPACE for one workspace (past it, 429
 ``workspace_busy`` for that workspace alone), so one workspace's burst never
 takes every slot and shuts the others out (P251W1-RVW-4). Both carry Retry-After.
+
+Once the service is listening, the Kokoro model loads in a background thread
+(PRD-262 US-053): /health answers at once, and the first render's voice step no
+longer carries the model load.
 """
 
 from __future__ import annotations
@@ -377,12 +381,41 @@ def create_app(
     return app
 
 
+async def _warm_voice(state: ServiceState) -> None:
+    logger.info("kokoro: loading the voice model in the background")
+    try:
+        seconds = await state.speaker.warm()
+    except Exception:
+        logger.exception("kokoro: the voice model did not load in the background; the first line spoken loads it")
+        return
+    logger.info("kokoro: the voice model loaded in the background in %.2f s", seconds)
+
+
+def warm_voice_in_background(app: web.Application) -> "asyncio.Task[None]":
+    """Start loading the Kokoro model off the event loop; cleanup cancels the wait with the app's other tasks."""
+    state = app[STATE]
+    task = asyncio.create_task(_warm_voice(state))
+    state.tasks.add(task)
+    task.add_done_callback(state.tasks.discard)
+    return task
+
+
+def _on_listening(app: web.Application, settings: Settings) -> Callable[..., None]:
+    """web.run_app calls its ``print`` once, after every site is listening: the voice model starts loading then."""
+
+    def listening(*_message: object) -> None:
+        logger.info("media-render listening on %s:%d", settings.bind_host, settings.port)
+        warm_voice_in_background(app)
+
+    return listening
+
+
 def serve(settings: Settings) -> None:
-    logger.info("media-render listening on %s:%d", settings.bind_host, settings.port)
+    app = create_app(settings)
     web.run_app(
-        create_app(settings),
+        app,
         host=settings.bind_host,
         port=settings.port,
         access_log=None,
-        print=None,
+        print=_on_listening(app, settings),
     )
