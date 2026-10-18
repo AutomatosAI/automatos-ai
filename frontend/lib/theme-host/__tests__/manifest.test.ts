@@ -8,8 +8,8 @@ import { readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
-import { RESERVED_HTML_CLASSES } from '../constants'
 import { parseActiveInstall, parseLookPreset, parseSpikeManifest, resolveUnderRoot, themeFilesRoot } from '../manifest'
+import { HTML_CLASS_OWNERS, RESERVED_HTML_CLASSES } from '../package-manifest'
 import { STYLE_HTML_CLASS_NAMES } from '@/lib/ui-style'
 
 /** The hello theme's manifest, as the browser lane serves it. */
@@ -47,10 +47,21 @@ describe('PRD-261 A-04a — parseSpikeManifest', () => {
     expect(parsed.ok && parsed.manifest.sdkRange).toBe('^2.0.0')
   })
 
+  it('reserves every Style-axis class the core sets on <html>', () => {
+    for (const name of STYLE_HTML_CLASS_NAMES) expect(RESERVED_HTML_CLASSES, name).toContain(name)
+    expect(RESERVED_HTML_CLASSES).toEqual(expect.arrayContaining(['classic', 'dark', 'light', 'system']))
+  })
+
   it("refuses every class the core owns on <html> as the theme's class", () => {
-    expect(RESERVED_HTML_CLASSES).toEqual(expect.arrayContaining([...STYLE_HTML_CLASS_NAMES, 'classic', 'dark', 'light']))
     for (const reserved of RESERVED_HTML_CLASSES) {
       expect(detailOf(withField('htmlClass', reserved)), reserved).not.toBeNull()
+    }
+  })
+
+  it('PA-8: lets only the owning package keep its reserved class', () => {
+    for (const [htmlClass, ownerId] of HTML_CLASS_OWNERS) {
+      expect(detailOf({ ...HELLO_MANIFEST, id: ownerId, htmlClass }), htmlClass).toBeNull()
+      expect(detailOf({ ...HELLO_MANIFEST, id: `${ownerId}-fork`, htmlClass }), htmlClass).not.toBeNull()
     }
   })
 
