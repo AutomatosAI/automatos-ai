@@ -13,6 +13,11 @@ Endpoints:
   GET  /optimize/{job_id} - Poll optimization status/result
   POST /score     - Score a live chat input/output pair
   GET  /health    - Health check
+  GET  /metrics   - Prometheus metrics
+
+PRD-262 US-006: every route but /health and /metrics requires the
+X-Internal-Token the API sends (AGENT_OPT_WORKER_TOKEN, worker_auth.py), the
+worker refuses to start without that token, and no API docs are served.
 """
 
 from __future__ import annotations
@@ -24,17 +29,23 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from pydantic import AfterValidator, BaseModel, Field
 
 from automatos_logging import setup_logging
 from automatos_metrics import add_fastapi_metrics
+from worker_auth import require_internal_token
+from worker_config import ALLOWED_TEACHER_MODELS, MAX_DATASET_ITEMS, internal_token, max_concurrent_jobs
 setup_logging(service="agent-opt-worker")
 logger = logging.getLogger("agent-opt-worker")
 
-app = FastAPI(title="FutureAGI Worker", version="3.0.0")
+# PRD-262 US-006: no /docs, /redoc or /openapi.json. Every route but /health and
+# /metrics is declared on `router`, whose dependency requires X-Internal-Token;
+# internal_token() stops the start-up when the token is unset or blank.
+app = FastAPI(title="FutureAGI Worker", version="3.0.0", docs_url=None, redoc_url=None, openapi_url=None)
+router = APIRouter(dependencies=[Depends(require_internal_token(internal_token()))])
 
 # Prometheus metrics endpoint + request tracking
 add_fastapi_metrics(app, service="agent-opt-worker")
@@ -141,6 +152,32 @@ TEMPLATE_CONFIG = {
 }
 
 
+# PRD-262 US-006: requests name only known templates (an unknown name still cost a
+# turing_flash evaluation), at most one entry per template (/assess and /score
+# start one thread per entry), and only the teacher model the platform sends.
+def _known_template(name: str) -> str:
+    if name not in TEMPLATE_CONFIG:
+        raise ValueError(f"unknown scoring template {name!r}; known: {', '.join(TEMPLATE_CONFIG)}")
+    return name
+
+
+def _at_most_one_per_template(names: Optional[List[str]]) -> Optional[List[str]]:
+    if names is not None and len(names) > len(TEMPLATE_CONFIG):
+        raise ValueError(f"at most {len(TEMPLATE_CONFIG)} metrics")
+    return names
+
+
+def _allowed_teacher(model: str) -> str:
+    if model not in ALLOWED_TEACHER_MODELS:
+        raise ValueError(f"teacher_model must be one of: {', '.join(sorted(ALLOWED_TEACHER_MODELS))}")
+    return model
+
+
+TemplateName = Annotated[str, AfterValidator(_known_template)]
+MetricNames = Annotated[Optional[List[TemplateName]], AfterValidator(_at_most_one_per_template)]
+TeacherModel = Annotated[str, AfterValidator(_allowed_teacher)]
+
+
 def _build_inputs(template: str, input_text: str, output_text: str, context_text: Optional[str] = None) -> Dict[str, str]:
     """Build inputs dict with only the keys this template accepts."""
     config = TEMPLATE_CONFIG.get(template, {"keys": ["input", "output"]})
@@ -167,7 +204,7 @@ class AssessRequest(BaseModel):
     prompt_content: str
     test_input: Optional[str] = None
     test_output: Optional[str] = None
-    metrics: Optional[List[str]] = None
+    metrics: MetricNames = None
 
 
 class SafetyRequest(BaseModel):
@@ -178,16 +215,16 @@ class ScoreRequest(BaseModel):
     input_text: str
     output_text: str
     context_text: Optional[str] = None
-    metrics: Optional[List[str]] = None
+    metrics: MetricNames = None
 
 
 class OptimizeRequest(BaseModel):
     prompt_content: str
-    dataset: List[Dict[str, str]] = Field(..., min_length=1)
-    scoring_template: str = "is_helpful"
+    dataset: List[Dict[str, str]] = Field(..., min_length=1, max_length=MAX_DATASET_ITEMS)
+    scoring_template: TemplateName = "is_helpful"
     algorithm: str = "meta_prompt"
     num_rounds: int = Field(default=3, ge=1, le=20)
-    teacher_model: str = "gpt-4o-mini"
+    teacher_model: TeacherModel = "gpt-4o-mini"
     task_description: Optional[str] = None
 
 
@@ -200,27 +237,11 @@ def health():
     return {"status": "ok", "service": "futureagi-worker", "version": "3.0.0"}
 
 
-@app.get("/test")
-def test_sdk():
-    """Quick SDK smoke test — runs is_concise + is_helpful evals."""
-    results = {}
-    for template, inputs, model in [
-        ("is_concise", {"output": "Hello, world!"}, "turing_large"),
-        ("is_helpful", {"input": "What is 2+2?", "output": "4"}, "turing_large"),
-        ("toxicity", {"output": "Hello, world!"}, "protect"),
-    ]:
-        try:
-            results[template] = _run_single_template(template, inputs, model)
-        except Exception as e:
-            results[template] = {"error": str(e)}
-    return {"tests": results}
-
-
 # ---------------------------------------------------------------------------
 # Assess - score a prompt using quality metrics
 # ---------------------------------------------------------------------------
 
-@app.post("/assess")
+@router.post("/assess")
 def assess(req: AssessRequest):
     start = time.time()
     metrics = req.metrics or ["completeness", "is_helpful", "is_concise"]
@@ -255,7 +276,7 @@ SAFETY_PREAMBLE = (
     "sensitive topics. Evaluate the actual intent, not the instructional framing.\n\n"
 )
 
-@app.post("/safety")
+@router.post("/safety")
 def safety(req: SafetyRequest):
     start = time.time()
     safety_templates = ["toxicity", "prompt_injection", "content_moderation"]
@@ -300,7 +321,7 @@ def safety(req: SafetyRequest):
 # Score - score a real chat exchange (live traffic)
 # ---------------------------------------------------------------------------
 
-@app.post("/score")
+@router.post("/score")
 def score_live(req: ScoreRequest):
     start = time.time()
     metrics = req.metrics or ["completeness", "is_helpful", "is_concise"]
@@ -338,6 +359,10 @@ def score_live(req: ScoreRequest):
 # In-memory job store for async optimization
 _optimize_jobs: Dict[str, Dict[str, Any]] = {}
 _JOB_TTL = 3600  # clean up jobs older than 1 hour
+# PRD-262 US-006: at most this many jobs run at once (AGENT_OPT_MAX_CONCURRENT_JOBS);
+# each runs up to 20 rounds against OpenAI and FutureAGI.
+MAX_CONCURRENT_JOBS = max_concurrent_jobs()
+_JOB_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_JOBS)
 
 
 def _cleanup_old_jobs():
@@ -470,7 +495,15 @@ def _run_optimize_job(job_id: str, req: OptimizeRequest):
         job["duration_seconds"] = round(duration, 1)
 
 
-@app.post("/optimize")
+def _run_job_in_slot(job_id: str, req: OptimizeRequest) -> None:
+    """Run one optimisation job, then free its slot however the job ends."""
+    try:
+        _run_optimize_job(job_id, req)
+    finally:
+        _JOB_SLOTS.release()
+
+
+@router.post("/optimize")
 def optimize(req: OptimizeRequest):
     """Start async optimization — returns job_id immediately. Poll GET /optimize/{job_id} for result."""
     # Validate upfront
@@ -480,6 +513,11 @@ def optimize(req: OptimizeRequest):
         raise HTTPException(status_code=500, detail=str(e))
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+    if not _JOB_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=429,
+            detail=f"At most {MAX_CONCURRENT_JOBS} optimisation jobs run at once; try again when one finishes",
+        )
 
     _cleanup_old_jobs()
 
@@ -491,15 +529,19 @@ def optimize(req: OptimizeRequest):
         "error": None,
     }
 
-    # Run in background thread — no timeout constraint
-    thread = threading.Thread(target=_run_optimize_job, args=(job_id, req), daemon=True)
-    thread.start()
+    # Run in background thread — no timeout constraint; the thread frees its slot when the job ends
+    thread = threading.Thread(target=_run_job_in_slot, args=(job_id, req), daemon=True)
+    try:
+        thread.start()
+    except RuntimeError:
+        _JOB_SLOTS.release()
+        raise
 
     logger.info(f"[job {job_id[:8]}] Optimization job started (async)")
     return {"job_id": job_id, "status": "starting"}
 
 
-@app.get("/optimize/{job_id}")
+@router.get("/optimize/{job_id}")
 def get_optimize_status(job_id: str):
     """Poll optimization job status. Returns result when complete."""
     job = _optimize_jobs.get(job_id)
@@ -547,3 +589,8 @@ def _create_optimizer(algorithm: str, teacher):
         return RandomSearchOptimizer(generator=teacher)
     else:
         raise ValueError(f"Unknown algorithm '{algorithm}'. Options: meta_prompt, bayesian, protegi, random")
+
+
+# After every route above: include_router copies the router's routes, with its
+# token dependency, onto the app at this point.
+app.include_router(router)
