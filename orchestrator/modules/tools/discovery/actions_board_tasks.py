@@ -289,7 +289,13 @@ def _register_get_task(registry: ActionRegistry) -> None:
         name="platform_get_task",
         description=(
             "Get full details of a specific task by ID. Returns title, description, "
-            "status, assigned agent, result, error message, and timestamps."
+            "status, assigned agent, result, error message, and timestamps. "
+            # P256-FIX-N17-6 (F445): "did that go through?" was answered from the status alone.
+            "On the owner's own chat it also says whether the card was sent back (times_sent_back; "
+            "sent_back: when, by whom, the notes, and `said`) and the newest send-back asked for on it, "
+            "with its approval approved, declined, lapsed or still waiting (send_back_card). Answer "
+            "\"did that go through?\" from sent_back.said and send_back_card, never from the status alone. "
+            "For the clicks on several cards use platform_my_actions {ticket}."
         ),
         category="tasks",
         parameters={

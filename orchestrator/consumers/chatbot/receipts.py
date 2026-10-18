@@ -44,11 +44,11 @@ from __future__ import annotations
 
 import functools
 from contextvars import ContextVar
-from typing import Any, AsyncGenerator, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, AsyncGenerator, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
 from consumers.chatbot.claim_check import READS_SAID, reads_put_in_front
 from consumers.chatbot.claims_backed import (
-    COMPLETED_ACTION, SAYS_DONE, claims_work_done, promised_unbacked, says_not_done, unbacked_where,
+    COMPLETED_ACTION, SAYS_DONE, claims_work_done, numbers_read, promised_unbacked, says_not_done, unbacked_where,
 )
 from consumers.chatbot.claims_by_kind import EACH_STEP_WAITS
 from consumers.chatbot.claims_not_reports import AUTOMATIC_READS  # the folded read's action (N15-1 reads it too)
@@ -92,6 +92,7 @@ _SAID = {SENT_BACK: "sent back to its agent", AGENT_SET: "agent set",
 # Calls whose name reads badly as "<thing> <past verb>".
 _OWN_WORDS = {"assign_tool_to_agent": "tool added", "unassign_tool_from_agent": "tool removed"}
 DOCUMENT_MADE = "document made"   # F351: the calls that make a document the owner finds in Deliverables
+GET_TASK = "platform_get_task"     # P256-FIX-N17-6: its answer on the owner's chat says whether a send-back went through
 _NAME_KEYS = ("title", "document_title", "agent_name", "name", "filename", "file_name")
 _CARD_KEYS = ("task_id", "task_number", "number")
 # The UI's pages for what a call touched (frontend/lib/ticket-links.ts, the agents page).
@@ -365,13 +366,32 @@ def unbacked_sentences(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any]
                        promises: Optional[bool] = True, own_only: bool = False) -> List[Tuple[str, str]]:
     """Each claim ``unbacked_claim`` reads, with the sentence that makes it (marks off): (its verb,
     "done" for a bare claim; the sentence). P256-FIX-N15-1 takes those sentences out of the reply.
-    P256-FIX-N17-5: ``own_only``, only the writer's own reports (``claims_backed._own``)."""
+    P256-FIX-N17-5: ``own_only``, only the writer's own reports (``claims_backed._own``). P256-FIX-N17-6:
+    a send-back the turn's read of a card shows went through is that read's finding (``_sent_back_found``)."""
+    outcomes = list(outcomes)
     ran = [receipt(action, params, result) for action, params, result in outcomes]
     writes = [r for r in ran if r["kind"] == WRITE]
     done_writes = [r for r in writes if r["status"] == DONE]
     unbacked = unbacked_where(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
-                              reads=_done_reads(ran), raised=_raised(writes), own_only=own_only)
+                              reads=_done_reads(ran), raised=_raised(writes), own_only=own_only,
+                              found_sent_back=_sent_back_found(outcomes, ran))
     return [(verb or "done", sentence) for verb, known, sentence in unbacked if known or verb in SAYS_DONE]
+
+
+def _sent_back_found(outcomes: Sequence[Tuple[str, Dict[str, Any], Any]], ran: Sequence[Receipt]) -> FrozenSet[str]:
+    """The numbers read by each done platform_get_task whose answer shows a send-back that went through
+    (``task.sent_back.went_through``, services.ticket_redo.send_back_seen)."""
+    return numbers_read([r for (action, _params, result), r in zip(outcomes, ran)
+                         if action == GET_TASK and r["kind"] == READ and r["status"] == DONE and _went_through(result)])
+
+
+def _went_through(result: Any) -> bool:
+    for answer in answers_in(result):
+        task = answer.get("task") if isinstance(answer.get("task"), dict) else {}
+        said = task.get("sent_back") if isinstance(task.get("sent_back"), dict) else {}
+        if said.get("went_through") is True:
+            return True
+    return False
 
 
 def unbacked_promise(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any], Any]]) -> Optional[str]:

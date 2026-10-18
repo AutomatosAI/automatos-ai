@@ -466,26 +466,41 @@ def _history_or_denial(sentence: str, match: re.Match) -> bool:
     return bool((past or match.group("state")) and _DENIED.search(before))
 
 
-def _found_by_a_read(sentence: str, match: re.Match, read: FrozenSet[str]) -> bool:
+def _found_by_a_read(sentence: str, match: re.Match, read: FrozenSet[str],
+                     sent_back: FrozenSet[str] = frozenset()) -> bool:
     """Whether a has-been or was claim names a number a done read of the turn named (P256-FIX-RVW-34):
     "Mission 0365 has been cancelled." after a read of #0365 is what the read found, as is "Card 0931
-    moved to Done." (RVW-35). "I've cancelled 0365" is the writer's own work."""
+    moved to Done." (RVW-35). "I've cancelled 0365" is the writer's own work. P256-FIX-N17-6: so is a
+    send-back the one card read shows went through (``_the_send_back_read``)."""
     said = _REPORTED.search(match.group(0)) or match.group("numbered")
     if not read or _FIRST_PERSON.match(match.group(0)) or not said:
         return False
-    return any(re.search(rf"(?<!\d){re.escape(number)}(?!\d)", sentence) for number in read)
+    if any(re.search(rf"(?<!\d){re.escape(number)}(?!\d)", sentence) for number in read):
+        return True
+    return _the_send_back_read(sentence, read, sent_back)
 
 
-def _counts(sentence: str, match: re.Match, first_person: bool, read: FrozenSet[str], looked_up: bool = False) -> bool:
+def _the_send_back_read(sentence: str, read: FrozenSet[str], sent_back: FrozenSet[str]) -> bool:
+    """P256-FIX-N17-6 (F445): "It was sent back to RESEARCHER with your note." after the turn read one
+    card, whose read shows a send-back that went through (``sent_back``: those reads' numbers), is what
+    the read found, unless it names another card."""
+    if not sent_back or len(read) != 1 or not read <= sent_back or not _SENT_BACK.search(sentence):
+        return False
+    return {number.lstrip("0") for number in _CARD_NUMBER.findall(sentence)} <= {n.lstrip("0") for n in read}
+
+
+def _counts(sentence: str, match: re.Match, first_person: bool, read: FrozenSet[str], looked_up: bool = False,
+            sent_back: FrozenSet[str] = frozenset()) -> bool:
     """Whether a claim shape reports this turn's work: no plan word before it, not the reply's own
     content, nor a simple past's history, a read's finding or a denial, nor a question or what a read
-    of the turn found (RVW-34), nor a read-only report (P256-FIX-N15-1, ``claims_not_reports``); with
-    ``first_person``, only the writer's own "I've <verb>" (P256-FIX-RVW-7) or "I <verb>" (RVW-25)."""
+    of the turn found (RVW-34; N17-6: a send-back it shows, ``sent_back``), nor a read-only report
+    (P256-FIX-N15-1, ``claims_not_reports``); with ``first_person``, only the writer's own "I've <verb>"
+    (P256-FIX-RVW-7) or "I <verb>" (RVW-25)."""
     if first_person and not _FIRST_PERSON.match(match.group(0)):
         return False
     if _history_or_denial(sentence, match) or _QUESTION.match(sentence) or _ASKS.match(sentence, match.end()):
         return False
-    if _found_by_a_read(sentence, match, read) or not_a_report(sentence, match, looked_up):
+    if _found_by_a_read(sentence, match, read, sent_back) or not_a_report(sentence, match, looked_up):
         return False
     return not _PLANNED.search(sentence[: match.start()]) and _reported(sentence, match.start(), match.end())
 
@@ -507,7 +522,7 @@ def _own(sentence: str, match: re.Match) -> bool:
 
 
 def _claims_in(sentence: str, first_person: bool, read: FrozenSet[str], looked_up: bool = False,
-               own_only: bool = False) -> List[str]:
+               own_only: bool = False, sent_back: FrozenSet[str] = frozenset()) -> List[str]:
     """The verbs of the sentence's reports of work done ("" for a shape with no verb); with ``own_only``,
     only the writer's own reports (``_own``) and the participles coordinated with them."""
     if _PAST.search(sentence):
@@ -516,7 +531,8 @@ def _claims_in(sentence: str, first_person: bool, read: FrozenSet[str], looked_u
     ends = [found.start() for found in matches[1:]] + [len(sentence)]
     verbs = []
     for match, upto in zip(matches, ends):
-        if not _counts(sentence, match, first_person, read, looked_up) or (own_only and not _own(sentence, match)):
+        counts = _counts(sentence, match, first_person, read, looked_up, sent_back)
+        if not counts or (own_only and not _own(sentence, match)):
             continue
         verbs.append(_verb(sentence, match.group(0), match.end()))
         verbs.extend(_coordinated(sentence, match.end(), upto))
@@ -556,13 +572,15 @@ def _sentences(answer: str) -> List[str]:
 
 
 def claims(answer: str, first_person: bool = False, read: FrozenSet[str] = frozenset(),
-           looked_up: bool = False, own_only: bool = False) -> List[Tuple[str, str]]:
+           looked_up: bool = False, own_only: bool = False,
+           sent_back: FrozenSet[str] = frozenset()) -> List[Tuple[str, str]]:
     """Each report of work done in the writer's own words: (its verb, its sentence); with
     ``first_person``, only its "I've <verb>" claims; ``read``: the numbers the turn's reads named;
     ``looked_up``: the turn looked something up and wrote nothing (N15-1: a stative passive is a finding);
-    ``own_only``: only the writer's own reports, not a third-person shape (P256-FIX-N17-5, ``_own``)."""
+    ``own_only``: only the writer's own reports, not a third-person shape (P256-FIX-N17-5, ``_own``);
+    ``sent_back``: the numbers of the reads that show a send-back that went through (P256-FIX-N17-6)."""
     return [(verb, sentence) for sentence in _sentences(answer)
-            for verb in _claims_in(sentence, first_person, read, looked_up, own_only)]
+            for verb in _claims_in(sentence, first_person, read, looked_up, own_only, sent_back)]
 
 
 def numbers_read(reads: Sequence[Receipt]) -> FrozenSet[str]:
@@ -616,20 +634,23 @@ def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: b
 
 def unbacked_where(answer: str, done_writes: Sequence[Receipt], first_person: bool = False, waiting: bool = False,
                    reads: Sequence[Receipt] = (), kinds_too: bool = True,
-                   raised: Optional[bool] = None, own_only: bool = False) -> List[Tuple[str, bool, str]]:
+                   raised: Optional[bool] = None, own_only: bool = False,
+                   found_sent_back: FrozenSet[str] = frozenset()) -> List[Tuple[str, bool, str]]:
     """``unbacked_claims``, each with the sentence that makes it, as ``claims`` reads it (its marks
     off): P256-FIX-N15-1 takes that sentence out of the reply. A turn that wrote nothing and read
     Auto's own record reports that record: no claim (N15-1). P256-FIX-N17-3 (F439): a claim of the
     ask is backed only by a card this turn ``raised`` (None: as ``waiting``); over a card met again
     from an earlier turn, "I've raised a fresh run card" is unbacked. P256-FIX-N17-5: ``own_only``
-    reads only the writer's own reports (the RVW-37 claims count as its own)."""
+    reads only the writer's own reports (the RVW-37 claims count as its own). P256-FIX-N17-6: on a turn
+    that wrote nothing and raised no card, a send-back the one card read shows (``found_sent_back``) is found."""
     wrote = bool(done_writes) or waiting
     if not wrote and recalled(reads):
         return []
     raised = waiting if raised is None else raised
     unbacked = []
     looked_up = not wrote and looked_something_up(reads)
-    for verb, sentence in claims(answer, first_person, numbers_read(reads), looked_up, own_only):
+    sent_back = frozenset() if wrote else found_sent_back
+    for verb, sentence in claims(answer, first_person, numbers_read(reads), looked_up, own_only, sent_back):
         if (raised or waiting) and _asked(verb, sentence):
             if not raised:
                 unbacked.append((verb, True, sentence))

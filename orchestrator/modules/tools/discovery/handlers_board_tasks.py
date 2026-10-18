@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from services.ticket_cards import WAIT_TERMINAL_STATUSES, _progress_line, _wait_budget, _wait_result, task_card  # noqa: F401
 from modules.tools.discovery.new_card_checks import checks_the_new_card
 from modules.tools.discovery.ticket_edits import briefs_like_the_board, notes_say_who_asked
+from services import ticket_redo
 from services.ticket_refs import by_ticket_number
 from modules.tools.discovery.ticket_changes import ASSIGN, EDIT, STATUS, guarded_and_recorded
 from modules.tools.discovery.ticket_cancel import stops_what_it_cancels
@@ -458,7 +459,7 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
         agent = db.query(Agent).get(task.assigned_agent_id)
         agent_name = agent.name if agent else None
 
-    return {
+    answer = {
         "success": True,
         "task": {
             "id": task.id,
@@ -479,6 +480,9 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
         # PRD-238 S6: the chat renders a live card for the ticket it just checked.
         "frontend_data": {"task_card": task_card(task, agent_name)},
     }
+    if params.get("_driving_user_id"):   # N17-6 (F445): the owner's own chat sees the card's send-backs
+        answer["task"] = {**answer["task"], **ticket_redo.send_back_seen(db, workspace_id, task, params["_driving_user_id"])}
+    return answer
 
 
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers

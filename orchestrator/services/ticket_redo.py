@@ -67,11 +67,19 @@ work". Now only a standing lesson is carried (``services/lesson_scope.is_standin
 note the owner said holds in general, or one about the work's form); a note about one
 card's facts stays on that card. The block is headed as the owner's rules, and says that
 none of it was said about this card, so the answer never credits the owner with it.
+
+P256-FIX-N17-6 (night 17, F445): "Did that one go through?" read #1745 with platform_get_task, saw it
+back in Review with an answer, and said "No, it hasn't gone through … no send-back", offering to send it
+back again: the read named nothing of the send-back, which lives here (``previous_runs``,
+``owner_corrections``), and the redo had blanked its times. On the owner's own chat a read of the card
+now carries ``send_back_seen``: the send-backs since the brief was agreed (when, by whom, the notes), the
+newest send-back asked for on it and its approval, and one line (``send_back_said``) that says whether it
+went through and what the card shows now.
 """
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 # keep_previous_run's reason for a Reject: the run whose draft a redo corrects.
@@ -148,6 +156,32 @@ GIVEN_BLOCK = ("## This card was given to you\n"
                "The owner gave this card to you after another agent had answered it; that answer is kept in the "
                "card's history. Answer the brief yourself, from the start.")
 GIVEN_CORRECTIONS = "The owner's corrections on this card, oldest first. All of them still apply:"
+
+# P256-FIX-N17-6 (F445): what a read of the card on the owner's own chat says of its send-backs.
+SENT_BACK_NOTES_SHOWN = 3
+SEND_BACK_ASKS_READ = 20
+SEND_BACK_ACTIONS = ("platform_update_task_status", "platform_update_task")
+NUMBER_MARK = "#"
+USER_REF = "user:"
+BY_YOU, BY_YOUR_TEAM, BY_AN_AGENT = "you", "a member of your team", "an agent"
+ASK_WAITING = "waiting"     # an ask whose card has no click yet (my_actions_clicks.decision_of: None)
+ASSIGNED, IN_PROGRESS, FAILED = "assigned", "in_progress", "failed"
+ANSWERED = ("review", "done")
+STATUS_SAID = {"review": "in Review", "done": "Done", "inbox": "in the Inbox"}
+ITS_AGENT = "its agent"
+WAITS_FOR_YOU = "A send-back asked for {at} is still waiting for your click."
+LAST_SENT_BACK = " The card was last sent back {at}."
+ASK_SAID = {"approved": "You approved the send-back asked {at}, but no send-back is on the card after it.",
+            "declined": "The send-back asked {at} was declined; nothing changed.",
+            "lapsed": "The send-back asked {at} lapsed with no click; nothing changed."}
+NEVER_SENT_BACK = "No send-back is on the card."
+WENT_THROUGH = "The send-back by {by} {at} went through."
+REDO_WAITS = "Its redo waits for {agent}."
+REDO_RUNNING = "Its redo is running."
+REDO_SHOWN = "The result shown is the redo's, finished {at}."
+REDO_FAILED = "The redo failed and left no answer."
+DRAFT_KEPT = " The last draft is the one that was sent back."
+NOW_STATUS = "It is now {status}."
 
 
 def with_correction(planning_data: Any, note: str, *, by: str, at: str) -> Dict[str, Any]:
@@ -450,6 +484,164 @@ def _distinct(notes: List[str]) -> List[str]:
             text = note.strip()
             kept.append(text if len(text) <= STANDING_NOTE_CHARS else text[:STANDING_NOTE_CHARS - 1] + "…")
     return kept
+
+
+def send_back_record(task: Any, you: Iterable[str]) -> Optional[Dict[str, Any]]:
+    """The card's send-backs since its brief was agreed (P256-FIX-N17-6): how many, when the newest was,
+    who made it, and the newest notes; None when it has none. ``you``: how the grants and the board name
+    the asking person ('user:<users.id>', 'user:<Clerk id>'): their send-back is 'you', another
+    person's 'a member of your team', any other (an agent's run, a tool with no person) 'an agent'."""
+    if times_sent_back(task) == 0:
+        return None
+    data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
+    since = _brief_agreed_at(data)
+    last = [run for run in data.get("previous_runs") or []
+            if isinstance(run, dict) and run.get("why") == SENT_BACK and _after(run.get("at"), since)][-1]
+    notes = [{"note": c["note"][:STANDING_NOTE_CHARS], "at": c.get("at")}
+             for c in _entries(data) if _after(c.get("at"), since)]
+    return {"times": times_sent_back(task), "last_at": last.get("at"), "by": _who(last.get("by"), you),
+            "notes": notes[-SENT_BACK_NOTES_SHOWN:]}
+
+
+def _who(by: Any, you: Iterable[str]) -> str:
+    ref = str(by or "")
+    if ref in set(you):
+        return BY_YOU
+    return BY_YOUR_TEAM if ref.startswith(USER_REF) else BY_AN_AGENT
+
+
+def newest_send_back_ask(db: Any, workspace_id: Any, task: Any, number: Optional[str],
+                         now: datetime) -> Optional[Dict[str, Any]]:
+    """The newest send-back of this card asked for on an approval card (P256-FIX-N17-6): when it was
+    asked, its decision (approved, declined, lapsed, or ``waiting`` for the click) and the card's words;
+    None when none was. Read from this workspace's newest call cards that name the card."""
+    from core.models.approval_grants import KIND_QUESTION, SUBJECT_TOOL_CALL, ApprovalGrant
+    from modules.tools.discovery.my_actions_clicks import decision_of
+    from services.click_memory import card_words, numbers_of_the_card
+
+    if not number or db is None:
+        return None
+    grants = (db.query(ApprovalGrant)
+              .filter(ApprovalGrant.workspace_id == workspace_id, ApprovalGrant.subject_type == SUBJECT_TOOL_CALL,
+                      ApprovalGrant.kind != KIND_QUESTION, ApprovalGrant.tool_name.in_(SEND_BACK_ACTIONS),
+                      _names_the_card(ApprovalGrant, task, number))
+              .order_by(ApprovalGrant.requested_at.desc()).limit(SEND_BACK_ASKS_READ).all())
+    grant = next((g for g in grants if _asks_a_send_back(g) and number in numbers_of_the_card(db, g)), None)
+    if grant is None:
+        return None
+    return {"asked_at": _iso(grant.requested_at), "decision": decision_of(grant, now) or ASK_WAITING,
+            "card": card_words(grant)}
+
+
+def _names_the_card(grant_model: Any, task: Any, number: str) -> Any:
+    """The SQL test that a call card's params name the card: its number as given, without its '#', or its id."""
+    from sqlalchemy import or_
+
+    refs = sorted({number, number.removeprefix(NUMBER_MARK), str(task.id)})
+    params = grant_model.details["params"]
+    return or_(params["task_id"].astext.in_(refs), params["task_ids"].contains([task.id]),
+               *(params["task_ids"].contains([ref]) for ref in refs))
+
+
+def _asks_a_send_back(grant: Any) -> bool:
+    """Whether a call card's call sends its card back: a status the board reads as Assigned
+    (``call_effects.STATUS_WORDS``), In progress with a note (``ticket_moves.sends_it_back``), or
+    the edit tool's ``send_back``."""
+    from modules.tools.discovery.ticket_moves import RERUN, SEND_BACK
+    from modules.tools.execution.call_effects import SENT_BACK as SEND_BACK_SET, call_effects
+
+    details = grant.details if isinstance(grant.details, dict) else {}
+    params = details.get("params") if isinstance(details.get("params"), dict) else {}
+    moves = {effect.rsplit(":", 1)[-1] for effect in call_effects(str(details.get("action") or grant.tool_name), params)}
+    noted = bool(str(params.get("note") or "").strip())
+    return bool(moves & {SEND_BACK, SEND_BACK_SET}) or (RERUN in moves and noted)
+
+
+def went_through(record: Optional[Dict[str, Any]], ask: Optional[Dict[str, Any]]) -> bool:
+    """Whether the card's newest send-back went through: one is on the card, and no send-back was
+    asked for after it."""
+    if record is None:
+        return False
+    if ask is None:
+        return True
+    asked, last = _moment(ask.get("asked_at")), _moment(record.get("last_at"))
+    return asked is not None and last is not None and asked <= last
+
+
+def send_back_said(task: Any, record: Optional[Dict[str, Any]], ask: Optional[Dict[str, Any]],
+                   agent: Optional[str] = None) -> str:
+    """One line on the card's send-back (P256-FIX-N17-6): a send-back still waiting for the click, one
+    that went through and what the card shows now, or what came of the newest ask. Only a send-back
+    that went through says "went through" or "the redo's"."""
+    if ask is not None and ask.get("decision") == ASK_WAITING:
+        last = LAST_SENT_BACK.format(at=_at(record.get("last_at"))) if record else ""
+        return WAITS_FOR_YOU.format(at=_at(ask.get("asked_at"))) + last
+    if went_through(record, ask):
+        opened = WENT_THROUGH.format(by=record.get("by") or BY_AN_AGENT, at=_at(record.get("last_at")))
+        return f"{opened} {_redo_now(task, record, agent)}"
+    if ask is None:
+        return NEVER_SENT_BACK
+    return ASK_SAID.get(ask.get("decision"), ASK_SAID["lapsed"]).format(at=_at(ask.get("asked_at")))
+
+
+def _redo_now(task: Any, record: Dict[str, Any], agent: Optional[str]) -> str:
+    """What the card shows since a send-back that went through: its redo waiting, running, answered, or failed."""
+    status = getattr(task, "status", None)
+    if status == ASSIGNED:
+        return REDO_WAITS.format(agent=agent or ITS_AGENT)
+    if status == IN_PROGRESS:
+        return REDO_RUNNING
+    finished, last = _moment(getattr(task, "completed_at", None)), _moment(record.get("last_at"))
+    if status in ANSWERED and finished is not None and last is not None and finished > last:
+        return REDO_SHOWN.format(at=_at(finished))
+    if status == FAILED:
+        return REDO_FAILED + (DRAFT_KEPT if kept_draft(task) else "")
+    return NOW_STATUS.format(status=STATUS_SAID.get(status, str(status or "").replace("_", " ")))
+
+
+def send_back_seen(db: Any, workspace_id: Any, task: Any, driving_user_id: Any) -> Dict[str, Any]:
+    """What a read of the card on its owner's own chat adds (P256-FIX-N17-6, F445): ``times_sent_back``,
+    ``updated_at``, ``sent_back`` (``send_back_record`` with ``went_through`` and the line, ``said``) and
+    ``send_back_card``, the newest send-back asked for on it (``newest_send_back_ask``). New dicts only."""
+    from modules.tools.discovery.my_actions_clicks import actor_refs
+    from services.ticket_numbers import ticket_number
+
+    record = send_back_record(task, actor_refs(db, driving_user_id))
+    ask = newest_send_back_ask(db, workspace_id, task, ticket_number(db, task), datetime.now(timezone.utc))
+    said = send_back_said(task, record, ask, agent=_agent_name(db, workspace_id, task))
+    return {"times_sent_back": times_sent_back(task), "updated_at": _iso(getattr(task, "updated_at", None)),
+            "sent_back": {**(record or {}), "went_through": went_through(record, ask), "said": said},
+            "send_back_card": ask}
+
+
+def _agent_name(db: Any, workspace_id: Any, task: Any) -> Optional[str]:
+    from core.models import Agent
+
+    agent_id = getattr(task, "assigned_agent_id", None)
+    if not agent_id:
+        return None
+    return db.query(Agent.name).filter(Agent.id == agent_id, Agent.workspace_id == workspace_id).scalar()
+
+
+def _moment(value: Any) -> Optional[datetime]:
+    """A time as UTC: a datetime, or one written as ISO text; None for neither."""
+    moment = value if isinstance(value, datetime) else _parsed(value)
+    if moment is None:
+        return None
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment.astimezone(timezone.utc)
+
+
+def _iso(value: Any) -> Optional[str]:
+    moment = _moment(value)
+    return moment.isoformat() if moment is not None else None
+
+
+def _at(value: Any) -> str:
+    """'at 20:40 on 15 Oct' (UTC, as platform_my_actions says it); '' with no time."""
+    from modules.tools.discovery.my_actions_reads import at_said
+
+    moment = _moment(value)
+    return at_said(moment) if moment is not None else ""
 
 
 def _session_of(task: Any) -> Any:

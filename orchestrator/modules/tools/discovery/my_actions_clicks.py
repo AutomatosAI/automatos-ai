@@ -37,7 +37,7 @@ def clicks_in(db: Any, workspace_id: Any, user_id: int, window: Window) -> Found
 
     from core.models.approval_grants import KIND_QUESTION, SUBJECT_TOOL_CALL, ApprovalGrant, GrantStatus
 
-    refs = _actor_refs(db, user_id)
+    refs = actor_refs(db, user_id)
     said_yes = and_(ApprovalGrant.granted_by.in_(refs), ApprovalGrant.granted_at >= window.start,
                     ApprovalGrant.granted_at < window.end)
     said_no = and_(ApprovalGrant.status == GrantStatus.DENIED.value, ApprovalGrant.revoked_by.in_(refs),
@@ -123,9 +123,9 @@ def board_numbers_said(db: Any, workspace_id: Any, card: str) -> List[str]:
     return [n for n in said if is_a_card(n)]
 
 
-def _actor_refs(db: Any, user_id: int) -> List[str]:
+def actor_refs(db: Any, user_id: int) -> List[str]:
     """How the grants table names this person: 'user:<users.id>', and 'user:<Clerk id>' (the hosted
-    edition's approval routes record the Clerk id)."""
+    edition's approval routes record the Clerk id, and so does Auto's send-back: P256-FIX-N17-6)."""
     from core.models.core import User
 
     clerk = db.query(User.clerk_user_id).filter(User.id == user_id).scalar()
@@ -142,4 +142,4 @@ def _utc(moment: datetime) -> datetime:
     return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment.astimezone(timezone.utc)
 
 
-__all__ = ["APPROVED", "DECIDED", "DECLINED", "LAPSED", "clicks_in", "decision_of", "settled"]
+__all__ = ["APPROVED", "DECIDED", "DECLINED", "LAPSED", "actor_refs", "clicks_in", "decision_of", "settled"]
