@@ -12,12 +12,18 @@ modes and ``images.yml``'s tags. The lane itself runs only in CI:
 * images.yml's merge job no longer pushes ``edge``; ``promote-edge`` moves it after
   both arches pass, for the images the merge job publishes;
 * the script empties the Docker cache before the pull, never builds in an image mode,
-  and asserts the production command's worker count (orchestrator/Dockerfile's CMD).
+  and asserts the production command's worker count (orchestrator/Dockerfile's CMD);
+* outside CI, the pull refuses to empty the host's image cache unless told it may.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -281,6 +287,71 @@ def test_the_script_asserts_what_booted_before_the_warm_restarts():
     assert "compose config --format json" in images
     assert '--expect-revision "${SMOKE_EXPECT_REVISION:-}"' in images
     assert '"$IMAGES_TOOL" report' in _function(text, "write_report")
+
+
+def test_the_pull_checks_the_host_before_it_sets_the_teardown_trap():
+    text = _script()
+    main = _function(text, "main")
+    order = [main.index(call) for call in ("refuse_existing_stack", "refuse_emptying_a_kept_image_cache",
+                                           "trap finish EXIT", "prepare_images")]
+    assert order == sorted(order)
+    guard = _function(text, "refuse_emptying_a_kept_image_cache")
+    assert '[ "$SMOKE_IMAGES" = "pull" ] || return 0' in guard
+    assert '[ "${CI:-}" = "true" ] || [ "${SMOKE_EMPTY_IMAGE_CACHE:-}" = "true" ]' in guard
+
+
+# A docker that records its calls, lists no container, volume or image, and fails a
+# compose pull; python3 is the interpreter running these tests.
+_FAKE_DOCKER = """#!/bin/bash
+echo "docker $*" >> "$CALL_LOG"
+case "$*" in
+  "compose "*" pull "*) exit 1 ;;
+esac
+exit 0
+"""
+
+
+def _run_pull_mode(tmp_path: Path, **extra: str) -> tuple:
+    """smoke-fresh-clone.sh with SMOKE_IMAGES=pull against the fake docker: (exit code, calls, output)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, body in {"docker": _FAKE_DOCKER, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}.items():
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod((bin_dir / name).stat().st_mode | stat.S_IXUSR)
+    log = tmp_path / "calls.log"
+    log.touch()
+    # Built from scratch, so the CI=true of the runner that runs these tests never leaks in.
+    env = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "CALL_LOG": str(log),
+           "SMOKE_OUT_DIR": str(tmp_path / "out"), "RUNNER_TEMP": str(tmp_path),
+           "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+           "SMOKE_IMAGES": "pull", "AUTOMATOS_IMAGE_TAG": "sha-0d9f0ac", **extra}
+    proc = subprocess.run(["bash", str(_SCRIPT)], env=env, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=60)
+    return proc.returncode, log.read_text(encoding="utf-8").splitlines(), proc.stdout + proc.stderr
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_outside_ci_the_pull_refuses_to_empty_the_hosts_image_cache(tmp_path):
+    code, calls, out = _run_pull_mode(tmp_path)
+    assert code == 1, out
+    assert "deletes every image on this host" in out and "SMOKE_EMPTY_IMAGE_CACHE=true" in out
+    # It stops before pruning, pulling or tearing anything down, and writes no report.
+    assert calls == ["docker ps -a --format {{.Names}}", "docker volume ls --format {{.Name}}"]
+    assert not (tmp_path / "summary.md").exists()
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize("allowed", [{"CI": "true"}, {"SMOKE_EMPTY_IMAGE_CACHE": "true"}])
+def test_in_ci_or_when_allowed_the_pull_empties_the_cache_and_never_builds(tmp_path, allowed):
+    code, calls, out = _run_pull_mode(tmp_path, **allowed)
+    assert code == 1, out  # the fake docker fails the pull
+    assert "docker compose pull failed" in out
+    assert "docker image prune -af" in calls
+    assert not any(" build" in call or " up " in call for call in calls), calls
+    assert calls[-1] == "docker compose -f docker-compose.yml -f docker-compose.images.yml down -v"
+    summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "**FAIL**: docker compose pull failed" in summary
+    assert "### Images: pull, first run, and what each container runs" in summary
 
 
 def test_the_expected_worker_count_is_the_production_commands():

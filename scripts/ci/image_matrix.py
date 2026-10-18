@@ -43,21 +43,29 @@ from datetime import datetime, timezone
 from typing import Iterable, List, Sequence
 
 LOCAL_REGISTRY_HOST = "localhost:5000"
+# GitHub gives these a meaning this picker does not copy (``?`` and ``+`` repeat the
+# character before them, ``[]`` is a class, a leading ``!`` negates), so a pattern
+# using one is refused: read literally, it would silently never match.
+UNSUPPORTED = re.compile(r"[?+\[\]!\\]")
 GLOB_PART = re.compile(r"\*\*|\*|\?|[^*?]+")
 WEEKLY_TAG_PREFIX = "weekly-"
 WEEKLY_DATE_FORMAT = "%Y%m%d"
 
 
 def glob_regex(pattern: str) -> re.Pattern:
-    """A GitHub path-filter glob as an anchored regex."""
+    """A GitHub path-filter glob as an anchored regex: ``*`` and ``**`` only.
+
+    GitHub's other filter syntax (``?``, ``+``, ``[]``, a leading ``!``) raises
+    ValueError instead of being misread.
+    """
+    if UNSUPPORTED.search(pattern):
+        raise ValueError(f"path filter {pattern!r} uses syntax image_matrix.py does not support")
     parts = []
     for token in GLOB_PART.findall(pattern):
         if token == "**":
             parts.append(".*")
         elif token == "*":
             parts.append("[^/]*")
-        elif token == "?":
-            parts.append("[^/]")
         else:
             parts.append(re.escape(token))
     return re.compile("".join(parts) + r"\Z")

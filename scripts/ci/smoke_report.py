@@ -15,7 +15,8 @@ US-004 takes its five-run medians from. The summary shows, pass or fail:
 * per backend boot, the seconds from the container's start to ``/health`` 200 and to
   ``/health/ready`` 200, separately, and the median of the warm restarts;
 * the frontend's seconds to its first 200 and the address compose published it on;
-* Started → Healthy per service and per start, from the daemon's events;
+* Started → Healthy per service and per start, from the daemon's events, and the
+  datastore gate the backend's start waits on (PRD-262 §8's datastore row);
 * the ``/health/bootstrap`` stage table of each boot;
 * the alembic runs of each boot, counted as PRD-262 §8 says: the
   ``Context impl PostgresqlImpl`` lines after ``init_fresh_db: done``, or all of them
@@ -57,6 +58,8 @@ HEALTHY_ACTION = "health_status: healthy"
 ALEMBIC_RUN_LINE = "Context impl PostgresqlImpl"
 FRESH_INIT_DONE_LINE = "init_fresh_db: done"
 WARM_PREFIX = "warm"
+# The compose services the backend's depends_on waits on to be healthy.
+DATASTORES = ("postgres", "redis", "minio")
 BACKEND_CONTAINER = "automatos_backend"
 FRONTEND_CONTAINER = "automatos_frontend"
 DEFAULT_TITLE = "Fresh-clone smoke: boot timings (PRD-262 US-002)"
@@ -198,6 +201,24 @@ def service_rows(spans: Sequence[dict]) -> List[dict]:
     return rows
 
 
+def datastore_gate(spans: Sequence[dict]) -> dict:
+    """How long the datastores held the backend's start: PRD-262 §8's datastore row.
+
+    It runs from the first datastore's start to the moment the last of them first
+    reported healthy, over each datastore's first start (``spans`` are in time order).
+    ``healthy_s`` is None, and ``missing`` names the service, while one never started
+    or never reported healthy.
+    """
+    first = {service: next((span for span in spans if span["service"] == service), None) for service in DATASTORES}
+    missing = [service for service, span in first.items() if span is None or span["healthy_ns"] is None]
+    started = [span for span in first.values() if span is not None]
+    seconds = None
+    if not missing:
+        gate_ns = max(span["healthy_ns"] for span in started) - min(span["start_ns"] for span in started)
+        seconds = round(gate_ns / NS_PER_SECOND, 3)
+    return {"services": list(DATASTORES), "healthy_s": seconds, "missing": missing}
+
+
 def frontend_row(records: Sequence[dict]) -> Optional[dict]:
     """The frontend's boot: seconds to its first 200, the final URL and the published address."""
     if not records:
@@ -228,12 +249,14 @@ def build_summary(
     """
     backend, frontend = containers
     boots = backend_boots([record for record in records if record.get("container") == backend], log_lines)
+    spans = service_spans(events)
     return {
         **run,
         "backend": boots,
         "warm_median": warm_median(boots),
         "frontend": frontend_row([record for record in records if record.get("container") == frontend]),
-        "services": service_rows(service_spans(events)),
+        "services": service_rows(spans),
+        "datastores": datastore_gate(spans),
     }
 
 
@@ -307,6 +330,18 @@ def render_services(rows: Sequence[dict]) -> List[str]:
     return lines + [""]
 
 
+def render_datastores(gate: dict) -> List[str]:
+    """The datastore gate: first datastore start to the last one healthy."""
+    names = ", ".join(gate["services"])
+    if gate["healthy_s"] is None:
+        return [f"Datastores ({names}): not all healthy; missing {', '.join(gate['missing'])}.", ""]
+    return [
+        f"Datastores ({names}): all healthy {_fmt(gate['healthy_s'])} after the first of them started "
+        "(the gate the backend's start waits on; PRD-262 §8).",
+        "",
+    ]
+
+
 def _stage_cell(stage: dict) -> str:
     duration = stage.get("duration_ms")
     return f"{duration}" if stage.get("status") == "success" else f"{stage.get('status')} {duration}"
@@ -343,7 +378,8 @@ def render_markdown(summary: dict) -> str:
         "",
     ]
     body = (render_backend(summary["backend"], summary["warm_median"]) + render_frontend(summary["frontend"])
-            + render_services(summary["services"]) + render_bootstrap(summary["backend"]))
+            + render_services(summary["services"]) + render_datastores(summary["datastores"])
+            + render_bootstrap(summary["backend"]))
     return "\n".join(head + body) + "\n"
 
 
