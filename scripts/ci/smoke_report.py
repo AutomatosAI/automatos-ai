@@ -59,6 +59,7 @@ FRESH_INIT_DONE_LINE = "init_fresh_db: done"
 WARM_PREFIX = "warm"
 BACKEND_CONTAINER = "automatos_backend"
 FRONTEND_CONTAINER = "automatos_frontend"
+DEFAULT_TITLE = "Fresh-clone smoke: boot timings (PRD-262 US-002)"
 parse_timestamp = smoke_boot.parse_timestamp
 
 
@@ -222,8 +223,8 @@ def build_summary(
 ) -> dict:
     """Everything the step summary shows, as one JSON-ready dict.
 
-    ``containers`` is (backend, frontend); ``run`` carries outcome, failure,
-    build_seconds, commit and run_id.
+    ``containers`` is (backend, frontend); ``run`` carries the title, outcome,
+    failure, build_seconds, commit and run_id.
     """
     backend, frontend = containers
     boots = backend_boots([record for record in records if record.get("container") == backend], log_lines)
@@ -334,7 +335,7 @@ def render_markdown(summary: dict) -> str:
     """The whole step summary."""
     result = "pass" if summary["outcome"] == "pass" else f"**FAIL**: {summary.get('failure') or 'see the log'}"
     head = [
-        "## Fresh-clone smoke: boot timings (PRD-262 US-002)",
+        f"## {summary.get('title') or DEFAULT_TITLE}",
         "",
         f"Result: {result}. Commit: `{(summary.get('commit') or 'local')[:7]}`. "
         f"Image build: {summary['build_seconds'] if summary.get('build_seconds') is not None else '—'} s "
@@ -358,6 +359,7 @@ def _read_lines(path: Optional[Path]) -> List[str]:
 def report(args: argparse.Namespace) -> int:
     """Write the step summary and the JSON report from a run's records, events and log."""
     run = {
+        "title": args.title,
         "outcome": args.outcome,
         "failure": args.failure or None,
         "build_seconds": args.build_seconds,
@@ -393,6 +395,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--build-seconds", type=_optional_int, default=None, help="empty when the build did not finish")
     parser.add_argument("--outcome", choices=("pass", "fail"), required=True)
     parser.add_argument("--failure", default="", help="why the smoke failed, empty on a pass")
+    parser.add_argument("--title", default=DEFAULT_TITLE, help="the summary's heading (smoke-images sets its own)")
     parser.add_argument("--json", type=Path, help="where the JSON report goes")
     parser.add_argument("--summary", default="/dev/stdout", help="the Markdown is appended here")
     return parser

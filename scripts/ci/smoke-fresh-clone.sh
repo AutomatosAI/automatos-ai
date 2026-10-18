@@ -33,6 +33,24 @@
 # land in $SMOKE_OUT_DIR, which the workflow uploads. No time is a bar yet: the lane fails only when a
 # boot or the frontend never answers 200 (PRD-262 US-004 records the baselines).
 #
+# PRD-262 US-003 runs the same boot steps on images instead of a source build, for
+# .github/workflows/smoke-images.yml. SMOKE_IMAGES picks where the app images come from:
+#   (unset)   build them from this checkout (the fresh-clone lane, above);
+#   pull      the published path: docker-compose.images.yml with AUTOMATOS_IMAGE_TAG.
+#             The Docker image cache is emptied first, then `docker compose pull` is
+#             timed and the bytes it brought in are counted;
+#   prebuilt  the pull-request variant: the workflow built the three amd64 images and
+#             tagged them with the GHCR names and AUTOMATOS_IMAGE_TAG, so compose
+#             neither pulls nor builds them.
+# Either way the stack starts with `up --no-build`, and scripts/ci/smoke_images.py
+# asserts what booted: the backend runs the production command (no --reload,
+# SMOKE_BACKEND_WORKERS workers), and each app container runs its
+# ghcr.io/automatosai/automatos-* image carrying the commit's revision label
+# (SMOKE_EXPECT_REVISION). With `pull`, each image's RepoDigests must also hold the
+# index digest its tag resolves to on GHCR, so nothing was built locally; no image may
+# carry a local-* tag or compose's own <project>-<service> name. The step summary
+# adds the pull, the first run from its start to :3000 200, and those checks.
+#
 # Exit 0 = every boot answered 200 with no external creds. Exit 1 = a boot failed.
 set -uo pipefail
 
@@ -40,6 +58,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 COMPOSE_FILE="docker-compose.yml"
+# The published images in place of the source builds (PRD-262 US-003).
+IMAGES_COMPOSE_FILE="docker-compose.images.yml"
+SMOKE_IMAGES="${SMOKE_IMAGES:-}"
+COMPOSE_ARGS=(-f "$COMPOSE_FILE")
+if [ -n "$SMOKE_IMAGES" ]; then
+  COMPOSE_ARGS+=(-f "$IMAGES_COMPOSE_FILE")
+fi
 API_BASE="http://localhost:${API_PORT:-8000}"
 HEALTH_URL="${API_BASE}/health"
 # Readiness probe (main.py:/health/ready) — 200 only once the boot lifespan has
@@ -59,8 +84,17 @@ WARM_RESTARTS=2
 OUT_DIR="${SMOKE_OUT_DIR:-${RUNNER_TEMP:-/tmp}/smoke-fresh-clone}"
 BOOT_TOOL="scripts/ci/smoke_boot.py"
 REPORT_TOOL="scripts/ci/smoke_report.py"
+IMAGES_TOOL="scripts/ci/smoke_images.py"
 BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
+# smoke_images.py's records (it reads them back from OUT_DIR for the report).
+PULL_FILE="${OUT_DIR}/pull.json"
+PROCESSES_FILE="${OUT_DIR}/processes.json"
+IMAGES_FILE="${OUT_DIR}/images.json"
+# Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
+COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
+# The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
+BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-4}"
 
 # ---------------------------------------------------------------------------
 # Local-only secrets. These are throwaway values for an ephemeral local stack —
@@ -83,9 +117,11 @@ outcome="fail"
 failure="the smoke stopped before its first boot"
 build_seconds=""
 events_pid=""
+up_started_ns=""
+images_before=0
 
 compose() {
-  docker compose -f "$COMPOSE_FILE" "$@"
+  docker compose "${COMPOSE_ARGS[@]}" "$@"
 }
 
 fail() {
@@ -94,9 +130,20 @@ fail() {
   exit 1
 }
 
+# Image modes need the tag to boot; a typo in the mode must not fall back to a build.
+check_mode() {
+  case "$SMOKE_IMAGES" in
+    "") ;;
+    pull|prebuilt)
+      [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=${SMOKE_IMAGES} needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
+    *) fail "SMOKE_IMAGES must be unset, pull or prebuilt, not '${SMOKE_IMAGES}'" ;;
+  esac
+}
+
 print_banner() {
   echo "========================================="
   echo "PRD-176 fresh-clone smoke test (PRD-262 US-002 boot timings)"
+  echo "  images     : ${SMOKE_IMAGES:-built from this checkout}${SMOKE_IMAGES:+ (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG:-})}"
   echo "  health url : ${HEALTH_URL} (liveness), ${READY_URL} (readiness)"
   echo "  frontend   : ${FRONTEND_URL}"
   echo "  max wait   : ${MAX_WAIT_SECONDS}s per boot, polled every second"
@@ -136,6 +183,31 @@ build_images() {
   echo "Images built in ${build_seconds}s"
 }
 
+# The published path starts from an empty Docker cache, as a new self-hoster's does.
+empty_docker_cache() {
+  images_before="$(docker image ls -q | wc -l | tr -d ' ')"
+  docker image prune -af > /dev/null || fail "could not empty the Docker image cache"
+  [ -z "$(docker image ls -q)" ] || fail "the Docker image cache is not empty after the prune"
+  echo "Docker image cache emptied (${images_before} image(s) were there)"
+}
+
+# Pulls every image of the default stack: the app images under AUTOMATOS_IMAGE_TAG and
+# the datastores. smoke_images.py times it and counts the bytes the runner received.
+pull_images() {
+  empty_docker_cache
+  echo "Pulling the stack's images (app images at ${AUTOMATOS_IMAGE_TAG})..."
+  python3 "$IMAGES_TOOL" pull --out "$PULL_FILE" --images-before "$images_before" -- \
+    docker compose "${COMPOSE_ARGS[@]}" pull --quiet || fail "docker compose pull failed"
+}
+
+prepare_images() {
+  case "$SMOKE_IMAGES" in
+    "") build_images ;;
+    pull) pull_images ;;
+    prebuilt) echo "Booting the images this job built (${AUTOMATOS_IMAGE_TAG}): no build, no pull" ;;
+  esac
+}
+
 # $1 = the boot's label (fresh, warm-1, ...). Times /health and /health/ready from
 # the backend's StartedAt, then fetches /health/bootstrap.
 wait_backend() {
@@ -147,6 +219,7 @@ wait_backend() {
 
 boot_fresh() {
   echo "Starting compose stack (postgres, redis, minio, workspace-worker, backend) on an empty database..."
+  up_started_ns="$(date +%s%N)"
   compose up -d --no-build postgres redis minio backend || fail "docker compose up failed"
   echo "Timing the fresh boot: liveness (/health), then readiness (/health/ready)..."
   wait_backend fresh \
@@ -163,6 +236,25 @@ boot_frontend() {
     --url "ui=${FRONTEND_URL}" --meta "address=${address}" \
     --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE" \
     || fail "the frontend never answered 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
+}
+
+# The first CI boot of the production stage (image modes): no --reload, the expected
+# worker count. PRD-262 US-008's kill-a-worker step goes after this check.
+check_backend_processes() {
+  [ -n "$SMOKE_IMAGES" ] || return 0
+  python3 "$IMAGES_TOOL" workers --container "$BACKEND_CONTAINER" --expect "$BACKEND_WORKERS" \
+    --out "$PROCESSES_FILE" \
+    || fail "the backend does not run the production command (no --reload, ${BACKEND_WORKERS} workers)"
+}
+
+# Image modes: every app container runs the image compose names for it, with this
+# commit's revision label; with `pull`, its RepoDigests prove it was pulled.
+check_images() {
+  [ -n "$SMOKE_IMAGES" ] || return 0
+  compose config --format json > "$COMPOSE_CONFIG_FILE" || fail "docker compose config failed"
+  python3 "$IMAGES_TOOL" images --mode "$SMOKE_IMAGES" --config "$COMPOSE_CONFIG_FILE" \
+    --expect-revision "${SMOKE_EXPECT_REVISION:-}" --out "$IMAGES_FILE" \
+    || fail "an app container does not run the image this smoke expects, or an image was built locally"
 }
 
 warm_restarts() {
@@ -193,7 +285,20 @@ write_report() {
     --results "$BOOTS_FILE" --events "$EVENTS_FILE" --backend-log "${OUT_DIR}/backend.log" \
     --backend-container "$BACKEND_CONTAINER" --frontend-container "$FRONTEND_CONTAINER" \
     --build-seconds "$build_seconds" --outcome "$outcome" --failure "$failure" \
-    --json "${OUT_DIR}/smoke-report.json" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+    --title "$(report_title)" \
+    --json "${OUT_DIR}/smoke-report.json" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" || return 1
+  [ -n "$SMOKE_IMAGES" ] || return 0
+  python3 "$IMAGES_TOOL" report --mode "$SMOKE_IMAGES" --tag "${AUTOMATOS_IMAGE_TAG:-}" \
+    --dir "$OUT_DIR" --results "$BOOTS_FILE" --up-started-ns "$up_started_ns" \
+    --json "${OUT_DIR}/smoke-images-report.json" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+}
+
+report_title() {
+  case "$SMOKE_IMAGES" in
+    pull) echo "smoke-images: the published images, pulled and booted (PRD-262 US-003)" ;;
+    prebuilt) echo "smoke-images: this pull request's images, built in the job and booted (PRD-262 US-003)" ;;
+    *) echo "Fresh-clone smoke: boot timings (PRD-262 US-002)" ;;
+  esac
 }
 
 finish() {
@@ -212,12 +317,15 @@ finish() {
 main() {
   mkdir -p "$OUT_DIR" || exit 1
   : > "$BOOTS_FILE"
+  check_mode
   print_banner
   trap finish EXIT
-  build_images
+  prepare_images
   start_event_log
   boot_fresh
+  check_backend_processes
   boot_frontend
+  check_images
   # Further checks against the running stack go here, before the warm restarts
   # (PRD-262 US-021: upload a document and fetch its presigned URL).
   warm_restarts

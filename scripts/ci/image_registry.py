@@ -15,11 +15,15 @@ API with the standard library only, because the arm64 runner image has no
 * ``platform_digest(index, arch)`` picks one architecture's manifest out of the
   index BuildKit pushes. With ``provenance`` and ``sbom`` on, a per-arch push is an
   index of two manifests: the image, and an ``unknown/unknown`` attestation.
+* ``resolve(ref)`` is the digest a tag points at: for a published tag, the
+  multi-arch index (smoke-images, PRD-262 US-003, checks that a pulled image's
+  ``RepoDigests`` holds it, and promote-edge that ``edge`` lands on it).
 * Reads retry three times on a network error, a 5xx or a 429.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -155,6 +159,26 @@ def manifest(session: Session, reference: str) -> dict:
     url = f"{session.base}/v2/{session.repo}/manifests/{reference}"
     with _open(_request(url, MANIFEST_TYPES, session.token)) as response:
         return json.load(response)
+
+
+def resolve(ref: str) -> str:
+    """The ``sha256:`` digest ``ref``'s tag points at, as the registry serves it.
+
+    A HEAD request answers with ``Docker-Content-Digest``; a registry that leaves the
+    header out is read with a GET and the digest is the hash of the bytes it served.
+    """
+    session, reference = connect(ref)
+    if reference.startswith("sha256:"):
+        return reference
+    url = f"{session.base}/v2/{session.repo}/manifests/{reference}"
+    head = _request(url, MANIFEST_TYPES, session.token)
+    head.method = "HEAD"
+    with _open(head) as response:
+        digest = response.headers.get("Docker-Content-Digest", "")
+    if digest:
+        return digest
+    with _open(_request(url, MANIFEST_TYPES, session.token)) as response:
+        return "sha256:" + hashlib.sha256(response.read()).hexdigest()
 
 
 def blob(session: Session, digest: str) -> IO[bytes]:
