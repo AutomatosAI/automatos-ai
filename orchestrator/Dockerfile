@@ -21,10 +21,13 @@ FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e57
 
 WORKDIR /app
 
+# binutils: the strip below (PRD-262 US-020). gcc brings it too; named so the strip
+# keeps it if the compilers go.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     libffi-dev \
+    binutils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -59,6 +62,18 @@ RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then \
         -r requirements.build.txt && \
     pip cache purge && \
     rm -rf /root/.cache/pip
+
+# What runs, and nothing else (PRD-262 US-020). strip --strip-debug drops the .debug_*
+# sections from every compiled library (about 91 MB of the 16 Oct pip layer) and leaves
+# .dynsym, which the loader resolves symbols through, as it is. It skips the auditwheel
+# *.libs directories: they hold about 1 MB of it, in libraries auditwheel renamed and
+# rewrote with patchelf, the kind of file strip has broken before. The extensions that
+# link them were rewritten too, so CI loads every file the strip touched
+# (scripts/ci/image_site_packages.py). Then every directory named exactly `tests` under
+# site-packages goes (about 108 MB); numpy.testing, sqlalchemy.testing and
+# alembic.testing are importable APIs, not test suites, and stay.
+RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-debug {} + && \
+    find /install -type d -name tests -path '*/site-packages/*' -prune -exec rm -rf {} +
 
 # -----------------------------------------------------------------------------
 # Base — RUNTIME dependencies only
