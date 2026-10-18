@@ -120,6 +120,18 @@ Adding a track is the owner's call (PRD-251 open question 5): add its entry with
 
 Staging and the check run in their own lane, `MEDIA_RENDER_MAX_CONCURRENT_CHECKS`.
 
+## The media assets image
+
+`ghcr.io/automatosai/automatos-media-assets` mirrors the Kokoro files and the music tracks in one small image, so a build can copy them from one registry instead of fetching them from GitHub releases and ende.app (PRD-262 US-053). This image's build moves to it in PRD-262 W8, pinned as its own stage (`FROM …automatos-media-assets:<tag>@sha256:… AS assets`). It holds data only, one layer per file:
+
+- `/kokoro/<release>/<file>`: the files `kokoro/assets.json` lists, each with its URL, size and sha256. Until the D4 model is picked by ear (PRD-262 US-050), every candidate is there: today's fp32 model, the v1.1 release's fp16 and the v1.0 release's fp16, with `voices-v1.0.bin`;
+- `/music/<id>.<ext>`: every track in `music/manifest.json`, under the name the library gives it;
+- `/NOTICE`: the Kokoro licence notice and every track's attribution line; `/licenses/Apache-2.0.txt`: the Apache License 2.0 terms.
+
+Its `org.opencontainers.image.licenses` label is `Apache-2.0 AND CC-BY-4.0`. It holds no GPL code.
+
+To publish it, run images.yml by hand on main with `media_assets` (`gh workflow run images.yml --ref main -f media_assets=true`). That run builds no other image, and smoke-images skips it. Its `media-assets` job (`scripts/ci/media_assets.py`) fetches every file and checks its sha256, publishes the image for amd64 and arm64, reads it back from the registry and checks every file again, and only then signs it. The job summary prints the `FROM` line to pin. After the first publish, an org owner makes the package public, so Railway and `--profile media` builds pull it without a login.
+
 ## Boot assertions
 
 `python -m media_render` (the entrypoint) checks the environment before serving. If any check fails, it exits with code 2. It refuses to start when:
