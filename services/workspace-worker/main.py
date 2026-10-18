@@ -40,7 +40,8 @@ from automatos_logging import setup_logging
 setup_logging(service="workspace-worker")
 logger = logging.getLogger("workspace-worker")
 
-from worker_config import workspace_root
+from task_executions_db import record_task_status
+from worker_config import database_url, workspace_root
 
 # Redis key patterns (must match queued.py)
 QUEUE_NAMES = [
@@ -74,7 +75,6 @@ class WorkspaceWorker:
         self.concurrency = int(os.environ.get("WORKER_CONCURRENCY", "3"))
         self.health_port = int(os.environ.get("WORKER_HEALTH_PORT", "8081"))
         self._redis = None
-        self._db_engine = None
         self._running = True
         self._active_tasks: Dict[str, asyncio.Task] = {}
         # F178: the tasks running now, per workspace; the last one out clears the
@@ -144,9 +144,6 @@ class WorkspaceWorker:
 
             if self._redis:
                 await self._redis.aclose()
-
-            if self._db_engine:
-                self._db_engine.dispose()
 
             logger.info("Worker %s shutdown complete", self._worker_id)
 
@@ -404,44 +401,16 @@ class WorkspaceWorker:
         await self._update_db_execution(task_id, status, error=error)
 
     async def _update_db_execution(self, task_id: str, status: str, error: str = None) -> None:
-        """Persist task lifecycle state to Postgres task_executions table."""
-        try:
-            from sqlalchemy import create_engine, text
+        """Persist task lifecycle state to Postgres task_executions, in a thread.
 
-            if self._db_engine is None:
-                db_url = os.environ.get("DATABASE_URL", "")
-                if not db_url:
-                    logger.warning("DATABASE_URL not set — skipping DB update for task %s", task_id[:8])
-                    return
-                self._db_engine = create_engine(db_url, pool_pre_ping=True)
-
-            now = datetime.now(timezone.utc)
-
-            set_clauses = ["status = :status", "worker_id = :worker_id"]
-            params: Dict[str, Any] = {
-                "task_id": task_id,
-                "status": status,
-                "worker_id": self._worker_id,
-            }
-
-            if status == "running":
-                set_clauses.append("started_at = :started_at")
-                params["started_at"] = now
-            elif status in ("completed", "failed", "timed_out", "cancelled"):
-                set_clauses.append("completed_at = :completed_at")
-                params["completed_at"] = now
-            if error:
-                set_clauses.append("error_message = :error")
-                params["error"] = error
-
-            sql = f"UPDATE task_executions SET {', '.join(set_clauses)} WHERE id = :task_id"
-
-            with self._db_engine.connect() as conn:
-                conn.execute(text(sql), params)
-                conn.commit()
-
-        except Exception as e:
-            logger.error("DB update failed for task %s (%s): %s", task_id[:8], status, e)
+        psycopg2's blocking write never runs on this event loop, which also serves
+        the health, canvas and file routes (PRD-262 US-044).
+        """
+        url = database_url()
+        if not url:
+            logger.warning("DATABASE_URL not set — skipping DB update for task %s", task_id[:8])
+            return
+        await asyncio.to_thread(record_task_status, url, task_id, status, self._worker_id, error)
 
     async def _write_result(self, task_id: str, workspace_id: str, result: Dict[str, Any]) -> None:
         """Write task result to Redis (for API polling)."""
