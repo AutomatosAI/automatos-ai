@@ -442,6 +442,19 @@ jobs:
           python scripts/ci/image_scan_policy.py check --report "$REPORT" --allowlist .grype.yaml \
             --mode "$POLICY_MODE" --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
 
+      # PRD-262 US-014: the API's production stage compiles the stdlib once, as
+      # root. In the layer listing above, the layer that RUN made holds stdlib
+      # .pyc files and no path under site-packages, whose bytecode comes only
+      # from pybuild. Last in the job, so the reports and the scan run first.
+      - name: The stdlib bytecode layer
+        if: matrix.name == 'api'
+        env:
+          REPORT: ${{ runner.temp }}/layers/${{ matrix.name }}-${{ matrix.arch }}.json
+        run: |
+          python3 scripts/ci/image_report.py layer --report "$REPORT" --instruction compileall \
+            --under usr/local/lib/python3.11/ --not-under usr/local/lib/python3.11/site-packages/ \
+            --suffix .pyc --summary "$GITHUB_STEP_SUMMARY"
+
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build
   # counts as its current `edge`. PRD-262 US-058's shared-layer check reads it.

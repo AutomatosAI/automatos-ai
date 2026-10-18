@@ -10,7 +10,9 @@ and configs recorded from the published ``edge`` images
   budget check (the committed ``.github/image-budgets.json``) warns on it;
 * a requirements change is reported apart from a code change;
 * the API and the worker share only the Debian layer today;
-* a layer download cut short is a warning in the report, never a failed build.
+* a layer download cut short is a warning in the report, never a failed build;
+* the layer check (PRD-262 US-014) passes the API's stdlib compile layer only when it
+  holds stdlib ``.pyc`` and nothing under site-packages.
 """
 from __future__ import annotations
 
@@ -185,11 +187,71 @@ def test_a_layers_paths_are_summed_by_prefix():
     assert listing["paths"][SITE] == [160, 3]
     assert listing["paths"]["app/main.py"] == [5, 1]
     assert listing["heaviest"][0] == [f"{SITE}/pkg_a", 150]
+    assert listing["suffixes"] == {".py": [165, 4]}
 
 
 def test_a_zstd_layer_is_refused_not_misread():
     with pytest.raises(ValueError):
         layers.list_paths(io.BytesIO(b""), "application/vnd.oci.image.layer.v1.tar+zstd")
+
+
+GZIP = "application/vnd.oci.image.layer.v1.tar+gzip"
+STDLIB = "usr/local/lib/python3.11"
+STDLIB_PYC = {f"{STDLIB}/__pycache__/os.cpython-311.pyc": b"o" * 30,
+              f"{STDLIB}/json/__pycache__/decoder.cpython-311.pyc": b"j" * 20}
+LAYER_CHECK = ("compileall", f"{STDLIB}/", f"{STDLIB}/site-packages/", ".pyc")
+
+
+def _compile_instruction() -> str:
+    """The orchestrator Dockerfile's stdlib compile, as US-001's listing names its layer."""
+    dockerfile = (_REPO / "orchestrator" / "Dockerfile").read_text(encoding="utf-8")
+    command = next(line for line in dockerfile.splitlines() if line.startswith("RUN python -m compileall"))
+    entry = {"created_by": f"RUN /bin/sh -c {command.removeprefix('RUN ')} # buildkit"}
+    return layers.shorten(layers.instruction(entry))
+
+
+def _rows(files: dict[str, bytes]) -> list[dict]:
+    code = {"instruction": "COPY . .", "listing": layers.list_paths(io.BytesIO(_layer_tar(LAYER)), GZIP)}
+    made = {"instruction": _compile_instruction(), "listing": layers.list_paths(io.BytesIO(_layer_tar(files)), GZIP)}
+    return [code, made]
+
+
+def test_the_stdlib_compile_layer_holds_stdlib_pyc_and_nothing_under_site_packages():
+    assert "compileall" in _compile_instruction()
+    verdict = layers.layer_verdict(_rows(STDLIB_PYC), *LAYER_CHECK)
+    assert verdict.level == "ok", verdict.message
+    assert "holds 2 files" in verdict.message
+
+
+@pytest.mark.parametrize("extra", [
+    {f"{SITE}/pkg_a/__pycache__/x.cpython-311.pyc": b"s"},  # site-packages bytecode is pybuild's
+    {"app/__pycache__/main.cpython-311.pyc": b"a"},  # outside the stdlib
+    {f"{STDLIB}/os.py": b"p"},  # not bytecode
+])
+def test_the_layer_check_fails_on_anything_else(extra):
+    verdict = layers.layer_verdict(_rows({**STDLIB_PYC, **extra}), *LAYER_CHECK)
+    assert verdict.level == "error", verdict.message
+
+
+def test_the_layer_check_needs_one_listed_layer_with_files():
+    rows = _rows(STDLIB_PYC)
+    assert layers.layer_verdict(rows[:1], *LAYER_CHECK).level == "error"  # no compile layer
+    assert layers.layer_verdict(rows + rows[1:], *LAYER_CHECK).level == "error"  # two
+    unlisted = [rows[0], {**rows[1], "listing": {"error": "IncompleteRead"}}]
+    assert "not listed: IncompleteRead" in layers.layer_verdict(unlisted, *LAYER_CHECK).message
+    assert "no file" in layers.layer_verdict(_rows({}), *LAYER_CHECK).message
+
+
+def test_the_layer_command_fails_the_job_and_says_why(tmp_path, capsys):
+    path, summary = tmp_path / "api-amd64.json", tmp_path / "summary.md"
+    path.write_text(json.dumps({"name": "api", "arch": "amd64", "layers": _rows({**STDLIB_PYC, f"{STDLIB}/os.py": b"p"})}))
+    args = ["layer", "--report", str(path), "--instruction", LAYER_CHECK[0], "--under", LAYER_CHECK[1],
+            "--not-under", LAYER_CHECK[2], "--suffix", LAYER_CHECK[3], "--summary", str(summary)]
+    assert report.main(args) == 1
+    assert capsys.readouterr().out.startswith("::error title=Layer contents::api (amd64): ")
+    assert "**Layer check:**" in summary.read_text()
+    path.write_text(json.dumps({"name": "api", "arch": "amd64", "layers": _rows(STDLIB_PYC)}))
+    assert report.main(args) == 0
 
 
 class _CutShort(io.BytesIO):

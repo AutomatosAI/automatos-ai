@@ -1,6 +1,6 @@
 """Image size, layers, update delta and budget reports for images.yml (PRD-262 US-001).
 
-Three commands, each run by one images.yml step:
+Four commands, each run by one images.yml step:
 
 * ``measure`` (each build job, after the push) reads the pushed digest back from its
   registry, picks the job's architecture out of the index, and writes a JSON report:
@@ -10,6 +10,10 @@ Three commands, each run by one images.yml step:
 * ``budget`` (each build job) checks that report against ``.github/image-budgets.json``.
   In the file's ``warn`` mode an over-budget build prints a warning; ``fail`` mode
   (PRD-262 US-004) fails the job.
+* ``layer`` (the API's build jobs, PRD-262 US-014) checks that one layer of that
+  report holds only files of one suffix below one directory: the stdlib compile's
+  layer holds stdlib ``.pyc`` and nothing under site-packages. It fails the job
+  otherwise, or when that layer could not be listed.
 * ``report`` (the report job) reads every build's JSON and works out, per arch, the
   layers the API and the worker share and what the default stack's app images cost
   to pull. An image this run did not build counts as its current ``edge``.
@@ -190,6 +194,15 @@ def budget(args: argparse.Namespace) -> int:
     return 1 if verdict.level == "error" else 0
 
 
+def layer(args: argparse.Namespace) -> int:
+    report = json.loads(Path(args.report).read_text(encoding="utf-8"))
+    verdict = layers.layer_verdict(report["layers"], args.instruction, args.under, args.not_under, args.suffix)
+    if verdict.level != "ok":
+        print(f"::{verdict.level} title=Layer contents::{report['name']} ({report['arch']}): {verdict.message}")
+    _append(args.summary, f"**Layer check:** {verdict.message}.")
+    return 1 if verdict.level == "error" else 0
+
+
 def _stack_layers(name: str, arch: str, built: dict, edge_prefix: str) -> Tuple[List[dict], str]:
     """This run's layers for ``name``, or its current ``edge``'s when it was not built."""
     if (name, arch) in built:
@@ -278,6 +291,10 @@ def parser() -> argparse.ArgumentParser:
     check.add_argument("--report", required=True)
     check.add_argument("--budgets", required=True)
     check.add_argument("--summary")
+    one_layer = commands.add_parser("layer", help="check what one layer of a report holds")
+    for flag in ("--report", "--instruction", "--under", "--not-under", "--suffix"):
+        one_layer.add_argument(flag, required=True)
+    one_layer.add_argument("--summary")
     every = commands.add_parser("report", help="the shared-layer and first-pull report")
     every.add_argument("--dir", required=True, help="the build jobs' JSON reports")
     every.add_argument("--edge-prefix", required=True, help="ghcr.io/<owner>/automatos-")
@@ -289,7 +306,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: List[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    return {"measure": measure, "budget": budget, "report": report}[args.command](args)
+    return {"measure": measure, "budget": budget, "layer": layer, "report": report}[args.command](args)
 
 
 if __name__ == "__main__":

@@ -977,6 +977,32 @@ jobs:
         run: |
           docker build --target production -t parity-be orchestrator/
           docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
+      # PRD-262 US-014: the test tools are in requirements-dev.txt, which only CI
+      # installs, so `import pytest` fails in the image and no distribution that
+      # file names is installed there.
+      - name: Backend — no test tools in the production image
+        env:
+          INSTALLED: |
+            import sys
+            from importlib import metadata
+            found = []
+            for name in sys.argv[1:]:
+                try:
+                    found.append(f"{name} {metadata.version(name)}")
+                except metadata.PackageNotFoundError:
+                    print(f"{name}: not installed")
+            for item in found:
+                print(f"::error::the production backend image has {item}")
+            sys.exit(1 if found else 0)
+        run: |
+          if docker run --rm parity-be python -c 'import pytest'; then
+            echo "::error::the production backend image imports pytest"; exit 1
+          fi
+          echo "import pytest fails in the image, as it should"
+          mapfile -t tools < <(sed -E 's/#.*//; s/[[:space:]]+//g; s/[][<>=!~;].*//' orchestrator/requirements-dev.txt | grep -v '^$')
+          echo "requirements-dev.txt names: ${tools[*]}"
+          if [ "${#tools[@]}" -eq 0 ]; then echo "::error::no tool read from orchestrator/requirements-dev.txt"; exit 1; fi
+          docker run --rm parity-be python -c "$INSTALLED" "${tools[@]}"
       - name: Worker — headless browser present with no args
         run: |
           docker build -t parity-wk services/workspace-worker/
