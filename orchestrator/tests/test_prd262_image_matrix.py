@@ -83,6 +83,7 @@ def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
 
 @pytest.mark.parametrize("path,names", [
     ("orchestrator/requirements.txt", ["api"]),
+    ("orchestrator/requirements-dev.txt", ["api"]),  # PRD-262 US-014
     ("services/workspace-worker/executor.py", ["workspace-worker"]),
     ("services/agent-opt-worker/main.py", ["agent-opt-worker"]),
     (".github/image-budgets.json", ["api", "frontend", "workspace-worker", "agent-opt-worker"]),

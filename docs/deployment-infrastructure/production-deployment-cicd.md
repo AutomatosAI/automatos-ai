@@ -237,10 +237,10 @@ This workflow enforces architectural boundaries within the Python codebase.
 - **Purpose**: Prevents unintended lateral coupling between feature modules, ensuring the modular monolith architecture is maintained [orchestrator/.importlinter:9-18]().
 - **Configuration**: The `orchestrator/.importlinter` file defines an `independence` contract, specifying that feature modules under `orchestrator/modules/*` should not import each other directly, except through `modules.tools` or the `api` package [orchestrator/.importlinter:28-30]().
 - **Ratchet Mechanism**: Existing lateral imports are explicitly listed in `ignore_imports` to allow the contract to be green initially. Any *new* lateral import will cause the CI check to fail, acting as a ratchet [orchestrator/.importlinter:19-22]().
-- **Implementation**: Uses the `import-linter` tool, pinned in `orchestrator/requirements.txt` [orchestrator/requirements.txt:66-70]().
+- **Implementation**: Uses the `import-linter` tool, pinned in `orchestrator/requirements-dev.txt` with the other test tools, which only CI installs [orchestrator/requirements-dev.txt]().
 - **Tests**: `orchestrator/tests/test_import_contract_present.py` verifies the presence and validity of the `.importlinter` configuration [orchestrator/tests/test_import_contract_present.py:1-84](). `orchestrator/tests/test_no_mem0_residue.py` ensures that old `mem0` service references are completely removed and not reintroduced, locking the "un-split" to an in-process Qdrant solution [orchestrator/tests/test_no_mem0_residue.py:1-78]().
 
-Sources: [.github/workflows/import-linter.yml:1-20](), [orchestrator/.importlinter:1-85](), [orchestrator/requirements.txt:66-70](), [orchestrator/tests/test_import_contract_present.py:1-84](), [orchestrator/tests/test_no_mem0_residue.py:1-78]()
+Sources: [.github/workflows/import-linter.yml:1-20](), [orchestrator/.importlinter:1-85](), [orchestrator/requirements-dev.txt](), [orchestrator/tests/test_import_contract_present.py:1-84](), [orchestrator/tests/test_no_mem0_residue.py:1-78]()
 
 ### Railway Manifest Topology (`infrastructure/railway-manifest.json`)
 The `railway-manifest.json` defines the production deployment topology on Railway.

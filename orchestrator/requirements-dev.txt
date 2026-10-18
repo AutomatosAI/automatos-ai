@@ -1,0 +1,17 @@
+# Test and lint tools: CI only, never the image (PRD-262 US-014).
+# The Dockerfile installs requirements.txt alone, so none of these reach the API
+# image. Every CI install of requirements.txt installs this file in the same pip
+# command, so the two resolve together: .github/workflows/test.yml,
+# .github/workflows/nl2sql-eval-scheduled.yml and .oss-scanner/Dockerfile.
+# orchestrator/tests/test_prd262_test_tools_leave_the_image.py holds all of that.
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-timeout==2.3.1  # per-test timeout net for CI (PRD-142 W2-S3); kills hangs fast
+pytest-cov==4.1.0  # PRD-182 W12-S4 (F092): measured coverage + ratchet (compatible with pytest 7.4.x)
+black==23.11.0
+isort==5.12.0
+# PRD-211: in-repo topology discipline. `import-linter` (pulls grimp, pure
+# Python) runs the feature-module `independence` contract in orchestrator/
+# .importlinter — the CI lane .github/workflows/import-linter.yml fails loud on
+# a new feature->feature import edge.
+import-linter==2.1

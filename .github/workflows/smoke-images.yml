@@ -79,6 +79,7 @@ on:
       - "orchestrator/Dockerfile"
       - "orchestrator/.dockerignore"
       - "orchestrator/requirements.txt"
+      - "orchestrator/requirements-dev.txt"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
       - "frontend/Dockerfile"

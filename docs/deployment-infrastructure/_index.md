@@ -133,10 +133,10 @@ For details, see [Redis & Vector Store Configuration](#20.5).
 
 ## Production Deployment & CI/CD
 
-The Automatos AI platform is deployed to production using Railway, with its topology defined in `infrastructure/railway-manifest.json`. This manifest organizes services into logical groups like `core`, `data`, `voice`, and `monitoring`, specifying their repositories, build configurations (e.g., `builder: DOCKERFILE`), and environment variables [infrastructure/railway-manifest.json:12-228](). GitHub Actions workflows, such as `test.yml`, enforce code quality and reliability by running comprehensive test suites, including a coverage ratchet to maintain code coverage standards [orchestrator/tests/test.yml:1-144](). The `import-linter` tool is used to enforce architectural boundaries and prevent unwanted dependencies between modules [orchestrator/requirements.txt:66-70](). Scaling and disaster recovery scripts are part of the operational toolkit, ensuring high availability and performance.
+The Automatos AI platform is deployed to production using Railway, with its topology defined in `infrastructure/railway-manifest.json`. This manifest organizes services into logical groups like `core`, `data`, `voice`, and `monitoring`, specifying their repositories, build configurations (e.g., `builder: DOCKERFILE`), and environment variables [infrastructure/railway-manifest.json:12-228](). GitHub Actions workflows, such as `test.yml`, enforce code quality and reliability by running comprehensive test suites, including a coverage ratchet to maintain code coverage standards [orchestrator/tests/test.yml:1-144](). The `import-linter` tool is used to enforce architectural boundaries and prevent unwanted dependencies between modules [orchestrator/requirements-dev.txt](). Scaling and disaster recovery scripts are part of the operational toolkit, ensuring high availability and performance.
 
 For details, see [Production Deployment & CI/CD](#20.6).
 
-**Sources:** [infrastructure/railway-manifest.json:12-228](), [orchestrator/tests/test.yml:1-144](), [orchestrator/requirements.txt:66-70]()
+**Sources:** [infrastructure/railway-manifest.json:12-228](), [orchestrator/tests/test.yml:1-144](), [orchestrator/requirements-dev.txt]()
 
 ---

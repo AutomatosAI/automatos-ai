@@ -84,6 +84,7 @@ on:
       - "orchestrator/Dockerfile"
       - "orchestrator/.dockerignore"
       - "orchestrator/requirements.txt"
+      - "orchestrator/requirements-dev.txt"
       - "frontend/Dockerfile"
       - "frontend/.dockerignore"
       - "frontend/package.json"
@@ -172,7 +173,7 @@ jobs:
                "cache_mode": "min", "no_cache_filters": ["base"],
                "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["orchestrator/Dockerfile", "orchestrator/.dockerignore",
-                          "orchestrator/requirements.txt"]},
+                          "orchestrator/requirements.txt", "orchestrator/requirements-dev.txt"]},
               {"name": "frontend", "context": "frontend", "target": "production",
                "build_args": ["NEXT_PUBLIC_AUTH_EDITION=local",
                               "NEXT_PUBLIC_API_URL=http://localhost:8000",

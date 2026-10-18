@@ -143,8 +143,16 @@ CMD sh -c "alembic upgrade heads && exec uvicorn main:app --host 0.0.0.0 --port 
 # =============================================================================
 FROM base as production
 
-# Copy application code only (no dev tools)
-# .dockerignore will exclude unnecessary files
+# The stdlib's bytecode, compiled once as root (PRD-262 US-014): the python base
+# ships none, and the automatos user can't write to /usr/local, so without it
+# every process compiles each stdlib module it imports, every time. site-packages
+# is excluded: its bytecode comes only from pybuild. unchecked-hash .pyc stay
+# valid whatever the build clamps file mtimes to. Before the COPY, so a code-only
+# change reuses this layer.
+RUN python -m compileall -q -x '/site-packages/' --invalidation-mode unchecked-hash /usr/local/lib/python3.11
+
+# Copy application code only. The test tools are in requirements-dev.txt, which
+# only CI installs. .dockerignore will exclude unnecessary files.
 COPY . .
 
 # The wait-migrate-seed entrypoint. By default it runs the CMD directly, so
@@ -157,13 +165,6 @@ COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
-
-# Remove dev dependencies and clean up
-RUN pip uninstall -y pytest pytest-asyncio black isort 2>/dev/null || true && \
-    pip cache purge && \
-    rm -rf /root/.cache/pip /root/.cache/pytest /tmp/* && \
-    find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
-    find /app -type f -name "*.pyc" -delete 2>/dev/null || true
 
 # Create non-root user for security
 RUN useradd -m -u 1000 automatos && \
