@@ -2,7 +2,9 @@
   "name": "app",
   "private": true,
   "scripts": {
+    "predev": "node scripts/theme-sdk/generate-shims.js",
     "dev": "next dev",
+    "prebuild": "node scripts/theme-sdk/generate-shims.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
