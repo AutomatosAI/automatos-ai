@@ -11,7 +11,7 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
 - [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
 - [services/agent-opt-worker/main.py](services/agent-opt-worker/main.py)
-- [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
+- [services/agent-opt-worker/requirements.in](services/agent-opt-worker/requirements.in)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
@@ -201,7 +201,7 @@ For details, see [Agent-Opt Worker Service](#15.5).
 
 - **FastAPI Application:** Defined in `services/agent-opt-worker/main.py` [services/agent-opt-worker/main.py:37]().
 - **Metrics & Logging:** Integrates `add_fastapi_metrics` and `setup_logging` for platform-wide observability [services/agent-opt-worker/main.py:34-40]().
-- **Dependency Management:** Uses `python:3.11-slim` with specific SDK versions including `agent-opt==0.0.1` [services/agent-opt-worker/requirements.txt:1-7]().
+- **Dependency Management:** Uses `python:3.11-slim` with specific SDK versions including `agent-opt==0.0.1` [services/agent-opt-worker/requirements.in:1-7]().
 
 **Sources:** [services/agent-opt-worker/Dockerfile:1-15](), [services/agent-opt-worker/main.py:26-35]()
 
