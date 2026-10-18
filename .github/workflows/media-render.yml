@@ -60,7 +60,7 @@ jobs:
       - name: The versions baked into the image
         run: docker run --rm --entrypoint cat "$IMAGE" /opt/media-render/versions.json
       # PRD-262 US-053: each part is built in its own stage and COPY --link'ed into the
-      # runtime, so a Hyperframes bump leaves the 354 MB Kokoro layer as it was. The
+      # runtime, so a Hyperframes bump leaves the 340 MB Kokoro layer as it was. The
       # image is built again from a copy whose only change is the Hyperframes pin (one
       # release back, lock re-resolved by npm); the Kokoro layer must keep its digest,
       # and the js layer must change, or the second build proved nothing.
@@ -361,6 +361,36 @@ jobs:
           path: ${{ runner.temp }}/music-render
           if-no-files-found: ignore
           retention-days: 7
+      # PRD-262 US-052: the image carries the catalogue's 27 voices and espeak-ng's
+      # English dictionary alone, and validation follows that data. Against the running
+      # image, a voice outside voices.json (am_santa and zf_xiaoxiao, both in upstream's
+      # file) and a language other than en-us or en-gb are each a 400 that names the
+      # field, on /tts and on /render, before anything is spoken or staged; a catalogue
+      # voice in en-gb is spoken. Every catalogue voice speaking a line, and the phoneme
+      # snapshot, are in the image's own suite (tests/test_kokoro.py).
+      - name: A voice outside voices.json and a language other than en-us or en-gb are each a 400 naming the field
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/voices"
+          mkdir -p "$out"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle > "$out/bundle.json"
+          docker run -d --name media-render-voices -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8094:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8094/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-voices; docker rm -f media-render-voices > /dev/null; echo "::error::the API never answered /health"; exit 1; fi
+          set +e
+          python3 services/media-render/ci/assert_voice_refusals.py --url http://127.0.0.1:8094 --token "$TOKEN" \
+            --bundle "$out/bundle.json" --voices services/media-render/media_render/voices.json
+          code=$?
+          set -e
+          docker logs media-render-voices 2>&1 | tail -n 20
+          docker rm -f media-render-voices > /dev/null
+          exit "$code"
       # PRD-262 US-051 (§8's media-render row): the amd64 image is at most 1.30 GB on
       # disk; it was 1.81 GB in run 37612086159. `docker image ls` prints the image's
       # Size rounded, so the bar reads the same Size in bytes. It runs last and always,
