@@ -3423,6 +3423,17 @@ class ApiClient {
       body: JSON.stringify({ name }),
     })
   }
+
+  // ===== PRD-261 themes (W-A2's opening commit adds the rest of plan §2.2's theme methods) =====
+  /**
+   * GET /api/themes/active: the workspace's theme choice and its active install. A-07b (W-B2)
+   * mounts the route, so the path is baselined in scripts/route-contract-baseline.json until then;
+   * a 404 means no active install (lib/theme-host/sources.ts). parseActiveInstall checks the
+   * answer, so it is unknown here.
+   */
+  async getActiveTheme(): Promise<unknown> {
+    return this.request<unknown>('/api/themes/active')
+  }
 }
 
 export const apiClient = new ApiClient()

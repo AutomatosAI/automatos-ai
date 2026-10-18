@@ -1,19 +1,14 @@
 /**
  * PRD-261 A-01, A-04a — the frame slot draws the core's chrome unchanged with no theme host or no
- * active frame, nothing while a theme is still loading under the theme layout (so the page never
- * mounts twice), the theme's frame around the page when one is active (with frame@1's props), and
+ * active frame, nothing while the host is still loading a theme (so the page never mounts twice), the theme's frame around the page when one is active (with frame@1's props), and
  * the chrome again (telling the host) when the frame throws. A page that throws inside the frame
  * draws the core's error UI there, keeps the frame, and never tells the host.
  */
 import React from 'react'
 import { render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { FrameComponent, FrameProps, ThemeHostStatus } from '@/lib/theme-host/types'
-import type { ThemeLayout } from '@/lib/theme-host/registry-types'
-
-const layout = vi.hoisted(() => ({ current: 'fallback' as ThemeLayout }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useThemeLayout: () => layout.current }))
 
 import { PAGE_ERROR_TEST_ID } from '../page-boundary'
 import { ThemeFrameSlot } from '../theme-frame-slot'
@@ -52,10 +47,6 @@ function renderSlot(host: ThemeHostContextValue | null, page: React.ReactNode = 
   return render(host === null ? slot : <ThemeHostContext.Provider value={host}>{slot}</ThemeHostContext.Provider>)
 }
 
-beforeEach(() => {
-  layout.current = 'fallback'
-})
-
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -72,20 +63,17 @@ describe('PRD-261 A-04a — ThemeFrameSlot', () => {
     expect(screen.queryByTestId('theme-frame')).toBeNull()
   })
 
-  it('draws nothing while the theme loads under the theme layout', () => {
-    layout.current = 'theme'
+  it('draws nothing, neither the fallback nor the page, while the host loads a theme', () => {
     const { container } = renderSlot(hostWith(null, vi.fn(), 'loading'))
     expect(container.innerHTML).toBe('')
   })
 
-  it('draws the fallback while the theme loads under the fallback layout', () => {
-    layout.current = 'fallback'
-    renderSlot(hostWith(null, vi.fn(), 'loading'))
+  it.each(['off', 'failed', 'safe-mode'] as const)("draws the fallback when the host is '%s'", (status) => {
+    renderSlot(hostWith(null, vi.fn(), status))
     expect(screen.getByTestId('core-shell')).toBeInTheDocument()
   })
 
   it("draws the active theme's frame around the page, with frame@1's props, without the core's chrome", () => {
-    layout.current = 'theme'
     renderSlot(hostWith(HelloFrame))
     expect(screen.getByTestId('theme-frame')).toHaveTextContent('page')
     expect(screen.getByTestId('theme-frame')).toHaveAttribute('data-full-bleed', 'true')

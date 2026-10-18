@@ -94,12 +94,23 @@ export interface ThemeLoadFailure {
   readonly detail: string
 }
 
-export type ThemeLoadResult = ThemeLoadOk | ThemeLoadFailure
+/**
+ * No theme to load: GET /api/themes/active answered 404, so the workspace has no active install
+ * (a stale `theme:install:` cookie, or a backend without A-07b's route). Not a failure: the host
+ * turns off and Studio shows, with no notice. `reason` is null so it never reads as a failure's.
+ */
+export interface ThemeLoadAbsent {
+  readonly ok: false
+  readonly reason: null
+  readonly detail: string
+}
+
+export type ThemeLoadResult = ThemeLoadOk | ThemeLoadFailure | ThemeLoadAbsent
 
 /** Everything a load reaches outside itself, injected so tests can replace each one. */
 export interface LoaderDeps {
   readonly exposeHost: () => ThemeHostGlobal
-  /** GET /api/themes/active through the backend client (A-07b's route). */
+  /** GET /api/themes/active through the backend client (A-07b's route); null when it answers 404 (no active install). */
   readonly fetchActive: () => Promise<unknown>
   /** A same-origin JSON file under the theme's files folder (its preset). */
   readonly fetchJson: (url: string) => Promise<unknown>

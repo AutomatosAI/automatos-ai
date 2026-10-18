@@ -111,7 +111,7 @@ describe('PRD-261 A-04a — an installed theme fails to load with a reason, in o
 
   it("maps an active-theme request that fails to 'manifest'", async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const deps = depsWith({ fetchActive: vi.fn(async () => { throw new Error('HTTP 404') }) })
+    const deps = depsWith({ fetchActive: vi.fn(async () => { throw Object.assign(new Error('HTTP 500'), { status: 500 }) }) })
     expect(reasonOf(await loadInstalled(deps))).toBe('manifest')
     expect(error).toHaveBeenCalledWith('[theme-host]', 'manifest', expect.any(Error))
     expect(deps.importModule).not.toHaveBeenCalled()

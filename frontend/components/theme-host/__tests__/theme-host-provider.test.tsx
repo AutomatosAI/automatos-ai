@@ -2,7 +2,8 @@
  * PRD-261 A-01, A-04a — the theme host provider, in every build (no build flag). Under Classic,
  * Studio and builtin Play it renders its children and does nothing else: no load, no global, no
  * status on <html>. Under an installed theme's style it loads that theme, never in safe mode,
- * falls back with a notice, keeps the loaded result as an object (a frame that uses hooks renders
+ * reports 'loading' from its first render, turns off with no notice when the server has no active
+ * install, falls back with a notice, keeps the loaded result as an object (a frame that uses hooks renders
  * cleanly), cleans the theme up when the style changes or it unmounts, and runs loads one after
  * another so a cancelled load cannot strip the live one's look.
  */
@@ -95,6 +96,12 @@ function cleanupThatUnmarksHtml() {
   return vi.fn().mockImplementation(() => document.documentElement.classList.remove(MANIFEST.htmlClass))
 }
 
+/** Every status the slot would read, render by render. */
+function StatusProbe({ seen }: { seen: string[] }) {
+  seen.push(useThemeHost()?.status ?? 'none')
+  return null
+}
+
 function app() {
   return (
     <ThemeHostProvider>
@@ -177,6 +184,34 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     await waitFor(() => expect(hostStatus()).toBe('failed'))
     expect(document.documentElement.getAttribute('data-theme-host-reason')).toBe('engines')
     expect(mocks.toast.error).toHaveBeenCalledWith(THEME_FALLBACK_NOTICE, expect.objectContaining({ id: THEME_NOTICE_ID }))
+    expect(screen.getByText('no frame')).toBeInTheDocument()
+  })
+
+  it('reports loading from its first render, before its effect starts the load (M69)', async () => {
+    const pending = deferred<ThemeLoadResult>()
+    mocks.loadThemeForStyle.mockReturnValue(pending.promise)
+    const seen: string[] = []
+    render(
+      <ThemeHostProvider>
+        <StatusProbe seen={seen} />
+      </ThemeHostProvider>,
+    )
+    expect(seen[0]).toBe('loading')
+    await waitFor(() => expect(hostStatus()).toBe('loading'))
+    expect(seen).not.toContain('off')
+    // Settle the load, so the module's load queue is free for the next test.
+    await act(async () => pending.resolve({ ok: false, reason: 'load', detail: 'settled by the test' }))
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+  })
+
+  it('turns off with no notice when the server has no active install (GET /api/themes/active 404)', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: null, detail: 'GET /api/themes/active answered 404: no active install' })
+    render(app())
+    await waitFor(() => expect(mocks.toast.dismiss).toHaveBeenCalledWith(THEME_NOTICE_ID))
+    expect(hostStatus()).toBeNull()
+    expect(document.documentElement.getAttribute('data-theme-host-reason')).toBeNull()
+    expect(mocks.toast.error).not.toHaveBeenCalled()
+    expect(mocks.toast).not.toHaveBeenCalled()
     expect(screen.getByText('no frame')).toBeInTheDocument()
   })
 

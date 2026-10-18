@@ -18,6 +18,7 @@ import type {
   SpikeManifest,
   ThemeDefinition,
   ThemeFailureReason,
+  ThemeLoadAbsent,
   ThemeLoadOk,
   ThemeLoadResult,
   ThemeRegistrationHost,
@@ -181,8 +182,8 @@ export async function loadFromManifest(
   return { ok: true, ref, manifest, ...registrations, cleanup: cleanupOnce(lookCleanup, definition) }
 }
 
-/** Runs a load to its result. Never throws: a failure is logged and returned with its reason. */
-export async function settleLoad(run: () => Promise<ThemeLoadOk>): Promise<ThemeLoadResult> {
+/** Runs a load to its result. Never throws: a failure is logged and returned with its reason; no theme to load is returned as it is. */
+export async function settleLoad(run: () => Promise<ThemeLoadOk | ThemeLoadAbsent>): Promise<ThemeLoadResult> {
   try {
     return await run()
   } catch (error) {

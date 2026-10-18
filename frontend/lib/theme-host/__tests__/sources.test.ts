@@ -2,11 +2,23 @@
  * PRD-261 A-04a — where a theme comes from. A style names an installed theme's source only for
  * `theme:install:<uuid>`; Classic, Studio and builtin Play name none (builtin Play keeps its
  * compiled path until A-04b). A builtin source loads its compiled module and registers its frame
- * as soon as the import resolves, with no manifest, no look and no host module global.
+ * as soon as the import resolves, with no manifest, no look and no host module global. A 404 from
+ * GET /api/themes/active means no active install: no theme to load, and no failure.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { builtinThemeSource, installIdOf, loadThemeForStyle, sourceForStyle } from '../sources'
+const api = vi.hoisted(() => ({ getActiveTheme: vi.fn() }))
+vi.mock('@/lib/api-client', () => ({ apiClient: { getActiveTheme: api.getActiveTheme } }))
+
+import {
+  builtinThemeSource,
+  defaultLoaderDeps,
+  fetchActiveInstall,
+  installedThemeSource,
+  installIdOf,
+  loadThemeForStyle,
+  sourceForStyle,
+} from '../sources'
 import type { LoaderDeps, ThemeHostGlobal, ThemeLoadResult, ThemeRegistrationHost } from '../types'
 import { UI_STYLES, type UiStyle } from '@/lib/ui-style'
 
@@ -38,6 +50,44 @@ function reasonOf(result: ThemeLoadResult): string | null {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  api.getActiveTheme.mockReset()
+})
+
+/** The error apiClient throws for a response that is not ok: the status rides it. */
+function httpError(status: number): Error {
+  return Object.assign(new Error(`HTTP ${status}`), { status })
+}
+
+describe('PRD-261 A-04a — GET /api/themes/active through the named apiClient method', () => {
+  it("is the loader's active-theme request, and hands back the server's answer", async () => {
+    const answer = { choice: 'studio', theme: null }
+    api.getActiveTheme.mockResolvedValue(answer)
+    expect(defaultLoaderDeps().fetchActive).toBe(fetchActiveInstall)
+    await expect(fetchActiveInstall()).resolves.toBe(answer)
+    expect(api.getActiveTheme).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads a 404 as no active install', async () => {
+    api.getActiveTheme.mockRejectedValue(httpError(404))
+    await expect(fetchActiveInstall()).resolves.toBeNull()
+  })
+
+  it('rethrows any other failure', async () => {
+    const failure = httpError(500)
+    api.getActiveTheme.mockRejectedValue(failure)
+    await expect(fetchActiveInstall()).rejects.toBe(failure)
+  })
+
+  it('loads nothing and reports no failure for no active install (a stale theme:install cookie)', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    api.getActiveTheme.mockRejectedValue(httpError(404))
+    const deps = depsWith({ fetchActive: fetchActiveInstall })
+    const result = await installedThemeSource(INSTALL_ID).load(deps)
+    expect(result).toEqual({ ok: false, reason: null, detail: expect.stringContaining('404') })
+    expect(deps.fetchJson).not.toHaveBeenCalled()
+    expect(deps.importModule).not.toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+  })
 })
 
 describe('PRD-261 A-04a — the source a style names', () => {

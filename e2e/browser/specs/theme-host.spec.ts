@@ -8,9 +8,10 @@ import { themeRequestPaths, watchPage } from '../support/watch'
 // PRD-261 A-01, A-04a (@host): the theme host in the build every image ships. Under an installed
 // theme's style, the hello theme comes from the intercepted install routes (/api/themes/active,
 // /api/themes/files/**) and loads at runtime through the import map against the host's own React;
-// it survives a reload, falls back to Studio on every failure of its own, keeps its frame when the
-// page inside it throws, and loads no theme code in safe mode or under Classic. The import map
-// comes before every module script. Each test opens its own page.
+// it survives a reload, falls back to Studio on every failure of its own (and shows Studio with no
+// notice when the server has no active install), keeps its frame when the page inside it throws,
+// and loads no theme code in safe mode or under Classic. The import map comes before every module
+// script. Each test opens its own page.
 
 const STATUS_ATTR = 'data-theme-host'
 const REASON_ATTR = 'data-theme-host-reason'
@@ -98,7 +99,7 @@ async function openWithHello(page: Page, variant: HelloThemeVariant): Promise<Se
 
 /**
  * Answers the page's agent statistics with a value it cannot draw, once the theme is active, so
- * the page throws inside the theme's frame (and never in the Studio chrome drawn while loading).
+ * the page throws inside the theme's frame (never in the Studio chrome, should a load fall back).
  */
 async function breakTheAgentsPageOnceActive(page: Page): Promise<void> {
   await page.route(AGENT_STATS_ROUTE, async (route) => {
@@ -191,9 +192,14 @@ test.describe('the theme host', () => {
     expect(served.requested).not.toContain(`${served.filesRoot}entry.js`)
   })
 
-  test('falls back to Studio when no theme is served', { tag: '@host' }, async ({ page }) => {
-    await openWithHello(page, 'missing')
-    await expectStudioFallback(page, 'manifest')
+  test('shows Studio with no notice when the workspace has no active install (a 404)', { tag: '@host' }, async ({ page }) => {
+    const served = await openWithHello(page, 'missing')
+    await expect(page.locator('.sh-shell')).toBeVisible()
+    await expect(page.locator('html')).not.toHaveAttribute(STATUS_ATTR)
+    await expect(page.getByTestId('hello-theme-frame')).toHaveCount(0)
+    await expect(page.getByText(FALLBACK_NOTICE)).toHaveCount(0)
+    expect(served.requested).toContain(ACTIVE_PATH)
+    expect(served.requested).not.toContain(`${served.filesRoot}entry.js`)
   })
 
   test('keeps the theme when the page inside its frame throws', { tag: '@host' }, async ({ page }) => {

@@ -9,9 +9,11 @@
  *   its frame registers synchronously as soon as that import resolves. Builtin Play keeps its
  *   compiled path until A-04b registers it here.
  *
- * The active-theme request goes through apiClient (W-A2 replaces the generic get with its named
- * method). The preset fetch below is a same-origin static file under the theme's files folder,
- * not the backend client, so it is a plain fetch.
+ * The active-theme request goes through apiClient's named method (getActiveTheme), so the
+ * route-contract check sees it; a 404 from it means the workspace has no active install (a stale
+ * `theme:install:` cookie), which is no theme to load, not a failure. The preset fetch below is a
+ * same-origin static file under the theme's files folder, not the backend client, so it is a
+ * plain fetch.
  */
 import { apiClient } from '@/lib/api-client'
 import type { UiStyle } from '@/lib/ui-style'
@@ -24,9 +26,30 @@ import { importThemeModule } from './native-import'
 import { isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeRef } from './registry-types'
 import { SDK_VERSION } from './sdk'
-import type { LoaderDeps, SpikeManifest, ThemeLoadOk, ThemeLoadResult, ThemeSource } from './types'
+import type { LoaderDeps, SpikeManifest, ThemeLoadAbsent, ThemeLoadOk, ThemeLoadResult, ThemeSource } from './types'
 
 const INSTALL_REF_PREFIX = 'install:'
+/** What GET /api/themes/active answers when the workspace has no active install. */
+const NO_ACTIVE_INSTALL_STATUS = 404
+
+/** The HTTP status apiClient puts on the error it throws, if it has one. */
+function httpStatusOf(error: unknown): unknown {
+  return (error as { status?: unknown } | null)?.status
+}
+
+/** GET /api/themes/active through apiClient; null when it answers 404: no active install. */
+export async function fetchActiveInstall(): Promise<unknown> {
+  try {
+    return await apiClient.getActiveTheme()
+  } catch (error) {
+    if (httpStatusOf(error) === NO_ACTIVE_INSTALL_STATUS) return null
+    throw error
+  }
+}
+
+function noActiveInstall(): ThemeLoadAbsent {
+  return { ok: false, reason: null, detail: `GET ${THEME_ACTIVE_ENDPOINT} answered ${NO_ACTIVE_INSTALL_STATUS}: no active install` }
+}
 
 async function fetchSameOriginJson(url: string): Promise<unknown> {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
@@ -37,7 +60,7 @@ async function fetchSameOriginJson(url: string): Promise<unknown> {
 export function defaultLoaderDeps(): LoaderDeps {
   return {
     exposeHost: exposeHostModules,
-    fetchActive: () => apiClient.get<unknown>(THEME_ACTIVE_ENDPOINT),
+    fetchActive: fetchActiveInstall,
     fetchJson: fetchSameOriginJson,
     importModule: importThemeModule,
     doc: document,
@@ -45,10 +68,12 @@ export function defaultLoaderDeps(): LoaderDeps {
   }
 }
 
-/** The active install's checked manifest, with its files resolved under the package's folder. */
-async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<SpikeManifest> {
+/** The active install's checked manifest, with its files resolved under the package's folder; null with no active install. */
+async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<SpikeManifest | null> {
   const timedOut = `GET ${THEME_ACTIVE_ENDPOINT} did not answer within ${deps.timeoutMs} ms`
-  const active = parseActiveInstall(await withTimeout(deps.fetchActive(), deps.timeoutMs, timedOut), installId)
+  const answer = await withTimeout(deps.fetchActive(), deps.timeoutMs, timedOut)
+  if (answer === null) return null
+  const active = parseActiveInstall(answer, installId)
   if (!active.ok) throw new Error(active.detail)
   const parsed = parseSpikeManifest(active.manifest, active.filesRoot)
   if (!parsed.ok) throw new Error(parsed.detail)
@@ -61,9 +86,10 @@ export function installedThemeSource(installId: string): ThemeSource {
   return {
     ref,
     load: (deps) =>
-      settleLoad(async () => {
+      settleLoad(async (): Promise<ThemeLoadOk | ThemeLoadAbsent> => {
         const host = await step('load', () => deps.exposeHost())
         const manifest = await step('manifest', () => readActiveManifest(installId, deps))
+        if (manifest === null) return noActiveInstall()
         return loadFromManifest(ref, manifest, host.sdkVersion, deps)
       }),
   }

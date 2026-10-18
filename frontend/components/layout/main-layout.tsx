@@ -10,11 +10,11 @@ import { Header } from './header'
 import { StudioSidebar } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
 import { AutoWidget } from '../chatbot/chat-widget'
-import { PlayFrame } from '@/components/play/shell/play-frame-lazy'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { ThemeFrameSlot } from '@/components/theme-host/theme-frame-slot'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsStudio, useThemeLayout } from '@/hooks/use-studio-theme'
+import { useActiveTheme, useIsStudio, useThemeLayout } from '@/hooks/use-studio-theme'
+import { builtinFrameOf } from '@/lib/theme-host/builtin/frames'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -107,6 +107,7 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   const isMobileLayout = useIsTabletOrBelow()
   const isStudio = useIsStudio()
   const themeLayout = useThemeLayout()
+  const BuiltinFrame = builtinFrameOf(useActiveTheme())
   const pathname = usePathname()
 
   // Get current page context for the chat
@@ -148,14 +149,15 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
     }
   }
 
-  // PRD-260 D7, PRD-261 A-02b: the theme's frame from its entry's minWidth up; below it, the
-  // fallback chrome as for Studio. Under a theme while the width isn't known (the server,
+  // PRD-260 D7, PRD-261 A-02b: a builtin theme's frame from its entry's minWidth up; below it,
+  // the fallback chrome as for Studio. Under a theme while the width isn't known (the server,
   // hydration), nothing: a page mounted in one chrome and again in the other runs its effects
-  // twice (P260-FX-25, M69). Builtin Play is the only theme with a layout here until A-04b
-  // moves its frame into the frame@1 slot.
+  // twice (P260-FX-25, M69). Only a builtin theme's frame draws here (builtin/frames.ts, until
+  // A-04b moves Play's into the frame@1 slot); an installed theme's draws through ThemeFrameSlot,
+  // which draws nothing while the host loads it, for the same reason.
   if (themeLayout === 'pending') return null
-  if (themeLayout === 'theme') {
-    return <PlayFrame fullBleed={fullBleed} autoWidget={autoWidget}>{children}</PlayFrame>
+  if (themeLayout === 'theme' && BuiltinFrame !== null) {
+    return <BuiltinFrame fullBleed={fullBleed} autoWidget={autoWidget}>{children}</BuiltinFrame>
   }
 
   if (isStudio && !isMobileLayout) {
