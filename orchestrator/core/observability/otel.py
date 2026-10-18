@@ -145,6 +145,16 @@ def _instrument_httpx(_: Any = None) -> None:
                                          async_request_hook=_scrub_url_attributes_async)
 
 
+def _instrument_httpx2(_: Any = None) -> None:
+    """The same for httpx's fork, httpx2: openai 3.x sends through it, so every
+    OpenAI-compatible model call (OpenAI, OpenRouter, NVIDIA, DeepSeek, Grok) gets its
+    HTTP span under the GenAI one, scrubbed the same way (#1112)."""
+    from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor
+
+    HTTPX2ClientInstrumentor().instrument(request_hook=_scrub_url_attributes,
+                                          async_request_hook=_scrub_url_attributes_async)
+
+
 def _instrument_redis(_: Any = None) -> None:
     """A span per command, recorded as ``SET ? ?``: never a key or a value."""
     from opentelemetry.instrumentation.redis import RedisInstrumentor
@@ -166,7 +176,7 @@ def _instrument_work_items(_: Any = None) -> None:
     register_work_links()
 
 
-_LIBRARIES = (("sqlalchemy", _instrument_sqlalchemy), ("httpx", _instrument_httpx),
+_LIBRARIES = (("sqlalchemy", _instrument_sqlalchemy), ("httpx", _instrument_httpx), ("httpx2", _instrument_httpx2),
               ("redis", _instrument_redis), ("botocore", _instrument_botocore),
               ("work items", _instrument_work_items))
 
