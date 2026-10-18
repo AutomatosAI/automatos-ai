@@ -8,8 +8,11 @@ name: images
 #   throwaway `registry:2` service inside the job (localhost:5000), never to
 #   GHCR, so they are measured without publishing. Only publishing runs write
 #   the build cache; every run reads it (PRD-262 §9-Q13).
-# - A push to main publishes `edge` and `sha-<short>`; a `v*` tag publishes
-#   `X.Y.Z` and `X.Y`.
+# - A push to main publishes `sha-<short>`; a `v*` tag publishes `X.Y.Z` and
+#   `X.Y`. This workflow never moves `edge`: smoke-images.yml pulls and boots
+#   each main publish on both arches, and its promote-edge job then points
+#   `edge` at that `sha-<short>` (PRD-262 US-003). An image that cannot boot
+#   never reaches `edge`, the tag plain compose and the Helm chart pull.
 # - Each architecture builds on its own native runner (no QEMU), pushes by
 #   digest and scans that digest (report only), so amd64 and arm64 are both
 #   scanned. The merge job joins the digests into one multi-arch index and
@@ -406,11 +409,12 @@ jobs:
             org.opencontainers.image.title=automatos-${{ matrix.image.name }}
             org.opencontainers.image.description=${{ matrix.image.description }}
             org.opencontainers.image.licenses=Apache-2.0
-          # No `latest` until the maintainers choose to publish one.
+          # No `latest` until the maintainers choose to publish one. No `edge`
+          # either: smoke-images.yml's promote-edge job moves it once this
+          # `sha-<short>` has booted on both arches (PRD-262 US-003).
           flavor: |
             latest=false
           tags: |
-            type=edge,branch=main
             type=sha
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
