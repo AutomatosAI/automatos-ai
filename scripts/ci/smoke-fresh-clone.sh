@@ -16,6 +16,15 @@
 # The lane is HARD in CI (no continue-on-error, PRD-209 US-004); still
 # non-required in branch protection until the owner flips it (Q2).
 #
+# It is built for a throwaway Docker host, such as a CI runner: its teardown removes the
+# stack together with its volumes, and the compose file names those volumes
+# (automatos_postgres_data, ...), so on a machine running its own Automatos stack it
+# would delete that stack's database. It refuses to start on a host that already has
+# Automatos containers or volumes, before it builds, pulls or tears anything down.
+# SMOKE_IMAGES=pull (below) also empties the Docker image cache, which deletes every
+# image on the host, Automatos's or not. Outside CI (CI=true) it refuses unless
+# SMOKE_EMPTY_IMAGE_CACHE=true says the host's images may go.
+#
 # What it measures (PRD-262 US-002), every time from the container's own start
 # (`docker inspect -f '{{.State.StartedAt}}'`), never from this script's sleeps,
 # polling every second:
@@ -50,15 +59,6 @@
 # index digest its tag resolves to on GHCR, so nothing was built locally; no image may
 # carry a local-* tag or compose's own <project>-<service> name. The step summary
 # adds the pull, the first run from its start to :3000 200, and those checks.
-#
-# It is built for a throwaway Docker host, such as a CI runner: its teardown removes the
-# stack together with its volumes, and the compose file names those volumes
-# (automatos_postgres_data, ...), so on a machine running its own Automatos stack it
-# would delete that stack's database. It refuses to start on a host that already has
-# Automatos containers or volumes, before it builds, pulls or tears anything down.
-# SMOKE_IMAGES=pull also empties the Docker image cache, which deletes every image on
-# the host, Automatos's or not. Outside CI (CI=true) it refuses unless
-# SMOKE_EMPTY_IMAGE_CACHE=true says the host's images may go.
 #
 # Exit 0 = every boot answered 200 with no external creds. Exit 1 = a boot failed.
 set -uo pipefail

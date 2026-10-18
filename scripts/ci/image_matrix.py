@@ -17,8 +17,7 @@ GHCR; ``registry`` names that service's image, and is empty when nothing needs i
 ``edge`` is the published tag the update delta is measured against; an image that
 is never published has none.
 
-Patterns follow GitHub's path filters: ``*`` stops at ``/``, ``**`` does not. GitHub's
-other filter syntax (``?``, ``+``, ``[]``, a leading ``!``) is refused, not misread.
+Patterns follow GitHub's path filters: ``*`` stops at ``/``, ``**`` does not.
 
     image_matrix.py --images JSON --shared-inputs JSON --runners JSON \\
         --owner OWNER --publish true|false --local-registry IMAGE [--every] < files
@@ -32,15 +31,19 @@ import sys
 from typing import Iterable, List, Sequence
 
 LOCAL_REGISTRY_HOST = "localhost:5000"
-GLOB_PART = re.compile(r"\*\*|\*|[^*]+")
 # GitHub gives these a meaning this picker does not copy (``?`` and ``+`` repeat the
 # character before them, ``[]`` is a class, a leading ``!`` negates), so a pattern
 # using one is refused: read literally, it would silently never match.
 UNSUPPORTED = re.compile(r"[?+\[\]!\\]")
+GLOB_PART = re.compile(r"\*\*|\*|\?|[^*?]+")
 
 
 def glob_regex(pattern: str) -> re.Pattern:
-    """A GitHub path-filter glob (``*`` and ``**`` only) as an anchored regex."""
+    """A GitHub path-filter glob as an anchored regex: ``*`` and ``**`` only.
+
+    GitHub's other filter syntax (``?``, ``+``, ``[]``, a leading ``!``) raises
+    ValueError instead of being misread.
+    """
     if UNSUPPORTED.search(pattern):
         raise ValueError(f"path filter {pattern!r} uses syntax image_matrix.py does not support")
     parts = []
