@@ -89,7 +89,7 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 | `test` · `schema-drift` | No migration `ALTER`s a table that no writer `CREATE`s (`scripts/ci/schema_drift_check.py`). |
 | `test` · `frontend-ci` | vitest, baselined `tsc`, an ESLint report, the code-shape rules and `apiClient`-only calls on changed lines, and the route contract (every backend path the frontend calls exists in the route manifest). |
 | `test` · eval lanes | Self-tests of the NL2SQL, retrieval-recall, memory-recall and graph-uplift harnesses (informational). |
-| `smoke-fresh-clone` | `docker compose up` from an empty checkout, with only the three secrets, reaches a green `/health` and `/health/ready`. |
+| `smoke-fresh-clone` | `docker compose up` from an empty checkout, with only the three secrets, reaches a green `/health` and `/health/ready`, and the frontend answers on `:3000`. It times the fresh boot and two warm restarts from the container's start and writes them, with the alembic runs and the boot stages, to the step summary. It also runs every night. |
 | `import-linter` | The module-boundary contracts (`orchestrator/.importlinter`). **Required.** |
 | `dco` | A `Signed-off-by:` trailer on every commit. **Required.** |
 | `gitleaks` | No secret anywhere in the pull request's history. **Required.** |
