@@ -122,6 +122,16 @@ def _span_attributes(request: Any) -> Dict[str, Any]:
     return {**attributes, ATTR_WORKSPACE_ID: workspace_id} if workspace_id else attributes
 
 
+def _failed(span: Any, exc: BaseException) -> None:
+    """An error on the span as its type only: an exception's message and stack trace can
+    name a workspace file or carry a URL, so they never leave on a span (#1107). The
+    whole exception is in the worker's log, which carries the same trace_id (O5)."""
+    from opentelemetry.trace import Status, StatusCode
+
+    span.set_attribute("error.type", type(exc).__qualname__)
+    span.set_status(Status(StatusCode.ERROR, type(exc).__qualname__))
+
+
 async def _traced(request: Any, handler: Any) -> Any:
     """Run ``handler`` inside a server span that continues the caller's trace."""
     from aiohttp import web
@@ -131,11 +141,17 @@ async def _traced(request: Any, handler: Any) -> Any:
     tracer = trace.get_tracer(TRACER_NAME)
     name = f"{request.method} {_route_of(request)}"
     with tracer.start_as_current_span(name, context=propagate.extract(request.headers), kind=SpanKind.SERVER,
-                                      attributes=_span_attributes(request)) as span:
+                                      attributes=_span_attributes(request), record_exception=False,
+                                      set_status_on_exception=False) as span:
         try:
             response = await handler(request)
         except web.HTTPException as exc:
             span.set_attribute("http.status_code", exc.status)
+            if exc.status >= 500:
+                _failed(span, exc)
+            raise
+        except Exception as exc:
+            _failed(span, exc)
             raise
         span.set_attribute("http.status_code", response.status)
         return response
