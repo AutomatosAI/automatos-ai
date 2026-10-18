@@ -7,7 +7,9 @@ with no new dependency (D1-f):
 * each selector of a top-level rule (or of one inside ``@media``, ``@supports``, ``@layer`` or
   ``@container``) starts with ``html.<class>``, or with ``:where(...)``/``:is(...)`` whose every
   argument does (PA-15 leaves the wrap form to D2-c, so both forms pass);
-* rules nested inside a scoped rule, ``@font-face`` and ``@keyframes`` are already contained;
+* rules nested inside a scoped rule, ``@font-face`` and ``@keyframes`` are already contained,
+  except a nested selector that names ``&`` anywhere but at its start: CSS Nesting reads it as
+  written, so ``:not(&)`` or ``:is(&, body)`` reaches every element outside the theme's class;
 * ``!important`` is refused (any ``!`` outside a string or a comment), and so are ``@import``
   and every other at-rule;
 * anything the tokenizer could read differently from a browser is refused rather than
@@ -35,6 +37,8 @@ GROUP_AT_RULES = frozenset({"media", "supports", "layer", "container"})
 CONTAINED_AT_RULES = frozenset({"font-face", "keyframes", "-webkit-keyframes"})
 STATEMENT_AT_RULES = frozenset({"charset", "layer"})
 WRAPPING_PSEUDOS = (":where(", ":is(")
+NESTING_SELECTOR = "&"
+OPAQUE_SELECTOR_START = frozenset("\"'\\")  # a string or an escape: no & inside counts
 SELECTOR_BOUNDARY = frozenset(" \t\n\r\f>+~.:[#")
 BRACKET_STEP = {"(": 1, "[": 1, ")": -1, "]": -1}
 OPENING_BRACKET = {")": "(", "]": "["}
@@ -113,6 +117,28 @@ def is_scoped_selector(selector: str, html_class: str, level: int = 0) -> bool:
 def is_scoped_selector_list(prelude: str, html_class: str) -> bool:
     """True when every selector of the list is scoped."""
     return all(is_scoped_selector(part, html_class) for part in _split_top_level(prelude))
+
+
+def _names_nesting_selector(selector: str) -> bool:
+    """True when ``&`` appears in the selector outside a string or an escape."""
+    pieces = (match.group(0) for match in SELECTOR_TOKEN.finditer(selector))
+    return any(NESTING_SELECTOR in piece for piece in pieces if piece[0] not in OPAQUE_SELECTOR_START)
+
+
+def is_anchored_nested_selector(selector: str) -> bool:
+    """True when a selector nested in a scoped rule can only match inside that rule's reach.
+
+    CSS Nesting reads a nested selector with no ``&`` as ``& <selector>``, and one with ``&`` as
+    written. One that starts with ``&`` stays on the parent's elements, their descendants and
+    their siblings; ``&`` anywhere else (``:not(&)``, ``:is(&, body)``, ``body:not(&)``) is refused.
+    """
+    text = selector.strip()
+    return text.startswith(NESTING_SELECTOR) or not _names_nesting_selector(text)
+
+
+def is_anchored_nested_selector_list(prelude: str) -> bool:
+    """True when every selector of a nested rule's list is anchored."""
+    return all(is_anchored_nested_selector(part) for part in _split_top_level(prelude))
 
 
 def _at_name(prelude: str) -> str:
@@ -227,7 +253,13 @@ class _Scanner:
 
     def rule_frame(self, prelude: str, parent: _Frame, at: int) -> _Frame:
         contained = parent.kind == "contained" or parent.scoped
-        if not contained and not is_scoped_selector_list(prelude, self.html_class):
+        if contained and not is_anchored_nested_selector_list(prelude):
+            self.error(
+                "CSS_UNSCOPED", at,
+                f'the nested rule "{echo(prelude)}" names & other than at the start of a selector, '
+                f"so it can reach outside html.{self.html_class}.",
+            )
+        elif not contained and not is_scoped_selector_list(prelude, self.html_class):
             self.error(
                 "CSS_UNSCOPED", at,
                 f'the rule "{echo(prelude)}" is not under html.{self.html_class} (or :where(html.{self.html_class})).',
