@@ -211,8 +211,10 @@ def test_the_daily_check_passes_and_warns_in_an_entrys_last_week(tmp_path, capsy
 def test_the_committed_allowlist_is_readable_and_its_curl_rows_name_the_cached_version():
     """Every entry has a reason and an expiry at most 90 days out (expiry itself is the daily lane's job)."""
     entries = policy.load_allowlist(ROOT / ".grype.yaml", date.today())
+    # PRD-262 US-013: the curl rows come out after the first weekly uncached rebuild
+    # (US-011), so their absence is the goal; while either is listed, it names only the
+    # cached deb13u5 package and the reason.
     curl = [entry for entry in entries if entry.vulnerability in CURL_CRITICALS]
-    assert {entry.vulnerability for entry in curl} == CURL_CRITICALS
     for entry in curl:
         assert dict(entry.package) == {"version": "8.14.1-2+deb13u5", "type": "deb"}
         assert "US-011" in entry.reason
