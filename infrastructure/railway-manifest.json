@@ -920,5 +920,5 @@
       "redis-exporter"
     ]
   },
-  "_builder_correction_2026-08-30": "railway.json is the truth: builder DOCKERFILE, dockerfileTarget production, for every service. This 2026-04-09 export said RAILPACK and misled the PRD-233 Docker slim pass into shipping the local edition's defaults to production (#650 -> Clerk outage -> #668). Dockerfile ARG defaults are production values; docker-compose.yml passes the local edition's choices explicitly."
+  "_builder_correction_2026-08-30": "railway.json is the truth: builder DOCKERFILE for every service. Railway's config has no target key, so it builds each Dockerfile's last stage, production (PRD-262 US-010 checks the order). This 2026-04-09 export said RAILPACK and misled the PRD-233 Docker slim pass into shipping the local edition's defaults to production (#650 -> Clerk outage -> #668). Dockerfile ARG defaults are production values; docker-compose.yml passes the local edition's choices explicitly."
 }

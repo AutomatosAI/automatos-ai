@@ -74,9 +74,9 @@ graph TB
 - **Monitoring Stack**: A dedicated group for observability including `log-relay` for Railway log drain webhooks and `Grafana` for visualization.
 
 ### Railway Build Configuration
-The platform uses a `railway.json` configuration for production builds, targeting the `production` stage in the multi-stage `Dockerfile` [railway.json:3-6](). It implements a robust restart policy that allows up to 10 retries on failure [railway.json:9-10]().
+The platform uses a `railway.json` configuration for production builds: builder `DOCKERFILE`, each service's `Dockerfile` [railway.json:3-6](). Railway's config has no target key, so it builds the last stage of each multi-stage `Dockerfile`, which must be `production`; `orchestrator/tests/test_prd262_production_last_stage.py` fails CI if a stage is added after it. It implements a robust restart policy that allows up to 10 retries on failure [railway.json:8-9]().
 
-Sources: [railway.json:1-12]()
+Sources: [railway.json:1-11]()
 
 ---
 
@@ -189,6 +189,6 @@ Redis is tuned for high-throughput with specific memory policies:
 ### Advisory Lock Safety
 The use of `pg_advisory_unlock` in a `finally` block ensures that even if a seed operation fails, the lock is released for subsequent attempts or other processes [orchestrator/core/database/boot_lock.py:49-54]().
 
-Sources: [orchestrator/core/database/boot_lock.py:47-54](), [railway.json:1-12]()
+Sources: [orchestrator/core/database/boot_lock.py:47-54](), [railway.json:1-11]()
 
 ---

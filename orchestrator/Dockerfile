@@ -15,8 +15,8 @@
 # -----------------------------------------------------------------------------
 # gcc/g++/dev headers are needed to build wheels, not to run them; leaving them
 # in the shipped image cost ~250 MB in every install (PRD-233 slim pass).
-# Railway builds this file too (target production, default args), so the slim
-# pass applies to SaaS as well.
+# Railway builds this file too (its last stage, production; default args), so the
+# slim pass applies to SaaS as well.
 FROM python:3.11-slim as pybuild
 
 WORKDIR /app
@@ -37,7 +37,7 @@ COPY requirements.txt .
 # installed", so the Knowledge Graph still clusters without it, at lower
 # partition quality.
 # THE DEFAULT IS THE PRODUCTION VALUE (true). Railway builds THIS file
-# (railway.json: builder DOCKERFILE, target production), so a Dockerfile default
+# (railway.json: builder DOCKERFILE; the last stage), so a Dockerfile default
 # is a production decision — a `false` here shipped degraded clustering to prod
 # on 2026-08-30 (#650). The local edition passes INSTALL_GRAPH_EXTRAS=false
 # explicitly via docker-compose.yml build args to stay slim; want Leiden

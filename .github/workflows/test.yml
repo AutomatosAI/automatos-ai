@@ -905,8 +905,8 @@ jobs:
 
   # Prod-image parity (2026-08-30, after #650 shipped the local edition's
   # Dockerfile defaults to production — Clerk outage, #668). Railway builds the
-  # three Dockerfiles with NO build args (railway.json: DOCKERFILE, target
-  # production), so this lane builds exactly that and checks what got baked:
+  # three Dockerfiles with NO build args (railway.json: DOCKERFILE; the last
+  # stage, production), so this lane builds exactly that and checks what got baked:
   # the frontend's edition literal, the backend's graph extras, the worker's
   # browser. Non-required like the other lanes; the required flip is the repo
   # admin's call.
