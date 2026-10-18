@@ -17,7 +17,7 @@
 # in the shipped image cost ~250 MB in every install (PRD-233 slim pass).
 # Railway builds this file too (its last stage, production; default args), so the
 # slim pass applies to SaaS as well.
-FROM python:3.11-slim as pybuild
+FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce as pybuild
 
 WORKDIR /app
 
@@ -61,7 +61,7 @@ RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then \
 # -----------------------------------------------------------------------------
 # Base — RUNTIME dependencies only
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim as base
+FROM python:3.11-slim@sha256:e88e9763f943ec1834f992a4b51e0f24500486803e8bc534e5767af9ea65f6ce as base
 
 WORKDIR /app
 

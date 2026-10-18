@@ -39,7 +39,7 @@ services:
   # PostgreSQL Database with pgvector
   # ===========================================================================
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     container_name: automatos_postgres
     restart: unless-stopped
     environment:
@@ -64,7 +64,7 @@ services:
   # Redis Cache & Session Store
   # ===========================================================================
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     container_name: automatos_redis
     restart: unless-stopped
     # PRD-70 FIX-05: Disable dangerous Redis commands to prevent data wipe if exposed.
@@ -102,9 +102,9 @@ services:
     # MinIO no longer publishes free images: quay.io/minio/minio and Docker Hub's
     # minio/minio both refuse anonymous pulls (401) since 2026-09, which broke
     # `docker compose up` and the fresh-clone smoke lane. Chainguard publishes a
-    # maintained build; its free tier offers only `latest`. Docker keeps a cached
-    # `latest` forever, so refresh it with `docker compose pull minio`.
-    image: cgr.dev/chainguard/minio:latest
+    # maintained build; its free tier offers only `latest`, so the digest pins it
+    # and Dependabot moves the digest weekly (.github/dependabot.yml, PRD-262).
+    image: cgr.dev/chainguard/minio:latest@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
     container_name: automatos_minio
     restart: unless-stopped
     # Root, like the official image: Chainguard's runs as uid 65532, which can't
@@ -139,7 +139,7 @@ services:
   # Prod is unchanged (hosted Qdrant via its own QDRANT_URL).
   # ===========================================================================
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:latest@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
     container_name: automatos_qdrant
     restart: unless-stopped
     profiles: ["memory"]
@@ -518,7 +518,7 @@ services:
   # ===========================================================================
   
   adminer:
-    image: adminer:latest
+    image: adminer:latest@sha256:49a7d30e71de97fb18933ffe7d46cc2b343c49fd7a63a7791c8be2548eb65115
     container_name: automatos_adminer
     restart: unless-stopped
     profiles: ["all"]
@@ -537,7 +537,7 @@ services:
   # DOCX/XLSX → PDF via Chromium + LibreOffice
   # ===========================================================================
   gotenberg:
-    image: gotenberg/gotenberg:8
+    image: gotenberg/gotenberg:8@sha256:aa552cc115db488e0f0bcb07446aac13071ad51505b642c84bb894500907b42b
     container_name: automatos_gotenberg
     restart: unless-stopped
     profiles: ["all"]
@@ -556,7 +556,7 @@ services:
   # the third search backend after OpenRouter and Composio).
   # ===========================================================================
   searxng:
-    image: docker.io/searxng/searxng:latest
+    image: docker.io/searxng/searxng:latest@sha256:8bdd9aa136b2dc3b9332cf24714fa34a375b8a1949a1201ec900c24d7378596e
     container_name: automatos_searxng
     restart: unless-stopped
     profiles: ["search"]
