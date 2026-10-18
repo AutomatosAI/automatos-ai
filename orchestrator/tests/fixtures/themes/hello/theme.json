@@ -1,0 +1,17 @@
+{
+  "schema": "automatos-theme/v1",
+  "id": "automatos-e2e/hello",
+  "name": "Hello theme",
+  "version": "1.0.0",
+  "description": "The test theme: a frame, a look editor, a style sheet and one theme-only page.",
+  "engines": { "automatos": "^1.0.0", "sdk": "^1.0.0" },
+  "base": "studio",
+  "htmlClass": "hello",
+  "minWidth": 0,
+  "tone": "user",
+  "slots": ["frame@1", "lookEditor@1", "styleSheet@1"],
+  "routes": ["hello"],
+  "nav": [{ "id": "hello", "label": "Hello", "path": "/x/hello" }],
+  "uses": [],
+  "look": "default"
+}
