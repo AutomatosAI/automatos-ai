@@ -13,6 +13,7 @@ Converse wants turns that alternate, so consecutive turns of one role are merged
 """
 
 import base64
+import binascii
 import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
@@ -31,8 +32,13 @@ def _image(media_type: str, data: str) -> Optional[Dict[str, Any]]:
     """A base64 image as a Converse image block, or None for a format Converse doesn't take."""
     image_format = _IMAGE_FORMATS.get((media_type or "").lower())
     if not image_format:
+        logger.warning("[bedrock] an image of type %r has no Converse form; left out", media_type)
         return None
-    return {"image": {"format": image_format, "source": {"bytes": base64.b64decode(data)}}}
+    try:
+        image_bytes = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("An image in the conversation isn't valid base64, so Bedrock can't be sent it.") from error
+    return {"image": {"format": image_format, "source": {"bytes": image_bytes}}}
 
 
 def _image_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -70,7 +76,7 @@ def _content_blocks(content: Any) -> List[Dict[str, Any]]:
         elif (image := _image_block(block)) is not None:
             blocks.append(image)
         else:
-            logger.debug("[bedrock] a %r content block has no Converse form; left out", block.get("type"))
+            logger.warning("[bedrock] a %r content block has no Converse form; left out", block.get("type"))
     return blocks
 
 
@@ -83,7 +89,10 @@ def _tool_uses(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         try:
             parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
         except (json.JSONDecodeError, TypeError):
-            parsed = {}
+            parsed = None
+        if not isinstance(parsed, dict):
+            logger.warning("[bedrock] tool call %s had arguments that aren't a JSON object; sent as {}",
+                           call.get("id"))
         uses.append({"toolUse": {"toolUseId": str(call.get("id")), "name": function.get("name"),
                                  "input": parsed if isinstance(parsed, dict) else {}}})
     return uses
@@ -101,6 +110,12 @@ def _turn(message: Dict[str, Any]) -> Optional[Tuple[str, List[Dict[str, Any]]]]
     return ("user", blocks) if blocks else None
 
 
+def _results_first(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """A merged user turn with its tool results first, as Converse wants them right after
+    the assistant's tool calls; the other blocks keep their order after them."""
+    return [b for b in blocks if "toolResult" in b] + [b for b in blocks if "toolResult" not in b]
+
+
 def converse_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Platform messages as Converse ``(system, messages)``. Turns of one role in a row
     are merged into one, as Converse wants turns that alternate."""
@@ -115,7 +130,7 @@ def converse_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, An
             continue
         role, blocks = turn
         if turns and turns[-1]["role"] == role:
-            turns[-1] = {"role": role, "content": [*turns[-1]["content"], *blocks]}
+            turns[-1] = {"role": role, "content": _results_first([*turns[-1]["content"], *blocks])}
         else:
             turns.append({"role": role, "content": blocks})
     return system, turns

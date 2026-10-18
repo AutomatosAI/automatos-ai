@@ -150,6 +150,29 @@ def test_turns_alternate_a_later_system_message_is_a_user_turn_and_images_go_as_
     ]
 
 
+def test_tool_results_lead_their_user_turn_even_when_the_user_spoke_first():
+    provider, seen = _bedrock(OPUS)
+    provider.generate_response_sync([
+        {"role": "user", "content": "Weather in Paris?"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "t1", "type": "function", "function": {"name": "weather", "arguments": "not json"}}]},
+        {"role": "user", "content": "Also, be quick."},
+        {"role": "tool", "tool_call_id": "t1", "content": "18C"},
+    ])
+    messages = _body(seen[0])["messages"]
+    assert messages[1]["content"] == [{"toolUse": {"toolUseId": "t1", "name": "weather", "input": {}}}]
+    assert messages[2]["content"] == [
+        {"toolResult": {"toolUseId": "t1", "content": [{"text": "18C"}]}}, {"text": "Also, be quick."}]
+
+
+def test_an_image_that_isnt_base64_fails_plainly_before_any_request():
+    provider, seen = _bedrock(NOVA)
+    bad = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "!!!"}}
+    with pytest.raises(ValueError, match="isn't valid base64"):
+        provider.generate_response_sync([{"role": "user", "content": [bad]}])
+    assert seen == []
+
+
 def test_a_newer_claude_gets_no_temperature_and_a_cut_off_answer_is_length():
     provider, seen = _bedrock(OPUS, reply=_reply(stop="max_tokens"), temperature=0.7)
     assert provider.generate_response_sync([{"role": "user", "content": "Go on"}]).finish_reason == "length"
@@ -167,6 +190,15 @@ def test_a_bedrock_api_key_is_a_bearer_token_of_this_provider_alone():
     assert "X-Amz-Date" not in seen_first[0].headers   # not SigV4
 
 
+def test_a_bedrock_api_key_stays_a_bearer_token_with_a_secret_beside_it_and_the_env_token_is_never_read(
+        monkeypatch):
+    # The agent factory gives every Bedrock config the server's AWS secret, whatever its key.
+    monkeypatch.setenv("AWS_BEARER_TOKEN_BEDROCK", "env-token-of-another-workspace")
+    provider, seen = _bedrock(api_key="bedrock-api-key-fake", secret="server-aws-secret")
+    provider.generate_response_sync([{"role": "user", "content": "hi"}])
+    assert seen[0].headers["Authorization"].decode() == "Bearer bedrock-api-key-fake"
+
+
 def test_an_access_key_and_secret_are_signed_with_sigv4_for_the_saved_region():
     provider, seen = _bedrock(api_key="AKIAIOSFODNN7EXAMPLE", secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
                               region="ap-southeast-2")
@@ -181,7 +213,17 @@ def test_a_model_served_only_by_an_inference_profile_says_which_ids_to_use():
                "supported. Retry your request with the ID or ARN of an inference profile that contains this model.")
     provider, _ = _bedrock("anthropic.claude-sonnet-4-5-20250929-v1:0", reply={"message": message}, status=400,
                            error_type="ValidationException")
-    with pytest.raises(ValueError, match=r"us\.anthropic\.claude-sonnet-4-5-20250929-v1:0.*global\."):
+    with pytest.raises(ValueError, match=r"us\.anthropic\.claude-sonnet-4-5-20250929-v1:0.*global\..*Bedrock said"):
+        provider.generate_response_sync([{"role": "user", "content": "hi"}])
+
+
+def test_a_model_that_already_names_a_profile_is_never_offered_another():
+    from botocore.exceptions import ClientError
+
+    message = "Invocation of model ID us.anthropic.claude-x with on-demand throughput isn't supported."
+    provider, _ = _bedrock("us.anthropic.claude-x", reply={"message": message}, status=400,
+                           error_type="ValidationException")
+    with pytest.raises(ClientError, match="on-demand"):
         provider.generate_response_sync([{"role": "user", "content": "hi"}])
 
 

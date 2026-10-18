@@ -9,9 +9,11 @@ The request and the answer are translated in :mod:`.bedrock_converse`.
 The region is ``config.base_url`` (the manager stores it there). Credentials, per
 provider and never process-wide:
 
-- an access key ID with its secret (``config.secret_key``): IAM, signed with SigV4;
 - a Bedrock API key (``ABSK…`` long-term, ``bedrock-api-key-…`` short-term): sent as
-  a bearer token, the way AWS documents it, through this client's own token provider;
+  a bearer token, the way AWS documents it, through this client's own token provider,
+  whatever secret came with it (the agent factory adds the server's AWS secret to every
+  Bedrock config);
+- an access key ID with its secret (``config.secret_key``): IAM, signed with SigV4;
 - otherwise the default AWS credential chain (environment, profile, instance role).
 """
 
@@ -32,6 +34,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 DEFAULT_REGION = "us-east-1"
+# Inference-profile prefixes: an ID that has one already is never offered another.
+_PROFILE_PREFIXES = ("us.", "eu.", "apac.", "jp.", "au.", "global.")
 # An AWS access key ID (AKIA… long-term, ASIA… temporary): IAM, never a Bedrock API key.
 _ACCESS_KEY_ID = re.compile(r"^(AKIA|ASIA)[A-Z0-9]{16}$")
 _NOT_CONFIGURED = (
@@ -57,27 +61,28 @@ def runtime_client(api_key: Optional[str], secret_key: Optional[str], region: Op
     import botocore.session
 
     config = Config(region_name=region or DEFAULT_REGION, retries={"max_attempts": 3, "mode": "adaptive"})
-    if api_key and secret_key:
-        return boto3.client("bedrock-runtime", aws_access_key_id=api_key, aws_secret_access_key=secret_key,
-                            config=config)
     if api_key and not _ACCESS_KEY_ID.match(api_key):
         session = botocore.session.Session()
         session.register_component("token_provider", _StaticToken(api_key))
         return boto3.Session(botocore_session=session).client(
             "bedrock-runtime", config=config.merge(Config(signature_version="bearer")))
+    if api_key and secret_key:
+        return boto3.client("bedrock-runtime", aws_access_key_id=api_key, aws_secret_access_key=secret_key,
+                            config=config)
     return boto3.client("bedrock-runtime", config=config)
 
 
 def _plain_error(error: Exception, model_id: str) -> Optional[str]:
-    """What to do about a model ID Bedrock won't serve, in plain words; None for any other error."""
+    """What to do about a model ID Bedrock won't serve, in plain words, with what Bedrock
+    said; None for any other error."""
     text = str(error)
-    if "on-demand throughput isn" in text or "inference profile" in text:
+    if "with on-demand throughput isn" in text and not model_id.startswith(_PROFILE_PREFIXES):
         return (f"AWS Bedrock serves {model_id} only through an inference profile. Set the model to the "
                 f"profile for where your data may go: us.{model_id}, eu.{model_id}, apac.{model_id} "
-                f"or global.{model_id}.")
+                f"or global.{model_id}. (Bedrock said: {text})")
     if "model identifier is invalid" in text or "end of its life" in text or "marked by provider as Legacy" in text:
-        return (f"AWS Bedrock no longer serves {model_id} (or doesn't know it). Pick a current model ID from "
-                "the Bedrock console's model catalog.")
+        return (f"AWS Bedrock won't serve {model_id}: it is retired, misspelt or not offered in this region. "
+                f"Pick a current model ID from the Bedrock console's model catalog. (Bedrock said: {text})")
     return None
 
 
