@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from core.cli_runtime import (
     CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, PROVIDER_CLAUDE, RUNTIME_CLI,
-    runtime_kind_of,
+    runtime_kind_of, session_cli,
 )
 from core.models.core import Agent, BoardTask
 from services.ticket_numbers import ticket_label  # PRD-252 R4
@@ -60,9 +60,7 @@ def agent_cli_provider(db: Session, agent_id: Optional[int]) -> str:
     except Exception:  # noqa: BLE001 — a test double or a broken session
         logger.debug("[CliTicketLane] provider lookup unavailable for agent %s", agent_id, exc_info=True)
         return PROVIDER_CLAUDE
-    configuration = row[0] if isinstance(row, (tuple, list)) else getattr(row, "configuration", row)
-    provider = configuration.get(CONFIG_PROVIDER_KEY) if isinstance(configuration, dict) else None
-    return provider if isinstance(provider, str) and provider else PROVIDER_CLAUDE
+    return session_cli(row[0] if isinstance(row, (tuple, list)) else getattr(row, "configuration", row))
 
 
 def no_cli_host_reason_for(db: Session, workspace_id: Any, cli: str) -> Optional[str]:

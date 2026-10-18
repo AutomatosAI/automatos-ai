@@ -8,6 +8,12 @@ ask is raised the name is bound to one agent's id (the way FX-009 binds a missio
 one whose whole name it is, else the one whose name contains it. Two or more such agents
 are refused, naming them, and none is refused with the workspace's roster: nothing is
 asked about an agent the call cannot name (F091).
+
+PRD-256 N17-8 (F440): the same rule (``one_named``) reads a name in the ungated write resolvers
+(``handlers_agents._resolve_agent``, ``handlers_assignments.resolve_agent``), which took the first
+row whose name contained it. platform_get_agent by name reads the agent the board gives work to
+(``the_agent_named``) and lists every agent carrying the whole name: night 16's 'WRITER' read an
+inactive namesake while the board's WRITER had just finished two cards.
 """
 from __future__ import annotations
 
@@ -42,17 +48,44 @@ def bound_to_the_agent(db: Any, workspace_id: Any, action: str,
         return _bound_on_the_card(db, workspace_id, params, name_key(action))
     if not names_the_agent_alone(action, params):
         return params, None
-    said = params[AGENT_NAME]
-    matches = _named(db, workspace_id, said)
-    if len(matches) == 1:
-        return {**params, AGENT_ID: matches[0].id}, None
-    if not matches:
+    agent_id, refusal = one_named(db, workspace_id, params[AGENT_NAME], action)
+    if agent_id is not None:
+        return {**params, AGENT_ID: agent_id}, None
+    if refusal is None:
         from modules.tools.discovery.handlers_assignments import resolve_agent
 
         return params, resolve_agent(db, workspace_id, params)[1]  # the roster
+    return params, refusal
+
+
+def one_named(db: Any, workspace_id: Any, said: str,
+              action: str = "the same tool") -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    """(the id of the one agent ``said`` names, None); (None, the refusal naming each by id) when
+    several do; (None, None) when none does. Its whole name, else the one name containing it."""
+    matches = named_agents(db, workspace_id, said)
+    if len(matches) == 1:
+        return matches[0].id, None
+    if not matches:
+        return None, None
     named = ", ".join(f"{agent.id}:{agent.name}" for agent in matches[:MAX_NAMED])
-    return params, {"success": False, "error": AMBIGUOUS.format(count=len(matches), said=said, named=named,
-                                                                   action=action)}
+    return None, {"success": False, "error": AMBIGUOUS.format(count=len(matches), said=said, named=named,
+                                                                 action=action)}
+
+
+def the_agent_named(db: Any, workspace_id: Any, said: str) -> Tuple[Optional[int], List[str]]:
+    """(the id of the agent a read by name means, every namesake): the board's agent (the active
+    agent whose whole name it is, ``agent_refs.active_named``; the lowest id of several), else the
+    first ``named_agents`` gives, else None; then, when two or more agents of any status carry the
+    whole name, each as "id · name · job title · status" by id. A name contained in another agent's
+    is never listed."""
+    from modules.tools.discovery.agent_refs import CANDIDATE_SEP, active_named, candidate
+
+    active = active_named(db, workspace_id, said)
+    named = named_agents(db, workspace_id, said)
+    chosen = active[0].id if active else named[0].id if named else None
+    whole = [agent for agent in named if _is_whole(agent, said)]
+    same_name = [CANDIDATE_SEP.join((candidate(agent), str(agent.status))) for agent in whole]
+    return chosen, same_name if len(same_name) > 1 else []
 
 
 def names_the_agent_alone(action: str, params: Any) -> bool:
@@ -86,17 +119,21 @@ def _bound_on_the_card(db: Any, workspace_id: Any, params: Dict[str, Any],
     return {**rest, AGENT_ID: agent.id}, None
 
 
-def _named(db: Any, workspace_id: Any, said: str) -> List[Any]:
+def named_agents(db: Any, workspace_id: Any, said: str) -> List[Any]:
     """This workspace's agents whose whole name is ``said`` (any case), else those whose
-    name contains it, by id."""
+    name contains it, by id; each with what ``agent_refs.candidate`` names it by."""
     from core.models import Agent
 
-    wanted = said.strip()
-    agents = (db.query(Agent.id, Agent.name)
-              .filter(Agent.workspace_id == workspace_id, Agent.name.ilike(f"%{wanted}%"))
+    agents = (db.query(Agent.id, Agent.name, Agent.status, Agent.job_title, Agent.team, Agent.agent_type)
+              .filter(Agent.workspace_id == workspace_id, Agent.name.ilike(f"%{said.strip()}%"))
               .order_by(Agent.id).all())
-    whole = [agent for agent in agents if (agent.name or "").strip().lower() == wanted.lower()]
+    whole = [agent for agent in agents if _is_whole(agent, said)]
     return whole or agents
 
 
-__all__ = ["BINDS", "GIVES_THE_CARD", "SCHEDULES_AN_AGENT", "bound_to_the_agent", "name_key", "names_the_agent_alone"]
+def _is_whole(agent: Any, said: str) -> bool:
+    return (agent.name or "").strip().lower() == said.strip().lower()
+
+
+__all__ = ["BINDS", "GIVES_THE_CARD", "SCHEDULES_AN_AGENT", "bound_to_the_agent", "name_key", "named_agents",
+           "names_the_agent_alone", "one_named", "the_agent_named"]
