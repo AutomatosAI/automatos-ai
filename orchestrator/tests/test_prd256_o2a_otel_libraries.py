@@ -180,6 +180,29 @@ def test_a_model_call_through_the_openai_sdk_is_a_client_span_too(spans, http_se
     assert _leaks(exporter.get_finished_spans()) == []
 
 
+def test_an_async_model_call_through_the_openai_sdk_is_a_client_span_too(spans, http_server):
+    """The embedding clients (and any async caller) use AsyncOpenAI: httpx2's async transport."""
+    import openai
+    from opentelemetry import trace
+    from opentelemetry.trace import SpanKind
+
+    exporter, _ = spans
+    base, seen = http_server
+
+    async def call():
+        client = openai.AsyncOpenAI(api_key="test-key", base_url=f"{base}/v1", default_query={"key": SECRET},
+                                    max_retries=0)
+        with trace.get_tracer("t").start_as_current_span("chat m") as parent:
+            await client.chat.completions.create(model="m", messages=[{"role": "user", "content": "hi"}])
+        return parent
+
+    parent = asyncio.run(call())
+    [span] = [s for s in exporter.get_finished_spans() if s.kind == SpanKind.CLIENT]
+    assert span.parent.span_id == parent.get_span_context().span_id
+    assert seen[0] and seen[0].split("-")[1] == format(parent.get_span_context().trace_id, "032x")
+    assert span.attributes["http.url"].endswith("?key=REDACTED") and _leaks(exporter.get_finished_spans()) == []
+
+
 def test_a_sql_statement_is_a_span_without_its_bound_values(spans):
     import sqlalchemy
 
