@@ -363,17 +363,21 @@ _JOB_TTL = 3600  # clean up jobs older than 1 hour
 # each runs up to 20 rounds against OpenAI and FutureAGI.
 MAX_CONCURRENT_JOBS = max_concurrent_jobs()
 _JOB_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_JOBS)
+# /optimize is a plain def, so concurrent requests run in FastAPI's threadpool:
+# every insert into or sweep of the job store takes this lock.
+_JOBS_LOCK = threading.Lock()
 
 
 def _cleanup_old_jobs():
     """Remove completed/failed jobs older than TTL to prevent memory leak."""
     now = time.time()
-    stale = [
-        jid for jid, job in _optimize_jobs.items()
-        if job["status"] in ("completed", "failed") and now - job["created_at"] > _JOB_TTL
-    ]
-    for jid in stale:
-        del _optimize_jobs[jid]
+    with _JOBS_LOCK:
+        stale = [
+            jid for jid, job in list(_optimize_jobs.items())
+            if job["status"] in ("completed", "failed") and now - job["created_at"] > _JOB_TTL
+        ]
+        for jid in stale:
+            _optimize_jobs.pop(jid, None)
     if stale:
         logger.info(f"[cleanup] removed {len(stale)} stale optimization jobs")
 
@@ -519,21 +523,22 @@ def optimize(req: OptimizeRequest):
             detail=f"At most {MAX_CONCURRENT_JOBS} optimisation jobs run at once; try again when one finishes",
         )
 
-    _cleanup_old_jobs()
-
-    job_id = str(uuid.uuid4())
-    _optimize_jobs[job_id] = {
-        "status": "starting",
-        "created_at": time.time(),
-        "result": None,
-        "error": None,
-    }
-
-    # Run in background thread — no timeout constraint; the thread frees its slot when the job ends
-    thread = threading.Thread(target=_run_job_in_slot, args=(job_id, req), daemon=True)
+    # Once a slot is taken, only the started thread may free it. Anything that
+    # fails before the thread starts gives the slot back, or the cap would leak
+    # shut and every later /optimize would answer 429.
     try:
+        _cleanup_old_jobs()
+        job_id = str(uuid.uuid4())
+        with _JOBS_LOCK:
+            _optimize_jobs[job_id] = {
+                "status": "starting",
+                "created_at": time.time(),
+                "result": None,
+                "error": None,
+            }
+        thread = threading.Thread(target=_run_job_in_slot, args=(job_id, req), daemon=True)
         thread.start()
-    except RuntimeError:
+    except BaseException:
         _JOB_SLOTS.release()
         raise
 

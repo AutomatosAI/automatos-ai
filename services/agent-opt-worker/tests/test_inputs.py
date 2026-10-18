@@ -105,6 +105,29 @@ def test_concurrent_optimisation_jobs_are_bounded(client, authed, worker_main, b
     assert refused.status_code == 429, refused.text
 
 
+class _StoreThatRefusesInserts(dict):
+    def __setitem__(self, key, value):
+        raise RuntimeError("the job store failed after the slot was taken")
+
+
+@pytest.mark.parametrize("broken", ["cleanup", "job-store"])
+def test_a_failure_before_the_job_starts_gives_its_slot_back(client, authed, worker_main, monkeypatch, broken):
+    for name in ("FUTUREAGI_API_KEY", "FUTUREAGI_SECRET_KEY", "OPENAI_API_KEY"):
+        monkeypatch.setenv(name, "ci-not-a-real-key")
+
+    def explode():
+        raise RuntimeError("the cleanup failed after the slot was taken")
+
+    if broken == "cleanup":
+        monkeypatch.setattr(worker_main, "_cleanup_old_jobs", explode)
+    else:
+        monkeypatch.setattr(worker_main, "_optimize_jobs", _StoreThatRefusesInserts())
+    for _ in range(worker_main.MAX_CONCURRENT_JOBS + 1):
+        with pytest.raises(RuntimeError):
+            client.post("/optimize", headers=authed, json=_optimize_body())
+    _wait_until_every_slot_is_free(worker_main)
+
+
 def test_a_finished_job_frees_its_slot(client, authed, worker_main, monkeypatch):
     for name in ("FUTUREAGI_API_KEY", "FUTUREAGI_SECRET_KEY", "OPENAI_API_KEY"):
         monkeypatch.setenv(name, "ci-not-a-real-key")
