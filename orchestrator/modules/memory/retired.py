@@ -4,7 +4,10 @@ Night 15: the owner replaced their 'cafe minimum 12 kg' with '10 kg'. Auto store
 the old row stayed in the memory store, and the Memory page listed both while the rules said 10.
 Now the row a new rule replaces is retired (``platform_store_memory``'s
 ``rule_replaces.retires_what_it_replaces`` picks it): its metadata says when, and by what
-(``retired_at``, ``replaced_by``); nothing is deleted (a delete is the owner's click).
+(``retired_at``, ``replaced_by``); nothing is deleted. A delete is ``platform_delete_memory``,
+which an owner or admin's own chat instruction runs with no card (``platform_executor``'s
+human-directed rule, Gerard 2026-08-06): it is no owner-only action (``owner_only``), so a rule
+is replaced by retiring it, never by deleting it first (P256-FIX-N17-4).
 
 A retired row is left out of every read of the durable store (``leaves_out_retired`` on
 ``DurableMemoryStore.search`` and ``_scroll``): recall, the standing rules, the Memory page and

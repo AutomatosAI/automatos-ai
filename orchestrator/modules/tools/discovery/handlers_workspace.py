@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from modules.tools.discovery.memory_owner import owned_by_the_driver
 from modules.tools.discovery.memory_source import defaults_the_source_type
-from modules.tools.discovery.memory_write import memory_metadata, memory_params_refusal, rule_answer
+from modules.tools.discovery.memory_write import memory_metadata, memory_params_refusal, owner_turns, rule_answer
 from modules.tools.discovery.rule_replaces import retires_what_it_replaces
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,10 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         # tool says; nothing files for another agent (the executor strips the key).
         agent_id_int = None
         # ``_user_id`` is server-injected by the executor (strip-then-inject), never caller-supplied.
-        metadata = memory_metadata(db, ws_id, params, _resolve_owner_subject(db, params.get("_user_id")))
+        # N17-4: the owner and their messages are read once, for the rule check and the answer.
+        owner = _resolve_owner_subject(db, params.get("_user_id"))
+        said = owner_turns(db, ws_id, params, owner)
+        metadata = memory_metadata(db, ws_id, params, owner, said=said)
         result = await service.store_long_term(
             workspace_id=ws_id,
             content=content,
@@ -214,7 +217,7 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             "success": True,
             "message": f"Stored in memory (user_id={user_id}): '{content[:100]}'",
             "facts_extracted": result.get("facts_extracted", "unknown"),
-            **rule_answer(metadata),
+            **rule_answer(metadata, content, said),
         }
     except Exception as e:
         logger.warning(f"[PlatformExecutor] Memory store failed: {e}", exc_info=True)
