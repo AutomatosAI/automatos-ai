@@ -188,7 +188,8 @@ jobs:
           # no longer carries the model load.
           loaded=""
           for i in $(seq 1 60); do
-            if docker logs media-render-api 2>&1 | grep -q 'kokoro: the voice model loaded in the background'; then loaded=1; break; fi
+            # grep reads every line (no -q): under pipefail an early exit would fail docker logs.
+            if docker logs media-render-api 2>&1 | grep 'kokoro: the voice model loaded in the background' > /dev/null; then loaded=1; break; fi
             sleep 1
           done
           docker logs media-render-api 2>&1 | grep 'kokoro: ' || true
