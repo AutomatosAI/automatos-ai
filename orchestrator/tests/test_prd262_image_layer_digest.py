@@ -74,6 +74,29 @@ def test_the_config_is_read_from_either_save_layout_in_one_pass(oci):
     assert digest.read_config(_archive(config, oci=oci, big_layer=True)) == config
 
 
+def test_with_two_images_in_the_archive_the_tagged_one_is_read():
+    config = _config(JS_OLD)
+    other = {"Config": "blobs/sha256/" + "0" * 64, "RepoTags": ["docker.io/library/media-render:pin"], "Layers": []}
+    buffer = io.BytesIO()
+    members = {
+        "blobs/sha256/" + "e" * 64: json.dumps(config).encode(),
+        "blobs/sha256/" + "0" * 64: json.dumps(_config(JS_NEW)).encode(),
+        "manifest.json": json.dumps([
+            other, {"Config": "blobs/sha256/" + "e" * 64, "RepoTags": ["docker.io/library/media-render:ci"], "Layers": []},
+        ]).encode(),
+    }
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    buffer.seek(0)
+    assert digest.read_config(buffer, "media-render:ci") == config
+    buffer.seek(0)
+    with pytest.raises(digest.LayerError, match="2 matching images"):
+        digest.read_config(buffer)
+
+
 def test_an_archive_without_a_manifest_is_refused():
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w"):

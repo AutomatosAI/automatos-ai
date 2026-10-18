@@ -48,7 +48,17 @@ class LayerError(ValueError):
     """An image this check cannot read, or a COPY it cannot find exactly once."""
 
 
-def read_config(stream: IO[bytes]) -> dict:
+def _entry(entries: List[dict], tag: Optional[str]) -> dict:
+    """The manifest.json entry of the image saved: the only one, or the one tagged ``tag``."""
+    if len(entries) > 1 and tag:
+        # A registry host may be spelt out: docker.io/library/media-render:ci for media-render:ci.
+        entries = [entry for entry in entries if any(t == tag or t.endswith("/" + tag) for t in entry.get("RepoTags") or [])]
+    if len(entries) != 1:
+        raise LayerError(f"the archive holds {len(entries)} matching images; save one at a time")
+    return entries[0]
+
+
+def read_config(stream: IO[bytes], tag: Optional[str] = None) -> dict:
     """The image config inside a ``docker save`` tar stream, read in one pass."""
     small: Dict[str, bytes] = {}
     with tarfile.open(fileobj=stream, mode="r|") as tar:
@@ -57,12 +67,10 @@ def read_config(stream: IO[bytes]) -> dict:
                 small[member.name] = tar.extractfile(member).read()
     if MANIFEST not in small:
         raise LayerError("the archive has no manifest.json: not a docker save archive")
-    entries = json.loads(small[MANIFEST])
-    if len(entries) != 1:
-        raise LayerError(f"the archive holds {len(entries)} images; save one at a time")
-    config = small.get(entries[0]["Config"])
+    entry = _entry(json.loads(small[MANIFEST]), tag)
+    config = small.get(entry["Config"])
     if config is None:
-        raise LayerError(f"the archive has no config at {entries[0]['Config']}")
+        raise LayerError(f"the archive has no config at {entry['Config']}")
     return json.loads(config)
 
 
@@ -101,7 +109,7 @@ def compare(first: dict, second: dict, same: Sequence[str], differ: Sequence[str
 def saved_config(image: str) -> dict:
     """``docker save IMAGE``, streamed: its config."""
     with subprocess.Popen(["docker", "save", image], stdout=subprocess.PIPE) as proc:
-        config = read_config(proc.stdout)
+        config = read_config(proc.stdout, image)
         proc.stdout.read()  # drain what the tar reader left, so docker save can finish
         code = proc.wait(timeout=SAVE_TIMEOUT_SECONDS)
     if code != 0:
