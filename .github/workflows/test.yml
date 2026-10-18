@@ -930,6 +930,21 @@ jobs:
             echo "::error::the production frontend image bakes the LOCAL edition — check ARG NEXT_PUBLIC_AUTH_EDITION in frontend/Dockerfile"
             exit 1
           fi
+      # PRD-262 US-007: the runtime is Alpine plus the node binary of the node:24 base.
+      - name: Frontend — Node 24, and no npm, curl, yarn or corepack
+        run: |
+          version=$(docker run --rm parity-fe node -v)
+          echo "node $version"
+          case "$version" in v24.*) ;; *) echo "::error::the frontend image runs Node $version, not 24"; exit 1 ;; esac
+          bad=0
+          for name in npm curl yarn corepack; do
+            if docker run --rm parity-fe sh -c "command -v $name"; then
+              echo "::error::the production frontend image carries $name"; bad=1
+            else
+              echo "$name: absent"
+            fi
+          done
+          exit "$bad"
       - name: Backend — graph extras present with no args
         run: |
           docker build --target production -t parity-be orchestrator/
@@ -940,6 +955,31 @@ jobs:
           # --entrypoint: the worker image's entrypoint.sh execs the worker itself
           # (ignoring CMD) and dies on Redis — we only want to look inside the image.
           docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
+      # PRD-262 US-007: Node 24 copied from the official image, with npm, corepack and
+      # the exact pnpm pin; nothing NodeSource brought (one package per check).
+      - name: Worker — Node 24 from the official image, pnpm pinned, no NodeSource leftovers
+        run: |
+          in_image() { docker run --rm --entrypoint sh parity-wk -c "$1"; }
+          version=$(in_image 'node -v')
+          echo "node $version"
+          case "$version" in v24.*) ;; *) echo "::error::the worker image runs Node $version, not 24"; exit 1 ;; esac
+          in_image 'for tool in npm npx corepack; do printf "%s " "$tool"; "$tool" --version || exit 1; done'
+          pin=$(grep -oE 'pnpm@[0-9]+\.[0-9]+\.[0-9]+' services/workspace-worker/Dockerfile | cut -d@ -f2)
+          pnpm=$(in_image 'pnpm --version')
+          echo "pnpm $pnpm (Dockerfile pin: $pin)"
+          if [ -z "$pin" ] || [ "$pnpm" != "$pin" ]; then echo "::error::pnpm $pnpm is not the Dockerfile's exact pin '$pin'"; exit 1; fi
+          bad=0
+          for pkg in python3.13 nodejs gnupg; do
+            if in_image "dpkg -s $pkg > /dev/null 2>&1"; then
+              echo "::error::the worker image has the Debian package $pkg"; bad=1
+            else
+              echo "$pkg: not installed"
+            fi
+          done
+          for path in /root/.npm/_cacache /usr/local/include/node; do
+            if in_image "test -e $path"; then echo "::error::the worker image has $path"; bad=1; else echo "$path: absent"; fi
+          done
+          exit "$bad"
 
   # The media-render lanes (the image, the fixture renders, the seeded templates in 4 shards)
   # run on demand only, in .github/workflows/media-render.yml (Gerard, 7 Oct 2026: not on
@@ -1025,7 +1065,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

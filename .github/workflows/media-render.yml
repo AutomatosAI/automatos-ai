@@ -57,6 +57,22 @@ jobs:
           docker image ls "$IMAGE"
       - name: The versions baked into the image
         run: docker run --rm --entrypoint cat "$IMAGE" /opt/media-render/versions.json
+      # PRD-262 US-007: Node 24 copied from the official image; nothing NodeSource
+      # brought (one Debian package per check).
+      - name: Node 24 from the official image, with no NodeSource leftovers
+        run: |
+          version=$(docker run --rm --entrypoint node "$IMAGE" -v)
+          echo "node $version"
+          case "$version" in v24.*) ;; *) echo "::error::the media-render image runs Node $version, not 24"; exit 1 ;; esac
+          bad=0
+          for pkg in python3.13 nodejs gnupg; do
+            if docker run --rm --entrypoint dpkg "$IMAGE" -s "$pkg" > /dev/null 2>&1; then
+              echo "::error::the media-render image has the Debian package $pkg"; bad=1
+            else
+              echo "$pkg: not installed"
+            fi
+          done
+          exit "$bad"
       # US-112 (S1.6): the music library. The build fetched every track named in
       # services/media-render/music/manifest.json, checked its sha256 and analysed
       # it; the manifest it wrote must carry every committed track as committed,
