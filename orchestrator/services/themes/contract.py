@@ -133,7 +133,11 @@ ECHO_REPLACEMENT = "?"
 # Format characters a script or an emoji sequence needs: zero-width non-joiner and joiner.
 JOINERS = frozenset({"‌", "‍"})
 # Categories that break a line, hide text or carry hidden data (lib/text/plain-line.ts).
-UNSAFE_CATEGORIES = frozenset({"Cc", "Zl", "Zp", "Co", "Cn"})
+# Unassigned (Cn) is left out on purpose: this Python's Unicode tables are older than the
+# browser's, so a character added since (U+1FA77 PINK HEART) would be refused here and
+# accepted there. The server is never stricter than the client; Cf and the hidden variation
+# selectors below still cover hidden data.
+UNSAFE_CATEGORIES = frozenset({"Cc", "Zl", "Zp", "Co"})
 HIDDEN_VARIATION_SELECTORS = range(0xE0100, 0xE01F0)
 
 

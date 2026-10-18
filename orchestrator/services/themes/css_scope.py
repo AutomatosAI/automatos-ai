@@ -10,6 +10,9 @@ with no new dependency (D1-f):
 * rules nested inside a scoped rule, ``@font-face`` and ``@keyframes`` are already contained,
   except a nested selector that names ``&`` anywhere but at its start: CSS Nesting reads it as
   written, so ``:not(&)`` or ``:is(&, body)`` reaches every element outside the theme's class;
+* the names those two declare are global, though: every ``@keyframes`` (and
+  ``@-webkit-keyframes``) name and every ``@font-face`` ``font-family`` (quoted or not) starts
+  with ``<class>-``, so ``@keyframes spin`` can't replace the host's own ``animate-spin``;
 * ``!important`` is refused (any ``!`` outside a string or a comment), and so are ``@import``
   and every other at-rule;
 * anything the tokenizer could read differently from a browser is refused rather than
@@ -36,7 +39,12 @@ MAX_WRAP_DEPTH = 3
 MAX_NESTING = 64
 
 GROUP_AT_RULES = frozenset({"media", "supports", "layer", "container"})
-CONTAINED_AT_RULES = frozenset({"font-face", "keyframes", "-webkit-keyframes"})
+FONT_FACE = "font-face"
+KEYFRAMES_AT_RULES = frozenset({"keyframes", "-webkit-keyframes"})
+CONTAINED_AT_RULES = frozenset({FONT_FACE, *KEYFRAMES_AT_RULES})
+FONT_FAMILY = "font-family"
+DECLARATION_COLON = ":"
+QUOTES = frozenset("\"'")
 STATEMENT_AT_RULES = frozenset({"charset", "layer"})
 WRAPPING_PSEUDOS = (":where(", ":is(")
 NESTING_SELECTOR = "&"
@@ -75,7 +83,7 @@ SELECTOR_TOKEN = re.compile(
 class _Frame(NamedTuple):
     """An open block: what kind it is, and whether rules inside it are already contained."""
 
-    kind: str  # "top", "group", "style" or "contained"
+    kind: str  # "top", "group", "style", "contained" or "font-face"
     scoped: bool
 
 
@@ -148,6 +156,27 @@ def is_anchored_nested_selector_list(prelude: str) -> bool:
 def _at_name(prelude: str) -> str:
     match = AT_NAME.match(prelude)
     return match.group(1).lower() if match else ""
+
+
+def _unquoted(text: str) -> str:
+    """``text`` without one pair of matching quotes around it (a CSS string), else as given."""
+    if len(text) >= 2 and text[0] in QUOTES and text[-1] == text[0]:
+        return text[1:-1]
+    return text
+
+
+def is_theme_name(text: str, html_class: str) -> bool:
+    """True for a global name (an animation, a font family) the theme owns: ``<class>-`` then more."""
+    pattern = rf"{re.escape(html_class)}-[A-Za-z0-9_-]+"
+    return re.fullmatch(pattern, _unquoted(text.strip())) is not None
+
+
+def _font_family_value(declaration: str) -> Optional[str]:
+    """The value of a ``font-family`` declaration, or None for any other declaration."""
+    name, colon, value = declaration.partition(DECLARATION_COLON)
+    if not colon or name.strip().lower() != FONT_FAMILY:
+        return None
+    return value
 
 
 class _Scanner:
@@ -257,9 +286,28 @@ class _Scanner:
         name = _at_name(prelude)
         if name in GROUP_AT_RULES:
             return _Frame("group", parent.scoped)
-        if name not in CONTAINED_AT_RULES:
+        if name in KEYFRAMES_AT_RULES:
+            self.check_keyframes_name(prelude[len(name) + 1:], at)
+        elif name not in CONTAINED_AT_RULES:
             self.refuse_at_rule(name, prelude, at)
-        return _Frame("contained", True)
+        return _Frame(FONT_FACE if name == FONT_FACE else "contained", True)
+
+    def check_keyframes_name(self, keyframes_name: str, at: int) -> None:
+        if not is_theme_name(keyframes_name, self.html_class):
+            self.error(
+                "CSS_UNSCOPED", at,
+                f'the animation "{echo(keyframes_name.strip())}" must be named {self.html_class}-something: '
+                "animation names are shared with the whole app, so this one could replace the app's own.",
+            )
+
+    def check_font_family(self, declaration: str, at: int) -> None:
+        family = _font_family_value(declaration)
+        if family is not None and not is_theme_name(family, self.html_class):
+            self.error(
+                "CSS_UNSCOPED", at,
+                f'the font "{echo(family.strip())}" must be named {self.html_class}-something: '
+                "font names are shared with the whole app, so this one could replace the app's own.",
+            )
 
     def rule_frame(self, prelude: str, parent: _Frame, at: int) -> _Frame:
         contained = parent.kind == "contained" or parent.scoped
@@ -289,6 +337,8 @@ class _Scanner:
             return
         if leftover and frame.kind == "group":
             self.error("CSS_SYNTAX", at, f'"{echo(leftover)}" has no block.')
+        if leftover and frame.kind == FONT_FACE:
+            self.check_font_family(leftover, at)
         self.stack.pop()
 
     def end_statement(self, at: int) -> None:
@@ -300,6 +350,8 @@ class _Scanner:
             return
         if prelude and self.stack[-1].kind in ("top", "group"):
             self.error("CSS_SYNTAX", at, f'"{echo(prelude)}" is not inside a rule.')
+        elif self.stack[-1].kind == FONT_FACE:
+            self.check_font_family(prelude, at)
 
     def finish(self) -> None:
         end = len(self.css)

@@ -231,8 +231,11 @@ def _member_error(info: zipfile.ZipInfo, seen: set) -> Optional[ThemeError]:
         return theme_error("SYMLINK", name, f"{shown} is a link: a theme package can't hold links.")
     if _is_unsafe(name):
         return theme_error("UNSAFE_PATH", name, f"{shown} is not a plain relative path inside the package.")
-    if name in seen:
-        return theme_error("DUPLICATE_FILE", name, f"{shown} is in the package more than once.")
+    if name.lower() in seen:
+        return theme_error(
+            "DUPLICATE_FILE", name,
+            f"{shown} is in the package more than once (names that differ only in capitals count as the same file).",
+        )
     if info.flag_bits & ENCRYPTED_FLAG:
         return theme_error("ENCRYPTED", name, f"{shown} is encrypted: a theme package can't be.")
     if info.compress_type not in ALLOWED_COMPRESSION:
@@ -251,7 +254,7 @@ def _checked_members(zf: zipfile.ZipFile) -> List[zipfile.ZipInfo]:
         raise _refuse("TOO_MANY_FILES", "", f"A theme package holds at most {MAX_MEMBERS} entries.")
     errors: List[ThemeError] = []
     for index, info in enumerate(infos):
-        seen = {earlier.filename for earlier in infos[:index]}
+        seen = {earlier.filename.lower() for earlier in infos[:index]}
         error = _member_error(info, seen)
         errors += [error] if error is not None else []
     if errors:
@@ -348,7 +351,8 @@ def _manifest_link_errors(manifest: Mapping[str, Any], files: Mapping[str, Theme
     if look is not None and look not in preset_ids(files):
         errors += [theme_error("UNKNOWN_DEFAULT_LOOK", f"{MANIFEST_PATH}#look", f'"look" names "{echo(look)}", which isn\'t a preset.')]
     if STYLE_PATH in files:
-        errors += css_scope_errors(files[STYLE_PATH].data.decode("utf-8"), manifest["htmlClass"])
+        # utf-8-sig, as theme.json is read: a leading BOM is not part of the first selector.
+        errors += css_scope_errors(files[STYLE_PATH].data.decode("utf-8-sig"), manifest["htmlClass"])
     return errors
 
 

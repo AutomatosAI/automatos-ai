@@ -318,6 +318,16 @@ def test_a_duplicate_member_is_refused():
     assert _codes(data) == ["DUPLICATE_FILE"]
 
 
+def test_a_member_differing_only_in_capitals_is_a_duplicate():
+    # Both unpack to one file on a case-insensitive disk (macOS, Windows), so one would hide the other.
+    assert _codes(build.build_package(extra=[("readme.md", b"# again")])) == ["DUPLICATE_FILE"]
+
+
+def test_a_style_sheet_starting_with_a_bom_is_read_without_it():
+    css = (build.HELLO_DIR / "dist/theme.css").read_bytes()
+    assert _codes(build.build_package(replace={"dist/theme.css": b"\xef\xbb\xbf" + css})) == []
+
+
 def _with_flag(data: bytes, name: str, flag: int) -> bytes:
     """``data`` with ``flag`` written into ``name``'s central directory entry."""
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
