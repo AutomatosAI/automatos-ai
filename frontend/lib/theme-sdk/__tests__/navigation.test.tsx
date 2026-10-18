@@ -9,15 +9,28 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const nav = vi.hoisted(() => ({
   router: { push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() },
   pathname: '/agents' as string | null,
+  search: new URLSearchParams('tab=blogs') as URLSearchParams | null,
 }))
 
-vi.mock('next/navigation', () => ({ useRouter: () => nav.router, usePathname: () => nav.pathname }))
+vi.mock('next/navigation', () => ({
+  useRouter: () => nav.router,
+  usePathname: () => nav.pathname,
+  useSearchParams: () => nav.search,
+}))
 
 import { filterNavForEdition } from '@/lib/auth-edition'
+import { EXPLORER_HREF } from '@/lib/deliverables/tabs'
 import { STUDIO_MENU_FOOTER, STUDIO_MENU_PRIMARY } from '@/lib/studio-menu'
 import { buildCoreNav } from '../internal/core-nav'
 import { isExternalHref, isInternalHref } from '../internal/href'
-import { HostLink, resolveActiveNavId, useHostPathname, useHostRouter } from '../navigation'
+import {
+  DELIVERABLE_EXPLORER_HREF,
+  HostLink,
+  resolveActiveNavId,
+  useHostPathname,
+  useHostRouter,
+  useHostSearchParams,
+} from '../navigation'
 
 const REFUSED = [
   '//evil.example',
@@ -45,6 +58,7 @@ const REFUSED_EXTERNAL = [
 afterEach(() => {
   Object.values(nav.router).forEach((fn) => fn.mockClear())
   nav.pathname = '/agents'
+  nav.search = new URLSearchParams('tab=blogs')
 })
 
 describe('PRD-261 A-10a — hrefs', () => {
@@ -89,6 +103,35 @@ describe('PRD-261 A-10a — useHostRouter and useHostPathname', () => {
     expect(renderHook(() => useHostPathname()).result.current).toBe('/agents')
     nav.pathname = null
     expect(renderHook(() => useHostPathname()).result.current).toBe('/')
+  })
+})
+
+describe('PRD-261 A-10c — useHostSearchParams and the explorer href', () => {
+  it("reads the query string as a copy, never the router's own object", () => {
+    const params = renderHook(() => useHostSearchParams()).result.current
+    expect(params.get('tab')).toBe('blogs')
+    expect(params.has('deliverable')).toBe(false)
+    expect(params).not.toBe(nav.search)
+  })
+
+  it('is empty when the router has no query string', () => {
+    nav.search = null
+    const params = renderHook(() => useHostSearchParams()).result.current
+    expect(params.toString()).toBe('')
+  })
+
+  it('keeps one copy while the query string stays the same, and a new one when it changes', () => {
+    const hook = renderHook(() => useHostSearchParams())
+    const first = hook.result.current
+    hook.rerender()
+    expect(hook.result.current).toBe(first)
+    nav.search = new URLSearchParams('tab=socials')
+    hook.rerender()
+    expect(hook.result.current.get('tab')).toBe('socials')
+  })
+
+  it("is the deliverables explorer's own route", () => {
+    expect(DELIVERABLE_EXPLORER_HREF).toBe(EXPLORER_HREF)
   })
 })
 

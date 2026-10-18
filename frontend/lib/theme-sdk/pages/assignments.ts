@@ -1,5 +1,6 @@
 /**
- * PRD-261 A-10a — SDK area `pages/assignments`: the data the /assignments missions tab and /missions/[id] read. Stubbed here; A-12e fills the bodies.
+ * PRD-261 A-10a — SDK area `pages/assignments`: the data the /assignments missions tab and /missions/[id] read
+ * (the Mission field and step-check names planned by A-10c, docs/theme-host/sdk-surface-map.md). Stubbed here; A-12e fills the bodies.
  * Until then every name throws "not in this SDK build" (internal/stub.ts), so a theme built
  * against a later SDK fails loudly. The names are the plan's (surface/pages-assignments.json): the
  * area's lane replaces bodies, never names, unless the A-10c surface map changes first.
@@ -19,3 +20,6 @@ export const useReplanMission = notInThisBuild(AREA, 'useReplanMission')
 export const useRerunMission = notInThisBuild(AREA, 'useRerunMission')
 export const useSaveAsRoutine = notInThisBuild(AREA, 'useSaveAsRoutine')
 export const useRecommendedAssignments = notInThisBuild(AREA, 'useRecommendedAssignments')
+export const useMissionField = notInThisBuild(AREA, 'useMissionField')
+export const useFieldQuery = notInThisBuild(AREA, 'useFieldQuery')
+export const useUpdateMissionSettings = notInThisBuild(AREA, 'useUpdateMissionSettings')

@@ -7,6 +7,7 @@
     "BOARD_HREF",
     "CHAT_HREF",
     "DELIVERABLES_HREF",
+    "DELIVERABLE_EXPLORER_HREF",
     "DELIVERABLE_PARAM",
     "HostLink",
     "LOOKS_HREF",
@@ -19,6 +20,7 @@
     "ticketHref",
     "useCoreNav",
     "useHostPathname",
-    "useHostRouter"
+    "useHostRouter",
+    "useHostSearchParams"
   ]
 }

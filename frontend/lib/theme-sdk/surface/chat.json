@@ -4,6 +4,12 @@
   "story": "A-11b",
   "status": "stub",
   "names": [
-    "useChatController"
+    "movedSomethingOnTheBoard",
+    "receiptLine",
+    "receiptLink",
+    "useChatController",
+    "useConversationList",
+    "useRecentChats",
+    "useStartChat"
   ]
 }

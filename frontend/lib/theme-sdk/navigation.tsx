@@ -1,6 +1,6 @@
 /**
  * PRD-261 A-10a — SDK area `navigation`: moving around the app without importing `next/*`.
- * `useHostRouter` and `useHostPathname` wrap the App Router's own, `HostLink` is the host's
+ * `useHostRouter`, `useHostPathname` and `useHostSearchParams` wrap the App Router's own, `HostLink` is the host's
  * `next/link` (an https href opens in a new tab instead), the hrefs are core's own route
  * builders, and `useCoreNav` is the Studio menu after the host's filters.
  *
@@ -9,7 +9,7 @@
  */
 import { forwardRef, useMemo, type AnchorHTMLAttributes, type ReactNode } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { useSystemRoleOptional } from '@/contexts/role-context'
@@ -31,6 +31,8 @@ export {
   questionHref,
   ticketHref,
 } from '@/lib/ticket-links'
+/** The deliverables file explorer's route (A-10c: Play's shelf links to it as its last tab). */
+export { EXPLORER_HREF as DELIVERABLE_EXPLORER_HREF } from '@/lib/deliverables/tabs'
 export type { CoreNav, CoreNavItem } from './internal/core-nav'
 
 export interface HostRouter {
@@ -40,6 +42,9 @@ export interface HostRouter {
   refresh(): void
   prefetch(href: string): void
 }
+
+/** The query string, read-only: a theme reads its parameters and never edits the router's own. */
+export type HostSearchParams = Pick<URLSearchParams, 'get' | 'getAll' | 'has' | 'toString' | 'forEach' | 'keys' | 'values' | 'entries'>
 
 export interface HostLinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'target' | 'rel'> {
   /** A path inside the app, or an https URL (opened in a new tab). */
@@ -74,6 +79,12 @@ export function useHostRouter(): HostRouter {
 /** The current path, without the query string. */
 export function useHostPathname(): string {
   return usePathname() ?? '/'
+}
+
+/** The current query string (A-10c: Play's shelf reads its tab from it), as a copy that changes when the URL does. */
+export function useHostSearchParams(): HostSearchParams {
+  const query = useSearchParams()?.toString() ?? ''
+  return useMemo(() => new URLSearchParams(query), [query])
 }
 
 /** A link: the host's client-side link for a path, a new tab for https, a TypeError for anything else. */

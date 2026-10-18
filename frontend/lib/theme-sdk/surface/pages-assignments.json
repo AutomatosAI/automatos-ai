@@ -6,7 +6,9 @@
   "names": [
     "useApproveMission",
     "useCancelMission",
+    "useFieldQuery",
     "useMission",
+    "useMissionField",
     "useMissions",
     "usePauseMission",
     "useRecommendedAssignments",
@@ -14,6 +16,7 @@
     "useReplanMission",
     "useRerunMission",
     "useResumeMission",
-    "useSaveAsRoutine"
+    "useSaveAsRoutine",
+    "useUpdateMissionSettings"
   ]
 }
