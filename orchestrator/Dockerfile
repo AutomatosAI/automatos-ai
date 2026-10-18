@@ -3,7 +3,7 @@
 # =============================================================================
 # Stages:
 #   - base: Common dependencies
-#   - development: Hot-reload, debugging tools
+#   - development: Hot reload; no code (compose mounts the source over /app)
 #   - production: Optimized, minimal image
 # =============================================================================
 
@@ -93,24 +93,25 @@ COPY --from=pybuild /install /usr/local
 # =============================================================================
 FROM base as development
 
+# No application code (PRD-262 US-017). Both compose files bind-mount ./orchestrator
+# over /app, which hid a baked copy, while `COPY . .` and a `chown -R /app` stored the
+# whole build context twice on every build, a checkout's uploads and caches included.
+# Run this stage with the source mounted at /app.
+#
+# The user and the directories the app writes, owned by it (no -R: they are empty), so
+# a fresh backend_logs or backend_data named volume mounted on one starts writable
+# (PRD-209: the credential key lives in /app/data). The production stage's first RUN,
+# word for word, so the two stages share the layer.
+RUN useradd -m -u 1000 automatos && \
+    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
+    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
+
 # The wait-migrate-seed entrypoint. It runs the lifecycle only for `migrate` or
 # AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it); otherwise it runs the CMD
 # directly. Compose also bind-mounts it, so edits apply without a rebuild.
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
-
-# Copy application code (Dockerfile is in orchestrator/, so copy from current dir)
-COPY . .
-
-# Create necessary directories and non-root user (matches production stage)
-RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports && \
-    useradd -m -u 1000 automatos && \
-    chown -R automatos:automatos /app
-
-# PRD-209: persisted credential-encryption key dir (compose mounts the backend_data
-# volume here; ownership set BEFORE the USER switch so a fresh named volume inherits it).
-RUN mkdir -p /app/data && chown -R automatos:automatos /app/data
 USER automatos
 
 # Expose port

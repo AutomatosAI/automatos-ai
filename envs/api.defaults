@@ -70,6 +70,13 @@ CREDENTIAL_KEY_FILE=/app/data/.credential_key
 # scripts/reingest_documents.py --move-uploads --apply.
 DOCUMENT_UPLOAD_DIR=/app/data/uploads
 
+# [ACTIVE] Generated documents, their thumbnails and the brand kit's files, on the
+# same volume (PRD-262 US-017). The code default `documents` is /app/documents, which
+# the source bind mount put in your checkout, so every source build sent them to
+# Docker. It is a cache: object storage (MinIO locally) keeps the persistent copy and
+# the app reads it back from there when the file is not on disk.
+DOCUMENT_STORAGE_DIR=/app/data/documents
+
 # [ACTIVE] The single local workspace every anonymous request resolves to.
 # This exact id is what the CI seed (orchestrator/scripts/init_test_db.py) and
 # the entrypoint seed create; validate_auth_edition() (config.py) hard-requires
