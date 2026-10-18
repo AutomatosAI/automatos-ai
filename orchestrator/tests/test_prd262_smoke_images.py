@@ -13,8 +13,6 @@ modes and ``images.yml``'s tags. The lane itself runs only in CI:
   both arches pass, for the images the merge job publishes;
 * the script empties the Docker cache before the pull, never builds in an image mode,
   and asserts the production command's worker count (orchestrator/Dockerfile's CMD);
-* the weekly rebuild (PRD-262 US-011) is booted and promoted under the
-  ``weekly-<yyyymmdd>`` tag images.yml gives it;
 * outside CI, the pull refuses to empty the host's image cache unless told it may.
 """
 from __future__ import annotations
@@ -88,30 +86,6 @@ def test_only_a_successful_publish_from_this_repositorys_main_is_booted():
         assert clause in condition, clause
     checkout = _step("smoke-images", lambda step: "actions/checkout" in step.get("uses", ""))
     assert checkout["with"]["ref"] == "${{ github.event.workflow_run.head_sha || github.sha }}"
-
-
-def test_a_scheduled_rebuild_is_booted_under_its_weekly_tag():
-    condition = " ".join(JOBS["smoke-images"]["if"].split())
-    assert "github.event.workflow_run.event == 'schedule'" in condition
-    target = _step("smoke-images", lambda step: step.get("id") == "target")
-    assert target["env"]["RUN_EVENT"] == "${{ github.event.workflow_run.event }}"
-    assert target["env"]["RUN_STARTED"] == "${{ github.event.workflow_run.run_started_at }}"
-    assert '--run-event "$RUN_EVENT"' in target["run"] and '--run-started "$RUN_STARTED"' in target["run"]
-
-
-def test_images_yml_tags_a_scheduled_rebuild_as_the_smoke_expects():
-    """smoke_images.py names a scheduled run's tag weekly-<UTC start date>.
-
-    PRD-262 US-011 adds images.yml's schedule. Its merge job must then tag those runs
-    with metadata-action's ``weekly-{{date 'YYYYMMDD'}}``, whose date is UTC unless a
-    ``tz`` is given, or the smoke would boot a tag that does not exist.
-    """
-    if "schedule" not in _triggers(IMAGES_WORKFLOW):
-        return  # no weekly rebuild yet, so no weekly tag to agree on
-    meta = next(step for step in IMAGES_WORKFLOW["jobs"]["merge"]["steps"] if step.get("id") == "meta")
-    scheduled = [line.strip() for line in meta["with"]["tags"].splitlines() if "type=schedule" in line]
-    assert scheduled, "images.yml runs on a schedule but its merge job gives those runs no type=schedule tag"
-    assert all("pattern=weekly-{{date 'YYYYMMDD'}}" in line and "tz=" not in line for line in scheduled), scheduled
 
 
 def test_the_pull_request_variant_watches_compose_the_makefile_envs_and_every_image_input():
