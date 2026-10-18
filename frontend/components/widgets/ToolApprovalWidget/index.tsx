@@ -17,6 +17,10 @@
  * PRD-260 T-005c: Play's chat renders this same card inline in Auto's reply and
  * passes onDecided, told once an approve or a deny went through, so Auto stops
  * waiting on the owner. Studio's canvas passes none.
+ *
+ * PRD-261 A-12c: the card is a protected surface — the exported widget wraps
+ * it in ProtectedSurface, so no theme stylesheet can hide it or switch off
+ * its buttons (components/theme-host/protected-surface.tsx).
  */
 
 import { useState } from 'react'
@@ -25,6 +29,7 @@ import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
+import { ProtectedSurface } from '@/components/theme-host/protected-surface'
 import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
@@ -58,7 +63,16 @@ export interface ToolApprovalWidgetProps extends WidgetBaseProps<ToolApprovalWid
   onDecided?: (decision: ApprovalDecision) => void
 }
 
-export function ToolApprovalWidget({
+/** Every place the card renders gets it guarded (the canvas, a chat reply, a theme's page). */
+export function ToolApprovalWidget(props: ToolApprovalWidgetProps) {
+  return (
+    <ProtectedSurface surface="tool-approval">
+      <ToolApprovalCard {...props} />
+    </ProtectedSurface>
+  )
+}
+
+function ToolApprovalCard({
   title,
   data,
   metadata,
