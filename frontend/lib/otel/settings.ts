@@ -42,9 +42,9 @@ export function redactQuery(url: string): string {
   return `${url.slice(0, start + 1)}${query}${url.slice(end)}`
 }
 
-/** An exception event's attributes that carry the error's text: never exported (#1107).
- * Next.js still writes the error itself to the web app's log. */
-export const EXCEPTION_TEXT = ['exception.message', 'exception.stacktrace'] as const
+/** All an exception event keeps on an exported span (#1107): its type, never its text,
+ * nor anything else recorded with it. Next.js still writes the error to the web app's log. */
+export const EXCEPTION_KEPT = ['exception.type', 'exception.escaped'] as const
 
 /** A span's attributes with the query values on its URL attributes redacted. */
 export function redactedAttributes<T extends Record<string, unknown>>(attributes: T): T {

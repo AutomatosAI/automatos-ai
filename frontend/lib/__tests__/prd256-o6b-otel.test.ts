@@ -106,9 +106,9 @@ describe('the provider', () => {
     expect(JSON.stringify([span.status, span.events])).not.toContain('SECRET')
   })
 
-  it('keeps a status that names a type and other events; drops a status of free text', async () => {
+  it("keeps a status that names the span's error.type and other events; drops any other status", async () => {
     const [named] = await exported({}, (tracer) => {
-      const span = tracer.startSpan('GET /chat')
+      const span = tracer.startSpan('GET /chat', { attributes: { 'error.type': 'agent_error' } })
       span.addEvent('retry', { attempt: 2 })
       span.setStatus({ code: SpanStatusCode.ERROR, message: 'agent_error' })
       return span
@@ -118,6 +118,16 @@ describe('the provider', () => {
     const [free] = await exported({}, (tracer) =>
       tracer.startSpan('GET /chat').setStatus({ code: SpanStatusCode.ERROR, message: 'no account for SECRET@bank.example' }))
     expect(free.status).toEqual({ code: SpanStatusCode.ERROR })
+    const [lookalike] = await exported({}, (tracer) =>
+      tracer.startSpan('GET /files').setStatus({ code: SpanStatusCode.ERROR, message: 'SECRET_report.xlsx' }))
+    expect(lookalike.status).toEqual({ code: SpanStatusCode.ERROR })
+  })
+
+  it('keeps only the type on an exception event, whatever else was recorded with it', async () => {
+    const [span] = await exported({}, (tracer) => tracer.startSpan('POST /api/chat').addEvent('exception', {
+      'exception.type': 'TypeError', 'exception.escaped': false, 'exception.message': 'SECRET', detail: 'SECRET',
+    }))
+    expect(span.events[0].attributes).toEqual({ 'exception.type': 'TypeError', 'exception.escaped': false })
   })
 
   it('drops a span it cannot redact, never sends it as it was', async () => {

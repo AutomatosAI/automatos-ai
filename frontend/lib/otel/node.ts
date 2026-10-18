@@ -25,39 +25,37 @@ import {
   type SpanExporter,
 } from '@opentelemetry/sdk-trace-node'
 
-import { DEFAULT_SERVICE_NAME, EXCEPTION_TEXT, redactQuery, redactedAttributes, samplerRatio } from './settings'
+import { DEFAULT_SERVICE_NAME, EXCEPTION_KEPT, redactQuery, redactedAttributes, samplerRatio } from './settings'
 
 /** The environment the settings are read from (process.env, or a test's own). */
 type Env = Record<string, string | undefined>
 
 type SpanEvent = ReadableSpan['events'][number]
 
-/** A short name, as an error type is ("TypeError", "agent_error"); free text is not. */
-const TYPE_NAME = /^[A-Za-z_][\w.]*$/
-
 /** An `exception` event keeps its type and drops its text: Next.js records a failure
  * with the error's message and stack trace, which can hold a URL or a user's data. */
 function typeOnlyEvent(event: SpanEvent): SpanEvent {
   if (event.name !== 'exception') return event
   const attributes = Object.fromEntries(Object.entries(event.attributes ?? {})
-    .filter(([key]) => !(EXCEPTION_TEXT as readonly string[]).includes(key)))
+    .filter(([key]) => (EXCEPTION_KEPT as readonly string[]).includes(key)))
   return { ...event, attributes }
 }
 
-/** What an ERROR status may say: the recorded exception's type, else the message when
- * it is a type name itself; never the error's text (Next.js copies its message there). */
-function failedType(events: SpanEvent[], message: string): string | undefined {
+/** What an ERROR status may say: the recorded exception's type, else the message when it
+ * is the span's own `error.type`; never the error's text (Next.js copies its message there),
+ * nor a word that merely looks like a type ("report_q3.xlsx"). */
+function failedType(events: SpanEvent[], attributes: ReadableSpan['attributes'], message: string): string | undefined {
   const typed = events.find((event) => event.name === 'exception' && event.attributes?.['exception.type'])
   if (typed) return String(typed.attributes?.['exception.type'])
-  const head = message.split(':', 1)[0].trim()
-  return TYPE_NAME.test(head) ? head : undefined
+  const errorType = attributes['error.type']
+  return errorType !== undefined && message === String(errorType) ? message : undefined
 }
 
 /** The span as exported: no query value in its name or URL attributes, and an error as
  * its type only. The span itself stays the prototype, so spanContext() still answers. */
 function redactedSpan(span: ReadableSpan): ReadableSpan {
   const events = span.events.map(typeOnlyEvent)
-  const status = span.status.message ? { ...span.status, message: failedType(events, span.status.message) } : span.status
+  const status = span.status.message ? { ...span.status, message: failedType(events, span.attributes, span.status.message) } : span.status
   return Object.create(span, {
     name: { value: redactQuery(span.name), enumerable: true },
     attributes: { value: redactedAttributes({ ...span.attributes }), enumerable: true },
