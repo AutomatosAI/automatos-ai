@@ -57,6 +57,7 @@ from core.models.themes import (  # noqa: E402
     ThemeWorkspaceSettings,
 )
 from core.workspaces.models import WorkspaceMember  # noqa: E402
+from services.themes import records  # noqa: E402
 from services.themes.records import PRIVATE_UPLOAD_SETTING  # noqa: E402
 
 WS_A = uuid.uuid4()
@@ -72,6 +73,8 @@ MEMBERS_DDL = (
     "user_id INTEGER NOT NULL, role VARCHAR(50), invited_by INTEGER, invited_at DATETIME, "
     "joined_at DATETIME, is_active BOOLEAN)"
 )
+# ``workspaces.owner_id`` names an owner who may have no member row (records.people_count).
+WORKSPACES_DDL = "CREATE TABLE workspaces (id CHAR(32) PRIMARY KEY, owner_id INTEGER)"
 
 
 def _ctx(workspace_id=WS_A, clerk="clerk-7"):
@@ -99,6 +102,7 @@ def api(monkeypatch):
         conn.execute(sa.text("CREATE TABLE users (id INTEGER PRIMARY KEY, clerk_user_id TEXT, email TEXT)"))
         conn.execute(sa.text("INSERT INTO users (id, clerk_user_id) VALUES (7, 'clerk-7'), (8, 'clerk-8')"))
         conn.execute(sa.text(MEMBERS_DDL))
+        conn.execute(sa.text(WORKSPACES_DDL))
     session = sessionmaker(bind=engine)()
     state = SimpleNamespace(db=session, ctx=_ctx(), role="owner")
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: state.role)
@@ -179,6 +183,24 @@ def test_each_default_per_edition_and_member_count(api, monkeypatch, edition, sw
     assert (body["membersMayChoose"], body["installRole"], body["canInstall"]) == (True, "admins", True)
     assert body["installRoles"] == ["admins", "owner"]
     assert (body["defaultInstallId"], body["pins"], body["updatedAt"]) == (None, [], None)
+
+
+def test_an_owner_without_a_member_row_and_one_member_are_two_people_so_auto_is_off(api):
+    # S2: workspaces.owner_id names an owner who has no workspace_members row; with one
+    # member that is two people, so SaaS ``auto`` defaults uploads off.
+    api.db.execute(sa.text("INSERT INTO workspaces (id, owner_id) VALUES (:id, :owner)"), {"id": WS_A.hex, "owner": 99})
+    api.db.commit()
+    _members(api.db, WS_A, 1)
+    assert records.people_count(api.db, WS_A) == 2
+    assert _get(api)["privateUploads"]["default"] == "off"
+
+
+def test_an_owner_who_is_also_the_member_counts_once(api):
+    api.db.execute(sa.text("INSERT INTO workspaces (id, owner_id) VALUES (:id, :owner)"), {"id": WS_A.hex, "owner": 1})
+    api.db.commit()
+    _members(api.db, WS_A, 1)  # user_id 1
+    assert records.people_count(api.db, WS_A) == 1
+    assert _get(api)["privateUploads"]["default"] == "on"
 
 
 def test_auto_is_a_default_an_admin_can_switch_on_and_null_puts_it_back(api):

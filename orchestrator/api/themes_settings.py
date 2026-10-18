@@ -16,7 +16,7 @@ Routes (plan §2.2; B2-wire registers the router and lists both routes in
 
 "Member" is ``require_workspace_permission("members:read")``, "manage" is
 ``"workspace:manage"``; "step-up" is A-07c's ``require_step_up`` at
-``THEME_STEP_UP_MAX_AGE_MINUTES``, after the gate. Changing who may install also needs the old and the new install
+``STEP_UP_MAX_AGE_MINUTES``, after the gate. Changing who may install also needs the old and the new install
 permission, and a pin needs the install permission (``services/themes/settings.py``). An
 install of another workspace answers 404. The workspace default is set by
 ``PUT /api/themes/default`` (A-07b), never here. Users are resolved with
@@ -57,7 +57,7 @@ router = APIRouter(prefix="/api/themes", tags=["themes"])
 
 MEMBER = require_workspace_permission("members:read")
 MANAGE = require_workspace_permission("workspace:manage")
-STEP_UP = require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES)
+STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
 # The wire names of plan §2.2 -> the keys ``apply_settings`` reads.
 SCALAR_FIELDS = {

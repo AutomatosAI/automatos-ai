@@ -59,7 +59,7 @@ from core.auth.hybrid import get_request_context_hybrid
 logger = logging.getLogger(__name__)
 
 # Gerard D1-a/e (18 Oct 2026): ten minutes. B2-wire passes
-# config.THEME_STEP_UP_MAX_AGE_MINUTES; this is the fallback default.
+# config.STEP_UP_MAX_AGE_MINUTES; this is the fallback default.
 DEFAULT_MAX_AGE_MINUTES = 10
 
 # Clerk's level names (@clerk/shared authorization.js ALLOWED_LEVELS).
@@ -205,7 +205,7 @@ def require_step_up(max_age_minutes: int = DEFAULT_MAX_AGE_MINUTES) -> Callable:
 
     Apply it next to the route's permission gate, e.g.
     ``dependencies=[Depends(require_workspace_permission("workspace:manage")),
-    Depends(require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES))]``.
+    Depends(require_step_up(config.STEP_UP_MAX_AGE_MINUTES))]``.
     """
     max_age = _validated_max_age(max_age_minutes)
 

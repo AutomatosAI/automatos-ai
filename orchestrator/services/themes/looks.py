@@ -33,15 +33,14 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from config import config
 from core.models.themes import ThemeInstallation, ThemeLook, ThemePackage
-from core.storage import get_s3_client
 from services.themes.contract import ThemeError, echo, parse_json, theme_error
 from services.themes.digest import sha256_hex
 from services.themes.look_schema import (
     PRESET_SUFFIX, PRESETS_DIR, SCHEMA_PATH, LookSchema, preset_paths, validate_look, validate_look_schema,
 )
 from services.themes.manifest import ID_PATTERN
+from services.themes.serve import ThemeStorageUnavailable, read_stored_file
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +56,6 @@ BODY_FIELDS = ("looks", "active")
 # Checked looks/schema.json documents, by the sha256 of the file (content-addressed, so safe
 # to share between packages and workspaces).
 SCHEMA_CACHE_SIZE = 64
-THEMES_STORAGE_ROOT = "themes/"
 MARKETPLACE_OWNER = "marketplace"
 
 NOT_INSTALLED = "This theme isn't installed in this workspace."
@@ -107,23 +105,6 @@ def builtin_play_schema() -> LookSchema:
     return schema
 
 
-def _object_key(prefix: str, path: str) -> str:
-    """The storage key of ``path`` in a package stored under ``prefix`` (a row this server wrote)."""
-    parts = prefix.rstrip("/").split("/")
-    if not prefix.startswith(THEMES_STORAGE_ROOT) or not prefix.endswith("/") or any(
-        part in ("", ".", "..") for part in parts
-    ):
-        raise ValueError(f"Not a theme storage prefix: {prefix!r}")
-    return f"{prefix}{path}"
-
-
-def read_package_file(package: ThemePackage, path: str) -> bytes:
-    """One stored file of ``package`` (blocking: call it from a plain-``def`` route)."""
-    key = _object_key(package.storage_prefix, path)
-    response = get_s3_client().get_object(Bucket=config.MARKETPLACE_S3_BUCKET, Key=key)
-    return response["Body"].read()
-
-
 class _SchemaCache:
     """A small bounded map of checked schemas by file sha256, safe across threadpool workers."""
 
@@ -148,10 +129,12 @@ _schema_cache = _SchemaCache(SCHEMA_CACHE_SIZE)
 
 def _stored_schema_bytes(package: ThemePackage, expected_sha: str) -> bytes:
     try:
-        raw = read_package_file(package, SCHEMA_PATH)
-    except Exception as exc:
+        raw = read_stored_file(package.storage_prefix, SCHEMA_PATH)
+    except ThemeStorageUnavailable as exc:
         logger.exception("Could not read %s of theme package %s", SCHEMA_PATH, package.id)
         raise LooksError(503, SCHEMA_UNAVAILABLE) from exc
+    if raw is None:
+        raise LooksError(503, SCHEMA_UNAVAILABLE)  # read_stored_file logged the missing object
     if sha256_hex(raw) != expected_sha:
         logger.error("Stored %s of theme package %s does not match its file manifest", SCHEMA_PATH, package.id)
         raise LooksError(503, SCHEMA_UNAVAILABLE)

@@ -111,7 +111,7 @@ def db():
 def storage(monkeypatch):
     """The package files a test stored, by (storage prefix, path); a fresh schema cache."""
     files = {}
-    monkeypatch.setattr(looks_service, "read_package_file", lambda package, path: files[(package.storage_prefix, path)])
+    monkeypatch.setattr(looks_service, "read_stored_file", lambda prefix, path: files.get((prefix, path)))
     monkeypatch.setattr(looks_service, "_schema_cache", looks_service._SchemaCache(8))
     return files
 

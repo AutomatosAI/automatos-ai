@@ -8,11 +8,12 @@ upload identical bytes each get their own row and their own files.
 Who may upload (A-07a with A-07e's workspace setting, D1-b):
 
 * the platform switch ``THEMES_PRIVATE_UPLOAD`` (``on|off|admins|auto``, default ``auto``) is
-  read through ``config`` once B2-wire names it. ``off`` is a ceiling; ``admins`` lets only a
+  read from ``config``. ``off`` is a ceiling; ``admins`` lets only a
   platform admin (``caller_is_admin``) upload; ``on`` and ``auto`` defer to the workspace;
 * the workspace setting (``theme_workspace_settings.private_uploads``) is ``on``, ``off`` or NULL.
   NULL means the default: ``on``, except under ``auto`` in the SaaS edition, where it is ``on``
-  only in a single-member workspace (Q6). ``auto`` sets the default, not a ceiling: a workspace
+  only in a workspace of one person (Q6): the distinct people in its active member rows plus
+  its owner (``workspaces.owner_id``, who may have no member row). ``auto`` sets the default, not a ceiling: a workspace
   admin may switch it on.
 
 An upload of a version this workspace already holds with other files is refused, and so is one
@@ -28,12 +29,13 @@ import logging
 from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 from uuid import UUID
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.roles import caller_is_admin
 from core.models.themes import ThemeInstallation, ThemePackage, ThemeWorkspaceSettings
+from core.models.workspaces import Workspace
 from core.workspaces.models import WorkspaceMember
 from services.themes.contract import RESERVED_PUBLISHERS, echo
 from services.themes.manifest import VERSION_PATTERN
@@ -46,7 +48,7 @@ SWITCH_ON, SWITCH_OFF, SWITCH_ADMINS, SWITCH_AUTO = "on", "off", "admins", "auto
 PRIVATE_UPLOAD_SWITCHES: Tuple[str, ...] = (SWITCH_ON, SWITCH_OFF, SWITCH_ADMINS, SWITCH_AUTO)
 PRIVATE_UPLOAD_DEFAULT = SWITCH_AUTO
 SETTING_ON, SETTING_OFF = "on", "off"
-SINGLE_MEMBER = 1
+SINGLE_PERSON = 1
 OWNER_WORKSPACE = "workspace"
 PUBLISHER_SEPARATOR = "/"
 
@@ -85,7 +87,7 @@ def _workspace(workspace_id: Any) -> UUID:
 
 def private_upload_switch() -> str:
     """The platform switch; a value it doesn't know is read as ``off`` (fail closed) and logged."""
-    raw = getattr(config, PRIVATE_UPLOAD_SETTING, PRIVATE_UPLOAD_DEFAULT)
+    raw = config.THEMES_PRIVATE_UPLOAD
     value = str(raw or PRIVATE_UPLOAD_DEFAULT).strip().lower()
     if value not in PRIVATE_UPLOAD_SWITCHES:
         logger.warning("[Themes] %s=%r is not one of %s: private uploads are off", PRIVATE_UPLOAD_SETTING, raw, PRIVATE_UPLOAD_SWITCHES)
@@ -93,14 +95,24 @@ def private_upload_switch() -> str:
     return value
 
 
-def active_member_count(db: Session, workspace_id: Any) -> int:
-    """How many active member rows the workspace has (0 when only ``workspaces.owner_id`` names its owner)."""
-    count = (
-        db.query(func.count(WorkspaceMember.id))
-        .filter(WorkspaceMember.workspace_id == _workspace(workspace_id), WorkspaceMember.is_active.is_(True))
-        .scalar()
+def people_count(db: Session, workspace_id: Any) -> int:
+    """How many distinct people the workspace has: its active members plus its owner.
+
+    ``workspaces.owner_id`` names an owner who may have no member row, so counting member rows
+    alone would read an owner with one member as a single-person workspace.
+    """
+    ws = _workspace(workspace_id)
+    member_rows = (
+        db.query(WorkspaceMember.user_id)
+        .filter(WorkspaceMember.workspace_id == ws, WorkspaceMember.is_active.is_(True))
+        .distinct()
+        .all()
     )
-    return int(count or 0)
+    people = {row.user_id for row in member_rows}
+    owner_id = db.query(Workspace.owner_id).filter(Workspace.id == ws).scalar()
+    if owner_id is not None:
+        people.add(owner_id)
+    return len(people)
 
 
 def default_private_uploads(db: Session, workspace_id: Any, switch: str) -> str:
@@ -109,7 +121,7 @@ def default_private_uploads(db: Session, workspace_id: Any, switch: str) -> str:
         return SETTING_OFF
     if switch != SWITCH_AUTO or config.IS_LOCAL_EDITION:
         return SETTING_ON
-    return SETTING_ON if active_member_count(db, workspace_id) <= SINGLE_MEMBER else SETTING_OFF
+    return SETTING_ON if people_count(db, workspace_id) <= SINGLE_PERSON else SETTING_OFF
 
 
 def stored_private_uploads(db: Session, workspace_id: Any) -> Optional[str]:

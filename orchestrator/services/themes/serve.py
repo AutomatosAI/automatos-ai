@@ -43,20 +43,21 @@ from uuid import UUID
 from sqlalchemy import or_
 
 from config import config
-from core.models.themes import ThemeInstallation, ThemeOptIn, ThemePackage
+from core.models.themes import ThemeInstallation, ThemePackage
 from core.storage import get_s3_client
 from services.themes.choices import is_private
 from services.themes.contract import HTML_CLASS_OWNERS, parse_json
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import sha256_hex
 from services.themes.membership import Membership
+from services.themes.optin import has_opted_in
 from services.themes.revocations import is_disabled
+from services.themes.storage import theme_key
 
 logger = logging.getLogger(__name__)
 
 FILES_ROUTE = "/api/themes/files"
 DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
-STORAGE_ROOT = "themes/"
 MARKETPLACE = "marketplace"
 APPROVED = "approved"
 # A Marketplace package keeps serving its installs once deactivated (a revocation is the kill
@@ -68,9 +69,6 @@ REFUSED_SUFFIXES = (".svg", ".svgz")
 REFUSED_TYPES = frozenset({"image/svg+xml"})
 INTEGRITY_PREFIX = "sha256-"
 MISSING_OBJECT_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
-
-FILE_CACHE_SETTING = "THEME_FILE_CACHE_SECONDS"  # named in config.py by B2-wire
-FILE_CACHE_DEFAULT_SECONDS = 86400
 
 STUDIO_BASE = "studio"
 STUDIO_HTML_CLASS = "studio"
@@ -100,8 +98,8 @@ class BootTarget(NamedTuple):
 
 
 def file_cache_seconds() -> int:
-    """How long a browser may keep a theme file (``THEME_FILE_CACHE_SECONDS`` once B2-wire names it)."""
-    return int(getattr(config, FILE_CACHE_SETTING, FILE_CACHE_DEFAULT_SECONDS))
+    """How long a browser may keep a theme file (``THEME_FILE_CACHE_SECONDS``)."""
+    return int(config.THEME_FILE_CACHE_SECONDS)
 
 
 def _storage_error_code(exc: Exception) -> str:
@@ -110,37 +108,32 @@ def _storage_error_code(exc: Exception) -> str:
 
 
 def read_stored_file(storage_prefix: str, path: str) -> Optional[bytes]:
-    """One stored theme file's bytes from the Marketplace bucket (blocking; plain-``def`` routes only)."""
-    if not storage_prefix.startswith(STORAGE_ROOT) or not storage_prefix.endswith("/"):
-        raise ThemeStorageUnavailable(f"Not a theme storage prefix: {storage_prefix!r}")
-    key = f"{storage_prefix}{path}"
+    """One stored theme file's bytes from the Marketplace bucket, or None when the object is gone.
+
+    The one stored-file reader (the files and boot routes, ``looks.py``): blocking, so plain-``def``
+    routes only. The key comes from ``storage.theme_key``, the one prefix and path check.
+    """
+    try:
+        key = theme_key(storage_prefix, path)
+    except ValueError as exc:
+        logger.error("Theme package row has an unusable storage key (%r, %r)", storage_prefix, path)
+        raise ThemeStorageUnavailable("Theme storage is unavailable.") from exc
     try:
         response = get_s3_client().get_object(Bucket=config.MARKETPLACE_S3_BUCKET, Key=key)
         return response["Body"].read()
     except Exception as exc:
         if _storage_error_code(exc) in MISSING_OBJECT_CODES:
-            logger.error("Theme file %s is listed in its package but missing from storage", key)
+            logger.error("Theme file %r is listed in its package but missing from storage", key)
             return None
-        logger.exception("Theme file %s could not be read from storage", key)
+        logger.exception("Theme file %r could not be read from storage", key)
         raise ThemeStorageUnavailable("Theme storage is unavailable.") from exc
-
-
-def _opted_in(db: Any, workspace_id: Any, user_pk: Optional[int], package_id: Any) -> bool:
-    if user_pk is None:
-        return False
-    row = (
-        db.query(ThemeOptIn.id)
-        .filter(ThemeOptIn.workspace_id == workspace_id, ThemeOptIn.user_id == user_pk, ThemeOptIn.package_id == package_id)
-        .first()
-    )
-    return row is not None
 
 
 def may_run(db: Any, membership: Membership, install: ThemeInstallation, package: ThemePackage) -> bool:
     """A member may run an installed package: reviewed Marketplace code always, private code after opting in to it."""
     if not is_private(package):
         return True
-    return _opted_in(db, install.workspace_id, membership.user_pk, package.id)
+    return has_opted_in(db, install.workspace_id, membership.user_pk, package.id)
 
 
 def belongs_to_install(install: ThemeInstallation, package: ThemePackage) -> bool:
@@ -211,7 +204,7 @@ def verified_file(package: ThemePackage, path: str, reader: FileReader) -> Tuple
         raise ThemeFileMissing(path)
     if sha256_hex(data) != row["sha256"]:
         logger.error(
-            "Theme file %s of package %s (digest %s) does not match its file manifest: refused as tampered",
+            "Theme file %r of package %s (digest %s) does not match its file manifest: refused as tampered",
             path, package.id, package.digest,
         )
         raise ThemeFileMissing(path)
@@ -229,13 +222,22 @@ def module_url(digest: str, path: str) -> str:
 
 
 def module_integrity(package: ThemePackage) -> Dict[str, str]:
-    """``{module URL: 'sha256-<base64>'}`` for every JS module the package lists (PA-13)."""
+    """``{module URL: 'sha256-<base64>'}`` for every JS module the package lists (PA-13).
+
+    The one integrity map: the boot route and ``active`` (``defaults.py``) both carry it. A module
+    is a ``.js`` path listed as ``text/javascript``; one without a valid sha256 is left out and logged.
+    """
     manifest = package.file_manifest if isinstance(package.file_manifest, dict) else {}
-    return {
-        module_url(package.digest, path): integrity_value(row["sha256"])
-        for path, row in sorted(manifest.items())
-        if path.endswith(MODULE_SUFFIX) and isinstance(row, dict) and row.get("type") == MODULE_TYPE
-    }
+    pinned: Dict[str, str] = {}
+    for path, row in sorted(manifest.items()):
+        if not path.endswith(MODULE_SUFFIX) or not isinstance(row, dict) or row.get("type") != MODULE_TYPE:
+            continue
+        sha = row.get("sha256")
+        if not isinstance(sha, str) or DIGEST_PATTERN.fullmatch(sha) is None:  # a sha256 hex, like a digest
+            logger.error("Theme package %s has no valid sha256 for %r", package.id, path)
+            continue
+        pinned[module_url(package.digest, path)] = integrity_value(sha)
+    return pinned
 
 
 def boot_target(db: Any, membership: Membership, install_id: UUID) -> Optional[BootTarget]:

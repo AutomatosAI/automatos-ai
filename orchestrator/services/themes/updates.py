@@ -26,25 +26,28 @@ from core.models.themes import ThemeInstallation, ThemePackage
 from services.themes.choices import (
     CONFLICT,
     MARKETPLACE_OWNER,
-    REVOCATION_DISABLE,
+    NOT_FOUND,
+    PACKAGE_NOT_FOUND,
     ThemeInstallError,
     active_install,
     active_installs,
     forget_choices_of,
     is_private,
     package_is_visible,
-    revocation_of,
     visible_package,
 )
-from services.themes.defaults import PRIVATE_DEFAULT, WITHDRAWN, can_be_default, revocation_body
+from services.themes.defaults import PRIVATE_DEFAULT, WITHDRAWN, can_be_default
 from services.themes.drift import needs_update
 from services.themes.optin import opt_in_state
+from services.themes.records import version_key
+from services.themes.revocations import disables, revocation_body, revocation_of
 
 APPROVED = "approved"
 CLOSED_STATUSES = ("rejected", "deactivated")
 
 OTHER_THEME = "That package is a different theme."
 SAME_VERSION = "The install already runs that version."
+NOT_NEWER = "That version is not newer than the one installed. Use rollback to go back to the previous version."
 NOT_APPROVED = "That Marketplace version isn't approved yet."
 CLOSED = "That version was rejected or withdrawn."
 NO_PREVIOUS = "There is no earlier version to go back to."
@@ -89,8 +92,13 @@ def list_installed(db: Session, workspace_id: UUID, user_pk: Optional[int]) -> L
     return [install_row(db, workspace_id, user_pk, install) for install in active_installs(db, workspace_id)]
 
 
+def _unlisted_marketplace(package: ThemePackage) -> bool:
+    """A Marketplace version that is not approved (pending, rejected or deactivated)."""
+    return package.owner_type == MARKETPLACE_OWNER and package.status != APPROVED
+
+
 def _refuse_unusable(package: ThemePackage) -> None:
-    if package.owner_type == MARKETPLACE_OWNER and package.status != APPROVED:
+    if _unlisted_marketplace(package):
         raise ThemeInstallError(CONFLICT, NOT_APPROVED)
     if package.status in CLOSED_STATUSES:
         raise ThemeInstallError(CONFLICT, CLOSED)
@@ -104,8 +112,7 @@ def _check_switch(db: Session, install: ThemeInstallation, target: ThemePackage)
         ))
     if install.is_default and not can_be_default(target):
         raise ThemeInstallError(CONFLICT, PRIVATE_DEFAULT)
-    revocation = revocation_of(db, target)
-    if revocation is not None and revocation.level == REVOCATION_DISABLE:
+    if disables(revocation_of(db, target)):
         raise ThemeInstallError(CONFLICT, WITHDRAWN)
 
 
@@ -146,6 +153,9 @@ def compare(db: Session, workspace_id: UUID, install_id: UUID, package_id: UUID)
     install = active_install(db, workspace_id, install_id)
     current = visible_package(db, workspace_id, install.package_id)
     target = _target(db, workspace_id, install, package_id)
+    if _unlisted_marketplace(target):
+        # A pending or rejected Marketplace version is not one this workspace may see: 404, as missing.
+        raise ThemeInstallError(NOT_FOUND, PACKAGE_NOT_FOUND)
     return {
         "installId": str(install.id),
         "from": {"packageId": str(current.id), "version": current.version, "reviewed": bool(current.reviewed)},
@@ -159,6 +169,9 @@ def apply_update(db: Session, workspace_id: UUID, install_id: UUID, package_id: 
     """Move the install to ``package_id``; the old package becomes the rollback target."""
     install = active_install(db, workspace_id, install_id)
     target = _target(db, workspace_id, install, package_id)
+    current = visible_package(db, workspace_id, install.package_id)
+    if version_key(target.version) <= version_key(current.version):
+        raise ThemeInstallError(CONFLICT, NOT_NEWER)
     _refuse_unusable(target)
     _check_switch(db, install, target)
     install.previous_package_id = install.package_id

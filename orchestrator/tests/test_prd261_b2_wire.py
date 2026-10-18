@@ -7,8 +7,8 @@ Pins (plan §2.4 W-B2 row, §2.6 B2-wire; Gerard D1-a/d/e):
   ``test_route_manifest.py`` / authZ-sweep precedent);
 * every W-B2 route is in ``reports/route-manifest.json`` and ``route_count == len(routes)``;
 * the step-up dependency (A-07c) is on EXACTLY the routes §2.2 marks (import, opt-in,
-  default, update, rollback, the settings PUT) plus the workspace role change (D1-d, #1157), each
-  after its permission gate, and the app renders its refusal with ``clerk_error`` at the
+  default, update, rollback, the settings PUT), each after its permission gate, and NOT on the
+  workspace role change (its step-up lands with the client flow, PRD-261 W-A2, #1157), and the app renders its refusal with ``clerk_error`` at the
   top level;
 * "who may install" (A-07e) gates import, update and rollback;
 * every W-B2 mutating route carries ``require_workspace_permission`` (authZ-sweep bucket a);
@@ -18,7 +18,7 @@ Pins (plan §2.4 W-B2 row, §2.6 B2-wire; Gerard D1-a/d/e):
 * the app's security-headers middleware keeps the files route's ``sandbox`` CSP, and puts
   ``default-src 'none'`` in front of a route policy that names none.
 
-The refusals themselves, on the real routes and on the role change, are
+The refusals themselves, on the real routes, are
 ``test_prd261_b2_step_up_routes.py``.
 """
 from __future__ import annotations
@@ -148,7 +148,7 @@ def test_every_w_b2_route_is_in_the_manifest_and_the_count_holds():
 
 def test_every_theme_config_name_is_on_config_and_in_the_config_surface():
     names = {"THEMES_PRIVATE_UPLOAD", "THEMES_MARKETPLACE", "THEME_MAX_PACKAGE_MB", "THEME_MAX_CODE_KB",
-             "THEME_MAX_ENTRY_KB", "THEME_MAX_CLIP_KB", "THEME_FILE_CACHE_SECONDS", "THEME_STEP_UP_MAX_AGE_MINUTES"}
+             "THEME_MAX_ENTRY_KB", "THEME_MAX_CLIP_KB", "THEME_FILE_CACHE_SECONDS", "STEP_UP_MAX_AGE_MINUTES"}
     surface = set(json.loads((ORCH / "reports" / "config-surface.json").read_text(encoding="utf-8"))["settings"])
     assert names <= surface
     for name in names:
@@ -157,7 +157,7 @@ def test_every_theme_config_name_is_on_config_and_in_the_config_surface():
 
 def test_the_config_defaults_are_gerards_d1_values():
     defaults = {"THEME_MAX_CODE_KB": 3072, "THEME_MAX_ENTRY_KB": 300, "THEME_MAX_CLIP_KB": 1024,
-                "THEME_STEP_UP_MAX_AGE_MINUTES": 10}
+                "STEP_UP_MAX_AGE_MINUTES": 10}
     source = (ORCH / "config.py").read_text(encoding="utf-8")
     for name, value in defaults.items():
         assert f'os.getenv("{name}", "{value}")' in source, name
@@ -177,20 +177,19 @@ def test_step_up_is_on_exactly_the_marked_theme_routes_after_the_gate():
         if at is None:
             continue
         marked.add(key)
-        assert getattr(calls[at], step_up.STEP_UP_MARKER_ATTR) == config.THEME_STEP_UP_MAX_AGE_MINUTES
+        assert getattr(calls[at], step_up.STEP_UP_MARKER_ATTR) == config.STEP_UP_MAX_AGE_MINUTES
         assert _index(calls, _is_gate) < at, f"{key}: the permission gate must run before step-up"
     assert marked == STEP_UP_ROUTES
 
 
-def test_the_role_change_route_carries_step_up_after_its_gate():
+def test_no_team_route_carries_step_up_until_w_a2():
+    # The role change's only client cannot show Clerk's reverification prompt yet (W-A2, #1157).
     marked = set()
     for route in team_api.router.routes:
         for method in route.methods - {"HEAD", "OPTIONS"}:
-            calls = _calls(route.dependant)
-            if _index(calls, _is_step_up) is not None:
+            if _index(_calls(route.dependant), _is_step_up) is not None:
                 marked.add((method, route.path))
-                assert _index(calls, _is_gate) < _index(calls, _is_step_up)
-    assert marked == {ROLE_CHANGE}
+    assert marked == set()
 
 
 def test_who_may_install_gates_import_update_and_rollback():
@@ -290,7 +289,7 @@ def test_the_app_serves_every_w_b2_route_exactly_once(live_app):
 
 
 def test_the_app_carries_step_up_on_exactly_the_planned_routes(live_app):
-    assert {_key(name) for name in live_app["step_up"]} == STEP_UP_ROUTES | {ROLE_CHANGE}
+    assert {_key(name) for name in live_app["step_up"]} == STEP_UP_ROUTES
     assert live_app["handler"] is True
 
 

@@ -17,7 +17,8 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
 already in this workspace (never a misleading 409); 409 for a version clash.
 
 Gates, in order: ``workspace:manage``, the workspace's "who may install" setting (A-07e's
-``require_install_role``) and a fresh step-up (A-07c, ``THEME_STEP_UP_MAX_AGE_MINUTES``). B2-wire
+``require_install_role``), the private-upload switch and setting (``require_private_uploads``; a
+refused upload is never asked to reverify) and a fresh step-up (A-07c, ``STEP_UP_MAX_AGE_MINUTES``). B2-wire
 registers the router in ``main.py`` with a body-size limit for ``THEME_IMPORT_ROUTE``
 (``services/themes/package.py``); tests mount it on a test app. A plain ``def`` (a synchronous session
 and S3 client, run in the threadpool).
@@ -57,7 +58,7 @@ router = APIRouter(prefix="/api/themes", tags=["Themes"])
 THEME_IMPORT_PERMISSION = "workspace:manage"
 MANAGE_GATE = require_workspace_permission(THEME_IMPORT_PERMISSION)
 INSTALL_ROLE_GATE = require_install_role()
-STEP_UP = require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES)
+STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
 IMPORT_REFUSED = "This theme can't be installed."
 STORE_FAILED = "The theme's files couldn't be stored. Try again."
@@ -124,6 +125,18 @@ def _refuse(status: int, message: str) -> HTTPException:
     return HTTPException(status_code=status, detail=message)
 
 
+def require_private_uploads(
+    ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
+) -> None:
+    """403 with the plain reason when uploads are off for this caller.
+
+    Listed before the step-up, so a caller who can't upload anyway is never asked to reverify.
+    """
+    refusal = private_upload_refusal(db, ctx)
+    if refusal is not None:
+        raise _refuse(403, refusal)
+
+
 def _after_integrity_error(db: Session, ctx: RequestContext, checked: CheckedThemePackage, exc: IntegrityError) -> SavedUpload:
     """A concurrent upload won the unique index: its package when it holds these bytes, else 409.
 
@@ -156,7 +169,9 @@ def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, packag
 
 @router.post(
     "/import", status_code=201,
-    dependencies=[Depends(MANAGE_GATE), Depends(INSTALL_ROLE_GATE), Depends(STEP_UP)],
+    dependencies=[
+        Depends(MANAGE_GATE), Depends(INSTALL_ROLE_GATE), Depends(require_private_uploads), Depends(STEP_UP),
+    ],
 )
 def import_theme(
     response: Response,
@@ -165,9 +180,6 @@ def import_theme(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Upload a .autotheme into this workspace only; returns the package, its scan and the install."""
-    refusal = private_upload_refusal(db, ctx)
-    if refusal is not None:
-        raise _refuse(403, refusal)
     checked, package_bytes = _read_upload(file)
     refusal = reserved_publisher_refusal(checked.manifest["id"], ctx.user)
     if refusal is not None:

@@ -17,7 +17,7 @@ Routes (plan §2.2; B2-wire registers the router and lists the routes in
 
 "Member" is ``require_workspace_permission("members:read")``, "manage" is
 ``"workspace:manage"``; "step-up" is A-07c's ``require_step_up`` at
-``THEME_STEP_UP_MAX_AGE_MINUTES``, layered after the gate so a non-member is refused before
+``STEP_UP_MAX_AGE_MINUTES``, layered after the gate so a non-member is refused before
 any reverification prompt; "who installs" is A-07e's ``require_install_role``. Every route is scoped to the caller's workspace and answers 404,
 never 403, for another workspace's install or package. Users are resolved with
 ``resolve_user_pk``, so the local edition's anonymous owner and a Clerk member both work.
@@ -32,6 +32,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import config
@@ -43,7 +44,7 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.themes import THEME_CHOICE_LENGTH
 from services.themes import updates
-from services.themes.choices import NOT_FOUND, ThemeInstallError, set_choice
+from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError, set_choice
 from services.themes.defaults import resolve_active, set_default
 from services.themes.optin import record_opt_in
 from services.themes.settings import require_install_role
@@ -55,12 +56,14 @@ router = APIRouter(prefix="/api/themes", tags=["themes"])
 MEMBER = require_workspace_permission("members:read")
 MANAGE = require_workspace_permission("workspace:manage")
 INSTALL_ROLE = require_install_role()
-STEP_UP = require_step_up(config.THEME_STEP_UP_MAX_AGE_MINUTES)
+STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 # A route with more than one gate lists them in order in ``dependencies`` (the permission
 # first, so a non-member is refused before any reverification prompt) and reads the caller
 # with the shared hybrid dependency, so each gate appears once in the route's tree.
 CALLER = get_request_context_hybrid
 NO_WORKSPACE = "Choose a workspace first."
+# Two writes raced on a unique index (two admins setting the default at once): nothing was saved.
+CONCURRENT_CHANGE = "Someone changed this at the same moment. Reload and try again."
 
 T = TypeVar("T")
 
@@ -103,6 +106,10 @@ def _run(db: Session, work: Callable[[], T], commit: bool) -> T:
     except ThemeInstallError as refusal:
         db.rollback()
         raise HTTPException(status_code=refusal.status_code, detail=refusal.message) from refusal
+    except IntegrityError as clash:
+        db.rollback()
+        logger.warning("theme write lost a race on a unique index: %s", clash.orig.__class__.__name__)
+        raise HTTPException(status_code=CONFLICT, detail=CONCURRENT_CHANGE) from clash
 
 
 def _install_answer(db: Session, ctx: RequestContext, install: Any) -> Dict[str, Any]:

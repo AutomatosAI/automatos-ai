@@ -5,13 +5,13 @@ gate (only the caller's workspace role is stubbed) and the REAL step-up dependen
 
 * in SaaS, import, opt-in, default, update, rollback and the settings PUT answer 403 with Clerk's
   reverification body at the top level when the first factor is missing, never verified or
-  older than ``THEME_STEP_UP_MAX_AGE_MINUTES``, and no handler runs;
+  older than ``STEP_UP_MAX_AGE_MINUTES``, and no handler runs;
 * a caller the permission gate refuses gets the plain 403, never a reverification prompt;
 * rollback (it switches the running theme code, like update) runs with a fresh step-up in
   SaaS and with none in the local edition;
-* the workspace role change (``members:change_role``) is refused in SaaS without a fresh
-  step-up and the role is unchanged; with one it is allowed; the local edition's one owner
-  changes a role with no step-up.
+* the workspace role change (``members:change_role``) carries NO step-up yet: its only client
+  cannot show Clerk's reverification prompt, so the step-up lands with that flow
+  (PRD-261 W-A2, #1157); a SaaS owner with no fresh step-up still changes a role.
 
 The route table facts (which routes carry the dependency, in which order) are
 ``test_prd261_b2_wire.py``.
@@ -91,7 +91,7 @@ def _assert_reverification(resp):
     assert resp.status_code == 403, resp.text
     body = resp.json()
     level = body["clerk_error"]["metadata"]["reverification"]
-    assert level == {"level": "first_factor", "afterMinutes": config.THEME_STEP_UP_MAX_AGE_MINUTES}
+    assert level == {"level": "first_factor", "afterMinutes": config.STEP_UP_MAX_AGE_MINUTES}
     assert body["code"] == step_up.STEP_UP_CODE
 
 
@@ -110,12 +110,14 @@ STEP_UP_CALLS = [
 @pytest.fixture
 def saas_owner(monkeypatch):
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    # Uploads on, so the import route's private-upload gate (before the step-up) lets the caller through.
+    monkeypatch.setattr(config, "THEMES_PRIVATE_UPLOAD", "on")
     role = SimpleNamespace(value="owner")
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: role.value)
     return role
 
 
-@pytest.mark.parametrize("fva", [None, [-1, -1], [config.THEME_STEP_UP_MAX_AGE_MINUTES + 5, -1]])
+@pytest.mark.parametrize("fva", [None, [-1, -1], [config.STEP_UP_MAX_AGE_MINUTES + 5, -1]])
 @pytest.mark.parametrize("method,path,kwargs", STEP_UP_CALLS)
 def test_a_theme_route_without_a_fresh_step_up_is_refused_in_saas(saas_owner, fva, method, path, kwargs):
     client = _app(import_api.router, install_api.router, settings_api.router, ctx=_clerk(fva), db=_NoSettingsDb())
@@ -165,7 +167,7 @@ def test_rollback_runs_with_a_fresh_step_up_in_saas_and_with_none_locally(monkey
 
 
 # ---------------------------------------------------------------------------
-# Behaviour: the workspace role change (D1-d, #1157)
+# Behaviour: the workspace role change (step-up deferred to W-A2, #1157)
 # ---------------------------------------------------------------------------
 
 
@@ -204,25 +206,9 @@ def role_change(monkeypatch):
     return SimpleNamespace(change=change, db=db, audits=audits)
 
 
-@pytest.mark.parametrize("fva", [None, [-1, -1], [30, -1]])
-def test_a_role_change_without_a_fresh_step_up_is_refused_in_saas(role_change, monkeypatch, fva):
+def test_a_role_change_needs_no_step_up_until_its_client_can_reverify(role_change, monkeypatch):
+    # PRD-261 W-A2 (#1157) adds the step-up together with team-management's reverification flow.
     monkeypatch.setattr(config, "AUTH_EDITION", "saas")
-    _assert_reverification(role_change.change(_clerk(fva)))
-    assert role_change.db.member.role == "editor" and role_change.db.commits == 0
-    assert role_change.audits == []
-
-
-def test_a_role_change_with_a_fresh_step_up_is_allowed_in_saas(role_change, monkeypatch):
-    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
-    resp = role_change.change(_clerk([1, -1]))
+    resp = role_change.change(_clerk(None))
     assert resp.status_code == 200, resp.text
     assert role_change.db.member.role == "admin" and role_change.audits[0]["action"] == "member:role_changed"
-
-
-def test_the_local_editions_owner_changes_a_role_with_no_step_up(role_change, monkeypatch):
-    monkeypatch.setattr(config, "AUTH_EDITION", "local")
-    operator = RequestContext(workspace_id=WS, auth_type="anonymous",
-                              user=UserContext(id="operator@local", email="operator@local", system_role="user"))
-    resp = role_change.change(operator)
-    assert resp.status_code == 200, resp.text
-    assert role_change.db.member.role == "admin"

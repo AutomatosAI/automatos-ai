@@ -1517,8 +1517,8 @@ class Config:
     THEME_MAX_CLIP_KB: int = int(os.getenv("THEME_MAX_CLIP_KB", "1024"))
     # How long a browser keeps a theme file (immutable: the URL carries the digest).
     THEME_FILE_CACHE_SECONDS: int = int(os.getenv("THEME_FILE_CACHE_SECONDS", "86400"))
-    # Step-up on sensitive theme and role routes: a first factor this recent (D1-e: 10).
-    THEME_STEP_UP_MAX_AGE_MINUTES: int = int(os.getenv("THEME_STEP_UP_MAX_AGE_MINUTES", "10"))
+    # Step-up on sensitive routes (themes now; role changes with W-A2): a first factor this recent (D1-e: 10).
+    STEP_UP_MAX_AGE_MINUTES: int = int(os.getenv("STEP_UP_MAX_AGE_MINUTES", "10"))
 
     # =============================================================================
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)

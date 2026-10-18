@@ -20,12 +20,10 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models.themes import ThemeChoice, ThemeInstallation, ThemePackage, ThemeRevocation, ThemeWorkspaceSettings
-from services.themes.manifest import RANGE_PATTERN, satisfies_range
+from core.models.themes import ThemeChoice, ThemeInstallation, ThemePackage, ThemeWorkspaceSettings
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +33,6 @@ BUILTIN_CHOICES = ("builtin:play",)
 FALLBACK_CHOICE = "studio"
 MARKETPLACE_OWNER = "marketplace"
 WORKSPACE_OWNER = "workspace"
-REVOCATION_DISABLE = "disable"
-REVOCATION_STRENGTH = {"warn": 1, REVOCATION_DISABLE: 2}
 
 NOT_FOUND = 404
 CONFLICT = 409
@@ -47,6 +43,7 @@ INSTALL_NOT_FOUND = "That theme isn't installed in this workspace."
 PACKAGE_NOT_FOUND = "That theme version doesn't exist in this workspace."
 CHOICE_LOCKED = "This workspace's admins choose its theme; the workspace default applies."
 NEEDS_MEMBER = "Choosing a theme needs a signed-in member of this workspace."
+CHOICE_RACED = "Your theme choice changed in another tab at the same moment. Try again."
 BAD_CHOICE = "A theme choice is 'classic', 'studio', 'builtin:play' or an installed theme's id."
 
 
@@ -161,6 +158,11 @@ def set_choice(db: Session, workspace_id: UUID, user_pk: Optional[int], choice: 
         # our insert: re-check the choice in the fresh transaction, then update that row.
         checked = _checked_choice(db, workspace_id, choice)
         row = _choice_row(db, workspace_id, user_pk)
+        if row is None:
+            # That concurrent row is gone again (an uninstall dropped it): one more insert, else 409.
+            if _inserted_choice(db, workspace_id, user_pk, checked):
+                return checked
+            raise ThemeInstallError(CONFLICT, CHOICE_RACED)
     row.choice = checked
     db.flush()
     return checked
@@ -189,31 +191,3 @@ def forget_choices_of(db: Session, workspace_id: UUID, install_id: UUID) -> None
     db.query(ThemeChoice).filter(
         ThemeChoice.workspace_id == workspace_id, ThemeChoice.choice == str(install_id),
     ).delete(synchronize_session=False)
-
-
-def _revocation_applies(revocation: ThemeRevocation, package: ThemePackage) -> bool:
-    if revocation.digest is not None:
-        return revocation.digest == package.digest
-    if revocation.version_range is None:
-        return True
-    if RANGE_PATTERN.fullmatch(revocation.version_range) is None:
-        # Fail closed: a range this server can't read revokes every version of the theme.
-        logger.warning("theme revocation %s has an unreadable version range", revocation.id)
-        return True
-    return satisfies_range(revocation.version_range, package.version)
-
-
-def revocation_of(db: Session, package: ThemePackage) -> Optional[ThemeRevocation]:
-    """The strongest standing revocation of this package (by digest or theme id), or None."""
-    candidates = (
-        db.query(ThemeRevocation)
-        .filter(
-            ThemeRevocation.lifted_at.is_(None),
-            or_(ThemeRevocation.digest == package.digest, ThemeRevocation.theme_id == package.theme_id),
-        )
-        .all()
-    )
-    matching = [row for row in candidates if _revocation_applies(row, package)]
-    if not matching:
-        return None
-    return max(matching, key=lambda row: REVOCATION_STRENGTH.get(row.level, REVOCATION_STRENGTH[REVOCATION_DISABLE]))

@@ -132,11 +132,6 @@ def install_role_label(row: Optional[ThemeWorkspaceSettings]) -> str:
     return label
 
 
-def install_permission(db: Session, workspace_id: UUID) -> str:
-    """The workspace permission a caller needs to install, update or pin a theme here."""
-    return INSTALL_ROLE_PERMISSIONS[install_role_label(settings_row(db, workspace_id))]
-
-
 def install_refusal(db: Session, ctx: Any) -> Optional[str]:
     """Why this caller may not install a theme in its workspace (the setting), or None."""
     workspace_id = getattr(ctx, "workspace_id", None)
@@ -338,7 +333,6 @@ __all__ = [
     "INSTALL_ROLE_PERMISSIONS",
     "MAX_PINS",
     "apply_settings",
-    "install_permission",
     "install_refusal",
     "pinnable_versions",
     "private_uploads_state",

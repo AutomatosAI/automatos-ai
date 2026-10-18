@@ -49,6 +49,8 @@ MEMBERS_DDL = (
     "user_id INTEGER NOT NULL, role VARCHAR(50), invited_by INTEGER, invited_at DATETIME, "
     "joined_at DATETIME, is_active BOOLEAN)"
 )
+# ``workspaces.owner_id`` names an owner who may have no member row (records.people_count).
+WORKSPACES_DDL = "CREATE TABLE workspaces (id CHAR(32) PRIMARY KEY, owner_id INTEGER)"
 
 
 class _FakeS3:
@@ -79,6 +81,7 @@ def env(monkeypatch):
     ThemePackage.metadata.create_all(engine, tables=tables)
     with engine.begin() as conn:
         conn.execute(sa.text(MEMBERS_DDL))
+        conn.execute(sa.text(WORKSPACES_DDL))
     fake = _FakeS3()
     monkeypatch.setattr(storage, "get_s3_client", lambda: fake)
     monkeypatch.setattr(storage, "ensure_bucket", lambda bucket: None)
@@ -185,6 +188,10 @@ def test_the_route_is_a_plain_def_gated_by_workspace_manage():
     assert not inspect.iscoroutinefunction(import_theme)
     marks = [getattr(dep.call, workspace_permission.PERMISSION_MARKER_ATTR, None) for dep in route.dependant.dependencies]
     assert "workspace:manage" in marks
+    from api.themes_import import STEP_UP, require_private_uploads
+
+    calls = [dep.call for dep in route.dependant.dependencies]
+    assert calls.index(require_private_uploads) < calls.index(STEP_UP)  # L4: refuse before any reverification
 
 
 def test_a_caller_without_workspace_manage_is_refused(env, monkeypatch):
@@ -448,6 +455,28 @@ def test_an_unknown_switch_value_fails_closed(env, monkeypatch):
     monkeypatch.setattr(config, SWITCH, "sometimes", raising=False)
     response = _upload(_client(env, _local_ctx(uuid4())), _hello())
     assert response.status_code == 403 and response.json()["detail"] == records.PLATFORM_OFF
+
+
+def test_a_refused_upload_is_never_asked_to_step_up(env, monkeypatch):
+    # L4: the private-upload gate runs before the step-up, so a caller who can't upload anyway
+    # gets the plain reason, never a reverification prompt.
+    from core.auth import step_up
+    from core.auth.dependencies import RequestContext, UserContext
+
+    monkeypatch.setattr(config, "AUTH_EDITION", "saas")
+    monkeypatch.setattr(workspace_permission, "workspace_permission_granted", lambda db, ctx, permission: True)
+    monkeypatch.setattr(theme_settings, "workspace_permission_granted", lambda db, ctx, permission: True)
+    monkeypatch.setattr(config, SWITCH, "off", raising=False)
+    stale = UserContext(id="user_1", email="a@example.com", system_role="user", clerk_user_id="user_1",
+                        raw_claims={"sub": "user_1", "iat": int(time.time())})
+    client = _client(env, RequestContext(workspace_id=uuid4(), user=stale, auth_type="clerk"))
+    step_up.install_step_up_handler(client.app)
+    refused = _upload(client, _hello())
+    assert refused.status_code == 403 and refused.json() == {"detail": records.PLATFORM_OFF}
+    monkeypatch.setattr(config, SWITCH, "on", raising=False)
+    asked = _upload(client, _hello())
+    assert asked.status_code == 403 and "clerk_error" in asked.json()
+    assert _rows(env, ThemePackage) == []
 
 
 def test_admins_lets_only_a_platform_admin_upload(env, monkeypatch):

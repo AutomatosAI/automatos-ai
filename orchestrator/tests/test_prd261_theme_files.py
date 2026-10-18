@@ -217,7 +217,8 @@ def test_a_range_past_the_end_is_416_and_a_malformed_one_serves_the_whole_file(w
         assert resp.status_code == 416, header
         assert resp.headers["content-range"] == f"bytes */{size}"
         _assert_serving_headers(resp)
-    for header in ("bytes=0-1,4-5", "bytes=9-2", "lines=1-2"):
+    huge = "9" * 5000  # S1: past Python's int() digit limit; no Range, never a 500
+    for header in ("bytes=0-1,4-5", "bytes=9-2", "lines=1-2", f"bytes={huge}-", f"bytes=0-{huge}", f"bytes=-{huge}"):
         resp = _file(world, _person("alice"), CLIP, headers={"Range": header})
         assert (resp.status_code, len(resp.content)) == (200, size), header
 
@@ -421,6 +422,8 @@ def test_requested_range_reads_one_range_against_the_size():
     assert requested_range("bytes=-3", 10) == ByteRange(7, 9)
     assert requested_range("bytes=-30", 10) == ByteRange(0, 9)
     assert requested_range("bytes=0-1,3-4", 10) is None
+    assert requested_range("bytes=" + "9" * 5000 + "-", 10) is None
+    assert requested_range("bytes=-" + "9" * 5000, 10) is None
     for header, size in (("bytes=10-", 10), ("bytes=-0", 10), ("bytes=0-", 0)):
         with pytest.raises(RangeNotSatisfiable):
             requested_range(header, size)

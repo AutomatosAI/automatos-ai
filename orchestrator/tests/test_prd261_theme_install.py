@@ -64,6 +64,9 @@ from core.models.themes import (  # noqa: E402
     ThemeWorkspaceSettings,
 )
 import services.themes.choices as choices_mod  # noqa: E402
+import services.themes.defaults as defaults_mod  # noqa: E402
+from services.themes import revocations, serve  # noqa: E402
+import services.themes.updates as updates_mod  # noqa: E402
 from services.themes.contract import core_page_hashes  # noqa: E402
 from services.themes.optin import OPT_IN_WORDING  # noqa: E402
 
@@ -261,6 +264,45 @@ def test_a_concurrent_first_choice_ends_stored_not_500(api, monkeypatch):
     assert api.db.query(ThemeChoice).filter_by(workspace_id=WS_A, user_id=MEMBER_PK).count() == 1
 
 
+def test_a_concurrent_choice_row_that_vanishes_is_inserted_again(api, monkeypatch):
+    # L2: the other tab's row was removed (an uninstall) between our collision and our re-read.
+    api.db.add(ThemeChoice(workspace_id=WS_A, user_id=MEMBER_PK, choice="classic"))
+    api.db.commit()
+    calls = []
+
+    def reads(*args):
+        calls.append(args)
+        if len(calls) == 2:
+            api.db.query(ThemeChoice).filter_by(workspace_id=WS_A, user_id=MEMBER_PK).delete()
+        return None
+
+    monkeypatch.setattr(choices_mod, "_choice_row", reads)
+    resp = _choose(api, "builtin:play")
+    assert resp.status_code == 200, resp.text
+    rows = api.db.query(ThemeChoice).filter_by(workspace_id=WS_A, user_id=MEMBER_PK).all()
+    assert [row.choice for row in rows] == ["builtin:play"]
+
+
+def test_a_choice_that_keeps_colliding_is_409_not_500(api, monkeypatch):
+    api.db.add(ThemeChoice(workspace_id=WS_A, user_id=MEMBER_PK, choice="classic"))
+    api.db.commit()
+    monkeypatch.setattr(choices_mod, "_choice_row", lambda *args: None)
+    resp = _choose(api, "builtin:play")
+    assert resp.status_code == 409 and resp.json() == {"detail": choices_mod.CHOICE_RACED}
+
+
+def test_a_concurrent_default_is_409_not_500(api, monkeypatch):
+    # L2: another admin's default landed between our clear and our write (uq_theme_installations_default).
+    first = _install(api.db, _package(api.db), is_default=True)
+    second = _install(api.db, _package(api.db, theme_id="acme/pen"))
+    monkeypatch.setattr(defaults_mod, "_clear_default", lambda db, workspace_id: None)
+    resp = api.client.put("/api/themes/default", json={"installId": str(second.id)})
+    assert resp.status_code == 409 and resp.json() == {"detail": install_api.CONCURRENT_CHANGE}
+    api.db.refresh(first)
+    api.db.refresh(second)
+    assert (first.is_default, second.is_default) == (True, False)
+
+
 def test_members_may_not_choose_answers_403_and_active_shows_the_default(api):
     default = _install(api.db, _package(api.db))
     api.client.put("/api/themes/default", json={"installId": str(default.id)})
@@ -372,6 +414,28 @@ def test_a_default_never_moves_to_unreviewed_code(api):
     assert install.package_id == v1.id
 
 
+def test_update_to_an_older_or_equal_version_is_409(api):
+    # L1: update only moves forward; rollback is the way back.
+    v1, v2 = _package(api.db), _package(api.db, version="1.1.0")
+    twin = _package(api.db, version="1.1.0")
+    install = _install(api.db, v2)
+    for target in (v1, twin):
+        resp = api.client.post(f"/api/themes/installs/{install.id}/update", json={"packageId": str(target.id)})
+        assert resp.status_code == 409 and resp.json() == {"detail": updates_mod.NOT_NEWER}, target.version
+    api.db.refresh(install)
+    assert (install.package_id, install.previous_package_id) == (v2.id, None)
+
+
+@pytest.mark.parametrize("status", ["pending", "rejected"])
+def test_compare_to_an_unlisted_marketplace_version_is_404(api, status):
+    # L3: a pending or rejected Marketplace version is not one this workspace may see.
+    v1 = _package(api.db)
+    unlisted = _package(api.db, version="1.1.0", status=status, reviewed=False)
+    install = _install(api.db, v1)
+    resp = api.client.get(f"/api/themes/installs/{install.id}/compare/{unlisted.id}")
+    assert resp.status_code == 404 and resp.json() == {"detail": choices_mod.PACKAGE_NOT_FOUND}
+
+
 def test_compare_lists_changed_files_and_the_scan_diff(api):
     v1 = _package(api.db, scan_verdict="pass", scan_report={"contrast": "ok"})
     v2 = _package(api.db, version="1.1.0", scan_verdict="review_required", scan_report={"contrast": "low"})
@@ -417,6 +481,51 @@ def test_a_disable_revocation_makes_active_return_the_base(api):
     body = _active(api)
     assert (body["choice"], body["theme"]) == ("classic", None)
     assert body["revoked"] == {"installId": str(install.id), "level": "disable", "reason": "leaks data"}
+
+
+def test_active_and_boot_carry_one_integrity_map(api):
+    # M1: one map (serve.module_integrity): text/javascript modules only, a bad sha left out.
+    package = _package(api.db)
+    package.file_manifest = {
+        **package.file_manifest,
+        "dist/data.js": {"type": "text/plain", "size": 1, "sha256": "ef" * 32},
+        "dist/broken.js": {"type": "text/javascript", "size": 1, "sha256": "not-hex"},
+    }
+    api.db.commit()
+    install = _install(api.db, package)
+    _choose(api, str(install.id))
+    integrity = _active(api)["theme"]["integrity"]
+    assert integrity == serve.module_integrity(package) == serve.theme_boot(package, None)["integrity"]
+    assert list(integrity) == [f"/api/themes/files/{package.digest}/dist/entry.js"]
+
+
+class _RevocationRows:
+    """A session answering ``theme_revocations`` with fixed rows."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def query(self, model):
+        return self
+
+    def filter(self, *conditions):
+        return self
+
+    def all(self):
+        return self.rows
+
+
+def test_an_unknown_revocation_level_fails_closed():
+    # M1: one revocation rule; a level it doesn't know reads as disable everywhere.
+    row = SimpleNamespace(id=1, digest="d" * 64, theme_id="acme/ink", version_range=None, level="quarantine",
+                          reason="new level")
+    package = SimpleNamespace(digest="d" * 64, theme_id="acme/ink", version="1.0.0")
+    db = _RevocationRows([row])
+    assert revocations.revocation_level(db, package.digest, package.theme_id, package.version) == "disable"
+    assert revocations.is_disabled(db, package) and revocations.disables(revocations.revocation_of(db, package))
+    assert revocations.revocation_body(row) == {"level": "disable", "reason": "new level"}
+    warn = SimpleNamespace(id=2, digest=None, theme_id="acme/ink", version_range=None, level="warn", reason="slow")
+    assert revocations.revocation_of(_RevocationRows([warn, row]), package) is row
 
 
 def test_a_stale_clone_shows_needs_update(api):

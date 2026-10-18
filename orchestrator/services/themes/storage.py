@@ -14,7 +14,7 @@ FastAPI runs in its threadpool, never directly on the event loop.
 from __future__ import annotations
 
 import logging
-from typing import Iterable, List, Mapping, Optional
+from typing import List, Mapping, Optional
 from uuid import UUID
 
 from config import config
@@ -90,22 +90,3 @@ def write_theme_files(prefix: str, files: Mapping[str, ThemeFile]) -> List[str]:
         written = [*written, key]
     logger.info("[Themes] Stored %d theme files under s3://%s/%s", len(written), bucket, prefix)
     return written
-
-
-def read_theme_file(prefix: str, path: str) -> bytes:
-    """The bytes of one stored theme file (blocking)."""
-    response = get_s3_client().get_object(Bucket=config.MARKETPLACE_S3_BUCKET, Key=theme_key(prefix, path))
-    return response["Body"].read()
-
-
-def delete_theme_files(prefix: str, paths: Iterable[str]) -> List[str]:
-    """Remove the files at ``paths`` under ``prefix`` (blocking); returns the keys removed.
-
-    Every path is checked before the first delete, like :func:`write_theme_files`.
-    """
-    keys = [theme_key(prefix, path) for path in paths]
-    client = get_s3_client()
-    for key in keys:
-        client.delete_object(Bucket=config.MARKETPLACE_S3_BUCKET, Key=key)
-    logger.info("[Themes] Removed %d theme files under s3://%s/%s", len(keys), config.MARKETPLACE_S3_BUCKET, prefix)
-    return keys

@@ -5,7 +5,9 @@ Safari plays an HEVC/MP4 clip only over byte ranges, so the files route answers 
 the file is in range (RFC 9110 §14). The header is read by the platform's own parser
 (``core.services.image_store.parse_byte_range``, the generated-images route's): a
 malformed, reversed or multi-range header is ignored and the whole file is served (200),
-which RFC 9110 §14.2 allows.
+which RFC 9110 §14.2 allows. That parser takes ASCII digits only, at most
+``RANGE_MAX_DIGITS`` (15) a side, so a number of thousands of digits never reaches ``int()``
+(Python's digit limit would raise): it is no Range, and the file is served whole.
 
 Theme files are small (a clip is at most ``THEME_MAX_CLIP_KB``) and every one is re-hashed
 on read, so the range is cut from bytes already in memory, never streamed.

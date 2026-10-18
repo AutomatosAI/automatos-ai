@@ -22,21 +22,18 @@ plus a top-level ``revoked`` naming the install, so the host can say why.
 
 from __future__ import annotations
 
-import base64
 import logging
-import re
 from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from core.models.themes import ThemeInstallation, ThemePackage, ThemeRevocation
+from core.models.themes import ThemeInstallation, ThemePackage
 from services.themes.choices import (
     BUILTIN_CHOICES,
     CONFLICT,
     FALLBACK_CHOICE,
     PLAIN_CHOICES,
-    REVOCATION_DISABLE,
     ThemeInstallError,
     active_install,
     find_active_install,
@@ -44,20 +41,15 @@ from services.themes.choices import (
     is_private,
     members_may_choose,
     package_is_visible,
-    revocation_of,
     stored_choice,
 )
 from services.themes.contract import THEME_BASES
 from services.themes.drift import needs_update
 from services.themes.optin import opt_in_state
+from services.themes.revocations import disables, revocation_body, revocation_of
+from services.themes.serve import module_integrity
 
 logger = logging.getLogger(__name__)
-
-# The browser fetches a package's files under this path (frontend/lib/theme-host/constants.ts THEME_FILES_PATH).
-THEME_FILES_PATH = "/api/themes/files/"
-MODULE_SUFFIX = ".js"
-SHA256_HEX = re.compile(r"[0-9a-f]{64}")
-INTEGRITY_PREFIX = "sha256-"
 
 PRIVATE_DEFAULT = "An unreviewed theme can't be the workspace default: members would run its code without saying yes."
 WITHDRAWN = "That theme version was withdrawn, so it can't be used."
@@ -66,26 +58,6 @@ WITHDRAWN = "That theme version was withdrawn, so it can't be used."
 def can_be_default(package: ThemePackage) -> bool:
     """Only reviewed Marketplace code may run for members who never opted in (Q6)."""
     return not is_private(package)
-
-
-def integrity_map(package: ThemePackage) -> Dict[str, str]:
-    """``{module URL: 'sha256-<base64>'}`` for every ``.js`` file, from the stored hex (PA-13)."""
-    pinned: Dict[str, str] = {}
-    for path, entry in sorted((package.file_manifest or {}).items()):
-        sha = entry.get("sha256") if isinstance(entry, dict) else None
-        if not path.endswith(MODULE_SUFFIX):
-            continue
-        if not isinstance(sha, str) or SHA256_HEX.fullmatch(sha) is None:
-            logger.error("theme package %s has no valid sha256 for %s", package.id, path)
-            continue
-        url = f"{THEME_FILES_PATH}{package.digest}/{path}"
-        pinned[url] = INTEGRITY_PREFIX + base64.b64encode(bytes.fromhex(sha)).decode("ascii")
-    return pinned
-
-
-def revocation_body(revocation: Optional[ThemeRevocation]) -> Optional[Dict[str, str]]:
-    """``{level, reason}`` of a standing revocation, or None."""
-    return None if revocation is None else {"level": revocation.level, "reason": revocation.reason}
 
 
 def _base_of(package: ThemePackage) -> str:
@@ -109,7 +81,7 @@ def theme_payload(
         "optIn": opt_in_state(db, workspace_id, user_pk, package),
         "revoked": revocation_body(revocation_of(db, package)),
         "needsUpdate": needs_update(manifest),
-        "integrity": integrity_map(package),
+        "integrity": module_integrity(package),
     }
 
 
@@ -152,7 +124,7 @@ def resolve_active(db: Session, workspace_id: UUID, user_pk: Optional[int]) -> D
         return {"choice": picked, "theme": None}
     package = db.get(ThemePackage, install.package_id)
     revocation = revocation_of(db, package)
-    if revocation is not None and revocation.level == REVOCATION_DISABLE:
+    if disables(revocation):
         revoked = {"installId": str(install.id), **revocation_body(revocation)}
         return {"choice": _base_of(package), "theme": None, "revoked": revoked}
     return {"choice": picked, "theme": theme_payload(db, workspace_id, user_pk, install, package)}
@@ -172,8 +144,7 @@ def set_default(db: Session, workspace_id: UUID, install_id: Optional[UUID]) -> 
         package = db.get(ThemePackage, target.package_id)
         if not can_be_default(package):
             raise ThemeInstallError(CONFLICT, PRIVATE_DEFAULT)
-        revocation = revocation_of(db, package)
-        if revocation is not None and revocation.level == REVOCATION_DISABLE:
+        if disables(revocation_of(db, package)):
             raise ThemeInstallError(CONFLICT, WITHDRAWN)
     _clear_default(db, workspace_id)
     if target is not None:
