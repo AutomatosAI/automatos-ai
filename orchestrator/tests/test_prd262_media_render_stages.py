@@ -15,7 +15,8 @@ in the required orchestrator job and pins the definition a later edit could undo
   with its integrity) and requirements.lock (every pin hashed, the input's pins
   kept), installed with `npm ci` and `uv pip install --require-hashes --no-deps`;
 - versions.py reads the js tree, Node's compile cache is seeded as the runtime
-  user, and the Chrome launch at build is called a smoke test, which it is.
+  user, and the Chrome launch at build is called a smoke test, which it is;
+- Dependabot: pip for services/media-render, npm for services/media-render/js.
 
 Pure file reads: no Docker, no network.
 """
@@ -274,3 +275,18 @@ def test_the_chrome_launch_at_build_is_called_a_smoke_test():
 def test_the_test_stage_installs_pytest_into_the_same_venv():
     test = _stage("test")
     assert "uv pip install --python /opt/venv/bin/python --no-cache -r /app/requirements-test.txt" in test
+
+
+# ── Dependabot ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("ecosystem", "directory"), [("pip", "/services/media-render"), ("npm", "/services/media-render/js")])
+def test_dependabot_updates_the_media_render_locks_weekly_and_grouped(ecosystem, directory):
+    entries = [
+        entry for entry in DEPENDABOT["updates"]
+        if entry["package-ecosystem"] == ecosystem and entry.get("directory") == directory
+    ]
+    assert len(entries) == 1, (ecosystem, directory)
+    (entry,) = entries
+    assert entry["schedule"]["interval"] == "weekly"
+    assert any("*" in group["patterns"] for group in entry["groups"].values())
