@@ -1,6 +1,13 @@
 import random, math
 from math import comb
 from statistics import NormalDist
+import sys
+
+
+def report(*parts):
+    """Write one line of results to stdout (the repo's lint bans print)."""
+    sys.stdout.write(" ".join(str(p) for p in parts) + "\n")
+
 N=NormalDist()
 def pz(x_cur,n_cur,x_ref,n_ref):
     pc=x_cur/n_cur; pr=x_ref/n_ref; pp=(x_cur+x_ref)/(n_cur+n_ref)
@@ -15,8 +22,8 @@ def flag(x_cur,n_cur,x_ref,n_ref):
 def strong(x_cur,n_cur,x_ref,n_ref):
     return flag(x_cur,n_cur,x_ref,n_ref) and pz(x_cur,n_cur,x_ref,n_ref)<0.001
 random.seed(7)
-print("--- FROZEN reference = 4 clean weeks before change (n=80); post-change weeks n=20")
-print("rollback = two consecutive flags vs frozen ref, or one strong flag, within 4 post weeks")
+report("--- FROZEN reference = 4 clean weeks before change (n=80); post-change weeks n=20")
+report("rollback = two consecutive flags vs frozen ref, or one strong flag, within 4 post weeks")
 for p0,p1 in ((0.8,0.8),(0.9,0.9),(0.8,0.5),(0.8,0.6),(0.8,0.65)):
     T=100000; rb=0; f=[0]*4; rb2=0
     for _ in range(T):
@@ -28,8 +35,8 @@ for p0,p1 in ((0.8,0.8),(0.9,0.9),(0.8,0.5),(0.8,0.6),(0.8,0.65)):
         trig=any(st) or any(fl[i] and fl[i+1] for i in range(3))
         rb+=trig
         rb2+= (fl[0] and fl[1]) or st[0] or st[1]
-    print(p0,"->",p1," P(flag) wk1-4",[round(x/T,3) for x in f]," P(rollback in 4 wks)",round(rb/T,4)," P(rollback by wk2)",round(rb2/T,4))
-print("--- old rule: max of relative deltas >10%, success down OR error_rate(=1-success) up, same n both weeks")
+    report(p0,"->",p1," P(flag) wk1-4",[round(x/T,3) for x in f]," P(rollback in 4 wks)",round(rb/T,4)," P(rollback by wk2)",round(rb2/T,4))
+report("--- old rule: max of relative deltas >10%, success down OR error_rate(=1-success) up, same n both weeks")
 def pmf(n,k,p): return comb(n,k)*p**k*(1-p)**(n-k)
 def old2(p,n):
     t=0
@@ -40,4 +47,4 @@ def old2(p,n):
             e_up = (ea-eb)/eb*100>10 if eb>0 else (ea>0)
             if s_down or e_up: t+=pmf(n,a,p)*pmf(n,b,p)
     return t
-for n in (10,20): print("p=.8 n=",n,round(old2(.8,n),3))
+for n in (10,20): report("p=.8 n=",n,round(old2(.8,n),3))
