@@ -14,7 +14,10 @@ with that digest:
 
 Two workspaces may hold the same digest, so the row is chosen by the digest and the caller's
 authorisation, never as "the one row with that digest". A live ``disable`` revocation
-(``revocations.py``) then serves nothing.
+(``revocations.py``) then serves nothing. ``theme.json`` is one of the hashed files, so every
+row with a digest has the same theme id and version, and a revocation (by digest, or by theme id
+and version range) covers all of them or none: the first authorised row's answer is final, and
+the same bytes are never served through a sibling row once revoked.
 
 Every file read is checked against the row's ``file_manifest``: the path must be listed, its
 stored bytes must hash to the listed sha256 (a mismatch is logged as tampering and serves
