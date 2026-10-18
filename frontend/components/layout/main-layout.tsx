@@ -160,7 +160,11 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
 
   if (isStudio && !isMobileLayout) {
     const shell = <StudioDesktopShell fullBleed={fullBleed} autoWidget={autoWidget}>{children}</StudioDesktopShell>
-    return <ThemeFrameSlot fallback={shell}>{children}</ThemeFrameSlot>
+    return (
+      <ThemeFrameSlot fallback={shell} fullBleed={fullBleed} autoWidget={autoWidget}>
+        {children}
+      </ThemeFrameSlot>
+    )
   }
 
   // PRD-246: below 1024 the Studio pages render inside this chrome, and they are

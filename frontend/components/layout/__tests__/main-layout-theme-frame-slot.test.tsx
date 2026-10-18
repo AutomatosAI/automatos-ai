@@ -21,7 +21,7 @@ vi.mock('../mobile-sidebar', () => ({ MobileSidebar: () => null }))
 vi.mock('../header', () => ({ Header: () => null }))
 vi.mock('../studio-sidebar', () => ({ StudioSidebar: () => null }))
 vi.mock('../studio-header', () => ({ StudioHeader: () => null }))
-vi.mock('../../chatbot/chat-widget', () => ({ AutoWidget: () => null }))
+vi.mock('../../chatbot/chat-widget', () => ({ AutoWidget: () => <aside data-testid="auto-widget" /> }))
 vi.mock('@/components/ui/sheet', () => ({
   Sheet: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   SheetContent: () => null,
@@ -31,10 +31,22 @@ vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => false, useIsMob
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useActiveTheme: () => null, useThemeLayout: () => 'fallback' }))
 vi.mock('@/components/theme-host/theme-host-context', () => ({ useThemeHost: () => host.current }))
 
+import type { FrameProps } from '@/lib/theme-host/types'
+
 import { MainLayout } from '../main-layout'
 
 function HelloFrame({ children }: { children?: React.ReactNode }) {
   return <section data-testid="theme-frame">{children}</section>
+}
+
+/** A frame that shows the two frame@1 props MainLayout hands it (plan §2.2). */
+function PropsFrame({ children, fullBleed, autoWidget }: FrameProps) {
+  return (
+    <section data-testid="theme-frame" data-full-bleed={String(fullBleed)}>
+      {children}
+      {autoWidget}
+    </section>
+  )
 }
 
 afterEach(() => {
@@ -83,5 +95,17 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
     )
     expect(screen.getByTestId('theme-frame')).toContainElement(screen.getByTestId('page'))
     expect(container.querySelector('.sh-shell')).toBeNull()
+  })
+
+  it("hands the active theme's frame the full-bleed flag and Auto's widget", () => {
+    host.current = { status: 'active', reason: null, frame: PropsFrame, reportRenderFailure: vi.fn() }
+    render(
+      <MainLayout fullBleed>
+        <div data-testid="page" />
+      </MainLayout>,
+    )
+    const frame = screen.getByTestId('theme-frame')
+    expect(frame).toHaveAttribute('data-full-bleed', 'true')
+    expect(frame).toContainElement(screen.getByTestId('auto-widget'))
   })
 })

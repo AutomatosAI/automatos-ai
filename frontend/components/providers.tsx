@@ -3,8 +3,7 @@
 
 import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import dynamic from 'next/dynamic'
-import { useState, type ComponentType } from 'react'
+import { useState } from 'react'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
@@ -15,7 +14,7 @@ import { LookProvider } from './looks/look-provider'
 import { AccountLookScope } from './looks/account-look-scope'
 import type { UiStyle } from '@/lib/ui-style'
 import type { ThemeTone } from '@/lib/theme-host/boot'
-import { BUILTIN_PLAY_REF } from '@/lib/theme-host/builtin/play-entry'
+import { BUILTIN_THEME_CLIENTS } from '@/lib/theme-host/builtin/clients'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { ThemeHostProvider } from './theme-host/theme-host-provider'
@@ -78,17 +77,7 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   )
 }
 
-/**
- * PRD-261 A-03 — each builtin theme's client module (its stylesheet), by the theme's ref. Each is
- * its own chunk, fetched only while that theme is the style: rendered on the server, next/dynamic
- * writes the chunk's stylesheet link into the first response, so the theme's first paint is
- * styled, and a Studio or Classic page requests none of it.
- */
-const BUILTIN_THEME_CLIENTS: ReadonlyMap<string, ComponentType> = new Map([
-  [BUILTIN_PLAY_REF, dynamic(() => import('@/lib/theme-host/builtin/play-client'))],
-])
-
-/** The active builtin theme's client module, or nothing. */
+/** PRD-261 A-03: the active builtin theme's client module (its stylesheet chunk), or nothing. */
 function BuiltinThemeClient() {
   const { activeTheme } = useUiStyle()
   const Client = activeTheme === null ? undefined : BUILTIN_THEME_CLIENTS.get(activeTheme.ref)
