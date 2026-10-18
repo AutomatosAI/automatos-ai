@@ -971,12 +971,110 @@ jobs:
         run: |
           docker build --target production -t parity-be orchestrator/
           docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
-      - name: Worker — headless browser present with no args
+      # PRD-262 US-043: Railway's worker carries Chromium's headless shell only, every
+      # library it links resolves after Mesa's drivers are purged, and Playwright runs
+      # on the image's Node rather than its own bundled copy.
+      - name: Worker — the headless shell only, every library resolved, no Mesa
         run: |
           docker build -t parity-wk services/workspace-worker/
           # --entrypoint: the worker image's entrypoint.sh execs the worker itself
           # (ignoring CMD) and dies on Redis — we only want to look inside the image.
-          docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
+          in_image() { docker run --rm --entrypoint sh parity-wk -c "$1"; }
+          in_image 'ls /opt/playwright-browsers'
+          bad=0
+          if in_image 'ls -d /opt/playwright-browsers/chromium-[0-9]*'; then
+            echo "::error::the worker image carries the full Chromium; html_to_png runs only the headless shell"; bad=1
+          fi
+          if ! in_image 'ls -d /opt/playwright-browsers/chromium_headless_shell-*'; then
+            echo "::error::the worker image has no chromium_headless_shell-* directory"; bad=1
+          fi
+          if ! libs=$(in_image 'shell=$(find /opt/playwright-browsers -type f -name chrome-headless-shell) && ldd "$shell" "$(dirname "$shell")"/*.so*'); then
+            echo "::error::ldd could not read the headless shell"; bad=1
+          fi
+          echo "$libs"
+          if grep 'not found' <<< "$libs"; then
+            echo "::error::the headless shell links the libraries above, which the image lacks"; bad=1
+          fi
+          for pkg in mesa-libgallium libllvm19 libz3-4; do
+            if in_image "dpkg -s $pkg > /dev/null 2>&1"; then
+              echo "::error::the worker image still has the Debian package $pkg"; bad=1
+            else
+              echo "$pkg: purged"
+            fi
+          done
+          if ! docker run --rm --entrypoint python parity-wk -c 'import os, playwright; from importlib.metadata import version; node = os.path.join(os.path.dirname(playwright.__file__), "driver", "node"); assert not os.path.exists(node), node; print("Playwright", version("playwright"), "runs on", os.environ["PLAYWRIGHT_NODEJS_PATH"])'; then
+            echo "::error::Playwright still carries its bundled Node, or PLAYWRIGHT_NODEJS_PATH is unset"; bad=1
+          fi
+          exit "$bad"
+      # The worker's own launch arguments, as uid 1000 (the worker user, with its own
+      # HOME): set_content then screenshot for a Latin and a CJK fixture, and the CJK
+      # text must be drawn with a font fontconfig lists for U+4E2D; then the worker's
+      # html_to_png on a workspace file.
+      - name: Worker — renders PNGs as uid 1000, CJK included
+        run: |
+          docker run --rm -i --user 1000 --entrypoint python parity-wk - <<'PY'
+          import asyncio
+          import subprocess
+          import uuid
+
+          from playwright.async_api import async_playwright
+
+          from executor import WorkspaceToolExecutor
+          from workspace_manager import WorkspaceManager
+
+          ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--allow-file-access-from-files", "--disable-web-security"]
+          PNG = b"\x89PNG\r\n\x1a\n"
+          FIXTURES = {
+              "latin": "<p id='text' style='font: 32px sans-serif'>Automatos render check</p>",
+              "cjk": "<p id='text' lang='zh' style='font: 32px sans-serif'>中文渲染 日本語 한국어</p>",
+          }
+          listed = subprocess.run(["fc-list", ":charset=4e2d", "family"], capture_output=True, text=True, check=True).stdout
+          CJK_FAMILIES = {name.strip() for line in listed.splitlines() for name in line.split(",") if name.strip()}
+          assert CJK_FAMILIES, "fontconfig lists no font with U+4E2D"
+
+
+          async def fonts_used(page):
+              cdp = await page.context.new_cdp_session(page)
+              await cdp.send("DOM.enable")
+              await cdp.send("CSS.enable")
+              root = (await cdp.send("DOM.getDocument"))["root"]["nodeId"]
+              node = (await cdp.send("DOM.querySelector", {"nodeId": root, "selector": "#text"}))["nodeId"]
+              fonts = (await cdp.send("CSS.getPlatformFontsForNode", {"nodeId": node}))["fonts"]
+              await cdp.detach()
+              return {font["familyName"] for font in fonts}
+
+
+          async def render_fixtures():
+              async with async_playwright() as pw:
+                  browser = await pw.chromium.launch(args=ARGS)
+                  print("headless shell", browser.version)
+                  page = await browser.new_page(viewport={"width": 640, "height": 120})
+                  used = {}
+                  for name, html in FIXTURES.items():
+                      await page.set_content(html)
+                      png = await page.screenshot(type="png")
+                      used[name] = await fonts_used(page)
+                      print(f"{name}: {len(png)} bytes, drawn with {sorted(used[name])}")
+                      assert png.startswith(PNG) and len(png) > len(PNG), f"{name}: no PNG"
+                  await browser.close()
+              assert used["cjk"] & CJK_FAMILIES, f"CJK drawn with {sorted(used['cjk'])}, none of {sorted(CJK_FAMILIES)}"
+
+
+          async def render_with_the_worker():
+              ws = WorkspaceManager(str(uuid.uuid4()))
+              ws.ensure_workspace_exists()
+              card = ws.root / "content" / "card.html"
+              card.write_text("<!doctype html><meta charset='utf-8'><h1>中文 Automatos</h1>", encoding="utf-8")
+              result = await WorkspaceToolExecutor(ws).html_to_png(
+                  url=f"file://{card}", viewport_w=320, viewport_h=120,
+                  output_path="content/card.png", wait_for=None)
+              print("html_to_png:", result)
+              assert result.get("success") and result["file_size_bytes"] > 0, result
+
+
+          asyncio.run(render_fixtures())
+          asyncio.run(render_with_the_worker())
+          PY
       # PRD-262 US-007: Node 24 copied from the official image, with npm, corepack and
       # the exact pnpm pin; nothing NodeSource brought (one package per check).
       - name: Worker — Node 24 from the official image, pnpm pinned, no NodeSource leftovers
@@ -1002,6 +1100,18 @@ jobs:
             if in_image "test -e $path"; then echo "::error::the worker image has $path"; bad=1; else echo "$path: absent"; fi
           done
           exit "$bad"
+      # PRD-262 US-043: the local edition and the GHCR image (INSTALL_BROWSER=false)
+      # carry no Playwright and no browser.
+      - name: Worker — the INSTALL_BROWSER=false build carries no Playwright
+        run: |
+          docker build --build-arg INSTALL_BROWSER=false -t parity-wk-local services/workspace-worker/
+          if docker run --rm --entrypoint python parity-wk-local -c 'import playwright' 2> /dev/null; then
+            echo "::error::the INSTALL_BROWSER=false worker image installs Playwright"; exit 1
+          fi
+          if docker run --rm --entrypoint sh parity-wk-local -c 'test -e /opt/playwright-browsers'; then
+            echo "::error::the INSTALL_BROWSER=false worker image carries /opt/playwright-browsers"; exit 1
+          fi
+          echo "INSTALL_BROWSER=false: import playwright fails and /opt/playwright-browsers is absent"
 
   # The media-render lanes (the image, the fixture renders, the seeded templates in 4 shards)
   # run on demand only, in .github/workflows/media-render.yml (Gerard, 7 Oct 2026: not on
