@@ -3,14 +3,12 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono, Newsreader } from 'next/font/google'
 import { cookies } from 'next/headers'
 import { Providers } from '../components/providers'
-import { LOOK_PREPAINT_SCRIPT } from '@/lib/looks/prepaint'
-import { PLAY_TONE_COOKIE, playToneFor } from '@/lib/looks/tone'
-import { parseUiStyle, STYLE_CLASS_SCRIPT, UI_STYLE_COOKIE } from '@/lib/ui-style'
-import { isThemeHostSpikeOn } from '@/lib/theme-host/spike-flag'
+import { parseUiStyle, UI_STYLE_COOKIE } from '@/lib/ui-style'
+import { createThemeBootResolver, type CookieReader } from '@/lib/theme-host/boot'
+import { PLAY_FONT_VARIABLE_CLASSES } from '@/lib/theme-host/builtin/play-fonts'
+import { ThemeBootScripts } from '@/components/theme-host/theme-boot'
 import { ThemeImportMap } from '@/components/theme-host/theme-import-map'
-import { PLAY_FONT_VARIABLE_CLASSES } from './play-fonts'
 import './globals.css'
-import './play-theme.css'
 
 // Force dynamic rendering to prevent build-time Clerk errors
 export const dynamic = 'force-dynamic'
@@ -43,7 +41,9 @@ export const metadata: Metadata = {
 
 // PRD-260 M07: <html className> is the font variables only, the same string on every render, so
 // a server re-render (router.refresh after a client-side style switch) never rewrites the class
-// attribute and drops next-themes' tone class. The style's classes come from STYLE_CLASS_SCRIPT.
+// attribute and drops next-themes' tone class. The style's classes come from the theme boot
+// (PRD-261 A-03). Builtin Play's face classes are host-generated and defined here for every
+// page; with preload off, a face file downloads only when a Play type style uses it.
 const HTML_FONT_CLASSES = [
   geistSans.variable,
   geistMono.variable,
@@ -56,14 +56,15 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  // PRD-244 D1: the Style axis (Classic | Studio | Play) is read from its cookie
-  // here, so the chosen chrome renders on first paint with no classic flash —
-  // Play as "studio play" (PRD-260 D1). The Tone axis (Light | Dark | System)
-  // stays with next-themes in the browser; under Play the look's ground forces it,
-  // and its own cookie lets ThemeProvider force it from the first paint (PRD-260 K4).
+  // PRD-244 D1: the Style axis (Classic | Studio | a theme) is read from its cookie here, so the
+  // chosen chrome renders on first paint with no classic flash. PRD-261 A-03: the style's boot
+  // (lib/theme-host/boot.ts) carries its <html> classes, the look it paints before first paint
+  // and its tone; the Tone axis stays with next-themes in the browser, and a theme whose tone
+  // follows its look forces it from the first paint through the boot's tone (PRD-260 K4).
   const store = await cookies()
-  const uiStyle = parseUiStyle(store.get(UI_STYLE_COOKIE)?.value)
-  const playTone = playToneFor(uiStyle, store.get(PLAY_TONE_COOKIE)?.value)
+  const readCookie: CookieReader = (name) => store.get(name)?.value
+  const uiStyle = parseUiStyle(readCookie(UI_STYLE_COOKIE))
+  const boot = await createThemeBootResolver(readCookie)(uiStyle)
 
   return (
     <html
@@ -72,21 +73,14 @@ export default async function RootLayout({
       className={HTML_FONT_CLASSES}
     >
       <head>
-        {/* PRD-261 A-01: the theme import map, rendered only by a build with the spike on (off in
-            every shipped build). It must precede every module script, so it is the first child. */}
-        {isThemeHostSpikeOn() && <ThemeImportMap />}
-        {/* PRD-260 M07: the style's classes go on <html> before first paint, ahead of the look
-            script below, which needs 'play'. A constant per style from lib/ui-style.ts; the
-            parsed style only picks it, no cookie text goes into it. React doesn't own these
-            classes, so a server re-render changes only this script's text, which never runs again. */}
-        <script dangerouslySetInnerHTML={{ __html: STYLE_CLASS_SCRIPT[uiStyle] }} />
-        {/* PRD-260 D4, K3: under Play only, a constant built from lib/looks/catalogue.ts puts
-            the stored look on <html> before first paint. It reads only the stored look, checked
-            against the catalogue's keys; no user text ever goes into it. */}
-        {uiStyle === 'play' && <script dangerouslySetInnerHTML={{ __html: LOOK_PREPAINT_SCRIPT }} />}
+        {/* PRD-261 A-03 (PA-13): the theme import map is on every page. It must precede every
+            module script, so it is the first child; then the boot's JSON element and the one
+            constant script that applies it before first paint. */}
+        <ThemeImportMap integrity={boot.integrity} />
+        <ThemeBootScripts boot={boot} />
       </head>
       <body>
-        <Providers initialUiStyle={uiStyle} initialPlayTone={playTone}>
+        <Providers initialUiStyle={uiStyle} initialTone={boot.tone.value ?? undefined}>
           {children}
         </Providers>
       </body>

@@ -10,7 +10,7 @@
  * Classic or Studio page never downloads it; under Play the frame arrives a
  * moment after the first render, so each test waits for it (findBy*).
  *
- * P260-FX-25 (M69): MainLayout reads Play's width from usePlayLayout (stood in
+ * P260-FX-25 (M69): MainLayout reads Play's width from useThemeLayout (stood in
  * for here; play-layout-phone.test.tsx runs the real one) and, under Play
  * while it isn't known (the server, hydration), renders nothing, so the page
  * never mounts in one chrome and again in the other.
@@ -29,14 +29,17 @@ vi.mock('framer-motion', () => ({
   motion: { div: ({ children, className }: { children?: React.ReactNode; className?: string }) => <div className={className}>{children}</div> },
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => state.narrow, useIsMobile: () => state.narrow }))
-vi.mock('@/hooks/use-studio-theme', () => ({
-  useIsStudio: () => state.studio,
-  useIsPlay: () => state.play,
-  usePlayLayout: () => {
-    if (!state.play || state.narrow) return 'fallback'
-    return state.widthUnknown ? 'pending' : 'play'
-  },
-}))
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => state.studio,
+    useActiveTheme: () => (state.play ? BUILTIN_PLAY_ENTRY : null),
+    useThemeLayout: () => {
+      if (!state.play || state.narrow) return 'fallback'
+      return state.widthUnknown ? 'pending' : 'theme'
+    },
+  }
+})
 // GET /health answers, so the frame shows (edges.test.tsx covers the asleep screen in its place).
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
 

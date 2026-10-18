@@ -65,11 +65,14 @@ vi.mock('next/navigation', () => ({
 }))
 const style = vi.hoisted(() => ({ play: true, narrow: false }))
 // Play's width source (P260-FX-25): Play's version only under Play at >= 1024 px.
-vi.mock('@/hooks/use-studio-theme', () => ({
-  useIsStudio: () => true,
-  useIsPlay: () => style.play,
-  usePlayLayout: () => (style.play && !style.narrow ? 'play' : 'fallback'),
-}))
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => true,
+    useActiveTheme: () => (style.play ? BUILTIN_PLAY_ENTRY : null),
+    useThemeLayout: () => (style.play && !style.narrow ? 'theme' : 'fallback'),
+  }
+})
 vi.mock('@/hooks/use-backend-health', () => ({ useBackendHealth: () => ({ connection: 'connected', check: vi.fn() }) }))
 vi.mock('@/stores/chat-session-store', () => ({
   useChatSessionStore: (select: (state: { newDraft: () => void }) => unknown) => select({ newDraft: vi.fn() }),

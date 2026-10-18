@@ -1,12 +1,14 @@
 /**
  * PRD-261 A-01 — a frame that throws while drawing is replaced by the fallback, and the host is
- * told once, with the error.
+ * told once, with the error. Next's notFound() and redirect() pass through it to the boundary
+ * above, and never take the theme down.
  */
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ThemeErrorBoundary } from '../theme-error-boundary'
+import { OUTER_CAUGHT_TEST_ID, OuterBoundary, ROUTER_ERROR_PAGES } from './next-router-errors'
 
 const FAILURE = new Error('deliberate render failure')
 
@@ -40,5 +42,22 @@ describe('PRD-261 A-01 — ThemeErrorBoundary', () => {
     expect(screen.getByText('fallback')).toBeInTheDocument()
     expect(onError).toHaveBeenCalledTimes(1)
     expect(onError).toHaveBeenCalledWith(FAILURE)
+  })
+
+  it.each(ROUTER_ERROR_PAGES)("rethrows Next's %s to the boundary above, without the fallback or onError", (_name, Page) => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const onError = vi.fn()
+    const onCaught = vi.fn()
+    render(
+      <OuterBoundary onCaught={onCaught}>
+        <ThemeErrorBoundary fallback={<p>fallback</p>} onError={onError}>
+          <Page />
+        </ThemeErrorBoundary>
+      </OuterBoundary>,
+    )
+    expect(screen.getByTestId(OUTER_CAUGHT_TEST_ID)).toBeInTheDocument()
+    expect(screen.queryByText('fallback')).toBeNull()
+    expect(onError).not.toHaveBeenCalled()
+    expect(onCaught).toHaveBeenCalledWith(expect.objectContaining({ digest: expect.stringMatching(/^NEXT_/) }))
   })
 })
