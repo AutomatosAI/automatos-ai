@@ -13,6 +13,9 @@
     "workspace-worker": {
       "amd64": {"max_mb": 506.6, "reason": "edge at 0d9f0ac, 16 Oct 2026 (506.56 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."},
       "arm64": {"max_mb": 496.6, "reason": "edge at 0d9f0ac, 16 Oct 2026 (496.51 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."}
+    },
+    "agent-opt-worker": {
+      "amd64": {"max_mb": 150.0, "reason": "PRD-262 US-006: never built in CI before, so an estimate (16 Oct): python:3.11-slim 45.6 MB plus the locked dependencies, 103.7 MB as a gzip-6 layer, less uvicorn[standard]'s extras. Report only until US-004 sets the baseline from measured builds."}
     }
   }
 }

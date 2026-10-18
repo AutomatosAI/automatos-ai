@@ -23,6 +23,9 @@ name: images
 #   leaves the digest untagged and unsigned. The merge job joins the digests
 #   into one multi-arch index and signs it with cosign (keyless, through
 #   GitHub OIDC).
+# - agent-opt-worker (PRD-262 US-006) builds for amd64 only, on pull requests
+#   that touch it and on main. It is measured and scanned like the others and
+#   pushed only to the job's registry, never to GHCR: Railway builds it itself.
 # - Every build reports its size, its layers (with the Dockerfile instruction
 #   and the heaviest paths of each) and its update delta, the MB an existing
 #   user downloads to move from `edge` to it, in the step summary and as a
@@ -90,6 +93,7 @@ on:
       - "frontend/.npmrc"
       - "frontend/public/**"
       - "services/workspace-worker/**"
+      - "services/agent-opt-worker/**"
   # The weekly OS rebuild (PRD-262 US-011).
   schedule:
     - cron: "0 5 * * 1"
@@ -154,7 +158,8 @@ jobs:
           # scans an image without ever pushing it to GHCR, so it has no `edge`.
           # cache_mode: `min` for the API, whose pybuild output `max` would
           # export and never reuse; `max` for the frontend's builder
-          # node_modules, and for the worker as before.
+          # node_modules, and for the worker as before; `min` for
+          # agent-opt-worker, whose one stage is all the image.
           # no_cache_filters: the stages whose apt or apk packages ship in the
           # image, which the weekly run rebuilds without the cache (PRD-262
           # US-011; orchestrator/tests/test_prd262_weekly_rebuild.py reads them
@@ -183,7 +188,12 @@ jobs:
                "build_args": ["INSTALL_BROWSER=false"],
                "cache_mode": "max", "no_cache_filters": ["production"],
                "arches": ["amd64", "arm64"], "publish": true,
-               "inputs": ["services/workspace-worker/**"]}
+               "inputs": ["services/workspace-worker/**"]},
+              {"name": "agent-opt-worker", "context": "services/agent-opt-worker", "target": "production",
+               "build_args": [],
+               "cache_mode": "min", "no_cache_filters": [],
+               "arches": ["amd64"], "publish": false,
+               "inputs": ["services/agent-opt-worker/**"]}
             ]
           # What every image is built or judged by: a change here builds them all.
           SHARED_INPUTS: |

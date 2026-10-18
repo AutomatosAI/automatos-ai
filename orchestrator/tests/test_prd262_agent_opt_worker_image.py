@@ -11,14 +11,18 @@ and pins what a later edit could quietly lose:
   BuildKit cache mount (Railway refuses one without a service id), the lock
   installed with --require-hashes, the user created before the code is copied in;
 - main.py: no API docs, no /test route, every route but /health on the token router;
-- the CI lane that builds and tests the image.
+- the CI lane that builds and tests the image;
+- images.yml builds, measures and scans it for amd64 and never publishes it, and
+  litellm's three Criticals are allowlisted against the version the lock installs.
 
 Pure file reads: no Docker, no database.
 """
 from __future__ import annotations
 
 import ast
+import json
 import re
+from datetime import date, timedelta
 from pathlib import Path
 
 import yaml
@@ -133,3 +137,35 @@ def test_the_ci_lane_builds_and_tests_the_image():
     for needle in ("'^fi=='", "--target test", "-m pytest", "import fi.evals, fi.opt.optimizers",
                    "AGENT_OPT_WORKER_TOKEN is not set"):
         assert needle in script, needle
+
+
+def _images_workflow() -> tuple[dict, dict]:
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "images.yml").read_text())
+    pick = next(step for step in workflow["jobs"]["changes"]["steps"] if step.get("id") == "pick")
+    image = next(item for item in json.loads(pick["env"]["IMAGES"]) if item["name"] == "agent-opt-worker")
+    return workflow, image
+
+
+def test_images_yml_builds_and_scans_it_on_amd64_and_never_publishes_it():
+    workflow, image = _images_workflow()
+    assert (image["context"], image["target"]) == ("services/agent-opt-worker", "production")
+    assert image["arches"] == ["amd64"] and image["publish"] is False
+    assert image["inputs"] == ["services/agent-opt-worker/**"]
+    triggers = workflow.get("on", workflow.get(True))  # PyYAML reads the `on` key as True
+    assert "services/agent-opt-worker/**" in triggers["pull_request"]["paths"]
+    merged = [entry["name"] for entry in workflow["jobs"]["merge"]["strategy"]["matrix"]["image"]]
+    assert "agent-opt-worker" not in merged, "never published to GHCR (PRD-262 D1, §9-Q4)"
+    budgets = json.loads((ROOT / ".github" / "image-budgets.json").read_text())
+    assert budgets["budgets"]["agent-opt-worker"]["amd64"]["reason"].strip()
+
+
+def test_litellms_criticals_are_allowlisted_for_the_version_the_lock_installs():
+    """litellm stays at 1.80.0 while ai-evaluation needs openai<2; a bump past it must drop these."""
+    allowlist = yaml.safe_load((ROOT / ".grype.yaml").read_text())["ignore"]
+    litellm = [entry for entry in allowlist if (entry.get("package") or {}).get("name") == "litellm"]
+    assert {entry["vulnerability"] for entry in litellm} == {
+        "GHSA-6wvf-77m9-58rm", "GHSA-4xpc-pv4p-pm3w", "GHSA-jjhc-v7c2-5hh6"}
+    for entry in litellm:
+        assert entry["package"]["version"] == _pins()["litellm"]
+        assert "openai<2" in entry["reason"] and "openai>=2.8.0" in entry["reason"]
+        assert entry["expires"] <= date.today() + timedelta(days=90)

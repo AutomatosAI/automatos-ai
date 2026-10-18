@@ -89,6 +89,7 @@ on:
       - "frontend/.npmrc"
       - "frontend/public/**"
       - "services/workspace-worker/**"
+      - "services/agent-opt-worker/**"
 
 # A newer push to a pull request cancels its older run. Main and manual runs are
 # measurements, so they finish; a re-run of one commit waits for the run before it.

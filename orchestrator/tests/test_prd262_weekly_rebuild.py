@@ -210,7 +210,7 @@ def _entries(no_cache: bool, publish: bool = True) -> list[dict]:
 
 def test_a_no_cache_run_hands_each_build_its_filters_and_any_other_run_none():
     entries = _entries(no_cache=True)
-    assert len(entries) == 2 * len(IMAGES)
+    assert len(entries) == sum(len(image["arches"]) for image in IMAGES)
     for entry in entries:
         assert entry["no_cache_filters"] == ",".join(_image(entry["name"])["no_cache_filters"])
     assert {entry["no_cache_filters"] for entry in _entries(no_cache=False)} == {""}
