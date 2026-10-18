@@ -1182,6 +1182,14 @@ jobs:
             || git fetch --no-tags origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
           node scripts/check-changed-lines-eslint.js "origin/${GITHUB_BASE_REF:-main}"
 
+      # PRD-262 US-049: HARD gate. public/ ships in the frontend image, so it stays within
+      # scripts/public-budget.json, and every file under public/logos is a real PNG or SVG by
+      # its magic bytes, at most 256 px. Plain Node, no install needed, so it reports even
+      # when an earlier step failed.
+      - name: public/ within its budget, and every logo a real PNG or SVG
+        if: ${{ !cancelled() }}
+        run: node scripts/check-public-assets.js
+
   # PRD-182 W12-S2 (F056) — the two orphaned backend test trees. The required
   # `orchestrator-tests` job only ever ran `tests/`; `modules/*/tests` (81 fns)
   # and `integrations/*/tests` (34 fns) were never collected. This job runs them
