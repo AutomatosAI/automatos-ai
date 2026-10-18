@@ -3,8 +3,9 @@
 
 media-render's build is to read the Kokoro voice model, its voices and the music
 library from this image, pinned as its own stage (``FROM
-ghcr.io/automatosai/automatos-media-assets:<tag>@sha256:… AS assets``, FR-9),
-instead of fetching them from GitHub releases and ende.app on every build. PR
+ghcr.io/automatosai/automatos-media-assets:<tag>@sha256:… AS assets-image``, FR-9,
+which its MEDIA_ASSETS build arg picks), instead of fetching them from GitHub
+releases and ende.app on every build. PR
 builds never push to GHCR, so images.yml's ``media-assets`` job publishes it, on
 a manual run on main with ``media_assets``. The job runs this tool twice:
 

@@ -608,9 +608,10 @@ jobs:
   # PRD-262 US-053: the media assets image, ghcr.io/<owner>/automatos-media-assets.
   # media-render's build is to copy the Kokoro model and voices and the music tracks
   # from it, pinned as its own stage (`FROM …automatos-media-assets:<tag>@sha256:…
-  # AS assets`, FR-9), instead of fetching them from GitHub releases and ende.app on
-  # every build. PR builds never push to GHCR, so this job publishes it, and only on a
-  # manual run on main with `media_assets`.
+  # AS assets-image`, FR-9, picked by its MEDIA_ASSETS build arg), instead of fetching
+  # them from GitHub releases and ende.app on every build. PR builds never push to
+  # GHCR, so this job publishes it, and only on a manual run on main with
+  # `media_assets`.
   # - scripts/ci/media_assets.py fetches every file services/media-render/kokoro/
   #   assets.json and music/manifest.json name and checks each sha256 before the
   #   build; after the push it reads the image back, per platform, and checks every
@@ -738,10 +739,10 @@ jobs:
         run: |
           tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           {
-            echo "Published \`${tag}@${DIGEST}\`. media-render's Dockerfile pins it as its own stage:"
+            echo "Published \`${tag}@${DIGEST}\`. media-render's Dockerfile pins it as its own stage, and its MEDIA_ASSETS default becomes image:"
             echo
             echo '```dockerfile'
-            echo "FROM ${tag}@${DIGEST} AS assets"
+            echo "FROM ${tag}@${DIGEST} AS assets-image"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           repository="${IMAGE#ghcr.io/}"

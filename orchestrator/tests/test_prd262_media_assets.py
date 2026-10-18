@@ -480,7 +480,9 @@ def test_only_this_job_may_push_and_sign_on_a_media_assets_run():
 
 def test_the_job_reports_the_pin_line_and_whether_an_anonymous_pull_works():
     report = _step(lambda step: "anonymous pull" in step.get("name", ""))
-    assert 'echo "FROM ${tag}@${DIGEST} AS assets"' in report["run"]
+    # The stage media-render's MEDIA_ASSETS switch picks as `image` (PRD-262 US-053).
+    assert 'echo "FROM ${tag}@${DIGEST} AS assets-image"' in report["run"]
+    assert "its MEDIA_ASSETS default becomes image" in report["run"]
     assert "https://ghcr.io/token?scope=repository:${repository}:pull" in report["run"]
     assert "::warning title=media-assets is private::" in report["run"]
     assert "exit 1" not in report["run"], "the first publish is always private: report only"
