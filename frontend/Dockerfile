@@ -110,7 +110,10 @@ FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cab
 
 WORKDIR /app
 
-RUN apk add --no-cache libstdc++
+# PRD-262 US-011: images.yml's weekly run rebuilds this stage without the cache, and
+# `apk upgrade` then takes Alpine's fixes (OpenSSL and the rest) before the pinned digest moves.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache libstdc++
 
 COPY --from=base /usr/local/bin/node /usr/local/bin/node
 

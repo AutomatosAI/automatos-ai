@@ -102,7 +102,7 @@ The frontend utilizes a 4-stage build process to handle Next.js static generatio
 | **base** | `node:24-alpine3.24`, pinned by tag and digest. No apk build tools: every native package ships a prebuilt binary | `package.json` [frontend/Dockerfile:11-25]() |
 | **development** | Hot-reload dev server, installs all dependencies including devDependencies | `npm install --legacy-peer-deps`, `npm run dev` [frontend/Dockerfile:27-47]() |
 | **builder** | Production build stage, installs all dependencies, copies source, runs `npm run build` | `npm install --legacy-peer-deps`, `npm run build` [frontend/Dockerfile:49-101]() |
-| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. Copies the standalone build, creates the `nextjs` user, runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:103-142]() |
+| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. `apk upgrade` runs in the same layer, so the weekly uncached rebuild takes Alpine's fixes. Copies the standalone build, creates the `nextjs` user, runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:103-145]() |
 
 ### Build-time Environment Variables
 Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:57-70](). The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:58-65]().
@@ -110,7 +110,7 @@ Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT
 ### Cache Invalidation
 A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:90-95]().
 
-Sources: [frontend/Dockerfile:1-142]()
+Sources: [frontend/Dockerfile:1-145]()
 
 ## 3. Worker Services & Auth (PRD-203)
 
