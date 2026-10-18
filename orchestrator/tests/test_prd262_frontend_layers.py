@@ -183,7 +183,9 @@ def test_parity_checks_that_the_local_build_reuses_the_saas_layers():
 def test_parity_looks_inside_the_build_context():
     _, run = _parity_step(CONTEXT_STEP)
     assert "docker build --target development -t parity-fe-context frontend/" in run
-    assert "-path /app/node_modules -prune" in run
+    assert "docker run --rm -w /app parity-fe-context sh -c 'find . -path ./node_modules -prune" in run
+    # The backend ownership check (US-016) is the parity step found by `find /app`.
+    assert "find /app" not in run
     for test in ("-name __tests__", '-name "*.test.*"', '-name "*.md"', "-name tsconfig.tsbuildinfo"):
         assert test in run, test
     assert 'if [ -n "$found" ]' in run and "exit 1" in run

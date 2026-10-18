@@ -1020,11 +1020,12 @@ jobs:
         run: bash frontend/scripts/check-layer-reuse.sh parity-fe parity-fe-local
       # PRD-262 US-048: frontend/.dockerignore keeps tests, docs and tsconfig.tsbuildinfo out of
       # the build context. The development stage is the install plus `COPY . .`, so its /app
-      # outside node_modules is the context exactly as the builder copies it.
+      # outside node_modules is the context exactly as the builder copies it. The listing runs
+      # from /app (`find .`), so `find /app` stays the backend ownership step's own (US-016).
       - name: Frontend — the build context leaves out tests, docs and tsconfig.tsbuildinfo
         run: |
           docker build --target development -t parity-fe-context frontend/
-          found=$(docker run --rm parity-fe-context sh -c 'find /app -path /app/node_modules -prune -o \( -name __tests__ -o -name "*.test.*" -o -name "*.md" -o -name tsconfig.tsbuildinfo \) -print')
+          found=$(docker run --rm -w /app parity-fe-context sh -c 'find . -path ./node_modules -prune -o \( -name __tests__ -o -name "*.test.*" -o -name "*.md" -o -name tsconfig.tsbuildinfo \) -print')
           if [ -n "$found" ]; then
             echo "$found" | head -n 20
             echo "::error::the frontend build context carries files frontend/.dockerignore leaves out"; exit 1
