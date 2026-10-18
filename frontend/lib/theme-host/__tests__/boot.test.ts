@@ -130,9 +130,9 @@ describe('PRD-261 A-03 — the gate before a boot is written', () => {
   })
 
   it("escapes a '</script><!--' value so the element body cannot end early, and parses back", () => {
-    const boot = { ...sampleBoot(), lookGuard: { schema: '</script><!--', iface: '  ' } }
+    const boot = { ...sampleBoot(), lookGuard: { schema: '</script><!--', iface: '\u2028\u2029' } }
     const body = scriptSafeJson(boot)
-    expect(body).not.toMatch(/[<  ]/)
+    expect(body).not.toMatch(/[<\u2028\u2029]/)
     expect(JSON.parse(body)).toEqual(boot)
   })
 })
@@ -148,7 +148,7 @@ describe('PRD-261 A-03 — the one constant boot script', () => {
     expect(THEME_BOOT_SCRIPT).not.toMatch(/<\/?script/i)
     expect(THEME_BOOT_SCRIPT).not.toContain('<!--')
     expect(THEME_BOOT_SCRIPT).not.toContain('</')
-    expect(THEME_BOOT_SCRIPT).not.toMatch(/[  ]/)
+    expect(THEME_BOOT_SCRIPT).not.toMatch(/[\u2028\u2029]/)
   })
 
   it("puts on exactly each style's classes and leaves the tone and font classes alone", () => {
