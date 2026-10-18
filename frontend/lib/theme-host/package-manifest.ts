@@ -16,7 +16,7 @@ import {
   type JsonRecord, type ThemeError,
 } from './css-value'
 import { satisfiesSdkRange } from './engines'
-import { LOOK_ID_PATTERN } from './look-schema'
+import { LOOK_ID_PATTERN } from '@/lib/looks/types'
 import { SDK_VERSION } from './sdk'
 import sharedModules from './shared-modules.json'
 

@@ -12,6 +12,7 @@ import {
   echo, errorIf, hasOwn, isFiniteNumber, isOneOf, isRecord, isWholeNumber, own, plainTextProblem, themeError,
   unknownFieldErrors, type JsonRecord, type ThemeError,
 } from './css-value'
+import { LOOK_ID_PATTERN } from '@/lib/looks/types'
 
 export const LOOK_SCHEMA_SCHEMA = 'automatos-look-schema/v1'
 export const LOOK_SCHEMA_PATH = 'looks/schema.json'
@@ -34,9 +35,6 @@ const SCHEMA_ID_PATTERN = /^[a-z][a-z0-9.-]{0,47}\/v[0-9]{1,3}$/
 const INTERFACE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 const KNOB_NAME_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/
 const CHOICE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/
-/** lib/looks/types.ts LOOK_ID_PATTERN: safe as a storage key, a React key and a file name. */
-export const LOOK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
-
 const MAX_KNOBS = 32
 const MAX_CHOICES = 64
 const KNOB_NUMBER_LIMIT = 1_000_000
