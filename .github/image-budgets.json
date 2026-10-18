@@ -1,5 +1,5 @@
 {
-  "about": "Compressed-size budget per image and arch, in MB (1 MB = 1,000,000 bytes, the sum of the manifest's layer sizes). images.yml checks every build against it (scripts/ci/image_report.py budget). In mode \"warn\" an over-budget build prints a warning; in mode \"fail\" it fails. PRD-262 US-004 sets each budget to the five-run median plus 2% and switches the mode to \"fail\". Raise a budget only in the pull request that needs it, and say why in its reason.",
+  "about": "Compressed-size budget per image and arch, in MB (1 MB = 1,000,000 bytes, the sum of the manifest's layer sizes). images.yml checks every build against it (scripts/ci/image_report.py budget). In mode \"warn\" an over-budget build prints a warning; in mode \"fail\" it fails. PRD-262 US-004 sets each budget to the five-run median plus 2% and switches the mode to \"fail\". Raise a budget only in the pull request that needs it, and say why in its reason. `updates` holds the update bars, per image and kind of update as the update delta files it (`code-only`, `dependencies`, `system`): the most an existing user downloads to move from `edge` to the build, and optionally how many of the new layers may be over 1 MB. The same mode applies.",
   "mode": "warn",
   "budgets": {
     "api": {
@@ -16,6 +16,11 @@
     },
     "agent-opt-worker": {
       "amd64": {"max_mb": 150.0, "reason": "PRD-262 US-006: never built in CI before, so an estimate (16 Oct): python:3.11-slim 45.6 MB plus the locked dependencies, 103.7 MB as a gzip-6 layer, less uvicorn[standard]'s extras. Report only until US-004 sets the baseline from measured builds."}
+    }
+  },
+  "updates": {
+    "api": {
+      "code-only": {"max_mb": 6.0, "layers_over_1_mb": 1, "reason": "PRD-262 US-016 and §8 (from W2): the production stage copies the code in last, already owned by its user, so a code-only update downloads that one layer (5.33 MB compressed on 16 Oct). It was 14.7 MB in three layers over 1 MB: the code, the pip uninstall RUN (gone with US-014) and the chown -R copy of /app."}
     }
   }
 }

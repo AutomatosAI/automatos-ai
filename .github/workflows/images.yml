@@ -29,7 +29,8 @@ name: images
 # - Every build reports its size, its layers (with the Dockerfile instruction
 #   and the heaviest paths of each) and its update delta, the MB an existing
 #   user downloads to move from `edge` to it, in the step summary and as a
-#   `layers-<image>-<arch>` artifact, and checks its size against
+#   `layers-<image>-<arch>` artifact, and checks its size, and its update delta
+#   where the image has an update bar (US-016), against
 #   .github/image-budgets.json (scripts/ci/image_report.py, PRD-262 US-001).
 #   The report job adds the layers the API and the worker share and the app
 #   images' first pull.
@@ -354,9 +355,11 @@ jobs:
             --image "$IMAGE" --digest "$DIGEST" --edge "$EDGE" \
             --out "${RUNNER_TEMP}/layers/${NAME}-${ARCH}.json" --summary "$GITHUB_STEP_SUMMARY"
 
-      # Report only: .github/image-budgets.json's `mode` is `warn` until
-      # PRD-262 US-004 sets the baseline and switches it to `fail`.
-      - name: Size budget
+      # The size budget, and the update bar where the image has one: a code-only
+      # API update is one layer of 6 MB or less (PRD-262 US-016). Report only:
+      # .github/image-budgets.json's `mode` is `warn` until PRD-262 US-004 sets
+      # the baseline and switches it to `fail`.
+      - name: Size and update budgets
         env:
           REPORT: ${{ runner.temp }}/layers/${{ matrix.name }}-${{ matrix.arch }}.json
         run: |

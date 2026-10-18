@@ -7,9 +7,11 @@ Four commands, each run by one images.yml step:
   compressed size, every layer with the instruction that made it and its heaviest
   paths, and the update delta against the published ``edge``. It appends a
   Markdown table to the step summary.
-* ``budget`` (each build job) checks that report against ``.github/image-budgets.json``.
-  In the file's ``warn`` mode an over-budget build prints a warning; ``fail`` mode
-  (PRD-262 US-004) fails the job.
+* ``budget`` (each build job) checks that report against ``.github/image-budgets.json``:
+  its compressed size against the image's budget, and its update delta against the
+  image's update bar, if it has one (PRD-262 US-016: a code-only API update is one
+  layer of 6 MB or less). In the file's ``warn`` mode a miss prints a warning;
+  ``fail`` mode (PRD-262 US-004) fails the job.
 * ``layer`` (the API's build jobs, PRD-262 US-014) checks that one layer of that
   report holds only files of one suffix below one directory: the stdlib compile's
   layer holds stdlib ``.pyc`` and nothing under site-packages. It fails the job
@@ -187,11 +189,17 @@ def measure(args: argparse.Namespace) -> int:
 def budget(args: argparse.Namespace) -> int:
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
     budgets = json.loads(Path(args.budgets).read_text(encoding="utf-8"))
-    verdict = layers.budget_verdict(report["name"], report["arch"], report["bytes"], budgets)
-    if verdict.level != "ok":
-        print(f"::{verdict.level} title=Image size budget::{verdict.message}")
-    _append(args.summary, f"**Budget** ({budgets.get('mode', 'warn')} mode): {verdict.message}.")
-    return 1 if verdict.level == "error" else 0
+    mode = budgets.get("mode", "warn")
+    checks = (
+        ("Image size budget", "Budget",
+         layers.budget_verdict(report["name"], report["arch"], report["bytes"], budgets)),
+        ("Update budget", "Update bar", layers.update_verdict(report, budgets)),
+    )
+    for title, label, verdict in checks:
+        if verdict.level != "ok":
+            print(f"::{verdict.level} title={title}::{verdict.message}")
+        _append(args.summary, f"**{label}** ({mode} mode): {verdict.message}.")
+    return 1 if any(verdict.level == "error" for _, _, verdict in checks) else 0
 
 
 def layer(args: argparse.Namespace) -> int:

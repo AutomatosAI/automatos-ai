@@ -12,6 +12,8 @@ Pure functions over registry JSON, so the tests feed them recorded manifests:
 * ``shared_layers`` and ``unique_bytes`` say what two or more images share, and
   what pulling them together costs.
 * ``budget_verdict`` checks a compressed size against ``.github/image-budgets.json``.
+* ``update_verdict`` checks an update delta against the same file's update bars: a
+  code-only API update is one layer of 6 MB or less (PRD-262 US-016).
 * ``list_paths`` sums one layer's files by path prefix and by file suffix, from its
   tar stream.
 * ``layer_verdict`` checks that the layer one instruction made holds only files of
@@ -39,8 +41,12 @@ HEAVY_COUNT = 25
 UNKNOWN = "unknown"
 KINDS = ("system", "dependencies", "code")
 KIND_PATTERNS = (
+    # The stdlib's bytecode (PRD-262 US-014) is part of the Python runtime, so a
+    # rebuilt compile layer is never filed as a code-only update. An app compile
+    # (a path outside /usr/local/lib) stays code.
     ("system", re.compile(
-        r"^ADD \S*rootfs|^# debian\.sh|\bapt-get (?:-\S+ )*install\b|\bapk (?:--\S+ )*add\b")),
+        r"^ADD \S*rootfs|^# debian\.sh|\bapt-get (?:-\S+ )*install\b|\bapk (?:--\S+ )*add\b"
+        r"|\bcompileall (?:\S+ )*/usr/local/lib/python3")),
     ("dependencies", re.compile(
         r"\b(?:pip3?|uv pip|uv) (?:install|sync)\b|\b(?:npm|pnpm|yarn) (?:install|ci|add)\b"
         r"|\bplaywright install\b"
@@ -162,6 +168,44 @@ def budget_verdict(name: str, arch: str, size: int, budgets: dict) -> Verdict:
     if size <= limit:
         return Verdict("ok", f"{name} ({arch}) is {mb(size)}, within its {mb(limit)} budget")
     return Verdict(failing, f"{name} ({arch}) is {mb(size)}, {mb(size - limit)} over its {mb(limit)} budget")
+
+
+def update_verdict(report: dict, budgets: dict) -> Verdict:
+    """A measured report's update delta against ``budgets["updates"][name][change]``.
+
+    A bar judges one kind of update (``code-only``, as ``change_kind`` files it): at
+    most ``max_mb``, and, when the bar names ``layers_over_1_mb``, exactly that many
+    new layers over 1 MB (PRD-262 US-016: the API's code is one layer). An image with
+    no bar for its kind of update, or a build with no ``edge`` to compare, passes with
+    a note. The file's mode applies, as for the size budgets.
+    """
+    name, arch, delta = report["name"], report["arch"], report.get("delta")
+    if not delta:
+        return Verdict("ok", f"{name} ({arch}) has no update delta to judge")
+    bar = budgets.get("updates", {}).get(name, {}).get(delta["change"])
+    if not bar:
+        return Verdict("ok", f"{name} has no update bar for a {delta['change']} change")
+    fresh = set(delta["new_digests"])
+    big = len({row["digest"] for row in report["layers"] if row["digest"] in fresh and row["size"] > MB})
+    found = (f"this {delta['change']} update of {name} ({arch}) downloads {mb(delta['bytes'])}, "
+             f"with {big} new layers over 1 MB")
+    misses = _update_misses(delta["bytes"], big, bar)
+    if not misses:
+        return Verdict("ok", f"{found}, within its bar")
+    failing = "error" if budgets.get("mode") == "fail" else "warning"
+    return Verdict(failing, f"{found}: {'; '.join(misses)}")
+
+
+def _update_misses(size: int, big: int, bar: dict) -> List[str]:
+    """Where an update of ``size`` bytes, ``big`` of its new layers over 1 MB, misses ``bar``."""
+    misses = []
+    limit = round(bar["max_mb"] * MB)
+    if size > limit:
+        misses.append(f"{mb(size - limit)} over its {mb(limit)} bar")
+    expected = bar.get("layers_over_1_mb")
+    if expected is not None and big != expected:
+        misses.append(f"the bar allows exactly {expected} new layers over 1 MB")
+    return misses
 
 
 def compression(media_type: str) -> Optional[str]:
