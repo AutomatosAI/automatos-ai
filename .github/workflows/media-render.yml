@@ -28,7 +28,7 @@ jobs:
       IMAGE: media-render:ci
       TEST_IMAGE: media-render:test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # US-104 (S1.1c): the local edition runs the renderer as the optional
       # compose profile `media`, and the backend's SOCIALS_RENDER_URL points at it.
       # Throwaway values for the three `:?`-required secrets; nothing starts.
@@ -192,7 +192,7 @@ jobs:
         run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"
       - name: Keep the rendered fixture
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: media-render-fixture
           path: ${{ runner.temp }}/out
@@ -239,7 +239,7 @@ jobs:
             --pcm "$out/script.pcm" --rate 16000 --duration 9.0 --expect-fitted l01 --max-tempo 1.25
       - name: Keep the rendered fixture script
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: media-render-fixture-script
           path: ${{ runner.temp }}/script
@@ -288,7 +288,7 @@ jobs:
             --credit 'Music: "Deep House 003" by Sascha Ende (ende.app), licensed CC BY 4.0.'
       - name: Keep the rendered video with music
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: media-render-fixture-music
           path: ${{ runner.temp }}/music-render
@@ -346,7 +346,7 @@ jobs:
       SHARDS: 4
       PER_JOB: 2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build the image (default target, as Railway builds it)
         run: docker build -t "$IMAGE" services/media-render/
       - name: The seeded templates pass the check; videos preview, images render as PNGs at every size; the pixel follows the brand kit; the headline takes the uploaded heading font
@@ -387,7 +387,7 @@ jobs:
           exit $code
       - name: Keep the seeded templates' previews
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: media-render-template-previews-${{ matrix.shard }}
           path: ${{ runner.temp }}/templates

@@ -129,7 +129,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Start the local backend (postgres, redis, minio, backend)
         run: docker compose up -d --build postgres redis minio backend
@@ -138,7 +138,7 @@ jobs:
         run: bash e2e/browser/scripts/wait-for-url.sh http://localhost:8000/health/ready 300
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           cache: npm
@@ -198,7 +198,7 @@ jobs:
 
       - name: Upload the resolved e2e lockfile
         if: matrix.build == 'default'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-browser-lockfile
           path: e2e/browser/package-lock.json
@@ -233,7 +233,7 @@ jobs:
 
       - name: Upload the theme-host record
         if: always() && matrix.build == 'spike'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: theme-host-record
           path: e2e/browser/records
@@ -249,7 +249,7 @@ jobs:
 
       - name: Upload the Playwright report, traces and logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: browser-e2e-${{ matrix.build }}-report
           path: |
