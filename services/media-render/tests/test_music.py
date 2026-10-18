@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from helpers import VOICES
 from media_render import music_build
 from media_render.bundle import parse_bundle
 from media_render.config import load_settings
@@ -357,7 +358,7 @@ def test_the_music_fixture_is_the_script_composition_over_deep_house_003():
 
 
 def test_a_render_with_music_reports_the_track_its_window_and_its_credit_line(settings):
-    parsed = parse_bundle(music_bundle(), settings, _image_library())
+    parsed = parse_bundle(music_bundle(), settings, _image_library(), VOICES)
     report = music_report(parsed)
     assert report == {
         "track": "deep-house-003",
@@ -370,5 +371,5 @@ def test_a_render_with_music_reports_the_track_its_window_and_its_credit_line(se
         "start": 32.0,
         "end": 41.0,
     }
-    silent = parse_bundle({**music_bundle(), "audio": {"voice": music_bundle()["audio"]["voice"]}}, settings, {})
+    silent = parse_bundle({**music_bundle(), "audio": {"voice": music_bundle()["audio"]["voice"]}}, settings, {}, VOICES)
     assert music_report(silent) is None

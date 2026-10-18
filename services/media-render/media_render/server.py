@@ -28,6 +28,9 @@ takes every slot and shuts the others out (P251W1-RVW-4). Both carry Retry-After
 Once the service is listening, the Kokoro model loads in a background thread
 (PRD-262 US-053): /health answers at once, and the first render's voice step no
 longer carries the model load.
+
+The voices a render or /tts may name are those the image's voices file holds,
+read when the app is made, at boot (PRD-262 US-052); any other voice is a 400.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, Mapping, Optional, Set
+from typing import AbstractSet, Any, AsyncIterator, Callable, Dict, FrozenSet, Mapping, Optional, Set
 
 from aiohttp import web
 
@@ -54,6 +57,7 @@ from .pipeline import CheckOutcome, Pipeline, PipelineError, RenderPipeline
 from .tts import Speaker, line_report, parse_tts_request
 from .validate import BundleError
 from .versions import read_versions
+from .voices_build import voice_names
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +72,7 @@ class ServiceState:
     pipeline: Pipeline
     speaker: Speaker
     library: Mapping[str, Track]
+    voices: FrozenSet[str]
     check_lane: Lane
     render_lane: Lane
     versions: Mapping[str, str]
@@ -220,7 +225,7 @@ async def post_render(request: web.Request) -> web.Response:
     if active >= state.settings.max_active_jobs:
         return _retry_later(state, 503, "busy", f"{active} renders are already in progress; try again shortly")
     try:
-        bundle = parse_bundle(payload, state.settings, state.library)
+        bundle = parse_bundle(payload, state.settings, state.library, state.voices)
     except BundleError as exc:
         return _error(400, "invalid_bundle", str(exc))
     # No await from here to create(): the count and the admission are one step.
@@ -273,7 +278,7 @@ async def post_tts(request: web.Request) -> web.Response:
     state = request.app[STATE]
     payload = await _read_json(request)
     try:
-        spec = parse_tts_request(payload, state.settings)
+        spec = parse_tts_request(payload, state.settings, state.voices)
     except BundleError as exc:
         return _error(400, "invalid_request", str(exc))
     started = time.monotonic()
@@ -342,9 +347,13 @@ def create_app(
     pipeline: Optional[Pipeline] = None,
     speaker: Optional[Speaker] = None,
     library: Optional[Mapping[str, Track]] = None,
+    voices: Optional[AbstractSet[str]] = None,
     clock: Callable[[], float] = time.time,
 ) -> web.Application:
-    """The app. Tests pass a stub pipeline or speaker; the service uses the real ones."""
+    """The app. Tests pass a stub pipeline or speaker; the service uses the real ones.
+
+    The music library and the voices are read from the image unless given.
+    """
 
     @web.middleware
     async def internal_token(request: web.Request, handler):
@@ -364,6 +373,7 @@ def create_app(
         pipeline=pipeline or real_pipeline,
         speaker=speaker,
         library=load_library(settings.music_dir) if library is None else library,
+        voices=voice_names(settings.kokoro_voices_path) if voices is None else frozenset(voices),
         check_lane=Lane(settings.max_concurrent_checks, settings.max_checks_per_workspace),
         render_lane=Lane(settings.max_concurrent_renders, settings.max_renders_per_workspace),
         versions=read_versions(settings.versions_path),

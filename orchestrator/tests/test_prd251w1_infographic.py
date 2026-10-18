@@ -108,8 +108,11 @@ from core.social_templates import (  # noqa: E402
 )
 from media_render.bundle import parse_bundle  # noqa: E402  (media-render's own parser: stdlib only)
 from media_render.config import load_settings  # noqa: E402
+from media_render.voices_build import load_catalogue  # noqa: E402
 from modules.documents.social_starters import SOCIAL_IMAGE_STARTER_SLUGS, social_starters  # noqa: E402
 
+# media-render's voices: the catalogue its voices file holds (PRD-262 US-052).
+VOICES = frozenset(load_catalogue())
 # Hex with letters, so SQLite keeps every UUID column as text.
 WS = uuid.UUID("00000000-0000-0000-0000-0000000001b3")
 WS_OTHER = uuid.UUID("00000000-0000-0000-0000-0000000001b4")
@@ -908,7 +911,7 @@ def test_the_ci_driver_binds_fixture_reports_and_hands_media_render_only_their_o
         for size in starter["blocks"]["sizes"]:
             bundle = driver.chart_bundle_for(starter, kit, size, values)
             shown = driver.check_chart_from_report(bundle, starter, report, series)
-            parsed = parse_bundle(bundle, settings, {})
+            parsed = parse_bundle(bundle, settings, {}, VOICES)
             assert (parsed.composition.width, parsed.composition.height) == tuple(int(x) for x in size.split("x"))
             assert parsed.still.at == (0.0,) and bundle["variables"]["chart"] == kind
             assert len(shown) == 5

@@ -18,7 +18,7 @@ import asyncio
 import base64
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
+from typing import AbstractSet, Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
 from . import validate
 from .config import Settings
@@ -38,7 +38,8 @@ class TtsRequest:
     include_audio: bool
 
 
-def parse_tts_request(payload: Any, settings: Settings) -> TtsRequest:
+def parse_tts_request(payload: Any, settings: Settings, voices: AbstractSet[str]) -> TtsRequest:
+    """Validate a POST /tts body; ``voices`` are the voices the image's voices file holds."""
     body = validate.mapping(payload, "the request")
     validate.keys(body, "the request", required=("lines",), optional=("voice", "speed", "lang", "include_audio"))
     lines: List[Tuple[str, str]] = []
@@ -56,7 +57,7 @@ def parse_tts_request(payload: Any, settings: Settings) -> TtsRequest:
         raise BundleError("include_audio must be true or false")
     return TtsRequest(
         lines=tuple(lines),
-        voice=validate.voice_name(body.get("voice", settings.kokoro_voice), "voice"),
+        voice=validate.voice_name(body.get("voice", settings.kokoro_voice), "voice", voices),
         speed=validate.speed(body.get("speed", settings.kokoro_speed), "speed"),
         lang=validate.language(body.get("lang", settings.kokoro_lang), "lang"),
         include_audio=include_audio,
