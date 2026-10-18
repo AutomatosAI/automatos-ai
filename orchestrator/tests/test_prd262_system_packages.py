@@ -205,7 +205,8 @@ def test_ci_lays_out_the_helvetica_fixture_in_edge_and_in_the_new_image():
 
 
 def test_ci_runs_the_clone_tests_in_the_test_image_off_the_network():
-    step = _after_the_api_build(lambda step: "image_test_image.py" in step.get("run", ""))
+    # US-028 adds its parser tests to the test image; this finds the clone tests' step.
+    step = _after_the_api_build(lambda step: CLONE_TESTS in step.get("run", ""))
     run = " ".join(_CONTINUATION.sub(" ", step["run"]).split())
     assert "image_test_image.py build parity-be parity-be-test" in run
     assert f"image_test_image.py pytest parity-be-test --network none -q --timeout=120 {CLONE_TESTS}" in run
