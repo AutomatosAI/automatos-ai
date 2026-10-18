@@ -13,6 +13,9 @@ Its `locks` stage cuts requirements.lock into those two parts, and this suite
 runs that awk on the real lock. SQLAlchemy has left the worker
 (test_prd262_worker_task_executions.py covers its replacement).
 
+test.yml's prod-image-parity job checks the built image: the SDK version against
+the lock, uv against its pin, no SQLAlchemy, and a consistent installed set.
+
 File reads plus awk on the real lock: no Docker, no network.
 """
 from __future__ import annotations
@@ -24,6 +27,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+import yaml
 from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -213,3 +217,18 @@ def test_no_cache_mount_in_the_worker_until_railway_gives_its_service_id():
     """PRD-262 §10: the worker's Railway service id is unknown, so no install has a cache mount."""
     assert not [line for line in INSTRUCTIONS if "--mount=type=cache" in line]
 
+
+def test_the_parity_job_checks_the_installed_set():
+    steps = yaml.safe_load((ROOT / ".github" / "workflows" / "test.yml").read_text())["jobs"]["prod-image-parity"]["steps"]
+    script = "\n".join(step.get("run", "") for step in steps)
+    for needle in (
+        "for image in parity-wk parity-wk-local; do",
+        'docker run --rm --entrypoint pip "$image" show claude-agent-sdk',
+        f"{REL}/{MAIN_LOCK}",
+        'docker run --rm --entrypoint uv "$image" --version',
+        "ghcr\\.io/astral-sh/uv:",
+        "docker run --rm --entrypoint python \"$image\" -c 'import sqlalchemy'",
+        'docker run --rm --entrypoint pip "$image" check',
+        "_bundled/claude",
+    ):
+        assert needle in script, needle

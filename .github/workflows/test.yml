@@ -1112,6 +1112,36 @@ jobs:
             echo "::error::the INSTALL_BROWSER=false worker image carries /opt/playwright-browsers"; exit 1
           fi
           echo "INSTALL_BROWSER=false: import playwright fails and /opt/playwright-browsers is absent"
+      # PRD-262 US-044: both worker builds install the hash-checked lock through the
+      # pinned uv: the SDK at the lock's pin with its bundled CLI runnable, uv at its
+      # image's tag, no SQLAlchemy, and an installed set whose requirements hold.
+      - name: Worker — the locked set, the SDK at the lock's pin, uv at its tag, no SQLAlchemy
+        run: |
+          want_sdk=$(grep -oE '^claude-agent-sdk==[^ ;\\]+' services/workspace-worker/requirements.lock | cut -d= -f3)
+          want_uv=$(grep -oE 'ghcr\.io/astral-sh/uv:[0-9]+\.[0-9]+\.[0-9]+@' services/workspace-worker/Dockerfile | sed -E 's/.*uv:([0-9.]+)@/\1/')
+          echo "lock: claude-agent-sdk $want_sdk; Dockerfile: uv $want_uv"
+          if [ -z "$want_sdk" ] || [ -z "$want_uv" ]; then
+            echo "::error::could not read the SDK pin from requirements.lock or the uv tag from the Dockerfile"; exit 1
+          fi
+          bad=0
+          for image in parity-wk parity-wk-local; do
+            sdk=$(docker run --rm --entrypoint pip "$image" show claude-agent-sdk | awk '/^Version:/ {print $2}')
+            uv=$(docker run --rm --entrypoint uv "$image" --version | awk '{print $2}')
+            echo "$image: claude-agent-sdk $sdk, uv $uv"
+            if [ "$sdk" != "$want_sdk" ]; then echo "::error::$image has claude-agent-sdk '$sdk', not the lock's $want_sdk"; bad=1; fi
+            if [ "$uv" != "$want_uv" ]; then echo "::error::$image has uv '$uv', not the pinned $want_uv"; bad=1; fi
+            if docker run --rm --entrypoint python "$image" -c 'import sqlalchemy' 2> /dev/null; then
+              echo "::error::$image can import sqlalchemy; the worker writes task_executions through psycopg2"; bad=1
+            fi
+            if ! docker run --rm --entrypoint pip "$image" check; then
+              echo "::error::$image's installed packages do not satisfy each other's requirements: a dependency is missing from the lock's install"; bad=1
+            fi
+            sdk_dir=$(docker run --rm --entrypoint python "$image" -c 'import os, claude_agent_sdk; print(os.path.dirname(claude_agent_sdk.__file__))')
+            if ! docker run --rm --entrypoint timeout "$image" 60 "$sdk_dir/_bundled/claude" --version; then
+              echo "::error::$image cannot run the Claude CLI the SDK bundles ($sdk_dir/_bundled/claude)"; bad=1
+            fi
+          done
+          exit "$bad"
 
   # The media-render lanes (the image, the fixture renders, the seeded templates in 4 shards)
   # run on demand only, in .github/workflows/media-render.yml (Gerard, 7 Oct 2026: not on
