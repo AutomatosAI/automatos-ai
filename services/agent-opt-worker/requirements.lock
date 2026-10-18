@@ -419,9 +419,9 @@ distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
     # via openai
-fastapi==0.144.0 \
-    --hash=sha256:7392b2609ebaf7e2dbffd38b8a927499e61a50e55dd0e57323ebee30efc1a462 \
-    --hash=sha256:ce62d92f1abe5e06f9111a3d39c675340d440ee7095beab06ec31fee7c070a71
+fastapi==0.146.0 \
+    --hash=sha256:0eb9985a7d5bb11ce9a962d4b65e0cf1a2e13d6aca2e14da57bc526370e26748 \
+    --hash=sha256:e96047fc353ff43f7fda069c3578a7d94902a762d9aca2e065f7f801abd91a49
     # via -r services/agent-opt-worker/requirements.in
 fastuuid==0.14.0 \
     --hash=sha256:05a8dde1f395e0c9b4be515b7a521403d1e8349443e7641761af07c7ad1624b1 \

@@ -162,8 +162,12 @@ def _known_template(name: str) -> str:
 
 
 def _at_most_one_per_template(names: Optional[List[str]]) -> Optional[List[str]]:
-    if names is not None and len(names) > len(TEMPLATE_CONFIG):
+    if names is None:
+        return names
+    if len(names) > len(TEMPLATE_CONFIG):
         raise ValueError(f"at most {len(TEMPLATE_CONFIG)} metrics")
+    if len(set(names)) != len(names):
+        raise ValueError("each metric may be named once")
     return names
 
 
@@ -596,6 +600,8 @@ def _create_optimizer(algorithm: str, teacher):
         raise ValueError(f"Unknown algorithm '{algorithm}'. Options: meta_prompt, bayesian, protegi, random")
 
 
-# After every route above: include_router copies the router's routes, with its
-# token dependency, onto the app at this point.
+# Last, after every route above. Each route declared on `router` carries the token
+# dependency from the moment it is declared (APIRouter adds its dependencies then),
+# and FastAPI 0.137+ keeps the included router as one node of app.routes instead
+# of copying its routes in.
 app.include_router(router)

@@ -15,7 +15,7 @@
 #
 # litellm stays at 1.80.0 in the lock: ai-evaluation 1.1.0 requires openai<2,
 # and litellm 1.80.5 and later require openai>=2.8.0.
-fastapi==0.144.0
+fastapi==0.146.0
 # GHSA-86qp-5c8j-p5mr (a forged Host header rewrites request.url.path) is fixed in 1.0.1.
 starlette>=1.0.1
 # Plain uvicorn: [standard]'s uvloop, httptools, watchfiles and websockets add

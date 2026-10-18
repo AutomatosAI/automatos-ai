@@ -46,6 +46,14 @@ def test_an_unknown_metric_is_a_422(client, authed, fake_scoring, path):
 
 
 @pytest.mark.parametrize("path", sorted(ROUTES_WITH_METRICS))
+def test_a_template_named_twice_is_a_422(client, authed, fake_scoring, path):
+    body = {**ROUTES_WITH_METRICS[path], "metrics": ["is_helpful", "is_concise", "is_helpful"]}
+    response = client.post(path, headers=authed, json=body)
+    assert response.status_code == 422, response.text
+    assert fake_scoring == []
+
+
+@pytest.mark.parametrize("path", sorted(ROUTES_WITH_METRICS))
 def test_every_template_once_is_accepted(client, authed, worker_main, fake_scoring, path):
     names = list(worker_main.TEMPLATE_CONFIG)
     response = client.post(path, headers=authed, json={**ROUTES_WITH_METRICS[path], "metrics": names})
