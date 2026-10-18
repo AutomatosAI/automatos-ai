@@ -135,6 +135,30 @@ def test_a_database_error_is_logged_and_reported_not_raised(monkeypatch):
     assert logged == ["DB update failed for task 6f1c2a4e (running)"]
 
 
+class _RefusingRecorder(_Recorder):
+    """A connection whose statement psycopg2 refuses before sending it."""
+
+    def execute(self, sql, params):
+        raise ValueError("A string literal cannot contain NUL (0x00) characters.")
+
+
+def test_a_parameter_psycopg2_refuses_is_logged_and_reported_not_raised(monkeypatch):
+    """psycopg2 raises ValueError, not psycopg2.Error, for a NUL byte in a string: an error
+    message from a command's binary output. The SQLAlchemy write caught it with every other
+    exception, and a status write still must not fail the task."""
+    recorder, logged = _RefusingRecorder(), []
+
+    class _Logger:
+        def exception(self, message, *args):
+            logged.append(message % args)
+
+    monkeypatch.setattr(db.psycopg2, "connect", recorder.connect)
+    monkeypatch.setattr(db, "logger", _Logger())
+    assert db.record_task_status("postgresql://u:p@db/x", TASK_ID, "failed", WORKER_ID, "bad\x00output") is False
+    assert logged == ["DB update failed for task 6f1c2a4e (failed)"]
+    assert not recorder.committed and recorder.closed
+
+
 @pytest.mark.asyncio
 async def test_the_worker_writes_in_a_thread_not_on_its_event_loop(monkeypatch, tmp_path):
     worker_main = load_worker_main(monkeypatch, tmp_path)
@@ -231,3 +255,7 @@ def test_the_lifecycle_lands_in_postgres_through_a_sqlalchemy_style_url(scratch_
 
     assert db.record_task_status(worker_url, TASK_ID, "cancelled", WORKER_ID, None) is True
     assert _row(admin)[4] == "boom", "a change with no error keeps the earlier message"
+
+    # The real psycopg2 refuses a NUL byte with a ValueError: reported, not raised.
+    assert db.record_task_status(worker_url, TASK_ID, "failed", WORKER_ID, "bad\x00output") is False
+    assert _row(admin)[0] == "cancelled" and _row(admin)[4] == "boom"

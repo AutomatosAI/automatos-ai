@@ -31,6 +31,11 @@ FINISHED_STATUSES = frozenset({"completed", "failed", "timed_out", "cancelled"})
 # The write runs in a thread, but an unreachable database must not hold that
 # thread for libpq's default, which is to wait forever.
 CONNECT_TIMEOUT_SECONDS = 10
+# What a refused write raises: any psycopg2 error, and the ValueError psycopg2 raises
+# before sending when a string parameter holds a NUL byte (an error message taken from
+# a command's binary output) or cannot be encoded for the connection. The SQLAlchemy
+# write this replaced caught every exception, so neither may fail the task now.
+REFUSED_WRITES = (psycopg2.Error, ValueError)
 # SQLAlchemy's dialect+driver scheme (``postgresql+psycopg2://``), which libpq rejects.
 _DRIVER_SCHEME = re.compile(r"^postgres(?:ql)?\+[A-Za-z0-9_]+://")
 
@@ -82,7 +87,7 @@ def record_task_status(
         with closing(psycopg2.connect(dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS)) as conn:
             with conn, conn.cursor() as cursor:  # commits on success, rolls back on error
                 cursor.execute(UPDATE_TASK_EXECUTION, params)
-    except psycopg2.Error:
+    except REFUSED_WRITES:
         logger.exception("DB update failed for task %s (%s)", task_id[:8], status)
         return False
     return True
