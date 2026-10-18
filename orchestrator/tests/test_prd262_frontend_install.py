@@ -43,7 +43,12 @@ JOBS = yaml.safe_load(TEST_YML)["jobs"]
 
 INSTALL = "RUN npm ci --no-audit --no-fund"
 INSTALL_INPUTS = "COPY package.json package-lock.json .npmrc ./"
-BUILD = "RUN npm run build && rm -rf .next/cache"
+# US-048 ends the same RUN by moving the traced node_modules out of the standalone output
+# (test_prd262_frontend_layers.py).
+BUILD = (
+    "RUN npm run build && rm -rf .next/cache"
+    " && mv .next/standalone/node_modules .next/standalone-node_modules"
+)
 LOCAL_LOG = '"$RUNNER_TEMP/parity-fe-local.log"'
 CACHED_STEP = "Frontend — a build that changes only build args reuses the npm ci layer"
 LOCAL_STEP = "Frontend — the local build serves /chat with no network, without sharp, libvips or TypeScript"

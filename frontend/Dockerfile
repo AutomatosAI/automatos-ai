@@ -101,7 +101,10 @@ ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL}
 # Build application (NEXT_PUBLIC_* vars will be baked into the bundle). The same RUN deletes
 # webpack's cache, which would otherwise ride in this layer (and the CI layer cache) until a
 # .next/cache mount can replace it, once Railway's frontend service id is known.
-RUN npm run build && rm -rf .next/cache
+# PRD-262 US-048: it also moves the dependencies Next traced out of the standalone output, so
+# the runtime copies them as a layer of their own. Here the move is a rename; in a later RUN
+# it could copy them into another builder layer.
+RUN npm run build && rm -rf .next/cache && mv .next/standalone/node_modules .next/standalone-node_modules
 
 # =============================================================================
 # Production Stage - Optimized (Next.js standalone)
@@ -124,10 +127,21 @@ COPY --from=base /usr/local/bin/node /usr/local/bin/node
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nextjs -u 1001
 
-# Copy standalone build (includes only traced dependencies — no full node_modules)
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# PRD-262 US-048: the app goes in as four layers, the one that changes least often first, so
+# an update downloads only the layers whose files changed. BuildKit keys a COPY on its files'
+# content, not their mtimes: a layer whose files and every layer below it are unchanged is
+# reused, digest and all.
+#   1. node_modules: only the dependencies Next traced, which change with the lock.
+#   2. public/: the builder's copy, which is the build context's public/ plus any file the
+#      build writes there, such as the theme-sdk shims (generated, never committed:
+#      frontend/.gitignore). A copy from the build context would leave those out.
+#   3. .next/static: the client bundle.
+#   4. The server: server.js, package.json and .next, which every code change moves.
+# frontend/scripts/check-layer-reuse.sh relies on these being the stage's last four layers.
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone-node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 
 USER nextjs
 
