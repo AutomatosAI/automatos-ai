@@ -10,8 +10,12 @@ The rule is ``owner_only.sends_back`` (beside ``closing_status``); this module r
 needs from the board, in the caller's workspace: each card's current status, and for the
 card the owner reads, the agent it goes back to and the note it carries. Giving a new inbox
 card to an agent (inbox → assigned, the hand-off lane) stays free: an inbox card is not worked.
-A new brief on a worked card (the board's Re-brief, FX-013) drops the call's status, so the
-status is not the move: it is read as no send-back here.
+
+P256-FIX-N17-1 (F438, nights 16–17): a new brief on a worked card is the board's Re-brief, which
+sends the card back to its agent whatever status the call names (FX-013 drops that status), so
+the Re-brief is the move: platform_update_task {description} on a Review card is a send-back and
+waits for the click. Before, a new brief was read as no move at all, and "get it rewritten and
+bring it back" re-ran #1713 with no card. A description made only of status orders is no new brief.
 """
 from __future__ import annotations
 
@@ -25,23 +29,36 @@ SEND_BACK_TO = "assigned"  # where the board's Reject puts the card (ticket_move
 NOTE = "note"
 DESCRIPTION = "description"
 ACT = "send {what} back to {agent} {words}"
+REBRIEF_ACT = "give {what} a new brief and send it back to {agent} {words}"  # N17-1: the Re-brief
 WITH_THE_NOTE = "with your note: {note}"
 WITH_NO_NOTE = "with no note"
 ITS_AGENT = "its agent"
 THEIR_AGENTS = "their agents"
+# N17-1: what the model is told of the calls that send a worked card back (follows_the_owner,
+# actions_board_tasks): they wait for the owner's click in a person's chat.
+WAITS_FOR_THE_CLICK = "It waits for the owner's click on the approval card."
+REBRIEF_WAITS = ("On a card in Review or Done this is the Re-brief: it goes back to its agent, and it waits for "
+                 "the owner's click on the approval card.")
 
 
 def moved_to(action: str, params: Dict[str, Any]) -> Optional[str]:
     """The status a card move sends its cards to, read the board's way ('send back' is
-    Assigned); None when the call names none, or a re-brief drops it (FX-013)."""
+    Assigned, and so is a Re-brief, whose call's status is dropped, FX-013); None when the
+    call names none."""
     from modules.tools.execution.call_effects import STATUS_WORDS
 
-    if params.get(SEND_BACK_FLAG):
+    if params.get(SEND_BACK_FLAG) or rebriefs(action, params):
         return SEND_BACK_TO
-    if action == EDIT_ACTION and str(params.get(DESCRIPTION) or "").strip():
-        return None
     status = str(params.get("status") or "").strip().lower()
     return STATUS_WORDS.get(status, status) or None
+
+
+def rebriefs(action: str, params: Dict[str, Any]) -> bool:
+    """Whether the call gives its card a new brief (platform_update_task's description, less
+    the sentences that only move the card): on a worked card, the board's Re-brief."""
+    from modules.tools.discovery.ticket_edits import new_brief  # lazy: ticket_edits imports owner_only
+
+    return action == EDIT_ACTION and bool(new_brief(params))
 
 
 def sends_back_a_card(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> bool:
@@ -52,7 +69,9 @@ def sends_back_a_card(db: Any, workspace_id: Any, action: str, params: Dict[str,
 
 def send_back_act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], what: str) -> Optional[str]:
     """What the card asks for a send-back: "send 'Wholesale reply' (ticket #1219) back to
-    Content Creator with your note: …", or None when the call sends nothing back."""
+    Content Creator with your note: …", or for a Re-brief (N17-1) "give … a new brief and
+    send it back to …"; None when the call sends nothing back. ``send_back`` comes first,
+    then a new brief, then the status the call names."""
     cards = _sent_back(db, workspace_id, action, params)
     if not cards:
         return None
@@ -61,7 +80,8 @@ def send_back_act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any
         note = str(params.get(DESCRIPTION) or "").strip()  # F279: the owner's words, sent as a description
     words = WITH_THE_NOTE.format(note=shown(note)) if note else WITH_NO_NOTE
     agent = _agent_given(db, workspace_id, params) or _agent_called(db, workspace_id, cards)
-    return ACT.format(what=what, agent=agent, words=words)
+    act = REBRIEF_ACT if not params.get(SEND_BACK_FLAG) and rebriefs(action, params) else ACT
+    return act.format(what=what, agent=agent, words=words)
 
 
 def _sent_back(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[Any]:
@@ -112,4 +132,4 @@ def _agent_called(db: Any, workspace_id: Any, cards: List[Any]) -> str:
     return str(row.name) if row is not None else ITS_AGENT
 
 
-__all__ = ["moved_to", "send_back_act", "sends_back_a_card"]
+__all__ = ["REBRIEF_WAITS", "WAITS_FOR_THE_CLICK", "moved_to", "rebriefs", "send_back_act", "sends_back_a_card"]

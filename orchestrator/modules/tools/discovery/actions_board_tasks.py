@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from .action_registry import ActionDefinition, ActionRegistry
 from .agent_refs import agent_id_property
+from .send_backs import REBRIEF_WAITS
 
 
 def _board_statuses() -> list:
@@ -415,7 +416,8 @@ def _update_task_parameters() -> dict:
                 "description": (
                     "A new brief, in the owner's words. On a card its agent has already worked on, this is the "
                     "board's Re-brief: the card goes back to its agent to redo it from this brief, and the old "
-                    "brief and the last draft stay on record. For 'update #0377 with this brief: …'."
+                    "brief and the last draft stay on record. For 'update #0377 with this brief: …'. "
+                    + REBRIEF_WAITS   # P256-FIX-N17-1 (F438)
                 ),
             },
             "priority": {
@@ -452,7 +454,8 @@ def _register_update_task(registry: ActionRegistry) -> None:
             "moves it as platform_update_task_status does, its note kept with the move; "
             "send_back is the board's Reject (the owner's words in note, the brief kept); "
             "a new description on a card already worked on is its Re-brief; and agent_id "
-            "(or agent_name) gives the card to that agent as platform_assign_task does."
+            "(or agent_name) gives the card to that agent as platform_assign_task does. "
+            + REBRIEF_WAITS   # P256-FIX-N17-1 (F438)
         ),
         category="tasks",
         parameters=_update_task_parameters(),

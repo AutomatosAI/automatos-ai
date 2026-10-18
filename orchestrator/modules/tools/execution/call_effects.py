@@ -107,6 +107,10 @@ MAKE_REFUSED = "make_refused"
 # PRD-256 FX-013 (night 12, A440): a re-brief sent with a status re-briefs the card and drops the
 # status; its answer carries this key, and the move the status asked for is not recorded as made.
 STATUS_IGNORED_SAID = "status_ignored"
+# P256-FIX-N17-1: an answered card given to another agent runs again from its brief
+# (handlers_board_task_assign's ``runs_again``): never recorded as sent back.
+RUNS_AGAIN_SAID = "runs_again"
+GIVEN_AGAIN = "given_again"
 
 
 def answers_in(result: Any) -> List[Dict[str, Any]]:
@@ -133,8 +137,9 @@ def what_it_said(result: Any) -> str:
 
 def result_effects(result: Any) -> Tuple[str, ...]:
     """What a call's answer says it did beyond its name: left a mission's steps waiting
-    for the owner's check or running on unchecked (F308), sent a card back (F319), or
-    filed a card that waits for the owner's review (FX-010); () when it says none."""
+    for the owner's check or running on unchecked (F308), sent a card back (F319), filed a
+    card that waits for the owner's review (FX-010), or gave an answered card to another
+    agent to run again (N17-1); () when it says none."""
     effects: Tuple[str, ...] = ()
     for answer in answers_in(result):
         if answer.get(SENT_BACK_SAID) is True and SENT_BACK not in effects:
@@ -146,6 +151,8 @@ def result_effects(result: Any) -> Tuple[str, ...]:
             effects += (REVIEWED_BY_YOU,)
         if answer.get(STATUS_IGNORED_SAID) is True and STATUS_IGNORED_SAID not in effects:
             effects += (STATUS_IGNORED_SAID,)
+        if answer.get(RUNS_AGAIN_SAID) is True and GIVEN_AGAIN not in effects:
+            effects += (GIVEN_AGAIN,)
     return effects
 
 
@@ -176,6 +183,6 @@ def call_params(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in tool_args.items() if k not in ("action", "name", "params")}
 
 
-__all__ = ["DOCUMENT_MAKES", "MAKE_REFUSED", "REVIEWED_BY_YOU", "SENT_BACK_SAID", "STATUS_IGNORED_SAID", "STATUS_WORDS",
-           "STEPS_CHECKED", "STEPS_UNCHECKED", "answers_in", "call_effects", "call_params", "done_effects",
-           "refused_effects", "result_effects", "what_it_said"]
+__all__ = ["DOCUMENT_MAKES", "GIVEN_AGAIN", "MAKE_REFUSED", "REVIEWED_BY_YOU", "RUNS_AGAIN_SAID", "SENT_BACK_SAID",
+           "STATUS_IGNORED_SAID", "STATUS_WORDS", "STEPS_CHECKED", "STEPS_UNCHECKED", "answers_in", "call_effects",
+           "call_params", "done_effects", "refused_effects", "result_effects", "what_it_said"]

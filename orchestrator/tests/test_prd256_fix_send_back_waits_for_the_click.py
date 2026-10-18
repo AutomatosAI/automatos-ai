@@ -29,6 +29,7 @@ EDIT = "platform_update_task"
 NOTE = "Lead with the Guji's price, and drop the line about Tuesday."
 CLICKER = "user:7"
 DRAFT = "Hello Larder & Loaf, our wholesale list for October…"
+NEW_BRIEF = "Write it for the October list: the Guji first, then the Yirgacheffe, in two short paragraphs."
 
 
 @pytest.fixture
@@ -145,6 +146,24 @@ def test_a_send_back_that_also_gives_the_card_names_the_agent_it_goes_to(desk):
     assert "back to Wholesale Desk with your note" in reply["message"]
 
 
+def test_a_rebrief_that_also_gives_the_card_says_a_new_brief_and_names_the_agent(desk):
+    """P256-FIX-N17-1: the same call with a new brief is the Re-brief (its status dropped, FX-013)."""
+    from sqlalchemy import text
+
+    other = desk.db.execute(
+        text("INSERT INTO agents (name, agent_type, workspace_id, status, configuration) "
+             "VALUES ('Wholesale Desk', 'custom', CAST(:w AS uuid), 'active', CAST('{}' AS json)) RETURNING id"),
+        {"w": str(desk.ws)}).scalar()
+    task = _card(desk, "review")
+
+    reply = _call(desk, {"task_id": _number(task), "status": "assigned", "note": NOTE, "agent_id": other,
+                         "description": NEW_BRIEF}, _owners_chat(), action=EDIT)
+
+    assert _asked(reply), reply
+    assert "a new brief" in reply["message"] and "back to Wholesale Desk" in reply["message"]
+    assert _status(desk, task) == "review"
+
+
 def test_a_done_card_reopened_to_in_progress_waits_for_the_click(desk):
     task = _card(desk, "done")
 
@@ -237,15 +256,18 @@ def test_the_board_is_read_in_the_callers_workspace_only(desk, seed_workspace):
     assert is_owner_only(MOVE, params) is False                                 # no board: by its status alone
 
 
-def test_a_rebrief_and_a_missions_own_card_are_not_read_as_a_send_back(desk):
-    """FX-013: a new brief drops the call's status; a mission's card is decided on its page."""
+def test_a_rebrief_is_a_send_back_and_a_missions_own_card_is_not(desk):
+    """P256-FIX-N17-1 (F438): a new brief on a worked card is the board's Re-brief, which sends it
+    back (FX-013 drops the call's status), so it waits for the click; a mission's card is decided
+    on its page."""
     from api.board_tasks import MISSION_CARD_SOURCE
     from modules.tools.discovery.owner_only import is_owner_only
 
     task = _card(desk, "review")
     rebrief = {"task_id": _number(task), "description": "Write it for the October list.", "status": "in_progress"}
-    assert is_owner_only(EDIT, rebrief, db=desk.db, workspace_id=desk.ws) is False
+    assert is_owner_only(EDIT, rebrief, db=desk.db, workspace_id=desk.ws) is True
     task.source_type = MISSION_CARD_SOURCE
     desk.db.flush()
+    assert is_owner_only(EDIT, rebrief, db=desk.db, workspace_id=desk.ws) is False
     moved_back = {"task_id": _number(task), "status": "assigned"}
     assert is_owner_only(MOVE, moved_back, db=desk.db, workspace_id=desk.ws) is False

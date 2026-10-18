@@ -72,6 +72,7 @@ from modules.tools.discovery.brand_turns import refusal_on_a_brand_turn
 from modules.tools.discovery.card_words_said import owners_card_words
 from modules.tools.discovery.click_resume import on_the_click
 from modules.tools.discovery.owner_only import human_driven, is_owner_only
+from modules.tools.discovery.send_backs import REBRIEF_WAITS, WAITS_FOR_THE_CLICK
 from modules.tools.formatting.card_digest import fits_on_the_card
 from modules.tools.discovery.owner_turn import (
     AGAIN, GIVE, MISSION_CARD, NEW_CARD, NEW_MISSION, OTHER_VERB, RUN_CARD, SEND_BACK, SENDS_IT_BACK, STEP_CARD,
@@ -426,7 +427,8 @@ def _owners_note(words: str) -> str:
 
 def _send_back_call(ref: str, words: str = "") -> str:
     return (f"To send it back: platform_update_task_status {{task_id: \"{ref}\", status: \"assigned\", "
-            f"note: {_owners_note(words)}}}: its brief stays, and the agent redoes it on the same card.")
+            f"note: {_owners_note(words)}}}: its brief stays, and the agent redoes it on the same card. "
+            f"{WAITS_FOR_THE_CLICK}")
 
 
 # F309 (night 9): giving comes before sending back, so "Give card 1859 to the Analyst
@@ -435,9 +437,9 @@ _CARD_CALLS = (
     (GIVE, "To give it to an agent: platform_assign_task {{task_id: \"{ref}\", agent_name: …}}: a card its agent "
            "already answered goes to the new agent and runs again."),
     (SEND_BACK, "To send it back: platform_update_task_status {{task_id: \"{ref}\", status: \"assigned\", "
-                "note: {note}}}: its brief stays, and the agent redoes it on the same card."),
+                "note: {note}}}: its brief stays, and the agent redoes it on the same card. " + WAITS_FOR_THE_CLICK),
     (UPDATE, "To give it a new brief: platform_update_task {{task_id: \"{ref}\", description: the owner's "
-             "brief, word for word}}."),
+             "brief, word for word}}. " + REBRIEF_WAITS),   # P256-FIX-N17-1 (F438): the Re-brief waits too
 )
 
 

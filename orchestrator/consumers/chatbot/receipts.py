@@ -53,8 +53,8 @@ from consumers.chatbot.claims_backed import (
 from consumers.chatbot.claims_by_kind import EACH_STEP_WAITS
 from consumers.chatbot.claims_not_reports import AUTOMATIC_READS  # the folded read's action (N15-1 reads it too)
 from modules.tools.execution.call_effects import (
-    AGENT_SET, DOCUMENT_MAKES, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED, STEPS_UNCHECKED,
-    answers_in, done_effects,
+    AGENT_SET, DOCUMENT_MAKES, GIVEN_AGAIN, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED,
+    STEPS_UNCHECKED, answers_in, done_effects,
 )
 from modules.tools.execution.card_raised import is_waiting, receipt_effect
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
@@ -84,7 +84,8 @@ _MOVES = {"done": "moved to Done", "cancelled": "moved to Cancelled", "assigned"
 _SAID = {SENT_BACK: "sent back to its agent", AGENT_SET: "agent set",
          STEPS_CHECKED: EACH_STEP_WAITS, STEPS_UNCHECKED: "its steps run without your check",
          REVIEWED_BY_YOU: "card created, reviewed by you before it closes",  # FX-010 (D7)
-         STATUS_IGNORED_SAID: "status ignored: a re-brief sends the card back by itself"}  # FX-013
+         STATUS_IGNORED_SAID: "status ignored: a re-brief sends the card back by itself",  # FX-013
+         GIVEN_AGAIN: "given to another agent; it runs again from its brief"}  # N17-1
 # Calls whose name reads badly as "<thing> <past verb>".
 _OWN_WORDS = {"assign_tool_to_agent": "tool added", "unassign_tool_from_agent": "tool removed"}
 DOCUMENT_MADE = "document made"   # F351: the calls that make a document the owner finds in Deliverables
