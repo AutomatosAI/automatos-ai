@@ -6,12 +6,13 @@
  * user: the manifest's file names must resolve under that folder (manifest.ts).
  */
 import type { SlotId } from './registry-types'
+import sharedModules from './shared-modules.json'
 
 /**
- * PA-2: the host contract's version (slots, pages, routes, the boot contract). A-06b moves it
- * into shared-modules.json next to sdkVersion, with the Python parity test.
+ * PA-2: the host contract's version (slots, pages, routes, the boot contract). It lives in
+ * shared-modules.json next to sdkVersion; validator-parity.test.ts holds it equal to contract.py.
  */
-export const THEME_HOST_VERSION = '1.0.0'
+export const THEME_HOST_VERSION: string = sharedModules.hostVersion
 
 /** The caller's active theme in this workspace (A-07b), read through the backend client. */
 export const THEME_ACTIVE_ENDPOINT = '/api/themes/active'

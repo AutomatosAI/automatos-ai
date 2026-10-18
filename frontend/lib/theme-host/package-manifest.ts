@@ -10,7 +10,7 @@
  * shared-modules.json (PA-2), next to the SDK's; a theme's `engines` is checked against both.
  * Nothing here throws on bad input: every refusal is a ThemeError.
  */
-import { HTML_CLASS_PATTERN } from './constants'
+import { HTML_CLASS_PATTERN, THEME_HOST_VERSION } from './constants'
 import {
   echo, errorIf, hasOwn, isOneOf, isRecord, isWholeNumber, own, plainTextProblem, themeError, unknownFieldErrors,
   type JsonRecord, type ThemeError,
@@ -18,10 +18,9 @@ import {
 import { satisfiesSdkRange } from './engines'
 import { LOOK_ID_PATTERN } from '@/lib/looks/types'
 import { SDK_VERSION } from './sdk'
-import sharedModules from './shared-modules.json'
 
 /** PA-2: the host contract's version (slots, pages, routes, boot data). */
-export const THEME_HOST_VERSION: string = sharedModules.hostVersion
+export { THEME_HOST_VERSION }
 export const MANIFEST_SCHEMA = 'automatos-theme/v1'
 
 /** Classes the core owns on <html>: the Style axis, Classic and the tones (and next-themes' "system"). */
