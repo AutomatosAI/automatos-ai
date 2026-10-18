@@ -945,6 +945,28 @@ jobs:
             fi
           done
           exit "$bad"
+      # PRD-262 US-009: the lock records each native build's C library, so the Alpine
+      # builder installs, and Next traces, only the musl sharp, at the lock's release.
+      - name: Frontend — sharp at the lock's release, and no glibc build
+        run: |
+          want=$(jq -r '.packages["node_modules/sharp"].version' frontend/package-lock.json)
+          builds=$(docker run --rm parity-fe sh -c 'ls node_modules/@img 2>/dev/null')
+          echo "node_modules/@img:" $builds
+          bad=0
+          if docker run --rm parity-fe sh -c 'test -d node_modules/sharp'; then
+            got=$(docker run --rm parity-fe node -p 'require("/app/node_modules/sharp/package.json").version')
+            echo "sharp $got (lock: $want)"
+            if [ "$got" != "$want" ]; then echo "::error::the image's sharp $got is not the lock's $want"; bad=1; fi
+          else
+            echo "::notice::sharp is not in the standalone trace"
+          fi
+          for build in $builds; do
+            case "$build" in
+              sharp-linux-*|sharp-libvips-linux-*) echo "::error::the Alpine image carries the glibc build @img/$build"; bad=1 ;;
+              sharp-wasm32) echo "::warning::the image carries @img/sharp-wasm32, the WebAssembly fallback" ;;
+            esac
+          done
+          exit "$bad"
       - name: Backend — graph extras present with no args
         run: |
           docker build --target production -t parity-be orchestrator/
