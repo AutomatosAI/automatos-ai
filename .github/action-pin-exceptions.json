@@ -1,0 +1,4 @@
+{
+  "_about": "PRD-262 US-012. scripts/ci/check_action_pins.py fails on any uses: that is not pinned to a 40-hex commit, in this repository's workflows or inside a composite action they pin. A reference that cannot be pinned is listed here exactly as written, with the reason. An entry with no reason, or one that no longer matches anything, fails the check.",
+  "exceptions": []
+}

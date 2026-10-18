@@ -96,6 +96,7 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 | `gitleaks` | No secret anywhere in the pull request's history. **Required.** |
 | `malware-scan` | Known malicious payloads and hidden loaders. **Required.** |
 | `CodeQL`, `check-shopify-isolation` | Static analysis, and the Shopify package's isolation. |
+| `action-pins` | Every `uses:` names a 40-hex commit, and so does every `uses:` inside a composite action or reusable workflow those commits point at, read from GitHub at that commit. Exceptions, each with its reason, are in `.github/action-pin-exceptions.json`. It runs when a workflow, the check or that list changes. |
 
 Lanes marked non-required in their workflow file still run and still report. Treat red as red.
 
