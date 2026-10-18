@@ -12,7 +12,8 @@ through ``scripts/ci/smoke-fresh-clone.sh`` in one of two modes:
 The script times the boots with ``smoke_boot.py``, as the fresh-clone smoke does. This
 tool does the rest, one command per step:
 
-* ``target``: the tag a run boots and the commit its images must carry;
+* ``target``: the tag a run boots (``sha-<7>``, ``weekly-<yyyymmdd>`` after the weekly
+  rebuild, ``pr-<7>`` or a manual run's tag) and the commit its images must carry;
 * ``pull``: runs ``docker compose pull``, timing it and counting the bytes the runner
   received meanwhile;
 * ``workers``: the backend's processes. This is the first CI boot of the production
@@ -36,6 +37,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -63,6 +65,8 @@ SHA_TAG = re.compile(r"^sha-([0-9a-f]{7})$")
 IMAGE_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 SHORT_SHA = 7  # docker/metadata-action's type=sha
 TAG_PREFIXES = {"workflow_run": "sha", "pull_request": "pr"}
+SCHEDULED = "schedule"  # the event behind images.yml's weekly rebuild (PRD-262 US-011)
+WEEKLY_TAG = "weekly-%Y%m%d"  # its tag: metadata-action's type=schedule, weekly-{{date 'YYYYMMDD'}}
 ROUTE_TABLE, DEVICE_TABLE = Path("/proc/net/route"), Path("/proc/net/dev")
 DEFAULT_ROUTE = "00000000"
 # -ww: ps never cuts a command line short, so `--reload` at its end is seen.
@@ -78,24 +82,43 @@ READ_ERRORS = registry.READ_ERRORS
 # --------------------------------------------------------------------------- target
 
 
-def target(event: str, sha: str = "", tag: str = "") -> Dict[str, str]:
+def weekly_tag(started_at: str) -> str:
+    """``weekly-<yyyymmdd>``: the tag a scheduled images.yml run that started at ``started_at`` publishes.
+
+    images.yml's weekly rebuild (PRD-262 US-011) tags its images with metadata-action's
+    ``{{date 'YYYYMMDD'}}``, the UTC date when its merge job runs. US-011 schedules the
+    run for 05:00 UTC, so its start date is that date. A run that only publishes after the next
+    midnight UTC would name another day: the pull then finds no such tag, the smoke
+    fails, and ``edge`` stays where it is.
+    """
+    started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    if started.tzinfo is None:
+        raise ValueError(f"the run's start time carries no time zone: {started_at!r}")
+    return started.astimezone(timezone.utc).strftime(WEEKLY_TAG)
+
+
+def target(event: str, sha: str = "", tag: str = "", run_event: str = "", run_started: str = "") -> Dict[str, str]:
     """The tag this run boots, and the commit (or a ``sha-<7>`` tag's prefix) it must carry.
 
-    * ``workflow_run`` (images.yml published on main): ``sha-<7>`` of that commit;
+    * ``workflow_run`` (images.yml published on main): ``sha-<7>`` of that commit, or,
+      when ``run_event`` is ``schedule`` (the weekly rebuild), ``weekly-<yyyymmdd>`` of
+      the day the run started (``run_started``), which never re-pushes a ``sha-<7>``;
     * ``pull_request``: ``pr-<7>`` of the commit the job checked out and built;
     * ``workflow_dispatch``: the tag given. A ``sha-<7>`` tag names its commit's
       prefix; any other tag (``edge``) must carry a revision, but not a known one.
     """
-    if event in TAG_PREFIXES:
-        if not FULL_SHA.match(sha):
-            raise ValueError(f"not a full commit sha: {sha!r}")
-        return {"tag": f"{TAG_PREFIXES[event]}-{sha[:SHORT_SHA]}", "revision": sha}
-    if event != "workflow_dispatch":
+    if event == "workflow_dispatch":
+        if not IMAGE_TAG.match(tag):
+            raise ValueError(f"not an image tag: {tag!r}")
+        named = SHA_TAG.match(tag)
+        return {"tag": tag, "revision": named.group(1) if named else ""}
+    if event not in TAG_PREFIXES:
         raise ValueError(f"smoke-images does not run on {event!r}")
-    if not IMAGE_TAG.match(tag):
-        raise ValueError(f"not an image tag: {tag!r}")
-    named = SHA_TAG.match(tag)
-    return {"tag": tag, "revision": named.group(1) if named else ""}
+    if not FULL_SHA.match(sha):
+        raise ValueError(f"not a full commit sha: {sha!r}")
+    if event == "workflow_run" and run_event == SCHEDULED:
+        return {"tag": weekly_tag(run_started), "revision": sha}
+    return {"tag": f"{TAG_PREFIXES[event]}-{sha[:SHORT_SHA]}", "revision": sha}
 
 
 # --------------------------------------------------------------------------- pull
@@ -328,7 +351,7 @@ def _say(failures: Sequence[str], what: str) -> int:
 
 def cmd_target(args: argparse.Namespace) -> int:
     """Print the tag and revision, and append them to ``--outputs`` ($GITHUB_OUTPUT)."""
-    chosen = target(args.event, args.sha, args.tag)
+    chosen = target(args.event, args.sha, args.tag, args.run_event, args.run_started)
     lines = "".join(f"{key}={value}\n" for key, value in chosen.items())
     print(lines, end="")
     if args.outputs:
@@ -404,6 +427,8 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--event", required=True, help="workflow_run, pull_request or workflow_dispatch")
     pick.add_argument("--sha", default="", help="the commit the images were built from")
     pick.add_argument("--tag", default="", help="workflow_dispatch: the tag to boot")
+    pick.add_argument("--run-event", default="", help="workflow_run: the event that ran images.yml")
+    pick.add_argument("--run-started", default="", help="workflow_run: when that run started (ISO 8601)")
     pick.add_argument("--outputs", help="append tag= and revision= here ($GITHUB_OUTPUT)")
     pull = commands.add_parser("pull", help="time a pull and count the bytes received")
     pull.add_argument("--out", type=Path, required=True)

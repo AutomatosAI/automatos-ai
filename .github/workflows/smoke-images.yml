@@ -15,11 +15,15 @@ name: smoke-images
 #   images must carry their commit's org.opencontainers.image.revision, and the backend,
 #   booted from the production stage for the first time in CI, must run without
 #   --reload and with the production command's worker count. PRD-262 US-036 and US-037
-#   switch this job to `make up` on a clean checkout.
+#   switch this job to `make up` on a clean checkout, and PRD-262 US-056 (W9) adds a
+#   rollback step: the previous main run's API image, with AUTOMATOS_SKIP_MIGRATIONS=true,
+#   against the schema the new image migrated, must answer /health/ready 200.
 # - promote-edge: once smoke-images passes on both arches for a main publish, it points
 #   `edge` at that `sha-<7>` (`docker buildx imagetools create`, which keeps the signed
 #   digest). images.yml no longer moves `edge`, so an image that cannot boot never
-#   reaches it. A manual run never promotes; re-run a failed main run instead.
+#   reaches it. A manual run never promotes; re-run a failed main run instead. When
+#   images.yml's weekly uncached rebuild runs (schedule, PRD-262 US-011), its
+#   `weekly-<yyyymmdd>` tag is booted and promoted the same way.
 # - smoke-images-pr: on pull requests that touch compose, the Makefile, envs/ or an
 #   image input (images.yml's pull_request paths, plus the backend's entrypoint and
 #   healthcheck and this lane's own files), it builds the three amd64 images in the job
@@ -95,14 +99,16 @@ permissions:
 jobs:
   smoke-images:
     name: smoke-images (${{ matrix.arch }}) — pull and boot the published images (non-required)
-    # Only a successful images.yml run that published from this repository's main.
+    # Only a successful images.yml run that published from this repository's main: a
+    # push, a manual run, or the weekly uncached rebuild (schedule, PRD-262 US-011).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
-       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch' ||
+        github.event.workflow_run.event == 'schedule'))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -124,13 +130,19 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
+      # sha-<7> of a main publish; weekly-<yyyymmdd> of the day a scheduled rebuild
+      # started, which never re-pushes a sha-<7>; or the tag a manual run names.
       - name: The tag to boot
         id: target
         env:
           EVENT: ${{ github.event_name }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_STARTED: ${{ github.event.workflow_run.run_started_at }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           TAG: ${{ inputs.tag }}
-        run: python3 scripts/ci/smoke_images.py target --event "$EVENT" --sha "$SHA" --tag "$TAG" --outputs "$GITHUB_OUTPUT"
+        run: |
+          python3 scripts/ci/smoke_images.py target --event "$EVENT" --run-event "$RUN_EVENT" \
+            --run-started "$RUN_STARTED" --sha "$SHA" --tag "$TAG" --outputs "$GITHUB_OUTPUT"
 
       # The same throwaway local-only secrets as smoke-fresh-clone.yml; no external
       # SaaS credential is set.

@@ -56,6 +56,9 @@
 # (automatos_postgres_data, ...), so on a machine running its own Automatos stack it
 # would delete that stack's database. It refuses to start on a host that already has
 # Automatos containers or volumes, before it builds, pulls or tears anything down.
+# SMOKE_IMAGES=pull also empties the Docker image cache, which deletes every image on
+# the host, Automatos's or not. Outside CI (CI=true) it refuses unless
+# SMOKE_EMPTY_IMAGE_CACHE=true says the host's images may go.
 #
 # Exit 0 = every boot answered 200 with no external creds. Exit 1 = a boot failed.
 set -uo pipefail
@@ -146,6 +149,13 @@ check_mode() {
       [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=${SMOKE_IMAGES} needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
     *) fail "SMOKE_IMAGES must be unset, pull or prebuilt, not '${SMOKE_IMAGES}'" ;;
   esac
+}
+
+# Runs before the exit trap is set, like refuse_existing_stack, so a refusal deletes nothing.
+refuse_emptying_a_kept_image_cache() {
+  [ "$SMOKE_IMAGES" = "pull" ] || return 0
+  [ "${CI:-}" = "true" ] || [ "${SMOKE_EMPTY_IMAGE_CACHE:-}" = "true" ] \
+    || fail "SMOKE_IMAGES=pull starts from an empty Docker image cache, so it deletes every image on this host. Run it on a throwaway host such as a CI runner, or set SMOKE_EMPTY_IMAGE_CACHE=true to let it delete them here"
 }
 
 # Runs before the exit trap is set, so a refusal tears nothing down.
@@ -336,6 +346,7 @@ main() {
   check_mode
   print_banner
   refuse_existing_stack
+  refuse_emptying_a_kept_image_cache
   trap finish EXIT
   prepare_images
   start_event_log

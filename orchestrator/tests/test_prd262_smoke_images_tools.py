@@ -3,8 +3,9 @@
 ``scripts/ci/smoke_images.py`` runs inside smoke-images.yml against a real stack; these
 tests feed it recorded shapes instead of Docker:
 
-* ``target`` picks ``sha-<7>`` after a main publish, ``pr-<7>`` on a pull request, and a
-  manual run's tag, refusing anything that is not a tag;
+* ``target`` picks ``sha-<7>`` after a main publish, ``weekly-<yyyymmdd>`` after the
+  weekly rebuild, ``pr-<7>`` on a pull request, and a manual run's tag, refusing
+  anything that is not a tag;
 * ``pull`` times the pull and counts the bytes the default-route interface received;
 * ``workers`` reads ``docker top``: the production command runs 4 uvicorn workers
   without ``--reload``; the development stage's ``--reload`` and a wrong count fail;
@@ -81,6 +82,34 @@ def test_a_manual_run_boots_the_tag_it_was_given(tag, revision):
 def test_target_refuses_what_it_cannot_boot(event, sha, tag):
     with pytest.raises(ValueError):
         tool.target(event, sha, tag)
+
+
+@pytest.mark.parametrize("started,tag", [
+    ("2026-10-19T05:03:12Z", "weekly-20261019"),
+    ("2026-10-19T23:59:59+00:00", "weekly-20261019"),
+    ("2026-10-19T01:30:00+02:00", "weekly-20261018"),  # 23:30 UTC the day before
+])
+def test_a_scheduled_rebuild_boots_the_weekly_tag_of_the_utc_day_it_started(started, tag):
+    assert tool.target("workflow_run", SHA, run_event="schedule", run_started=started) == {"tag": tag, "revision": SHA}
+
+
+@pytest.mark.parametrize("run_event", ["push", "workflow_dispatch", ""])
+def test_a_publish_that_is_not_scheduled_boots_its_sha_tag(run_event):
+    assert tool.target("workflow_run", SHA, run_event=run_event, run_started="2026-10-19T05:03:12Z")["tag"] == TAG
+
+
+@pytest.mark.parametrize("started", ["", "yesterday", "2026-10-19T05:03:12"])
+def test_a_scheduled_rebuild_needs_a_start_time_with_its_zone(started):
+    with pytest.raises(ValueError):
+        tool.target("workflow_run", SHA, run_event="schedule", run_started=started)
+
+
+def test_the_target_command_passes_the_run_event_and_start_on(tmp_path):
+    outputs = tmp_path / "out"
+    args = ["target", "--event", "workflow_run", "--run-event", "schedule", "--run-started", "2026-10-19T05:03:12Z",
+            "--sha", SHA, "--tag", "", "--outputs", str(outputs)]
+    assert tool.main(args) == 0
+    assert outputs.read_text().splitlines() == ["tag=weekly-20261019", f"revision={SHA}"]
 
 
 def test_the_target_command_writes_the_job_outputs(tmp_path, capsys):
