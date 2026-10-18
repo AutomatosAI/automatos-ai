@@ -18,8 +18,8 @@ name: test
 # Concurrency cancels superseded runs on the same ref so rapid pushes don't queue.
 #
 # The path-gated lanes (the backend test shards, the image build, the frontend,
-# the CLI host, the sim units) run on a PR only when it touches what they read —
-# the `changes` job decides — and always on main.
+# the CLI host, the sim units, agent-opt-worker) run on a PR only when it touches
+# what they read — the `changes` job decides — and always on main.
 #
 # Introduced NON-REQUIRED on purpose. The net is expected to surface
 # pre-existing gaps that Wave 2 (WS-G golden journeys, WS-H untested
@@ -63,6 +63,7 @@ jobs:
       frontend: ${{ steps.match.outputs.frontend }}
       cli_host: ${{ steps.match.outputs.cli_host }}
       sim: ${{ steps.match.outputs.sim }}
+      agent_opt: ${{ steps.match.outputs.agent_opt }}
       backend_mode: ${{ steps.match.outputs.backend_mode }}
       backend_keywords: ${{ steps.match.outputs.backend_keywords }}
       backend_shards: ${{ steps.match.outputs.backend_shards }}
@@ -91,6 +92,7 @@ jobs:
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
           SIM_PATHS: ^tests/sim/|^\.github/workflows/test\.yml$
+          AGENT_OPT_PATHS: ^services/agent-opt-worker/|^\.github/workflows/test\.yml$
         run: |
           set -euo pipefail
           full_backend() {
@@ -100,7 +102,7 @@ jobs:
             echo "backend_shard_count=$BACKEND_SHARDS"
           }
           all() {
-            { printf '%s=true\n' prod_images frontend cli_host sim; full_backend; } | tee -a "$GITHUB_OUTPUT"
+            { printf '%s=true\n' prod_images frontend cli_host sim agent_opt; full_backend; } | tee -a "$GITHUB_OUTPUT"
             echo "every lane runs: $1"
           }
           if [ "$EVENT" != "pull_request" ]; then all "$EVENT"; exit 0; fi
@@ -115,6 +117,7 @@ jobs:
             lane frontend "$FRONTEND_PATHS"
             lane cli_host "$CLI_HOST_PATHS"
             lane sim "$SIM_PATHS"
+            lane agent_opt "$AGENT_OPT_PATHS"
           } | tee -a "$GITHUB_OUTPUT"
           scope=$(python3 scripts/ci/backend_test_plan.py scope <<< "$files")
           echo "backend scope: $scope"
@@ -1199,6 +1202,101 @@ jobs:
           pytest -q tests/test_ptyproc.py tests/test_filelock.py tests/test_lifecycle.py
           tests/test_winservice.py tests/test_hook_pipe.py tests/test_platform_guard.py
           tests/test_session_on_windows.py
+
+  # PRD-262 US-006: agent-opt-worker answers only the platform. Railway builds this
+  # image (no target, so the last stage, production); nothing else built it before.
+  # The lane checks the lock keeps the PyPI package `fi` out, builds the image as
+  # Railway does, imports the SDK modules inside it, proves it refuses to start
+  # without its token, runs the service's own TestClient suite inside the `test`
+  # stage, and checks the running container answers /health and 401s the rest.
+  agent-opt-worker:
+    name: agent-opt-worker (PRD-262) — locked image, token on every route (non-required)
+    needs: changes
+    if: needs.changes.outputs.agent_opt == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CONTEXT: services/agent-opt-worker
+      IMAGE: agent-opt-worker:ci
+      TEST_IMAGE: agent-opt-worker:test
+    steps:
+      - uses: actions/checkout@v4
+      - name: The lock keeps the PyPI package `fi` out, and every pin carries a hash
+        run: |
+          lock="$CONTEXT/requirements.lock"
+          if grep -nE '^fi==' "$lock"; then
+            echo "::error file=$lock::the lock installs the PyPI package fi (a 2019 sdist that runs setup.py); see $CONTEXT/overrides.txt"
+            exit 1
+          fi
+          pins=$(grep -cE '^[A-Za-z0-9._-]+==' "$lock")
+          unhashed=$(awk '/^[A-Za-z0-9._-]+==/ { if (pin != "" && !hashed) print pin; pin = $1; hashed = 0; next } /--hash=sha256:/ { hashed = 1 } END { if (pin != "" && !hashed) print pin }' "$lock")
+          if [ -n "$unhashed" ]; then echo "::error file=$lock::pins without a hash: $unhashed"; exit 1; fi
+          if grep -nE 'uvicorn\[' "$lock" "$CONTEXT/requirements.in"; then echo "::error::uvicorn extras are back"; exit 1; fi
+          echo "$pins pins, every one hashed, no fi==: PASS"
+      - name: Build the image (default target, as Railway builds it)
+        run: |
+          start=$(date +%s)
+          docker build -t "$IMAGE" "$CONTEXT"
+          echo "image build: $(( $(date +%s) - start )) s"
+          docker image ls "$IMAGE"
+      - name: The SDK modules import inside the image (fi.evals from ai-evaluation, fi.opt from agent-opt)
+        run: |
+          docker run --rm -e LOG_RELAY_ENABLED=false --entrypoint python "$IMAGE" \
+            -c 'import fi.evals, fi.opt.optimizers; print("fi.evals and fi.opt.optimizers import")'
+          if docker run --rm --entrypoint pip "$IMAGE" show fi > /dev/null 2>&1; then
+            echo "::error::the PyPI package fi is installed in the image"; exit 1
+          fi
+      - name: Start-up fails without the token
+        run: |
+          set +e
+          timeout 120 docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" > boot.log 2>&1
+          code=$?
+          set -e
+          cat boot.log
+          if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
+            echo "::error::the worker started without AGENT_OPT_WORKER_TOKEN (exit $code)"; exit 1
+          fi
+          grep -q 'AGENT_OPT_WORKER_TOKEN is not set' boot.log
+          echo "the worker refused to start without its token (exit $code): PASS"
+      - name: The service's own suite, inside the image
+        run: |
+          docker build --target test -t "$TEST_IMAGE" "$CONTEXT"
+          docker run --rm -e LOG_RELAY_ENABLED=false --entrypoint python "$TEST_IMAGE" -m pytest -v
+      - name: The running container answers /health and /metrics, and 401s everything else without the token
+        env:
+          TOKEN: ci-agent-opt-worker-token
+        run: |
+          docker run -d --name agent-opt-worker -e LOG_RELAY_ENABLED=false \
+            -e AGENT_OPT_WORKER_TOKEN="$TOKEN" -p 127.0.0.1:8080:8080 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/health; then up=1; echo; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs agent-opt-worker; echo "::error::/health never answered"; exit 1; fi
+          fail=""
+          check() {
+            got=$(curl -sS -o /dev/null -w '%{http_code}' "$@")
+            echo "$got  $*"
+            [ "$got" = "$expected" ] || fail=1
+          }
+          expected=200; check http://127.0.0.1:8080/metrics
+          expected=401
+          check -X POST http://127.0.0.1:8080/assess
+          check -X POST http://127.0.0.1:8080/safety
+          check -X POST http://127.0.0.1:8080/score
+          check -X POST http://127.0.0.1:8080/optimize
+          check http://127.0.0.1:8080/optimize/some-job
+          check -X POST -H 'X-Internal-Token: wrong' http://127.0.0.1:8080/assess
+          check -X POST -H 'Host: evil.example/health?' http://127.0.0.1:8080/assess
+          expected=404
+          check http://127.0.0.1:8080/docs
+          check http://127.0.0.1:8080/openapi.json
+          check -H "X-Internal-Token: $TOKEN" http://127.0.0.1:8080/test
+          expected=404; check -H "X-Internal-Token: $TOKEN" http://127.0.0.1:8080/optimize/some-job
+          docker logs agent-opt-worker 2>&1 | tail -n 20
+          docker rm -f agent-opt-worker > /dev/null
+          if [ -n "$fail" ]; then echo "::error::a route answered other than expected (above)"; exit 1; fi
 
   # PRD-247: the simulation harness's own unit tests (tests/sim/tests). Pure
   # standard library, no database, no platform — parsers, pack validation,
