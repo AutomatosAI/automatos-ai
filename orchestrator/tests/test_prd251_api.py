@@ -51,7 +51,7 @@ if str(_ORCH) not in sys.path:
 
 import sqlalchemy as sa  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
-from fastapi.routing import APIRoute  # noqa: E402
+from fastapi.routing import APIRoute, iter_route_contexts  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
@@ -183,8 +183,9 @@ def _approved(api, **body):
 
 def _router_routes():
     out = []
-    for route in socials_api.router.routes:
-        if isinstance(route, APIRoute):
+    # The routes of the routers included in this one too (FastAPI 0.137+ keeps those as tree nodes).
+    for route in iter_route_contexts(socials_api.router.routes):
+        if isinstance(route.original_route, APIRoute):
             for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
                 out.append((method, route.path))
     return sorted(out)
@@ -346,8 +347,8 @@ def test_the_gate_answers_before_the_permission_check(api):
 
 
 def test_every_route_depends_on_the_gate_first():
-    for route in socials_api.router.routes:
-        assert isinstance(route, APIRoute)
+    for route in iter_route_contexts(socials_api.router.routes):
+        assert isinstance(route.original_route, APIRoute)
         first = route.dependant.dependencies[0].call
         assert first is require_socials_enabled, route.path
 
@@ -916,7 +917,7 @@ def test_request_changes_needs_a_comment_and_reject_archives(api):
 
 _PROBE = r"""
 import json
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from main import app
 from modules.socials.settings import require_socials_enabled
 
@@ -927,12 +928,12 @@ def flatten(dependant, acc):
         flatten(sub, acc)
 
 out = []
-for route in app.routes:
+for route in iter_route_contexts(app.routes):
     path = getattr(route, "path", "") or ""
     if not path.startswith("/api/socials"):
         continue
     calls = []
-    if isinstance(route, APIRoute):
+    if isinstance(route.original_route, APIRoute):
         flatten(route.dependant, calls)
     methods = sorted(set(getattr(route, "methods", None) or []) - {"HEAD", "OPTIONS"})
     out.append({"path": path, "methods": methods, "gated": require_socials_enabled in calls})

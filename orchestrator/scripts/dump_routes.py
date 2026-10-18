@@ -25,6 +25,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from fastapi.routing import iter_route_contexts
+
 # Methods FastAPI auto-adds for every route; they are not part of the contract
 # the frontend calls against.
 _IGNORED_METHODS = frozenset({"HEAD", "OPTIONS"})
@@ -39,9 +41,13 @@ def collect_pairs(app) -> List[Dict[str, str]]:
     Method-less routes (WebSocket endpoints, sub-app mounts, static files) are
     emitted once with an empty method so the manifest is a faithful superset of
     the served surface.
+
+    FastAPI 0.137+ keeps each included router as one tree node in ``app.routes``,
+    with no ``path`` (PRD-262 US-008). ``iter_route_contexts`` walks that tree and
+    gives every served route with its full path, include prefixes and all.
     """
     seen: set[tuple[str, str]] = set()
-    for route in app.routes:
+    for route in iter_route_contexts(app.routes):
         path = getattr(route, "path", None)
         if not path:
             continue

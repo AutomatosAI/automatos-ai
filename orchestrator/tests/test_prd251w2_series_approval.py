@@ -46,7 +46,7 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from fastapi.routing import APIRoute  # noqa: E402
+from fastapi.routing import APIRoute, iter_route_contexts  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 import api.socials as socials_api  # noqa: E402
@@ -511,8 +511,8 @@ def test_every_campaign_route_is_a_plain_def():
 def test_the_campaign_routes_are_in_the_socials_router_behind_the_gate():
     served = {
         (method, route.path): route
-        for route in socials_api.router.routes
-        if isinstance(route, APIRoute)
+        for route in iter_route_contexts(socials_api.router.routes)  # the included campaigns router too
+        if isinstance(route.original_route, APIRoute)
         for method in route.methods
     }
     for key in NEW_ROUTES:
