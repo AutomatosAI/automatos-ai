@@ -64,6 +64,11 @@
 # carry a local-* tag or compose's own <project>-<service> name. The step summary
 # adds the pull, the first run from its start to :3000 200, and those checks.
 #
+# PRD-262 US-008, in the pull-request variant (`prebuilt`) only: once the worker count
+# checks out, scripts/ci/smoke_worker_restart.py kills one uvicorn worker of the
+# production-stage backend and needs uvicorn to start a replacement within 30 s, with
+# /health 200 and no container restart. uvicorn 0.24 never replaced a dead worker.
+#
 # Exit 0 = every boot answered 200 with no external creds and every published port is
 # on loopback. Exit 1 = a boot failed, or a port listens beyond this machine.
 set -uo pipefail
@@ -99,12 +104,15 @@ OUT_DIR="${SMOKE_OUT_DIR:-${RUNNER_TEMP:-/tmp}/smoke-fresh-clone}"
 BOOT_TOOL="scripts/ci/smoke_boot.py"
 REPORT_TOOL="scripts/ci/smoke_report.py"
 IMAGES_TOOL="scripts/ci/smoke_images.py"
+RESTART_TOOL="scripts/ci/smoke_worker_restart.py"
 BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
 # smoke_images.py's records (it reads them back from OUT_DIR for the report).
 PULL_FILE="${OUT_DIR}/pull.json"
 PROCESSES_FILE="${OUT_DIR}/processes.json"
 IMAGES_FILE="${OUT_DIR}/images.json"
+# smoke_worker_restart.py's record (PRD-262 US-008).
+WORKER_RESTART_FILE="${OUT_DIR}/worker-restart.json"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
 # The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
@@ -277,12 +285,22 @@ check_loopback_ports() {
 }
 
 # The first CI boot of the production stage (image modes): no --reload, the expected
-# worker count. PRD-262 US-008's kill-a-worker step goes after this check.
+# worker count. check_worker_restart runs right after it.
 check_backend_processes() {
   [ -n "$SMOKE_IMAGES" ] || return 0
   python3 "$IMAGES_TOOL" workers --container "$BACKEND_CONTAINER" --expect "$BACKEND_WORKERS" \
     --out "$PROCESSES_FILE" \
     || fail "the backend does not run the production command (no --reload, ${BACKEND_WORKERS} workers)"
+}
+
+# PRD-262 US-008, smoke-images' pull-request variant only: SIGKILL one uvicorn worker and
+# require uvicorn to replace it within 30 s, /health 200, and no container restart.
+# The main runs (pull) are measurements, so they kill nothing.
+check_worker_restart() {
+  [ "$SMOKE_IMAGES" = "prebuilt" ] || return 0
+  python3 "$RESTART_TOOL" --container "$BACKEND_CONTAINER" --health-url "$HEALTH_URL" \
+    --out "$WORKER_RESTART_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "uvicorn did not replace a killed worker within 30s with /health 200 and no container restart"
 }
 
 # Image modes: every app container runs the image compose names for it, with this
@@ -364,6 +382,7 @@ main() {
   start_event_log
   boot_fresh
   check_backend_processes
+  check_worker_restart
   boot_frontend
   check_loopback_ports
   check_images

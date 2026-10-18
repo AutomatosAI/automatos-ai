@@ -11,20 +11,27 @@ and runs only in CI; these tests hold its logic:
   the worker count is back; the killed worker must be gone;
 - the run fails when nothing replaces the worker, when /health stays down, or when the
   container itself restarted;
-- the process listing it runs inside the container reads /proc correctly.
+- the process listing it runs inside the container reads /proc correctly;
+- smoke-fresh-clone.sh runs the step in smoke-images' pull-request variant (prebuilt),
+  right after the worker-count check, and that variant watches the step's file.
 """
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ci" / "smoke_worker_restart.py"
+_REPO = Path(__file__).resolve().parents[2]
+_SCRIPT = _REPO / "scripts" / "ci" / "smoke_worker_restart.py"
+_SMOKE = _REPO / "scripts" / "ci" / "smoke-fresh-clone.sh"
+_SMOKE_IMAGES = _REPO / ".github" / "workflows" / "smoke-images.yml"
 _spec = importlib.util.spec_from_file_location("smoke_worker_restart", _SCRIPT)
 restart = importlib.util.module_from_spec(_spec)
 sys.modules["smoke_worker_restart"] = restart
@@ -162,3 +169,33 @@ def test_the_process_listing_reads_proc():
     proc = subprocess.run([sys.executable, "-c", restart.LIST_PROCESSES], capture_output=True, text=True, check=True)
     children = [row for row in json.loads(proc.stdout) if row["ppid"] == os.getpid()]
     assert any("import json, os" in row["args"] for row in children), children
+
+
+# --------------------------------------------------------------------------- the wiring
+
+
+def _shell_function(text: str, name: str) -> str:
+    match = re.search(rf"^{name}\(\) \{{\n(.*?)^\}}", text, re.M | re.S)
+    assert match, f"smoke-fresh-clone.sh has no {name}() function"
+    return match.group(1)
+
+
+def test_the_smoke_kills_a_worker_in_the_pull_request_variant_after_the_worker_count():
+    text = _SMOKE.read_text(encoding="utf-8")
+    assert 'RESTART_TOOL="scripts/ci/smoke_worker_restart.py"' in text
+    step = _shell_function(text, "check_worker_restart")
+    assert step.lstrip().startswith('[ "$SMOKE_IMAGES" = "prebuilt" ] || return 0'), "the main runs kill nothing"
+    assert '"$RESTART_TOOL" --container "$BACKEND_CONTAINER" --health-url "$HEALTH_URL"' in step
+    assert "|| fail " in step
+    main = _shell_function(text, "main")
+    order = [main.index(call) for call in ("check_backend_processes", "check_worker_restart", "boot_frontend")]
+    assert order == sorted(order)
+
+
+def test_the_pull_request_variant_boots_prebuilt_images_and_watches_the_step():
+    workflow = yaml.safe_load(_SMOKE_IMAGES.read_text(encoding="utf-8"))
+    triggers = workflow.get("on", workflow.get(True))
+    assert "scripts/ci/smoke_worker_restart.py" in triggers["pull_request"]["paths"]
+    boot = next(step for step in workflow["jobs"]["smoke-images-pr"]["steps"]
+                if step.get("run") == "bash scripts/ci/smoke-fresh-clone.sh")
+    assert boot["env"]["SMOKE_IMAGES"] == "prebuilt"

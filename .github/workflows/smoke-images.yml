@@ -72,6 +72,7 @@ on:
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/smoke_images.py"
       - "scripts/ci/smoke_images_report.py"
+      - "scripts/ci/smoke_worker_restart.py"
       - "docker-compose*.yml"
       - "Makefile"
       - "envs/**"
