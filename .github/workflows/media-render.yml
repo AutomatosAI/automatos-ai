@@ -396,6 +396,8 @@ jobs:
   # The v1.1 export is called with sentence_pause=0, clause_pause=0, which keeps
   # today's line timing. The three WAVs are kept as one artifact, and each model's
   # voice_seconds (load plus the four lines) goes to the job summary, report only.
+  # A model that fails to load or speaks silence fails the job, after the others
+  # have spoken: their samples are still kept.
   media-render-listening-test:
     name: media-render — the fp16 voice listening test (fp32 and both fp16 models)
     if: ${{ inputs.listening_test }}
@@ -425,18 +427,25 @@ jobs:
           chmod a+rwx "$out"
           docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle script > "$out/bundle.json"
           labels=$(python3 services/media-render/ci/listening_test.py labels)
+          # Every model gets its turn: one that fails to load or speaks silence fails the
+          # job, but the others' samples are still spoken and kept (the upload below).
+          failed=""
           for model in $labels; do
             echo "──── $model ────"
             docker run --rm -e LOG_RELAY_ENABLED=false \
               -v "$GITHUB_WORKSPACE/services/media-render/ci:/ci:ro" \
               -v "$RUNNER_TEMP/kokoro:/models:ro" -v "$out:/listening" \
               --entrypoint python "$IMAGE" /ci/listening_test.py speak \
-              --model "$model" --models /models --bundle /listening/bundle.json --out /listening
+              --model "$model" --models /models --bundle /listening/bundle.json --out /listening \
+              || failed="$failed $model"
           done
+          if [ -n "$failed" ]; then echo "::error::no sample from:$failed (see each model's log above)"; exit 1; fi
           python3 services/media-render/ci/listening_test.py summary --out "$out" > "$out/summary.md"
           cat "$out/summary.md"
           cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Keep the three voice samples
+        # Also when a model failed: the samples that were spoken are still worth a listen.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: media-render-listening-test

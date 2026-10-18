@@ -55,6 +55,11 @@ def _commands(job) -> str:
     return "\n".join(step.get("run", "") for step in job["steps"])
 
 
+def _step(job, prefix: str) -> dict:
+    (step,) = [step for step in job["steps"] if step.get("name", "").startswith(prefix)]
+    return step
+
+
 def _script(helper):
     return helper.script_from_bundle(json.loads((MEDIA_RENDER / "fixtures" / "script.bundle.json").read_text()), DEFAULTS)
 
@@ -124,6 +129,19 @@ def test_the_summary_carries_voice_seconds_and_one_artifact_holds_the_three_wavs
     assert upload["name"] == "media-render-listening-test"
     assert [Path(line.strip()).name for line in upload["path"].strip().splitlines()] == list(WAVS)
     assert upload["if-no-files-found"] == "error"
+
+
+def test_a_model_that_fails_fails_the_job_and_the_other_samples_are_kept():
+    """An fp16 graph that will not load on the CPU provider is a result too: every model
+    still gets its turn, the job fails after the loop, and the samples spoken are kept."""
+    job = _job()
+    speak = _step(job, "Speak the fixture script")["run"]
+    loop = re.search(r"for model in \$labels; do\n(.*?)\ndone\n", speak, re.S)
+    assert loop and '|| failed="$failed $model"' in loop.group(1)
+    after = speak[loop.end():]
+    assert after.index('if [ -n "$failed" ]') < after.index("exit 1") < after.index("listening_test.py summary")
+    upload = _step(job, "Keep the three voice samples")
+    assert upload["if"] == "always()" and upload["with"]["if-no-files-found"] == "error"
 
 
 # ---------------------------------------------------------------------------
