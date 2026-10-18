@@ -28,7 +28,7 @@ vi.mock('@/components/ui/sheet', () => ({
 }))
 // A desktop width, in the Studio style (the core's chrome, not another style's frame).
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => false, useIsMobile: () => false }))
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => false, usePlayLayout: () => 'fallback' }))
+vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useActiveTheme: () => null, useThemeLayout: () => 'fallback' }))
 vi.mock('@/components/theme-host/theme-host-context', () => ({ useThemeHost: () => host.current }))
 
 import { MainLayout } from '../main-layout'
