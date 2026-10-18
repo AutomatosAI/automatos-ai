@@ -16,7 +16,9 @@ name: smoke-fresh-clone
 # the frontend's :3000, Started → Healthy per service, the /health/bootstrap
 # stages and the alembic runs per boot. The step summary shows them on every run;
 # the records and logs are uploaded as the smoke-fresh-clone-boot artifact, which
-# PRD-262 US-004 takes its five-run medians from. No time is a bar here yet.
+# PRD-262 US-004 takes its five-run medians from. No backend or frontend time is a
+# bar here yet; the workspace worker must report healthy within 20 s of its start
+# and answer /metrics 200 (PRD-262 US-045).
 #
 # Runs on manual dispatch, every night (most main pushes skip the path filter,
 # and US-004 needs five runs), and on pushes and pull requests that touch what the
@@ -57,6 +59,7 @@ on:
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
+      - "scripts/ci/smoke_worker_health.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -86,6 +89,7 @@ on:
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
+      - "scripts/ci/smoke_worker_health.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual
