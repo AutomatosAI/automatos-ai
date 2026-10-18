@@ -177,3 +177,10 @@ def test_glob_patterns_follow_github_path_filters():
     assert not picker.glob_regex("scripts/ci/image_*.py").match("scripts/ci/a/image_x.py")
     assert picker.glob_regex("frontend/public/**").match("frontend/public/auto/poses/a.webm")
     assert not picker.glob_regex(".grype.yaml").match("xgrype.yaml")
+
+
+@pytest.mark.parametrize("pattern", ["frontend/*.config.[jt]s", "frontend/next.config.?s", "!docs/**", "a+b"])
+def test_filter_syntax_the_picker_does_not_copy_is_refused(pattern):
+    """GitHub reads these differently from a literal match, so the picker must not guess."""
+    with pytest.raises(ValueError, match="does not support"):
+        picker.glob_regex(pattern)
