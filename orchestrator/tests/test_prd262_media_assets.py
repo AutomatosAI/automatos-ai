@@ -404,6 +404,10 @@ def _needs(name: str) -> set:
     return set(direct).union(*(_needs(need) for need in direct))
 
 
+# A job whose `if:` calls one of these runs even when a job it needs was skipped.
+_RUNS_PAST_A_SKIP = re.compile(r"\b(?:always|cancelled)\(\)")
+
+
 def test_a_media_assets_run_builds_and_publishes_no_other_image():
     """`changes` skips on such a run; every other image job waits on it, so it skips too."""
     assert JOBS["changes"]["if"] == "inputs.media_assets != true"
@@ -411,7 +415,8 @@ def test_a_media_assets_run_builds_and_publishes_no_other_image():
     assert {"build", "report", "merge"} <= gated
     for name in gated:
         assert "changes" in _needs(name), f"{name} would run on a media-assets run"
-        assert "always()" not in str(JOBS[name].get("if", "")), f"{name} would run with its needs skipped"
+        condition = str(JOBS[name].get("if", ""))
+        assert not _RUNS_PAST_A_SKIP.search(condition), f"{name} would run with its needs skipped: {condition}"
 
 
 def test_a_media_assets_run_never_replaces_or_waits_behind_a_queued_publish():
