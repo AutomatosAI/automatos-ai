@@ -40,7 +40,7 @@ if [ -z "$(docker compose -f "$COMPOSE_FILE" ps --status running -q frontend 2>/
 fi
 
 # 2. The address the frontend publishes on.
-frontend_addr="$(docker compose -f "$COMPOSE_FILE" port frontend 3000 2>&1)"
+frontend_addr="$(docker compose -f "$COMPOSE_FILE" port frontend 3000)"
 echo "docker compose port frontend 3000 -> ${frontend_addr}"
 [ "$frontend_addr" = "$FRONTEND_EXPECTED" ] \
   || fail "the frontend publishes on '${frontend_addr}', expected ${FRONTEND_EXPECTED} (BIND_ADDRESS unset)"
