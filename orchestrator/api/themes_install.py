@@ -11,7 +11,7 @@ Routes (plan §2.2; B2-wire registers the router and lists the routes in
 ``PUT    /api/themes/default``         ``{installId|null}``  manage (+ step-up)
 ``GET    /api/themes/installs/{id}/compare/{packageId}``    manage
 ``POST   /api/themes/installs/{id}/update``  ``{packageId}``  manage (+ who installs, step-up)
-``POST   /api/themes/installs/{id}/rollback``               manage (+ who installs)
+``POST   /api/themes/installs/{id}/rollback``               manage (+ who installs, step-up)
 ``DELETE /api/themes/installs/{id}``                        manage
 ==========================================================  ==================
 
@@ -173,7 +173,9 @@ def update_theme_install(
     return _install_answer(db, ctx, install)
 
 
-@router.post("/installs/{install_id}/rollback", dependencies=[Depends(MANAGE), Depends(INSTALL_ROLE)])
+@router.post(
+    "/installs/{install_id}/rollback", dependencies=[Depends(MANAGE), Depends(INSTALL_ROLE), Depends(STEP_UP)],
+)
 def rollback_theme_install(
     install_id: UUID, ctx: RequestContext = Depends(CALLER), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:

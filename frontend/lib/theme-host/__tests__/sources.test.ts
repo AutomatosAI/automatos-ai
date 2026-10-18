@@ -2,8 +2,9 @@
  * PRD-261 A-04a — where a theme comes from. A style names an installed theme's source only for
  * `theme:install:<uuid>`; Classic, Studio and builtin Play name none (builtin Play keeps its
  * compiled path until A-04b). A builtin source loads its compiled module and registers its frame
- * as soon as the import resolves, with no manifest, no look and no host module global. A 404 from
- * GET /api/themes/active means no active install: no theme to load, and no failure.
+ * as soon as the import resolves, with no manifest, no look and no host module global. When
+ * GET /api/themes/active names no theme for the install (a 404, a 200 with `theme: null`, a
+ * `disable` revocation or another install) there is no theme to load, and no failure.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -90,6 +91,26 @@ describe('PRD-261 A-04a — GET /api/themes/active through the named apiClient m
   })
 })
 
+const OTHER_INSTALL_ID = '00000000-0000-4000-8000-00000000e2e2'
+const REVOKED = { installId: INSTALL_ID, level: 'disable', reason: 'withdrawn' }
+
+describe('PRD-261 A-07b seam — a 200 answer that names no theme for this install', () => {
+  it.each([
+    ['no choice, or the install was removed', { choice: 'studio', theme: null }, 'no active install'],
+    ['a disable revocation', { choice: 'studio', theme: null, revoked: REVOKED }, 'revoked'],
+    ['the workspace default, another install', { choice: OTHER_INSTALL_ID, theme: { installId: OTHER_INSTALL_ID } }, OTHER_INSTALL_ID],
+  ])('loads nothing and reports no failure for %s', async (_case, answer, detail) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    api.getActiveTheme.mockResolvedValue(answer)
+    const deps = depsWith({ fetchActive: fetchActiveInstall })
+    const result = await installedThemeSource(INSTALL_ID).load(deps)
+    expect(result).toEqual({ ok: false, reason: null, detail: expect.stringContaining(detail) })
+    expect(deps.fetchJson).not.toHaveBeenCalled()
+    expect(deps.importModule).not.toHaveBeenCalled()
+    expect(error).not.toHaveBeenCalled()
+  })
+})
+
 describe('PRD-261 A-04a — the source a style names', () => {
   it('names the install for an installed theme style', () => {
     expect(installIdOf(INSTALLED_STYLE)).toBe(INSTALL_ID)
@@ -111,7 +132,7 @@ describe('PRD-261 A-04a — the source a style names', () => {
 
   it('reads the active install for an installed theme style', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const deps = depsWith()
+    const deps = depsWith({ fetchActive: vi.fn(async () => ({ choice: INSTALL_ID, theme: { installId: INSTALL_ID } })) })
     expect(reasonOf(await loadThemeForStyle(INSTALLED_STYLE, deps))).toBe('manifest')
     expect(deps.fetchActive).toHaveBeenCalledTimes(1)
   })

@@ -117,11 +117,11 @@ describe('PRD-261 A-04a — an installed theme fails to load with a reason, in o
     expect(deps.importModule).not.toHaveBeenCalled()
   })
 
-  it("maps no active theme, another install, a bad digest or a refused manifest to 'manifest'", async () => {
+  it("maps a missing install id, a bad digest or a refused manifest to 'manifest'", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const answers = [
-      { choice: 'studio', theme: null },
-      activeWith(MANIFEST, { installId: OTHER_INSTALL_ID }),
+      { choice: INSTALL_ID },
+      activeWith(MANIFEST, { installId: undefined }),
       activeWith(MANIFEST, { digest: 'not-a-digest' }),
       activeWith({ ...MANIFEST, entry: '../elsewhere/entry.js' }),
       activeWith({ ...MANIFEST, htmlClass: 'studio' }),
@@ -131,6 +131,16 @@ describe('PRD-261 A-04a — an installed theme fails to load with a reason, in o
       expect(reasonOf(await loadInstalled(deps)), JSON.stringify(answer)).toBe('manifest')
       expect(deps.importModule).not.toHaveBeenCalled()
     }
+  })
+
+  it('loads nothing and reports no failure when the answer names no theme or another install', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    for (const answer of [{ choice: 'studio', theme: null }, activeWith(MANIFEST, { installId: OTHER_INSTALL_ID })]) {
+      const deps = depsWith({ fetchActive: vi.fn(async () => answer) })
+      expect(reasonOf(await loadInstalled(deps)), JSON.stringify(answer)).toBeNull()
+      expect(deps.importModule).not.toHaveBeenCalled()
+    }
+    expect(error).not.toHaveBeenCalled()
   })
 
   it("refuses an SDK mismatch as 'engines' and never requests the entry", async () => {

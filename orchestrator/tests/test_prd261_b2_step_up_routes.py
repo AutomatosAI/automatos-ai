@@ -3,10 +3,12 @@
 The real routers run on a mini app with the step-up handler installed, the REAL permission
 gate (only the caller's workspace role is stubbed) and the REAL step-up dependency. Pins:
 
-* in SaaS, import, opt-in, default, update and the settings PUT answer 403 with Clerk's
+* in SaaS, import, opt-in, default, update, rollback and the settings PUT answer 403 with Clerk's
   reverification body at the top level when the first factor is missing, never verified or
   older than ``THEME_STEP_UP_MAX_AGE_MINUTES``, and no handler runs;
 * a caller the permission gate refuses gets the plain 403, never a reverification prompt;
+* rollback (it switches the running theme code, like update) runs with a fresh step-up in
+  SaaS and with none in the local edition;
 * the workspace role change (``members:change_role``) is refused in SaaS without a fresh
   step-up and the role is unchanged; with one it is allowed; the local edition's one owner
   changes a role with no step-up.
@@ -100,6 +102,7 @@ STEP_UP_CALLS = [
     ("post", f"/api/themes/installs/{INSTALL_ID}/opt-in", {"json": {"packageId": PACKAGE_ID}}),
     ("put", "/api/themes/default", {"json": {"installId": None}}),
     ("post", f"/api/themes/installs/{INSTALL_ID}/update", {"json": {"packageId": PACKAGE_ID}}),
+    ("post", f"/api/themes/installs/{INSTALL_ID}/rollback", {}),
     ("put", "/api/themes/settings", {"json": {"membersMayChoose": False}}),
 ]
 
@@ -124,6 +127,41 @@ def test_a_viewer_is_refused_by_the_gate_before_any_reverification_prompt(saas_o
     client = _app(install_api.router, ctx=_clerk(None), db=_NoSettingsDb())
     resp = client.put("/api/themes/default", json={"installId": None})
     assert resp.status_code == 403 and "clerk_error" not in resp.json()
+
+
+class _RollbackDb:
+    """The gates read no settings row; the handler's one write is a counted commit."""
+
+    def __init__(self):
+        self.commits = 0
+
+    def get(self, *args, **kwargs):
+        return None
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        raise AssertionError("the rollback was refused")
+
+
+def _local_operator():
+    return RequestContext(workspace_id=WS, auth_type="anonymous",
+                          user=UserContext(id="operator@local", email="operator@local", system_role="user"))
+
+
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_rollback_runs_with_a_fresh_step_up_in_saas_and_with_none_locally(monkeypatch, edition):
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    ctx = _clerk([1, -1]) if edition == "saas" else _local_operator()
+    monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: "owner")
+    rolled = []
+    monkeypatch.setattr(install_api.updates, "rollback", lambda db, ws, install: rolled.append((ws, install)) or "row")
+    monkeypatch.setattr(install_api, "_install_answer", lambda db, ctx, install: {"install": install})
+    db = _RollbackDb()
+    resp = _app(install_api.router, ctx=ctx, db=db).post(f"/api/themes/installs/{INSTALL_ID}/rollback")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"install": "row"} and rolled == [(WS, UUID(INSTALL_ID))] and db.commits == 1
 
 
 # ---------------------------------------------------------------------------

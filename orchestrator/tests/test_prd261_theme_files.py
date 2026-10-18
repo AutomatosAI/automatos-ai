@@ -14,7 +14,8 @@ Pinned (plan §2.6 A-08a):
 * a member of two workspaces whose install is in the non-default one gets 200 for files and boot;
 * a non-member gets 404 for both; a member who has not opted in to a private package gets 404
   for files and the base boot; another workspace's private package referenced from an install
-  serves nothing;
+  serves nothing; an unreviewed Marketplace package is private code too (the rule ``active``
+  reports), so it is no approved listing and an install runs it only after the member's opt-in;
 * tampered stored bytes → 404 and a logged error; ``Service-Worker: script`` → 403;
 * the integrity value is the base64 form of the stored hex; a ``disable`` revocation → 404 and
   the base boot; the local edition's operator counts as owner of every workspace.
@@ -117,14 +118,14 @@ def _store(world, prefix: str) -> None:
     world.stored.update({(prefix, path): item.data for path, item in world.package.files.items()})
 
 
-def _row(world, owner_type: str, workspace=None, status="pending", file_manifest=None) -> ThemePackage:
+def _row(world, owner_type: str, workspace=None, status="pending", file_manifest=None, reviewed=False) -> ThemePackage:
     pkg = world.package
     where = f"_workspace/{workspace}/" if workspace else ""
     prefix = f"themes/{where}{pkg.manifest['id']}/{pkg.manifest['version']}/"
     row = ThemePackage(
         theme_id=pkg.manifest["id"], version=pkg.manifest["version"], owner_type=owner_type, workspace_id=workspace,
         digest=pkg.digest, manifest=pkg.manifest, file_manifest=file_manifest or pkg.file_manifest,
-        storage_prefix=prefix, status=status,
+        storage_prefix=prefix, status=status, reviewed=reviewed,
     )
     world.db.add(row)
     world.db.flush()
@@ -352,7 +353,7 @@ def test_a_disable_revocation_is_404_and_the_base_boot_and_a_warn_still_serves(w
 
 
 def test_an_approved_listing_serves_anyone_signed_in_and_a_pending_one_only_nobody(world):
-    pending = _row(world, "marketplace", status="pending")
+    pending = _row(world, "marketplace", status="pending", reviewed=True)
     world.db.commit()
     assert _file(world, _person("bob")).status_code == 404
     _install(world, HOME, pending)
@@ -364,6 +365,18 @@ def test_an_approved_listing_serves_anyone_signed_in_and_a_pending_one_only_nobo
     world.db.commit()
     assert _file(world, _person("bob")).status_code == 404
     assert _file(world, _person("alice")).status_code == 200  # its installs keep running
+
+
+def test_an_unreviewed_marketplace_package_runs_only_after_the_members_opt_in(world):
+    unreviewed = _row(world, "marketplace", status="approved")
+    install = _install(world, HOME, unreviewed)
+    assert _file(world, _person("bob")).status_code == 404  # no approved listing: never reviewed
+    assert _file(world, _person("alice")).status_code == 404
+    assert _boot(world, _person("alice"), install.id).json()["addClasses"] == ["studio"]
+    world.db.add(ThemeOptIn(workspace_id=HOME, user_id=ALICE, package_id=unreviewed.id))
+    world.db.commit()
+    assert _file(world, _person("alice")).status_code == 200
+    assert _boot(world, _person("alice"), install.id).json()["addClasses"] == ["studio", "hello"]
 
 
 def test_the_local_operator_counts_as_owner_of_every_workspace(world, monkeypatch):

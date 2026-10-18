@@ -1079,20 +1079,26 @@ async def limit_request_body(request, call_next):
 # Security headers middleware
 DEFAULT_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'"
 FRAME_ANCESTORS_NONE = "frame-ancestors 'none'"
+DEFAULT_SRC_NONE = "default-src 'none'"
 
 
 def content_security_policy(route_policy: Optional[str]) -> str:
     """The app's CSP for a response: a route's own policy is kept, never overwritten.
 
     Routes that serve stored files (theme files, generated images, widget attachments) set
-    ``sandbox`` so a file opened as a page runs nothing; the app only adds
-    ``frame-ancestors 'none'`` when the route's policy does not already say who may frame it.
+    ``sandbox`` so a file opened as a page runs nothing; the app only adds what the route's
+    policy leaves out: ``default-src 'none'`` in front when it names no ``default-src`` (so a
+    bare ``sandbox`` still loads nothing), and ``frame-ancestors 'none'`` at the end when it
+    does not already say who may frame it.
     """
-    if not route_policy:
+    policy = (route_policy or "").strip().rstrip("; ")
+    if not policy:
         return DEFAULT_CONTENT_SECURITY_POLICY
-    if "frame-ancestors" in route_policy:
-        return route_policy
-    return f"{route_policy.rstrip('; ')}; {FRAME_ANCESTORS_NONE}"
+    if "default-src" not in policy:
+        policy = f"{DEFAULT_SRC_NONE}; {policy}"
+    if "frame-ancestors" not in policy:
+        policy = f"{policy}; {FRAME_ANCESTORS_NONE}"
+    return policy
 
 
 @app.middleware("http")

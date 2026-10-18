@@ -5,12 +5,14 @@
 ``ctx.workspace_id``. A digest is servable to a caller when, for one ``theme_packages`` row
 with that digest:
 
-* it is an approved Marketplace package (an approved listing); or
+* it is an approved, reviewed Marketplace package (an approved listing); or
 * it is installed (an active ``theme_installations`` row whose ``package_id`` is the row) in a
   workspace where the caller is a member or owner, and the package belongs to that install:
   a Marketplace package, or a private package of **that** workspace (a private package
-  referenced from another workspace's install serves nothing). A private package also needs
-  the caller's opt-in to that version in that workspace (``theme_opt_ins``, Q6).
+  referenced from another workspace's install serves nothing). Private code (``choices.is_private``:
+  a workspace's own upload, or any package not reviewed yet, the same rule ``active`` reports
+  as ``optIn.required``) also needs the caller's opt-in to that version in that workspace
+  (``theme_opt_ins``, Q6).
 
 Two workspaces may hold the same digest, so the row is chosen by the digest and the caller's
 authorisation, never as "the one row with that digest". A live ``disable`` revocation
@@ -43,6 +45,7 @@ from sqlalchemy import or_
 from config import config
 from core.models.themes import ThemeInstallation, ThemeOptIn, ThemePackage
 from core.storage import get_s3_client
+from services.themes.choices import is_private
 from services.themes.contract import HTML_CLASS_OWNERS, parse_json
 from services.themes.css_value import PREPAINT_PATH, prepaint_errors
 from services.themes.digest import sha256_hex
@@ -55,7 +58,6 @@ FILES_ROUTE = "/api/themes/files"
 DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 STORAGE_ROOT = "themes/"
 MARKETPLACE = "marketplace"
-PRIVATE = "workspace"
 APPROVED = "approved"
 # A Marketplace package keeps serving its installs once deactivated (a revocation is the kill
 # switch); a pending or rejected one was never installable.
@@ -123,11 +125,6 @@ def read_stored_file(storage_prefix: str, path: str) -> Optional[bytes]:
         raise ThemeStorageUnavailable("Theme storage is unavailable.") from exc
 
 
-def is_private(package: ThemePackage) -> bool:
-    """A workspace's own upload: code that runs only after a member's opt-in."""
-    return package.owner_type == PRIVATE
-
-
 def _opted_in(db: Any, workspace_id: Any, user_pk: Optional[int], package_id: Any) -> bool:
     if user_pk is None:
         return False
@@ -140,7 +137,7 @@ def _opted_in(db: Any, workspace_id: Any, user_pk: Optional[int], package_id: An
 
 
 def may_run(db: Any, membership: Membership, install: ThemeInstallation, package: ThemePackage) -> bool:
-    """A member may run an installed package: a Marketplace one always, a private one after opting in to it."""
+    """A member may run an installed package: reviewed Marketplace code always, private code after opting in to it."""
     if not is_private(package):
         return True
     return _opted_in(db, install.workspace_id, membership.user_pk, package.id)
@@ -156,7 +153,10 @@ def belongs_to_install(install: ThemeInstallation, package: ThemePackage) -> boo
 def _approved_listing(db: Any, digest: str) -> Optional[ThemePackage]:
     return (
         db.query(ThemePackage)
-        .filter(ThemePackage.owner_type == MARKETPLACE, ThemePackage.digest == digest, ThemePackage.status == APPROVED)
+        .filter(
+            ThemePackage.owner_type == MARKETPLACE, ThemePackage.digest == digest,
+            ThemePackage.status == APPROVED, ThemePackage.reviewed.is_(True),
+        )
         .first()
     )
 

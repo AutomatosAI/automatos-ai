@@ -7,7 +7,7 @@ Pins (plan §2.4 W-B2 row, §2.6 B2-wire; Gerard D1-a/d/e):
   ``test_route_manifest.py`` / authZ-sweep precedent);
 * every W-B2 route is in ``reports/route-manifest.json`` and ``route_count == len(routes)``;
 * the step-up dependency (A-07c) is on EXACTLY the routes §2.2 marks (import, opt-in,
-  default, update, the settings PUT) plus the workspace role change (D1-d, #1157), each
+  default, update, rollback, the settings PUT) plus the workspace role change (D1-d, #1157), each
   after its permission gate, and the app renders its refusal with ``clerk_error`` at the
   top level;
 * "who may install" (A-07e) gates import, update and rollback;
@@ -15,7 +15,8 @@ Pins (plan §2.4 W-B2 row, §2.6 B2-wire; Gerard D1-a/d/e):
   the files and boot routes carry none: they authorise by membership, never by
   ``ctx.workspace_id``;
 * the import route's body limit is sized from ``THEME_MAX_PACKAGE_MB``;
-* the app's security-headers middleware keeps the files route's ``sandbox`` CSP.
+* the app's security-headers middleware keeps the files route's ``sandbox`` CSP, and puts
+  ``default-src 'none'`` in front of a route policy that names none.
 
 The refusals themselves, on the real routes and on the role change, are
 ``test_prd261_b2_step_up_routes.py``.
@@ -63,6 +64,7 @@ STEP_UP_ROUTES = {
     ("POST", "/api/themes/installs/{install_id}/opt-in"),
     ("PUT", "/api/themes/default"),
     ("POST", "/api/themes/installs/{install_id}/update"),
+    ("POST", "/api/themes/installs/{install_id}/rollback"),
     ("PUT", "/api/themes/settings"),
 }
 INSTALL_ROLE_ROUTES = {
@@ -257,6 +259,7 @@ print(json.dumps({
     "import_limit": main._body_limit_for("/api/themes/import"),
     "file_csp": csp_after_app_headers(themes_files.SERVING_HEADERS),
     "default_csp": csp_after_app_headers({}),
+    "sandbox_only_csp": csp_after_app_headers({"Content-Security-Policy": "sandbox"}),
 }))
 """
 
@@ -314,3 +317,6 @@ def test_the_app_keeps_the_theme_files_sandbox_csp(live_app):
 
 def test_the_app_default_csp_is_unchanged_for_routes_without_one(live_app):
     assert live_app["default_csp"] == "default-src 'none'; frame-ancestors 'none'"
+    # A route policy without default-src (the widget attachment's bare ``sandbox``) keeps the
+    # app's default-src 'none', so an inline-rendered file still loads nothing remote.
+    assert live_app["sandbox_only_csp"] == "default-src 'none'; sandbox; frame-ancestors 'none'"
