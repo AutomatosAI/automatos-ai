@@ -13,11 +13,11 @@
 import {
   FRAME_SLOT,
   HTML_CLASS_PATTERN,
-  RESERVED_HTML_CLASSES,
   THEME_DIGEST_PATTERN,
   THEME_FILES_PATH,
   THEME_SLOT_IDS,
 } from './constants'
+import { HTML_CLASS_OWNERS, RESERVED_HTML_CLASSES } from './package-manifest'
 import { DEFAULT_THEME_BASE } from './registry'
 import type { LookPreset, SpikeManifest } from './types'
 
@@ -84,11 +84,14 @@ function identityProblem(raw: Record<string, unknown>): string | null {
   return null
 }
 
-function htmlClassProblem(value: unknown): string | null {
+/** A reserved class is refused unless HTML_CLASS_OWNERS gives it to this theme's id (PA-8). */
+function htmlClassProblem(value: unknown, id: unknown): string | null {
   if (typeof value !== 'string' || !HTML_CLASS_PATTERN.test(value)) {
     return 'htmlClass must be 3 to 32 lower-case letters, digits or hyphens, starting with a letter'
   }
-  return RESERVED_HTML_CLASSES.includes(value) ? `htmlClass "${value}" is reserved` : null
+  if (!RESERVED_HTML_CLASSES.includes(value)) return null
+  const owner = HTML_CLASS_OWNERS.get(value)
+  return owner !== undefined && owner === id ? null : `htmlClass "${value}" is reserved`
 }
 
 function slotsProblem(value: unknown): string | null {
@@ -115,7 +118,7 @@ function manifestFrom(raw: Record<string, unknown>, entry: string, styleSheet: s
 /** A checked theme.json whose files resolve under `root`, or why it was refused. */
 export function parseSpikeManifest(raw: unknown, root: string): ManifestParse {
   if (!isRecord(raw)) return failure('theme.json must be an object')
-  const problem = identityProblem(raw) ?? htmlClassProblem(raw.htmlClass) ?? slotsProblem(raw.slots)
+  const problem = identityProblem(raw) ?? htmlClassProblem(raw.htmlClass, raw.id) ?? slotsProblem(raw.slots)
   if (problem !== null) return failure(problem)
   const entry = resolveUnderRoot(raw.entry, root)
   const styleSheet = resolveUnderRoot(raw.styleSheet, root)

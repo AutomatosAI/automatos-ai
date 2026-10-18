@@ -5,8 +5,6 @@
  * from the same-origin files route under its package digest, so no theme URL ever comes from a
  * user: the manifest's file names must resolve under that folder (manifest.ts).
  */
-import { STYLE_HTML_CLASS_NAMES } from '@/lib/ui-style'
-
 import type { SlotId } from './registry-types'
 
 /**
@@ -35,8 +33,7 @@ export const SAFE_MODE_STORAGE_KEY = 'automatos-theme-safe-mode'
 /** A theme's own class on <html>: 3 to 32 characters, lower-case letters, digits and hyphens. */
 export const HTML_CLASS_PATTERN = /^[a-z][a-z0-9-]{2,31}$/
 
-/** Classes the core owns on <html> (every Style-axis class, and the tone's), never a theme's. */
-export const RESERVED_HTML_CLASSES: readonly string[] = [...STYLE_HTML_CLASS_NAMES, 'classic', 'dark', 'light']
+/* The classes the core owns on <html> are RESERVED_HTML_CLASSES in package-manifest.ts, the one list. */
 
 /** Mirrors of the host's status and failure reason on <html>, for the browser lane to wait on. */
 export const THEME_HOST_STATUS_ATTR = 'data-theme-host'
