@@ -44,17 +44,19 @@ COPY requirements.txt .
 # locally: docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
 ARG INSTALL_GRAPH_EXTRAS=true
 
-# futureagi is installed separately with --no-deps because it pins exact
-# versions of common packages (requests==2.32.3, pandas==2.2.2, etc.)
-# that conflict with our stack. Its code works fine with our versions.
 # --prefix keeps the whole install in one tree the runtime stage copies.
+# Wheels only (PRD-262 US-015): a package that would build from source fails the
+# build instead. The two exceptions are pure-Python sdists: pysher (composio's) and
+# graspologic (the [leiden] extra; it leaves the list with PRD-262 US-027). The order
+# matters: `--only-binary :all:` clears every per-package exception named before it,
+# so `--no-binary` comes after.
 RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then \
         cp requirements.txt requirements.build.txt; \
     else \
         sed 's/^graphifyy\[leiden\]/graphifyy/' requirements.txt > requirements.build.txt; \
     fi && \
-    pip install --no-cache-dir --prefix=/install -r requirements.build.txt && \
-    pip install --no-cache-dir --prefix=/install --no-deps futureagi==0.6.0 && \
+    pip install --no-cache-dir --prefix=/install --only-binary :all: --no-binary pysher,graspologic \
+        -r requirements.build.txt && \
     pip cache purge && \
     rm -rf /root/.cache/pip
 
@@ -85,9 +87,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 COPY --from=pybuild /install /usr/local
-
-# (NLTK data download removed: `nltk` is imported nowhere in the tree — 52 MB
-# of corpora plus the package for dead weight. PRD-233 slim pass.)
 
 # =============================================================================
 # Development Stage - Hot Reload & Debugging

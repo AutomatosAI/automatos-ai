@@ -88,7 +88,7 @@ The orchestrator uses a Python 3.11-slim base with specialized system dependenci
 
 ### Key Implementation Details
 - **Graph Extras**: The `INSTALL_GRAPH_EXTRAS` build argument controls whether the `[leiden]` extra for `graphifyy` is installed. This extra pulls in a significant number of dependencies (~660 MB) for advanced graph clustering. By default, it's `true` for production builds (Railway) and `false` for local development to keep images slim [orchestrator/Dockerfile:38-44]().
-- **Dependency Handling**: `futureagi` is installed with `--no-deps` to prevent version conflicts with core requirements like `requests` or `pandas` [orchestrator/Dockerfile:46-50]().
+- **Dependency Handling**: `pybuild` installs wheels only (`--only-binary :all: --no-binary pysher,graspologic`), so a package that would compile from source fails the build; the two exceptions are pure-Python sdists. The API never installs the FutureAGI SDK: it calls `agent-opt-worker` over HTTP (PRD-262 US-015).
 - **Schema Safety**: The `CMD` for the development stage enforces `alembic upgrade heads` before starting `uvicorn`. This ensures the live schema never drifts from the code and handles multiple migration heads [orchestrator/Dockerfile:121-131](). The production stage also includes this in its entrypoint [orchestrator/Dockerfile:178-184]().
 - **Non-root User**: A dedicated `automatos` user with UID 1000 is created, and `/app` directories are chowned to this user for enhanced security [orchestrator/Dockerfile:103-109]().
 

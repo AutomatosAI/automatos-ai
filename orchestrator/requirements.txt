@@ -20,7 +20,8 @@ sqlalchemy==2.0.23
 alembic==1.12.1
 psycopg2-binary==2.9.9
 asyncpg==0.29.0
-pgvector==0.2.4
+# pgvector is the Postgres extension only: the code casts to `vector` in SQL and never
+# imports the Python package, so it is not installed (PRD-262 US-015).
 sqlparse>=0.5.4
 sqlglot>=25.5.1  # PRD-160 S2: AST-based NL2SQL SQL validation (SELECT-only, table allowlist, cross-schema)
 greenlet>=3.0.0
@@ -30,9 +31,8 @@ pydantic>=2.7.4,<3.0.0
 pydantic-settings>=2.1.0
 email-validator>=2.1.0
 
-# Security
-python-jose[cryptography]>=3.4.0
-passlib[bcrypt]==1.7.4
+# Forms. JWTs go through PyJWT (below); python-jose and passlib were never imported
+# (PRD-262 US-015).
 python-multipart>=0.0.18
 
 # File processing
@@ -44,8 +44,10 @@ beautifulsoup4==4.12.2
 python-magic==0.4.27
 pytesseract==0.3.10
 
-# System monitoring (essential for our dashboard)
-psutil==5.9.6
+# System monitoring (essential for our dashboard). 6.0 is the first psutil with
+# aarch64 wheels, so arm64 builds no longer compile it (PRD-262 US-015); the calls the
+# code makes (cpu_percent, virtual_memory, disk_usage, ...) are unchanged since 5.9.
+psutil==7.2.2
 
 # Scheduling (heartbeat service)
 apscheduler>=3.10
@@ -91,11 +93,11 @@ openai>=1.45.0
 anthropic>=0.40.0,<1.0.0
 google-generativeai>=0.8.0  # Google Gemini native API
 
-# Data & ML (actively used in multi-agent optimization + RAG)
+# Data & ML (actively used in multi-agent optimization + RAG). scikit-learn and nltk
+# were never imported (PRD-262 US-015); Railway's [leiden] build still gets
+# scikit-learn through graspologic until PRD-262 US-027.
 numpy>=1.26.2,<3.0.0
 pandas>=2.2.0,<3.0
-scikit-learn>=1.5.0,<2.0.0
-nltk>=3.9.3
 networkx==3.1
 
 # RAG chunking (only text-splitters + core are actually imported)
@@ -135,8 +137,10 @@ gotenberg-client>=0.8.0
 pypdfium2>=5.0.0,<6.0.0  # F353: draws a document Deliverable's first page for its card
 prometheus-client>=0.20.0
 
-# PRD-126: Business Knowledge Graph (Graphify Integration)
-graphifyy[leiden]>=0.3.28
+# PRD-126: Business Knowledge Graph (Graphify Integration). Pinned exactly to the
+# version `>=0.3.28` resolved to (networkx==3.1 holds it there), so a rebuild can't
+# move the graph code under us (PRD-262 US-015). The Dockerfile's sed drops [leiden].
+graphifyy[leiden]==0.8.31
 
 # PRD-256 (#847): OpenTelemetry traces over OTLP, default OFF (OTEL_ENABLED). Installed
 # always, imported only when enabled (core/observability/otel.py). OTLP over HTTP only:

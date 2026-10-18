@@ -11,9 +11,6 @@ set -e
 # Get port from argument or use default
 PORT=${1:-8000}
 
-# Set NLTK data directory
-export NLTK_DATA=/usr/local/nltk_data
-
 # Create necessary directories
 mkdir -p logs vector_stores projects exports
 
@@ -31,10 +28,6 @@ source venv/bin/activate
 echo "📥 Installing dependencies..."
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# Download NLTK data if not present
-echo "📚 Checking NLTK data..."
-python -c "import nltk; import os; os.makedirs('/usr/local/nltk_data', exist_ok=True); nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')" 2>/dev/null || true
 
 # Start the server with hot reload
 echo "🚀 Starting Automatos AI backend on port $PORT..."
