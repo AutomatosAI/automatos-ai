@@ -70,7 +70,9 @@ def test_hyperframes_is_pinned_exactly_on_node_24():
     # PRD-262 US-007: Node comes from the official image's named stage, not NodeSource.
     assert re.search(r"^FROM node:24-trixie-slim@sha256:[0-9a-f]{64} AS node$", DOCKERFILE, re.M)
     assert "COPY --from=node /usr/local/bin/node /usr/local/bin/node" in DOCKERFILE
-    assert "nodesource" not in DOCKERFILE.lower()
+    # The instructions, not the comments: the comment that says NodeSource is gone names it.
+    instructions = "\n".join(line for line in DOCKERFILE.splitlines() if not line.lstrip().startswith("#"))
+    assert "nodesource" not in instructions.lower()
     # npm stays: the global Hyperframes install and versions.py's `npm root -g` use it.
     assert DOCKERFILE.index("/usr/local/lib/node_modules/npm") < DOCKERFILE.index("npm install -g")
 
