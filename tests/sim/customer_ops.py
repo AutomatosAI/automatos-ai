@@ -129,6 +129,25 @@ def question_line(q: Mapping[str, Any]) -> str:
     return str(q.get("question_md") or q.get("question") or q.get("reason") or q.get("tool_name") or "").strip()
 
 
+def grant_outcome(response: Any) -> dict[str, Any]:
+    """What a click ran, from the /grant response (P256-FIX-N17-2, F444): the resumed call's
+    ``executed_result`` success and error, which the route's 200 does not say. Night 17's
+    #2827 and #2832 were granted and did nothing, and the night's record never showed it."""
+    grant = response.get("grant") if isinstance(response, Mapping) else None
+    details = grant.get("details") if isinstance(grant, Mapping) else None
+    executed = details.get("executed_result") if isinstance(details, Mapping) else None
+    if not isinstance(executed, Mapping):
+        return {"executed_success": None, "executed_error": None}
+    return {"executed_success": executed.get("success"), "executed_error": executed.get("error")}
+
+
+def grant_outcome_line(grant_id: Any, outcome: Mapping[str, Any]) -> str:
+    """One line for the persona: the click, and what it ran."""
+    error = outcome.get("executed_error")
+    return (f"granted #{grant_id} · executed_result.success={outcome.get('executed_success')}"
+            + (f" · error: {error}" if error else ""))
+
+
 def render_inventory(inv: Mapping[str, Any]) -> str:
     """A compact markdown snapshot the persona can read at the top of an iteration."""
     lines = [f"### Workspace inventory{' (tag ' + inv['tag'] + ')' if inv.get('tag') else ''}", ""]

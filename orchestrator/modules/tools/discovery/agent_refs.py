@@ -167,7 +167,8 @@ def takes_the_agent_id(name_key: str) -> Callable[[Handler], Handler]:
 def gives_the_card_on_update(update: Handler) -> Handler:
     """Wrap platform_update_task: an agent_id or agent_name gives the card to that agent the
     way platform_assign_task does (an answered card runs again, F309), then any other edit
-    runs. A refused assignment edits nothing."""
+    runs. A refused assignment edits nothing. A card the same call sends back is only given
+    (P256-FIX-N17-2, ``_the_give``), so the send-back carries the owner's note."""
     @functools.wraps(update)
     async def wrapped(db: Any, workspace_id: Any, params: Dict[str, Any]) -> Dict[str, Any]:
         given = {key: value for key, value in (params or {}).items() if key not in (AGENT_ID, AGENT_NAME)}
@@ -175,14 +176,31 @@ def gives_the_card_on_update(update: Handler) -> Handler:
                  if (params or {}).get(key) not in (None, "")}
         if not agent:
             return await update(db, workspace_id, given)
-        from modules.tools.discovery.handlers_board_task_assign import assign_board_task
-
+        give = _the_give(db, workspace_id, given)
         private = {key: value for key, value in given.items() if key.startswith("_")}
-        assigned = await assign_board_task(db, workspace_id, {**private, "task_id": given.get("task_id"), **agent})
+        assigned = await give(db, workspace_id, {**private, "task_id": given.get("task_id"), **agent})
         if assigned.get("success") is not True or not _edits(given):
             return assigned
         return _both(assigned, await update(db, workspace_id, given))
     return wrapped
+
+
+def _the_give(db: Any, workspace_id: Any, edit: Dict[str, Any]) -> Handler:
+    """How the card is given. Night 17 (F444): {agent, status: 'assigned', note} on an answered
+    card ran it again for the new agent (``an_answered_card_runs_again``), so the move found
+    it already Assigned, never reached the board's Reject, and the owner's note never reached
+    the redo. When the edit sends the card back (``send_back_checks.board_sends_back``), the
+    plain assignment only sets its agent, and the Reject sends it back with the note."""
+    from modules.tools.discovery.send_back_checks import board_sends_back
+    from modules.tools.discovery.send_backs import EDIT_ACTION
+
+    if board_sends_back(db, workspace_id, EDIT_ACTION, edit):
+        from modules.tools.discovery.handlers_board_tasks import assign_board_task as only_given
+
+        return only_given
+    from modules.tools.discovery.handlers_board_task_assign import assign_board_task
+
+    return assign_board_task
 
 
 def _edits(params: Dict[str, Any]) -> bool:

@@ -66,10 +66,12 @@ def asks_as_the_owner_says(handler: Handler) -> Handler:
         from modules.tools.discovery.mission_owner_words import (
             asks_for_checks, autos_last_words, chosen_staffing, owners_words,
         )
+        from modules.tools.discovery.owner_only import CLICKED_BY
 
         params = params or {}
         said = owners_words(db, workspace_id, params)
-        refusal = refusal_for_mission(db, workspace_id, params, said)
+        # N17-2 (F444): on the owner's click only the copy check; the word rules ran before the card.
+        refusal = refusal_for_mission(db, workspace_id, params, said, clicked=bool(params.get(CLICKED_BY)))
         if refusal:
             return {"success": False, "error": refusal}
         asked, note = as_the_mission_settings(params)

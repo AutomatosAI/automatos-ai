@@ -64,7 +64,7 @@ def rebriefs(action: str, params: Dict[str, Any]) -> bool:
 def sends_back_a_card(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> bool:
     """Whether the move sends back a card its agent has worked on (``owner_only.sends_back``),
     each card's status read from this workspace's board. Without the board (no session), no."""
-    return bool(_sent_back(db, workspace_id, action, params))
+    return bool(cards_sent_back(db, workspace_id, action, params))
 
 
 def send_back_act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], what: str) -> Optional[str]:
@@ -72,7 +72,7 @@ def send_back_act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any
     Content Creator with your note: …", or for a Re-brief (N17-1) "give … a new brief and
     send it back to …"; None when the call sends nothing back. ``send_back`` comes first,
     then a new brief, then the status the call names."""
-    cards = _sent_back(db, workspace_id, action, params)
+    cards = cards_sent_back(db, workspace_id, action, params)
     if not cards:
         return None
     note = str(params.get(NOTE) or "").strip()
@@ -84,7 +84,7 @@ def send_back_act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any
     return act.format(what=what, agent=agent, words=words)
 
 
-def _sent_back(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[Any]:
+def cards_sent_back(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[Any]:
     """The worked cards this move sends back, in this workspace; a mission's own card is
     decided on the mission's page, never here."""
     from api.board_tasks import MISSION_CARD_SOURCE
@@ -132,4 +132,5 @@ def _agent_called(db: Any, workspace_id: Any, cards: List[Any]) -> str:
     return str(row.name) if row is not None else ITS_AGENT
 
 
-__all__ = ["REBRIEF_WAITS", "WAITS_FOR_THE_CLICK", "moved_to", "rebriefs", "send_back_act", "sends_back_a_card"]
+__all__ = ["REBRIEF_WAITS", "WAITS_FOR_THE_CLICK", "cards_sent_back", "moved_to", "rebriefs", "send_back_act",
+           "sends_back_a_card"]

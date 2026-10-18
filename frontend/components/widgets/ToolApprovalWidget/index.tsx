@@ -24,27 +24,10 @@ import { OversightNote } from '../oversight-note'
 import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
+import { executedOutcomeLine, executedResultOf } from '@/lib/grant-outcome'
 
-
-interface ExecutedResult {
-  success?: boolean
-  error?: string | null
-  requires_confirmation?: boolean
-  resumed_via?: string
-}
-
-/** Post-approve outcome line — honest about what actually happened (S4). */
-export function executedOutcomeLine(executed?: ExecutedResult | null): string {
-  if (!executed) return 'Approved.'
-  if (executed.resumed_via === 'board_task_requeue') {
-    return 'Approved — the blocked task was re-queued and will complete under this grant.'
-  }
-  if (executed.requires_confirmation) {
-    return 'Approved, but the action asked for confirmation again — check the pending approvals.'
-  }
-  if (executed.success) return 'Approved — the action ran.'
-  return `Approved, but execution failed: ${executed.error || 'unknown error'}`
-}
+// P256-FIX-N17-2: the outcome line lives in lib/grant-outcome, shared with the Governance inbox.
+export { executedOutcomeLine }
 
 export function ToolApprovalWidget({
   title,
@@ -67,9 +50,7 @@ export function ToolApprovalWidget({
 
   const handleApprove = async () => {
     try {
-      const res = await grantApproval.mutateAsync(data.grant_id)
-      const executed = (res?.grant?.details as { executed_result?: ExecutedResult } | undefined)
-        ?.executed_result
+      const executed = executedResultOf(await grantApproval.mutateAsync(data.grant_id))
       const line = executedOutcomeLine(executed)
       setOutcome(line)
       setDone('approved')

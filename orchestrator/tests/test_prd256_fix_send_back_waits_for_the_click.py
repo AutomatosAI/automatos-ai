@@ -130,20 +130,32 @@ def test_the_click_moves_it_to_assigned_once_with_the_note(desk):
 
 
 def test_a_send_back_that_also_gives_the_card_names_the_agent_it_goes_to(desk):
-    """The click signs what the card shows: platform_update_task's agent_id beside the send-back."""
+    """The click signs what the card shows: platform_update_task's agent_id beside the send-back.
+    P256-FIX-N17-2 (F444): and the click sends it back to that agent with the note; before, the
+    card was given the way platform_assign_task gives it, ran again, and the note never landed."""
     from sqlalchemy import text
+
+    from core.models.approval_grants import ApprovalGrant
+    from core.services.approval_grants import grant_grant
+    from services.ticket_redo import times_sent_back
 
     other = desk.db.execute(
         text("INSERT INTO agents (name, agent_type, workspace_id, status, configuration) "
              "VALUES ('Wholesale Desk', 'custom', CAST(:w AS uuid), 'active', CAST('{}' AS json)) RETURNING id"),
         {"w": str(desk.ws)}).scalar()
     task = _card(desk, "review")
+    params = {"task_id": _number(task), "status": "assigned", "note": NOTE, "agent_id": other}
 
-    reply = _call(desk, {"task_id": _number(task), "status": "assigned", "note": NOTE, "agent_id": other},
-                  _owners_chat(), action=EDIT)
+    reply = _call(desk, params, _owners_chat(), action=EDIT)
 
     assert _asked(reply), reply
     assert "back to Wholesale Desk with your note" in reply["message"]
+    grant_grant(desk.db.get(ApprovalGrant, reply["grant_id"]), granted_by=CLICKER)
+    desk.db.flush()
+    ran = _call(desk, params, _owners_chat(), action=EDIT)
+    assert ran["success"] is True and ran["sent_back"] is True, ran
+    assert (_status(desk, task), task.assigned_agent_id, task.review_feedback) == ("assigned", other, NOTE)
+    assert task.planning_data["owner_corrections"][-1]["note"] == NOTE and times_sent_back(task) == 1
 
 
 def test_a_rebrief_that_also_gives_the_card_says_a_new_brief_and_names_the_agent(desk):

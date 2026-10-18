@@ -33,8 +33,8 @@ from typing import Any, Optional
 from .api import Api, ApiError, Trace
 from .config import (DEFAULT_WORKSPACE_ID, LOGS_DIR, MIN_BALANCE_USD, PLATFORM_KEY_WORKSPACE_ID, SIM_HOME, ConfigError,
                      load_settings)
-from .customer_ops import (cost_table, inventory, local_time, purge_tagged, question_line, render_inventory,
-                           render_prompt, render_turn)
+from .customer_ops import (cost_table, grant_outcome, grant_outcome_line, inventory, local_time, purge_tagged,
+                           question_line, render_inventory, render_prompt, render_turn)
 from .judge import judge_output
 from .sse import parse_data_stream
 
@@ -105,9 +105,9 @@ def cmd_answer(args: argparse.Namespace) -> int:
 
 def cmd_grant(args: argparse.Namespace) -> int:
     api, _ = _api(args)
-    api.post(f"/api/v1/approval-grants/{args.grant_id}/grant", {})
-    _append_jsonl("answers.jsonl", {"ts": time.time(), "grant_id": args.grant_id, "granted": True})
-    print(f"granted #{args.grant_id}")
+    outcome = grant_outcome(api.post(f"/api/v1/approval-grants/{args.grant_id}/grant", {}))  # N17-2: what it ran
+    _append_jsonl("answers.jsonl", {"ts": time.time(), "grant_id": args.grant_id, "granted": True, **outcome})
+    print(grant_outcome_line(args.grant_id, outcome))
     return 0
 
 

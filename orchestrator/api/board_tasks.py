@@ -57,6 +57,7 @@ from api.board_mission_card import (  # F291: a mission's card waiting for its p
 )
 from services.run_cancel import is_playbook_card
 from services.run_redo import RedoTaken, redo_refusal, start_redo, takes_its_own_redo
+from services.send_back_rules import send_back_refusal  # N17-2 (F444): the Reject's rule
 from services.step_lessons import a_cards_answer_goes_on_the_card  # F297 (night 8)
 from services.social_ticket_post import a_social_card_has_its_post  # F380 (night 11)
 from services.claims_taken_out import a_cards_claims_taken_out_are_noted  # N15-CI
@@ -800,9 +801,8 @@ async def approve_task(
     }
 
 
-# F092 (night 3): a finished ticket can be sent back, and a re-run says what it
-# replaces. Night 3's #484 re-run overwrote the only evidence of F093.
-SENDABLE_BACK = ("review", "done")
+# F092 (night 3): a finished ticket can be sent back (services.send_back_rules), and a
+# re-run says what it replaces. Night 3's #484 re-run overwrote the only evidence of F093.
 FINISHED = ("done", "failed", "cancelled", "review")
 PREVIOUS_RUNS_KEPT = 5
 PREVIOUS_RESULT_CHARS = 4000
@@ -887,16 +887,9 @@ def send_back(db: Session, ctx: Any, task: BoardTask, feedback: Any, *, by: str)
     same card. Refused with an HTTPException before anything changes. ``ctx``
     carries the workspace (and the person, for a playbook's redo). The feedback
     as kept."""
-    if task.status not in SENDABLE_BACK:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Only a ticket in review or done can be sent back (currently: {task.status})",
-        )
-    refused = redo_refusal(db, task)  # F243: a redo that can't run on this card is refused before anything changes
+    refused = send_back_refusal(db, task)  # N17-2 (F444): one rule, read by the chat's card before it asks
     if refused:
-        raise HTTPException(status_code=409, detail=refused)
-    if not task.assigned_agent_id and not takes_its_own_redo(task):
-        raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
+        raise HTTPException(status_code=refused[0], detail=refused[1])
 
     feedback = str(feedback or "").strip()[:MAX_REVIEW_FEEDBACK_CHARS]
     seen = task.status
