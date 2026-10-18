@@ -37,9 +37,18 @@ The Dockerfile builds each part in its own stage, and BuildKit runs the stages s
 | `assets` | the Kokoro files and the music tracks, at `/kokoro/<release>/<file>` and `/music/<id>.<ext>` | `assets-fetch` (see below) |
 | `kokoro` | `/opt/kokoro`, every file checked against `kokoro/SHA256SUMS` | `assets` |
 | `js` | `/opt/media-render/js`: `npm ci --omit=dev` from `js/package-lock.json` | `node` |
-| `chrome` | `/opt/chrome` | `js` (both ways of fetching it run on Node) |
-| `py` | `/opt/venv` and `/opt/espeak`: `uv pip install --require-hashes --no-deps` from `requirements.lock` | `python:3.12-slim`, `uv` |
+| `chrome` | `/opt/chrome`: the arm64 headless shell stripped, only `en-US.pak` among the locales | `js` (both ways of fetching it run on Node) |
+| `py` | `/opt/venv` and `/opt/espeak`: `uv pip install --require-hashes --no-deps` from `requirements.lock`, the espeak data moved out of its package, onnxruntime's unlinked library and numpy's tests deleted | `python:3.12-slim`, `uv` |
 | `music` | `/opt/media-render/music`: every track checked against `music/manifest.json` again, then analysed | `py` plus ffmpeg |
+
+**What renders never load stays out** (PRD-262 US-051). Each cut is made in the RUN that brings the files in, because a file deleted in a later layer would still be in the earlier one:
+- the packages only `mesa-libgallium` needs, about 200 MB, most of it LLVM. Chrome's `libgbm1` and ffmpeg's `libsdl2` pull Mesa in, but `libgbm.so.1` needs only libdrm, libexpat, libm and libc, and renders run with the GPU off (the headless shell brings its own SwiftShader). The runtime's apt RUN ends with `dpkg --purge --force-depends` of that list, and then checks that ffmpeg and ffprobe still find every library. Debian's ffmpeg stays, with its security updates. dpkg now records `libgbm1`'s and `libglx-mesa0`'s dependency on `mesa-libgallium` as unmet, so nothing after that RUN can use apt;
+- Chrome's locale files except `en-US.pak` (amd64, about 51 MB), and the arm64 headless shell's symbol tables (about 130 MB; the amd64 build ships stripped). The `chrome` stage installs binutils to strip it, and the build fails if `readelf` still lists a `.symtab`;
+- the second copy of the espeak-ng data (18 MB): it is moved to `/opt/espeak`, so `espeakng_loader.get_data_path()` finds nothing, and Kokoro takes the path from `MEDIA_RENDER_ESPEAK_DATA_PATH`;
+- onnxruntime's `libonnxruntime.so.*` (29 MB), which its Python module does not link (the build imports onnxruntime afterwards, so a release that starts linking it fails there), and numpy's tests;
+- curl and unzip: downloads happen in the builder stages, and the image's `HEALTHCHECK` and compose's probe are Python's `urllib`. The image's probe runs every 2 s while the container starts (`--start-interval`, Docker Engine 25 or later); compose's `start_interval` comes with PRD-262 US-038.
+
+`media-render.yml` fails when the amd64 image is over 1.30 GB on disk (PRD-262 §8).
 
 **Where the media assets come from.** The `MEDIA_ASSETS` build argument picks the `assets` stage. Its default, `fetch`, is what Railway, compose and CI build: the `assets-fetch` stage downloads the Kokoro files from their GitHub release and the tracks from their source URLs (`media_render/music_build.py --fetch-only`, which checks each sha256), into the same layout the media assets image has. Once that image is published and public, its pinned `FROM ghcr.io/automatosai/automatos-media-assets:<tag>@sha256:<digest> AS assets-image` stage goes in, and `image` becomes the default. Either way the `kokoro` and `music` stages check every file, so a wrong sha256 still fails the build.
 
@@ -155,7 +164,7 @@ To publish it, run images.yml by hand on main with `media_assets` (`gh workflow 
 ## Boot assertions
 
 `python -m media_render` (the entrypoint) checks the environment before serving. If any check fails, it exits with code 2. It refuses to start when:
-- the espeak-ng data path is 160 characters or longer, measured after symlinks are resolved. espeak-ng truncates longer paths. The image copies the data to `/opt/espeak`;
+- the espeak-ng data path is 160 characters or longer, measured after symlinks are resolved. espeak-ng truncates longer paths. The image moves the data to `/opt/espeak`;
 - any of the four Hyperframes switches is not `1`;
 - `ENVIRONMENT=production` and `SOCIALS_RENDER_TOKEN` is unset. Outside production, a missing token leaves every route open, and a warning is logged;
 - the music library's manifest names a track that is missing or outside the library, or one with an unknown licence or no attribution.
