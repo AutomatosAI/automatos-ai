@@ -1,0 +1,58 @@
+/* PRD-261 A-12c: the hostile stylesheet. It is what a theme may ship: every rule sits under
+   html.hello-a12c (the server's scope check), no declaration is marked important (the check
+   refuses that), and it stays unlayered like all theme CSS (docs/theme-host/css-layer-model.md).
+   It aims every way to hide a card or switch off its buttons at the two protected elements of
+   each approval card (the host, [data-protected-surface], and its inner wrapper), with doubled
+   attribute selectors (specificity is not what decides), and it takes visibility and clicks
+   away from every ancestor of the cards. protected-surfaces.spec.ts checks that each rule
+   matched and that the cards are still drawn and clickable. */
+
+html.hello-a12c .hello-a12c-frame {
+  min-height: 100vh;
+  background: var(--hello-a12c-ground);
+  color: var(--hello-a12c-ink);
+}
+
+/* On the cards: gone from the layout. */
+html.hello-a12c body [data-protected-surface][data-protected-surface],
+html.hello-a12c body [data-protected-surface-inner][data-protected-surface-inner] {
+  display: none;
+}
+
+/* Faded out. */
+html.hello-a12c body [data-protected-surface][data-protected-surface],
+html.hello-a12c body [data-protected-surface-inner][data-protected-surface-inner] {
+  opacity: 0;
+  filter: opacity(0);
+}
+
+/* Hidden. */
+html.hello-a12c body [data-protected-surface][data-protected-surface],
+html.hello-a12c body [data-protected-surface-inner][data-protected-surface-inner] {
+  visibility: hidden;
+}
+
+/* Off-screen. */
+html.hello-a12c body [data-protected-surface][data-protected-surface],
+html.hello-a12c body [data-protected-surface-inner][data-protected-surface-inner] {
+  position: fixed;
+  left: -10000px;
+  top: -10000px;
+  transform: translate(-10000px, -10000px);
+  clip-path: inset(50%);
+}
+
+/* Not clickable. */
+html.hello-a12c body [data-protected-surface][data-protected-surface],
+html.hello-a12c body [data-protected-surface-inner][data-protected-surface-inner] {
+  pointer-events: none;
+}
+
+/* On their parents: every ancestor of a card loses visibility and clicks, which its children
+   inherit. (display, opacity and position on an ancestor are not reachable from the card: see
+   README.md.) */
+html.hello-a12c :has(> [data-protected-surface]),
+html.hello-a12c :has([data-protected-surface]) {
+  visibility: hidden;
+  pointer-events: none;
+}

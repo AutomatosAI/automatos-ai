@@ -7,6 +7,10 @@
  * summary, cost vs ceiling, an optional auto-proceed countdown, and
  * Approve / Reject. Approving starts execution; rejecting returns structured
  * feedback to the mission. Rendered via the widget router.
+ *
+ * PRD-261 A-12c: the card is a protected surface — the exported widget wraps
+ * it in ProtectedSurface, so no theme stylesheet can hide it or switch off
+ * its buttons (components/theme-host/protected-surface.tsx).
  */
 
 import { useState, useEffect } from 'react'
@@ -15,6 +19,7 @@ import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
+import { ProtectedSurface } from '@/components/theme-host/protected-surface'
 import { useApproveMission, useRejectMission, useUpdateMissionPlan } from '@/hooks/use-missions-api'
 import type { WidgetBaseProps, MissionApprovalTask, MissionApprovalWidgetData, WidgetDefinition } from '../types'
 import { roleEdit, withPlanPicks } from './role-edit'
@@ -39,7 +44,16 @@ function useCountdown(deadlineIso?: string): number | null {
   return secsLeft
 }
 
-export function MissionApprovalWidget({
+/** Every place the card renders gets it guarded (the canvas, a chat reply, a theme's page). */
+export function MissionApprovalWidget(props: WidgetBaseProps<MissionApprovalWidgetData>) {
+  return (
+    <ProtectedSurface surface="mission-approval">
+      <MissionApprovalCard {...props} />
+    </ProtectedSurface>
+  )
+}
+
+function MissionApprovalCard({
   title,
   data,
   metadata,

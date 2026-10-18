@@ -1,0 +1,121 @@
+/**
+ * PRD-261 A-12c — protected surfaces. The host and the inner wrapper both carry every guard
+ * declaration inline with `!important`, and the two approval widgets render their card inside
+ * one, wherever they are drawn (the canvas, a chat reply), with the card's buttons inside the
+ * guard. The cascade itself (a hostile theme sheet losing to the guard) is a browser fact:
+ * e2e/browser/specs/protected-surfaces.spec.ts proves it in Chromium and WebKit.
+ */
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/hooks/use-approval-grants', () => ({
+  useGrantApproval: () => ({ isLoading: false, mutateAsync: vi.fn() }),
+  useDenyApproval: () => ({ isLoading: false, mutateAsync: vi.fn() }),
+}))
+vi.mock('@/hooks/use-missions-api', () => ({
+  useApproveMission: () => ({ isLoading: false, mutateAsync: vi.fn() }),
+  useRejectMission: () => ({ isLoading: false, mutateAsync: vi.fn() }),
+  useUpdateMissionPlan: () => ({ isLoading: false, mutateAsync: vi.fn() }),
+}))
+
+import { MissionApprovalWidget } from '@/components/widgets/MissionApprovalWidget'
+import { ToolApprovalWidget } from '@/components/widgets/ToolApprovalWidget'
+import type { WidgetMetadata } from '@/components/widgets/types'
+
+import {
+  guardProtectedElement,
+  PROTECTED_SURFACE_ATTR,
+  PROTECTED_SURFACE_GUARD,
+  PROTECTED_SURFACE_INNER_ATTR,
+  ProtectedSurface,
+  type ProtectedSurfaceName,
+} from '../protected-surface'
+
+const IMPORTANT = 'important'
+/** PA-15's five: the ones a theme would use to hide a card or switch off its buttons. */
+const PA15_PROPERTIES = ['display', 'visibility', 'opacity', 'pointer-events', 'position']
+const APPROVE_BUTTON = /Approve & run/
+const metadata: WidgetMetadata = { source: { type: 'tool', name: 'platform_action' }, createdAt: new Date() }
+
+function expectGuarded(element: HTMLElement): void {
+  for (const [property, value] of Object.entries(PROTECTED_SURFACE_GUARD)) {
+    expect({ property, value: element.style.getPropertyValue(property) }).toEqual({ property, value })
+    expect({ property, priority: element.style.getPropertyPriority(property) }).toEqual({ property, priority: IMPORTANT })
+  }
+}
+
+/** The host and inner wrapper around `inside`, both guarded, the host named `surface`. */
+function expectInsideSurface(inside: HTMLElement, surface: ProtectedSurfaceName): void {
+  const inner = inside.closest<HTMLElement>(`[${PROTECTED_SURFACE_INNER_ATTR}]`)
+  const host = inside.closest<HTMLElement>(`[${PROTECTED_SURFACE_ATTR}]`)
+  expect(inner).not.toBeNull()
+  expect(host?.getAttribute(PROTECTED_SURFACE_ATTR)).toBe(surface)
+  expect(inner?.parentElement).toBe(host)
+  expectGuarded(host as HTMLElement)
+  expectGuarded(inner as HTMLElement)
+}
+
+describe('ProtectedSurface (PRD-261 A-12c)', () => {
+  it('guards PA-15\'s five properties at least', () => {
+    expect(Object.keys(PROTECTED_SURFACE_GUARD)).toEqual(expect.arrayContaining(PA15_PROPERTIES))
+    expect(PROTECTED_SURFACE_GUARD.display).not.toBe('none')
+    expect(PROTECTED_SURFACE_GUARD.visibility).toBe('visible')
+    expect(PROTECTED_SURFACE_GUARD.opacity).toBe('1')
+    expect(PROTECTED_SURFACE_GUARD['pointer-events']).toBe('auto')
+    // static voids every top/left a theme sets: no off-screen move
+    expect(PROTECTED_SURFACE_GUARD.position).toBe('static')
+  })
+
+  it('puts the guard inline, important, on the host and on the inner wrapper', () => {
+    render(
+      <ProtectedSurface surface="tool-approval">
+        <button type="button">inside</button>
+      </ProtectedSurface>,
+    )
+    expectInsideSurface(screen.getByRole('button', { name: 'inside' }), 'tool-approval')
+  })
+
+  it('keeps the guard across a re-render (React never rewrites the style attribute)', () => {
+    const view = render(
+      <ProtectedSurface surface="mission-approval">
+        <span>first</span>
+      </ProtectedSurface>,
+    )
+    view.rerender(
+      <ProtectedSurface surface="mission-approval">
+        <span>second</span>
+      </ProtectedSurface>,
+    )
+    expectInsideSurface(screen.getByText('second'), 'mission-approval')
+  })
+
+  it('does nothing when the ref callback is called with null (unmount)', () => {
+    expect(() => guardProtectedElement(null)).not.toThrow()
+  })
+
+  it('renders the tool approval card, its buttons included, inside a guarded surface', () => {
+    render(
+      <ToolApprovalWidget
+        id="w-tool"
+        title="Action approval needed"
+        data={{ grant_id: 7, action: 'platform_delete_document' }}
+        metadata={metadata}
+      />,
+    )
+    expectInsideSurface(screen.getByRole('button', { name: APPROVE_BUTTON }), 'tool-approval')
+    expectInsideSurface(screen.getByRole('button', { name: /Deny/ }), 'tool-approval')
+  })
+
+  it('renders the Mission approval card, its buttons included, inside a guarded surface', () => {
+    render(
+      <MissionApprovalWidget
+        id="w-mission"
+        title="Mission plan — approval needed"
+        data={{ mission_id: 'm-1', goal: 'Refund the customer', task_count: 1, tasks: [{ title: 'Issue refund' }] }}
+        metadata={metadata}
+      />,
+    )
+    expectInsideSurface(screen.getByRole('button', { name: APPROVE_BUTTON }), 'mission-approval')
+    expectInsideSurface(screen.getByRole('button', { name: /Reject/ }), 'mission-approval')
+  })
+})
