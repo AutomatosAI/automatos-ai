@@ -11,8 +11,9 @@
  * come from the install the build uses and nothing is executed. react/jsx-dev-runtime is not
  * shared: themes are built in production mode.
  *
- * The shims are built, never committed (frontend/.gitignore): only the browser lane's spike job
- * runs this, right before `next build`, so a shipped image serves nothing new.
+ * The shims are built, never committed (frontend/.gitignore): package.json's prebuild and predev
+ * run this before every `next build` and `next dev`, so every build, and every image, serves
+ * /theme-sdk/v1/*.
  *
  * Usage (from `frontend/`): node scripts/theme-sdk/generate-shims.js
  *

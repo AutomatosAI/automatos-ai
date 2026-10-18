@@ -1,0 +1,34 @@
+/* PRD-261 A-06a: the hello theme's stylesheet. Every rule sits under html.hello, the theme's
+   own class, in both wrap forms the scope check accepts. */
+html.hello .hello-frame {
+  min-height: 100vh;
+  background: var(--hello-ground, #f4efe6);
+  color: var(--hello-ink, #1a1814);
+}
+
+:where(html.hello) .hello-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background-color: var(--hello-accent, #2f6fed);
+  color: var(--hello-ground, #f4efe6);
+}
+
+html.hello .hello-bar button {
+  padding: 6px 12px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+
+html.hello .hello-content {
+  padding: 24px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.hello .hello-bar button {
+    transition: none;
+  }
+}

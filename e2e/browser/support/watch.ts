@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
-import { THEME_SDK_ROOT, THEME_SPIKE_ROOT } from './hello-theme'
+import { THEME_API_ROOT, THEME_SDK_ROOT } from './hello-theme'
 
-// PRD-261 A-01: what a page did while a spec watched it: uncaught errors, console errors, and
+// PRD-261 A-01, A-04a: what a page did while a spec watched it: uncaught errors, console errors, and
 // every request and response.
 
 export interface ResponseSeen {
@@ -28,9 +28,9 @@ export function watchPage(page: Page): PageWatch {
   return watch
 }
 
-/** The paths of the requests that reached for theme code: the shims or the theme's folder. */
+/** The paths of the requests that reached for a theme: the shims, the active install or a theme's files. */
 export function themeRequestPaths(urls: readonly string[]): string[] {
   return urls
     .map((url) => new URL(url).pathname)
-    .filter((pathname) => pathname.startsWith(THEME_SDK_ROOT) || pathname.startsWith(THEME_SPIKE_ROOT))
+    .filter((pathname) => pathname.startsWith(THEME_SDK_ROOT) || pathname.startsWith(THEME_API_ROOT))
 }

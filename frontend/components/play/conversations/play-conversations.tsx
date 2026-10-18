@@ -7,7 +7,7 @@ import { AutoMascot } from '@/components/mascot/auto-mascot'
 import { MascotColumn, PageColumns } from '@/components/play/shell/page-columns'
 import { type ConversationListState, useConversationList } from '@/hooks/use-conversation-list'
 import { useStartChat } from '@/hooks/use-start-chat'
-import { usePlayLayout } from '@/hooks/use-studio-theme'
+import { useThemeLayout } from '@/hooks/use-studio-theme'
 import { type ConversationSummary, filterByTitle } from '@/lib/play/conversations'
 import { CHAT_HREF } from '@/lib/ticket-links'
 
@@ -66,13 +66,13 @@ export interface PlayConversationsProps {
 
 /** The page under Play at >= 1024 px; anywhere else, the chat. */
 export function PlayConversations({ now }: PlayConversationsProps) {
-  const layout = usePlayLayout()
+  const layout = useThemeLayout()
   const router = useRouter()
   const elsewhere = layout === 'fallback'
   useEffect(() => {
     if (elsewhere) router.replace(CHAT_HREF)
   }, [elsewhere, router])
-  return layout === 'play' ? <ConversationsScreen now={now} /> : null
+  return layout === 'theme' ? <ConversationsScreen now={now} /> : null
 }
 
 export function ConversationsScreen({ now }: PlayConversationsProps) {

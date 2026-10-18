@@ -14,8 +14,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { TerminalSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import { useBackendHealthQuery } from '@/hooks/use-backend-health'
-import { usePlayLayout } from '@/hooks/use-studio-theme'
+import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
 import { apiClient } from '@/lib/api-client'
+import type { SlotId } from '@/lib/theme-host/registry-types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { permissionModeLabel, type PermissionMode } from './PermissionModePicker'
@@ -81,14 +82,20 @@ interface SessionModeHealth {
   cli_runtime_enabled?: boolean
 }
 
+/** The theme's frame owns the /health poll where it renders and the theme fills the asleep screen. */
+const FRAME_POLL_SLOT: SlotId = 'asleep@1'
+
 /**
  * GET /health through the one shared query (hooks/use-backend-health.ts, P260-FX-27 M88), so
- * Play's connection and this tab share one cache and one request. Inside Play's frame its
- * AsleepGate owns the poll; anywhere else (Classic, Studio, Play below its width) the tab polls
- * it, as it always has.
+ * a theme's connection and this tab share one cache and one request. Inside a theme's frame
+ * whose asleep gate owns the poll (PRD-261 A-02b: the theme's layout renders and its entry has
+ * the asleep slot — builtin Play's AsleepGate) the tab reads it; anywhere else (Classic, Studio,
+ * a theme below its width) the tab polls it, as it always has.
  */
 function useSessionModeHealth() {
-  const framePolls = usePlayLayout() === 'play'
+  const gatePolls = useActiveTheme()?.slots.includes(FRAME_POLL_SLOT) ?? false
+  const layout = useThemeLayout()
+  const framePolls = gatePolls && layout === 'theme'
   return useBackendHealthQuery<SessionModeHealth>({ poll: !framePolls })
 }
 

@@ -1,11 +1,11 @@
 import { createHash } from 'crypto'
 import { expect, test } from '@playwright/test'
-import { serveHelloTheme, THEME_E2E_PATH } from '../support/hello-theme'
+import { chooseStyle, HELLO_STYLE, serveHelloTheme, THEME_E2E_PATH } from '../support/hello-theme'
 import '../support/page-globals'
 import type { ProbeOutcome } from '../support/page-globals'
 import { writeRecord } from '../support/records'
 
-// PRD-261 A-01 (@record): measured facts, written to records/ and summarised in the job summary.
+// PRD-261 A-01, A-04a (@record): measured facts, written to records/ and summarised in the job summary.
 // R1: the React the App Router really renders with, against next/dist/compiled/react in the CI
 // install. R2: whether this browser enforces `integrity` in an import map (PRD-261 §6 signing
 // rests on it). Runs on Chromium, WebKit and Firefox.
@@ -63,6 +63,7 @@ function classify(outcome: Readonly<Record<string, ProbeOutcome>>): IntegritySup
 }
 
 test('records the React the App Router renders with', { tag: '@record' }, async ({ page, browser }, testInfo) => {
+  await chooseStyle(page, HELLO_STYLE, APP_URL)
   await serveHelloTheme(page, 'ok')
   await page.goto(THEME_E2E_PATH)
   await expect(page.locator('html')).toHaveAttribute(STATUS_ATTR, LOADER_FINISHED)
