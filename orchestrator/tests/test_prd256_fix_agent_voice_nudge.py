@@ -151,8 +151,9 @@ def test_the_check_passes_the_runs_voice():
     from modules.tools.execution import claims_in_place
 
     assert "return in_place(self, current)" in inspect.getsource(ToolLoopExecutor._recover_claimed_action)
-    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises)" in inspect.getsource(
-        claims_in_place.in_place)                                                     # N15-2: the one check
+    in_place = inspect.getsource(claims_in_place.in_place)        # N15-2: the one check; N17-5: the turn's reads
+    assert "without_unbacked_claims(text, loop.tracker.outcomes, promises=loop.promises," in in_place
+    assert 'read_ahead=getattr(loop, "read_ahead", False))' in in_place
 
 
 # ── F201 is unchanged ───────────────────────────────────────────────────────
