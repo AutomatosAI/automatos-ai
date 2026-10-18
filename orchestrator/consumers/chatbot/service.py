@@ -54,9 +54,7 @@ from consumers.chatbot.tool_router import get_tool_router
 # Import from modules — SINGLE SOURCE for tool schemas
 # Async-native entries: the chat hot path must never bridge the narrowing
 # embed through a helper thread (freezes the event loop for its duration).
-from modules.tools.tool_router import (
-    get_tools_for_agent_async,
-)
+from modules.tools.tool_router import get_tools_for_agent_async
 from services.page_context import (
     merge_into_trace,
     page_actions_from_context as _page_actions_from_context,
@@ -79,6 +77,7 @@ from consumers.chatbot.same_failure import MAX_IDENTICAL_TOOL_FAILURES, same_fai
 from consumers.chatbot.needs_you_turn import answers_what_needs_you, never_all_clear_unread  # F307 (night 9)
 from consumers.chatbot.named_template_note import fills_the_named_template  # F351 (night 10b)
 from consumers.chatbot.team_findings import reads_what_the_team_found  # F317 (night 9b)
+from consumers.chatbot.waiting_asks_turn import reads_the_waiting_asks  # F439 (nights 16-17)
 from consumers.chatbot.document_conversation import (  # F351 (night 10b)
     about_a_document, full_path_for_documents, with_document_actions,
 )
@@ -1411,6 +1410,7 @@ class StreamingChatService:
     @its_reads_are_receipted  # PRD-256 US-001: the automatic reads fold into one read receipt
     @grounds_the_cards  # F241 (night 8): the turn says which cards the owner named, and the call for each
     @answers_what_needs_you  # F307 (night 9): "what needs me?" reads the board's Needs you first
+    @reads_the_waiting_asks  # F439 (night 16): "did it run?" names the cards still waiting for the click
     @reads_what_the_team_found  # F317 (night 9b): the cards that already answer, by number
     @fills_the_named_template  # F351 (night 10b): a template the owner names gets its fields and the rules
     async def _retrieval_first(self, latest_text: str, llm_messages: List[Dict[str, Any]], agent_runtime,

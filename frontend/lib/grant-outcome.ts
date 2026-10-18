@@ -20,6 +20,18 @@ export function executedResultOf(response: unknown): ExecutedResult | undefined 
   return grant?.details?.executed_result
 }
 
+/**
+ * P256-FIX-N17-3 (F439, night 17): a click the server refused says why, in its words. The /grant
+ * route answers 422 for a card that can no longer run ("This card expired at 05:12 on 15 Oct;
+ * nothing ran…", "…replaced by a newer card…"); the api client puts that detail in the error's
+ * message. Any other failure keeps the surface's own line.
+ */
+export function refusedClickLine(err: unknown, fallback: string): string {
+  const status = (err as { status?: unknown } | null)?.status
+  const message = err instanceof Error ? err.message.trim() : ''
+  return status === 422 && message ? message : fallback
+}
+
 /** Post-approve outcome line — honest about what actually happened (S4). */
 export function executedOutcomeLine(executed?: ExecutedResult | null): string {
   if (!executed) return 'Approved.'

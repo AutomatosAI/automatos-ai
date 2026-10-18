@@ -24,7 +24,7 @@ import { OversightNote } from '../oversight-note'
 import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
-import { executedOutcomeLine, executedResultOf } from '@/lib/grant-outcome'
+import { executedOutcomeLine, executedResultOf, refusedClickLine } from '@/lib/grant-outcome'
 
 // P256-FIX-N17-2: the outcome line lives in lib/grant-outcome, shared with the Governance inbox.
 export { executedOutcomeLine }
@@ -59,8 +59,8 @@ export function ToolApprovalWidget({
       } else {
         toast.success(line)
       }
-    } catch {
-      toast.error('Failed to approve the action')
+    } catch (err) {
+      toast.error(refusedClickLine(err, 'Failed to approve the action'))
     }
   }
 

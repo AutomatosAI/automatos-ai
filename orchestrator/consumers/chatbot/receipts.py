@@ -56,7 +56,7 @@ from modules.tools.execution.call_effects import (
     AGENT_SET, DOCUMENT_MAKES, GIVEN_AGAIN, REVIEWED_BY_YOU, SENT_BACK, STATUS_IGNORED_SAID, STEPS_CHECKED,
     STEPS_UNCHECKED, answers_in, done_effects,
 )
-from modules.tools.execution.card_raised import is_waiting, receipt_effect
+from modules.tools.execution.card_raised import ALREADY_WAITING, already_waiting, is_waiting, receipt_effect
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
 from modules.tools.execution.turn_account import auto_speaks, is_read, thing_of, what_it_did
 
@@ -185,9 +185,11 @@ def receipt(action: str, params: Dict[str, Any], result: Any) -> Receipt:
 
 
 def _waiting_receipt(action: str, subject: str, result: Any) -> Receipt:
-    """An ask: a write that waits for the owner's click, with no reason (it was not refused)."""
-    return {"action": action, "kind": WRITE, "status": WAITING, "subject": subject,
-            "effect": receipt_effect(result, action, subject), "link": None, "reason": None}
+    """An ask: a write that waits for the owner's click, with no reason (it was not refused).
+    P256-FIX-N17-3: one that met its card from an earlier turn is marked ``already_waiting``."""
+    waiting = {"action": action, "kind": WRITE, "status": WAITING, "subject": subject,
+               "effect": receipt_effect(result, action, subject), "link": None, "reason": None}
+    return {**waiting, ALREADY_WAITING: True} if already_waiting(result) else waiting
 
 
 def skipped_receipt(action: str, params: Dict[str, Any], why: str) -> Receipt:
@@ -316,6 +318,11 @@ def _asks(writes: Iterable[Receipt]) -> bool:
     return any(r.get("status") == WAITING for r in writes)
 
 
+def _raised(writes: Iterable[Receipt]) -> bool:
+    """Whether a write of the turn raised a card this turn (P256-FIX-N17-3: not one met again)."""
+    return any(r.get("status") == WAITING and not r.get(ALREADY_WAITING) for r in writes)
+
+
 def _done_reads(receipts: Iterable[Receipt]) -> List[Receipt]:
     """The turn's reads that went through: what they name was found, not done (P256-FIX-RVW-34)."""
     return [r for r in receipts if r.get("kind") == READ and r.get("status") == DONE]
@@ -343,7 +350,7 @@ def unbacked_sentences(answer: str, outcomes: Iterable[Tuple[str, Dict[str, Any]
     writes = [r for r in ran if r["kind"] == WRITE]
     done_writes = [r for r in writes if r["status"] == DONE]
     unbacked = unbacked_where(answer, done_writes, first_person=not auto_speaks(promises), waiting=_asks(writes),
-                              reads=_done_reads(ran))
+                              reads=_done_reads(ran), raised=_raised(writes))
     return [(verb or "done", sentence) for verb, known, sentence in unbacked if known or verb in SAYS_DONE]
 
 

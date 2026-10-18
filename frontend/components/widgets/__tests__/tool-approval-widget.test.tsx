@@ -23,6 +23,8 @@ vi.mock('@/hooks/use-approval-grants', () => ({
   useGrantApproval: () => ({ isLoading: false, mutateAsync: grantMutateAsync }),
   useDenyApproval: () => ({ isLoading: false, mutateAsync: denyMutateAsync }),
 }))
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }))
+vi.mock('sonner', () => ({ toast }))
 
 import { ToolApprovalWidget, executedOutcomeLine } from '../ToolApprovalWidget'
 import { oversightTierLabel } from '../oversight-note'
@@ -52,6 +54,8 @@ function data(overrides?: Partial<ToolApprovalWidgetData>): ToolApprovalWidgetDa
 beforeEach(() => {
   grantMutateAsync.mockReset()
   denyMutateAsync.mockReset()
+  toast.error.mockReset()
+  toast.success.mockReset()
 })
 
 describe('ToolApprovalWidget — PRD-193 S3', () => {
@@ -158,5 +162,32 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
     expect(screen.getByText(/description: Runs the club desk → \(empty\)/)).toBeInTheDocument()
     expect(screen.getByText(/Change an agent 'CLUB DESK'/)).toBeInTheDocument()
     expect(screen.queryByText('Waiting for the owner')).not.toBeInTheDocument()
+  })
+})
+
+// P256-FIX-N17-3 (F439, night 17): a click on a card past its expiry (or one a newer card replaced)
+// is refused by /grant with a 422 that says why; the chat's card toasts those words.
+describe('ToolApprovalWidget — a refused click says why (P256-FIX-N17-3)', () => {
+  const EXPIRED = 'This card expired at 05:12 on 15 Oct; nothing ran. Ask Auto again for a fresh card.'
+
+  it("an expired card's 422 is toasted in the server's words", async () => {
+    grantMutateAsync.mockRejectedValue(Object.assign(new Error(EXPIRED), { status: 422 }))
+    const user = userEvent.setup()
+    render(<ToolApprovalWidget id="w6" title="Action approval needed" data={data()} metadata={metadata} />)
+
+    await user.click(screen.getByRole('button', { name: /approve & run/i }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(EXPIRED))
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('a failure that is not a refusal keeps the card\'s own line', async () => {
+    grantMutateAsync.mockRejectedValue(new Error('Network down'))
+    const user = userEvent.setup()
+    render(<ToolApprovalWidget id="w7" title="Action approval needed" data={data()} metadata={metadata} />)
+
+    await user.click(screen.getByRole('button', { name: /approve & run/i }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to approve the action'))
   })
 })

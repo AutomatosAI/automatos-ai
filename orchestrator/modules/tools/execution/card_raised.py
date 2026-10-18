@@ -12,24 +12,37 @@ by ``the_model_reads_the_card``), the tool-end line the chat shows (``tool_end_s
 the account a blank answer becomes (``account_line``, read by ``turn_account.account_of``).
 What the card asks (``ACT``) is set by the ask itself (``owner_only._ask``: "change an agent
 'Scout' (agent #12)"); an ask that does not say is named from the call's name ("delete the
-document").
+document"). P256-FIX-N17-3 (F439): an ask that met a card raised on an earlier turn of the chat
+(``already_waiting``) is never "Card raised": each reading says it still waits, raised at its time.
 """
 from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, Iterator, Optional
 
 from .call_effects import answers_in
+from .stale_cards import ALREADY_WAITING
 from .turn_account import thing_of
 
 # The ask's key for what its card asks: the verb and the subject, in the owner's words.
 ACT = "act"
 CARD_RAISED = "Card raised: {act}. Nothing changes until the owner clicks"
-FOR_THE_MODEL = CARD_RAISED + "; say so in one line and do not retry the call."
+# P256-FIX-N17-3 (F439): night 16 told the owner to "click … on the board"; the card is in Approvals.
+FOR_THE_MODEL = CARD_RAISED + ("; say so in one line, say its approval card is under Approvals (and beside this "
+                               "reply in a chat), not a ticket on the board, and do not retry the call.")
 TOOL_END = CARD_RAISED + "."
 RECEIPT_EFFECT = "card raised: {act}"
+# P256-FIX-N17-3: a chat turn that met its own card from an earlier turn (``ALREADY_WAITING`` on the ask)
+# raised nothing: each reading names that card and when it was raised ("at 03:04 on 13 Oct").
+ALREADY_FOR_THE_MODEL = ("Not run: this exact call already waits on its approval card, raised {at}: {act}. No new "
+                         "card was raised: tell the owner it is that card (beside the reply that raised it and under "
+                         "Approvals, not a ticket on the board), and do not retry the call.")
+ALREADY_TOOL_END = "Still waiting on its card, raised {at}: {act}."
+ALREADY_EFFECT = "still waiting on its card (raised {at}): {act}"
+ALREADY_ACCOUNT_LINE = "- Still waiting on its card, raised {at}: {act}. Nothing changes until you click."
 # An ask whose card could not be issued (tool_grants' fail-safe floor) is still waiting, but
 # nothing claims a card that is not there: the model keeps the ask's own words, still not "failed".
 ASKED_FOR_THE_MODEL = "Not run, and not refused: {said} Say so in one line and do not retry the call."
@@ -78,13 +91,32 @@ def act_of(ask: Dict[str, Any], action: str = "", subject: str = "") -> str:
     return f"{what} {subject}".strip()
 
 
+def raised_at(ask: Dict[str, Any]) -> Optional[str]:
+    """When the card this ask meets again was raised ("at 03:04 on 13 Oct"), when the ask is
+    marked ``already_waiting``; None for a card this call raised."""
+    from modules.tools.discovery.my_actions_reads import at_said
+
+    waiting = ask.get(ALREADY_WAITING)
+    since = waiting.get("since") if isinstance(waiting, dict) else None
+    try:
+        return at_said(datetime.fromisoformat(str(since))) if since else None
+    except ValueError:
+        return None
+
+
+def _card_said(ask: Dict[str, Any], raised: str, already: str, act: str) -> str:
+    """The card's line: the one met again with its time (``already``), else the one raised."""
+    at = raised_at(ask)
+    return already.format(at=at, act=act) if at else raised.format(act=act)
+
+
 def for_the_model(result: Any, action: str = "") -> Optional[str]:
     """The model's tool result for an ask ("Card raised: …"); None for any other result."""
     ask = the_ask(result)
     if ask is None:
         return None
     if has_a_card(ask):
-        return FOR_THE_MODEL.format(act=act_of(ask, action))
+        return _card_said(ask, FOR_THE_MODEL, ALREADY_FOR_THE_MODEL, act_of(ask, action))
     said = str(ask.get("message") or "").strip() or f"{act_of(ask, action)} waits for the owner's OK."
     return ASKED_FOR_THE_MODEL.format(said=said)
 
@@ -94,7 +126,9 @@ def tool_end_summary(result: Any) -> Optional[str]:
     ask = the_ask(result)
     if ask is None:
         return None
-    return (TOOL_END if has_a_card(ask) else ASKED_TOOL_END).format(act=act_of(ask))
+    if has_a_card(ask):
+        return _card_said(ask, TOOL_END, ALREADY_TOOL_END, act_of(ask))
+    return ASKED_TOOL_END.format(act=act_of(ask))
 
 
 def account_line(result: Any, action: str = "") -> Optional[str]:
@@ -103,7 +137,9 @@ def account_line(result: Any, action: str = "") -> Optional[str]:
     ask = the_ask(result)
     if ask is None:
         return None
-    return (ACCOUNT_LINE if has_a_card(ask) else ASKED_ACCOUNT_LINE).format(act=act_of(ask, action))
+    if has_a_card(ask):
+        return _card_said(ask, ACCOUNT_LINE, ALREADY_ACCOUNT_LINE, act_of(ask, action))
+    return ASKED_ACCOUNT_LINE.format(act=act_of(ask, action))
 
 
 def the_model_reads_the_card(backfill: Backfill) -> Backfill:
@@ -164,10 +200,17 @@ def streams_the_wait(tool_end: Callable[..., str]) -> Callable[..., str]:
 def receipt_effect(result: Any, action: str, subject: str = "") -> str:
     """A waiting receipt's effect: "card raised: change an agent 'Scout'"."""
     ask = the_ask(result) or {}
-    template = RECEIPT_EFFECT if has_a_card(ask) else ASKED_EFFECT
-    return template.format(act=act_of(ask, action, "" if ask.get(ACT) else subject))
+    act = act_of(ask, action, "" if ask.get(ACT) else subject)
+    return _card_said(ask, RECEIPT_EFFECT, ALREADY_EFFECT, act) if has_a_card(ask) else ASKED_EFFECT.format(act=act)
 
 
-__all__ = ["ACCOUNT_LINE", "ACT", "FOR_THE_MODEL", "RECEIPT_EFFECT", "TOOL_END", "WAITING", "account_line", "act_of",
-           "emit_flagged", "for_the_model", "has_a_card", "is_waiting", "receipt_effect", "streams_the_wait", "the_ask",
+def already_waiting(result: Any) -> bool:
+    """Whether the call met its card from an earlier turn again (nothing was raised this turn)."""
+    ask = the_ask(result)
+    return ask is not None and has_a_card(ask) and raised_at(ask) is not None
+
+
+__all__ = ["ACCOUNT_LINE", "ACT", "ALREADY_FOR_THE_MODEL", "ALREADY_WAITING", "FOR_THE_MODEL", "RECEIPT_EFFECT",
+           "TOOL_END", "WAITING", "account_line", "act_of", "already_waiting", "emit_flagged", "for_the_model",
+           "has_a_card", "is_waiting", "raised_at", "receipt_effect", "streams_the_wait", "the_ask",
            "the_model_reads_the_card", "the_results_flag", "tool_end_summary"]

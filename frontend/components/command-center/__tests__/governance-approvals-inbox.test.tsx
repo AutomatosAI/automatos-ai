@@ -6,7 +6,7 @@
  * Revoke, not Grant/Deny; a fully-decided (denied) grant is read-only.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { ApprovalGrant } from '@/lib/api-client'
 
 const { grantMutate, denyMutate, revokeMutate } = vi.hoisted(() => ({
@@ -44,6 +44,7 @@ vi.mock('sonner', () => ({
 
 import { ApprovalsInbox } from '../governance/approvals-inbox'
 import { useApprovalGrants } from '@/hooks/use-approval-grants'
+import { toast } from 'sonner'
 
 const mockUse = vi.mocked(useApprovalGrants)
 
@@ -226,5 +227,40 @@ describe('ApprovalsInbox — PRD-200 S3 parked missions', () => {
     render(<ApprovalsInbox />)
     expect(screen.getByRole('button', { name: /Grant/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Approve$/ })).not.toBeInTheDocument()
+  })
+})
+
+// P256-FIX-N17-3 (F439, night 17): #2607 was clicked 13 hours after it expired; the click ran nothing
+// and said "no reason given". The /grant route now refuses it (422) and the card toasts its words.
+describe('ApprovalsInbox — a refused click says why (P256-FIX-N17-3)', () => {
+  const EXPIRED = 'This card expired at 05:12 on 15 Oct; nothing ran. Ask Auto again for a fresh card.'
+  const playbookCard = { id: 2607, subject_type: 'tool_call', subject_id: 'platform_execute_playbook:abc' }
+
+  beforeEach(() => {
+    setMissions([])
+    grantMutate.mockClear()
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.success).mockClear()
+  })
+
+  it("an expired card's 422 is toasted in the server's words, never 'granted'", async () => {
+    grantMutate.mockRejectedValueOnce(Object.assign(new Error(EXPIRED), { status: 422 }))
+    setGrants([grant(playbookCard)])
+    render(<ApprovalsInbox />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Grant/ }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(EXPIRED))
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('a failure with no words for the owner keeps the card\'s own line', async () => {
+    grantMutate.mockRejectedValueOnce(Object.assign(new Error('Internal Server Error'), { status: 500 }))
+    setGrants([grant(playbookCard)])
+    render(<ApprovalsInbox />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Grant/ }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to grant grant 2607'))
   })
 })

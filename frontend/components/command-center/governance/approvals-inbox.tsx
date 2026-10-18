@@ -32,7 +32,7 @@ import {
 } from '@/hooks/use-missions-api'
 import type { ApprovalGrant } from '@/lib/api-client'
 import { ownerLine } from '@/lib/grant-owner'
-import { executedOutcomeLine, executedResultOf } from '@/lib/grant-outcome'
+import { executedOutcomeLine, executedResultOf, refusedClickLine } from '@/lib/grant-outcome'
 import type { MissionResponse } from '@/types/missions'
 
 const PENDING = 'pending'
@@ -76,8 +76,9 @@ export function GrantCard({ grant }: { grant: ApprovalGrant }) {
       const executed = mut === grantMut ? executedResultOf(res) : undefined
       if (executed?.success === false) toast.error(executedOutcomeLine(executed))
       else toast.success(`Grant ${grant.id} ${verb}`)
-    } catch {
-      toast.error(`Failed to ${verb.replace(/ed$/, '')} grant ${grant.id}`)
+    } catch (err) {
+      // P256-FIX-N17-3 (F439): an expired or replaced card says so, in the server's words.
+      toast.error(refusedClickLine(err, `Failed to ${verb.replace(/ed$/, '')} grant ${grant.id}`))
     }
   }
 

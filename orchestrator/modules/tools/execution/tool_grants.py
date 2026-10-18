@@ -152,16 +152,14 @@ def issue_tool_grant(
     """
     try:
         from core.models.approval_grants import SUBJECT_TOOL_CALL
-        from core.services.approval_grants import create_grant, find_pending_grant
+        from core.services.approval_grants import create_grant
+        from modules.tools.execution.stale_cards import the_pending_card
 
         subject_id = tool_call_subject_id(workspace_id, action, params)
-
-        existing = find_pending_grant(
-            db, workspace_id, subject_type=SUBJECT_TOOL_CALL, subject_id=subject_id
-        )
+        # Idempotent ask: the pending row (already announced on creation) is the
+        # actionable thing, unless it lapsed or another chat raised it (N17-3, F439).
+        existing = the_pending_card(db, workspace_id, subject_id, caller_context)
         if existing is not None:
-            # Idempotent ask: the pending row (already announced on creation)
-            # is the actionable thing — no grant spam, no re-notify.
             return existing
 
         risk_class = _risk_class_for(action, permission_level)
@@ -305,9 +303,10 @@ def attach_ask_grant(
         # yield id-less rows get the plain prose ask, never a dead card.
         if grant is None or not isinstance(getattr(grant, "id", None), int):
             return ask
-        return enrich_ask_with_grant(
-            ask, grant, risk_class=_risk_class_for(action, permission_level)
-        )
+        from modules.tools.execution.stale_cards import with_already_waiting
+
+        enriched = enrich_ask_with_grant(ask, grant, risk_class=_risk_class_for(action, permission_level))
+        return with_already_waiting(enriched, grant, caller_context)  # N17-3: a card an earlier turn raised
     except Exception:  # pragma: no cover - issue/enrich already guard; belt & braces
         logger.warning("[tool_grants] ask enrichment failed for %s", action, exc_info=True)
         return ask

@@ -580,17 +580,23 @@ def unbacked_claims(answer: str, done_writes: Sequence[Receipt], first_person: b
 
 
 def unbacked_where(answer: str, done_writes: Sequence[Receipt], first_person: bool = False, waiting: bool = False,
-                   reads: Sequence[Receipt] = (), kinds_too: bool = True) -> List[Tuple[str, bool, str]]:
+                   reads: Sequence[Receipt] = (), kinds_too: bool = True,
+                   raised: Optional[bool] = None) -> List[Tuple[str, bool, str]]:
     """``unbacked_claims``, each with the sentence that makes it, as ``claims`` reads it (its marks
     off): P256-FIX-N15-1 takes that sentence out of the reply. A turn that wrote nothing and read
-    Auto's own record reports that record: no claim (N15-1)."""
+    Auto's own record reports that record: no claim (N15-1). P256-FIX-N17-3 (F439): a claim of the
+    ask is backed only by a card this turn ``raised`` (None: as ``waiting``); over a card met again
+    from an earlier turn, "I've raised a fresh run card" is unbacked."""
     wrote = bool(done_writes) or waiting
     if not wrote and recalled(reads):
         return []
+    raised = waiting if raised is None else raised
     unbacked = []
     looked_up = not wrote and looked_something_up(reads)
     for verb, sentence in claims(answer, first_person, numbers_read(reads), looked_up):
-        if waiting and _asked(verb, sentence):
+        if (raised or waiting) and _asked(verb, sentence):
+            if not raised:
+                unbacked.append((verb, True, sentence))
             continue
         backs = _family(verb, sentence)
         if not any((backs or _unfamiliar(verb))(r) for r in done_writes):
