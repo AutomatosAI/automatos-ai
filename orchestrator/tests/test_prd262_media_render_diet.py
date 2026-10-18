@@ -175,7 +175,10 @@ def test_the_in_image_suite_carries_the_image_checks():
 
 
 def test_the_proof_run_fails_above_1_30_gb_on_disk():
-    step = _step("media-render", "budget=1300000000")
+    # The bar is media-render's amd64 on_disk_max_mb, the entry images.yml checks too
+    # (PRD-262 US-054; tests/test_prd262_media_render_images.py holds it at 1,300 MB).
+    reads = "budget=$(jq -er '.budgets[\"media-render\"].amd64.on_disk_max_mb * 1000000 | floor' .github/image-budgets.json)"
+    step = _step("media-render", reads)
     assert 'docker image ls "$IMAGE"' in step
     assert "size=$(docker image inspect -f '{{.Size}}' \"$IMAGE\")" in step
     assert 'if [ "$arch" != amd64 ]' in step

@@ -395,21 +395,23 @@ jobs:
       # disk; it was 1.81 GB in run 37612086159. `docker image ls` prints the image's
       # Size rounded, so the bar reads the same Size in bytes. It runs last and always,
       # so an image over the bar still gets every render above proved, and a failed
-      # render still gets its size reported. US-054 checks the same bar in images.yml.
+      # render still gets its size reported. The bar is media-render's amd64
+      # `on_disk_max_mb` in .github/image-budgets.json, which images.yml checks too
+      # (US-054), so the two never disagree.
       - name: The image is at most 1.30 GB on disk (amd64)
         if: always()
         run: |
           docker image ls "$IMAGE"
           arch=$(docker image inspect -f '{{.Architecture}}' "$IMAGE")
           size=$(docker image inspect -f '{{.Size}}' "$IMAGE")
-          budget=1300000000
+          budget=$(jq -er '.budgets["media-render"].amd64.on_disk_max_mb * 1000000 | floor' .github/image-budgets.json)
           echo "media-render ($arch) on disk: $(( size / 1000000 )) MB ($size bytes); the bar is $(( budget / 1000000 )) MB, 1810 MB in run 37612086159"
-          if [ "$arch" != amd64 ]; then echo "::error::the 1.30 GB bar is amd64's; this image is $arch"; exit 1; fi
+          if [ "$arch" != amd64 ]; then echo "::error::the on-disk bar is amd64's; this image is $arch"; exit 1; fi
           if [ "$size" -gt "$budget" ]; then
-            echo "::error::media-render is $(( size / 1000000 )) MB on disk, over its 1.30 GB bar (PRD-262 §8)"
+            echo "::error::media-render is $(( size / 1000000 )) MB on disk, over its $(( budget / 1000000 )) MB bar (PRD-262 §8)"
             exit 1
           fi
-          echo "media-render is within its 1.30 GB bar: PASS"
+          echo "media-render is within its $(( budget / 1000000 )) MB bar: PASS"
 
   # Gerard, 6 Oct ("why is CI taking 45 mins"): the seeded templates' renders were
   # one step of the job above, about 180 renders in series against one container

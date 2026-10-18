@@ -26,6 +26,16 @@ name: images
 # - agent-opt-worker (PRD-262 US-006) builds for amd64 only, on pull requests
 #   that touch it and on main. It is measured and scanned like the others and
 #   pushed only to the job's registry, never to GHCR: Railway builds it itself.
+# - media-render (PRD-262 US-054) builds for amd64 and arm64, on pull requests
+#   that touch it and on main, and is pushed only to the job's registry, never
+#   published: it carries GPL-3.0 espeak-ng and phonemizer and GPL x264, and
+#   Railway builds it itself (§9-Q6). It is too big for the GHA cache, so its
+#   cache is a private GHCR ref, ghcr.io/<owner>/automatos-media-render:
+#   buildcache-<arch>, which publishing runs write and every run reads (§9-Q13).
+#   Keep that package private. Its budget also bars it on disk, as `docker image
+#   inspect` reports the image pulled from the job's registry (§8). Its scan is
+#   report only (`scan_report_only`) until its first findings are fixed or
+#   allowlisted.
 # - Every build reports its size, its layers (with the Dockerfile instruction
 #   and the heaviest paths of each) and its update delta, the MB an existing
 #   user downloads to move from `edge` to it, in the step summary and as a
@@ -102,6 +112,7 @@ on:
       - "frontend/public/**"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
+      - "services/media-render/**"
   # The weekly OS rebuild (PRD-262 US-011).
   schedule:
     - cron: "0 5 * * 1"
@@ -172,7 +183,8 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           # The images this workflow builds. `inputs` are the on.pull_request
           # paths that change the image. `publish: false` builds, measures and
-          # scans an image without ever pushing it to GHCR, so it has no `edge`.
+          # scans an image without ever pushing the image to GHCR, so it has no
+          # `edge`.
           # cache_mode: `min` for the API, whose pybuild output `max` would
           # export and never reuse; `max` for the frontend's builder
           # node_modules, and for the worker as before; `min` for
@@ -182,6 +194,12 @@ jobs:
           # US-011; orchestrator/tests/test_prd262_weekly_rebuild.py reads them
           # against each Dockerfile). The API's pybuild is not one: its compilers
           # never ship.
+          # media-render (PRD-262 US-054) adds three keys the others leave at
+          # their defaults: `cache: registry` (a private GHCR buildcache ref, not
+          # the GHA cache, which a 1.8 GB image on two arches would evict; `max`,
+          # so its builder stages are cached too), `on_disk` (§8 bars it on disk)
+          # and `scan_report_only` (its first scans warn, whatever POLICY_MODE
+          # says; the wave's last commit drops it).
           IMAGES: |
             [
               {"name": "api", "context": "orchestrator", "target": "production",
@@ -210,7 +228,13 @@ jobs:
                "build_args": [],
                "cache_mode": "min", "no_cache_filters": [],
                "arches": ["amd64"], "publish": false,
-               "inputs": ["services/agent-opt-worker/**"]}
+               "inputs": ["services/agent-opt-worker/**"]},
+              {"name": "media-render", "context": "services/media-render", "target": "production",
+               "build_args": [],
+               "cache_mode": "max", "cache": "registry", "no_cache_filters": ["runtime"],
+               "arches": ["amd64", "arm64"], "publish": false,
+               "on_disk": true, "scan_report_only": true,
+               "inputs": ["services/media-render/**"]}
             ]
           # What every image is built or judged by: a change here builds them all.
           SHARED_INPUTS: |
@@ -302,8 +326,10 @@ jobs:
         with:
           driver-opts: network=host
 
+      # To publish, and to read or write a registry build cache (media-render,
+      # PRD-262 US-054), which lives in a private GHCR package.
       - name: Log in to GHCR
-        if: matrix.publish
+        if: matrix.ghcr_login
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -313,7 +339,9 @@ jobs:
       # Pushes by digest: to GHCR when publishing, to the job's registry
       # otherwise. Every run reads the cache; only publishing runs write it, so
       # PR and branch caches (which main can never read) stop crowding main's
-      # out of the 10 GB GHA cache. On a weekly or `no_cache` run,
+      # out of the 10 GB GHA cache. The picker (scripts/ci/image_matrix.py)
+      # writes both cache settings: the GHA cache, one scope per image and arch,
+      # or media-render's GHCR buildcache ref. On a weekly or `no_cache` run,
       # no-cache-filters rebuilds the image's OS-package stages, and every step
       # after them, from fresh packages; the weekly run's cache-to then hands
       # those layers to the builds that follow.
@@ -329,8 +357,8 @@ jobs:
           outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
-          cache-to: ${{ env.PUBLISH == 'true' && format('type=gha,mode={0},scope={1}-{2}', matrix.cache_mode, matrix.name, matrix.arch) || '' }}
+          cache-from: ${{ matrix.cache_from }}
+          cache-to: ${{ matrix.cache_to }}
           no-cache-filters: ${{ matrix.no_cache_filters }}
 
       - name: Export digest
@@ -369,6 +397,26 @@ jobs:
           python3 scripts/ci/image_report.py measure --name "$NAME" --arch "$ARCH" \
             --image "$IMAGE" --digest "$DIGEST" --edge "$EDGE" \
             --out "${RUNNER_TEMP}/layers/${NAME}-${ARCH}.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      # PRD-262 US-054: an image that is never published has no download a user
+      # pays for, so §8 bars media-render on disk. This arch's image is pulled from
+      # the job's registry, and the Size `docker image inspect` reports (what
+      # media-render.yml's 1.30 GB check reads) joins the report, which the budget
+      # step checks against the image's `on_disk_max_mb`.
+      - name: On-disk size
+        if: matrix.on_disk
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REPORT: ${{ runner.temp }}/layers/${{ matrix.name }}-${{ matrix.arch }}.json
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          size=$(docker image inspect -f '{{.Size}}' "${IMAGE}@${DIGEST}")
+          echo "Docker's image store: $(docker info -f '{{.Driver}}')"
+          docker image ls --digests "$IMAGE"
+          python3 scripts/ci/image_report.py disk --report "$REPORT" --bytes "$size" --summary "$GITHUB_STEP_SUMMARY"
+          # The scan reads the registry, not this copy.
+          docker image rm "${IMAGE}@${DIGEST}" > /dev/null
 
       # Report only: .github/image-budgets.json's `mode` is `warn` until
       # PRD-262 US-004 sets the baseline and switches it to `fail`.
@@ -453,7 +501,13 @@ jobs:
           REPORT: ${{ runner.temp }}/grype/report.json
           NAME: ${{ matrix.name }}
           ARCH: ${{ matrix.arch }}
+          # PRD-262 US-054: an image scanned here for the first time (IMAGES'
+          # `scan_report_only`: media-render) is judged report only, whatever
+          # POLICY_MODE says, until each finding it shows is fixed or allowlisted.
+          # It can only lower the mode, never raise it.
+          SCAN_REPORT_ONLY: ${{ matrix.scan_report_only }}
         run: |
+          if [ "$SCAN_REPORT_ONLY" = "true" ]; then POLICY_MODE=report; fi
           python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
           python scripts/ci/image_scan_policy.py check --report "$REPORT" --allowlist .grype.yaml \
             --mode "$POLICY_MODE" --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
