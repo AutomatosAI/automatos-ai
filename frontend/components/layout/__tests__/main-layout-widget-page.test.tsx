@@ -20,8 +20,8 @@ vi.mock('framer-motion', () => ({
   AnimatePresence: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsTabletOrBelow: () => false, useIsMobile: () => false }))
-// Under Play at a laptop's width: Play's frame (P260-FX-25: usePlayLayout is MainLayout's width source).
-vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useIsPlay: () => true, usePlayLayout: () => 'play' }))
+// Under Play at a laptop's width: Play's frame (P260-FX-25, PRD-261 A-02b: useThemeLayout is MainLayout's width source).
+vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => true, useThemeLayout: () => 'theme' }))
 
 // Play's frame: the page and the widget MainLayout hands it (play-frame.test.tsx covers the frame).
 vi.mock('@/components/play/shell/play-frame', () => ({
