@@ -5,17 +5,18 @@ import type {
 } from '@/components/widgets/types'
 
 /**
- * PRD-260 T-005c — the approvals a turn raises, for Play's chat. The core chat
- * (components/chatbot/chat.tsx) turns a 'tool-data' part's `tool_approval` (a
- * confirmation-gated action holding a grant, PRD-193) and `mission_approval`
- * (a Mission plan awaiting approval, PRD-163) into the 'Action approval
- * needed' and 'Mission plan — approval needed' widgets; Play's chat reads the
- * same part the same way and shows the same widgets inside Auto's reply. The
- * payloads come off the wire (result_formatter.py builds them), so every field
- * is checked here, and the ids are checked before they reach a request path.
- * A filed card remembers the reply that raised it and whether the owner has
- * answered it or closed it; a card whose reply left the conversation is
- * loose, still open. Pure (stores/play-approvals-store.ts holds the cards).
+ * PRD-260 T-005c, PRD-261 A-11a (M28) — the approvals a turn raises, for any
+ * theme's chat. The core chat (components/chatbot/chat.tsx) turns a
+ * 'tool-data' part's `tool_approval` (a confirmation-gated action holding a
+ * grant, PRD-193) and `mission_approval` (a Mission plan awaiting approval,
+ * PRD-163) into the 'Action approval needed' and 'Mission plan — approval
+ * needed' widgets; a theme's chat reads the same part the same way and shows
+ * the same widgets inside Auto's reply. The payloads come off the wire
+ * (result_formatter.py builds them), so every field is checked here, and the
+ * ids are checked before they reach a request path. A filed card remembers the
+ * reply that raised it and whether the owner has answered it or closed it; a
+ * card whose reply left the conversation is loose, still open. Pure
+ * (lib/chat-controller/approvals.ts holds the cards).
  */
 
 /** chat.tsx's widget titles. */
@@ -174,7 +175,7 @@ export function isWaiting(filed: readonly FiledApproval[]): boolean {
 
 /**
  * The open cards whose reply is no longer in the conversation: useChat drops
- * the reply when the request fails mid-turn (a reply you stopped Play keeps,
+ * the reply when the request fails mid-turn (a reply you stopped is kept,
  * hooks/use-stopped-reply.ts), and Try again replaces it; a conversation
  * shown again (the chat screen mounted afresh) holds the server's copy of a
  * reply, under its own id. The grant or Mission

@@ -112,14 +112,14 @@ import {
   MISSION_APPROVAL_TITLE,
   TOOL_APPROVAL_TITLE,
   withStatus,
-} from '@/components/play/chat/approvals'
+} from '@/lib/chat/approvals'
 import { AWAITING_ANSWER } from '@/components/play/chat/caption'
 import { PlayChat } from '@/components/play/chat/play-chat'
 import { TURN_END_LABEL } from '@/components/play/chat/turn-end'
 import { type ChatSession, EMPTY_CHAT_SESSION } from '@/lib/chat/chat-session'
 import { HELLO_KEY } from '@/lib/mascot/session'
 import { useChatSessionStore } from '@/stores/chat-session-store'
-import { usePlayApprovalsStore } from '@/stores/play-approvals-store'
+import { useChatApprovalsStore as usePlayApprovalsStore } from '@/lib/chat-controller/approvals'
 
 // --- core fixtures: the ChatMessage shape of types/chat.ts, the payloads of result_formatter.py ----------
 

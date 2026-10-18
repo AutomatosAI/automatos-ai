@@ -3,8 +3,9 @@ import { DELIVERABLE_PARAM, DELIVERABLES_HREF } from '@/lib/ticket-links'
 import type { Receipt } from '@/types'
 
 /**
- * PRD-260 §4, K8 — which Deliverables a turn made, for the inline card in the
- * chat, ported from Automatos Play's lib/chat/deliverables.ts. Two sources:
+ * PRD-260 §4, K8, PRD-261 A-11a (M28) — which Deliverables a turn made, for the
+ * inline card in any theme's chat (first ported for the PRD-260 theme). Two
+ * sources:
  * - the document tool's tool-data part, {generated_document: {deliverable_id,
  *   title, format, …}} (format_for_frontend in
  *   orchestrator/modules/tools/formatting/result_formatter.py);
@@ -34,7 +35,7 @@ const DELIVERABLE_ID = /^[A-Za-z0-9_-]{1,128}$/
 const DELIVERABLE_PAGE = /^\/deliverables\/([^/]+)\/?$/
 const DELIVERABLES_LIST = /^\/deliverables\/?$/
 /** Only for resolving relative links; never fetched. */
-const LINK_BASE = 'http://play.invalid'
+const LINK_BASE = 'http://chat.invalid'
 /** An absolute receipt link: the open_url with FRONTEND_URL in front. Any other scheme is no link. */
 const ABSOLUTE_LINK = /^https?:\/\//i
 const GENERATED_DOCUMENT = 'generated_document'
@@ -103,7 +104,7 @@ function parseLink(link: string): URL | null {
   try {
     return new URL(link, LINK_BASE)
   } catch (error) {
-    console.warn('[play-chat] a receipt link that is not a URL:', link, error)
+    console.warn('[chat] a receipt link that is not a URL:', link, error)
     return null
   }
 }
@@ -115,7 +116,7 @@ function idOnPage(url: URL): string | null {
   try {
     return decodeURIComponent(raw)
   } catch (error) {
-    console.warn('[play-chat] a Deliverable link with a broken id:', raw, error)
+    console.warn('[chat] a Deliverable link with a broken id:', raw, error)
     return null
   }
 }
