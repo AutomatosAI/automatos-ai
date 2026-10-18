@@ -28,10 +28,12 @@ The rules, from the issue:
   boot, goes on without spans.
 * **Private by default.** Spans carry IDs and HTTP metadata, never a request or
   response body, and never a query-string value (:func:`_scrub_url_attributes`):
-  an OAuth ``code`` or a ``token`` in a URL must not reach the collector.
+  an OAuth ``code`` or a ``token`` in a URL must not reach the collector. An error
+  leaves as its type only, never its message or stack trace (:func:`error_type_only`).
 """
 from __future__ import annotations
 
+import functools
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
@@ -56,6 +58,9 @@ URL_ATTRIBUTES = ("http.url", "http.target", "url.full", "url.query")
 REDACTED = "REDACTED"
 # When OTEL_TRACES_SAMPLER_RATIO is not a number: keep every trace, and say so.
 DEFAULT_SAMPLER_RATIO = 1.0
+# All an exception event keeps on a span (#1107): its type, never its text, nor any
+# attribute a caller passed to record_exception.
+EXCEPTION_KEPT = ("exception.type", "exception.escaped")
 
 
 class _State:
@@ -225,14 +230,111 @@ def resource() -> Any:
     })
 
 
+def _failed_type(events: Any, attributes: Any, description: str) -> str:
+    """What an ERROR status may say: the recorded exception's type, or the description
+    when it is the span's own ``error.type`` (as our GenAI spans set "agent_error");
+    else nothing. A word that merely looks like a type ("report_q3.xlsx") is not one."""
+    for event in events:
+        if event.name == "exception" and (event.attributes or {}).get("exception.type"):
+            return str(event.attributes["exception.type"])
+    error_type = (attributes or {}).get("error.type")
+    return description if error_type and description == str(error_type) else ""
+
+
+@functools.cache
+def _rewritten_span_type() -> Any:
+    """A ``ReadableSpan`` that still reports what the SDK dropped from the original (its
+    span limits): a span built from plain values would claim nothing was dropped."""
+    from opentelemetry.sdk.trace import ReadableSpan
+
+    class RewrittenSpan(ReadableSpan):
+        def __init__(self, original: Any, **fields: Any) -> None:
+            super().__init__(**fields)
+            self._original = original
+
+        @property
+        def dropped_attributes(self) -> int:
+            return self._original.dropped_attributes
+
+        @property
+        def dropped_events(self) -> int:
+            return self._original.dropped_events
+
+        @property
+        def dropped_links(self) -> int:
+            return self._original.dropped_links
+
+    return RewrittenSpan
+
+
+def _type_only_event(event: Any) -> Any:
+    """An ``exception`` event with only its type (``EXCEPTION_KEPT``); any other event as is."""
+    from opentelemetry.sdk.trace import Event
+
+    if event.name != "exception":
+        return event
+    kept = {key: value for key, value in (event.attributes or {}).items() if key in EXCEPTION_KEPT}
+    return Event(event.name, kept, event.timestamp)
+
+
+def error_type_only(span: Any) -> Any:
+    """``span`` as exported: an error keeps its type, never its text (#1107).
+
+    The FastAPI and httpx instrumentations record an unhandled exception's message and
+    stack trace on the span and put the message in its status; SQLAlchemy puts the
+    driver's error in the status (Postgres's ``DETAIL`` carries row values), botocore
+    the AWS error (bucket and key names). Any of that can be a URL with a token, a
+    customer's data or a file name, so no span carries it (Principle 5): exception
+    events keep ``exception.type``, and an ERROR status names only the type. The whole
+    exception is in the logs, which carry the same ``trace_id`` (O5)."""
+    from opentelemetry.trace import Status
+
+    events = tuple(_type_only_event(event) for event in span.events)
+    status = span.status
+    if status.description:
+        status = Status(status.status_code, _failed_type(events, span.attributes, status.description) or None)
+    return _rewritten_span_type()(span, name=span.name, context=span.context, parent=span.parent, resource=span.resource,
+                                  attributes=span.attributes, events=events, links=span.links, kind=span.kind,
+                                  status=status, start_time=span.start_time, end_time=span.end_time,
+                                  instrumentation_scope=span.instrumentation_scope)
+
+
+def type_only_exporter(exporter: Any) -> Any:
+    """``exporter`` behind :func:`error_type_only`. A span it can't rewrite is dropped,
+    never sent as it was: this fails closed."""
+    from opentelemetry.sdk.trace.export import SpanExporter
+
+    def rewritten(spans: Any) -> list:
+        kept = []
+        for span in spans:
+            try:
+                kept.append(error_type_only(span))
+            except Exception:  # noqa: BLE001 — logged; the span is dropped, never exported unredacted
+                logger.warning("[otel] a span could not be rewritten and was dropped", exc_info=True)
+        return kept
+
+    class TypeOnly(SpanExporter):
+        def export(self, spans: Any) -> Any:
+            return exporter.export(rewritten(spans))
+
+        def shutdown(self) -> None:
+            exporter.shutdown()
+
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return exporter.force_flush(timeout_millis)
+
+    return TypeOnly()
+
+
 def build_provider(exporter: Any, ratio: float) -> Any:
     """A tracer provider: this service's resource, the request-rooted ratio sampler,
-    and batched export through ``exporter``. Nothing global is touched."""
+    and batched export through ``exporter``, which never sees an error's text
+    (:func:`type_only_exporter`). Nothing global is touched."""
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     provider = TracerProvider(resource=resource(), sampler=request_rooted_sampler(ratio))
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+    provider.add_span_processor(BatchSpanProcessor(type_only_exporter(exporter)))
     return provider
 
 
@@ -330,8 +432,9 @@ def annotate_request(request_id: str, workspace_id: str = "") -> None:
 
 __all__ = [
     "ATTR_REQUEST_ID", "ATTR_WORKSPACE_ID", "EXCLUDED_URLS", "REDACTED", "annotate_request", "build_provider",
-    "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query",
-    "request_rooted_sampler", "sampler_ratio", "start_tracing", "tracing_enabled", "with_tracing",
+    "error_type_only", "flush_tracing", "instrument_app", "instrument_libraries", "otlp_headers", "redact_query",
+    "request_rooted_sampler", "sampler_ratio", "start_tracing", "tracing_enabled", "type_only_exporter",
+    "with_tracing",
 ]
 
 

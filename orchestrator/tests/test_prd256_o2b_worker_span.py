@@ -163,6 +163,35 @@ def test_a_handler_error_is_recorded_on_the_span_and_still_answered(traced_worke
     assert [(s.name, s.attributes.get("http.status_code")) for s in spans] == [("GET unmatched", 404)]
 
 
+def test_a_handler_failure_leaves_its_type_not_its_message(traced_worker):
+    """#1107: an exception's message and stack trace can name a workspace file, so the
+    span carries only its type; a 404 is the caller's mistake, not a server error."""
+    from aiohttp.test_utils import TestClient, TestServer
+    from opentelemetry.trace import StatusCode
+
+    worker_http, exporter = traced_worker
+    secret = "SECRET-VALUE-7"
+    app = worker_http.build_app(_worker())
+
+    async def explode(request):
+        raise OSError(f"/workspaces/{WS}/{secret}.txt: permission denied")
+
+    app.router.add_get("/explode", explode)
+
+    async def run():
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.get("/explode")).status == 500
+            assert (await client.get("/no/such/route")).status == 404
+
+    asyncio.run(run())
+    failed, missing = _server_spans(exporter)
+    assert failed.status.status_code == StatusCode.ERROR and failed.status.description == "OSError"
+    assert failed.attributes["error.type"] == "OSError" and failed.events == ()
+    assert missing.status.status_code == StatusCode.UNSET and missing.events == ()
+    texts = [str(v) for s in (failed, missing) for v in (s.status.description, *s.attributes.values())]
+    assert not [t for t in texts if secret in t]
+
+
 def test_the_sampler_ratio_never_raises(traced_worker):
     import worker_otel
 
