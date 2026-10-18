@@ -56,6 +56,21 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "uv/file_updater/compile_file_updater.rb, read 18 Oct 2026). How this lock "
         "is kept current is open for Gerard and Dave (PRD-262 US-012)."
     ),
+    # PRD-262 US-044. A pip entry for the directory would read requirements.in and
+    # requirements-browser.in only, and bump a pin there while leaving the lock
+    # behind (test_prd262_worker_locks.py then fails the lock against its input).
+    "services/workspace-worker/requirements.lock": (
+        "Dependabot's pip and uv updaters read only *.txt and *.in files "
+        "(dependabot-core python/shared_file_fetcher.rb, read 18 Oct 2026), so they "
+        "cannot regenerate a requirements.lock. How this lock is kept current is open "
+        "for Gerard and Dave (PRD-262 US-012, US-044)."
+    ),
+    "services/workspace-worker/requirements-browser.lock": (
+        "Dependabot's pip and uv updaters read only *.txt and *.in files "
+        "(dependabot-core python/shared_file_fetcher.rb, read 18 Oct 2026), and this "
+        "lock is compiled with -c requirements.lock, which neither updater passes. "
+        "How it is kept current is open for Gerard and Dave (PRD-262 US-012, US-044)."
+    ),
 }
 
 _CONTINUATION = re.compile(r"\\[ \t]*\n")

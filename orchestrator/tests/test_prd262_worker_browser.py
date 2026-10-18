@@ -1,9 +1,9 @@
 """PRD-262 US-043: a browser only where one runs.
 
 The workspace worker's Dockerfile installs Playwright and Chromium only when
-INSTALL_BROWSER=true, the default Railway builds. The local edition and the GHCR
-image pass false and carry neither. Where the browser is installed it is the
-headless shell alone (html_to_png launches headless with no channel), driven by the
+INSTALL_BROWSER=true, the default Railway builds, from requirements-browser.lock
+(US-044). The local edition and the GHCR image pass false and carry neither.
+Where the browser is installed it is the headless shell alone (html_to_png launches headless with no channel), driven by the
 image's own Node, with only the libraries the shell links and without Mesa's GPU
 drivers. The step sits above the code, after the worker user exists, and the code
 goes in last, worker-owned.
@@ -59,12 +59,16 @@ def _words_after(command: str, text: str) -> list[str]:
 
 
 def test_playwright_is_installed_only_by_the_browser_step_at_a_current_release():
-    requirements = (WORKER / "requirements.txt").read_text()
-    assert not re.search(r"^\s*playwright\b", requirements, re.M | re.I), "playwright is back in requirements.txt"
+    # US-044: requirements.txt became requirements.in, locked to requirements.lock.
+    for name in ("requirements.in", "requirements.lock"):
+        requirements = (WORKER / name).read_text()
+        assert not re.search(r"^\s*playwright\b", requirements, re.M | re.I), f"playwright is back in {name}"
     browser_in = (WORKER / "requirements-browser.in").read_text()
     pins = re.findall(r"^playwright==(\d+)\.(\d+)\.(\d+)\s*$", browser_in, re.M)
     assert len(pins) == 1, "requirements-browser.in pins playwright exactly, once"
     assert tuple(map(int, pins[0][:2])) >= OLD_CAP, pins[0]
+    locked = re.findall(r"^playwright==(\S+) \\$", (WORKER / "requirements-browser.lock").read_text(), re.M)
+    assert locked == [".".join(pins[0])], "requirements-browser.lock pins the release requirements-browser.in names"
     installs = [line for line in INSTRUCTIONS if "requirements-browser" in line and "install" in line]
     assert installs == [BROWSER_RUN]
     gate = BROWSER_RUN.index('if [ "$INSTALL_BROWSER" != "true" ]; then')
@@ -77,7 +81,7 @@ def test_the_headless_shell_runs_on_the_image_node():
         "playwright install --only-shell chromium"
     ]
     # Playwright's bundled Node goes in the RUN that installed it, or the layer keeps it.
-    pip = BROWSER_RUN.index("pip install --no-cache-dir -r requirements-browser.in")
+    pip = BROWSER_RUN.index("--require-hashes --no-deps -r requirements-browser.lock")
     assert pip < BROWSER_RUN.index("/driver/node") < BROWSER_RUN.index("playwright install")
     env = re.search(r"\bPLAYWRIGHT_NODEJS_PATH=(\S+)", DOCKERFILE)
     assert env and env.group(1) == "/usr/local/bin/node"
