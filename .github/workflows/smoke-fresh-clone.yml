@@ -10,6 +10,10 @@ name: smoke-fresh-clone
 # allowed-to-fail mask is removed. Still NON-REQUIRED in branch protection;
 # flipping it to required is the owner's Q2 action.
 #
+# PRD-262 US-017 — before the build, dummy uploads and caches go where a
+# self-hoster's checkout collects them (scripts/ci/build_context.py seed), and the
+# smoke fails if the backend's build sent more than the context budget.
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -21,9 +25,9 @@ name: smoke-fresh-clone
 # Runs on manual dispatch, every night (most main pushes skip the path filter,
 # and US-004 needs five runs), and on pushes and pull requests that touch what the
 # stack builds or boots from: compose, the Makefile, the env defaults, the
-# backend's image, entrypoint, requirements, boot module, seeds and migrations, the
-# worker, the frontend's image and lock file, the script and this workflow. Not on
-# every push, since it builds and boots the full stack.
+# backend's image, .dockerignore, entrypoint, requirements, boot module, seeds and
+# migrations, the worker, the frontend's image and lock file, the scripts and this
+# workflow. Not on every push, since it builds and boots the full stack.
 
 on:
   workflow_dispatch:
@@ -38,6 +42,7 @@ on:
       - "Makefile"
       - "envs/*.defaults"
       - "orchestrator/Dockerfile"
+      - "orchestrator/.dockerignore"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
       - "orchestrator/requirements*.txt"
@@ -57,6 +62,7 @@ on:
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
+      - "scripts/ci/build_context.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -67,6 +73,7 @@ on:
       - "Makefile"
       - "envs/*.defaults"
       - "orchestrator/Dockerfile"
+      - "orchestrator/.dockerignore"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
       - "orchestrator/requirements*.txt"
@@ -86,6 +93,7 @@ on:
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
+      - "scripts/ci/build_context.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual
@@ -110,6 +118,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # PRD-262 US-017: generated documents under orchestrator/documents, nested
+      # __pycache__ and the eval and import-linter caches, each a file of random bytes
+      # as large as the context budget. The smoke reads what the backend's build sent.
+      - name: Seed dummy uploads and caches in the backend's build context
+        run: python3 scripts/ci/build_context.py seed orchestrator
 
       # Local-only secrets — throwaway values for an ephemeral stack. No external
       # SaaS credential (Clerk / AWS / LLM) is provided, on purpose: that is the

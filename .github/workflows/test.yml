@@ -85,10 +85,11 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BACKEND_SHARDS: 4
           # What the three default-args builds bake: Dockerfiles, dependency
-          # manifests, the frontend edition literal, the worker image; and the
-          # script that looks for packages inside them.
+          # manifests, the frontend edition literal, the worker image; the script
+          # that looks for packages inside them, and the one that reads the API's
+          # build context off its log.
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/image_dists_absent\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context)\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -974,10 +975,20 @@ jobs:
             esac
           done
           exit "$bad"
+      # PRD-262 US-017: generated documents under orchestrator/documents, nested
+      # __pycache__ and the eval and import-linter caches, each a file of random bytes
+      # as large as the context budget, before the backend build below.
+      - name: Backend — seed dummy uploads and caches in the build context
+        run: python3 scripts/ci/build_context.py seed orchestrator
       - name: Backend — graph extras present with no args
         run: |
-          docker build --target production -t parity-be orchestrator/
+          set -o pipefail
+          docker build --target production -t parity-be orchestrator/ 2>&1 | tee "$RUNNER_TEMP/parity-be-build.log"
           docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
+      # The production stage copies the whole context, so what the build sent is what
+      # orchestrator/.dockerignore let in (scripts/ci/build_context.py reads it off the log).
+      - name: Backend — the build context left the uploads and caches out
+        run: python3 scripts/ci/build_context.py check "$RUNNER_TEMP/parity-be-build.log"
       # PRD-262 US-014: the test tools are in requirements-dev.txt, which only CI
       # installs, so `import pytest` fails in the image and no distribution that
       # file names is installed there (scripts/ci/image_dists_absent.py reads the

@@ -69,8 +69,14 @@
 # production-stage backend and needs uvicorn to start a replacement within 30 s, with
 # /health 200 and no container restart. uvicorn 0.24 never replaced a dead worker.
 #
+# PRD-262 US-017, when it builds from this checkout: the build log is kept, and
+# scripts/ci/build_context.py reads what the backend's build sent as its context off it.
+# The workflow first seeds dummy uploads and caches where a self-hoster's checkout
+# collects them, each as large as the budget, so one that reaches the context fails it.
+#
 # Exit 0 = every boot answered 200 with no external creds and every published port is
-# on loopback. Exit 1 = a boot failed, or a port listens beyond this machine.
+# on loopback. Exit 1 = a boot failed, a port listens beyond this machine, or the
+# backend's build context is over its budget.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -105,6 +111,7 @@ BOOT_TOOL="scripts/ci/smoke_boot.py"
 REPORT_TOOL="scripts/ci/smoke_report.py"
 IMAGES_TOOL="scripts/ci/smoke_images.py"
 RESTART_TOOL="scripts/ci/smoke_worker_restart.py"
+CONTEXT_TOOL="scripts/ci/build_context.py"
 BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
 # smoke_images.py's records (it reads them back from OUT_DIR for the report).
@@ -113,6 +120,8 @@ PROCESSES_FILE="${OUT_DIR}/processes.json"
 IMAGES_FILE="${OUT_DIR}/images.json"
 # smoke_worker_restart.py's record (PRD-262 US-008).
 WORKER_RESTART_FILE="${OUT_DIR}/worker-restart.json"
+# The source build's log (PRD-262 US-017: build_context.py reads the context transfer off it).
+BUILD_LOG="${OUT_DIR}/build.log"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
 # The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
@@ -214,12 +223,21 @@ stop_event_log() {
 }
 
 # The build is timed for the record only: CI build time has no bar (PRD-262 §7).
+# Piped, so BuildKit prints its plain progress, `transferring context` lines included.
 build_images() {
   echo "Building the backend (development stage), workspace-worker and frontend images..."
   local started=$SECONDS
-  compose build backend workspace-worker frontend || fail "docker compose build failed"
+  compose build backend workspace-worker frontend 2>&1 | tee "$BUILD_LOG" || fail "docker compose build failed"
   build_seconds=$((SECONDS - started))
   echo "Images built in ${build_seconds}s"
+  check_build_context
+}
+
+# PRD-262 US-017: the backend's build sent only code. The development stage copies none
+# (compose mounts the source), and orchestrator/.dockerignore keeps the rest out.
+check_build_context() {
+  python3 "$CONTEXT_TOOL" check --service backend "$BUILD_LOG" \
+    || fail "the backend's build context is over its budget, or the build log does not show it"
 }
 
 # The published path starts from an empty Docker cache, as a new self-hoster's does.
