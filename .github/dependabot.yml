@@ -41,11 +41,9 @@ updates:
         patterns: ["*"]
         update-types: [major]
 
-  # Every directory that holds a tracked Dockerfile. `/` is Dockerfile.backend
-  # until US-018 deletes it (then `/` leaves this list).
+  # Every directory that holds a tracked Dockerfile.
   - package-ecosystem: docker
     directories:
-      - /
       - /.oss-scanner
       - /frontend
       - /orchestrator
