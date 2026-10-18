@@ -950,6 +950,11 @@ class Config:
     # Escalation threshold: prescriptions at or above this risk are flagged high
     # priority and escalated for human approval (when self-management is on).
     HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
+    # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
+    # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
+    # where F408, F409 and F416 happened. It becomes a trigger only through
+    # services.schedule_util.scheduler_cron_trigger (F240: weekday as day names).
+    HARNESS_SWEEP_CRON: str = os.getenv("HARNESS_SWEEP_CRON", "0 10 * * 1")
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
