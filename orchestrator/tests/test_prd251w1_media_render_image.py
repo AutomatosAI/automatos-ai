@@ -10,7 +10,7 @@ could quietly lose:
   stage's lock (US-053), with telemetry, global skill installs and update checks
   switched off before npm ci and in the runtime;
 - the Kokoro files hash-checked at build in the kokoro stage, and the espeak data
-  copied to a short real path (espeak-ng truncates its data path at about 160
+  moved to a short real path (espeak-ng truncates its data path at about 160
   characters);
 - the CI job itself: a top-level sibling job, with no `needs:`.
 
@@ -132,9 +132,15 @@ def test_the_kokoro_files_are_hash_checked_at_build():
     assert "COPY --link --from=kokoro /opt/kokoro /opt/kokoro" in _stage("runtime")
 
 
-def test_the_espeak_data_is_copied_to_a_short_real_path():
+def test_the_espeak_data_is_moved_to_a_short_real_path():
     py = _stage("py")
-    assert re.search(r"cp -r .*espeakng_loader.* /opt/espeak;", py)
+    # PRD-262 US-051: moved, not copied (the copy stored it twice), in the RUN that
+    # installs the lock (every line from the install to the mv is continued), so the
+    # package's own copy never reaches a layer.
+    assert re.search(
+        r"uv pip install[^\n]*\\\n(?:[^\n]*\\\n)*?[ \t]*mv [^\n]*espeakng_loader[^\n]* /opt/espeak; \\\n", py
+    )
+    assert "cp -r" not in py
     assert "test ! -L /opt/espeak" in py
     # phonemizer resolves symlinks, so a link to the long site-packages path fails.
     assert not re.search(r"ln -s[^\n]*/opt/espeak", DOCKERFILE)

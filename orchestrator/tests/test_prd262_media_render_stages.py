@@ -104,9 +104,9 @@ def test_the_runtime_copy_links_each_stage():
     runtime = _stage("runtime")
     for stage, path in COPIED_IN.items():
         assert re.search(rf"^COPY --link --from={stage} {re.escape(path)} {re.escape(path)}$", runtime, re.M), stage
-    # Each part is built once, in its stage: no install or download in the runtime
-    # (curl stays only for the HEALTHCHECK, until PRD-262 US-051).
-    for absent in ("npm ", "pip install", "uv pip", "curl -fsSL", "hyperframes browser", "music_build.py"):
+    # Each part is built once, in its stage: no install or download in the runtime,
+    # which carries no curl or unzip at all (PRD-262 US-051).
+    for absent in ("npm ", "pip install", "uv pip", "curl", "unzip", "hyperframes browser", "music_build.py"):
         assert absent not in runtime, absent
 
 

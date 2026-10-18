@@ -505,7 +505,8 @@ services:
           cpus: '4.0'
           memory: 8G
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/health"]
+      # Python's urllib: the image carries no curl (PRD-262 US-051).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3

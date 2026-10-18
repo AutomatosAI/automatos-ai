@@ -4,11 +4,15 @@ job runs this suite inside the media-render image, never on a bare runner.
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from media_render import boot
 from media_render.config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, load_settings
@@ -18,6 +22,11 @@ HYPERFRAMES_PIN = "0.8.62"
 # PRD-262 US-053: the js stage's locked tree, and the py stage's venv.
 JS_TREE = Path("/opt/media-render/js/node_modules")
 VENV = "/opt/venv"
+# PRD-262 US-051: what renders never load. One package per check: dpkg -s fails on
+# the first package it does not know, so a pair would hide the second.
+MESA_ONLY = ("mesa-libgallium", "libllvm19")
+LINKED = ("/usr/bin/ffmpeg", "/usr/bin/ffprobe", "/opt/chrome/chrome-headless-shell")
+CHROME_LOCALES = Path("/opt/chrome/locales")
 
 
 def test_the_hyperframes_switches_are_set_in_the_image():
@@ -37,6 +46,12 @@ def test_the_espeak_data_sits_at_a_short_real_path():
     assert os.path.realpath(path) == path
     assert len(path) < ESPEAK_DATA_PATH_LIMIT
     assert Path(path, "phontab").is_file()
+
+
+def test_the_espeak_data_was_moved_not_copied():
+    # PRD-262 US-051: one copy, at the short path; none left in the package.
+    package = Path(importlib.util.find_spec("espeakng_loader").origin).parent
+    assert not (package / "espeak-ng-data").exists()
 
 
 def test_hyperframes_is_pinned_exactly_and_runs_on_node_24():
@@ -91,3 +106,54 @@ def test_gsap_and_the_kokoro_files_are_in_the_image():
 
 def test_the_service_runs_as_an_unprivileged_user():
     assert os.getuid() != 0
+
+
+# ── PRD-262 US-051: what renders never load ─────────────────────────────────
+
+
+@pytest.mark.parametrize("binary", LINKED)
+def test_ffmpeg_ffprobe_and_the_headless_shell_find_every_library(binary):
+    ldd = subprocess.run(["ldd", binary], capture_output=True, text=True, timeout=60)
+    assert ldd.returncode == 0, ldd.stderr
+    assert "not found" not in ldd.stdout, ldd.stdout
+
+
+@pytest.mark.parametrize("package", MESA_ONLY)
+def test_mesa_and_llvm_are_purged(package):
+    status = subprocess.run(["dpkg", "-s", package], capture_output=True, text=True, timeout=60)
+    assert status.returncode != 0, f"{package} is installed:\n{status.stdout}"
+
+
+def test_libgbm_stays_and_no_llvm_library_is_left():
+    # Chrome links libgbm.so.1, which needs only libdrm, libexpat, libm and libc.
+    assert list(Path("/usr/lib").glob("*/libgbm.so.1"))
+    assert not list(Path("/usr/lib").glob("*/libLLVM*"))
+
+
+def test_chrome_keeps_only_the_en_us_locale():
+    kept = sorted(os.listdir(CHROME_LOCALES)) if CHROME_LOCALES.is_dir() else []
+    if platform.machine() == "x86_64":
+        assert kept == ["en-US.pak"]
+    # The arm64 headless shell (Playwright's) ships none; whatever it ships is trimmed.
+    assert kept in ([], ["en-US.pak"]), kept
+
+
+def test_onnxruntime_loads_without_its_unlinked_library():
+    probe = "import onnxruntime as o; print(o.get_available_providers())"
+    run = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120)
+    assert run.returncode == 0, run.stderr
+    assert "CPUExecutionProvider" in run.stdout
+    capi = Path(importlib.util.find_spec("onnxruntime").origin).parent / "capi"
+    assert not list(capi.glob("libonnxruntime.so.*"))
+    assert list(capi.glob("onnxruntime_pybind11_state*.so"))
+
+
+def test_numpy_ships_no_tests():
+    numpy = Path(importlib.util.find_spec("numpy").origin).parent
+    assert [str(path) for path in numpy.rglob("tests") if path.is_dir()] == []
+
+
+def test_the_runtime_has_no_curl_or_unzip():
+    # Downloads happen in the builder stages; the HEALTHCHECK is Python's urllib.
+    for tool in ("curl", "unzip"):
+        assert shutil.which(tool) is None, tool

@@ -2,7 +2,7 @@
 with the voiced segments on-screen text lands on (US-102).
 
 This loads the real 310 MB model through the image's espeak-ng data, so it
-also proves the short-path copy works end to end.
+also proves the data moved to the short path works end to end.
 """
 
 from __future__ import annotations

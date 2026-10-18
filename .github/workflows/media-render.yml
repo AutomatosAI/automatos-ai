@@ -157,17 +157,33 @@ jobs:
           fi
           grep -q 'espeak-ng data path is 165 characters' boot.log
           echo "the default command refused to boot with a ${#long}-character path (exit $code): PASS"
-      - name: The container boots and /health answers without a token
+      # PRD-262 US-051: the image's HEALTHCHECK is Python's urllib (the image has no
+      # curl) and probes every 2 s while the container starts, so Docker reports it
+      # healthy within seconds of /health answering, not at the first 30 s interval.
+      - name: The container boots, /health answers without a token, and Docker reports it healthy
         run: |
+          started=$(date +%s)
           docker run -d --name media-render-health -e LOG_RELAY_ENABLED=false -p 127.0.0.1:8090:8090 "$IMAGE"
           ok=""
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8090/health; then ok=1; echo; break; fi
             sleep 2
           done
+          health=""
+          for i in $(seq 1 20); do
+            health=$(docker inspect -f '{{.State.Health.Status}}' media-render-health)
+            if [ "$health" = healthy ]; then break; fi
+            sleep 1
+          done
+          echo "Docker's health status: $health, $(( $(date +%s) - started )) s after docker run"
+          docker inspect -f '{{json .State.Health.Log}}' media-render-health
           docker logs media-render-health
           docker rm -f media-render-health > /dev/null
           if [ -z "$ok" ]; then echo "::error::/health never answered"; exit 1; fi
+          if [ "$health" != healthy ]; then
+            echo "::error::the image's HEALTHCHECK did not report healthy within 20 s of /health answering (status: $health)"
+            exit 1
+          fi
       - name: The API renders the fixture bundle (POST /render, poll, fetch the MP4), timed
         env:
           TOKEN: ci-render-token
@@ -345,6 +361,25 @@ jobs:
           path: ${{ runner.temp }}/music-render
           if-no-files-found: ignore
           retention-days: 7
+      # PRD-262 US-051 (§8's media-render row): the amd64 image is at most 1.30 GB on
+      # disk; it was 1.81 GB in run 37612086159. `docker image ls` prints the image's
+      # Size rounded, so the bar reads the same Size in bytes. It runs last and always,
+      # so an image over the bar still gets every render above proved, and a failed
+      # render still gets its size reported. US-054 checks the same bar in images.yml.
+      - name: The image is at most 1.30 GB on disk (amd64)
+        if: always()
+        run: |
+          docker image ls "$IMAGE"
+          arch=$(docker image inspect -f '{{.Architecture}}' "$IMAGE")
+          size=$(docker image inspect -f '{{.Size}}' "$IMAGE")
+          budget=1300000000
+          echo "media-render ($arch) on disk: $(( size / 1000000 )) MB ($size bytes); the bar is $(( budget / 1000000 )) MB, 1810 MB in run 37612086159"
+          if [ "$arch" != amd64 ]; then echo "::error::the 1.30 GB bar is amd64's; this image is $arch"; exit 1; fi
+          if [ "$size" -gt "$budget" ]; then
+            echo "::error::media-render is $(( size / 1000000 )) MB on disk, over its 1.30 GB bar (PRD-262 §8)"
+            exit 1
+          fi
+          echo "media-render is within its 1.30 GB bar: PASS"
 
   # Gerard, 6 Oct ("why is CI taking 45 mins"): the seeded templates' renders were
   # one step of the job above, about 180 renders in series against one container

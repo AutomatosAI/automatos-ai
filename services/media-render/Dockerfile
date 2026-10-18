@@ -104,22 +104,39 @@ ENV PATH=/opt/media-render/js/node_modules/.bin:$PATH
 #   as Hyperframes' own Dockerfile.render does.
 # Either way it lands at /opt/chrome. Its shared libraries are the runtime's, so
 # the runtime stage checks them.
+#
+# PRD-262 US-051: what a render never loads stays here.
+# - The arm64 headless shell ships its symbol tables (about 130 MB of .symtab and
+#   .strtab), so it is stripped (the amd64 build ships stripped). Neither the
+#   runtime nor python:3.12-slim has strip, so binutils comes first, in this stage
+#   alone, and the build fails if readelf still lists a .symtab on either arch.
+# - Of the locales, Chrome's UI strings, only en-US.pak is kept (amd64; about 51 MB
+#   in 220 files). Chrome falls back to it. The arm64 build has no locales.
 FROM js AS chrome
 ARG TARGETARCH
 RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends binutils; \
     if [ "${TARGETARCH:-amd64}" = "arm64" ]; then \
         npm ci --no-fund --no-audit; \
         PLAYWRIGHT_BROWSERS_PATH=/tmp/pw playwright-core install chromium-headless-shell; \
         BIN="$(find /tmp/pw \( -name chrome-headless-shell -o -name headless_shell \) -type f | head -n1)"; \
+        strip --strip-unneeded "$BIN"; \
     else \
-        apt-get update; \
         apt-get install -y --no-install-recommends unzip; \
         HOME=/tmp/hf hyperframes browser ensure; \
         BIN="$(HOME=/tmp/hf hyperframes browser path | tail -n1)"; \
     fi; \
     test -x "$BIN"; \
+    if readelf -SW "$BIN" | grep -F .symtab; then \
+        echo "$BIN still carries its symbol table (.symtab)" >&2; exit 1; \
+    fi; \
     mv "$(dirname "$BIN")" /opt/chrome; \
     if [ ! -e /opt/chrome/chrome-headless-shell ]; then ln -s "$(basename "$BIN")" /opt/chrome/chrome-headless-shell; fi; \
+    if [ -d /opt/chrome/locales ]; then \
+        find /opt/chrome/locales -mindepth 1 ! -name en-US.pak -delete; \
+        test "$(ls /opt/chrome/locales)" = en-US.pak; \
+    fi; \
     chmod -R a+rX /opt/chrome
 
 # The Python packages, from requirements.lock (requirements.in says how to
@@ -128,22 +145,33 @@ RUN set -eux; \
 # the runtime puts first on PATH. --compile-bytecode writes the .pyc now: the
 # service runs as uid 1000 and cannot write them into the venv. --no-cache keeps
 # uv's download cache out of the layer.
+#
+# The same RUN trims the venv (PRD-262 US-051): a file deleted in a later layer
+# would still be in this one.
+# - espeak-ng truncates its data path at about 160 characters, and phonemizer
+#   resolves symlinks, so the data is MOVED (not copied, which stored it twice) to
+#   a short real path (PRD-251 Traps). Kokoro gets the path from config
+#   (MEDIA_RENDER_ESPEAK_DATA_PATH), never from espeakng_loader. Boot refuses a
+#   path of 160 characters or more (media_render/boot.py).
+# - onnxruntime's libonnxruntime.so.* (29 MB) is a library its Python module
+#   does not link; onnxruntime is imported before the layer is kept, so a release
+#   that starts linking it fails the build here. numpy's tests go too.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS py
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements.lock /opt/media-render/requirements.lock
-RUN uv venv --python /usr/local/bin/python3.12 /opt/venv \
-    && uv pip install --python /opt/venv/bin/python --no-cache --compile-bytecode --require-hashes --no-deps \
-        -r /opt/media-render/requirements.lock
-ENV PATH=/opt/venv/bin:$PATH
-
-# espeak-ng truncates its data path at about 160 characters, and phonemizer
-# resolves symlinks, so the data is COPIED to a short real path (PRD-251 Traps).
-# Boot refuses a path of 160 characters or more (media_render/boot.py).
 RUN set -eux; \
-    cp -r "$(python -c 'import espeakng_loader; print(espeakng_loader.get_data_path())')" /opt/espeak; \
+    uv venv --python /usr/local/bin/python3.12 /opt/venv; \
+    uv pip install --python /opt/venv/bin/python --no-cache --compile-bytecode --require-hashes --no-deps \
+        -r /opt/media-render/requirements.lock; \
+    site=/opt/venv/lib/python3.12/site-packages; \
+    mv "$(/opt/venv/bin/python -c 'import espeakng_loader; print(espeakng_loader.get_data_path())')" /opt/espeak; \
     test -f /opt/espeak/phontab; \
     test ! -L /opt/espeak; \
-    chmod -R a+rX /opt/espeak
+    chmod -R a+rX /opt/espeak; \
+    rm "$site"/onnxruntime/capi/libonnxruntime.so.*; \
+    find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +; \
+    /opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'
+ENV PATH=/opt/venv/bin:$PATH
 
 # The music library (PRD-251 S1.6), on py (numpy) plus ffmpeg (to decode). Every
 # track in music/manifest.json is taken from the assets and checked against its
@@ -174,18 +202,38 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ffmpeg (encode, mix, ffprobe), curl (the HEALTHCHECK), tini (PID 1 reaps
-# Chrome's orphans), fonts, libstdc++6 (the node binary's one library beyond glibc
-# and libgcc-s1), and the libraries chrome-headless-shell needs on Debian trixie:
-# the worker's list (services/workspace-worker/Dockerfile, INSTALL_BROWSER).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl ffmpeg tini fontconfig libstdc++6 \
+# ffmpeg (encode, mix, ffprobe), tini (PID 1 reaps Chrome's orphans), fonts,
+# libstdc++6 (the node binary's one library beyond glibc and libgcc-s1), and the
+# libraries chrome-headless-shell needs on Debian trixie: the worker's list
+# (services/workspace-worker/Dockerfile, INSTALL_BROWSER). No curl or unzip: the
+# downloads happen in the builder stages, and the HEALTHCHECK is Python's urllib.
+#
+# PRD-262 US-051: the RUN ends by purging the packages that only mesa-libgallium
+# needs, about 200 MB, most of it LLVM. Chrome's libgbm1 and ffmpeg's libsdl2 pull
+# Mesa in, but libgbm.so.1 itself needs only libdrm, libexpat, libm and libc, and it
+# stays: Mesa's drivers load only when something opens a GPU device, renders run
+# with the GPU off (--disable-gpu, Hyperframes' --no-browser-gpu), and the headless
+# shell brings its own SwiftShader. Debian's ffmpeg stays, with its security
+# updates. The list is that closure on trixie (libdrm-intel1 and libpciaccess0 are
+# amd64's alone). dpkg then records libgbm1's and libglx-mesa0's dependency on
+# mesa-libgallium as unmet, so no later stage runs apt. ffmpeg and ffprobe must
+# still find every library they link, or the build fails here.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates ffmpeg tini fontconfig libstdc++6 \
         libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
         libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
         libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \
-        fonts-liberation fonts-dejavu-core fonts-noto-color-emoji \
-    && rm -rf /var/lib/apt/lists/* \
-    && fc-cache -f
+        fonts-liberation fonts-dejavu-core fonts-noto-color-emoji; \
+    rm -rf /var/lib/apt/lists/*; \
+    mesa_only="mesa-libgallium libllvm19 libz3-4 libelf1t64 libedit2 libdrm-amdgpu1 libsensors5 libsensors-config libxcb-randr0 libxcb-sync1"; \
+    if [ "$(dpkg --print-architecture)" = amd64 ]; then mesa_only="$mesa_only libdrm-intel1 libpciaccess0"; fi; \
+    dpkg --purge --force-depends $mesa_only; \
+    if ldd /usr/bin/ffmpeg /usr/bin/ffprobe | grep 'not found'; then \
+        echo "ffmpeg or ffprobe lost a shared library to the purge above" >&2; exit 1; \
+    fi; \
+    fc-cache -f
 
 # Each part from its stage. The node binary alone: Hyperframes is the js stage's
 # locked tree, so the runtime needs no npm.
@@ -233,8 +281,13 @@ RUN timeout 120 /opt/chrome/chrome-headless-shell --no-sandbox --no-zygote --dis
 ENV PYTHONPATH=/app \
     MEDIA_RENDER_PORT=8090
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS "http://127.0.0.1:${MEDIA_RENDER_PORT}/health" || exit 1
+# Python's urllib, so the runtime carries no curl (PRD-262 US-051): a refused
+# connection or a status other than 2xx raises, and the probe fails. While the
+# container starts, Docker probes every 2 s (--start-interval, Engine 25+; the
+# syntax line on line 1 lets older BuildKit parse it), so it reports healthy
+# within seconds of the listener, not at the first 30 s interval.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --start-interval=2s --retries=3 \
+    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ['MEDIA_RENDER_PORT'], timeout=4)"]
 
 EXPOSE 8090
 
