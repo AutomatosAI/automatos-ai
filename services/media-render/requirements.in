@@ -18,7 +18,7 @@
 # deletes those; the service loads onnxruntime.capi alone. So they stay out of the
 # lock (about 3.1 MB). Dependabot's uv updater does not pass --no-emit-package, so
 # a lock it regenerates carries them again, and
-# orchestrator/tests/test_prd262_media_render_cuts.py fails until the lock is
+# orchestrator/tests/test_prd262_media_render_venv_trim.py fails until the lock is
 # compiled again with the command above.
 
 # HTTP service (the worker's server library)
