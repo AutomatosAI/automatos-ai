@@ -112,9 +112,14 @@ def _norm_path(path: str) -> str:
 
 
 def _find_route(module, method: str, path: str) -> Tuple[Any, Any]:
-    """Locate the APIRoute for 'METHOD path' across the module's routers."""
+    """Locate the APIRoute for 'METHOD path' across the module's routers.
+
+    A router's included routers are searched too, with their full paths and
+    inherited dependencies: FastAPI 0.137+ keeps them as tree nodes in
+    ``router.routes``, which ``iter_route_contexts`` flattens (PRD-262 US-008).
+    """
     from fastapi import APIRouter
-    from fastapi.routing import APIRoute
+    from fastapi.routing import APIRoute, iter_route_contexts
 
     method = method.upper()
     want = _norm_path(path)
@@ -122,8 +127,8 @@ def _find_route(module, method: str, path: str) -> Tuple[Any, Any]:
         (obj, route)
         for obj in vars(module).values()
         if isinstance(obj, APIRouter)
-        for route in obj.routes
-        if isinstance(route, APIRoute)
+        for route in iter_route_contexts(obj.routes)
+        if isinstance(route.original_route, APIRoute)
     ]
     for router, route in candidates:
         if method in (route.methods or ()) and _norm_path(route.path) == want:

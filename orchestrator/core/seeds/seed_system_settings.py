@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.models.system_settings import SystemSetting, SettingCategory
+from core.seeds.llm_tier_route import on_the_default_route
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 # Every LLM tier exposes the same shape. We generate the per-tier setting list
 # from this template so adding a field once propagates everywhere.
 
+@on_the_default_route  # provider and model: core/llm/defaults' pair
 def _llm_tier_settings(category: str, defaults: dict) -> list[dict]:
     """Build the canonical per-tier setting blocks.
 
@@ -305,8 +307,6 @@ def seed_system_settings(db: Session):
     settings_to_create.extend(_llm_tier_settings(
         SettingCategory.ORCHESTRATOR_LLM.value,
         defaults={
-            "provider": "openrouter",
-            "model": "google/gemini-2.5-flash",  # overridden by user to gpt-5.5/opus-4.7 in production
             "temperature": "0.7",
             "max_tokens": "8000",
             "top_p": "1.0",
@@ -337,8 +337,6 @@ def seed_system_settings(db: Session):
     settings_to_create.extend(_llm_tier_settings(
         SettingCategory.SYSTEM_LLM.value,
         defaults={
-            "provider": "openrouter",
-            "model": "google/gemini-2.5-flash",
             "temperature": "0.3",  # lower than Auto — internal tasks favor consistency
             "max_tokens": "8000",
             "top_p": "1.0",

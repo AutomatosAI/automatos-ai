@@ -12,11 +12,11 @@ turn, the first system message is the system prompt and a later one is a user tu
 Converse wants turns that alternate, so consecutive turns of one role are merged.
 """
 
-import base64
-import binascii
 import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
+
+from .image_blocks import decoded_image
 
 logger = logging.getLogger(__name__)
 
@@ -25,32 +25,21 @@ _STOP_REASONS = {
     "end_turn": "stop", "stop_sequence": "stop", "tool_use": "tool_calls", "max_tokens": "length",
     "guardrail_intervened": "content_filter", "content_filtered": "content_filter",
 }
-_IMAGE_FORMATS = {"image/png": "png", "image/jpeg": "jpeg", "image/jpg": "jpeg", "image/gif": "gif", "image/webp": "webp"}
-
-
-def _image(media_type: str, data: str) -> Optional[Dict[str, Any]]:
-    """A base64 image as a Converse image block, or None for a format Converse doesn't take."""
-    image_format = _IMAGE_FORMATS.get((media_type or "").lower())
-    if not image_format:
-        logger.warning("[bedrock] an image of type %r has no Converse form; left out", media_type)
-        return None
-    try:
-        image_bytes = base64.b64decode(data, validate=True)
-    except (binascii.Error, ValueError) as error:
-        raise ValueError("An image in the conversation isn't valid base64, so Bedrock can't be sent it.") from error
-    return {"image": {"format": image_format, "source": {"bytes": image_bytes}}}
+# The media types Converse takes, as its image ``format``.
+_IMAGE_FORMATS = {"image/png": "png", "image/jpeg": "jpeg", "image/gif": "gif", "image/webp": "webp"}
 
 
 def _image_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """An Anthropic-style base64 image, or an OpenAI-style data URL, as a Converse image."""
-    source = block.get("source") or {}
-    if block.get("type") == "image" and source.get("type") == "base64":
-        return _image(source.get("media_type", ""), source.get("data", ""))
-    url = (block.get("image_url") or {}).get("url", "")
-    if block.get("type") == "image_url" and url.startswith("data:") and ";base64," in url:
-        media_type, data = url[len("data:"):].split(";base64,", 1)
-        return _image(media_type, data)
-    return None
+    """A base64 image or a data URL (``image_blocks``) as a Converse image; None, logged,
+    for a format Converse doesn't take or an image whose bytes aren't in the message."""
+    image = decoded_image(block)
+    if image is None:
+        return None
+    media_type, data = image
+    if media_type not in _IMAGE_FORMATS:
+        logger.warning("[bedrock] an image of type %r has no Converse form; left out", media_type)
+        return None
+    return {"image": {"format": _IMAGE_FORMATS[media_type], "source": {"bytes": data}}}
 
 
 def _tool_result(tool_use_id: Any, content: Any) -> Dict[str, Any]:

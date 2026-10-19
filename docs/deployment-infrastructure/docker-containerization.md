@@ -30,6 +30,8 @@ Automatos AI utilizes a distributed container architecture to isolate core platf
 
 **Key Design Principles:**
 - **Multi-stage builds** to minimize final image size by separating build tools from runtimes [orchestrator/Dockerfile:4-8]().
+- **Production is the last stage.** Railway's config has no target key, so Railway builds each Dockerfile's last stage. `orchestrator/tests/test_prd262_production_last_stage.py` fails CI when a stage follows `production` in any Dockerfile Railway builds.
+- **Pinned, and kept current.** Every `FROM` image and every third-party compose image is pinned as `name:tag@sha256:<digest>`, and every workflow `uses:` as a 40-hex commit. Node reaches an image through a named `FROM … AS node` stage, never a bare `COPY --from=<image>`. Dependabot (`.github/dependabot.yml`) opens one grouped pull request a week per ecosystem. It moves image digests along their tag, so a tag move such as Python 3.12 or Postgres 17 is made by hand. `orchestrator/tests/test_prd262_dependabot.py` and the `action-pins` workflow enforce both.
 - **Service Isolation**: Distinct containers for the Next.js frontend, FastAPI orchestrator, and specialized workers [docker-compose.yml:18-200]().
 - **Non-root execution**: All production images switch to low-privilege users (`automatos` or `nextjs`) [orchestrator/Dockerfile:103-109](), [frontend/Dockerfile:110-112]().
 - **Health Monitoring**: Integrated Docker health checks for automated service recovery [orchestrator/Dockerfile:115-117](), [frontend/Dockerfile:43-45]().
@@ -98,18 +100,18 @@ The frontend utilizes a 4-stage build process to handle Next.js static generatio
 
 | Stage | Description | Key Files / Commands |
 | :--- | :--- | :--- |
-| **base** | Node 20-alpine foundation, installs build tools like `python3`, `make`, `g++` | `package.json` [frontend/Dockerfile:14-26]() |
-| **development** | Hot-reload dev server, installs all dependencies including devDependencies | `npm install --legacy-peer-deps`, `npm run dev` [frontend/Dockerfile:31-48]() |
-| **builder** | Production build stage, installs all dependencies, copies source, runs `npm run build` | `npm install --legacy-peer-deps`, `npm run build` [frontend/Dockerfile:53-99]() |
-| **production** | Minimal standalone runner, copies built assets, creates `nextjs` user, runs `node server.js` | `node server.js` [frontend/Dockerfile:103-132]() |
+| **base** | `node:24-alpine3.24`, pinned by tag and digest. No apk build tools: every native package ships a prebuilt binary | `package.json` [frontend/Dockerfile:11-25]() |
+| **development** | Hot-reload dev server, installs all dependencies including devDependencies | `npm install --legacy-peer-deps`, `npm run dev` [frontend/Dockerfile:27-47]() |
+| **builder** | Production build stage, installs all dependencies, copies source, runs `npm run build` | `npm install --legacy-peer-deps`, `npm run build` [frontend/Dockerfile:49-101]() |
+| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. `apk upgrade` runs in the same layer, so the weekly uncached rebuild takes Alpine's fixes. Copies the standalone build, creates the `nextjs` user, runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:103-145]() |
 
 ### Build-time Environment Variables
-Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:58-71](). The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:60-66]().
+Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:57-70](). The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:58-65]().
 
 ### Cache Invalidation
-A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:88-92]().
+A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:90-95]().
 
-Sources: [frontend/Dockerfile:1-132]()
+Sources: [frontend/Dockerfile:1-145]()
 
 ## 3. Worker Services & Auth (PRD-203)
 
@@ -134,7 +136,7 @@ Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/test
 
 | | |
 |---|---|
-| **Image** | `python:3.12-slim` + Node 22 + Hyperframes **0.8.62** (pinned) + chrome-headless-shell (installed at build) + ffmpeg + Kokoro v1.0 (fetched at build, hash-checked). Hyperframes telemetry, skill installs and update checks are switched off, and boot refuses to start without those switches. |
+| **Image** | `python:3.12-slim` + Node 24 (from the official image's `node` stage) + Hyperframes **0.8.62** (pinned) + chrome-headless-shell (installed at build) + ffmpeg + Kokoro v1.0 (fetched at build, hash-checked). Hyperframes telemetry, skill installs and update checks are switched off, and boot refuses to start without those switches. |
 | **Build** | No build args (`orchestrator/tests/test_dockerfile_prod_parity.py` registers none). The last stage, `production`, is what Railway builds; CI also builds `test`, which adds pytest. |
 | **Port** | 8090 (`MEDIA_RENDER_PORT`), internal only. Every route but `/health` needs `X-Internal-Token`. |
 | **Token** | `SOCIALS_RENDER_TOKEN`: the same name on the service and on the backend, which sends it (`orchestrator/core/media_render_client.py`). Boot refuses production without one. |

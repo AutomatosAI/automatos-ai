@@ -18,7 +18,7 @@ voice lines are spoken here with Kokoro, and the mix is made here with ffmpeg.
 
 Every version is pinned. The build records them in `/opt/media-render/versions.json`, and `/health` serves them.
 
-- **Hyperframes 0.8.62** (Apache-2.0) runs on Node 22.
+- **Hyperframes 0.8.62** (Apache-2.0) runs on Node 24, copied from the official `node:24-trixie-slim` image (pinned by tag and digest in the Dockerfile's `node` stage).
 - **chrome-headless-shell** is installed at build time at `/opt/chrome`, so a render never downloads it:
   - on amd64, the build Hyperframes manages;
   - on arm64, Playwright's pinned headless shell.

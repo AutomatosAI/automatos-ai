@@ -237,7 +237,7 @@ def test_the_files_and_boot_code_never_reads_ctx_workspace_id():
 _PROBE = """
 import asyncio, collections, json
 from fastapi import Response
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from api import themes_files
 from core.auth import step_up
 from core.auth.workspace_permission import PERMISSION_MARKER_ATTR
@@ -257,8 +257,10 @@ def csp_after_app_headers(route_headers):
 
 served = collections.Counter()
 step_up_routes, gated = [], []
-for route in main.app.routes:
-    if not isinstance(route, APIRoute):
+# FastAPI 0.137+ keeps an included router as one node of app.routes (PRD-262 US-008); the
+# walk gives each served route with its full path and its inherited dependencies.
+for route in iter_route_contexts(main.app.routes):
+    if not isinstance(route.original_route, APIRoute):
         continue
     found = calls(route.dependant)
     for method in sorted(route.methods - {"HEAD", "OPTIONS"}):

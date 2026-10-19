@@ -12,7 +12,8 @@ through ``scripts/ci/smoke-fresh-clone.sh`` in one of two modes:
 The script times the boots with ``smoke_boot.py``, as the fresh-clone smoke does. This
 tool does the rest, one command per step:
 
-* ``target``: the tag a run boots and the commit its images must carry;
+* ``target``: the tag a run boots and the commit its images must carry: ``sha-<7>``, or
+  ``weekly-<yyyymmdd>`` after images.yml's weekly OS rebuild (PRD-262 US-011);
 * ``pull``: runs ``docker compose pull``, timing it and counting the bytes the runner
   received meanwhile;
 * ``workers``: the backend's processes. This is the first CI boot of the production
@@ -52,6 +53,7 @@ def _sibling(name: str):
 smoke_boot = _sibling("smoke_boot")
 layers = _sibling("image_layers")
 registry = _sibling("image_registry")
+image_matrix = _sibling("image_matrix")  # images.yml's picker, which also names the weekly tag
 
 MODES = ("pull", "prebuilt")
 APP_SERVICES = ("backend", "frontend", "workspace-worker")
@@ -63,6 +65,7 @@ SHA_TAG = re.compile(r"^sha-([0-9a-f]{7})$")
 IMAGE_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 SHORT_SHA = 7  # docker/metadata-action's type=sha
 TAG_PREFIXES = {"workflow_run": "sha", "pull_request": "pr"}
+SCHEDULE_TRIGGER = "schedule"  # images.yml's weekly OS rebuild, which publishes weekly-<yyyymmdd>
 ROUTE_TABLE, DEVICE_TABLE = Path("/proc/net/route"), Path("/proc/net/dev")
 DEFAULT_ROUTE = "00000000"
 # -ww: ps never cuts a command line short, so `--reload` at its end is seen.
@@ -78,10 +81,12 @@ READ_ERRORS = registry.READ_ERRORS
 # --------------------------------------------------------------------------- target
 
 
-def target(event: str, sha: str = "", tag: str = "") -> Dict[str, str]:
+def target(event: str, sha: str = "", tag: str = "", trigger: str = "", created: str = "") -> Dict[str, str]:
     """The tag this run boots, and the commit (or a ``sha-<7>`` tag's prefix) it must carry.
 
-    * ``workflow_run`` (images.yml published on main): ``sha-<7>`` of that commit;
+    * ``workflow_run`` (images.yml published on main): ``sha-<7>`` of that commit. When
+      the weekly schedule started that run (``trigger`` ``schedule``), it published
+      ``weekly-<yyyymmdd>`` of its ``created`` time instead, and that is booted;
     * ``pull_request``: ``pr-<7>`` of the commit the job checked out and built;
     * ``workflow_dispatch``: the tag given. A ``sha-<7>`` tag names its commit's
       prefix; any other tag (``edge``) must carry a revision, but not a known one.
@@ -89,6 +94,8 @@ def target(event: str, sha: str = "", tag: str = "") -> Dict[str, str]:
     if event in TAG_PREFIXES:
         if not FULL_SHA.match(sha):
             raise ValueError(f"not a full commit sha: {sha!r}")
+        if event == "workflow_run" and trigger == SCHEDULE_TRIGGER:
+            return {"tag": image_matrix.weekly_tag(created), "revision": sha}
         return {"tag": f"{TAG_PREFIXES[event]}-{sha[:SHORT_SHA]}", "revision": sha}
     if event != "workflow_dispatch":
         raise ValueError(f"smoke-images does not run on {event!r}")
@@ -328,7 +335,7 @@ def _say(failures: Sequence[str], what: str) -> int:
 
 def cmd_target(args: argparse.Namespace) -> int:
     """Print the tag and revision, and append them to ``--outputs`` ($GITHUB_OUTPUT)."""
-    chosen = target(args.event, args.sha, args.tag)
+    chosen = target(args.event, args.sha, args.tag, args.trigger, args.created)
     lines = "".join(f"{key}={value}\n" for key, value in chosen.items())
     print(lines, end="")
     if args.outputs:
@@ -404,6 +411,8 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--event", required=True, help="workflow_run, pull_request or workflow_dispatch")
     pick.add_argument("--sha", default="", help="the commit the images were built from")
     pick.add_argument("--tag", default="", help="workflow_dispatch: the tag to boot")
+    pick.add_argument("--trigger", default="", help="workflow_run: the event that started the images run")
+    pick.add_argument("--created", default="", help="workflow_run: when the images run was created (ISO 8601)")
     pick.add_argument("--outputs", help="append tag= and revision= here ($GITHUB_OUTPUT)")
     pull = commands.add_parser("pull", help="time a pull and count the bytes received")
     pull.add_argument("--out", type=Path, required=True)

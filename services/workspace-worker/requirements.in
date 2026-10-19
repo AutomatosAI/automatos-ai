@@ -1,0 +1,45 @@
+# Workspace Worker Dependencies
+# PRD-56 Phase 2
+#
+# The direct dependencies only (PRD-262 US-044). The image installs
+# requirements.lock, never this file: every pin there carries its hashes, and the
+# Dockerfile installs it with --require-hashes --no-deps. --universal resolves for
+# every platform, because the lock installs on linux/amd64 and linux/arm64 whatever
+# machine compiles it. Regenerate both locks from the repository root after
+# changing this file or requirements-browser.in, main lock first:
+#
+#   uv pip compile services/workspace-worker/requirements.in \
+#     --universal --python-version 3.12 --generate-hashes \
+#     -o services/workspace-worker/requirements.lock
+#   uv pip compile services/workspace-worker/requirements-browser.in \
+#     -c services/workspace-worker/requirements.lock \
+#     --universal --python-version 3.12 --generate-hashes \
+#     -o services/workspace-worker/requirements-browser.lock
+
+# Redis (async)
+redis[hiredis]>=5.0.0,<8.0.0
+
+# HTTP server for health check
+aiohttp>=3.9.0,<3.14.0
+
+# Shared with orchestrator (already in main requirements)
+pydantic>=2.0.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# Database (task status updates): the one UPDATE in task_executions_db.py, run
+# through psycopg2 in a thread. No SQLAlchemy (PRD-262 US-044).
+psycopg2-binary>=2.9.0,<3.0.0
+
+# Observability
+prometheus_client>=0.20.0,<1.0.0
+# PRD-256 O2b (#847): traces over OTLP/HTTP, default OFF (OTEL_ENABLED); imported only
+# when enabled (worker_otel.py). The same versions as the platform's.
+opentelemetry-api==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
+
+# Claude Agent SDK — headless canvas sessions (PRD-170 S1). It drives the Claude
+# CLI its own wheel bundles (claude_agent_sdk/_bundled/claude). Pinned exactly:
+# the old >=0.1.0 floor allowed releases with no bundled CLI. The Dockerfile
+# installs it last, in its own layer, so a bump re-downloads only the SDK.
+claude-agent-sdk==0.2.168

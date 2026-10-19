@@ -936,25 +936,43 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5: gates HARNESS self-management (auto-applying approved
-    # config changes back onto the platform). HIGH RISK — default OFF. Nothing
-    # in Phase 5 may take effect unless this is true.
+    # PRD-141 Phase 5: gates the owner's /approve of a [HARNESS] card
+    # (api/harness_commands.py, until PRD-263 US-047). HIGH RISK — default OFF.
+    # The weekly run is report_only and applies nothing whatever its value
+    # (PRD-263 US-016); US-054 redefines it as the switch for approval grants.
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
-    # PRD-142 Wave 4 (§12.3): HARNESS risk thresholds — Railway-overridable env vars
-    # (change in Railway + restart, no file edit). Auto-apply ceilings: a prescription
-    # auto-applies only when its risk_score <= the workspace's ceiling; higher risk is
-    # queued for human approval. Workspaces at autonomy=full get the higher ceiling,
-    # standard workspaces the lower one.
-    HARNESS_AUTO_APPLY_MAX_RISK_STANDARD: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_STANDARD", "2"))
-    HARNESS_AUTO_APPLY_MAX_RISK_FULL: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_FULL", "3"))
-    # Escalation threshold: prescriptions at or above this risk are flagged high
-    # priority and escalated for human approval (when self-management is on).
-    HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
     # where F408, F409 and F416 happened. It becomes a trigger only through
     # services.schedule_util.scheduler_cron_trigger (F240: weekday as day names).
     HARNESS_SWEEP_CRON: str = os.getenv("HARNESS_SWEEP_CRON", "0 10 * * 1")
+    # PRD-263 US-014a/US-014b: how DIAGNOSE judges each agent x metric (design section
+    # 5.1 ORG-4; services.harness_diagnose passes each to core.stats.harness_verdicts).
+    # Below HARNESS_MIN_SAMPLES in the judged week or its reference a pair is
+    # INSUFFICIENT_DATA. The reference is the HARNESS_REF_DAYS before the judged week,
+    # in whole ISO weeks, less weeks already flagged and weeks after an applied change.
+    # A rate flags only when it worsens by both HARNESS_ABS_DROP and HARNESS_REL_DROP
+    # (fractions) with a one-sided p below HARNESS_ALPHA; cost or tokens per run only
+    # when the median rises by both HARNESS_COST_REL_RISE and HARNESS_COST_ABS_RISE ($)
+    # with a Mann-Whitney p below HARNESS_ALPHA. Benjamini-Hochberg at HARNESS_FDR_Q
+    # runs across every test of a run. A first flag is WATCH; REGRESSION needs a flag
+    # in the previous ISO week too, or p below HARNESS_STRONG_P. Below
+    # HARNESS_MIN_COVERAGE (judged over active agents) convergence reads insufficient_data.
+    HARNESS_MIN_SAMPLES: int = int(os.getenv("HARNESS_MIN_SAMPLES", "20"))
+    HARNESS_REF_DAYS: int = int(os.getenv("HARNESS_REF_DAYS", "28"))
+    HARNESS_ABS_DROP: float = float(os.getenv("HARNESS_ABS_DROP", "0.15"))
+    HARNESS_REL_DROP: float = float(os.getenv("HARNESS_REL_DROP", "0.20"))
+    HARNESS_ALPHA: float = float(os.getenv("HARNESS_ALPHA", "0.05"))
+    HARNESS_FDR_Q: float = float(os.getenv("HARNESS_FDR_Q", "0.10"))
+    HARNESS_COST_REL_RISE: float = float(os.getenv("HARNESS_COST_REL_RISE", "0.25"))
+    HARNESS_COST_ABS_RISE: float = float(os.getenv("HARNESS_COST_ABS_RISE", "0.005"))
+    HARNESS_STRONG_P: float = float(os.getenv("HARNESS_STRONG_P", "0.001"))
+    HARNESS_MIN_COVERAGE: float = float(os.getenv("HARNESS_MIN_COVERAGE", "0.5"))
+    # PRD-263 US-019 (FR-8): an agent's calls of one app in the judged week flag when there
+    # are at least HARNESS_MIN_SAMPLES and the Wilson lower bound (95%) of their failure
+    # rate is at least HARNESS_TOOL_FAIL_WILSON_MIN. A flag carried by sign-in and
+    # connection failures is reported as "reconnect <app>", never as a bad tool.
+    HARNESS_TOOL_FAIL_WILSON_MIN: float = float(os.getenv("HARNESS_TOOL_FAIL_WILSON_MIN", "0.5"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
@@ -1486,6 +1504,9 @@ class Config:
     FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
     # PRD-176 F068: local-safe default (SaaS sets the railway worker host via env).
     AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://localhost:8080")
+    # PRD-262 US-006: sent as X-Internal-Token on every worker call. It must match the
+    # worker's own AGENT_OPT_WORKER_TOKEN, which the worker refuses to start without.
+    AGENT_OPT_WORKER_TOKEN: str = os.getenv("AGENT_OPT_WORKER_TOKEN", "").strip()
 
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)

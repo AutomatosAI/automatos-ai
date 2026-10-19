@@ -752,7 +752,10 @@ order they expect: migrations first, then the code that uses them.
 with `make up-images` again: it pulls the newer `edge` (or the
 `AUTOMATOS_IMAGE_TAG` you pin) and recreates the containers. Nothing is
 bind-mounted from your checkout, so there's no reload-mode ordering to worry
-about; migrations run as the new backend boots.
+about; migrations run as the new backend boots. Every Monday CI also rebuilds
+the images with fresh Debian and Alpine packages and moves `edge` to that
+rebuild (`weekly-<yyyymmdd>`) once it boots, so updating on `edge` picks up
+OS security fixes; a pinned `sha-<7>` keeps the packages it was built with.
 Database migrations run on every backend boot (`alembic upgrade heads`,
 fail-closed — a failing migration stops the backend rather than serving a
 half-built schema), and the seeds are idempotent. If you use media
@@ -1143,9 +1146,11 @@ choice; the phrase above is the ceiling to keep in mind.
 
 ## Network exposure (`BIND_ADDRESS`)
 
-The API (8000), Postgres, Redis and MinIO publish on `127.0.0.1` by default, so
-they are reachable from this machine only. To reach them from another device on
-your network, set `BIND_ADDRESS=0.0.0.0` in `.env` deliberately. In the local
-edition an anonymous request is the operator, and with session mode (PRD-234)
-the API can start Claude Code sessions that run commands on this machine — do
-not expose it to a network you do not control.
+Every port the stack publishes listens on `127.0.0.1` by default: the web app
+(3000), the API (8000), Postgres, Redis, MinIO and the services of the optional
+profiles. They are reachable from this machine only. To reach them from another
+device on your network, set `BIND_ADDRESS=0.0.0.0` in `.env` deliberately. In the
+local edition an anonymous request is the operator (through the web app's chat as
+much as through the API), and with session mode (PRD-234) the API can start
+Claude Code sessions that run commands on this machine — do not expose it to a
+network you do not control.

@@ -11,7 +11,7 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
 - [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
 - [services/agent-opt-worker/main.py](services/agent-opt-worker/main.py)
-- [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
+- [services/agent-opt-worker/requirements.in](services/agent-opt-worker/requirements.in)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
@@ -221,12 +221,12 @@ Sources: [frontend/components/settings/SystemPromptsTab.tsx:61-72](), [orchestra
 
 ## Worker Service Deployment
 
-The `agent-opt-worker` is a standalone service defined by its own `Dockerfile` and `requirements.txt`. It is designed to be isolated from the main orchestrator to avoid dependency conflicts with the specialized FutureAGI SDKs.
+The `agent-opt-worker` is a standalone service defined by its own `Dockerfile`, `requirements.in` and hash-locked `requirements.lock`. It is designed to be isolated from the main orchestrator to avoid dependency conflicts with the specialized FutureAGI SDKs.
 
 ### Worker Environment
 
 -   **Base Image:** `python:3.11-slim` [services/agent-opt-worker/Dockerfile:1]()
--   **Key Dependencies:** `agent-opt`, `ai-evaluation`, `litellm`, `fastapi` [services/agent-opt-worker/requirements.txt:1-7]()
+-   **Key Dependencies:** `agent-opt`, `ai-evaluation`, `litellm`, `fastapi` [services/agent-opt-worker/requirements.in:1-7]()
 -   **Health Check:** Standard `/health` endpoint integrated with `automatos_metrics` [services/agent-opt-worker/main.py:15-40]()
 
 ### Orchestrator Connection

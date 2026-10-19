@@ -51,6 +51,7 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 from fastapi import Depends, FastAPI, HTTPException  # noqa: E402
+from fastapi.routing import iter_route_contexts  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
@@ -382,7 +383,7 @@ def test_a_failed_read_is_404_over_http_and_current_reports_socials_unavailable(
     app.dependency_overrides[get_request_context_hybrid] = _anonymous_ctx
     app.dependency_overrides[get_db] = lambda: db
     client = TestClient(app)
-    assert "/api/socials/posts" in {route.path for route in app.routes}  # the 404 is the gate's
+    assert "/api/socials/posts" in {route.path for route in iter_route_contexts(app.routes)}  # the 404 is the gate's
 
     assert client.get("/api/socials/posts").status_code == 404
 

@@ -3,6 +3,7 @@
 * **Run table (US-009, US-010).** Every HARNESS run is one ``harness_runs`` row,
   opened as ``running`` when the run starts and closed with its outcome when it
   ends, so status and history read one database row that every worker sees.
+  Completed runs' verdicts are the week-by-week history DIAGNOSE reads (US-014b).
 * **Lock (US-011).** One run per workspace at a time, whatever the uvicorn worker
   or Railway replica count: a session-level Postgres advisory lock in its two-key
   form (``HARNESS_LOCK_NAMESPACE``, ``hashtext(<workspace id>)``), held on one
@@ -19,7 +20,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 from uuid import UUID
 
 from sqlalchemy import func, text
@@ -43,6 +44,12 @@ INTERRUPTED = "interrupted"
 FAILURE_PREFIX = "failed: "
 # A run judges the last complete ISO week: the week that held the moment a week ago.
 WEEK = timedelta(days=7)
+# harness_runs.counts keys read outside DIAGNOSE: how many changes the run suggested
+# (written by HarnessService._run_pipeline), and, on a run imported from the HARNESS
+# files (US-023), how many changes the loop before PRD-263 applied in it. A report-only
+# run applies nothing and has no IMPORTED_APPLIED key.
+PRESCRIPTION_COUNT = "prescriptions"
+IMPORTED_APPLIED = "applied"
 
 _TRY_LOCK = text("SELECT pg_try_advisory_lock(:namespace, hashtext(:key))")
 _UNLOCK = text("SELECT pg_advisory_unlock(:namespace, hashtext(:key))")
@@ -154,16 +161,69 @@ def week_is_settled(db: "Session", workspace_id: UUID, cur_window: str) -> bool:
     return found is not None
 
 
+def judged_verdicts(db: "Session", workspace_id: UUID, windows: Sequence[str]) -> List[Tuple[str, Any]]:
+    """The (cur_window, verdicts) of the workspace's completed runs that judged one of
+    ``windows``, oldest first: DIAGNOSE's week-by-week verdict history (US-014b)."""
+    from core.models.harness import RUN_COMPLETED, HarnessRun
+
+    rows = (
+        db.query(HarnessRun.cur_window, HarnessRun.verdicts)
+        .filter(
+            HarnessRun.workspace_id == workspace_id,
+            HarnessRun.status == RUN_COMPLETED,
+            HarnessRun.cur_window.in_(list(windows)),
+        )
+        .order_by(HarnessRun.id)
+        .all()
+    )
+    return [(window, verdicts) for window, verdicts in rows]
+
+
 def latest_run(db: "Session", workspace_id: UUID) -> Optional["HarnessRun"]:
     """The workspace's most recent run, or None before its first."""
+    runs = recent_runs(db, workspace_id, 1)
+    return runs[0] if runs else None
+
+
+def recent_runs(db: "Session", workspace_id: UUID, limit: int) -> List["HarnessRun"]:
+    """The workspace's ``limit`` most recent runs, newest first.
+
+    Ordered by when each run started, then id: rows imported from the HARNESS files
+    on the volume (``scripts/harness_backfill_runs.py``, US-023) are inserted after
+    newer runs, so their ids say nothing about when they ran.
+    """
     from core.models.harness import HarnessRun
 
     return (
         db.query(HarnessRun)
         .filter(HarnessRun.workspace_id == workspace_id)
-        .order_by(HarnessRun.id.desc())
-        .first()
+        .order_by(HarnessRun.started_at.desc(), HarnessRun.id.desc())
+        .limit(limit)
+        .all()
     )
+
+
+def recorded_windows(db: "Session", workspace_id: UUID) -> Set[str]:
+    """Every ISO week the workspace has a run row for, whatever its status."""
+    from core.models.harness import HarnessRun
+
+    rows = db.query(HarnessRun.cur_window).filter(HarnessRun.workspace_id == workspace_id).distinct().all()
+    return {window for (window,) in rows}
+
+
+def record_imported_runs(db: "Session", workspace_id: UUID, runs: Sequence[Mapping[str, Any]]) -> int:
+    """Insert finished runs read from the HARNESS files on the volume (US-023) and commit.
+
+    Each mapping carries the row's columns (``cur_window``, ``started_at``,
+    ``finished_at``, ``status``, ``iteration`` and optionally ``counts``,
+    ``prescriptions`` and ``report_status``). The caller has already left out every
+    week in recorded_windows. Returns how many rows were inserted.
+    """
+    from core.models.harness import HarnessRun
+
+    db.add_all([HarnessRun(workspace_id=workspace_id, **dict(run)) for run in runs])
+    db.commit()
+    return len(runs)
 
 
 def open_run(db: "Session", workspace_id: UUID, cur_window: str) -> int:
@@ -194,7 +254,9 @@ def close_run(
     status: str,
     *,
     iteration: Optional[int] = None,
+    coverage: Optional[float] = None,
     counts: Optional[Dict[str, Any]] = None,
+    verdicts: Optional[Dict[str, Any]] = None,
     prescriptions: Optional[List[Dict[str, Any]]] = None,
     report_md: Optional[str] = None,
     report_status: Optional[str] = None,
@@ -207,7 +269,9 @@ def close_run(
 
     fields = {
         "iteration": iteration,
+        "coverage": coverage,
         "counts": counts,
+        "verdicts": verdicts,
         "prescriptions": prescriptions,
         "report_md": report_md,
         "report_status": report_status,

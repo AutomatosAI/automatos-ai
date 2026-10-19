@@ -359,7 +359,7 @@ For team management, actions like inviting a member, accepting an invitation, ch
 Sources:
 - [orchestrator/core/workspaces/invitations.py:216-220]()
 
-This ensures that all critical team-related activities are recorded, fulfilling compliance requirements like those outlined in PRD-181 S1 (EU-AI-Act Art.12).
+This ensures that all critical team-related activities are recorded, supporting the Art. 12 record-keeping duty (PRD-181 S1).
 
 ## Frontend UI for Team Management
 

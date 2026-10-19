@@ -16,6 +16,15 @@ aiohttp usage:
     add_aiohttp_metrics(app, service="my-service")
 
 Requires: prometheus_client
+
+Requests are labelled by route template ("/optimize/{job_id}"), never by the raw
+path, and every path no route matches shares one "unmatched" label; a method
+outside the standard set is labelled "OTHER". A scanner's paths, a job id per
+request or a forged Host header therefore add no new series (PRD-262 US-006).
+
+services/shared holds the source; each service vendors a byte-identical copy,
+because Railway builds every service from its own directory. A test in the
+orchestrator suite (test_prd262_vendored_metrics.py) keeps the copies identical.
 """
 
 import time
@@ -35,6 +44,34 @@ try:
     HAS_PROMETHEUS = True
 except ImportError:
     HAS_PROMETHEUS = False
+
+
+METRICS_PATH = "/metrics"
+UNMATCHED = "unmatched"
+OTHER_METHOD = "OTHER"
+KNOWN_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
+
+
+def _method_label(method: str) -> str:
+    """The request method, or OTHER: the client chooses it, so it must not mint series."""
+    return method if method in KNOWN_METHODS else OTHER_METHOD
+
+
+def _fastapi_route_label(scope) -> str:
+    """The template of the route the router matched, or "unmatched".
+
+    The router stores the matched route in the ASGI scope; the label never reads
+    request.url, which a forged Host header can rewrite.
+    """
+    route = scope.get("route")
+    path = getattr(route, "path", None)
+    return path if isinstance(path, str) and path else UNMATCHED
+
+
+def _aiohttp_route_label(request) -> str:
+    """The canonical path of the resource aiohttp resolved, or "unmatched" (404 and 405)."""
+    resource = request.match_info.route.resource
+    return resource.canonical if resource is not None else UNMATCHED
 
 
 def _create_metrics(service: str, registry=None):
@@ -98,11 +135,10 @@ def add_fastapi_metrics(app, service: str = "unknown"):
 
     class PrometheusMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
-            if request.url.path == "/metrics":
+            if request.scope.get("path") == METRICS_PATH:
                 return await call_next(request)
 
-            method = request.method
-            endpoint = request.url.path
+            method = _method_label(request.method)
 
             metrics["in_progress"].inc()
             start = time.monotonic()
@@ -115,13 +151,15 @@ def add_fastapi_metrics(app, service: str = "unknown"):
                 raise
             finally:
                 duration = time.monotonic() - start
+                # Read after call_next: the router has stored the matched route by now.
+                endpoint = _fastapi_route_label(request.scope)
                 metrics["in_progress"].dec()
                 metrics["requests_total"].labels(method, endpoint, status).inc()
                 metrics["request_duration"].labels(method, endpoint).observe(duration)
 
     app.add_middleware(PrometheusMiddleware)
 
-    @app.get("/metrics", include_in_schema=False)
+    @app.get(METRICS_PATH, include_in_schema=False)
     async def metrics_endpoint():
         return Response(
             content=generate_latest(REGISTRY),
@@ -154,11 +192,12 @@ def add_aiohttp_metrics(app, service: str = "unknown"):
 
     @web.middleware
     async def prometheus_middleware(request, handler):
-        if request.path == "/metrics":
+        if request.path == METRICS_PATH:
             return await handler(request)
 
-        method = request.method
-        endpoint = request.path
+        # aiohttp resolves the route before any middleware runs.
+        method = _method_label(request.method)
+        endpoint = _aiohttp_route_label(request)
 
         metrics["in_progress"].inc()
         start = time.monotonic()
@@ -178,10 +217,14 @@ def add_aiohttp_metrics(app, service: str = "unknown"):
     # Prepend middleware
     app.middlewares.insert(0, prometheus_middleware)
 
+    # prometheus_client's content type carries a charset ("text/plain;
+    # version=...; charset=utf-8"). aiohttp refuses a charset in content_type
+    # with a ValueError, so /metrics answered 500; as a header it goes out
+    # exactly as the client library names it (PRD-262 US-045).
     async def metrics_handler(request):
         return web.Response(
             body=generate_latest(REGISTRY),
-            content_type=CONTENT_TYPE_LATEST,
+            headers={"Content-Type": CONTENT_TYPE_LATEST},
         )
 
-    app.router.add_get("/metrics", metrics_handler)
+    app.router.add_get(METRICS_PATH, metrics_handler)

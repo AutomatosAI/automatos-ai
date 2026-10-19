@@ -20,7 +20,7 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
 - [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
 - [services/agent-opt-worker/main.py](services/agent-opt-worker/main.py)
-- [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
+- [services/agent-opt-worker/requirements.in](services/agent-opt-worker/requirements.in)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)

@@ -6,8 +6,8 @@ could quietly lose:
 
 - the GPL boundary: phonemizer and espeak-ng (GPL-3.0, pulled in by kokoro-onnx)
   are never imported by, or a dependency of, the orchestrator (PRD-251 D3, Traps);
-- Hyperframes pinned exactly at 0.8.62 on Node 22, with telemetry, global skill
-  installs and update checks switched off in the image;
+- Hyperframes pinned exactly at 0.8.62 on Node 24 (PRD-262 US-007), with telemetry,
+  global skill installs and update checks switched off in the image;
 - the Kokoro files hash-checked at build, and the espeak data copied to a short
   real path (espeak-ng truncates its data path at about 160 characters);
 - the CI job itself: a top-level sibling job, with no `needs:`.
@@ -65,10 +65,16 @@ def test_the_gpl_voice_stack_lives_in_media_render():
         assert re.search(rf"^{re.escape(name)}==", requirements, re.M), name
 
 
-def test_hyperframes_is_pinned_exactly_on_node_22():
+def test_hyperframes_is_pinned_exactly_on_node_24():
     assert re.findall(r"hyperframes@([0-9][^\s\"']*)", DOCKERFILE) == ["0.8.62"]
-    assert "deb.nodesource.com/setup_22.x" in DOCKERFILE
-    assert "setup_20.x" not in DOCKERFILE
+    # PRD-262 US-007: Node comes from the official image's named stage, not NodeSource.
+    assert re.search(r"^FROM node:24-trixie-slim@sha256:[0-9a-f]{64} AS node$", DOCKERFILE, re.M)
+    assert "COPY --from=node /usr/local/bin/node /usr/local/bin/node" in DOCKERFILE
+    # The instructions, not the comments: the comment that says NodeSource is gone names it.
+    instructions = "\n".join(line for line in DOCKERFILE.splitlines() if not line.lstrip().startswith("#"))
+    assert "nodesource" not in instructions.lower()
+    # npm stays: the global Hyperframes install and versions.py's `npm root -g` use it.
+    assert DOCKERFILE.index("/usr/local/lib/node_modules/npm") < DOCKERFILE.index("npm install -g")
 
 
 def test_the_image_switches_off_telemetry_skills_and_update_checks():

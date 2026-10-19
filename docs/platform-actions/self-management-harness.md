@@ -3,226 +3,131 @@
 <details>
 <summary>Relevant source files</summary>
 
-The following files were used as context for generating this wiki page:
-
-- [orchestrator/api/harness.py](orchestrator/api/harness.py)
-- [orchestrator/api/widget_workflows.py](orchestrator/api/widget_workflows.py)
-- [orchestrator/modules/knowledge/primitive_heartbeat.py](orchestrator/modules/knowledge/primitive_heartbeat.py)
-- [orchestrator/modules/memory/operations/__init__.py](orchestrator/modules/memory/operations/__init__.py)
-- [orchestrator/modules/tools/discovery/actions_harness.py](orchestrator/modules/tools/discovery/actions_harness.py)
-- [orchestrator/modules/tools/discovery/actions_routing.py](orchestrator/modules/tools/discovery/actions_routing.py)
-- [orchestrator/modules/tools/discovery/handlers_harness.py](orchestrator/modules/tools/discovery/handlers_harness.py)
-- [orchestrator/modules/tools/discovery/handlers_routing.py](orchestrator/modules/tools/discovery/handlers_routing.py)
 - [orchestrator/services/harness_service.py](orchestrator/services/harness_service.py)
-- [orchestrator/tests/test_graph_single_store.py](orchestrator/tests/test_graph_single_store.py)
-- [orchestrator/tests/test_harness_api.py](orchestrator/tests/test_harness_api.py)
-- [orchestrator/tests/test_harness_power_mode.py](orchestrator/tests/test_harness_power_mode.py)
-- [orchestrator/tests/test_harness_routing_rule.py](orchestrator/tests/test_harness_routing_rule.py)
-- [orchestrator/tests/test_harness_self_management.py](orchestrator/tests/test_harness_self_management.py)
-- [orchestrator/tests/test_p2w1_relics_deleted.py](orchestrator/tests/test_p2w1_relics_deleted.py)
-- [orchestrator/tests/test_w1s9_idle_in_tx.py](orchestrator/tests/test_w1s9_idle_in_tx.py)
+- [orchestrator/services/harness_mode.py](orchestrator/services/harness_mode.py)
+- [orchestrator/services/harness_runs.py](orchestrator/services/harness_runs.py)
+- [orchestrator/services/harness_metrics.py](orchestrator/services/harness_metrics.py)
+- [orchestrator/services/harness_diagnose.py](orchestrator/services/harness_diagnose.py)
+- [orchestrator/core/stats/harness_verdicts.py](orchestrator/core/stats/harness_verdicts.py)
+- [orchestrator/core/models/harness.py](orchestrator/core/models/harness.py)
+- [orchestrator/api/harness.py](orchestrator/api/harness.py)
+- [orchestrator/modules/tools/discovery/actions_harness.py](orchestrator/modules/tools/discovery/actions_harness.py)
+- [orchestrator/modules/tools/discovery/handlers_harness.py](orchestrator/modules/tools/discovery/handlers_harness.py)
+- [orchestrator/core/services/auto_cadence.py](orchestrator/core/services/auto_cadence.py)
+- [orchestrator/scripts/harness_backfill_runs.py](orchestrator/scripts/harness_backfill_runs.py)
+- [frontend/components/settings/harness-settings-section.tsx](frontend/components/settings/harness-settings-section.tsx)
+- [frontend/components/activity/widgets/self-learning-health-widget.tsx](frontend/components/activity/widgets/self-learning-health-widget.tsx)
 
 </details>
 
-
-
-The Self-Management Harness, implemented by the `HarnessService` and its associated API, provides a self-optimizing organizational loop for the Automatos AI platform. Its purpose is to autonomously monitor, diagnose, and prescribe configuration changes to agents and the platform itself, ensuring continuous improvement and governance. This system operates largely invisibly to users, running weekly to collect metrics, identify regressions, and apply safe optimizations automatically. Risky changes are flagged for human review via board tasks, integrating governance gates into the self-management process. The harness also enables dynamic routing rule mutation and power mode adjustments from within the product.
+HARNESS is the weekly review of a workspace's agents. Once a week it reads what each agent actually did, judges each agent against its own recent weeks, and files an audit report from Auto. It is **report only**: it changes no agent setting, creates no Task and raises no approval. Its suggestions are lines of the report, and acting on them is the owner's call (PRD-263).
 
 Sources:
-- [orchestrator/services/harness_service.py:1-12]()
+- [orchestrator/services/harness_service.py]()
+- [orchestrator/services/harness_mode.py]()
 
-## Harness Service (`HarnessService`)
+## The mode setting
 
-The `HarnessService` is the core component of the self-management harness. It runs a weekly sweep across all active, opted-in workspaces to analyze performance metrics and propose configuration changes.
+The only per-workspace HARNESS control is its mode, under **Settings > Orchestrator** (`orchestrator.harness.mode` in the workspace settings):
 
-### Lifecycle and Scheduling
+| Mode | What HARNESS does |
+|---|---|
+| **Report only** (the default) | Runs every week, files the audit report, changes nothing. |
+| **Disabled** | Does not run for this workspace. A manual trigger answers that HARNESS is disabled. |
+| **Propose** (arrives in PRD-263 phase 3) | Will raise each suggested change as an approval for the owner's click. Until then a stored `propose` runs exactly like Report only. |
 
-The `HarnessService` is initialized and started at server startup, similar to `HeartbeatService` and `CoordinatorService` [orchestrator/services/harness_service.py:88-90](). It registers a single cron job, `_harness_sweep`, which runs every Sunday at 2 AM UTC [orchestrator/services/harness_service.py:34,97-104](). This single job design prevents a "thundering herd" problem by iterating through workspaces sequentially and automatically includes new workspaces without requiring a restart.
+There is no on/off switch and no schedule select. A value stored before PRD-263 is read, never rewritten: `full_auto` and `manual` read as Report only, and the retired `disabled: true` or `enabled: false` reads as Disabled ([orchestrator/services/harness_mode.py]()). The Settings API accepts only `report_only`, `propose` and `disabled`.
 
-The `_harness_sweep` method retrieves all active workspaces and filters them based on whether they have opted into the HARNESS service [orchestrator/services/harness_service.py:107-127](). For each eligible workspace, it calls `_harness_tick` to perform the self-optimization process.
+## When it runs
 
-### Self-Optimization Loop
+One scheduler job sweeps every active workspace whose mode is not Disabled, on the cron in the installation setting `HARNESS_SWEEP_CRON`, read in UTC. The default, `0 10 * * 1`, is Monday 10:00 UTC: a weekday daytime hour, outside the night window. The day and hour are an installation setting, not a workspace one.
 
-The `_harness_tick` method (not fully shown in provided code, but implied by the service description) orchestrates the self-optimization loop, which involves several phases:
-
-1.  **Collect Metrics**: Gathers organization-wide metrics.
-2.  **Diagnose Regressions**: Identifies performance degradations or inefficiencies.
-3.  **Prescribe Configuration Changes**: Proposes adjustments to agent configurations or platform settings. Each prescription includes a risk score.
-4.  **Auto-Apply Safe Changes**: Automatically applies changes with a low risk score (e.g., risk ≤ 2) [orchestrator/services/harness_service.py:6]().
-5.  **Queue Risky Changes**: For changes with higher risk scores (e.g., risk ≥ 3), it creates board tasks for human review and approval [orchestrator/services/harness_service.py:7]().
-6.  **Snapshot Baseline**: Records a new baseline for comparison in the next weekly run [orchestrator/services/harness_service.py:8-9]().
-
-### Status and Configuration
-
-The `HarnessService` provides a `get_status` method to retrieve the current state of the HARNESS for a given workspace [orchestrator/services/harness_service.py:132-135](). Possible statuses include:
-*   `disabled`: Workspace explicitly opted out.
-*   `running`: A tick is currently in progress.
-*   `failed`: The last tick encountered an exception.
-*   `dormant_insufficient_agents`: Fewer than `_MIN_AGENTS` are active [orchestrator/services/harness_service.py:35]().
-*   `dormant_insufficient_data`: Insufficient heartbeat history (`_MIN_DATA_DAYS`) [orchestrator/services/harness_service.py:36]().
-*   `scheduled_not_run_yet`: Eligible but the cron job hasn't fired.
-*   `completed`: The last tick successfully produced a baseline.
-
-Workspaces can opt-in or out of the HARNESS service via their settings [orchestrator/services/harness_service.py:169-173]().
+A run judges the **last complete ISO week** (its `cur_window`, for example `2026-W42`). Each run takes its workspace's Postgres advisory lock first, so whatever the worker or replica count, one workspace has one run at a time; a run that finds the lock held does nothing. The sweep also skips a workspace whose judged week already has a completed or dormant run, so a week is judged once. Auto's `platform_harness_trigger` starts a run at once; it is exempt from the once-a-week skip, and a rerun of a week already judged keeps that week's verdicts.
 
 Sources:
-- [orchestrator/services/harness_service.py:1-175]()
+- [orchestrator/services/harness_runs.py]()
 
-### Harness Service Diagram
+## What a run does
+
+1. **Dormancy.** A workspace with fewer than three active agents is `dormant_insufficient_agents`, and the run stops there.
+2. **Collect.** One workspace-bound read of the tables that record each agent's work (Tasks done and failed, model usage, heartbeat outcomes, Mission steps, production tool calls) returns raw weekly counts for the judged week and the weeks before it. An agent with no rows has n = 0, never 0% ([orchestrator/services/harness_metrics.py]()).
+3. **Diagnose.** Each agent and metric is judged against a clean reference: the `HARNESS_REF_DAYS` before the judged week, less weeks already flagged and weeks after a change. Every threshold is a `HARNESS_*` setting in `config.py`, with Benjamini-Hochberg across the run.
+4. **Suggest.** Each agent's tool failures in the judged week are judged on production tool logs; when sign-in or connection errors carry the flag, the report says "reconnect &lt;app&gt;". Suggestions are report lines only.
+5. **Report.** Auto files the audit report ("HARNESS Weekly Org Review — Run #n") in Reports, with the coverage, each agent's verdicts and the suggested changes under "Suggested changes (reported only; nothing was changed)".
+
+### The four verdicts
+
+| Verdict | Meaning |
+|---|---|
+| `INSUFFICIENT_DATA` | Fewer than `HARNESS_MIN_SAMPLES` in the judged week or its reference: too little work to judge. Never called stable. |
+| `STABLE` | Judged, and no metric worsened beyond the thresholds. |
+| `WATCH` | A first flag: the metric worsened this week. |
+| `REGRESSION` | Flagged in two consecutive ISO weeks, or once with p below `HARNESS_STRONG_P`. |
+
+### Coverage and convergence
+
+**Coverage** is the agents judged over the active agents (Auto is not counted). Below `HARNESS_MIN_COVERAGE` the run's convergence reads `insufficient_data`; otherwise it reads `regression` if any agent is in REGRESSION, `watching` if any is in WATCH, and `steady` if not. On fake or light traffic, expect a high INSUFFICIENT_DATA share.
+
+Sources:
+- [orchestrator/services/harness_diagnose.py]()
+- [orchestrator/core/stats/harness_verdicts.py]()
+
+## Status and the run record
+
+Every run is one `harness_runs` row: its judged week, start and finish, status, iteration (completed runs so far), coverage, the verdict counts, its suggestions, the audit report and whether the report was filed. Nothing is written to the workspace volume. `get_status` reads the latest row and returns one of:
+
+- `running`: a run holds the workspace's lock;
+- `disabled`: the workspace's mode is Disabled;
+- `failed`: the latest run failed, or was left unfinished (`interrupted`), with its `error`;
+- `dormant_insufficient_agents`: too few active agents;
+- `scheduled_not_run_yet`: no run yet, with `next_scheduled_run`;
+- `completed`: with `iteration_count`, `cur_window`, coverage, convergence, the INSUFFICIENT_DATA, WATCH and REGRESSION counts, `last_run_at` and `artifacts.audit_report`.
+
+History from before PRD-263, kept as JSON files under `<WORKSPACE_VOLUME_PATH>/<ws>/harness`, is imported once by `scripts/harness_backfill_runs.py`, which Gerard runs. It inserts one row per workspace and week that has none, defaults to a dry run (`--apply` writes), never writes or deletes a file, and `--summary-only` prints totals that name no workspace. Imported rows carry no coverage or verdicts: the old loop's judgement is not something DIAGNOSE reads.
+
+### Status diagram
 
 ```mermaid
 graph TD
-    subgraph "Automatos AI Platform"
-        A[Server Startup] --> B{HarnessService.start()}
-        B --> C{_register_workspace_jobs()}
-        C --> D[Scheduler.add_job(harness_sweep, cron)]
-        D -- "Every Sunday 2 AM UTC" --> E[Scheduler Trigger]
-        E --> F{_harness_sweep()}
-        F -- "Iterate active, opted-in workspaces" --> G{_harness_tick(workspace_id)}
-        G --> H[Collect Metrics]
-        H --> I[Diagnose Regressions]
-        I --> J[Prescribe Changes (Risk Score)]
-        J -- "Risk <= 2" --> K[Auto-Apply Changes]
-        J -- "Risk >= 3" --> L[Queue Board Task for Human Review]
-        K --> M[Snapshot New Baseline]
-        L --> M
-        M --> N[Next Week's Comparison]
-    end
-    subgraph "Harness Status"
-        O[get_status(workspace_id)] --> P{Current State}
-        P --> Q[disabled]
-        P --> R[running]
-        P --> S[failed]
-        P --> T[dormant_insufficient_agents]
-        P --> U[dormant_insufficient_data]
-        P --> V[scheduled_not_run_yet]
-        P --> W[completed]
-    end
+    A[HARNESS_SWEEP_CRON, UTC] --> B{Mode Disabled?}
+    T[platform_harness_trigger] --> B
+    B -- yes --> X[disabled: no run]
+    B -- no --> L{Advisory lock free?}
+    L -- no --> N[No-op: a run is in flight]
+    L -- yes --> R[Open harness_runs row: running]
+    R --> D{At least three active agents?}
+    D -- no --> DA[dormant_insufficient_agents]
+    D -- yes --> C[Collect raw weekly counts]
+    C --> G[Diagnose: verdicts, coverage, convergence]
+    G --> S[Suggest: report lines only]
+    S --> P[Auto files the audit report]
+    P --> CO[completed]
 ```
 
-Sources:
-- [orchestrator/services/harness_service.py:1-175]()
+## How Auto and the owner see it
 
-## Harness API
-
-The HARNESS API provides authenticated endpoints for managing high-risk prescriptions generated by the `HarnessService`. This API is crucial for governance, allowing human administrators to review and approve or reject proposed changes.
-
-### API Endpoints
-
-The `api/harness.py` router defines the following endpoints:
-
-*   `POST /api/harness/prescriptions/{rx_id}/approve`: Approves a queued HARNESS prescription. This action applies the change, which is audited and reversible [orchestrator/api/harness.py:80-87]().
-*   `POST /api/harness/prescriptions/{rx_id}/reject`: Rejects a queued HARNESS prescription. This prevents the system from re-proposing the same change in the future [orchestrator/api/harness.py:90-97]().
-*   `GET /api/harness/self-learning`: Provides a health check for the self-learning components, including HARNESS status, tool-routing recorder stats, and a prescription summary [orchestrator/api/harness.py:100-129]().
-
-### Authentication and Authorization
-
-These endpoints are secured and require `workspace:manage` permission [orchestrator/api/harness.py:80,90](). The system resolves the authenticated principal (user) to an internal `users.id` [orchestrator/api/harness.py:41-58](). This `user_id` is then passed to `handle_harness_command` [orchestrator/api/harness.py:68-70](), which performs further authorization checks.
-
-A key design principle is that approval is **human-admin-only**. If the principal cannot be resolved to an active owner/admin `users` row (e.g., an API key or service principal), the request fails with a `403 Forbidden` status [orchestrator/api/harness.py:17-20,71-72](). If the HARNESS self-management is disabled, a `409 Conflict` status is returned [orchestrator/api/harness.py:73-76]().
-
-### `handle_harness_command`
-
-The actual logic for approving or rejecting prescriptions resides in `api.harness_commands.handle_harness_command` [orchestrator/api/harness.py:30](). This function receives the workspace ID, command (`/approve` or `/reject`), prescription ID, and the resolved `identity` (including the `user_id`).
+- **`platform_harness_status`** returns the state above. Auto never calls an unjudged agent stable.
+- **`platform_harness_history`** lists past runs, newest first, from `harness_runs`: the week judged, status, iteration, coverage, convergence, the verdict counts, how many changes each report suggested and how many the run applied itself (0 for every report-only run; a run imported from before PRD-263 shows what the old loop applied).
+- **`platform_harness_trigger`** starts a run now, or says the workspace is disabled.
+- **The Weekly HARNESS Review** cadence (opt-in, on Auto's heartbeat) tells Auto to read the status, wait when this week's run has not happened yet (`scheduled_not_run_yet`, or a `cur_window` other than the week it names), pull the audit report and send the owner a short summary: coverage and the INSUFFICIENT_DATA, WATCH and REGRESSION counts. It names no day or time.
+- **The Command Center Self-Learning tile** reads `GET /api/harness/self-learning`: the latest run's status, iteration, coverage and verdict counts, the workspace's mode, and this workspace's production tool calls over the last 7 days. Any member of the workspace may read it; it returns counts only, never grant text. A figure the backend does not have shows "—".
 
 Sources:
-- [orchestrator/api/harness.py:1-129]()
-- [orchestrator/tests/test_harness_api.py:1-191]()
+- [orchestrator/modules/tools/discovery/actions_harness.py]()
+- [orchestrator/modules/tools/discovery/handlers_harness.py]()
+- [orchestrator/core/services/auto_cadence.py]()
+- [orchestrator/api/harness.py]()
 
-### Harness API Flow
+## The /approve routes (removed in PRD-263 phase 3)
 
-```mermaid
-graph TD
-    subgraph "Command Center Frontend"
-        A[User Action: Approve/Reject Prescription] --> B{HTTP POST /api/harness/prescriptions/{rx_id}/(approve|reject)}
-    end
-
-    subgraph "FastAPI Backend"
-        B --> C{RequestContext (get_request_context_hybrid)}
-        C --> D{DB Session (get_db)}
-        D --> E{require_workspace_permission("workspace:manage")}
-        E -- Authorized --> F{_run_command(db, ctx, command, rx_id)}
-        F --> G{_resolve_internal_user_id(db, ctx)}
-        G -- "user.id (integer)" --> H{handle_harness_command(db, workspace_id, command, rx_id, identity)}
-        H -- "Result: success, unauthorized, message" --> I{Map Result to HTTP Status}
-        I -- "unauthorized=True" --> J[HTTPException 403 Forbidden]
-        I -- "success=False" --> K[HTTPException 409 Conflict]
-        I -- "success=True" --> L[200 OK]
-    end
-
-    subgraph "Harness Service (Internal)"
-        H --> M[Apply/Reject Prescription Logic]
-        M --> N[Update Configuration / Create Audit Log]
-    end
-```
-
-Sources:
-- [orchestrator/api/harness.py:1-129]()
-- [orchestrator/tests/test_harness_api.py:1-191]()
-
-## Self-Management Flag and Execution
-
-The HARNESS self-management capabilities are controlled by the `HARNESS_SELF_MANAGEMENT_ENABLED` configuration flag [orchestrator/tests/test_harness_self_management.py:14,124](). When this flag is `False`, no HARNESS tasks are listed or applied [orchestrator/tests/test_harness_self_management.py:165-177](). When enabled, approved board tasks are parsed, their targets resolved, and the prescribed changes are executed.
-
-The `HarnessService` includes a method `_apply_approved_board_tasks` which is responsible for processing approved tasks. It uses an executor to perform actions like `platform_list_tasks` and `platform_list_agents` to gather necessary information, and then applies the changes [orchestrator/tests/test_harness_self_management.py:168-173]().
-
-The `_parse_harness_task` method extracts structured information from a board task's title and description, such as `change_type`, `target_name`, `current_value`, `proposed_value`, `risk_score`, `rationale`, and `expected_improvement` [orchestrator/tests/test_harness_self_management.py:81-96](). It also attempts to resolve the `target_name` to a `target_id` (e.g., an agent ID) [orchestrator/tests/test_harness_self_management.py:83,88](). If a target name cannot be resolved, `target_id` will be `None`, and the system will not attempt to apply the change to an unknown target [orchestrator/tests/test_harness_self_management.py:111-121]().
-
-Sources:
-- [orchestrator/tests/test_harness_self_management.py:1-126]()
-
-## Governance Gates and Power Modes
-
-The HARNESS system incorporates governance gates through its risk scoring and human approval process. Changes with higher risk scores are not automatically applied but are instead converted into board tasks, requiring explicit human review and approval via the HARNESS API.
-
-### Power Mode Adjustments
-
-The HARNESS can propose changes to the platform's power modes. For example, a `power_mode_upgrade` or `power_mode_downgrade` prescription maps to the `platform_set_power_mode` action, which updates the `workspace.settings['power_mode']` [orchestrator/tests/test_harness_routing_rule.py:151-159](). This allows the system to autonomously adjust its operational intensity based on observed performance and resource utilization.
-
-Sources:
-- [orchestrator/tests/test_harness_routing_rule.py:151-159]()
-
-## Routing Rule Mutation
-
-One of the self-management capabilities of the HARNESS is the ability to mutate routing rules. This allows the system to dynamically optimize how messages are routed to agents or workflows based on observed patterns and performance.
-
-### `platform_create_routing_rule` Action
-
-The `platform_create_routing_rule` action is used to add new routing rules to the system [orchestrator/modules/tools/discovery/actions_routing.py](). This action takes parameters such as `source_channel`, `source_pattern`, `target_agent_id`, `target_workflow_id`, `intent_keywords`, and `priority` [orchestrator/tests/test_harness_routing_rule.py:92-94,135-138]().
-
-The `create_routing_rule` handler function (in `modules/tools/discovery/handlers_routing.py`) inserts a new row into the `routing_rules` table, ensuring it is workspace-scoped [orchestrator/tests/test_harness_routing_rule.py:91-99](). It validates that the rule includes both a target (agent or workflow) and a matcher (e.g., `source_channel` or `source_pattern`), failing closed if these are missing [orchestrator/tests/test_harness_routing_rule.py:106-118](). It also handles invalid priority values by coercing them to a default (e.g., 0) [orchestrator/tests/test_harness_routing_rule.py:120-127]().
-
-### HARNESS Integration
-
-When the HARNESS prescribes a `routing_rule_add` change, the `_auto_apply_prescription` method in `HarnessService` maps this prescription to the `platform_create_routing_rule` action with the appropriate parameters [orchestrator/tests/test_harness_routing_rule.py:131-149](). This enables the HARNESS to autonomously create or modify routing rules to improve system efficiency or agent allocation.
-
-Sources:
-- [orchestrator/modules/tools/discovery/actions_routing.py]()
-- [orchestrator/modules/tools/discovery/handlers_routing.py]()
-- [orchestrator/tests/test_harness_routing_rule.py:1-149]()
-
-## Platform Actions for HARNESS
-
-The HARNESS service exposes several platform actions that allow agents or administrators to interact with its functionality:
-
-*   `platform_harness_status`: Returns the current status of the HARNESS optimization loop, including whether it's disabled, running, failed, dormant, or completed [orchestrator/modules/tools/discovery/actions_harness.py:9-37](). This is useful for checking team performance, optimization status, or overall organizational health. The `harness_status` handler retrieves this information from `HarnessService.get_status` [orchestrator/modules/tools/discovery/handlers_harness.py:14-26]().
-*   `platform_harness_trigger`: Manually triggers a HARNESS optimization run outside its weekly cron schedule [orchestrator/modules/tools/discovery/actions_harness.py:39-61](). This is useful after significant organizational changes or incidents. The `harness_trigger` handler calls `HarnessService.trigger_now` [orchestrator/modules/tools/discovery/handlers_harness.py:29-45]().
-*   `platform_harness_history`: Lists past HARNESS optimization runs, including dates, prescription counts, applied/queued counts, and convergence status [orchestrator/modules/tools/discovery/actions_harness.py:63-89](). This allows review of historical optimizations. The `harness_history` handler reads baseline files from workspace storage to compile this history [orchestrator/modules/tools/discovery/handlers_harness.py:48-89]().
-
-These actions are registered in the `ActionRegistry` and have defined permission levels and example utterances for discovery [orchestrator/modules/tools/discovery/actions_harness.py:9-89]().
-
-Sources:
-- [orchestrator/modules/tools/discovery/actions_harness.py:1-89]()
-- [orchestrator/modules/tools/discovery/handlers_harness.py:1-90]()
+`POST /api/harness/prescriptions/{rx_id}/approve` and `/reject` remain until PRD-263 phase 3 removes them (US-047). The weekly run files no Task, so they act only on a [HARNESS] Task filed before PRD-263, and only while `HARNESS_SELF_MANAGEMENT_ENABLED` is on (default off).
 
 ## Idle-in-Transaction Prevention
 
-A critical aspect of the HARNESS service's robustness, along with other long-running services like the coordinator and heartbeat, is the prevention of "idle in transaction" database states. This issue, where a database connection holds an open transaction across long `await` points (e.g., LLM calls), can block DDL and lead to performance problems.
-
-The solution involves calling `end_open_transaction(db)` immediately before any long `await` operation. This commits the current session, releasing the transaction and returning the connection to an idle state. The `test_w1s9_idle_in_tx.py` suite specifically tests this behavior, ensuring that the commit happens *between* database reads and subsequent `await` calls [orchestrator/tests/test_w1s9_idle_in_tx.py:1-23,170-177]().
+A run commits its session before each phase (`end_open_transaction(db)`), so the connection never sits idle in a transaction across a phase's long awaits. The `test_w1s9_idle_in_tx.py` suite checks that the commit happens between the database reads and the awaits that follow them.
 
 Sources:
-- [orchestrator/tests/test_w1s9_idle_in_tx.py:1-23,170-177]()
+- [orchestrator/tests/test_w1s9_idle_in_tx.py]()
 
 ## Knowledge Graph Single Store and Heartbeat
 
