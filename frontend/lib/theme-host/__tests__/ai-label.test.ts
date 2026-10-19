@@ -4,10 +4,11 @@
  *
  * app/chat/layout.tsx is rendered for real, with the default chat (its input, the one Mission
  * Mode uses too: chat.tsx draws FencedMultimodalInput), with builtin Play's chat (its message box,
- * through the lazy slot the layout hands the route switch), and with a fixture theme that
- * registers /chat (the route switch draws the host's chat screen inside the theme's own page
- * markup and stylesheet). The label renders once, after the route switch, outside the theme's
- * page, with role="note" and the same words. Then hostile fixture themes set `display:none`,
+ * through the lazy slot builtin Play registers for /chat, lib/theme-host/builtin/play-slots.tsx),
+ * and with an installed fixture theme that registers /chat through the theme host (ThemeSlot draws
+ * its page, the host's chat screen inside the theme's own markup and stylesheet, in MainLayout).
+ * The label renders once, after ThemeSlot, outside the theme's page, with role="note" and the
+ * same words. Then hostile fixture themes set `display:none`,
  * `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the label (and a fade
  * on an ancestor): each time the label reports itself hidden, the chat's input is disabled with
  * the PRD's words, and a card's button outside the composer stays clickable (approval cards are
@@ -21,12 +22,15 @@
  * `top: -500px` therefore reaches the check the way a browser's layout would hand it over.
  */
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import { createElement as h, type ReactElement } from 'react'
+import { createElement as h, type ReactElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ThemeEntry } from '@/lib/theme-host/registry-types'
+
 const state = vi.hoisted(() => ({
+  entry: null as ThemeEntry | null,
   layout: 'fallback' as 'fallback' | 'theme' | 'pending',
-  /** What the route switch's play slot draws: Play's chat, or the chat inside a fixture theme's page. */
+  /** What builtin Play's /chat slot draws: Play's chat. */
   slot: null as null | (() => ReactElement),
 }))
 
@@ -37,11 +41,15 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/hooks/use-studio-theme', () => ({
   useIsStudio: () => state.layout === 'theme',
-  useActiveTheme: () => null,
+  useActiveTheme: () => state.entry,
   useThemeLayout: () => state.layout,
 }))
 vi.mock('@/components/play/chat/play-chat-lazy', () => ({
   PlayChat: () => (state.slot ? state.slot() : null),
+}))
+/** The theme's frame around an installed theme's page: its content alone here. */
+vi.mock('@/components/layout/main-layout', () => ({
+  MainLayout: ({ children }: { readonly children?: ReactNode }) => children,
 }))
 vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => null }))
 vi.mock('@/components/chatbot/agent-selector', () => ({ AgentSelector: () => null }))
@@ -55,9 +63,12 @@ import { AI_LABEL_ATTR, AiLabelGate } from '@/components/ai-label/ai-label'
 import { AI_LABEL_FENCE_ATTR } from '@/components/ai-label/ai-label-fence'
 import { FencedMultimodalInput } from '@/components/ai-label/fenced-multimodal-input'
 import { MessageBox, PLACEHOLDER as PLAY_PLACEHOLDER } from '@/components/play/chat/message-box'
+import { ThemeHostContext, type ThemeHostContextValue } from '@/components/theme-host/theme-host-context'
 import { AI_LABEL_PAUSED_TEXT, aiLabelText } from '@/lib/ai-label/copy'
 import { useAiLabelStore, usePublishAnsweringAgent } from '@/lib/ai-label/store'
 import { aiLabelHiddenReason } from '@/lib/ai-label/visibility'
+import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
+import { CHAT_HREF } from '@/lib/ticket-links'
 
 type Page = 'default' | 'play' | 'theme'
 
@@ -114,10 +125,27 @@ function themeChat(): ReactElement {
   return h('div', { 'data-testid': 'theme-page', 'data-theme-page': '' }, h('header', null, 'Hello theme'), playChat())
 }
 
+function FixtureFrame({ children }: { readonly children?: ReactNode }): ReactElement {
+  return h('div', { 'data-testid': 'theme-frame' }, children)
+}
+
+/** The theme host with an installed fixture theme active, its /chat page registered (registerPage). */
+const FIXTURE_THEME_HOST: ThemeHostContextValue = {
+  status: 'active',
+  reason: null,
+  frame: FixtureFrame,
+  slots: new Map(),
+  pages: new Map<string, unknown>([[CHAT_HREF, themeChat]]),
+  routes: new Map(),
+  reportRenderFailure: () => undefined,
+}
+
 function renderChat(page: Page) {
+  state.entry = page === 'play' ? BUILTIN_PLAY_ENTRY : null
   state.layout = page === 'default' ? 'fallback' : 'theme'
-  state.slot = page === 'play' ? playChat : page === 'theme' ? themeChat : null
-  return render(h(ChatLayout, null, h('div', { 'data-testid': 'core-chat' }, card(), defaultChat())))
+  state.slot = page === 'play' ? playChat : null
+  const chat = h(ChatLayout, null, h('div', { 'data-testid': 'core-chat' }, card(), defaultChat()))
+  return render(page === 'theme' ? h(ThemeHostContext.Provider, { value: FIXTURE_THEME_HOST }, chat) : chat)
 }
 
 function inputOf(page: Page): HTMLElement {
@@ -146,6 +174,7 @@ afterEach(() => {
   document.head.querySelectorAll('[data-test-theme]').forEach((sheet) => sheet.remove())
   document.documentElement.classList.remove(THEME_CLASS, HOSTILE_CLASS)
   useAiLabelStore.setState({ agentId: null, hidden: false })
+  state.entry = null
   state.layout = 'fallback'
   state.slot = null
 })
@@ -160,7 +189,7 @@ describe('the AI label on every in-app chat (PRD-264 EUAI-11a)', () => {
     const note = screen.getByRole('note', { name: AUTO_LABEL })
     expect(note).toHaveTextContent(AUTO_LABEL)
     expect(theLabel()).toBe(note)
-    // after the route switch, outside the page and the theme's markup: no page or theme draws it
+    // after ThemeSlot, outside the page and the theme's markup: no page or theme draws it
     const pageRoot = screen.getByTestId(page === 'default' ? 'core-chat' : page === 'play' ? 'play-chat' : 'theme-page')
     expect(pageRoot.contains(note)).toBe(false)
     expect(note.closest(`[${AI_LABEL_FENCE_ATTR}]`)).toBeNull()
@@ -226,7 +255,7 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     expect(useAiLabelStore.getState().hidden).toBe(false)
   })
 
-  it('shows the label on the Conversations page (its own gate, on the left) and says so when it is hidden', async () => {
+  it('shows the label on a theme route such as Conversations (its own gate, on the left) and says so when it is hidden', async () => {
     render(h(AiLabelGate, { placement: 'bottom-left', children: h('ul', { 'aria-label': 'Conversations' }) }))
     expect(screen.getByRole('note', { name: AUTO_LABEL })).toHaveClass('left-3')
     addThemeSheet(`html.${HOSTILE_CLASS} ${LABEL} { visibility: hidden; }`)

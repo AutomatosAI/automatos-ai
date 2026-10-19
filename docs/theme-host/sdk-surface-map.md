@@ -176,12 +176,14 @@ EU AI Act Art. 50(1) and (5): a person chatting in the app is told, at first exp
 session, that they are talking to an AI. The host draws that notice; no theme draws it, moves it or turns it
 off, and no manifest field, SDK name or setting does either.
 
-- **Where the host draws it.** `app/chat/layout.tsx` wraps the route switch in `AiLabelGate`
-  (`frontend/components/ai-label/ai-label.tsx`), which renders the label after the switch: outside it and
-  outside the theme's page slot. So the default chat (with Mission Mode), Play's chat and any theme's `/chat`
-  show it, once. Play's Conversations page (`app/conversations/page.tsx`) renders its own gate. Every `/x/`
-  route whose manifest `uses` the `chat` area must render the same gate in its layout: the PRD-261 wave that
-  adds `frontend/app/x/` carries that as an acceptance criterion, with a test that fails without it.
+- **Where the host draws it.** `app/chat/layout.tsx` wraps `ThemeSlot` (the theme's page slot) in
+  `AiLabelGate` (`frontend/components/ai-label/ai-label.tsx`), which renders the label after it, outside it. So
+  the default chat (with Mission Mode), Play's chat and any theme's `/chat` show it, once. Every `/x/` theme
+  route (`app/x/[...path]/page.tsx`, Play's Conversations among them) renders the same gate around
+  `MainLayout`, on the left (Auto's widget takes the bottom right), so the label sits outside the theme's frame
+  and route. Every theme route gets it: a manifest's `uses` is checked (`lib/theme-host/package-manifest.ts`)
+  but not handed to the host, so the host can't yet tell which routes use the `chat` area.
+  `components/theme-host/__tests__/theme-slot-route.test.tsx` proves the gate is there.
 - **What it says.** "Auto is an AI", or "{agent name} is an AI" while the owner's picked agent answers
   (`frontend/lib/ai-label/copy.ts`), in theme tokens, with `role="note"` and the same words for screen readers.
 - **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or

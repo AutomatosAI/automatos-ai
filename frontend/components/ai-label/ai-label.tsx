@@ -12,9 +12,10 @@ import { useAiLabelCheck } from './use-ai-label-check'
  * PRD-264 EUAI-11a (EU AI Act Art. 50(1), (5)) — the host's AI label on every in-app chat.
  *
  * A route that holds a chat wraps its page in <AiLabelGate> (app/chat/layout.tsx: the default
- * chat with Mission Mode, Play's chat and any theme's /chat; app/conversations/page.tsx). The
- * gate renders the label after the page, outside the route switch and outside the theme's page
- * slot, so no page, frame or theme component draws it or can leave it out. It reads "Auto is an
+ * chat with Mission Mode, Play's chat and any theme's /chat; app/x/[...path]/page.tsx: every theme
+ * route, Play's Conversations among them). The gate renders the label after the page, outside the
+ * theme's page slot (ThemeSlot) and outside the theme's frame and routes, so no page, frame or theme
+ * component draws it or can leave it out. It reads "Auto is an
  * AI", or "{agent name} is an AI" while the owner's picked agent answers, in theme tokens, with
  * role="note" and the same words for screen readers.
  *
