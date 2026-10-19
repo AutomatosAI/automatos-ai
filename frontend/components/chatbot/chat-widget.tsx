@@ -32,6 +32,7 @@ import {
 import { useUser } from '@/lib/auth-hooks'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
 import { useChat } from '@/lib/chat/hooks'
+import { WidgetAiLabelFrame } from '@/components/ai-label/widget-ai-label' // PRD-264 EUAI-11a
 import { usePageContext } from '@/lib/page-context'
 import { getPageEntry } from '@/lib/generated/page-manifest'
 import { useSystemRole } from '@/contexts/role-context'
@@ -360,12 +361,7 @@ function WidgetConversation({
     (qp) => !qp.admin_only || isAdmin,
   )
 
-  const {
-    messages,
-    isLoading,
-    sendMessage,
-    stop,
-  } = useChat({
+  const { messages, isLoading, sendMessage, stop } = useChat({
     // Empty id → the backend creates the chat and streams its id back.
     id: initialChatId ?? '',
     initialMessages,
@@ -397,7 +393,7 @@ function WidgetConversation({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <WidgetAiLabelFrame>
       {/* Messages area */}
       <div
         ref={scrollRef}
@@ -505,7 +501,7 @@ function WidgetConversation({
           )}
         </div>
       </div>
-    </div>
+    </WidgetAiLabelFrame>
   )
 }
 

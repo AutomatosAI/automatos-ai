@@ -156,7 +156,8 @@ at least half opaque through all its ancestors, at least 4 px each way and wholl
 While the check fails, the chat is paused: every composer inside `AiLabelFence` is disabled, and the chat says
 "This theme hides the AI notice, so chat is paused. Switch theme in Settings." A theme rule that hides, fades,
 shrinks or moves the label therefore never leaves a chat running without it; it stops the chat. The fence
-wraps only the composer, so a theme can't use the label to switch off the approval cards either.
+wraps only the composer, so a theme can't use the label to switch off the approval cards either. Auto's
+floating widget draws its own label in its panel (`WidgetAiLabelFrame`), and its fence pauses only the widget.
 
 Not checked, and so review rules for the label as for the cards: an element the theme draws over it (an
 overlay, a pseudo-element, a fixed layer), and code the theme runs in the page.

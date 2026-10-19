@@ -37,9 +37,9 @@ class CtoPromptBuilder:
         memories: Optional[List[str]] = None,
         tool_names: Optional[List[str]] = None,
         platform_state: Optional[Dict[str, Any]] = None,
-        workspace_name: Optional[str] = None,
         db_session: Any = None,
         workspace_id: Any = None,
+        widget_mode: bool = False,
     ) -> str:
         """
         Build the complete CTO system prompt.
@@ -52,17 +52,17 @@ class CtoPromptBuilder:
             memories: Retrieved memory strings
             tool_names: Available tool names
             platform_state: Live platform metrics (workspace count, agent count, etc.)
-            workspace_name: The workspace the agent acts for, named in the closing AI rule only
-                when it is a public name (PRD-264 FR-15)
             db_session: SQLAlchemy session the rule's public name is read through
             workspace_id: The workspace the agent acts for; with ``db_session`` the rule names
                 its business profile's company name, else its public workspace name (FR-15),
                 the same way ContextService's prompt does
+            widget_mode: A public widget visitor's turn: the rule names only the Site's public
+                ``display_name``, never the workspace's (FR-15)
 
         PRD-264 EUAI-11a: the prompt ends with the platform rule that the agent answers
         truthfully that it is an AI, after the soul document, so the soul can't remove it.
         """
-        from modules.context.ai_identity_rule import principal_for_workspace, with_ai_identity_rule
+        from modules.context.ai_identity_rule import principal_for_turn, with_ai_identity_rule
 
         now = datetime.now(timezone.utc)
         time_str = now.strftime("%Y-%m-%d %H:%M UTC")
@@ -110,7 +110,7 @@ class CtoPromptBuilder:
         parts.append(CtoPromptBuilder._response_rules())
 
         # ── 7. The platform AI rule, last (PRD-264) ──
-        principal = principal_for_workspace(db_session, workspace_id, workspace_name)
+        principal = principal_for_turn(db_session, workspace_id, widget_mode)
         return with_ai_identity_rule("\n\n".join(parts), principal)
 
     @staticmethod

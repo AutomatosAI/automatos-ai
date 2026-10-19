@@ -173,7 +173,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   document.head.querySelectorAll('[data-test-theme]').forEach((sheet) => sheet.remove())
   document.documentElement.classList.remove(THEME_CLASS, HOSTILE_CLASS)
-  useAiLabelStore.setState({ agentId: null, hidden: false })
+  useAiLabelStore.setState({ agentId: null, hiddenLabels: [] })
   state.entry = null
   state.layout = 'fallback'
   state.slot = null
@@ -197,7 +197,7 @@ describe('the AI label on every in-app chat (PRD-264 EUAI-11a)', () => {
     // the composer sits in the label's fence, and runs while the label can be seen
     expect(inputOf(page).closest(`[${AI_LABEL_FENCE_ATTR}]`)).not.toBeNull()
     expect(inputOf(page)).toBeEnabled()
-    expect(useAiLabelStore.getState().hidden).toBe(false)
+    expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -250,9 +250,9 @@ describe('no theme can hide the AI label (PRD-264 EUAI-11a)', () => {
     document.documentElement.classList.add(HOSTILE_CLASS)
     addThemeSheet(`html.${HOSTILE_CLASS} ${LABEL} { opacity: 0; }`)
     const view = renderChat('play')
-    await waitFor(() => expect(useAiLabelStore.getState().hidden).toBe(true))
+    await waitFor(() => expect(useAiLabelStore.getState().hiddenLabels).toEqual(['page']))
     view.unmount()
-    expect(useAiLabelStore.getState().hidden).toBe(false)
+    expect(useAiLabelStore.getState().hiddenLabels).toEqual([])
   })
 
   it('shows the label on a theme route such as Conversations (its own gate, on the left) and says so when it is hidden', async () => {

@@ -266,7 +266,7 @@ class ContextService:
 
             # --- 6. Assemble system prompt (PRD-201 S4: cache-stable ordering), the AI rule last (PRD-264) ---
             system_prompt, cacheable_prefix = self._assemble_prompt(included)
-            system_prompt = with_rule_for_mode(system_prompt, mode, ctx.workspace_name, ctx.db_session, ctx.workspace_id)
+            system_prompt = with_rule_for_mode(system_prompt, mode, ctx.db_session, ctx.workspace_id, ctx.widget_mode)
 
             # --- 7. Load tools ---
             tools, tool_choice = await self._load_tools(config, ctx)

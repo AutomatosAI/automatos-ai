@@ -183,7 +183,10 @@ off, and no manifest field, SDK name or setting does either.
   `MainLayout`, on the left (Auto's widget takes the bottom right), so the label sits outside the theme's frame
   and route. Every theme route gets it: a manifest's `uses` is checked (`lib/theme-host/package-manifest.ts`)
   but not handed to the host, so the host can't yet tell which routes use the `chat` area.
-  `components/theme-host/__tests__/theme-slot-route.test.tsx` proves the gate is there.
+  `components/theme-host/__tests__/theme-slot-route.test.tsx` proves the gate is there. Auto's floating
+  widget, which `MainLayout` draws on every page but `/chat` (theme-drawn pages among them), carries its own
+  label inside its panel (`WidgetAiLabelFrame`, `frontend/components/ai-label/widget-ai-label.tsx`), checked
+  the same way; while it is hidden, the widget's input and starter chips are disabled.
 - **What it says.** "Auto is an AI", or "{agent name} is an AI" while the owner's picked agent answers
   (`frontend/lib/ai-label/copy.ts`), in theme tokens, with `role="note"` and the same words for screen readers.
 - **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or
@@ -199,4 +202,5 @@ off, and no manifest field, SDK name or setting does either.
 - **Proof.** `frontend/lib/theme-host/__tests__/ai-label.test.ts` renders the chat layout with the default chat,
   builtin Play's chat and a fixture theme that owns `/chat`, then with hostile fixture sheets that set
   `display:none`, `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the label: in each
-  hiding case the input is disabled.
+  hiding case the input is disabled. `frontend/lib/theme-host/__tests__/ai-label-widget.test.tsx` does the
+  same for Auto's floating widget.

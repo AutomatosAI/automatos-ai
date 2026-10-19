@@ -1,10 +1,10 @@
 'use client'
 
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef } from 'react'
 
 import { useAgents } from '@/hooks/use-agent-api'
 import { AI_LABEL_PAUSED_TEXT, UNNAMED_AGENT, aiLabelText } from '@/lib/ai-label/copy'
-import { useAiLabelPaused, useAiLabelStore } from '@/lib/ai-label/store'
+import { PAGE_AI_LABEL, useAiLabelPaused, useAiLabelStore } from '@/lib/ai-label/store'
 
 import { useAiLabelCheck } from './use-ai-label-check'
 
@@ -22,7 +22,8 @@ import { useAiLabelCheck } from './use-ai-label-check'
  * No theme can hide it: the label checks it can be seen (use-ai-label-check.ts) and publishes
  * the answer (lib/ai-label/store.ts). While it can't be seen, every chat composer's fence
  * (ai-label-fence.tsx) disables the input, and the gate says why (AI_LABEL_PAUSED_TEXT). No
- * prop, manifest field or setting turns the label off.
+ * prop, manifest field or setting turns the label off. Auto's floating widget, which MainLayout
+ * draws on every page but /chat, carries its own label in its panel (widget-ai-label.tsx).
  */
 
 export const AI_LABEL_ATTR = 'data-ai-label'
@@ -89,14 +90,15 @@ export interface AiLabelGateProps {
 
 /** A chat route's page with the host's AI label after it, and the pause notice while the label is hidden. */
 export function AiLabelGate({ children, placement = 'bottom-right' }: AiLabelGateProps) {
-  const hidden = useAiLabelPaused()
+  const hidden = useAiLabelPaused(PAGE_AI_LABEL)
   const setHidden = useAiLabelStore((state) => state.setHidden)
+  const setPageHidden = useCallback((labelHidden: boolean) => setHidden(PAGE_AI_LABEL, labelHidden), [setHidden])
   // A gate that goes takes its pause with it; the next one checks its own label as it mounts.
-  useEffect(() => () => setHidden(false), [setHidden])
+  useEffect(() => () => setPageHidden(false), [setPageHidden])
   return (
     <>
       {children}
-      <AiLabel placement={placement} onHiddenChange={setHidden} />
+      <AiLabel placement={placement} onHiddenChange={setPageHidden} />
       {hidden ? (
         <p role="alert" className={`${PAUSED_CLASS} ${PLACEMENT_CLASS[placement]}`}>
           {AI_LABEL_PAUSED_TEXT}

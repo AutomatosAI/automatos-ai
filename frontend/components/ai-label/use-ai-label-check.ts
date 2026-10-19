@@ -9,6 +9,9 @@ import { aiLabelHiddenReason } from '@/lib/ai-label/visibility'
  * have changed: on mount; when the theme changes (the style and the tone are classes and
  * attributes on <html>, and a theme's stylesheet is an element in <head>); when the window is
  * resized; and every RECHECK_INTERVAL_MS, for a stylesheet that finishes loading later.
+ *
+ * `firstCheckDelayMs` puts the first check off for a label that animates in (Auto's widget panel
+ * fades in from opacity 0): checked at once it would read as hidden. 0, the default, checks on mount.
  */
 
 /** A slow safety net: a theme's sheet that loads after mount changes no element the observer watches. */
@@ -24,18 +27,33 @@ function observeThemeChanges(onChange: () => void): () => void {
   return () => observer.disconnect()
 }
 
+/** Runs `check` now, or after `delayMs`; returns what cancels a check still to come. */
+function firstCheck(check: () => void, delayMs: number): () => void {
+  if (delayMs <= 0) {
+    check()
+    return () => undefined
+  }
+  const timer = window.setTimeout(check, delayMs)
+  return () => window.clearTimeout(timer)
+}
+
 /** Calls `onHiddenChange` with true when the label at `ref` can't be seen, false when it can. */
-export function useAiLabelCheck(ref: RefObject<HTMLElement>, onHiddenChange: (hidden: boolean) => void): void {
+export function useAiLabelCheck(
+  ref: RefObject<HTMLElement>,
+  onHiddenChange: (hidden: boolean) => void,
+  firstCheckDelayMs = 0,
+): void {
   useEffect(() => {
     const check = () => onHiddenChange(aiLabelHiddenReason(ref.current, window) !== null)
-    check()
+    const cancelFirst = firstCheck(check, firstCheckDelayMs)
     const stopObserving = observeThemeChanges(check)
     const timer = window.setInterval(check, RECHECK_INTERVAL_MS)
     window.addEventListener('resize', check)
     return () => {
+      cancelFirst()
       stopObserving()
       window.clearInterval(timer)
       window.removeEventListener('resize', check)
     }
-  }, [ref, onHiddenChange])
+  }, [ref, onHiddenChange, firstCheckDelayMs])
 }

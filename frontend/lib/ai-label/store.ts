@@ -4,35 +4,49 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 
 /**
- * PRD-264 EUAI-11a — the host AI label's shared state: which agent the chat on screen is talking
- * to, and whether a theme has hidden the label.
+ * PRD-264 EUAI-11a — the host AI labels' shared state: which agent the chat on screen is talking
+ * to, and which labels a theme has hidden.
  *
- * The label sits in the chat route's layout, outside the page and the theme's slot
- * (components/ai-label/ai-label.tsx), so it can't read the chat's state, and the chat's
- * composers can't read the label's. The chat's stream hook (lib/chat/use-chat-with-receipts.ts)
- * publishes the agent the owner picked; the label says "{agent name} is an AI", or "Auto is an
- * AI" when none is picked. The label publishes whether it can be seen; every composer's fence
- * (components/ai-label/ai-label-fence.tsx) disables its input while it can't.
+ * There are two labels, one per kind of in-app chat. The page's label sits in the chat route's
+ * layout, outside the page and the theme's slot (components/ai-label/ai-label.tsx); Auto's
+ * floating widget draws its own inside its panel (components/ai-label/widget-ai-label.tsx). Each
+ * label publishes whether it can be seen, and each composer's fence
+ * (components/ai-label/ai-label-fence.tsx) disables its input while the label beside it can't.
+ * The chat's stream hook (lib/chat/use-chat-with-receipts.ts) publishes the agent the owner
+ * picked; the page's label says "{agent name} is an AI", or "Auto is an AI" when none is picked.
  */
+
+/** The page's label (AiLabelGate) and Auto's floating widget's label. */
+export type AiLabelId = 'page' | 'widget'
+
+export const PAGE_AI_LABEL: AiLabelId = 'page'
+export const WIDGET_AI_LABEL: AiLabelId = 'widget'
+
 export interface AiLabelState {
   /** The picked agent's id; null while Auto answers. */
   readonly agentId: number | null
-  /** The label is mounted and a theme keeps it from being seen: the chat is paused. */
-  readonly hidden: boolean
+  /** The labels that are mounted and that a theme keeps from being seen: their chats are paused. */
+  readonly hiddenLabels: readonly AiLabelId[]
   readonly setAgentId: (agentId: number | null) => void
-  readonly setHidden: (hidden: boolean) => void
+  readonly setHidden: (label: AiLabelId, hidden: boolean) => void
+}
+
+/** `labels` with `label` in it when `hidden`, without it otherwise (a new list either way). */
+function withHidden(labels: readonly AiLabelId[], label: AiLabelId, hidden: boolean): readonly AiLabelId[] {
+  const others = labels.filter((candidate) => candidate !== label)
+  return hidden ? [...others, label] : others
 }
 
 export const useAiLabelStore = create<AiLabelState>((set) => ({
   agentId: null,
-  hidden: false,
+  hiddenLabels: [],
   setAgentId: (agentId) => set({ agentId }),
-  setHidden: (hidden) => set({ hidden }),
+  setHidden: (label, hidden) => set((state) => ({ hiddenLabels: withHidden(state.hiddenLabels, label, hidden) })),
 }))
 
-/** Whether the chat is paused because the label can't be seen. */
-export function useAiLabelPaused(): boolean {
-  return useAiLabelStore((state) => state.hidden)
+/** Whether the chat beside `label` is paused because that label can't be seen. */
+export function useAiLabelPaused(label: AiLabelId = PAGE_AI_LABEL): boolean {
+  return useAiLabelStore((state) => state.hiddenLabels.includes(label))
 }
 
 /** Publishes the chat's picked agent while the chat is mounted; Auto again once it unmounts. */
