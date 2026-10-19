@@ -225,7 +225,7 @@ def _status_of(result: Dict[str, Any]) -> str:
     """``success``; ``asked`` for a call that waits for the owner's click instead of
     running (PRD-263 US-018: an ask is not a failure); otherwise ``error``. The ask is
     read as the tool router reads it (``card_raised.is_waiting``, envelopes included)."""
-    from .card_raised import is_waiting
+    from modules.tools.execution.card_raised import is_waiting
 
     if result.get("success", result.get("successful")):
         return SUCCESS_STATUS
