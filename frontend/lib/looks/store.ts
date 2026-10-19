@@ -205,15 +205,24 @@ export interface LookOutbox {
 export function createLookOutbox(): LookOutbox {
   let tail: Promise<unknown> = Promise.resolve()
   let queued = 0
+  /** Saves queued and not yet answered: at 0 a new save has nothing before it, so it starts at once. */
+  let unanswered = 0
   const newest = new Map<string, number>()
   return {
     queue(key, send) {
       queued += 1
       const ticket = queued
       newest.set(key, ticket)
-      tail = tail
-        .then(() => (newest.get(key) === ticket ? send() : undefined))
+      const run = () => (newest.get(key) === ticket ? send() : undefined)
+      // Started now when idle (a newer save queued in the same tick then waits behind it, never
+      // drops it); otherwise once the saves before it have their answers. A throwing send rejects.
+      const started = unanswered === 0 ? new Promise<unknown>((resolve) => resolve(run())) : tail.then(run)
+      unanswered += 1
+      tail = started
         .catch((error: unknown) => console.warn("[looks] a save's answer couldn't be handled:", error))
+        .finally(() => {
+          unanswered -= 1
+        })
     },
   }
 }

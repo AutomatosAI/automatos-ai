@@ -1,3 +1,6 @@
+// @vitest-environment node
+// A route handler runs on Node, so its Headers are Node's: jsdom's Headers drops `range` on every
+// set() or append() (its privileged no-CORS cleanup runs under every guard), which no server does.
 /**
  * PRD-261 A-08b — GET /api/themes/files/<digest>/<path>, the same-origin proxy a native import()
  * and a <video src> reach an installed theme's files through. SaaS: the Clerk session is read in

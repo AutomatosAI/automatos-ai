@@ -113,8 +113,17 @@ vi.mock('@/components/ui/sheet', () => ({
 }))
 
 // Play's slots as they are once their chunks have loaded: the screen renders in the same pass.
-vi.mock('@/components/play/chat/play-chat-lazy', async () => ({
-  PlayChat: (await import('@/components/play/chat/play-chat')).PlayChat,
+// The chat's slot reads the real PlayChat from a holder the imports below fill. Its factory may not
+// import play-chat itself: play-chat imports MainLayout, which reaches this slot through the
+// builtin registrations (theme-slot-registrations -> builtin/slots -> play-slots, PRD-261 A-04b),
+// so a factory awaiting play-chat waits on MainLayout, which waits on the factory: the file never loads.
+const loadedChat = vi.hoisted(() => ({ PlayChat: null as null | (() => React.ReactElement | null) }))
+vi.mock('@/components/play/chat/play-chat-lazy', () => ({
+  PlayChat: () => {
+    const Screen = loadedChat.PlayChat
+    if (Screen === null) throw new Error('play-chat has not loaded: the test imports it below')
+    return <Screen />
+  },
 }))
 vi.mock('@/components/play/shell/play-frame-lazy', async () => ({
   PlayFrame: (await import('@/components/play/shell/play-frame')).PlayFrame,
@@ -130,12 +139,14 @@ import NotFound from '@/app/not-found'
 import { MainLayout } from '@/components/layout/main-layout'
 import { WIDER_SCREEN_NOTE } from '@/components/looks/play-only-route'
 import { MASCOT_LABEL } from '@/components/looks/style/style-mascots'
-import { OPENING } from '@/components/play/chat/play-chat'
+import { OPENING, PlayChat } from '@/components/play/chat/play-chat'
 import { PlayConversations } from '@/components/play/conversations/play-conversations'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { LAPTOP_WIDTH_PX, PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION } from '@/lib/ui-style'
+
+loadedChat.PlayChat = PlayChat
 
 const CHAT_PAGE = 'The core chat page'
 const STUDIO_PAGE = 'A Studio page Play has no design for'
