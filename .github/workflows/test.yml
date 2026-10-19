@@ -1080,10 +1080,6 @@ jobs:
       # botocore and fetches it back by its presigned URL.
       - name: Backend — botocore keeps the services we call, and builds a client for each
         run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_botocore.py
-      # PRD-262 US-016: the code is copied in owned by the automatos user (uid and
-      # gid 1000) instead of through a `chown -R /app` layer, and /app and the
-      # directories the named volumes mount on are the user's own, so the app writes
-      # there as before. Runs as the image's own user.
       # PRD-262 US-032: the compile stage compiles the boot modules (the image's own
       # scripts/boot_modules.py lists them), and the production stage copies them in with
       # the code. Every .pyc under /app is this Python's unchecked-hash bytecode of the
@@ -1092,6 +1088,10 @@ jobs:
       # (scripts/ci/image_app_bytecode.py). Runs as the image's own user.
       - name: Backend — the boot modules ship as bytecode of their own source
         run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_app_bytecode.py
+      # PRD-262 US-016: the code is copied in owned by the automatos user (uid and
+      # gid 1000) instead of through a `chown -R /app` layer, and /app and the
+      # directories the named volumes mount on are the user's own, so the app writes
+      # there as before. Runs as the image's own user.
       - name: Backend — the app and its writable directories belong to the automatos user
         run: |
           docker run --rm --entrypoint sh parity-be -c '
