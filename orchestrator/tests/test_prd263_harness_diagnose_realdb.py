@@ -9,8 +9,9 @@ reports coverage, INSUFFICIENT_DATA, WATCH and REGRESSION.
 
 Most cases run the real pipeline on the transactional ``db_session`` with the platform
 actions faked (``helpers_harness_diagnose.judge``). The judged week is 2026-W42 with
-reference weeks W38-W41. The Benjamini-Hochberg case is pure. The last case runs a
-full tick on committed rows and checks the workspace volume.
+reference weeks W38-W41. The Benjamini-Hochberg case is pure. The dormancy case calls
+the real check, which the pipeline cases stub. The last case runs a full tick on
+committed rows and checks the workspace volume.
 """
 from __future__ import annotations
 
@@ -263,6 +264,23 @@ def test_workspace_b_never_appears(db_session, ws, seed_workspace):
     assert set(run["verdicts"]["agents"]) == {str(mine)}
     assert (hdx.metric(run, mine)["x_cur"], hdx.metric(run, mine)["n_cur"]) == (16, 20)
     assert "Their barista" not in run["report_md"]
+
+
+def test_a_workspace_with_no_heartbeat_history_is_not_dormant(db_session, seed_workspace):
+    """Dormancy is the active-agent count alone (Auto included). Before PR-1D a workspace
+    with no heartbeat_results rows read dormant_insufficient_data whatever its agents."""
+    from services.harness_service import HarnessService
+
+    workspace = seed_workspace(name="harness-dormancy")
+    hdx.auto(db_session, workspace)
+    for name in ("Barista", "Baker", "Roaster"):
+        hdx.agent(db_session, workspace, name)
+    service = HarnessService()
+
+    breakdown = service._sufficiency_breakdown(db_session, UUID(workspace))
+
+    assert breakdown == {"active_agents": 4, "min_required_agents": 3, "agents_ok": True}
+    assert service._dormancy(breakdown) is None
 
 
 # ── the full tick writes nothing to the volume ────────────────────────────────

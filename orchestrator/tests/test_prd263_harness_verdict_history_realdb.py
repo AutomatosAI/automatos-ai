@@ -3,10 +3,11 @@
 A first flag is WATCH; REGRESSION needs flags in two distinct, consecutive ISO weeks,
 or one flag below HARNESS_STRONG_P. The history is read from the workspace's
 completed ``harness_runs.verdicts``, so a rerun of a week already judged (Auto can call
-``platform_harness_trigger`` from chat) keeps that week's verdict and is never a second
-flag. The reference is the weeks of HARNESS_REF_DAYS before the judged one, less weeks
-already flagged for that agent and metric (a bad week is never absorbed into it) and
-less the weeks from a change HARNESS applied to that agent (``harness_task_ledger``).
+``platform_harness_trigger`` from chat) keeps that week's verdict, and the figures it
+came from, and is never a second flag. The reference is the weeks of HARNESS_REF_DAYS
+before the judged one, less weeks already flagged for that agent and metric (a bad
+week is never absorbed into it) and less the weeks from a change HARNESS applied to
+that agent (``harness_task_ledger``).
 
 Each case runs the real pipeline on the transactional ``db_session``
 (``helpers_harness_diagnose.judge``), one harness_runs row per judged week. The
@@ -67,6 +68,24 @@ def test_a_rerun_of_the_same_week_stays_watch(db_session, ws):
     assert first["verdict"] == "WATCH"
     assert (rerun["verdict"], rerun["reason"]) == ("WATCH", "kept")
     assert rerun_row["verdicts"]["convergence"] == "watching"
+
+
+def test_a_rerun_reports_the_figures_its_kept_verdict_came_from(db_session, ws):
+    """Late tickets land in the judged week between the two runs. The rerun keeps the
+    first run's WATCH and its 12 of 20, so the report never prints numbers that no
+    longer back the verdict."""
+    barista = hdx.agent(db_session, ws, "Barista")
+    _steady_then(db_session, ws, barista, judged_weeks=(0,))
+    hdx.judge(db_session, ws, hdx.WEEK)
+    hdx.tickets(db_session, ws, barista, 0, 8, 0)   # W42 now reads 20 of 28
+
+    rerun_row = hdx.judge(db_session, ws, hdx.WEEK)
+    rerun = hdx.metric(rerun_row, barista)
+
+    assert (rerun["verdict"], rerun["reason"]) == ("WATCH", "kept")
+    assert (rerun["x_cur"], rerun["n_cur"], rerun["x_ref"], rerun["n_ref"]) == (12, 20, 64, 80)
+    assert ("Task success fell from 80% (64 of 80) to 60% (12 of 20), p=0.031 "
+            "(this week's verdict from its first run)") in rerun_row["report_md"]
 
 
 def test_a_flagged_week_is_left_out_of_the_next_reference(db_session, ws):

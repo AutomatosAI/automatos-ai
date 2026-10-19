@@ -51,6 +51,8 @@ _MIN_AGENTS = 3
 # emitted it (model, description) until PRD-263 PR-1D, so [HARNESS] cards filed
 # before then can still carry it. The apply layer MUST refuse it: writing it
 # literally would set an agent's model/description to the string "review_needed".
+# _auto_apply_prescription refuses it, for the low-risk auto-apply path and the
+# approved-board-task path alike: both go through it.
 _PLACEHOLDER_PROPOSED_VALUE = "review_needed"
 # W4-S10: a fails_for_intent affinity must reach this many samples before HARNESS
 # treats it as a *sustained* tool failure worth surfacing (not a one-off).
@@ -161,6 +163,12 @@ class HarnessService:
           - scheduled_not_run_yet         — eligible but cron hasn't fired
           - completed                     — the latest run completed; with its
                                             coverage, convergence and verdict counts
+
+        ``active_agents`` counts two different sets. On ``completed`` it is the run's
+        own count: the agents DIAGNOSE judged or could not judge, never Auto (the
+        denominator of ``coverage``). On the dormant, scheduled and unfinished
+        statuses it is the dormancy count from _sufficiency_breakdown, which
+        includes Auto. Compare it only with figures from the same status.
 
         Runs are read from harness_runs (US-010); ``running`` from pg_locks (US-011).
         """
@@ -682,8 +690,6 @@ class HarnessService:
                         "target_id": rx.get("target_id"),
                         "target_name": target_name,
                         "change_type": change_type,
-                        # Snapshot so US-022 can revert this change if the agent
-                        # regresses on the next tick.
                         "current_value_before": self._snapshot_current_value(rx),
                         "result": "applied",
                     })
@@ -955,11 +961,6 @@ class HarnessService:
         target_id = rx.get("target_id")
         proposed = rx.get("proposed_value", {})
 
-        # Refuse placeholder prescriptions — _phase_prescribe emits
-        # {"model"|"description": "review_needed"} when it can flag a problem but
-        # not decide the fix. Applying the sentinel literally would corrupt the
-        # agent. This guard protects BOTH the low-risk auto-apply path and the
-        # approved-board-task path, which both flow through here.
         if isinstance(proposed, dict) and _PLACEHOLDER_PROPOSED_VALUE in proposed.values():
             return {
                 "success": False,
@@ -1207,19 +1208,19 @@ class HarnessService:
         Uses the prescription's parsed current_value — the producer wrote it in
         the same shape _auto_apply_prescription consumes, so it round-trips
         exactly with no agent-schema coupling. Recorded as current_value_before
-        so US-022 can roll back to it on regression.
+        with the change. The baseline rollback that read it back went in PRD-263
+        PR-1D; US-056 rebuilds rollback on the ledger.
         """
         current = rx.get("current_value")
         if isinstance(current, dict):
             return current
-        # Rollback prescriptions legitimately carry current_value={} (a dict), so
-        # reaching here means a non-dict slipped through (e.g. a mis-parsed board
-        # task). The change stays safe — it just becomes ineligible for rollback —
-        # but log it so the dropped snapshot is visible rather than silent.
+        # Reaching here means a non-dict slipped through (e.g. a mis-parsed board
+        # task). The change stays safe — it just records no prior value — but log
+        # it so the dropped snapshot is visible rather than silent.
         if current is not None:
             logger.warning(
                 "[HARNESS] prescription %s has non-dict current_value (%s); "
-                "recording empty snapshot — change will be ineligible for rollback",
+                "recording an empty snapshot",
                 rx.get("prescription_id"), type(current).__name__,
             )
         return {}
@@ -1332,8 +1333,8 @@ class HarnessService:
         newly_held: List[str],
     ) -> None:
         """Record newly applied tasks (each with its entry: the value it
-        replaced, for US-022) and newly held ones. A held task that is later
-        applied becomes applied; an applied one never goes back to held."""
+        replaced) and newly held ones. A held task that is later applied
+        becomes applied; an applied one never goes back to held."""
         from core.models.harness import LEDGER_APPLIED, LEDGER_HELD
 
         rows = [(entry.get("task_id"), LEDGER_APPLIED, json.dumps(entry, default=str)) for entry in newly_applied]

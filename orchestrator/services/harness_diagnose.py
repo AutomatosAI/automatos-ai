@@ -20,7 +20,8 @@ statistics in ``core.stats.harness_verdicts`` (design section 5.1, ORG-4 and ORG
   INSUFFICIENT_DATA. Benjamini-Hochberg at ``HARNESS_FDR_Q`` runs across every test
   of the run. A first flag is WATCH; REGRESSION needs a flag in the previous ISO
   week too, or p below ``HARNESS_STRONG_P``. A week already judged keeps its
-  verdicts, so a rerun (``platform_harness_trigger``) never counts as a second flag.
+  verdicts, so a rerun (``platform_harness_trigger``) never counts as a second flag,
+  and the figures of its first run, so the report shows the numbers behind them.
 * **Coverage** is judged agents over active agents (Auto is not one). Below
   ``HARNESS_MIN_COVERAGE`` the run's convergence reads ``insufficient_data``;
   otherwise ``regression``, ``watching`` or ``steady``.
@@ -62,6 +63,7 @@ DIAGNOSE_READS: Tuple[str, ...] = (
 UNIT_RATE = "rate"
 UNIT_USD = "usd"
 UNIT_TOKENS = "tokens"
+_UNITS = frozenset({UNIT_RATE, UNIT_USD, UNIT_TOKENS})
 
 # Run-level convergence (ORG-5).
 CONVERGENCE_INSUFFICIENT = "insufficient_data"
@@ -101,7 +103,10 @@ VERDICT_WORDS = {
     hv.Verdict.REGRESSION: "Regression",
 }
 
-History = Mapping[str, Mapping[str, Mapping[str, str]]]  # ISO week -> agent id -> metric -> verdict
+# ISO week -> agent id -> metric -> that metric's stored entry (its verdict and figures).
+History = Mapping[str, Mapping[str, Mapping[str, Mapping[str, Any]]]]
+# The figures a stored metric entry carries; a kept verdict is reported with its own.
+FIGURE_KEYS = ("unit", "n_cur", "n_ref", "x_cur", "x_ref", "cur_value", "ref_value", "p_value", "ref_weeks")
 
 
 @dataclass(frozen=True)
@@ -200,24 +205,25 @@ def reference_weeks() -> int:
 # ------------------------------------------------------------------ inputs
 
 
-def _stored_metric_verdicts(entry: Any) -> Dict[str, str]:
-    """metric -> verdict from one stored agent entry; anything else in it is skipped."""
+def _stored_metrics(entry: Any) -> Dict[str, Dict[str, Any]]:
+    """metric -> its stored entry, from one stored agent entry; a metric without a
+    known verdict, and anything else in the entry, is skipped."""
     metrics = entry.get(METRICS_KEY) if isinstance(entry, dict) else None
     if not isinstance(metrics, dict):
         return {}
-    found = {name: judged.get(VERDICT_KEY) for name, judged in metrics.items() if isinstance(judged, dict)}
-    return {name: verdict for name, verdict in found.items() if verdict in _VERDICT_VALUES}
+    return {name: judged for name, judged in metrics.items()
+            if isinstance(judged, dict) and judged.get(VERDICT_KEY) in _VERDICT_VALUES}
 
 
-def verdict_history(runs: Iterable[Tuple[str, Any]]) -> Dict[str, Dict[str, Dict[str, str]]]:
-    """ISO week -> agent id -> metric -> verdict, from the (cur_window, verdicts) of
-    completed runs, oldest first (``harness_runs.judged_verdicts``). A week judged
-    more than once keeps its first run's verdicts for each agent."""
-    history: Dict[str, Dict[str, Dict[str, str]]] = {}
+def verdict_history(runs: Iterable[Tuple[str, Any]]) -> Dict[str, Dict[str, Dict[str, Dict[str, Any]]]]:
+    """ISO week -> agent id -> metric -> stored entry, from the (cur_window, verdicts)
+    of completed runs, oldest first (``harness_runs.judged_verdicts``). A week judged
+    more than once keeps its first run's entries for each agent."""
+    history: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
     for window, stored in runs:
         agents = stored.get(AGENTS_KEY) if isinstance(stored, dict) else None
         for agent_id, entry in (agents if isinstance(agents, dict) else {}).items():
-            history.setdefault(window, {}).setdefault(str(agent_id), _stored_metric_verdicts(entry))
+            history.setdefault(window, {}).setdefault(str(agent_id), _stored_metrics(entry))
     return history
 
 
@@ -271,7 +277,8 @@ def _rows_by_agent(agent_rows: Iterable[Mapping[str, Any]]) -> Dict[int, Dict[st
 def _own_history(history: History, agent_id: int, metric: str) -> Dict[str, str]:
     """ISO week -> verdict, for one agent and metric."""
     key = str(agent_id)
-    return {week: agents[key][metric] for week, agents in history.items() if metric in agents.get(key, {})}
+    return {week: agents[key][metric][VERDICT_KEY] for week, agents in history.items()
+            if metric in agents.get(key, {})}
 
 
 def _clean_reference(window: Window, own: Mapping[str, str], changed: Optional[str]) -> Tuple[str, ...]:
@@ -329,6 +336,16 @@ def _metric_entry(test: _Test, result: hv.FlagResult, verdict: hv.Verdict, reaso
         "cur_value": result.cur_value, "ref_value": result.ref_value, "p_value": result.p_value,
         "ref_weeks": list(test.ref_weeks),
     }
+
+
+def _kept_entry(stored: Mapping[str, Any], fresh: Dict[str, Any]) -> Dict[str, Any]:
+    """A week already judged keeps its first run's figures with its verdict, so the
+    report never prints numbers that no longer back it (a late ticket, a backfilled
+    llm_usage row). ``fresh`` carries the kept verdict already; its figures stand
+    only when the stored entry lacks some."""
+    if not all(key in stored for key in FIGURE_KEYS) or stored["unit"] not in _UNITS:
+        return fresh
+    return {**fresh, **{key: stored[key] for key in FIGURE_KEYS}}
 
 
 def _agent_entry(row: Mapping[str, Any], metrics: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -393,6 +410,8 @@ def diagnose(metrics: HarnessMetrics, history: History, change_weeks: Mapping[in
         own = _own_history(history, test.agent_id, test.metric.name)
         verdict = hv.window_verdict(window.cur_week, result, own, settings.strong_p)
         entry = _metric_entry(test, result, verdict, _reason(verdict, window.cur_week, own))
+        if entry["reason"] == REASON_KEPT:
+            entry = _kept_entry(history[window.cur_week][str(test.agent_id)][test.metric.name], entry)
         judged.setdefault(test.agent_id, {})[test.metric.name] = entry
     agents = {str(agent_id): _agent_entry(weeks[agent_id][window.cur_week], judged[agent_id]) for agent_id in weeks}
     return _summary(window, agents, settings)
@@ -443,7 +462,7 @@ def _why(judged: Mapping[str, Any]) -> str:
 def _finding(metric: Metric, judged: Mapping[str, Any]) -> str:
     """One flagged metric, e.g. "Task success fell from 80% (64 of 80) to 60% (12 of 20), p=0.031"."""
     unit = judged["unit"]
-    if judged["cur_value"] is None:  # a kept verdict whose week now lacks the data
+    if judged["cur_value"] is None:  # a kept verdict stored without figures, its week now short of data
         return f"{_label(metric, unit)}{_why(judged)}"
     worse = "rose" if unit != UNIT_RATE or metric.higher_is_worse else "fell"
     before, after = _number(judged["ref_value"], unit), _number(judged["cur_value"], unit)
