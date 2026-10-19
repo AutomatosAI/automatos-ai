@@ -13,6 +13,9 @@
  * An installed theme's registrations come from the theme host (provided here as the provider
  * provides it, with its pages); builtin Play's from its module constants, through the chat layout
  * (its chat comes through its lazy slot, so it arrives a moment after the first render: findBy*).
+ * A-04d: an installed theme's page draws full bleed inside MainLayout (the theme's frame, stood in
+ * for here); builtin Play's pages draw MainLayout themselves, so ThemeSlot never frames them, and
+ * a slot is drawn where it is placed, never framed.
  */
 import React from 'react'
 import { act, cleanup, render, screen } from '@testing-library/react'
@@ -43,6 +46,13 @@ vi.mock('@/hooks/use-studio-theme', () => ({
 }))
 vi.mock('@/components/play/chat/play-chat', () => ({ PlayChat: () => <div data-testid="play-chat">Play chat</div> }))
 vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => <div data-testid="discussion-bar" /> }))
+vi.mock('@/components/layout/main-layout', () => ({
+  MainLayout: ({ children, fullBleed }: { children: React.ReactNode; fullBleed?: boolean }) => (
+    <div data-testid="main-layout" data-full-bleed={fullBleed ? 'true' : 'false'}>
+      {children}
+    </div>
+  ),
+}))
 
 import ChatLayout from '@/app/chat/layout'
 import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
@@ -153,6 +163,19 @@ describe('ThemeSlot, a page entry', () => {
     underInstalledTheme()
     renderPage()
     shows('theme')
+  })
+
+  it("draws an installed theme's page full bleed inside MainLayout, the theme's frame (A-04d)", () => {
+    underInstalledTheme()
+    renderPage()
+    expect(screen.getByTestId('main-layout')).toContainElement(screen.getByTestId('theme'))
+    expect(screen.getByTestId('main-layout')).toHaveAttribute('data-full-bleed', 'true')
+  })
+
+  it('never frames the core page: the core page draws its own MainLayout', () => {
+    renderPage()
+    shows('page')
+    expect(screen.queryByTestId('main-layout')).toBeNull()
   })
 
   it('renders the core page with no theme', () => {
@@ -282,10 +305,11 @@ describe('ThemeSlot, a slot', () => {
     return render(host === null ? slot : <ThemeHostContext.Provider value={host}>{slot}</ThemeHostContext.Provider>)
   }
 
-  it("renders the theme's version where it registered one, at the theme layout", () => {
+  it("renders the theme's version where it registered one, at the theme layout, never framed", () => {
     underInstalledTheme()
     renderSlot()
     shows('theme')
+    expect(screen.queryByTestId('main-layout')).toBeNull()
   })
 
   it("renders the core's version with no theme, below the theme's width, and for a slot the theme left out", () => {
@@ -331,6 +355,13 @@ describe('app/chat/layout.tsx under builtin Play (its chat registered by lib/the
     expect(await screen.findByTestId('play-chat')).toBeInTheDocument()
     expect(screen.queryByTestId('page')).toBeNull()
     expect(screen.getByTestId('discussion-bar')).toBeInTheDocument()
+  })
+
+  it("never frames Play's chat a second time: PlayChat draws MainLayout itself (A-04d)", async () => {
+    underPlay()
+    renderLayout()
+    expect(await screen.findByTestId('play-chat')).toBeInTheDocument()
+    expect(screen.queryByTestId('main-layout')).toBeNull()
   })
 
   it('renders neither chat while the width is not known, the DiscussionBar still there (M69)', () => {

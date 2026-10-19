@@ -494,8 +494,8 @@ describe("PRD-260 (d) — Play's own type, inline code and sheet colours win ove
 const CHROME_DIR = 'components/layout'
 /** The files every page of a route loads with it: its layouts and its 404. */
 const APP_SEAM = /^(layout|not-found)\.tsx$/
-/** PRD-261 A-04b: the page every theme route (/x/<route>) renders through. */
-const THEME_ROUTE_PAGE = 'app/x/[...path]/page.tsx'
+/** PRD-261 A-04b: the page every theme route (/x/<route>) renders through; A-04d: home, a ThemeSlot page entry. */
+const [THEME_ROUTE_PAGE, HOME_PAGE] = ['app/x/[...path]/page.tsx', 'app/page.tsx']
 const PLAY_DIR = 'components/play/'
 /** A slot: a 'use client' module that fetches one Play screen with import() when it renders. */
 const LAZY_SLOT = /-lazy\.tsx$/
@@ -570,7 +570,7 @@ function staticGraph(seam: string): string[] {
 function seamFiles(): string[] {
   const chrome = walk(path.join(FRONTEND, CHROME_DIR), (name) => SOURCE_FILE.test(name))
   const app = walk(path.join(FRONTEND, 'app'), (name) => APP_SEAM.test(name))
-  return [...chrome, ...app].map(relative).filter((rel) => !TEST_FILE.test(rel)).concat(THEME_ROUTE_PAGE)
+  return [...chrome, ...app].map(relative).filter((rel) => !TEST_FILE.test(rel)).concat(THEME_ROUTE_PAGE, HOME_PAGE)
 }
 
 function isSlot(rel: string): boolean {

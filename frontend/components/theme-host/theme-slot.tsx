@@ -3,6 +3,7 @@
 import { Suspense, type ComponentType, type ReactNode } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 
+import { MainLayout } from '@/components/layout/main-layout'
 import type { SlotId } from '@/lib/theme-host/registry-types'
 
 import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from './theme-slot-registrations'
@@ -16,7 +17,9 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  *   a surface only the core page has (`keepCorePage` names those query parameters; `themeServes`
  *   names values of one that the theme's page still is). The choice reads the search params, so
  *   it sits inside its own Suspense boundary whose fallback is the core page: a static prerender
- *   renders the core page.
+ *   renders the core page. An installed theme's page draws full bleed inside MainLayout (the
+ *   theme's frame), as its routes at /x/<route> do (A-04d); builtin Play's pages draw MainLayout
+ *   themselves (ActiveThemeSlots.framesPages).
  * - a **slot** (`slot="notFound@1"`, registerSlot): wherever it is placed.
  *
  * Where the theme decides (it registered this page or slot, or an installed theme is still
@@ -74,21 +77,30 @@ export function corePageAsked(
   )
 }
 
-/** The theme's version if it draws here now, null for nothing yet, or the core's version. */
-function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode): ReactNode {
+/**
+ * The theme's version if it draws here now, null for nothing yet, or the core's version. `framed`
+ * draws the theme's version inside MainLayout (an installed theme's page).
+ */
+function chooseVersion(active: ActiveThemeSlots, registered: unknown, core: ReactNode, framed = false): ReactNode {
   const Theme = registeredComponent(registered)
   if (active.layout === 'none' || active.layout === 'narrow') return core
   if (active.layout === 'pending') return active.registrations === null || Theme !== null ? null : core
-  return Theme === null ? core : <ThemeVersion component={Theme} />
+  return Theme === null ? core : <ThemeVersion component={Theme} framed={framed} />
+}
+
+interface ThemeVersionProps {
+  readonly component: ComponentType
+  readonly framed: boolean
 }
 
 /** The theme's component; a lazy one (an installed theme's React.lazy) suspends to nothing. */
-function ThemeVersion({ component: Component }: { readonly component: ComponentType }) {
-  return (
+function ThemeVersion({ component: Component, framed }: ThemeVersionProps) {
+  const version = (
     <Suspense fallback={null}>
       <Component />
     </Suspense>
   )
+  return framed ? <MainLayout fullBleed>{version}</MainLayout> : version
 }
 
 function ThemePageChoice({ page, keepCorePage = NO_PARAMS, themeServes = NO_SERVED_VALUES, children }: ThemePageSlotProps) {
@@ -97,7 +109,7 @@ function ThemePageChoice({ page, keepCorePage = NO_PARAMS, themeServes = NO_SERV
   const params = useSearchParams()
   const here = routeMatches(page, pathname) && !corePageAsked(params, keepCorePage, themeServes)
   if (!here) return <>{children}</>
-  return <>{chooseVersion(active, active.registrations?.pages.get(page), children)}</>
+  return <>{chooseVersion(active, active.registrations?.pages.get(page), children, active.framesPages)}</>
 }
 
 function ThemeNamedSlot({ slot, children }: ThemeNamedSlotProps) {

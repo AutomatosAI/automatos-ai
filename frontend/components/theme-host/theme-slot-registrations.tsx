@@ -29,11 +29,18 @@ export interface ActiveThemeSlots {
   readonly layout: ThemeSlotLayout
   /** What the active theme registered; null with no theme, and while an installed theme loads. */
   readonly registrations: ThemeRegistrations | null
+  /**
+   * PRD-261 A-04d: whether ThemeSlot draws the theme's frame around its pages (MainLayout full
+   * bleed, as a theme route at /x/<route> and the /looks pages get it). An installed theme's page
+   * is its content only, so the host frames it; builtin Play's pages (PRD-260's PlayChat and
+   * PlayShelf) draw MainLayout themselves, so they are never framed twice.
+   */
+  readonly framesPages: boolean
 }
 
 const LOG_PREFIX = '[theme-host]'
-const NO_THEME: ActiveThemeSlots = { layout: 'none', registrations: null }
-const INSTALLED_LOADING: ActiveThemeSlots = { layout: 'pending', registrations: null }
+const NO_THEME: ActiveThemeSlots = { layout: 'none', registrations: null, framesPages: false }
+const INSTALLED_LOADING: ActiveThemeSlots = { layout: 'pending', registrations: null, framesPages: true }
 const NO_SLOTS: ReadonlyMap<SlotId, unknown> = new Map()
 const NO_PAGES: ReadonlyMap<string, unknown> = new Map()
 
@@ -66,7 +73,7 @@ function installedSlots(host: ThemeHostContextValue | null, layout: ThemeSlotLay
   if (host === null) return NO_THEME
   if (host.status === 'loading') return INSTALLED_LOADING
   const registrations = host.status === 'active' ? hostRegistrations(host) : null
-  return registrations === null ? NO_THEME : { layout, registrations }
+  return registrations === null ? NO_THEME : { layout, registrations, framesPages: true }
 }
 
 /** The active theme's registrations and where it draws them (see the module comment). */
@@ -75,7 +82,7 @@ export function useActiveThemeSlots(): ActiveThemeSlots {
   const layout = useThemeLayout()
   const host = useThemeHost()
   const builtin = builtinRegistrationsOf(entry)
-  if (builtin !== null) return { layout: layoutOf(layout), registrations: builtin }
+  if (builtin !== null) return { layout: layoutOf(layout), registrations: builtin, framesPages: false }
   return installedSlots(host, entry === null ? 'theme' : layoutOf(layout))
 }
 
