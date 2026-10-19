@@ -7,14 +7,26 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
 2. the package is read and checked (``services/themes/package.py``: zip, manifest, engines,
    htmlClass, sizes, CSS scope, looks): 413 over the package cap, 400 with the codes;
 3. an id under a reserved publisher (``automatos/…``) needs ``caller_is_admin``, else 403;
-4. the scan report is built (``services/themes/scan.py``); the files are stored under
+4. the automated review stage runs inline (C-02a, ``services/themes/review_stage.py``; the LLM
+   stage reads ``dist/``, the code that runs, since no isolated rebuild ever checks a private
+   upload's ``source/``) unless these bytes are already here, and never for a version that would be
+   refused (409, checked read-only first); the request's read transaction ends before the stage,
+   so no connection waits idle in transaction while it runs; one upload of the same bytes runs at
+   a time (``services/themes/upload_claim.py``: an overlapping one is 409, try again, so a resent
+   request never pays for the stage twice); the files are stored under
    ``themes/_workspace/<ws>/<publisher>/<slug>/<version>/`` before the commit, so a failed
-   write leaves no row (503);
+   write leaves no row (503). What it may spend (``services/themes/review_limits.py``): a review
+   slot in this process is taken first, before the claim's connection (503 with ``Retry-After``
+   when ``THEME_REVIEW_MAX_CONCURRENT`` stages already run); a workspace past
+   ``THEME_UPLOADS_PER_DAY`` in 24 hours is 429; the LLM check gets what is left of
+   ``THEME_REVIEW_DAILY_TOKENS``;
 5. the package row (``owner_type`` 'workspace', ``reviewed`` false) and an install row are
    written; a newer version of an installed theme becomes the install's pending update.
 
-201 with the package and the install; 200 with the existing ones when these exact bytes are
-already in this workspace (never a misleading 409); 409 for a version clash.
+201 with the package (its verdict and plain checks; the LLM check's score and findings are the
+platform reviewer's alone, ``review_stage.member_view``) and the install; 200 with the existing ones when these exact bytes are
+already in this workspace (never a misleading 409); 409 for a version clash, or while the same
+bytes are still being uploaded.
 
 Gates, in order: ``workspace:manage``, the workspace's "who may install" setting (A-07e's
 ``require_install_role``), the private-upload switch and setting (``require_private_uploads``; a
@@ -44,12 +56,14 @@ from core.models.themes import ThemeInstallation, ThemePackage
 from services.themes.package import ThemePackage as CheckedThemePackage
 from services.themes.package import ThemePackageError, cap_bytes, read_theme_package
 from services.themes.records import (
-    SavedUpload, UploadConflict, active_installation, conflict_after_race, package_by_digest, private_upload_refusal,
-    reserved_publisher_refusal, save_private_upload,
+    SavedUpload, UploadConflict, active_installation, package_by_digest, private_upload_refusal,
+    reserved_publisher_refusal, save_private_upload, upload_conflict,
 )
-from services.themes.scan import build_scan_report
+from services.themes import review_limits
+from services.themes.review_stage import member_view, run_review_stage
 from services.themes.settings import require_install_role
 from services.themes.storage import theme_prefix, write_theme_files
+from services.themes.upload_claim import upload_claim
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +127,7 @@ def upload_item(saved: SavedUpload) -> Dict[str, Any]:
             "id": str(package.id), "themeId": package.theme_id, "version": package.version,
             "name": (package.manifest or {}).get("name"), "digest": package.digest,
             "ownerType": package.owner_type, "reviewed": bool(package.reviewed),
-            "scanVerdict": package.scan_verdict, "scanReport": package.scan_report,
+            "scanVerdict": package.scan_verdict, "scanReport": member_view(package.scan_report),
         },
         "install": _install_item(saved.installation),
         "status": _install_status(package, saved.installation),
@@ -147,14 +161,74 @@ def _after_integrity_error(db: Session, ctx: RequestContext, checked: CheckedThe
     existing = package_by_digest(db, ctx.workspace_id, checked.digest)
     if existing is None:
         logger.warning("[Themes] Concurrent upload of %s in workspace %s", checked.manifest["id"], ctx.workspace_id)
-        raise _refuse(409, conflict_after_race(db, ctx.workspace_id, checked.manifest) or BUSY) from exc
+        raise _refuse(409, upload_conflict(db, ctx.workspace_id, checked.manifest) or BUSY) from exc
     return SavedUpload(existing, active_installation(db, ctx.workspace_id, existing.theme_id), created=False)
 
 
+def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
+            tokens: review_limits.TokenHold) -> Dict[str, Any]:
+    """The automated stage's report (C-02a), skipped when these bytes are already in this workspace.
+
+    Their existing row is reused as it is (``save_private_upload``), so a second run would only
+    spend an LLM call; a version ``save_private_upload`` would refuse is 409 before the stage, and
+    a workspace past ``THEME_UPLOADS_PER_DAY`` is 429. The stage spends from ``tokens``, the
+    request's hold on what is left of the day's review tokens.
+    The read transaction ends before the stage, so the session holds no connection while it runs
+    (``save_private_upload`` checks again under its row lock). Called under the upload claim, so
+    an overlapping upload of the same bytes never runs it too. The route is a plain ``def``: this
+    runs in a threadpool thread, with no loop.
+    """
+    existing = package_by_digest(db, ctx.workspace_id, checked.digest)
+    if existing is not None:
+        return dict(existing.scan_report or {"verdict": existing.scan_verdict})
+    conflict = upload_conflict(db, ctx.workspace_id, checked.manifest)
+    if conflict is not None:
+        db.rollback()
+        logger.info("[Themes] Upload of %s in workspace %s refused before the review stage: version clash",
+                    checked.manifest["id"], ctx.workspace_id)
+        raise _refuse(409, conflict)
+    quota = review_limits.upload_quota_refusal(db, ctx.workspace_id)
+    if quota is not None:
+        db.rollback()
+        raise _refuse(429, quota)
+    db.rollback()
+    return run_review_stage(checked, package_bytes, include_source=False, token_budget=tokens)
+
+
 def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+    """Review and save in a review slot, taken before the claim holds a connection: 503 with
+    ``Retry-After`` while ``THEME_REVIEW_MAX_CONCURRENT`` stages run here."""
+    with review_limits.review_slot() as slot:
+        if not slot:
+            logger.info("[Themes] Upload of %s in workspace %s refused: every review slot is busy",
+                        checked.manifest["id"], ctx.workspace_id)
+            db.rollback()
+            raise HTTPException(status_code=503, detail=review_limits.REVIEWS_BUSY, headers=review_limits.busy_headers())
+        return _save_in_slot(db, ctx, checked, package_bytes)
+
+
+def _save_in_slot(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+    """Review and save under the (workspace, digest) claim: 409 while another upload of these bytes runs."""
+    with upload_claim(db, ctx.workspace_id, checked.digest) as claimed:
+        if not claimed:
+            logger.info("[Themes] Upload of %s in workspace %s refused: the same bytes are being uploaded",
+                        checked.manifest["id"], ctx.workspace_id)
+            raise _refuse(409, BUSY)
+        return _save_claimed(db, ctx, checked, package_bytes)
+
+
+def _save_claimed(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+    """Review, then store, under one token hold (``review_limits.token_hold``): what the stage
+    spent stays held in this process until its row is committed, when ``tokens_used_today`` sees it."""
+    with review_limits.token_hold(lambda: review_limits.tokens_left_today(db)) as tokens:
+        return _review_and_store(db, ctx, checked, package_bytes, tokens)
+
+
+def _review_and_store(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
+                      tokens: review_limits.TokenHold) -> SavedUpload:
     manifest = checked.manifest
     prefix = theme_prefix(manifest["id"], manifest["version"], ctx.workspace_id)
-    report = build_scan_report(checked.files, package_bytes)
+    report = _review(db, ctx, checked, package_bytes, tokens)
     try:
         return save_private_upload(
             db, ctx.workspace_id, resolve_user_pk(db, ctx), checked, prefix, report,

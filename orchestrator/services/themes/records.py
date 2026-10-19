@@ -219,11 +219,12 @@ def _check_new_version(db: Session, ws: UUID, manifest: Dict[str, Any], install:
         )
 
 
-def conflict_after_race(db: Session, workspace_id: Any, manifest: Dict[str, Any]) -> Optional[str]:
-    """After a concurrent upload won a unique index: the clash it left (``UploadConflict``'s message), or None.
+def upload_conflict(db: Session, workspace_id: Any, manifest: Dict[str, Any]) -> Optional[str]:
+    """The version clash :func:`save_private_upload` would refuse (``UploadConflict``'s message), or None. Read-only.
 
-    The losing upload's own pre-insert check ran before the winner committed; run again, it sees the
-    winner's rows, so a same-version-other-files race is reported as that, not as "try again".
+    Run before the review stage, so a refused version never pays for it; and after a concurrent
+    upload won a unique index, where it sees the winner's rows, so a same-version-other-files
+    race is reported as that, not as "try again".
     """
     ws = _workspace(workspace_id)
     try:

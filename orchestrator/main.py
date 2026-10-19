@@ -88,6 +88,11 @@ from api.themes_looks import router as themes_looks_router
 from api.themes_settings import router as themes_settings_router
 from core.auth.step_up import install_step_up_handler  # PRD-261 A-07c: the reverification 403 body
 from services.themes.package import THEME_IMPORT_ROUTE, cap_bytes as theme_cap_bytes
+# PRD-261 W-C1: the theme Marketplace (submit, the Themes tab listings, the admin review queue).
+from api.marketplace_themes_submit import router as marketplace_themes_submit_router
+from api.marketplace_themes import router as marketplace_themes_router
+from api.admin_themes import router as admin_themes_router
+from services.themes.submissions import THEME_SUBMIT_ROUTE
 
 # PRD-56's /api/tasks direct-step router was DELETED (PRD-192 S6, locked #5):
 # an ungoverned side-effecting ingress with zero product callers (grep-proven
@@ -1053,6 +1058,8 @@ PATH_BODY_LIMITS = {
     BRAND_FONTS_ROUTE: MAX_FONT_BYTES + 512 * 1024,
     # PRD-261 A-07a: a .autotheme up to THEME_MAX_PACKAGE_MB, plus the multipart envelope.
     THEME_IMPORT_ROUTE: theme_cap_bytes("package") + 512 * 1024,
+    # PRD-261 C-01a: a Marketplace submission is the same .autotheme, under the same cap.
+    THEME_SUBMIT_ROUTE: theme_cap_bytes("package") + 512 * 1024,
 }
 
 
@@ -1061,6 +1068,13 @@ def _body_limit_for(path: str) -> int:
         if path.startswith(prefix):
             return limit
     return MAX_UPLOAD_SIZE if any(path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
+
+
+# PRD-261 W-C1 (M4): on the capped upload paths the body is counted as it arrives, so a chunked
+# upload past the cap is 413 and one with no length or chunking is 411, before FastAPI parses the
+# form (which happens before any auth dependency runs). Every other path passes through untouched.
+from core.security.body_limit import CappedBodyMiddleware
+app.add_middleware(CappedBodyMiddleware, limits=PATH_BODY_LIMITS)
 
 
 @app.middleware("http")
@@ -1275,6 +1289,9 @@ app.include_router(themes_install_router)  # PRD-261 A-07b: installed, active, c
 app.include_router(themes_files_router)  # PRD-261 A-08a: files by digest + boot data (membership, not ctx.workspace_id)
 app.include_router(themes_looks_router)  # PRD-261 A-09a: a member's own looks per theme
 app.include_router(themes_settings_router)  # PRD-261 A-07e: workspace theme settings
+app.include_router(marketplace_themes_submit_router)  # PRD-261 C-01a: POST /api/marketplace/themes/submit
+app.include_router(marketplace_themes_router)  # PRD-261 C-04a: the Themes tab listings + install by reference
+app.include_router(admin_themes_router)  # PRD-261 C-03a: admin review queue (caller_is_admin in each handler)
 
 # PRD-155 S3: conditionally-mounted routers — previously a wall of silent
 # import guards that swallowed failures into `x_router = None` (two of which,
