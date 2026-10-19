@@ -43,6 +43,7 @@ again what the reply's line says (``says_nothing_was_done``).
 from __future__ import annotations
 
 import functools
+import re
 from contextvars import ContextVar
 from typing import Any, AsyncGenerator, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
@@ -59,6 +60,7 @@ from modules.tools.execution.call_effects import (
 from modules.tools.execution.card_raised import ALREADY_WAITING, already_waiting, is_waiting, receipt_effect
 from modules.tools.execution.claims_in_place import READ_AHEAD
 from modules.tools.execution.composio_action import is_slug
+from modules.tools.execution.owner_reasons import ACTS_ON, OWNER_REASON, SENT_WRONG, failed_inside, said_in
 from modules.tools.execution.tool_execution_tracker import TRACKERS_MADE
 from modules.tools.execution.turn_account import auto_speaks, is_read, thing_of, what_it_did
 
@@ -95,6 +97,7 @@ DOCUMENT_MADE = "document made"   # F351: the calls that make a document the own
 GET_TASK = "platform_get_task"     # P256-FIX-N17-6: its answer on the owner's chat says whether a send-back went through
 _NAME_KEYS = ("title", "document_title", "agent_name", "name", "filename", "file_name")
 _CARD_KEYS = ("task_id", "task_number", "number")
+_CARD_NUMBER = re.compile(r"#?0*(\d+(?:\.\d+)?)")   # a card's number however it is written (F449)
 # The UI's pages for what a call touched (frontend/lib/ticket-links.ts, the agents page).
 CARD_LINK = "/command-center?tab=board&task_id={id}"
 AGENT_LINK = "/agents?agent={id}"
@@ -160,12 +163,25 @@ def _link(answers: Sequence[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
-def _reason(answers: Sequence[Dict[str, Any]]) -> str:
+def _reason(action: str, answers: Sequence[Dict[str, Any]]) -> str:
+    """Why a call was refused, in the owner's words (P256-FIX-N17-10, F449): the reason its refusal
+    carries (``owner_reason``); else a driver's or validator's failure said plainly (``failed_inside``);
+    else what the call said, on one line."""
+    for answer in answers:
+        said = said_in(answer, OWNER_REASON)
+        if said:
+            return _one_line(said, REASON_CHARS)
     for answer in answers:
         said = answer.get("error") or answer.get("message")
         if isinstance(said, str) and said.strip():
-            return _one_line(said, REASON_CHARS)
+            return failed_inside(action, said) or _one_line(said, REASON_CHARS)
     return FAILED
+
+
+def _acts_on(answers: Sequence[Dict[str, Any]]) -> Dict[str, str]:
+    """The card a refusal named, as ``acts_on``, when it named one (F449)."""
+    card = next((said for said in (said_in(answer, ACTS_ON) for answer in answers) if said), None)
+    return {ACTS_ON: card} if card else {}
 
 
 def receipt(action: str, params: Dict[str, Any], result: Any) -> Receipt:
@@ -184,7 +200,8 @@ def receipt(action: str, params: Dict[str, Any], result: Any) -> Receipt:
         "subject": _subject(answers, params) or (thing_of(action) if reads else ""),
         "effect": LOOKED_UP if reads else _effect(action, params, result),
         "link": None if refused else _link(answers),
-        "reason": _reason(answers) if refused else None,
+        "reason": _reason(action, answers) if refused else None,
+        **(_acts_on(answers) if refused else {}),
     }
 
 
@@ -307,17 +324,42 @@ def tried(r: Receipt) -> str:
     return f"{what} {subject}" if subject.startswith("#") else f'{what} "{subject}"'
 
 
+def _settles(later: Receipt, refusal: Receipt) -> bool:
+    """Whether a later write settles a refusal: it went through or waits for the owner's click, and it is
+    the same action, or it acts on the card the refusal named (P256-FIX-N17-10, F449: a new card refused as
+    a copy of #1746, then #1746 sent back, is the send-back the owner asked for)."""
+    if later.get("status") not in (DONE, WAITING):
+        return False
+    card = _card_number(refusal.get(ACTS_ON))
+    return later["action"] == refusal["action"] or bool(card) and _card_number(later.get("subject")) == card
+
+
+def _card_number(said: Any) -> str:
+    """A card's number as digits ("1746" for "#1746", "#01746" or "1746"); '' for anything else."""
+    match = _CARD_NUMBER.fullmatch(str(said or "").strip())
+    return match.group(1) if match else ""
+
+
 def refused_writes_left(writes: Sequence[Receipt]) -> List[Receipt]:
     """The refused writes still standing, the first of each action: a refusal is settled by a later done
     write of the same action, or a later one waiting for the owner's click (P256-FIX-N17-5, F446: a refused
-    change then the card raised for it is an ask, not a failure)."""
+    change then the card raised for it is an ask, not a failure), or a later one on the card it named."""
     left: Dict[str, Receipt] = {}
     for at, r in enumerate(writes):
         if r.get("status") != REFUSED or r["action"] in left:
             continue
-        if not any(w["action"] == r["action"] and w.get("status") in (DONE, WAITING) for w in writes[at + 1:]):
+        if not any(_settles(w, r) for w in writes[at + 1:]):
             left[r["action"]] = r
     return list(left.values())
+
+
+def _reason_said(refusal: Receipt, writes: Sequence[Receipt]) -> str:
+    """The reason a line gives for a standing refusal: its action's first reason from it on that is not the
+    call's shape (F449, ask 38: a call sent wrong, then sent right and failed, names the failure)."""
+    at = next(i for i, w in enumerate(writes) if w is refusal)
+    reasons = [w.get("reason") or FAILED for w in writes[at:]
+               if w["action"] == refusal["action"] and w.get("status") == REFUSED]
+    return next((said for said in reasons if said != SENT_WRONG), reasons[0])
 
 
 def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
@@ -325,12 +367,13 @@ def honesty_lines(receipts: Sequence[Receipt], answer: str) -> List[str]:
     waits for the owner's click (FX-004) is neither done nor refused: it writes no "I tried to" line.
     P256-FIX-N15-2: never the not-done line, which is said only in place of the claim it answers
     (``claim_removed``); an answer that carries it has nothing above, since that line names the
-    refused writes too."""
+    refused writes too. F449: each line once (ask 370 said the same line twice)."""
     if says_not_done(answer):
         return []
     writes = [r for r in receipts if r.get("kind") == WRITE]
-    return [TRIED_LINE.format(what=tried(r), reason=(r.get("reason") or FAILED).rstrip(". "))
-            for r in refused_writes_left(writes)]       # one line per action: its first reason
+    lines = [TRIED_LINE.format(what=tried(r), reason=_reason_said(r, writes).rstrip(". "))
+             for r in refused_writes_left(writes)]       # one line per action
+    return list(dict.fromkeys(lines))
 
 
 def _asks(writes: Iterable[Receipt]) -> bool:

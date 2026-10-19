@@ -19,6 +19,8 @@ import functools
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from modules.tools.execution.owner_reasons import Refusal, agents_share_a_name
+
 Handler = Callable[[Any, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
 
 AGENT_ID, AGENT_NAME = "agent_id", "agent_name"
@@ -107,8 +109,9 @@ def resolve_active_agent(db: Any, workspace_id: Any, ref: Any) -> Tuple[Optional
     matches = active_named(db, workspace_id, said)
     if len(matches) == 1:
         return matches[0], None
-    if matches:
-        return None, CLASH.format(said=said.strip(), candidates=candidates(matches))
+    if matches:   # P256-FIX-N17-10 (F449): the owner is told the clash, never the call's agent_id
+        return None, Refusal(CLASH.format(said=said.strip(), candidates=candidates(matches)),
+                             agents_share_a_name(len(matches), said))
     return None, None
 
 

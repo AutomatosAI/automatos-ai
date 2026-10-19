@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from modules.tools.execution.owner_reasons import agents_share_a_name, refused
+
 # The owner-only actions that take agent_id or agent_name (owner_only.OWNER_ONLY_ACTIONS).
 BINDS = frozenset({
     "platform_update_agent", "platform_assign_tool_to_agent", "platform_unassign_tool_from_agent",
@@ -68,8 +70,8 @@ def one_named(db: Any, workspace_id: Any, said: str,
     if not matches:
         return None, None
     named = ", ".join(f"{agent.id}:{agent.name}" for agent in matches[:MAX_NAMED])
-    return None, {"success": False, "error": AMBIGUOUS.format(count=len(matches), said=said, named=named,
-                                                                 action=action)}
+    return None, refused(AMBIGUOUS.format(count=len(matches), said=said, named=named, action=action),
+                         agents_share_a_name(len(matches), said))   # P256-FIX-N17-10 (F449): the owner's words
 
 
 def the_agent_named(db: Any, workspace_id: Any, said: str) -> Tuple[Optional[int], List[str]]:
@@ -114,7 +116,7 @@ def _bound_on_the_card(db: Any, workspace_id: Any, params: Dict[str, Any],
 
     agent, refusal = board_agent(db, workspace_id, params, said_key)
     if agent is None:
-        return params, {"success": False, "error": refusal}
+        return params, refused(refusal)   # a clash carries the owner's words (agent_refs, F449)
     rest = {key: value for key, value in params.items() if key != said_key}
     return {**rest, AGENT_ID: agent.id}, None
 

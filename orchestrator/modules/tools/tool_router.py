@@ -30,6 +30,7 @@ from modules.tools.registry import ToolCategory, get_tool_registry as registry_g
 from modules.tools.execution import UnifiedToolExecutor
 from modules.tools.execution.card_raised import the_model_reads_the_card
 from modules.tools.execution.held_context import holds_the_callers_context, the_callers_context
+from modules.tools.execution.owner_reasons import OWNER_REASON, intent_refused
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
 from core.database.database import SessionLocal
@@ -2111,10 +2112,9 @@ async def execute_tool_with_validation(
                 return {
                     "success": False,
                     "error": f"Action not allowed for this intent: {reason}",
-                    "error_type": "validation_blocked",
-                    "blocked_by": "capability_validation",
-                    "action_id": action_id,
-                    "intent": original_intent[:100]
+                    "error_type": "validation_blocked", "blocked_by": "capability_validation",
+                    OWNER_REASON: intent_refused(action_id),  # P256-FIX-N17-10 (F449): what the owner reads
+                    "action_id": action_id, "intent": original_intent[:100],
                 }
 
     # Proceed with normal execution, in the router call's context: the owner's-click gate reads it (P256-FIX-RVW-2)
