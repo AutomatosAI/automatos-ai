@@ -48,6 +48,15 @@ function statusOf(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined
 }
 
+/**
+ * True when a write was refused because what the dialog showed is out of date (404 gone, 409 moved
+ * on). The hook already refetched the list; the dialog closes so the next try starts from it.
+ */
+export function isStaleThemeRefusal(error: unknown): boolean {
+  const status = statusOf(error)
+  return status !== undefined && STALE_STATUSES.has(status)
+}
+
 function useInvalidateThemes(): () => Promise<void> {
   const workspaceId = useWorkspaceId()
   const queryClient = useQueryClient()
@@ -119,8 +128,7 @@ function useThemeWrite<Vars, Result>(run: (vars: Vars) => Promise<Result>, done:
     },
     onError: async (error) => {
       toast.error(themeErrorMessage(error))
-      const status = statusOf(error)
-      if (status !== undefined && STALE_STATUSES.has(status)) await invalidate()
+      if (isStaleThemeRefusal(error)) await invalidate()
     },
   })
 }

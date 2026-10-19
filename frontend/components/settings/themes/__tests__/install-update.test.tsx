@@ -177,6 +177,21 @@ describe('update, rollback and uninstall', () => {
     await waitFor(() => expect(api.updateThemeInstall).toHaveBeenCalledWith(INSTALL_ID, NEXT_PACKAGE_ID))
   })
 
+  it('a 409 on Apply (the install already moved on) refetches the list and closes the compare', async () => {
+    api.getInstalledThemes.mockResolvedValue({
+      installs: [installRow({ pendingPackageId: NEXT_PACKAGE_ID, pendingVersion: '1.1.0' })],
+    })
+    api.compareThemeUpdate.mockResolvedValue(COMPARISON)
+    api.updateThemeInstall.mockRejectedValue(Object.assign(new Error('moved on'), { status: 409, body: { detail: 'moved on' } }))
+    const row = await renderOwnerTab()
+    fireEvent.click(within(row).getByRole('button', { name: 'Review update' }))
+    await screen.findByTestId('theme-update-compare')
+    fireEvent.click(screen.getByRole('button', { name: APPLY_UPDATE }))
+
+    await waitFor(() => expect(api.getInstalledThemes).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByTestId('theme-update-compare')).toBeNull())
+  })
+
   it('rolls back to the previous version', async () => {
     api.getInstalledThemes.mockResolvedValue({ installs: [installRow({ previousPackageId: 'previous-1' })] })
     api.rollbackTheme.mockResolvedValue(installRow())

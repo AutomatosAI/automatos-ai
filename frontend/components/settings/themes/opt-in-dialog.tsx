@@ -7,8 +7,9 @@
  * member says yes to this exact package. The dialog shows the server's wording (`optIn.wording`,
  * never a copy) and the version, and posts the `packageId` it SHOWED: `install` is the row as it
  * was when the dialog opened, so a list refetched behind an open dialog can't swap the version
- * the member is agreeing to. A 409 (the install moved on) shows the server's sentence and
- * refetches the list (hooks/use-installed-themes.ts).
+ * the member is agreeing to. A 404/409 (the install is gone or moved on) shows the server's
+ * sentence, refetches the list (hooks/use-installed-themes.ts) and closes the dialog, so the next
+ * "Use this theme" opens on the current version instead of resending the stale one.
  */
 import { ShieldAlert } from 'lucide-react'
 
@@ -21,7 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useOptInTheme } from '@/hooks/use-installed-themes'
+import { isStaleThemeRefusal, useOptInTheme } from '@/hooks/use-installed-themes'
 import type { InstalledTheme } from '@/lib/api-client'
 
 import { themeName } from './theme-labels'
@@ -43,8 +44,9 @@ export function OptInDialog({ install, onClose, onOptedIn }: OptInDialogProps) {
     if (!install) return
     try {
       await optIn.mutateAsync({ installId: install.installId, packageId: install.optIn.packageId })
-    } catch {
-      return // the hook showed the server's sentence
+    } catch (error) {
+      if (isStaleThemeRefusal(error)) onClose() // the hook showed the server's sentence
+      return
     }
     onOptedIn(install)
     onClose()

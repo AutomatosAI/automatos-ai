@@ -5,7 +5,8 @@
  * (`GET /api/themes/installs/{id}/compare/{packageId}`: the versions, the changed files from the
  * two file manifests, the scan diff), and Apply, which posts the package the compare SHOWED
  * (`POST …/update`, manage + step-up). A private version is a new opt-in for every member: opt-ins
- * are keyed by package (A-07b).
+ * are keyed by package (A-07b). A 404/409 on Apply (the install is gone or already moved on)
+ * shows the server's sentence and closes, so the refetched row is what gets compared next.
  */
 import { Button } from '@/components/ui/button'
 import {
@@ -16,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useThemeUpdateComparison, useUpdateThemeInstall } from '@/hooks/use-installed-themes'
+import { isStaleThemeRefusal, useThemeUpdateComparison, useUpdateThemeInstall } from '@/hooks/use-installed-themes'
 import type { InstalledTheme, ThemeUpdateComparison } from '@/lib/api-client'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 
@@ -89,8 +90,9 @@ function UpdateCompareContent({ install, onClose }: { install: InstalledTheme; o
     if (!shown) return
     try {
       await update.mutateAsync({ installId: install.installId, packageId: shown.to.packageId })
-    } catch {
-      return // the hook showed the server's sentence
+    } catch (error) {
+      if (isStaleThemeRefusal(error)) onClose() // the hook showed the server's sentence
+      return
     }
     onClose()
   }

@@ -165,15 +165,35 @@ describe('the opt-in and the choice', () => {
     expect(screen.queryByTestId('theme-opt-in-dialog')).toBeNull()
   })
 
-  it('a 409 (the install moved on) chooses nothing and refetches the list', async () => {
+  it('a 409 (the install moved on) chooses nothing, refetches the list and closes the dialog', async () => {
     api.optInTheme.mockRejectedValue(Object.assign(new Error('superseded'), { status: 409, body: { detail: 'superseded' } }))
     const row = await renderTab('member')
     fireEvent.click(within(row).getByRole('button', { name: USE_THEME }))
     fireEvent.click(within(await screen.findByTestId('theme-opt-in-dialog')).getByRole('button', { name: OPT_IN_CONFIRM }))
 
     await waitFor(() => expect(api.getInstalledThemes).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByTestId('theme-opt-in-dialog')).toBeNull())
     expect(api.putThemeChoice).not.toHaveBeenCalled()
     expect(setStyle).not.toHaveBeenCalled()
+  })
+
+  it('reopening after a 409 opts in to the refetched version, not the stale one', async () => {
+    const NEW_PACKAGE = 'pkg-moved-on'
+    api.optInTheme.mockRejectedValueOnce(Object.assign(new Error('superseded'), { status: 409, body: { detail: 'superseded' } }))
+    const row = await renderTab('member')
+    api.getInstalledThemes.mockResolvedValue({
+      installs: [installRow({ optIn: { required: true, wording: OPT_IN_WORDING, packageId: NEW_PACKAGE } })],
+    })
+    fireEvent.click(within(row).getByRole('button', { name: USE_THEME }))
+    fireEvent.click(within(await screen.findByTestId('theme-opt-in-dialog')).getByRole('button', { name: OPT_IN_CONFIRM }))
+    await waitFor(() => expect(screen.queryByTestId('theme-opt-in-dialog')).toBeNull())
+    await waitFor(() => expect(api.getInstalledThemes).toHaveBeenCalledTimes(2))
+
+    const fresh = await screen.findByTestId(`installed-theme-${INSTALL_ID}`)
+    fireEvent.click(within(fresh).getByRole('button', { name: USE_THEME }))
+    fireEvent.click(within(await screen.findByTestId('theme-opt-in-dialog')).getByRole('button', { name: OPT_IN_CONFIRM }))
+
+    await waitFor(() => expect(api.optInTheme).toHaveBeenLastCalledWith(INSTALL_ID, NEW_PACKAGE))
   })
 
   it('a revoked (disabled) theme cannot be chosen', async () => {

@@ -4,7 +4,8 @@
  * PRD-261 A-07d — the workspace's installed themes and the member's choice among them.
  *
  * "Use this theme" on a private version this member has not opted in to opens the opt-in dialog
- * first (with the row as it was when clicked); once the server recorded it, the choice is stored
+ * first (with the row as it was when clicked; a 404/409 closes it so a retry starts from the
+ * refetched row); once the server recorded it, the choice is stored
  * and the page reloads into the theme (hooks/use-installed-themes.ts `useChooseTheme`). Every
  * member sees the list and the choice; the manage actions show only for `workspace:manage`.
  */
