@@ -27,8 +27,9 @@ import { useMascotMotion } from './use-mascot-motion'
  * no image role, no name, no caption read out (P260-FX-24, M74).
  *
  * PRD-261 A-13b (F10, WCAG 2.2.2): under him sits the Pause Auto control,
- * wherever he can move (not decorative, not under the OS reduced-motion
- * setting). Paused, he is his still and his ring stops (data-motion="still"),
+ * wherever he can move (playing, not decorative, not under the OS reduced-motion
+ * setting) and is the page's live Auto (pauseControl, false on a picture of the
+ * chat such as the Looks preview). Paused, he is his still and his ring stops (data-motion="still"),
  * and he stays paused across a state change, a remount and a reload, in every
  * tab of this browser (lib/mascot/pause.ts). Under reduced motion he is the
  * same still, with no control, since nothing moves.
@@ -65,6 +66,22 @@ export interface AutoMascotProps {
    * is never announced as a live status ('Something went wrong').
    */
   readonly decorative?: boolean
+  /**
+   * False where he is a picture of the chat, not a live Auto (the Looks page's
+   * preview): he keeps his name and caption and obeys the shared pause, but has
+   * no Pause Auto control of his own, so a mockup never offers a real button.
+   */
+  readonly pauseControl?: boolean
+}
+
+/** The Pause Auto control shows only where a live Auto's clip could be moving. */
+function showsPauseControl(props: {
+  readonly playing: boolean
+  readonly decorative: boolean
+  readonly pauseControl: boolean
+  readonly reducedMotion: boolean
+}): boolean {
+  return props.playing && props.pauseControl && !props.decorative && !props.reducedMotion
 }
 
 /** play()'s refusal when the browser blocks autoplay. */
@@ -82,6 +99,7 @@ export function AutoMascot({
   lightsPage = true,
   playing = true,
   decorative = false,
+  pauseControl = true,
 }: AutoMascotProps) {
   const motion = useMascotMotion()
   const format = useVideoFormat()
@@ -90,6 +108,7 @@ export function AutoMascot({
   const video = playing && !motion.still && !videoFailed ? format : null
   const player = useMascotPlayer({ target: state, still: video === null, onClipEnded })
   const label = caption ?? captionFor(state)
+  const pausable = showsPauseControl({ playing, decorative, pauseControl, reducedMotion: motion.reducedMotion })
 
   const onVideoError = useCallback((event: SyntheticEvent<HTMLVideoElement>) => {
     console.warn(`[mascot] Auto's clip ${event.currentTarget.src} didn't play, so he is a still.`)
@@ -132,7 +151,7 @@ export function AutoMascot({
           {detail && <span className={styles.captionDetail}>{detail}</span>}
         </p>
       )}
-      {!decorative && !motion.reducedMotion && (
+      {pausable && (
         <MascotPauseButton paused={motion.paused} onToggle={motion.togglePaused} />
       )}
     </div>

@@ -124,6 +124,25 @@ describe('Pause Auto (F10, WCAG 2.2.2)', () => {
     expect(screen.queryByRole('button', { hidden: true })).toBeNull()
     expect(container.firstElementChild).toHaveAttribute('data-motion', 'still')
   })
+
+  it('gives a still that was never asked to play (playing={false}) no control: nothing of his can move', () => {
+    const { container } = render(<AutoMascot state="idle" playing={false} />)
+    expect(screen.queryByRole('button', { name: PAUSE_AUTO })).toBeNull()
+    expect(clips(container)).toHaveLength(0)
+  })
+
+  it('gives a picture of the chat (pauseControl={false}) no control, yet keeps his name and obeys the pause', () => {
+    const preview = render(<AutoMascot state="celebrate" caption="Ta-da." pauseControl={false} />)
+    expect(screen.queryByRole('button', { name: PAUSE_AUTO })).toBeNull()
+    expect(screen.getByRole('img', { name: 'Ta-da.' })).toBeInTheDocument()
+    expect(clips(preview.container)).toHaveLength(1)
+    preview.unmount()
+
+    window.localStorage.setItem(PAUSE_KEY, '1')
+    const { container } = render(<AutoMascot state="celebrate" caption="Ta-da." pauseControl={false} />)
+    expect(clips(container)).toHaveLength(0)
+    expect(container.firstElementChild).toHaveAttribute('data-motion', 'still')
+  })
 })
 
 describe('Auto under reduced motion: the still', () => {
