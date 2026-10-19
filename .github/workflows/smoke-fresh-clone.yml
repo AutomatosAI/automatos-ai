@@ -10,50 +10,104 @@ name: smoke-fresh-clone
 # allowed-to-fail mask is removed. Still NON-REQUIRED in branch protection;
 # flipping it to required is the owner's Q2 action.
 #
-# Runs on manual dispatch and on pushes that touch the boot substrate (compose,
-# entrypoint, this workflow, or the script) — not on every push, since it builds
-# and boots the full stack.
+# PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
+# the fresh boot and two warm restarts of the backend to /health 200 and to
+# /health/ready 200, timed from the container's start and polled every second,
+# the frontend's :3000, Started → Healthy per service, the /health/bootstrap
+# stages and the alembic runs per boot. The step summary shows them on every run;
+# the records and logs are uploaded as the smoke-fresh-clone-boot artifact, which
+# PRD-262 US-004 takes its five-run medians from. No time is a bar here yet.
+#
+# Runs on manual dispatch, every night (most main pushes skip the path filter,
+# and US-004 needs five runs), and on pushes and pull requests that touch what the
+# stack builds or boots from: compose, the Makefile, the env defaults, the
+# backend's image, entrypoint, requirements, boot module, seeds and migrations, the
+# worker, the frontend's image and lock file, the script and this workflow. Not on
+# every push, since it builds and boots the full stack.
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "41 2 * * *" # every night, 02:41 UTC
   push:
     branches:
       - main
     paths:
       - "docker-compose.yml"
-      - "orchestrator/docker-entrypoint.sh"
+      - "docker-compose.dev.yml"
+      - "Makefile"
+      - "envs/*.defaults"
       - "orchestrator/Dockerfile"
-      - "envs/api.defaults"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/requirements*.txt"
+      - "orchestrator/requirements.in"
+      - "orchestrator/requirements*.lock"
+      - "orchestrator/main.py"
+      - "orchestrator/core/seeds/**"
+      - "orchestrator/core/database/load_seed_data.py"
+      - "orchestrator/alembic.ini"
+      - "orchestrator/alembic/**"
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
+      - "services/workspace-worker/**"
+      - "frontend/Dockerfile"
+      - "frontend/package-lock.json"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke_boot.py"
+      - "scripts/ci/smoke_report.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
       - main
     paths:
       - "docker-compose.yml"
-      - "orchestrator/docker-entrypoint.sh"
+      - "docker-compose.dev.yml"
+      - "Makefile"
+      - "envs/*.defaults"
       - "orchestrator/Dockerfile"
-      - "envs/api.defaults"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/requirements*.txt"
+      - "orchestrator/requirements.in"
+      - "orchestrator/requirements*.lock"
+      - "orchestrator/main.py"
+      - "orchestrator/core/seeds/**"
+      - "orchestrator/core/database/load_seed_data.py"
+      - "orchestrator/alembic.ini"
+      - "orchestrator/alembic/**"
       - "orchestrator/scripts/init_fresh_db.py"
       - "orchestrator/scripts/init_test_db.py"
+      - "services/workspace-worker/**"
+      - "frontend/Dockerfile"
+      - "frontend/package-lock.json"
       - "scripts/ci/smoke-fresh-clone.sh"
+      - "scripts/ci/smoke_boot.py"
+      - "scripts/ci/smoke_report.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
+# A newer push to a pull request cancels its older run. Main, nightly and manual
+# runs are measurements, so each gets a group of its own: GitHub keeps one pending
+# run per group and cancels the older one, which would lose a run US-004 needs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   fresh-clone-boot:
     name: Fresh-clone docker compose up -> /health 200 (non-required)
-    runs-on: ubuntu-latest
+    # A fixed runner image, so the five-run baselines and later runs compare like with like.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Local-only secrets — throwaway values for an ephemeral stack. No external
       # SaaS credential (Clerk / AWS / LLM) is provided, on purpose: that is the
@@ -67,4 +121,16 @@ jobs:
           AUTH_EDITION: local
           REQUIRE_AUTH: "false"
           DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-fresh-clone
         run: bash scripts/ci/smoke-fresh-clone.sh
+
+      # The boot records (boots.jsonl, events.jsonl, smoke-report.json) and the
+      # stack's logs, pass or fail. The values in them are the throwaway ones above.
+      - name: Upload boot measurements
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-fresh-clone-boot
+          path: ${{ runner.temp }}/smoke-fresh-clone/
+          if-no-files-found: warn
+          retention-days: 30

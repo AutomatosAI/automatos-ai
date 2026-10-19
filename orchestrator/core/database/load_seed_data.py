@@ -315,5 +315,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     success = load_seed_data(load_credentials=True, load_platform_defaults=not args.credentials_only)
     sys.exit(0 if success else 1)

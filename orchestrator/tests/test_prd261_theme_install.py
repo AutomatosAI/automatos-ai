@@ -481,6 +481,18 @@ def test_compare_lists_changed_files_and_the_scan_diff(api):
     assert body["scan"]["changed"] == {"contrast": {"from": "ok", "to": "low"}}
 
 
+def test_compare_never_shows_the_llm_checks_score_or_findings(api):
+    # M2: the LLM check is the platform reviewer's; a workspace sees the verdict and the plain checks.
+    llm = {"level": "warning", "riskScore": 40, "findings": [{"description": "reads a token"}]}
+    v1 = _package(api.db, scan_report={"verdict": "pass", "summary": {"warning": 0}, "checks": {"sizes": {"level": "pass"}}})
+    v2 = _package(api.db, version="1.1.0", scan_verdict="review_required", scan_report={
+        "verdict": "review_required", "summary": {"warning": 1}, "checks": {"sizes": {"level": "pass"}, "llm": llm}})
+    install = _install(api.db, v1)
+    body = api.client.get(f"/api/themes/installs/{install.id}/compare/{v2.id}").json()
+    assert body["scan"]["changed"] == {"verdict": {"from": "pass", "to": "review_required"}}
+    assert "riskScore" not in str(body) and "reads a token" not in str(body)
+
+
 def test_uninstall_is_soft_keeps_looks_and_moves_members_to_the_default(api):
     default = _install(api.db, _package(api.db, theme_id="acme/pen"))
     api.client.put("/api/themes/default", json={"installId": str(default.id)})

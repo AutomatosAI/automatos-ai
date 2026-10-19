@@ -41,6 +41,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+from core.monitoring.request_log_guard import guard_request_logs
+guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
 logger = logging.getLogger("harvest_plugins")
 
 # ---------------------------------------------------------------------------
