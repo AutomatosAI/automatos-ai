@@ -9,15 +9,19 @@
  *   so do Next's own build and dev internals (PRD-262 #29) and React's development builds (#47).
  * - test.yml's prod-image-parity job and images.yml boot each built image and look for every
  *   excluded glob (scripts/check-standalone-image.sh), so the script's list is this config's list.
+ * - The server builds resolve the client-only Retell, LiveKit and SheetJS packages to an empty
+ *   module, so their code stays out of the server chunks (PRD-262 #47); the browser keeps them.
  */
 import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import { describe, expect, it } from 'vitest'
 
+type WebpackConfig = { mode?: string; resolve?: { alias?: Record<string, string | false> } }
 type NextConfig = {
   images?: { unoptimized?: boolean }
   outputFileTracingExcludes?: Record<string, string[]>
+  webpack?: (config: WebpackConfig, options: { isServer: boolean }) => WebpackConfig
 }
 
 const load = createRequire(import.meta.url)
@@ -94,6 +98,23 @@ describe('the standalone build without sharp, libvips or TypeScript', () => {
 
   it('has the image check look for every glob the trace leaves out', () => {
     expect(checkedGlobs()).toEqual(config.outputFileTracingExcludes?.['*'])
+  })
+})
+
+describe('the client-only packages, out of the server bundle', () => {
+  const CLIENT_ONLY = { 'retell-client-js-sdk': false, 'livekit-client': false, xlsx: false }
+
+  it('resolves each to an empty module in the server builds and keeps the other aliases', () => {
+    const base: WebpackConfig = { mode: 'production', resolve: { alias: { react: '/react' } } }
+    const server = config.webpack?.(base, { isServer: true })
+    expect(server?.resolve?.alias).toEqual({ react: '/react', ...CLIENT_ONLY })
+    expect(server?.mode).toBe('production')
+    expect(base.resolve?.alias).toEqual({ react: '/react' })
+  })
+
+  it('leaves the browser build as it is', () => {
+    const base: WebpackConfig = { resolve: { alias: { react: '/react' } } }
+    expect(config.webpack?.(base, { isServer: false })).toBe(base)
   })
 })
 

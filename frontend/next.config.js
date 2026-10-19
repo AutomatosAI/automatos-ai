@@ -133,6 +133,20 @@ const STANDALONE_TRACE_EXCLUDES = [
   'node_modules/next/dist/compiled/react-refresh/**',
 ]
 
+// PRD-262 #47: packages only the browser runs, loaded on demand inside a handler or an effect
+// (hooks/use-retell-call.ts's voice call, which brings LiveKit, and FilePreview's spreadsheet
+// preview), never during a server render. The server builds resolve them to an empty module, so
+// their code (0.96 MB of server chunks) stays out of the image; the browser bundle keeps them.
+// Not `externals`: the trace would then copy each package into node_modules.
+const CLIENT_ONLY_PACKAGES = ['retell-client-js-sdk', 'livekit-client', 'xlsx']
+
+/** The webpack config with each client-only package resolved to an empty module on the server. */
+function withoutClientOnlyPackagesOnTheServer(config, { isServer }) {
+  if (!isServer) return config
+  const absent = Object.fromEntries(CLIENT_ONLY_PACKAGES.map((name) => [name, false]))
+  return { ...config, resolve: { ...config.resolve, alias: { ...config.resolve?.alias, ...absent } } }
+}
+
 const nextConfig = {
   output: 'standalone',
   // PRD-262 US-046 (§9-Q12): no image optimisation, so the server never loads sharp and
@@ -141,6 +155,7 @@ const nextConfig = {
   images: { unoptimized: true },
   // '*' matches every route and the server's own trace ('next-server').
   outputFileTracingExcludes: { '*': STANDALONE_TRACE_EXCLUDES },
+  webpack: withoutClientOnlyPackagesOnTheServer,
   reactStrictMode: false,
   // SECURITY: Disable X-Powered-By header to reduce information leakage (OWASP A05:2021)
   poweredByHeader: false,

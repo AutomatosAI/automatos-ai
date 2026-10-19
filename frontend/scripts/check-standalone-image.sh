@@ -8,6 +8,9 @@
 #   /app (the image's sh expands each one).
 # - /app/.next holds none of the build's trace files (*.nft.json): the build deletes them,
 #   and the server never reads them (PRD-262 #47).
+# - /app/.next/server holds no code of the packages only the browser runs, which
+#   next.config.js resolves to an empty module on the server (PRD-262 #47): a string literal
+#   from each package's own code marks it.
 # - node runs, and its binary has no symbol table or debug section (strip --strip-all in
 #   the Dockerfile's node-strip stage, PRD-262 #24). The image has no readelf, so its own
 #   node reads its section headers.
@@ -60,6 +63,12 @@ TRACE_EXCLUDED=(
   'node_modules/scheduler/cjs/*.development.js'
   'node_modules/next/dist/compiled/react-is/cjs/*.development.js'
   'node_modules/next/dist/compiled/react-refresh/**'
+)
+# <package>:<a string literal of that package's code, in none of ours>.
+CLIENT_ONLY_MARKERS=(
+  'retell-client-js-sdk:retell-ai-4ihahnq7.livekit.cloud'
+  'livekit-client:livekit-room'
+  'xlsx:SheetJS Table Export'
 )
 READY_TIMEOUT_S=60
 # A static file: the middleware's matcher skips paths with an extension.
@@ -133,6 +142,17 @@ check_no_trace_files() {
   fi
 }
 
+check_client_only_packages() {
+  local found package
+  # shellcheck disable=SC2016 # $entry expands inside the container's sh
+  found=$(docker run --rm "$IMAGE" sh -c 'for entry in "$@"; do if grep -rqF -- "${entry#*:}" .next/server; then echo "${entry%%:*}"; fi; done' sh "${CLIENT_ONLY_MARKERS[@]}")
+  if [ -z "$found" ]; then
+    echo "no client-only package in /app/.next/server: ${CLIENT_ONLY_MARKERS[*]%%:*}"
+    return
+  fi
+  while IFS= read -r package; do fail "the server output carries ${package}, which only the browser runs"; done <<< "$found"
+}
+
 check_node() {
   local version sections
   if ! version=$(docker run --rm "$IMAGE" node -v); then fail "node does not run"; return; fi
@@ -183,6 +203,7 @@ expect_status() {
 
 check_trace
 check_no_trace_files
+check_client_only_packages
 check_node
 docker run -d --name "$CONTAINER" --network none "$@" "$IMAGE" > /dev/null
 trap 'docker rm -f "$CONTAINER" > /dev/null 2>&1 || true' EXIT

@@ -10,7 +10,10 @@ either: the standalone server.js sets NODE_ENV=production, as the Dockerfile doe
 next.config.js's STANDALONE_TRACE_EXCLUDES lists them all, which Next applies to the
 server's own trace and to every route's. The build's own trace files (43 *.nft.json, 0.39
 MB, #47) are read only by deploy tooling, so the build RUN deletes them from the
-standalone output before the runtime copies it.
+standalone output before the runtime copies it. And three packages only the browser runs,
+loaded on demand in a handler or an effect (Retell's voice client, the LiveKit it brings,
+and SheetJS), are resolved to an empty module in the server builds (0.96 MB of server
+chunks, #47); the browser bundle keeps them.
 
 This pins:
 - every one of those files is matched by a glob, and nothing the server loads is (the
@@ -26,6 +29,7 @@ images.yml (the published image, both arches).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -102,6 +106,16 @@ RUNTIME = [
     NEXT + "compiled/react-is/index.js",
     "node_modules/@opentelemetry/api/build/src/index.js",
 ]
+
+
+CLIENT_ONLY_PACKAGES = ["retell-client-js-sdk", "livekit-client", "xlsx"]
+SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
+NOT_SHIPPED_DIRS = {"node_modules", ".next", "__tests__"}
+PACKAGE_IMPORT = re.compile(
+    r"""(?P<how>\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|\brequire\s*\(\s*)"""
+    r"""['"](?P<package>retell-client-js-sdk|livekit-client|xlsx)(?:/[^'"]*)?['"]"""
+)
+USE_CLIENT = re.compile(r"""\s*['"]use client['"]""")
 
 
 def _config_globs() -> list[str]:
@@ -183,6 +197,71 @@ def test_the_check_script_requests_every_page_and_reads_the_log_for_missing_modu
     assert 'grep -qE "MODULE_NOT_FOUND|Cannot find module" <<< "$logs"' in script
 
 
+# ── client-only packages, out of the server bundle ──────────────────────────
+
+
+def _shipped_sources() -> list[Path]:
+    found = []
+    for directory, subdirs, files in os.walk(FRONTEND):
+        subdirs[:] = [name for name in subdirs if name not in NOT_SHIPPED_DIRS]
+        found += [Path(directory, name) for name in files
+                  if Path(name).suffix in SOURCE_SUFFIXES and ".test." not in name]
+    return found
+
+
+def test_the_server_builds_resolve_the_client_only_packages_to_an_empty_module():
+    match = re.search(r"^const CLIENT_ONLY_PACKAGES = (\[.*\])$", NEXT_CONFIG, re.M)
+    assert match, "next.config.js defines no CLIENT_ONLY_PACKAGES"
+    assert json.loads(match.group(1).replace("'", '"')) == CLIENT_ONLY_PACKAGES
+    assert "  if (!isServer) return config\n" in NEXT_CONFIG
+    assert "Object.fromEntries(CLIENT_ONLY_PACKAGES.map((name) => [name, false]))" in NEXT_CONFIG
+    assert re.search(r"^  webpack: withoutClientOnlyPackagesOnTheServer,$", NEXT_CONFIG, re.M)
+    assert not re.search(r"\bexternals\b", NEXT_CONFIG.split("const nextConfig")[1]), "externals would trace them in"
+
+
+def _is_dynamic(found: re.Match) -> bool:
+    return found.group("how").startswith("import") and "(" in found.group("how")
+
+
+def test_the_source_loads_each_client_only_package_only_on_demand_in_client_code():
+    """A static import would put the package back in the server render, where it is now empty."""
+    loads = {}
+    for path in _shipped_sources():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in PACKAGE_IMPORT.finditer(text):
+            name = path.relative_to(FRONTEND).as_posix()
+            assert _is_dynamic(match), f"{name}: a static import of {match.group('package')}"
+            assert USE_CLIENT.match(text), f"{name} is not a client module"
+            loads.setdefault(match.group("package"), []).append(name)
+    assert loads == {
+        "retell-client-js-sdk": ["hooks/use-retell-call.ts"],
+        "xlsx": ["components/widgets/FileWidget/FilePreview.tsx"],
+    }
+
+
+def test_the_import_pattern_tells_a_dynamic_import_from_a_static_one():
+    for line in ("const XLSX = await import('xlsx')", 'const { RetellWebClient } = await import("retell-client-js-sdk")'):
+        found = PACKAGE_IMPORT.search(line)
+        assert found and _is_dynamic(found), line
+    for line in ("import * as XLSX from 'xlsx'", "import 'livekit-client'", "const x = require('xlsx/dist/x')",
+                 "export { utils } from 'xlsx'"):
+        found = PACKAGE_IMPORT.search(line)
+        assert found and not _is_dynamic(found), line
+
+
+def test_the_check_script_looks_for_each_client_only_package_in_the_server_output():
+    script = CHECK_SCRIPT.read_text()
+    block = re.search(r"^CLIENT_ONLY_MARKERS=\(\n(.*?)\n\)$", script, re.M | re.S)
+    assert block, "check-standalone-image.sh defines no CLIENT_ONLY_MARKERS"
+    entries = [line.strip().strip("'") for line in block.group(1).splitlines()]
+    assert [entry.split(":", 1)[0] for entry in entries] == CLIENT_ONLY_PACKAGES
+    assert 'grep -rqF -- "${entry#*:}" .next/server' in script
+    assert re.search(r"^check_client_only_packages$", script, re.M)
+    sources = "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in _shipped_sources())
+    for entry in entries:
+        assert entry.split(":", 1)[1] not in sources, f"{entry}: our own code carries the marker"
+
+
 # ── the script, against a stub docker ───────────────────────────────────────
 
 # `docker run --rm <image> sh -c <script> sh <args>` runs <script> with the host's sh in the
@@ -253,6 +332,7 @@ def test_a_clean_image_passes_and_every_page_is_requested(tmp_path):
     assert "absent from /app: node_modules/@img/**" in out
     assert "3 pages answered" in out
     assert "no *.nft.json in /app/.next" in out
+    assert "no client-only package in /app/.next/server: retell-client-js-sdk livekit-client xlsx" in out
     assert "307 /settings" in out
 
 
@@ -266,6 +346,17 @@ def test_a_glob_that_still_matches_fails_once_by_its_glob(tmp_path):
     carried = re.findall(r"the standalone build carries (\S+)", out)
     # In the config's order, each glob once, however many files it still matches.
     assert carried == ["node_modules/caniuse-lite/**", NEXT + "compiled/next-server/*-turbo.runtime.prod.js"]
+
+
+@needs_bash
+def test_client_only_package_code_in_the_server_output_fails(tmp_path):
+    leaking = tmp_path / "app" / ".next" / "server" / "chunks" / "7752.js"
+    leaking.parent.mkdir(parents=True)
+    leaking.write_text('var h="<html><head><title>SheetJS Table Export</title></head>";', encoding="utf-8")
+    code, out = _run_check(tmp_path)
+    assert code == 1, out
+    assert "the server output carries xlsx, which only the browser runs" in out
+    assert "carries livekit-client" not in out
 
 
 @needs_bash
