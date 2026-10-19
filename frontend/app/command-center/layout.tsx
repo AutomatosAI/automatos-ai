@@ -4,10 +4,13 @@ import { ThemeSlot } from '@/components/theme-host/theme-slot'
 /** The route a theme's Command Center page is registered on (registerPage, plan §2.6 Q3: command-center). */
 const COMMAND_CENTER_ROUTE = '/command-center'
 /**
- * Links into a surface only the core page has: another tab (Board, Questions, …) and the Command
- * Center's deep links to one execution, Playbook, agent or Task (components/activity/activity-page.tsx).
+ * Links into a surface only the core page has: another tab (Board, Questions, …), a Task on the
+ * board (task_id: BoardTab's useTicketDeepLink, both bases), and one execution or Playbook
+ * (openExecution, recipeId). A theme's base may be Classic (THEME_BASES), and then the core page
+ * under it is components/activity/activity-page.tsx, which opens those in its feed. agent_id is not
+ * listed: nothing reads it, and every link that sets it also sets tab=board.
  */
-const CORE_COMMAND_CENTER_PARAMS = ['tab', 'openExecution', 'recipeId', 'agent_id', 'task_id']
+const CORE_COMMAND_CENTER_PARAMS = ['tab', 'openExecution', 'recipeId', 'task_id']
 /** The tab a theme's page is: Summary, the core page's own default tab (command-center-shell.tsx). */
 const THEME_SERVES = { tab: ['summary'] }
 
