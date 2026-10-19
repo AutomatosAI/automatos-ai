@@ -54,9 +54,45 @@ LOCALE_SETTINGS_KEY = "locale"  # the merchant's locale (modules/widgets/i18n.py
 LINE_FIELD = "line"
 EDITABLE_FIELDS: frozenset[str] = frozenset({LINE_FIELD})
 
-# ── Wire names on the widget stream ────────────────────────────────────────
+# ── Wire names on the widget stream and the generic webhook payload ────────
 DISCLOSURE_EVENT = "ai_disclosure"
 AI_GENERATED_FIELD = "ai_generated"
+AI_DISCLOSURE_FIELD = "ai_disclosure"
+
+# ── Channel bots (EUAI-03, PRD-264 §8) ─────────────────────────────────────
+CHANNEL_NOTICE = "AI assistant for {principal}."
+CHANNEL_NOTICE_UNNAMED = "AI assistant."
+TELEGRAM_START_INTRO = "I'm an AI assistant for {principal}."
+TELEGRAM_START_INTRO_UNNAMED = "I'm an AI assistant."
+NOTICE_SEPARATOR = "\n\n"
+
+# FR-15: an auto-created workspace is named "{name or email}'s Workspace"
+# (core/auth/hybrid.py), so that form, or any name with an "@", may carry the
+# owner's name or email and is never used as a public name.
+AUTO_WORKSPACE_NAME_SUFFIX = "'s workspace"
+PERSONAL_DATA_MARK = "@"
+
+# A message asking whether the other side is a person or a bot: the reply to it
+# always carries the notice. English, Portuguese, Spanish, French, German and
+# Italian, matched case-insensitively anywhere in the message.
+HUMAN_QUESTION_PATTERNS: tuple[str, ...] = (
+    r"\bare\s+you\s+(?:an?\s+)?(?:real\s+)?(?:human|person|bot|robot|machine|ai|real)\b",
+    r"\b(?:am\s+i|are\s+we)\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+(?:an?\s+)?"
+    r"(?:real\s+)?(?:human|person|bot|robot|machine|ai)\b",
+    r"\bis\s+(?:this|that)\s+(?:an?\s+)?(?:real\s+)?(?:human|person|bot|robot|ai)\b",
+    r"\b(?:voc[eê]|tu)\s+[eé]s?\s+(?:uma?\s+)?(?:humano|humana|pessoa|rob[oô]|bot|ia)\b",
+    r"\b(?:estou|est[aá]s?)\s+a?\s*(?:falar|falando|conversar)\s+com\s+(?:uma?\s+)?"
+    r"(?:humano|pessoa|rob[oô]|bot|ia)\b",
+    r"\b(?:eres|es\s+usted)\s+(?:una?\s+)?(?:humano|humana|persona|robot|bot|ia)\b",
+    r"\bestoy\s+hablando\s+con\s+(?:una?\s+)?(?:humano|persona|robot|bot|ia)\b",
+    r"\b(?:es-tu|êtes-vous|tu\s+es|vous\s+êtes)\s+(?:une?\s+)?(?:humain|humaine|personne|robot|bot|ia)\b",
+    r"\bje\s+parle\s+(?:à|a|avec)\s+(?:une?\s+)?(?:humain|personne|robot|bot|ia)\b",
+    r"\b(?:bist\s+du|sind\s+sie)\s+(?:ein\s+|eine\s+)?(?:mensch|bot|roboter|ki)\b",
+    r"\b(?:rede|spreche|chatte)\s+ich\s+mit\s+(?:einem\s+|einer\s+)?(?:menschen|mensch|bot|roboter|ki)\b",
+    r"\bsei\s+(?:una?\s+|un'\s*)?(?:umano|umana|persona|robot|bot|ia)\b",
+    r"\bsto\s+parlando\s+con\s+(?:una?\s+|un'\s*)?(?:umano|persona|robot|bot|ia)\b",
+)
+_HUMAN_QUESTION = re.compile("|".join(HUMAN_QUESTION_PATTERNS), re.IGNORECASE)
 
 _LOCALE_SEPARATOR = re.compile(r"[-_]")
 
@@ -193,3 +229,79 @@ def disclosure_event_payload(disclosure: AIDisclosure, conversation_id: str) -> 
 def mark_ai_generated(payload: Mapping[str, Any]) -> dict[str, Any]:
     """A copy of an assistant message payload marked ``"ai_generated": true``."""
     return {**payload, AI_GENERATED_FIELD: True}
+
+
+# ── Channel bots (EUAI-03) ─────────────────────────────────────────────────
+
+def _public_text(value: Any) -> Optional[str]:
+    """``value`` stripped when it is text that carries no personal-data mark."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped or PERSONAL_DATA_MARK in stripped:
+        return None
+    return stripped
+
+
+def public_principal_name(company_name: Any, workspace_name: Any) -> Optional[str]:
+    """The public name a notice may give for whom the AI acts (FR-15), or ``None``.
+
+    The business profile's ``company_name`` first; then the workspace name,
+    unless it is the auto-created "{name or email}'s Workspace" form. A name
+    holding an "@" is never used: it may be the owner's email.
+    """
+    company = _public_text(company_name)
+    if company:
+        return company
+    workspace = _public_text(workspace_name)
+    if workspace and not workspace.casefold().endswith(AUTO_WORKSPACE_NAME_SUFFIX):
+        return workspace
+    return None
+
+
+def channel_notice(principal: Optional[str]) -> str:
+    """The channel bot notice: "AI assistant for {principal}." or "AI assistant."."""
+    if principal:
+        return CHANNEL_NOTICE.format(principal=principal)
+    return CHANNEL_NOTICE_UNNAMED
+
+
+def telegram_start_intro(principal: Optional[str]) -> str:
+    """The first sentence of the Telegram /start reply."""
+    if principal:
+        return TELEGRAM_START_INTRO.format(principal=principal)
+    return TELEGRAM_START_INTRO_UNNAMED
+
+
+def asks_if_human(text: Any) -> bool:
+    """True when a message asks whether it is talking to a person or a bot."""
+    return isinstance(text, str) and _HUMAN_QUESTION.search(text) is not None
+
+
+def channel_notice_due(
+    *,
+    last_notice_at: Optional[float],
+    now: float,
+    idle_seconds: float,
+    inbound_text: Any = None,
+) -> bool:
+    """Whether a message to a person on a channel carries the AI notice.
+
+    The one rule for both outbound channel paths (PRD-264 EUAI-03): the first
+    message to that person on that connection (``last_notice_at`` is ``None``,
+    which also stands for "the record can't be read": fail toward telling),
+    the first after ``idle_seconds`` since the last notice, and any reply to a
+    message asking whether they are talking to a human or a bot.
+    """
+    if asks_if_human(inbound_text):
+        return True
+    if last_notice_at is None:
+        return True
+    return now - last_notice_at >= idle_seconds
+
+
+def prepend_notice(notice: Optional[str], text: str) -> str:
+    """``text`` with ``notice`` as its first paragraph; ``text`` when no notice."""
+    if not notice:
+        return text
+    return f"{notice}{NOTICE_SEPARATOR}{text}"

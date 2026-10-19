@@ -1242,6 +1242,11 @@ class Config:
     COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))
     COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
+    # PRD-264 EUAI-03 (EU AI Act Art. 50(1)): a channel bot's reply carries "AI
+    # assistant for {principal}." on first contact with a person and again once
+    # this many hours have passed since the last notice. The last-notice time
+    # lives in Redis with this TTL (channels/ai_notice.py). No setting turns it off.
+    AI_DISCLOSURE_IDLE_HOURS: int = int(os.getenv("AI_DISCLOSURE_IDLE_HOURS", "24"))
     # SEMANTIC_TOOL_ROUTING (default ON) and TOOL_ROUTING_GRAPH (default OFF, below)
     # gate DIFFERENT surfaces — PRD-232 US-002 split them after C2 found the
     # inversion. SEMANTIC_TOOL_ROUTING gates EMBEDDING narrowing everywhere:

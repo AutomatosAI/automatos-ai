@@ -15,6 +15,11 @@ from .base import BaseChannelAdapter
 
 logger = logging.getLogger(__name__)
 
+START_REPLY_BODY = (
+    "✅ Connected. This chat is now your default for Automatos "
+    "notifications. Send any message to talk to your agents."
+)
+
 
 class TelegramAdapter(BaseChannelAdapter):
     """Telegram bot adapter using python-telegram-bot."""
@@ -99,7 +104,11 @@ class TelegramAdapter(BaseChannelAdapter):
             return {"status": "error", "detail": str(e)}
 
     async def _on_command(self, update, context):
-        """Handle /start and /help — captures chat_id and confirms wiring."""
+        """Handle /start and /help — captures chat_id and confirms wiring.
+
+        The reply's first sentence says it is an AI and for whom (PRD-264
+        EUAI-03): "I'm an AI assistant for {principal}."
+        """
         if not update.effective_chat:
             return
         chat_id = str(update.effective_chat.id)
@@ -107,13 +116,22 @@ class TelegramAdapter(BaseChannelAdapter):
         try:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=(
-                    "✅ Connected. This chat is now your default for Automatos "
-                    "notifications. Send any message to talk to your agents."
-                ),
+                text=f"{self._start_intro()} {START_REPLY_BODY}",
             )
         except Exception as e:
             logger.warning("[Telegram:%s] Failed to ack /start: %s", self.connection_id, e)
+
+    def _start_intro(self) -> str:
+        """The /start reply's first sentence, naming the workspace's public name."""
+        from channels.ai_notice import principal_name
+        from core.database.database import SessionLocal
+        from modules.policy.ai_disclosure import telegram_start_intro
+
+        db = SessionLocal()
+        try:
+            return telegram_start_intro(principal_name(db, self.workspace_id))
+        finally:
+            db.close()
 
     def _persist_default_chat_id(self, chat_id: str) -> None:
         """Seed telegram_default_chat_id in workspace settings.integrations —

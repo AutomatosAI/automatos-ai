@@ -146,7 +146,13 @@ class WhatsAppAdapter(BaseChannelAdapter):
     # ------------------------------------------------------------------
 
     async def handle_webhook(self, payload: Dict[str, Any]) -> Optional[str]:
-        """Process an incoming WhatsApp webhook payload."""
+        """Process an incoming WhatsApp webhook payload.
+
+        Each message goes through ``handle_message``, which replies to the
+        sender through the base class's one reply point, so the reply carries
+        the AI notice (PRD-264 EUAI-03). The sender's number is the reply
+        target and the person the notice is tracked for.
+        """
         try:
             entry = payload.get("entry", [{}])[0]
             changes = entry.get("changes", [{}])[0]
@@ -159,10 +165,10 @@ class WhatsAppAdapter(BaseChannelAdapter):
 
             for i, msg in enumerate(messages):
                 contact = contacts[i] if i < len(contacts) else {}
-                msg["_contact"] = contact
-                response = await self.handle_message(msg)
-                if response:
-                    await self.send_message(msg.get("from", ""), response)
+                sender = msg.get("from", "")
+                await self.handle_message({
+                    **msg, "_contact": contact, "reply_channel_id": sender, "user_id": sender,
+                })
                 self._increment_message_count()
 
             return "ok"
