@@ -1,0 +1,244 @@
+"""PRD-262 #29 (the 19 Oct breakdown): Next's build and dev internals stay out of the image.
+
+The standalone trace reached about 13.7 MB of next's own files (and caniuse-lite) through
+requires the production server never runs: next/font's loader and the capsize metrics only
+it reads, Babel, browserslist and caniuse-lite, the CSS tools, webpack's crypto polyfill,
+Next's file tracer, the dev overlay, and the route runtimes Next picks only when
+experimental React or Turbopack is on. A probe of 23 routes and a chat POST read none of
+them. next.config.js's STANDALONE_TRACE_EXCLUDES lists them, which Next applies to the
+server's own trace and to every route's.
+
+This pins:
+- every one of those files is matched by a glob, and nothing the server loads is (the
+  runtime list holds the files the probe read that sit beside the excluded ones);
+- frontend/scripts/check-standalone-image.sh looks for exactly the config's globs, which
+  the image's sh can expand (no braces or extglobs);
+- the script, run here against a stub docker, fails on a glob that still matches, on a page
+  that answers 5xx or nothing, and on a server log that reports a missing module, and
+  passes a clean image; it requests every page the build's manifest lists.
+
+In CI the script boots the real images: test.yml's prod-image-parity (both editions) and
+images.yml (the published image, both arches).
+"""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import stat
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+FRONTEND = ROOT / "frontend"
+NEXT_CONFIG = (FRONTEND / "next.config.js").read_text()
+CHECK_SCRIPT = FRONTEND / "scripts" / "check-standalone-image.sh"
+NEXT = "node_modules/next/dist/"
+
+# Required only from next/dist/build, the dev server, the dev overlay or each other (#29).
+BUILD_ONLY = [
+    NEXT + "server/capsize-font-metrics.json",
+    NEXT + "server/font-utils.js",
+    NEXT + "compiled/@next/font/dist/google/loader.js",
+    NEXT + "compiled/babel/bundle.js",
+    NEXT + "compiled/babel-packages/packages-bundle.js",
+    NEXT + "compiled/browserslist/index.js",
+    "node_modules/caniuse-lite/dist/unpacker/agents.js",
+    NEXT + "compiled/postcss-preset-env/index.cjs",
+    NEXT + "compiled/cssnano-simple/index.js",
+    NEXT + "compiled/crypto-browserify/index.js",
+    NEXT + "compiled/@vercel/nft/index.js",
+    NEXT + "compiled/next-devtools/index.js",
+    NEXT + "compiled/next-server/app-page-experimental.runtime.prod.js",
+    NEXT + "compiled/next-server/app-page-turbo.runtime.prod.js",
+    NEXT + "compiled/next-server/app-page-turbo-experimental.runtime.prod.js",
+    NEXT + "compiled/next-server/pages-turbo.runtime.prod.js",
+]
+# What the standalone server loads beside them: it must stay.
+RUNTIME = [
+    NEXT + "compiled/babel/code-frame.js",
+    NEXT + "compiled/babel-code-frame/index.js",
+    NEXT + "build/output/log.js",
+    NEXT + "build/next-config-ts/transpile-config.js",
+    NEXT + "compiled/next-server/app-page.runtime.prod.js",
+    NEXT + "compiled/next-server/app-route.runtime.prod.js",
+    NEXT + "compiled/next-server/pages.runtime.prod.js",
+    NEXT + "compiled/next-server/pages-api.runtime.prod.js",
+    NEXT + "compiled/next-server/server.runtime.prod.js",
+    NEXT + "compiled/@edge-runtime/primitives/load.js",
+    NEXT + "compiled/edge-runtime/index.js",
+    NEXT + "shared/lib/modern-browserslist-target.js",
+    NEXT + "server/lib/start-server.js",
+    NEXT + "server/next-server.js",
+    NEXT + "server/route-modules/app-page/module.compiled.js",
+    NEXT + "next-devtools/server/shared.js",
+    NEXT + "compiled/source-map/source-map.js",
+    "node_modules/react-dom/server.browser.js",
+    "node_modules/@opentelemetry/api/build/src/index.js",
+]
+
+
+def _config_globs() -> list[str]:
+    match = re.search(r"^const STANDALONE_TRACE_EXCLUDES = \[\n(.*?)\n\]$", NEXT_CONFIG, re.M | re.S)
+    assert match, "next.config.js defines no STANDALONE_TRACE_EXCLUDES"
+    code = "\n".join(line for line in match.group(1).splitlines() if not line.strip().startswith("//"))
+    return re.findall(r"'([^']+)'", code)
+
+
+def _script_globs() -> list[str]:
+    match = re.search(r"^TRACE_EXCLUDED=\(\n(.*?)\n\)$", CHECK_SCRIPT.read_text(), re.M | re.S)
+    assert match, "check-standalone-image.sh defines no TRACE_EXCLUDED"
+    return [line.strip().strip("'") for line in match.group(1).splitlines() if line.strip()]
+
+
+def _glob_regex(glob: str) -> re.Pattern:
+    """picomatch's reading of these globs: ** crosses directories, * and ? do not."""
+    parts = re.split(r"(\*\*|\*|\?)", glob)
+    wildcards = {"**": ".*", "*": "[^/]*", "?": "[^/]"}
+    return re.compile("".join(wildcards.get(part, re.escape(part)) for part in parts))
+
+
+def _excluded_by(path: str) -> list[str]:
+    # Next matches with `contains: true`, against the absolute path in the build (/app).
+    return [glob for glob in _config_globs() if _glob_regex(glob).search(f"/app/{path}")]
+
+
+@pytest.mark.parametrize("path", BUILD_ONLY)
+def test_a_build_or_dev_internal_is_traced_out(path):
+    assert _excluded_by(path), f"no glob keeps {path} out of the standalone trace"
+
+
+@pytest.mark.parametrize("path", RUNTIME)
+def test_what_the_server_loads_stays_in_the_trace(path):
+    assert _excluded_by(path) == []
+
+
+def test_the_us_046_globs_stay():
+    for glob in ("node_modules/@img/**", "node_modules/sharp/**", "node_modules/typescript/**",
+                 NEXT + "compiled/amphtml-validator/**"):
+        assert glob in _config_globs(), glob
+
+
+def test_the_check_script_looks_for_exactly_the_config_globs_and_its_sh_can_expand_each():
+    assert _script_globs() == _config_globs()
+    for glob in _config_globs():
+        assert not re.search(r"[{}\[\]!+@]\(|[{}]", glob), f"{glob}: busybox sh cannot expand braces or extglobs"
+        assert glob.startswith("node_modules/"), glob
+
+
+def test_the_check_script_requests_every_page_and_reads_the_log_for_missing_modules():
+    script = CHECK_SCRIPT.read_text()
+    assert 'require("/app/.next/app-path-routes-manifest.json")' in script
+    assert re.search(r'^expect_status "\$OPTIMISER_PATH" 404 .*\ncheck_every_page$', script, re.M)
+    assert "awk '$1 == 0 || $1 >= 500'" in script
+    assert 'grep -qE "MODULE_NOT_FOUND|Cannot find module" <<< "$logs"' in script
+
+
+# ── the script, against a stub docker ───────────────────────────────────────
+
+# `docker run --rm <image> sh -c <script> sh <args>` runs <script> with the host's sh in the
+# fake /app; `node -v` and the ELF reader print canned output; `docker exec <c> node -e <js>`
+# answers the page walk from pages.txt and a single request from status.txt (200 otherwise);
+# `docker logs` prints log.txt.
+_STUB_DOCKER = r"""#!/bin/bash
+echo "docker $1" >> "$STUB_DIR/calls.log"
+case "$1" in
+  run)
+    shift
+    if [ "$1" = "-d" ]; then echo started; exit 0; fi
+    shift 2
+    case "$1 $2" in
+      "sh -c") cd "$STUB_DIR/app" && exec sh -c "$3" "${@:4}" ;;
+      "node -v") echo v24.22.0 ;;
+      "node -e") cat "$STUB_DIR/sections.txt" ;;
+      *) exit 9 ;;
+    esac ;;
+  inspect) echo true ;;
+  exec)
+    case "$5" in
+      *app-path-routes-manifest*) cat "$STUB_DIR/pages.txt" ;;
+      *) status=$(awk -v p="$6" '$1 == p {print $2}' "$STUB_DIR/status.txt"); echo "${status:-200}" ;;
+    esac ;;
+  logs) cat "$STUB_DIR/log.txt" ;;
+  rm) ;;
+  *) exit 9 ;;
+esac
+"""
+CLEAN_APP = [
+    NEXT + "compiled/next-server/app-page.runtime.prod.js",
+    NEXT + "compiled/next-server/pages.runtime.prod.js",
+    NEXT + "compiled/babel/code-frame.js",
+    "server.js",
+]
+CLEAN_PAGES = "200 /chat\n307 /settings\n404 /_not-found\n"
+CLEAN_LOG = "  ▲ Next.js 15.5.27\n ✓ Ready in 120ms\n"
+
+needs_bash = pytest.mark.skipif(shutil.which("bash") is None or shutil.which("sh") is None, reason="needs bash")
+
+
+def _run_check(tmp_path: Path, app=CLEAN_APP, pages=CLEAN_PAGES, log=CLEAN_LOG) -> tuple[int, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(_STUB_DOCKER, encoding="utf-8")
+    docker.chmod(docker.stat().st_mode | stat.S_IXUSR)
+    for relative in app:
+        (tmp_path / "app" / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "app" / relative).write_text("x", encoding="utf-8")
+    (tmp_path / "app").mkdir(exist_ok=True)
+    for name, text in (("sections.txt", ""), ("pages.txt", pages), ("log.txt", log),
+                       ("status.txt", "/_next/image?url=%2Fbrand%2Fautomatos-mark.png&w=96&q=75 404\n")):
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    env = {"PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin", "STUB_DIR": str(tmp_path)}
+    proc = subprocess.run(["bash", str(CHECK_SCRIPT), "parity-fe-local", "/chat"], env=env,
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+@needs_bash
+def test_a_clean_image_passes_and_every_page_is_requested(tmp_path):
+    code, out = _run_check(tmp_path)
+    assert code == 0, out
+    assert "absent from /app: node_modules/@img/**" in out
+    assert "3 pages answered" in out
+    assert "307 /settings" in out
+
+
+@needs_bash
+def test_a_glob_that_still_matches_fails_once_by_its_glob(tmp_path):
+    leftovers = [NEXT + "compiled/next-server/app-page-turbo.runtime.prod.js",
+                 NEXT + "compiled/next-server/pages-turbo.runtime.prod.js",
+                 "node_modules/caniuse-lite/data/agents.js"]
+    code, out = _run_check(tmp_path, app=CLEAN_APP + leftovers)
+    assert code == 1, out
+    carried = re.findall(r"the standalone build carries (\S+)", out)
+    # In the config's order, each glob once, however many files it still matches.
+    assert carried == ["node_modules/caniuse-lite/**", NEXT + "compiled/next-server/*-turbo.runtime.prod.js"]
+
+
+@needs_bash
+@pytest.mark.parametrize("pages", ["200 /chat\n500 /settings\n", "200 /chat\n0 /settings\n"], ids=["5xx", "no-answer"])
+def test_a_page_that_errors_or_never_answers_fails(tmp_path, pages):
+    code, out = _run_check(tmp_path, pages=pages)
+    assert code == 1, out
+    assert f"pages that answered 5xx or nothing: {pages.splitlines()[1]}" in out
+
+
+@needs_bash
+def test_a_manifest_with_no_page_fails(tmp_path):
+    code, out = _run_check(tmp_path, pages="")
+    assert code == 1, out
+    assert "app-path-routes-manifest.json lists no page" in out
+
+
+@needs_bash
+@pytest.mark.parametrize("line", [
+    "Error: Cannot find module 'next/dist/compiled/babel/bundle.js'",
+    "  code: 'MODULE_NOT_FOUND',",
+])
+def test_a_missing_module_in_the_log_fails(tmp_path, line):
+    code, out = _run_check(tmp_path, log=CLEAN_LOG + line + "\n")
+    assert code == 1, out
+    assert "the server log reports a missing module" in out

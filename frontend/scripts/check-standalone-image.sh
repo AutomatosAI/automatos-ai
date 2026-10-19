@@ -4,14 +4,19 @@
 #
 #   check-standalone-image.sh <image> <page path> [docker run options...]
 #
-# - None of the paths next.config.js keeps out of the standalone trace is in /app.
+# - None of the globs next.config.js keeps out of the standalone trace matches a file in
+#   /app (the image's sh expands each one).
 # - node runs, and its binary has no symbol table or debug section (strip --strip-all in
 #   the Dockerfile's node-strip stage, PRD-262 #24). The image has no readelf, so its own
 #   node reads its section headers.
 # - Started with no network at all (--network none), the server answers <page path>
 #   with 200 (a signed-out request needs no network) and /_next/image with 404 (image
 #   optimisation is off, so nothing asks for sharp).
-# - The server's log never mentions sharp.
+# - It answers every page the build's app-path-routes-manifest.json lists without a
+#   dynamic segment, and none with a 5xx or with nothing. A redirect or a 404 passes: the
+#   SaaS build sends a signed-out request to sign-in.
+# - The server's log never mentions sharp, MODULE_NOT_FOUND or "Cannot find module", the
+#   error a request gets when the trace left out a file it loads (PRD-262 #29).
 #
 # A container with no network publishes no port, so each request is made from inside
 # it, with the image's own node (fetch, redirects not followed). test.yml's
@@ -30,19 +35,46 @@ PAGE=$2
 shift 2
 
 TRACE_EXCLUDED=(
-  node_modules/@img
-  node_modules/sharp
-  node_modules/typescript
-  node_modules/next/dist/compiled/amphtml-validator
+  'node_modules/@img/**'
+  'node_modules/sharp/**'
+  'node_modules/typescript/**'
+  'node_modules/next/dist/compiled/amphtml-validator/**'
+  'node_modules/next/dist/server/capsize-font-metrics.json'
+  'node_modules/next/dist/server/font-utils.js'
+  'node_modules/next/dist/compiled/@next/font/**'
+  'node_modules/next/dist/compiled/babel/bundle.js'
+  'node_modules/next/dist/compiled/babel-packages/**'
+  'node_modules/next/dist/compiled/browserslist/**'
+  'node_modules/caniuse-lite/**'
+  'node_modules/next/dist/compiled/postcss-preset-env/**'
+  'node_modules/next/dist/compiled/cssnano-simple/**'
+  'node_modules/next/dist/compiled/crypto-browserify/**'
+  'node_modules/next/dist/compiled/@vercel/nft/**'
+  'node_modules/next/dist/compiled/next-devtools/**'
+  'node_modules/next/dist/compiled/next-server/*-experimental.runtime.prod.js'
+  'node_modules/next/dist/compiled/next-server/*-turbo.runtime.prod.js'
 )
 READY_TIMEOUT_S=60
 # A static file: the middleware's matcher skips paths with an extension.
 READY_PATH=/favicon.ico
 OPTIMISER_PATH='/_next/image?url=%2Fbrand%2Fautomatos-mark.png&w=96&q=75'
 STATUS_JS='fetch(`http://127.0.0.1:${process.env.PORT || 3000}${process.argv[1]}`, { redirect: "manual" }).then((r) => console.log(r.status), () => console.log(0))'
+# Every page the build lists whose path has no dynamic segment, each with the status the
+# server gives it: "<status> <path>" per line, 0 when nothing answers.
+# shellcheck disable=SC2016 # JavaScript, not shell: nothing here expands
+PAGES_JS='const manifest = require("/app/.next/app-path-routes-manifest.json");
+const pages = [...new Set(Object.entries(manifest).filter(([entry, path]) => entry.endsWith("/page") && !path.includes("[")).map(([, path]) => path))].sort();
+const origin = `http://127.0.0.1:${process.env.PORT || 3000}`;
+(async () => {
+  for (const path of pages) {
+    const status = await fetch(origin + path, { redirect: "manual", signal: AbortSignal.timeout(60000) }).then((r) => r.status, () => 0);
+    console.log(`${status} ${path}`);
+  }
+})();'
 CONTAINER="standalone-check-$$"
 # The names of the ELF sections strip --strip-all removes that the image's node binary still
 # has: .symtab, .strtab and .debug_*. Prints nothing for a stripped binary.
+# shellcheck disable=SC2016 # JavaScript, not shell: nothing here expands
 ELF_SECTIONS_JS='const fs = require("fs"); const file = process.argv[1] || process.execPath; const fd = fs.openSync(file, "r");
 const read = (at, length) => { const b = Buffer.alloc(length); fs.readSync(fd, b, 0, length, at); return b };
 const head = read(0, 64);
@@ -71,12 +103,17 @@ running() {
   [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2> /dev/null)" = true ]
 }
 
+# Each glob is expanded by the image's sh (where ** works as *); one that still matches a
+# file is printed once.
 check_trace() {
-  local present
-  # shellcheck disable=SC2016 # $@ expands inside the container's sh
-  present=$(docker run --rm "$IMAGE" sh -c 'for p in "$@"; do [ ! -e "$p" ] || echo "$p"; done' sh "${TRACE_EXCLUDED[@]}")
-  for path in $present; do fail "the standalone build carries ${path}"; done
-  if [ -z "$present" ]; then echo "absent from /app: ${TRACE_EXCLUDED[*]}"; fi
+  local present glob
+  # shellcheck disable=SC2016 # $glob expands inside the container's sh
+  present=$(docker run --rm "$IMAGE" sh -c 'for glob in "$@"; do for p in $glob; do if [ -e "$p" ]; then echo "$glob"; break; fi; done; done' sh "${TRACE_EXCLUDED[@]}")
+  if [ -z "$present" ]; then
+    echo "absent from /app: ${TRACE_EXCLUDED[*]}"
+    return
+  fi
+  while IFS= read -r glob; do fail "the standalone build carries ${glob}"; done <<< "$present"
 }
 
 check_node() {
@@ -107,6 +144,19 @@ wait_until_ready() {
   echo "the server answered ${READY_PATH} after ${waited} s"
 }
 
+check_every_page() {
+  local results failing
+  if ! results=$(docker exec "$CONTAINER" node -e "$PAGES_JS"); then fail "could not request the pages"; return; fi
+  if [ -z "$results" ]; then fail "app-path-routes-manifest.json lists no page"; return; fi
+  echo "$results"
+  failing=$(awk '$1 == 0 || $1 >= 500' <<< "$results")
+  if [ -n "$failing" ]; then
+    fail "pages that answered 5xx or nothing: ${failing//$'\n'/, }"
+  else
+    echo "$(wc -l <<< "$results" | tr -d ' ') pages answered"
+  fi
+}
+
 expect_status() {
   local path=$1 want=$2 why=$3 got
   got=$(status_of "$path")
@@ -121,9 +171,13 @@ trap 'docker rm -f "$CONTAINER" > /dev/null 2>&1 || true' EXIT
 wait_until_ready
 expect_status "$PAGE" 200 "the page must render with no network"
 expect_status "$OPTIMISER_PATH" 404 "image optimisation must be off"
+check_every_page
 
 logs=$(docker logs "$CONTAINER" 2>&1)
 echo "----- server log -----"
 echo "$logs"
 if grep -qi sharp <<< "$logs"; then fail "the server log mentions sharp"; fi
+if grep -qE "MODULE_NOT_FOUND|Cannot find module" <<< "$logs"; then
+  fail "the server log reports a missing module: a file the trace left out is still loaded"
+fi
 exit "$bad"

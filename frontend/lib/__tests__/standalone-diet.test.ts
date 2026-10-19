@@ -5,9 +5,10 @@
  * - Image optimisation is off (§9-Q12), so the server never loads sharp. The only image Next
  *   optimised was the 48 px brand mark on the hosted sign-in pages, so public/brand/ holds it at
  *   that size: 96 px wide, the 2x copy Next's optimiser served to high-density screens.
- * - sharp and its libvips builds, TypeScript and Next's AMP validator stay out of the trace.
- * - test.yml's prod-image-parity job boots both built editions and looks for every excluded
- *   path (scripts/check-standalone-image.sh), so the script's list is this config's list.
+ * - sharp and its libvips builds, TypeScript and Next's AMP validator stay out of the trace, and
+ *   so do Next's own build and dev internals (PRD-262 #29).
+ * - test.yml's prod-image-parity job and images.yml boot each built image and look for every
+ *   excluded glob (scripts/check-standalone-image.sh), so the script's list is this config's list.
  */
 import fs from 'fs'
 import path from 'path'
@@ -29,6 +30,20 @@ const EXCLUDED = [
   'node_modules/sharp/**',
   'node_modules/typescript/**',
   'node_modules/next/dist/compiled/amphtml-validator/**',
+  'node_modules/next/dist/server/capsize-font-metrics.json',
+  'node_modules/next/dist/server/font-utils.js',
+  'node_modules/next/dist/compiled/@next/font/**',
+  'node_modules/next/dist/compiled/babel/bundle.js',
+  'node_modules/next/dist/compiled/babel-packages/**',
+  'node_modules/next/dist/compiled/browserslist/**',
+  'node_modules/caniuse-lite/**',
+  'node_modules/next/dist/compiled/postcss-preset-env/**',
+  'node_modules/next/dist/compiled/cssnano-simple/**',
+  'node_modules/next/dist/compiled/crypto-browserify/**',
+  'node_modules/next/dist/compiled/@vercel/nft/**',
+  'node_modules/next/dist/compiled/next-devtools/**',
+  'node_modules/next/dist/compiled/next-server/*-experimental.runtime.prod.js',
+  'node_modules/next/dist/compiled/next-server/*-turbo.runtime.prod.js',
 ]
 const MARK_SRC = '/brand/automatos-mark.png'
 const MARK_DISPLAY_PX = 48
@@ -52,11 +67,14 @@ function pngSize(bytes: Buffer): { width: number; height: number } {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
 }
 
-/** The paths scripts/check-standalone-image.sh looks for, from its TRACE_EXCLUDED array. */
-function checkedPaths(): string[] {
+/** The globs scripts/check-standalone-image.sh looks for, from its TRACE_EXCLUDED array (each quoted). */
+function checkedGlobs(): string[] {
   const script = read('scripts/check-standalone-image.sh').toString('utf8')
   const block = /^TRACE_EXCLUDED=\(\n([\s\S]*?)\n\)$/m.exec(script)
-  return (block?.[1] ?? '').split('\n').map((line) => line.trim()).filter(Boolean)
+  return (block?.[1] ?? '')
+    .split('\n')
+    .map((line) => line.trim().replace(/^'(.*)'$/, '$1'))
+    .filter(Boolean)
 }
 
 describe('the standalone build without sharp, libvips or TypeScript', () => {
@@ -64,13 +82,13 @@ describe('the standalone build without sharp, libvips or TypeScript', () => {
     expect(config.images?.unoptimized).toBe(true)
   })
 
-  it('keeps sharp, libvips, TypeScript and the AMP validator out of every trace', () => {
+  it("keeps sharp, libvips, TypeScript, the AMP validator and Next's build internals out of every trace", () => {
     // '*' matches every route and the server's own trace ('next-server').
     expect(config.outputFileTracingExcludes).toEqual({ '*': EXCLUDED })
   })
 
-  it('has the parity check look for every path the trace leaves out', () => {
-    expect(checkedPaths().map((dir) => `${dir}/**`)).toEqual(config.outputFileTracingExcludes?.['*'])
+  it('has the image check look for every glob the trace leaves out', () => {
+    expect(checkedGlobs()).toEqual(config.outputFileTracingExcludes?.['*'])
   })
 })
 
