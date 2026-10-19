@@ -90,7 +90,7 @@ from core.models.socials import SOCIAL_POST_FORMATS, SOCIAL_POST_STATUSES, Socia
 from core.models.workspaces import Workspace  # noqa: E402
 from core.report_tables import PARTS  # noqa: E402
 from modules.documents.social_starters import social_starters  # noqa: E402
-from modules.tools.discovery import actions_socials  # noqa: E402
+from core import social_post_schema  # noqa: E402
 from modules.tools.discovery.action_registry import get_action_registry  # noqa: E402
 from modules.tools.discovery.platform_executor import PlatformActionExecutor  # noqa: E402
 
@@ -625,7 +625,7 @@ def test_list_filters_by_status_and_returns_only_the_callers_workspace(env):
 
     unknown = _tool(env, "platform_list_social_posts", status=["pending"])
     assert unknown["success"] is False and "Unknown status pending" in unknown["error"]
-    too_many = _tool(env, "platform_list_social_posts", limit=actions_socials.LIST_MAX_LIMIT + 1)
+    too_many = _tool(env, "platform_list_social_posts", limit=social_post_schema.LIST_MAX_LIMIT + 1)
     assert too_many["success"] is False and "limit must be" in too_many["error"]
     assert _tool(env, "platform_list_social_posts", workspace_id=WS_OTHER)["posts"][0]["id"] == theirs["id"]
 
@@ -713,10 +713,10 @@ def test_a_field_the_post_does_not_take_is_refused_and_nothing_is_saved(env):
 
 
 def test_the_schemas_speak_the_lifecycles_own_vocabulary():
-    assert actions_socials.POST_FORMATS == list(SOCIAL_POST_FORMATS)
-    assert actions_socials.POST_STATUSES == list(SOCIAL_POST_STATUSES)
-    assert actions_socials.CHART_KINDS == list(CHART_KINDS)
-    assert actions_socials.CHART_PARTS == list(PARTS)
+    assert social_post_schema.POST_FORMATS == list(SOCIAL_POST_FORMATS)
+    assert social_post_schema.POST_STATUSES == list(SOCIAL_POST_STATUSES)
+    assert social_post_schema.CHART_KINDS == list(CHART_KINDS)
+    assert social_post_schema.CHART_PARTS == list(PARTS)
     create = get_action_registry().get("platform_create_social_post")
     fields = set(create.parameters["properties"]) - {"template", "chart_report", "render"}
     # The REST body's own fields, template_id taken as ``template`` (an id or a name).

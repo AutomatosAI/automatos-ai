@@ -12,6 +12,7 @@ from modules.tools.discovery.agent_listing import (
 )
 from modules.tools.discovery.agent_made_by import describes_the_agent, lists_the_team
 from modules.tools.discovery.agent_runtime import sets_the_runtime_on_create, sets_the_runtime_on_update
+from services.session_capability_gaps import agent_session_view
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,7 @@ def _described(db: Session, agent: Any) -> Dict[str, Any]:
         **runs_on(config, mc.get("model_id") or config.get("model") or config.get("llm_model"),
                   mc.get("provider") or config.get("provider") or config.get("llm_provider")),
         "runtime": _runtime_of(config),
+        **agent_session_view(agent),  # F430: a CLI agent's session tools and its skills' gaps
         "temperature": mc.get("temperature"),
         "max_tokens": mc.get("max_tokens"),
         "has_system_prompt": bool(agent.custom_persona_prompt),

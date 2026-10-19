@@ -325,3 +325,47 @@ describe('RuntimeSection session tool gaps', () => {
     expect(screen.queryByTestId('session-tool-gaps')).not.toBeInTheDocument()
   })
 })
+
+// PRD-256 F430: a skill that calls a tool the agent's sessions cannot use is said in the warning
+// tone, not as muted help: the Director's posts failed while its page read like a footnote.
+describe('RuntimeSection gap tone', () => {
+  const cliFields = {
+    runtime: 'cli' as const,
+    cli_provider: 'claude',
+    cli_model: '',
+    cli_working_directory: '',
+    cli_worktree: true,
+    cli_permission_mode: '',
+  }
+
+  it('marks a gap that names a missing tool, and only that one', async () => {
+    const { sessionGapLines } = await load('local')
+    expect(sessionGapLines([
+      { skill: 'social-video-director', tools: ['platform_list_deliverables'] },
+      { skill: 'note-taking', tools: [], instead: { platform_board_summary: 'board_summary' } },
+      { skill: 'blank', tools: ['  '] },
+      { kind: 'workspace', capability: 'socials', group: 'socials', message: 'Turn on Socials.' },
+    ]).map((entry) => entry.cannotUse)).toEqual([true, false])
+    expect(sessionGapLines(null)).toEqual([])
+  })
+
+  it('renders a skill gap with missing tools in the warning tone and a renamed one muted', async () => {
+    const { RuntimeSection, GAP_WARNING_CLASS, GAP_NOTE_CLASS } = await load('local')
+    render(
+      <RuntimeSection
+        value={cliFields}
+        onChange={vi.fn()}
+        sessionToolGaps={[
+          { skill: 'social-video-director', tools: ['platform_list_deliverables'] },
+          { skill: 'note-taking', tools: [], instead: { platform_board_summary: 'board_summary' } },
+        ]}
+      />,
+    )
+    const [missing, renamed] = Array.from(screen.getByTestId('session-tool-gaps').querySelectorAll('p'))
+    expect(missing.textContent).toContain('which a session cannot use')
+    expect(missing).toHaveAttribute('data-tone', 'warning')
+    expect(missing.className).toBe(GAP_WARNING_CLASS)
+    expect(renamed).toHaveAttribute('data-tone', 'note')
+    expect(renamed.className).toBe(GAP_NOTE_CLASS)
+  })
+})

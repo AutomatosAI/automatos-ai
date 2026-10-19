@@ -19,6 +19,7 @@ import functools
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from modules.tools.discovery.cannot_call_warning import CANNOT_CALL_KEYS
 from modules.tools.execution.owner_reasons import Refusal, agents_share_a_name
 
 Handler = Callable[[Any, Any, Dict[str, Any]], Awaitable[Dict[str, Any]]]
@@ -212,9 +213,11 @@ def _edits(params: Dict[str, Any]) -> bool:
 
 
 def _both(assigned: Dict[str, Any], edited: Dict[str, Any]) -> Dict[str, Any]:
-    """One answer for a card given to an agent and then edited."""
+    """One answer for a card given to an agent and then edited, with what the agent's
+    sessions cannot call (F430, ``cannot_call_warning``)."""
     agent = assigned.get("assigned_agent")
-    out = {"status": assigned.get("status"), **edited, "assigned_agent": agent}
+    warned = {key: assigned[key] for key in CANNOT_CALL_KEYS if key in assigned}
+    out = {"status": assigned.get("status"), **edited, "assigned_agent": agent, **warned}
     if edited.get("success") is True:
         return out
     return {**out, "partial": True, "error": GIVEN_BEFORE_REFUSED.format(error=edited.get("error"), agent=agent)}

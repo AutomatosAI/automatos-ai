@@ -1,7 +1,7 @@
 """#942 (B): what a session is offered is the agent's own list, the same every time.
 
 ``configuration.session_tool_groups`` picks the groups; absent is the fixed default
-(all six), ``[]`` is the core tools only. The list is core first, then the groups'
+(every group: seven since PRD-256 F430 added Socials), ``[]`` is the core tools only. The list is core first, then the groups'
 tools in display order, whatever order the owner saved them in, so two sessions of
 one agent advertise byte-identical tools (Claude Code's prompt cache) and the list
 moves only when the owner changes the agent. The claim's names (the host's MCP
@@ -39,8 +39,8 @@ def _listed(ctx):
     return reply["result"]["tools"]
 
 
-def test_the_catalogue_is_the_agreed_six_and_core_is_the_agreed_eleven():
-    assert groups.GROUP_IDS == ("data", "graph", "documents", "playbooks", "reports", "missions")
+def test_the_catalogue_is_the_agreed_seven_and_core_is_the_agreed_eleven():
+    assert groups.GROUP_IDS == ("data", "graph", "documents", "playbooks", "reports", "missions", "socials")
     assert groups.DEFAULT_SESSION_TOOL_GROUPS == groups.GROUP_IDS
     assert groups.CORE_TOOLS == CORE
     # every session tool is core or in exactly one group

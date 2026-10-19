@@ -42,6 +42,7 @@ from services.brand_hooks import a_cards_answer_is_on_brand  # brand kit at gene
 from services.ticket_verdict import record_approval
 from core.services.ticket_reasons import MOVED_BY_YOU, SPEND_HOLD_KEY, with_review_reason
 from services.board_task_view import board_dict, enrich_with_agents
+from services.session_capability_gaps import card_assignment_warning  # F430: what a CLI agent cannot call
 from services.ticket_numbers import ticket_label, ticket_number, title_or_number  # PRD-252 R4
 from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
@@ -321,7 +322,7 @@ async def create_task(
         db.commit()  # F118: the wake rides this commit
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
-    return created_ticket_answer(db, task)
+    return {**created_ticket_answer(db, task), **card_assignment_warning(db, task)}
 
 
 @router.get("")
@@ -564,8 +565,9 @@ async def update_task(
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     said = moved.get("message") if moved else None
+    warned = card_assignment_warning(db, task) if "assigned_agent_id" in body else {}
     # F276: the ticket as the board lists it, its number included
-    return {**board_dict(task, ticket_number(db, task)), **({"message": said} if said else {})}
+    return {**board_dict(task, ticket_number(db, task)), **({"message": said} if said else {}), **warned}
 
 
 @router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])

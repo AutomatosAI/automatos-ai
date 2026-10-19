@@ -19,6 +19,7 @@ from modules.tools.discovery.ticket_run_now import redo_keeps_the_correction
 from modules.tools.discovery.ticket_moves import keeps_the_board_rules
 from modules.tools.discovery.auto_approve_scope import auto_approves_only_what_it_runs
 from modules.tools.discovery.agent_refs import gives_the_card_on_update, resolve_active_agent, takes_the_agent_id
+from modules.tools.discovery.cannot_call_warning import says_what_it_cannot_call
 
 # update_board_task_status: how many task_ids one bulk call may carry. The chat
 # loop caps a tool at 8 calls per turn, so one-id-per-call could never close more
@@ -166,6 +167,7 @@ def _parse_deadline(value: Any):
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 @auto_approves_only_what_it_runs  # auto_approve runs only publish_blog; others wait for the owner
 @takes_the_agent_id("assigned_agent_name")  # FX-012: agent_id beside the name; an id wins
+@says_what_it_cannot_call  # F430: a CLI agent's card names what its sessions cannot call
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
@@ -488,6 +490,7 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
 @by_ticket_number  # PRD-252 R4: takes #0042, answers with numbers
 @guarded_and_recorded(ASSIGN)  # F241: never a closed ticket; each change noted on its ticket
 @takes_the_agent_id("agent_name")  # FX-012: agent_id beside the name; an id wins
+@says_what_it_cannot_call  # F430: a CLI agent's card names what its sessions cannot call
 async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Assign a board task to an agent, by its id (FX-012) or its name."""
     from core.models.core import BoardTask

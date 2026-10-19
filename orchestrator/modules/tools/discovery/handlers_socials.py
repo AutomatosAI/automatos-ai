@@ -42,7 +42,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from modules.tools.discovery.actions_socials import HISTORY_MAX_DAYS, HISTORY_MAX_LIMIT, LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT
+from core.social_post_schema import LIST_DEFAULT_LIMIT, LIST_MAX_LIMIT
+from modules.tools.discovery.actions_socials import HISTORY_MAX_DAYS, HISTORY_MAX_LIMIT
 
 logger = logging.getLogger(__name__)
 

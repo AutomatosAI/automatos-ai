@@ -15,14 +15,19 @@ PRD-245 S0.6 (D8): the prompt tells the truth about tools. A ``## Tools in this
 session`` block names what a ticket session can use (files inside its roots,
 the Bash allowlist, the web) and says that the platform tools skill bodies call
 are NOT there; each skill header names the ones it would have called.
+
+PRD-256 F430: the persona gets the same line in a ticket session (an installed copy
+keeps its own persona text, which names the API agents' tools), and
+``calls_it_cannot_make`` reads a ticket's brief the way the tools block reads a
+skill, so whoever assigns a CLI agent work hears what it cannot call.
 """
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from core.cli_presets import SESSION_BASH_VERBS
-from core.cli_runtime import CONFIG_ALLOWED_TOOLS_KEY
+from core.cli_runtime import CONFIG_ALLOWED_TOOLS_KEY, is_cli_agent
 from modules.context.sections.identity import IdentitySection
 from modules.context.sections.skills import SkillsSection
 
@@ -123,6 +128,43 @@ def tool_names_in(body: str) -> List[str]:
     return out
 
 
+def _missing_and_instead(names: Iterable[str], available: Iterable[str]) -> Tuple[List[str], Dict[str, str]]:
+    """Of ``names`` (the platform tools a text calls), the ones a session offered
+    ``available`` cannot call, and the ones it can under another name:
+    ``(missing, {mentioned: session_name})``. Pure."""
+    from services.session_tools import equivalent_of
+
+    offered = set(available or ())
+    missing: List[str] = []
+    instead: Dict[str, str] = {}
+    for name in names:
+        if name in offered:
+            continue
+        replacement = equivalent_of(name)
+        if replacement and replacement in offered:
+            instead[name] = replacement
+        # A skill that says ``workspace_read_file`` is asking to read a file, and the
+        # session has a better tool for it than any bridge: the CLI's own. Naming
+        # these as simply "not available" told WRITER and AUTOMATOS-DEV their file
+        # tools did not exist, one line under the sentence that says they can read
+        # and edit.
+        elif name in CLI_NATIVE_EQUIVALENTS:
+            instead[name] = CLI_NATIVE_EQUIVALENTS[name]
+        else:
+            missing.append(name)
+    return missing, instead
+
+
+def calls_it_cannot_make(agent: Any, text: str) -> List[str]:
+    """F430: the platform tools ``text`` (a ticket's title and brief) names that this
+    agent's sessions cannot call, exactly the ones its tools block calls missing;
+    ``[]`` for an agent on the API runtime, which has every platform tool. Pure."""
+    if not is_cli_agent(getattr(agent, "configuration", None)):
+        return []
+    missing, _instead = _missing_and_instead(tool_names_in(text), agent_session_tools(agent))
+    return missing
+
+
 def session_tool_gaps(agent: Any, available: Sequence[str]) -> List[Dict[str, Any]]:
     """PRD-245 S0.6/S1.5: per active skill, the platform tools its body calls
     that the session cannot call — and, where the session has an equivalent under
@@ -130,29 +172,10 @@ def session_tool_gaps(agent: Any, available: Sequence[str]) -> List[Dict[str, An
     ``[{"skill": name, "tools": [names], "instead": {mentioned: session_name}}]``.
     Skills with nothing to say are omitted. Pure; the agent form and the session
     prompt share it."""
-    from services.session_tools import equivalent_of
-
-    offered = set(available or ())
-    # A skill that says ``workspace_read_file`` is asking to read a file, and the
-    # session has a better tool for it than any bridge: the CLI's own. Naming
-    # these as simply "not available" told WRITER and AUTOMATOS-DEV their file
-    # tools did not exist, one line under the sentence that says they can read
-    # and edit.
-    native = CLI_NATIVE_EQUIVALENTS
     gaps: List[Dict[str, Any]] = []
     for skill in _active_skills(agent):
-        missing: List[str] = []
-        instead: Dict[str, str] = {}
-        for name in tool_names_in(_text(getattr(skill, "prompt_template", None))):
-            if name in offered:
-                continue
-            replacement = equivalent_of(name)
-            if replacement and replacement in offered:
-                instead[name] = replacement
-            elif name in native:
-                instead[name] = native[name]
-            else:
-                missing.append(name)
+        missing, instead = _missing_and_instead(tool_names_in(_text(getattr(skill, "prompt_template", None))),
+                                                available)
         if missing or instead:
             entry: Dict[str, Any] = {"skill": _text(getattr(skill, "name", None)) or "skill", "tools": missing}
             if instead:
@@ -171,11 +194,11 @@ def _gap_line(gaps: Sequence[str], instead: Optional[Dict[str, str]] = None) -> 
         swaps = ", ".join(f"`{replacement}` instead of `{mentioned}`" for mentioned, replacement in pairs)
         parts.append(INSTEAD_LINE.format(swaps=swaps))
     if gaps:
-        parts.append(GAP_LINE_PREFIX + ", ".join(_named_gap(g) for g in gaps) + ".")
+        parts.append(GAP_LINE_PREFIX + ", ".join(named_gap(g) for g in gaps) + ".")
     return " ".join(parts)
 
 
-def _named_gap(name: str) -> str:
+def named_gap(name: str) -> str:
     """``name``, and, for a tool the owner can turn on for this agent, which group
     gives it (#942): the session says what it lacks and why, never "someone needs to
     run a SELECT" (F329)."""
@@ -307,13 +330,22 @@ def session_system_prompt(agent: Any, max_skill_chars: Optional[int] = None, *, 
     description = _text(getattr(agent, "description", None))
     if description:
         parts.append(f"## About you\n{description}")
+    available = agent_session_tools(agent)  # #942: this agent's own tools, in every block
     persona = IdentitySection._get_persona_text(agent)
     if persona:
-        parts.append(f"## Persona & Communication Style\n{persona}")
-    available = agent_session_tools(agent)  # #942: this agent's own tools, in both blocks
+        parts.append(_persona_section(persona, available if ticket_session else None))
     if ticket_session:
         parts.append(tools_block(agent, available))
     skills = skills_block(agent, max_skill_chars, available=available)
     if skills:
         parts.append(skills)
     return "\n\n".join(parts)
+
+
+def _persona_section(persona: str, available: Optional[Sequence[str]]) -> str:
+    """The persona as written and, in a ticket session (``available``), what its tool names
+    are called here (F430: the Director's persona says platform_create_social_post). The
+    line is fixed per agent, so the prompt cache holds."""
+    section = f"## Persona & Communication Style\n{persona}"
+    line = _gap_line(*_missing_and_instead(tool_names_in(persona), available)) if available is not None else ""
+    return f"{section}\n\n{line}" if line else section

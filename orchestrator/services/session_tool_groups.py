@@ -1,9 +1,11 @@
 """#942: the owner chooses, per agent, which platform tool groups its sessions get.
 
 ``agent.configuration["session_tool_groups"]`` is a list of group ids. Absent means
-``DEFAULT_SESSION_TOOL_GROUPS`` (all six: a fixed constant, never derived from the
-workspace, so what an agent is offered moves only when the owner changes the
-agent); ``[]`` means the core tools only. PRD-245 D2's prompt-cache rule still
+``DEFAULT_SESSION_TOOL_GROUPS`` (every group: a fixed constant, never derived from
+the workspace, so what an agent is offered moves only when the owner changes the
+agent); ``[]`` means the core tools only. A group added to the catalogue reaches
+every agent on the default at once (F430: Socials), and an agent whose owner saved
+a list only when the owner turns it on. PRD-245 D2's prompt-cache rule still
 holds, one level down: the advertised list is fixed PER AGENT across all its
 sessions. Scope is still applied per call, and a call to a tool outside the
 agent's groups is refused in words (``not_offered_text``).
@@ -56,6 +58,12 @@ SESSION_TOOL_GROUPS: Tuple[ToolGroup, ...] = (
     ToolGroup("missions", "Missions",
               "Read missions and their steps, and what the mission's other agents found.",
               ("list_missions", "get_mission", "search_mission_findings")),
+    # PRD-256 F430: a CLI agent makes the Socials posts an API agent makes (never approves or publishes).
+    ToolGroup("socials", "Socials",
+              "Draft the workspace's Socials posts on its templates, change and re-render them, read them and "
+              "send them for approval; never approves, schedules or publishes.",
+              ("create_social_post", "update_social_post", "submit_social_post", "get_social_post",
+               "list_social_posts")),
 )
 GROUP_IDS: Tuple[str, ...] = tuple(g.id for g in SESSION_TOOL_GROUPS)
 DEFAULT_SESSION_TOOL_GROUPS: Tuple[str, ...] = GROUP_IDS

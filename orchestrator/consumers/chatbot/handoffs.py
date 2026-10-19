@@ -192,11 +192,19 @@ UNAVAILABLE_NOTE = (
 SOCIALS_TICKET = (
     "The ticket is a Socials post. This is social media work, the {name}'s job. In the ticket's "
     "description, after the owner's words and facts exactly as they gave them, say: make it as a Socials "
-    "post with platform_create_social_post, on one of this workspace's social templates (platform_list_"
-    "templates with format social_image or social_video), its fields filled from these facts only, render "
+    "post with platform_create_social_post (create_social_post in a CLI session), on one of this "
+    "workspace's social templates (platform_list_templates, or list_templates in a session, with format "
+    "social_image or social_video), its fields filled from these facts only, render "
     "true; done means the post exists in the Socials tab and has rendered, with its post id in the report; "
     "if a fact or a photo is missing, ask the owner on this card instead of making something up. Don't make "
     "the post yourself in this reply. Tell the owner in one line that the {name} has it, and the card's number."
+)
+# PRD-256 F430: the session tool that makes a post, and what the note adds when the Director's sessions lack it.
+SESSION_POST_TOOL = "create_social_post"
+DIRECTOR_CANNOT_POST = (
+    " The {name} runs as a CLI session and its Socials tool group is off, so its sessions cannot make posts: "
+    "tell the owner that in one line (its Model tab turns Socials on), and offer to make the post yourself "
+    "if they'd rather."
 )
 # P256-FIX-N17-10 (F449, night 17): "make the Guji quote 8kg fortnightly instead" filed a new card to find
 # the quote while its card waited in Review; the change goes back on the card that holds the work.
@@ -362,9 +370,26 @@ def _designer_note(db: Any, workspace_id: UUID, turn: Turn) -> str:
 
 
 def _director_ticket(db: Any, workspace_id: UUID, turn: Turn) -> Optional[str]:
-    """What the Director's ticket must say, on a turn pinned to the Director only."""
+    """What the Director's ticket must say, on a turn pinned to the Director only, and whether its
+    sessions can make the post (F430)."""
     name = turn.agent_for(SOCIALS)
-    return SOCIALS_TICKET.format(name=name) if name else None
+    return (SOCIALS_TICKET.format(name=name) + _cannot_post(db, workspace_id, name)) if name else None
+
+
+def _cannot_post(db: Any, workspace_id: UUID, name: str) -> str:
+    """F430: what the owner must hear when the Director is a CLI agent whose sessions cannot make
+    posts (Socials off for it); '' otherwise, and when it can't be read (the ticket is filed as before)."""
+    from core.cli_runtime import is_cli_agent
+    from services.session_tool_groups import agent_tool_names
+
+    try:
+        director = find_social_media_director(db, workspace_id)
+    except Exception:
+        logger.exception("[F430] the Social Media Director could not be read for workspace %s", workspace_id)
+        return ""
+    if director is None or not is_cli_agent(getattr(director, "configuration", None)):
+        return ""
+    return "" if SESSION_POST_TOOL in agent_tool_names(director) else DIRECTOR_CANNOT_POST.format(name=name)
 
 
 def _team_note(db: Any, workspace_id: UUID, turn: Turn) -> Optional[str]:
@@ -718,7 +743,8 @@ def auto_always_answers(assess: Assess) -> Assess:
 
 
 __all__ = [
-    "BRAND", "CHANGE_GOES_BACK", "CUSTOMER_WRITING_SOURCE", "DESIGNER_NOTE", "HANDOFFS", "HandOff", "PAPERWORK",
+    "BRAND", "CHANGE_GOES_BACK", "CUSTOMER_WRITING_SOURCE", "DESIGNER_NOTE", "DIRECTOR_CANNOT_POST", "HANDOFFS",
+    "HandOff", "PAPERWORK",
     "PAPER_KINDS", "REMOVED_NOTE", "SOCIALS",
     "SOCIALS_TICKET", "SOCIAL_ROLE", "TEAM_NOTE", "Turn", "UNAVAILABLE_NOTE", "active_designer",
     "active_director", "agent_names", "agents_named_in", "answered_by_auto", "asks_for_brand_work",
