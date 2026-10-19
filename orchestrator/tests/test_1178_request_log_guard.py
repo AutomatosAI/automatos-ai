@@ -82,6 +82,21 @@ def test_an_sdk_retry_line_and_a_library_warning_still_show(captured):
     assert MARKER not in out
 
 
+def test_a_urllib3_warning_shows_without_its_request_path(captured):
+    setup_logging(service="test", level=logging.INFO, enable_relay=False)
+    pool = logging.getLogger("urllib3.connectionpool")
+    pool.warning("Retrying (%r) after connection broken by '%r': %s", "Retry(total=2)",
+                 "NewConnectionError('Connection refused')", f"/bot{MARKER}/getUpdates?offset=7")
+    logging.getLogger("urllib3.connection").warning("Failed to parse headers (url=%s): %s",
+                                                    f"https://api.telegram.org/bot{MARKER}/x?y=1", "bad header")
+    pool.warning("Connection pool is full, discarding connection: %s. Connection pool size: %s", "api.example", 10)
+    out = captured.getvalue()
+    assert MARKER not in out
+    assert "Connection refused" in out and "': /REDACTED\n" in out
+    assert "(url=https://api.telegram.org/REDACTED): bad header" in out
+    assert "discarding connection: api.example. Connection pool size: 10" in out
+
+
 def test_a_scripts_own_handler_is_guarded_once():
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
