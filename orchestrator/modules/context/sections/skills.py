@@ -67,19 +67,10 @@ class SkillsSection(BaseSection):
     # ------------------------------------------------------------------
 
     def _build(self, ctx: SectionContext) -> str:
-        agent = ctx.agent
-        if agent is None:
-            return ""
-
-        skills = getattr(agent, "skills", None)
-        if not skills:
-            return ""
-
-        active_skills = [s for s in skills if getattr(s, "is_active", True)]
+        active_skills = self._active_skills(ctx.agent)
         if not active_skills:
             return ""
 
-        active_skills = self._dedup(active_skills)
         core_names = self._core_always_on_names()
 
         core_bodies: list[str] = []
@@ -108,14 +99,7 @@ class SkillsSection(BaseSection):
 
         skill_tool_names = self._extract_skill_tool_names(active_skills)
         if skill_tool_names:
-            parts.append(
-                "## Using Your Skill Tools\n"
-                f"You have access to: {', '.join(skill_tool_names)}\n"
-                "When your task requires capabilities provided by these tools, "
-                "you MUST use them via function calling. "
-                "Analyze your task, check if any tools match, and CALL them — "
-                "do not just describe what you would do."
-            )
+            parts.append(self._render_skill_tools(skill_tool_names))
 
         if not parts:
             return ""
@@ -133,6 +117,12 @@ class SkillsSection(BaseSection):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @classmethod
+    def _active_skills(cls, agent) -> list:
+        """The agent's active skills, deduplicated, in attachment-priority order."""
+        skills = getattr(agent, "skills", None) if agent is not None else None
+        return cls._dedup([s for s in skills or [] if getattr(s, "is_active", True)])
 
     @staticmethod
     def _dedup(active_skills: list) -> list:
@@ -190,6 +180,18 @@ class SkillsSection(BaseSection):
             "(name=\"<skill-name>\") to load that skill's full instructions for "
             "this turn.\n"
             + "\n".join(entries)
+        )
+
+    @staticmethod
+    def _render_skill_tools(tool_names: list[str]) -> str:
+        """The instruction to call the attached skills' own tools."""
+        return (
+            "## Using Your Skill Tools\n"
+            f"You have access to: {', '.join(tool_names)}\n"
+            "When your task requires capabilities provided by these tools, "
+            "you MUST use them via function calling. "
+            "Analyze your task, check if any tools match, and CALL them — "
+            "do not just describe what you would do."
         )
 
     @staticmethod
