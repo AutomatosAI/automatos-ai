@@ -120,6 +120,8 @@ def run():
     from core.database.database import SessionLocal
 
     logging.basicConfig(level=logging.INFO)
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     db = SessionLocal()
     try:
         seed_cto_agent(db)
