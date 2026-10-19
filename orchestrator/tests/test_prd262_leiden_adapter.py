@@ -352,6 +352,12 @@ def test_prod_image_parity_clusters_with_graspologic_native_and_cannot_import_gr
                           timeout=120, check=False)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "graspologic-native clusters in the image" in done.stdout
+    changes = next(step for step in workflow["jobs"]["changes"]["steps"]
+                   if "PROD_IMAGE_PATHS" in (step.get("env") or {}))
+    pattern = changes["env"]["PROD_IMAGE_PATHS"]
+    assert re.search(pattern, "orchestrator/modules/knowledge/leiden_partition.py"), (
+        "a change to the adapter reruns the in-image check")
+    assert not re.search(pattern, "orchestrator/modules/knowledge/graph_service.py")
 
 
 def test_no_file_outside_the_prds_names_the_graph_extras_build_argument():
