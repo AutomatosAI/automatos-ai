@@ -1,0 +1,154 @@
+# Deploy the Theme SDK types to the CDN whenever main moves (PRD-261 A-10d, Gerard D2-b).
+#
+# The widget SDK's distribution, reused: automatos-widget-sdk's
+# .github/workflows/deploy-cdn-on-main.yml + scripts/deploy-cdn.sh, same S3
+# bucket, same CloudFront distribution (widgets.automatos.app), same five
+# secrets. scripts/theme-sdk/deploy-cdn.sh packs frontend/packages/theme-sdk
+# (npm pack) and uploads the tarball to
+#   theme-sdk/v<version>/theme-sdk.tgz   immutable, max-age 1 year, never overwritten
+#   theme-sdk/v<major>/theme-sdk.tgz     major alias, max-age 3600, the only path invalidated
+# The version is frontend/packages/theme-sdk/package.json's (= sdkVersion).
+#
+# Idempotency: a version counts as published only once the script has written
+# theme-sdk/v<version>/published.json, its last step (after the alias upload, the
+# CloudFront invalidation has completed and both URLs serve the tarball's bytes).
+# With the marker present the script exits 3; this workflow reads that as
+# "nothing to ship" and exits 0 with a notice. A run that failed part way leaves
+# no marker, so the next run (a re-run, or the next push) resumes the alias steps
+# instead of skipping them.
+#
+# Secrets (Settings -> Secrets and variables -> Actions, repo or org level),
+# the widget SDK's five. Until all five exist the job prints a notice and exits 0:
+#   AWS_SDK_DEPLOY_ACCESS_KEY_ID
+#   AWS_SDK_DEPLOY_SECRET_ACCESS_KEY
+#   AWS_SDK_DEPLOY_REGION              e.g. us-east-1
+#   AWS_SDK_DEPLOY_BUCKET              e.g. automatos-widget-sdk
+#   AWS_SDK_DEPLOY_DISTRIBUTION_ID     CloudFront distribution ID
+# The key needs s3:GetObject + s3:PutObject on theme-sdk/* (the resume path reads
+# the immutable copy back), cloudfront:CreateInvalidation and, for the waiter,
+# cloudfront:GetInvalidation.
+#
+# Manual run: Actions -> "Theme SDK types to CDN (main)" -> "Run workflow"
+# (e.g. after the secrets are added, or after a change to the deploy script).
+
+name: Theme SDK types to CDN (main)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/packages/theme-sdk/**'
+      - 'frontend/lib/theme-sdk/surface/**'
+  workflow_dispatch:
+
+concurrency:
+  group: theme-sdk-cdn
+  cancel-in-progress: false   # never cancel a deploy mid-flight
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20   # the invalidation waiter alone may take 10
+    steps:
+      - name: Checkout (the package and the deploy script)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            frontend/packages/theme-sdk
+            scripts/theme-sdk
+
+      - name: Check the deploy secrets
+        id: secrets
+        env:
+          AWS_SDK_DEPLOY_ACCESS_KEY_ID: ${{ secrets.AWS_SDK_DEPLOY_ACCESS_KEY_ID }}
+          AWS_SDK_DEPLOY_SECRET_ACCESS_KEY: ${{ secrets.AWS_SDK_DEPLOY_SECRET_ACCESS_KEY }}
+          AWS_SDK_DEPLOY_REGION: ${{ secrets.AWS_SDK_DEPLOY_REGION }}
+          AWS_SDK_DEPLOY_BUCKET: ${{ secrets.AWS_SDK_DEPLOY_BUCKET }}
+          AWS_SDK_DEPLOY_DISTRIBUTION_ID: ${{ secrets.AWS_SDK_DEPLOY_DISTRIBUTION_ID }}
+        run: |
+          missing=""
+          for name in AWS_SDK_DEPLOY_ACCESS_KEY_ID AWS_SDK_DEPLOY_SECRET_ACCESS_KEY \
+                      AWS_SDK_DEPLOY_REGION AWS_SDK_DEPLOY_BUCKET AWS_SDK_DEPLOY_DISTRIBUTION_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice::Theme SDK CDN deploy skipped: secrets not set:$missing (add them on the repo or the org, then re-run)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve version
+        id: version
+        if: steps.secrets.outputs.configured == 'true'
+        run: |
+          v=$(jq -r .version frontend/packages/theme-sdk/package.json)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "major=v${v%%.*}" >> "$GITHUB_OUTPUT"
+          echo "Theme SDK version: $v"
+
+      - name: Deploy via scripts/theme-sdk/deploy-cdn.sh
+        id: deploy
+        if: steps.secrets.outputs.configured == 'true'
+        env:
+          # Secrets pass through env, never interpolated into the script body.
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_SDK_DEPLOY_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SDK_DEPLOY_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_SDK_DEPLOY_REGION }}
+          AWS_SDK_DEPLOY_REGION: ${{ secrets.AWS_SDK_DEPLOY_REGION }}
+          AWS_SDK_DEPLOY_BUCKET: ${{ secrets.AWS_SDK_DEPLOY_BUCKET }}
+          AWS_SDK_DEPLOY_DISTRIBUTION_ID: ${{ secrets.AWS_SDK_DEPLOY_DISTRIBUTION_ID }}
+        run: |
+          set +e
+          bash scripts/theme-sdk/deploy-cdn.sh
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::This Theme SDK version is already on the CDN: nothing to ship. Bump frontend/packages/theme-sdk/package.json and sdkVersion together to publish."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::scripts/theme-sdk/deploy-cdn.sh exited with $rc"
+            exit "$rc"
+          fi
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        if: always()
+        env:
+          CONFIGURED: ${{ steps.secrets.outputs.configured }}
+          SKIPPED: ${{ steps.deploy.outputs.skipped }}
+          VERSION: ${{ steps.version.outputs.version }}
+          MAJOR: ${{ steps.version.outputs.major }}
+          TRIGGER: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          base="https://widgets.automatos.app/theme-sdk"
+          {
+            echo "## Theme SDK CDN deploy"
+            echo ""
+            if [ "$CONFIGURED" != "true" ]; then
+              echo "**Skipped**: the AWS_SDK_DEPLOY_* secrets are not set on this repository."
+            elif [ "$SKIPPED" = "true" ]; then
+              echo "**Skipped**: version \`$VERSION\` is already on the CDN."
+            elif [ "$SKIPPED" = "false" ]; then
+              echo "**Deployed** version \`$VERSION\`"
+              echo ""
+              echo "- Immutable: $base/v$VERSION/theme-sdk.tgz"
+              echo "- Alias: $base/$MAJOR/theme-sdk.tgz"
+              echo "- Install: \`npm install $base/$MAJOR/theme-sdk.tgz\`"
+            else
+              echo "**Failed**: see the deploy step's log."
+            fi
+            echo ""
+            echo "Triggered by: $TRIGGER (commit \`$SHA\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
