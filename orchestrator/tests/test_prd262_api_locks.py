@@ -10,8 +10,10 @@ scanner and start.sh install the locks. This suite checks:
   only, so an upstream release never turns it red;
 - the same check on small fixtures, one per kind of problem it must catch;
 - orchestrator/scripts/split_lock.py, which pybuild runs to install the lock in two
-  layers: the stable set the PRD names goes first, every other pin second, nothing is
-  dropped or reordered, and it refuses a lock it cannot split safely.
+  layers: the stable set the PRD names goes first, every other pin an image installs
+  second, the development stage's pins (row #47) to a part of their own and LEFT_OUT
+  (row #11) to none, nothing else is dropped or reordered, and it refuses a lock it
+  cannot split safely.
 
 File reads and pure functions; no network, no install.
 """
@@ -202,10 +204,15 @@ def test_the_split_keeps_every_pin_once_in_order_stable_first():
     stable, rest = split_lock.split(text)
     every = split_lock.blocks(text)
     first, second = split_lock.blocks(stable), split_lock.blocks(rest)
+    third = split_lock.blocks(split_lock.development(text))
+    elsewhere = split_lock.LEFT_OUT | split_lock.DEVELOPMENT_ONLY
     assert {block.name for block in first} == PRD_STABLE
     assert not {block.name for block in second} & PRD_STABLE
     assert first == [block for block in every if block.name in PRD_STABLE]
-    assert second == [block for block in every if block.name not in PRD_STABLE]
+    assert second == [block for block in every if block.name not in PRD_STABLE | elsewhere]
+    assert third == [block for block in every if block.name in split_lock.DEVELOPMENT_ONLY]
+    assert [block for block in every if block not in first + second + third] == [
+        block for block in every if block.name in split_lock.LEFT_OUT]
     assert all("--hash=sha256:" in block.text for block in first + second)
     assert "botocore" in {block.name for block in second}, "US-021's prune works on the second half"
 
@@ -222,8 +229,22 @@ def test_the_split_refuses_a_lock_missing_a_stable_package():
         split_lock.split(text + f"requests==2.0.0 \\\n    --hash=sha256:{HASH_B}\n")
 
 
+def _named_pins(names) -> str:
+    return "".join(f"{name}==1.0.0 \\\n    --hash=sha256:{HASH_A}\n" for name in sorted(names))
+
+
+def test_the_split_refuses_a_lock_missing_a_left_out_or_development_package():
+    """A stale list fails the build instead of leaving nothing out: PRD-262 rows #11 and #47."""
+    complete = PRD_STABLE | split_lock.LEFT_OUT | split_lock.DEVELOPMENT_ONLY | {"requests"}
+    assert split_lock.split(_named_pins(complete))[1].startswith("requests==")
+    with pytest.raises(ValueError, match="LEFT_OUT names packages the lock does not pin: tree-sitter-zig"):
+        split_lock.split(_named_pins(complete - {"tree-sitter-zig"}))
+    with pytest.raises(ValueError, match="DEVELOPMENT_ONLY names packages the lock does not pin: watchfiles"):
+        split_lock.development(_named_pins(complete - {"watchfiles"}))
+
+
 def test_the_split_refuses_a_lock_with_nothing_outside_the_stable_set():
-    text = "".join(f"{name}==1.0.0 \\\n    --hash=sha256:{HASH_A}\n" for name in sorted(PRD_STABLE))
+    text = _named_pins(PRD_STABLE | split_lock.LEFT_OUT | split_lock.DEVELOPMENT_ONLY)
     with pytest.raises(ValueError, match="second layer would be empty"):
         split_lock.split(text)
 
@@ -238,14 +259,15 @@ def test_the_split_reads_pep_503_names():
     assert [block.name for block in split_lock.blocks(text)] == ["pydantic-core"]
 
 
-def test_the_command_writes_both_halves_and_fails_cleanly(tmp_path, capsys):
-    stable, rest = tmp_path / "stable.txt", tmp_path / "rest.txt"
-    assert split_lock.main([str(ORCH / "requirements.lock"), str(stable), str(rest)]) == 0
+def test_the_command_writes_every_part_and_fails_cleanly(tmp_path, capsys):
+    stable, rest, development = tmp_path / "stable.txt", tmp_path / "rest.txt", tmp_path / "development.txt"
+    assert split_lock.main([str(ORCH / "requirements.lock"), str(stable), str(rest), str(development)]) == 0
     assert stable.read_text().startswith(("asyncpg==", "cryptography=="))
-    assert "botocore==" in rest.read_text()
+    assert "botocore==" in rest.read_text() and "watchfiles==" not in rest.read_text()
+    assert development.read_text().startswith("watchfiles==")
     broken = tmp_path / "broken.lock"
     broken.write_text("requests==2.0.0\n")
-    assert split_lock.main([str(broken), str(stable), str(rest)]) == 1
+    assert split_lock.main([str(broken), str(stable), str(rest), str(development)]) == 1
     assert "pins without a hash" in capsys.readouterr().err
     assert split_lock.main([]) == 2
 

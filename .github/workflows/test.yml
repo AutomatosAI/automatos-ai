@@ -1099,6 +1099,17 @@ jobs:
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
+      # PRD-262 rows #11 and #47: the lock pins them (CI's pip --require-hashes needs every
+      # requirement pinned) but orchestrator/scripts/split_lock.py leaves them out of the
+      # production image: LEFT_OUT, the 12 tree-sitter grammars only graphify.extract
+      # imports, and DEVELOPMENT_ONLY, watchfiles, which only the development stage's
+      # --reload uses (tests/test_prd262_left_out_packages.py holds this list equal to both).
+      - name: Backend — the lock's left-out and development-only packages are not in the image
+        env:
+          LEFT_OUT: tree-sitter-bash tree-sitter-elixir tree-sitter-fortran tree-sitter-groovy tree-sitter-json tree-sitter-julia tree-sitter-lua tree-sitter-objc tree-sitter-powershell tree-sitter-scala tree-sitter-verilog tree-sitter-zig watchfiles
+        run: |
+          read -ra names <<< "$LEFT_OUT"
+          docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
       # PRD-262 US-020: pybuild strips the debug sections from site-packages' compiled
       # libraries and deletes its tests/ directories. Every file the strip touched still
       # loads (an extension module is imported, any other library opened with ctypes), none

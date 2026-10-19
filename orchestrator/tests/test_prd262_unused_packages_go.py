@@ -409,7 +409,7 @@ def test_pybuild_installs_wheels_only_with_the_pure_python_exceptions_last():
     installs = _pip_installs()
     assert len(installs) == 1, installs
     args = installs[0]
-    assert args[args.index("-r") + 1] == "$half.txt" and args[args.index("--prefix") + 1] == "/install/$half", args
+    assert args[args.index("-r") + 1] == "$part.txt" and args[args.index("--prefix") + 1] == "/install/$part", args
     only = [i for i, arg in enumerate(args) if arg.startswith("--only-binary")]
     no = [i for i, arg in enumerate(args) if arg.startswith("--no-binary")]
     assert len(only) == 1 and args[only[0] + 1] == ":all:", args

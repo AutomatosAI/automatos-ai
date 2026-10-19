@@ -287,8 +287,10 @@ PRODUCTION = _stage("production")
 def test_the_development_stage_copies_no_code_and_stores_nothing_twice():
     copies = [line for line in DEVELOPMENT if line.split()[0].upper() in ("COPY", "ADD")]
     assert [line.split()[-1] for line in copies] == [
-        "/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh",
+        "/usr/local", "/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh",
         "/usr/local/bin/docker-secrets-guard.sh"]
+    # PRD-262 row #47: watchfiles, which --reload uses, from pybuild's development part; no code.
+    assert copies[0] == "COPY --from=pybuild /install/development /usr/local"
     assert not [line for line in DEVELOPMENT if _CHOWN_R.search(line)]
 
 

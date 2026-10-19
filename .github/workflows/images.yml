@@ -541,6 +541,23 @@ jobs:
           docker pull --quiet "${IMAGE}@${DIGEST}"
           docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_scipy.py
 
+      # PRD-262 rows #11 and #47: the lock pins them, but orchestrator/scripts/split_lock.py
+      # leaves them out of the production image: LEFT_OUT, the 12 tree-sitter grammars only
+      # graphify.extract imports, and DEVELOPMENT_ONLY, watchfiles, which only the
+      # development stage's --reload uses (scripts/ci/image_dists_absent.py reads the
+      # image's package metadata). Same conditions as the step above; test.yml's
+      # prod-image-parity runs it on the Railway build.
+      - name: The lock's left-out and development-only packages are not in the image
+        if: ${{ !cancelled() && matrix.name == 'api' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          LEFT_OUT: tree-sitter-bash tree-sitter-elixir tree-sitter-fortran tree-sitter-groovy tree-sitter-json tree-sitter-julia tree-sitter-lua tree-sitter-objc tree-sitter-powershell tree-sitter-scala tree-sitter-verilog tree-sitter-zig watchfiles
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          read -ra names <<< "$LEFT_OUT"
+          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - "${names[@]}" < scripts/ci/image_dists_absent.py
+
       # PRD-262 US-022: pybuild installs requirements.lock in two halves, copied as two
       # layers (the stable set, then the rest), and this build is reproducible. On a
       # push to main (not the weekly schedule run), each layer must be the published

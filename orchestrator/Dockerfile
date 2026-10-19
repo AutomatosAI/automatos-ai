@@ -55,6 +55,12 @@ COPY requirements.lock scripts/split_lock.py ./
 # rest, so a bump outside the stable set leaves the first layer as it was.
 # --prefix keeps each half in a tree of its own; the scripts it writes run
 # /usr/local/bin/python, where the base stage puts both trees.
+# split_lock.py leaves two sets out of both halves (PRD-262, the 19 Oct breakdown's rows
+# #11 and #47). LEFT_OUT, which no image installs: the 12 tree-sitter grammars graphifyy
+# requires that only graphify/extract.py imports, a module the app never loads (about
+# 47 MB; the lock still pins them, because CI's pip --require-hashes refuses a
+# requirement it does not pin). DEVELOPMENT_ONLY, watchfiles, which only uvicorn --reload
+# uses: a third prefix, /install/development, that only the development stage copies.
 # No bytecode here: the compile below writes it once the prune is done.
 # Wheels only (PRD-262 US-015): a package that would build from source fails the
 # build instead. The one exception is a pure-Python sdist: pysher (composio's);
@@ -64,11 +70,11 @@ COPY requirements.lock scripts/split_lock.py ./
 # way.
 # No BuildKit cache mount: Railway fails one that lacks a hard-coded
 # id=s/<service-id>-<path>, and the service ids are not known (PRD-262 §10).
-RUN python split_lock.py requirements.lock stable.txt rest.txt && \
-    for half in stable rest; do \
-        uv pip install --python /usr/local/bin/python --prefix "/install/$half" --no-deps --require-hashes \
+RUN python split_lock.py requirements.lock stable.txt rest.txt development.txt && \
+    for part in stable rest development; do \
+        uv pip install --python /usr/local/bin/python --prefix "/install/$part" --no-deps --require-hashes \
             --no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher \
-            -r "$half.txt" || exit 1; \
+            -r "$part.txt" || exit 1; \
     done
 
 # What runs, and nothing else (PRD-262 US-020). strip --strip-unneeded drops the .debug_*
@@ -133,8 +139,9 @@ RUN keep="s3 s3vectors bedrock-runtime sts sso sso-oidc" && \
         case " $keep " in *" $name "*) ;; *) rm -rf "$dir" || exit 1 ;; esac; \
     done
 
-# site-packages' bytecode, once the prune is done (PRD-262 US-022), for each half. -s
-# and -p record each module under /usr/local, where the base stage puts it.
+# site-packages' bytecode, once the prune is done (PRD-262 US-022), for each half and the
+# development part. -s and -p record each module under /usr/local, where the base and
+# development stages put it.
 # unchecked-hash: Python never compares a .pyc with its source's mtime, so the clamped
 # mtimes of images.yml's reproducible build (SOURCE_DATE_EPOCH, rewrite-timestamp) can't
 # make one stale, and the automatos user, who can't write to /usr/local, never
@@ -148,7 +155,7 @@ RUN keep="s3 s3vectors bedrock-runtime sts sso sso-oidc" && \
 # only if it is a template or test data. PYTHONHASHSEED=0 fixes the string
 # hashes, the one input of a .pyc that changes from run to run, so the same sources
 # compile to the same bytes and the layer stays reproducible.
-RUN for prefix in /install/stable /install/rest; do \
+RUN for prefix in /install/stable /install/rest /install/development; do \
         PYTHONHASHSEED=0 python -m compileall -q -s "$prefix" -p /usr/local --invalidation-mode unchecked-hash \
             "$prefix/lib/python3.11/site-packages" || exit 1; \
     done
@@ -242,6 +249,11 @@ FROM base as development
 RUN useradd -m -u 1000 automatos && \
     mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces && \
     chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces
+
+# watchfiles, through which --reload below watches the mounted source (PRD-262 row #47):
+# split_lock.py's DEVELOPMENT_ONLY, from the lock, which the production stage never
+# copies. Without it uvicorn would poll every .py under /app four times a second.
+COPY --from=pybuild /install/development /usr/local
 
 # The wait-migrate-seed entrypoint, the only owner of migrations (PRD-262 US-029):
 # before the server it runs the migration step, plus the seeds where

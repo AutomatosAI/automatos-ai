@@ -466,12 +466,16 @@ def test_the_strip_names_the_files_the_check_loads():
 
 
 def test_the_base_stage_copies_the_pruned_tree():
-    """Both halves of PRD-262 US-022's two-layer install sit under /install, which the strip walks."""
+    """Both halves of PRD-262 US-022's two-layer install sit under /install, which the strip walks,
+    and so does the development stage's part (row #47), copied by that stage alone."""
     instructions = _instructions(DOCKERFILE)
     prune = next(i for i, line in enumerate(instructions) if STRIP in line)
     copies = [i for i, line in enumerate(instructions) if line.startswith("COPY --from=pybuild ")]
     assert [instructions[i] for i in copies] == ["COPY --from=pybuild /install/stable /usr/local",
-                                                 "COPY --from=pybuild /install/rest /usr/local"]
+                                                 "COPY --from=pybuild /install/rest /usr/local",
+                                                 "COPY --from=pybuild /install/development /usr/local"]
+    development = next(i for i, line in enumerate(instructions) if re.match(r"FROM\s.*\sas\s+development$", line, re.I))
+    assert copies[1] < development < copies[2], "the base stage copies the halves; the development stage its part"
     assert prune < copies[0]
     assert not any("RUN --mount" in line for line in instructions), "Railway builds this file: no cache mounts"
 

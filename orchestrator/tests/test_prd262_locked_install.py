@@ -7,17 +7,19 @@ orchestrator/Dockerfile:
 - every build installs requirements.lock, Railway's included: no build arg picks a
   second lock (US-027 removed the graph-extras arg and the [leiden] lock), and no sed
   rewrites a requirement;
-- the install is ``uv pip install --python /usr/local/bin/python --prefix /install/<half>
+- the install is ``uv pip install --python /usr/local/bin/python --prefix /install/<part>
   --no-deps --require-hashes --no-compile-bytecode`` with US-015's binary flags, once per
-  half of the lock (split_lock.py), and a failed half fails the RUN. Run here with ``sh``
-  and a fake uv, it installs the halves of the lock, stable first;
-- after US-020's strip and US-021's prune, site-packages is compiled per half with
+  part of the lock (split_lock.py: the two halves, then the development stage's part,
+  watchfiles, the 19 Oct breakdown's row #47), and a failed part fails the RUN. Run here
+  with ``sh`` and a fake uv, it installs the parts of the lock, stable first;
+- after US-020's strip and US-021's prune, site-packages is compiled per part with
   ``compileall -s <half> -p /usr/local --invalidation-mode unchecked-hash`` and a fixed
   PYTHONHASHSEED, never ending in ``|| true``. Run here on a fake tree, it writes
   unchecked-hash .pyc that name their /usr/local path, and fails on a file that does not
   compile;
-- the base stage copies the two halves as two layers, stable first; no RUN uses a
-  BuildKit cache mount (Railway).
+- the base stage copies the two halves as two layers, stable first, and only the
+  development stage copies the development part; no RUN uses a BuildKit cache mount
+  (Railway).
 
 CI: the image paths of test.yml and images.yml name the input, the locks and the
 splitter; images.yml compares the pip layers with ``edge`` on pushes to main only; start.sh
@@ -43,8 +45,9 @@ ROOT = Path(__file__).resolve().parents[2]
 ORCH = ROOT / "orchestrator"
 WORKFLOWS = ROOT / ".github" / "workflows"
 DOCKERFILE = (ORCH / "Dockerfile").read_text(encoding="utf-8")
-INSTALL = ('uv pip install --python /usr/local/bin/python --prefix "/install/$half" --no-deps --require-hashes '
-           '--no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher -r "$half.txt"')
+INSTALL = ('uv pip install --python /usr/local/bin/python --prefix "/install/$part" --no-deps --require-hashes '
+           '--no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher -r "$part.txt"')
+PARTS = ("stable", "rest", "development")
 COMPILE = ('PYTHONHASHSEED=0 python -m compileall -q -s "$prefix" -p /usr/local --invalidation-mode unchecked-hash '
            '"$prefix/lib/python3.11/site-packages"')
 UNCHECKED_HASH_FLAGS = 0b01  # PEP 552: hash-based, source never checked
@@ -100,14 +103,14 @@ def test_every_build_installs_the_one_lock():
     assert not [line for line in pybuild if line.startswith("ARG ")], pybuild
     assert "COPY requirements.lock scripts/split_lock.py ./" in pybuild
     run = _run("uv pip install")
-    assert run.startswith("RUN python split_lock.py requirements.lock stable.txt rest.txt && "), run
+    assert run.startswith("RUN python split_lock.py requirements.lock stable.txt rest.txt development.txt && "), run
     assert "sed " not in run and "requirements.build" not in DOCKERFILE
     assert "leiden" not in "\n".join(_instructions()).lower()
 
 
-def test_the_install_is_the_lock_exactly_in_two_halves():
+def test_the_install_is_the_lock_exactly_in_two_halves_and_the_development_part():
     run = _run("uv pip install")
-    assert run.endswith(f"for half in stable rest; do {INSTALL} || exit 1; done"), run
+    assert run.endswith(f"for part in {' '.join(PARTS)}; do {INSTALL} || exit 1; done"), run
     assert "--system" not in run, "it would install into pybuild's /usr/local and leave /install empty"
     assert "|| true" not in run
     assert not [line for line in _instructions() if line.startswith("RUN --mount")], "Railway: no cache mounts"
@@ -118,13 +121,18 @@ def test_site_packages_compiles_after_the_strip_and_the_prune():
     at = pybuild.index(_run("compileall"))
     assert at > pybuild.index(_run("strip --strip-unneeded")) and at > pybuild.index(_run("botocore/data"))
     assert at == len(pybuild) - 1, "the last pybuild step: nothing changes site-packages after it"
-    assert _run("compileall") == f"RUN for prefix in /install/stable /install/rest; do {COMPILE} || exit 1; done"
+    prefixes = " ".join(f"/install/{part}" for part in PARTS)
+    assert _run("compileall") == f"RUN for prefix in {prefixes}; do {COMPILE} || exit 1; done"
 
 
 def test_the_base_stage_copies_the_two_halves_stable_first():
     base = _stage("base")
     copies = [line for line in base if line.startswith("COPY ")]
     assert copies == ["COPY --from=pybuild /install/stable /usr/local", "COPY --from=pybuild /install/rest /usr/local"]
+    from_pybuild = [line for line in _instructions() if line.startswith("COPY --from=pybuild ")]
+    assert [line for line in from_pybuild if line not in copies] == [
+        "COPY --from=pybuild /install/development /usr/local"]
+    assert from_pybuild[-1] in _stage("development") and from_pybuild[-1] not in _stage("production")
 
 
 # --------------------------------------------------------------------------- the two RUNs, under sh
@@ -154,14 +162,16 @@ def _install(tmp_path: Path, fail: str = "none") -> subprocess.CompletedProcess:
 
 
 @NEEDS_SH
-def test_the_install_run_installs_the_halves_of_the_lock(tmp_path):
+def test_the_install_run_installs_the_parts_of_the_lock(tmp_path):
     done = _install(tmp_path)
     assert done.returncode == 0, done.stderr
     calls = (tmp_path / "uv.log").read_text().splitlines()
-    assert [call.split("--prefix ")[1].split()[0] for call in calls] == ["/install/stable", "/install/rest"]
-    stable, rest = split_lock.split((ORCH / "requirements.lock").read_text(encoding="utf-8"))
+    assert [call.split("--prefix ")[1].split()[0] for call in calls] == [f"/install/{part}" for part in PARTS]
+    lock = (ORCH / "requirements.lock").read_text(encoding="utf-8")
+    stable, rest = split_lock.split(lock)
     assert (tmp_path / "work" / "stable.txt").read_text() == stable
     assert (tmp_path / "work" / "rest.txt").read_text() == rest
+    assert (tmp_path / "work" / "development.txt").read_text() == split_lock.development(lock)
     assert "graspologic-native==" in rest and "graspologic==" not in stable + rest, "US-027"
 
 
