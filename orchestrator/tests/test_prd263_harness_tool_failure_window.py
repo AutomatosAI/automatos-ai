@@ -11,7 +11,7 @@ Failures ``classify_tool_error`` reads as auth or connection give "reconnect <ap
 never a removal; tool-removal proposals come with US-049 and US-057.
 
 Replaces test_harness_tool_failure_signal.py. Each case runs the real pipeline on the
-transactional ``db_session`` with the platform actions faked
+transactional ``db_session`` with the audit report faked
 (helpers_harness_diagnose.judge); the judged week is 2026-W42.
 """
 from __future__ import annotations

@@ -1,16 +1,16 @@
-"""PRD-142 Wave 4 (W4-S6): platform_create_routing_rule + HARNESS routing_rule_add.
+"""PRD-142 Wave 4 (W4-S6): platform_create_routing_rule.
 
-Two units: (1) the new routing-rule handler inserts a workspace-scoped row into
-the routing_rules table (read by the UniversalRouter at Tier 2a) and fails closed
-on a rule with no target or no matcher; (2) the HARNESS apply branch maps a
-routing_rule_add prescription onto that action with the right params. Dummy
-POSTGRES_* + the apscheduler stub let the harness_service import chain load
-without a DB or the prod-only scheduler.
+The routing-rule handler inserts a workspace-scoped row into the routing_rules
+table (read by the UniversalRouter at Tier 2a) and fails closed on a rule with no
+target or no matcher. The HARNESS apply branch that mapped routing_rule_add (and
+power_mode_*) prescriptions onto platform actions went with HARNESS's direct apply
+helper (PRD-263 US-048), and with it this file's harness_service import and its
+apscheduler stub. HARNESS's change-kind registry (US-049, a later PR) brings the
+kinds it may propose, with their own tests. Dummy POSTGRES_* lets the config
+import chain load without a DB.
 """
 import asyncio
 import os
-import sys
-import types
 from uuid import UUID
 
 import pytest
@@ -21,34 +21,7 @@ os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
-
-def _install_fake_apscheduler():
-    if "apscheduler" in sys.modules:
-        return
-    aps = types.ModuleType("apscheduler")
-    schedulers = types.ModuleType("apscheduler.schedulers")
-    asyncio_mod = types.ModuleType("apscheduler.schedulers.asyncio")
-    asyncio_mod.AsyncIOScheduler = type("AsyncIOScheduler", (), {})
-    jobstores = types.ModuleType("apscheduler.jobstores")
-    memory_mod = types.ModuleType("apscheduler.jobstores.memory")
-    memory_mod.MemoryJobStore = type("MemoryJobStore", (), {})
-    aps.schedulers = schedulers
-    aps.jobstores = jobstores
-    schedulers.asyncio = asyncio_mod
-    jobstores.memory = memory_mod
-    sys.modules.update({
-        "apscheduler": aps,
-        "apscheduler.schedulers": schedulers,
-        "apscheduler.schedulers.asyncio": asyncio_mod,
-        "apscheduler.jobstores": jobstores,
-        "apscheduler.jobstores.memory": memory_mod,
-    })
-
-
-_install_fake_apscheduler()
-
 from modules.tools.discovery.handlers_routing import create_routing_rule  # noqa: E402
-from services.harness_service import get_harness_service  # noqa: E402
 
 _WS = UUID("00000000-0000-0000-0000-000000000001")
 
@@ -76,15 +49,6 @@ class _FakeDB:
 
     def rollback(self):
         pass
-
-
-class _FakeExecutor:
-    def __init__(self):
-        self.calls = []
-
-    async def execute(self, name, params, caller_context=None):
-        self.calls.append((name, params))
-        return {"success": True}
 
 
 # --- the handler -----------------------------------------------------------
@@ -133,35 +97,3 @@ def test_create_routing_rule_coerces_bad_priority(_targets_are_ours):
     assert res["success"] is True
     assert db.added[0].priority == 0  # defaults rather than raising
 
-
-# --- the HARNESS apply branch ---------------------------------------------
-
-def test_routing_rule_add_maps_to_action():
-    svc = get_harness_service()
-    ex = _FakeExecutor()
-    rx = {"change_type": "routing_rule_add", "proposed_value": {
-        "source_pattern": "invoice",
-        "target_workflow_id": 3,
-        "intent_keywords": ["billing"],
-        "priority": 2,
-    }}
-    res = _run(svc._auto_apply_prescription(ex, rx))
-    assert res.get("success") is True
-    assert len(ex.calls) == 1
-    name, params = ex.calls[0]
-    assert name == "platform_create_routing_rule"
-    assert params["source_pattern"] == "invoice"
-    assert params["target_workflow_id"] == 3
-    assert params["intent_keywords"] == ["billing"]
-    assert params["priority"] == 2
-
-
-def test_power_mode_upgrade_maps_to_action():
-    # W4-S5: power_mode_upgrade/downgrade now map onto the platform_set_power_mode
-    # action (sets workspace.settings['power_mode']) — no longer refused.
-    svc = get_harness_service()
-    ex = _FakeExecutor()
-    rx = {"change_type": "power_mode_upgrade", "proposed_value": {"power_mode": "max"}}
-    res = _run(svc._auto_apply_prescription(ex, rx))
-    assert res.get("success") is True
-    assert ex.calls == [("platform_set_power_mode", {"power_mode": "max"})]

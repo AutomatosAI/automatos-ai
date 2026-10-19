@@ -7,8 +7,8 @@ judges each agent x metric of the ``services.harness_metrics`` rows with the
 statistics in ``core.stats.harness_verdicts`` (``services.harness_diagnose``), and
 reports coverage, INSUFFICIENT_DATA, WATCH and REGRESSION.
 
-Most cases run the real pipeline on the transactional ``db_session`` with the platform
-actions faked (``helpers_harness_diagnose.judge``). The judged week is 2026-W42 with
+Most cases run the real pipeline on the transactional ``db_session`` with the audit
+report faked (``helpers_harness_diagnose.judge``). The judged week is 2026-W42 with
 reference weeks W38-W41. The Benjamini-Hochberg case is pure. The dormancy case calls
 the real check, which the pipeline cases stub. The last case runs a full tick on
 committed rows and checks the workspace volume.
@@ -62,7 +62,7 @@ def test_a_first_flag_is_watch(db_session, ws, calls):
 
     run = hdx.judge(db_session, ws)
 
-    # COLLECT is one SQL read: the only platform action of the run is the audit report.
+    # COLLECT is one SQL read and the run calls no platform action: its one call is the audit report.
     assert calls == [(ws, hr.REPORT)]
     task = hdx.metric(run, barista)
     assert (task["verdict"], task["reason"]) == ("WATCH", None)
