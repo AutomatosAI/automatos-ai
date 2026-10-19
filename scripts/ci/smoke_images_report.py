@@ -37,6 +37,9 @@ layers = _sibling("image_layers")
 
 NS_PER_SECOND = smoke_boot.NS_PER_SECOND
 FRESH_LABEL, FRONTEND_LABEL = "fresh", "frontend"  # smoke-fresh-clone.sh's labels
+# Where a first run is timed from, by what started it: make up's pull, make build (a
+# source build, PRD-262 US-039) or compose up after the job built the images.
+SINCE = {"pull": "the start of `make up`", "build": "the start of `make build`", "up": "`docker compose up`"}
 TITLE = "### Images: pull, first run, and what each container runs (PRD-262 US-003)"
 
 
@@ -51,8 +54,9 @@ def _answered_ns(record: Optional[dict], probe: str) -> Optional[int]:
 def first_run(boots: Sequence[dict], started_ns: Optional[int], since: str) -> dict:
     """Seconds from the run's start to the backend's first ``/health/ready`` 200 and ``:3000`` 200.
 
-    ``since`` names the start: ``pull`` (the empty-cache pull began) or ``up`` (nothing
-    was pulled: ``docker compose up`` began).
+    ``since`` names the start (``SINCE``): ``pull`` (the empty-cache pull began),
+    ``build`` (``make build`` began, PRD-262 US-039) or ``up`` (the images were built in
+    the job: ``docker compose up`` began).
     """
     fresh = next((record for record in boots if record.get("label") == FRESH_LABEL), None)
     frontend = next((record for record in boots if record.get("label") == FRONTEND_LABEL), None)
@@ -73,9 +77,13 @@ def build(run: dict, pull: Optional[dict], processes: Optional[dict], images: Op
           boots: Sequence[dict]) -> dict:
     """Everything the section shows, as one JSON-ready dict.
 
-    ``run`` carries the mode, the tag and when ``compose up`` started (``up_started_ns``).
+    ``run`` carries the mode, the tag and when ``make build`` or ``compose up`` started
+    (``up_started_ns``).
     """
-    since, started = ("pull", pull["started_ns"]) if pull else ("up", run.get("up_started_ns"))
+    if pull:
+        since, started = "pull", pull["started_ns"]
+    else:
+        since, started = ("build" if run["mode"] == "build" else "up"), run.get("up_started_ns")
     return {
         "mode": run["mode"],
         "tag": run.get("tag") or "",
@@ -129,8 +137,7 @@ def _pull_lines(data: dict) -> List[str]:
 
 def _first_run_line(data: dict) -> str:
     run = data["first_run"]
-    start = "the start of `make up`" if run["since"] == "pull" else "`docker compose up`"
-    return (f"- First run, from {start}: `/health/ready` 200 after {_seconds(run['ready_s'])}, "
+    return (f"- First run, from {SINCE[run['since']]}: `/health/ready` 200 after {_seconds(run['ready_s'])}, "
             f":3000 200 after {_seconds(run['ui_s'])}.")
 
 

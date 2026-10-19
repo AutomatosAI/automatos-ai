@@ -15,9 +15,11 @@ URL never answered 200 within ``--timeout``.
         --fetch bootstrap=http://localhost:8000/health/bootstrap --out boots.jsonl
 
 When another process starts the container (``make up`` in the published-image smoke,
-PRD-262 US-036), ``--wait-start`` first waits for it to start, so the boot is timed
-while it runs rather than after it returns; ``--stop-file`` names the file that process
-writes when it ends, so a start that will never come stops the wait at once.
+PRD-262 US-036, ``make build`` in the fresh-clone smoke, US-039), ``--wait-start`` first
+waits for it to start, so the boot is timed while it runs rather than after it returns;
+``--stop-file`` names the file that process writes when it ends, so a start that will
+never come stops the wait at once. ``--start-timeout`` bounds that wait on its own
+(``make build`` builds three images first); it defaults to ``--timeout``.
 ``--published-port`` records where Docker published one of the container's ports, as
 ``address``, once it has started.
 
@@ -198,8 +200,9 @@ def _say(record: dict) -> None:
 
 def wait(args: argparse.Namespace) -> int:
     """Time one boot of ``--container`` and append its record to ``--out``."""
-    if args.wait_start and not wait_for_start(args.container, args.timeout, args.stop_file):
-        print(f"::error title=Smoke boot::{args.container} did not start within {args.timeout:.0f}s, "
+    start_timeout = args.timeout if args.start_timeout is None else args.start_timeout
+    if args.wait_start and not wait_for_start(args.container, start_timeout, args.stop_file):
+        print(f"::error title=Smoke boot::{args.container} did not start within {start_timeout:.0f}s, "
               "or the process that starts it ended first")
         return 1
     try:
@@ -246,9 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=300, help="seconds before giving up")
     parser.add_argument("--out", type=Path, required=True, help="JSON-lines file the record is appended to")
     parser.add_argument("--wait-start", action="store_true",
-                        help="another process starts the container: wait for it (within --timeout) first")
+                        help="another process starts the container: wait for it (within --start-timeout) first")
     parser.add_argument("--stop-file", type=Path,
                         help="with --wait-start: the file that process writes when it ends")
+    parser.add_argument("--start-timeout", type=float, default=None,
+                        help="with --wait-start: seconds to wait for the start (default: --timeout)")
     parser.add_argument("--published-port", help="record `docker port <container> <port>` as meta address")
     return parser
 
