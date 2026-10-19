@@ -462,6 +462,11 @@ async def test_heartbeat_commits_before_each_generate(monkeypatch):
 # diagnose, prescribe, apply, baseline) on one shared session. Pre-fix that
 # session stayed idle-in-transaction across every phase. The fix commits before
 # each phase. We assert a commit immediately precedes each phase.
+#
+# PRD-263 PR-1B: the tick runs under the workspace's advisory lock and records
+# itself in a harness_runs row (services.harness_runs) instead of last_run.json.
+# The lock and the run-row helpers are stubbed here; they have real-DB suites of
+# their own (test_prd263_harness_advisory_lock.py, test_prd263_harness_run_record.py).
 # ---------------------------------------------------------------------------
 
 
@@ -527,7 +532,23 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         },
     )
     monkeypatch.setattr(svc, "_workspace_allows_auto_apply", lambda _s: True)
-    monkeypatch.setattr(svc, "_write_last_run", lambda *a, **k: None)
+
+    import contextlib
+
+    from services import harness_runs
+
+    @contextlib.contextmanager
+    def _lock(_engine, _ws):
+        yield True
+
+    closed: list[dict] = []
+    monkeypatch.setattr(harness_runs, "workspace_lock", _lock)
+    monkeypatch.setattr(harness_runs, "close_interrupted", lambda _db, _ws: 0)
+    monkeypatch.setattr(harness_runs, "week_is_settled", lambda _db, _ws, _window: False)
+    monkeypatch.setattr(harness_runs, "completed_runs", lambda _db, _ws: 0)
+    monkeypatch.setattr(harness_runs, "open_run", lambda _db, _ws, _window: 1)
+    monkeypatch.setattr(harness_runs, "close_run", lambda _db, run_id, status, **fields: closed.append(
+        {"run_id": run_id, "status": status, **fields}))
 
     async def _collect(_ws, _db):
         events.append("collect")
@@ -545,9 +566,9 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         events.append("apply")
         return {"applied": [], "queued": []}
 
-    async def _baseline(_ws, _metrics, _diag, _rx, _changelog, _db):
+    async def _baseline(_ws, _metrics, _diag, _rx, _changelog, _db, _iteration):
         events.append("baseline")
-        return ({"iteration": 1}, {})
+        return ("# report", "ok")
 
     monkeypatch.setattr(svc, "_phase_collect", _collect)
     monkeypatch.setattr(svc, "_phase_diagnose", _diagnose)
@@ -564,3 +585,5 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         "commit", "apply",
         "commit", "baseline",
     ], events
+    # The run is closed on its row, once, after the last phase.
+    assert [(c["run_id"], c["status"], c["report_status"]) for c in closed] == [(1, "completed", "ok")]
