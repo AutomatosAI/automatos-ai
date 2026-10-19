@@ -2,7 +2,7 @@
  * PRD-261 A-02c (PA-12, R16) — the server holds the theme choice; the style cookie caches it.
  *
  * - A pick stores the choice (builtin Play as 'builtin:play', an install by its id); Classic,
- *   Studio and builtin themes apply at once, an installed theme reloads after the PUT.
+ *   Studio and builtin themes apply at once (undone if the PUT fails), an installed one after it.
  * - The check: one GET /api/themes/active per workspace and tab; a differing server choice moves
  *   the tab, an installed one with one reload at most (sessionStorage guard; none without it).
  * - The appearance-defaults step never overrides a server choice, and never stores one.
@@ -372,6 +372,19 @@ describe('choosing stores the choice on the server', () => {
     await settle()
     expect(reload).not.toHaveBeenCalled()
     expect(toasts.error).toHaveBeenCalledWith(CHOICE_NOT_SAVED, { description: 'Members of this workspace may not choose a theme.' })
+  })
+
+  it('a refused Classic pick puts back the style and cookie the tab had', async () => {
+    seenDefaults()
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('studio'))
+    vi.spyOn(apiClient, 'putThemeChoice').mockRejectedValue(Object.assign(new Error('No.'), { status: 403 }))
+    mount('studio', vi.fn())
+    await settle()
+    act(() => { screen.getByText('pick classic').click() })
+    expect(styleShown()).toBe('classic')
+    await settle()
+    expect(styleShown()).toBe('studio')
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=studio`)
   })
 
   it('outside a workspace a pick only applies the style', async () => {

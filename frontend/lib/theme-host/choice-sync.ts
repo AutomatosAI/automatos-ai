@@ -5,7 +5,8 @@
  * - Choosing (the theme menu, ⌘K): `useChooseStyle` stores the pick with `PUT /api/themes/choice`
  *   ('classic' | 'studio' | 'builtin:<name>' | an install id) and writes the cookie. Classic,
  *   Studio and a builtin theme apply at once; an installed theme is stored first, then the page
- *   reloads into it (PA-13: its first paint comes from the server).
+ *   reloads into it (PA-13: its first paint comes from the server). A refused or failed PUT puts
+ *   the tab and the cookie back on the style it had, unless a newer pick has replaced it.
  * - Checking (`ThemeChoiceSync`, mounted once inside the workspace and query providers): once per
  *   workspace and tab, `GET /api/themes/active`. A server choice that differs from this tab's
  *   style rewrites the cookie; an installed one reloads the page, at most once per tab (R16: the
@@ -243,19 +244,28 @@ export function ThemeChoiceSync() {
 
 interface StoreChoice {
   readonly next: UiStyle
+  /** The style the tab had before this pick: put back when the server does not store the pick. */
+  readonly previous: UiStyle
+  /** This pick's number in `picksMade`: a newer pick is never undone by this one's failure. */
+  readonly pick: number
   readonly workspaceId: string
   readonly setStyle: (style: UiStyle) => void
   readonly refresh: () => void
 }
 
-/** PUT the choice; Classic, Studio and a builtin theme are already showing, an installed one reloads after. */
-async function storeChoice({ next, workspaceId, setStyle, refresh }: StoreChoice): Promise<void> {
+/**
+ * PUT the choice; Classic, Studio and a builtin theme are already showing, an installed one reloads
+ * after. When the PUT fails, a pick already showing is undone (style and cookie), so the tab never
+ * keeps a choice the server does not hold.
+ */
+async function storeChoice({ next, previous, pick, workspaceId, setStyle, refresh }: StoreChoice): Promise<void> {
   const installed = isInstalledThemeStyle(next)
   if (!installed) setStyle(next)
   try {
     await apiClient.putThemeChoice(choiceOfStyle(next))
   } catch (error) {
     toast.error(CHOICE_NOT_SAVED, { description: themeErrorMessage(error) })
+    if (!installed && picksMade === pick) setStyle(previous)
     return
   }
   recordCheck(workspaceId, CHECKED)
@@ -281,7 +291,7 @@ export function useChooseStyle(): (next: UiStyle) => void {
         return
       }
       const refresh = () => void queryClient?.invalidateQueries({ queryKey: themeQueryKeys.active(workspaceId) })
-      void storeChoice({ next, workspaceId, setStyle: ui.setStyle, refresh })
+      void storeChoice({ next, previous: ui.style, pick: picksMade, workspaceId, setStyle: ui.setStyle, refresh })
     },
     [ui, workspaceId, queryClient],
   )
