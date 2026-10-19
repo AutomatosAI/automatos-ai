@@ -5,7 +5,6 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { LOOK_VAR_NAMES } from '@/lib/looks/css'
 import {
   LOOK_DOCUMENT_NAMES,
   MOTION_ATTRIBUTE,
@@ -15,8 +14,8 @@ import {
   clearLook,
   lookDocumentVars,
 } from '@/lib/looks/document'
+import { LOOK_VAR_NAMES, STUDIO_TOKEN_NAMES } from '@/lib/looks/engine'
 import { DAYLIGHT, PRESETS } from '@/lib/looks/presets'
-import { STUDIO_TOKEN_NAMES } from '@/lib/looks/studio-tokens'
 
 import { clearRoot, lookNamesLeft, myLook, rootVars } from './helpers'
 

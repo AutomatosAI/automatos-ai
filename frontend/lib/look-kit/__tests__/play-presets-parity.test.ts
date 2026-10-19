@@ -2,16 +2,16 @@
 /**
  * PRD-261 A-13a — the look runtime moves to lib/look-kit without changing one variable.
  * fixtures/play-presets-pre-move.json holds what Play's 5 presets painted BEFORE the move (Play's
- * --pl-* variables and Studio's tokens, main a290c428f); the code that paints them now must give
+ * --pl-* variables and Studio's tokens, main a290c428f); the code that paints them now (the
+ * runtime in lib/look-kit with Play's catalogue bound in by lib/looks/engine.ts) must give
  * exactly those names, in the same order, with exactly those values.
  */
 import { readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
-import { lookToCssVars } from '@/lib/looks/css'
+import { lookToCssVars, lookToStudioTokens } from '@/lib/looks/engine'
 import { PRESETS } from '@/lib/looks/presets'
-import { lookToStudioTokens } from '@/lib/looks/studio-tokens'
 
 type Vars = Readonly<Record<string, string>>
 
