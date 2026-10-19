@@ -9,14 +9,17 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
 3. an id under a reserved publisher (``automatos/…``) needs ``caller_is_admin``, else 403;
 4. the automated review stage runs inline (C-02a, ``services/themes/review_stage.py``; the LLM
    stage reads ``dist/``, the code that runs, since no isolated rebuild ever checks a private
-   upload's ``source/``) unless these bytes are already here; the files are stored under
+   upload's ``source/``) unless these bytes are already here; one upload of the same bytes runs at
+   a time (``services/themes/upload_claim.py``: an overlapping one is 409, try again, so a resent
+   request never pays for the stage twice); the files are stored under
    ``themes/_workspace/<ws>/<publisher>/<slug>/<version>/`` before the commit, so a failed
    write leaves no row (503);
 5. the package row (``owner_type`` 'workspace', ``reviewed`` false) and an install row are
    written; a newer version of an installed theme becomes the install's pending update.
 
 201 with the package and the install; 200 with the existing ones when these exact bytes are
-already in this workspace (never a misleading 409); 409 for a version clash.
+already in this workspace (never a misleading 409); 409 for a version clash, or while the same
+bytes are still being uploaded.
 
 Gates, in order: ``workspace:manage``, the workspace's "who may install" setting (A-07e's
 ``require_install_role``), the private-upload switch and setting (``require_private_uploads``; a
@@ -52,6 +55,7 @@ from services.themes.records import (
 from services.themes.review_stage import run_review_stage
 from services.themes.settings import require_install_role
 from services.themes.storage import theme_prefix, write_theme_files
+from services.themes.upload_claim import upload_claim
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +161,8 @@ def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, pack
     """The automated stage's report (C-02a), skipped when these bytes are already in this workspace.
 
     Their existing row is reused as it is (``save_private_upload``), so a second run would only
-    spend an LLM call. The route is a plain ``def``: this runs in a threadpool thread, with no loop.
+    spend an LLM call. Called under the upload claim, so an overlapping upload of the same bytes
+    never runs it too. The route is a plain ``def``: this runs in a threadpool thread, with no loop.
     """
     existing = package_by_digest(db, ctx.workspace_id, checked.digest)
     if existing is not None:
@@ -166,6 +171,16 @@ def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, pack
 
 
 def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+    """Review and save under the (workspace, digest) claim: 409 while another upload of these bytes runs."""
+    with upload_claim(db, ctx.workspace_id, checked.digest) as claimed:
+        if not claimed:
+            logger.info("[Themes] Upload of %s in workspace %s refused: the same bytes are being uploaded",
+                        checked.manifest["id"], ctx.workspace_id)
+            raise _refuse(409, BUSY)
+        return _save_claimed(db, ctx, checked, package_bytes)
+
+
+def _save_claimed(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
     manifest = checked.manifest
     prefix = theme_prefix(manifest["id"], manifest["version"], ctx.workspace_id)
     report = _review(db, ctx, checked, package_bytes)

@@ -291,6 +291,28 @@ def test_the_same_bytes_again_never_run_the_stage_twice(env, monkeypatch):
     assert again.json()["package"]["scanVerdict"] == "blocked"
 
 
+def test_an_upload_overlapping_one_of_the_same_bytes_is_409_and_never_runs_the_stage(env, monkeypatch):
+    from api.themes_import import BUSY
+    from services.themes.package import read_theme_package
+    from services.themes.upload_claim import upload_claim
+
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    workspace_a = uuid4()
+    client = _client(env, _local_ctx(workspace_a))
+    session = env.sessions()
+    try:
+        with upload_claim(session, workspace_a, read_theme_package(_hello()).digest) as claimed:
+            assert claimed
+            overlapping = _upload(client, _hello())
+    finally:
+        session.close()
+
+    assert overlapping.status_code == 409 and overlapping.json()["detail"] == BUSY
+    assert calls == [] and _rows(env, ThemePackage) == [] and env.s3.objects == {}
+    assert _upload(client, _hello()).status_code == 201 and len(calls) == 1
+
+
 def test_a_package_the_reader_refuses_never_reaches_the_review_stage(env, monkeypatch):
     calls = []
     _risky_llm(monkeypatch, calls)
