@@ -7,6 +7,14 @@
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
 FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
 
+# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
+# and services/media-render/Dockerfile, so the two images share one node layer on a host.
+FROM node AS node-stripped
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends binutils \
+ && strip --strip-unneeded --preserve-dates /usr/local/bin/node \
+ && rm -rf /var/lib/apt/lists/*
+
 # PRD-262 US-044: uv from its own image, in a named stage for the same reason.
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
@@ -28,6 +36,12 @@ RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/ } !sdk' requirements.lock 
 
 # Railway builds no target, so the last stage is what it ships: keep it last.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS production
+
+# Node.js 24's binary, stripped of its symbol tables and debug sections (PRD-262, row 21:
+# 20 MB). .dynsym stays, so native addons still resolve Node's N-API symbols
+# (scripts/ci/image_worker_toolchain.py loads one). First, and with --link, so the layer
+# is the same blob, on the same base, as media-render's: a host with both keeps one copy.
+COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node
 
 WORKDIR /app
 
@@ -54,11 +68,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/git /usr/lib/git-core/git \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js 24 with npm and corepack, from the `node` stage: no NodeSource, so no
-# extra apt updates, Debian python3.13 or gnupg. Not /usr/local/include: node-gyp
-# downloads the headers on its first native build. The binary's libraries beyond
-# glibc (libstdc++6, libgcc-s1) come with build-essential above.
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
+# npm and corepack for Node.js 24 (its binary is copied first, above), from the `node`
+# stage: no NodeSource, so no extra apt updates, Debian python3.13 or gnupg. Not
+# /usr/local/include: node-gyp downloads the headers on its first native build. The
+# binary's libraries beyond glibc (libstdc++6, libgcc-s1) come with build-essential above.
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=node /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
 # pnpm pinned exactly (PRD-262 §9-Q9: the current 12.x), and the npm cache the

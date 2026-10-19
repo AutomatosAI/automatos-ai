@@ -7,13 +7,17 @@ runs on the image it built, on both arches:
 - row 16: gcc's lto-dump is deleted in the apt layer that installs build-essential;
 - row 19: the API's git trim (US-019) is applied to the worker: the same server-side
   and mail binaries go, and git-core's git becomes a link to /usr/bin/git;
+- row 21: Node's binary comes from a `node-stripped` stage that media-render carries
+  byte for byte, copied with --link as the production stage's first instruction, so
+  the two images' layers are one blob on the same base;
 - row 47, gosu: gone from the apt list; entrypoint.sh drops to the worker with setpriv
   (test_prd262_worker_boot.py runs the entrypoint, and test.yml's parity job checks the
   worker's uid and HOME in the Railway build).
 
 scripts/ci/image_worker_toolchain.py proves inside the image that ``gcc -flto`` still
-links, that git still commits, branches, clones, pulls and clones over HTTPS, and that
-setpriv drops root to the worker with the worker's HOME.
+links, that git still commits, branches, clones, pulls and clones over HTTPS, that the
+stripped node runs, keeps .dynsym and loads a native N-API addon, and that setpriv drops
+root to the worker with the worker's HOME.
 
 Pure file reads: no Docker, no network.
 """
@@ -125,6 +129,59 @@ def test_the_in_image_check_looks_for_exactly_what_the_trim_deletes():
     assert toolchain.HTTPS_REPO.startswith("https://")
 
 
+# --------------------------------------------------------------------------- row 21
+
+# Shared with services/media-render/Dockerfile, byte for byte: the same stage on the same
+# node digest strips to the same file, and COPY --link makes it the same layer blob.
+NODE_STRIPPED_STAGE = (
+    "# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile\n"
+    "# and services/media-render/Dockerfile, so the two images share one node layer on a host.\n"
+    "FROM node AS node-stripped\n"
+    "RUN apt-get update \\\n"
+    " && apt-get install -y --no-install-recommends binutils \\\n"
+    " && strip --strip-unneeded --preserve-dates /usr/local/bin/node \\\n"
+    " && rm -rf /var/lib/apt/lists/*\n"
+)
+NODE_COPY = "COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node"
+NODE_DOCKERFILES = ("services/workspace-worker/Dockerfile", "services/media-render/Dockerfile")
+
+
+def _stage_lines(stage: str) -> list[str]:
+    """The instructions of the worker's stage named ``stage``, its FROM line first."""
+    start = next(i for i, line in enumerate(INSTRUCTIONS) if re.fullmatch(rf"FROM \S+ AS {stage}", line))
+    end = next((i for i in range(start + 1, len(INSTRUCTIONS)) if INSTRUCTIONS[i].startswith("FROM ")),
+               len(INSTRUCTIONS))
+    return INSTRUCTIONS[start:end]
+
+
+def test_the_node_stripped_stage_follows_the_node_stage_word_for_word():
+    node_at = DOCKERFILE.index(" AS node\n")
+    assert DOCKERFILE[node_at:].startswith(" AS node\n\n" + NODE_STRIPPED_STAGE + "\n")
+
+
+def test_every_dockerfile_with_the_stage_carries_it_byte_for_byte():
+    """media-render carries the same stage (its own lane adds it), never a variant of it."""
+    for path in NODE_DOCKERFILES:
+        text = (ROOT / path).read_text()
+        if "AS node-stripped" in text:
+            assert text.count(NODE_STRIPPED_STAGE) == 1, f"{path}'s node-stripped stage is not the shared one"
+            assert text.count(NODE_COPY) == 1, f"{path} copies the stripped node some other way"
+
+
+def test_the_worker_copies_node_first_with_link_and_only_from_the_stripped_stage():
+    production = _stage_lines("production")
+    assert production[0].startswith("FROM python:3.12-slim@sha256:") and production[1] == NODE_COPY
+    assert [line for line in INSTRUCTIONS if "/usr/local/bin/node " in line and line.startswith("COPY")] == [NODE_COPY]
+    assert INSTRUCTIONS[-1] == "CMD []" and production[-1] == "CMD []", "production stays the last stage"
+
+
+def test_the_in_image_node_checks_look_for_the_strip():
+    assert toolchain.NODE == "/usr/local/bin/node"
+    assert set(toolchain.NODE_STRIPPED_SECTIONS) == {".symtab", ".strtab"}
+    assert "napi_register_module_v1" in toolchain.NODE_ADDON_SOURCE
+    assert set(toolchain.NODE_TOOLS) == {"npm", "npx", "corepack", "pnpm"}
+
+
 # --------------------------------------------------------------------------- images.yml
 
 
@@ -158,4 +215,4 @@ def test_gosu_is_gone_and_the_in_image_check_drops_as_the_entrypoint_does():
 
 def test_every_toolchain_check_names_its_breakdown_row():
     rows = [title.split(":")[0] for title, _ in toolchain.CHECKS]
-    assert rows == ["row 16", "row 19", "row 19", "row 19", "row 47"]
+    assert rows == ["row 16", "row 19", "row 19", "row 19", "row 21", "row 21", "row 21", "row 47"]

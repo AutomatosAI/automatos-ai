@@ -16,6 +16,9 @@ Each check names the row of the 19 Oct size breakdown it proves:
   ``git`` is a link to /usr/bin/git, and a repository can still be made, committed to,
   branched, checked out, cloned and pulled; an HTTPS clone works (git-remote-https), and
   git's credential protocol answers;
+- row 21, the node binary: no .symtab, .strtab or debug sections, .dynsym kept; it
+  runs JavaScript and crypto, a native N-API addon compiled here resolves Node's
+  symbols and loads, and npm, npx, corepack and pnpm run on it;
 - row 47, gosu: it is gone, and setpriv (util-linux, in the base image) drops root to
   the worker the way entrypoint.sh does, with the worker's uid, gid, groups and HOME.
 
@@ -24,7 +27,9 @@ Standard library only. Exit 0 when every check passes, 1 otherwise.
 from __future__ import annotations
 
 import glob
+import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -62,6 +67,36 @@ GIT_IDENTITY = ("-c", "user.name=probe", "-c", "user.email=probe@example.invalid
 HTTPS_REPO = "https://github.com/octocat/Hello-World.git"
 HTTPS_REPO_FILE = "README"
 CREDENTIAL_INPUT = "protocol=https\nhost=example.invalid\nusername=probe\npassword=probe-secret\n\n"
+
+# Row 21: the node binary the node-stripped stage strips.
+NODE = "/usr/local/bin/node"
+NODE_STRIPPED_SECTIONS = (".symtab", ".strtab")
+DEBUG_PREFIXES = (".debug_", ".zdebug_")
+SECTION_NAME = re.compile(r"^\s*\[\s*\d+\]\s+(\S+)", re.M)
+CRYPTO_INPUT = "probe"
+NODE_PROBE_JS = (
+    "process.stdout.write(process.version + ' ' + "
+    f"require('crypto').createHash('sha256').update('{CRYPTO_INPUT}').digest('hex'))"
+)
+NODE_MAJOR = "v24."
+# A Node-API addon written against the ABI alone (no headers: the image has none), loaded
+# by the well-known napi_register_module_v1 symbol. Its napi_* calls resolve against the
+# node binary's .dynsym, which a strip that went too far would take with it.
+NODE_ADDON_SOURCE = """#include <stddef.h>
+typedef struct napi_env__ *napi_env;
+typedef struct napi_value__ *napi_value;
+typedef int napi_status;
+napi_status napi_create_string_utf8(napi_env env, const char *str, size_t length, napi_value *result);
+napi_status napi_set_named_property(napi_env env, napi_value object, const char *name, napi_value value);
+napi_value napi_register_module_v1(napi_env env, napi_value exports) {
+    napi_value text;
+    if (napi_create_string_utf8(env, "n-api ok", (size_t)-1, &text) != 0) return NULL;
+    napi_set_named_property(env, exports, "probe", text);
+    return exports;
+}
+"""
+NODE_ADDON_TEXT = "n-api ok"
+NODE_TOOLS = ("npm", "npx", "corepack", "pnpm")
 
 # Row 47: entrypoint.sh's drop to the worker, minus the exec of the worker itself.
 SETPRIV_DROP = ("setpriv", "--reuid=worker", "--regid=worker", "--init-groups", "env", "HOME=/home/worker")
@@ -154,6 +189,46 @@ def check_git_https(work: Path) -> List[str]:
     return failures
 
 
+# --------------------------------------------------------------------------- row 21
+
+
+def elf_sections(path: str) -> List[str]:
+    """The section names ``readelf -S`` lists (binutils comes with build-essential)."""
+    return SECTION_NAME.findall(must(["readelf", "-S", "-W", path], Path("/")))
+
+
+def check_node_binary(work: Path) -> List[str]:
+    """Stripped, with .dynsym kept, and still running JavaScript and crypto."""
+    sections = elf_sections(NODE)
+    failures = [f"{NODE} still has {name}" for name in sections
+                if name in NODE_STRIPPED_SECTIONS or name.startswith(DEBUG_PREFIXES)]
+    if ".dynsym" not in sections:
+        failures.append(f"{NODE} lost .dynsym: native addons cannot resolve Node's symbols")
+    expected = f"{hashlib.sha256(CRYPTO_INPUT.encode()).hexdigest()}"
+    version, _, digest = must([NODE, "-e", NODE_PROBE_JS], work).partition(" ")
+    if not version.startswith(NODE_MAJOR) or digest != expected:
+        failures.append(f"node printed {version} {digest}, not {NODE_MAJOR}x and sha256({CRYPTO_INPUT!r})")
+    return failures
+
+
+def check_node_addon(work: Path) -> List[str]:
+    """A native addon built here loads into the stripped node and runs."""
+    (work / "probe.c").write_text(NODE_ADDON_SOURCE, encoding="utf-8")
+    must(["gcc", "-shared", "-fPIC", "-O2", "probe.c", "-o", "probe.node"], work)
+    loaded = must([NODE, "-e", "process.stdout.write(require('./probe.node').probe)"], work)
+    return [] if loaded == NODE_ADDON_TEXT else [f"the addon answered {loaded!r}, not {NODE_ADDON_TEXT!r}"]
+
+
+def check_node_tools(work: Path) -> List[str]:
+    """npm, npx, corepack and pnpm each run on the stripped node."""
+    failures = []
+    for tool in NODE_TOOLS:
+        code, output = run([tool, "--version"], work)
+        if code != 0:
+            failures.append(f"{tool} --version exited {code}: {output[-STDERR_TAIL_CHARS:]}")
+    return failures
+
+
 # --------------------------------------------------------------------------- row 47
 
 
@@ -175,6 +250,9 @@ CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 19: git's server-side binaries are gone", check_git_trim),
     ("row 19: git init, commit, clone, branch, checkout and pull", check_git_local),
     ("row 19: an HTTPS clone and git's credential protocol", check_git_https),
+    ("row 21: node is stripped, keeps .dynsym and runs", check_node_binary),
+    ("row 21: a native N-API addon loads into the stripped node", check_node_addon),
+    ("row 21: npm, npx, corepack and pnpm run on the stripped node", check_node_tools),
     ("row 47: no gosu, and setpriv drops to the worker", check_setpriv),
 )
 
