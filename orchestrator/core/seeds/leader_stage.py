@@ -3,9 +3,10 @@
 The lifespan's boot leader (``main._boot_phase_1_core``, under the boot advisory lock,
 so one worker of N) used to run every seed below on every boot. They now run only
 when the leader stage's fingerprint (``core/seeds/fingerprint.py``) differs from the
-stored one. The stage is these sections plus the starters pass ``main._then_starters``
-runs after the core phase; its fingerprint is stored by :func:`finish_leader_stage`
-once all of it ran clean, so a failed section runs again on the next boot, as before.
+stored one. The stage is these sections plus the starters pass (``main._run_starters``,
+which the background boot runs once the server listens, PRD-262 US-034); its
+fingerprint is stored by :func:`finish_leader_stage` once all of it ran clean, so a
+failed section runs again on the next boot, as before.
 
 This is the only place Railway seeds: credential types and system settings are
 seeded here, once per boot that runs the stage, and the entrypoint's boot loader no

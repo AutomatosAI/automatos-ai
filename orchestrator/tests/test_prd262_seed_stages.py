@@ -6,7 +6,7 @@
   The boot loader leaves out what the lifespan leader seeds (credential types, system
   settings, packages, the local first-run content); ``migrate`` keeps the full loader.
   Its ``__main__`` flushes and ends with ``os._exit``.
-* **The leader stage** (``core/seeds/leader_stage.py`` plus ``main._then_starters``) is
+* **The leader stage** (``core/seeds/leader_stage.py`` plus ``main._run_starters``) is
   skipped when ``seed_fingerprint.leader`` matches, and stores it only after its
   sections and the starters pass ran clean. The local first-run seed and the reaper run
   on every boot, under the same lock.
@@ -259,10 +259,7 @@ def test_the_starters_run_only_after_the_leader_ran_its_seeds(monkeypatch):
     for seeds, expected in cases:
         calls.clear()
 
-        async def phase(seeds=seeds):
-            return seeds
-
-        asyncio.run(main._then_starters(phase)())
+        asyncio.run(main._run_starters(seeds))
         assert calls == expected, seeds
 
 

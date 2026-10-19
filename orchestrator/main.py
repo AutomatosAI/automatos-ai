@@ -5,10 +5,12 @@ Main FastAPI Application for Automatos AI
 Comprehensive API server with WebSocket support for real-time updates. DO NOT COMMENT OUT ANYTHING IN THIS FILE.
 """
 
+import asyncio
 import functools
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
+from typing import TYPE_CHECKING
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
@@ -21,6 +23,10 @@ import uuid
 import time
 from datetime import datetime, timezone
 from collections import defaultdict, deque
+
+if TYPE_CHECKING:  # annotations only: the boot report and what the leader's seeds did
+    from core.models.bootstrap import BootstrapReport
+    from core.seeds.leader_stage import LeaderSeeds
 
 # Load .env file BEFORE anything else
 env_path = Path(__file__).parent / '.env'
@@ -209,30 +215,25 @@ def _seed_document_starters_everywhere() -> bool:
         return False
 
 
-def _then_starters(phase):
-    """``phase``, then the starters pass: the document starters for every workspace and the
-    social starters for workspaces already on Socials. A decorator, so the core phase stays
-    short. PRD-262 US-031: the pass belongs to the leader stage, so it runs only after the
-    leader's gated seeds ran (``phase`` returns what they did), and the stage's fingerprint
-    is stored after it."""
+async def _run_starters(seeds: "Optional[LeaderSeeds]") -> None:
+    """The starters pass: the document starters for every workspace and the social
+    starters for workspaces already on Socials.
 
-    import asyncio as _asyncio
+    PRD-262 US-031: the pass belongs to the leader stage, so it runs only when this
+    worker's core phase ran the leader's gated seeds (``seeds`` is what they did; None on
+    a worker that did not lead), and the stage's fingerprint is stored after it.
+    PRD-262 US-034: the background boot runs it once the server listens, each part in a
+    worker thread, off the event loop.
+    """
+    from core.seeds.leader_stage import finish_leader_stage
 
-    @functools.wraps(phase)
-    async def run():
-        from core.seeds.leader_stage import finish_leader_stage
-
-        seeds = await phase()
-        if seeds is None or not seeds.ran:
-            return
-        documents = await _asyncio.to_thread(_seed_document_starters_everywhere)
-        socials = await _asyncio.to_thread(_seed_social_starters_where_on)
-        await _asyncio.to_thread(finish_leader_stage, seeds, documents and socials)
-
-    return run
+    if seeds is None or not seeds.ran:
+        return
+    documents = await asyncio.to_thread(_seed_document_starters_everywhere)
+    socials = await asyncio.to_thread(_seed_social_starters_where_on)
+    await asyncio.to_thread(finish_leader_stage, seeds, documents and socials)
 
 
-@_then_starters
 async def _boot_phase_1_core():
     """
     Phase 1: Core infrastructure — database tables, then the boot leader's work.
@@ -241,8 +242,9 @@ async def _boot_phase_1_core():
     The leader runs the seeds when seed_fingerprint.leader changed
     (core/seeds/leader_stage.py, PRD-262 US-031), then, on every boot, the local
     first-run seed and the orphaned-run reaper. It returns what the seeds did, for
-    the starters pass after it. Per-workspace seeding (templates, Auto agent)
-    happens at signup time in _provision_new_user_workspace(), NOT here.
+    the starters pass the background boot runs (PRD-262 US-034); a result that is not
+    None also marks this worker as the boot leader. Per-workspace seeding (templates,
+    Auto agent) happens at signup time in _provision_new_user_workspace(), NOT here.
     """
     import core.models.system_prompts  # register models with Base.metadata
     import core.models.core  # noqa: F811 — registers all models with Base
@@ -276,14 +278,19 @@ async def _boot_phase_1_core():
         return seeds
 
 
-async def _seed_semantic_embeddings():
+async def _seed_semantic_embeddings(leader: bool):
     """Phase 1 continued: launch the non-blocking boot seeds.
 
     The seed bodies live in ``core.boot.startup_tasks`` — importable, tested,
     and observable: on failure they report into ``error_events`` via
     ``record_error(subsystem="startup")`` (WS-A sink) instead of dying with
     only a log line. All are self-guarding (never raise), so a bare
-    ``create_task`` cannot leak an unretrieved exception.
+    ``create_task`` cannot leak an unretrieved exception. Their synchronous
+    work runs in worker threads, off the event loop (PRD-262 US-034).
+
+    PRD-262 US-034: only the boot leader (``leader``: this worker's core phase
+    took the boot lock) embeds the agents, because that writes their shared
+    embeddings to the database; on Railway each of the four workers used to.
     """
     import asyncio as _asyncio
     from core.boot.startup_tasks import (
@@ -294,22 +301,28 @@ async def _seed_semantic_embeddings():
     )
 
     await warm_output_budgets_on_startup()  # #836: before the worker serves
-    _asyncio.create_task(embed_all_agents_on_startup())
+    if leader:
+        _asyncio.create_task(embed_all_agents_on_startup())
     _asyncio.create_task(ensure_field_memory_collection())
+    # Every worker warms its own action index: ActionSemanticIndex keeps the
+    # vectors in this process's memory (Redis caches only the texts' embeddings),
+    # so a worker that skipped it would rank its first turns on a cold index.
     _asyncio.create_task(warm_action_index_on_startup())
 
 
-def _bootstrap_composio_catalog() -> None:
+async def _bootstrap_composio_catalog() -> None:
     """PRD-233 S2: Composio catalogue bootstrap (core/composio/bootstrap.py).
 
     Key + empty ``composio_apps_cache`` ⇒ full sync on a background thread,
     then the seeded marketplace agents are re-bound; key + populated cache ⇒
     one COUNT and a no-op rebind; no key ⇒ logs why integrations are off.
-    Self-guarding — never blocks or fails boot.
+    Self-guarding — never blocks or fails boot. PRD-262 US-034: the background
+    boot runs it while the server serves, so its COUNT and rebind run in a
+    worker thread, off the event loop.
     """
     from core.composio.bootstrap import ensure_catalog_on_boot
 
-    ensure_catalog_on_boot()
+    await asyncio.to_thread(ensure_catalog_on_boot)
 
 
 class TrustGateError(RuntimeError):
@@ -522,17 +535,177 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
     return result
 
 
+async def _boot_core(app_instance: "FastAPI", report: "BootstrapReport") -> "tuple[Optional[LeaderSeeds], bool]":
+    """PRD-262 US-034: the boot the server waits for before it listens.
+
+    Phase 1 core (tables, the boot leader's seeds, the warm-up launches) and the
+    trust gate. Returns what the leader's seeds did (None on a worker that did not
+    lead), for the starters pass in the background boot, and whether the trust gate
+    passed.
+    """
+    from core.models.bootstrap import BootstrapStage, run_stage
+
+    # ── Phase 1: Core Infrastructure ──
+    core = await run_stage(report, BootstrapStage.DATABASE_INIT, _boot_phase_1_core)
+    seeds = core.value
+    # Seed embeddings (fire-and-forget background tasks); the leader alone embeds the agents
+    await run_stage(report, BootstrapStage.SEMANTIC_EMBEDDINGS,
+                    functools.partial(_seed_semantic_embeddings, leader=seeds is not None))
+
+    logger.info("Phase 1 complete: core ready")
+
+    # ── PRD-181 S1: attach the audit handler to the policy bus ──
+    # The bus becomes the single write point for the per-tenant Art.12
+    # record of every tool call + policy verdict. Only meaningful when the
+    # plane is on; idempotent and never fatal (a registration failure must
+    # not stop the server booting). Before the server serves, so every tool
+    # call is audited.
+    try:
+        from modules.policy import policy_plane_enabled, register_audit_handler
+
+        if policy_plane_enabled():
+            register_audit_handler()
+    except Exception as _audit_reg_err:  # noqa: BLE001
+        logger.warning("Policy audit handler registration failed: %s", _audit_reg_err)
+
+    # NOTE: Redis client uses lazy initialization via get_redis_client()
+    logger.info("Redis client will lazy-initialize on first use")
+
+    # ── Trust Gate ──
+    trust_result = await run_stage(report, BootstrapStage.TRUST_GATE, _trust_gate)
+    app_instance.state.trust_passed = trust_result.status == "success"
+    return seeds, app_instance.state.trust_passed
+
+
+async def _boot_phase_2_stage(app_instance: "FastAPI", report: "BootstrapReport", trust_passed: bool) -> None:
+    """Phase 2: extensions (scheduler, channels), only if the trust gate passed."""
+    from core.models.bootstrap import BootstrapStage, DeferredInitResult, run_stage
+
+    if not trust_passed:
+        logger.warning("Phase 2 SKIPPED — trust gate failed, running in degraded mode")
+        app_instance.state.deferred_init = DeferredInitResult()
+        await run_stage(report, BootstrapStage.SCHEDULER_INIT, lambda: None, skip_condition=True)
+        return
+
+    logger.info("Phase 2: loading extensions...")
+
+    async def _run_phase_2():
+        app_instance.state.deferred_init = await _boot_phase_2_extensions(app_instance)
+
+    await run_stage(report, BootstrapStage.SCHEDULER_INIT, _run_phase_2)
+
+
+def _start_board_dispatch(app_instance: "FastAPI", trust_passed: bool) -> None:
+    """PRD-161: the board dispatch spine (single claim/lease/requeue loop).
+
+    Assigned BoardTasks flow through this, not the heartbeat fold-in. It starts
+    where it always did, after Phase 2 and before READY (PRD-262 US-034 kept it
+    there, inside the background boot).
+    """
+    if not (trust_passed and config.BOARD_DISPATCH_ENABLED):
+        return
+    from services.board_dispatcher import run_dispatch_loop
+
+    app_instance.state.board_dispatch_stop = asyncio.Event()
+    app_instance.state.board_dispatch_task = asyncio.create_task(
+        run_dispatch_loop(stop_event=app_instance.state.board_dispatch_stop)
+    )
+    logger.info("Board dispatch loop started (PRD-161)")
+
+
+async def _mark_ready(app_instance: "FastAPI", report: "BootstrapReport") -> None:
+    """READY, the last stage: /health/ready answers 200 from here on, failed stages or not."""
+    from core.models.bootstrap import BootstrapStage, run_stage
+
+    report.ready_at = datetime.now(timezone.utc)
+    await run_stage(report, BootstrapStage.READY, lambda: None)
+    app_instance.state.ready = True
+
+    failed = report.failed_stages
+    if failed:
+        logger.warning(
+            "Bootstrap completed with %d failed stage(s): %s",
+            len(failed),
+            [s.stage.value for s in failed],
+        )
+    else:
+        logger.info(
+            "Bootstrap completed in %dms — all stages passed",
+            report.total_duration_ms,
+        )
+
+
+async def _boot_in_background(
+    app_instance: "FastAPI", report: "BootstrapReport", seeds: "Optional[LeaderSeeds]", trust_passed: bool
+) -> None:
+    """PRD-262 US-034: the rest of the boot, as one task, once the server listens.
+
+    In order: the starters pass (the leader stage's last part), the Composio
+    catalogue, Phase 2 (scheduler, channels), then board dispatch, which starts
+    after Phase 2 as it always has. Each of the first three is a stage of the
+    bootstrap report, so a failure shows in /health/bootstrap. app.state.ready
+    (/health/ready 200) is set once all of them finished, whether or not a stage
+    failed, as before. A crash outside a stage is logged and leaves /health/ready
+    at 503.
+    """
+    from core.models.bootstrap import BootstrapStage, run_stage
+
+    try:
+        await run_stage(report, BootstrapStage.SEED_SYSTEM_DATA, functools.partial(_run_starters, seeds))
+        # PRD-233 S2: Composio catalogue — sync on the first keyed boot, re-bind seeds.
+        await run_stage(report, BootstrapStage.TOOL_SYNC, _bootstrap_composio_catalog)
+        await _boot_phase_2_stage(app_instance, report, trust_passed)
+        _start_board_dispatch(app_instance, trust_passed)
+    except Exception:
+        logger.exception("Background boot failed outside its stages; /health/ready stays 503")
+        return
+    await _mark_ready(app_instance, report)
+
+
+def _start_serving(
+    app_instance: "FastAPI", report: "BootstrapReport", seeds: "Optional[LeaderSeeds]", trust_passed: bool
+) -> None:
+    """PRD-262 US-034: what starts as the lifespan yields and uvicorn listens.
+
+    /health/bootstrap shows the report from here on, its stages as they finish. The
+    loop watchdog starts now, while requests are already served (F105: from here on,
+    a stall of the loop logs the stack that caused it; LOOP_STALL_LOG_SECONDS=0
+    starts nothing; never raises). The background boot runs the rest.
+    """
+    from core.loop_watchdog import start_loop_watchdog
+
+    app_instance.state.bootstrap_report = report
+    app_instance.state.loop_watchdog = start_loop_watchdog()
+    app_instance.state.background_boot = asyncio.create_task(
+        _boot_in_background(app_instance, report, seeds, trust_passed)
+    )
+
+
+async def _stop_background_boot(app_instance: "FastAPI") -> None:
+    """A shutdown during the background boot cancels it first, so it starts nothing
+    after the steps below stopped what it had started (PRD-262 US-034)."""
+    task = getattr(app_instance.state, "background_boot", None)
+    if task is None or task.done():
+        return
+    task.cancel()
+    await asyncio.wait({task})
+    logger.info("Background boot cancelled by the shutdown, before READY")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Application lifespan — PRD-123 Pattern #2 (Trust-Gated Init)
     and Pattern #10 (Named Bootstrap Stages).
 
-    Phase 1: Core (DB, migrations, seeds) — must succeed.
+    Phase 1: Core (DB, seeds) — must succeed.
     Trust Gate: Verify DB reachable + config valid.
-    Phase 2: Extensions (dashboard, scheduler, channels) — independently faulted.
+    Then the lifespan yields and uvicorn listens (PRD-262 US-034): /health answers.
+    The starters, the Composio catalogue, Phase 2 extensions (dashboard, scheduler,
+    channels; independently faulted) and board dispatch run as one background task,
+    which sets app.state.ready, so /health/ready 200, once all of them finished.
     """
-    from core.models.bootstrap import BootstrapReport, BootstrapStage, DeferredInitResult, run_stage
+    from core.models.bootstrap import BootstrapReport
 
     report = BootstrapReport()
     report.started_at = datetime.now(timezone.utc)
@@ -561,96 +734,21 @@ async def lifespan(app: FastAPI):
     config.validate_security()
 
     try:
-        # ── Phase 1: Core Infrastructure ──
-        await run_stage(report, BootstrapStage.DATABASE_INIT, _boot_phase_1_core)
-        # Seed embeddings (fire-and-forget background task)
-        await run_stage(report, BootstrapStage.SEMANTIC_EMBEDDINGS, _seed_semantic_embeddings)
-        # PRD-233 S2: Composio catalogue — sync on the first keyed boot, re-bind seeds.
-        await run_stage(report, BootstrapStage.TOOL_SYNC, _bootstrap_composio_catalog)
-
-        logger.info("Phase 1 complete: core ready")
-
-        # ── PRD-181 S1: attach the audit handler to the policy bus ──
-        # The bus becomes the single write point for the per-tenant Art.12
-        # record of every tool call + policy verdict. Only meaningful when the
-        # plane is on; idempotent and never fatal (a registration failure must
-        # not stop the server booting).
-        try:
-            from modules.policy import policy_plane_enabled, register_audit_handler
-
-            if policy_plane_enabled():
-                register_audit_handler()
-        except Exception as _audit_reg_err:  # noqa: BLE001
-            logger.warning("Policy audit handler registration failed: %s", _audit_reg_err)
-
-        # NOTE: Redis client uses lazy initialization via get_redis_client()
-        logger.info("Redis client will lazy-initialize on first use")
-
-        # ── Trust Gate ──
-        trust_result = await run_stage(report, BootstrapStage.TRUST_GATE, _trust_gate)
-        trust_passed = trust_result.status == "success"
-        app.state.trust_passed = trust_passed
-
-        # ── Phase 2: Extensions (only if trust gate passed) ──
-        if trust_passed:
-            logger.info("Phase 2: loading extensions...")
-
-            async def _run_phase_2():
-                app.state.deferred_init = await _boot_phase_2_extensions(app)
-
-            await run_stage(report, BootstrapStage.SCHEDULER_INIT, _run_phase_2)
-        else:
-            logger.warning("Phase 2 SKIPPED — trust gate failed, running in degraded mode")
-            app.state.deferred_init = DeferredInitResult()
-            await run_stage(
-                report, BootstrapStage.SCHEDULER_INIT, lambda: None, skip_condition=True
-            )
-
-        # ── PRD-161: board dispatch spine (single claim/lease/requeue loop) ──
-        # Assigned BoardTasks flow through this, not the heartbeat fold-in.
-        if trust_passed and config.BOARD_DISPATCH_ENABLED:
-            import asyncio as _asyncio
-            from services.board_dispatcher import run_dispatch_loop
-
-            app.state.board_dispatch_stop = _asyncio.Event()
-            app.state.board_dispatch_task = _asyncio.create_task(
-                run_dispatch_loop(stop_event=app.state.board_dispatch_stop)
-            )
-            logger.info("Board dispatch loop started (PRD-161)")
-
-        # ── Ready ──
-        report.ready_at = datetime.now(timezone.utc)
-        await run_stage(report, BootstrapStage.READY, lambda: None)
-        app.state.bootstrap_report = report
-        app.state.ready = True
-
-        # F105: from here on, a stall of the loop logs the stack that caused it
-        # (LOOP_STALL_LOG_SECONDS; 0 starts nothing). Never raises.
-        from core.loop_watchdog import start_loop_watchdog
-
-        app.state.loop_watchdog = start_loop_watchdog()
-
-        failed = report.failed_stages
-        if failed:
-            logger.warning(
-                "Bootstrap completed with %d failed stage(s): %s",
-                len(failed),
-                [s.stage.value for s in failed],
-            )
-        else:
-            logger.info(
-                "Bootstrap completed in %dms — all stages passed",
-                report.total_duration_ms,
-            )
-
+        seeds, trust_passed = await _boot_core(app, report)
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
         raise
+
+    # PRD-262 US-034: uvicorn listens once the lifespan yields, so /health answers
+    # from here; the rest of the boot runs in the background, and /health/ready
+    # answers 503 until it has finished.
+    _start_serving(app, report, seeds, trust_passed)
 
     yield
 
     # Shutdown
     logger.info("Shutting down Automatos AI API Server...")
+    await _stop_background_boot(app)
 
     _watchdog = getattr(app.state, "loop_watchdog", None)
     if _watchdog is not None:
@@ -1181,9 +1279,12 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
 
-# Readiness probe — Railway healthcheck target.
-# Returns 200 only after full boot (seeds, trust gate, extensions).
-# During startup returns 503 so Railway holds traffic on the old container.
+# Readiness probe (PRD-262 US-034). The server listens, and GET /health answers, once
+# the lifespan's core (tables, the boot leader's seeds, the trust gate) is done. The
+# rest of the boot (the starters, the Composio catalogue, the scheduler and channels,
+# board dispatch) runs in the background; this answers 503 until it has finished and
+# 200 after, whether or not a stage failed (GET /health/bootstrap shows which). A
+# deploy healthcheck that must wait for the scheduler targets this one.
 @app.get("/health/ready",
          summary="Readiness probe",
          tags=["🏥 System Health"])

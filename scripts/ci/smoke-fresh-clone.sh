@@ -125,13 +125,12 @@ if [ -n "$SMOKE_IMAGES" ]; then
 fi
 API_BASE="http://localhost:${API_PORT:-8000}"
 HEALTH_URL="${API_BASE}/health"
-# Readiness probe (main.py:/health/ready) — 200 only once the boot lifespan has
-# finished (migrations applied, trust gate, Phase-2 extensions, READY stage); 503
-# before. This is what Railway healthchecks: /health/ready is true only when the
-# local edition booted far enough to serve, /health whenever the process answers.
-# Under uvicorn 0.24 the lifespan runs before the socket listens, so today both
-# first answer at the same moment; they are timed separately so the gap shows
-# once the boot moves work off the critical path.
+# Readiness probe (main.py:/health/ready), PRD-262 US-034. uvicorn listens, and
+# /health answers, once the lifespan's core is up (tables, the leader's seeds, the
+# trust gate). The rest of the boot (the starters, the Composio catalogue, Phase-2
+# extensions, board dispatch, the READY stage) runs in the background; /health/ready
+# answers 503 until it has finished, then 200. The two are timed separately, so the
+# report shows the gap.
 READY_URL="${API_BASE}/health/ready"
 BOOTSTRAP_URL="${API_BASE}/health/bootstrap"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT:-3000}/"

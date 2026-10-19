@@ -121,9 +121,11 @@ source code isn't used. The published web app calls the API at
 8000. Needs Docker Compose 2.24.4 or newer. To update, run `make up-images` again.
 
 First run builds the images, builds the database schema, runs the seeds and
-then serves. `http://localhost:8000/health` answers as soon as the API process
-is up; `http://localhost:8000/health/ready` returns 503 until the full boot has
-finished and 200 once the instance is usable.
+then serves. `http://localhost:8000/health` answers once the API's core is up
+(the schema, the seeds and the database check); `http://localhost:8000/health/ready`
+returns 503 while the rest of the boot (the starters, the integrations catalogue,
+the scheduler and channels) runs in the background, and 200 once the instance is
+fully up.
 
 ## 3. Open it
 
