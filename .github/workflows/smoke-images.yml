@@ -42,7 +42,12 @@ name: smoke-images
 #   containers; `make up CORE=1` on that stack stops the worker and runs five; and a fresh
 #   `make up CORE=1` (docker-compose.core.yml) runs five, answers /health/ready 200 and
 #   "Workspace worker not running" from a workspace endpoint, then starts the worker, which
-#   must leave a file in the deliverables folder with its host owner.
+#   must leave a file in the deliverables folder with its host owner. Then, on the same
+#   images (PRD-262 US-041, scripts/ci/smoke-minio-upgrade.sh): a minio_data volume that
+#   MinIO wrote as root, as installs before US-041 did, is upgraded once through `make up`
+#   and once through plain `docker compose up -d`. Each time minio-volume-owner must
+#   re-own it and exit 0, MinIO must run healthy as uid 65532, the backend must answer
+#   /health/ready 200, the old object must read back and its bucket must take a new one.
 # - make-up-pr (PRD-262 US-036): on the same pull requests, `make up` on the pull
 #   request's checkout with AUTOMATOS_IMAGE_TAG pinned to sha-<7> of the merge base (or of
 #   its nearest ancestor CI published, when the merge base has none: a [skip ci] merge).
@@ -53,9 +58,11 @@ name: smoke-images
 #   three generated ones to .env (PRD-262 US-037). Then, with the stack gone, make env
 #   must leave a placeholder .env as it is and exit non-zero once the database volume
 #   exists, saying how to rotate (scripts/ci/smoke-make-env.sh).
-# - Both jobs, before the warm restarts: a document uploaded to the backend goes into
-#   MinIO through the image's pruned botocore, and the host fetches it back by its
-#   presigned URL (scripts/ci/smoke_document_presign.py, PRD-262 US-021).
+# - Both jobs, before the warm restarts: MinIO runs as its image's user, uid 65532, on the
+#   fresh volume, after minio-volume-owner exited 0 (scripts/ci/smoke_minio.py, PRD-262
+#   US-041); then a document uploaded to the backend goes into MinIO through the image's
+#   pruned botocore, and the host fetches it back by its presigned URL
+#   (scripts/ci/smoke_document_presign.py, PRD-262 US-021).
 # - Both jobs, the production backend in compose (PRD-262 US-035): no bind mount over
 #   /app, no --reload, and uvicorn is the process the entrypoint's watchdog signals; after
 #   the warm restarts a key written only to envs/api.local reaches the backend that
@@ -117,6 +124,8 @@ on:
       - "scripts/ci/smoke-make-up.sh"
       - "scripts/ci/smoke-make-env.sh"
       - "scripts/ci/smoke-core-stack.sh"
+      - "scripts/ci/smoke-minio-upgrade.sh"
+      - "scripts/ci/smoke_minio.py"
       - "scripts/stack_images.py"
       - "scripts/stack_env.sh"
       - "scripts/stack_docker_floor.sh"
@@ -414,6 +423,17 @@ jobs:
           AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.tag }}
           SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images/core-stack
         run: bash scripts/ci/smoke-core-stack.sh
+
+      # PRD-262 US-041, on the same images: a volume MinIO wrote as root (as every install
+      # before US-041 did) is re-owned by minio-volume-owner, once through make up and once
+      # through plain docker compose up, and MinIO serves its old object as uid 65532
+      # (scripts/ci/smoke-minio-upgrade.sh). No secret is exported: make env writes them.
+      - name: MinIO runs as its own user on a volume root wrote, through make up and docker compose up
+        env:
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.tag }}
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images/minio-upgrade
+        run: bash scripts/ci/smoke-minio-upgrade.sh
 
       - name: Upload the measurements
         if: always()

@@ -128,12 +128,19 @@
 # reports the image build time from make build's start (report only). Compose's own log
 # cannot show the order: it prints `postgres Healthy` only while a later up waits on it.
 #
+# PRD-262 US-041, in every mode, before the document check: MinIO runs as its image's own
+# user, uid 65532, never root, and the one-shot minio-volume-owner that runs before it
+# exited 0 (scripts/ci/smoke_minio.py server). Docker creates this fresh volume root's, so
+# the one-shot may have re-owned it; either way the document below is stored by a MinIO
+# that is not root. scripts/ci/smoke-minio-upgrade.sh covers a volume root wrote before.
+#
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, the document came back, the backend ran as the production stage should, and
-# the health gates held their bars.
+# loopback, MinIO ran as uid 65532, the document came back, the backend ran as the
+# production stage should, and the health gates held their bars.
 # Exit 1 = a boot failed, a port listens beyond this machine, the backend's build context
-# is over its budget, the document did not come back from object storage, a US-035
-# check failed, make up wrote no generated secrets to .env (US-037), a health gate
+# is over its budget, MinIO ran as root or minio-volume-owner failed (US-041), the
+# document did not come back from object storage, a US-035 check failed, make up
+# wrote no generated secrets to .env (US-037), a health gate
 # missed its bar (US-038), make build or make up failed, or postgres was not healthy
 # before make build had built the backend's image (US-039).
 set -uo pipefail
@@ -212,6 +219,11 @@ OVERLAP_FILE="${OUT_DIR}/build-overlap.json"
 BUILD_SECONDS_FILE="${OUT_DIR}/build-seconds.txt"
 # smoke_document_presign.py's record (PRD-262 US-021).
 DOCUMENT_FILE="${OUT_DIR}/document-presign.json"
+# PRD-262 US-041: MinIO's user and the one-shot that hands it its volume, and their record.
+MINIO_TOOL="scripts/ci/smoke_minio.py"
+MINIO_CONTAINER="automatos_minio"
+MINIO_OWNER_CONTAINER="automatos_minio_volume_owner"
+MINIO_FILE="${OUT_DIR}/minio-user.json"
 # Where compose publishes MinIO on this host: presigned links must point here
 # (S3_PUBLIC_ENDPOINT_URL in envs/api.defaults).
 STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
@@ -574,6 +586,15 @@ check_images() {
     || fail "an app container does not run the image this smoke expects: a wrong tag or revision label, or an image built instead of pulled"
 }
 
+# PRD-262 US-041: MinIO is healthy as its image's user, uid 65532, on the fresh volume, and
+# minio-volume-owner exited 0. A fresh volume is root's until the one-shot runs, so whether
+# it re-owned this one is recorded, not required.
+check_minio_user() {
+  python3 "$MINIO_TOOL" server --container "$MINIO_CONTAINER" --owner-container "$MINIO_OWNER_CONTAINER" \
+    --reowned any --out "$MINIO_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "MinIO is not healthy as uid 65532, or minio-volume-owner did not exit 0 (PRD-262 US-041)"
+}
+
 # PRD-262 US-021: a document uploaded to the backend lands in MinIO through the pruned
 # botocore, and the host fetches it back by its presigned URL.
 check_document_storage() {
@@ -732,6 +753,7 @@ main() {
   check_build_overlap
   check_loopback_ports
   check_images
+  check_minio_user
   check_document_storage
   warm_restarts
   check_api_local_reaches_backend
@@ -739,8 +761,8 @@ main() {
   outcome="pass"
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot and" \
-    "${WARM_RESTARTS} warm restarts, :3000 answered 200, a document came back from" \
-    "object storage, the backend ran as the production stage and the health gates held" \
+    "${WARM_RESTARTS} warm restarts, :3000 answered 200, MinIO ran as uid 65532, a document" \
+    "came back from object storage, the backend ran as the production stage and the health gates held" \
     "— the local edition serves with NO external credentials"
 }
 

@@ -19,6 +19,11 @@ name: smoke-fresh-clone
 # MinIO through that botocore, and fetches it back from the host by its presigned URL
 # (scripts/ci/smoke_document_presign.py).
 #
+# PRD-262 US-041 — MinIO runs as its image's own user, uid 65532, not root. Before the
+# document check the smoke needs MinIO healthy as that user on this fresh volume, and the
+# one-shot minio-volume-owner, which re-owns a volume root wrote, exited 0
+# (scripts/ci/smoke_minio.py server).
+#
 # PRD-262 US-035 — compose runs the backend's production stage; hot reload is `make dev`.
 # After the fresh boot the smoke checks that no bind mount lays the checkout over /app,
 # nothing runs --reload, and the entrypoint's watchdog signals uvicorn itself (docker
@@ -100,6 +105,7 @@ on:
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_minio.py"
       - "scripts/ci/smoke_production_backend.py"
       - "scripts/ci/smoke_health_gates.py"
       - "scripts/ci/smoke_images.py"
@@ -144,6 +150,7 @@ on:
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_minio.py"
       - "scripts/ci/smoke_production_backend.py"
       - "scripts/ci/smoke_health_gates.py"
       - "scripts/ci/smoke_images.py"
