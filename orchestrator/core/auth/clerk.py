@@ -13,6 +13,7 @@ from functools import lru_cache
 import httpx
 
 from config import config
+from core.auth.clerk_azp import azp_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,9 @@ class ClerkAuth:
                 }
             )
 
+            # Refuse a token minted for another origin (azp); rules in core/auth/clerk_azp.py.
+            if not azp_allowed(payload):
+                return None
             return payload
             
         except jwt.ExpiredSignatureError:
