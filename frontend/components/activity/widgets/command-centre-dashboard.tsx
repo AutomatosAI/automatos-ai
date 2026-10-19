@@ -56,7 +56,7 @@ const WIDGET_REGISTRY: WidgetDef[] = [
   // Opt-in: these live on Analytics / Agents / Assignments in full.
   { id: 'agent-performance', label: 'Agent Performance',  icon: <TrendingUp className="w-3.5 h-3.5" />,    defaultVisible: false, size: 'half',  height: 'min-h-[320px]' },
   { id: 'playbook-metrics',  label: 'Playbook Metrics',   icon: <BookOpen className="w-3.5 h-3.5" />,      defaultVisible: false, size: 'half',  height: 'min-h-[280px]' },
-  // PRD-142 Wave 4 (W4-S16): "is self-learning working right now?" — HARNESS loop, tool-routing signals, prescriptions.
+  // PRD-142 Wave 4 (W4-S16), PRD-263 US-022: "is self-learning working right now?" — the latest HARNESS run, its coverage and verdict counts, this workspace's 7-day tool calls.
   { id: 'self-learning',     label: 'Self-Learning',      icon: <Brain className="w-3.5 h-3.5" />,         defaultVisible: false, size: 'half',  height: 'min-h-[320px]' },
 ]
 

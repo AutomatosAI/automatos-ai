@@ -11,7 +11,7 @@ graph_router, PRD-138/139) is already wired; this hardens it:
   drop silently. Authoritative learning survives a restart because the nightly
   edge_builder recomputes from the durable tool_execution_logs (so the in-memory
   queue is intra-day freshness only, not the system of record).
-- **Observable:** `stats()` exposes the counters the self-learning tile reads.
+- **Observable:** `stats()` exposes the recorder's process counters.
 
 `signal_recorder` is leaf-loadable (stdlib-only top imports), so these are pure
 unit tests — no DB, no apscheduler, no env stubbing.
