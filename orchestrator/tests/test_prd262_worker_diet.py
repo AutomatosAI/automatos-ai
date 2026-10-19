@@ -10,6 +10,8 @@ runs on the image it built, on both arches:
 - row 21: Node's binary comes from a `node-stripped` stage that media-render carries
   byte for byte, copied with --link as the production stage's first instruction, so
   the two images' layers are one blob on the same base;
+- row 47, npm: an `npm` stage drops npm's docs and man pages before the copy, and the
+  pnpm install's RUN deletes Node's compile cache and npm's logs it leaves behind;
 - row 47, gosu: gone from the apt list; entrypoint.sh drops to the worker with setpriv
   (test_prd262_worker_boot.py runs the entrypoint, and test.yml's parity job checks the
   worker's uid and HOME in the Railway build).
@@ -205,6 +207,31 @@ def _apt_packages(run: str) -> list[str]:
     return [word for word in words[2:] if not word.startswith("-")]
 
 
+def test_npm_is_copied_without_its_docs_and_man_pages():
+    assert _stage_lines("npm") == [
+        "FROM node AS npm",
+        "RUN rm -rf /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man",
+    ]
+    copies = [line for line in INSTRUCTIONS if line.startswith("COPY") and "node_modules/npm" in line]
+    assert copies == ["COPY --from=npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm"]
+
+
+def test_the_pnpm_install_leaves_no_compile_cache_or_npm_logs():
+    run = _only(lambda line: line.startswith("RUN") and "pnpm@" in line)
+    commands = _commands(run)
+    cleanup = ["rm", "-rf", "/tmp/node-compile-cache", "/root/.npm"]
+    assert commands[-1] == cleanup, "last, after npm cache clean, so nothing writes them again"
+    assert ["npm", "cache", "clean", "--force"] in commands
+
+
+def test_the_in_image_check_looks_for_the_leftovers_before_npm_runs():
+    assert set(toolchain.NODE_LEFTOVERS) == {
+        "/usr/local/lib/node_modules/npm/docs", "/usr/local/lib/node_modules/npm/man",
+        "/tmp/node-compile-cache", "/root/.npm",
+    }
+    assert toolchain.CHECKS[0][1] is toolchain.check_node_leftovers
+
+
 def test_gosu_is_gone_and_the_in_image_check_drops_as_the_entrypoint_does():
     assert "gosu" not in _apt_packages(APT_RUN)
     assert not [line for line in INSTRUCTIONS if "gosu" in line]
@@ -215,4 +242,4 @@ def test_gosu_is_gone_and_the_in_image_check_drops_as_the_entrypoint_does():
 
 def test_every_toolchain_check_names_its_breakdown_row():
     rows = [title.split(":")[0] for title, _ in toolchain.CHECKS]
-    assert rows == ["row 16", "row 19", "row 19", "row 19", "row 21", "row 21", "row 21", "row 47"]
+    assert rows == ["row 47", "row 16", "row 19", "row 19", "row 19", "row 21", "row 21", "row 21", "row 47"]

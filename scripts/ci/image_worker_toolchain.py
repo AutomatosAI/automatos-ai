@@ -9,6 +9,9 @@ worker image it built, on each architecture, with the image's own Python, as roo
 
 Each check names the row of the 19 Oct size breakdown it proves:
 
+- row 47, what the npm install left: npm's docs and man pages, Node's compile cache in
+  /tmp and npm's cache and logs in /root/.npm are not in the image (checked first,
+  before any check below runs npm and writes them again);
 - row 16, gcc's lto-dump: nothing named lto-dump is left in /usr/bin, and two units
   compiled with ``-flto`` still link (lto-wrapper, lto1 and the linker plugin) into a
   program that runs;
@@ -98,6 +101,14 @@ napi_value napi_register_module_v1(napi_env env, napi_value exports) {
 NODE_ADDON_TEXT = "n-api ok"
 NODE_TOOLS = ("npm", "npx", "corepack", "pnpm")
 
+# Row 47: npm's docs and what the pnpm install left behind.
+NODE_LEFTOVERS = (
+    "/usr/local/lib/node_modules/npm/docs",
+    "/usr/local/lib/node_modules/npm/man",
+    "/tmp/node-compile-cache",
+    "/root/.npm",
+)
+
 # Row 47: entrypoint.sh's drop to the worker, minus the exec of the worker itself.
 SETPRIV_DROP = ("setpriv", "--reuid=worker", "--regid=worker", "--init-groups", "env", "HOME=/home/worker")
 WORKER_IDENTITY = "1000 1000 /home/worker"
@@ -118,6 +129,14 @@ def must(argv: Sequence[str], cwd: Path, stdin: str = "") -> str:
     if code != 0:
         raise RuntimeError(f"{' '.join(argv)} exited {code}: {output[-STDERR_TAIL_CHARS:]}")
     return output
+
+
+# --------------------------------------------------------------------------- row 47, npm
+
+
+def check_node_leftovers(work: Path) -> List[str]:
+    """npm's docs and the install's caches and logs never reached the image."""
+    return [f"{path} is in the image" for path in NODE_LEFTOVERS if os.path.lexists(path)]
 
 
 # --------------------------------------------------------------------------- row 16
@@ -246,6 +265,7 @@ def check_setpriv(work: Path) -> List[str]:
 
 
 CHECKS: Tuple[Tuple[str, Check], ...] = (
+    ("row 47: no npm docs, compile cache or npm logs", check_node_leftovers),
     ("row 16: no lto-dump, and gcc -flto links", check_lto),
     ("row 19: git's server-side binaries are gone", check_git_trim),
     ("row 19: git init, commit, clone, branch, checkout and pull", check_git_local),

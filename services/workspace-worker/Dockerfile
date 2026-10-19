@@ -15,6 +15,11 @@ RUN apt-get update \
  && strip --strip-unneeded --preserve-dates /usr/local/bin/node \
  && rm -rf /var/lib/apt/lists/*
 
+# npm without its docs and man pages (PRD-262, row 47: 2.67 MB). The image has no `man`,
+# so `npm help` never showed them; `npm <command> --help` prints from npm's own code.
+FROM node AS npm
+RUN rm -rf /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
+
 # PRD-262 US-044: uv from its own image, in a named stage for the same reason.
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
@@ -68,19 +73,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/git /usr/lib/git-core/git \
     && rm -rf /var/lib/apt/lists/*
 
-# npm and corepack for Node.js 24 (its binary is copied first, above), from the `node`
-# stage: no NodeSource, so no extra apt updates, Debian python3.13 or gnupg. Not
-# /usr/local/include: node-gyp downloads the headers on its first native build. The
-# binary's libraries beyond glibc (libstdc++6, libgcc-s1) come with build-essential above.
-COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+# npm (from the `npm` stage, without its docs) and corepack for Node.js 24, whose binary
+# is copied first, above. All from the official image: no NodeSource, so no extra apt
+# updates, Debian python3.13 or gnupg. Not /usr/local/include: node-gyp downloads the
+# headers on its first native build. The binary's libraries beyond glibc (libstdc++6,
+# libgcc-s1) come with build-essential above.
+COPY --from=npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=node /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
-# pnpm pinned exactly (PRD-262 §9-Q9: the current 12.x), and the npm cache the
-# install leaves in /root/.npm cleaned in the same layer.
+# pnpm pinned exactly (PRD-262 §9-Q9: the current 12.x), and what the install leaves
+# behind gone in the same layer: npm's cache in /root/.npm, its logs there, and Node 24's
+# compile cache, which npm writes to /tmp/node-compile-cache (PRD-262, row 47: 1.4 MB).
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
     && npm install -g --no-fund --no-audit pnpm@12.14.0 \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && rm -rf /tmp/node-compile-cache /root/.npm
 
 # The Claude Code CLI is NOT installed here: claude-agent-sdk ships its own copy
 # (site-packages/claude_agent_sdk/_bundled/claude) and resolves it FIRST —
