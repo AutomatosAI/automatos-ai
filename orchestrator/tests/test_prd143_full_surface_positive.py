@@ -25,7 +25,6 @@ Wave 4 harness helpers from tests/test_harness_self_management.py. No DB.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import json
 import os
 import sys
@@ -68,18 +67,6 @@ def _install_fake_apscheduler():
 
 _install_fake_apscheduler()
 
-
-# Lean-venv shim: modules/tools/__init__ pulls modules.rag's ingestion chain
-# (camelot at module top). Stub the missing leaf only when truly absent.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 import modules.tools.discovery.platform_executor as pe  # noqa: E402
 from core.security.hierarchy_permissions import (  # noqa: E402

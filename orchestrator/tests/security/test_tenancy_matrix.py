@@ -21,29 +21,10 @@ builder in isolation). The end-to-end DB matrix runs in CI.
 """
 from __future__ import annotations
 
-import importlib.util as _ilu
 import re
-import sys as _sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-# Lean-venv shim: importing the multimodal tools pulls modules.rag's ingestion
-# chain, whose PDF processor does ``import camelot`` at module top. camelot is a
-# CI dep (requirements.txt) but often absent from a lean local venv, where it
-# breaks collection. Stub only the missing *leaf* (never the modules.rag
-# package) — the blessed pattern used across the security suite.
-def _camelot_unlocatable() -> bool:  # pragma: no cover - env-dependent
-    try:
-        return _ilu.find_spec("camelot") is None
-    except ValueError:
-        return False  # spec-less camelot stub already present → chain satisfied
-
-
-if _camelot_unlocatable():  # pragma: no cover - env-dependent
-    import types as _types
-
-    _sys.modules.setdefault("camelot", _types.ModuleType("camelot"))
 
 from modules.rag.services.multimodal_knowledge_tools import MultimodalKnowledgeTools
 

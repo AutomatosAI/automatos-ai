@@ -29,7 +29,7 @@ These tests pin the W3-S8 hardening contract:
   ``green`` finding on ingest success and a ``rag`` / ``down`` finding
   on failure via the W3-S1 helper — un-instrumented before this story.
 
-Pure unit shape — heavy infra (boto3, camelot, ``docx``) is stubbed in
+Pure unit shape — heavy infra (boto3, ``docx``) is stubbed in
 ``sys.modules`` before importing ``modules.rag.ingestion.manager`` so the
 test runs without AWS / DOCX deps, mirroring the
 ``test_memory_single_write_path`` pattern.
@@ -89,9 +89,6 @@ if "botocore" not in sys.modules:
     _botocore_exc.ClientError = _ClientError
     sys.modules["botocore"] = _botocore
     sys.modules["botocore.exceptions"] = _botocore_exc
-
-# camelot — optional PDF dep, absent in test env.
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 # magic stubs are typically present, but a couple of CI envs lack it.
 if "magic" not in sys.modules:

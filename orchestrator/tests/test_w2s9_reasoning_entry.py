@@ -23,8 +23,6 @@ input, independent pipelines, type-distinct results. See
 from __future__ import annotations
 
 import os
-import sys
-import types
 
 # auto.py → core.database/config pulls Postgres env at import. Seed harmless
 # defaults; nothing in this module touches a real DB or network.
@@ -33,11 +31,6 @@ os.environ.setdefault("POSTGRES_PASSWORD", "test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 os.environ.setdefault("POSTGRES_DB", "test")
-
-# consumers/__init__.py eagerly imports the chatbot stack → RAG → camelot, an
-# optional PDF table-extraction dep that isn't installed in the test env. Stub
-# it so the import chain resolves (same pattern as test_l3_distill_input.py).
-sys.modules.setdefault("camelot", types.ModuleType("camelot"))
 
 from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 

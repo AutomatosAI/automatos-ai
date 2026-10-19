@@ -71,7 +71,7 @@ import pytest
 
 # ---------------------------------------------------------------------------
 # Paths to the surfaces we pin without importing them through heavy package
-# __init__ chains (planner → LLM, board bridge → DB, RAG → camelot, etc).
+# __init__ chains (planner → LLM, board bridge → DB, RAG → PDF libraries, etc).
 # ---------------------------------------------------------------------------
 
 ORCH_ROOT = Path(__file__).resolve().parent.parent
