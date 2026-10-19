@@ -10,15 +10,18 @@
  *   compiled path until A-04b registers it here.
  *
  * The active-theme request goes through apiClient's named method (getActiveTheme), so the
- * route-contract check sees it; a 404 from it means the workspace has no active install (a stale
- * `theme:install:` cookie), which is no theme to load, not a failure. The preset fetch below is a
- * same-origin static file under the theme's files folder, not the backend client, so it is a
- * plain fetch.
+ * route-contract check sees it. When it names no theme for this install (a stale
+ * `theme:install:` cookie) there is no theme to load, which is not a failure: A-07b answers 200
+ * with `theme: null` (no choice, the install was removed, or a `disable` revocation, which also
+ * carries a top-level `revoked`) or with another install (the workspace default), and a 404 is a
+ * backend without the route or no workspace. The preset fetch below is a same-origin static file
+ * under the theme's files folder, not the backend client, so it is a plain fetch.
  */
 import { apiClient } from '@/lib/api-client'
 import type { UiStyle } from '@/lib/ui-style'
 
 import { THEME_ACTIVE_ENDPOINT, THEME_LOAD_TIMEOUT_MS } from './constants'
+import { isRecord } from './css-value'
 import { exposeHostModules } from './host-modules'
 import { cleanupOnce, definitionOf, loadFromManifest, registerTheme, settleLoad, step, withTimeout } from './loader'
 import { parseActiveInstall, parseSpikeManifest } from './manifest'
@@ -37,7 +40,7 @@ function httpStatusOf(error: unknown): unknown {
   return (error as { status?: unknown } | null)?.status
 }
 
-/** GET /api/themes/active through apiClient; null when it answers 404: no active install. */
+/** GET /api/themes/active through apiClient; null when it answers 404 (no route or no workspace). */
 export async function fetchActiveInstall(): Promise<unknown> {
   try {
     return await apiClient.getActiveTheme()
@@ -47,9 +50,30 @@ export async function fetchActiveInstall(): Promise<unknown> {
   }
 }
 
-function noActiveInstall(): ThemeLoadAbsent {
-  return { ok: false, reason: null, detail: `GET ${THEME_ACTIVE_ENDPOINT} answered ${NO_ACTIVE_INSTALL_STATUS}: no active install` }
+function noActiveInstall(detail: string): ThemeLoadAbsent {
+  return { ok: false, reason: null, detail }
 }
+
+/**
+ * Why the active-theme answer names no theme for `installId` (none, a revocation or another
+ * install), or null when it names this one or is malformed (parseActiveInstall refuses that).
+ */
+export function absenceOf(answer: unknown, installId: string): string | null {
+  const answered = `GET ${THEME_ACTIVE_ENDPOINT}`
+  if (answer === null) return `${answered} answered ${NO_ACTIVE_INSTALL_STATUS}: no active install`
+  if (!isRecord(answer)) return null
+  const theme = answer.theme
+  if (theme === null) {
+    return answer.revoked == null
+      ? `${answered} names no installed theme: no active install`
+      : `${answered} names no installed theme: the install's version is revoked`
+  }
+  const other = isRecord(theme) ? theme.installId : undefined
+  if (typeof other === 'string' && other !== installId) return `${answered} names the install ${other}, not ${installId}`
+  return null
+}
+
+type ActiveManifest = { readonly manifest: SpikeManifest } | { readonly absent: string }
 
 async function fetchSameOriginJson(url: string): Promise<unknown> {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
@@ -68,16 +92,17 @@ export function defaultLoaderDeps(): LoaderDeps {
   }
 }
 
-/** The active install's checked manifest, with its files resolved under the package's folder; null with no active install. */
-async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<SpikeManifest | null> {
+/** The active install's checked manifest, with its files resolved under the package's folder, or why there is none to load. */
+async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<ActiveManifest> {
   const timedOut = `GET ${THEME_ACTIVE_ENDPOINT} did not answer within ${deps.timeoutMs} ms`
   const answer = await withTimeout(deps.fetchActive(), deps.timeoutMs, timedOut)
-  if (answer === null) return null
+  const absent = absenceOf(answer, installId)
+  if (absent !== null) return { absent }
   const active = parseActiveInstall(answer, installId)
   if (!active.ok) throw new Error(active.detail)
   const parsed = parseSpikeManifest(active.manifest, active.filesRoot)
   if (!parsed.ok) throw new Error(parsed.detail)
-  return parsed.manifest
+  return { manifest: parsed.manifest }
 }
 
 /** The theme installed in the workspace as `installId` (a lowercase uuid). */
@@ -88,9 +113,9 @@ export function installedThemeSource(installId: string): ThemeSource {
     load: (deps) =>
       settleLoad(async (): Promise<ThemeLoadOk | ThemeLoadAbsent> => {
         const host = await step('load', () => deps.exposeHost())
-        const manifest = await step('manifest', () => readActiveManifest(installId, deps))
-        if (manifest === null) return noActiveInstall()
-        return loadFromManifest(ref, manifest, host.sdkVersion, deps)
+        const active = await step('manifest', () => readActiveManifest(installId, deps))
+        if ('absent' in active) return noActiveInstall(active.absent)
+        return loadFromManifest(ref, active.manifest, host.sdkVersion, deps)
       }),
   }
 }

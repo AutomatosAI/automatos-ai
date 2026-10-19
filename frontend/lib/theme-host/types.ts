@@ -95,8 +95,9 @@ export interface ThemeLoadFailure {
 }
 
 /**
- * No theme to load: GET /api/themes/active answered 404, so the workspace has no active install
- * (a stale `theme:install:` cookie, or a backend without A-07b's route). Not a failure: the host
+ * No theme to load: GET /api/themes/active names no theme for the install (`theme: null`, a
+ * `disable` revocation, another install, or a 404 from a backend without A-07b's route), as for a
+ * stale `theme:install:` cookie. Not a failure: the host
  * turns off and Studio shows, with no notice. `reason` is null so it never reads as a failure's.
  */
 export interface ThemeLoadAbsent {

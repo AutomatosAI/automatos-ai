@@ -5,8 +5,9 @@
  * while the style is an installed theme (`theme:install:<uuid>`): it reads that install from the
  * server, hands the theme's frame to the frame slot and its other registered slots to the
  * placement slots (A-12b), and on any failure falls back to Studio with a notice; in safe mode
- * it loads no theme code at all. When the server has no active install (GET
- * /api/themes/active answers 404: a stale cookie) it turns off, and Studio shows with no notice.
+ * it loads no theme code at all. When the server names no theme for the install (GET
+ * /api/themes/active answers `theme: null`, another install or 404: a stale cookie) it turns
+ * off, and Studio shows with no notice.
  * Under an installed theme's style it reports 'loading' from the first render, before its effect
  * starts the load, so the frame slot never mounts the page in the fallback first (M69). Under
  * Classic, Studio and builtin Play (which keeps its compiled path until A-04b) it is off: it loads
