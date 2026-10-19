@@ -115,6 +115,11 @@ export API_KEY="${API_KEY:-smoke_api_key}"
 export AUTH_EDITION="${AUTH_EDITION:-local}"
 export REQUIRE_AUTH="${REQUIRE_AUTH:-false}"
 export DEFAULT_WORKSPACE_ID="${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
+# A build from this checkout gets a local-<sha7> tag and its commit as the revision
+# label, never an official tag (PRD-262 US-036, FR-13), wherever compose names them.
+AUTOMATOS_REVISION="${AUTOMATOS_REVISION:-$(git rev-parse HEAD 2>/dev/null)}"
+export AUTOMATOS_REVISION
+export AUTOMATOS_IMAGE_TAG="${AUTOMATOS_IMAGE_TAG:-local-${AUTOMATOS_REVISION:0:7}}"
 
 outcome="fail"
 failure="the smoke stopped before its first boot"
