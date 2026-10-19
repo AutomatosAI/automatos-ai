@@ -23,21 +23,44 @@ RUN rm -rf /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/
 # PRD-262 US-044: uv from its own image, in a named stage for the same reason.
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
-# PRD-262 US-044: requirements.lock in two parts, claude-agent-sdk alone and
-# everything else (the SDK's own dependencies included). The production stage
-# copies each part by its content, so an SDK bump that leaves the rest of the
-# lock alone re-runs only the SDK's install: from the build cache, the stable
-# layer keeps its digest. awk keeps or drops a whole entry: the pin line, and
-# the indented hash and `# via` lines under it. The build fails unless the SDK
-# part holds the SDK and nothing else.
+# PRD-262 US-044: requirements.lock in three parts: claude-agent-sdk alone, psycopg2
+# alone (the psycopg2 stage below builds it from source, PRD-262 row 27) and everything
+# else (the SDK's own dependencies included). The production stage copies each part
+# by its content, so an SDK bump that leaves the rest of the lock alone re-runs only
+# the SDK's install: from the build cache, the stable layer keeps its digest. awk
+# keeps or drops a whole entry: the pin line, and the indented hash and `# via` lines
+# under it. The build fails unless the SDK and psycopg2 parts each hold their one
+# package and nothing else, and the stable part holds neither.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS locks
 WORKDIR /locks
 COPY requirements.lock .
-RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/ } !sdk' requirements.lock > stable.lock \
+RUN awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/; pg = /^psycopg2==/ } !sdk && !pg' requirements.lock > stable.lock \
     && awk '/^[A-Za-z0-9]/ { sdk = /^claude-agent-sdk==/ } sdk' requirements.lock > sdk.lock \
+    && awk '/^[A-Za-z0-9]/ { pg = /^psycopg2==/ } pg' requirements.lock > psycopg2.lock \
     && test "$(grep -c '^[A-Za-z0-9]' sdk.lock)" = 1 \
     && grep -q '^claude-agent-sdk==' sdk.lock \
-    && ! grep -q '^claude-agent-sdk==' stable.lock
+    && test "$(grep -c '^[A-Za-z0-9]' psycopg2.lock)" = 1 \
+    && grep -q '^psycopg2==' psycopg2.lock \
+    && ! grep -q '^claude-agent-sdk==' stable.lock \
+    && ! grep -q '^psycopg2==' stable.lock
+
+# psycopg2 compiled against Debian's libpq (PRD-262, row 27: 15.7 MB). psycopg2-binary's
+# wheel carried its own libpq and two OpenSSLs, krb5, LDAP and SASL (16.1 MB), libraries
+# Debian already installs in this image; the production stage installs libpq5 (0.4 MB)
+# instead, so libpq gets the weekly OS rebuild's fixes too. Same project, version and
+# API. The compiler and headers stay in this stage. The lock's psycopg2 entry is the
+# hash-checked sdist, built in uv's isolated build environment and installed into
+# /install, which the production stage copies whole; its extension's debug info and
+# uv's lock file are left behind here.
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS psycopg2
+COPY --from=uv /uv /usr/local/bin/uv
+COPY --from=locks /locks/psycopg2.lock /locks/
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libpq-dev binutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --python /usr/local/bin/python --prefix /install --no-cache --compile-bytecode \
+        --require-hashes --no-deps --no-binary psycopg2 -r /locks/psycopg2.lock \
+    && find /install -type f -name '*.so*' -exec strip --strip-debug {} + \
+    && rm -f /install/.lock
 
 # Railway builds no target, so the last stage is what it ships: keep it last.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS production
@@ -61,10 +84,12 @@ WORKDIR /app
 #   git-remote-http (clone, pull and push over HTTPS) and ssh stay.
 # - PRD-262 (row 47): no gosu (2.9 MB). entrypoint.sh drops to the worker with
 #   setpriv, which util-linux in the base image already carries.
+# - PRD-262 (row 27): libpq5, the libpq the psycopg2 stage's build links. Its own
+#   dependencies (libssl3t64, libgssapi-krb5-2, libldap2) are already here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget openssh-client ca-certificates \
     build-essential \
-    jq tree \
+    jq tree libpq5 \
     && rm -f /usr/bin/*lto-dump* \
     && rm -f /usr/bin/git-shell /usr/bin/scalar \
         /usr/lib/git-core/git-daemon /usr/lib/git-core/git-http-backend \
@@ -133,6 +158,9 @@ RUN uv pip install --system --no-cache --compile-bytecode --require-hashes --no-
     && find /usr/local/lib/python3.12/site-packages -type f -name '*.so*' -not -path '*.libs/*' \
         -exec strip --strip-debug {} + \
     && find /usr/local/lib/python3.12/site-packages -type d -name tests -prune -exec rm -rf {} +
+
+# psycopg2, built above against libpq5 (PRD-262, row 27), as a layer of its own.
+COPY --from=psycopg2 /install /usr/local
 
 # The worker user first, so everything after it can be created worker-owned:
 # /app (the code lands below with --chown), the volume mount point and HOME's

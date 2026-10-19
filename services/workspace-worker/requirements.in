@@ -28,8 +28,11 @@ aiohttp>=3.9.0,<3.14.0
 pydantic>=2.0.0,<3.0.0
 
 # Database (task status updates): the one UPDATE in task_executions_db.py, run
-# through psycopg2 in a thread. No SQLAlchemy (PRD-262 US-044).
-psycopg2-binary>=2.9.0,<3.0.0
+# through psycopg2 in a thread. No SQLAlchemy (PRD-262 US-044). psycopg2 from its
+# source, not psycopg2-binary (PRD-262, row 27): the Dockerfile's psycopg2 stage builds
+# it against Debian's libpq, which the image installs as libpq5, so the wheel's own
+# copies of libpq, OpenSSL, krb5, LDAP and SASL (16 MB) stay out. Same project and API.
+psycopg2>=2.9.0,<3.0.0
 
 # Observability
 prometheus_client>=0.20.0,<1.0.0

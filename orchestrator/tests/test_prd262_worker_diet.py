@@ -10,6 +10,9 @@ runs on the image it built, on both arches:
 - row 21: Node's binary comes from a `node-stripped` stage that media-render carries
   byte for byte, copied with --link as the production stage's first instruction, so
   the two images' layers are one blob on the same base;
+- row 27: psycopg2 replaces psycopg2-binary at the same version; a `psycopg2` stage
+  builds it from the lock's hash-checked sdist against libpq-dev, and the production
+  stage installs Debian's libpq5 and copies the build in;
 - row 40: the stable layer's RUN strips the debug sections from every *.so* it
   installed outside the auditwheel *.libs directories, as the API's US-020 does;
 - row 47, tests: the same RUN deletes every directory named exactly `tests`;
@@ -26,7 +29,8 @@ links, that git still commits, branches, clones, pulls and clones over HTTPS, th
 stripped node runs, keeps .dynsym and loads a native N-API addon, and that setpriv drops
 root to the worker with the worker's HOME. scripts/ci/image_worker_site_packages.py
 loads every library the strip touched, as the worker user, and finds no debug section
-and no tests directory.
+and no tests directory, and that psycopg2 links Debian's libpq and queries the compose
+stack's Postgres image.
 
 Pure file reads: no Docker, no network.
 """
@@ -194,6 +198,68 @@ def test_the_in_image_node_checks_look_for_the_strip():
     assert set(toolchain.NODE_TOOLS) == {"npm", "npx", "corepack", "pnpm"}
 
 
+# --------------------------------------------------------------------------- row 27
+
+PSYCOPG2_VERSION = "2.9.13"  # psycopg2-binary's pin before the swap: same release, same API
+PROD_PYTHON = "FROM python:3.12-slim@sha256:"
+
+
+def test_psycopg2_replaces_psycopg2_binary_at_the_same_release():
+    requirements = _requirement_lines()
+    assert [line for line in requirements if line.startswith("psycopg2")] == ["psycopg2>=2.9.0,<3.0.0"]
+    lock = (WORKER / "requirements.lock").read_text()
+    assert re.findall(r"^psycopg2==(\S+) \\$", lock, re.M) == [PSYCOPG2_VERSION]
+    for name in ("requirements.lock", "requirements-browser.lock"):
+        assert "psycopg2-binary" not in _lock_pins(name), name
+
+
+def test_the_psycopg2_stage_builds_the_sdist_against_libpq_on_the_production_python():
+    stage = _stage_lines("psycopg2")
+    production = _stage_lines("production")
+    assert stage[0].split(" AS ")[0] == production[0].split(" AS ")[0], "the same Python, so the same ABI"
+    assert "COPY --from=locks /locks/psycopg2.lock /locks/" in stage
+    (run,) = [line for line in stage if line.startswith("RUN ")]
+    commands = _commands(run)
+    assert {"gcc", "libc6-dev", "libpq-dev", "binutils"} <= set(_apt_packages(run))
+    install = next(words for words in commands if words[:3] == ["uv", "pip", "install"])
+    for flag in ("--require-hashes", "--no-deps", "--no-cache", "--compile-bytecode"):
+        assert flag in install, flag
+    assert install[install.index("--no-binary") + 1] == "psycopg2", "always the sdist, built here"
+    assert install[install.index("--prefix") + 1] == "/install"
+    assert install[install.index("-r") + 1] == "/locks/psycopg2.lock"
+    assert ["find", "/install", "-type", "f", "-name", "*.so*", "-exec", "strip", "--strip-debug", "{}", "+"] in commands
+
+
+def test_production_installs_libpq5_and_copies_the_build_without_the_toolchain_stage():
+    assert "libpq5" in _apt_packages(APT_RUN)
+    assert "libpq-dev" not in _apt_packages(APT_RUN)
+    copy = "COPY --from=psycopg2 /install /usr/local"
+    assert copy in INSTRUCTIONS
+    stable_at = INSTRUCTIONS.index(STABLE_RUN)
+    user_at = next(i for i, line in enumerate(INSTRUCTIONS) if "useradd" in line)
+    assert stable_at < INSTRUCTIONS.index(copy) < user_at, "its own layer, after the stable lock"
+
+
+def test_the_in_image_check_proves_debians_libpq_and_a_query():
+    assert site_packages.REMOVED["psycopg2-binary"] == "row 27"
+    assert site_packages.BUNDLED_LIBS_DIR == "psycopg2_binary.libs"
+    assert site_packages.LIBPQ_MIN_VERSION >= 170000
+    assert site_packages.SYSTEM_LIBPQ.search("\tlibpq.so.5 => /usr/lib/x86_64-linux-gnu/libpq.so.5 (0x1)")
+    assert not site_packages.SYSTEM_LIBPQ.search(
+        "\tlibpq-ab12.so.5.17 => /usr/local/lib/python3.12/site-packages/psycopg2_binary.libs/libpq-ab12.so.5.17")
+
+
+def test_images_starts_the_compose_postgres_for_the_psycopg2_check():
+    step = _worker_step(SITE_PACKAGES_SCRIPT)
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+    images = {service.get("image") for service in compose["services"].values()}
+    assert step["env"]["POSTGRES_IMAGE"] in images, "the database image the worker writes to"
+    run = step["run"]
+    assert "-e POSTGRES_HOST_AUTH_METHOD=trust" in run, "a throwaway database with no password to leak"
+    assert f"-e {site_packages.DATABASE_URL_ENV}=postgresql://postgres@worker-probe-db:5432/postgres" in run
+    assert run.index("docker network create worker-probe") < run.index("--network worker-probe \\\n")
+
+
 # --------------------------------------------------------------------------- rows 40 and 47
 
 
@@ -323,9 +389,12 @@ def test_images_runs_the_site_packages_check_as_the_worker_user():
     condition = " ".join(step["if"].split())
     assert "!cancelled()" in condition and "matrix.name == 'workspace-worker'" in condition
     assert "steps.build.outcome == 'success'" in condition
-    assert step["env"] == {"IMAGE": "${{ matrix.image }}", "DIGEST": "${{ steps.build.outputs.digest }}"}
-    assert f'--user 1000 --entrypoint python "${{IMAGE}}@${{DIGEST}}" - < {SITE_PACKAGES_SCRIPT}' in step["run"]
-    assert [title.split(":")[0] for title, _ in site_packages.CHECKS][:2] == ["row 40", "row 47"]
+    assert {key: step["env"][key] for key in ("IMAGE", "DIGEST")} == {
+        "IMAGE": "${{ matrix.image }}", "DIGEST": "${{ steps.build.outputs.digest }}"}
+    assert "docker run --rm -i --user 1000 --network worker-probe" in step["run"]
+    assert f'--entrypoint python "${{IMAGE}}@${{DIGEST}}" - < {SITE_PACKAGES_SCRIPT}' in step["run"]
+    assert [title.split(":")[0] for title, _ in site_packages.CHECKS] == [
+        "row 40", "row 47", "row 27", "row 27", "rows 27 and 47"]
 
 
 def test_every_toolchain_check_names_its_breakdown_row():

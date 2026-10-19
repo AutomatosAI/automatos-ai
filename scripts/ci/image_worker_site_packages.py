@@ -3,7 +3,8 @@
 images.yml runs this inside the worker image it built, on each architecture, with the
 image's own Python, as the worker user:
 
-    docker run --rm -i --user 1000 --entrypoint python IMAGE - < scripts/ci/image_worker_site_packages.py
+    docker run --rm -i --user 1000 --network NET -e PROBE_DATABASE_URL=postgresql://postgres@db:5432/postgres \
+        --entrypoint python IMAGE - < scripts/ci/image_worker_site_packages.py
 
 Each check names the row of the 19 Oct size breakdown it proves:
 
@@ -13,6 +14,10 @@ Each check names the row of the 19 Oct size breakdown it proves:
   ``PyInit_<name>`` is imported by its dotted name, any other is opened with ctypes. The
   extensions named in ``MUST_LOAD`` must be among them, so an empty glob never passes;
 - row 47, the tests directories: none named exactly ``tests`` is left;
+- row 27, psycopg2: built from source against Debian's libpq. psycopg2-binary and its
+  bundled libraries are gone, ``_psycopg`` links Debian's libpq.so.5 (libpq 17 or
+  later), and psycopg2 connects to the Postgres at ``PROBE_DATABASE_URL`` (the compose
+  stack's image, which images.yml starts) and runs a parameterised query;
 - the distributions a cut removed (``REMOVED``, each with its row) are not installed,
   and what replaced them imports: redis.asyncio without hiredis's parser.
 
@@ -21,13 +26,15 @@ Standard library only. Exit 0 when every check passes, 1 otherwise.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 import sysconfig
+import time
 from importlib import metadata
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 SITE = Path(sysconfig.get_paths()["purelib"])
 COMMAND_TIMEOUT_S = 120
@@ -49,8 +56,23 @@ MUST_LOAD = frozenset({
 # Row 47.
 TESTS_DIR = "tests"
 
+# Row 27.
+BUNDLED_LIBS_DIR = "psycopg2_binary.libs"
+LIBPQ_MIN_VERSION = 170000  # Debian trixie's libpq5 is 17.x
+# Debian's, from /usr/lib/<arch> (ldd may print it through the /lib symlink), never a copy
+# a wheel bundles under site-packages.
+SYSTEM_LIBPQ = re.compile(r"^\s*libpq\.so\.5 => ((?:/usr)?/lib/\S+)", re.M)
+PSYCOPG2_PROBE = ("import psycopg2, psycopg2._psycopg as c, psycopg2.extensions as e; "
+                  "print(e.libpq_version(), c.__file__)")
+DATABASE_URL_ENV = "PROBE_DATABASE_URL"
+CONNECT_ATTEMPTS = 30
+CONNECT_PAUSE_S = 1.0
+CONNECT_TIMEOUT_S = 5
+ECHO = "probe"
+
 # Distributions a cut took out of the lock, by the breakdown row that took it.
 REMOVED = {
+    "psycopg2-binary": "row 27",
     "hiredis": "row 47",
     "python-dotenv": "row 47",
 }
@@ -125,6 +147,57 @@ def check_tests_dirs() -> List[str]:
     return [f"{path.relative_to(SITE)} is in the image" for path in sorted(SITE.rglob(TESTS_DIR)) if path.is_dir()]
 
 
+# --------------------------------------------------------------------------- row 27
+
+
+def check_psycopg2_build() -> List[str]:
+    """No bundled libraries, and _psycopg links Debian's libpq 17."""
+    failures = [f"{BUNDLED_LIBS_DIR} is in the image"] if (SITE / BUNDLED_LIBS_DIR).exists() else []
+    exit_code, output = run([sys.executable, "-c", PSYCOPG2_PROBE])
+    if exit_code:
+        return [*failures, f"import psycopg2 failed, exit {exit_code}: {output[-STDERR_TAIL_CHARS:]}"]
+    libpq_version, extension = output.split()
+    if int(libpq_version) < LIBPQ_MIN_VERSION:
+        failures.append(f"psycopg2 runs on libpq {libpq_version}, older than Debian's {LIBPQ_MIN_VERSION}")
+    linked = SYSTEM_LIBPQ.search(run(["ldd", extension])[1])
+    return failures if linked else [*failures, f"{extension} does not link Debian's libpq.so.5"]
+
+
+def _connect(psycopg2: Any, url: str) -> Any:
+    """A connection to ``url``, retried while the database starts."""
+    for _ in range(CONNECT_ATTEMPTS - 1):
+        try:
+            return psycopg2.connect(url, connect_timeout=CONNECT_TIMEOUT_S)
+        except psycopg2.OperationalError:
+            time.sleep(CONNECT_PAUSE_S)
+    return psycopg2.connect(url, connect_timeout=CONNECT_TIMEOUT_S)
+
+
+def _echo(psycopg2: Any, url: str) -> str:
+    """ECHO, sent through a bound parameter and read back."""
+    connection = _connect(psycopg2, url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT %(word)s::text", {"word": ECHO})
+            return cursor.fetchone()[0]
+    finally:
+        connection.close()
+
+
+def check_psycopg2_connects() -> List[str]:
+    """psycopg2 reaches the database and runs a parameterised query, as the worker's UPDATE does."""
+    url = os.environ.get(DATABASE_URL_ENV)
+    if not url:
+        return [f"{DATABASE_URL_ENV} is not set: start a Postgres and point it there"]
+    import psycopg2
+
+    try:
+        echoed = _echo(psycopg2, url)
+    except psycopg2.Error as exc:
+        return [f"psycopg2 could not query the database: {type(exc).__name__}: {exc}"]
+    return [] if echoed == ECHO else [f"the query echoed {echoed!r}, not {ECHO!r}"]
+
+
 # --------------------------------------------------------------------------- removed distributions
 
 
@@ -151,7 +224,9 @@ def check_removed() -> List[str]:
 CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 40: every stripped library loads, with no debug sections", check_strip),
     ("row 47: no tests directories in site-packages", check_tests_dirs),
-    ("row 47: the removed distributions are gone, their replacements import", check_removed),
+    ("row 27: psycopg2 is built against Debian's libpq", check_psycopg2_build),
+    ("row 27: psycopg2 connects to Postgres and runs a query", check_psycopg2_connects),
+    ("rows 27 and 47: the removed distributions are gone, their replacements import", check_removed),
 )
 
 
@@ -159,7 +234,7 @@ def run_check(check: Check) -> List[str]:
     """The check's failures; one that raises is a failure with its message."""
     try:
         return check()
-    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+    except (ImportError, OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         return [f"{type(exc).__name__}: {exc}"]
 
 
