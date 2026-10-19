@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/shared/page-header'
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import type { InstalledTheme } from '@/lib/api-client'
 import { BUILTIN_PLAY_REF, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
-import { packageIdOfBuiltin, useChooseStyle } from '@/lib/theme-host/choice-sync'
+import { packageIdOfBuiltin, useChooseStyle, useWantInstalledThemes } from '@/lib/theme-host/choice-sync'
 import { themeStyleOf } from '@/lib/theme-host/registry'
 import type { UiStyle } from '@/lib/theme-host/registry-types'
 
@@ -61,6 +61,8 @@ export function playStyleFor(installs: readonly InstalledTheme[]): UiStyle {
 export function PlayOnlyNote({ title, note, offerSwitch }: PlayOnlyNoteProps) {
   const uiStyle = useUiStyleOptional()
   const chooseStyle = useChooseStyle()
+  // 'Switch to Play' picks Play's installed package when there is one, so the installs are wanted.
+  useWantInstalledThemes(offerSwitch)
   const { lead, accent } = titleParts(title)
   const switchToPlay = () => {
     if (!uiStyle) {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { fulfillBackendJson } from '../support/backend-route'
 import { chooseStyle, serveInstalledTheme, type InstalledTheme } from '../support/hello-theme'
 import { watchPage } from '../support/watch'
 
@@ -36,6 +37,15 @@ const PLAY_COMPOSER = 'Message Auto'
 const CONVERSATIONS_HEADING = 'Conversations'
 const CONVERSATIONS_SEARCH = 'Search conversations'
 
+const ACTIVE_ROUTE = '**/api/themes/active'
+/**
+ * GET /api/themes/active naming builtin Play, with no `source`. The projects share one backend
+ * user: with no choice stored, the real answer would have ThemeChoiceSync store this tab's Play as
+ * the member's choice (PRD-261 A-02c), and every later Studio tab of the run would move to Play.
+ */
+const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
+const OK = 200
+
 const HELLO_A04B: InstalledTheme = { installId: '00000000-0000-4000-8000-0000000a04b0', fixture: 'hello-a04b' }
 const HELLO_FRAME_TEST_ID = 'hello-a04b-frame'
 const HELLO_ROUTE_TEST_ID = 'hello-a04b-route'
@@ -70,6 +80,12 @@ async function countMounts(page: Page): Promise<void> {
   }, COUNTED)
 }
 
+/** Puts this browser on Play: the cookie, and a server answer that agrees with it (PLAY_CHOICE). */
+async function choosePlay(page: Page): Promise<void> {
+  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
+  await chooseStyle(page, PLAY_COOKIE, APP_URL)
+}
+
 async function mountsOf(page: Page): Promise<Record<string, number>> {
   return page.evaluate(() => ({ ...((window as MountWindow).__a04bMounts ?? {}) }))
 }
@@ -85,7 +101,7 @@ function playChat(page: Page) {
 test.describe('theme pages and routes through ThemeSlot', () => {
   test("under the Play cookie /chat is Play's chat in Play's frame at 1440 px", { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
-    await chooseStyle(page, PLAY_COOKIE, APP_URL)
+    await choosePlay(page)
     await page.goto(CHAT_PATH)
 
     await expect(page.locator('html')).toHaveClass(PLAY_CLASS)
@@ -98,7 +114,7 @@ test.describe('theme pages and routes through ThemeSlot', () => {
   test('under the Play cookie /chat is the core chat at 800 px, below Play\'s width', { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
     await page.setViewportSize(NARROW_VIEWPORT)
-    await chooseStyle(page, PLAY_COOKIE, APP_URL)
+    await choosePlay(page)
     await page.goto(CHAT_PATH)
 
     await expect(page.locator('html')).toHaveClass(PLAY_CLASS)
@@ -110,7 +126,7 @@ test.describe('theme pages and routes through ThemeSlot', () => {
 
   test("a cold load of /chat under Play mounts Play's frame once, and never the Studio shell or the core chat", { tag: '@host' }, async ({ page }) => {
     await countMounts(page)
-    await chooseStyle(page, PLAY_COOKIE, APP_URL)
+    await choosePlay(page)
     await page.goto(CHAT_PATH)
 
     await expect(playChat(page)).toBeVisible()
@@ -120,7 +136,7 @@ test.describe('theme pages and routes through ThemeSlot', () => {
 
   test("/x/conversations renders Play's Conversations under the Play cookie", { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
-    await chooseStyle(page, PLAY_COOKIE, APP_URL)
+    await choosePlay(page)
     await page.goto(CONVERSATIONS_PATH)
 
     await expect(page.locator(PLAY_FRAME)).toBeVisible()

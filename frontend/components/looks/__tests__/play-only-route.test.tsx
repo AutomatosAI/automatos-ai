@@ -30,6 +30,10 @@ describe('Switch to Play', () => {
     expect(src).not.toContain('uiStyle.setStyle(')
   })
 
+  it('asks for the workspace installs while it offers the switch, so playStyleFor sees them', () => {
+    expect(src).toContain('useWantInstalledThemes(offerSwitch)')
+  })
+
   it('picks builtin Play when the workspace has no install of its package', () => {
     expect(playStyleFor([])).toBe(BUILTIN_PLAY_STYLE)
     expect(playStyleFor([install({ themeId: 'acme/neon' })])).toBe(BUILTIN_PLAY_STYLE)

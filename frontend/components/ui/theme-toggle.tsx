@@ -17,7 +17,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useUiStyle } from '@/contexts/ui-style-context'
 import { useThemeLayout } from '@/hooks/use-studio-theme'
-import { themeChoiceEntries, useChooseStyle, type ThemeChoiceEntry } from '@/lib/theme-host/choice-sync'
+import {
+  themeChoiceEntries,
+  useChooseStyle,
+  useWantInstalledThemes,
+  type ThemeChoiceEntry,
+} from '@/lib/theme-host/choice-sync'
 import type { ThemeTonePolicy } from '@/lib/theme-host/registry-types'
 import { LOOKS_HREF } from '@/lib/ticket-links'
 import { isUiStyle } from '@/lib/ui-style'
@@ -103,6 +108,9 @@ export function ThemeToggle() {
   const toneLocked = toneNote !== null
   const offersLookEditor = activeTheme !== null && layout === 'theme'
   const [mounted, setMounted] = useState(false)
+  // The workspace's installs are fetched only once the menu is first opened (choice-sync.ts).
+  const [menuOpen, setMenuOpen] = useState(false)
+  useWantInstalledThemes(menuOpen)
   const toneNoteId = useId()
   // Under the lock the Tone group has no handler at all, so no pick reaches the stored tone.
   const setTheme = toneLocked ? undefined : setStoredTone
@@ -123,7 +131,7 @@ export function ThemeToggle() {
   const ToneIcon = theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="hover:bg-secondary/80" aria-label="Appearance">
           <ToneIcon className="h-4 w-4" />

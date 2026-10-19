@@ -48,7 +48,8 @@ const NO_PAGES: ReadonlyMap<string, unknown> = new Map()
 
 /**
  * Where MainLayout draws an installed theme's frame: its desktop shell, from useIsTabletOrBelow's
- * 1024 px (hooks/use-mobile.ts). An installed theme always has the Studio base (DEFAULT_THEME_BASE).
+ * 1024 px (hooks/use-mobile.ts). The host loads only Studio-based installs for now (Phase A): the
+ * loader refuses any other base (lib/theme-host/manifest.ts, STUDIO_BASE_ONLY).
  */
 export const INSTALLED_FRAME_MIN_WIDTH_PX = 1024
 const BELOW_INSTALLED_FRAME_QUERY = `(max-width: ${INSTALLED_FRAME_MIN_WIDTH_PX - 1}px)`

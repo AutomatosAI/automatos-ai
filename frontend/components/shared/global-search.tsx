@@ -16,7 +16,7 @@ import { THEME_SEARCH_WORDS, useGlobalSearch, type SearchResult, type ThemeSearc
 import { useActiveTheme } from '@/hooks/use-studio-theme'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
-import { ThemeChoiceSync, styleChoices, useChooseStyle } from '@/lib/theme-host/choice-sync'
+import { ThemeChoiceSync, styleChoices, useChooseStyle, useWantInstalledThemes } from '@/lib/theme-host/choice-sync'
 
 const CATEGORY_META = {
   pages: { heading: 'Pages', icon: LayoutDashboard },
@@ -125,6 +125,8 @@ export function GlobalSearch() {
     socials: posts,
     handleOpenChange,
   } = useGlobalSearch(socials, themeNav, useStyleChoices())
+  // The workspace's installs (its themes in the list) are fetched only once ⌘K first opens.
+  useWantInstalledThemes(open)
 
   const handleSelect = (result: SearchResult) => {
     handleOpenChange(false)

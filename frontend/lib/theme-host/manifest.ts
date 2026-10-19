@@ -108,6 +108,16 @@ function urlUnderRoot(relativePath: string, root: string): string | null {
   return url.origin === origin && url.pathname.startsWith(root) ? url.href : null
 }
 
+/**
+ * PRD-261 Phase A limit: the host draws an installed theme on Studio only (its first paint, its
+ * frame width and its slots assume Studio's chrome). The server's manifest check accepts both
+ * THEME_BASES (services/themes/contract.py), so a `base: "classic"` package installs and can be
+ * chosen; the loader then refuses it with this reason, which the provider shows.
+ */
+const STUDIO_BASE_ONLY =
+  `base must be "${DEFAULT_THEME_BASE}": this host runs only Studio-based themes for now ` +
+  '(a "classic" base installs but cannot load yet)'
+
 function identityProblem(raw: Record<string, unknown>): string | null {
   if (typeof raw.schema !== 'string' || !MANIFEST_SCHEMAS.includes(raw.schema)) {
     return `schema must be "${PACKAGE_SCHEMA}" (or the browser lane's "${SPIKE_SCHEMA}")`
@@ -115,7 +125,7 @@ function identityProblem(raw: Record<string, unknown>): string | null {
   const missing = IDENTITY_FIELDS.find((field) => !isNonEmptyString(raw[field]))
   if (missing !== undefined) return `${missing} must be a non-empty string`
   if (!isRecord(raw.engines) || !isNonEmptyString(raw.engines.sdk)) return 'engines.sdk must be a non-empty string'
-  if (raw.base !== DEFAULT_THEME_BASE) return `base must be "${DEFAULT_THEME_BASE}"`
+  if (raw.base !== DEFAULT_THEME_BASE) return STUDIO_BASE_ONLY
   return null
 }
 

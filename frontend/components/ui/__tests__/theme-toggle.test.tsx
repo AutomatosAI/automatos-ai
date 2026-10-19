@@ -35,4 +35,9 @@ describe('ThemeToggle', () => {
     expect(src).not.toContain("setStyle('light'")
     expect(src).not.toContain("chooseStyle('light'")
   })
+
+  it('asks for the workspace installs once the menu opens (PRD-261 A-02c)', () => {
+    expect(src).toContain('<DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>')
+    expect(src).toContain('useWantInstalledThemes(menuOpen)')
+  })
 })
