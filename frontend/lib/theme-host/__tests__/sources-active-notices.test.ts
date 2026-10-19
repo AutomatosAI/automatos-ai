@@ -9,6 +9,8 @@
  *   failure ledger never counts.
  * jsdom loads no stylesheets, so the successful loads settle the theme's <link> themselves.
  */
+import { readFileSync } from 'fs'
+import path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { countsTowardRevert } from '../failure-ledger'
@@ -170,5 +172,27 @@ describe('theme files that cannot be reached', () => {
 
   it('never counts toward the revert', () => {
     expect(countsTowardRevert('unavailable')).toBe(false)
+  })
+})
+
+describe('a real automatos-theme/v1 package (the hello fixture hello.autotheme is built from)', () => {
+  const packageDir = path.resolve(__dirname, '../../../../orchestrator/tests/fixtures/themes/hello')
+  const readJson = (file: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(path.join(packageDir, file), 'utf8')) as Record<string, unknown>
+  const root = `${window.location.origin}/api/themes/files/${DIGEST}/`
+
+  it('loads from the package layout: dist/entry.js, dist/theme.css and its default look', async () => {
+    observer = settleStylesheets()
+    const deps: LoaderDeps = {
+      ...depsWith(activeWith({ manifest: readJson('theme.json'), defaultLook: 'default' })),
+      fetchJson: vi.fn(async () => readJson('looks/presets/default.look.json')),
+    }
+    const result = await installedThemeSource(INSTALL_ID).load(deps)
+    expect(result.ok).toBe(true)
+    expect(deps.importModule).toHaveBeenCalledWith(`${root}dist/entry.js`)
+    expect(deps.fetchJson).toHaveBeenCalledWith(`${root}looks/presets/default.look.json`)
+    expect(document.querySelector(STYLE_LINK)?.getAttribute('href')).toBe(`${root}dist/theme.css`)
+    expect(document.documentElement.classList.contains('hello')).toBe(true)
+    if (result.ok) result.cleanup()
   })
 })

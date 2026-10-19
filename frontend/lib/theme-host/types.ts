@@ -66,8 +66,9 @@ export interface FrameProps {
 export type FrameComponent = ComponentType<FrameProps>
 
 /**
- * A checked theme.json (the spike's format, `automatos-theme-spike/v1`, until A-06b's package
- * manifest replaces it). The three file fields are absolute URLs under the theme's files folder.
+ * A checked theme.json: a package's (`automatos-theme/v1`, its files by the package layout) or the
+ * browser lane's spike fixtures' (`automatos-theme-spike/v1`, its files named), manifest.ts
+ * parseThemeManifest. The three file fields are absolute URLs under the theme's files folder.
  */
 export interface SpikeManifest {
   readonly id: string

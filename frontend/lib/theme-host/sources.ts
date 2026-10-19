@@ -3,7 +3,8 @@
  *
  * - **installed** (`install:<uuid>`): reads GET /api/themes/active through the backend client,
  *   checks that it names this install and carries a sha256 digest, checks its manifest with every
- *   file under `/api/themes/files/<digest>/`, then imports the entry with the browser's own
+ *   file under `/api/themes/files/<digest>/` (a package's by its fixed layout and the answer's
+ *   `defaultLook`, manifest.ts), then imports the entry with the browser's own
  *   import(), so its bare imports resolve through the page's import map to the host's modules.
  * - **builtin** (`builtin:<id>`): a module compiled into the app, loaded with a webpack import();
  *   its frame registers synchronously as soon as that import resolves. Builtin Play keeps its
@@ -40,7 +41,7 @@ import { THEME_ACTIVE_ENDPOINT, THEME_LOAD_TIMEOUT_MS } from './constants'
 import { isRecord } from './css-value'
 import { exposeHostModules } from './host-modules'
 import { cleanupOnce, definitionOf, loadFromManifest, registerTheme, settleLoad, step, withTimeout } from './loader'
-import { parseActiveInstall, parseSpikeManifest } from './manifest'
+import { parseActiveInstall, parseThemeManifest } from './manifest'
 import { importThemeModule } from './native-import'
 import { isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeRef } from './registry-types'
@@ -249,7 +250,7 @@ async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<
   const active = parseActiveInstall(answer, installId)
   if (!active.ok) throw new Error(active.detail)
   deps.rememberDigest?.(installId, active.digest)
-  const parsed = parseSpikeManifest(active.manifest, active.filesRoot)
+  const parsed = parseThemeManifest(active.manifest, active.filesRoot, active.defaultLook)
   if (!parsed.ok) throw new Error(parsed.detail)
   return { manifest: parsed.manifest, revoked: revocationWarningOf(answer) }
 }
