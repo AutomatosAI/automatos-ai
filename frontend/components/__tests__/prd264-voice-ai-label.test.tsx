@@ -93,4 +93,19 @@ describe('PRD-264 EUAI-04 — LiveVoiceMode (the chat screen\'s call strip)', ()
     expect(screen.getByRole('button', { name: 'Mute microphone' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'End call' })).toBeTruthy()
   })
+
+  // A Retell/network fault can land mid-call, while Auto is still talking:
+  // the failure box replaces the controls, never the label (PRD-264 §8).
+  it.each([
+    { kind: 'refusal', refusal: 'Live voice is off for this workspace.', error: null },
+    { kind: 'mid-call error', refusal: null, error: 'The call dropped.' },
+  ])('keeps "AI voice assistant" on a $kind', ({ refusal, error }) => {
+    inCallState(CALL_STATES[2])
+    Object.assign(hookState, { refusal, error })
+    render(<LiveVoiceMode onExit={() => {}} />)
+    expectTheLabel()
+    expect(screen.getByText((refusal ?? error) as string)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'End call' })).toBeNull()
+  })
 })

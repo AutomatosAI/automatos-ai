@@ -277,6 +277,43 @@ def test_an_unreadable_mark_counts_as_a_reconnect(monkeypatch, store):
     assert asyncio.run(ai_notice.socket_reconnected(CALL_ID)) is True
 
 
+class SlowReminderSocket(ScriptedSocket):
+    """A socket whose send of the AI reminder is slow (a loaded event loop)."""
+
+    async def send_json(self, data: dict) -> None:
+        if str(data.get("content", "")).startswith(REMINDER):
+            await asyncio.sleep(SLOW_SEND_SECONDS)
+        self.sent.append(data)
+
+
+SLOW_SEND_SECONDS = 0.05
+ACK_TEXT = "One moment."
+
+
+def test_the_reminder_comes_before_the_slow_turn_ack(monkeypatch):
+    """A slow reminder send never lets the slow-turn ack speak first."""
+    monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", SLOW_SEND_SECONDS / 5)
+    monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", ACK_TEXT)
+
+    async def slow_answer(req: Any):
+        await asyncio.sleep(SLOW_SEND_SECONDS * 2)
+        yield {"response_id": req.response_id, "content": "answer", "content_complete": True}
+
+    ports = live_socket.SocketPorts(
+        stream_turn=slow_answer,
+        call_status=lambda cid: "started",
+        clock=Clock(T0),
+        socket_reconnected=_reconnect_says(True),
+    )
+    ws = SlowReminderSocket([CALL_DETAILS, _turn(1)])
+    asyncio.run(live_socket.LiveCallSocket(ws, CALL_ID, ports).run())
+
+    contents = _contents(ws, 1)
+    assert contents[0].startswith(REMINDER), "the reminder opens the response"
+    assert contents[1].startswith(ACK_TEXT)
+    assert contents[2:] == ["answer"]
+
+
 # ---------------------------------------------------------------------------
 # Every VOICE_AI_REMINDER_MINUTES of call time, the reminder once
 # ---------------------------------------------------------------------------

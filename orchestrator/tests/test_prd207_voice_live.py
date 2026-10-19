@@ -1919,6 +1919,7 @@ def test_ws_slow_first_frame_speaks_an_honest_ack(monkeypatch):
     monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", 0.05)
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment.")
+    _first_socket_of_call(monkeypatch)
 
     async def slow_stream(req):
         await asyncio.sleep(0.25)
@@ -1949,6 +1950,7 @@ def test_ws_fast_turn_sends_no_ack(monkeypatch):
     monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", 0.3)
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment.")
+    _first_socket_of_call(monkeypatch)
 
     async def fast_stream(req):
         yield {"response_id": req.response_id, "content": "instant", "content_complete": True}
@@ -1973,6 +1975,7 @@ def test_ws_dead_socket_mid_turn_still_drains_the_brain(monkeypatch):
     monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
     monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
     monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", 0)
+    _first_socket_of_call(monkeypatch)
 
     drained = []
 

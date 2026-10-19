@@ -194,59 +194,62 @@ export function LiveVoiceMode({
     >
       {/* Whisper strip — no card, no border: the room glows behind the whole
           chat, the words stream in the thread like any typed reply; up here
-          only the quiet facts and the two buttons that matter. */}
-      {!failure && (
-        <div className="mx-auto flex w-fit items-center gap-3 px-2 py-0.5">
-          <AiVoiceLabel />
-          <p aria-live="polite" className="text-[11px] tracking-wide text-muted-foreground/60">
-            {stateLabel}
+          only the quiet facts and the two buttons that matter. The AI label
+          stays for the whole call, a failure included (PRD-264 §8). */}
+      <div className="mx-auto flex w-fit items-center gap-3 px-2 py-0.5">
+        <AiVoiceLabel />
+        {!failure && (
+          <>
+            <p aria-live="polite" className="text-[11px] tracking-wide text-muted-foreground/60">
+              {stateLabel}
+              {isLive && (
+                <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">
+                  {formatDuration(durationSec)}
+                </span>
+              )}
+            </p>
             {isLive && (
-              <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">
-                {formatDuration(durationSec)}
+              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    muted ? 'bg-muted-foreground/40' : 'bg-warning animate-pulse'
+                  }`}
+                />
+                {muted ? 'Mic muted' : 'Mic live'}
               </span>
             )}
-          </p>
-          {isLive && (
-            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  muted ? 'bg-muted-foreground/40' : 'bg-warning animate-pulse'
-                }`}
+            {isLive && <MuteToggle muted={muted} onToggle={toggleMute} />}
+            {isLive && (
+              <MicDevicePicker
+                devices={inputDevices}
+                activeDeviceId={captureDeviceId}
+                onPickDevice={pickDevice}
               />
-              {muted ? 'Mic muted' : 'Mic live'}
-            </span>
-          )}
-          {isLive && <MuteToggle muted={muted} onToggle={toggleMute} />}
-          {isLive && (
-            <MicDevicePicker
-              devices={inputDevices}
-              activeDeviceId={captureDeviceId}
-              onPickDevice={pickDevice}
-            />
-          )}
-          {isLive || orbState === 'connecting' ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-full text-destructive hover:text-destructive"
-              onClick={handleExit}
-              aria-label="End call"
-            >
-              <PhoneOff className="h-3.5 w-3.5" />
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-full"
-              onClick={handleExit}
-              aria-label="Close live voice"
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
-      )}
+            )}
+            {isLive || orbState === 'connecting' ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-full text-destructive hover:text-destructive"
+                onClick={handleExit}
+                aria-label="End call"
+              >
+                <PhoneOff className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-full"
+                onClick={handleExit}
+                aria-label="Close live voice"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </>
+        )}
+      </div>
 
       {/* The mic is bound to a device delivering silence — name it, fix it
           here. The #1 cause of "recording forever, Auto never answers". */}

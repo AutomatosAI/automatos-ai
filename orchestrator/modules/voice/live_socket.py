@@ -244,11 +244,16 @@ class LiveCallSocket:
             self._speaking.cancel()
 
     async def respond(self, req: RetellLLMRequest) -> None:
-        """Stream one turn to Retell, then record where its time went."""
+        """Stream one turn to Retell, then record where its time went.
+
+        A due AI reminder goes out before the slow-turn ack is armed, so the
+        reminder is always the response's first frame (PRD-264 EUAI-04).
+        """
         turn = _TurnMarks()
-        ack_task = self._arm_ack(req, turn)
+        ack_task: Optional[asyncio.Task] = None
         try:
             await self._remind_if_due(req, turn)
+            ack_task = self._arm_ack(req, turn)
             await self._relay(req, turn, ack_task)
         except asyncio.CancelledError:
             # Superseded turn (barge-in): Retell has moved on — stop quietly.
