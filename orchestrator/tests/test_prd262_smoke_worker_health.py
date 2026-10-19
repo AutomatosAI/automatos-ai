@@ -162,7 +162,9 @@ def test_main_writes_the_record_and_the_summary(tmp_path, monkeypatch, healthy_a
 
 
 def _shell_function(text: str, name: str) -> str:
-    start = text.index(f"\n{name}() {{\n") + 1
+    """The body of shell function `name`: the lines between `name() {` and its closing `}`."""
+    header = f"\n{name}() {{\n"
+    start = text.index(header) + len(header)
     return text[start:text.index("\n}\n", start)]
 
 
