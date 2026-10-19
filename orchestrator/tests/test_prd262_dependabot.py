@@ -17,8 +17,8 @@ A pin with nothing to move it freezes security fixes, so the two travel together
   and compose ignore tag moves (semver major and minor), so the digest is what
   moves;
 * every Python lock file has an updater, or is listed below with the reason
-  Dependabot cannot update it. A new lock (US-022, US-044) fails here until one
-  or the other is true.
+  Dependabot cannot update it. A new lock (US-044) fails here until one or the
+  other is true; US-022's three API locks are listed.
 
 Pure file reads: no Docker, no network.
 """
@@ -55,6 +55,16 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "(dependabot-core python/shared_file_fetcher.rb and "
         "uv/file_updater/compile_file_updater.rb, read 18 Oct 2026). How this lock "
         "is kept current is open for Gerard and Dave (PRD-262 US-012)."
+    ),
+    **dict.fromkeys(
+        ("orchestrator/requirements.lock", "orchestrator/requirements-leiden.lock",
+         "orchestrator/requirements-dev.lock"),
+        "Dependabot's pip and uv updaters fetch only *.txt and *.in files (and uv.lock), so "
+        "they never see these locks (dependabot-core uv/lib/dependabot/uv/file_fetcher.rb, "
+        "read 19 Oct 2026). Pointed at /orchestrator they would bump requirements.in alone, "
+        "which test_prd262_api_locks.py then fails because the lock no longer satisfies it. "
+        "A bump is an edit to the input plus the compile command at the top of each lock "
+        "(PRD-262 US-022); which updater keeps them current is open for Gerard and Dave.",
     ),
 }
 

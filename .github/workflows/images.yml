@@ -39,6 +39,10 @@ name: images
 #   (scripts/ci/image_site_packages.py, PRD-262 US-020), and botocore must hold
 #   the models of the services we call, and only those, with boto3 building a
 #   client for each (scripts/ci/image_botocore.py, PRD-262 US-021).
+# - The API builds reproducibly (PRD-262 US-022): a fixed SOURCE_DATE_EPOCH and
+#   rewrite-timestamp=true, so a layer rebuilt from the same inputs is the same
+#   bytes. On a push to main, its two pip layers must be `edge`'s when the lock half
+#   each holds and pybuild are (scripts/ci/image_pip_layers.py).
 # - The weekly OS rebuild (PRD-262 US-011): every Monday at 05:00 UTC a schedule
 #   run rebuilds each image's `no_cache_filters` stages (those whose apt or apk
 #   packages ship) without the cache, so Debian and Alpine fixes reach the
@@ -89,8 +93,13 @@ on:
       - "scripts/ci/image_*.py"
       - "orchestrator/Dockerfile"
       - "orchestrator/.dockerignore"
-      - "orchestrator/requirements.txt"
+      - "orchestrator/requirements.in"
+      - "orchestrator/requirements-leiden.in"
+      - "orchestrator/requirements.lock"
+      - "orchestrator/requirements-leiden.lock"
       - "orchestrator/requirements-dev.txt"
+      - "orchestrator/requirements-dev.lock"
+      - "orchestrator/scripts/split_lock.py"
       - "frontend/Dockerfile"
       - "frontend/.dockerignore"
       - "frontend/package.json"
@@ -172,14 +181,26 @@ jobs:
           # US-011; orchestrator/tests/test_prd262_weekly_rebuild.py reads them
           # against each Dockerfile). The API's pybuild is not one: its compilers
           # never ship.
+          # source_date_epoch (the API only, PRD-262 US-022): a fixed date, set
+          # once (2026-10-19T00:00:00Z), that image_matrix.py passes as the
+          # SOURCE_DATE_EPOCH build arg, with rewrite-timestamp=true appended to the
+          # build's outputs (matrix.rewrite_timestamp), so a rebuilt layer is the
+          # same bytes and a rebuild that changes nothing downloads nothing. Not
+          # the lock's commit time: a lock change outside the stable set would
+          # re-stamp the stable pip layer. Not on the other images: a constant
+          # epoch would clamp the frontend's public/ mtimes, which its ETags read.
           IMAGES: |
             [
               {"name": "api", "context": "orchestrator", "target": "production",
                "build_args": ["INSTALL_GRAPH_EXTRAS=false"],
+               "source_date_epoch": 1792368000,
                "cache_mode": "min", "no_cache_filters": ["base"],
                "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["orchestrator/Dockerfile", "orchestrator/.dockerignore",
-                          "orchestrator/requirements.txt", "orchestrator/requirements-dev.txt"]},
+                          "orchestrator/requirements.in", "orchestrator/requirements-leiden.in",
+                          "orchestrator/requirements.lock", "orchestrator/requirements-leiden.lock",
+                          "orchestrator/requirements-dev.txt", "orchestrator/requirements-dev.lock",
+                          "orchestrator/scripts/split_lock.py"]},
               {"name": "frontend", "context": "frontend", "target": "production",
                "build_args": ["NEXT_PUBLIC_AUTH_EDITION=local",
                               "NEXT_PUBLIC_API_URL=http://localhost:8000",
@@ -316,7 +337,7 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           build-args: ${{ matrix.build_args }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true${{ matrix.rewrite_timestamp }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
@@ -344,6 +365,7 @@ jobs:
       # Dockerfile instruction and heaviest paths, and the update delta against
       # the published `edge` (none for an image that is never published).
       - name: Size, layers and update delta
+        id: measure
         env:
           NAME: ${{ matrix.name }}
           ARCH: ${{ matrix.arch }}
@@ -498,6 +520,40 @@ jobs:
         run: |
           docker pull --quiet "${IMAGE}@${DIGEST}"
           docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_botocore.py
+
+      # PRD-262 US-022: pybuild installs requirements.lock in two halves, copied as two
+      # layers (the stable set, then the rest), and this build is reproducible. On a
+      # push to main (not the weekly schedule run), each layer must be the published
+      # `edge`'s when the half it holds and pybuild (its stages, the base and uv
+      # digests, split_lock.py) are what they were at edge's revision; a half that moved
+      # makes a new layer, which the report above counts as the update. A layer that
+      # should match and does not is judged by the distributions both install: the same
+      # set is a warning (pybuild's apt layer or BuildKit's compression moved the
+      # bytes), another set fails (scripts/ci/image_pip_layers.py). edge's three files
+      # come from its revision; an edge built before the split has no split_lock.py,
+      # and the check says so and passes.
+      - name: The pip layers are edge's when their inputs are
+        if: ${{ !cancelled() && matrix.name == 'api' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.measure.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ runner.temp }}/layers/${{ matrix.name }}-${{ matrix.arch }}.json
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          edge_dir="${RUNNER_TEMP}/edge-files"
+          revision=$(jq -r '.edge.revision // ""' "$REPORT")
+          if [ -n "$revision" ]; then
+            for path in orchestrator/Dockerfile orchestrator/requirements.lock orchestrator/scripts/split_lock.py; do
+              mkdir -p "$edge_dir/$(dirname "$path")"
+              if ! gh api -H "Accept: application/vnd.github.raw+json" \
+                  "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${revision}" > "$edge_dir/$path"; then
+                echo "$path is not in edge's revision ${revision}"
+                rm -f "$edge_dir/$path"
+              fi
+            done
+          fi
+          python3 scripts/ci/image_pip_layers.py --report "$REPORT" --edge-dir "$edge_dir" \
+            --summary "$GITHUB_STEP_SUMMARY"
 
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build

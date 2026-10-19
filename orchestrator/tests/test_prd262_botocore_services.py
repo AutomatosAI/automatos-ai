@@ -6,8 +6,9 @@ other service then raises UnknownServiceError in the image, which the backend sh
 would never see: they install the full botocore on the runner. This suite checks:
 
 - the Dockerfile: the prune RUN sits in pybuild, after US-020's strip and before the
-  base stage copies /install, and keeps exactly the six. Run here with ``sh`` on a fake
-  ``botocore/data``, it keeps those six and the top-level files, deletes every other
+  base stage copies /install, and keeps exactly the six. botocore is in the second half
+  of US-022's two-layer install, /install/rest, which the prune names. Run here with
+  ``sh`` on a fake ``botocore/data``, it keeps those six and the top-level files, deletes every other
   service (names that share a prefix with a kept one included), and fails before it
   deletes anything when a kept service is missing;
 - the guard for future code and botocore bumps: every boto3 client or resource built
@@ -49,7 +50,8 @@ DOCKERFILE = (ORCHESTRATOR / "Dockerfile").read_text(encoding="utf-8")
 SCRIPT = ROOT / "scripts" / "ci" / "image_botocore.py"
 SCRIPT_RUN = "docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_botocore.py"
 PRD_SERVICES = frozenset({"s3", "s3vectors", "bedrock-runtime", "sts", "sso", "sso-oidc"})
-DATA = "/install/lib/python3.11/site-packages/botocore/data"
+# PRD-262 US-022: botocore is outside the lock's stable set, so it installs into the rest half.
+DATA = "/install/rest/lib/python3.11/site-packages/botocore/data"
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
 _KEEP = re.compile(r'\bkeep="([^"]+)"')
 
@@ -63,6 +65,9 @@ def _load(name: str):
 
 
 image_botocore = _load("image_botocore")
+_split_spec = importlib.util.spec_from_file_location("split_lock", ORCHESTRATOR / "scripts" / "split_lock.py")
+split_lock = importlib.util.module_from_spec(_split_spec)
+_split_spec.loader.exec_module(split_lock)
 
 
 # --------------------------------------------------------------------------- the Dockerfile
@@ -107,7 +112,8 @@ def test_the_prune_runs_in_pybuild_after_the_strip_and_before_the_base_copies_it
     prune = next(i for i, line in enumerate(stage) if "botocore/data" in line)
     assert install < strip < prune
     instructions = _instructions(DOCKERFILE)
-    assert instructions.index(_prune_run()) < instructions.index("COPY --from=pybuild /install /usr/local")
+    assert instructions.index(_prune_run()) < instructions.index("COPY --from=pybuild /install/rest /usr/local")
+    assert "botocore" not in split_lock.STABLE, "the prune names the half botocore installs into"
     run = _prune_run()
     assert run.startswith("RUN ") and not run.startswith("RUN --mount"), "Railway builds this file: no cache mounts"
     assert "|| true" not in run and f"data={DATA}" in run

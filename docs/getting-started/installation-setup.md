@@ -21,7 +21,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py](../../orchestrator/alembic/versions/prd222_veteran_skip_backfill.py)
 - [orchestrator/core/redis/client.py](../../orchestrator/core/redis/client.py)
 - [orchestrator/core/seeds/seed_local_first_run.py](../../orchestrator/core/seeds/seed_local_first_run.py)
-- [orchestrator/requirements.txt](../../orchestrator/requirements.txt)
+- [orchestrator/requirements.in](../../orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](../../orchestrator/tests/test_dockerfile_prod_parity.py)
 - [orchestrator/tests/test_prd222_onboarding_reset.py](../../orchestrator/tests/test_prd222_onboarding_reset.py)
 - [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](../../orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
@@ -180,7 +180,7 @@ Sources: [docker-compose.yml:41-321](../../docker-compose.yml#L41-L321), [.env.e
 Automatos AI uses multi-stage Docker builds to decouple build-time compilers and heavy development tools from lightweight production runtimes.
 
 ### Backend Multi-Stage Pipeline (`orchestrator/Dockerfile`)
-1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed to build Python wheels from `requirements.txt` into `/install`. Handles conditional graph extra compilation (`INSTALL_GRAPH_EXTRAS` build arg) [orchestrator/Dockerfile:20-59](../../orchestrator/Dockerfile#L20-L59).
+1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed, and installs the locked Python packages from `requirements.lock` into `/install`, every pin hash-checked (PRD-262 US-022). The `INSTALL_GRAPH_EXTRAS` build arg picks `requirements-leiden.lock`, which adds the graph extra, [orchestrator/Dockerfile:20-59](../../orchestrator/Dockerfile#L20-L59).
 2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `libmagic1`, `libpango-1.0-0`, `libcairo2`, `fonts-urw-base35`) [orchestrator/Dockerfile:64-109](../../orchestrator/Dockerfile#L64-L109).
 3. **`development` & `production` Stages**: Installs application code, creates non-root user `automatos`, and exposes port `8000` running Uvicorn with reload in development or multiple workers in production [orchestrator/Dockerfile:95-189](../../orchestrator/Dockerfile#L95-L189).
 

@@ -35,9 +35,10 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY . /src
 WORKDIR /src
 
-# Backend (orchestrator) and the Python services, as CI installs them. The test
-# tools, pytest-timeout among them, are in orchestrator/requirements-dev.txt.
-RUN pip install -r orchestrator/requirements.txt -r orchestrator/requirements-dev.txt \
+# Backend (orchestrator) and the Python services, as CI installs them: the API's locks
+# in one command, hashes required (PRD-262 US-022). The test tools, pytest-timeout
+# among them, are in orchestrator/requirements-dev.txt, locked in requirements-dev.lock.
+RUN pip install --require-hashes -r orchestrator/requirements.lock -r orchestrator/requirements-dev.lock \
     && pip install -r services/workspace-worker/requirements.txt
 
 # Frontend: `npm install`, not `npm ci` (CI does the same; see frontend-ci in test.yml).

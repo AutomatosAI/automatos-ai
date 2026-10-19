@@ -13,7 +13,7 @@ The following files were used as context for generating this wiki page:
 - [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 
 </details>
@@ -121,7 +121,7 @@ Sources: [frontend/Dockerfile:1-145]()
 Specialized workers, such as the `workspace-worker` and `agent-opt-worker`, operate in isolated environments.
 
 ### `agent-opt-worker`
-This worker is responsible for prompt optimization and FutureAGI SDK integration [orchestrator/requirements.txt:136-143](). Its Dockerfile is not provided in the current context, but its URL is configured via `AGENT_OPT_WORKER_URL` [infrastructure/.env.example:120]().
+This worker is responsible for prompt optimization and FutureAGI SDK integration [orchestrator/requirements.in:136-143](). Its Dockerfile is not provided in the current context, but its URL is configured via `AGENT_OPT_WORKER_URL` [infrastructure/.env.example:120]().
 
 ### `workspace-worker`
 This worker handles sandboxed code execution and file operations. Its Dockerfile is located at `services/workspace-worker/Dockerfile`. It also supports conditional installation of a browser via `INSTALL_BROWSER` build argument, which is `true` by default for production and `false` for local development [orchestrator/tests/test_dockerfile_prod_parity.py:33]().
@@ -131,7 +131,7 @@ Workers utilize a centralized environment configuration via `worker_config.py` t
 - **model_auth_env()**: Retrieves `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` from the environment [services/workspace-worker/worker_config.py:21-39]().
 - **Fail-Fast Policy**: The worker is designed to fail clearly rather than idling silently if model credentials are missing [orchestrator/tests/test_prd203_cs8_worker_auth.py:97-114]().
 
-Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/tests/test_prd203_cs8_worker_auth.py:1-116](), [orchestrator/requirements.txt:136-143](), [infrastructure/.env.example:120](), [orchestrator/tests/test_dockerfile_prod_parity.py:33]()
+Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/tests/test_prd203_cs8_worker_auth.py:1-116](), [orchestrator/requirements.in:136-143](), [infrastructure/.env.example:120](), [orchestrator/tests/test_dockerfile_prod_parity.py:33]()
 
 ## 4. `media-render` — the Socials renderer (PRD-251)
 

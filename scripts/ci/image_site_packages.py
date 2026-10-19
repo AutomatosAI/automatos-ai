@@ -20,11 +20,14 @@ binutils):
 
 The failures must be exactly the ``EXPECTED_FAILURES`` whose files this image has: any
 other ImportError or OSError fails, and so does a listed one that now loads, so the
-list stays true. It also checks that no ``tests`` directory is left and that the
-``testing`` packages other code imports (numpy, SQLAlchemy, alembic) are still there,
-then runs ``import main`` in a fresh interpreter in /app, with throwaway database
-settings (nothing connects on import). The probe's own imports read site-packages only,
-so the app's directories (``alembic/``) shadow nothing.
+list stays true. It also checks that no ``tests`` directory is left (the base image's
+own setuptools, pip and wheel aside: they sit in its layers, out of pybuild's reach)
+and that the ``testing`` packages other code imports (numpy, SQLAlchemy, alembic) are
+still there, then runs ``import main`` in a fresh interpreter in /app, with throwaway
+database settings (nothing connects on import), under ``python -v``: no line may say
+``bytecode is stale`` (PRD-262 US-022: images.yml's reproducible build clamps every
+file's mtime, and only unchecked-hash bytecode ignores that). The probe's own imports
+read site-packages only, so the app's directories (``alembic/``) shadow nothing.
 
 Standard library only. Exit 0 when every check passes, 1 otherwise.
 """
@@ -69,6 +72,14 @@ AUDITWHEEL_SUFFIX = ".libs"  # auditwheel's vendored libraries: not stripped, no
 DEBUG_PREFIXES = (".debug_", ".zdebug_")
 TESTS_DIR = "tests"
 KEPT_TESTING = ("numpy/testing", "sqlalchemy/testing", "alembic/testing")
+# The python base image's own packages, in its own layers, which pybuild's prune never
+# reaches. docker-library's Dockerfile sweeps test directories out of /usr/local and then
+# pip-installs setuptools and wheel, so setuptools/tests, setuptools/_distutils/tests and
+# pkg_resources/tests (setuptools 79.0.1) sit in the base layer. A RUN in a later stage
+# deleting them would add whiteouts and save no byte of the download, and a lock that
+# pinned one would not hide the base layer's copy either. US-058's Python 3.12 base has
+# no setuptools.
+BASE_IMAGE_PACKAGES = ("pip", "setuptools", "pkg_resources", "_distutils_hack", "wheel")
 APP_DIR = "/app"
 APP_IMPORT = "import main"
 # Importing the app builds its database engine (core/database/database.py), which needs
@@ -86,6 +97,13 @@ APP_IMPORT_ENV = {
 }
 APP_IMPORT_TIMEOUT_S = 600
 STDERR_TAIL_LINES = 15
+# PRD-262 US-022: the import runs under `python -v`, which reports each .pyc it finds
+# out of date with this line. pybuild and the production stage compile with
+# unchecked-hash, so the clamped mtimes of images.yml's reproducible build can't make
+# one stale; one that is would be recompiled by every process (the automatos user can't
+# write /usr/local).
+STALE_BYTECODE = "bytecode is stale"
+STALE_LISTED = 5
 MAPS = Path("/proc/self/maps")
 
 ELF_MAGIC = b"\x7fELF"
@@ -322,25 +340,39 @@ def problems_with(results: Sequence[Result], expected: Dict[str, str]) -> List[s
 
 
 def tree_problems(site: Path) -> List[str]:
-    """A ``tests`` directory left under ``site``, or a kept ``testing`` package gone."""
-    left = sorted(path.relative_to(site).as_posix() for path in site.rglob(TESTS_DIR) if path.is_dir())
+    """A ``tests`` directory pybuild left under ``site``, or a kept ``testing`` package gone.
+    The base image's own packages (BASE_IMAGE_PACKAGES) are not pybuild's, so not judged."""
+    left = sorted(path.relative_to(site).as_posix() for path in site.rglob(TESTS_DIR)
+                  if path.is_dir() and path.relative_to(site).parts[0] not in BASE_IMAGE_PACKAGES)
     problems = [f"site-packages still has {path}/" for path in left]
     problems += [f"site-packages lost {path}/: only directories named exactly {TESTS_DIR} go"
                  for path in KEPT_TESTING if not (site / path / "__init__.py").is_file()]
     return problems
 
 
+def stale_bytecode(verbose_stderr: str) -> List[str]:
+    """The ``bytecode is stale`` lines of a ``python -v`` run's stderr. Pure."""
+    return [line.strip() for line in verbose_stderr.splitlines() if STALE_BYTECODE in line]
+
+
 def app_problems() -> List[str]:
-    """``import main`` in a fresh interpreter in /app, so the probe's imports can't help or hurt it."""
+    """``import main`` in a fresh interpreter in /app, so the probe's imports can't help or hurt it,
+    under ``-v``: no module it imports may find its .pyc stale (PRD-262 US-022)."""
     try:
-        done = subprocess.run([sys.executable, "-c", APP_IMPORT], cwd=APP_DIR, capture_output=True, text=True,
-                              env={**os.environ, **APP_IMPORT_ENV}, timeout=APP_IMPORT_TIMEOUT_S, check=False)
+        done = subprocess.run([sys.executable, "-v", "-c", APP_IMPORT], cwd=APP_DIR, capture_output=True,
+                              text=True, env={**os.environ, **APP_IMPORT_ENV}, timeout=APP_IMPORT_TIMEOUT_S,
+                              check=False)
     except subprocess.TimeoutExpired:
         return [f"`{APP_IMPORT}` did not finish in {APP_IMPORT_TIMEOUT_S} s"]
-    if done.returncode == 0:
-        return []
-    tail = " | ".join(done.stderr.strip().splitlines()[-STDERR_TAIL_LINES:])
-    return [f"`{APP_IMPORT}` failed with exit {done.returncode}: {tail}"]
+    if done.returncode != 0:
+        tail = " | ".join(done.stderr.strip().splitlines()[-STDERR_TAIL_LINES:])
+        return [f"`{APP_IMPORT}` failed with exit {done.returncode}: {tail}"]
+    stale = stale_bytecode(done.stderr)
+    print(f"`python -v -c '{APP_IMPORT}'`: {len(stale)} lines say `{STALE_BYTECODE}`")
+    if stale:
+        return [f"{len(stale)} modules found their bytecode stale under `{APP_IMPORT}`: "
+                f"{' | '.join(stale[:STALE_LISTED])}"]
+    return []
 
 
 def _probe_all(site: Path, files: Iterable[Path]) -> List[Result]:
@@ -372,7 +404,7 @@ def main() -> int:
         print(f"::error title=site-packages (PRD-262 US-020)::{problem}")
     if not problems:
         print(f"every file loads as expected, none carries debug sections, no {TESTS_DIR}/ is left, "
-              f"and `{APP_IMPORT}` works")
+              f"and `{APP_IMPORT}` works with no stale bytecode")
     return 1 if problems else 0
 
 

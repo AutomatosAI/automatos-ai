@@ -15,7 +15,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/.importlinter](orchestrator/.importlinter)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 - [orchestrator/tests/test_import_contract_present.py](orchestrator/tests/test_import_contract_present.py)
 - [orchestrator/tests/test_no_mem0_residue.py](orchestrator/tests/test_no_mem0_residue.py)
@@ -111,7 +111,7 @@ The codebase utilizes multi-stage Docker builds to ensure development agility an
 
 ### Backend Dockerfile (`orchestrator/Dockerfile`)
 The backend build is split into multiple stages:
-1.  **pybuild**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and Python packages from `requirements.txt`. This stage is responsible for building wheels and installing `graphifyy[leiden]` if `INSTALL_GRAPH_EXTRAS` is `true` (default for production) [orchestrator/Dockerfile:19-58]().
+1.  **pybuild**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and the locked Python packages from `requirements.lock`, with uv, every pin hash-checked (PRD-262 US-022). When `INSTALL_GRAPH_EXTRAS` is `true` (default for production) it installs `requirements-leiden.lock`, which adds `graphifyy[leiden]` [orchestrator/Dockerfile]().
 2.  **base**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`, `libcairo2`, `fonts-dejavu-core`, `fonts-urw-base35` [orchestrator/Dockerfile:63-107](). It copies the installed Python packages from the `pybuild` stage [orchestrator/Dockerfile:83]().
 3.  **development**: Includes hot-reload via `--reload` and mounts source code for active development [orchestrator/Dockerfile:91-131]().
 4.  **production**: An optimized stage that copies only necessary application code, creates directories, and sets up the entrypoint for production execution [orchestrator/Dockerfile:136-150]().
@@ -230,7 +230,7 @@ This workflow runs the `pytest` suite for the `orchestrator` service.
     - **Coverage Ratchet**: A `python scripts/check_coverage_baseline.py` script enforces a minimum code coverage. The baseline is stored in `orchestrator/.coverage-baseline`. If the measured coverage drops below this baseline, the build fails [.github/workflows/test.yml:135-144]().
 - **NL2SQL Evaluation**: A separate, non-required job runs NL2SQL regression evaluations against an in-memory SQLite database [.github/workflows/test.yml:150-153]().
 
-Sources: [.github/workflows/test.yml:1-166](), [orchestrator/requirements.txt:63-64]()
+Sources: [.github/workflows/test.yml:1-166](), [orchestrator/requirements.in:63-64]()
 
 #### Import Linter (`.github/workflows/import-linter.yml`)
 This workflow enforces architectural boundaries within the Python codebase.

@@ -1,3 +1,14 @@
+# The API's direct dependencies: the input to the locks (PRD-262 US-022). Nothing
+# installs this file. The image installs requirements.lock (requirements-leiden.lock
+# on Railway, which builds with INSTALL_GRAPH_EXTRAS=true), and CI installs
+# requirements.lock with requirements-dev.lock, every pin with its hashes. After
+# changing this file, or requirements-leiden.in or requirements-dev.txt, regenerate
+# the three locks from the repository root with the command at the top of each, in
+# this order: requirements.lock, requirements-leiden.lock, requirements-dev.lock.
+# The backend suite fails when a lock does not satisfy its input
+# (orchestrator/tests/test_prd262_api_locks.py runs scripts/ci/lock_check.py, which
+# reads the files and never re-resolves against PyPI).
+#
 # Core FastAPI dependencies
 # The web stack is pinned exactly, as a tested set (F092: an unpinned fresh install
 # once served a manifest of about a dozen routes). Since FastAPI 0.137 an included
@@ -138,8 +149,9 @@ prometheus-client>=0.20.0
 
 # PRD-126: Business Knowledge Graph (Graphify Integration). Pinned exactly to the
 # version `>=0.3.28` resolved to (networkx==3.1 holds it there), so a rebuild can't
-# move the graph code under us (PRD-262 US-015). The Dockerfile's sed drops [leiden].
-graphifyy[leiden]==0.8.31
+# move the graph code under us (PRD-262 US-015). Railway's build adds the [leiden]
+# extra through requirements-leiden.in and its own lock (PRD-262 US-022).
+graphifyy==0.8.31
 
 # PRD-256 (#847): OpenTelemetry traces over OTLP, default OFF (OTEL_ENABLED). Installed
 # always, imported only when enabled (core/observability/otel.py). OTLP over HTTP only:

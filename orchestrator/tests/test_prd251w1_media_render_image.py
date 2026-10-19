@@ -49,8 +49,12 @@ def test_the_orchestrator_never_imports_the_gpl_voice_stack():
 
 
 def test_the_orchestrator_does_not_depend_on_the_gpl_voice_stack():
-    manifests = sorted((ROOT / "orchestrator").glob("requirements*.txt"))
-    assert manifests, "no orchestrator requirements file found"
+    # PRD-262 US-022: requirements.in is the input and the locks are what the image and
+    # CI install, so the scan reads every one of them, transitive pins included.
+    manifests = sorted(path for pattern in ("requirements*.txt", "requirements*.in", "requirements*.lock")
+                       for path in (ROOT / "orchestrator").glob(pattern))
+    names = {path.name for path in manifests}
+    assert {"requirements.in", "requirements.lock"} <= names, f"the API's dependency set is not scanned: {names}"
     pyproject = ROOT / "orchestrator" / "pyproject.toml"
     if pyproject.exists():
         manifests.append(pyproject)

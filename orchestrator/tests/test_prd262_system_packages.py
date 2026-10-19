@@ -204,12 +204,16 @@ def test_ci_lays_out_the_helvetica_fixture_in_edge_and_in_the_new_image():
     assert 'image_pdf_fixture.py compare "$out/edge.txt" "$out/new.txt"' in run
 
 
-def test_ci_runs_the_clone_tests_in_the_test_image_off_the_network():
+def test_ci_runs_the_clone_tests_in_the_test_image():
     # US-028 adds its parser tests to the test image; this finds the clone tests' step.
     step = _after_the_api_build(lambda step: CLONE_TESTS in step.get("run", ""))
     run = " ".join(_CONTINUATION.sub(" ", step["run"]).split())
     assert "image_test_image.py build parity-be parity-be-test" in run
-    assert f"image_test_image.py pytest parity-be-test --network none -q --timeout=120 {CLONE_TESTS}" in run
+    assert f"image_test_image.py pytest parity-be-test -q --timeout=120 {CLONE_TESTS}" in run
+    # On the network: the clone tests' module imports the skill loader, which loads
+    # modules/rag/service.py, and that fetches tiktoken's encoding when imported (until
+    # PRD-262 US-033). The clones themselves are of a repository made on the spot.
+    assert "--network" not in run
     assert (ROOT / "orchestrator" / CLONE_TESTS).is_file()
 
 
@@ -234,13 +238,16 @@ def test_a_change_to_a_check_reruns_prod_image_parity(path):
 
 
 def test_the_test_image_is_the_image_under_test_plus_the_dev_requirements():
+    """PRD-262 US-022: the dev lock, hashes required, compiled against the image's own lock."""
     dockerfile = test_image.dockerfile("parity-be")
     assert dockerfile.splitlines() == [
         "FROM parity-be",
-        "COPY requirements-dev.txt /tmp/requirements-dev.txt",
-        "RUN python -m pip install --user --no-cache-dir --no-warn-script-location -r /tmp/requirements-dev.txt",
+        "COPY requirements-dev.lock /tmp/requirements-dev.lock",
+        "RUN python -m pip install --user --no-cache-dir --no-warn-script-location --require-hashes "
+        "-r /tmp/requirements-dev.lock",
     ]
-    assert test_image.DEV_REQUIREMENTS == ROOT / "orchestrator" / "requirements-dev.txt"
+    assert test_image.DEV_LOCK == ROOT / "orchestrator" / "requirements-dev.lock"
+    assert test_image.DEV_LOCK.is_file()
     assert test_image.build_command("t", "/ctx") == ["docker", "build", "--tag", "t", "--file", "-", "/ctx"]
 
 
@@ -251,6 +258,18 @@ def test_the_test_image_mounts_the_tests_read_only():
     assert command[command.index("--network") + 1] == "none"
     assert command[command.index("t"):] == ["t", "-m", "pytest", "-p", "no:cacheprovider", "-q", CLONE_TESTS]
     assert "--network" not in test_image.pytest_command("t", [])
+
+
+def test_the_test_image_runs_with_the_apps_throwaway_database_settings():
+    """The image sets no database settings, and core/database/database.py raises when imported
+    without them; the clone tests' module reaches it through the skill loader. The run gets
+    the ones image_site_packages.py imports the app with (PRD-262 US-020): nothing listens."""
+    command = test_image.pytest_command("t", ["-q", CLONE_TESTS])
+    settings = test_image.site_packages.APP_IMPORT_ENV
+    assert {"POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB"} <= set(settings)
+    passed = [command[i + 1] for i, word in enumerate(command[:command.index("t")]) if word == "--env"]
+    assert [f"{key}={value}" for key, value in settings.items()] == passed[1:], passed
+    assert passed[0] == "PYTHONDONTWRITEBYTECODE=1"
 
 
 @pytest.mark.parametrize("rest,expected", [

@@ -1,9 +1,12 @@
 # Test and lint tools: CI only, never the image (PRD-262 US-014).
-# The Dockerfile installs requirements.txt alone, so none of these reach the API
-# image. Every CI install of requirements.txt installs this file in the same pip
-# command, so the two resolve together: .github/workflows/test.yml,
-# .github/workflows/nl2sql-eval-scheduled.yml and .oss-scanner/Dockerfile.
-# orchestrator/tests/test_prd262_test_tools_leave_the_image.py holds all of that.
+# The Dockerfile installs requirements.lock (requirements-leiden.lock on Railway)
+# alone, so none of these reach the API image. This file is compiled against
+# requirements.lock into requirements-dev.lock (PRD-262 US-022; the command is at the
+# top of that file), so a dev tool never moves a locked version. Every CI install of
+# requirements.lock installs requirements-dev.lock in the same pip command, hashes
+# required: .github/workflows/test.yml, .github/workflows/nl2sql-eval-scheduled.yml
+# and .oss-scanner/Dockerfile. orchestrator/tests/test_prd262_test_tools_leave_the_image.py
+# and test_prd262_api_locks.py hold all of that.
 pytest==7.4.3
 pytest-asyncio==0.21.1
 pytest-timeout==2.3.1  # per-test timeout net for CI (PRD-142 W2-S3); kills hangs fast

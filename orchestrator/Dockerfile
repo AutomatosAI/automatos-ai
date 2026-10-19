@@ -2,15 +2,21 @@
 # Automatos AI - Backend Dockerfile (Multi-stage)
 # =============================================================================
 # Stages:
+#   - uv: the installer pybuild copies (pinned, read by Dependabot)
+#   - pybuild: installs the locked dependencies; never ships
 #   - base: Common dependencies
 #   - development: Hot reload; no code (compose mounts the source over /app)
 #   - compile: the code, with its boot modules compiled; never ships itself
 #   - production: Optimized, minimal image
 # =============================================================================
 
-# =============================================================================
-# Base Stage - Common Dependencies
-# =============================================================================
+# -----------------------------------------------------------------------------
+# uv, the installer pybuild runs (PRD-262 US-022). A stage of its own, so the
+# tag@digest pin sits on a FROM line, where Dependabot reads it (FR-9). Only the
+# binary is copied, into pybuild, which never ships.
+# -----------------------------------------------------------------------------
+FROM ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a AS uv
+
 # -----------------------------------------------------------------------------
 # Wheel-build stage — compilers live HERE and never reach the runtime image
 # -----------------------------------------------------------------------------
@@ -31,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     binutils \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY --from=uv /uv /usr/local/bin/uv
 
 # Knowledge-Graph clustering quality, opt-in (PRD-233 slim pass). The `[leiden]`
 # extra on graphifyy pulls graspologic, and with it POT + llvmlite + numba +
@@ -39,7 +45,9 @@ COPY requirements.txt .
 # graphify.cluster documents its own fallback: "Tries Leiden (graspologic)
 # first… falls back to Louvain (built into networkx) if graspologic is not
 # installed", so the Knowledge Graph still clusters without it, at lower
-# partition quality.
+# partition quality. It picks the lock pybuild installs (PRD-262 US-022):
+# requirements-leiden.lock (requirements.in plus requirements-leiden.in) when
+# true, requirements.lock otherwise. PRD-262 US-027 deletes the arg and that lock.
 # THE DEFAULT IS THE PRODUCTION VALUE (true). Railway builds THIS file
 # (railway.json: builder DOCKERFILE; the last stage), so a Dockerfile default
 # is a production decision — a `false` here shipped degraded clustering to prod
@@ -48,21 +56,32 @@ COPY requirements.txt .
 # locally: docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
 ARG INSTALL_GRAPH_EXTRAS=true
 
-# --prefix keeps the whole install in one tree the runtime stage copies.
+COPY requirements.lock requirements-leiden.lock scripts/split_lock.py ./
+
+# The lock, exactly (PRD-262 US-022): every pin with its hashes, so CI, GHCR and
+# Railway install the same versions, and --no-deps resolves nothing. The lock goes in
+# two halves, each into its own prefix, which the base stage copies as its own layer:
+# first the stable set split_lock.py names (numpy, scipy, grpcio, cryptography,
+# SQLAlchemy, Pillow, lxml, fonttools, uvloop, asyncpg, pydantic-core), then the
+# rest, so a bump outside the stable set leaves the first layer as it was.
+# --prefix keeps each half in a tree of its own; the scripts it writes run
+# /usr/local/bin/python, where the base stage puts both trees.
+# No bytecode here: the compile below writes it once the prune is done.
 # Wheels only (PRD-262 US-015): a package that would build from source fails the
 # build instead. The two exceptions are pure-Python sdists: pysher (composio's) and
-# graspologic (the [leiden] extra; it leaves the list with PRD-262 US-027). The order
-# matters: `--only-binary :all:` clears every per-package exception named before it,
-# so `--no-binary` comes after.
-RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then \
-        cp requirements.txt requirements.build.txt; \
-    else \
-        sed 's/^graphifyy\[leiden\]/graphifyy/' requirements.txt > requirements.build.txt; \
-    fi && \
-    pip install --no-cache-dir --prefix=/install --only-binary :all: --no-binary pysher,graspologic \
-        -r requirements.build.txt && \
-    pip cache purge && \
-    rm -rf /root/.cache/pip
+# graspologic (the [leiden] extra; it leaves the list with PRD-262 US-027). pip's
+# `--only-binary :all:` cleared every per-package exception named before it, so
+# `--no-binary` still comes after; uv lets a named --no-binary package build either
+# way.
+# No BuildKit cache mount: Railway fails one that lacks a hard-coded
+# id=s/<service-id>-<path>, and the service ids are not known (PRD-262 §10).
+RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then lock=requirements-leiden.lock; else lock=requirements.lock; fi && \
+    python split_lock.py "$lock" stable.txt rest.txt && \
+    for half in stable rest; do \
+        uv pip install --python /usr/local/bin/python --prefix "/install/$half" --no-deps --require-hashes \
+            --no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher,graspologic \
+            -r "$half.txt" || exit 1; \
+    done
 
 # What runs, and nothing else (PRD-262 US-020). strip --strip-debug drops the .debug_*
 # sections from every compiled library (about 91 MB of the 16 Oct pip layer) and leaves
@@ -72,7 +91,8 @@ RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then \
 # link them were rewritten too, so CI loads every file the strip touched
 # (scripts/ci/image_site_packages.py). Then every directory named exactly `tests` under
 # site-packages goes (about 108 MB); numpy.testing, sqlalchemy.testing and
-# alembic.testing are importable APIs, not test suites, and stay.
+# alembic.testing are importable APIs, not test suites, and stay. /install holds both
+# halves of the lock (/install/stable and /install/rest), so this covers both.
 RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-debug {} + && \
     find /install -type d -name tests -path '*/site-packages/*' -prune -exec rm -rf {} +
 
@@ -84,15 +104,34 @@ RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --stri
 # A kept service missing from the install fails the build before anything goes. Any
 # other client raises UnknownServiceError: test_prd262_botocore_services.py fails when
 # code in orchestrator/ names one, and CI builds each kept client inside the image
-# (scripts/ci/image_botocore.py).
+# (scripts/ci/image_botocore.py). botocore is in the second half of the lock.
 RUN keep="s3 s3vectors bedrock-runtime sts sso sso-oidc" && \
-    data=/install/lib/python3.11/site-packages/botocore/data && \
+    data=/install/rest/lib/python3.11/site-packages/botocore/data && \
     for service in $keep; do \
         test -d "$data/$service" || { echo "botocore/data has no $service" >&2; exit 1; }; \
     done && \
     for dir in "$data"/*/; do \
         name=$(basename "$dir"); \
         case " $keep " in *" $name "*) ;; *) rm -rf "$dir" || exit 1 ;; esac; \
+    done
+
+# site-packages' bytecode, once the prune is done (PRD-262 US-022), for each half. -s
+# and -p record each module under /usr/local, where the base stage puts it.
+# unchecked-hash: Python never compares a .pyc with its source's mtime, so the clamped
+# mtimes of images.yml's reproducible build (SOURCE_DATE_EPOCH, rewrite-timestamp) can't
+# make one stale, and the automatos user, who can't write to /usr/local, never
+# recompiles one at start-up (scripts/ci/image_site_packages.py counts `bytecode is
+# stale` under `python -v -c 'import main'`). uv has no invalidation-mode option, so
+# compileall writes it. Nothing is excluded with -x: pip compiled every .py of the
+# published edge's site-packages (951a84b) on its Python 3.11, and the .py of every
+# [leiden] wheel and of every package the locks moved parse as Python 3.11 (checked 19
+# Oct). A file that ever fails to compile fails the build; exclude it here by name, with
+# the reason, only if it is a template or test data. PYTHONHASHSEED=0 fixes the string
+# hashes, the one input of a .pyc that changes from run to run, so the same sources
+# compile to the same bytes and the layer stays reproducible.
+RUN for prefix in /install/stable /install/rest; do \
+        PYTHONHASHSEED=0 python -m compileall -q -s "$prefix" -p /usr/local --invalidation-mode unchecked-hash \
+            "$prefix/lib/python3.11/site-packages" || exit 1; \
     done
 
 # -----------------------------------------------------------------------------
@@ -141,7 +180,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-COPY --from=pybuild /install /usr/local
+# The two halves of the lock, each its own layer, the stable set first (PRD-262
+# US-022): a bump outside it downloads only the second.
+COPY --from=pybuild /install/stable /usr/local
+COPY --from=pybuild /install/rest /usr/local
 
 # tiktoken's encodings, fetched here so the API counts tokens with no internet
 # (PRD-262 US-033). tiktoken downloads an encoding it has no cached copy of, through
@@ -267,8 +309,8 @@ COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
 # so a code-only update downloads this one layer (PRD-262 US-016; images.yml
 # judges it against .github/image-budgets.json's update bar). Owned by the user
 # created above, by its numeric id. Everything after it only sets image metadata.
-# The test tools are in requirements-dev.txt, which only CI installs;
-# .dockerignore keeps the rest of the context out.
+# The test tools are in requirements-dev.txt (locked in requirements-dev.lock),
+# which only CI installs; .dockerignore keeps the rest of the context out.
 COPY --from=compile --chown=1000:1000 /app /app
 USER automatos
 

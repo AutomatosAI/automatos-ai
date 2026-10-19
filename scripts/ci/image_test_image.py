@@ -2,12 +2,14 @@
 """PRD-262 US-019: the throwaway test image, for pytest runs inside an API image.
 
 US-014 took pytest out of the production image, so a test that must run inside an image
-runs in one built from it: ``FROM <the image under test>``, then ``pip install --user``
-of orchestrator/requirements-dev.txt as the image's own user. The tests are mounted
-read-only at /app/tests. The image is built in the CI job and never pushed, and
+runs in one built from it: ``FROM <the image under test>``, then ``pip install --user
+--require-hashes`` of orchestrator/requirements-dev.lock as the image's own user
+(US-022: the lock is compiled against the image's own lock, so the versions the two
+share are the ones the image already has, and pip leaves them alone). The tests are
+mounted read-only at /app/tests. The image is built in the CI job and never pushed, and
 orchestrator/Dockerfile gains no stage for it, so ``production`` stays its last stage
 (US-010). Its Dockerfile is written here and sent on stdin, with a build context that
-holds only the dev requirements.
+holds only the dev lock.
 
     image_test_image.py build IMAGE TAG
         Builds TAG from IMAGE, a local or registry image.
@@ -17,12 +19,19 @@ holds only the dev requirements.
         orchestrator/tests mounted read-only over /app/tests and no bytecode written.
         ``--network none`` keeps the run off the network.
 
-test.yml's prod-image-parity runs US-019's clone tests in it. US-028 runs its
-per-language parser tests here with ``--network none``, and US-022 adds
-``--require-hashes`` from requirements-dev.lock to the install. Stdlib only.
+The run gets the throwaway database settings image_site_packages.py imports the app
+with (``APP_IMPORT_ENV``): the image sets none, and core/database/database.py raises
+when imported without them, so a test whose module reaches it (the skill loader's
+does) would fail to collect. Nothing listens there, and nothing connects on import.
+
+test.yml's prod-image-parity runs US-019's clone tests in it, on the network:
+importing the skill loader loads modules/rag/service.py, which fetches tiktoken's
+encoding when imported until US-033. US-028 runs its per-language parser tests here
+with ``--network none``. Stdlib only.
 """
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -30,8 +39,20 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+
+def _sibling(name: str):
+    """``scripts/ci/<name>.py``, loaded by path: the tests load these scripts by path too."""
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().with_name(f"{name}.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # registered before exec, as the tests load them
+    spec.loader.exec_module(module)
+    return module
+
+
+site_packages = _sibling("image_site_packages")
+
 ROOT = Path(__file__).resolve().parents[2]
-DEV_REQUIREMENTS = ROOT / "orchestrator" / "requirements-dev.txt"
+DEV_LOCK = ROOT / "orchestrator" / "requirements-dev.lock"
 TESTS = ROOT / "orchestrator" / "tests"
 IMAGE_TESTS = "/app/tests"
 USAGE = "usage: image_test_image.py build IMAGE TAG | pytest TAG [--network NAME] [PYTEST_ARG...]"
@@ -41,9 +62,9 @@ def dockerfile(image: str) -> str:
     """The test image's Dockerfile: the image under test plus the test tools, installed as its user. Pure."""
     return (
         f"FROM {image}\n"
-        f"COPY {DEV_REQUIREMENTS.name} /tmp/{DEV_REQUIREMENTS.name}\n"
-        "RUN python -m pip install --user --no-cache-dir --no-warn-script-location "
-        f"-r /tmp/{DEV_REQUIREMENTS.name}\n"
+        f"COPY {DEV_LOCK.name} /tmp/{DEV_LOCK.name}\n"
+        "RUN python -m pip install --user --no-cache-dir --no-warn-script-location --require-hashes "
+        f"-r /tmp/{DEV_LOCK.name}\n"
     )
 
 
@@ -53,9 +74,12 @@ def build_command(tag: str, context: str) -> List[str]:
 
 
 def pytest_command(tag: str, pytest_args: List[str], network: Optional[str] = None) -> List[str]:
-    """``docker run`` of pytest in TAG with the tests mounted read-only. Pure."""
+    """``docker run`` of pytest in TAG with the tests mounted read-only and the app's
+    throwaway database settings. Pure."""
     command = ["docker", "run", "--rm", "--workdir", "/app", "--entrypoint", "python",
                "--volume", f"{TESTS}:{IMAGE_TESTS}:ro", "--env", "PYTHONDONTWRITEBYTECODE=1"]
+    for key, value in site_packages.APP_IMPORT_ENV.items():
+        command += ["--env", f"{key}={value}"]
     if network:
         command += ["--network", network]
     return command + [tag, "-m", "pytest", "-p", "no:cacheprovider", *pytest_args]
@@ -64,7 +88,7 @@ def pytest_command(tag: str, pytest_args: List[str], network: Optional[str] = No
 def build(image: str, tag: str) -> int:
     context = tempfile.mkdtemp(prefix="prd262-test-image-")
     try:
-        shutil.copy(DEV_REQUIREMENTS, Path(context) / DEV_REQUIREMENTS.name)
+        shutil.copy(DEV_LOCK, Path(context) / DEV_LOCK.name)
         print(dockerfile(image), end="")
         return subprocess.run(build_command(tag, context), input=dockerfile(image), text=True, check=False).returncode
     finally:
