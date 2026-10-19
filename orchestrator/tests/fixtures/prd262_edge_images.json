@@ -1,0 +1,605 @@
+{
+ "about": "Recorded from ghcr.io/automatosai/automatos-<image>:edge (built from 0d9f0ac), linux/amd64, on 18 Oct 2026, for PRD-262 US-001's report tests. Configs keep only the revision label and the history (created_by, empty_layer); an empty-layer entry keeps only its instruction keyword, and every created_by is cut to 110 characters.",
+ "frontend": {
+  "index": {
+   "schemaVersion": 2,
+   "mediaType": "application/vnd.oci.image.index.v1+json",
+   "manifests": [
+    {
+     "mediaType": "application/vnd.oci.image.manifest.v1+json",
+     "digest": "sha256:f6ab19529ea4c526c571bc579234d1f3547b754c4776660be4a5ae0ae0086abc",
+     "size": 2199,
+     "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+     }
+    },
+    {
+     "mediaType": "application/vnd.oci.image.manifest.v1+json",
+     "digest": "sha256:47042e4586b22b158ec320c7cd7cb6b15db579ca1c03ba4771a498e2ab6f42d9",
+     "size": 1111,
+     "annotations": {
+      "vnd.docker.reference.digest": "sha256:f6ab19529ea4c526c571bc579234d1f3547b754c4776660be4a5ae0ae0086abc",
+      "vnd.docker.reference.type": "attestation-manifest"
+     },
+     "platform": {
+      "architecture": "unknown",
+      "os": "unknown"
+     }
+    },
+    {
+     "mediaType": "application/vnd.oci.image.manifest.v1+json",
+     "digest": "sha256:38772890d34e1e8759d9e19809899b850f3912721253007aa4a4b56c027cb3a3",
+     "size": 2199,
+     "platform": {
+      "architecture": "arm64",
+      "os": "linux"
+     }
+    },
+    {
+     "mediaType": "application/vnd.oci.image.manifest.v1+json",
+     "digest": "sha256:5fdd5e25c1b4bc127dd293444391f19438360e9f16816956415663a6d0a28566",
+     "size": 1111,
+     "annotations": {
+      "vnd.docker.reference.digest": "sha256:38772890d34e1e8759d9e19809899b850f3912721253007aa4a4b56c027cb3a3",
+      "vnd.docker.reference.type": "attestation-manifest"
+     },
+     "platform": {
+      "architecture": "unknown",
+      "os": "unknown"
+     }
+    }
+   ],
+   "annotations": {
+    "org.opencontainers.image.created": "2026-10-16T17:34:30.867Z",
+    "org.opencontainers.image.description": "Automatos AI web app, local edition. The API address is currently fixed at build time to http://localhost:8000; a runtime setting is coming.",
+    "org.opencontainers.image.licenses": "Apache-2.0",
+    "org.opencontainers.image.revision": "0d9f0ac594c3783e62a30e6c5ce75164028850db",
+    "org.opencontainers.image.source": "https://github.com/AutomatosAI/automatos-ai",
+    "org.opencontainers.image.title": "automatos-frontend",
+    "org.opencontainers.image.url": "https://github.com/AutomatosAI/automatos-ai",
+    "org.opencontainers.image.version": "edge"
+   }
+  },
+  "manifest": {
+   "schemaVersion": 2,
+   "mediaType": "application/vnd.oci.image.manifest.v1+json",
+   "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:c306cb2593065a0fce413ca3f04a9533172824c4e8922329af081d2f9e12104f",
+    "size": 9933
+   },
+   "layers": [
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:6a0ac1617861a677b045b7ff88545213ec31c0ff08763195a70a4a5adda577bb",
+     "size": 3864189
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:4feea04c154301db6f4a496efa397b3db96603b1c009c797cfdde77bea8b3287",
+     "size": 43229397
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:b2cbbfe903b0821005780971ddc5892edcc4ce74c5a48d82e1d2b382edac3122",
+     "size": 1262126
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:fff4e2c1b189bf87d63ad8bd07f7f4eb288d6f2b6a07a8bb44c60e8c075d2096",
+     "size": 445
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:04fc4b072378a2bca963b3712faac2f5d1d125697050ff08f2b5f07cbc77d218",
+     "size": 93
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:15add309ed935eb0cbb3da93ba4e8e3f785b450119ae01d3a058a44a9f373b36",
+     "size": 2486770
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:8ed1253a5fa7a96f2d597e47663c0c6d885098b0ba3038b739757a2a7d642fb0",
+     "size": 976
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:a093de52dd79d24998568253a21af4f1cd6ca7183e18b9447fcdba15d8286017",
+     "size": 26076508
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:79143fd858785e765007fead78f021bf3811fccd9d8d7b714c0e404bc10efe4d",
+     "size": 3189414
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:02ac3734cccafa18aa77fc77f7f3e984fcbb2edbdfda7cbdd68b8b0daeef6619",
+     "size": 13741258
+    }
+   ]
+  },
+  "config": {
+   "config": {
+    "Labels": {
+     "org.opencontainers.image.revision": "0d9f0ac594c3783e62a30e6c5ce75164028850db"
+    }
+   },
+   "history": [
+    {
+     "created_by": "ADD alpine-minirootfs-3.23.4-x86_64.tar.gz / # buildkit"
+    },
+    {
+     "created_by": "CMD",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "RUN /bin/sh -c addgroup -g 1000 node     && adduser -u 1000 -G node -s /bin/sh -D node     && apk add --no-cac"
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "RUN /bin/sh -c apk add --no-cache --virtual .build-deps-yarn curl gnupg tar   && export GNUPGHOME=\"$(mktemp -d"
+    },
+    {
+     "created_by": "COPY docker-entrypoint.sh /usr/local/bin/ # buildkit"
+    },
+    {
+     "created_by": "ENTRYPOINT",
+     "empty_layer": true
+    },
+    {
+     "created_by": "CMD",
+     "empty_layer": true
+    },
+    {
+     "created_by": "WORKDIR /app"
+    },
+    {
+     "created_by": "RUN /bin/sh -c apk add --no-cache curl # buildkit"
+    },
+    {
+     "created_by": "RUN /bin/sh -c addgroup -g 1001 -S nodejs &&     adduser -S nextjs -u 1001 # buildkit"
+    },
+    {
+     "created_by": "COPY --chown=nextjs:nodejs /app/.next/standalone ./ # buildkit"
+    },
+    {
+     "created_by": "COPY --chown=nextjs:nodejs /app/.next/static ./.next/static # buildkit"
+    },
+    {
+     "created_by": "COPY --chown=nextjs:nodejs /app/public ./public # buildkit"
+    },
+    {
+     "created_by": "USER",
+     "empty_layer": true
+    },
+    {
+     "created_by": "EXPOSE",
+     "empty_layer": true
+    },
+    {
+     "created_by": "HEALTHCHECK",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "CMD",
+     "empty_layer": true
+    }
+   ]
+  }
+ },
+ "api": {
+  "manifest": {
+   "schemaVersion": 2,
+   "mediaType": "application/vnd.oci.image.manifest.v1+json",
+   "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:e1bae6fee919bdaf24c608901d51cd71f0bb9a3473fb893df4458290ebf14f74",
+    "size": 10418
+   },
+   "layers": [
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:ecc510c1e359bdc007b39802570bb7e4dec7d6ebccf357c3201a74299113e05e",
+     "size": 29843350
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:0f752a1982d6f819fc2c9e78ac1514c63f2f2e1dec7885ffd4cb6809ba4a26ca",
+     "size": 1294051
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:759a7f30c31818dda4c97b407b24d93da479c306568d185ced927e1a749164f1",
+     "size": 14456911
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:496c1a902b3a93cea3e54b90b79dbcaa0e58ad90c3fe9dd0a43c9557dc47f17d",
+     "size": 250
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:82152fec68906d60093481ce7fb0bedcc3a998d7e26a1466eee4ecf4b8be9dff",
+     "size": 93
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:846a631f714ae3e507016bb8c6d658d32d6fef1b56e6627d3f6a10f97268b677",
+     "size": 99187287
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:563ee6e5bb478a47f98dfd02ae34de29a91571913e88631be97d343e969414de",
+     "size": 361043661
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:c5355f2a6bdaba02b1611332c5fc92fc132bceb1fe033a34a8358f39a4a54631",
+     "size": 5326535
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:c1a33e52317d4bdffacdeba1820463653395e5bb5812c0148f0bfc9acd2bd554",
+     "size": 5767
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:d7f00bb668fec8a09bd5771e1e6ebc12cd65ee7b4e64352ee3427d0185f4a4d4",
+     "size": 790
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:47abbf4dac3153ec7b548f671e3c21b9594261ab7371236d25637846442651e0",
+     "size": 170
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:79abb8d02fe8f17cd569b3d3ef410f8966c650fc7cf21e40e62769ea7658c1ba",
+     "size": 3990740
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:f7a9beed530a3e3d68ca76f515b27641631fc218aeab13a97382d916e3d23b13",
+     "size": 5330384
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:fc5724364de0d99efe215fa92641b7149c192ec6f022023a7372cf4c579e8a9a",
+     "size": 113
+    }
+   ]
+  },
+  "config": {
+   "config": {
+    "Labels": {
+     "org.opencontainers.image.revision": "0d9f0ac594c3783e62a30e6c5ce75164028850db"
+    }
+   },
+   "history": [
+    {
+     "created_by": "# debian.sh --arch 'amd64' out/ 'trixie' '@1791158400'"
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "RUN /bin/sh -c set -eux; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tnetb"
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "RUN /bin/sh -c set -eux; \t\tsavedAptMark=\"$(apt-mark showmanual)\"; \tapt-get update; \tapt-get install -y --no-in"
+    },
+    {
+     "created_by": "RUN /bin/sh -c set -eux; \tfor src in idle3 pip3 pydoc3 python3 python3-config; do \t\tdst=\"$(echo \"$src\" | tr -d"
+    },
+    {
+     "created_by": "CMD",
+     "empty_layer": true
+    },
+    {
+     "created_by": "WORKDIR /app"
+    },
+    {
+     "created_by": "RUN /bin/sh -c apt-get update && apt-get install -y --no-install-recommends     curl     git     postgresql-cl"
+    },
+    {
+     "created_by": "COPY /install /usr/local # buildkit"
+    },
+    {
+     "created_by": "COPY . . # buildkit"
+    },
+    {
+     "created_by": "COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh # buildkit"
+    },
+    {
+     "created_by": "COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh # buildkit"
+    },
+    {
+     "created_by": "RUN /bin/sh -c mkdir -p /app/logs /app/vector_stores /app/projects /app/exports # buildkit"
+    },
+    {
+     "created_by": "RUN /bin/sh -c pip uninstall -y pytest pytest-asyncio black isort 2>/dev/null || true &&     pip cache purge &"
+    },
+    {
+     "created_by": "RUN /bin/sh -c useradd -m -u 1000 automatos &&     chown -R automatos:automatos /app # buildkit"
+    },
+    {
+     "created_by": "RUN /bin/sh -c mkdir -p /app/data && chown -R automatos:automatos /app/data # buildkit"
+    },
+    {
+     "created_by": "USER",
+     "empty_layer": true
+    },
+    {
+     "created_by": "EXPOSE",
+     "empty_layer": true
+    },
+    {
+     "created_by": "HEALTHCHECK",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENTRYPOINT",
+     "empty_layer": true
+    },
+    {
+     "created_by": "CMD",
+     "empty_layer": true
+    }
+   ]
+  }
+ },
+ "workspace-worker": {
+  "manifest": {
+   "schemaVersion": 2,
+   "mediaType": "application/vnd.oci.image.manifest.v1+json",
+   "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:a8b598dce6eded761807f6882d5d593fdfce7d9242a85178aecb1ccb18e15207",
+    "size": 12465
+   },
+   "layers": [
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:ecc510c1e359bdc007b39802570bb7e4dec7d6ebccf357c3201a74299113e05e",
+     "size": 29843350
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:75b6a36c64a1cf3520fc4b4aae4739d5caa8a6a05c27835a920a61784c9c32f8",
+     "size": 1294052
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:6912e23eb44595b44dc6d9882b34f305ad6f6e9667cec70b13e5dbc4f8cd97f4",
+     "size": 12121637
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:bbc5a12237474ec0b23b5051260d56d6436a24d70d9cad961adebe7a037ed813",
+     "size": 249
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:82152fec68906d60093481ce7fb0bedcc3a998d7e26a1466eee4ecf4b8be9dff",
+     "size": 93
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:d0b3b4ef85a11a28eb1454f1fd05aa7558374736cacca119cb183a0aa881b19f",
+     "size": 133771342
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:0e38a2110968a8da98c142634f04e25c3b82babd1a5f999ec93b096081d83730",
+     "size": 113337628
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:ff6cbfca93ccf4ea7bbdb39cb6a6b4e780a82b76f9bff54cd484322c3b00a07a",
+     "size": 21227577
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:524cbdd92678049db808c064e615537d576c53096d4f3c7bd6aa6fea6688b856",
+     "size": 709
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:cf692dc927868bf9622cf7f7c0ca9bf1763d52466e3b7daafdc50c16e459b830",
+     "size": 194859523
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:fe15cd9da94de0ad95bb3e4280e0f7edbfb0ea54209043fecd5697dca31401ed",
+     "size": 50976
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:4e6d1a58208db0497e494ccf433fcc18ccb73a15ede2828379f1611f0863af92",
+     "size": 54648
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+     "size": 32
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:1cfa26c51d6254b183cf6d18d1a5f19b88a5093c8ab51873e1fc34f1398f574d",
+     "size": 709
+    },
+    {
+     "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+     "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+     "size": 32
+    }
+   ]
+  },
+  "config": {
+   "config": {
+    "Labels": {
+     "org.opencontainers.image.revision": "0d9f0ac594c3783e62a30e6c5ce75164028850db"
+    }
+   },
+   "history": [
+    {
+     "created_by": "# debian.sh --arch 'amd64' out/ 'trixie' '@1791158400'"
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "RUN /bin/sh -c set -eux; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tnetb"
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "RUN /bin/sh -c set -eux; \t\tsavedAptMark=\"$(apt-mark showmanual)\"; \tapt-get update; \tapt-get install -y --no-in"
+    },
+    {
+     "created_by": "RUN /bin/sh -c set -eux; \tfor src in idle3 pip3 pydoc3 python3 python3-config; do \t\tdst=\"$(echo \"$src\" | tr -d"
+    },
+    {
+     "created_by": "CMD",
+     "empty_layer": true
+    },
+    {
+     "created_by": "WORKDIR /app"
+    },
+    {
+     "created_by": "RUN /bin/sh -c apt-get update && apt-get install -y --no-install-recommends     git curl wget openssh-client c"
+    },
+    {
+     "created_by": "RUN /bin/sh -c curl -fsSL https://deb.nodesource.com/setup_20.x | bash -     && apt-get install -y --no-instal"
+    },
+    {
+     "created_by": "RUN /bin/sh -c pip install --no-cache-dir uv # buildkit"
+    },
+    {
+     "created_by": "COPY requirements.txt . # buildkit"
+    },
+    {
+     "created_by": "RUN /bin/sh -c pip install --no-cache-dir -r requirements.txt # buildkit"
+    },
+    {
+     "created_by": "COPY . . # buildkit"
+    },
+    {
+     "created_by": "RUN /bin/sh -c useradd -m -u 1000 worker     && mkdir -p /workspaces     && chown -R worker:worker /app /works"
+    },
+    {
+     "created_by": "ARG",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "RUN |1 INSTALL_BROWSER=false /bin/sh -c if [ \"$INSTALL_BROWSER\" = \"true\" ]; then         apt-get update && apt"
+    },
+    {
+     "created_by": "COPY entrypoint.sh /usr/local/bin/entrypoint.sh # buildkit"
+    },
+    {
+     "created_by": "RUN |1 INSTALL_BROWSER=false /bin/sh -c chmod +x /usr/local/bin/entrypoint.sh # buildkit"
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENV",
+     "empty_layer": true
+    },
+    {
+     "created_by": "HEALTHCHECK",
+     "empty_layer": true
+    },
+    {
+     "created_by": "EXPOSE",
+     "empty_layer": true
+    },
+    {
+     "created_by": "ENTRYPOINT",
+     "empty_layer": true
+    },
+    {
+     "created_by": "CMD",
+     "empty_layer": true
+    }
+   ]
+  }
+ }
+}
