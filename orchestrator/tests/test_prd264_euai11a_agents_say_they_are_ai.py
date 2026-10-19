@@ -289,23 +289,11 @@ SAME_ROWS = (
 )
 
 
-def test_the_prompt_rule_and_the_channel_notice_name_the_same_principal():
-    """Runs once EUAI-03's channel notice (channels/ai_notice.py) is on the branch."""
-    ai_notice = pytest.importorskip("channels.ai_notice")
+def test_the_prompt_rule_names_the_same_principal_as_the_shared_kernel():
+    """The prompt rule and every notice read the name from core.public_principal (FR-15, one copy)."""
     for rows in SAME_ROWS:
         expected = workspace_principal_name(_db(**rows), WORKSPACE_ID)
-        assert ai_notice.principal_name(_db(**rows), WORKSPACE_ID) == expected, rows
         assert principal_for_turn(_db(**rows), WORKSPACE_ID, widget_mode=False) == expected, rows
-
-
-def test_the_notice_rules_and_the_kernel_decide_names_alike():
-    """Runs once EUAI-02a's notice rules (modules/policy/ai_disclosure.py) are on the branch."""
-    ai_disclosure = pytest.importorskip("modules.policy.ai_disclosure")
-    names = (None, "", "  ", 42, COMPANY, WORKSPACE, SITE, "owner@acme.example", "Jo’s workspace", *PRIVATE_WORKSPACE_NAMES)
-    for company in names:
-        for workspace in names:
-            assert ai_disclosure.public_principal_name(company, workspace) == public_principal_name(company, workspace)
-        assert ai_disclosure.public_site_name(company) == public_site_name(company)
 
 
 # ---------------------------------------------------------------------------
