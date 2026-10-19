@@ -29,7 +29,7 @@ W-A3, so the names A-10c added on top of A-10a's need no version bump; any chang
 
 Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/`.
 
-## 1. The core modules Play's folders import (64: 61 in §0, plus W-A1's three)
+## 1. The core modules Play's folders import (73: 61 in §0, W-A1's three, and the rows W-A2 added)
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
@@ -43,6 +43,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/components/local/first-run-nudge` | c/play/chat/play-chat.tsx | SDK | `cards.FirstRunNudge` | The local edition's first-run nudge. |
 | `@/components/onboarding/trial-exhausted-banner` | c/play/chat/turn-end.tsx | SDK | `cards.TrialExhaustedBanner` | The host's trial banner. |
 | `@/components/shared/markdown-view` | c/play/chat/play-markdown.tsx, c/play/deliverables/deliverable-content.tsx | SDK | `cards.MarkdownView` | The host's sanitising Markdown renderer; a theme never renders untrusted Markdown itself. |
+| `@/components/settings/themes/theme-labels` | c/looks/play-only-route.tsx | host-only | — | The same note: its Switch to Play skips an install of Play's package that is turned off (`isDisabled`), as the host's theme menu does (A-02c). A theme never lists or picks installs. |
 | `@/components/shared/page-header` | c/looks/play-only-route.tsx | host-only | — | Only the "Looks are part of Play" note uses it; that note is the host's plain `/looks` page under Classic and Studio (PA-14, A-04b). |
 | `@/components/ui/button` | c/looks/play-only-route.tsx | host-only | — | Same note as the row above; a theme's own buttons are its own. |
 | `@/components/widgets/FileWidget/FilePreview` | c/play/deliverables/deliverable-content.tsx, c/play/deliverables/shelf-card.tsx | SDK | `deliverables.useAuthenticatedBlobUrl` | A file the backend serves only with the caller's token, as a blob URL; a theme cannot send the token. The preview component itself is `cards.FilePreview`. |
@@ -72,7 +73,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/hooks/use-shelf-mascot` | c/play/deliverables/play-shelf.tsx | copied into Play | — | Play's own mascot code; its reads go through `context.useHealth` and `deliverables.useDeliverables`. |
 | `@/hooks/use-start-chat` | c/play/conversations/play-conversations.tsx, c/play/deliverables/shelf-body.tsx, c/play/shell/play-sidebar.tsx | SDK | `chat.useStartChat` | New chat: a fresh draft in the host's chat session, then the chat page. |
 | `@/hooks/use-stopped-reply` | l/chat-controller/controller.ts | SDK | `chat.useChatController` | Stop keeps the partial reply (FX-30); the controller owns it (A-11a). |
-| `@/hooks/use-studio-theme` | c/play/play-route-switch.tsx, c/play/conversations/play-conversations.tsx, c/play/edges/not-found-view.tsx, c/looks/play-only-route.tsx | host-only | — | The host renders a theme's pages and slots only when the layout is `theme` (ThemeSlot, A-04b); a theme never branches on the layout or the width. |
+| `@/hooks/use-studio-theme` | c/play/conversations/play-conversations.tsx, c/looks/play-only-route.tsx | host-only | — | The host renders a theme's pages and slots only when the layout is `theme` (ThemeSlot, A-04b); a theme never branches on the layout or the width. play-route-switch.tsx and not-found-view.tsx, which also read it, are gone: A-04b moved their job into ThemeSlot, host code. |
 | `@/lib/auth-edition` | c/play/shell/play-nav.ts, c/play/edges/asleep-gate.tsx | SDK | `context.useEdition`, `navigation.useCoreNav` | `isLocal` is `useEdition() === 'local'`; the edition's nav filters run inside `useCoreNav`. |
 | `@/lib/auth-hooks` | c/looks/account-look-scope.tsx | host-only | — | Whose looks to show is the host look runtime's job (A-13c); a theme reads the active look with `looks.useLook`. |
 | `@/lib/chat-controller/*` | c/play/chat/play-chat-view.tsx, hooks/use-play-conversation.ts, hooks/use-play-turn.ts | SDK | `chat.useChatController` | The controller itself (A-11a); a theme reaches it only through the SDK (A-11b). |
@@ -95,6 +96,9 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/lib/theme-host/boot-sanitize` | l/looks/tone.ts | host-only | — | The boot data's tone parser; the host applies the tone before first paint (A-03). |
 | `@/lib/theme-host/boot-types` | l/looks/prepaint.ts | host-only | — | Builtin Play's first-paint tables (A-03, PA-7); an installed theme ships them as data in its package, not code. |
 | `@/lib/theme-host/builtin/play-entry` | c/looks/look-provider.tsx, c/looks/play-only-route.tsx | host-only | — | Builtin Play's registry entry (PA-7); deleted at A-19. |
+| `@/lib/theme-host/choice-sync` | c/looks/play-only-route.tsx | host-only | — | The same note: Switch to Play is the theme menu's pick (`useChooseStyle`: stored on the server, put back when refused, PA-12) and asks for the workspace's installs (`useWantInstalledThemes`, `packageIdOfBuiltin`), A-02c. A theme never chooses the workspace's theme. |
+| `@/lib/theme-host/registry` | c/looks/play-only-route.tsx | host-only | — | The same note: the style an install of Play's package is picked by (`themeStyleOf`); the registry of themes is the host's. |
+| `@/lib/theme-host/registry-types` | c/looks/play-only-route.tsx | host-only | — | The same note: types only (`UiStyle`), the host's style axis (A-02a). |
 | `@/lib/ticket-links` | c/play/*, c/looks/*, l/play/draft.ts, l/chat/deliverables.ts, l/chat-controller/view-model.ts | SDK | `navigation.CHAT_HREF`, `navigation.chatHref`, `navigation.DELIVERABLES_HREF`, `navigation.DELIVERABLE_PARAM`, `navigation.LOOKS_HREF`, `navigation.LOOK_STYLE_HREF` | Core's route builders. |
 | `@/lib/trial` | c/play/chat/turn-end.tsx | SDK | `chat.useChatController`, `context.useTrial` | A turn that ends on an exhausted trial says so on the view model (today `errorCode === TRIAL_EXHAUSTED_CODE`); the ledger is `useTrial`. |
 | `@/lib/ui-style` | l/looks/tone.ts | host-only | — | The tone cookie's age; the host owns the cookie (PA-12) and forces the tone. |
@@ -146,7 +150,7 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 |---|---|---|---|---|
 | `react` | every component | shared module | — | The host's React, through the import map; a theme never bundles its own. |
 | `next/link` | c/play/*, c/looks/* | SDK | `navigation.HostLink` | The host's client-side link; an https href opens in a new tab. |
-| `next/navigation` | c/play/conversations/play-conversations.tsx, c/play/deliverables/play-shelf.tsx, c/play/play-route-switch.tsx, c/play/shell/play-sidebar.tsx | SDK | `navigation.useHostRouter`, `navigation.useHostPathname`, `navigation.useHostSearchParams` | The App Router, the path and the query string; play-route-switch is host code once ThemeSlot replaces it (A-04b). |
+| `next/navigation` | c/play/conversations/play-conversations.tsx, c/play/deliverables/play-shelf.tsx, c/play/shell/play-sidebar.tsx | SDK | `navigation.useHostRouter`, `navigation.useHostPathname`, `navigation.useHostSearchParams` | The App Router, the path and the query string; play-route-switch read it too, before A-04b made it host code (ThemeSlot, components/theme-host/theme-slot.tsx) and deleted the file. |
 | `next/dynamic` | c/play/*-lazy.tsx | host-only | — | It needs Next's compiler; a theme splits its own bundle with `React.lazy` and `import()`. |
 | `lucide-react` | c/play/shell/play-frame.tsx, c/play/shell/play-sidebar.tsx | copied into Play | — | Icons are bundled into the theme's package. |
 | `@tanstack/react-query` | c/looks/account-look-scope.tsx | host-only | — | A theme has no query client; account-look-scope is host code from A-13c, and every query a theme needs is an SDK hook. |

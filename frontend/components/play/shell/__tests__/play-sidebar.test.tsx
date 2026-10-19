@@ -54,7 +54,7 @@ const BUSINESS_EXPOSURE = { plan: 'business', families: {}, marketplace_depth: 3
 
 /** Every entry Play's nav shows an admin on a business plan, in order. */
 const SAAS_NAV = [
-  '/chat', '/conversations', '/command-center', '/assignments', '/deliverables',
+  '/chat', '/x/conversations', '/command-center', '/assignments', '/deliverables',
   '/agents', '/tools', '/documents', '/marketplace',
   '/team', '/analytics', '/admin/workspaces',
   '/looks',
@@ -198,7 +198,7 @@ describe('Play sidebar — the page you are on', () => {
   it.each([
     ['/command-center', 'Command Centre'],
     ['/chat', 'Chat'],
-    ['/conversations', 'Conversations'],
+    ['/x/conversations', 'Conversations'],
     ['/looks/style', 'Look'],
     ['/deliverables/explorer', 'Deliverables'],
     ['/settings', 'Settings'],

@@ -8,7 +8,7 @@
     "app/deliverables/page.tsx": "8d6daee8922c2619cc71e7bd3bb23e177f5fc6b22bb14e9eedd49225a5b96d55",
     "app/documents/page.tsx": "c9f4e8544bcee335de2a26132cb6d7f1945e1ec0dd1c467e19116702beadf808",
     "app/missions/[id]/page.tsx": "f254b860faa9566479ee3a53c8d12ddeaaba1295e932c0518cc33f8c8f2d0e89",
-    "app/page.tsx": "e37375cd415c24b3270aaa7c99186b5ce95b8e684a2fbc36f40cb3a00f277479",
+    "app/page.tsx": "da72491fc863f00521ac024f4c43c7e9810ac206cb7f61dcb619453adcbfe533",
     "app/playbooks/page.tsx": "6bd7522e1268fd3cec737df995e1ea8e82debca5d6ed1221e2de653981697b27",
     "components/agents/studio/agent-management-studio.tsx": "4bbcef4e09158bc526623c85574771867895efa3007b55cd537b98379be3427b",
     "components/chatbot/studio-chat-shell.tsx": "eb0aa1b42b3c6971037935b10b7a0e74e257758f7ed3c7a1ba728a0a4887b492",

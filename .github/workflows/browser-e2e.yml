@@ -268,6 +268,18 @@ jobs:
         working-directory: e2e/browser
         run: npx tsc -p fixtures/hello-theme/tsconfig.json
 
+      # PRD-261 A-07d (PA-6): the .autotheme packages the install specs upload, built with the
+      # backend's own fixture builder (bare python3, no orchestrator dependencies). The specs read
+      # the folder from E2E_THEME_PACKAGES: hello (A-07d), hello-clip (A-08b), hello-throws (A-04c).
+      - name: Build the test theme packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/theme-packages"
+          for variant in hello hello-clip hello-throws; do
+            python3 orchestrator/tests/fixtures/themes/build.py --variant "$variant" \
+              --out "$RUNNER_TEMP/theme-packages/$variant.autotheme"
+          done
+          echo "E2E_THEME_PACKAGES=$RUNNER_TEMP/theme-packages" >> "$GITHUB_ENV"
+
       # EXPECTED_REACT_VERSION and NEXT_VERSION come from $GITHUB_ENV (set above).
       - name: Run the browser specs
         working-directory: e2e/browser
