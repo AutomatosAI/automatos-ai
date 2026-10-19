@@ -968,6 +968,11 @@ class Config:
     HARNESS_COST_ABS_RISE: float = float(os.getenv("HARNESS_COST_ABS_RISE", "0.005"))
     HARNESS_STRONG_P: float = float(os.getenv("HARNESS_STRONG_P", "0.001"))
     HARNESS_MIN_COVERAGE: float = float(os.getenv("HARNESS_MIN_COVERAGE", "0.5"))
+    # PRD-263 US-019 (FR-8): an agent's calls of one app in the judged week flag when there
+    # are at least HARNESS_MIN_SAMPLES and the Wilson lower bound (95%) of their failure
+    # rate is at least HARNESS_TOOL_FAIL_WILSON_MIN. A flag carried by sign-in and
+    # connection failures is reported as "reconnect <app>", never as a bad tool.
+    HARNESS_TOOL_FAIL_WILSON_MIN: float = float(os.getenv("HARNESS_TOOL_FAIL_WILSON_MIN", "0.5"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:

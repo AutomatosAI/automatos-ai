@@ -61,9 +61,9 @@ DISABLED_MESSAGE = (
 # _auto_apply_prescription refuses it; an owner's /approve (api.harness_commands,
 # until PRD-263 US-047) is the one path left that applies a change.
 _PLACEHOLDER_PROPOSED_VALUE = "review_needed"
-# W4-S10: a fails_for_intent affinity must reach this many samples before HARNESS
-# treats it as a *sustained* tool failure worth surfacing (not a one-off).
-_TOOL_FAILURE_MIN_SAMPLES = 5
+# PRD-263 US-019: a "reconnect <app>" suggestion changes no agent setting (the owner
+# reconnects the app), so it carries the lowest risk score.
+RECONNECT_RISK = 1
 
 # F156: the ledger file kept before the move to the database, and the one card
 # that says when it cannot be read (_file_unreadable_ledger_card).
@@ -462,8 +462,8 @@ class HarnessService:
         reference, with the week-by-week verdict history (US-014b).
 
         The history is the workspace's completed harness_runs rows; post-change
-        weeks come from harness_task_ledger. Sustained tool failures are surfaced
-        as issues (W4-S10).
+        weeks come from harness_task_ledger. Each agent's tool failures in the
+        judged week, from its production tool logs, are issues (US-019).
         """
         from services import harness_diagnose, harness_runs
 
@@ -471,103 +471,14 @@ class HarnessService:
         logger.info("[HARNESS] Phase 2 DIAGNOSE — workspace %s, week %s", workspace_id, window.cur_week)
         history = harness_diagnose.verdict_history(harness_runs.judged_verdicts(db, workspace_id, window.weeks))
         changes = harness_diagnose.applied_change_weeks(db, workspace_id, window)
-        diagnosis = harness_diagnose.diagnose(metrics, history, changes, harness_diagnose.settings_from_config())
-        issues = self._diagnose_tool_failures(workspace_id, db, harness_diagnose.agent_names(metrics))
+        settings = harness_diagnose.settings_from_config()
+        diagnosis = harness_diagnose.diagnose(metrics, history, changes, settings)
+        issues = harness_diagnose.tool_failure_issues(metrics, settings)
         logger.info(
             "[HARNESS] DIAGNOSE done — coverage %s, convergence %s, %s, %d issues",
             diagnosis["coverage"], diagnosis["convergence"], diagnosis["counts"], len(issues),
         )
         return {**diagnosis, "issues": issues}
-
-    @staticmethod
-    def _derive_app_name(action_name: str) -> Optional[str]:
-        """Best-effort map a recorded action_name to a removable Composio app.
-
-        Composio app actions are uppercase APP_ACTION (e.g. 'GMAIL_SEND_EMAIL' ->
-        'GMAIL'). Returns None for meta-tools / platform_* / workspace_* tools,
-        whose failures are surfaced as a diagnosis but never auto-proposed for
-        removal — the assignment they map to is ambiguous (the tool hot path often
-        records the 'composio_execute' meta-tool, not the specific app action).
-        """
-        if not action_name or "_" not in action_name or not action_name.isupper():
-            return None
-        return action_name.split("_", 1)[0]
-
-    def _diagnose_tool_failures(
-        self, workspace_id: UUID, db: "Session", name_by_id: Dict[str, str]
-    ) -> List[Dict[str, Any]]:
-        """Surface SUSTAINED tool failures from the tool-routing learning graph
-        (PRD-138/139 fails_for_intent) as inefficiency issues HARNESS can act on
-        (W4-S10 — the learning cross-link). Learning-only: reads ONLY
-        tool_routing_affinities, never a business entity. Workspace-scoped.
-        ``name_by_id`` maps agent ids (as strings) to names.
-        Best-effort — never raises (telemetry must not break the weekly tick)."""
-        issues: List[Dict[str, Any]] = []
-        try:
-            from core.models.tool_routing import ToolRoutingAffinity
-
-            rows = (
-                db.query(ToolRoutingAffinity)
-                .filter(
-                    ToolRoutingAffinity.affinity_type == "fails_for_intent",
-                    ToolRoutingAffinity.workspace_id == workspace_id,
-                    ToolRoutingAffinity.agent_id.isnot(None),
-                    ToolRoutingAffinity.sample_count >= _TOOL_FAILURE_MIN_SAMPLES,
-                )
-                .all()
-            )
-            for row in rows:
-                issues.append({
-                    "agent_id": str(row.agent_id),
-                    "agent_name": name_by_id.get(str(row.agent_id), "unknown"),
-                    "root_cause": "tool_failure",
-                    "severity": "medium",
-                    "detail": (
-                        f"tool '{row.action_name}' failed {row.sample_count}x for this agent "
-                        f"(tool-routing fails_for_intent)"
-                    ),
-                    "tool_failure_spec": {
-                        "agent_id": row.agent_id,
-                        "action_name": row.action_name,
-                        "app_name": self._derive_app_name(row.action_name),
-                        "sample_count": row.sample_count,
-                    },
-                })
-        except Exception as exc:
-            logger.warning("[HARNESS] tool-failure diagnosis skipped: %s", exc)
-        return issues
-
-    def _prescribe_tool_removals(self, issues, run_id, start_seq):
-        """Turn tool_failure issues (W4-S10) into risk-3 tool_assignment_remove
-        prescriptions — only when the failing action cleanly maps to a removable
-        Composio app. A prescription is a line of the audit report and nothing
-        else (PRD-263 US-016); its id is ``rx-<run_id>-<seq>``, from the run's
-        harness_runs row. When the action has no clean app mapping the issue is
-        surfaced in the diagnosis but no removal is proposed. Returns
-        (prescriptions, next_seq)."""
-        out: List[Dict[str, Any]] = []
-        seq = start_seq
-        for issue in issues:
-            if issue.get("root_cause") != "tool_failure":
-                continue
-            spec = issue.get("tool_failure_spec") or {}
-            app_name = spec.get("app_name")
-            if not app_name or spec.get("agent_id") is None:
-                continue  # surfaced as a diagnosis, but not a clean removable assignment
-            seq += 1
-            out.append({
-                "prescription_id": f"rx-{run_id}-{seq:03d}",
-                "target_type": "agent",
-                "target_id": spec.get("agent_id"),
-                "target_name": issue.get("agent_name", "unknown"),
-                "change_type": "tool_assignment_remove",
-                "current_value": {"app_name": app_name},
-                "proposed_value": {"app_name": app_name},
-                "risk_score": 3,
-                "expected_improvement": f"Stop assigning '{app_name}' — it keeps failing for this agent",
-                "rationale": issue.get("detail", "Sustained tool failure from the tool-routing graph."),
-            })
-        return out, seq
 
     # ------------------------------------------------------------------
     # Phase 3: PRESCRIBE
@@ -580,18 +491,38 @@ class HarnessService:
         the audit report; nothing is applied or queued (PRD-263 US-016).
 
         Ids are ``rx-<run_id>-<seq>``: the run's harness_runs id keeps two runs on
-        one day apart. Sustained tool failures are the one input left (W4-S10).
-        The heartbeat, cost and description rules read list_agents fields and
+        one day apart. "Reconnect <app>" is the one suggestion left (US-019). The
+        heartbeat, cost and description rules read list_agents fields and
         week-over-week deltas that never existed; they went with those inputs
         (PRD-263 PR-1D), and the change-kind registry brings real detectors
         (US-049, US-050).
         """
         logger.info("[HARNESS] Phase 3 PRESCRIBE — workspace %s", workspace_id)
-        tool_rxs, _seq = self._prescribe_tool_removals(diagnosis.get("issues", []), run_id, 0)
-        # Sort: risk ascending, then by prescription_id
-        prescriptions = sorted(tool_rxs, key=lambda p: (p["risk_score"], p["prescription_id"]))
+        prescriptions = self._prescribe_reconnects(diagnosis.get("issues", []), run_id)
         logger.info("[HARNESS] PRESCRIBE done — %d prescriptions generated", len(prescriptions))
         return prescriptions
+
+    @staticmethod
+    def _prescribe_reconnects(issues: List[Dict[str, Any]], run_id: int) -> List[Dict[str, Any]]:
+        """A "reconnect <app>" suggestion for each reconnect_app issue (PRD-263 US-019): a
+        line of the audit report for the owner, applied by nothing. Its id is
+        ``rx-<run_id>-<seq>``, from the run's harness_runs row. A tool failure gets no
+        removal suggestion; tool-removal proposals come with US-049 and US-057."""
+        from services.harness_diagnose import RECONNECT_APP
+
+        reconnects = [issue for issue in issues if issue.get("root_cause") == RECONNECT_APP]
+        return [{
+            "prescription_id": f"rx-{run_id}-{seq:03d}",
+            "target_type": "agent",
+            "target_id": int(issue["agent_id"]),
+            "target_name": issue["agent_name"],
+            "change_type": RECONNECT_APP,
+            "current_value": {"app_name": issue["app_name"]},
+            "proposed_value": {"app_name": issue["app_name"]},
+            "risk_score": RECONNECT_RISK,
+            "expected_improvement": f"{issue['agent_name']}'s {issue['app_name']} calls stop failing",
+            "rationale": issue["detail"],
+        } for seq, issue in enumerate(reconnects, 1)]
 
     # ------------------------------------------------------------------
     # Phase 4: REPORT

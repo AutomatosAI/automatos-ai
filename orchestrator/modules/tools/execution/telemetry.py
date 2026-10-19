@@ -51,6 +51,19 @@ def resolve_action_name(tool_name: str, parameters: Dict[str, Any]) -> str:
 _CLERK_ID_CACHE: Dict[str, int] = {}
 _CLERK_ID_CACHE_MAX = 5000
 
+SUCCESS_STATUS = "success"
+ERROR_STATUS = "error"
+# PRD-263 US-018: a call that asked for the owner's click instead of running (the
+# executor's own ask carries ``requires_confirmation: True``, owner_only._ask) neither
+# ran nor failed, so it is logged as ``asked``. ``status`` is a free String(50) that
+# already holds the non-execution ``gap`` and ``shown``. WIRE PROTOCOL: EdgeBuilder's
+# read (core/services/edge_builder_logs), the SLO rate (services/slo_metrics) and
+# HARNESS's read model (services/harness_metrics) leave it out by this literal.
+ASKED_STATUS = "asked"
+# A failed result's own code (the tool-result convention, modules/tools/README.md
+# "Result shape"), cut to tool_execution_logs.error_code's String(100).
+ERROR_CODE_MAX_CHARS = 100
+
 
 def _coerce_user_id(db: Session, raw: Any) -> Optional[int]:
     """Coerce a caller_context ``user_id`` into the integer ``users.id`` the column expects.
@@ -131,49 +144,11 @@ def write_telemetry(
             session_factory = SessionLocal
         db = session_factory()
 
-        ctx = caller_context or {}
-
-        # PRD-177 S1 (F016): resolve the real composio action so it is not
-        # collapsed to a single ``composio_execute`` node in the routing graph.
-        action_name = resolve_action_name(tool_name, parameters)
-
-        # Determine app_name from the RESOLVED action's prefix (e.g. the resolved
-        # SLACK_SEND_MESSAGE yields app SLACK, not COMPOSIO).
-        if action_name.startswith("platform_"):
-            app_name = "PLATFORM"
-        elif action_name.startswith("workspace_"):
-            app_name = "WORKSPACE"
-        else:
-            app_name = action_name.split("_")[0].upper() if "_" in action_name else action_name.upper()
-
-        # Resolve agent_id: use None for non-agent calls (never write 0 with FK)
-        resolved_agent_id = agent_id if agent_id and agent_id > 0 else None
-
-        status = "success" if result.get("success", result.get("successful")) else "error"
-
-        log_entry = ToolExecutionLog(
-            agent_id=resolved_agent_id,
-            app_name=app_name[:100],
-            action_name=action_name[:255],
-            workspace_id=workspace_id,
-            user_id=_coerce_user_id(db, ctx.get("user_id")),
-            input_parameters={"keys": list(parameters.keys())} if isinstance(parameters, dict) else {},
-            user_query=ctx.get("user_query"),
-            status=status,
-            error_message=result.get("error") if status == "error" else None,
-            execution_time_ms=execution_time_ms,
-            router_decision=_build_router_decision(
-                ctx,
-                autonomous=result.get("autonomous") is True,
-                approved_via_grant_id=result.get("approved_via_grant_id"),
-                human_directed=result.get("human_directed") is True,
-            ),
-            intent_cluster_id=ctx.get("intent_cluster_id"),
-            routing_source=ctx.get("routing_source"),
-            telemetry_source=ctx.get("telemetry_source", "production"),
-        )
-
-        db.add(log_entry)
+        db.add(_log_entry(
+            db, ToolExecutionLog, tool_name=tool_name, parameters=parameters, agent_id=agent_id,
+            workspace_id=workspace_id, result=result, execution_time_ms=execution_time_ms,
+            ctx=caller_context or {},
+        ))
         db.commit()
     except Exception as exc:
         # Loud on purpose (PRD-185 S1): a DEBUG swallow here hid a 2-month,
@@ -190,6 +165,77 @@ def write_telemetry(
                 db.close()
             except Exception:
                 pass
+
+
+def _log_entry(
+    db: Session,
+    model: Any,
+    *,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    agent_id: Optional[int],
+    workspace_id: Optional[UUID],
+    result: Dict[str, Any],
+    execution_time_ms: int,
+    ctx: Dict[str, Any],
+) -> Any:
+    """The tool_execution_logs row for one call. ``model`` is ToolExecutionLog, which
+    ``write_telemetry`` imports lazily."""
+    # PRD-177 S1 (F016): resolve the real composio action so it is not
+    # collapsed to a single ``composio_execute`` node in the routing graph.
+    action_name = resolve_action_name(tool_name, parameters)
+    status = _status_of(result)
+    return model(
+        # Resolve agent_id: use None for non-agent calls (never write 0 with FK)
+        agent_id=agent_id if agent_id and agent_id > 0 else None,
+        app_name=_app_name_of(action_name)[:100],
+        action_name=action_name[:255],
+        workspace_id=workspace_id,
+        user_id=_coerce_user_id(db, ctx.get("user_id")),
+        input_parameters={"keys": list(parameters.keys())} if isinstance(parameters, dict) else {},
+        user_query=ctx.get("user_query"),
+        status=status,
+        error_message=result.get("error") if status == ERROR_STATUS else None,
+        error_code=_error_code_of(result, status),
+        execution_time_ms=execution_time_ms,
+        router_decision=_build_router_decision(
+            ctx,
+            autonomous=result.get("autonomous") is True,
+            approved_via_grant_id=result.get("approved_via_grant_id"),
+            human_directed=result.get("human_directed") is True,
+        ),
+        intent_cluster_id=ctx.get("intent_cluster_id"),
+        routing_source=ctx.get("routing_source"),
+        telemetry_source=ctx.get("telemetry_source", "production"),
+    )
+
+
+def _app_name_of(action_name: str) -> str:
+    """The app of the RESOLVED action, from its prefix (the resolved
+    SLACK_SEND_MESSAGE yields app SLACK, not COMPOSIO); the platform's own tools
+    are PLATFORM and WORKSPACE."""
+    if action_name.startswith("platform_"):
+        return "PLATFORM"
+    if action_name.startswith("workspace_"):
+        return "WORKSPACE"
+    return action_name.split("_")[0].upper() if "_" in action_name else action_name.upper()
+
+
+def _status_of(result: Dict[str, Any]) -> str:
+    """``success``; ``asked`` for a call that waits for the owner's click instead of
+    running (PRD-263 US-018: an ask is not a failure); otherwise ``error``."""
+    if result.get("success", result.get("successful")):
+        return SUCCESS_STATUS
+    return ASKED_STATUS if result.get("requires_confirmation") is True else ERROR_STATUS
+
+
+def _error_code_of(result: Dict[str, Any], status: str) -> Optional[str]:
+    """A failed result's own ``error_code`` (``integrations_unavailable``, …), cut to
+    the column; None for any other row and for a failure that carries none."""
+    code = result.get("error_code")
+    if status != ERROR_STATUS or code is None:
+        return None
+    return str(code)[:ERROR_CODE_MAX_CHARS] or None
 
 
 def _build_router_decision(
@@ -280,11 +326,12 @@ TOOL_GAP_ACTION = "__tool_gap__"
 # (__tool_gap__, __tool_shown__). These are NOT tool executions, so they must NOT
 # land in the 'production' bucket that services/slo_metrics.tool_call_success_rate
 # and services/telemetry_canary read (both filter telemetry_source=='production',
-# with no action/status exclusion) — a 'gap'/'shown' row there would drag the SLI
+# with no action exclusion) — a 'gap'/'shown' row there would drag the SLI
 # and mask the silence canary. A DISTINCT value (not 'synthetic', which
 # seed_telemetry DELETES) keeps them out of both while staying readable by the
-# nightly edge_builder (_load_logs has no telemetry_source filter). WIRE PROTOCOL —
-# signal_recorder._insert_shown_row must write the same literal.
+# nightly edge_builder (_load_logs reads production, this value and untagged rows,
+# PRD-263 US-018). WIRE PROTOCOL — signal_recorder._insert_shown_row and
+# edge_builder_logs must use the same literal.
 SYNTHETIC_SIGNAL_SOURCE = "synthetic_signal"
 
 

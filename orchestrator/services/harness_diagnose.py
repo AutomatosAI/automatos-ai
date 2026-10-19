@@ -25,6 +25,11 @@ statistics in ``core.stats.harness_verdicts`` (design section 5.1, ORG-4 and ORG
 * **Coverage** is judged agents over active agents (Auto is not one). Below
   ``HARNESS_MIN_COVERAGE`` the run's convergence reads ``insufficient_data``;
   otherwise ``regression``, ``watching`` or ``steady``.
+* **Tool failures** (US-019, FR-8) are judged per agent and app on the judged week's
+  production tool logs, never on the routing graph's lifetime ``fails_for_intent``
+  counts: a pair flags at n of at least ``HARNESS_MIN_SAMPLES`` with a Wilson lower
+  bound of the failure rate at least ``HARNESS_TOOL_FAIL_WILSON_MIN``. A flag that
+  sign-in and connection failures carry is "reconnect <app>", never a bad tool.
 
 Agent rows are read only through the names in ``DIAGNOSE_READS``, which
 ``tests/test_prd263_harness_key_contract.py`` pins to
@@ -44,7 +49,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.stats import harness_verdicts as hv
-from services.harness_metrics import AGENT_ID_PATTERN, UTC_ZONE, HarnessMetrics, Window, iso_week_label
+from services.harness_metrics import (
+    AGENT_ID_PATTERN, RECONNECT_CLASSES, TOOL_SUCCESS, UTC_ZONE, HarnessMetrics, Window, iso_week_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +115,12 @@ History = Mapping[str, Mapping[str, Mapping[str, Mapping[str, Any]]]]
 # The figures a stored metric entry carries; a kept verdict is reported with its own.
 FIGURE_KEYS = ("unit", "n_cur", "n_ref", "x_cur", "x_ref", "cur_value", "ref_value", "p_value", "ref_weeks")
 
+# The root causes of DIAGNOSE's tool issues (US-019).
+TOOL_FAILURE = "tool_failure"
+RECONNECT_APP = "reconnect_app"
+# The platform's own tools, as telemetry names their app: no connection to reconnect.
+PLATFORM_APPS = frozenset({"PLATFORM", "WORKSPACE"})
+
 
 @dataclass(frozen=True)
 class RateMetric:
@@ -160,6 +173,7 @@ class DiagnoseSettings:
     fdr_q: float
     strong_p: float
     min_coverage: float
+    tool_fail_wilson_min: float
 
 
 @dataclass(frozen=True)
@@ -192,6 +206,7 @@ def settings_from_config() -> DiagnoseSettings:
         fdr_q=config.HARNESS_FDR_Q,
         strong_p=config.HARNESS_STRONG_P,
         min_coverage=config.HARNESS_MIN_COVERAGE,
+        tool_fail_wilson_min=config.HARNESS_TOOL_FAIL_WILSON_MIN,
     )
 
 
@@ -417,6 +432,58 @@ def diagnose(metrics: HarnessMetrics, history: History, change_weeks: Mapping[in
     return _summary(window, agents, settings)
 
 
+# ------------------------------------------------------------------ tool failures
+
+
+def _tool_counts(metrics: HarnessMetrics) -> Dict[Tuple[int, str], Tuple[int, int, int]]:
+    """(agent id, app) -> (calls, failed calls, failed on the app's sign-in or connection),
+    from the judged week's production tool runs."""
+    counts: Dict[Tuple[int, str], List[int]] = {}
+    for run in metrics.tool_rows:
+        if run["iso_week"] != metrics.window.cur_week:
+            continue
+        tally = counts.setdefault((run["agent_id"], run["app_name"]), [0, 0, 0])
+        failed = run["status"] != TOOL_SUCCESS
+        tally[0] += run["calls"]
+        tally[1] += run["calls"] if failed else 0
+        tally[2] += run["calls"] if failed and run["error_class"] in RECONNECT_CLASSES else 0
+    return {key: (n, bad, lost) for key, (n, bad, lost) in counts.items()}
+
+
+def _fails(failed: int, calls: int, settings: DiagnoseSettings) -> bool:
+    """FR-8: enough calls, and a failure rate surely at least HARNESS_TOOL_FAIL_WILSON_MIN."""
+    return (calls >= settings.rates.min_samples
+            and hv.wilson_lower_bound(failed, calls) >= settings.tool_fail_wilson_min)
+
+
+def _tool_issue(name: str, agent_id: int, app: str, counts: Tuple[int, int, int],
+                settings: DiagnoseSettings) -> Dict[str, Any]:
+    """One flagged agent-app pair. It is "reconnect <app>" when the sign-in and connection
+    failures carry the flag (the other failures alone would not flag) and the app has a
+    connection; otherwise a tool failure. Neither proposes removing the tool (US-049, US-057)."""
+    calls, failed, reconnect = counts
+    reconnects = app not in PLATFORM_APPS and reconnect > 0 and not _fails(failed - reconnect, calls, settings)
+    if reconnects:
+        detail = f"reconnect {app}: {reconnect} of its {calls} calls this week failed on {app}'s sign-in or connection"
+    else:
+        bound = hv.wilson_lower_bound(failed, calls)
+        detail = f"{app} failed {failed} of {calls} calls this week (a failure rate of at least {bound:.0%})"
+    return {
+        "agent_id": str(agent_id), "agent_name": name, "root_cause": RECONNECT_APP if reconnects else TOOL_FAILURE,
+        "detail": detail, "app_name": app, "calls": calls, "failed_calls": failed, "reconnect_calls": reconnect,
+    }
+
+
+def tool_failure_issues(metrics: HarnessMetrics, settings: DiagnoseSettings) -> List[Dict[str, Any]]:
+    """The judged week's tool issues (US-019, FR-8): one per agent and app whose production
+    failure rate flags, as a tool failure or as "reconnect <app>". The window is the judged
+    ISO week, so an old failure never flags again; asked and refused rows are not in it."""
+    names = agent_names(metrics)
+    return [_tool_issue(names.get(str(agent_id), "unknown"), agent_id, app, counts, settings)
+            for (agent_id, app), counts in sorted(_tool_counts(metrics).items())
+            if _fails(counts[1], counts[0], settings)]
+
+
 def stored_verdicts(diagnosis: Mapping[str, Any]) -> Dict[str, Any]:
     """What a run keeps in ``harness_runs.verdicts``: its convergence and its agents."""
     return {CONVERGENCE_KEY: diagnosis[CONVERGENCE_KEY], AGENTS_KEY: diagnosis[AGENTS_KEY]}
@@ -529,6 +596,8 @@ __all__ = [
     "DIAGNOSE_READS",
     "DiagnoseSettings",
     "METRICS",
+    "RECONNECT_APP",
+    "TOOL_FAILURE",
     "agent_names",
     "applied_change_weeks",
     "diagnose",
@@ -538,5 +607,6 @@ __all__ = [
     "settings_from_config",
     "status_fields",
     "stored_verdicts",
+    "tool_failure_issues",
     "verdict_history",
 ]
