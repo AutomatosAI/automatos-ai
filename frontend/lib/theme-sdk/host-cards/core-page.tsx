@@ -3,8 +3,9 @@
  *
  * A theme page drawn on a core route (registerPage) can keep a surface only the core page has, a
  * tab the SDK v1 has no data hooks for (docs/theme-host/sdk-surface-map.md §3), by rendering
- * `<CorePage />` where it wants it. The host hands the core page down through CorePageProvider,
- * around the theme's version of the page; where there is no core page (a theme route under /x/,
+ * `<CorePage />` where it wants it. The host's page seam (ThemeSlot's page entry,
+ * components/theme-host/theme-slot.tsx) hands the core page down through CorePageProvider, around
+ * the theme's version of the page; where there is no core page (a theme route under /x/, a slot,
  * or outside the provider) CorePage renders its `children` instead.
  *
  * This module imports React only: the host's page seam (components/theme-host/theme-slot.tsx)
