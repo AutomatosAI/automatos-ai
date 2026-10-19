@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from modules.tools.discovery.owner_only import OWNERS_OWN_DECISION
@@ -118,6 +118,25 @@ def _find_task_by_rx(tasks: Any, rx_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+async def _harness_cards(executor: Any) -> List[Any]:
+    """Every [HARNESS] card, page by page (PRD-263 US-020). platform_list_tasks returns
+    one page (20 by default) and the next page's ``next_offset``, None on the last
+    (modules/tools/discovery/board_task_list.py); stopping at the first page missed
+    every older card. A page that is not a list of cards, or does not move forward,
+    ends the walk."""
+    cards: List[Any] = []
+    offset: Optional[int] = 0
+    while offset is not None:
+        page = await executor.execute("platform_list_tasks", {"tags": ["harness"], "offset": offset})
+        listed = page.get("data", page.get("tasks", [])) if isinstance(page, dict) else None
+        if not isinstance(listed, list):
+            break
+        cards = [*cards, *listed]
+        following = page.get("next_offset")
+        offset = following if isinstance(following, int) and following > offset else None
+    return cards
+
+
 async def handle_harness_command(
     db,
     workspace_id: UUID,
@@ -160,12 +179,8 @@ async def handle_harness_command(
     svc = get_harness_service()
     executor = _make_executor(db, workspace_id)
 
-    # Locate the queued board task for this prescription (tag-keyed).
-    list_result = await executor.execute("platform_list_tasks", {"tags": ["harness"]})
-    tasks: Any = []
-    if isinstance(list_result, dict):
-        tasks = list_result.get("data", list_result.get("tasks", [])) or []
-    task = _find_task_by_rx(tasks, rx_id)
+    # Locate the queued board task for this prescription (tag-keyed), on every page.
+    task = _find_task_by_rx(await _harness_cards(executor), rx_id)
     if not task:
         return {
             "success": False,

@@ -220,63 +220,70 @@ def test_real_gate_refuses_non_admin(monkeypatch):
         assert exc.status_code == 403
 
 
-# --- W4-S16: self-learning health endpoint (backend half) ------------------
+# --- PRD-263 US-021: self-learning health endpoint ---------------------------
+# The endpoint is a plain def now, so these call it directly (no _run). The real-DB
+# reads (harness_runs, the workspace-scoped signal count) are covered by
+# test_prd263_self_learning_endpoint.py; here the three reads are faked.
 
-class _RxQuery:
-    def __init__(self, rows):
-        self._rows = rows
+class _RollbackDB:
+    """The endpoint touches the session itself to read the workspace's settings and
+    to roll back a failed section."""
 
-    def filter(self, *a, **k):
-        return self
+    def __init__(self, settings=None):
+        self._settings = settings
+        self.rollbacks = 0
 
-    def group_by(self, *a, **k):
-        return self
+    def get(self, _model, _id):
+        return types.SimpleNamespace(settings=self._settings)
 
-    def all(self):
-        return self._rows
-
-
-class _RxDB:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def query(self, *a, **k):
-        return _RxQuery(self._rows)
+    def rollback(self):
+        self.rollbacks += 1
 
 
 def test_self_learning_health_combines_sections(monkeypatch):
-    import types
+    import services.harness_runs as runs
     import services.harness_service as hsvc
-    import modules.tools.discovery.signal_recorder as sr
+
+    status = {"status": "completed", "iteration_count": 3, "coverage": 0.75, "convergence": "watching",
+              "cur_window": "2026-W42", "active_agents": 4, "artifacts": {"audit_report": "ok"}}
+    latest = types.SimpleNamespace(
+        iteration=3, coverage=0.75, verdicts={"convergence": "watching", "agents": {}},
+        counts={"active_agents": 4, "judged_agents": 3, "insufficient_data": 1, "watch": 1, "regression": 0,
+                "prescriptions": 2})
     monkeypatch.setattr(hsvc, "get_harness_service",
-                        lambda: types.SimpleNamespace(get_status=lambda ws, db=None: {"status": "completed", "iteration": 3}))
-    monkeypatch.setattr(sr, "get_tool_signal_recorder",
-                        lambda: types.SimpleNamespace(stats=lambda: {"recorded": 5, "dropped": 0}))
-    out = _run(h.self_learning_health(ctx=_ctx(clerk="admin"), db=_RxDB([("applied", 2), ("queued", 1)])))
-    assert out["workspace_id"] == str(_WS_ID)
-    assert out["harness"]["status"] == "completed"
-    assert out["tool_routing"]["recorded"] == 5
-    # PRD-187 S5: the prescriptions DB section is gone with harness_prescriptions
-    assert "prescriptions" not in out
+                        lambda: types.SimpleNamespace(get_status=lambda ws, db=None: dict(status)))
+    monkeypatch.setattr(runs, "latest_run", lambda db, ws: latest)
+    monkeypatch.setattr(h, "_signals_7d", lambda db, ws: 12)
+    # A mode stored before PRD-263 reads through harness_mode(): full_auto is report_only.
+    db = _RollbackDB(settings={"orchestrator": {"harness": {"mode": "full_auto"}}})
+
+    out = h.self_learning_health(ctx=_ctx(clerk="admin"), db=db)
+
+    assert out == {
+        "workspace_id": str(_WS_ID), "status": "completed", "iteration_count": 3, "coverage": 0.75,
+        "insufficient_data": 1, "watch": 1, "regression": 0, "mode": "report_only", "signals_7d": 12,
+        "unavailable": [],
+    }
+    # Counts, coverage and mode only (#1148): no prescriptions, report, artifacts or
+    # process-global tool-routing stats.
+    assert not {"prescriptions", "harness", "tool_routing", "artifacts", "convergence"} & set(out)
+    assert db.rollbacks == 0
 
 
 def test_self_learning_health_degrades_gracefully(monkeypatch):
-    import services.harness_service as hsvc
-    import modules.tools.discovery.signal_recorder as sr
-
     def _boom(*a, **k):
-        raise RuntimeError("section down")
+        raise RuntimeError("section down: secret-internal-detail")
 
-    monkeypatch.setattr(hsvc, "get_harness_service", _boom)
-    monkeypatch.setattr(sr, "get_tool_signal_recorder", _boom)
+    monkeypatch.setattr(h, "_harness_fields", _boom)
+    monkeypatch.setattr(h, "_signals_7d", _boom)
+    db = _RollbackDB()
 
-    class _BoomDB:
-        def query(self, *a, **k):
-            raise RuntimeError("no harness_prescriptions table")
+    # Each section degrades to None figures and is named in `unavailable`; the endpoint
+    # never 500s, never answers 0 for a figure it could not read, and leaks no error text.
+    out = h.self_learning_health(ctx=_ctx(clerk="admin"), db=db)
 
-    # Each section degrades to an error marker; the endpoint never 500s.
-    out = _run(h.self_learning_health(ctx=_ctx(clerk="admin"), db=_BoomDB()))
     assert out["workspace_id"] == str(_WS_ID)
-    assert "error" in out["harness"]
-    assert "error" in out["tool_routing"]
-    assert "prescriptions" not in out
+    assert all(out[field] is None for field in h.HARNESS_FIELDS + h.SIGNALS_FIELDS)
+    assert out["unavailable"] == [h.SECTION_HARNESS, h.SECTION_SIGNALS]
+    assert "secret-internal-detail" not in repr(out)
+    assert db.rollbacks == 2

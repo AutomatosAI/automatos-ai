@@ -28,7 +28,7 @@ from uuid import UUID, uuid4
 # (modules/tools/__init__.py imports from this file)
 from modules.tools.registry import ToolCategory, get_tool_registry as registry_get_tool_registry
 from modules.tools.execution import UnifiedToolExecutor
-from modules.tools.execution.card_raised import the_model_reads_the_card
+from modules.tools.execution.card_raised import holds_the_signal, signals_unless_it_asked, the_model_reads_the_card
 from modules.tools.execution.held_context import holds_the_callers_context, the_callers_context
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
@@ -1572,6 +1572,7 @@ class ToolRouter:
             frontend_data = {**frontend_data, "documents": kept}
         return frontend_data
 
+    @signals_unless_it_asked     # PRD-263 US-018: an ask sends the routing graph no failure
     @holds_the_callers_context   # P256-FIX-RVW-2: the validation path keeps the caller's context
     async def execute_and_format(
         self,
@@ -1777,6 +1778,7 @@ class ToolRouter:
         return envelope
 
     @staticmethod
+    @holds_the_signal   # PRD-263 US-018: sent when the call's answer is known, never for an ask
     def _record_tool_signal(
         tool_name: str,
         success: bool,
@@ -1797,11 +1799,7 @@ class ToolRouter:
             from modules.tools.execution.telemetry import resolve_action_name
 
             action_name = resolve_action_name(tool_name, parameters or {})
-            prior_action = (
-                caller_context.get("prior_action")
-                if isinstance(caller_context, dict)
-                else None
-            )
+            prior_action = caller_context.get("prior_action") if isinstance(caller_context, dict) else None
             get_tool_signal_recorder().record(
                 ToolSignal(
                     action_name=action_name,

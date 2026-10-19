@@ -10,8 +10,11 @@ else, ``propose`` behaves the same until US-054, and ``disabled`` (or a stored
 services.harness_mode, which maps the values stored before PRD-263.
 
 Each case runs a full tick on committed rows (the tick opens its own sessions). The
-seeded evidence is an agent with a week of tickets and a sustained GMAIL failure, so
-PRESCRIBE has a risk-3 tool removal to suggest. The platform executor records every
+seeded evidence is an agent with a week of tickets and a judged week in which every
+GMAIL call failed on its expired connection, so PRESCRIBE has a "reconnect GMAIL" to
+suggest (PRD-263 US-019 replaced the tool-routing graph's lifetime failure count, and
+the tool removal it suggested, with that week's production tool logs). The platform
+executor records every
 action and runs the real platform_submit_report handler (ReportService) with the
 workspace file and the knowledge ingest stubbed; every notification the run
 dispatches and every channel notice it sends is recorded, and so is any call to the
@@ -43,7 +46,8 @@ AGENT_REPORTS = """
         created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
     )
 """
-FAILING_ACTION = "GMAIL_SEND_EMAIL"
+FAILING_APP = "GMAIL"
+EXPIRED = "Connected account ca_scout_gmail has expired; reconnect it to continue"
 
 
 @pytest.fixture(scope="module")
@@ -67,7 +71,7 @@ def workspace(new_session):
     ws = hr.seed_workspace(new_session)
     yield ws
     s = new_session.sweep()
-    for sql in ("DELETE FROM tool_routing_affinities WHERE workspace_id = CAST(:id AS uuid)",
+    for sql in ("DELETE FROM tool_execution_logs WHERE workspace_id = CAST(:id AS uuid)",
                 "DELETE FROM agent_reports WHERE workspace_id = CAST(:id AS uuid)"):
         s.execute(text(sql), {"id": str(ws)})
     s.commit()
@@ -153,15 +157,13 @@ def _record_llm(monkeypatch, seen):
 
 
 def _seed_evidence(new_session, ws: UUID) -> int:
-    """Scout: two weeks of tickets and a sustained GMAIL failure (a risk-3 removal to suggest)."""
+    """Scout: two weeks of tickets and, in the judged week, 20 GMAIL calls that all failed
+    on an expired connection (a "reconnect GMAIL" to suggest)."""
     s = new_session()
     scout = hdx.agent(s, ws, "Scout")
     hdx.tickets(s, ws, scout, -1, 16, 4)
     hdx.tickets(s, ws, scout, 0, 14, 6)
-    s.execute(text("INSERT INTO tool_routing_affinities (action_name, affinity_type, workspace_id, agent_id, "
-                   "weight, confidence, sample_count, last_updated) VALUES (:action, 'fails_for_intent', "
-                   "CAST(:ws AS uuid), :agent, 1.0, 0.9, 9, now())"),
-              {"action": FAILING_ACTION, "ws": str(ws), "agent": scout})
+    hdx.tool_runs(s, ws, scout, 0, 20, app=FAILING_APP, status="error", error_message=EXPIRED)
     s.commit()
     s.close()
     return scout
@@ -208,14 +210,15 @@ async def _swept(monkeypatch) -> list:
 
 def _assert_reported_only(record, new_session, ws: UUID, tickets_before: int) -> dict:
     """One completed run whose suggestion is a report line; nothing filed, granted or sent but the report."""
-    from services.harness_service import SUGGESTIONS_HEADING
+    from services.harness_service import RECONNECT_RISK, SUGGESTIONS_HEADING
 
     (run,) = hr.runs(new_session, ws)
     assert (run["status"], run["report_status"]) == ("completed", "ok")
     (rx,) = run["prescriptions"]
-    assert (rx["prescription_id"], rx["change_type"], rx["risk_score"]) == (
-        f"rx-{run['id']}-001", "tool_assignment_remove", 3)
+    assert (rx["prescription_id"], rx["change_type"], rx["risk_score"], rx["proposed_value"]) == (
+        f"rx-{run['id']}-001", "reconnect_app", RECONNECT_RISK, {"app_name": FAILING_APP})
     assert SUGGESTIONS_HEADING in run["report_md"] and rx["prescription_id"] in run["report_md"]
+    assert f"reconnect {FAILING_APP}" in run["report_md"]
     assert record.actions == [hr.REPORT]               # no platform write but the audit report
     assert record.notifications == ["report_submitted"]
     assert record.channel_notices == []                # no escalation

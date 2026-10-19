@@ -86,10 +86,11 @@ def _usage(db, ws, agent_id, at, *, request_type="board_task", status="success",
     db.flush()
 
 
-def _tool_run(db, ws, agent_id, at, *, app="GMAIL", status="success", error_code=None, source="production"):
+def _tool_run(db, ws, agent_id, at, *, app="GMAIL", status="success", error_code=None, source="production",
+              error_message=None):
     run = ToolExecutionLog(workspace_id=UUID(ws), agent_id=agent_id, app_name=app,
                            action_name=f"{app}_SEND", status=status, error_code=error_code,
-                           telemetry_source=source, executed_at=at)
+                           error_message=error_message, telemetry_source=source, executed_at=at)
     db.add(run)
     db.flush()
     return run
@@ -314,6 +315,8 @@ def test_tool_runs_are_production_only_grouped_by_app_and_error_class(world):
         _tool_run(db, a, w, IN_WEEK)
     _tool_run(db, a, w, IN_WEEK, status="error", error_code=" 401 ")
     _tool_run(db, a, w, IN_WEEK, status="error")
+    # PRD-263 US-019: a row with no code (every row before US-018) classes from its message.
+    _tool_run(db, a, w, IN_WEEK, status="error", error_message="httpx.ConnectError: [Errno 111] Connection refused")
     _tool_run(db, a, w, IN_WEEK, app="SLACK", status="timeout")
     _tool_run(db, a, w, IN_WEEK, status="asked")            # a wait for the owner's click
     _tool_run(db, a, w, IN_WEEK, status="error", source="eval")
@@ -322,11 +325,12 @@ def test_tool_runs_are_production_only_grouped_by_app_and_error_class(world):
     result = _read(world)
     got = {(r["app_name"], r["status"], r["error_class"]): r["calls"]
            for r in result.tool_rows if r["agent_id"] == w and r["iso_week"] == WEEK}
-    assert got == {("GMAIL", "success", "none"): 2, ("GMAIL", "error", "401"): 1,
-                   ("GMAIL", "error", "uncoded"): 1, ("SLACK", "timeout", "uncoded"): 1}
+    assert got == {("GMAIL", "success", "none"): 2, ("GMAIL", "error", "auth"): 1,
+                   ("GMAIL", "error", "connection"): 1, ("GMAIL", "error", "other"): 1,
+                   ("SLACK", "timeout", "other"): 1}
     assert all(set(r) == set(hm.TOOL_ROW_FIELDS) for r in result.tool_rows)
     cur = _row(result, w)
-    assert (cur["tool_calls"], cur["tool_failed_calls"]) == (5, 3)
+    assert (cur["tool_calls"], cur["tool_failed_calls"]) == (6, 4)
 
 
 # ── tenant isolation ─────────────────────────────────────────────────────────
