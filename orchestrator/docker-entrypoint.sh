@@ -5,7 +5,8 @@
 # The only owner of migrations (PRD-176 F051, PRD-262 US-029). The boot steps:
 #   1. Waits for PostgreSQL to be ready
 #   2. Verifies the database connection
-#   3. Initializes an empty database, then runs Alembic migrations (fail closed)
+#   3. Initializes an empty database, then runs Alembic migrations (fail closed),
+#      unless alembic_version already holds the code's head(s) (PRD-262 US-030)
 #   4. Loads seed data (idempotent)
 #   5. Ensures the local-edition workspace and operator exist (local only)
 # Steps 1-3 are the migration step; 4-5 run only where a flag below asks.
@@ -151,15 +152,38 @@ init_fresh_if_empty() {
 }
 
 # =============================================================================
+# Function: Is the schema already at head? (PRD-262 US-030)
+# =============================================================================
+# alembic's own start imports the app's models (alembic/env.py) before it finds
+# nothing to do: 7-9 s on a warm local boot, 35 s under load (F228).
+# scripts/alembic_heads.py reads the code's head(s) from the migration scripts
+# with no import (an AST parse) and compares them with alembic_version. True
+# only when they are the same set. Everything else goes to alembic as before:
+# an empty or unreadable alembic_version, a database behind the code, one ahead
+# of it (a rollback, which alembic refuses loudly), or a migration script the
+# AST reader cannot read.
+ALEMBIC_HEADS_SCRIPT=scripts/alembic_heads.py
+
+schema_at_head() {
+    local stamped
+    stamped=$(db_psql -tAc "SELECT version_num FROM alembic_version" 2>/dev/null) || return 1
+    printf '%s\n' "$stamped" | python "$ALEMBIC_HEADS_SCRIPT"
+}
+
+# =============================================================================
 # Function: Run Database Migrations (PRD-176 F051)
 # =============================================================================
 # Brings the schema to head via Alembic — the single owner of the schema
-# lifecycle, run once per boot (the image CMD runs no alembic). Fails CLOSED:
-# unlike seed loading, a failed migration exits non-zero so the app never
-# starts against a half-built schema. Alembic is idempotent — on an
-# already-migrated database `upgrade heads` is a no-op.
+# lifecycle, run at most once per boot (the image CMD runs no alembic), and not
+# at all when the schema is already at head (above). Fails CLOSED: unlike seed
+# loading, a failed migration exits non-zero so the app never starts against a
+# half-built schema.
 run_migrations() {
     echo ""
+    if schema_at_head; then
+        echo "⏭️  schema at head — alembic skipped"
+        return 0
+    fi
     echo "🗄️  Running database migrations (alembic upgrade heads)..."
 
     if alembic upgrade heads; then

@@ -21,17 +21,28 @@ Dockerfile) and the only owner of migrations (PRD-262 US-029). It runs:
 
 The image CMDs run no alembic of their own: they exec uvicorn.
 
-Each test runs the script under bash with ``pg_isready``, ``psql``, ``alembic``,
-``python`` and ``uvicorn`` replaced by stubs that record their arguments, so the
-assertions are about what the script actually calls, in what order.
+PRD-262 US-030: the migration step runs no alembic either when ``alembic_version``
+already holds the code's head(s), which ``scripts/alembic_heads.py`` reads with no
+import; it logs ``schema at head — alembic skipped``. A missing table still goes to
+init_fresh_db first, and a database ahead of the code still goes to alembic, which
+fails loudly.
+
+Each test runs the script under bash, from ``orchestrator/`` as the image runs it from
+``/app``, with ``pg_isready``, ``psql``, ``alembic``, ``python`` and ``uvicorn``
+replaced by stubs that record their arguments, so the assertions are about what the
+script actually calls, in what order. The head check's ``python`` stub answers
+``FAKE_AT_HEAD_RC`` (not at head by default), or, with ``REAL_PYTHON`` set, runs the
+real reader against the real migration scripts.
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -52,8 +63,10 @@ _POSTGRES_ENV = {
 _DATABASE_URL = "postgresql://u:p@db.internal:5432/app"
 
 # psql logs its arguments and any SQL it reads on stdin (one line), and answers
-# the two queries the script parses; FAKE_DB_STATE is the fresh-path state the
+# the queries the script parses; FAKE_DB_STATE is the fresh-path state the
 # script reads (empty | interrupted | existing), unset looks migrated.
+# FAKE_DB_VERSION is alembic_version's rows (none by default) and FAKE_VERSION_RC
+# that query's exit status.
 _STUBS = {
     "pg_isready": 'echo "pg_isready $*" >> "$CALL_LOG"',
     "psql": (
@@ -61,6 +74,9 @@ _STUBS = {
         'case "$*" in\n'
         '  *automatos_fresh_init_incomplete*) echo "${FAKE_DB_STATE-existing}" ;;\n'
         '  *COUNT*) echo 3 ;;\n'
+        '  *"SELECT version_num FROM alembic_version"*)\n'
+        '    [ -z "${FAKE_DB_VERSION:-}" ] || printf \'%s\\n\' "$FAKE_DB_VERSION"\n'
+        '    exit "${FAKE_VERSION_RC:-0}" ;;\n'
         "esac"
     ),
     "alembic": 'echo "alembic $*" >> "$CALL_LOG"\nexit "${FAKE_ALEMBIC_RC:-0}"',
@@ -69,6 +85,10 @@ _STUBS = {
         'case "$*" in\n'
         '  *load_seed_data*) exit "${FAKE_SEED_RC:-0}" ;;\n'
         '  *init_fresh_db*) exit "${FAKE_INIT_RC:-0}" ;;\n'
+        '  *alembic_heads*)\n'
+        '    [ -z "${REAL_PYTHON:-}" ] || exec "$REAL_PYTHON" "$@"\n'
+        '    echo "python stdin: $(cat | tr \'\\n\' \' \')" >> "$CALL_LOG"\n'
+        '    exit "${FAKE_AT_HEAD_RC:-1}" ;;\n'
         "esac"
     ),
     "uvicorn": 'echo "uvicorn $*" >> "$CALL_LOG"',
@@ -79,6 +99,9 @@ _SERVER = ["uvicorn", "main:app", "--port", "8000"]
 _SERVED = "uvicorn main:app --port 8000"
 _SEED = "python -m core.database.load_seed_data"
 _BANNER = "🚀 Starting Backend Application"
+_HEAD_CHECK = "python scripts/alembic_heads.py"
+_SKIPPED = "schema at head — alembic skipped"
+_MIGRATING = "Running database migrations"
 _LOCAL_ENV = {"AUTH_EDITION": "local", "DEFAULT_WORKSPACE_ID": "00000000-0000-0000-0000-0000000000c1"}
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
@@ -105,6 +128,7 @@ def _run(tmp_path: Path, args: list[str], env: dict[str, str]) -> tuple[int, lis
     }
     proc = subprocess.run(
         ["bash", str(_ENTRYPOINT), *args],
+        cwd=_ORCH,  # the image's WORKDIR, /app: alembic.ini and scripts/ are relative to it
         env=full_env,
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -279,6 +303,107 @@ def test_failed_migration_fails_closed(tmp_path, flags):
     code, calls, out = _run(tmp_path, _SERVER, {**_POSTGRES_ENV, **flags, "FAKE_ALEMBIC_RC": "1"})
     assert code != 0, out
     assert not any(c.startswith("uvicorn") for c in calls)
+
+
+# --------------------------------------------------------------------------- the head check (PRD-262 US-030)
+
+
+def _heads_reader():
+    spec = importlib.util.spec_from_file_location("alembic_heads_for_entrypoint", _ORCH / "scripts" / "alembic_heads.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _code_head_and_parent() -> tuple[str, str]:
+    reader = _heads_reader()
+    graph = reader.read_graph()
+    (head,) = reader.heads(graph)  # one head: test_prd209_alembic_single_head
+    return head, graph[head][0]
+
+
+_REAL_READER = {"REAL_PYTHON": sys.executable}
+
+
+@pytest.mark.parametrize("flags", [{}, {"AUTOMATOS_MIGRATE_ON_BOOT": "true"}])
+def test_a_boot_at_head_runs_no_alembic(tmp_path, flags):
+    """The head check passes: no alembic, the skip line, and the rest of the boot as before."""
+    env = {**_POSTGRES_ENV, **_LOCAL_ENV, **flags, "FAKE_AT_HEAD_RC": "0", "FAKE_DB_VERSION": "the_head"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert _alembic(calls) == [], calls
+    assert _SKIPPED in out and _MIGRATING not in out
+    assert "python stdin: the_head" in calls, "the check reads alembic_version's rows on stdin"
+    assert calls[-1] == _SERVED
+    assert any(call.startswith(_SEED) for call in calls) is bool(flags), calls
+    assert _BANNER in out
+
+
+def test_the_check_reads_alembic_version_then_alembic_runs_when_not_at_head(tmp_path):
+    code, calls, out = _run(tmp_path, _SERVER, {**_POSTGRES_ENV, "FAKE_DB_VERSION": "the_parent"})
+    assert code == 0, out
+    order = [_containing(calls, "SELECT version_num FROM alembic_version"), _first(calls, _HEAD_CHECK),
+             _first(calls, "alembic upgrade heads"), len(calls) - 1]
+    assert order == sorted(order), calls
+    assert _alembic(calls) == ["alembic upgrade heads"]
+    assert _MIGRATING in out and _SKIPPED not in out
+
+
+def test_an_unreadable_alembic_version_goes_to_alembic(tmp_path):
+    env = {**_POSTGRES_ENV, "FAKE_DB_VERSION": "the_head", "FAKE_VERSION_RC": "2", "FAKE_AT_HEAD_RC": "0"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert not any(call.startswith(_HEAD_CHECK) for call in calls), calls
+    assert _alembic(calls) == ["alembic upgrade heads"]
+
+
+@pytest.mark.parametrize("flags", [{}, {"AUTOMATOS_MIGRATE_ON_BOOT": "true"}])
+def test_the_real_reader_skips_alembic_at_the_codes_head(tmp_path, flags):
+    head, _parent = _code_head_and_parent()
+    env = {**_POSTGRES_ENV, **flags, **_REAL_READER, "FAKE_DB_VERSION": head}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert _alembic(calls) == [], calls
+    assert _SKIPPED in out and f"the code's head(s): {head}" in out
+
+
+def test_the_real_reader_migrates_a_database_behind_the_code(tmp_path):
+    _head, parent = _code_head_and_parent()
+    code, calls, out = _run(tmp_path, _SERVER, {**_POSTGRES_ENV, **_REAL_READER, "FAKE_DB_VERSION": parent})
+    assert code == 0, out
+    assert _alembic(calls) == ["alembic upgrade heads"], calls
+    assert out.count(_MIGRATING) == 1 and _SKIPPED not in out
+
+
+@pytest.mark.parametrize("stamped", ["", "prd999_from_newer_code"])
+def test_an_empty_table_or_a_database_ahead_goes_to_alembic_which_fails_loudly(tmp_path, stamped):
+    """A rollback leaves a version this code does not know: alembic refuses it, and uvicorn never starts."""
+    env = {**_POSTGRES_ENV, **_REAL_READER, "FAKE_DB_VERSION": stamped, "FAKE_ALEMBIC_RC": "1"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code != 0, out
+    assert _alembic(calls) == ["alembic upgrade heads"], calls
+    assert not any(call.startswith("uvicorn") for call in calls)
+    assert "Migration failed" in out
+
+
+def test_a_fresh_database_is_initialized_then_skips_alembic(tmp_path):
+    """A missing alembic_version still goes to init_fresh_db, which stamps the head: no alembic run after it."""
+    head, _parent = _code_head_and_parent()
+    env = {**_POSTGRES_ENV, **_REAL_READER, "FAKE_DB_STATE": "empty", "FAKE_DB_VERSION": head,
+           "AUTOMATOS_MIGRATE_ON_BOOT": "true"}
+    code, calls, out = _run(tmp_path, _SERVER, env)
+    assert code == 0, out
+    assert _first(calls, "python -m scripts.init_fresh_db") < _first(calls, _HEAD_CHECK)
+    assert _alembic(calls) == [] and _SKIPPED in out
+
+
+def test_migrate_at_head_skips_alembic_and_still_seeds(tmp_path):
+    head, _parent = _code_head_and_parent()
+    code, calls, out = _run(tmp_path, ["migrate"], {**_POSTGRES_ENV, **_REAL_READER, "FAKE_DB_VERSION": head})
+    assert code == 0, out
+    assert _alembic(calls) == [] and _SKIPPED in out
+    assert any(call.startswith(_SEED) for call in calls), calls
+    assert "Migrate complete" in out
 
 
 def test_failed_seed_fails_migrate(tmp_path):
