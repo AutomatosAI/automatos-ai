@@ -177,7 +177,7 @@ docker builder prune -f
 docker compose -f docker-compose.yml -f docker-compose.images.yml pull backend frontend workspace-worker
 docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --no-build --remove-orphans
 
-# make dev: hot reload from your source
+# make dev: for editing the code (the development stages, your source mounted, hot reload)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
 
 # make down: stop, keep your data
@@ -292,8 +292,8 @@ Composio, if you add a key).
 | `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
 | `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. |
 | `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and exits. |
-| `backend` | `automatos_backend` | built from `./orchestrator` (`development` target) | 8000 (`API_PORT`) | The FastAPI API. Source is bind-mounted and served by `uvicorn --reload`. |
-| `frontend` | `automatos_frontend` | built from `./frontend` (`development` target) | 3000 (`FRONTEND_PORT`) | The Next.js UI (`npm run dev`, source bind-mounted). Starts once the backend health check passes. |
+| `backend` | `automatos_backend` | built from `./orchestrator` (`production` target) | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
+| `frontend` | `automatos_frontend` | built from `./frontend` (`production` target) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
 | `workspace-worker` | `automatos_workspace_worker` | built from `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
 
 `docker compose --profile all up` adds one more:
@@ -731,20 +731,27 @@ Deliverable feature that exists in the code runs locally.
 ## 10. Updating
 
 ```bash
-docker compose stop backend                  # 1. stop the API before the code changes
 git pull
-docker compose up -d --build                 # 2. rebuild; migrations run as the backend boots
-docker compose exec backend alembic current  # 3. one revision, marked (head)
+docker compose up -d --build                 # 1. rebuild; migrations run as the new backend boots
+docker compose exec backend alembic current  # 2. one revision, marked (head)
 ```
 
-**Stop the backend before you pull.** The backend runs in reload mode with
-`./orchestrator` bind-mounted, so a pull under a running backend loads the
-new code at once, and its startup `create_all` builds any new tables before
-the new migrations run. Migrations are written to survive that
-([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first keeps the
-order they expect: migrations first, then the code that uses them.
+The default stack runs the production images, with the code inside them, so a
+pull changes nothing until `--build` rebuilds them and recreates the
+containers; the new backend migrates before it serves.
 
-`--build` rebuilds the images when dependencies or Dockerfiles changed.
+**Under `make dev`, stop the backend before you pull.** That stack runs the
+backend in reload mode with `./orchestrator` bind-mounted, so a pull under a
+running backend loads the new code at once, and its startup `create_all`
+builds any new tables before the new migrations run. Migrations are written to
+survive that ([AGENTS.md](../../AGENTS.md) → Migrations), but stopping first
+keeps the order they expect: migrations first, then the code that uses them.
+
+```bash
+docker compose stop backend   # under make dev: stop the API before the code changes
+git pull
+make dev
+```
 
 **Running the published images** (`make up-images`, see
 [QUICKSTART](../../QUICKSTART.md#or-run-the-published-images-no-build))? Update
@@ -804,8 +811,8 @@ git ls-files --eol orchestrator/docker-entrypoint.sh services/workspace-worker/e
 If either reports `w/crlf`, change its line-ending setting to LF in your editor
 and save, preserving any local edits. Then run
 `docker compose up -d --build backend workspace-worker`. Rebuilding alone
-cannot repair the backend script: Compose bind-mounts the host's copy over
-the image's entrypoint.
+cannot repair the backend script: the build copies your checkout's file into
+the image, and `make dev` also mounts it over the image's copy.
 
 **`password authentication failed for user "postgres"` after changing
 `POSTGRES_PASSWORD`.** Postgres applies the password only when it initialises
@@ -877,6 +884,8 @@ The same CI gates both: every change is compose-only, fresh-clone-only, or
 guarded by `AUTH_EDITION`, and the fresh-clone smoke lane boots this exact
 stack from an empty checkout. Contributions land in every edition under the
 repository's Apache-2.0 licence with a DCO sign-off — see
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
+
 ### Keeping it small
 
 Rebuilding leaves the previous image untagged and grows the build cache, and
@@ -904,16 +913,21 @@ Docker Engine:
 
 ### Working on the code instead of with it
 
-The default stack runs the shipped production images — the Next.js standalone
-build and a compiler-free Python runtime — because that is what a user installs.
-For hot reload while editing:
+The default stack (`make up`, plain `docker compose up`) runs the published
+production images, pulled from GHCR: the Next.js standalone build and a
+compiler-free Python runtime, with the code inside them, because that is what a
+user installs. Nothing is mounted over the code and nothing reloads. To edit the
+code, run `make dev`:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+make dev    # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
 ```
 
-That swaps the frontend and backend to their development stages and mounts your
-source. It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
+That builds the frontend's and the backend's development stages from your
+checkout and mounts your source over `/app`: the backend runs `uvicorn
+--reload` and the frontend the Next.js dev server, so edits reload live. The
+backend's entrypoint and healthcheck scripts are mounted from the checkout too.
+It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
 
 Two things are opt-in to keep the default install small:
 
@@ -925,8 +939,6 @@ docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
 # still clusters, using networkx's Louvain — lower partition quality)
 docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
 ```
-
-[CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Session mode — your own Claude Code sessions, managed (PRD-234)
 

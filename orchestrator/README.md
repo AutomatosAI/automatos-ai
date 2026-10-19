@@ -38,13 +38,14 @@ There is no bare-metal setup to maintain. From the repository root:
 
 ```bash
 cp .env.example .env     # POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY (+ one LLM key)
-docker compose up
+make dev                 # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-- The `backend` service builds this directory with the `development` target,
-  bind-mounts it at `/app` and runs `uvicorn main:app --reload`, so edits are
-  live. Dependency or Dockerfile changes need
-  `docker compose up -d --build backend`.
+- Under `make dev` the `backend` service builds this directory with the
+  `development` target, bind-mounts it at `/app` and runs
+  `uvicorn main:app --reload`, so edits are live. Dependency or Dockerfile
+  changes need `make dev` again, which rebuilds. Plain `docker compose up` runs
+  the production target instead, with the code inside the image and no reload.
 - Configuration is layered: `envs/api.defaults` (committed local topology,
   `AUTH_EDITION=local`), `envs/api.local` (gitignored overrides for any
   `config.py` dial) and the compose `environment:` block (secrets substituted

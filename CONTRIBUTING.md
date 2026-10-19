@@ -42,18 +42,19 @@ Other welcome contributions:
 
 ## Development environment
 
-The compose stack **is** the development environment; there is no separate bare-metal setup.
+`make dev` is the development environment: the compose stack with your source mounted. There is no separate bare-metal setup.
 
 ```bash
 git clone https://github.com/<you>/automatos-ai.git
 cd automatos-ai
 cp .env.example .env        # POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY and one LLM key
-docker compose up
+make dev                    # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-- **Reload mode.** The backend and frontend containers bind-mount their source directories (`./orchestrator` → `/app`, `./frontend` → `/app`) and run in reload mode (`uvicorn --reload`, `npm run dev`), so edits are picked up without a rebuild. A dependency change needs `docker compose up -d --build`.
+- **Reload mode.** `make dev` builds the backend's and the frontend's development stages, bind-mounts their source directories (`./orchestrator` → `/app`, `./frontend` → `/app`) and runs them in reload mode (`uvicorn --reload`, `npm run dev`), so edits are picked up without a rebuild. A dependency change needs `make dev` again, which rebuilds.
+- **Plain `docker compose up` and `make up` run the published images, not your checkout.** They run the production stages CI builds and scans: the code is inside the images, nothing is mounted over it and nothing reloads.
 - **Frontend-only work** can run the UI on the host instead (`cd frontend && npm install && npm run dev`), against the containerised API at `http://localhost:8000`.
-- **Migrations.** Database migrations run on every backend boot (`alembic upgrade heads`). A fresh, empty database is first built by `python -m scripts.init_fresh_db`. To update an existing environment, stop the backend before you pull ([self-hosting guide §10](docs/getting-started/self-hosting.md#10-updating)).
+- **Migrations.** Database migrations run once per boot, from the backend's entrypoint (`alembic upgrade heads`), and not at all when the database is already at head. A fresh, empty database is first built by `python -m scripts.init_fresh_db`. Under `make dev`, stop the backend before you pull, so the reload does not start the new code before its migrations ([self-hosting guide §10](docs/getting-started/self-hosting.md#10-updating)).
 - **Everything else** — services, ports, dials, troubleshooting — is in the [self-hosting guide](docs/getting-started/self-hosting.md).
 
 ---
@@ -89,7 +90,7 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 | `test` · `schema-drift` | No migration `ALTER`s a table that no writer `CREATE`s (`scripts/ci/schema_drift_check.py`). |
 | `test` · `frontend-ci` | vitest, baselined `tsc`, an ESLint report, the code-shape rules and `apiClient`-only calls on changed lines, and the route contract (every backend path the frontend calls exists in the route manifest). |
 | `test` · eval lanes | Self-tests of the NL2SQL, retrieval-recall, memory-recall and graph-uplift harnesses (informational). |
-| `smoke-fresh-clone` | `docker compose up` from an empty checkout, with only the three secrets, reaches a green `/health` and `/health/ready`, and the frontend answers on `:3000`. It times the fresh boot and two warm restarts from the container's start and writes them, with the alembic runs and the boot stages, to the step summary. It also runs every night. |
+| `smoke-fresh-clone` | `make build` from an empty checkout builds the production stages of the backend, the frontend and the workspace worker while the datastores start; with only the three secrets the stack reaches a green `/health` and `/health/ready`, and the frontend answers on `:3000`. The backend must run as the production stage: no bind mount over `/app`, no `--reload`, and uvicorn is the process the entrypoint's watchdog signals. A key set only in `envs/api.local` must reach the backend after `docker compose up -d --no-deps backend`, and `docker compose stop backend` must finish in under 8 s with an SSE client connected. It times the fresh boot and two warm restarts from the container's start and writes them, with the alembic runs and the boot stages, to the step summary. It also runs every night. |
 | `smoke-images` | Boots the images CI publishes. After each main publish it pulls `sha-<7>` into an empty Docker cache on amd64 and arm64, boots it, and asserts nothing was built, every image carries its commit's revision label, and the backend runs the production command; then it moves `edge` to that tag. Every Monday it does the same for `weekly-<yyyymmdd>`, the images' weekly rebuild with fresh OS packages. On pull requests that touch compose, the Makefile, `envs/` or an image input, it builds the three amd64 images in the job and boots them the same way. It reports the pull, the boots and the first run to `:3000` in the step summary. |
 | `images` | Builds the container images whose inputs a pull request touches (all of them on `main`), pushes them to a registry inside the job, and reports each one's size, layers and update delta. Scans each image with Grype: a fixable Critical, or a match on CISA's Known Exploited Vulnerabilities list at any severity, fails it unless `.grype.yaml` allowlists the row with a reason and an expiry at most 90 days out (`POLICY_MODE` in `images.yml`: `report` only warns, `fail` blocks). On `main` it then publishes to GHCR and signs. |
 | `scan-allowlist` | Every `.grype.yaml` entry has a reason and an expiry at most 90 days out. Runs every day and fails once an entry has expired, and on pull requests that change the allowlist. |
