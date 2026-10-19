@@ -19,6 +19,11 @@ name: smoke-fresh-clone
 # MinIO through that botocore, and fetches it back from the host by its presigned URL
 # (scripts/ci/smoke_document_presign.py).
 #
+# PRD-262 US-029 — the entrypoint is the only owner of migrations. After the warm
+# restarts the database is stamped one revision behind head and the backend boots once
+# more; every boot must show the entrypoint's banner, no alembic after it and at most
+# one alembic run, and the behind-head boot exactly one (scripts/ci/smoke_alembic.py).
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -69,6 +74,8 @@ on:
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_alembic.py"
+      - "scripts/ci/smoke_alembic_behind.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -101,6 +108,8 @@ on:
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_alembic.py"
+      - "scripts/ci/smoke_alembic_behind.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual

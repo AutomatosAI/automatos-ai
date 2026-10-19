@@ -17,7 +17,8 @@ tool does the rest, one command per step:
 * ``pull``: runs ``docker compose pull``, timing it and counting the bytes the runner
   received meanwhile;
 * ``workers``: the backend's processes. This is the first CI boot of the production
-  stage, so it must run without ``--reload`` and with the expected worker count;
+  stage, so it must run without ``--reload`` and with the expected worker count, the
+  one compose's WEB_CONCURRENCY sets (PRD-262 US-029: the CMD names no ``--workers``);
 * ``images``: each app container runs its ``ghcr.io/automatosai/automatos-*`` image,
   which carries the commit's ``org.opencontainers.image.revision``. A pulled image's
   ``RepoDigests`` holds the index digest its tag resolves to on GHCR (a local build
