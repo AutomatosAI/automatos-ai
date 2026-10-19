@@ -14,7 +14,9 @@
  * theme, reloads (PA-13: its first paint comes from the server).
  *
  * Query keys are scoped by workspace id, so switching workspaces clears the cache. A-02c reads
- * `useInstalledThemes` for the menu and ⌘K entries.
+ * `useInstalledThemes` for the menu and ⌘K entries, but only once one of them asks
+ * (`wantInstalledThemes`, choice-sync.ts): until then it passes `enabled: false` and reads only
+ * what Settings › Appearance already fetched, so an ordinary page asks for no installs.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -65,12 +67,17 @@ function useInvalidateThemes(): () => Promise<void> {
 
 // ============= QUERIES =============
 
+export interface InstalledThemesOptions {
+  /** False reads the cache only (no request); the default fetches. */
+  readonly enabled?: boolean
+}
+
 /** The workspace's active installs, each with its opt-in, revocation and "needs update" state. */
-export function useInstalledThemes() {
+export function useInstalledThemes({ enabled = true }: InstalledThemesOptions = {}) {
   const workspaceId = useWorkspaceId()
   return useQuery<InstalledTheme[]>({
     queryKey: themeQueryKeys.installed(workspaceId),
-    enabled: !!workspaceId,
+    enabled: enabled && !!workspaceId,
     queryFn: async () => (await apiClient.getInstalledThemes()).installs,
     staleTime: 15_000,
   })
@@ -91,6 +98,16 @@ export function useThemeSettings() {
 export function choiceOf(active: unknown): string | null {
   const choice = (active as { choice?: unknown } | null | undefined)?.choice
   return typeof choice === 'string' ? choice : null
+}
+
+/** Where GET /api/themes/active's choice came from (A-07b): the member's own, the workspace default, or Studio for neither. */
+export type ChoiceSource = 'choice' | 'default' | 'fallback'
+const CHOICE_SOURCES: readonly string[] = ['choice', 'default', 'fallback']
+
+/** The `source` field of GET /api/themes/active, or null when it has none (a backend before it). */
+export function choiceSourceOf(active: unknown): ChoiceSource | null {
+  const source = (active as { source?: unknown } | null | undefined)?.source
+  return typeof source === 'string' && CHOICE_SOURCES.includes(source) ? (source as ChoiceSource) : null
 }
 
 /** The member's current choice here, as the server holds it ('studio', 'builtin:play', an install id…). */

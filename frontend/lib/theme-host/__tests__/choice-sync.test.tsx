@@ -11,6 +11,9 @@
  *   the host's revert to Studio (A-04c), so its answer never reloads back into the failing theme.
  * - The entries: installs join as theme:install:<id>, 'Private · not reviewed' when unreviewed;
  *   D1-c hides builtin Play once automatos/play is installed, except from a member still on it.
+ * - M1: the installs are fetched only once the menu, ⌘K or the Play note wants them, never in
+ *   safe mode. M2: with no stored server choice (`source` default or fallback), a tab on its own
+ *   style (not Studio) stores it instead of following the workspace default.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -39,10 +42,12 @@ import {
   forgetChecksInThisDocumentForTests,
   packageIdOfBuiltin,
   reconcileTarget,
+  storesTabStyle,
   styleChoices,
   styleOfChoice,
   themeChoiceEntries,
   useChooseStyle,
+  wantInstalledThemes,
 } from '@/lib/theme-host/choice-sync'
 import { SAFE_MODE_PARAM, SAFE_MODE_VALUE } from '@/lib/theme-host/constants'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, UI_STYLE_COOKIE, type UiStyle } from '@/lib/ui-style'
@@ -67,6 +72,11 @@ const INSTALLED_PLAY = installRow({ installId: OTHER_INSTALL_ID, themeId: 'autom
 
 function activeAnswer(choice: string, theme: unknown = null) {
   return { choice, theme }
+}
+
+/** The answer of a backend that says where the choice came from (A-07b `source`). */
+function sourcedAnswer(choice: string, source: 'choice' | 'default' | 'fallback', theme: unknown = null) {
+  return { choice, source, theme }
 }
 
 const seenDefaults = () => window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
@@ -337,15 +347,97 @@ describe('the server choice check (once per workspace and tab)', () => {
     expect(checkRecord('ws-1')).toBeNull()
   })
 
-  it('hands the workspace’s installs to the style context', async () => {
+  it('hands the workspace’s installs to the style context, fetched only once wanted (M1)', async () => {
     seenDefaults()
     vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(activeAnswer('studio'))
-    vi.spyOn(apiClient, 'getInstalledThemes').mockResolvedValue({ installs: [installRow()] })
+    const installed = vi.spyOn(apiClient, 'getInstalledThemes').mockResolvedValue({ installs: [installRow()] })
     function Installed() {
       return <span data-testid="installed">{useUiStyle().installedThemes.map((row) => row.name).join(',')}</span>
     }
     mount('studio', vi.fn(), <Installed />)
+    await settle()
+    expect(installed).not.toHaveBeenCalled()
+    expect(screen.getByTestId('installed').textContent).toBe('')
+    act(() => wantInstalledThemes())
     await waitFor(() => expect(screen.getByTestId('installed').textContent).toBe('Garden'))
+    expect(installed).toHaveBeenCalledTimes(1)
+  })
+
+  it('never fetches the installs in safe mode, even when wanted', async () => {
+    seenDefaults()
+    const installed = vi.spyOn(apiClient, 'getInstalledThemes').mockResolvedValue({ installs: [installRow()] })
+    window.history.replaceState(null, '', `/agents?${SAFE_MODE_PARAM}=${SAFE_MODE_VALUE}`)
+    mount('studio', vi.fn())
+    act(() => wantInstalledThemes())
+    await settle()
+    expect(installed).not.toHaveBeenCalled()
+  })
+})
+
+describe('a cookie-only style with no stored server choice (M2)', () => {
+  it('stores the tab style only when the server holds no choice and the tab is on its own style', () => {
+    expect(storesTabStyle('classic', sourcedAnswer(INSTALL_ID, 'default'))).toBe(true)
+    expect(storesTabStyle(BUILTIN_PLAY_STYLE, sourcedAnswer('studio', 'fallback'))).toBe(true)
+    expect(storesTabStyle(INSTALLED_STYLE, sourcedAnswer(OTHER_INSTALL_ID, 'default'))).toBe(true)
+    expect(storesTabStyle('studio', sourcedAnswer(INSTALL_ID, 'default'))).toBe(false)     // the build default follows
+    expect(storesTabStyle('classic', sourcedAnswer(INSTALL_ID, 'choice'))).toBe(false)     // the member's own choice wins
+    expect(storesTabStyle(INSTALLED_STYLE, sourcedAnswer(INSTALL_ID, 'default'))).toBe(false) // already the default
+    expect(storesTabStyle('classic', activeAnswer(INSTALL_ID))).toBe(false)                // a backend with no source
+  })
+
+  it('a workspace default does not override a Classic tab: Classic is stored, no reload', async () => {
+    seenDefaults()
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer(INSTALL_ID, 'default'))
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    const reload = vi.fn()
+    mount('classic', reload)
+    await settle()
+    expect(put).toHaveBeenCalledWith('classic')
+    expect(styleShown()).toBe('classic')
+    expect(reload).not.toHaveBeenCalled()
+    expect(checkRecord('ws-1')).toBe('checked')
+  })
+
+  it("an installed tab with no stored choice stores its install, and is not reloaded off it", async () => {
+    seenDefaults()
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer('studio', 'fallback'))
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    mount(INSTALLED_STYLE, vi.fn())
+    await settle()
+    expect(put).toHaveBeenCalledWith(INSTALL_ID)
+    expect(styleShown()).toBe(INSTALLED_STYLE)
+  })
+
+  it('a tab on Studio follows the workspace default and stores nothing', async () => {
+    seenDefaults()
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer(INSTALL_ID, 'default'))
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    const reload = vi.fn()
+    mount('studio', reload)
+    await settle()
+    expect(put).not.toHaveBeenCalled()
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('a refused store (members may not choose) follows the server as before', async () => {
+    seenDefaults()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer('builtin:play', 'default'))
+    vi.spyOn(apiClient, 'putThemeChoice').mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+    mount('classic', vi.fn())
+    await settle()
+    await settle()
+    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
+  })
+
+  it("the member's own stored choice is followed, never overwritten", async () => {
+    seenDefaults()
+    vi.spyOn(apiClient, 'getActiveTheme').mockResolvedValue(sourcedAnswer('builtin:play', 'choice'))
+    const put = vi.spyOn(apiClient, 'putThemeChoice').mockResolvedValue({})
+    mount('classic', vi.fn())
+    await settle()
+    expect(put).not.toHaveBeenCalled()
+    expect(styleShown()).toBe(BUILTIN_PLAY_STYLE)
   })
 })
 

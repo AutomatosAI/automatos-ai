@@ -16,23 +16,32 @@
  *   pick was made while it was in flight, or when the tab left the installed theme it was on
  *   (the host's three-failure revert to Studio, A-04c): the answer can only name the choice the
  *   server held before, and following it would reload straight back into the failing theme.
- * - The server answers 'studio' both for a stored Studio and for "no choice, no default"; the two
- *   can't be told apart, so a server Studio never moves a tab off Classic or a builtin theme (a
- *   pick made before PA-12; builtin Play until A-18 moves it). It does move a tab off an installed
- *   theme, which only the server can give. Any other server choice wins.
+ * - The answer's `source` says where its choice came from: the member's stored choice, the
+ *   workspace default, or Studio's fallback. With no stored choice (`default` or `fallback`), a
+ *   tab on anything but Studio holds a pick only its cookie knows (made before PA-12): the first
+ *   check PUTs that style as the member's choice instead of following the default, so a workspace
+ *   default never overrides it. A tab on Studio, the build's own default, follows the default. A
+ *   refused PUT (members may not choose, the install is gone) follows the server as below.
+ * - Without `source` (a backend before it), 'studio' is both a stored Studio and "no choice, no
+ *   default"; so a server Studio never moves a tab off Classic or a builtin theme (a pick made
+ *   before PA-12; builtin Play until A-18 moves it). It does move a tab off an installed theme,
+ *   which only the server can give. Any other server choice wins.
+ * - The installs (`/api/themes/installed`) are asked for only once the theme menu, ⌘K or the
+ *   Play note needs them (`wantInstalledThemes` / `useWantInstalledThemes`), never in safe mode;
+ *   until then the menu shows what Settings › Appearance already fetched, if anything.
  * - The menu's entries (`themeChoiceEntries`): the builtin themes, then the workspace's installs
  *   as `theme:install:<id>`, "Private · not reviewed" when unreviewed. D1-c (Gerard, 18 Oct):
  *   once a builtin theme's own package (`automatos/<name>`) is installed, the builtin entry is
  *   hidden, except from a member still on it, who keeps it until A-18 moves them.
  */
-import { createElement, useCallback, useContext, useEffect, useRef } from 'react'
+import { createElement, useCallback, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 import { defaultContext } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { PRIVATE_NOT_REVIEWED, isDisabled, themeName } from '@/components/settings/themes/theme-labels'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
 import { persistUiStyle, useUiStyleOptional, type UiStyleContextValue } from '@/contexts/ui-style-context'
-import { choiceOf, themeQueryKeys, useInstalledThemes } from '@/hooks/use-installed-themes'
+import { choiceOf, choiceSourceOf, themeQueryKeys, useInstalledThemes } from '@/hooks/use-installed-themes'
 import { apiClient, type InstalledTheme } from '@/lib/api-client'
 import { themeErrorMessage } from '@/lib/theme-host/api'
 import { BUILTIN_THEMES, isInstalledThemeStyle, themeRefOf, themeStyleOf } from '@/lib/theme-host/registry'
@@ -74,6 +83,17 @@ export function styleOfChoice(choice: string | null): UiStyle | null {
   }
   const installed = themeStyleOf(`${INSTALL_REF_PREFIX}${choice}`)
   return isInstalledThemeStyle(installed) ? installed : null
+}
+
+/**
+ * True when the server holds no choice for this member (`source` default or fallback) and the tab
+ * is on a style of its own that the answer does not name: the first check stores the tab's style.
+ * Studio is the build's default, not a pick, so a tab on it follows the workspace default.
+ */
+export function storesTabStyle(current: UiStyle, active: unknown): boolean {
+  const source = choiceSourceOf(active)
+  if (source === null || source === 'choice' || current === DEFAULT_UI_STYLE) return false
+  return styleOfChoice(choiceOf(active)) !== current
 }
 
 /**
@@ -148,10 +168,46 @@ const checkedInThisDocument = new Set<string>()
 /** Picks made in this document; a check answered after a pick is dropped (the pick is newer). */
 let picksMade = 0
 
+/** Whether the menu, ⌘K or the Play note has asked for the installs in this document. */
+let installsWanted = false
+const installsWantedListeners = new Set<() => void>()
+
 /** Tests only: a new document (a reload) forgets what this one checked; sessionStorage keeps the tab's record. */
 export function forgetChecksInThisDocumentForTests(): void {
   checkedInThisDocument.clear()
   picksMade = 0
+  installsWanted = false
+}
+
+/**
+ * The theme menu (on open), ⌘K (on open) and the Play note call this when they need the
+ * workspace's installs: ThemeChoiceSync then fetches them, once, outside safe mode.
+ */
+export function wantInstalledThemes(): void {
+  if (installsWanted) return
+  installsWanted = true
+  installsWantedListeners.forEach((listener) => listener())
+}
+
+/** `wantInstalledThemes` from a component, once `when` is true (a menu or dialog open). */
+export function useWantInstalledThemes(when = true): void {
+  useEffect(() => {
+    if (when) wantInstalledThemes()
+  }, [when])
+}
+
+function subscribeInstallsWanted(listener: () => void): () => void {
+  installsWantedListeners.add(listener)
+  return () => {
+    installsWantedListeners.delete(listener)
+  }
+}
+
+const installsWantedNow = (): boolean => installsWanted
+const installsWantedOnServer = (): boolean => false
+
+function inSafeMode(): boolean {
+  return typeof window !== 'undefined' && isSafeModeRequested(window.location.search, safeSessionStorage())
 }
 
 function checkKey(workspaceId: string): string {
@@ -202,35 +258,64 @@ function movedOnSince(picksBefore: number, styleBefore: UiStyle | null, current:
   return styleBefore !== null && isInstalledThemeStyle(styleBefore) && current.style !== styleBefore
 }
 
-/** Once per workspace and tab, outside safe mode: GET /api/themes/active and follow a differing choice. */
+/** PUTs the tab's cookie-only style as the member's choice; true when the server stored it. */
+async function storeTabStyle(style: UiStyle): Promise<boolean> {
+  try {
+    await apiClient.putThemeChoice(choiceOfStyle(style))
+    return true
+  } catch (error) {
+    console.warn(LOG_PREFIX, "the tab's theme could not be stored as the member's choice", error)
+    return false
+  }
+}
+
+/** Once per workspace and tab, outside safe mode: GET /api/themes/active, then store the tab's own style or follow the server's. */
 function useServerChoiceCheck(workspaceId: string): void {
   const ui = useUiStyleOptional()
   const uiRef = useRef(ui)
   uiRef.current = ui
+  const queryClient = useContext(defaultContext)
 
   useEffect(() => {
     if (checkedInThisTab(workspaceId)) return
-    if (isSafeModeRequested(window.location.search, safeSessionStorage())) return
+    if (inSafeMode()) return
     checkedInThisDocument.add(workspaceId)
     const picksBefore = picksMade
     const styleBefore = uiRef.current?.style ?? null
+    const stillCurrent = (): UiStyleContextValue | null => {
+      const current = uiRef.current
+      return current === null || movedOnSince(picksBefore, styleBefore, current) ? null : current
+    }
+    const settle = async (active: unknown): Promise<void> => {
+      const current = stillCurrent()
+      if (current === null) return
+      if (storesTabStyle(current.style, active) && (await storeTabStyle(current.style))) {
+        recordCheck(workspaceId, CHECKED)
+        void queryClient?.invalidateQueries({ queryKey: themeQueryKeys.active(workspaceId) })
+        return
+      }
+      const now = stillCurrent()
+      if (now === null) return
+      const target = reconcileTarget(now.style, active)
+      if (target === null) recordCheck(workspaceId, CHECKED)
+      else applyServerStyle(now, workspaceId, target)
+    }
     apiClient
       .getActiveTheme()
-      .then((active) => {
-        const current = uiRef.current
-        if (current === null || movedOnSince(picksBefore, styleBefore, current)) return
-        const target = reconcileTarget(current.style, active)
-        if (target === null) recordCheck(workspaceId, CHECKED)
-        else applyServerStyle(current, workspaceId, target)
-      })
+      .then(settle)
       .catch((error: unknown) => console.warn(LOG_PREFIX, 'the theme choice could not be checked', error))
-  }, [workspaceId])
+  }, [workspaceId, queryClient])
 }
 
-/** Hands the workspace's installs to the style context, where the menu and ⌘K read them. */
+/**
+ * Hands the workspace's installs to the style context, where the menu and ⌘K read them. They are
+ * fetched only once wanted (wantInstalledThemes) and never in safe mode; until then this reads the
+ * cache only, which Settings › Appearance fills.
+ */
 function usePublishInstalledThemes(): void {
   const setInstalledThemes = useUiStyleOptional()?.setInstalledThemes
-  const { data } = useInstalledThemes()
+  const wanted = useSyncExternalStore(subscribeInstallsWanted, installsWantedNow, installsWantedOnServer)
+  const { data } = useInstalledThemes({ enabled: wanted && !inSafeMode() })
   useEffect(() => {
     if (setInstalledThemes) setInstalledThemes(data ?? [])
   }, [data, setInstalledThemes])
