@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
 import uuid
@@ -20,6 +20,7 @@ from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
+from core.llm import auto_model_sync
 from core.models.system_settings import (
     SystemSetting, SystemSettingResponse, SystemSettingUpdate, 
     SystemSettingCreate, SystemSettingsByCategory, SystemSettingsStats,
@@ -47,53 +48,28 @@ def _require_admin(ctx: RequestContext) -> None:
     raise HTTPException(status_code=403, detail="Admin access required")
 
 
-# The orchestrator_llm keys core/llm/new_agent_model.default_route reads for the
-# platform's default Auto model (the legacy names too).
-ORCHESTRATOR_ROUTE_KEYS = frozenset({"provider", "model", "llm_provider", "llm_model"})
-RESTAMP_UNDONE = ("The Auto agents on the platform default could not be moved to the new "
-                  "model, so nothing was saved. Try again.")
-RESTAMP_FAILED = ("The setting was saved, but the Auto agents on the platform default were "
-                  "not moved to it. Run scripts/restamp_auto_models.py --apply.")
+# The Auto restamp on a change of the platform default (core/llm/auto_model_sync):
+# the keys it watches, and what the admin is told when the move fails.
+ORCHESTRATOR_ROUTE_KEYS = auto_model_sync.ORCHESTRATOR_ROUTE_KEYS
+RESTAMP_UNDONE = auto_model_sync.RESTAMP_UNDONE
+RESTAMP_FAILED = auto_model_sync.RESTAMP_FAILED
 
-Changed = List[Tuple[SystemSetting, Optional[str]]]  # (setting, its value before)
+Changed = auto_model_sync.Changed  # (setting, its value before)
 
 
 def _moves_auto_default(setting: SystemSetting, old_value: Optional[str]) -> bool:
     """Did this update change the provider or model of the platform's default Auto model?"""
-    return (setting.category == SettingCategory.ORCHESTRATOR_LLM.value and setting.key in ORCHESTRATOR_ROUTE_KEYS
-            and (old_value or "") != (setting.value or ""))
-
-
-def _undo(db: Session, changed: Changed) -> str:
-    """Put ``changed`` back as it was, so the same save retries the move (the
-    restamp fires on a changed value only); the message for the admin."""
-    try:
-        for setting, old_value in changed:
-            setting.value = old_value
-        db.commit()
-        return RESTAMP_UNDONE
-    except Exception:
-        db.rollback()
-        logger.exception("Could not undo the settings saved before a failed Auto model restamp")
-        return RESTAMP_FAILED
+    return auto_model_sync.changes_platform_default(setting.category, setting.key, old_value, setting.value)
 
 
 def _restamp_auto_models(db: Session, changed: Changed) -> Dict[str, Any]:
-    """Move the Auto rows still on the platform default to the one just saved
-    (core/llm/auto_model_sync), in this request. The setting is committed first:
-    ``default_route`` reads it on its own connection. If the move fails, the saved
-    settings in ``changed`` are put back, so the setting and the rows never part."""
-    from core.llm.auto_model_sync import restamp_inheriting_auto_agents
-
+    """Move the Auto rows still on the platform default to the one just saved, in
+    this request (auto_model_sync.restamp_after_settings_change). If the move fails,
+    the saved settings in ``changed`` are put back and the admin gets a 500 saying so."""
     try:
-        counts = restamp_inheriting_auto_agents(db)
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        logger.exception("Auto model restamp failed after an orchestrator_llm change")
-        raise HTTPException(status_code=500, detail=_undo(db, changed)) from exc
-    logger.info("orchestrator_llm changed: Auto model restamp %s", counts)
-    return counts
+        return auto_model_sync.restamp_after_settings_change(db, changed)
+    except auto_model_sync.AutoRestampError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/", response_model=List[SystemSettingResponse])
@@ -375,30 +351,34 @@ def bulk_update_settings(
 
 
 @router.post("/reset-to-defaults", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def reset_settings_to_defaults(
+def reset_settings_to_defaults(
     category: Optional[str] = None,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
-    """Reset settings to their default values"""
+    """Reset settings to their default values. A reset that moves the platform
+    default for Auto restamps the Auto rows on it, as an update does (a plain
+    ``def``, as update_system_setting)."""
     _require_admin(ctx)
 
     try:
         query = db.query(SystemSetting)
         if category:
             query = query.filter(SystemSetting.category == category)
-        
         settings = query.filter(SystemSetting.default_value.isnot(None)).all()
-        
-        reset_count = 0
+
+        changed: Changed = [(setting, setting.value) for setting in settings]
         for setting in settings:
             setting.value = setting.default_value
-            reset_count += 1
-        
         db.commit()
-        
-        logger.info(f"Reset {reset_count} settings to defaults")
-        return {"message": f"Reset {reset_count} settings to default values"}
+
+        logger.info(f"Reset {len(settings)} settings to defaults")
+        response: Dict[str, Any] = {"message": f"Reset {len(settings)} settings to default values"}
+        if any(_moves_auto_default(setting, old_value) for setting, old_value in changed):
+            response["auto_models"] = _restamp_auto_models(db, changed)
+        return response
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to reset settings to defaults: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

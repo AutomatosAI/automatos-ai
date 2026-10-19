@@ -5,7 +5,7 @@
  * the tab fits the component length rule.
  */
 
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
+import { getDefaultModelConfig } from '@/lib/llm-defaults'
 
 export interface LLMConfig {
   provider: string
@@ -107,7 +107,7 @@ export function fallbackOrchestratorConfig(): OrchestratorConfig {
       notification_channel: 'in_app',
     },
     llm: {
-      ...LLM_DEFAULTS,
+      ...getDefaultModelConfig(),
       max_tokens: 4000,
       stop: null,
       timeout: null,

@@ -10,8 +10,9 @@ The pair below is used only when no setting names both a provider and a model
 (a database that was never seeded, or a settings read that failed). It is also the
 initial value ``core/seeds/seed_system_settings.py`` gives those settings on a fresh
 install; the seed never overwrites a stored value, so changing the pair moves no
-existing deployment. ``frontend/lib/llm-defaults.ts`` holds a copy for the UI,
-held equal to this one by tests/test_auto_model_from_config_frontend_parity.py.
+existing deployment (the one deploy-time move of the platform default is the Alembic
+data migration auto_haiku_default_20261019). The frontend keeps no copy: it reads the
+platform default from ``GET /api/models/platform-default``.
 """
 
 DEFAULT_LLM_PROVIDER = "anthropic"

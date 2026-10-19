@@ -410,6 +410,18 @@ async def list_system_settings(db: Session, workspace_id: UUID, params: Dict[str
         return {"success": False, "error": str(exc)}
 
 
+def _restamp_auto_models(db: Session, setting, old_value: Optional[str]) -> Dict[str, Any]:
+    """A change of the platform default for Auto (orchestrator_llm provider/model)
+    moves the Auto rows still on it, as the System Settings API does
+    (core/llm/auto_model_sync): ``{"auto_models": counts}``, or nothing for any other
+    setting. A failed move puts the setting back and raises, so the tool reports it."""
+    from core.llm import auto_model_sync
+
+    if not auto_model_sync.changes_platform_default(setting.category, setting.key, old_value, setting.value):
+        return {}
+    return {"auto_models": auto_model_sync.restamp_after_settings_change(db, [(setting, old_value)])}
+
+
 async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Update one system setting by category + key (platform-wide — the
     action carries requires_confirmation=True for exactly that reason)."""
@@ -432,6 +444,7 @@ async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[st
         if not setting:
             return {"success": False, "error": f"Setting not found: {category}.{key}"}
 
+        old_value = setting.value
         setting.value = str(value)
         setting.updated_at = datetime.utcnow()
         db.commit()
@@ -440,7 +453,10 @@ async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[st
             "[workspace] system setting %s.%s updated via platform tool (workspace %s)",
             category, key, workspace_id,
         )
-        return {"success": True, "setting": _masked_setting(setting)}
+        # The restamp locks and writes every Auto row: off the event loop, as the
+        # module's other blocking work runs (the session is not used meanwhile).
+        restamped = await asyncio.to_thread(_restamp_auto_models, db, setting, old_value)
+        return {"success": True, "setting": _masked_setting(setting), **restamped}
     except Exception as exc:
         db.rollback()
         logger.error("[workspace] update_system_setting failed: %s", exc, exc_info=True)

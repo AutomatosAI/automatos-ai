@@ -1,8 +1,9 @@
 """An admin's change of the platform default moves the Auto rows that never chose one.
 
 Gerard, 19 Oct 2026: the live default for Auto is system_settings
-``orchestrator_llm``. Deploying moves nothing; when an admin changes the setting
-through the System Settings API, ``restamp_inheriting_auto_agents`` moves the Auto
+``orchestrator_llm``. Code moves nothing at boot (the one deploy-time move is the
+migration auto_haiku_default_20261019); when an admin changes the setting through
+the System Settings API, ``restamp_inheriting_auto_agents`` moves the Auto
 rows still on a shipped seed's pair or marked as inheriting, and leaves every row a
 workspace chose in Settings > Orchestrator. PURE: rows, settings and the session are
 faked (tests/test_auto_model_from_config_restamp_realdb.py holds the SQL filter).
@@ -247,7 +248,7 @@ class _UndoFailsDb(_SettingsDb):
             raise RuntimeError("pool gone")
 
 
-def test_when_the_undo_fails_too_the_admin_is_told_to_run_the_script(monkeypatch):
+def test_when_the_undo_fails_too_the_admin_is_told_how_to_retry(monkeypatch):
     monkeypatch.setattr(sync, "restamp_inheriting_auto_agents", _boom)
     setting = _setting("orchestrator_llm", "model", "old")
     with pytest.raises(settings_api.HTTPException) as raised:

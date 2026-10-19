@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
+import { usePlatformDefaultRoute } from '@/hooks/use-model-api'
 import { Download, Zap, Wrench, Brain, Settings, Info } from 'lucide-react'
 import { DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -127,12 +127,13 @@ function ModelStat({ icon: Icon, label, value }: { icon: typeof Info; label: str
 }
 
 export function ItemModelSection({ item }: { item: MarketplaceItem }) {
-  // Prefer model_config, fall back to the agent's llm_config.
+  // Prefer model_config, fall back to the agent's llm_config, then the platform default.
+  const { data: platformRoute } = usePlatformDefaultRoute()
   const modelConfig = item.metadata?.model_config || {}
   const llmConfig = item.metadata?.configuration?.llm_config || {}
   const capabilities: string[] = item.metadata?.configuration?.capabilities || []
-  const modelProvider = modelConfig.provider || llmConfig.provider || 'openrouter'
-  const modelId: string = modelConfig.model_id || llmConfig.model || LLM_DEFAULTS.model_id
+  const modelProvider = modelConfig.provider || llmConfig.provider || platformRoute?.provider || ''
+  const modelId: string = modelConfig.model_id || llmConfig.model || platformRoute?.model_id || ''
   const temperature = modelConfig.temperature || llmConfig.temperature
   const maxTokens = modelConfig.max_tokens || llmConfig.max_tokens
   const contextWindow = llmConfig.context_window

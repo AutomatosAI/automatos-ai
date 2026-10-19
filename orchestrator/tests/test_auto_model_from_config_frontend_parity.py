@@ -1,7 +1,8 @@
-"""The model ids around the platform default stay real and in step (Gerard, 19 Oct 2026).
+"""The model ids around the platform default stay real, and the UI keeps none (Gerard, 19 Oct 2026).
 
-* frontend/lib/llm-defaults.ts is a hand-kept copy of core/llm/defaults' pair until
-  the UI reads it from the API: its provider and model_id must equal the backend's.
+* frontend/lib/llm-defaults.ts holds no provider or model id: the UI reads the
+  platform default from ``GET /api/models/platform-default`` (default_route), so a
+  change of the setting needs no frontend release and there is no copy to drift.
 * With no Anthropic key the factory sends a Claude through OpenRouter, which lists
   only dotted ids (``anthropic/claude-haiku-5.5``); the hyphenated direct id 404s.
 * A saved Anthropic key is checked with the named probe model, not the retired
@@ -22,16 +23,12 @@ REPO = Path(__file__).resolve().parents[2]
 FRONTEND_DEFAULTS = REPO / "frontend" / "lib" / "llm-defaults.ts"
 
 
-def _ts_field(source: str, name: str) -> str:
-    match = re.search(rf"^\s*{name}:\s*'([^']*)'", source, re.MULTILINE)
-    assert match, f"{name} not found in {FRONTEND_DEFAULTS}"
-    return match.group(1)
-
-
-def test_the_frontend_copy_equals_the_backend_default():
+def test_the_frontend_defaults_hold_no_model_id():
     source = FRONTEND_DEFAULTS.read_text(encoding="utf-8")
-    assert _ts_field(source, "provider") == defaults.DEFAULT_LLM_PROVIDER
-    assert _ts_field(source, "model_id") == defaults.DEFAULT_LLM_MODEL
+    assert not re.search(r"(provider|model_id):\s*'[^']+'", source)
+    for model_id in (defaults.DEFAULT_LLM_MODEL, "claude-", "gemini", "gpt-"):
+        assert model_id not in source
+    assert "/api/models/platform-default" in source
 
 
 # ── the no-Anthropic-key fallback sends OpenRouter's id ─────────────────────

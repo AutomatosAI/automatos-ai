@@ -6,8 +6,10 @@
  * Provides model discovery, recommendations, and cost estimation.
  */
 
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import { ModelRoute, fetchPlatformDefaultRoute, getDefaultModelConfig } from '@/lib/llm-defaults'
 import { useWorkspace } from '@/hooks/use-workspace'
 
 // Types
@@ -111,6 +113,32 @@ export function useWorkspaceModels(options?: { enabled?: boolean }) {
     staleTime: 5 * 60 * 1000,
     enabled: (options?.enabled ?? true) && !!workspaceId,
   })
+}
+
+/**
+ * The platform default model route (GET /api/models/platform-default): what a new
+ * agent, and an Auto that follows the platform default, runs on. Short-lived, so an
+ * admin's change shows within a minute.
+ */
+export function usePlatformDefaultRoute() {
+  return useQuery<ModelRoute>({
+    queryKey: ['platform-default-route'],
+    queryFn: fetchPlatformDefaultRoute,
+    staleTime: 60 * 1000,
+  })
+}
+
+/**
+ * A new agent's model_config state, pre-filled with the platform default once the
+ * API answers, unless a model was picked meanwhile.
+ */
+export function useNewAgentModelConfig() {
+  const { data: platformRoute } = usePlatformDefaultRoute()
+  const [modelConfig, setModelConfig] = useState(getDefaultModelConfig())
+  useEffect(() => {
+    if (platformRoute) setModelConfig((prev) => (prev.model_id ? prev : { ...prev, ...platformRoute }))
+  }, [platformRoute])
+  return { modelConfig, setModelConfig, platformRoute }
 }
 
 /**

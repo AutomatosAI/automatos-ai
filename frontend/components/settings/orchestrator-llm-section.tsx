@@ -80,7 +80,7 @@ export function OrchestratorLLMSection(props: OrchestratorLLMSectionProps) {
                 <div>
                   <CardTitle>LLM Configuration</CardTitle>
                   <CardDescription>
-                    Provider, model, and performance settings for the orchestrator
+                    This workspace&apos;s Auto: provider, model and performance. Reset returns it to the platform default an admin sets.
                   </CardDescription>
                 </div>
               </div>
