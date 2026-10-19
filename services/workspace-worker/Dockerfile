@@ -31,11 +31,25 @@ FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0
 
 WORKDIR /app
 
-# System dependencies — DevOps toolchain for agent workspaces
+# System dependencies — DevOps toolchain for agent workspaces. The same layer drops
+# what no agent build or clone runs (scripts/ci/image_worker_toolchain.py proves the
+# rest still works):
+# - PRD-262 (row 16): gcc's lto-dump (29.4 MB on arm64). `gcc -flto` runs lto1,
+#   lto-wrapper and the linker plugin, never lto-dump, which only prints LTO objects.
+# - PRD-262 (row 19), the API's git trim (US-019): git's server-side and mail
+#   binaries, both copies, which an agent workspace never serves. git-core's second
+#   copy of git, which every builtin there links to, becomes a link to /usr/bin/git.
+#   git-remote-http (clone, pull and push over HTTPS) and ssh stay.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget openssh-client ca-certificates \
     build-essential \
     jq tree gosu \
+    && rm -f /usr/bin/*lto-dump* \
+    && rm -f /usr/bin/git-shell /usr/bin/scalar \
+        /usr/lib/git-core/git-daemon /usr/lib/git-core/git-http-backend \
+        /usr/lib/git-core/git-http-push /usr/lib/git-core/git-imap-send \
+        /usr/lib/git-core/git-shell /usr/lib/git-core/scalar \
+    && ln -sf /usr/bin/git /usr/lib/git-core/git \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 24 with npm and corepack, from the `node` stage: no NodeSource, so no
