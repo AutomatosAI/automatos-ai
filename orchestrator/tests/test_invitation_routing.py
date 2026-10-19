@@ -125,6 +125,7 @@ def test_resolver_skips_provision_when_pending_invitation(mock_provision):
     """The auto-provision race fix: pending invite blocks silent provisioning."""
     db = _exec_returning(
         None,                # no membership
+        None,                # no users row with this email to relink (Clerk cutover)
         ("tok_pending_xyz",),  # pending invitation row exists
     )
 
@@ -147,6 +148,7 @@ def test_resolver_provisions_when_no_invitation(mock_provision):
 
     db = _exec_returning(
         None,   # no membership
+        None,   # no users row with this email to relink (Clerk cutover)
         None,   # no pending invitation
     )
 

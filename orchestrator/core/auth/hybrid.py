@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import hmac as _hmac
 import logging
-import secrets
 import time
 from typing import Callable, Optional
 from urllib.parse import urlparse
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 
 from config import config
 from core.auth.clerk import get_clerk_auth
 from core.auth.dependencies import RequestContext, UserContext
+from core.auth.personal_workspace import insert_personal_workspace, seed_new_workspace
+from core.auth.user_link import ensure_user_row, relink_user_by_email
 from core.database.database import SessionLocal
 from core.services.api_key_service import ApiKeyService
 
@@ -262,32 +262,16 @@ def _provision_new_user_workspace(
     Auto-provision a personal workspace for a new Clerk user.
 
     Creates:
-    1. A ``users`` row (if missing) linked via clerk_user_id
+    1. A ``users`` row (if missing) linked via clerk_user_id. A person who already
+       has a row under another Clerk ID and the same email (the Clerk production
+       cutover) keeps that row, relinked: ``core.auth.user_link.ensure_user_row``.
     2. A personal ``workspaces`` row owned by that user
     3. A ``workspace_members`` row with role='owner'
 
-    Returns the new workspace UUID.
+    Returns the new workspace UUID, or the user's existing personal workspace.
     """
-    # 1) Atomic upsert user -- INSERT ON CONFLICT to avoid race conditions
-    username = email or clerk_user_id
-    try:
-        db.execute(
-            text(
-                "INSERT INTO users (username, email, clerk_user_id, name, is_active) "
-                "VALUES (:username, :email, :cid, :name, true) "
-                "ON CONFLICT (clerk_user_id) DO NOTHING"
-            ),
-            {"username": username, "email": email or f"{clerk_user_id}@pending", "cid": clerk_user_id, "name": name},
-        )
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-
-    uid_row = db.execute(
-        text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-        {"cid": clerk_user_id},
-    ).fetchone()
-    uid = uid_row[0]
+    # 1) Find, relink or insert the user (idempotent; never a 500 on a taken email)
+    uid = ensure_user_row(db, clerk_user_id, email=email, name=name)
     logger.info("Resolved user record id=%s for clerk_user_id=%s", uid, clerk_user_id)
 
     # Serialize concurrent provisioning for the same user via transaction-scoped
@@ -319,35 +303,7 @@ def _provision_new_user_workspace(
         return existing[0]
 
     # 2) Create personal workspace with slug collision handling
-    ws_id = uuid4()
-    ws_name = f"{name or email or 'My'}'s Workspace"
-    base_slug = (email or clerk_user_id).split("@")[0].lower().replace(" ", "-")[:50]
-
-    webhook_key = uuid4().hex
-
-    for attempt in range(5):
-        slug = base_slug if attempt == 0 else f"{base_slug}-{secrets.token_hex(3)}"
-        try:
-            db.execute(
-                text(
-                    "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits, webhook_key) "
-                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'basic', :plan_limits, :webhook_key)"  # PRD-222 W2·S1: entry tier (renamed from 'starter')
-                ),
-                {
-                    "id": str(ws_id),
-                    "name": ws_name,
-                    "slug": slug,
-                    "owner_id": uid,
-                    "plan_limits": '{"max_agents": 10, "max_workflows": 10, "max_documents": 100, "max_members": 5}',
-                    "webhook_key": webhook_key,
-                },
-            )
-            db.flush()
-            break
-        except IntegrityError:
-            db.rollback()
-            if attempt == 4:
-                raise
+    ws_id, ws_name = insert_personal_workspace(db, uid, clerk_user_id, email, name)
 
     # 3) Create workspace_members row
     db.execute(
@@ -365,53 +321,67 @@ def _provision_new_user_workspace(
 
     db.commit()
 
-    # 4) Seed the Auto agent for this workspace (orchestrator default)
-    try:
-        from core.seeds.seed_auto_agent import seed_auto_agent
-        seed_auto_agent(db, ws_id)
-        db.commit()
-    except Exception:
-        logger.exception("Failed to seed Auto agent for workspace %s — non-fatal", ws_id)
-
-    # 5) Seed starter document templates for this workspace
-    try:
-        from modules.documents.seed_templates import seed_starter_templates
-        seed_starter_templates(db, ws_id)
-        db.commit()
-    except Exception:
-        logger.exception("Failed to seed document templates for workspace %s — non-fatal", ws_id)
-
-    # 5.5) 2026-08-29 (the Harbourline failure): every workspace starts with
-    # WORKING models — base OpenRouter set in workspace_models + the primary in
-    # settings.orchestrator. Zero-model workspaces broke Settings → Orchestrator
-    # ("Failed to load LLM settings") and left chat with no sane default.
-    try:
-        from services.workspace_model_seeding import seed_workspace_models
-        if seed_workspace_models(db, ws_id) is not None:
-            db.commit()
-    except Exception:
-        logger.exception("Base-model seed failed for workspace %s — non-fatal", ws_id)
-
-    # 6) PRD-222 US-004 (W1·S9): grant the one-time $5 onboarding trial credit so
-    # the value moment lands before the BYOK ask. One per Clerk user; paused by
-    # the global daily cap or the TRIAL_ENABLED kill switch (all config-driven).
-    # Non-fatal — a workspace must provision even if the grant hiccups.
-    try:
-        from services.trial_ledger import grant_trial_at_provisioning
-        if grant_trial_at_provisioning(db, ws_id, owner_id=uid) is not None:
-            db.commit()
-    except Exception:
-        logger.exception("Trial grant failed for workspace %s — non-fatal", ws_id)
-        try:
-            db.rollback()
-        except Exception:
-            pass
+    # 4–6) Auto, starter templates, base models and the trial grant
+    seed_new_workspace(db, ws_id, uid)
 
     logger.info(
         "Provisioned personal workspace %s (%s) for user %s (clerk=%s)",
         ws_id, ws_name, uid, clerk_user_id,
     )
     return ws_id
+
+
+def _accessible_workspace_for_clerk_user(db, clerk_user_id: str) -> Optional[UUID]:
+    """Any workspace the Clerk user can open (owned OR active membership), owner-biased.
+
+    Mirrors the LEFT JOIN access pattern in `_user_has_workspace_access` so
+    invitees who joined a workspace as members (not owners) resolve correctly
+    when no X-Workspace-ID header is present. Owner-bias keeps existing solo
+    users on their personal workspace; recency tiebreaker favours the most
+    recent join for users with multiple memberships.
+    """
+    ws_row = db.execute(
+        text(
+            "SELECT w.id FROM users u "
+            "JOIN workspaces w "
+            "  ON w.owner_id = u.id "
+            "  OR EXISTS ("
+            "    SELECT 1 FROM workspace_members wm "
+            "    WHERE wm.workspace_id = w.id "
+            "      AND wm.user_id = u.id "
+            "      AND wm.is_active = true "
+            "  ) "
+            "LEFT JOIN workspace_members wm2 "
+            "  ON wm2.workspace_id = w.id AND wm2.user_id = u.id AND wm2.is_active = true "
+            "WHERE u.clerk_user_id = :cid "
+            "  AND w.is_active = true "
+            "  AND w.deleted_at IS NULL "
+            "ORDER BY "
+            "  CASE WHEN w.owner_id = u.id OR COALESCE(wm2.role, '') = 'owner' THEN 0 ELSE 1 END, "
+            "  wm2.joined_at DESC NULLS LAST, "
+            "  w.created_at DESC "
+            "LIMIT 1"
+        ),
+        {"cid": clerk_user_id},
+    ).fetchone()
+    return ws_row[0] if ws_row and ws_row[0] else None
+
+
+def _relinked_workspace_for_clerk_user(
+    db, clerk_user_id: str, email: Optional[str],
+) -> Optional[UUID]:
+    """A returning person's workspace, once their ``users`` row is relinked to this Clerk ID.
+
+    Moving Clerk to its production instance gives every returning person a new Clerk
+    user ID with the same email. Their row moves to the new ID (committed, so every
+    later request resolves by Clerk ID), and they land in the workspace they had
+    before: owned or joined, ahead of the pending-invitation gate, exactly as on the
+    old ID. None when no row has the email, or the row has no usable workspace.
+    """
+    if relink_user_by_email(db, clerk_user_id, email) is None:
+        return None
+    db.commit()
+    return _accessible_workspace_for_clerk_user(db, clerk_user_id)
 
 
 def _resolve_workspace_for_clerk_user(
@@ -426,7 +396,8 @@ def _resolve_workspace_for_clerk_user(
 
     Priority:
     1. Org workspace (workspaces.clerk_org_id == org_id)
-    2. Any workspace the user can access (owned OR active membership), owner-biased
+    2. Any workspace the user can access (owned OR active membership), owner-biased;
+       a returning person under a new Clerk ID is relinked by email first
     3. Auto-provision a new personal workspace (only when no pending invitation)
     """
     # 1) Org workspace
@@ -443,39 +414,13 @@ def _resolve_workspace_for_clerk_user(
         if row and row[0]:
             return row[0]
 
-    # 2) Workspace via ownership OR active membership.
-    # Mirrors the LEFT JOIN access pattern in `_user_has_workspace_access` so
-    # invitees who joined a workspace as members (not owners) resolve correctly
-    # when no X-Workspace-ID header is present. Owner-bias keeps existing solo
-    # users on their personal workspace; recency tiebreaker favours the most
-    # recent join for users with multiple memberships.
+    # 2) Workspace via ownership OR active membership, then via a relink by email.
     if clerk_user_id:
-        ws_row = db.execute(
-            text(
-                "SELECT w.id FROM users u "
-                "JOIN workspaces w "
-                "  ON w.owner_id = u.id "
-                "  OR EXISTS ("
-                "    SELECT 1 FROM workspace_members wm "
-                "    WHERE wm.workspace_id = w.id "
-                "      AND wm.user_id = u.id "
-                "      AND wm.is_active = true "
-                "  ) "
-                "LEFT JOIN workspace_members wm2 "
-                "  ON wm2.workspace_id = w.id AND wm2.user_id = u.id AND wm2.is_active = true "
-                "WHERE u.clerk_user_id = :cid "
-                "  AND w.is_active = true "
-                "  AND w.deleted_at IS NULL "
-                "ORDER BY "
-                "  CASE WHEN w.owner_id = u.id OR COALESCE(wm2.role, '') = 'owner' THEN 0 ELSE 1 END, "
-                "  wm2.joined_at DESC NULLS LAST, "
-                "  w.created_at DESC "
-                "LIMIT 1"
-            ),
-            {"cid": clerk_user_id},
-        ).fetchone()
-        if ws_row and ws_row[0]:
-            return ws_row[0]
+        workspace = _accessible_workspace_for_clerk_user(db, clerk_user_id) or (
+            _relinked_workspace_for_clerk_user(db, clerk_user_id, email)
+        )
+        if workspace:
+            return workspace
 
     # 3) No workspace found -- auto-provision for authenticated Clerk users,
     # unless they have a pending invitation (which owns the consent UX).
