@@ -11,7 +11,9 @@ uvicorn 0.24 awaits the lifespan's start-up before it listens, so ``/health`` an
   failed or not; ``/health/ready`` answers 503 until then;
 * board dispatch keeps its place: after Phase 2, before READY;
 * only the boot leader (the worker whose core phase returned seeds) embeds the agents;
-* a shutdown during the background boot cancels it.
+* a shutdown during the background boot cancels it;
+* the shutdown stops board dispatch, whose loop re-raises the cancel, and still stops
+  what comes after it (the dashboard services).
 
 The starters pass itself (``main._run_starters``) is held in test_prd262_seed_stages.py.
 
@@ -39,7 +41,8 @@ class _Boot:
     """main's boot steps, stubbed: each records its call, and the Composio stage waits
     on ``gate`` so a test can hold the background boot where it likes."""
 
-    def __init__(self, monkeypatch, *, seeds=SEEDS, trust=True, catalog_error=None, dispatch=False):
+    def __init__(self, monkeypatch, *, seeds=SEEDS, trust=True, catalog_error=None, dispatch=False,
+                 dispatch_error=None):
         import core.loop_watchdog as loop_watchdog
         import main
 
@@ -47,6 +50,7 @@ class _Boot:
         self.gate: asyncio.Event | None = None
         self.app = FastAPI()
         self._seeds, self._trust, self._catalog_error = seeds, trust, catalog_error
+        self._dispatch_error = dispatch_error
         for name in ("HEARTBEAT_ENABLED", "RECIPE_SCHEDULER_ENABLED", "COORDINATOR_ENABLED", "CHANNELS_ENABLED"):
             monkeypatch.setattr(main.config, name, False)
         monkeypatch.setattr(main.config, "BOARD_DISPATCH_ENABLED", dispatch)
@@ -95,12 +99,12 @@ class _Boot:
         self.calls.append(("dispatch", self.app.state.ready, tuple(self.stages())))
         return self._dispatch_loop(stop_event)
 
-    @staticmethod
-    async def _dispatch_loop(stop_event):
-        try:
-            await stop_event.wait()
-        except asyncio.CancelledError:
-            return  # the shutdown cancels it; this stand-in ends quietly
+    async def _dispatch_loop(self, stop_event):
+        """Like services.board_dispatcher.run_dispatch_loop: the shutdown's cancel
+        propagates out of it (the real loop re-raises it), or it has already failed."""
+        if self._dispatch_error is not None:
+            raise self._dispatch_error
+        await stop_event.wait()
 
     async def _shutdown_dashboard(self, app):
         self.calls.append("dashboard shut down")
@@ -201,7 +205,44 @@ def test_board_dispatch_starts_after_phase_2_and_before_ready(monkeypatch):
     dispatch = next(call for call in boot.calls if isinstance(call, tuple) and call[0] == "dispatch")
     assert boot.calls.index("phase 2") < boot.calls.index(dispatch)
     assert dispatch[1:] == (False, tuple(CORE_STAGES + ["seed_system_data", "tool_sync", "scheduler_init"]))
-    assert task.done()  # the shutdown stopped it
+    assert task.cancelled()  # the shutdown stopped it
+
+
+def test_the_shutdown_stops_board_dispatch_and_then_the_rest(monkeypatch):
+    """The loop re-raises the shutdown's cancel. Awaited directly, that CancelledError
+    (no Exception) ended the lifespan's shutdown, and the steps after it never ran."""
+    boot = _Boot(monkeypatch, dispatch=True)
+
+    async def scenario():
+        boot.gate = asyncio.Event()
+        boot.gate.set()
+        async with boot.main.lifespan(boot.app):
+            await asyncio.wait_for(asyncio.shield(boot.app.state.background_boot), WAIT_S)
+            await _settle()
+        return boot.app.state.board_dispatch_task
+
+    task = asyncio.run(scenario())
+
+    assert task.cancelled()
+    assert boot.calls[-2:] == ["watchdog stopped", "dashboard shut down"]
+
+
+def test_a_dispatch_loop_that_had_failed_is_logged_and_the_shutdown_goes_on(monkeypatch, caplog):
+    boot = _Boot(monkeypatch, dispatch=True, dispatch_error=RuntimeError("lease table gone"))
+
+    async def scenario():
+        boot.gate = asyncio.Event()
+        boot.gate.set()
+        async with boot.main.lifespan(boot.app):
+            await asyncio.wait_for(asyncio.shield(boot.app.state.background_boot), WAIT_S)
+            await _settle()  # the loop fails on its first step
+
+    with caplog.at_level("ERROR", logger="main"):
+        asyncio.run(scenario())
+
+    failed = [record for record in caplog.records if "Board dispatch loop had failed" in record.getMessage()]
+    assert failed and "lease table gone" in str(failed[0].exc_info[1])
+    assert boot.calls[-1] == "dashboard shut down"
 
 
 def test_a_worker_that_did_not_lead_neither_embeds_the_agents_nor_runs_the_starters(monkeypatch):

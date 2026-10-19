@@ -692,6 +692,27 @@ async def _stop_background_boot(app_instance: "FastAPI") -> None:
     logger.info("Background boot cancelled by the shutdown, before READY")
 
 
+async def _stop_board_dispatch(app_instance: "FastAPI") -> None:
+    """PRD-161: stop the board dispatch loop at shutdown: its stop event, then a cancel.
+
+    The loop re-raises the cancel (services/board_dispatcher.py), and CancelledError
+    is no Exception, so awaiting the task directly ended the lifespan's shutdown there
+    and ChannelManager and the dashboard services were never stopped. asyncio.wait
+    never raises the task's own outcome; a loop that had failed is logged instead.
+    """
+    task = getattr(app_instance.state, "board_dispatch_task", None)
+    if task is None:
+        return
+    stop = getattr(app_instance.state, "board_dispatch_stop", None)
+    if stop is not None:
+        stop.set()
+    task.cancel()
+    await asyncio.wait({task})
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Board dispatch loop had failed before the shutdown", exc_info=task.exception())
+    logger.info("Board dispatch loop stopped")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -763,18 +784,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
-    # PRD-161: stop the board dispatch loop
-    _bd_task = getattr(app.state, "board_dispatch_task", None)
-    if _bd_task is not None:
-        _bd_stop = getattr(app.state, "board_dispatch_stop", None)
-        if _bd_stop is not None:
-            _bd_stop.set()
-        _bd_task.cancel()
-        try:
-            await _bd_task
-        except Exception:
-            pass
-        logger.info("Board dispatch loop stopped")
+    await _stop_board_dispatch(app)
 
     # PRD-55: Stop ChannelManager
     if config.CHANNELS_ENABLED:
