@@ -32,6 +32,7 @@ from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud rout
 
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
+from sqlalchemy import text  # the SQL left in _boot_phase_1_core (PRD-262 US-030)
 from core.models import Base
 
 # Import API routers
@@ -234,22 +235,6 @@ async def _boot_phase_1_core():
 
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)
     create_tables()
-
-    # Idempotent column migrations (safe on all workers, fast no-op when columns exist)
-    try:
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            conn.execute(text(
-                "ALTER TABLE system_prompts ADD COLUMN IF NOT EXISTS "
-                "futureagi_eval_enabled BOOLEAN NOT NULL DEFAULT FALSE"
-            ))
-            conn.execute(text(
-                "ALTER TABLE skills ADD COLUMN IF NOT EXISTS "
-                "content_hash VARCHAR(64)"
-            ))
-            conn.commit()
-    except Exception as col_err:
-        logger.debug("Column migration check: %s", col_err)
 
     # ── Single-worker seed gate ──
     # Only 1 of N workers runs seeds. The rest skip immediately.
