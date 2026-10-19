@@ -1,0 +1,11 @@
+/* PRD-261 A-12g: the playbooks-data hello theme's one stylesheet. Every rule sits under
+   html.hello-a12g, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a12g .hello-a12g-frame {
+  min-height: 100vh;
+  background: var(--hello-a12g-ground);
+  color: var(--hello-a12g-ink);
+}
+
+html.hello-a12g .hello-a12g-page {
+  padding: 24px;
+}

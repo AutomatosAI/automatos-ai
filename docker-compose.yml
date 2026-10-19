@@ -104,7 +104,7 @@ services:
     # `docker compose up` and the fresh-clone smoke lane. Chainguard publishes a
     # maintained build; its free tier offers only `latest`, so the digest pins it
     # and Dependabot moves the digest weekly (.github/dependabot.yml, PRD-262).
-    image: cgr.dev/chainguard/minio:latest@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
+    image: cgr.dev/chainguard/minio:latest@sha256:2915cb406f38ed6ff9634de0a3e4a9423e2dda06a6f1aca18f8c968aa37a01f6
     container_name: automatos_minio
     restart: unless-stopped
     # Root, like the official image: Chainguard's runs as uid 65532, which can't

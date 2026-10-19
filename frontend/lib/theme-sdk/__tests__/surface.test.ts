@@ -26,6 +26,19 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 const SKIPPED = new Set(['default', '__esModule'])
 const STATUSES = ['built', 'stub']
 const BUILT_BY_THIS_STORY = ['theme', 'context', 'navigation', 'notices', 'events']
+/** The stubbed areas whose lanes have landed since: W-A4 (A-11b, A-12a, A-13c) and W-A4P (A-12d to A-12h). */
+const BUILT_BY_LATER_LANES = [
+  'chat',
+  'deliverables',
+  'cards',
+  'looks',
+  'assets',
+  'pages/agents',
+  'pages/assignments',
+  'pages/documents',
+  'pages/playbooks',
+  'pages/command-center',
+]
 /** A stub's body: an area still calling it is not built. */
 const STUB_CALL = /\bnotInThisBuild\(/
 
@@ -102,10 +115,11 @@ describe('PRD-261 A-10a — the surface files', () => {
   })
 
   // The areas after A-10a are built by their own lanes (W-A4, W-A4P): each lane marks its area built in its
-  // surface file, so this holds A-10a's five built and every built area free of stubs, not a fixed list.
-  it('marks the five areas A-10a builds as built, and no other area built while it still has a stub', () => {
+  // surface file and adds it to BUILT_BY_LATER_LANES; A-10a's five stay built, no built area may still call a
+  // stub, and every area still a stub must call one.
+  it('marks the five areas A-10a builds and the area of each landed lane as built, and every other area as a stub', () => {
     const built = SURFACES.filter((surface) => surface.status === 'built').map((surface) => surface.area)
-    expect(built).toEqual(expect.arrayContaining(BUILT_BY_THIS_STORY))
+    expect(built.sort()).toEqual([...BUILT_BY_THIS_STORY, ...BUILT_BY_LATER_LANES].sort())
     expect(built.filter((area) => STUB_CALL.test(areaSource(area)))).toEqual([])
   })
 
