@@ -37,7 +37,7 @@ The Dockerfile builds each part in its own stage, and BuildKit runs the stages s
 |---|---|---|
 | `assets` | the Kokoro files and the music tracks, at `/kokoro/<release>/<file>` and `/music/<id>.<ext>` | `assets-fetch` (see below) |
 | `kokoro` | `/opt/kokoro`: every file checked against `kokoro/SHA256SUMS`, then the voices file cut to the catalogue's 27 voices (`media_render/voices_build.py`) | `assets` |
-| `node-stripped` | `/usr/local/bin/node` with `strip --strip-unneeded` (about 20 MB less; `.dynsym` stays, so native addons load) | `node` |
+| `node-stripped` | `/usr/local/bin/node` with `strip --strip-unneeded` (about 20 MB less; `.dynsym` stays, so native addons load), in a `/node-layer` tree at the binary's upstream time that the runtime copies to `/`, so every build makes the same layer | `node` |
 | `js` | `/opt/media-render/js`: `npm ci --omit=dev` from `js/package-lock.json`, then what renders never load deleted (`js/prune.txt`, below) | `node` |
 | `chrome` | `/opt/chrome`: the arm64 headless shell and its libraries stripped, only `en-US.pak` among the locales | `js` (both ways of fetching it run on Node) |
 | `py` | `/opt/venv` and `/opt/espeak`: `uv pip install --require-hashes --no-deps` from `requirements.lock`, the espeak data moved out of its package and cut to `en_dict` among the dictionaries (`media_render/espeak_build.py`), onnxruntime's unlinked library and unused subpackages and numpy's tests and f2py deleted, every shared library stripped | `python:3.12-slim`, `uv` |

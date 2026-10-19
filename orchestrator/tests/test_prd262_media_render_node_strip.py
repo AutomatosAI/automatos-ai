@@ -20,17 +20,18 @@ from tests.test_prd262_media_render_stages import DOCKERFILE, MEDIA_RENDER, ROOT
 # The stage both Debian images carry byte for byte, so their node layers match.
 NODE_STRIPPED_STAGE = """# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
-# strip renames its output into /usr/local/bin, which stamps the directory with the build
-# time, and COPY --link keeps that time in the layer: the directory takes the binary's
-# upstream time back, or every build makes a different node layer.
+# The binary goes into the /node-layer tree, every directory of it at the binary's upstream
+# time, and the images copy that tree to /. A COPY of the file alone stamps /usr/local/bin
+# with the time of the build, so each build made a different layer.
 FROM node AS node-stripped
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends binutils \\
- && strip --strip-unneeded --preserve-dates /usr/local/bin/node \\
- && touch -r /usr/local/bin/node /usr/local/bin \\
+ && mkdir -p /node-layer/usr/local/bin \\
+ && strip --strip-unneeded --preserve-dates -o /node-layer/usr/local/bin/node /usr/local/bin/node \\
+ && touch -r /usr/local/bin/node /node-layer/usr/local/bin /node-layer/usr/local /node-layer/usr /node-layer \\
  && rm -rf /var/lib/apt/lists/*
 """
-NODE_COPY = "COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node"
+NODE_COPY = "COPY --link --from=node-stripped /node-layer/ /"
 
 
 def _tracked_dockerfiles() -> list[str]:
