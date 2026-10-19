@@ -348,6 +348,18 @@ def test_hash_changes_when_any_one_content_field_changes(field, changed):
     assert before != after
 
 
+def test_the_ai_label_setting_is_content_once_a_person_sets_it():
+    """PRD-264 EUAI-08a: a person's "label as AI-generated" choice (the newest ``ai_label``
+    entry of the review log) joins the six fields; a post nobody set hashes as above."""
+    post = _with(**_CONTENT)
+    unset = service.compute_content_hash(post)
+    post.review_log = [{"at": "2026-10-20T09:00:00+00:00", "by": AUTHOR, "action": "ai_label", "comment": None, "on": False}]
+    six = {"copy": _CONTENT["copy"], "variables": _CONTENT["variables"], "sources": _CONTENT["sources"], "format": "fact_card",
+           "template_id": "11111111-2222-3333-4444-555555555555", "media": _CONTENT["media"]}
+    canonical = json.dumps({**six, "ai_label": False}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    assert service.compute_content_hash(post) == hashlib.sha256(canonical.encode("utf-8")).hexdigest() != unset
+
+
 def test_title_and_brief_are_labels_not_content():
     post = _with(**_CONTENT)
     before = service.compute_content_hash(post)

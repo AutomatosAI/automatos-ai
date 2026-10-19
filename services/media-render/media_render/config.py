@@ -10,6 +10,7 @@ Every limit and every timeout the service applies is a setting below.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, TypeVar
 
@@ -41,6 +42,9 @@ VOICE_TEMPO_RANGE = (1.0, 2.0)
 VOICE_FIT_GAP_RANGE = (0.0, 1.0)
 
 MEBIBYTE = 1024 * 1024
+# PRD-264 EUAI-08a: the label's font goes into an ffmpeg filter as it is, so it is a plain
+# absolute path: nothing in it can be read as filter syntax (ai_label.py).
+FONT_PATH = re.compile(r"^/[A-Za-z0-9/._-]+$")
 
 # PRD-264 EUAI-06b (D15): the algorithms c2pa signs with; the key must be of the matching type.
 C2PA_ALGORITHMS = ("es256", "es384", "es512", "ps256", "ps384", "ps512", "ed25519")
@@ -78,6 +82,8 @@ class Settings:
     ffprobe_bin: str
     # PRD-264 EUAI-06a (D14): the XMP writer and reader of the AI mark (provenance.py).
     exiftool_bin: str
+    # PRD-264 EUAI-08a: the font of a video's visible "AI-generated" label (ai_label.py).
+    ai_label_font_path: str
     render_quality: str
     render_fps: int
     render_workers: str
@@ -87,6 +93,8 @@ class Settings:
     probe_timeout_seconds: int
     fetch_timeout_seconds: int
     mark_timeout_seconds: int
+    # How long burning the AI-generated label into a video may take (a re-encode).
+    label_timeout_seconds: int
     # Where jobs stage their compositions and keep their outputs until they expire.
     work_dir: str
     # The music library (US-112): manifest.json plus the tracks it names.
@@ -207,6 +215,13 @@ def _image(env: _Env) -> Dict[str, Any]:
         "ffmpeg_bin": env.text("MEDIA_RENDER_FFMPEG_BIN", "ffmpeg"),
         "ffprobe_bin": env.text("MEDIA_RENDER_FFPROBE_BIN", "ffprobe"),
         "exiftool_bin": env.text("MEDIA_RENDER_EXIFTOOL_BIN", "exiftool"),
+        "ai_label_font_path": _parse(
+            "MEDIA_RENDER_AI_LABEL_FONT",
+            env.text("MEDIA_RENDER_AI_LABEL_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+            str,
+            lambda v: bool(FONT_PATH.match(v)),
+            "an absolute path of letters, digits, '/', '.', '_' and '-'",
+        ),
         "work_dir": env.text("MEDIA_RENDER_WORK_DIR", "/tmp/media-render"),
         "music_dir": env.text("MEDIA_RENDER_MUSIC_DIR", "/opt/media-render/music"),
     }
@@ -238,6 +253,7 @@ def _rendering(env: _Env) -> Dict[str, Any]:
         "probe_timeout_seconds": env.positive_int("MEDIA_RENDER_PROBE_TIMEOUT_SECONDS", 60),
         "fetch_timeout_seconds": env.positive_int("MEDIA_RENDER_FETCH_TIMEOUT_SECONDS", 120),
         "mark_timeout_seconds": env.positive_int("MEDIA_RENDER_MARK_TIMEOUT_SECONDS", 60),
+        "label_timeout_seconds": env.positive_int("MEDIA_RENDER_LABEL_TIMEOUT_SECONDS", 300),
     }
 
 

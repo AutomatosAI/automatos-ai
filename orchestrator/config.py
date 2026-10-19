@@ -2113,6 +2113,12 @@ class Config:
     # declared duration against the monthly quota while it runs, at most this;
     # one whose duration cannot be read holds this much.
     SOCIALS_RENDER_MAX_DURATION_SECONDS: int = int(os.getenv("SOCIALS_RENDER_MAX_DURATION_SECONDS", "180"))
+    # PRD-264 EUAI-08a (EU AI Act Art. 50(4)): a labelled video shows "AI-generated" for
+    # its first this many seconds, and again for as long every interval after
+    # (modules/socials/deepfake_label.py; media-render burns it in). An interval no longer
+    # than the label shows it the whole video.
+    SOCIALS_AI_LABEL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_SECONDS", "3"))
+    SOCIALS_AI_LABEL_INTERVAL_SECONDS: float = float(os.getenv("SOCIALS_AI_LABEL_INTERVAL_SECONDS", "30"))
     # How long a presigned link to a render's input in our storage (a voice line
     # spoken by a voice toolkit, S1.5) lives: media-render fetches it after the
     # render's queue wait, so keep it above SOCIALS_RENDER_MAX_WAIT_SECONDS.

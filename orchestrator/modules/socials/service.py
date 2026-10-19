@@ -84,7 +84,7 @@ from sqlalchemy import func, or_, update
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 from core.social_templates import MAX_SLOTS, VARIABLE_NAME
 from modules.socials import targets as post_targets
-from modules.socials import ai_media, post_text, text_search
+from modules.socials import ai_media, deepfake_label, post_text, text_search
 from modules.socials.voice_examples import draft_entry
 from modules.socials.kokoro_voices import validate_kokoro
 from modules.socials.music import validate_music
@@ -317,11 +317,11 @@ def _content_of(post: Any) -> Dict[str, Any]:
         "template_id": str(template_id) if template_id is not None else None,
         "media": getattr(post, "media", None) or {},
     }
-    # PRD-251B (B5): a chosen length is content; a post without one hashes as before,
-    # so no existing approval moves when the field arrives.
+    # PRD-251B (B5): a chosen length is content; a post without one hashes as before (no approval moves).
     length = getattr(post, "length_seconds", None)
     if length is not None:
         content["length_seconds"] = int(length)
+    content = deepfake_label.hashed(content, post)  # PRD-264 EUAI-08a: the AI label setting, once a person set it
     # Only a post with targets hashes them: one with none hashes as before (US-204).
     # With channels, the title is content too: a channel publishes it (YouTube's
     # video title, $title in channel_adapters.py), and so is whether its footage is
@@ -338,12 +338,12 @@ def compute_content_hash(post: Any) -> str:
     and media, and the post's targets, title and whether its footage is AI-made
     when it has any targets.
 
-    Canonical = ``sort_keys=True``, ``separators=(',', ':')``,
-    ``ensure_ascii=False``, so key order never changes the hash.
+    Canonical = ``sort_keys=True``, ``separators=(',', ':')``, ``ensure_ascii=False``, so key order never changes it.
     Wave 1 extends ``media`` with the rendered files' digests, so an approval
     also binds to the exact rendered bytes; Wave 2 adds where the post goes.
     PRD-251B adds ``length_seconds`` when the post has one (B5) and never
-    ``planned_for`` (B11): a slot move is not a content change.
+    ``planned_for`` (B11): a slot move is not a content change. PRD-264 EUAI-08a
+    adds ``ai_label`` once a person set it (``deepfake_label.hashed``).
     """
     canonical = json.dumps(
         _content_of(post), sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str

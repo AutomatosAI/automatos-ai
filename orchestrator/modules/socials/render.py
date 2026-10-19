@@ -100,7 +100,7 @@ from modules.socials.music import with_music
 from core.social_templates import (
     SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, resolve_variables, validate_social_blocks,
 )
-from modules.socials import ai_media, channel_sizes, notify, service, spoken_fields
+from modules.socials import ai_media, channel_sizes, deepfake_label, notify, service, spoken_fields
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -246,7 +246,8 @@ def bundle_for(
         size=size,
         story_safe=is_story(post),
     )
-    return ai_media.with_inputs(bundle, post, footage_slots, blocks.get("slots"))  # PRD-264 EUAI-06a
+    bundle = ai_media.with_inputs(bundle, post, footage_slots, blocks.get("slots"))  # PRD-264 EUAI-06a
+    return deepfake_label.with_label(bundle, post)  # PRD-264 EUAI-08a: the AI-generated label
 
 
 def is_story(post: Any) -> bool:

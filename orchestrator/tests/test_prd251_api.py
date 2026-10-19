@@ -216,8 +216,8 @@ _VALID_BODY = {
     # PRD-251B US-B305: AI options for an image slot, and the one picked.
     ("POST", "/api/socials/posts/{post_id}/ai-options"): {"slot": "hero", "prompt": "A sunrise over the bay"},
     ("PUT", "/api/socials/posts/{post_id}/ai-options/{slot}"): {"name": "hero_option_1.png"},
-    # A Library picture for a photo spot (the post is loaded before the spot or the picture).
-    ("PUT", "/api/socials/posts/{post_id}/photos/{slot}"): {"deliverable_id": str(uuid.uuid4())},
+    ("PUT", "/api/socials/posts/{post_id}/photos/{slot}"): {"deliverable_id": str(uuid.uuid4())},  # a Library picture for a photo spot (the post is loaded first)
+    ("PUT", "/api/socials/posts/{post_id}/ai-label"): {"on": False},  # PRD-264 EUAI-08a: the AI-generated label, switched off
     # US-210: putting a post in a campaign and taking it out take no body.
     ("POST", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
     ("DELETE", "/api/socials/campaigns/{campaign_id}/posts/{post_id}"): None,
@@ -317,7 +317,7 @@ def test_the_router_serves_exactly_the_socials_routes():
             ("GET", "/api/socials/plans/{plan_id}/health"),  # PRD-251C US-C407: the plan's health
             ("GET", "/api/socials/voice-examples"),  # PRD-251C US-C406: the owner's voice examples
             ("DELETE", "/api/socials/voice-examples/{example_id}"),
-            ("GET", "/api/socials/posts/{post_id}/ai-labels"),  # PRD-264 EUAI-05: each channel's AI label (socials_publish.py)
+            ("GET", "/api/socials/posts/{post_id}/ai-labels"), ("PUT", "/api/socials/posts/{post_id}/ai-label"),  # PRD-264 EUAI-05, EUAI-08a
         ]
         + [("POST", f"/api/socials/posts/{{post_id}}/{a}") for a in ACTION_PATHS]
     )
