@@ -15,7 +15,9 @@ Each check names the row of the 19 Oct size breakdown it proves:
 - row 19, the API's git trim: git's server-side and mail binaries are gone, git-core's
   ``git`` is a link to /usr/bin/git, and a repository can still be made, committed to,
   branched, checked out, cloned and pulled; an HTTPS clone works (git-remote-https), and
-  git's credential protocol answers.
+  git's credential protocol answers;
+- row 47, gosu: it is gone, and setpriv (util-linux, in the base image) drops root to
+  the worker the way entrypoint.sh does, with the worker's uid, gid, groups and HOME.
 
 Standard library only. Exit 0 when every check passes, 1 otherwise.
 """
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import glob
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -59,6 +62,10 @@ GIT_IDENTITY = ("-c", "user.name=probe", "-c", "user.email=probe@example.invalid
 HTTPS_REPO = "https://github.com/octocat/Hello-World.git"
 HTTPS_REPO_FILE = "README"
 CREDENTIAL_INPUT = "protocol=https\nhost=example.invalid\nusername=probe\npassword=probe-secret\n\n"
+
+# Row 47: entrypoint.sh's drop to the worker, minus the exec of the worker itself.
+SETPRIV_DROP = ("setpriv", "--reuid=worker", "--regid=worker", "--init-groups", "env", "HOME=/home/worker")
+WORKER_IDENTITY = "1000 1000 /home/worker"
 
 Check = Callable[[Path], List[str]]
 
@@ -147,6 +154,19 @@ def check_git_https(work: Path) -> List[str]:
     return failures
 
 
+# --------------------------------------------------------------------------- row 47
+
+
+def check_setpriv(work: Path) -> List[str]:
+    """No gosu, and setpriv drops root to the worker with the worker's HOME."""
+    failures = [] if shutil.which("gosu") is None else ["gosu is still in the image"]
+    # From /: the worker may not enter root's temporary directory.
+    identity = must([*SETPRIV_DROP, "sh", "-c", 'echo "$(id -u) $(id -g) $HOME"'], Path("/"))
+    if identity != WORKER_IDENTITY:
+        failures.append(f"setpriv ran the command as {identity!r}, not {WORKER_IDENTITY!r}")
+    return failures
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -155,6 +175,7 @@ CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 19: git's server-side binaries are gone", check_git_trim),
     ("row 19: git init, commit, clone, branch, checkout and pull", check_git_local),
     ("row 19: an HTTPS clone and git's credential protocol", check_git_https),
+    ("row 47: no gosu, and setpriv drops to the worker", check_setpriv),
 )
 
 

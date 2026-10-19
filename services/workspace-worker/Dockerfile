@@ -40,10 +40,12 @@ WORKDIR /app
 #   binaries, both copies, which an agent workspace never serves. git-core's second
 #   copy of git, which every builtin there links to, becomes a link to /usr/bin/git.
 #   git-remote-http (clone, pull and push over HTTPS) and ssh stay.
+# - PRD-262 (row 47): no gosu (2.9 MB). entrypoint.sh drops to the worker with
+#   setpriv, which util-linux in the base image already carries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget openssh-client ca-certificates \
     build-essential \
-    jq tree gosu \
+    jq tree \
     && rm -f /usr/bin/*lto-dump* \
     && rm -f /usr/bin/git-shell /usr/bin/scalar \
         /usr/lib/git-core/git-daemon /usr/lib/git-core/git-http-backend \

@@ -6,10 +6,14 @@ runs on the image it built, on both arches:
 
 - row 16: gcc's lto-dump is deleted in the apt layer that installs build-essential;
 - row 19: the API's git trim (US-019) is applied to the worker: the same server-side
-  and mail binaries go, and git-core's git becomes a link to /usr/bin/git.
+  and mail binaries go, and git-core's git becomes a link to /usr/bin/git;
+- row 47, gosu: gone from the apt list; entrypoint.sh drops to the worker with setpriv
+  (test_prd262_worker_boot.py runs the entrypoint, and test.yml's parity job checks the
+  worker's uid and HOME in the Railway build).
 
 scripts/ci/image_worker_toolchain.py proves inside the image that ``gcc -flto`` still
-links, and that git still commits, branches, clones, pulls and clones over HTTPS.
+links, that git still commits, branches, clones, pulls and clones over HTTPS, and that
+setpriv drops root to the worker with the worker's HOME.
 
 Pure file reads: no Docker, no network.
 """
@@ -136,5 +140,22 @@ def test_images_runs_the_toolchain_check_in_the_worker_it_built():
     assert BUILD_STEPS.index(step) > scan_at, "after the reports and the scan, so they run first"
 
 
+# --------------------------------------------------------------------------- row 47
+
+
+def _apt_packages(run: str) -> list[str]:
+    words = next(words for words in _commands(run) if words[:2] == ["apt-get", "install"])
+    return [word for word in words[2:] if not word.startswith("-")]
+
+
+def test_gosu_is_gone_and_the_in_image_check_drops_as_the_entrypoint_does():
+    assert "gosu" not in _apt_packages(APT_RUN)
+    assert not [line for line in INSTRUCTIONS if "gosu" in line]
+    exec_line = (WORKER / "entrypoint.sh").read_text().rstrip().splitlines()[-1]
+    assert exec_line == f'exec {" ".join(toolchain.SETPRIV_DROP)} python -m main "$@"'
+    assert toolchain.WORKER_IDENTITY == "1000 1000 /home/worker"
+
+
 def test_every_toolchain_check_names_its_breakdown_row():
-    assert [title.split(":")[0] for title, _ in toolchain.CHECKS] == ["row 16", "row 19", "row 19", "row 19"]
+    rows = [title.split(":")[0] for title, _ in toolchain.CHECKS]
+    assert rows == ["row 16", "row 19", "row 19", "row 19", "row 47"]
