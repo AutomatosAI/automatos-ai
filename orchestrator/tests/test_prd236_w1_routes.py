@@ -279,7 +279,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # platform default for Auto becomes Haiku 5.5, the Auto rows on it move); the guard follows it.
     haiku_default = (versions / "auto_haiku_default_20261019.py").read_text()
     assert 'down_revision = "prd263_harness_runs"' in haiku_default
-    assert 'EXPECTED_HEAD = "auto_haiku_default_20261019"' in guard
+    # 2026-10-19 (PRD-264 EUAI-10): prd264_content_provenance chains onto it — the provenance
+    # record (content_provenance), a new table only; the guard follows it.
+    provenance = (versions / "prd264_content_provenance.py").read_text()
+    assert 'down_revision = "auto_haiku_default_20261019"' in provenance
+    assert 'EXPECTED_HEAD = "prd264_content_provenance"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
