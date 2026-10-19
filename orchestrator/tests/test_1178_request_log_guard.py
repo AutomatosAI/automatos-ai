@@ -22,7 +22,7 @@ from core.monitoring.automatos_logging import setup_logging
 from core.monitoring.request_log_guard import RequestLogGuard, guard_request_logs
 
 _ORCH = Path(__file__).resolve().parents[1]
-SECRET = "SECRET_PROMPT_7"
+MARKER = "MARKER_PROMPT_7"
 
 
 @pytest.fixture
@@ -56,9 +56,9 @@ def _anthropic_call():
             "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
             "usage": {"input_tokens": 1, "output_tokens": 1}})
 
-    client = anthropic.Anthropic(api_key="test-key", base_url=f"https://models.example/route-{SECRET}",
+    client = anthropic.Anthropic(api_key="test-key", base_url=f"https://models.example/route-{MARKER}",
                                  http_client=httpx.Client(transport=httpx.MockTransport(answer)), max_retries=0)
-    client.messages.create(model="claude-x", max_tokens=8, messages=[{"role": "user", "content": SECRET}])
+    client.messages.create(model="claude-x", max_tokens=8, messages=[{"role": "user", "content": MARKER}])
 
 
 def test_anthropic_log_debug_set_after_setup_logging_leaks_no_prompt_or_url(captured, anthropic_debug):
@@ -68,18 +68,18 @@ def test_anthropic_log_debug_set_after_setup_logging_leaks_no_prompt_or_url(capt
     _logs.setup_logging()   # an import after setup_logging resets the levels
     assert logging.getLogger("anthropic").level == logging.DEBUG
     _anthropic_call()
-    assert SECRET not in captured.getvalue()
+    assert MARKER not in captured.getvalue()
 
 
 def test_an_sdk_retry_line_and_a_library_warning_still_show(captured):
     setup_logging(service="test", level=logging.INFO, enable_relay=False)
     logging.getLogger("anthropic._base_client").info("Retrying request to /v1/messages in 0.4 seconds")
     logging.getLogger("httpx2").warning("connection pool is full")
-    logging.getLogger("anthropic._base_client").debug("Request options: %s", {"json_data": SECRET})
-    logging.getLogger("urllib3.poolmanager").info("Redirecting %s -> %s", f"https://a/{SECRET}", "https://b")
+    logging.getLogger("anthropic._base_client").debug("Request options: %s", {"json_data": MARKER})
+    logging.getLogger("urllib3.poolmanager").info("Redirecting %s -> %s", f"https://a/{MARKER}", "https://b")
     out = captured.getvalue()
     assert "Retrying request to /v1/messages" in out and "connection pool is full" in out
-    assert SECRET not in out
+    assert MARKER not in out
 
 
 def test_a_scripts_own_handler_is_guarded_once():
@@ -92,8 +92,8 @@ def test_a_scripts_own_handler_is_guarded_once():
         guard_request_logs()
         assert sum(isinstance(f, RequestLogGuard) for f in handler.filters) == 1
         logging.getLogger("httpx").setLevel(logging.INFO)
-        logging.getLogger("httpx").info("HTTP Request: GET https://api.telegram.org/bot%s/getUpdates", SECRET)
-        assert SECRET not in stream.getvalue()
+        logging.getLogger("httpx").info("HTTP Request: GET https://api.telegram.org/bot%s/getUpdates", MARKER)
+        assert MARKER not in stream.getvalue()
     finally:
         root.removeHandler(handler)
         logging.getLogger("httpx").setLevel(logging.NOTSET)
