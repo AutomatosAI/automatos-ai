@@ -226,7 +226,8 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     mocks.loadThemeForStyle.mockResolvedValue(okResult())
     render(app())
     expect(await screen.findByTestId('f')).toHaveTextContent('page')
-    expect(hostStatus()).toBe('active')
+    // The status attribute is set in an effect after the frame commits, so wait for it.
+    await waitFor(() => expect(hostStatus()).toBe('active'))
     expect(error).not.toHaveBeenCalled()
   })
 
@@ -235,7 +236,7 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     mocks.loadThemeForStyle.mockResolvedValue(okResult(cleanup))
     const { rerender } = render(app())
     await screen.findByTestId('f')
-    expect(hostStatus()).toBe('active')
+    await waitFor(() => expect(hostStatus()).toBe('active'))
     mocks.style.current = 'studio'
     rerender(app())
     await waitFor(() => expect(hostStatus()).toBeNull())

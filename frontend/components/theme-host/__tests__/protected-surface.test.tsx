@@ -38,10 +38,11 @@ const APPROVE_BUTTON = /Approve & run/
 const metadata: WidgetMetadata = { source: { type: 'tool', name: 'platform_action' }, createdAt: new Date() }
 
 /**
- * The guarded property jsdom's CSSStyleDeclaration (cssstyle 4) does not know, so setProperty
- * drops it: the browser lane checks it (e2e/browser/specs/protected-surfaces.spec.ts).
+ * The guarded properties the CI jsdom's CSSStyleDeclaration does not know, so setProperty
+ * drops them (zoom included, seen in CI 19 Oct): the browser lane checks them
+ * (e2e/browser/specs/protected-surfaces.spec.ts).
  */
-const JSDOM_UNKNOWN = new Set(['-webkit-mask'])
+const JSDOM_UNKNOWN = new Set(['-webkit-mask', 'zoom'])
 /** The ones a theme moves, shrinks, masks or skips a card with, beyond PA-15's five (review M2). */
 const MOVE_AND_HIDE_PROPERTIES = ['translate', 'scale', 'rotate', 'offset-path', 'mask', '-webkit-mask', 'content-visibility', 'zoom']
 
