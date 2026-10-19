@@ -339,7 +339,7 @@ graph LR
 
 ## Worker HTTP Server
 
-The worker runs a Starlette app on uvicorn, port 8081 (configurable via `WORKER_HEALTH_PORT`), with file operation endpoints. It moved from aiohttp in PRD-262 with no change to any route, method or answer.
+The worker runs a Starlette app on uvicorn, port 8081 (configurable via `WORKER_HEALTH_PORT`), with file operation endpoints. It moved from aiohttp in PRD-262 with no change to any route, method, status or JSON answer, and keeps aiohttp's 1 MiB request body limit and 3630 s keep-alive. Two headers differ: a download whose file name a header cannot carry as it is (non-ASCII, a quote) is named with RFC 5987's `filename*=`, and downloads now also carry `ETag`, `Last-Modified` and `Accept-Ranges`.
 
 ### Authentication
 
