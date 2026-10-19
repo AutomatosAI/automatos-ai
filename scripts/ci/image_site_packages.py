@@ -48,23 +48,13 @@ from pathlib import Path, PurePosixPath
 from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 # What fails to load in this image today, each with its reason. A file the image does
-# not have is not expected to fail: Railway's [leiden] build has packages the GHCR
-# build lacks. Keys are the dotted module of an extension, or the site-packages path
-# of a plain library.
+# not have is not expected to fail. Keys are the dotted module of an extension, or the
+# site-packages path of a plain library. matplotlib's Tk backend and numba's TBB layer
+# left with Railway's [leiden] build (PRD-262 US-027): every build installs one lock.
 EXPECTED_FAILURES: Dict[str, str] = {
     "PIL._imagingtk": (
         "Pillow's Tk bridge imports tkinter, and python:slim ships _tkinter without the Tcl/Tk "
         "libraries it links. Nothing in the app draws to a Tk window."
-    ),
-    "matplotlib.backends._tkagg": (
-        "Railway's [leiden] build only (graspologic brings matplotlib). matplotlib's Tk backend "
-        "loads tkinter's functions when imported, and _tkinter can't load without Tcl/Tk. "
-        "Nothing renders through Tk."
-    ),
-    "numba.np.ufunc.tbbpool": (
-        "Railway's [leiden] build only (umap-learn, through graspologic, brings numba). numba's "
-        "TBB threading layer links libtbb.so.12, which only the optional tbb package installs; "
-        "numba falls back to its OpenMP or workqueue layer."
     ),
 }
 LIBRARY_GLOB = "*.so*"  # the files orchestrator/Dockerfile's strip names

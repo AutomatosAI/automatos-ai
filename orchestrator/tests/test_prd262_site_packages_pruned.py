@@ -448,7 +448,7 @@ def test_images_yml_runs_it_inside_every_api_build_on_both_arches():
     assert "continue-on-error" not in step
     pick = next(step for step in workflow["jobs"]["changes"]["steps"] if step.get("id") == "pick")
     api = next(image for image in json.loads(pick["env"]["IMAGES"]) if image["name"] == "api")
-    assert api["arches"] == ["amd64", "arm64"] and api["build_args"] == ["INSTALL_GRAPH_EXTRAS=false"]
+    assert api["arches"] == ["amd64", "arm64"] and api["build_args"] == [], "one API image (US-027)"
 
 
 def test_a_change_to_the_script_reruns_both_checks():

@@ -38,24 +38,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=uv /uv /usr/local/bin/uv
 
-# Knowledge-Graph clustering quality, opt-in (PRD-233 slim pass). The `[leiden]`
-# extra on graphifyy pulls graspologic, and with it POT + llvmlite + numba +
-# statsmodels + gensim + scikit-learn + matplotlib — ~660 MB — for ONE feature.
-# graphify.cluster documents its own fallback: "Tries Leiden (graspologic)
-# first… falls back to Louvain (built into networkx) if graspologic is not
-# installed", so the Knowledge Graph still clusters without it, at lower
-# partition quality. It picks the lock pybuild installs (PRD-262 US-022):
-# requirements-leiden.lock (requirements.in plus requirements-leiden.in) when
-# true, requirements.lock otherwise. PRD-262 US-027 deletes the arg and that lock.
-# THE DEFAULT IS THE PRODUCTION VALUE (true). Railway builds THIS file
-# (railway.json: builder DOCKERFILE; the last stage), so a Dockerfile default
-# is a production decision — a `false` here shipped degraded clustering to prod
-# on 2026-08-30 (#650). The local edition passes INSTALL_GRAPH_EXTRAS=false
-# explicitly via docker-compose.yml build args to stay slim; want Leiden
-# locally: docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
-ARG INSTALL_GRAPH_EXTRAS=true
-
-COPY requirements.lock requirements-leiden.lock scripts/split_lock.py ./
+# One lock for every build, Railway's included (PRD-262 US-027): the Knowledge Graph's
+# Leiden clustering comes from graspologic-native (modules/knowledge/leiden_partition.py),
+# which requirements.lock pins, so no build arg picks a second lock with graphifyy's
+# [leiden] extra and its ~585 MB any more.
+COPY requirements.lock scripts/split_lock.py ./
 
 # The lock, exactly (PRD-262 US-022): every pin with its hashes, so CI, GHCR and
 # Railway install the same versions, and --no-deps resolves nothing. The lock goes in
@@ -67,18 +54,17 @@ COPY requirements.lock requirements-leiden.lock scripts/split_lock.py ./
 # /usr/local/bin/python, where the base stage puts both trees.
 # No bytecode here: the compile below writes it once the prune is done.
 # Wheels only (PRD-262 US-015): a package that would build from source fails the
-# build instead. The two exceptions are pure-Python sdists: pysher (composio's) and
-# graspologic (the [leiden] extra; it leaves the list with PRD-262 US-027). pip's
+# build instead. The one exception is a pure-Python sdist: pysher (composio's);
+# graspologic left the list with the [leiden] extra (PRD-262 US-027). pip's
 # `--only-binary :all:` cleared every per-package exception named before it, so
 # `--no-binary` still comes after; uv lets a named --no-binary package build either
 # way.
 # No BuildKit cache mount: Railway fails one that lacks a hard-coded
 # id=s/<service-id>-<path>, and the service ids are not known (PRD-262 §10).
-RUN if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then lock=requirements-leiden.lock; else lock=requirements.lock; fi && \
-    python split_lock.py "$lock" stable.txt rest.txt && \
+RUN python split_lock.py requirements.lock stable.txt rest.txt && \
     for half in stable rest; do \
         uv pip install --python /usr/local/bin/python --prefix "/install/$half" --no-deps --require-hashes \
-            --no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher,graspologic \
+            --no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher \
             -r "$half.txt" || exit 1; \
     done
 
@@ -123,9 +109,10 @@ RUN keep="s3 s3vectors bedrock-runtime sts sso sso-oidc" && \
 # stale` under `python -v -c 'import main'`). uv has no invalidation-mode option, so
 # compileall writes it. Nothing is excluded with -x: pip compiled every .py of the
 # published edge's site-packages (951a84b) on its Python 3.11, and the .py of every
-# [leiden] wheel and of every package the locks moved parse as Python 3.11 (checked 19
-# Oct). A file that ever fails to compile fails the build; exclude it here by name, with
-# the reason, only if it is a template or test data. PYTHONHASHSEED=0 fixes the string
+# package the lock moved parse as Python 3.11 (checked 19 Oct; graspologic-native, which
+# US-027 added, has one .py, an __init__ that re-exports its compiled module). A file
+# that ever fails to compile fails the build; exclude it here by name, with the reason,
+# only if it is a template or test data. PYTHONHASHSEED=0 fixes the string
 # hashes, the one input of a .pyc that changes from run to run, so the same sources
 # compile to the same bytes and the layer stays reproducible.
 RUN for prefix in /install/stable /install/rest; do \

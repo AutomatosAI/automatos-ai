@@ -85,9 +85,7 @@ on:
       - "orchestrator/Dockerfile"
       - "orchestrator/.dockerignore"
       - "orchestrator/requirements.in"
-      - "orchestrator/requirements-leiden.in"
       - "orchestrator/requirements.lock"
-      - "orchestrator/requirements-leiden.lock"
       - "orchestrator/requirements-dev.txt"
       - "orchestrator/requirements-dev.lock"
       - "orchestrator/scripts/split_lock.py"
@@ -274,8 +272,6 @@ jobs:
           context: orchestrator
           target: production
           platforms: linux/amd64
-          build-args: |
-            INSTALL_GRAPH_EXTRAS=false
           labels: ${{ steps.meta-api.outputs.labels }}
           tags: ghcr.io/automatosai/automatos-api:${{ steps.target.outputs.tag }}
           load: true
@@ -283,12 +279,11 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=api-amd64
 
-      # PRD-262 US-015, US-018 and US-023: the GHCR build (no [leiden] extra) installs
-      # no package the code never imports, scikit-learn included, nor camelot and its
-      # opencv, which pdfplumber replaced. US-025: nor pandas. US-026: nor langchain's
-      # splitters and core, which were vendored, with langsmith and zstandard. test.yml's
-      # prod-image-parity checks the Railway build, which keeps scikit-learn and pandas
-      # until US-027.
+      # PRD-262 US-015, US-018 and US-023: the GHCR build installs no package the code
+      # never imports, scikit-learn included, nor camelot and its opencv, which
+      # pdfplumber replaced. US-025: nor pandas. US-026: nor langchain's splitters and
+      # core, which were vendored, with langsmith and zstandard. test.yml's
+      # prod-image-parity checks the Railway build, the same lock since US-027.
       - name: The api image has no package the code never imports
         env:
           IMAGE: ghcr.io/automatosai/automatos-api:${{ steps.target.outputs.tag }}

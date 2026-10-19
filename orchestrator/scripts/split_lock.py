@@ -1,7 +1,7 @@
 """Split the API's lock in two by package name, one half per pip layer (PRD-262 US-022).
 
-orchestrator/Dockerfile's pybuild stage installs the lock it picks (requirements.lock,
-or requirements-leiden.lock for Railway's [leiden] build) in two halves, each into its
+orchestrator/Dockerfile's pybuild stage installs requirements.lock (every build's,
+Railway's included, since PRD-262 US-027) in two halves, each into its
 own prefix, and the runtime copies each half as its own layer: first STABLE, the
 packages that rarely move and weigh the most, then the rest. images.yml builds the API
 reproducibly, so a bump that leaves every STABLE pin alone leaves the first layer the

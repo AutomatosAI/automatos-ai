@@ -4,9 +4,8 @@ pytest, pytest-asyncio, pytest-timeout, pytest-cov, black, isort and import-lint
 requirements.txt, so every image installed them, and the production stage's
 `pip uninstall` RUN removed only four of the seven while adding a layer of its own.
 They now live in requirements-dev.txt, which only CI installs. Since PRD-262 US-022 the
-API's dependencies are requirements.in, compiled into requirements.lock (and the
-Railway [leiden] variant's lock), and the dev file into requirements-dev.lock. This
-suite checks:
+API's dependencies are requirements.in, compiled into requirements.lock (every image's
+since US-027), and the dev file into requirements-dev.lock. This suite checks:
 
 - the seven tools are in requirements-dev.txt and not in requirements.in or the image's
   locks, and the two inputs name no package twice;
@@ -40,7 +39,7 @@ OSS_SCANNER = (ROOT / ".oss-scanner" / "Dockerfile").read_text(encoding="utf-8")
 DEV_FILE = "requirements-dev.txt"
 DEV_LOCK = "requirements-dev.lock"
 INPUT = "requirements.in"
-IMAGE_LOCKS = ("requirements.lock", "requirements-leiden.lock")
+IMAGE_LOCKS = ("requirements.lock",)
 TOOLS = {"pytest", "pytest-asyncio", "pytest-timeout", "pytest-cov", "black", "isort", "import-linter"}
 STDLIB = "/usr/local/lib/python3.11"
 STDLIB_COMPILE = (
@@ -112,7 +111,7 @@ def test_the_image_never_installs_the_dev_file():
     instructions = "\n".join(_instructions(DOCKERFILE))
     assert DEV_FILE not in instructions and DEV_LOCK not in instructions
     copies = [line for line in _instructions(DOCKERFILE) if re.match(r"COPY\s+requirements", line)]
-    assert copies == ["COPY requirements.lock requirements-leiden.lock scripts/split_lock.py ./"], copies
+    assert copies == ["COPY requirements.lock scripts/split_lock.py ./"], copies
 
 
 def test_no_pip_uninstall_is_left():

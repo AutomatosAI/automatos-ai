@@ -1,5 +1,5 @@
 # Test and lint tools: CI only, never the image (PRD-262 US-014).
-# The Dockerfile installs requirements.lock (requirements-leiden.lock on Railway)
+# The Dockerfile installs requirements.lock (on Railway too, since PRD-262 US-027)
 # alone, so none of these reach the API image. This file is compiled against
 # requirements.lock into requirements-dev.lock (PRD-262 US-022; the command is at the
 # top of that file), so a dev tool never moves a locked version. Every CI install of

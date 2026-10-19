@@ -4,12 +4,13 @@ orchestrator/Dockerfile:
 
 - uv comes from a named stage pinned as ``tag@sha256`` (FR-9: Dependabot reads FROM lines),
   and only pybuild, which never ships, gets the binary;
-- INSTALL_GRAPH_EXTRAS (default ``true``, the production value) picks the lock: the
-  [leiden] lock when true, requirements.lock otherwise; no sed rewrites a requirement;
+- every build installs requirements.lock, Railway's included: no build arg picks a
+  second lock (US-027 removed the graph-extras arg and the [leiden] lock), and no sed
+  rewrites a requirement;
 - the install is ``uv pip install --python /usr/local/bin/python --prefix /install/<half>
   --no-deps --require-hashes --no-compile-bytecode`` with US-015's binary flags, once per
   half of the lock (split_lock.py), and a failed half fails the RUN. Run here with ``sh``
-  and a fake uv, it installs the halves of the lock the argument picks, stable first;
+  and a fake uv, it installs the halves of the lock, stable first;
 - after US-020's strip and US-021's prune, site-packages is compiled per half with
   ``compileall -s <half> -p /usr/local --invalidation-mode unchecked-hash`` and a fixed
   PYTHONHASHSEED, never ending in ``|| true``. Run here on a fake tree, it writes
@@ -43,16 +44,13 @@ ORCH = ROOT / "orchestrator"
 WORKFLOWS = ROOT / ".github" / "workflows"
 DOCKERFILE = (ORCH / "Dockerfile").read_text(encoding="utf-8")
 INSTALL = ('uv pip install --python /usr/local/bin/python --prefix "/install/$half" --no-deps --require-hashes '
-           '--no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher,graspologic -r "$half.txt"')
-CHOOSE = ('if [ "$INSTALL_GRAPH_EXTRAS" = "true" ]; then lock=requirements-leiden.lock; '
-          'else lock=requirements.lock; fi')
+           '--no-compile-bytecode --no-cache --only-binary :all: --no-binary pysher -r "$half.txt"')
 COMPILE = ('PYTHONHASHSEED=0 python -m compileall -q -s "$prefix" -p /usr/local --invalidation-mode unchecked-hash '
            '"$prefix/lib/python3.11/site-packages"')
 UNCHECKED_HASH_FLAGS = 0b01  # PEP 552: hash-based, source never checked
 NEEDS_SH = pytest.mark.skipif(shutil.which("sh") is None, reason="needs sh, as the Docker build has")
 # What the API's install reads: the image paths in both workflows must name each one.
-LOCK_INPUTS = ("orchestrator/requirements.in", "orchestrator/requirements-leiden.in",
-               "orchestrator/requirements.lock", "orchestrator/requirements-leiden.lock",
+LOCK_INPUTS = ("orchestrator/requirements.in", "orchestrator/requirements.lock",
                "orchestrator/requirements-dev.txt", "orchestrator/requirements-dev.lock",
                "orchestrator/scripts/split_lock.py")
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
@@ -96,13 +94,15 @@ def test_uv_comes_from_a_pinned_named_stage_into_pybuild_only():
     assert not [line for line in instructions if "pip install uv" in line]
 
 
-def test_install_graph_extras_picks_the_lock_and_keeps_its_production_default():
+def test_every_build_installs_the_one_lock():
+    """PRD-262 US-027: Leiden through graspologic-native; no build arg picks a [leiden] lock."""
     pybuild = _stage("pybuild")
-    assert "ARG INSTALL_GRAPH_EXTRAS=true" in pybuild
-    assert "COPY requirements.lock requirements-leiden.lock scripts/split_lock.py ./" in pybuild
+    assert not [line for line in pybuild if line.startswith("ARG ")], pybuild
+    assert "COPY requirements.lock scripts/split_lock.py ./" in pybuild
     run = _run("uv pip install")
-    assert run.startswith(f"RUN {CHOOSE} && python split_lock.py \"$lock\" stable.txt rest.txt && ")
+    assert run.startswith("RUN python split_lock.py requirements.lock stable.txt rest.txt && "), run
     assert "sed " not in run and "requirements.build" not in DOCKERFILE
+    assert "leiden" not in "\n".join(_instructions()).lower()
 
 
 def test_the_install_is_the_lock_exactly_in_two_halves():
@@ -142,34 +142,32 @@ def _tools(tmp_path: Path) -> dict:
     return {"PATH": f"{bin_dir}:/usr/bin:/bin", "UV_LOG": str(tmp_path / "uv.log"), "UV_FAIL": "none"}
 
 
-def _install(tmp_path: Path, extras: str, fail: str = "none") -> subprocess.CompletedProcess:
+def _install(tmp_path: Path, fail: str = "none") -> subprocess.CompletedProcess:
     work = tmp_path / "work"
     work.mkdir()
-    for name in ("requirements.lock", "requirements-leiden.lock"):
-        shutil.copy(ORCH / name, work / name)
+    shutil.copy(ORCH / "requirements.lock", work / "requirements.lock")
     shutil.copy(ORCH / "scripts" / "split_lock.py", work / "split_lock.py")
-    env = {**_tools(tmp_path), "INSTALL_GRAPH_EXTRAS": extras, "UV_FAIL": fail}
+    env = {**_tools(tmp_path), "UV_FAIL": fail}
     script = _run("uv pip install").removeprefix("RUN ")
     return subprocess.run(["sh", "-c", script], cwd=work, env=env, capture_output=True, text=True, timeout=60,
                           check=False)
 
 
 @NEEDS_SH
-@pytest.mark.parametrize("extras,lock", [("true", "requirements-leiden.lock"), ("false", "requirements.lock")])
-def test_the_install_run_installs_the_halves_of_the_lock_it_picks(tmp_path, extras, lock):
-    done = _install(tmp_path, extras)
+def test_the_install_run_installs_the_halves_of_the_lock(tmp_path):
+    done = _install(tmp_path)
     assert done.returncode == 0, done.stderr
     calls = (tmp_path / "uv.log").read_text().splitlines()
     assert [call.split("--prefix ")[1].split()[0] for call in calls] == ["/install/stable", "/install/rest"]
-    stable, rest = split_lock.split((ORCH / lock).read_text(encoding="utf-8"))
+    stable, rest = split_lock.split((ORCH / "requirements.lock").read_text(encoding="utf-8"))
     assert (tmp_path / "work" / "stable.txt").read_text() == stable
     assert (tmp_path / "work" / "rest.txt").read_text() == rest
-    assert ("graspologic==" in rest) is (extras == "true")
+    assert "graspologic-native==" in rest and "graspologic==" not in stable + rest, "US-027"
 
 
 @NEEDS_SH
 def test_a_failed_half_fails_the_install_run(tmp_path):
-    done = _install(tmp_path, "false", fail="stable")
+    done = _install(tmp_path, fail="stable")
     assert done.returncode != 0
     assert len((tmp_path / "uv.log").read_text().splitlines()) == 1, "the second half never starts"
 

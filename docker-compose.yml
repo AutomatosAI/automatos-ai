@@ -154,10 +154,8 @@ services:
     build:
       context: ./orchestrator
       dockerfile: Dockerfile
-      args:
-        # The Dockerfile defaults are PRODUCTION values (Railway builds it). The
-        # local edition opts out of the ~660 MB Leiden clustering stack here.
-        INSTALL_GRAPH_EXTRAS: "false"
+      # No build args: one API dependency set for every build, Leiden through
+      # graspologic-native included (PRD-262 US-027).
       target: development
     container_name: automatos_backend
     restart: unless-stopped

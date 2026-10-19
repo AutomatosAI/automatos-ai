@@ -58,8 +58,7 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "is kept current is open for Gerard and Dave (PRD-262 US-012)."
     ),
     **dict.fromkeys(
-        ("orchestrator/requirements.lock", "orchestrator/requirements-leiden.lock",
-         "orchestrator/requirements-dev.lock"),
+        ("orchestrator/requirements.lock", "orchestrator/requirements-dev.lock"),
         "Dependabot's pip and uv updaters fetch only *.txt and *.in files (and uv.lock), so "
         "they never see these locks (dependabot-core uv/lib/dependabot/uv/file_fetcher.rb, "
         "read 19 Oct 2026). Pointed at /orchestrator they would bump requirements.in alone, "

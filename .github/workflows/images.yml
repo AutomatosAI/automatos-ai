@@ -56,9 +56,10 @@ name: images
 #   layer cache, so it gets these fixes only once it deploys the published
 #   images (PRD-262 D2, held until after WebSummit).
 #
-# Build args match docker-compose.yml, i.e. the local edition: no graph extras,
-# no bundled Chromium, and the frontend built for AUTH_EDITION=local against
+# Build args match docker-compose.yml, i.e. the local edition: no bundled
+# Chromium, and the frontend built for AUTH_EDITION=local against
 # http://localhost:8000 (NEXT_PUBLIC_* are inlined at build time, for now).
+# The API takes none: Railway's build installs the same lock (PRD-262 US-027).
 # The API reads AUTH_EDITION at runtime; only the frontend fixes its edition
 # at build time, and a hosted-edition frontend can't be published generically
 # because its Clerk key is per deployment. Railway builds its own images and
@@ -94,9 +95,7 @@ on:
       - "orchestrator/Dockerfile"
       - "orchestrator/.dockerignore"
       - "orchestrator/requirements.in"
-      - "orchestrator/requirements-leiden.in"
       - "orchestrator/requirements.lock"
-      - "orchestrator/requirements-leiden.lock"
       - "orchestrator/requirements-dev.txt"
       - "orchestrator/requirements-dev.lock"
       - "orchestrator/scripts/split_lock.py"
@@ -192,13 +191,12 @@ jobs:
           IMAGES: |
             [
               {"name": "api", "context": "orchestrator", "target": "production",
-               "build_args": ["INSTALL_GRAPH_EXTRAS=false"],
+               "build_args": [],
                "source_date_epoch": 1792368000,
                "cache_mode": "min", "no_cache_filters": ["base"],
                "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["orchestrator/Dockerfile", "orchestrator/.dockerignore",
-                          "orchestrator/requirements.in", "orchestrator/requirements-leiden.in",
-                          "orchestrator/requirements.lock", "orchestrator/requirements-leiden.lock",
+                          "orchestrator/requirements.in", "orchestrator/requirements.lock",
                           "orchestrator/requirements-dev.txt", "orchestrator/requirements-dev.lock",
                           "orchestrator/scripts/split_lock.py"]},
               {"name": "frontend", "context": "frontend", "target": "production",

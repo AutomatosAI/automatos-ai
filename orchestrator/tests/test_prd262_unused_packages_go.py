@@ -4,9 +4,10 @@ nltk, passlib, python-jose (with its ecdsa and rsa closure), pgvector (the Pytho
 package; the Postgres extension stays) and scikit-learn left requirements.txt. The
 Dockerfile's separate `--no-deps futureagi==0.6.0` install, a PRD-58 leftover, went
 too: the API calls agent-opt-worker over HTTP and never imports futureagi (its module
-is `fi`). Railway's [leiden] build still gets scikit-learn through graspologic until
-US-027. US-018 removed gotenberg-client with the Gotenberg sidecar and its only client,
-ConversionService, which nothing called. US-023 replaced camelot-py with pdfplumber's
+is `fi`). Railway's [leiden] build kept scikit-learn through graspologic until US-027,
+which serves Leiden from graspologic-native and removed that build. US-018 removed
+gotenberg-client with the Gotenberg sidecar and its only client, ConversionService,
+which nothing called. US-023 replaced camelot-py with pdfplumber's
 text strategy, and opencv-python-headless, which only camelot imported, went with it.
 US-024 moved Gemini onto the OpenAI-compatible adapter: google-generativeai left, with
 google-ai-generativelanguage and google-api-python-client (Google's API discovery
@@ -21,17 +22,17 @@ langsmith and zstandard, which only langchain-core brought. This suite checks:
   importlib.util.find_spec, pytest.importorskip) with a literal name, at any depth. The
   one exception is ALLOWED_SCOPES: pandas inside PandasAIService's methods;
 - requirements.in, requirements-dev.txt and the locks compiled from them (PRD-262
-  US-022) name none of them (the [leiden] lock only scikit-learn and pandas), the
-  Dockerfile's one install is the hashed lock, never futureagi, and start.sh no longer
-  downloads NLTK data;
-- graphifyy is pinned exactly in requirements.in, and with the [leiden] extra at the same
-  version in requirements-leiden.in; psutil is pinned at 6 or later, the first release
-  with aarch64 wheels;
-- pybuild installs wheels only, with `--no-binary pysher,graspologic` after
-  `--only-binary :all:` (pip's `:all:` cleared an exception named before it; uv, which
-  installs the lock since US-022, takes them either way and the order stays);
-- CI looks inside both built variants (scripts/ci/image_dists_absent.py): test.yml's
-  prod-image-parity checks the Railway build, smoke-images-pr the GHCR build;
+  US-022) name none of them, the Dockerfile's one install is the hashed lock, never
+  futureagi, and start.sh no longer downloads NLTK data;
+- graphifyy is pinned exactly in requirements.in, without its [leiden] extra, next to
+  graspologic-native, and the lock has no graspologic (US-027); psutil is pinned at 6 or
+  later, the first release with aarch64 wheels;
+- pybuild installs wheels only, with `--no-binary pysher` after `--only-binary :all:`
+  (pip's `:all:` cleared an exception named before it; uv, which installs the lock since
+  US-022, takes it either way and the order stays);
+- CI looks inside both builds (scripts/ci/image_dists_absent.py): test.yml's
+  prod-image-parity checks the default-argument build Railway makes, smoke-images-pr the
+  one images.yml publishes. Since US-027 the two install the same lock;
 - `git grep -i camelot -- orchestrator` lists this file alone (US-023): the test stubs,
   comments and code that named it are gone, and this file has to name it to forbid it.
 
@@ -86,10 +87,8 @@ ALLOWED_SCOPES = {("modules/tools/services/pandas_ai_service.py", "pandas"): "Pa
 # Distributions no image installs: the ones above plus python-jose's closure, and the two
 # langchain-core brought that nothing else needs (US-026).
 REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa", "langsmith", "zstandard"}
-# Railway's [leiden] build keeps these until US-027: scikit-learn through graspologic,
-# pandas through statsmodels and seaborn.
-RAILWAY_KEEPS = frozenset({"scikit-learn", "pandas"})
-WHEEL_EXCEPTIONS = "pysher,graspologic"
+# pysher 1.0.8 is a pure-Python sdist; graspologic, the other, left with US-027.
+WHEEL_EXCEPTIONS = "pysher"
 
 SKIP_DIRS = frozenset({"venv", ".venv", "node_modules", "__pycache__", "site-packages"})
 LAZY_IMPORTERS = frozenset({"import_module", "__import__", "find_spec", "importorskip"})
@@ -312,25 +311,20 @@ def _requirements(path: Path) -> dict[str, str]:
 
 
 def test_no_requirements_file_names_a_removed_distribution():
-    for name in ("requirements.in", "requirements-leiden.in", "requirements-dev.txt",
-                 "requirements.lock", "requirements-dev.lock"):
+    for name in ("requirements.in", "requirements-dev.txt", "requirements.lock", "requirements-dev.lock"):
         assert not REMOVED_DISTS & set(_requirements(ORCH / name)), name
-    railway = REMOVED_DISTS & set(_requirements(ORCH / "requirements-leiden.lock"))
-    assert railway <= RAILWAY_KEEPS, railway
 
 
-def test_graphifyy_is_pinned_exactly_with_and_without_the_leiden_extra():
-    """PRD-262 US-022: INSTALL_GRAPH_EXTRAS picks a lock; no sed rewrites a requirement."""
-    line = _requirements(ORCH / "requirements.in")["graphifyy"]
-    assert _PIN.match(line) and line.startswith("graphifyy=="), line
-    leiden = _requirements(ORCH / "requirements-leiden.in")["graphifyy"]
-    assert leiden == line.replace("graphifyy==", "graphifyy[leiden]==", 1), leiden
+def test_graphifyy_is_pinned_exactly_without_the_leiden_extra_beside_graspologic_native():
+    """PRD-262 US-022 pinned graphifyy; US-027 serves its Leiden calls from graspologic-native."""
+    requirements = _requirements(ORCH / "requirements.in")
+    lock = _requirements(ORCH / "requirements.lock")
+    for name in ("graphifyy", "graspologic-native"):
+        line = requirements[name]
+        assert _PIN.match(line) and line.startswith(f"{name}=="), f"{line}: pinned exactly, no extra"
+        assert lock[name].startswith(f"{line} "), (name, lock[name])
     assert "sed " not in DOCKERFILE and "requirements.build.txt" not in DOCKERFILE
-    version = line.split("==", 1)[1]
-    for lock in ("requirements.lock", "requirements-leiden.lock"):
-        assert _requirements(ORCH / lock)["graphifyy"].startswith(f"graphifyy=={version} "), lock
-    assert "graspologic" not in _requirements(ORCH / "requirements.lock"), "the GHCR build has no [leiden]"
-    assert "graspologic" in _requirements(ORCH / "requirements-leiden.lock"), "Railway's build keeps it"
+    assert "graspologic" not in lock, "no image installs graspologic since US-027"
 
 
 def test_psutil_is_pinned_at_6_or_later_for_its_aarch64_wheels():
@@ -355,8 +349,7 @@ def test_the_dockerfile_never_installs_futureagi():
     # install is the hashed lock (with --no-deps, as a lock needs), so nothing else gets in.
     installs = _pip_installs()
     assert len(installs) == 1 and "--require-hashes" in installs[0], installs
-    for lock in ("requirements.lock", "requirements-leiden.lock"):
-        assert "futureagi" not in _requirements(ORCH / lock), lock
+    assert "futureagi" not in _requirements(ORCH / "requirements.lock")
 
 
 def test_pybuild_installs_wheels_only_with_the_pure_python_exceptions_last():
@@ -427,13 +420,13 @@ def test_prod_image_parity_checks_the_railway_build():
                      lambda step: "docker build --target production -t parity-be orchestrator/" in step.get("run", ""))
     at, check = _step("test.yml", "prod-image-parity", lambda step: "REMOVED" in (step.get("env") or {}))
     assert built < at
-    assert set(check["env"]["REMOVED"].split()) == REMOVED_DISTS - RAILWAY_KEEPS
+    assert set(check["env"]["REMOVED"].split()) == REMOVED_DISTS, "Railway's build installs the same lock (US-027)"
     assert _checks_the_image(check, "parity-be"), check["run"]
 
 
 def test_smoke_images_pr_checks_the_ghcr_build():
     built, build = _step("smoke-images.yml", "smoke-images-pr", lambda step: step.get("name") == "Build api (amd64)")
-    assert build["with"]["build-args"].split() == ["INSTALL_GRAPH_EXTRAS=false"], "the GHCR variant"
+    assert "build-args" not in build["with"], "one API image: no variant argument since US-027"
     at, check = _step("smoke-images.yml", "smoke-images-pr", lambda step: "REMOVED" in (step.get("env") or {}))
     assert built < at
     assert set(check["env"]["REMOVED"].split()) == REMOVED_DISTS

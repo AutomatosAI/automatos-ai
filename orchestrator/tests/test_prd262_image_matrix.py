@@ -86,9 +86,7 @@ def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
 
 @pytest.mark.parametrize("path,names", [
     ("orchestrator/requirements.in", ["api"]),  # PRD-262 US-022: the input and its locks
-    ("orchestrator/requirements-leiden.in", ["api"]),
     ("orchestrator/requirements.lock", ["api"]),
-    ("orchestrator/requirements-leiden.lock", ["api"]),
     ("orchestrator/requirements-dev.lock", ["api"]),
     ("orchestrator/scripts/split_lock.py", ["api"]),
     ("orchestrator/requirements-dev.txt", ["api"]),  # PRD-262 US-014
@@ -170,7 +168,7 @@ def test_only_the_api_builds_reproducibly():
     for entry in _pick([], publish=True, every=True):
         args = entry["build_args"].splitlines()
         if entry["name"] == "api":
-            assert args == ["INSTALL_GRAPH_EXTRAS=false", f"SOURCE_DATE_EPOCH={API_EPOCH}"], args
+            assert args == [f"SOURCE_DATE_EPOCH={API_EPOCH}"], args  # no variant arg since US-027
             assert entry["rewrite_timestamp"] == ",rewrite-timestamp=true"
         else:
             assert not [arg for arg in args if arg.startswith("SOURCE_DATE_EPOCH")], (entry["name"], args)

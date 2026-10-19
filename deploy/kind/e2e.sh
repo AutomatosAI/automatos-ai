@@ -79,7 +79,7 @@ create_cluster() {
 prepare_images() {
     if [ "${E2E_SKIP_BUILD:-}" != "1" ] || ! docker image inspect "$API_IMAGE" >/dev/null 2>&1; then
         log "Building $API_IMAGE from this checkout"
-        docker build --target production --build-arg INSTALL_GRAPH_EXTRAS=false -t "$API_IMAGE" "$ROOT/orchestrator"
+        docker build --target production -t "$API_IMAGE" "$ROOT/orchestrator"
     fi
     # The web app and worker tags move (edge): pull them every run, or a cached
     # image older than the API under test answers with yesterday's contract.

@@ -190,7 +190,7 @@ def test_the_pr_variant_builds_each_image_as_images_yml_does(image):
     assert build["context"] == image["context"]
     assert build.get("target", "") == image["target"]
     assert build["platforms"] == "linux/amd64"
-    assert build["build-args"].split() == image["build_args"]
+    assert build.get("build-args", "").split() == image["build_args"], "the API takes none (US-027)"
     assert build["cache-from"] == f"type=gha,scope={name}-amd64", "images.yml's cache scope"
     assert "cache-to" not in build, "PR builds read the cache and never write it (§9-Q13)"
     assert build["load"] is True and build["provenance"] is False and build["sbom"] is False

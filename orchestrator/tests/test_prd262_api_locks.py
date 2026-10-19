@@ -1,10 +1,9 @@
 """PRD-262 US-022: the API's dependency set is locked, and each lock satisfies its input.
 
-orchestrator/requirements.in (the old requirements.txt), requirements-leiden.in
-(Railway's [leiden] build, until US-027) and requirements-dev.txt are compiled with uv
-into requirements.lock, requirements-leiden.lock and requirements-dev.lock, every pin
-with its hashes. The image, CI, the OSS scanner and start.sh install the locks. This
-suite checks:
+orchestrator/requirements.in (the old requirements.txt) and requirements-dev.txt are
+compiled with uv into requirements.lock and requirements-dev.lock, every pin with its
+hashes. Every image (Railway's too: US-027 removed its [leiden] lock), CI, the OSS
+scanner and start.sh install the locks. This suite checks:
 
 - scripts/ci/lock_check.py on the committed files: every lock is the compile of its
   input with the PRD's flags, and the locks installed together agree. It reads the files
@@ -61,17 +60,20 @@ def test_every_committed_lock_satisfies_its_input():
 
 def test_the_locks_are_compiled_with_the_prds_flags():
     commands = {spec.lock: spec.command for spec in lock_check.LOCKS}
-    assert set(commands) == {"orchestrator/requirements.lock", "orchestrator/requirements-leiden.lock",
-                             "orchestrator/requirements-dev.lock"}
+    assert set(commands) == {"orchestrator/requirements.lock", "orchestrator/requirements-dev.lock"}
     for command in commands.values():
         flags = command.split()
         assert "--universal" in flags and "--generate-hashes" in flags, command
         assert flags[flags.index("--python-version") + 1] == "3.11", "US-058 moves it to 3.12, not before"
+        assert flags[flags.index("--no-binary") + 1] == "pysher", "graspologic left with US-027"
     assert "-c orchestrator/requirements.lock" in commands["orchestrator/requirements-dev.lock"], (
         "dev tools never move a locked version")
-    assert "-c orchestrator/requirements.lock" in commands["orchestrator/requirements-leiden.lock"], (
-        "Railway's packages are the published image's where the two share one")
-    assert "orchestrator/requirements-leiden.in" in commands["orchestrator/requirements-leiden.lock"]
+
+
+def test_railways_leiden_lock_and_its_input_are_gone():
+    """PRD-262 US-027: Leiden through graspologic-native leaves one lock for every build."""
+    for name in ("requirements-leiden.in", "requirements-leiden.lock"):
+        assert not (ORCH / name).exists(), name
 
 
 def test_every_pin_of_every_lock_is_exact_and_hashed():
@@ -101,12 +103,11 @@ def _lock(lock: str, pins: list[tuple[str, list[str], list[str]]], command: str 
 
 
 def _files(**changes: str) -> dict[str, str]:
-    """A consistent set of the six files, with ``changes`` (by short name) swapped in."""
-    main_in, leiden_in, dev_in = "-r " + lock_check.IN, "-r " + lock_check.LEIDEN_IN, "-r " + lock_check.DEV_IN
+    """A consistent set of the four files, with ``changes`` (by short name) swapped in."""
+    main_in, dev_in = "-r " + lock_check.IN, "-r " + lock_check.DEV_IN
     from_main = "-c " + lock_check.LOCK
     files = {
         "in": "# the API\nfastapi==0.110.0\nhttpx>=0.27  # http\n",
-        "leiden_in": "graspologic==3.3.0\n",
         "dev_in": "pytest==7.4.3\n",
         "lock": _lock(lock_check.LOCK, [
             ("anyio==4.0.0", [HASH_A], ["httpx"]),
@@ -114,21 +115,13 @@ def _files(**changes: str) -> dict[str, str]:
             ("httpx==0.27.0", [HASH_C, HASH_A], [main_in]),
             ("packaging==24.0", [HASH_A], ["fastapi"]),
         ]),
-        "leiden_lock": _lock(lock_check.LEIDEN_LOCK, [
-            ("anyio==4.0.0", [HASH_A], [from_main, "httpx"]),
-            ("fastapi==0.110.0", [HASH_B], [from_main, main_in]),
-            ("graspologic==3.3.0", [HASH_C], [leiden_in]),
-            ("httpx==0.27.0", [HASH_C, HASH_A], [from_main, main_in]),
-            ("packaging==24.0", [HASH_A], [from_main, "fastapi"]),
-        ]),
         "dev_lock": _lock(lock_check.DEV_LOCK, [
             ("packaging==24.0", [HASH_A], [from_main, "pytest"]),
             ("pytest==7.4.3", [HASH_B], [dev_in]),
         ]),
     }
     files.update(changes)
-    paths = {"in": lock_check.IN, "leiden_in": lock_check.LEIDEN_IN, "dev_in": lock_check.DEV_IN,
-             "lock": lock_check.LOCK, "leiden_lock": lock_check.LEIDEN_LOCK, "dev_lock": lock_check.DEV_LOCK}
+    paths = {"in": lock_check.IN, "dev_in": lock_check.DEV_IN, "lock": lock_check.LOCK, "dev_lock": lock_check.DEV_LOCK}
     return {paths[key]: text for key, text in files.items()}
 
 
@@ -167,9 +160,9 @@ def test_a_requirement_bumped_without_recompiling_is_caught():
 
 
 def test_a_removed_requirement_left_in_the_lock_is_caught():
-    found = lock_check.problems(_files(leiden_in="# graspologic left\n"))
-    assert found == ["orchestrator/requirements-leiden.lock: graspologic==3.3.0 is pinned for "
-                     "-r orchestrator/requirements-leiden.in, which no longer asks for it: recompile the lock"]
+    found = lock_check.problems(_files(dev_in="# pytest left\n"))
+    assert found == ["orchestrator/requirements-dev.lock: pytest==7.4.3 is pinned for "
+                     "-r orchestrator/requirements-dev.txt, which no longer asks for it: recompile the lock"]
 
 
 def test_a_dev_pin_that_moves_a_locked_version_is_caught():
@@ -185,13 +178,6 @@ def test_a_shared_pin_with_no_hash_in_common_is_caught():
                                        ("pytest==7.4.3", [HASH_B], ["-r " + lock_check.DEV_IN])])
     found = lock_check.problems(_files(dev_lock=text))
     assert "orchestrator/requirements-dev.lock: packaging shares no hash with orchestrator/requirements.lock" in found
-
-
-def test_the_leiden_lock_must_pin_everything_the_published_lock_pins():
-    text = _files()[lock_check.LEIDEN_LOCK]
-    block = text[text.index("packaging==24.0"):]
-    found = lock_check.problems(_files(leiden_lock=text.replace(block, "")))
-    assert "orchestrator/requirements-leiden.lock: lacks packaging, which orchestrator/requirements.lock pins" in found
 
 
 def test_an_input_option_line_is_refused_rather_than_skipped():
@@ -211,9 +197,8 @@ def test_the_stable_set_is_the_prds():
     assert set(split_lock.STABLE) == PRD_STABLE
 
 
-@pytest.mark.parametrize("lock", ["requirements.lock", "requirements-leiden.lock"])
-def test_the_split_keeps_every_pin_once_in_order_stable_first(lock):
-    text = (ORCH / lock).read_text(encoding="utf-8")
+def test_the_split_keeps_every_pin_once_in_order_stable_first():
+    text = (ORCH / "requirements.lock").read_text(encoding="utf-8")
     stable, rest = split_lock.split(text)
     every = split_lock.blocks(text)
     first, second = split_lock.blocks(stable), split_lock.blocks(rest)
