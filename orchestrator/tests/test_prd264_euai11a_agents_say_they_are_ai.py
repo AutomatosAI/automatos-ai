@@ -302,3 +302,26 @@ def test_the_cto_prompt_never_names_an_owner_named_workspace():
     prompt = CtoPromptBuilder.build(soul_document=HUMAN_SOUL, workspace_name=OWNER_EMAIL_WORKSPACE)
     assert prompt.endswith(ai_identity_rule(None))
     assert "john@acme.example" not in prompt
+
+
+def _cto_turn_prompt(db, workspace_id):
+    """The system prompt Auto's CTO turn sends, built by the service's real CTO override."""
+    from consumers.chatbot.cto_prompt_builder import CtoPromptBuilder
+    from consumers.chatbot.service import StreamingChatService
+
+    svc = StreamingChatService.__new__(StreamingChatService)
+    svc.db, svc.workspace_id = db, workspace_id
+    llm_messages = [{"role": "system", "content": "the chat's prompt"}]
+    with patch.object(CtoPromptBuilder, "get_platform_state_snapshot", return_value={}):
+        svc._apply_cto_override(llm_messages, NS(orchestrator=NS(_last_memory_result=None)),
+                                NS(custom_persona_prompt=HUMAN_SOUL, configuration={}), [], None, 7)
+    return llm_messages[0]["content"]
+
+
+def test_autos_cto_turn_names_the_workspaces_public_name_like_context_service():
+    prompt = _cto_turn_prompt(_db(company=COMPANY, workspace=OWNER_NAMED_WORKSPACE), WORKSPACE_ID)
+    assert prompt.endswith(ai_identity_rule(COMPANY))
+    assert prompt.index(HUMAN_SOUL) < prompt.index(AI_IDENTITY_RULE_HEADING)
+    assert _cto_turn_prompt(_db(workspace=WORKSPACE), WORKSPACE_ID).endswith(ai_identity_rule(WORKSPACE))
+    owner_named = _cto_turn_prompt(_db(workspace=OWNER_NAMED_WORKSPACE), WORKSPACE_ID)
+    assert owner_named.endswith(ai_identity_rule(None)) and "John Smith" not in owner_named
