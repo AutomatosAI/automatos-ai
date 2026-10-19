@@ -6,7 +6,7 @@
  *   optimised was the 48 px brand mark on the hosted sign-in pages, so public/brand/ holds it at
  *   that size: 96 px wide, the 2x copy Next's optimiser served to high-density screens.
  * - sharp and its libvips builds, TypeScript and Next's AMP validator stay out of the trace, and
- *   so do Next's own build and dev internals (PRD-262 #29).
+ *   so do Next's own build and dev internals (PRD-262 #29) and React's development builds (#47).
  * - test.yml's prod-image-parity job and images.yml boot each built image and look for every
  *   excluded glob (scripts/check-standalone-image.sh), so the script's list is this config's list.
  */
@@ -44,6 +44,11 @@ const EXCLUDED = [
   'node_modules/next/dist/compiled/next-devtools/**',
   'node_modules/next/dist/compiled/next-server/*-experimental.runtime.prod.js',
   'node_modules/next/dist/compiled/next-server/*-turbo.runtime.prod.js',
+  'node_modules/react/cjs/*.development.js',
+  'node_modules/react-dom/cjs/*.development.js',
+  'node_modules/scheduler/cjs/*.development.js',
+  'node_modules/next/dist/compiled/react-is/cjs/*.development.js',
+  'node_modules/next/dist/compiled/react-refresh/**',
 ]
 const MARK_SRC = '/brand/automatos-mark.png'
 const MARK_DISPLAY_PX = 48

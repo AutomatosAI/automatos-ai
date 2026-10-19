@@ -103,8 +103,10 @@ const MASCOT_CACHE_RULE = {
 // dev overlay, and the route runtimes Next picks only for experimental React or Turbopack (turning
 // either on needs those two globs gone first, or every page fails with MODULE_NOT_FOUND). The
 // server does load compiled/babel/code-frame.js, babel-code-frame, next/dist/build and the edge
-// runtime, so they stay. frontend/scripts/check-standalone-image.sh looks for each glob in every
-// built image (test.yml's prod-image-parity job, images.yml) and requests every page.
+// runtime, so they stay. PRD-262 #47: React's development builds and Next's React Refresh, which
+// the server never loads: the standalone server.js sets NODE_ENV=production, and the Dockerfile
+// does too. frontend/scripts/check-standalone-image.sh looks for each glob in every built image
+// (test.yml's prod-image-parity job, images.yml) and requests every page.
 const STANDALONE_TRACE_EXCLUDES = [
   'node_modules/@img/**',
   'node_modules/sharp/**',
@@ -124,6 +126,11 @@ const STANDALONE_TRACE_EXCLUDES = [
   'node_modules/next/dist/compiled/next-devtools/**',
   'node_modules/next/dist/compiled/next-server/*-experimental.runtime.prod.js',
   'node_modules/next/dist/compiled/next-server/*-turbo.runtime.prod.js',
+  'node_modules/react/cjs/*.development.js',
+  'node_modules/react-dom/cjs/*.development.js',
+  'node_modules/scheduler/cjs/*.development.js',
+  'node_modules/next/dist/compiled/react-is/cjs/*.development.js',
+  'node_modules/next/dist/compiled/react-refresh/**',
 ]
 
 const nextConfig = {

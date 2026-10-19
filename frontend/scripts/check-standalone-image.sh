@@ -53,6 +53,11 @@ TRACE_EXCLUDED=(
   'node_modules/next/dist/compiled/next-devtools/**'
   'node_modules/next/dist/compiled/next-server/*-experimental.runtime.prod.js'
   'node_modules/next/dist/compiled/next-server/*-turbo.runtime.prod.js'
+  'node_modules/react/cjs/*.development.js'
+  'node_modules/react-dom/cjs/*.development.js'
+  'node_modules/scheduler/cjs/*.development.js'
+  'node_modules/next/dist/compiled/react-is/cjs/*.development.js'
+  'node_modules/next/dist/compiled/react-refresh/**'
 )
 READY_TIMEOUT_S=60
 # A static file: the middleware's matcher skips paths with an extension.

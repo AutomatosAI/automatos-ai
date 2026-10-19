@@ -1,11 +1,13 @@
-"""PRD-262 #29 (the 19 Oct breakdown): Next's build and dev internals stay out of the image.
+"""PRD-262 #29 and #47 (the 19 Oct breakdown): Next's build and dev internals stay out of the image.
 
 The standalone trace reached about 13.7 MB of next's own files (and caniuse-lite) through
 requires the production server never runs: next/font's loader and the capsize metrics only
 it reads, Babel, browserslist and caniuse-lite, the CSS tools, webpack's crypto polyfill,
 Next's file tracer, the dev overlay, and the route runtimes Next picks only when
 experimental React or Turbopack is on. A probe of 23 routes and a chat POST read none of
-them. next.config.js's STANDALONE_TRACE_EXCLUDES lists them, which Next applies to the
+them. React's development builds and Next's React Refresh (0.69 MB, #47) never load
+either: the standalone server.js sets NODE_ENV=production, as the Dockerfile does.
+next.config.js's STANDALONE_TRACE_EXCLUDES lists them all, which Next applies to the
 server's own trace and to every route's.
 
 This pins:
@@ -56,6 +58,18 @@ BUILD_ONLY = [
     NEXT + "compiled/next-server/app-page-turbo-experimental.runtime.prod.js",
     NEXT + "compiled/next-server/pages-turbo.runtime.prod.js",
 ]
+# The 8 development files the 19 Oct image held, and React Refresh's production half (#47).
+REACT_DEVELOPMENT = [
+    "node_modules/react-dom/cjs/react-dom-server-legacy.browser.development.js",
+    "node_modules/react-dom/cjs/react-dom-server.browser.development.js",
+    "node_modules/react/cjs/react.development.js",
+    "node_modules/react/cjs/react-jsx-runtime.development.js",
+    NEXT + "compiled/react-refresh/cjs/react-refresh-babel.development.js",
+    NEXT + "compiled/react-refresh/cjs/react-refresh-runtime.development.js",
+    NEXT + "compiled/react-refresh/cjs/react-refresh-runtime.production.min.js",
+    "node_modules/scheduler/cjs/scheduler.development.js",
+    NEXT + "compiled/react-is/cjs/react-is.development.js",
+]
 # What the standalone server loads beside them: it must stay.
 RUNTIME = [
     NEXT + "compiled/babel/code-frame.js",
@@ -76,6 +90,14 @@ RUNTIME = [
     NEXT + "next-devtools/server/shared.js",
     NEXT + "compiled/source-map/source-map.js",
     "node_modules/react-dom/server.browser.js",
+    "node_modules/react-dom/cjs/react-dom-server.browser.production.min.js",
+    "node_modules/react-dom/cjs/react-dom-server-legacy.browser.production.min.js",
+    "node_modules/react/index.js",
+    "node_modules/react/cjs/react.production.min.js",
+    "node_modules/react/cjs/react-jsx-runtime.production.min.js",
+    "node_modules/scheduler/cjs/scheduler.production.min.js",
+    NEXT + "compiled/react-is/cjs/react-is.production.js",
+    NEXT + "compiled/react-is/index.js",
     "node_modules/@opentelemetry/api/build/src/index.js",
 ]
 
@@ -108,6 +130,18 @@ def _excluded_by(path: str) -> list[str]:
 @pytest.mark.parametrize("path", BUILD_ONLY)
 def test_a_build_or_dev_internal_is_traced_out(path):
     assert _excluded_by(path), f"no glob keeps {path} out of the standalone trace"
+
+
+@pytest.mark.parametrize("path", REACT_DEVELOPMENT)
+def test_a_react_development_build_is_traced_out(path):
+    assert _excluded_by(path), f"no glob keeps {path} out of the standalone trace"
+
+
+def test_the_runtime_runs_react_in_production_mode():
+    """React's index files pick the development build unless NODE_ENV is production."""
+    dockerfile = (FRONTEND / "Dockerfile").read_text()
+    production = dockerfile[re.search(r"^FROM\s+\S+\s+AS\s+production\s*$", dockerfile, re.M | re.I).end():]
+    assert re.search(r"^ENV NODE_ENV=production$", production, re.M)
 
 
 @pytest.mark.parametrize("path", RUNTIME)
