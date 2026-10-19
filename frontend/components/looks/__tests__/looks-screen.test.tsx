@@ -30,6 +30,11 @@ vi.mock('@/components/layout/main-layout', () => ({
     </div>
   ),
 }))
+// PRD-261 A-04b: builtin Play's look editor comes through its lazy slot (lookEditor@1); here as it
+// is once its chunk has loaded, so the screen renders in the same pass (and on the server).
+vi.mock('@/components/looks/looks-screen-lazy', async () => ({
+  LooksScreen: (await import('@/components/looks/looks-screen')).LooksScreen,
+}))
 
 import { exportStarted } from '@/components/looks/look-manager'
 import { PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'

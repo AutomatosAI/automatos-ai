@@ -1,6 +1,7 @@
 /**
  * PRD-260 T-007a, K7, D7, D8 — app/deliverables/layout.tsx mounts Play's
- * shelf through PlayRouteSwitch: under Play at >= 1024 px on /deliverables
+ * shelf through ThemeSlot (PRD-261 A-04b: builtin Play registers it as its
+ * /deliverables page, lib/theme-host/builtin/play-slots.tsx): under Play at >= 1024 px on /deliverables
  * only, the existing page under Classic and Studio, below 1024 px, on the
  * explorer, and for a link into one of the page's other sections (a tab, a
  * post, a type drill-down). DeliverableDeepLink is mounted beside the page
