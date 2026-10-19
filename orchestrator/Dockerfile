@@ -95,6 +95,25 @@ RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --stri
 RUN find /install -type f -path '*/site-packages/*' \( -name '*.c' -o -name '*.cpp' -o -name '*.h' \
         -o -name '*.hpp' -o -name '*.pyx' -o -name '*.pxd' -o -name '*.pxi' \) -delete
 
+# scipy keeps the subpackages the code reaches, and no others (PRD-262, the 19 Oct
+# breakdown's row #17, about 29 MB). Nothing in the app imports scipy but
+# core/math/probability_theory.py (Student's t, from scipy.special); it is in the lock
+# for datasketch, which graphify's dedup runs (MinHashLSH integrates with
+# scipy.integrate.quad; WeightedMinHash takes scipy.sparse), and graspologic-native,
+# which never imports it, and networkx's pagerank reaches scipy.sparse. Those import
+# _lib, constants, integrate, linalg, optimize, sparse, spatial and special when they
+# load, and none of these imports a deleted one when it loads: only solve_bvp, qmc_quad,
+# differential_evolution, shgo and RotationSpline do, inside the function, and nothing
+# calls them. A kept subpackage missing fails the build. scipy is in the first half of
+# the lock; scripts/ci/image_scipy.py runs every scipy path of the code in the image.
+RUN scipy=/install/stable/lib/python3.11/site-packages/scipy && \
+    for kept in _lib constants integrate linalg optimize sparse spatial special; do \
+        test -d "$scipy/$kept" || { echo "scipy has no $kept" >&2; exit 1; }; \
+    done && \
+    for dropped in cluster datasets differentiate fftpack interpolate io misc ndimage odr signal stats; do \
+        rm -rf "${scipy:?}/$dropped" || exit 1; \
+    done
+
 # botocore keeps the models of the services we call, and no others (PRD-262 US-021).
 # botocore/data holds one for every AWS service, 437 directories and about 18.6 MB.
 # The app builds s3, s3vectors and bedrock-runtime clients; botocore's credential

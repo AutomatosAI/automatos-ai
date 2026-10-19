@@ -525,6 +525,22 @@ jobs:
           docker pull --quiet "${IMAGE}@${DIGEST}"
           docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_botocore.py
 
+      # PRD-262 row #17: pybuild deletes the scipy subpackages no code path loads. In the
+      # same image the kept ones import, every path by which the code reaches scipy runs
+      # (datasketch's MinHashLSH, graphify's dedup, the code graph's pagerank, the
+      # Knowledge Graph's Leiden chain, core.math's Student's t), and none of it loads a
+      # deleted subpackage or graphify.extract (scripts/ci/image_scipy.py). Same
+      # conditions as the step above; test.yml's prod-image-parity runs it on the Railway
+      # build.
+      - name: scipy keeps what the code reaches, and it runs
+        if: ${{ !cancelled() && matrix.name == 'api' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_scipy.py
+
       # PRD-262 US-022: pybuild installs requirements.lock in two halves, copied as two
       # layers (the stable set, then the rest), and this build is reproducible. On a
       # push to main (not the weekly schedule run), each layer must be the published
