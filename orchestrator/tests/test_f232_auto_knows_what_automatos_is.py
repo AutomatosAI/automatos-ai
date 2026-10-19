@@ -139,8 +139,11 @@ def test_the_atom_prompt_carries_the_same_facts():
     assert ". You're talking to Sam. Read the conversation" in prompt
     assert prompt.index("## Agent Description\nRuns the café") < prompt.index("## Automatos itself")
     assert prompt.index("## Automatos itself") < prompt.index("## What you remember about this user")
+    from modules.context.ai_identity_rule import ai_identity_rule
+
     bare = atom_system_prompt(NS(name="Auto", description="", persona=None), identity="", memory_block="", facts="")
-    assert bare.endswith("You adapt. That's what makes you good at this.\n")      # a widget turn: no facts
+    # a widget turn: no facts; only the platform AI rule (PRD-264 EUAI-11a) follows the prompt's own text
+    assert bare.endswith("You adapt. That's what makes you good at this.\n\n" + ai_identity_rule(None))
 
     source = (ORCH / "consumers" / "chatbot" / "service.py").read_text(encoding="utf-8")
     assert "facts=product_facts(self.db, self.workspace_id)" in source

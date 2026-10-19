@@ -29,10 +29,11 @@ W-A3, so the names A-10c added on top of A-10a's need no version bump; any chang
 
 Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/`.
 
-## 1. The core modules Play's folders import (73: 61 in §0, W-A1's three, and the rows W-A2 added)
+## 1. The core modules Play's folders import (74: 61 in §0, W-A1's three, the rows W-A2 added and PRD-264's one)
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
+| `@/components/ai-label/ai-label-fence` | c/play/chat/message-box.tsx | host-only | — | PRD-264 EUAI-11a: the host's AI label fence around the composer, which disables it while a theme hides the label. The host keeps it; once Play is a package, the SDK's chat area pauses its composer the same way (see "Host-owned AI label" below). |
 | `@/components/chatbot/mission-created-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionCreatedCard` | The host's card for the Mission the chat created. |
 | `@/components/chatbot/mission-suggestion-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionSuggestionCard` | The host's card offering a Mission. |
 | `@/components/chatbot/task-card` | c/play/chat/reply-cards.tsx | SDK | `cards.TaskCard` | The host's task card. |

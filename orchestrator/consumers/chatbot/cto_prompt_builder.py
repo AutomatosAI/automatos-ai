@@ -37,6 +37,7 @@ class CtoPromptBuilder:
         memories: Optional[List[str]] = None,
         tool_names: Optional[List[str]] = None,
         platform_state: Optional[Dict[str, Any]] = None,
+        workspace_name: Optional[str] = None,
     ) -> str:
         """
         Build the complete CTO system prompt.
@@ -49,7 +50,13 @@ class CtoPromptBuilder:
             memories: Retrieved memory strings
             tool_names: Available tool names
             platform_state: Live platform metrics (workspace count, agent count, etc.)
+            workspace_name: The workspace the agent acts for, named in the closing AI rule
+
+        PRD-264 EUAI-11a: the prompt ends with the platform rule that the agent answers
+        truthfully that it is an AI, after the soul document, so the soul can't remove it.
         """
+        from modules.context.ai_identity_rule import with_ai_identity_rule
+
         now = datetime.now(timezone.utc)
         time_str = now.strftime("%Y-%m-%d %H:%M UTC")
 
@@ -90,27 +97,32 @@ class CtoPromptBuilder:
 
         # ── 5. Tool Descriptions ──
         if tool_names:
-            # Categorize for readability
-            admin_tools = [t for t in tool_names if t.startswith("admin_")]
-            platform_tools = [t for t in tool_names if t.startswith("platform_")]
-            code_tools = [t for t in tool_names if "code" in t or "search" in t]
-            other_tools = [t for t in tool_names if t not in admin_tools + platform_tools + code_tools]
-
-            tool_parts = ["## My Tools"]
-            if admin_tools:
-                tool_parts.append(f"**Admin:** {', '.join(admin_tools)}")
-            if platform_tools:
-                tool_parts.append(f"**Platform:** {', '.join(platform_tools)}")
-            if code_tools:
-                tool_parts.append(f"**Code & Search:** {', '.join(code_tools)}")
-            if other_tools:
-                tool_parts.append(f"**Other:** {', '.join(other_tools)}")
-            parts.append("\n".join(tool_parts))
+            parts.append(CtoPromptBuilder._tool_descriptions(tool_names))
 
         # ── 6. Response Rules (Admin/CTO version) ──
         parts.append(CtoPromptBuilder._response_rules())
 
-        return "\n\n".join(parts)
+        # ── 7. The platform AI rule, last (PRD-264) ──
+        return with_ai_identity_rule("\n\n".join(parts), workspace_name)
+
+    @staticmethod
+    def _tool_descriptions(tool_names: List[str]) -> str:
+        """The "My Tools" block: the tool names grouped for readability."""
+        admin_tools = [t for t in tool_names if t.startswith("admin_")]
+        platform_tools = [t for t in tool_names if t.startswith("platform_")]
+        code_tools = [t for t in tool_names if "code" in t or "search" in t]
+        other_tools = [t for t in tool_names if t not in admin_tools + platform_tools + code_tools]
+
+        tool_parts = ["## My Tools"]
+        if admin_tools:
+            tool_parts.append(f"**Admin:** {', '.join(admin_tools)}")
+        if platform_tools:
+            tool_parts.append(f"**Platform:** {', '.join(platform_tools)}")
+        if code_tools:
+            tool_parts.append(f"**Code & Search:** {', '.join(code_tools)}")
+        if other_tools:
+            tool_parts.append(f"**Other:** {', '.join(other_tools)}")
+        return "\n".join(tool_parts)
 
     @staticmethod
     def _response_rules() -> str:
