@@ -40,7 +40,11 @@ JOBS = yaml.safe_load(TEST_YML)["jobs"]
 CHECK_SCRIPT = FRONTEND / "scripts" / "check-layer-reuse.sh"
 
 TRACED = ".next/standalone-node_modules"
-BUILD = f"RUN npm run build && rm -rf .next/cache && mv .next/standalone/node_modules {TRACED}"
+BUILD = (
+    f"RUN npm run build && rm -rf .next/cache && mv .next/standalone/node_modules {TRACED}"
+    # PRD-262 #47: the same RUN deletes the trace files (test_prd262_frontend_trace_diet.py).
+    " && find .next/standalone/.next -name '*.nft.json' -delete"
+)
 APP_LAYERS = [
     f"COPY --from=builder --chown=nextjs:nodejs /app/{TRACED} ./node_modules",
     "COPY --from=builder --chown=nextjs:nodejs /app/public ./public",

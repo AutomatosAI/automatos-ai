@@ -48,6 +48,8 @@ INSTALL_INPUTS = "COPY package.json package-lock.json .npmrc ./"
 BUILD = (
     "RUN npm run build && rm -rf .next/cache"
     " && mv .next/standalone/node_modules .next/standalone-node_modules"
+    # PRD-262 #47: and deletes the trace files (test_prd262_frontend_trace_diet.py).
+    " && find .next/standalone/.next -name '*.nft.json' -delete"
 )
 LOCAL_LOG = '"$RUNNER_TEMP/parity-fe-local.log"'
 CACHED_STEP = "Frontend — a build that changes only build args reuses the npm ci layer"

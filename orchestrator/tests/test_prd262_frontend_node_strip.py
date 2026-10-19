@@ -103,7 +103,7 @@ def _reader() -> str:
 def test_the_check_script_runs_node_and_reads_its_sections_in_the_image():
     assert 'docker run --rm "$IMAGE" node -v' in CHECK_SCRIPT
     assert 'docker run --rm "$IMAGE" node -e "$ELF_SECTIONS_JS"' in CHECK_SCRIPT
-    assert re.search(r"^check_trace\ncheck_node\n", CHECK_SCRIPT, re.M), "check_node runs with the trace check"
+    assert re.search(r"^check_node$", CHECK_SCRIPT, re.M), "the script runs check_node"
     assert "process.argv[1] || process.execPath" in _reader(), "the image's own node binary by default"
 
 

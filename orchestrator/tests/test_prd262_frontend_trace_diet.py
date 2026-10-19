@@ -1,4 +1,4 @@
-"""PRD-262 #29 and #47 (the 19 Oct breakdown): Next's build and dev internals stay out of the image.
+"""PRD-262 #29 and #47 (the 19 Oct breakdown): what the standalone server never reads stays out.
 
 The standalone trace reached about 13.7 MB of next's own files (and caniuse-lite) through
 requires the production server never runs: next/font's loader and the capsize metrics only
@@ -8,7 +8,9 @@ experimental React or Turbopack is on. A probe of 23 routes and a chat POST read
 them. React's development builds and Next's React Refresh (0.69 MB, #47) never load
 either: the standalone server.js sets NODE_ENV=production, as the Dockerfile does.
 next.config.js's STANDALONE_TRACE_EXCLUDES lists them all, which Next applies to the
-server's own trace and to every route's.
+server's own trace and to every route's. The build's own trace files (43 *.nft.json, 0.39
+MB, #47) are read only by deploy tooling, so the build RUN deletes them from the
+standalone output before the runtime copies it.
 
 This pins:
 - every one of those files is matched by a glob, and nothing the server loads is (the
@@ -162,6 +164,17 @@ def test_the_check_script_looks_for_exactly_the_config_globs_and_its_sh_can_expa
         assert glob.startswith("node_modules/"), glob
 
 
+def test_the_build_deletes_the_trace_files_before_the_runtime_copies_the_standalone_output():
+    dockerfile = (FRONTEND / "Dockerfile").read_text()
+    builds = [line for line in dockerfile.splitlines() if line.startswith("RUN npm run build ")]
+    assert len(builds) == 1, builds
+    assert builds[0].endswith(" && find .next/standalone/.next -name '*.nft.json' -delete")
+    assert "COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./" in dockerfile
+    script = CHECK_SCRIPT.read_text()
+    assert """sh -c 'find .next -name "*.nft.json"'""" in script
+    assert re.search(r"^check_no_trace_files$", script, re.M)
+
+
 def test_the_check_script_requests_every_page_and_reads_the_log_for_missing_modules():
     script = CHECK_SCRIPT.read_text()
     assert 'require("/app/.next/app-path-routes-manifest.json")' in script
@@ -201,6 +214,8 @@ case "$1" in
 esac
 """
 CLEAN_APP = [
+    ".next/server/app/chat/page.js",
+    ".next/app-path-routes-manifest.json",
     NEXT + "compiled/next-server/app-page.runtime.prod.js",
     NEXT + "compiled/next-server/pages.runtime.prod.js",
     NEXT + "compiled/babel/code-frame.js",
@@ -237,6 +252,7 @@ def test_a_clean_image_passes_and_every_page_is_requested(tmp_path):
     assert code == 0, out
     assert "absent from /app: node_modules/@img/**" in out
     assert "3 pages answered" in out
+    assert "no *.nft.json in /app/.next" in out
     assert "307 /settings" in out
 
 
@@ -250,6 +266,13 @@ def test_a_glob_that_still_matches_fails_once_by_its_glob(tmp_path):
     carried = re.findall(r"the standalone build carries (\S+)", out)
     # In the config's order, each glob once, however many files it still matches.
     assert carried == ["node_modules/caniuse-lite/**", NEXT + "compiled/next-server/*-turbo.runtime.prod.js"]
+
+
+@needs_bash
+def test_a_trace_file_left_in_the_image_fails(tmp_path):
+    code, out = _run_check(tmp_path, app=CLEAN_APP + [".next/server/app/chat/page.js.nft.json"])
+    assert code == 1, out
+    assert "/app/.next holds trace files (*.nft.json): 1, such as .next/server/app/chat/page.js.nft.json" in out
 
 
 @needs_bash

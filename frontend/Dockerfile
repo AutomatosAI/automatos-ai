@@ -104,8 +104,9 @@ ENV NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL}
 # .next/cache mount can replace it, once Railway's frontend service id is known.
 # PRD-262 US-048: it also moves the dependencies Next traced out of the standalone output, so
 # the runtime copies them as a layer of their own. Here the move is a rename; in a later RUN
-# it could copy them into another builder layer.
-RUN npm run build && rm -rf .next/cache && mv .next/standalone/node_modules .next/standalone-node_modules
+# it could copy them into another builder layer. PRD-262 #47: it deletes the build's trace
+# files (*.nft.json), which only deploy tooling reads, never the standalone server.
+RUN npm run build && rm -rf .next/cache && mv .next/standalone/node_modules .next/standalone-node_modules && find .next/standalone/.next -name '*.nft.json' -delete
 
 # =============================================================================
 # Node Strip Stage - the runtime's node binary, stripped

@@ -6,6 +6,8 @@
 #
 # - None of the globs next.config.js keeps out of the standalone trace matches a file in
 #   /app (the image's sh expands each one).
+# - /app/.next holds none of the build's trace files (*.nft.json): the build deletes them,
+#   and the server never reads them (PRD-262 #47).
 # - node runs, and its binary has no symbol table or debug section (strip --strip-all in
 #   the Dockerfile's node-strip stage, PRD-262 #24). The image has no readelf, so its own
 #   node reads its section headers.
@@ -121,6 +123,16 @@ check_trace() {
   while IFS= read -r glob; do fail "the standalone build carries ${glob}"; done <<< "$present"
 }
 
+check_no_trace_files() {
+  local found
+  found=$(docker run --rm "$IMAGE" sh -c 'find .next -name "*.nft.json"')
+  if [ -n "$found" ]; then
+    fail "/app/.next holds trace files (*.nft.json): $(wc -l <<< "$found" | tr -d ' '), such as $(head -n 1 <<< "$found")"
+  else
+    echo "no *.nft.json in /app/.next"
+  fi
+}
+
 check_node() {
   local version sections
   if ! version=$(docker run --rm "$IMAGE" node -v); then fail "node does not run"; return; fi
@@ -170,6 +182,7 @@ expect_status() {
 }
 
 check_trace
+check_no_trace_files
 check_node
 docker run -d --name "$CONTAINER" --network none "$@" "$IMAGE" > /dev/null
 trap 'docker rm -f "$CONTAINER" > /dev/null 2>&1 || true' EXIT
