@@ -1,7 +1,8 @@
 /**
  * PRD-261 A-08c — first paint for an installed theme: the root layout's resolver for
  * `theme:install:*` fetches the install's boot from the backend with the user's session within
- * 300 ms, keeps it 60 s per user and install pinned to one package digest, and drops any
+ * 300 ms, keeps it 60 s per user, install and package digest (fetched again at once when the
+ * client host saw another digest active), and drops any
  * integrity entry that is not a files-route module with a sha256 value. Anything slow or broken
  * paints the base boot (Studio's classes), and the client host takes over.
  */
@@ -14,12 +15,14 @@ import {
   THEME_BOOT_PATH,
   bootDigest,
   createInstalledBootResolver,
+  parseDigestHint,
   type BootCaller,
   type InstalledBootDeps,
 } from '@/lib/theme-host/boot-server'
 import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { importMapScriptBody } from '@/lib/theme-host/import-map'
 import type { UiStyle } from '@/lib/theme-host/registry-types'
+import { THEME_DIGEST_COOKIE } from '@/lib/theme-host/types'
 
 const clerk = vi.hoisted(() => ({ auth: vi.fn() }))
 
@@ -72,7 +75,8 @@ function caller(user = 'user_1', authorization: string | null = 'Bearer token-1'
 }
 
 function deps(fetchBoot: BootFetch, fields: Partial<InstalledBootDeps> = {}): Partial<InstalledBootDeps> {
-  return { caller: async () => caller(), fetchBoot, cache: new Map(), now: () => 1_000, ...fields }
+  const noHint = async (): Promise<string | null> => null
+  return { caller: async () => caller(), digestHint: noHint, fetchBoot, cache: new Map(), now: () => 1_000, ...fields }
 }
 
 function requestHeaders(fetchBoot: BootFetch, call = 0): Record<string, string> {
@@ -210,6 +214,28 @@ describe('PRD-261 A-08c — the per-process cache, per user and install, pinned 
     expect(Array.from(cache.values()).map((entry) => entry.digest)).toEqual([NEW_DIGEST])
   })
 
+  it('fetches again at once when the client host saw another digest active (an update, a rollback)', async () => {
+    const fetchBoot = answering(() => json(runningBoot(DIGEST)), () => json(runningBoot(NEW_DIGEST)))
+    let hint: string | null = DIGEST
+    const resolve = createInstalledBootResolver(deps(fetchBoot, { digestHint: async () => hint }))
+    expect(bootDigest(await resolve(INSTALL_STYLE))).toBe(DIGEST)
+    expect(bootDigest(await resolve(INSTALL_STYLE))).toBe(DIGEST)
+    expect(fetchBoot).toHaveBeenCalledTimes(1)
+    hint = NEW_DIGEST
+    expect(bootDigest(await resolve(INSTALL_STYLE))).toBe(NEW_DIGEST)
+    expect(bootDigest(await resolve(INSTALL_STYLE))).toBe(NEW_DIGEST)
+    expect(fetchBoot).toHaveBeenCalledTimes(2)
+  })
+
+  it("reads the hint only for this install, with a sha256 digest", () => {
+    expect(parseDigestHint(`${INSTALL_ID}.${DIGEST}`, INSTALL_ID)).toBe(DIGEST)
+    expect(parseDigestHint(undefined, INSTALL_ID)).toBeNull()
+    expect(parseDigestHint(`5d0f2a7e-1c4b-4e9a-b3d6-8f1a2c3e4b5d.${DIGEST}`, INSTALL_ID)).toBeNull()
+    expect(parseDigestHint(`${INSTALL_ID}.${'A'.repeat(64)}`, INSTALL_ID)).toBeNull()
+    expect(parseDigestHint(`${INSTALL_ID}.${DIGEST}0`, INSTALL_ID)).toBeNull()
+    expect(parseDigestHint(DIGEST, INSTALL_ID)).toBeNull()
+  })
+
   it('keeps no base boot, so an opt-in is painted on the next load', async () => {
     const fetchBoot = answering(() => json(baseAnswer()), () => json(runningBoot()))
     const resolve = createInstalledBootResolver(deps(fetchBoot))
@@ -309,5 +335,23 @@ describe('PRD-261 A-08c — whose session the boot is fetched with', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     clerk.auth.mockRejectedValue(new Error('auth() was called outside a request'))
     expect(await read()).toBeNull()
+  })
+})
+
+describe('PRD-261 A-08c — the digest hint the request carries', () => {
+  async function hintReader(cookies: () => Promise<unknown>): Promise<(installId: string) => Promise<string | null>> {
+    vi.resetModules()
+    vi.doMock('next/headers', () => ({ cookies }))
+    return (await import('@/lib/theme-host/boot-server')).requestDigestHint
+  }
+
+  it("reads the install's digest from THEME_DIGEST_COOKIE; null outside a request", async () => {
+    const jar = { get: (name: string) => (name === THEME_DIGEST_COOKIE ? { name, value: `${INSTALL_ID}.${DIGEST}` } : undefined) }
+    expect(await (await hintReader(async () => jar))(INSTALL_ID)).toBe(DIGEST)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const outside = await hintReader(async () => {
+      throw new Error('cookies() was called outside a request scope')
+    })
+    expect(await outside(INSTALL_ID)).toBeNull()
   })
 })

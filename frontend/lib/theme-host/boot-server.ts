@@ -17,12 +17,16 @@
  * expired session, a stale cookie, an install removed or of another workspace) is no theme to
  * paint, not a failure: the base boot, with nothing logged.
  *
- * A per-process cache keeps a boot for 60 s per (user, install), pinned to the one package
- * digest its integrity names, so a boot of one user is never served to another and one boot's
- * integrity never mixes two digests. An update or a rollback changes the digest: the next fetch
- * after the entry expires replaces it. Only a boot of a theme that runs (one with integrity) is
- * kept: a base boot means the user may not run it yet (no opt-in, a revoked version), which an
- * opt-in followed by a reload must change at once.
+ * A per-process cache keeps a boot for 60 s keyed by (user, install, digest): one slot per user
+ * and install holds the boot and the one package digest its integrity names, and it is served
+ * only while that digest is the one the client host last saw active for the install (the
+ * THEME_DIGEST_COOKIE hint sources.ts writes from GET /api/themes/active). So a boot of one user
+ * is never served to another, one boot's integrity never mixes two digests, and after an update
+ * or a rollback the first load the client host sees it on leaves the new digest, and the next
+ * request fetches the new boot instead of serving the old one for the rest of its 60 s. The hint
+ * can only make the server ask again; what is painted always comes from the backend. Only a boot
+ * of a theme that runs (one with integrity) is kept: a base boot means the user may not run it
+ * yet (no opt-in, a revoked version), which an opt-in followed by a reload must change at once.
  *
  * The answer passes sanitizeThemeBoot before it is kept or written: an integrity entry whose URL
  * is not a module of the files route or whose value is not `sha256-<base64>` is dropped
@@ -33,9 +37,10 @@ import { isSaaS } from '@/lib/auth-edition'
 import { baseThemeBoot } from './boot'
 import { sanitizeThemeBoot } from './boot-sanitize'
 import type { ThemeBoot, ThemeBootResolver } from './boot-types'
-import { THEME_FILES_PATH } from './constants'
+import { THEME_DIGEST_PATTERN, THEME_FILES_PATH } from './constants'
 import { isInstalledThemeStyle, themeRefOf } from './registry'
 import type { UiStyle } from './registry-types'
+import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
 
 /** The time the boot fetch may take before the page paints the base boot. */
 export const INSTALLED_BOOT_TIMEOUT_MS = 300
@@ -74,11 +79,13 @@ interface CachedBoot {
   readonly expiresAt: number
 }
 
-/** Per (user, install): the boot, the digest its integrity names, and when it expires. */
+/** Per (user, install): the boot, the digest its integrity names (the key's third part), and when it expires. */
 export type InstalledBootCache = Map<string, CachedBoot>
 
 export interface InstalledBootDeps {
   readonly caller: () => Promise<BootCaller | null>
+  /** The digest the client host last saw active for the install (THEME_DIGEST_COOKIE), or null. */
+  readonly digestHint: (installId: string) => Promise<string | null>
   readonly fetchBoot: (url: string, init: RequestInit) => Promise<Response>
   readonly now: () => number
   readonly timeoutMs: number
@@ -112,6 +119,27 @@ export async function sessionBootCaller(): Promise<BootCaller | null> {
   }
 }
 
+/** The digest a THEME_DIGEST_COOKIE value names for `installId`; null for another install or a malformed value. */
+export function parseDigestHint(value: string | undefined, installId: string): string | null {
+  if (value === undefined) return null
+  const at = value.lastIndexOf(THEME_DIGEST_HINT_SEPARATOR)
+  if (at < 0 || value.slice(0, at) !== installId) return null
+  const digest = value.slice(at + 1)
+  return THEME_DIGEST_PATTERN.test(digest) ? digest : null
+}
+
+/** The request's digest hint for `installId`; null without the cookie or outside a request. */
+export async function requestDigestHint(installId: string): Promise<string | null> {
+  try {
+    const { cookies } = await import('next/headers')
+    const store = await cookies()
+    return parseDigestHint(store.get(THEME_DIGEST_COOKIE)?.value, installId)
+  } catch (error) {
+    console.error(LOG_PREFIX, 'could not read the digest cookie', error)
+    return null
+  }
+}
+
 /** The install a style names, or null for anything but `theme:install:<uuid>`. */
 export function installIdOfStyle(style: UiStyle): string | null {
   if (!isInstalledThemeStyle(style)) return null
@@ -119,7 +147,7 @@ export function installIdOfStyle(style: UiStyle): string | null {
   return ref === null ? null : ref.slice(INSTALL_REF_PREFIX.length)
 }
 
-/** The cache key of a user's install: both values, unambiguously. */
+/** The slot of a user's install: both values, unambiguously (the digest is checked against the entry's). */
 export function bootCacheKey(user: string, installId: string): string {
   return JSON.stringify([user, installId])
 }
@@ -205,9 +233,18 @@ function remember(deps: InstalledBootDeps, key: string, boot: ThemeBoot): void {
   deps.cache.set(key, { digest, boot, expiresAt: now + deps.ttlMs })
 }
 
+/** The kept boot while it is fresh and its digest is the one the client last saw active (when it names one). */
+async function cachedBoot(deps: InstalledBootDeps, key: string, installId: string): Promise<ThemeBoot | null> {
+  const cached = deps.cache.get(key)
+  if (cached === undefined || cached.expiresAt <= deps.now()) return null
+  const hint = await deps.digestHint(installId)
+  return hint === null || hint === cached.digest ? cached.boot : null
+}
+
 function defaultDeps(): InstalledBootDeps {
   return {
     caller: sessionBootCaller,
+    digestHint: requestDigestHint,
     fetchBoot: (url, init) => fetch(url, init),
     now: () => Date.now(),
     timeoutMs: INSTALLED_BOOT_TIMEOUT_MS,
@@ -229,8 +266,8 @@ export function createInstalledBootResolver(overrides: Partial<InstalledBootDeps
     const caller = await deps.caller()
     if (caller === null) return baseThemeBoot(style)
     const key = bootCacheKey(caller.user, installId)
-    const cached = deps.cache.get(key)
-    if (cached !== undefined && cached.expiresAt > deps.now()) return cached.boot
+    const cached = await cachedBoot(deps, key, installId)
+    if (cached !== null) return cached
     const credential = await caller.credential()
     if (!credential.ok) return baseThemeBoot(style)
     const boot = await fetchInstalledBoot(installId, credential.authorization, deps)

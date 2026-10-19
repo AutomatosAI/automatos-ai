@@ -22,9 +22,13 @@
  * an expired session) fails the load with reason `auth`, which the failure ledger never counts.
  * import() reports no status, so after a failed entry import one byte of the entry is fetched
  * again (a same-origin file of the proxy, not the backend client) to read its status.
+ *
+ * A-08c: the digest the active-theme answer names is left in a cookie for the root layout's boot
+ * cache (boot-server.ts), which fetches a boot of any other digest again.
  */
 import { apiClient } from '@/lib/api-client'
-import type { UiStyle } from '@/lib/ui-style'
+import { writeCookie } from '@/lib/cookies'
+import { UI_STYLE_COOKIE_MAX_AGE_S, type UiStyle } from '@/lib/ui-style'
 
 import { THEME_ACTIVE_ENDPOINT, THEME_LOAD_TIMEOUT_MS } from './constants'
 import { isRecord } from './css-value'
@@ -35,6 +39,7 @@ import { importThemeModule } from './native-import'
 import { isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeRef } from './registry-types'
 import { SDK_VERSION } from './sdk'
+import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
 import type { LoaderDeps, SpikeManifest, ThemeLoadAbsent, ThemeLoadOk, ThemeLoadResult, ThemeSource } from './types'
 
 const INSTALL_REF_PREFIX = 'install:'
@@ -148,12 +153,23 @@ export async function importInstalledEntry(
   }
 }
 
+/**
+ * A-08c: leaves the digest the active-theme answer named for `installId` in THEME_DIGEST_COOKIE,
+ * so the next request's boot cache refetches a boot of another digest. Writes only on a change.
+ */
+export function rememberActiveDigest(installId: string, digest: string): void {
+  const value = `${installId}${THEME_DIGEST_HINT_SEPARATOR}${digest}`
+  if (document.cookie.split('; ').includes(`${THEME_DIGEST_COOKIE}=${value}`)) return
+  writeCookie(THEME_DIGEST_COOKIE, value, UI_STYLE_COOKIE_MAX_AGE_S)
+}
+
 export function defaultLoaderDeps(): LoaderDeps {
   return {
     exposeHost: exposeHostModules,
     fetchActive: fetchActiveInstall,
     fetchJson: (url) => refusedAsAuth(() => fetchSameOriginJson(url)),
     importModule: (url) => importInstalledEntry(url),
+    rememberDigest: rememberActiveDigest,
     doc: document,
     timeoutMs: THEME_LOAD_TIMEOUT_MS,
   }
@@ -167,6 +183,7 @@ async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<
   if (absent !== null) return { absent }
   const active = parseActiveInstall(answer, installId)
   if (!active.ok) throw new Error(active.detail)
+  deps.rememberDigest?.(installId, active.digest)
   const parsed = parseSpikeManifest(active.manifest, active.filesRoot)
   if (!parsed.ok) throw new Error(parsed.detail)
   return { manifest: parsed.manifest }

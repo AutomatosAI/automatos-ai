@@ -126,9 +126,23 @@ export interface LoaderDeps {
   readonly fetchJson: (url: string) => Promise<unknown>
   /** The browser's own import(), for an installed theme's entry. */
   readonly importModule: (url: string) => Promise<unknown>
+  /** A-08c: leaves the package digest the active-theme answer named for the next request's boot cache. */
+  readonly rememberDigest?: (installId: string, digest: string) => void
   readonly doc: Document
   readonly timeoutMs: number
 }
+
+/**
+ * A-08c: the cookie in which the client host leaves the package digest GET /api/themes/active
+ * named for an install, as `<installId>.<digest>`. The root layout's boot cache
+ * (boot-server.ts) is keyed by user, install and this digest, so a boot whose digest the client
+ * no longer sees active (after an update or a rollback) is fetched again instead of served for
+ * the rest of its 60 s. A hint only: it can make the server ask the backend again, never choose
+ * what the page paints.
+ */
+export const THEME_DIGEST_COOKIE = 'automatos-theme-digest'
+/** Between the install id and the digest in THEME_DIGEST_COOKIE (neither contains it). */
+export const THEME_DIGEST_HINT_SEPARATOR = '.'
 
 /** Where a theme comes from: compiled into the app (`builtin:`) or installed in the workspace (`install:`). */
 export interface ThemeSource {
