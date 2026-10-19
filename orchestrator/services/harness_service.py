@@ -5,7 +5,8 @@ HARNESS Service (PRD-121)
 Self-Optimizing Organization Loop.  Runs weekly, invisible to users.
 Reads each agent's real weekly counts, judges them against a clean reference
 (services.harness_diagnose, PRD-263), lists the configuration changes it would
-suggest with their risk scores, and submits the audit report. It changes nothing:
+suggest with their risk scores (services.harness_changes, the change-kind
+registry), and submits the audit report. It changes nothing:
 every workspace is report_only through beta (PRD-263 D2, services.harness_mode).
 
 Registered at server startup alongside HeartbeatService / CoordinatorService.
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from core.models.workspaces import Workspace
+    from services.harness_changes import Prescribed
     from services.harness_metrics import HarnessMetrics
 
 logger = logging.getLogger(__name__)
@@ -51,10 +53,6 @@ DISABLED_MESSAGE = (
     "HARNESS is disabled for this workspace. "
     "Choose Report only in Settings > Orchestrator to turn it back on."
 )
-
-# PRD-263 US-019: a "reconnect <app>" suggestion changes no agent setting (the owner
-# reconnects the app), so it carries the lowest risk score.
-RECONNECT_RISK = 1
 
 # The weekly audit report, written straight through ReportService and attributed to
 # Auto (PRD-263 US-048): its title (also the report's heading) and its report type.
@@ -342,15 +340,15 @@ class HarnessService:
         end_open_transaction(db)
         diagnosis = await self._phase_diagnose(workspace_id, metrics, db)
         end_open_transaction(db)
-        prescriptions = await self._phase_prescribe(workspace_id, diagnosis, run_id)
+        prescribed = await self._phase_prescribe(workspace_id, metrics, diagnosis, run_id, db)
         end_open_transaction(db)
         report_md, report_status = await self._phase_report(
-            workspace_id, diagnosis, prescriptions, db, iteration,
+            workspace_id, diagnosis, list(prescribed.valid), db, iteration,
         )
-        counts = {**diagnosis["counts"], "prescriptions": len(prescriptions)}
+        counts = {**diagnosis["counts"], "prescriptions": len(prescribed.valid)}
         return {
             "status": RUN_COMPLETED, "iteration": iteration, "coverage": diagnosis["coverage"], "counts": counts,
-            "verdicts": harness_diagnose.stored_verdicts(diagnosis), "prescriptions": prescriptions,
+            "verdicts": harness_diagnose.stored_verdicts(diagnosis), "prescriptions": prescribed.recorded(),
             "report_md": report_md, "report_status": report_status,
         }
 
@@ -464,44 +462,22 @@ class HarnessService:
     # ------------------------------------------------------------------
 
     async def _phase_prescribe(
-        self, workspace_id: UUID, diagnosis: Dict[str, Any], run_id: int
-    ) -> List[Dict[str, Any]]:
-        """Generate prioritized, risk-scored configuration change suggestions for
-        the audit report; nothing is applied or queued (PRD-263 US-016).
+        self, workspace_id: UUID, metrics: "HarnessMetrics", diagnosis: Dict[str, Any], run_id: int, db: "Session"
+    ) -> "Prescribed":
+        """Run every change kind's detector over the run's evidence and validate each
+        suggestion (services.harness_changes, PRD-263 US-049); a dropped one keeps its
+        reason on the run's row, and none targets the workspace's Auto. Nothing is
+        applied or queued (US-016). Ids are ``rx-<run_id>-<seq>``."""
+        from services import harness_changes
 
-        Ids are ``rx-<run_id>-<seq>``: the run's harness_runs id keeps two runs on
-        one day apart. "Reconnect <app>" is the one suggestion left (US-019). The
-        heartbeat, cost and description rules read list_agents fields and
-        week-over-week deltas that never existed; they went with those inputs
-        (PRD-263 PR-1D), and the change-kind registry brings real detectors
-        (US-049, US-050).
-        """
         logger.info("[HARNESS] Phase 3 PRESCRIBE — workspace %s", workspace_id)
-        prescriptions = self._prescribe_reconnects(diagnosis.get("issues", []), run_id)
-        logger.info("[HARNESS] PRESCRIBE done — %d prescriptions generated", len(prescriptions))
-        return prescriptions
-
-    @staticmethod
-    def _prescribe_reconnects(issues: List[Dict[str, Any]], run_id: int) -> List[Dict[str, Any]]:
-        """A "reconnect <app>" suggestion for each reconnect_app issue (PRD-263 US-019): a
-        line of the audit report for the owner, applied by nothing. Its id is
-        ``rx-<run_id>-<seq>``, from the run's harness_runs row. A tool failure gets no
-        removal suggestion; tool-removal proposals come with US-049 and US-057."""
-        from services.harness_diagnose import RECONNECT_APP
-
-        reconnects = [issue for issue in issues if issue.get("root_cause") == RECONNECT_APP]
-        return [{
-            "prescription_id": f"rx-{run_id}-{seq:03d}",
-            "target_type": "agent",
-            "target_id": int(issue["agent_id"]),
-            "target_name": issue["agent_name"],
-            "change_type": RECONNECT_APP,
-            "current_value": {"app_name": issue["app_name"]},
-            "proposed_value": {"app_name": issue["app_name"]},
-            "risk_score": RECONNECT_RISK,
-            "expected_improvement": f"{issue['agent_name']}'s {issue['app_name']} calls stop failing",
-            "rationale": issue["detail"],
-        } for seq, issue in enumerate(reconnects, 1)]
+        auto_agent = self._resolve_auto_agent(db, workspace_id)
+        evidence = harness_changes.Evidence(metrics, diagnosis, harness_changes.settings_from_config())
+        prescribed = harness_changes.prescribe(evidence, run_id, auto_agent["id"] if auto_agent else None)
+        logger.info(
+            "[HARNESS] PRESCRIBE done — %d suggested, %d dropped", len(prescribed.valid), len(prescribed.dropped),
+        )
+        return prescribed
 
     # ------------------------------------------------------------------
     # Phase 4: REPORT
