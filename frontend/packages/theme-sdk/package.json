@@ -1,0 +1,24 @@
+{
+  "name": "@automatos/theme-sdk",
+  "version": "1.0.0",
+  "description": "Type declarations for @automatos/theme-sdk, the one module an Automatos theme imports from the host. Types only: at runtime the host serves the SDK through its import map.",
+  "private": true,
+  "license": "Apache-2.0",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.d.ts",
+    "areas/",
+    "internal/",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "peerDependencies": {
+    "@types/react": "^19.0.0"
+  }
+}

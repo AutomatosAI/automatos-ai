@@ -13,6 +13,10 @@ with no new dependency (D1-f):
 * the names those two declare are global, though: every ``@keyframes`` (and
   ``@-webkit-keyframes``) name and every ``@font-face`` ``font-family`` (quoted or not) starts
   with ``<class>-``, so ``@keyframes spin`` can't replace the host's own ``animate-spin``;
+* no selector may name the app's protected surfaces (``data-protected-surface`` and
+  ``data-protected-surface-inner``, the approval cards' wrappers, PRD-261 A-12c), anywhere in it,
+  in any case, escaped or not: the cards' own boxes are guarded inline, and this keeps theme
+  rules off them and off the elements inside them;
 * ``!important`` is refused (any ``!`` outside a string or a comment), and so are ``@import``
   and every other at-rule;
 * anything the tokenizer could read differently from a browser is refused rather than
@@ -74,6 +78,11 @@ TOKEN = re.compile(
     r"|(?P<other>[^{};()\[\]!\"'/\\A-Za-z_\-\u0080-\U0010ffff]+|[/\-])",
     re.S,
 )
+# The approval cards' wrapper attributes (frontend/components/theme-host/protected-surface.tsx);
+# this prefix covers both, data-protected-surface and data-protected-surface-inner.
+PROTECTED_SURFACE_NAME = "data-protected-surface"
+# A backslash before a character stands for that character (only punctuation may be escaped).
+ESCAPED_CHAR = re.compile(r"\\([\s\S])")
 # A selector's pieces, for splitting a list at its top-level commas.
 SELECTOR_TOKEN = re.compile(
     r"\\[\s\S]?|\"(?:[^\"\\]|\\[\s\S])*\"?|'(?:[^'\\]|\\[\s\S])*'?|[()\[\],]|[^()\[\],\"'\\]+"
@@ -151,6 +160,15 @@ def is_anchored_nested_selector(selector: str) -> bool:
 def is_anchored_nested_selector_list(prelude: str) -> bool:
     """True when every selector of a nested rule's list is anchored."""
     return all(is_anchored_nested_selector(part) for part in _split_top_level(prelude))
+
+
+def names_protected_surface(selector: str) -> bool:
+    """True when the selector names a protected surface's attribute anywhere, in any case or escape.
+
+    HTML attribute names match case-insensitively, and ``\\-`` reads as ``-``, so both are undone
+    before the check. A string that happens to hold the name is refused too: refusing more is safe.
+    """
+    return PROTECTED_SURFACE_NAME in ESCAPED_CHAR.sub(r"\1", selector).lower()
 
 
 def _at_name(prelude: str) -> str:
@@ -311,7 +329,13 @@ class _Scanner:
 
     def rule_frame(self, prelude: str, parent: _Frame, at: int) -> _Frame:
         contained = parent.kind == "contained" or parent.scoped
-        if contained and not is_anchored_nested_selector_list(prelude):
+        if names_protected_surface(prelude):
+            self.error(
+                "CSS_UNSCOPED", at,
+                f'the rule "{echo(prelude)}" names {PROTECTED_SURFACE_NAME}: '
+                "a theme may not style the approval cards, which must always show as the app draws them.",
+            )
+        elif contained and not is_anchored_nested_selector_list(prelude):
             self.error(
                 "CSS_UNSCOPED", at,
                 f'the nested rule "{echo(prelude)}" names & other than at the start of a selector, '
