@@ -330,7 +330,11 @@ RUN if ldd /opt/chrome/chrome-headless-shell | grep 'not found'; then \
         echo "chrome-headless-shell is missing the shared libraries listed above" >&2; exit 1; \
     fi
 
-COPY . .
+# PRD-262 (code layer last): the versions record, the compile cache and the Chrome
+# smoke test need no app code, so they run before it, and a code-only change
+# rebuilds the one COPY of the code at the end (about 6.6 MB less per rebuild).
+# versions.py imports nothing but the standard library.
+COPY media_render/__init__.py media_render/versions.py /app/media_render/
 RUN python -m media_render.versions --browser /opt/chrome/chrome-headless-shell \
         --node-modules /opt/media-render/js/node_modules --write /opt/media-render/versions.json
 
@@ -354,6 +358,7 @@ RUN timeout 120 /opt/chrome/chrome-headless-shell --no-sandbox --no-zygote --dis
         --disable-dev-shm-usage --disable-breakpad --dump-dom 'data:text/html,<p>smoke</p>' \
     | grep -q smoke
 
+COPY . .
 ENV PYTHONPATH=/app \
     MEDIA_RENDER_PORT=8090
 
