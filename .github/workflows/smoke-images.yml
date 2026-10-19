@@ -37,7 +37,12 @@ name: smoke-images
 #   GHCR names and `pr-<7>`, and boots them the same way. It measures the boot; the pull
 #   numbers (bytes, seconds, nothing built) come from the main runs alone. Before the
 #   boot, it checks that the api image installs no package the code never imports
-#   (PRD-262 US-015).
+#   (PRD-262 US-015). After it, on the same images (PRD-262 US-040,
+#   scripts/ci/smoke-core-stack.sh): `make up` from an .env written before W5 starts six
+#   containers; `make up CORE=1` on that stack stops the worker and runs five; and a fresh
+#   `make up CORE=1` (docker-compose.core.yml) runs five, answers /health/ready 200 and
+#   "Workspace worker not running" from a workspace endpoint, then starts the worker, which
+#   must leave a file in the deliverables folder with its host owner.
 # - make-up-pr (PRD-262 US-036): on the same pull requests, `make up` on the pull
 #   request's checkout with AUTOMATOS_IMAGE_TAG pinned to sha-<7> of the merge base (or of
 #   its nearest ancestor CI published, when the merge base has none: a [skip ci] merge).
@@ -111,6 +116,7 @@ on:
       - "scripts/ci/smoke_health_gates.py"
       - "scripts/ci/smoke-make-up.sh"
       - "scripts/ci/smoke-make-env.sh"
+      - "scripts/ci/smoke-core-stack.sh"
       - "scripts/stack_images.py"
       - "scripts/stack_env.sh"
       - "scripts/stack_docker_floor.sh"
@@ -125,6 +131,9 @@ on:
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-secrets-guard.sh"
       - "orchestrator/docker-healthcheck.sh"
+      # The worker's absence as the core stack's smoke reads it (PRD-262 US-040).
+      - "orchestrator/core/workspace_client.py"
+      - "orchestrator/api/workspace_files.py"
       - "frontend/Dockerfile"
       - "frontend/.dockerignore"
       - "frontend/package.json"
@@ -394,6 +403,17 @@ jobs:
           SMOKE_EXPECT_REVISION: ${{ steps.target.outputs.revision }}
           SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images
         run: bash scripts/ci/smoke-fresh-clone.sh
+
+      # PRD-262 US-040, on the images this job built (the boot above tore its stack down):
+      # an .env written before W5 still starts six containers, and the core override runs
+      # five without the worker (scripts/ci/smoke-core-stack.sh). No secret is exported:
+      # the old .env carries its own, and make env writes the fresh core stack's.
+      - name: The core stack runs five containers, and an .env from before W5 still runs six
+        env:
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+          AUTOMATOS_IMAGE_TAG: ${{ steps.target.outputs.tag }}
+          SMOKE_OUT_DIR: ${{ runner.temp }}/smoke-images/core-stack
+        run: bash scripts/ci/smoke-core-stack.sh
 
       - name: Upload the measurements
         if: always()
