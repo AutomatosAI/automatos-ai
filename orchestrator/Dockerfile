@@ -143,6 +143,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=pybuild /install /usr/local
 
+# tiktoken's encodings, fetched here so the API counts tokens with no internet
+# (PRD-262 US-033). tiktoken downloads an encoding it has no cached copy of, through
+# requests.get with no timeout, into a temp directory no new container keeps; on a
+# host whose egress drops packets that hangs for minutes. TIKTOKEN_CACHE_DIR is read
+# by tiktoken itself, not by config.py (FR-12), and holds one hash-checked file per
+# encoding, readable by the runtime user. `encodings` lists every encoding the code
+# requests: core/context_guard.py's TOKENIZER_ENCODING, the only one today
+# (orchestrator/tests/test_prd262_offline_boot.py fails when the code asks for one
+# that is not here). The second load goes through a proxy that refuses every
+# connection, so a cache that cannot serve them offline fails the build. -B: the layer
+# holds the cache and nothing else (the stdlib's bytecode is the production stage's).
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken
+RUN encodings="cl100k_base" && \
+    load='import sys, tiktoken; [tiktoken.get_encoding(name) for name in sys.argv[1:]]' && \
+    python -B -c "$load" $encodings && \
+    HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 python -B -c "$load" $encodings
+
 # =============================================================================
 # Development Stage - Hot Reload & Debugging
 # =============================================================================
