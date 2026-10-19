@@ -143,3 +143,20 @@ A review rule, not a guarantee:
 
 The fixture's README (`e2e/browser/fixtures/hello-a12c/README.md`) says the same next to the
 hostile sheet.
+
+## Host-owned AI label (PRD-264 EUAI-11a, EUAI-11b)
+
+The in-app AI label ("Auto is an AI", EU AI Act Art. 50(1)) is protected differently from the approval cards.
+It carries no inline `!important` guard: a guard would beat a theme's rule on the label itself, but not a
+`display: none`, `opacity` or off-screen move on an element around it (the review rules above). So the host
+renders the label outside the theme's page slot (`AiLabelGate`, `frontend/components/ai-label/ai-label.tsx`)
+and checks at run time that a person can see it (`frontend/lib/ai-label/visibility.ts`): displayed, visible,
+at least half opaque through all its ancestors, at least 4 px each way and wholly inside the viewport.
+
+While the check fails, the chat is paused: every composer inside `AiLabelFence` is disabled, and the chat says
+"This theme hides the AI notice, so chat is paused. Switch theme in Settings." A theme rule that hides, fades,
+shrinks or moves the label therefore never leaves a chat running without it; it stops the chat. The fence
+wraps only the composer, so a theme can't use the label to switch off the approval cards either.
+
+Not checked, and so review rules for the label as for the cards: an element the theme draws over it (an
+overlay, a pseudo-element, a fixed layer), and code the theme runs in the page.
