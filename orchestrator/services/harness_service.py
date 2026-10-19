@@ -72,8 +72,10 @@ class HarnessService:
     # ------------------------------------------------------------------
 
     async def start(self, scheduler: Optional[AsyncIOScheduler] = None) -> None:
-        """Register the weekly sweep for all active workspaces."""
+        """Register the weekly sweep for all active workspaces, and the daily sweep of
+        HARNESS approval grants (services.harness_grants, PRD-263 US-053)."""
         from config import config
+        from services import harness_grants
 
         if scheduler:
             self._scheduler = scheduler
@@ -85,6 +87,7 @@ class HarnessService:
             self._owns_scheduler = True
 
         await self._register_workspace_jobs()
+        harness_grants.schedule_sweep(self._scheduler)
         logger.info("[HARNESS] Service started (cron: %s UTC)", config.HARNESS_SWEEP_CRON)
 
     async def _register_workspace_jobs(self) -> None:
@@ -261,10 +264,11 @@ class HarnessService:
 
     async def _run_locked(self, workspace_id: UUID, sweep: bool) -> None:
         """Holding the lock: skip a disabled workspace (sweep and trigger_now
-        alike), close interrupted runs, apply the weekly skip, then run the
+        alike), close interrupted runs, reconcile the ledger's open proposals with
+        their grants (ORG-2, PRD-263 US-053), apply the weekly skip, then run the
         pipeline on its own harness_runs row."""
         from core.database.database import SessionLocal
-        from services import harness_runs
+        from services import harness_grants, harness_runs
 
         db = SessionLocal()
         try:
@@ -273,6 +277,7 @@ class HarnessService:
                 return
             cur_window = harness_runs.last_complete_iso_week()
             harness_runs.close_interrupted(db, workspace_id)
+            harness_grants.reconcile(db, workspace_id)
             if sweep and harness_runs.week_is_settled(db, workspace_id, cur_window):
                 logger.info("[HARNESS] %s already has a run for %s, skipping", workspace_id, cur_window)
                 return

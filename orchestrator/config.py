@@ -980,6 +980,12 @@ class Config:
     # that met their objective is below HARNESS_HEARTBEAT_MAX_MET.
     HARNESS_HEARTBEAT_MIN_RUNS: int = int(os.getenv("HARNESS_HEARTBEAT_MIN_RUNS", "20"))
     HARNESS_HEARTBEAT_MAX_MET: float = float(os.getenv("HARNESS_HEARTBEAT_MAX_MET", "0.2"))
+    # PRD-263 US-053 (section 11-Q7 default): a HARNESS proposal granted, or being applied,
+    # longer than HARNESS_RECONCILE_GRACE_MINUTES ago with no outcome is closed as failed.
+    # The daily sweep of HARNESS grants runs on HARNESS_GRANT_SWEEP_CRON, read in UTC
+    # (default 09:00 every day; services.harness_grants).
+    HARNESS_RECONCILE_GRACE_MINUTES: int = int(os.getenv("HARNESS_RECONCILE_GRACE_MINUTES", "60"))
+    HARNESS_GRANT_SWEEP_CRON: str = os.getenv("HARNESS_GRANT_SWEEP_CRON", "0 9 * * *")
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
