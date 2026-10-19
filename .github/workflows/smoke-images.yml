@@ -93,6 +93,7 @@ on:
       - "frontend/public/**"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
+      - "services/media-render/**"
 
 # A newer push to a pull request cancels its older run. Main and manual runs are
 # measurements, so they finish; a re-run of one commit waits for the run before it.
@@ -106,13 +107,16 @@ permissions:
 jobs:
   smoke-images:
     name: smoke-images (${{ matrix.arch }}) — pull and boot the published images (non-required)
-    # Only a successful images.yml run that published from this repository's main.
+    # Only a successful images.yml run that published from this repository's main. A
+    # media-assets run (PRD-262 US-053; images.yml's run-name titles it) publishes no
+    # app image, so there is nothing new to boot and `edge` must not move.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.display_title != 'Publish the media assets image' &&
        (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'schedule' ||
         github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ${{ matrix.runner }}

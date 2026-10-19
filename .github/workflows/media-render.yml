@@ -49,14 +49,48 @@ jobs:
             || { echo "::error::the backend's SOCIALS_RENDER_URL does not point at media-render"; exit 1; }
           sed -n '/^  media-render:/,/^  [a-z]/p' "$RUNNER_TEMP/compose-media.yml" | head -60
           echo "docker compose --profile media config includes media-render; the default profile does not: PASS"
+      # PRD-262 US-053: the build time is reported against run 37612086159's 93 s,
+      # the last build before the parallel stages. Report only (§7, §9-Q13).
       - name: Build the image (default target, as Railway builds it)
         run: |
           start=$(date +%s)
           docker build -t "$IMAGE" services/media-render/
-          echo "image build: $(( $(date +%s) - start )) s"
+          echo "image build: $(( $(date +%s) - start )) s (93 s in run 37612086159, before PRD-262 US-053; report only)"
           docker image ls "$IMAGE"
       - name: The versions baked into the image
         run: docker run --rm --entrypoint cat "$IMAGE" /opt/media-render/versions.json
+      # PRD-262 US-053: each part is built in its own stage and COPY --link'ed into the
+      # runtime, so a Hyperframes bump leaves the 340 MB Kokoro layer as it was. The
+      # image is built again from a copy whose only change is the Hyperframes pin (one
+      # release back, lock re-resolved by npm); the Kokoro layer must keep its digest,
+      # and the js layer must change, or the second build proved nothing.
+      - name: Two builds that differ only in the Hyperframes pin share the Kokoro layer
+        run: |
+          pin="$RUNNER_TEMP/media-render-pin"
+          rm -rf "$pin"
+          cp -r services/media-render "$pin"
+          (cd "$pin/js" && npm install --package-lock-only --ignore-scripts --no-fund --no-audit --save-exact hyperframes@0.8.61)
+          git diff --no-index --stat services/media-render "$pin" || true
+          start=$(date +%s)
+          docker build -t media-render:pin "$pin"
+          echo "the build with the other Hyperframes pin: $(( $(date +%s) - start )) s"
+          python3 scripts/ci/image_layer_digest.py "$IMAGE" media-render:pin --same /opt/kokoro --differ /opt/media-render/js
+          docker rmi media-render:pin > /dev/null
+      # PRD-262 US-053: the build seeds Node's compile cache as the runtime user, so a
+      # render's Hyperframes calls start from compiled code.
+      - name: Node's compile cache is seeded and readable by uid 1000
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" -c '
+            set -eu
+            echo "uid $(id -u), NODE_COMPILE_CACHE=${NODE_COMPILE_CACHE:-unset}"
+            test "$(id -u)" = 1000
+            test -n "${NODE_COMPILE_CACHE:-}"
+            files=$(find "$NODE_COMPILE_CACHE" -type f | wc -l)
+            echo "$files files, $(du -sh "$NODE_COMPILE_CACHE" | cut -f1)"
+            test "$files" -gt 0
+            unreadable=$(find "$NODE_COMPILE_CACHE" ! -readable | wc -l)
+            test "$unreadable" -eq 0
+          ' || { echo "::error::NODE_COMPILE_CACHE is unset, empty or not readable by uid 1000"; exit 1; }
       # PRD-262 US-007: Node 24 copied from the official image; nothing NodeSource
       # brought (one Debian package per check).
       - name: Node 24 from the official image, with no NodeSource leftovers
@@ -123,17 +157,33 @@ jobs:
           fi
           grep -q 'espeak-ng data path is 165 characters' boot.log
           echo "the default command refused to boot with a ${#long}-character path (exit $code): PASS"
-      - name: The container boots and /health answers without a token
+      # PRD-262 US-051: the image's HEALTHCHECK is Python's urllib (the image has no
+      # curl) and probes every 2 s while the container starts, so Docker reports it
+      # healthy within seconds of /health answering, not at the first 30 s interval.
+      - name: The container boots, /health answers without a token, and Docker reports it healthy
         run: |
+          started=$(date +%s)
           docker run -d --name media-render-health -e LOG_RELAY_ENABLED=false -p 127.0.0.1:8090:8090 "$IMAGE"
           ok=""
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8090/health; then ok=1; echo; break; fi
             sleep 2
           done
+          health=""
+          for i in $(seq 1 20); do
+            health=$(docker inspect -f '{{.State.Health.Status}}' media-render-health)
+            if [ "$health" = healthy ]; then break; fi
+            sleep 1
+          done
+          echo "Docker's health status: $health, $(( $(date +%s) - started )) s after docker run"
+          docker inspect -f '{{json .State.Health.Log}}' media-render-health
           docker logs media-render-health
           docker rm -f media-render-health > /dev/null
           if [ -z "$ok" ]; then echo "::error::/health never answered"; exit 1; fi
+          if [ "$health" != healthy ]; then
+            echo "::error::the image's HEALTHCHECK did not report healthy within 20 s of /health answering (status: $health)"
+            exit 1
+          fi
       - name: The API renders the fixture bundle (POST /render, poll, fetch the MP4), timed
         env:
           TOKEN: ci-render-token
@@ -149,6 +199,18 @@ jobs:
             sleep 2
           done
           if [ -z "$up" ]; then docker logs media-render-api; echo "::error::the API never answered /health"; exit 1; fi
+          # PRD-262 US-053: Kokoro loads in the background once the service listens; it
+          # must have finished before the first POST, so the first render's voice step
+          # no longer carries the model load.
+          loaded=""
+          for i in $(seq 1 60); do
+            # grep reads every line (no -q): under pipefail an early exit would fail docker logs.
+            if docker logs media-render-api 2>&1 | grep 'kokoro: the voice model loaded in the background' > /dev/null; then loaded=1; break; fi
+            sleep 1
+          done
+          docker logs media-render-api 2>&1 | grep 'kokoro: ' || true
+          if [ -z "$loaded" ]; then docker logs media-render-api; echo "::error::the background Kokoro load did not finish before the first POST"; exit 1; fi
+          echo "the background Kokoro load finished before the first POST: PASS"
           code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8090/render)
           echo "POST /render without the token answered $code"
           if [ "$code" != 401 ]; then echo "::error::the render API is open without its token"; exit 1; fi
@@ -182,11 +244,16 @@ jobs:
           docker run --rm -v "$out:/out" --entrypoint ffmpeg "$IMAGE" -hide_banner -nostats \
             -i /out/fixture.mp4 -map 0:a:0 -af ebur128=peak=true -f null - 2> "$out/ebur128.log"
           sed -n '/Summary:/,$p' "$out/ebur128.log"
+          # PRD-262 US-053: the first render's voice step, with the model loaded at boot,
+          # is under run 37612086159's 2.394 s, which included the load. check_seconds is
+          # reported against that run's 5.009 s and never fails: the compile cache's
+          # 0.1-0.3 s is within run-to-run noise.
           python3 services/media-render/ci/assert_output.py "$out/probe.json" \
             --video-codec h264 --width 1080 --height 1920 --fps 30 \
             --audio-codec aac --duration 3.0 --tolerance 0.1 \
-            --job "$out/job.json" --min-line-seconds 0.5 \
+            --job "$out/job.json" --min-line-seconds 0.5 --max-voice-seconds 2.394 \
             --ebur128 "$out/ebur128.log" --lufs -14 --lufs-tolerance 1
+          python3 -c 'import json, sys; t = json.load(open(sys.argv[1]))["report"]["timings"]; print("check_seconds:", t.get("check_seconds"), "s (5.009 s in run 37612086159; report only)")' "$out/job.json"
       - name: The render job's report (check, mix, timings)
         if: always()
         run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"
@@ -294,6 +361,57 @@ jobs:
           path: ${{ runner.temp }}/music-render
           if-no-files-found: ignore
           retention-days: 7
+      # PRD-262 US-052: the image carries the catalogue's 27 voices and espeak-ng's
+      # English dictionary alone, and validation follows that data. Against the running
+      # image, a voice outside voices.json (am_santa and zf_xiaoxiao, both in upstream's
+      # file) and a language other than en-us or en-gb are each a 400 that names the
+      # field, on /tts and on /render, before anything is spoken or staged; a catalogue
+      # voice in en-gb is spoken. Every catalogue voice speaking a line, and the phoneme
+      # snapshot, are in the image's own suite (tests/test_kokoro.py).
+      - name: A voice outside voices.json and a language other than en-us or en-gb are each a 400 naming the field
+        env:
+          TOKEN: ci-render-token
+        run: |
+          out="$RUNNER_TEMP/voices"
+          mkdir -p "$out"
+          docker run --rm -e LOG_RELAY_ENABLED=false "$IMAGE" fixture-bundle > "$out/bundle.json"
+          docker run -d --name media-render-voices -e LOG_RELAY_ENABLED=false \
+            -e SOCIALS_RENDER_TOKEN="$TOKEN" -p 127.0.0.1:8094:8090 "$IMAGE"
+          up=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8094/health > /dev/null; then up=1; break; fi
+            sleep 2
+          done
+          if [ -z "$up" ]; then docker logs media-render-voices; docker rm -f media-render-voices > /dev/null; echo "::error::the API never answered /health"; exit 1; fi
+          set +e
+          python3 services/media-render/ci/assert_voice_refusals.py --url http://127.0.0.1:8094 --token "$TOKEN" \
+            --bundle "$out/bundle.json" --voices services/media-render/media_render/voices.json
+          code=$?
+          set -e
+          docker logs media-render-voices 2>&1 | tail -n 20
+          docker rm -f media-render-voices > /dev/null
+          exit "$code"
+      # PRD-262 US-051 (§8's media-render row): the amd64 image is at most 1.30 GB on
+      # disk; it was 1.81 GB in run 37612086159. `docker image ls` prints the image's
+      # Size rounded, so the bar reads the same Size in bytes. It runs last and always,
+      # so an image over the bar still gets every render above proved, and a failed
+      # render still gets its size reported. The bar is media-render's amd64
+      # `on_disk_max_mb` in .github/image-budgets.json, which images.yml checks too
+      # (US-054), so the two never disagree.
+      - name: The image is at most 1.30 GB on disk (amd64)
+        if: always()
+        run: |
+          docker image ls "$IMAGE"
+          arch=$(docker image inspect -f '{{.Architecture}}' "$IMAGE")
+          size=$(docker image inspect -f '{{.Size}}' "$IMAGE")
+          budget=$(jq -er '.budgets["media-render"].amd64.on_disk_max_mb * 1000000 | floor' .github/image-budgets.json)
+          echo "media-render ($arch) on disk: $(( size / 1000000 )) MB ($size bytes); the bar is $(( budget / 1000000 )) MB, 1810 MB in run 37612086159"
+          if [ "$arch" != amd64 ]; then echo "::error::the on-disk bar is amd64's; this image is $arch"; exit 1; fi
+          if [ "$size" -gt "$budget" ]; then
+            echo "::error::media-render is $(( size / 1000000 )) MB on disk, over its $(( budget / 1000000 )) MB bar (PRD-262 §8)"
+            exit 1
+          fi
+          echo "media-render is within its $(( budget / 1000000 )) MB bar: PASS"
 
   # Gerard, 6 Oct ("why is CI taking 45 mins"): the seeded templates' renders were
   # one step of the job above, about 180 renders in series against one container
