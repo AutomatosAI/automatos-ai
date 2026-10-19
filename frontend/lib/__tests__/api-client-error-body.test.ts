@@ -3,7 +3,7 @@
  *
  * 1. On a non-2xx response apiClient attaches the parsed JSON body to the error it throws as
  *    `body`. Step-up's 403 (orchestrator/core/auth/step_up.py) carries Clerk's `clerk_error` at
- *    the TOP level, and the step-up helper (lib/step-up) reads it from there. The messages and
+ *    the TOP level, and A-07d's fetcher (lib/theme-host/api.ts) reads it from there. The messages and
  *    the `status` callers already read are unchanged.
  * 2. Every theme route of §2.2 is a named apiClient method with a literal path, so the
  *    route-contract check (scripts/check-route-contract.js, which reads only api-client.ts) sees it.

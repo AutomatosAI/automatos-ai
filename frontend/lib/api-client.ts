@@ -1045,7 +1045,7 @@ export interface ApiHttpError extends Error {
  * The error for a non-2xx response: the message is the body's `detail` (a string, or the
  * JSON of a structured one), else the status text; the status rides it (so a caller can
  * tell a conflict, 409, from a failure) and, since PRD-261, the parsed body rides it as
- * `body`, so a caller can read a structured refusal such as step-up's (lib/step-up/hint.ts).
+ * `body`, so a caller can read a structured refusal such as step-up's (A-07d's lib/theme-host/api.ts).
  */
 async function httpErrorOf(response: Response): Promise<ApiHttpError> {
   console.error('❌ API Error:', response.status, response.statusText)
