@@ -26,7 +26,10 @@ composition's own size and flattened to opaque RGB: ``render.png`` for one,
 Every file with an AI element is marked after its last encode (PRD-264 EUAI-06a,
 provenance.py): the mix, the video, each still, each preview frame and the reel carry
 the IPTC DigitalSourceType their elements call for. A file that cannot be marked fails
-the job: a render never ships unmarked.
+the job: a render never ships unmarked. The Kokoro lines' own WAVs (``audio/vo``) and
+their fitted copies (``audio/fit``) are not marked: they never leave the service (no
+output names them, and the job drops them when its render ends), and the mix and the
+video they reach carry the mark. So the timed voice step runs no exiftool.
 """
 
 from __future__ import annotations
@@ -271,8 +274,6 @@ class RenderPipeline:
             )
         except ValueError as exc:  # Kokoro's refusal: an unknown voice, a line with nothing to say
             raise PipelineError("voice_refused", f"Kokoro could not speak the script: {exc}", status=400) from None
-        except provenance.ProvenanceError as exc:
-            raise PipelineError("voice_unmarked", "the spoken lines could not be marked as AI-made", detail=str(exc)) from None
         by_id = {line_id: said for (line_id, _), said in zip(texts, spoken)}
         placed = []
         for line in plan.lines:

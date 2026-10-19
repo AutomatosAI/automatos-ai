@@ -18,7 +18,9 @@ from the library and the workspace, and are not AI-made.
 
 **Which elements a file holds.** A video holds the visuals and the mix; a still, a
 preview frame and the preview reel (no sound) only the visuals; the mix only the audio.
-A Kokoro line's own WAV is AI-made through and through.
+A Kokoro line's own WAV is AI-made through and through. It is marked only where it
+leaves the service, in a POST /tts answer (tts.mark_audio); a render's lines stay
+inside it and reach the outside only through the mix and the video, which are marked.
 
 **The writer and the reader** is exiftool (D14), installed in the image. ffmpeg writes no
 XMP and its encodes drop metadata, so a file is marked after its last encode. MP4, PNG

@@ -10,8 +10,11 @@ Callers serialise synthesis through tts.Speaker: one line is spoken at a time.
 The service loads the model in the background once it is listening
 (PRD-262 US-053, server.py), so the first line spoken does not wait for it.
 
-Every line's WAV carries the IPTC "AI-generated" mark as it is written (PRD-264
-EUAI-06a, provenance.py): a Kokoro line is AI-made audio, and POST /tts hands it out.
+A line's WAV is written unmarked and synthesis runs no exiftool, so the render's
+timed voice step pays for no mark (PRD-264 EUAI-06a). Where a
+line's WAV leaves the service, POST /tts marks it before it answers
+(tts.mark_audio); a render's lines reach only the mix and the video, which are
+marked after their last encode (pipeline.py).
 """
 
 from __future__ import annotations
@@ -22,7 +25,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
-from . import provenance
 from .config import Settings
 from .timing import voiced_segments
 
@@ -63,9 +65,9 @@ def synthesize_line(
     speed: Optional[float] = None,
     lang: Optional[str] = None,
 ) -> SpokenLine:
-    """Speak one script line into ``output`` (a WAV, marked AI-made) and report its length and segments.
+    """Speak one script line into ``output`` (a WAV, not yet marked) and report its length and segments.
 
-    :class:`provenance.ProvenanceError` when the WAV could not be marked: it is never handed out unmarked.
+    No exiftool runs here: the caller that hands the WAV out marks it (POST /tts, tts.mark_audio).
     """
     import soundfile
 
@@ -81,9 +83,6 @@ def synthesize_line(
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     soundfile.write(str(output), samples, sample_rate)
-    provenance.mark(
-        output, provenance.TRAINED, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
-    )
     return SpokenLine(
         path=output,
         seconds=round(len(samples) / sample_rate, 3),

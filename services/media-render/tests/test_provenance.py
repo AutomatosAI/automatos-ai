@@ -3,18 +3,23 @@
 Inside the image, with its own ffmpeg and exiftool: one file of every format media-render
 hands out (MP4, PNG, JPEG, WAV) is made, marked by ``provenance.mark`` and read back with
 exiftool, the writer (D14), and its packet is held to the allowlist. The decision (which
-files are AI-made, and how) and the job's ``ai_inputs`` contract are pinned here too. The
-real pipeline's outputs are read back in test_provenance_render.py.
+files are AI-made, and how) and the job's ``ai_inputs`` contract are pinned here too.
+POST /tts marks each WAV it returns, under its own instance id, and answers 500 with no
+WAV when one cannot be marked; without ``include_audio`` no WAV leaves and none is marked.
+The real pipeline's outputs are read back in test_provenance_render.py.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import json
 import logging
 import shutil
 import struct
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -28,8 +33,10 @@ from media_render.bundle import AudioPlan, MusicCue, SfxCue, VoiceLine, VoicePla
 from media_render.jpeg import to_jpeg
 from media_render.provenance import COMPOSITE, TRAINED, AiInputs, ProvenanceError
 from media_render.server import TOKEN_HEADER, create_app
+from media_render.tts import Speaker
 from media_render.validate import BundleError
 from provenance_checks import assert_only_the_mark, ffmpeg, instance_id_of, packet_of, seconds_of, source_type_of
+from test_server import fake_synthesize
 
 AUTH = {TOKEN_HEADER: TOKEN}
 DECLARED = {"footage": True, "stills": False, "voice": True, "uploads": False, "template": True}
@@ -168,6 +175,74 @@ def test_post_jpeg_answers_a_jpeg_carrying_the_stills_mark(settings, tmp_path):
     out = tmp_path / "answer.jpg"
     out.write_bytes(asyncio.run(go()))
     assert source_type_of(settings, out) == TRAINED
+
+
+# ── POST /tts: a voice WAV is marked where it leaves the service ──────────
+
+TTS_LINES = [{"id": "l01", "text": "Three weeks to go."}, {"id": "l02", "text": "Three weeks to go."}]
+
+
+def _post_tts(settings, *, include_audio: bool):
+    """POST /tts through the app with a stub Kokoro (real WAVs, no model): the status and the body."""
+
+    async def go():
+        speaker = Speaker(settings, synthesize=fake_synthesize)
+        app = create_app(settings, pipeline=SimpleNamespace(), speaker=speaker, library={})
+        async with TestClient(TestServer(app)) as client:
+            body = {"lines": TTS_LINES, "include_audio": include_audio}
+            response = await client.post("/tts", data=json.dumps(body), headers=AUTH)
+            return response.status, await response.json()
+
+    return asyncio.run(go())
+
+
+def test_post_tts_marks_every_wav_it_returns_each_with_a_random_instance_id(settings, tmp_path):
+    status, body = _post_tts(settings, include_audio=True)
+    assert status == 200, body
+    ids = set()
+    for line in body["lines"]:
+        wav = tmp_path / f"{line['id']}.wav"
+        wav.write_bytes(base64.b64decode(line["audio_base64"]))
+        assert source_type_of(settings, wav) == TRAINED, line["id"]
+        packet = packet_of(settings, wav)
+        assert_only_the_mark(packet, TRAINED, absent=(str(tmp_path), settings.work_dir))
+        ids.add(instance_id_of(packet))
+    assert len(ids) == 2 and all(found.version == 4 for found in ids), "each WAV gets its own random instance id"
+
+
+def test_post_tts_answers_500_and_no_wav_when_exiftool_cannot_mark(settings, tmp_path):
+    """EUAI-06a: an unmarked AI WAV is never handed out; the failure is a clear error."""
+    broken = replace(settings, exiftool_bin=str(tmp_path / "no-such-exiftool"))
+    status, body = _post_tts(broken, include_audio=True)
+    assert status == 500 and body["error"] == "voice_unmarked", body
+    assert "lines" not in body and "audio_base64" not in json.dumps(body)
+
+
+def test_post_tts_returns_no_wav_when_any_line_cannot_be_marked(settings, monkeypatch):
+    """The first line marks, the second fails: neither goes out, marked or not."""
+    real_mark = provenance.mark
+    calls = []
+
+    def second_fails(path, kind, **kwargs):
+        calls.append(path.name)
+        if len(calls) > 1:
+            raise ProvenanceError("exiftool could not make the XMP packet: simulated")
+        return real_mark(path, kind, **kwargs)
+
+    monkeypatch.setattr(provenance, "mark", second_fails)
+    status, body = _post_tts(settings, include_audio=True)
+    assert calls == ["l01.wav", "l02.wav"]
+    assert status == 500 and body["error"] == "voice_unmarked", body
+    assert "lines" not in body and "audio_base64" not in json.dumps(body)
+
+
+def test_post_tts_without_audio_marks_nothing_since_no_wav_leaves(settings, tmp_path):
+    """Durations and segments only: no WAV leaves, so no exiftool runs (a broken one is never reached)."""
+    broken = replace(settings, exiftool_bin=str(tmp_path / "no-such-exiftool"))
+    status, body = _post_tts(broken, include_audio=False)
+    assert status == 200, body
+    assert [line["id"] for line in body["lines"]] == ["l01", "l02"]
+    assert all("audio_base64" not in line for line in body["lines"])
 
 
 # ── FR-16: one random instance id per file ────────────────────────────────

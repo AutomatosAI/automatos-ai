@@ -3,10 +3,11 @@ carries the IPTC DigitalSourceType after its last encode, read back with the ima
 exiftool, and its packet holds nothing but the mark.
 
 One job per kind, through the real stage, Kokoro, mix, `hyperframes check` and render:
-- a video: its Kokoro line's WAV, the mix (``mix.wav``) and ``render.mp4``;
+- a video: the mix (``mix.wav``) and ``render.mp4``; its Kokoro line's WAV, which never
+  leaves the service, is left unmarked (no exiftool in the timed voice step);
 - a still (``render.png``), and one made only from the template, which gets no mark;
 - a preview: its frames (``preview-NN.png``) and its reel (``preview.mp4``);
-- POST /tts: the Kokoro WAV it hands out.
+- POST /tts: each Kokoro WAV it hands out, under its own random instance id.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from media_render.pipeline import RenderPipeline, RenderResult
 from media_render.provenance import COMPOSITE, TRAINED
 from media_render.server import TOKEN_HEADER, create_app
 from media_render.tts import Speaker
-from provenance_checks import assert_only_the_mark, packet_of, source_type_of
+from provenance_checks import assert_only_the_mark, instance_id_of, packet_of, source_type_of
 
 AUTH = {TOKEN_HEADER: TOKEN}
 WORKSPACE = "ws-canary-7f3a"
@@ -78,14 +79,16 @@ def _assert_marked(settings, job: Job, path: Path, expected: str) -> None:
     assert_only_the_mark(packet_of(settings, path), expected, absent=_absent(settings, job))
 
 
-def test_a_video_marks_its_kokoro_line_its_mix_and_its_mp4(settings):
-    """AI footage and a Kokoro voice over the template: the line and the mix are AI-made
-    audio through and through; the video mixes them with the template's visuals."""
+def test_a_video_marks_its_mix_and_its_mp4_and_not_its_inner_kokoro_line(settings):
+    """AI footage and a Kokoro voice over the template: the mix is AI-made audio through
+    and through; the video mixes it with the template's visuals. The line's own WAV stays
+    inside the service, so it carries no mark of its own: the mix and the video carry it."""
     seen: Dict[str, Path] = {}
 
     def inspect(job: Job) -> None:
         line, mix = job.audio_dir / "vo" / "l01.wav", job.project_dir / MIX_PATH
-        _assert_marked(settings, job, line, TRAINED)
+        assert line.is_file(), "the spoken line is still held between the check and the render"
+        assert source_type_of(settings, line) is None, "the inner line WAV was marked in the voice step"
         _assert_marked(settings, job, mix, TRAINED)
         seen["mix"] = mix
 
@@ -121,16 +124,24 @@ def test_a_preview_marks_each_frame_and_its_reel(settings):
         _assert_marked(settings, job, path, COMPOSITE)
 
 
-def test_tts_hands_out_kokoro_wavs_marked_ai_made(settings, tmp_path):
+def test_tts_hands_out_kokoro_wavs_marked_ai_made_each_with_its_own_instance_id(settings, tmp_path):
+    """The real /tts with the real Kokoro: every WAV it returns is marked after it is spoken,
+    and two lines never share an instance id (FR-16)."""
+
     async def go() -> Dict[str, Any]:
         async with TestClient(TestServer(create_app(settings))) as client:
-            request = {"lines": [{"id": "l01", "text": "Orders. Stock. Customers."}], "include_audio": True}
-            response = await client.post("/tts", data=json.dumps(request), headers=AUTH)
+            lines = [{"id": "l01", "text": "Orders. Stock. Customers."}, {"id": "l02", "text": "Orders. Stock. Customers."}]
+            response = await client.post("/tts", data=json.dumps({"lines": lines, "include_audio": True}), headers=AUTH)
             body = await response.json()
             assert response.status == 200, body
             return body
 
-    wav = tmp_path / "l01.wav"
-    wav.write_bytes(base64.b64decode(asyncio.run(go())["lines"][0]["audio_base64"]))
-    assert source_type_of(settings, wav) == TRAINED
-    assert_only_the_mark(packet_of(settings, wav), TRAINED, absent=(str(tmp_path), settings.work_dir))
+    ids = set()
+    for line in asyncio.run(go())["lines"]:
+        wav = tmp_path / f"{line['id']}.wav"
+        wav.write_bytes(base64.b64decode(line["audio_base64"]))
+        assert source_type_of(settings, wav) == TRAINED, line["id"]
+        packet = packet_of(settings, wav)
+        assert_only_the_mark(packet, TRAINED, absent=(str(tmp_path), settings.work_dir))
+        ids.add(instance_id_of(packet))
+    assert len(ids) == 2, "two identical lines share an instance id"
