@@ -50,12 +50,13 @@ class CtoPromptBuilder:
             memories: Retrieved memory strings
             tool_names: Available tool names
             platform_state: Live platform metrics (workspace count, agent count, etc.)
-            workspace_name: The workspace the agent acts for, named in the closing AI rule
+            workspace_name: The workspace the agent acts for, named in the closing AI rule only
+                when it is a public name (PRD-264 FR-15)
 
         PRD-264 EUAI-11a: the prompt ends with the platform rule that the agent answers
         truthfully that it is an AI, after the soul document, so the soul can't remove it.
         """
-        from modules.context.ai_identity_rule import with_ai_identity_rule
+        from modules.context.ai_identity_rule import public_workspace_name, with_ai_identity_rule
 
         now = datetime.now(timezone.utc)
         time_str = now.strftime("%Y-%m-%d %H:%M UTC")
@@ -103,7 +104,7 @@ class CtoPromptBuilder:
         parts.append(CtoPromptBuilder._response_rules())
 
         # ── 7. The platform AI rule, last (PRD-264) ──
-        return with_ai_identity_rule("\n\n".join(parts), workspace_name)
+        return with_ai_identity_rule("\n\n".join(parts), public_workspace_name(workspace_name))
 
     @staticmethod
     def _tool_descriptions(tool_names: List[str]) -> str:

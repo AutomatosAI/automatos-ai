@@ -86,7 +86,8 @@ def atom_system_prompt(metadata: Any, *, identity: str, memory_block: str, facts
     DatetimeContextSection does, so late on a Sunday in London is Monday, not UTC's
     Sunday; UTC without one. The greeting stays on the UTC hour. PRD-264 EUAI-11a: it ends with
     the platform rule that the agent answers truthfully that it is an AI, after the persona, so
-    a persona can't remove it (the workspace's name is not known on this path)."""
+    a persona can't remove it. The workspace's public name is not known on this path, so the rule
+    names no one (FR-15)."""
     from modules.context.ai_identity_rule import with_ai_identity_rule
     from services.brief_facts import AUTO_OWNER_RULES
     from services.todays_date import today_line
