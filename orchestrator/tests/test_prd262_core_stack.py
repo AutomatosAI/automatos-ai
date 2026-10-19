@@ -83,9 +83,23 @@ BASE = _compose("docker-compose.yml")
 CORE = _compose("docker-compose.core.yml")
 
 
+def _one_shots(services: dict) -> set:
+    """Services another one waits on to finish (service_completed_successfully): they run and exit."""
+    waited = set()
+    for body in services.values():
+        depends = (body or {}).get("depends_on") or {}
+        if isinstance(depends, dict):
+            waited |= {name for name, dep in depends.items()
+                       if isinstance(dep, dict) and dep.get("condition") == "service_completed_successfully"}
+    return waited
+
+
 def _running(services: dict) -> set:
-    """The services plain `up` starts: those with no profile."""
-    return {name for name, body in services.items() if not (body or {}).get("profiles")}
+    """The long-running services plain `up` starts: those with no profile, less the one-shots.
+
+    minio-volume-owner (PRD-262 US-041) has no profile but exits before MinIO starts.
+    """
+    return {name for name, body in services.items() if not (body or {}).get("profiles")} - _one_shots(services)
 
 
 def _fields(entry: str) -> list:
@@ -361,7 +375,8 @@ def test_the_smoke_expects_the_stacks_compose_defines_and_the_clients_message():
     names = {name: BASE["services"][name]["container_name"] for name in SIX}
     assert _shell_value("SIX") == " ".join(sorted(names.values()))
     assert _shell_value("FIVE") == " ".join(sorted(names[name] for name in FIVE))
-    assert _shell_value("CORE_SERVICES") == " ".join(sorted(FIVE))
+    assert _one_shots(BASE["services"]) == {"minio-volume-owner"}
+    assert _shell_value("CORE_SERVICES") == " ".join(sorted(FIVE | _one_shots(BASE["services"])))
     assert _shell_value("CORE_FILES") == CORE_FILES
     assert _shell_value("NOT_RUNNING") == WORKER_NOT_RUNNING
 

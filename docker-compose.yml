@@ -43,9 +43,10 @@
 # also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
 #
 # Profiles:
-#   - Default: postgres, redis, minio (+ minio-init), backend, frontend and the
-#     workspace-worker (Code Canvas runtime). The worker's files live in a host
-#     directory — AUTOMATOS_WORKSPACE_DIR in .env, default ./workspaces next to
+#   - Default: postgres, redis, minio, backend, frontend and the
+#     workspace-worker (Code Canvas runtime), plus minio-volume-owner, a one-shot
+#     that runs before MinIO and exits (PRD-262 US-041). The worker's files live
+#     in a host directory — AUTOMATOS_WORKSPACE_DIR in .env, default ./workspaces next to
 #     this file, created on first boot (PRD-233 S1). It is mounted as THE local
 #     workspace's root (/workspaces/<DEFAULT_WORKSPACE_ID>), so on your machine
 #     it holds artifacts/, reports/, sessions/… directly — no workspace-id
@@ -136,6 +137,51 @@ services:
       - automatos
 
   # ===========================================================================
+  # minio-volume-owner — hands MinIO's volume to MinIO's own user (PRD-262 US-041)
+  # ===========================================================================
+  # MinIO runs as its image's user, uid 65532, not root. A minio_data volume that
+  # the official minio/minio image (or this stack, before US-041) wrote as root
+  # would refuse it. This one-shot re-owns such a volume to 65532:65532 once,
+  # says so in its log, and exits; on a volume already MinIO's it changes nothing.
+  # minio waits for it to finish (service_completed_successfully), so make up,
+  # plain `docker compose up` and every documented compose command repair an old
+  # volume before MinIO starts. A repair in the Makefile alone would leave plain
+  # compose upgrades with an unhealthy MinIO, and so no backend (it waits for
+  # minio: service_healthy).
+  # It runs on the stack's own digest-pinned redis image, already pulled, whose
+  # busybox has stat and chown: root, with no network and only the capabilities
+  # chown needs. Its image stays equal to redis's (a test holds them together).
+  # $$ is a literal $ to compose, which would otherwise read $owner as a variable.
+  # ===========================================================================
+  minio-volume-owner:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    container_name: automatos_minio_volume_owner
+    restart: "no"
+    user: "0:0"
+    network_mode: none
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+    volumes:
+      - minio_data:/data
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        owner="$$(stat -c '%u:%g' /data)"
+        if [ "$$owner" = "65532:65532" ]; then
+          exit 0
+        fi
+        if ! chown -R 65532:65532 /data; then
+          echo "minio-volume-owner: could not re-own /data (owned by $$owner) to 65532:65532, the user MinIO runs as" >&2
+          exit 1
+        fi
+        echo "minio-volume-owner: /data was owned by $$owner; re-owned it to 65532:65532, the user MinIO runs as (PRD-262 US-041)"
+
+  # ===========================================================================
   # MinIO — local S3-compatible object store (PRD-176 F089)
   # ===========================================================================
   # Gives the knowledge flywheel a durable local object store so generated
@@ -152,9 +198,11 @@ services:
     image: cgr.dev/chainguard/minio:latest@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
     container_name: automatos_minio
     restart: unless-stopped
-    # Root, like the official image: Chainguard's runs as uid 65532, which can't
-    # read a minio_data volume the official image already wrote as root.
-    user: "0:0"
+    # No user: key. MinIO runs as the image's own user, uid 65532, never root
+    # (PRD-262 US-041); minio-volume-owner, above, re-owns a volume root wrote first.
+    depends_on:
+      minio-volume-owner:
+        condition: service_completed_successfully
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}

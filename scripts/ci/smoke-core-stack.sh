@@ -11,9 +11,10 @@
 #   2. on that running stack, `make up CORE=1`: the worker an earlier make up started is
 #      stopped and removed, and five run;
 #   3. after `down -v`, a fresh core stack: `make up CORE=1` on a checkout with no .env.
-#      docker compose config shows the five services and the backend's workspaces volume
-#      mounted writable (docker-compose.core.yml); five containers run; /health/ready
-#      answers 200; a workspace endpoint answers 503 "Workspace worker not running"
+#      docker compose config shows the five services (and minio-volume-owner, the
+#      one-shot that runs before MinIO and exits, PRD-262 US-041) and the backend's
+#      workspaces volume mounted writable (docker-compose.core.yml); five containers
+#      run; /health/ready answers 200; a workspace endpoint answers 503 "Workspace worker not running"
 #      (orchestrator/core/workspace_client.py). Then the worker starts, the endpoint lists
 #      the deliverables folder, and a file planted there before the stack started keeps its
 #      host owner: the backend, mounting the fresh volume first, gave it its image's uid
@@ -41,7 +42,9 @@ CORE_FILES="docker-compose.yml:docker-compose.core.yml"
 STACK_NAME_PATTERN='^automatos_'
 SIX="automatos_backend automatos_frontend automatos_minio automatos_postgres automatos_redis automatos_workspace_worker"
 FIVE="automatos_backend automatos_frontend automatos_minio automatos_postgres automatos_redis"
-CORE_SERVICES="backend frontend minio postgres redis"
+# The core override's services: the five, and the one-shot that re-owns MinIO's volume and
+# exits before MinIO starts (PRD-262 US-041), so it never counts as running.
+CORE_SERVICES="backend frontend minio minio-volume-owner postgres redis"
 # What the backend answers a workspace call with when the worker is not there
 # (core/workspace_client.py WORKER_NOT_RUNNING).
 NOT_RUNNING="Workspace worker not running or unreachable"
@@ -178,9 +181,9 @@ plant_owner_probe() {
   echo "planted ${PROBE} (owner ${probe_owner})"
 }
 
-# docker compose itself says the override does what it should: five services, and the
-# backend's workspaces volume writable, so Docker can create the deliverables folder's
-# mount point inside it on a fresh volume.
+# docker compose itself says the override does what it should: five services and the
+# MinIO one-shot, and the backend's workspaces volume writable, so Docker can create the
+# deliverables folder's mount point inside it on a fresh volume.
 check_core_config() {
   local config services writable
   config="$(env "${UNUSED_SECRETS[@]}" COMPOSE_FILE="$CORE_FILES" docker compose config --format json)" || fail "docker compose config failed with docker-compose.core.yml"
