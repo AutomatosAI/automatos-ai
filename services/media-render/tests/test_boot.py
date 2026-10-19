@@ -5,12 +5,16 @@ and production's token rule. Pure functions plus one real `boot-check` process.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
+import pytest
+
 from media_render import boot
-from media_render.config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, TOKEN_ENV, load_settings
+from media_render.config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, TOKEN_ENV, ConfigError, load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 SWITCHES_ON = {name: "1" for name in HYPERFRAMES_OFF_SWITCHES}
@@ -112,3 +116,44 @@ def test_the_container_command_exits_2_on_a_long_espeak_path():
     )
     assert proc.returncode == boot.BOOT_FAILURE_EXIT_CODE, proc.stderr
     assert "espeak-ng data path is 165 characters" in proc.stderr
+
+
+# ── PRD-262 US-052: the voices and the language follow the image's data ──────
+
+
+def _boot_check(**env: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "media_render", "boot-check"],
+        cwd=ROOT,
+        env={**os.environ, "LOG_RELAY_ENABLED": "false", **env},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_the_voices_file_and_the_default_voice_are_checked_at_boot(tmp_path):
+    assert boot.kokoro_voice_problems(load_settings({})) == [], "the image's voices file holds af_heart"
+    (problem,) = boot.kokoro_voice_problems(load_settings({"MEDIA_RENDER_KOKORO_VOICES": str(tmp_path / "none.bin")}))
+    assert problem.startswith("MEDIA_RENDER_KOKORO_VOICES: the Kokoro voices file") and "cannot be read" in problem
+    empty = tmp_path / "empty.bin"
+    with zipfile.ZipFile(empty, "w") as archive:
+        archive.writestr("README.txt", "no voices here")
+    (problem,) = boot.kokoro_voice_problems(load_settings({"MEDIA_RENDER_KOKORO_VOICES": str(empty)}))
+    assert problem.endswith("holds no voices"), problem
+    # am_santa is in upstream's file, not in the image's: a default every request would be refused with.
+    (problem,) = boot.kokoro_voice_problems(load_settings({"MEDIA_RENDER_KOKORO_VOICE": "am_santa"}))
+    assert problem.startswith("MEDIA_RENDER_KOKORO_VOICE='am_santa' is not in the voices file /opt/kokoro/"), problem
+    proc = _boot_check(MEDIA_RENDER_KOKORO_VOICE="am_santa")
+    assert proc.returncode == boot.BOOT_FAILURE_EXIT_CODE and "MEDIA_RENDER_KOKORO_VOICE='am_santa'" in proc.stderr, proc.stderr
+
+
+def test_a_language_the_image_does_not_speak_stops_the_boot():
+    for lang in ("fr-fr", "en", "EN-US"):
+        expected = f"MEDIA_RENDER_KOKORO_LANG={lang!r} is not valid: expected one of en-us, en-gb"
+        with pytest.raises(ConfigError, match=re.escape(expected)):
+            load_settings({"MEDIA_RENDER_KOKORO_LANG": lang})
+    assert load_settings({"MEDIA_RENDER_KOKORO_LANG": "en-gb"}).kokoro_lang == "en-gb"
+    proc = _boot_check(MEDIA_RENDER_KOKORO_LANG="fr-fr")
+    assert proc.returncode == boot.BOOT_FAILURE_EXIT_CODE, proc.stderr
+    assert "MEDIA_RENDER_KOKORO_LANG='fr-fr' is not valid" in proc.stderr

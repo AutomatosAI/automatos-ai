@@ -1,22 +1,27 @@
 # PRD-132: EU AI Act Alignment
 
-> **Status:** Draft (2026-04-18)
+> **Status:** Draft (2026-04-18). Amended 2026-10-19: Article 50 moved to PRD-264, dates corrected for the AI Omnibus.
 > **Positioning:** "EU AI Act aligned" — *not* "certified" (no certification body exists for most categories yet)
 > **Dependencies:** PRD-44 (Security Hardening), PRD-70 (Pentest Remediation), PRD-103 (Verification & Quality), PRD-105 (Budget & Governance), PRD-106 (Outcome Telemetry), PRD-37 (SaaS Foundation)
 > **Design principle:** Opt-in, progressive disclosure. Compliance features do **not** appear in the default UX. They activate only when a workspace enables "Compliance Mode" or a customer provisions the Compliance Pack SKU.
+> **Exception: Article 50 transparency.** The AI-interaction notices and the machine-readable marking of generated content are a legal floor. They are always on, in every workspace and in both editions (`AUTH_EDITION=local` and `saas`), and they are not part of Compliance Mode or the Compliance Pack.
+
+> **Article 50 scope moved to PRD-264** ([PRD-264-EU-AI-ACT-ARTICLE-50.md](PRD-264-EU-AI-ACT-ARTICLE-50.md), 2026-10-19). PRD-264 holds the Article 50 requirements, stories and dates. The Article 50 row in §5 and the disclosure bullet in §8 Phase 1 point to it.
 
 ---
 
 ## 1. Problem
 
-The EU AI Act entered into force 2024-08-01. Key dates already in effect:
+The EU AI Act (Regulation (EU) 2024/1689) entered into force 2024-08-01. Key dates, as amended by the AI Omnibus, Regulation (EU) 2026/1744 (published 2026-07-24, in force 2026-07-27):
 
 - **2025-02-02** — Prohibited practices banned (Art. 5)
 - **2025-08-02** — GPAI obligations apply (Art. 53–55)
-- **2026-08-02** — High-risk AI system obligations fully apply (Art. 6, 9–15, 43, 50)
-- **2027-08-02** — Full application for embedded high-risk systems
+- **2026-08-02** — Article 50 transparency applies: people are told they are dealing with an AI, deep fakes are disclosed, and AI text on matters of public interest is disclosed. No grace period.
+- **2026-12-02** — Article 50(2) machine-readable marking deadline for generative AI systems already on the market before 2026-08-02. The new Art. 5 bans on generating non-consensual intimate content and child sexual abuse material apply.
+- **2027-12-02** — High-risk obligations for Annex III systems (Art. 6, 9–15, 43)
+- **2028-08-02** — High-risk obligations for Annex I systems (AI in products covered by EU product law)
 
-Automatos deploys autonomous agents that take real-world actions via 856+ Composio apps (Slack, Gmail, HR systems, CRM, etc.). Depending on the deployer's use case, Automatos-built agents may qualify as **high-risk AI systems** (e.g. HR screening, credit scoring, critical infrastructure monitoring) or **limited-risk** (customer-facing chatbots, content generation).
+Automatos deploys autonomous agents that take real-world actions via 1,000+ Composio apps (Slack, Gmail, HR systems, CRM, etc.). Depending on the deployer's use case, Automatos-built agents may qualify as **high-risk AI systems** (e.g. HR screening, credit scoring, critical infrastructure monitoring) or **limited-risk** (customer-facing chatbots, content generation).
 
 EU enterprise buyers — especially regulated industries (finance, healthcare, HR, legal, public sector) — are adding AI Act readiness to procurement gates **now**. Most US-first agent platforms (LangChain, CrewAI, n8n) are not leading with compliance. This is a competitive wedge.
 
@@ -78,7 +83,7 @@ Compliance Pack SKU (paid add-on)
 | **Art. 14** — Human oversight | Meaningful human oversight capability | Formalize existing approval flows (PRD-105 Budget & Governance); add mandatory `requires_human_approval` flag for `high` tier |
 | **Art. 15** — Accuracy, robustness, cybersecurity | Documented performance + adversarial robustness | PRD-103 verification outputs fed into auto-generated conformity evidence |
 | **Art. 43** — Conformity assessment | Self-assessment for Annex III systems | Annex IV-style doc generator; exportable PDF |
-| **Art. 50** — Transparency to end users | Users told they're interacting with AI | **Always-on** disclosure in chatbot, voice, widget SDK (overridable only with compliance-mode off-switch + audit event) |
+| **Art. 50** — Transparency to end users | Users told they're interacting with AI; generated content marked machine-readably and detectable | **Always-on**, with no off switch, in both editions: moved to PRD-264 |
 | **Art. 53–55** — GPAI obligations | Technical documentation, copyright summary, training data summary | GPAI model registry: each LLM in PRD-54 marketplace carries provider-supplied AI Act disclosures |
 | **Art. 73** — Serious incident reporting | Report serious incidents within 15 days | `/api/compliance/incidents` workflow, integrates with existing monitoring (PRD-74) |
 
@@ -122,7 +127,7 @@ All routes gated by `workspace.compliance_mode = true` **or** admin role. Invisi
 
 **Phase 1 — Always-on foundation (no UI changes)**
 - Prohibited-practice deny list in `tool_router`
-- AI disclosure markers in chatbot/voice/widget response metadata
+- AI disclosure: moved to PRD-264. A visible notice on every surface where a person meets the AI, plus machine-readable marks on generated content. Metadata alone does not meet Article 50(1).
 - Log retention config (default 180d; honors existing telemetry)
 - GPAI metadata on LLM provider registry
 
@@ -153,6 +158,8 @@ All routes gated by `workspace.compliance_mode = true` **or** admin role. Invisi
 - Not building a GRC suite — integrate, don't replicate
 
 ## 10. Commercial angle
+
+> **Roadmap, not shipped.** Nothing in this section exists today: no Compliance Mode, Compliance Pack, auditor share links, Vanta/Drata connector, quarterly report, compliance SLA or named compliance contact. The tier names below predate the 18 Oct 2026 price sheet.
 
 **Compliance Pack SKU** — add-on to existing SaaS tiers:
 

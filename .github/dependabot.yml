@@ -1,0 +1,126 @@
+# Dependabot version updates (PRD-262 US-012).
+#
+# Every base image, third-party compose image and action is pinned: FROM lines and
+# compose `image:` as name:tag@sha256:<digest>, `uses:` as a 40-hex commit. A pin
+# with nothing to move it would freeze security fixes, so Dependabot opens one
+# grouped pull request a week per ecosystem with the new digests and commits.
+# orchestrator/tests/test_prd262_dependabot.py keeps this file in step with the
+# Dockerfiles and compose files; the action-pins workflow checks each new commit.
+#
+# Docker and compose updates stay on each tag's line: the digest moves and the tag
+# does not. Moving a tag (Python 3.12, Node 26, Postgres 17, Redis 8, Alpine 3.25)
+# changes what we run, so it is done by hand and semver-major and -minor updates
+# are ignored here. node:24-alpineX.Y and alpine:X.Y in frontend/Dockerfile must
+# move together (test_prd262_node24_images.py), which a hand-made change does.
+#
+# Actions take every update. Majors come in their own group, so one breaking
+# release does not hold back the rest.
+#
+# Python lock files: Dependabot's pip and uv updaters read only *.txt and *.in
+# files, and both recompile without uv's --overrides. They cannot update
+# services/agent-opt-worker/requirements.lock or the workspace worker's
+# requirements.lock and requirements-browser.lock (PRD-262 US-044), so those have
+# no entry here; the test lists each with its reason. Security alerts and security
+# updates for the npm and pip manifests are repository settings and stay on.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+      actions-major:
+        patterns: ["*"]
+        update-types: [major]
+
+  # Every directory that holds a tracked Dockerfile. `/` is Dockerfile.backend
+  # until US-018 deletes it (then `/` leaves this list).
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /.oss-scanner
+      - /frontend
+      - /orchestrator
+      - /services/agent-opt-worker
+      - /services/media-render
+      - /services/workspace-worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  # docker-compose*.yml: pgvector, redis, minio, qdrant, adminer, gotenberg and
+  # searxng. The published-images override's own images follow AUTOMATOS_IMAGE_TAG.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      compose-images:
+        patterns: ["*"]
+
+  # media-render's Python dependencies (PRD-262 US-053). The pip updater reads
+  # requirements.in and requirements-test.txt here and moves their pins; it cannot
+  # rewrite requirements.lock (see the Python lock files note above). Its pull
+  # request therefore fails orchestrator/tests/test_prd262_media_render_stages.py,
+  # which holds the lock to requirements.in, until the lock is compiled again with
+  # the command at the top of requirements.in and pushed to the same branch.
+  - package-ecosystem: pip
+    directory: /services/media-render
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      media-render-python:
+        patterns: ["*"]
+
+  # media-render's Node packages (PRD-262 US-053): Hyperframes, GSAP and the
+  # playwright-core the arm64 build uses. npm rewrites package-lock.json itself.
+  # A Hyperframes bump moves the amd64 headless shell with it (its CHROME_VERSION),
+  # so its pull request needs a media-render.yml run before it merges.
+  - package-ecosystem: npm
+    directory: /services/media-render/js
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      media-render-js:
+        patterns: ["*"]

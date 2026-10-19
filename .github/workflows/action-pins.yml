@@ -1,0 +1,60 @@
+name: action-pins
+
+# PRD-262 US-012: every action a workflow runs is pinned to a commit.
+#
+# A tag such as actions/checkout@v4 is a pointer the action's owner can move, so
+# a lane could start running different code with no change in this repository.
+# scripts/ci/check_action_pins.py fails on any `uses:` that does not name a 40-hex
+# commit. It then reads each pinned action's action.yml at that commit from
+# GitHub, and fails if a composite action (or a reusable workflow) runs a `uses:`
+# of its own that is not pinned the same way. Exceptions, each with its reason,
+# are in .github/action-pin-exceptions.json. Dependabot (.github/dependabot.yml)
+# moves the pins; this lane checks each move. The backend suite runs the same
+# check on this repository's files, offline (test_prd262_action_pins.py).
+#
+# Introduced NON-REQUIRED like the other lanes; making it a required check is the
+# repo admin's call (CONTRIBUTING.md).
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - ".github/action-pin-exceptions.json"
+      - "scripts/ci/check_action_pins.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - ".github/action-pin-exceptions.json"
+      - "scripts/ci/check_action_pins.py"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    name: Every action pinned to a commit, composites included
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (the workflows and the check)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            scripts/ci
+
+      # Reads public repositories only; the token lifts the API's anonymous limit.
+      - name: Check every uses is pinned
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/check_action_pins.py

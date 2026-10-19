@@ -1,8 +1,9 @@
 """Agent-related ActionDefinitions (list, get, create, update, delete, heartbeat config).
 
 PRD-256 FX-016: platform_create_agent and platform_update_agent take the agent's runtime.
-They are registered inside ``register_agents_actions``, a function past the length rule;
-``takes_the_runtime`` hands it a registry that adds ``runtime``, ``provider`` and ``model``
+platform_update_agent is registered inside ``register_agents_actions``, a function past the
+length rule, and platform_create_agent by ``actions_agent_create`` (19 Oct 2026);
+``takes_the_runtime`` hands both a registry that adds ``runtime``, ``provider`` and ``model``
 to those two schemas as they are registered (the definition is rebuilt, never changed in
 place). What the handlers do with them is ``agent_runtime``. ``provider`` and ``model`` were
 already read by create_agent (the API model's provider, and ``model`` as an older name of
@@ -17,6 +18,7 @@ from typing import Any, Callable, Dict, Tuple
 from core.cli_runtime import CLI_PROVIDERS, RUNTIME_KINDS
 
 from .action_registry import ActionDefinition, ActionRegistry
+from .actions_agent_create import register_create_agent_action  # 19 Oct: left register_agents_actions
 
 RUNTIME_DESCRIPTION = (
     "How the agent runs: 'api' (the platform's models, chosen by model_id) or 'cli' (a session of "
@@ -80,7 +82,9 @@ def takes_the_runtime(register_actions: Callable[[Any], None]) -> Callable[[Any]
     """Wrap ``register_agents_actions`` (see the module docstring)."""
     @functools.wraps(register_actions)
     def wrapped(registry: Any) -> None:
-        register_actions(_TakesTheRuntime(registry))
+        takes_the_runtime_registry = _TakesTheRuntime(registry)
+        register_actions(takes_the_runtime_registry)
+        register_create_agent_action(takes_the_runtime_registry)
     return wrapped
 
 
@@ -196,86 +200,6 @@ def register_agents_actions(registry: ActionRegistry) -> None:
     ))
 
     # ── Write ────────────────────────────────────────────────────────
-
-    registry.register(ActionDefinition(
-        name="platform_create_agent",
-        description=(
-            "Create a new agent in the workspace. Requires a name and agent type. "
-            "Optionally accepts description, model, system prompt, temperature, tags, "
-            "team, job_title, and reports_to_id. "
-            "Use when the user asks to create, add, or set up a new agent."
-        ),
-        category="agents",
-        parameters={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Name for the new agent.",
-                },
-                "agent_type": {
-                    "type": "string",
-                    "enum": ["chatbot", "worker", "researcher", "coder"],
-                    "description": "Type of agent to create. Defaults to 'chatbot'.",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Brief description of the agent's purpose.",
-                },
-                "model_id": {
-                    "type": "string",
-                    "description": (
-                        "LLM model ID, as platform_list_workspace_models lists it "
-                        f"(e.g. '{DEFAULT_LLM_MODEL}'). Omit it for the default model, "
-                        f"{DEFAULT_LLM_MODEL}."
-                    ),
-                },
-                "system_prompt": {
-                    "type": "string",
-                    "description": (
-                        "Custom system prompt that defines the agent's persona, behaviour, "
-                        "and constraints. This is the instruction text the agent sees at the "
-                        "start of every conversation."
-                    ),
-                },
-                "temperature": {
-                    "type": "number",
-                    "description": (
-                        "Sampling temperature (0.0–2.0). Lower values are more deterministic, "
-                        "higher values are more creative. Defaults to 0.7."
-                    ),
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional tags for categorisation (e.g. ['support', 'customer-facing']).",
-                },
-                "team": {
-                    "type": "string",
-                    "description": "Department/team name (e.g. 'Engineering & DevOps', 'Growth & Marketing').",
-                },
-                "job_title": {
-                    "type": "string",
-                    "description": "Human-readable role title (e.g. 'Engineering Reliability & Security Lead').",
-                },
-                "reports_to_id": {
-                    "type": "integer",
-                    "description": "Agent ID of the manager this agent reports to (org hierarchy).",
-                },
-            },
-            "required": ["name"],
-        },
-        permission_level="write",
-        promoted=True,
-        requires_confirmation=False,
-        tags=["agents", "create", "write"],
-        examples=[
-            "create an agent called DevOps Bot",
-            "make a new researcher agent",
-            "create a support agent using claude sonnet with a helpful persona",
-        ],
-        accepts=("model", "provider"),
-    ))
 
     registry.register(ActionDefinition(
         name="platform_update_agent",

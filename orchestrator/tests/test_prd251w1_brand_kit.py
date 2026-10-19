@@ -71,6 +71,7 @@ from core.media_render_bundle import NO_LOGO, brand_tokens, build_bundle  # noqa
 from core.social_templates import resolve_variables  # noqa: E402
 from media_render.bundle import parse_bundle  # noqa: E402  (media-render's own parser: stdlib only)
 from media_render.config import load_settings  # noqa: E402
+from media_render.voices_build import load_catalogue  # noqa: E402
 from modules.documents.brand_fonts import (  # noqa: E402
     MAX_FONT_BYTES,
     WOFF2_MIME,
@@ -92,6 +93,8 @@ from modules.documents.brand_kit import (  # noqa: E402
 )
 from modules.documents.social_starters import social_starters  # noqa: E402
 
+# media-render's voices: the catalogue its voices file holds (PRD-262 US-052).
+VOICES = frozenset(load_catalogue())
 WS = uuid.UUID("00000000-0000-0000-0000-0000000000d1")
 FONTS_ROUTE = "/api/documents/brand-kit/fonts"
 MARK_ROUTE = "/api/documents/brand-kit/logo-mark"
@@ -464,7 +467,7 @@ def test_an_uploaded_woff2_is_stored_served_and_inlined_into_a_render_bundle(api
     # F376: the body font the kit names and did not upload (its default, Inter) ships bundled after it.
     assert bundled and {face["family"] for face in bundled} == {"Inter"}
     assert bundle["brand"]["tokens"]["heading-font"] == '"Brand Display", sans-serif'
-    parsed = parse_bundle(bundle, load_settings({}), {})
+    parsed = parse_bundle(bundle, load_settings({}), {}, VOICES)
     assert [(f.path, f.data) for f in parsed.files][0] == (font_path, WOFF2)
     assert len(parsed.files) == 1 + len(bundled)  # the upload, then the bundled faces
     assert '@font-face{font-family:"Brand Display";src:url("assets/brand/fonts/font-0.woff2") format("woff2");font-weight:700' in parsed.composition.html
@@ -571,7 +574,7 @@ def test_the_bundle_stages_the_mark_and_falls_back_to_the_logo():
     logo_only = bundle({"logo_url": logo_uri, "logo_mark_url": "https://cdn.example/mark.png"})  # never fetched
     assert logo_only["variables"]["brand.logo_mark"] == logo_only["variables"]["brand.logo"] == "assets/brand/logo.png"
     assert bundle({})["variables"]["brand.logo_mark"] == NO_LOGO
-    parsed = parse_bundle(both, load_settings({}), {})
+    parsed = parse_bundle(both, load_settings({}), {}, VOICES)
     assert 'src="assets/brand/logo-mark.png"' in parsed.composition.html
 
 
@@ -651,7 +654,7 @@ def test_the_ci_driver_renders_the_title_card_with_an_uploaded_heading_font_and_
     assert base64.b64decode(face["data_uri"].split(",", 1)[1]) == WOFF2
     starter = next(s for s in social_starters("social_image") if s["slug"] == driver.HEADING_FONT_TEMPLATE)
     bundle = driver.image_bundle_for(starter, kit, starter["blocks"]["sizes"][0])
-    parsed = parse_bundle(bundle, load_settings({}), {})
+    parsed = parse_bundle(bundle, load_settings({}), {}, VOICES)
     assert [f.path for f in parsed.files] == ["assets/brand/logo-mark.png", "assets/brand/fonts/font-0.woff2"]
     assert '@font-face{font-family:"CI Block";src:url("assets/brand/fonts/font-0.woff2") format("woff2");font-weight:900' in parsed.composition.html
     assert 'src="assets/brand/logo-mark.png"' in parsed.composition.html

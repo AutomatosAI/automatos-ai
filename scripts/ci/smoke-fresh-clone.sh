@@ -32,15 +32,20 @@
 #      and to /health/ready 200 (readiness), each timed separately;
 #   2. the frontend, started once the backend is healthy: :3000 must answer 200,
 #      and the address `docker compose port frontend 3000` reports is recorded
-#      (0.0.0.0:3000 until PRD-262 US-005 binds it to loopback);
+#      (127.0.0.1:3000 since PRD-262 US-005, checked below);
 #   3. two warm restarts, `docker compose restart backend` with the database kept,
 #      timed the same way; the report gives their median.
 # The step summary always shows (pass or fail): those times, Started → Healthy per
 # service from Docker's start and health_status events, the /health/bootstrap
 # stage table of each boot and the alembic runs per boot. scripts/ci/smoke_boot.py
 # does the polling and scripts/ci/smoke_report.py the report; the records and logs
-# land in $SMOKE_OUT_DIR, which the workflow uploads. No time is a bar yet: the lane fails only when a
-# boot or the frontend never answers 200 (PRD-262 US-004 records the baselines).
+# land in $SMOKE_OUT_DIR, which the workflow uploads. No backend or frontend time is a bar yet: the
+# lane fails when a boot or the frontend never answers 200 (PRD-262 US-004 records the baselines).
+# The one time bar is the workspace worker's 20 s to healthy (PRD-262 US-045, below).
+#
+# PRD-262 US-005: once the frontend answers, scripts/ci/smoke-loopback-ports.sh asserts
+# that it, and every other published port, listens on 127.0.0.1 (`docker compose port
+# frontend 3000` prints 127.0.0.1:3000).
 #
 # PRD-262 US-003 runs the same boot steps on images instead of a source build, for
 # .github/workflows/smoke-images.yml. SMOKE_IMAGES picks where the app images come from:
@@ -60,7 +65,17 @@
 # carry a local-* tag or compose's own <project>-<service> name. The step summary
 # adds the pull, the first run from its start to :3000 200, and those checks.
 #
-# Exit 0 = every boot answered 200 with no external creds. Exit 1 = a boot failed.
+# PRD-262 US-008, in the pull-request variant (`prebuilt`) only: once the worker count
+# checks out, scripts/ci/smoke_worker_restart.py kills one uvicorn worker of the
+# production-stage backend and needs uvicorn to start a replacement within 30 s, with
+# /health 200 and no container restart. uvicorn 0.24 never replaced a dead worker.
+#
+# PRD-262 US-045, in every variant: scripts/ci/smoke_worker_health.py needs the workspace
+# worker healthy within 20 s of its start (from the same Docker events) and its /metrics
+# answering 200.
+#
+# Exit 0 = every boot answered 200 with no external creds and every published port is
+# on loopback. Exit 1 = a boot failed, or a port listens beyond this machine.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -94,12 +109,20 @@ OUT_DIR="${SMOKE_OUT_DIR:-${RUNNER_TEMP:-/tmp}/smoke-fresh-clone}"
 BOOT_TOOL="scripts/ci/smoke_boot.py"
 REPORT_TOOL="scripts/ci/smoke_report.py"
 IMAGES_TOOL="scripts/ci/smoke_images.py"
+RESTART_TOOL="scripts/ci/smoke_worker_restart.py"
 BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
 # smoke_images.py's records (it reads them back from OUT_DIR for the report).
 PULL_FILE="${OUT_DIR}/pull.json"
 PROCESSES_FILE="${OUT_DIR}/processes.json"
 IMAGES_FILE="${OUT_DIR}/images.json"
+# smoke_worker_restart.py's record (PRD-262 US-008).
+WORKER_RESTART_FILE="${OUT_DIR}/worker-restart.json"
+# PRD-262 US-045: the workspace worker, its health bar and smoke_worker_health.py's record.
+WORKER_CONTAINER="automatos_workspace_worker"
+WORKER_HEALTH_TOOL="scripts/ci/smoke_worker_health.py"
+WORKER_HEALTHY_MAX_SECONDS=20
+WORKER_HEALTH_FILE="${OUT_DIR}/worker-health.json"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
 # The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
@@ -264,13 +287,40 @@ boot_frontend() {
     || fail "the frontend never answered 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
 }
 
+# PRD-262 US-005: the frontend, and every other published port, listens on 127.0.0.1.
+# The frontend is already running, so the check starts nothing; it only reads ports.
+check_loopback_ports() {
+  bash scripts/ci/smoke-loopback-ports.sh "$COMPOSE_FILE" \
+    || fail "a published port listens beyond this machine (expected 127.0.0.1), or the ports could not be read"
+}
+
 # The first CI boot of the production stage (image modes): no --reload, the expected
-# worker count. PRD-262 US-008's kill-a-worker step goes after this check.
+# worker count. check_worker_restart runs right after it.
 check_backend_processes() {
   [ -n "$SMOKE_IMAGES" ] || return 0
   python3 "$IMAGES_TOOL" workers --container "$BACKEND_CONTAINER" --expect "$BACKEND_WORKERS" \
     --out "$PROCESSES_FILE" \
     || fail "the backend does not run the production command (no --reload, ${BACKEND_WORKERS} workers)"
+}
+
+# PRD-262 US-008, smoke-images' pull-request variant only: SIGKILL one uvicorn worker and
+# require uvicorn to replace it within 30 s, /health 200, and no container restart.
+# The main runs (pull) are measurements, so they kill nothing.
+check_worker_restart() {
+  [ "$SMOKE_IMAGES" = "prebuilt" ] || return 0
+  python3 "$RESTART_TOOL" --container "$BACKEND_CONTAINER" --health-url "$HEALTH_URL" \
+    --out "$WORKER_RESTART_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "uvicorn did not replace a killed worker within 30s with /health 200 and no container restart"
+}
+
+# PRD-262 US-045: the workspace worker, started with the backend, reported healthy within
+# WORKER_HEALTHY_MAX_SECONDS of its start (its HEALTHCHECK probes every 2 s while it
+# starts), and its /metrics answers 200.
+check_workspace_worker() {
+  python3 "$WORKER_HEALTH_TOOL" --events "$EVENTS_FILE" --service workspace-worker \
+    --container "$WORKER_CONTAINER" --max-seconds "$WORKER_HEALTHY_MAX_SECONDS" \
+    --out "$WORKER_HEALTH_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "the workspace worker was not healthy within ${WORKER_HEALTHY_MAX_SECONDS}s of its start, or its /metrics did not answer 200"
 }
 
 # Image modes: every app container runs the image compose names for it, with this
@@ -300,6 +350,8 @@ dump_failure_logs() {
   compose logs --tail 150 backend >&2 || true
   echo "----- frontend logs (tail) -----" >&2
   compose logs --tail 80 frontend >&2 || true
+  echo "----- workspace-worker logs (tail) -----" >&2
+  compose logs --tail 80 workspace-worker >&2 || true
 }
 
 # The step summary is written on every exit, pass or fail.
@@ -352,8 +404,11 @@ main() {
   start_event_log
   boot_fresh
   check_backend_processes
+  check_worker_restart
   boot_frontend
+  check_loopback_ports
   check_images
+  check_workspace_worker
   # Further checks against the running stack go here, before the warm restarts
   # (PRD-262 US-021: upload a document and fetch its presigned URL).
   warm_restarts

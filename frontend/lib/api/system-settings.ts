@@ -59,6 +59,21 @@ export interface BulkUpdateRequest {
   value: string
 }
 
+/** What a save that moved the platform default for Auto did to the Auto agents (api/system_settings.py). */
+export interface AutoModelsRestamp {
+  target?: string
+  moved?: number
+  current?: number
+  chosen?: number
+  by_route?: Record<string, number>
+}
+
+export interface BulkUpdateReply {
+  message: string
+  /** Present when the update changed orchestrator_llm provider or model. */
+  auto_models?: AutoModelsRestamp
+}
+
 /**
  * List all system settings
  */
@@ -140,7 +155,7 @@ export async function deleteSystemSetting(settingId: number): Promise<void> {
 /**
  * Bulk update multiple settings
  */
-export async function bulkUpdateSettings(updates: BulkUpdateRequest[]): Promise<{ message: string }> {
+export async function bulkUpdateSettings(updates: BulkUpdateRequest[]): Promise<BulkUpdateReply> {
   const response = await apiClient.request('/api/system-settings/bulk-update', {
     method: 'POST',
     body: updates

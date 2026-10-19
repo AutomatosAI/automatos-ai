@@ -107,11 +107,11 @@ The API provides several endpoints for the frontend and external tools to verify
 
 ## Infrastructure Monitoring (Railway & Docker)
 
-The system is designed for deployment on Railway, utilizing its native monitoring stack. [railway.json:1-12]().
+The system is designed for deployment on Railway, utilizing its native monitoring stack. [railway.json:1-11]().
 
 ### Service Health and Lifecycle
 * **Bootstrap Guard**: To prevent race conditions during multi-worker startup, the system uses `pg_try_advisory_lock` (ID `47111`) to ensure only one worker runs database seeds. [orchestrator/core/database/boot_lock.py:21-40]()
-* **Restart Policy**: The `railway.json` configuration defines an `ON_FAILURE` restart policy with a maximum of 10 retries to ensure service availability. [railway.json:8-11]()
+* **Restart Policy**: The `railway.json` configuration defines an `ON_FAILURE` restart policy with a maximum of 10 retries to ensure service availability. [railway.json:7-10]()
 
 ### Natural Language to Code Entity Mapping
 

@@ -21,7 +21,7 @@ def _factory():
 def test_vendor_model_gains_openrouter_prefix():
     f = _factory()
     assert f._openrouter_model_id("openai", "gpt-4o-mini") == "openai/gpt-4o-mini"
-    assert f._openrouter_model_id("anthropic", "claude-haiku-4-5") == "anthropic/claude-haiku-4-5"
+    assert f._openrouter_model_id("anthropic", "claude-haiku-4-5") == "anthropic/claude-haiku-4.5"  # the dotted twin
 
 
 def test_prefixed_model_untouched():

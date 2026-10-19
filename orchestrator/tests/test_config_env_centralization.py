@@ -56,6 +56,8 @@ _SWEPT_ENV_VARS = (
     "INTERNAL_API_HOSTNAME",
     "INTERNAL_FRONTEND_HOSTNAME",
     "AGENT_OPT_WORKER_URL",
+    # PRD-262 US-006 — the token the API sends to agent-opt-worker.
+    "AGENT_OPT_WORKER_TOKEN",
     # PRD-251 S0.1 — the Socials group, swept so an env value can't mask the
     # defaults asserted below.
     "SOCIALS_ENABLED_DEFAULT",
@@ -400,6 +402,17 @@ def test_railway_host_still_settable_via_env(monkeypatch, attr, env_name, saas_v
     """SaaS supplies the real Railway host via env — only the default moved."""
     cfg = _reload_config(monkeypatch, {env_name: saas_value})
     assert getattr(cfg.config, attr) == saas_value
+
+
+@pytest.mark.parametrize(
+    "env,expected",
+    [({}, ""), ({"AGENT_OPT_WORKER_TOKEN": " worker-secret "}, "worker-secret"), ({"AGENT_OPT_WORKER_TOKEN": "   "}, "")],
+    ids=["unset", "padded", "blank"],
+)
+def test_agent_opt_worker_token(monkeypatch, env, expected):
+    """PRD-262 US-006: the X-Internal-Token value; blank counts as unset (no header is sent)."""
+    cfg = _reload_config(monkeypatch, env)
+    assert cfg.config.AGENT_OPT_WORKER_TOKEN == expected
 
 
 # ---------------------------------------------------------------------------

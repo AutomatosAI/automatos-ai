@@ -9,7 +9,7 @@ from dataclasses import replace
 
 import pytest
 
-from helpers import STORAGE, bundle, data_uri, page
+from helpers import STORAGE, VOICES, bundle, data_uri, page
 from media_render.bundle import parse_bundle
 from media_render.fixture import fixture_bundle
 from media_render.music import load_library
@@ -20,12 +20,12 @@ SIGNED = "?X-Amz-Signature=deadbeef&X-Amz-Expires=600"
 
 def refused(settings, body, library=None) -> str:
     with pytest.raises(BundleError) as caught:
-        parse_bundle(body, settings, library or {})
+        parse_bundle(body, settings, library or {}, VOICES)
     return str(caught.value)
 
 
 def test_the_fixture_bundle_parses(settings):
-    parsed = parse_bundle(fixture_bundle(), settings, {})
+    parsed = parse_bundle(fixture_bundle(), settings, {}, VOICES)
     assert parsed.workspace_id == "media-render-fixture"
     composition = parsed.composition
     assert (composition.duration, composition.width, composition.height, composition.aspect) == (3.0, 1080, 1920, "9:16")
@@ -36,7 +36,7 @@ def test_the_fixture_bundle_parses(settings):
 
 
 def test_variables_are_escaped_text(settings):
-    parsed = parse_bundle(bundle(variables={"headline": '<img src=x onerror="alert(1)"> & more'}), settings, {})
+    parsed = parse_bundle(bundle(variables={"headline": '<img src=x onerror="alert(1)"> & more'}), settings, {}, VOICES)
     assert "&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; more" in parsed.composition.html
     assert "<img src=x" not in parsed.composition.html
 
@@ -62,7 +62,7 @@ def test_text_never_lands_in_a_script_or_an_event_handler(settings, markup):
 def test_numbers_and_flags_may_time_a_script(settings):
     markup = "<script>window.__cue = {{ scene_at }}; window.__loop = {{ loop }};</script>"
     body = bundle(composition={"html": page(markup)}, variables={"headline": "On brand", "scene_at": 2.4, "loop": False})
-    assert "window.__cue = 2.4; window.__loop = false;" in parse_bundle(body, settings, {}).composition.html
+    assert "window.__cue = 2.4; window.__loop = false;" in parse_bundle(body, settings, {}, VOICES).composition.html
 
 
 def test_a_malformed_placeholder_is_refused(settings):
@@ -71,7 +71,7 @@ def test_a_malformed_placeholder_is_refused(settings):
 
 
 def test_brand_tokens_become_css_variables_before_head_closes(settings):
-    parsed = parse_bundle(bundle(brand={"tokens": {"accent": "#3a7bd5", "heading-font": '"Geist", sans-serif'}}), settings, {})
+    parsed = parse_bundle(bundle(brand={"tokens": {"accent": "#3a7bd5", "heading-font": '"Geist", sans-serif'}}), settings, {}, VOICES)
     html = parsed.composition.html
     style = html.index(":root{--brand-accent:#3a7bd5;--brand-heading-font:\"Geist\", sans-serif;}")
     assert style < html.index("</head>")
@@ -87,7 +87,7 @@ def test_fonts_are_inlined_files_with_font_face_rules(settings):
         files=[{"path": "assets/brand/geist-700.woff2", "data_uri": data_uri("font/woff2", b"wOF2-font-bytes")}],
         brand={"fonts": [{"family": "Geist", "weight": 700, "path": "assets/brand/geist-700.woff2"}]},
     )
-    parsed = parse_bundle(body, settings, {})
+    parsed = parse_bundle(body, settings, {}, VOICES)
     assert parsed.files[0].data == b"wOF2-font-bytes"
     assert '@font-face{font-family:"Geist";src:url("assets/brand/geist-700.woff2") format("woff2");' in parsed.composition.html
 
@@ -121,7 +121,7 @@ def test_an_inline_file_over_the_size_limit_is_refused(settings):
 
 def test_a_media_url_on_our_storage_is_accepted(settings):
     body = bundle(media=[{"path": "assets/cine/hook.mp4", "url": STORAGE + "ws-a/post-1/hook.mp4" + SIGNED}])
-    parsed = parse_bundle(body, settings, {})
+    parsed = parse_bundle(body, settings, {}, VOICES)
     assert parsed.media[0].path == "assets/cine/hook.mp4"
 
 
@@ -179,7 +179,7 @@ def test_inline_svg_data_and_fragment_references_are_fine(settings):
         '<svg xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g"/></defs>'
         '<rect fill="url(#g)"/><use href="#g"/></svg>'
     )
-    parse_bundle(bundle(composition={"html": page(markup)}), settings, {})
+    parse_bundle(bundle(composition={"html": page(markup)}), settings, {}, VOICES)
 
 
 def test_media_and_inline_files_can_be_referenced(settings):
@@ -189,7 +189,7 @@ def test_media_and_inline_files_can_be_referenced(settings):
         files=[{"path": "assets/brand/logo.svg", "data_uri": data_uri("image/svg+xml", b"<svg/>")}],
         media=[{"path": "assets/cine/hook.mp4", "url": STORAGE + "hook.mp4"}],
     )
-    parse_bundle(body, settings, {})
+    parse_bundle(body, settings, {}, VOICES)
 
 
 @pytest.mark.parametrize(
@@ -235,8 +235,27 @@ def test_a_voice_file_from_storage_can_be_a_line(settings):
         media=[{"path": "assets/vo/l01.wav", "url": STORAGE + "vo/l01.wav"}],
         audio={"voice": {"lines": [{"id": "l01", "at": 0.2, "path": "assets/vo/l01.wav"}]}},
     )
-    line = parse_bundle(body, settings, {}).audio.voice.lines[0]
+    line = parse_bundle(body, settings, {}, VOICES).audio.voice.lines[0]
     assert (line.path, line.text) == ("assets/vo/l01.wav", None)
+
+
+def test_a_voice_and_a_language_follow_the_images_data(settings):
+    # PRD-262 US-052: upstream's voices file also held am_santa and zf_xiaoxiao; the
+    # image keeps the catalogue's voices alone, and its espeak-ng data speaks en-us
+    # and en-gb alone. A pattern would have let each of these through to Kokoro.
+    line = [{"id": "l01", "at": 0.2, "text": "Hi."}]
+    for voice in ("am_santa", "zf_xiaoxiao", "AF_HEART", 7):
+        message = refused(settings, bundle(audio={"voice": {"lines": line, "voice": voice}}))
+        assert message.startswith("audio.voice.voice must be one of the renderer's Kokoro voices: af_alloy, "), message
+    for lang in ("fr-fr", "en", "en-US", "ja", None):
+        message = refused(settings, bundle(audio={"voice": {"lines": line, "lang": lang}}))
+        assert message == "audio.voice.lang must be one of en-us, en-gb", message
+    british = parse_bundle(bundle(audio={"voice": {"lines": line, "voice": "bm_george", "lang": "en-gb"}}), settings, {}, VOICES)
+    assert (british.audio.voice.voice, british.audio.voice.lang) == ("bm_george", "en-gb")
+    # The voices are the ones the caller passes: what the app read from the image at boot.
+    only = frozenset({"af_heart"})
+    with pytest.raises(BundleError, match="audio.voice.voice must be one of the renderer's Kokoro voices: af_heart$"):
+        parse_bundle(bundle(audio={"voice": {"lines": line, "voice": "bm_george"}}), settings, {}, only)
 
 
 def _library(tmp_path, duration):
@@ -255,7 +274,7 @@ def _library(tmp_path, duration):
 
 def test_music_comes_from_the_library(settings, tmp_path):
     library = _library(tmp_path, 120.0)
-    cue = parse_bundle(bundle(audio={"music": {"track": "deep-house-003", "start": 32.0}}), settings, library).audio.music
+    cue = parse_bundle(bundle(audio={"music": {"track": "deep-house-003", "start": 32.0}}), settings, library, VOICES).audio.music
     assert (cue.track, cue.start, cue.fade_in, cue.fade_out) == ("deep-house-003", 32.0, 0.02, 1.7)
     # The cue carries the library's word on the track: the report's licence and credit line (S1.6).
     assert cue.about["credit_required"] is True and cue.about["licence"] == "CC BY 4.0"
@@ -267,7 +286,7 @@ def test_music_comes_from_the_library(settings, tmp_path):
 
 def test_sfx_come_from_storage_at_a_volume_up_to_one(settings):
     media = [{"path": "assets/sfx/click.ogg", "url": STORAGE + "sfx/click.ogg"}]
-    cue = parse_bundle(bundle(media=media, audio={"sfx": [{"path": "assets/sfx/click.ogg", "at": 1.0}]}), settings, {})
+    cue = parse_bundle(bundle(media=media, audio={"sfx": [{"path": "assets/sfx/click.ogg", "at": 1.0}]}), settings, {}, VOICES)
     assert cue.audio.sfx[0].volume == 0.5
     loud = bundle(media=media, audio={"sfx": [{"path": "assets/sfx/click.ogg", "at": 1.0, "volume": 1.5}]})
     assert "at most 1" in refused(settings, loud)
@@ -279,9 +298,9 @@ def test_a_workspace_id_is_required(settings):
 
 
 def test_a_preview_names_moments_inside_the_composition(settings):
-    parsed = parse_bundle(bundle(preview={"at": [2.5, 0.5, 2.5]}), settings, {})
+    parsed = parse_bundle(bundle(preview={"at": [2.5, 0.5, 2.5]}), settings, {}, VOICES)
     assert parsed.preview.at == (0.5, 2.5)
-    assert parse_bundle(bundle(), settings, {}).preview is None
+    assert parse_bundle(bundle(), settings, {}, VOICES).preview is None
 
 
 @pytest.mark.parametrize(
@@ -303,9 +322,9 @@ def test_a_preview_outside_the_composition_is_refused(settings, preview, message
 
 def test_a_still_names_its_moments_in_order(settings):
     """US-107: an image, one full-size PNG per moment (a carousel's slides)."""
-    parsed = parse_bundle(bundle(still={"at": [0.0, 1.5, 2.5]}), settings, {})
+    parsed = parse_bundle(bundle(still={"at": [0.0, 1.5, 2.5]}), settings, {}, VOICES)
     assert parsed.still.at == (0.0, 1.5, 2.5) and parsed.preview is None
-    assert parse_bundle(bundle(), settings, {}).still is None
+    assert parse_bundle(bundle(), settings, {}, VOICES).still is None
 
 
 @pytest.mark.parametrize(

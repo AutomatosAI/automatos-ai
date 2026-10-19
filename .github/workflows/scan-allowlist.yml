@@ -1,0 +1,58 @@
+name: scan-allowlist
+
+# PRD-262 US-013 (D1, FR-3): an exception to the vulnerability scan policy is never
+# open-ended.
+#
+# images.yml's scan policy (scripts/ci/image_scan_policy.py) blocks a fixable Critical,
+# or a match on CISA's Known Exploited Vulnerabilities list at any severity, unless a
+# .grype.yaml entry covers it. Every entry carries a reason and an expiry at most 90
+# days out, and stops covering anything after its last day. This lane runs every day
+# and fails once an entry has expired, so someone fixes the image or renews the entry
+# with a current reason, instead of finding out from the next red build. It warns in
+# an entry's last week. It also runs on pull requests that change the allowlist or the
+# policy, which refuses an entry without a reason or an expiry, one more than 90 days
+# out, or a key it does not read.
+#
+# NON-REQUIRED at introduction, like the other lanes; making it a required check is
+# the repo admin's call (CONTRIBUTING.md). Actions are pinned to a commit; the
+# comment names the release.
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  pull_request:
+    paths:
+      - ".grype.yaml"
+      - "scripts/ci/image_scan_policy.py"
+      - ".github/workflows/scan-allowlist.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  allowlist:
+    name: Every scan allowlist entry has a reason and has not expired (non-required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Cone mode always checks out the files at the root, .grype.yaml among them.
+      - name: Checkout (the allowlist and the policy)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Check the allowlist
+        run: |
+          python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
+          python scripts/ci/image_scan_policy.py allowlist --allowlist .grype.yaml --summary "$GITHUB_STEP_SUMMARY"
