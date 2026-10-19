@@ -10,7 +10,8 @@ runs it on the Railway build, and images.yml on the GHCR build, on both arches.
 This suite checks:
 
 - the Dockerfile: the prune RUN in pybuild, after the install and before the base stage
-  copies /install, with the glob and the ``*.libs`` exclusion the script also uses;
+  copies /install's two halves (PRD-262 US-022), with the glob and the ``*.libs``
+  exclusion the script also uses;
 - the script's ELF reader, on ELF files built here (32- and 64-bit, both byte orders)
   and, on Linux, on this interpreter's own extension modules;
 - how the script names, finds, loads and judges files, including an extension its
@@ -387,10 +388,13 @@ def test_the_strip_names_the_files_the_check_loads():
 
 
 def test_the_base_stage_copies_the_pruned_tree():
+    """Both halves of PRD-262 US-022's two-layer install sit under /install, which the strip walks."""
     instructions = _instructions(DOCKERFILE)
     prune = next(i for i, line in enumerate(instructions) if STRIP in line)
-    copy = instructions.index("COPY --from=pybuild /install /usr/local")
-    assert prune < copy
+    copies = [i for i, line in enumerate(instructions) if line.startswith("COPY --from=pybuild ")]
+    assert [instructions[i] for i in copies] == ["COPY --from=pybuild /install/stable /usr/local",
+                                                 "COPY --from=pybuild /install/rest /usr/local"]
+    assert prune < copies[0]
     assert not any("RUN --mount" in line for line in instructions), "Railway builds this file: no cache mounts"
 
 

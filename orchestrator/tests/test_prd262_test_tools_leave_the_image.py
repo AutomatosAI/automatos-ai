@@ -3,16 +3,20 @@
 pytest, pytest-asyncio, pytest-timeout, pytest-cov, black, isort and import-linter sat in
 requirements.txt, so every image installed them, and the production stage's
 `pip uninstall` RUN removed only four of the seven while adding a layer of its own.
-They now live in requirements-dev.txt, which only CI installs. This suite checks:
+They now live in requirements-dev.txt, which only CI installs. Since PRD-262 US-022 the
+API's dependencies are requirements.in, compiled into requirements.lock (and the
+Railway [leiden] variant's lock), and the dev file into requirements-dev.lock. This
+suite checks:
 
-- the seven tools are in requirements-dev.txt and not in requirements.txt, and the two
-  files name no package twice;
-- the Dockerfile installs requirements.txt alone, has no `pip uninstall`, and its
-  production stage compiles the stdlib once, as root, excluding site-packages, before
-  the app code is copied in;
-- every CI install of requirements.txt installs the dev file in the same pip command,
-  and every pip cache key on requirements.txt lists the dev file too;
-- the image workflows watch the dev file;
+- the seven tools are in requirements-dev.txt and not in requirements.in or the image's
+  locks, and the two inputs name no package twice;
+- the Dockerfile copies the image locks alone (never a dev file), has no `pip uninstall`,
+  and its production stage compiles the stdlib once, as root, excluding site-packages,
+  before the app code is copied in; the only other compile is pybuild's, of
+  site-packages;
+- every CI install of the API's lock installs the dev lock in the same pip command, hashes
+  required, and every pip cache key on the lock lists the dev lock too, each path a file;
+- the image workflows watch the dev file and its lock;
 - CI checks the built image: `import pytest` fails in it (test.yml's prod-image-parity),
   and the stdlib compile's layer holds stdlib .pyc and nothing under site-packages
   (images.yml, from US-001's layer listing).
@@ -34,6 +38,9 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 DOCKERFILE = (ORCH / "Dockerfile").read_text(encoding="utf-8")
 OSS_SCANNER = (ROOT / ".oss-scanner" / "Dockerfile").read_text(encoding="utf-8")
 DEV_FILE = "requirements-dev.txt"
+DEV_LOCK = "requirements-dev.lock"
+INPUT = "requirements.in"
+IMAGE_LOCKS = ("requirements.lock", "requirements-leiden.lock")
 TOOLS = {"pytest", "pytest-asyncio", "pytest-timeout", "pytest-cov", "black", "isort", "import-linter"}
 STDLIB = "/usr/local/lib/python3.11"
 STDLIB_COMPILE = (
@@ -41,9 +48,9 @@ STDLIB_COMPILE = (
 )
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
 _NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
-# One pip command that reads orchestrator's requirements.txt (from orchestrator/ or the
-# repository root), in a workflow `run` or a RUN; it ends at the line or at && ; |.
-_INSTALL = re.compile(r"pip install[^\n&;|]*?-r ((?:orchestrator/)?)requirements\.txt(?=\s|$)[^\n&;|]*", re.M)
+# One pip command that reads one of orchestrator's requirement files (from orchestrator/ or
+# the repository root), in a workflow `run` or a RUN; it ends at the line or at && ; |.
+_INSTALL = re.compile(r"pip install[^\n&;|]*?-r ((?:orchestrator/)?)requirements[\w.-]*(?=\s|$)[^\n&;|]*", re.M)
 
 
 def _names(path: Path) -> set[str]:
@@ -87,21 +94,25 @@ def _steps():
 
 def test_the_test_tools_moved_to_the_dev_file():
     assert TOOLS <= _names(ORCH / DEV_FILE), "requirements-dev.txt lacks a test tool"
-    assert not TOOLS & _names(ORCH / "requirements.txt"), "a test tool is still in requirements.txt"
+    assert not TOOLS & _names(ORCH / INPUT), "a test tool is still in requirements.in"
+    for lock in IMAGE_LOCKS:
+        assert not TOOLS & _names(ORCH / lock), f"the image installs {lock}, which pins a test tool"
+    assert TOOLS <= _names(ORCH / DEV_LOCK), "requirements-dev.lock lacks a test tool"
 
 
 def test_the_two_files_name_no_package_twice():
-    """They install in one pip command; a package in both could be pinned two ways."""
-    assert not _names(ORCH / DEV_FILE) & _names(ORCH / "requirements.txt")
+    """Their locks install in one pip command; a package asked for in both could be pinned two ways."""
+    assert not _names(ORCH / DEV_FILE) & _names(ORCH / INPUT)
 
 
 # --------------------------------------------------------------------------- the image
 
 
 def test_the_image_never_installs_the_dev_file():
-    assert DEV_FILE not in "\n".join(_instructions(DOCKERFILE))
+    instructions = "\n".join(_instructions(DOCKERFILE))
+    assert DEV_FILE not in instructions and DEV_LOCK not in instructions
     copies = [line for line in _instructions(DOCKERFILE) if re.match(r"COPY\s+requirements", line)]
-    assert copies == ["COPY requirements.txt ."], copies
+    assert copies == ["COPY requirements.lock requirements-leiden.lock scripts/split_lock.py ./"], copies
 
 
 def test_no_pip_uninstall_is_left():
@@ -111,8 +122,12 @@ def test_no_pip_uninstall_is_left():
 
 def test_the_production_stage_compiles_the_stdlib_once_as_root_before_the_app():
     production = _stage(DOCKERFILE, "production")
-    compiles = [line for line in _instructions(DOCKERFILE) if "compileall" in line]
+    compiles = [line for line in production if "compileall" in line]
     assert compiles == [STDLIB_COMPILE], "one stdlib compile, site-packages excluded, unchecked-hash"
+    pybuild = _stage(DOCKERFILE, "pybuild")
+    elsewhere = [line for line in _instructions(DOCKERFILE) if "compileall" in line and line not in production]
+    assert len(elsewhere) == 1 and elsewhere[0] in pybuild, (
+        "site-packages' bytecode comes only from pybuild (PRD-262 US-022)")
     at = production.index(STDLIB_COMPILE)
     app = next(i for i, line in enumerate(production) if re.fullmatch(r"COPY (--\S+ )*\. \.", line))
     assert at < app, "before the app code, so a code change reuses the layer"
@@ -124,7 +139,7 @@ def test_the_production_stage_compiles_the_stdlib_once_as_root_before_the_app():
 
 
 def _ci_installs() -> list[tuple[str, str, str]]:
-    """(file, prefix, command) for every pip install of orchestrator's requirements.txt in CI."""
+    """(file, prefix, command) for every pip install of an orchestrator requirement file in CI."""
     found = []
     for path in sorted(WORKFLOWS.glob("*.yml")):
         found += [(path.name, m.group(1), m.group(0)) for m in _INSTALL.finditer(path.read_text(encoding="utf-8"))]
@@ -133,26 +148,35 @@ def _ci_installs() -> list[tuple[str, str, str]]:
     return found
 
 
-def test_every_ci_install_of_requirements_txt_installs_the_dev_file_in_the_same_command():
+def test_every_ci_install_of_the_lock_installs_the_dev_lock_in_the_same_command():
+    """PRD-262 US-022: one command, hashes required. A hashed lock puts pip in hash-checking
+    mode for the whole command, so the unhashed dev file can't join it, and a dev install of
+    its own could move a locked version."""
     installs = _ci_installs()
     where = {name for name, _, _ in installs}
     assert {"test.yml", "nl2sql-eval-scheduled.yml", ".oss-scanner/Dockerfile"} <= where, where
     assert sum(name == "test.yml" for name, _, _ in installs) >= 4
     for name, prefix, command in installs:
-        assert f"-r {prefix}{DEV_FILE}" in command, f"{name}: {command}"
+        files = re.findall(r"-r (\S+)", command)
+        assert files == [f"{prefix}requirements.lock", f"{prefix}{DEV_LOCK}"], f"{name}: {command}"
+        assert "--require-hashes" in command.split(), f"{name}: {command}"
 
 
 def test_the_oss_scanner_needs_no_separate_pytest_timeout():
     assert "pip install pytest-timeout" not in OSS_SCANNER
 
 
-def test_every_pip_cache_key_on_requirements_txt_lists_the_dev_file():
+def test_every_pip_cache_key_on_the_lock_lists_the_dev_lock():
     keyed = []
     for name, step in _steps():
-        paths = str((step.get("with") or {}).get("cache-dependency-path", ""))
-        if "actions/setup-python" in step.get("uses", "") and "orchestrator/requirements.txt" in paths:
+        paths = str((step.get("with") or {}).get("cache-dependency-path", "")).split()
+        if "actions/setup-python" not in step.get("uses", ""):
+            continue
+        # setup-python fails a step whose cache path matches no file (PRD-262 US-022).
+        assert all(list(ROOT.glob(path)) for path in paths if path.startswith("orchestrator/")), f"{name}: {paths}"
+        if "orchestrator/requirements.lock" in paths:
             keyed.append(name)
-            assert f"orchestrator/{DEV_FILE}" in paths.split(), f"{name}: {paths!r}"
+            assert f"orchestrator/{DEV_LOCK}" in paths, f"{name}: {paths!r}"
     assert keyed.count("test.yml") == 4 and "nl2sql-eval-scheduled.yml" in keyed, keyed
 
 
@@ -162,10 +186,11 @@ def test_every_pip_cache_key_on_requirements_txt_lists_the_dev_file():
 def test_the_image_workflows_watch_the_dev_file():
     images = _workflow("images.yml")
     triggers = images.get("on", images.get(True))  # PyYAML reads the `on` key as True
-    assert f"orchestrator/{DEV_FILE}" in triggers["pull_request"]["paths"]
     pick = next(step for step in images["jobs"]["changes"]["steps"] if step.get("id") == "pick")
     api = next(image for image in json.loads(pick["env"]["IMAGES"]) if image["name"] == "api")
-    assert f"orchestrator/{DEV_FILE}" in api["inputs"]
+    for name in (DEV_FILE, DEV_LOCK):
+        assert f"orchestrator/{name}" in triggers["pull_request"]["paths"]
+        assert f"orchestrator/{name}" in api["inputs"]
 
 
 def test_ci_finds_no_test_tool_in_the_built_image():

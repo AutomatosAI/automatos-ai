@@ -533,8 +533,9 @@ US002_PATHS = {
     "orchestrator/requirements*.txt", "orchestrator/main.py", "orchestrator/core/seeds/**",
     "orchestrator/core/database/load_seed_data.py", "orchestrator/alembic/**", "envs/*.defaults",
     "frontend/package-lock.json",
-    # US-022 renames requirements.txt to requirements.in plus lock files (review addendum).
-    "orchestrator/requirements.in", "orchestrator/requirements*.lock",
+    # US-022 renames requirements.txt to requirements.in plus lock files (review addendum),
+    # and pybuild splits the lock with orchestrator/scripts/split_lock.py.
+    "orchestrator/requirements.in", "orchestrator/requirements*.lock", "orchestrator/scripts/split_lock.py",
 }
 EARLIER_PATHS = {
     "docker-compose.yml", "orchestrator/docker-entrypoint.sh", "orchestrator/Dockerfile",

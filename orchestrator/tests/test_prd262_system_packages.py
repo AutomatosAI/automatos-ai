@@ -234,13 +234,16 @@ def test_a_change_to_a_check_reruns_prod_image_parity(path):
 
 
 def test_the_test_image_is_the_image_under_test_plus_the_dev_requirements():
+    """PRD-262 US-022: the dev lock, hashes required, compiled against the image's own lock."""
     dockerfile = test_image.dockerfile("parity-be")
     assert dockerfile.splitlines() == [
         "FROM parity-be",
-        "COPY requirements-dev.txt /tmp/requirements-dev.txt",
-        "RUN python -m pip install --user --no-cache-dir --no-warn-script-location -r /tmp/requirements-dev.txt",
+        "COPY requirements-dev.lock /tmp/requirements-dev.lock",
+        "RUN python -m pip install --user --no-cache-dir --no-warn-script-location --require-hashes "
+        "-r /tmp/requirements-dev.lock",
     ]
-    assert test_image.DEV_REQUIREMENTS == ROOT / "orchestrator" / "requirements-dev.txt"
+    assert test_image.DEV_LOCK == ROOT / "orchestrator" / "requirements-dev.lock"
+    assert test_image.DEV_LOCK.is_file()
     assert test_image.build_command("t", "/ctx") == ["docker", "build", "--tag", "t", "--file", "-", "/ctx"]
 
 

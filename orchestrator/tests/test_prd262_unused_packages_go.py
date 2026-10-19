@@ -11,12 +11,15 @@ ConversionService, which nothing called. This suite checks:
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
   importlib.util.find_spec, pytest.importorskip) with a literal name, at any depth;
-- requirements.txt and requirements-dev.txt name none of them, the Dockerfile never
-  installs futureagi, and start.sh no longer downloads NLTK data;
-- graphifyy is pinned exactly, with and without the Dockerfile's [leiden] sed, and
-  psutil is pinned at 6 or later, the first release with aarch64 wheels;
+- requirements.in, requirements-dev.txt and the locks compiled from them (PRD-262
+  US-022) name none of them (the [leiden] lock only scikit-learn), the Dockerfile's one
+  install is the hashed lock, never futureagi, and start.sh no longer downloads NLTK data;
+- graphifyy is pinned exactly in requirements.in, and with the [leiden] extra at the same
+  version in requirements-leiden.in; psutil is pinned at 6 or later, the first release
+  with aarch64 wheels;
 - pybuild installs wheels only, with `--no-binary pysher,graspologic` after
-  `--only-binary :all:`, because pip's `:all:` clears an exception named before it;
+  `--only-binary :all:` (pip's `:all:` cleared an exception named before it; uv, which
+  installs the lock since US-022, takes them either way and the order stays);
 - CI looks inside both built variants (scripts/ci/image_dists_absent.py): test.yml's
   prod-image-parity checks the Railway build, smoke-images-pr the GHCR build.
 
@@ -202,21 +205,29 @@ def _requirements(path: Path) -> dict[str, str]:
 
 
 def test_no_requirements_file_names_a_removed_distribution():
-    for name in ("requirements.txt", "requirements-dev.txt"):
+    for name in ("requirements.in", "requirements-leiden.in", "requirements-dev.txt",
+                 "requirements.lock", "requirements-dev.lock"):
         assert not REMOVED_DISTS & set(_requirements(ORCH / name)), name
+    railway = REMOVED_DISTS & set(_requirements(ORCH / "requirements-leiden.lock"))
+    assert railway <= RAILWAY_KEEPS, railway
 
 
 def test_graphifyy_is_pinned_exactly_with_and_without_the_leiden_extra():
-    line = _requirements(ORCH / "requirements.txt")["graphifyy"]
-    assert _PIN.match(line) and line.startswith("graphifyy[leiden]=="), line
-    sed = "sed 's/^graphifyy\\[leiden\\]/graphifyy/' requirements.txt > requirements.build.txt"
-    assert sed in DOCKERFILE, "the GHCR and local builds drop [leiden] with this sed"
-    slim = re.sub(r"^graphifyy\[leiden\]", "graphifyy", line)
-    assert _PIN.match(slim) and slim.startswith("graphifyy=="), slim
+    """PRD-262 US-022: INSTALL_GRAPH_EXTRAS picks a lock; no sed rewrites a requirement."""
+    line = _requirements(ORCH / "requirements.in")["graphifyy"]
+    assert _PIN.match(line) and line.startswith("graphifyy=="), line
+    leiden = _requirements(ORCH / "requirements-leiden.in")["graphifyy"]
+    assert leiden == line.replace("graphifyy==", "graphifyy[leiden]==", 1), leiden
+    assert "sed " not in DOCKERFILE and "requirements.build.txt" not in DOCKERFILE
+    version = line.split("==", 1)[1]
+    for lock in ("requirements.lock", "requirements-leiden.lock"):
+        assert _requirements(ORCH / lock)["graphifyy"].startswith(f"graphifyy=={version} "), lock
+    assert "graspologic" not in _requirements(ORCH / "requirements.lock"), "the GHCR build has no [leiden]"
+    assert "graspologic" in _requirements(ORCH / "requirements-leiden.lock"), "Railway's build keeps it"
 
 
 def test_psutil_is_pinned_at_6_or_later_for_its_aarch64_wheels():
-    line = _requirements(ORCH / "requirements.txt")["psutil"]
+    line = _requirements(ORCH / "requirements.in")["psutil"]
     pinned = _PIN.match(line)
     assert pinned and int(pinned.group(3)) >= 6, line
 
@@ -233,19 +244,24 @@ def _pip_installs() -> list[list[str]]:
 
 def test_the_dockerfile_never_installs_futureagi():
     assert "futureagi" not in DOCKERFILE.lower()
-    assert all("--no-deps" not in args for args in _pip_installs())
+    # The PRD-58 leftover was a second `--no-deps` install; since PRD-262 US-022 the one
+    # install is the hashed lock (with --no-deps, as a lock needs), so nothing else gets in.
+    installs = _pip_installs()
+    assert len(installs) == 1 and "--require-hashes" in installs[0], installs
+    for lock in ("requirements.lock", "requirements-leiden.lock"):
+        assert "futureagi" not in _requirements(ORCH / lock), lock
 
 
 def test_pybuild_installs_wheels_only_with_the_pure_python_exceptions_last():
     installs = _pip_installs()
     assert len(installs) == 1, installs
     args = installs[0]
-    assert "requirements.build.txt" in args and "--prefix=/install" in args, args
+    assert args[args.index("-r") + 1] == "$half.txt" and args[args.index("--prefix") + 1] == "/install/$half", args
     only = [i for i, arg in enumerate(args) if arg.startswith("--only-binary")]
     no = [i for i, arg in enumerate(args) if arg.startswith("--no-binary")]
     assert len(only) == 1 and args[only[0] + 1] == ":all:", args
     assert len(no) == 1 and args[no[0] + 1] == WHEEL_EXCEPTIONS, args
-    assert only[0] < no[0], "pip's --only-binary :all: clears a --no-binary named before it"
+    assert only[0] < no[0], "pip's --only-binary :all: cleared a --no-binary named before it"
 
 
 def test_start_sh_no_longer_downloads_nltk_data():

@@ -216,7 +216,9 @@ def test_the_code_the_app_loads_stays_in_the_context():
     seeds = [path for path in paths if path.startswith("core/seeds/") and path.endswith(".md")]
     assert documents and seeds
     assert not [path for path in documents + seeds if ignored(path)]
-    for path in ("main.py", "config.py", "alembic.ini", "requirements.txt", "docker-entrypoint.sh"):
+    # pybuild copies the two image locks and the splitter (PRD-262 US-022).
+    for path in ("main.py", "config.py", "alembic.ini", "requirements.lock", "requirements-leiden.lock",
+                 "scripts/split_lock.py", "docker-entrypoint.sh"):
         assert not ignored(path), path
 
 
