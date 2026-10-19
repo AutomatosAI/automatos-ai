@@ -34,15 +34,23 @@ and Instagram's ``INSTAGRAM_POST_IG_USER_MEDIA`` /
 ``INSTAGRAM_CREATE_CAROUSEL_CONTAINER`` / ``INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH`` take
 no AI flag, so the caption carries the disclosure.
 
+**The render's AI inputs** (PRD-264 EUAI-06a): every render bundle carries ``ai_inputs``
+(:func:`with_inputs`), the same rule applied to what the render is about to show: a slot it
+fills is AI footage or an AI still unless it holds the person's own file, a render that
+speaks its script speaks with a synthetic voice, and the template's own visuals are always
+there. media-render marks each file it makes from it (IPTC DigitalSourceType in XMP,
+``services/media-render/media_render/provenance.py``), so a post and its files agree.
+
 Pure: no database, no Composio.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from core.media_render_bundle import voice_script
+from core.media_render_bundle import AI_INPUTS, ai_inputs, voice_script
+from core.social_templates import IMAGE_SLOT
 from modules.socials.channel_adapters import CHANNEL_ADAPTERS
 from modules.socials.kokoro_voices import KOKORO
 
@@ -52,6 +60,7 @@ RENDER_DONE = "render_done"  # service.ACTION_RENDER_DONE (the service imports t
 VIDEO_FORMAT = "video"  # a post's format whose render speaks its script
 IMAGE_TYPE = "image/"
 FOOTAGE, STILLS, OWN, VOICE, FILES = "footage", "stills", "own", "voice", "files"
+INPUTS = AI_INPUTS  # a render bundle's key: which inputs are AI-made (media-render's bundle.py)
 
 # How each channel shows a post's AI label through Composio (the schemas above).
 NETWORK_FLAG, STUDIO_ONLY, CAPTION_ONLY = "network_flag", "studio_only", "caption_only"
@@ -162,6 +171,40 @@ def render_record(post: Any, bundle: Any, media: Any) -> Dict[str, Any]:
         VOICE: voice_name(getattr(post, "voice", None)) if spoken else None,
         FILES: sorted(_digests(media)),
     }
+
+
+def _ai_still(slot: str, done: Mapping[str, Tuple[str, ...]], specs: Mapping[str, Any]) -> bool:
+    """A filled slot's file is a still by its record; one still to be made, by its template slot."""
+    if slot in done[STILLS] or slot in done[FOOTAGE]:
+        return slot in done[STILLS]
+    spec = specs.get(slot)
+    return isinstance(spec, Mapping) and spec.get("kind") == IMAGE_SLOT
+
+
+def render_inputs(post: Any, shown: Sequence[str], slots: Any, *, speaks: bool) -> Dict[str, bool]:
+    """Which inputs of a render are AI-made, as media-render's ``ai_inputs`` takes them: each
+    slot in ``shown`` (the slots it fills) is the person's own file when its record says so
+    (an upload or a Library file), else AI footage or an AI still (``slots``, the template's,
+    tell a still to be made); a render that ``speaks`` its script speaks with a synthetic
+    voice; the template's own visuals are always in it."""
+    done = _done_slots(getattr(post, "footage", None))
+    specs = slots if isinstance(slots, Mapping) else {}
+    made = [slot for slot in shown if slot not in done[OWN]]
+    stills = [slot for slot in made if _ai_still(slot, done, specs)]
+    return ai_inputs(
+        footage=len(stills) < len(made), stills=bool(stills), voice=speaks,
+        uploads=any(slot in done[OWN] for slot in shown),
+    )
+
+
+def with_inputs(bundle: Mapping[str, Any], post: Any, shown: Sequence[str], slots: Any) -> Dict[str, Any]:
+    """A new copy of the render ``bundle`` carrying its ``ai_inputs`` (:func:`render_inputs`)."""
+    return {**dict(bundle), INPUTS: render_inputs(post, shown, slots, speaks=bool(voice_script(bundle)))}
+
+
+def own_file_inputs() -> Dict[str, bool]:
+    """``ai_inputs`` of a render showing only the person's own file (a crop of their still)."""
+    return ai_inputs(uploads=True)
 
 
 def with_record(report: Optional[Mapping[str, Any]], post: Any, bundle: Any, media: Any) -> Dict[str, Any]:

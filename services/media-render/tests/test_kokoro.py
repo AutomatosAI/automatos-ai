@@ -1,5 +1,6 @@
 """Kokoro speaks inside the image: one line, one WAV, longer than 0.5 s (US-101),
-with the voiced segments on-screen text lands on (US-102).
+with the voiced segments on-screen text lands on (US-102), marked AI-made as it is
+written (PRD-264 EUAI-06a).
 
 This loads the real 310 MB model through the image's espeak-ng data, so it
 also proves the data moved to the short path works end to end.
@@ -20,6 +21,7 @@ import soundfile
 from kokoro_onnx.config import EspeakConfig
 from kokoro_onnx.tokenizer import Tokenizer
 
+from media_render import provenance
 from media_render.config import load_settings
 from media_render.espeak_build import LANGUAGES
 from media_render.kokoro_tts import synthesize_line
@@ -39,6 +41,9 @@ def test_kokoro_synthesises_one_line(tmp_path):
     assert rate == spoken.sample_rate
     assert len(samples) / rate > 0.5
     assert float(abs(samples).max()) > 0.01, "the line is silent"
+    # EUAI-06a: the WAV carries the IPTC mark, read back with the writer (exiftool).
+    mark = provenance.read_source_type(spoken.path, exiftool_bin=settings.exiftool_bin, timeout_seconds=60)
+    assert mark == provenance.TRAINED
 
 
 def test_a_line_with_pauses_has_a_segment_per_phrase(tmp_path):

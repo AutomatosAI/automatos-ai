@@ -103,6 +103,15 @@ def test_ffmpeg_ffprobe_and_tini_are_installed():
         assert shutil.which(tool), tool
 
 
+def test_exiftool_the_ai_marks_writer_is_installed_and_recorded():
+    """PRD-264 EUAI-06a (D14): exiftool writes and reads the IPTC mark on every output."""
+    settings = load_settings()
+    assert shutil.which(settings.exiftool_bin), settings.exiftool_bin
+    live = subprocess.run([settings.exiftool_bin, "-ver"], capture_output=True, text=True, timeout=60)
+    assert live.returncode == 0 and live.stdout.strip()
+    assert read_versions(settings.versions_path)["exiftool"] == live.stdout.strip()
+
+
 def test_gsap_and_the_kokoro_files_are_in_the_image():
     settings = load_settings()
     assert Path(settings.gsap_path).stat().st_size > 10_000

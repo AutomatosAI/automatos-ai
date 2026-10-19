@@ -254,6 +254,26 @@ jobs:
             --job "$out/job.json" --min-line-seconds 0.5 --max-voice-seconds 2.394 \
             --ebur128 "$out/ebur128.log" --lufs -14 --lufs-tolerance 1
           python3 -c 'import json, sys; t = json.load(open(sys.argv[1]))["report"]["timings"]; print("check_seconds:", t.get("check_seconds"), "s (5.009 s in run 37612086159; report only)")' "$out/job.json"
+      # PRD-264 EUAI-06a (EU AI Act Art. 50(2)): the MP4 carries the IPTC "AI-generated"
+      # mark, read back with the image's own exiftool (the writer, D14). The fixture bundle
+      # names no ai_inputs (an older caller), so only its Kokoro line counts as AI: a
+      # synthetic voice over the template's visuals is a composite. Its packet carries a
+      # random xmpMM:InstanceID too (FR-16). Every format's own read-back, and the packet's
+      # field allowlist, run in tests/test_provenance*.py above.
+      - name: The MP4 carries its AI mark (exiftool reads the IPTC DigitalSourceType back)
+        run: |
+          out="$RUNNER_TEMP/out"
+          expected="http://cv.iptc.org/newscodes/digitalsourcetype/compositeWithTrainedAlgorithmicMedia"
+          found=$(docker run --rm -v "$out:/out:ro" --entrypoint exiftool "$IMAGE" -n -s3 -XMP-iptcExt:DigitalSourceType /out/fixture.mp4)
+          echo "DigitalSourceType: $found"
+          docker run --rm -v "$out:/out:ro" --entrypoint exiftool "$IMAGE" -b -XMP /out/fixture.mp4; echo
+          if [ "$found" != "$expected" ]; then echo "::error::the fixture MP4 is not marked $expected"; exit 1; fi
+          instance=$(docker run --rm -v "$out:/out:ro" --entrypoint exiftool "$IMAGE" -s3 -XMP-xmpMM:InstanceID /out/fixture.mp4)
+          echo "InstanceID: $instance"
+          if ! echo "$instance" | grep -Eqx 'xmp\.iid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'; then
+            echo "::error::the fixture MP4 carries no random InstanceID (FR-16)"; exit 1
+          fi
+          echo "the fixture MP4 carries DigitalSourceType $expected and a random InstanceID: PASS"
       - name: The render job's report (check, mix, timings)
         if: always()
         run: cat "$RUNNER_TEMP/out/job.json" 2>/dev/null || echo "no job report"

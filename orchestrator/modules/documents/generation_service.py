@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from modules.documents.url_fetcher import _safe_url_fetcher  # PRD-156 S4: the SSRF guard
 from config import config
-from core.media_render_bundle import build_bundle
+from core.media_render_bundle import build_bundle, with_template_inputs
 from core.media_render_client import MediaRenderClient
 from core.media_render_quota import book_render_seconds, declared_seconds, release_render, reserve_render, sessions_for
 from core.music_credit import MusicCredit, credit_for_render
@@ -523,7 +523,7 @@ class DocumentGenerationService:
         sessions = sessions_for(self.db)
         reservation = await reserve_render(sessions, workspace, declared_seconds(blocks, format), execution_id=reference)
         try:
-            bundle = build_bundle(
+            bundle = with_template_inputs(build_bundle(  # PRD-264 EUAI-06a: it says which inputs are AI-made
                 workspace_id=workspace_id,
                 reference=reference,
                 blocks=blocks,
@@ -531,7 +531,7 @@ class DocumentGenerationService:
                 brand_kit=brand_kit_for_media_render(get_brand_kit(getattr(workspace, "settings", None))),
                 fallback_name=getattr(workspace, "name", None) or "",
                 fmt=format,
-            )
+            ))
             output_path = Path(self._output_path(workspace_id, title, file_type))
             music = await self._render_social_file(bundle, output_path, workspace_id, reference)
         finally:

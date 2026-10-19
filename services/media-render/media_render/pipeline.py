@@ -22,6 +22,11 @@ A bundle with a ``still`` is an image (US-107): checked the same way, then its
 render is a PNG snapshot of the composition at each moment asked for, at the
 composition's own size and flattened to opaque RGB: ``render.png`` for one,
 ``render-01.png``, ``render-02.png``, … for a carousel's slides.
+
+Every file with an AI element is marked after its last encode (PRD-264 EUAI-06a,
+provenance.py): the mix, the video, each still, each preview frame and the reel carry
+the IPTC DigitalSourceType their elements call for. A file that cannot be marked fails
+the job: a render never ships unmarked.
 """
 
 from __future__ import annotations
@@ -38,7 +43,7 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Protocol, Seque
 import aiohttp
 from yarl import URL
 
-from . import audio, fit, hyperframes, probe
+from . import audio, fit, hyperframes, probe, provenance
 from .bundle import Bundle, MediaInput
 from .check_report import CheckReportError, parse_check_output
 from .composition import GSAP_PATH, MIX_PATH
@@ -266,6 +271,8 @@ class RenderPipeline:
             )
         except ValueError as exc:  # Kokoro's refusal: an unknown voice, a line with nothing to say
             raise PipelineError("voice_refused", f"Kokoro could not speak the script: {exc}", status=400) from None
+        except provenance.ProvenanceError as exc:
+            raise PipelineError("voice_unmarked", "the spoken lines could not be marked as AI-made", detail=str(exc)) from None
         by_id = {line_id: said for (line_id, _), said in zip(texts, spoken)}
         placed = []
         for line in plan.lines:
@@ -321,8 +328,35 @@ class RenderPipeline:
             )
         return fitted
 
+    async def _mark(self, path: Path, kind: Optional[str], code: str) -> None:
+        """EUAI-06a: ``path``'s AI mark, after its last encode; a file that cannot be marked fails with ``code``."""
+        settings = self._settings
+        try:
+            await asyncio.to_thread(
+                provenance.mark, path, kind, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
+            )
+        except provenance.ProvenanceError as exc:
+            raise PipelineError(code, f"{path.name} could not be marked as AI-made", detail=str(exc)) from None
+
+    async def _mix(self, job: Job, lines: Sequence[PlacedLine]) -> Dict[str, Any]:
+        """The mix, the composition's one <audio>, marked for its audio elements; its loudness facts."""
+        settings, target = self._settings, job.project_dir / MIX_PATH
+        try:
+            facts = await asyncio.to_thread(
+                audio.run_mix,
+                mix_plan(job.bundle, lines, job.project_dir),
+                target,
+                ffmpeg_bin=settings.ffmpeg_bin,
+                timeout_seconds=settings.mix_timeout_seconds,
+            )
+        except audio.MixError as exc:
+            raise PipelineError("mix_failed", "the mix could not be made", detail=str(exc)) from None
+        await self._mark(target, provenance.audio_type(job.bundle), "mix_failed")
+        return facts
+
     async def prepare_and_check(self, job: Job) -> CheckOutcome:
         settings, bundle = self._settings, job.bundle
+        provenance.warn_if_undeclared(job.id, bundle.ai_inputs)
         timings: Dict[str, float] = {}
         with _timed(timings, "stage_seconds"):
             await asyncio.to_thread(stage_project, bundle, job.project_dir, settings.gsap_path)
@@ -340,17 +374,8 @@ class RenderPipeline:
         findings = voice_findings(lines, bundle.composition.duration, max_tempo=settings.voice_max_tempo)
         if findings:
             return _refused(findings, report)
-        try:
-            with _timed(timings, "mix_seconds"):
-                report["audio"] = await asyncio.to_thread(
-                    audio.run_mix,
-                    mix_plan(bundle, lines, job.project_dir),
-                    job.project_dir / MIX_PATH,
-                    ffmpeg_bin=settings.ffmpeg_bin,
-                    timeout_seconds=settings.mix_timeout_seconds,
-                )
-        except audio.MixError as exc:
-            raise PipelineError("mix_failed", "the mix could not be made", detail=str(exc)) from None
+        with _timed(timings, "mix_seconds"):
+            report["audio"] = await self._mix(job, lines)
 
         run = await asyncio.to_thread(
             hyperframes.run_cli,
@@ -392,6 +417,7 @@ class RenderPipeline:
             if run.timed_out:
                 raise PipelineError("render_timed_out", f"the render ran past {settings.render_timeout_seconds} s")
             raise PipelineError("render_failed", f"hyperframes render exited {run.returncode}", detail=run.tail())
+        await self._mark(output, provenance.video_type(job.bundle), "render_failed")
         started = time.monotonic()
         try:
             facts = probe.output_facts(
@@ -460,6 +486,7 @@ class RenderPipeline:
             target = job.output_dir / name
             flatten = ["-i", str(frame), "-frames:v", "1", "-pix_fmt", "rgb24", str(target)]
             await asyncio.to_thread(self._ffmpeg, flatten, f"flattening {frame.name}", code="still_failed")
+            await self._mark(target, provenance.image_type(job.bundle), "still_failed")
             try:
                 info = await asyncio.to_thread(
                     probe.probe, target, ffprobe_bin=settings.ffprobe_bin, timeout_seconds=settings.probe_timeout_seconds
@@ -502,6 +529,7 @@ class RenderPipeline:
             target = job.output_dir / name
             scale = f"scale={width}:{height}:flags=area"
             await asyncio.to_thread(self._ffmpeg, ["-i", str(frame), "-vf", scale, "-frames:v", "1", str(target)], f"scaling {frame.name}")
+            await self._mark(target, provenance.image_type(job.bundle), "preview_failed")
             outputs.append(
                 {"name": name, "kind": "frame", "at": moment, "width": width, "height": height, "bytes": target.stat().st_size}
             )
@@ -511,6 +539,7 @@ class RenderPipeline:
             "-vf", "format=yuv420p", "-r", str(settings.render_fps), "-c:v", "libx264", "-movflags", "+faststart", str(reel),
         ]
         await asyncio.to_thread(self._ffmpeg, reel_argv, "joining the frames into the reel")
+        await self._mark(reel, provenance.image_type(job.bundle), "preview_failed")
         try:
             facts = probe.output_facts(
                 await asyncio.to_thread(

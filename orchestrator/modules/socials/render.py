@@ -233,7 +233,7 @@ def bundle_for(
         raise NotRenderable(f"fill in {', '.join(resolved.missing)} before rendering")
     if resolved.invalid:
         raise NotRenderable("; ".join(resolved.invalid))
-    return build_bundle(
+    bundle = build_bundle(
         workspace_id=post.workspace_id,
         reference=f"{EXECUTION_PREFIX}{post.id}",
         blocks=blocks,
@@ -245,6 +245,7 @@ def bundle_for(
         size=size,
         story_safe=is_story(post),
     )
+    return ai_media.with_inputs(bundle, post, footage_slots, blocks.get("slots"))  # PRD-264 EUAI-06a
 
 
 def is_story(post: Any) -> bool:
