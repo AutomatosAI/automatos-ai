@@ -191,7 +191,7 @@ Automatos AI supports multiple vector store backends for RAG (Retrieval Augmente
 **Key Features:**
 *   **Integrated Storage**: Vectors are stored alongside other data in PostgreSQL, simplifying data management.
 *   **Local Development**: Ideal for local development environments where a separate vector database might be overkill.
-*   **Requirements**: The `pgvector` Python package is listed as a core dependency [orchestrator/requirements.in:17-17]().
+*   **Requirements**: The Postgres extension only; the code casts to `vector` in SQL, so the API does not install the `pgvector` Python package (PRD-262 US-015) [orchestrator/requirements.in]().
 
 ### `Qdrant` (Vector Database)
 
