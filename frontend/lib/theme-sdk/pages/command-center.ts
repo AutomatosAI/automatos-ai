@@ -8,7 +8,9 @@
  * theme's page asks the same endpoints, through the same backend client, with the same cache keys,
  * polling and invalidation as the core page; no core hook is added or changed. A read comes back
  * as a small, frozen, theme-neutral view, never react-query's own result:
- * `{ data, isLoading, isFetching, error, refetch }`, its error as a message. The hooks read
+ * `{ data, isLoading, isFetching, error, refetch }`, its error as a message and its data a deep,
+ * frozen copy, never the objects react-query caches for the core page (internal/query-view.ts,
+ * the views every page area uses). The hooks read
  * react-query, so they need the host's QueryClientProvider above them, as every page and theme the
  * host draws has (components/providers.tsx).
  *
@@ -20,8 +22,6 @@
  * shell is not mounted there); its pushes reach the theme as `events.useHostEvent('board-changed')`
  * and refresh useNeedsYou, as on the core page.
  */
-import { useMemo } from 'react'
-
 import {
   useActivityFeed as useCoreActivityFeed,
   useActivitySchedule as useCoreActivitySchedule,
@@ -44,6 +44,8 @@ import {
 } from '@/hooks/use-needs-you'
 import { useWatches as useCoreWatches } from '@/hooks/use-watches-api'
 import type { ApprovalGrant, ApprovalGrantsResponse, WatchRow, WatchesResponse } from '@/lib/api-client'
+
+import { useQueryView } from '../internal/query-view'
 
 export type ActivityFeed = ActivityFeedResponse
 export type ActivityFeedItem = CoreActivityFeedItem
@@ -88,15 +90,6 @@ export interface CommandCenterQuery<T> {
   readonly refetch: () => void
 }
 
-/** The parts of react-query's query result the view reads. */
-interface CoreQuery<T> {
-  readonly data: T | undefined
-  readonly error: unknown
-  readonly isInitialLoading: boolean
-  readonly isFetching: boolean
-  readonly refetch: () => unknown
-}
-
 const ACTIVITY_PERIODS: readonly ActivityPeriod[] = ['1d', '7d', '30d', '90d']
 const SCHEDULE_RANGES: readonly ScheduleRange[] = ['7d', '14d', '30d']
 const ITEM_TYPES: readonly ActivityItemType[] = ['chat', 'routine', 'recipe', 'mission', 'task']
@@ -118,11 +111,6 @@ function wholeNumberIn(value: unknown, min: number, max: number): number | undef
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max ? value : undefined
 }
 
-function messageOf(error: unknown): string | null {
-  if (error === null || error === undefined) return null
-  return error instanceof Error ? error.message : String(error)
-}
-
 /** The known item types of a theme's list, or undefined (every type) when none is left. */
 function itemTypes(types: unknown): string[] | undefined {
   if (!Array.isArray(types)) return undefined
@@ -139,24 +127,6 @@ function feedFilters(filters: ActivityFeedFilters | undefined): CoreActivityFeed
     limit: wholeNumberIn(filters?.limit, MIN_FEED_LIMIT, MAX_FEED_LIMIT),
     offset: wholeNumberIn(filters?.offset, 0, Number.MAX_SAFE_INTEGER),
   }
-}
-
-/** The theme's view of a core query. */
-function useQueryView<T>(query: CoreQuery<T>): CommandCenterQuery<T> {
-  const { data, error, isInitialLoading, isFetching, refetch } = query
-  return useMemo(
-    () =>
-      Object.freeze({
-        data: data ?? null,
-        isLoading: isInitialLoading,
-        isFetching,
-        error: messageOf(error),
-        refetch: () => {
-          void refetch()
-        },
-      }),
-    [data, error, isInitialLoading, isFetching, refetch],
-  )
 }
 
 /** The workspace's runs (chats, routines, Playbooks, Missions, tasks), newest first, polled as the core feed is. */

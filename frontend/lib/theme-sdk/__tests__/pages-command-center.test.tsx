@@ -37,6 +37,7 @@ import {
   useQuestions,
   useWatches,
 } from '../pages/command-center'
+import { answer, cachedQueryData, inspectableClient } from './support/query-cache'
 
 const SDK_DIR = path.resolve(__dirname, '..')
 const SURFACE_FILE = path.join(SDK_DIR, 'surface/pages-command-center.json')
@@ -223,5 +224,25 @@ describe('PRD-261 A-12h — the board event stream', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('PRD-261 W-A4P — a theme never holds the objects the core page caches', () => {
+  it("hands on a deep, frozen copy of Needs-you, so a theme's in-place change cannot reach the widget's cache", async () => {
+    request.mockResolvedValue(answer(NEEDS_YOU))
+    const { client, wrapper: Providers } = inspectableClient()
+    const { result } = renderHook(() => useNeedsYou(), { wrapper: Providers })
+
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    const cached = cachedQueryData(client)
+    expect(result.current.data).toEqual(cached)
+    expect(result.current.data).not.toBe(cached)
+    const counts = result.current.data?.counts as unknown as Record<string, number>
+    expect(Object.isFrozen(counts)).toBe(true)
+    expect(() => {
+      counts.review = 0
+    }).toThrow(TypeError)
+    expect(() => (result.current.data?.rows.review as unknown as unknown[]).push({})).toThrow(TypeError)
+    expect(cached).toEqual(NEEDS_YOU)
   })
 })

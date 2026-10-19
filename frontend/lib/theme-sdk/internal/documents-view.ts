@@ -3,68 +3,44 @@
  * core hook gave it, and checks what a theme hands back. Not an area: nothing here is exported
  * from '@automatos/theme-sdk'.
  *
- * - A query becomes a frozen `KnowledgeQuery` whose data is a copy of the fields its type names
- *   (one level deep), so a theme never holds, or changes, the objects react-query caches for the
- *   core page.
+ * - A query becomes a frozen `KnowledgeQuery` whose data is a deep, frozen copy of the fields its
+ *   type names, so a theme never holds, or changes, the objects react-query caches for the core
+ *   page. The views themselves are the ones every page area uses (internal/query-view.ts).
  * - A mutation becomes a frozen `KnowledgeAction` whose variables go through `prepare` first: it
  *   converts them to what the core hook takes, or throws a TypeError naming why not.
  */
-import { useMemo } from 'react'
-
 import type { KnowledgeAction, KnowledgeQuery } from '../pages/documents'
 
-/** The parts of react-query's query result the view reads. */
-export interface CoreQuery {
-  readonly data: unknown
-  readonly error: unknown
-  readonly isInitialLoading: boolean
-  readonly isFetching: boolean
-  readonly refetch: () => unknown
-}
+import {
+  frozenCopy,
+  refuse,
+  useActionView as useSharedActionView,
+  useQueryView as useSharedQueryView,
+  type CoreMutation as SharedCoreMutation,
+  type CoreQuery,
+  type Prepare,
+  type Shape,
+} from './query-view'
 
-/** The parts of react-query's mutation result the view reads. */
-export interface CoreMutation<W, R> {
-  readonly mutate: (variables: W) => void
+export { refuse, type CoreQuery, type Prepare, type Shape }
+
+/** A core mutation typed by its answer, so an action's result type is the core hook's own. */
+export interface CoreMutation<W, R> extends SharedCoreMutation<W> {
   readonly mutateAsync: (variables: W) => Promise<R>
-  readonly isLoading: boolean
-  readonly error: unknown
   readonly data: R | undefined
-  readonly reset: () => void
 }
 
-/** Turns a theme's variables into the core hook's, or throws a TypeError naming why not. */
-export type Prepare<V, W> = (variables: V) => W
-/** Copies a backend answer into what the theme sees, or null when it is not that shape. */
-export type Shape<T> = (raw: unknown) => T | null
-
-const SDK_ERROR_PREFIX = 'Automatos theme SDK: '
 const EMPTY_LIST: readonly never[] = Object.freeze([])
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function messageOf(error: unknown): string | null {
-  if (error === null || error === undefined) return null
-  return error instanceof Error ? error.message : String(error)
-}
-
-/** Refuses a theme's input: throws the TypeError every SDK area throws. */
-export function refuse(reason: string): never {
-  throw new TypeError(`${SDK_ERROR_PREFIX}${reason}`)
-}
-
-/** A field's value, one level deep: an array or an object is a frozen copy, never the cache's own. */
-function copyValue(value: unknown): unknown {
-  if (Array.isArray(value)) return Object.freeze(value.slice())
-  return isRecord(value) ? Object.freeze({ ...value }) : value
-}
-
-/** A frozen copy of the named fields `raw` has, or null when it is not an object. */
+/** A frozen copy of the named fields `raw` has (each a deep, frozen copy), or null when it is not an object. */
 function pickFields(raw: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> | null {
   if (!isRecord(raw)) return null
   const present = fields.filter((field) => Object.prototype.hasOwnProperty.call(raw, field))
-  return Object.freeze(Object.fromEntries(present.map((field) => [field, copyValue(raw[field])])))
+  return Object.freeze(Object.fromEntries(present.map((field) => [field, frozenCopy(raw[field])])))
 }
 
 /** The shape of one record with `fields`. */
@@ -107,38 +83,10 @@ export function textList(value: unknown, what: string): string[] {
 
 /** The theme's view of a core query, with its data shaped by `shape` (a module-level function). */
 export function useQueryView<T>(query: CoreQuery, shape: Shape<T>): KnowledgeQuery<T> {
-  const { data, error, isInitialLoading, isFetching, refetch } = query
-  return useMemo(
-    () =>
-      Object.freeze({
-        data: data === undefined ? null : shape(data),
-        isLoading: isInitialLoading,
-        isFetching,
-        error: messageOf(error),
-        refetch: () => {
-          void refetch()
-        },
-      }),
-    [data, error, isInitialLoading, isFetching, refetch, shape],
-  )
+  return useSharedQueryView<T>(query, null, shape)
 }
 
 /** The theme's view of a core mutation; `prepare` checks and converts the variables before they are sent. */
 export function useActionView<V, W, R>(mutation: CoreMutation<W, R>, prepare: Prepare<V, W>): KnowledgeAction<V, R> {
-  const { mutate, mutateAsync, isLoading, error, data, reset } = mutation
-  return useMemo(
-    () =>
-      Object.freeze({
-        run: (variables: V) => mutate(prepare(variables)),
-        runAsync: (variables: V) =>
-          new Promise<R>((resolve, reject) => {
-            mutateAsync(prepare(variables)).then(resolve, reject)
-          }),
-        isRunning: isLoading,
-        error: messageOf(error),
-        result: data ?? null,
-        reset,
-      }),
-    [mutate, mutateAsync, isLoading, error, data, reset, prepare],
-  )
+  return useSharedActionView<V, W, R>(mutation, prepare)
 }

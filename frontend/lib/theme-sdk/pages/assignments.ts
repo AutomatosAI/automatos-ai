@@ -8,8 +8,9 @@
  * backend client, with the same cache keys, polling and invalidation as the core page; no core
  * hook is added or changed. What comes back is a small, frozen, theme-neutral view, never
  * react-query's own result: a query is `{ data, isLoading, isFetching, error, refetch }`, an action
- * is `{ run, runAsync, isRunning, error, result, reset }`, and an error is its message. The hooks
- * read react-query, so they need the host's QueryClientProvider above them, as every page and
+ * is `{ run, runAsync, isRunning, error, result, reset }`, and an error is its message; the data
+ * and results are deep, frozen copies, never the objects react-query caches for the core page
+ * (internal/query-view.ts, the views every page area uses). The hooks read react-query, so they need the host's QueryClientProvider above them, as every page and
  * theme the host draws has (components/providers.tsx).
  *
  * A theme is outside code, so its inputs are checked before they reach a URL: a mission id is one
@@ -17,7 +18,7 @@
  * says why; an action given one throws a TypeError, as the navigation area does for a bad href),
  * list filters keep only a known state and whole-number limits, and the field scope is one of two.
  */
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 
 import {
   useRecommendedAssignments as useCoreRecommendedAssignments,
@@ -67,6 +68,8 @@ import {
   type TaskResponse,
   type TaskState,
 } from '@/types/missions'
+
+import { refuse, useActionView, useQueryView, type Prepare } from '../internal/query-view'
 
 export type MissionRunState = RunState
 export type MissionTaskState = TaskState
@@ -123,28 +126,6 @@ export interface MissionAction<V, R> {
   readonly reset: () => void
 }
 
-/** The parts of react-query's query result the view reads. */
-interface CoreQuery<T> {
-  readonly data: T | undefined
-  readonly error: unknown
-  readonly isInitialLoading: boolean
-  readonly isFetching: boolean
-  readonly refetch: () => unknown
-}
-
-/** The parts of react-query's mutation result the view reads. */
-interface CoreMutation<V, R> {
-  readonly mutate: (variables: V) => void
-  readonly mutateAsync: (variables: V) => Promise<R>
-  readonly isLoading: boolean
-  readonly error: unknown
-  readonly data: R | undefined
-  readonly reset: () => void
-}
-
-/** Why an action's variables are refused, or null when they may go. */
-type Refusal<V> = (variables: V) => string | null
-
 const MISSION_ID = /^[A-Za-z0-9_-]{1,128}$/
 const NOT_A_MISSION_ID = 'Not a mission id.'
 const FIELD_SCOPES: readonly MissionFieldScope[] = ['mission', 'workspace']
@@ -152,11 +133,6 @@ const DEFAULT_FIELD_SCOPE: MissionFieldScope = 'mission'
 
 function isMissionId(value: unknown): value is string {
   return typeof value === 'string' && MISSION_ID.test(value)
-}
-
-function messageOf(error: unknown): string | null {
-  if (error === null || error === undefined) return null
-  return error instanceof Error ? error.message : String(error)
 }
 
 function wholeNumber(value: unknown): number | undefined {
@@ -185,52 +161,18 @@ function queryId(missionId: unknown): { readonly id: string | null; readonly ref
   return isMissionId(missionId) ? { id: missionId, refusal: null } : { id: null, refusal: NOT_A_MISSION_ID }
 }
 
-function refuseBadId(id: unknown): string | null {
-  return isMissionId(id) ? null : NOT_A_MISSION_ID
+/** An action's variables as they are, or a TypeError when their mission id is malformed. */
+function checkedInputId<V extends { readonly id: string }>(variables: V): V {
+  return isMissionId(variables?.id) ? variables : refuse(NOT_A_MISSION_ID)
 }
 
-const refuseBadInputId: Refusal<{ readonly id: string }> = (variables) => refuseBadId(variables?.id)
-const refuseBadIdArgument: Refusal<string> = (id) => refuseBadId(id)
-const refuseNothing: Refusal<unknown> = () => null
-
-/** The theme's view of a core query; `refusal` stands in for the error when the SDK asked for nothing. */
-function useQueryView<T>(query: CoreQuery<T>, refusal: string | null = null): MissionQuery<T> {
-  const { data, error, isInitialLoading, isFetching, refetch } = query
-  return useMemo(
-    () =>
-      Object.freeze({
-        data: data ?? null,
-        isLoading: isInitialLoading,
-        isFetching,
-        error: refusal ?? messageOf(error),
-        refetch: () => {
-          void refetch()
-        },
-      }),
-    [data, error, isInitialLoading, isFetching, refetch, refusal],
-  )
+/** A mission id an action may send, or a TypeError. */
+function checkedIdArgument(id: string): string {
+  return isMissionId(id) ? id : refuse(NOT_A_MISSION_ID)
 }
 
-/** The theme's view of a core mutation; variables `refuse` names are thrown as a TypeError, never sent. */
-function useActionView<V, R>(mutation: CoreMutation<V, R>, refuse: Refusal<V>): MissionAction<V, R> {
-  const { mutate, mutateAsync, isLoading, error, data, reset } = mutation
-  return useMemo(() => {
-    const checked = (variables: V): V => {
-      const reason = refuse(variables)
-      if (reason !== null) throw new TypeError(`Automatos theme SDK: ${reason}`)
-      return variables
-    }
-    return Object.freeze({
-      run: (variables: V) => mutate(checked(variables)),
-      runAsync: (variables: V) => new Promise<R>((resolve, reject) => {
-        mutateAsync(checked(variables)).then(resolve, reject)
-      }),
-      isRunning: isLoading,
-      error: messageOf(error),
-      result: data ?? null,
-      reset,
-    })
-  }, [mutate, mutateAsync, isLoading, error, data, reset, refuse])
+function unchecked<V>(variables: V): V {
+  return variables
 }
 
 /** The workspace's Missions, newest first, polled as the core list is. */
@@ -253,9 +195,12 @@ export function useMissionField(missionId: string | null, options?: MissionField
 
 /** Which of a Mission's field patterns fire for a query, and why; a null or malformed id refuses every run. */
 export function useFieldQuery(missionId: string | null): MissionAction<MissionFieldQueryInput, MissionFieldTrace> {
-  const refuse = useCallback<Refusal<MissionFieldQueryInput>>(() => refuseBadId(missionId), [missionId])
+  const prepare = useCallback<Prepare<MissionFieldQueryInput, MissionFieldQueryInput>>(
+    (variables) => (isMissionId(missionId) ? variables : refuse(NOT_A_MISSION_ID)),
+    [missionId],
+  )
   const trace = useCoreFieldQuery(isMissionId(missionId) ? missionId : null)
-  return useActionView<MissionFieldQueryInput, MissionFieldTrace>(trace, refuse)
+  return useActionView<MissionFieldQueryInput, MissionFieldQueryInput, MissionFieldTrace>(trace, prepare)
 }
 
 /** The recommended Playbooks and Missions, from the workspace and the marketplace. */
@@ -267,45 +212,45 @@ export function useRecommendedAssignments(limit?: number): MissionQuery<Recommen
 
 /** Approve a Mission's plan (an optional note and overrides). */
 export function useApproveMission(): MissionAction<MissionApproveInput, Mission> {
-  return useActionView<MissionApproveInput, Mission>(useCoreApproveMission(), refuseBadInputId)
+  return useActionView<MissionApproveInput, MissionApproveInput, Mission>(useCoreApproveMission(), checkedInputId)
 }
 
 /** Reject a Mission's plan, with the reason. */
 export function useRejectMission(): MissionAction<MissionRejectInput, Mission> {
-  return useActionView<MissionRejectInput, Mission>(useCoreRejectMission(), refuseBadInputId)
+  return useActionView<MissionRejectInput, MissionRejectInput, Mission>(useCoreRejectMission(), checkedInputId)
 }
 
 /** Pause a running Mission; `run(missionId)`. */
 export function usePauseMission(): MissionAction<string, Mission> {
-  return useActionView<string, Mission>(useCorePauseMission(), refuseBadIdArgument)
+  return useActionView<string, string, Mission>(useCorePauseMission(), checkedIdArgument)
 }
 
 /** Resume a paused Mission; `run(missionId)`. */
 export function useResumeMission(): MissionAction<string, Mission> {
-  return useActionView<string, Mission>(useCoreResumeMission(), refuseBadIdArgument)
+  return useActionView<string, string, Mission>(useCoreResumeMission(), checkedIdArgument)
 }
 
 /** Cancel a Mission; `run(missionId)`. */
 export function useCancelMission(): MissionAction<string, Mission> {
-  return useActionView<string, Mission>(useCoreCancelMission(), refuseBadIdArgument)
+  return useActionView<string, string, Mission>(useCoreCancelMission(), checkedIdArgument)
 }
 
 /** Plan a failed Mission again, with optional notes. */
 export function useReplanMission(): MissionAction<MissionReplanInput, Mission> {
-  return useActionView<MissionReplanInput, Mission>(useCoreReplanMission(), refuseBadInputId)
+  return useActionView<MissionReplanInput, MissionReplanInput, Mission>(useCoreReplanMission(), checkedInputId)
 }
 
 /** Start a new Mission from a finished one's goal and config. */
 export function useRerunMission(): MissionAction<MissionCreateBody, Mission> {
-  return useActionView<MissionCreateBody, Mission>(useCoreRerunMission(), refuseNothing)
+  return useActionView<MissionCreateBody, MissionCreateBody, Mission>(useCoreRerunMission(), unchecked)
 }
 
 /** Save a Mission as a reusable routine. */
 export function useSaveAsRoutine(): MissionAction<SaveAsRoutineInput, SavedRoutine> {
-  return useActionView<SaveAsRoutineInput, SavedRoutine>(useCoreSaveAsRoutine(), refuseBadInputId)
+  return useActionView<SaveAsRoutineInput, SaveAsRoutineInput, SavedRoutine>(useCoreSaveAsRoutine(), checkedInputId)
 }
 
 /** Change a Mission's settings ("Check each step with me"). */
 export function useUpdateMissionSettings(): MissionAction<MissionSettingsInput, MissionSettings> {
-  return useActionView<MissionSettingsInput, MissionSettings>(useCoreUpdateMissionSettings(), refuseBadInputId)
+  return useActionView<MissionSettingsInput, MissionSettingsInput, MissionSettings>(useCoreUpdateMissionSettings(), checkedInputId)
 }

@@ -37,6 +37,7 @@ import {
   useWorkflowPlaybook,
   useWorkflowPlaybooks,
 } from '../pages/playbooks'
+import { answer, cachedQueryData, inspectableClient } from './support/query-cache'
 
 const SURFACE_FILE = path.resolve(__dirname, '../surface/pages-playbooks.json')
 const DECLARATION_FILE = path.resolve(__dirname, '../../../packages/theme-sdk/areas/pages-playbooks.d.ts')
@@ -227,5 +228,25 @@ describe('PRD-261 A-12g — actions', () => {
     expect(() => result.current.update.run({ id: '..', body: {} })).toThrow(TypeError)
     expect(client.createWorkflowRecipe).toHaveBeenCalledTimes(1)
     expect(client.updateWorkflowRecipe).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('PRD-261 W-A4P — a theme never holds the objects the core page caches', () => {
+  it("hands on a deep, frozen copy of the playbooks, so a theme's in-place change cannot reach the cache", async () => {
+    client.listWorkflowRecipes.mockResolvedValue(answer(LIST))
+    const { client: queryClient, wrapper: Providers } = inspectableClient()
+    const { result } = renderHook(() => useWorkflowPlaybooks(), { wrapper: Providers })
+
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    const cached = cachedQueryData(queryClient)
+    expect(result.current.data).toEqual(cached)
+    expect(result.current.data).not.toBe(cached)
+    const items = result.current.data?.items as unknown as { name: string; steps: unknown[] }[]
+    expect(() => items.splice(0, 1)).toThrow(TypeError)
+    expect(() => {
+      items[0].name = 'Renamed by a theme'
+    }).toThrow(TypeError)
+    expect(() => items[0].steps.push({})).toThrow(TypeError)
+    expect(cached).toEqual(LIST)
   })
 })

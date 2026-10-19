@@ -2,7 +2,8 @@
  * PRD-261 A-12d — SDK area `pages/agents` (frontend/lib/theme-sdk/pages/agents.ts): the data the core /agents
  * page reads, for a theme's own /agents page (registerPage('/agents', …)). The hooks are the host's own, called
  * as the core page calls them, so they read through the host's backend client and share the core page's cache;
- * each hands back a frozen, read-only view of the query.
+ * each hands back the same small, frozen view as the other page areas: `{ data, isLoading, isFetching, error,
+ * refetch }`, null data until it answers, the error as its message, and the data a deep, frozen copy.
  */
 
 /** One agent of the workspace's roster: the fields of the backend's agent a theme can rely on. */
@@ -41,24 +42,22 @@ export interface AgentStatistics {
   readonly timestamp: string
 }
 
-/** The roster: react-query's result, read only. */
+/** The roster: null until it answers; `isLoading` is the first load only. */
 export interface RosterAgentsQuery {
-  readonly data: readonly RosterAgent[] | undefined
+  readonly data: readonly RosterAgent[] | null
   readonly isLoading: boolean
   readonly isFetching: boolean
-  readonly isError: boolean
-  readonly error: unknown
-  readonly refetch: () => Promise<unknown>
+  readonly error: string | null
+  readonly refetch: () => void
 }
 
-/** The agent counts: react-query's result, read only. */
+/** The agent counts: null until they answer; `isLoading` is the first load only. */
 export interface AgentStatisticsQuery {
-  readonly data: AgentStatistics | undefined
+  readonly data: AgentStatistics | null
   readonly isLoading: boolean
   readonly isFetching: boolean
-  readonly isError: boolean
-  readonly error: unknown
-  readonly refetch: () => Promise<unknown>
+  readonly error: string | null
+  readonly refetch: () => void
 }
 
 /** The workspace's agents, as the core roster lists them (the workspace's hidden system agents left out). */

@@ -10,8 +10,9 @@
  * PlaybooksPanel calls `apiClient.listWorkflowRecipes` itself, the same endpoint `useWorkflowPlaybooks`
  * reads. What comes back is a small, frozen, theme-neutral view, never react-query's own result: a
  * query is `{ data, isLoading, isFetching, error, refetch }`, an action is
- * `{ run, runAsync, isRunning, error, result, reset }`, and an error is its message (the same views
- * as the other page areas). The hooks read react-query, so they need the host's QueryClientProvider
+ * `{ run, runAsync, isRunning, error, result, reset }`, and an error is its message; the data and
+ * results are deep, frozen copies, never the objects react-query caches for the core page (the same
+ * views as the other page areas, internal/query-view.ts). The hooks read react-query, so they need the host's QueryClientProvider
  * above them, as every page and theme the host draws has (components/providers.tsx).
  *
  * The backend client types these answers as unknown; the shapes below are the backend's own
@@ -25,8 +26,6 @@
  * keep only booleans, a bounded search, whole-number paging within the backend's bounds and a
  * known sort or run status; a playbook body and a run's inputs must be plain objects.
  */
-import { useMemo } from 'react'
-
 import {
   useCreatePlaybook as useCoreCreatePlaybook,
   useDeletePlaybook as useCoreDeletePlaybook,
@@ -36,6 +35,8 @@ import {
   useWorkflowPlaybook as useCoreWorkflowPlaybook,
   useWorkflowPlaybooks as useCoreWorkflowPlaybooks,
 } from '@/hooks/use-playbook-api'
+
+import { refuse, useActionView, useQueryView, type Prepare } from '../internal/query-view'
 
 /** The orders the backend lists playbooks in (its `sort_by` pattern). */
 export type PlaybookSort = 'popularity' | 'created_at' | 'use_count' | 'average_rating' | 'name'
@@ -154,27 +155,8 @@ export interface PlaybookAction<V, R> {
   readonly reset: () => void
 }
 
-/** The parts of react-query's query result the view reads (the backend client's answers are unknown). */
-interface CoreQuery {
-  readonly data: unknown
-  readonly error: unknown
-  readonly isInitialLoading: boolean
-  readonly isFetching: boolean
-  readonly refetch: () => unknown
-}
-
-/** The parts of react-query's mutation result the view reads. */
-interface CoreMutation<C> {
-  readonly mutate: (variables: C) => void
-  readonly mutateAsync: (variables: C) => Promise<unknown>
-  readonly isLoading: boolean
-  readonly error: unknown
-  readonly data: unknown
-  readonly reset: () => void
-}
-
 /** The core hook's variables for the theme's, or a TypeError naming what is wrong. */
-type ToCore<V, C> = (variables: V) => C
+type ToCore<V, C> = Prepare<V, C>
 
 interface CoreUpdateVariables {
   readonly playbookId: string
@@ -208,19 +190,11 @@ function playbookIdOf(value: unknown): string | null {
 }
 
 function checkedId(value: unknown): string {
-  const id = playbookIdOf(value)
-  if (id === null) throw new TypeError(`Automatos theme SDK: ${NOT_A_PLAYBOOK_ID}`)
-  return id
+  return playbookIdOf(value) ?? refuse(NOT_A_PLAYBOOK_ID)
 }
 
 function checkedObject<T>(value: T, reason: string): T {
-  if (!isPlainObject(value)) throw new TypeError(`Automatos theme SDK: ${reason}`)
-  return value
-}
-
-function messageOf(error: unknown): string | null {
-  if (error === null || error === undefined) return null
-  return error instanceof Error ? error.message : String(error)
+  return isPlainObject(value) ? value : refuse(reason)
 }
 
 function wholeNumber(value: unknown, min: number, max: number): number | undefined {
@@ -283,43 +257,6 @@ const runToCore: ToCore<PlaybookRunInput, CoreRunVariables> = (input) => {
   const inputs = input?.inputs
   const inputData = inputs === undefined ? undefined : { ...checkedObject(inputs, NOT_INPUTS) }
   return { playbookId, inputData, waitForMe: flag(input?.waitForMe) }
-}
-
-/** The theme's view of a core query; `refusal` stands in for the error when the SDK asked for nothing. */
-function useQueryView<T>(query: CoreQuery, refusal: string | null = null): PlaybookQuery<T> {
-  const { data, error, isInitialLoading, isFetching, refetch } = query
-  return useMemo(
-    () =>
-      Object.freeze({
-        data: (data ?? null) as T | null,
-        isLoading: isInitialLoading,
-        isFetching,
-        error: refusal ?? messageOf(error),
-        refetch: () => {
-          void refetch()
-        },
-      }),
-    [data, error, isInitialLoading, isFetching, refetch, refusal],
-  )
-}
-
-/** The theme's view of a core mutation; `toCore` maps the theme's variables, throwing for refused ones. */
-function useActionView<V, C, R>(mutation: CoreMutation<C>, toCore: ToCore<V, C>): PlaybookAction<V, R> {
-  const { mutate, mutateAsync, isLoading, error, data, reset } = mutation
-  return useMemo(
-    () =>
-      Object.freeze({
-        run: (variables: V) => mutate(toCore(variables)),
-        runAsync: (variables: V) => new Promise<R>((resolve, reject) => {
-          mutateAsync(toCore(variables)).then((answer) => resolve(answer as R), reject)
-        }),
-        isRunning: isLoading,
-        error: messageOf(error),
-        result: (data ?? null) as R | null,
-        reset,
-      }),
-    [mutate, mutateAsync, isLoading, error, data, reset, toCore],
-  )
 }
 
 /** The workspace's playbooks, as the Playbooks tab lists them. */

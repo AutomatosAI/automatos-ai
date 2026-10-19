@@ -28,6 +28,7 @@ import {
   usePauseMission,
   useRecommendedAssignments,
 } from '../pages/assignments'
+import { answer, cachedMutationData, cachedQueryData, inspectableClient } from './support/query-cache'
 
 const MISSION_ID = '00000000-0000-4000-8000-0000000a12e1'
 const LIST = { missions: [{ id: MISSION_ID, goal: 'Draft the notes', state: 'running' }], total: 1, limit: 5, offset: 0 }
@@ -193,5 +194,41 @@ describe('PRD-261 A-12e — actions', () => {
     const refused = renderHook(() => useFieldQuery(null), { wrapper: wrapper() }).result
     await expect(refused.current.runAsync({ query: 'launch' })).rejects.toThrow(TypeError)
     expect(request).not.toHaveBeenCalled()
+  })
+})
+
+describe('PRD-261 W-A4P — a theme never holds the objects the core page caches', () => {
+  it("hands on a deep, frozen copy of the Missions list, so a theme's in-place change cannot reach the cache", async () => {
+    request.mockResolvedValue(answer(LIST))
+    const { client, wrapper: Providers } = inspectableClient()
+    const { result } = renderHook(() => useMissions(), { wrapper: Providers })
+
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+    const cached = cachedQueryData(client)
+    expect(result.current.data).toEqual(cached)
+    expect(result.current.data).not.toBe(cached)
+    const missions = result.current.data?.missions as unknown as { state: string }[]
+    expect(() => missions.splice(0, 1)).toThrow(TypeError)
+    expect(() => {
+      missions[0].state = 'cancelled'
+    }).toThrow(TypeError)
+    expect(cached).toEqual(LIST)
+  })
+
+  it("hands on a frozen copy of an action's answer, from run and from runAsync", async () => {
+    request.mockResolvedValue(answer(PAUSED))
+    const { client, wrapper: Providers } = inspectableClient()
+    const { result } = renderHook(() => usePauseMission(), { wrapper: Providers })
+
+    let resolved: unknown = null
+    await act(async () => {
+      resolved = await result.current.runAsync(MISSION_ID)
+    })
+    await waitFor(() => expect(result.current.result).toEqual(PAUSED))
+    const cached = cachedMutationData(client)
+    expect(result.current.result).not.toBe(cached)
+    expect(resolved).not.toBe(cached)
+    expect(Object.isFrozen(result.current.result)).toBe(true)
+    expect(Object.isFrozen(resolved)).toBe(true)
   })
 })
