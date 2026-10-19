@@ -5,10 +5,14 @@
 # previous image untagged and grows the build cache, which is what turns a
 # 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind.
 #
-#   make up      build (if needed), start, tidy up: the production images,
-#                with the code inside them and nothing reloading
-#   make up-images  start the PUBLISHED images instead of building (no source
-#                build; AUTOMATOS_IMAGE_TAG=sha-xxxxxxx pins one, default edge)
+#   make up      the published images for this checkout, pulled from GHCR, then
+#                start and tidy up (PRD-262 US-036). It picks one tag for the
+#                three app images, says which and why, builds only what CI has
+#                not published, and writes the tag to .env (AUTOMATOS_IMAGE_TAG)
+#                so plain docker compose runs the same images. Pin a tag with
+#                AUTOMATOS_IMAGE_TAG=sha-xxxxxxx make up (edge follows edge).
+#   make build   build the three app images from your checkout instead, as the
+#                production stages CI publishes, under a local-<sha7> tag
 #   make dev     for editing the code: the development stages with your source
 #                mounted, uvicorn --reload and the Next.js dev server
 #                (docker-compose.dev.yml)
@@ -18,14 +22,33 @@
 #   make status  what is running, and what it costs on disk
 #   make logs    follow the logs (make logs s=backend for one service)
 #
-# Nothing here is required: plain `docker compose up` still works.
+# Nothing here is required: plain `docker compose up` still works (the tag in
+# .env, or :edge), and self-hosting.md §1b gives the commands behind each target.
 # =============================================================================
 
 COMPOSE      ?= docker compose
 DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
-IMAGES_COMPOSE ?= docker compose -f docker-compose.yml -f docker-compose.images.yml
+# Picks the app images' tag for make up and make build (PRD-262 US-036).
+STACK_IMAGES ?= python3 scripts/stack_images.py
 
-.PHONY: up up-images dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
+.PHONY: up build dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
+
+# The commit a local build is made from: docker-compose.yml stamps it on each app
+# image as org.opencontainers.image.revision (PRD-262 US-036). HEAD, with -dirty
+# when orchestrator, frontend or services/workspace-worker has uncommitted
+# changes; empty outside a git checkout, where compose stamps `unknown`. Set
+# once, when make starts, and passed to every recipe.
+APP_CONTEXTS := orchestrator frontend services/workspace-worker
+ifeq ($(origin AUTOMATOS_REVISION),undefined)
+AUTOMATOS_REVISION := $(shell git rev-parse --verify -q HEAD 2>/dev/null)$(if $(shell git status --porcelain -- $(APP_CONTEXTS) 2>/dev/null),-dirty,)
+endif
+export AUTOMATOS_REVISION
+
+# An empty AUTOMATOS_IMAGE_TAG in the shell would make compose run :edge instead
+# of the tag make up wrote to .env, so an empty one is not passed on.
+ifeq ($(strip $(AUTOMATOS_IMAGE_TAG)),)
+unexport AUTOMATOS_IMAGE_TAG
+endif
 
 # PRD-234 S2: LOCAL_PROJECTS_DIR (root .env) is the owner's projects folder; the
 # default bind source ./workspaces/projects must exist before compose mounts it.
@@ -63,18 +86,21 @@ endef
 up:
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
-	$(COMPOSE) up -d --build --remove-orphans
+	@$(STACK_IMAGES) up
+	$(COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
 	@$(MAKE) --no-print-directory cli-host-nudge
 
-# The published images (docker-compose.images.yml): pull, never build. `clean`
-# afterwards drops the previous :edge left untagged by the pull.
-up-images:
+# Builds the three app images from this checkout (the production stages CI
+# publishes) under local-<sha7>, written to .env first so the build and every
+# later compose command use it. Compose never builds under an official tag.
+build:
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
-	$(IMAGES_COMPOSE) pull backend frontend workspace-worker
-	$(IMAGES_COMPOSE) up -d --no-build --remove-orphans
+	@$(STACK_IMAGES) build
+	$(COMPOSE) build backend frontend workspace-worker
+	$(COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
 	@$(MAKE) --no-print-directory cli-host-nudge

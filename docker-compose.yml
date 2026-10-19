@@ -6,7 +6,7 @@
 #   PRD-234/262: every published port, the web app included, listens on ${BIND_ADDRESS:-127.0.0.1}
 #   — this machine only. Set BIND_ADDRESS=0.0.0.0 in .env to expose them to your network
 #   deliberately (whoever reaches the local edition is its owner; session mode runs commands).
-#   2. Run: docker compose up
+#   2. Run: make up (or docker compose up)
 #   3. Access: http://localhost:3000
 #   4. Add an LLM key: Settings → API Keys in the UI, or OPENAI_API_KEY /
 #      ANTHROPIC_API_KEY / OPENROUTER_API_KEY in .env (passed through below)
@@ -15,6 +15,22 @@
 # inside them and nothing reloads (PRD-262 US-035). Editing the code instead:
 # `make dev` (docker-compose.dev.yml) builds the development stages, mounts your
 # source and runs uvicorn --reload and the Next.js dev server.
+#
+# The three app services (backend, frontend, workspace-worker) name the image CI
+# publishes, ghcr.io/automatosai/automatos-<x>:${AUTOMATOS_IMAGE_TAG:-edge}, next to
+# their build: (PRD-262 US-036). Compose pulls it first and builds only when no such
+# image exists. `make up` picks the tag for this checkout (sha-<7>, edge, or a
+# local-<sha7> it re-tags or builds), pulls it, starts the stack with --no-build and
+# writes the tag to .env, so later plain compose commands run the same images.
+# `make build` builds all three from source as local-<sha7>.
+# Source builds outside make: `AUTOMATOS_IMAGE_TAG=local-<ref> docker compose up -d
+# --build` builds the production stages under a tag no pull ever replaces (no local-*
+# tag is published). Image names are global to the Docker engine, so a second stack
+# next to this one sets its own local-<ref> in its .env. A plain `docker compose up
+# --build` with no tag tags its build :edge, which the next `make up` that picks edge
+# pulls over. Every local build is labelled org.opencontainers.image.revision from
+# AUTOMATOS_REVISION (make exports git HEAD, -dirty with uncommitted changes in a
+# context; `unknown` without it), as the published images are by CI.
 #
 # A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
 # LLM keys live in the database (Settings → API Keys) or in .env; the stored key
@@ -156,6 +172,8 @@ services:
       - automatos
 
   backend:
+    # The image CI publishes (PRD-262 US-036), pulled before anything is built.
+    image: ghcr.io/automatosai/automatos-api:${AUTOMATOS_IMAGE_TAG:-edge}
     build:
       context: ./orchestrator
       dockerfile: Dockerfile
@@ -163,6 +181,9 @@ services:
         # The Dockerfile defaults are PRODUCTION values (Railway builds it). The
         # local edition opts out of the ~660 MB Leiden clustering stack here.
         INSTALL_GRAPH_EXTRAS: "false"
+      # A local build carries its commit, as images.yml's published ones do.
+      labels:
+        org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
       # PRD-262 US-035: the stage CI builds, scans and publishes, with the code inside
       # the image. Its worker count comes from WEB_CONCURRENCY (envs/api.defaults).
       # Hot reload is `make dev`: docker-compose.dev.yml builds the development stage
@@ -343,6 +364,10 @@ services:
   #   cd frontend && npm install && npm run dev
   # ===========================================================================
   frontend:
+    # The image CI publishes (PRD-262 US-036). It inlines images.yml's build args
+    # (the local edition, localhost:8000 and localhost:9000); `make up` builds the
+    # frontend here instead when .env sets other NEXT_PUBLIC_* values.
+    image: ghcr.io/automatosai/automatos-frontend:${AUTOMATOS_IMAGE_TAG:-edge}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -358,6 +383,8 @@ services:
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
         # F237: the browser loads presigned media from MinIO's public origin (S3_PUBLIC_ENDPOINT_URL).
         NEXT_PUBLIC_MEDIA_ORIGINS: ${NEXT_PUBLIC_MEDIA_ORIGINS:-http://localhost:9000}
+      labels:
+        org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
     container_name: automatos_frontend
     restart: unless-stopped
     depends_on:
@@ -400,6 +427,8 @@ services:
   # WORKER_INTERNAL_URL (envs/api.defaults).
   # ===========================================================================
   workspace-worker:
+    # The image CI publishes (PRD-262 US-036), pulled before anything is built.
+    image: ghcr.io/automatosai/automatos-workspace-worker:${AUTOMATOS_IMAGE_TAG:-edge}
     build:
       context: ./services/workspace-worker
       dockerfile: Dockerfile
@@ -407,6 +436,8 @@ services:
         # Production default is a bundled Chromium (1.18 GB); the local edition
         # opts out — workspace_html_to_png says so honestly if used.
         INSTALL_BROWSER: "false"
+      labels:
+        org.opencontainers.image.revision: ${AUTOMATOS_REVISION:-unknown}
     container_name: automatos_workspace_worker
     restart: unless-stopped
     depends_on:

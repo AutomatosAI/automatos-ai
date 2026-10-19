@@ -13,9 +13,17 @@
 # and the frontend the Next.js dev server, so edits reload live. The backend's
 # entrypoint and healthcheck scripts are mounted too, so an edit to either
 # applies on the next start without a rebuild. Railway never reads either file.
+#
+# The development builds get local names, automatos-<x>:dev, with pull_policy:
+# build (PRD-262 US-036). Without them `make dev` would tag its builds with the
+# published names, ghcr.io/automatosai/automatos-<x>:edge, and a later plain
+# `docker compose up` would find :edge present, never pull it, and run the
+# development stage without the source mount it needs.
 # =============================================================================
 services:
   frontend:
+    image: automatos-frontend:dev
+    pull_policy: build
     build:
       target: development
     environment:
@@ -26,6 +34,8 @@ services:
       - /app/.next
 
   backend:
+    image: automatos-api:dev
+    pull_policy: build
     build:
       target: development
     volumes:
@@ -34,3 +44,8 @@ services:
       - ./orchestrator/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
       - ./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro
       - backend_data:/app/data
+
+  # One stage, the same as `make up`'s worker image, built from your checkout.
+  workspace-worker:
+    image: automatos-workspace-worker:dev
+    pull_policy: build
