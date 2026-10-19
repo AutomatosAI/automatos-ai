@@ -88,8 +88,9 @@ RUN python split_lock.py requirements.lock stable.txt rest.txt development.txt &
 # link them were rewritten too, so CI loads every file the strip touched
 # (scripts/ci/image_site_packages.py). Then every directory named exactly `tests` under
 # site-packages goes (about 108 MB); numpy.testing, sqlalchemy.testing and
-# alembic.testing are importable APIs, not test suites, and stay. /install holds both
-# halves of the lock (/install/stable and /install/rest), so this covers both.
+# alembic.testing are importable APIs, not test suites, and stay. /install holds every
+# part of the lock (/install/stable, /install/rest and /install/development), so this
+# covers them all.
 RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-unneeded {} + && \
     find /install -type d -name tests -path '*/site-packages/*' -prune -exec rm -rf {} +
 
