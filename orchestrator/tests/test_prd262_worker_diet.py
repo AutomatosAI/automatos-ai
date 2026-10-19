@@ -14,6 +14,9 @@ runs on the image it built, on both arches:
   builds it from the lock's hash-checked sdist against libpq-dev, without build
   isolation, on setuptools from the hashed requirements-build.lock, and the production
   stage installs Debian's libpq5 and copies the build in;
+- row 36: aiohttp and its six helpers leave the lock; the worker's server runs on the
+  Starlette and uvicorn mcp already brings, now listed as direct dependencies
+  (test_prd262_worker_starlette.py and the O2b suites test the server itself);
 - row 40: the stable layer's RUN strips the debug sections from every *.so* it
   installed outside the auditwheel *.libs directories, as the API's US-020 does;
 - row 47, tests: the same RUN deletes every directory named exactly `tests`;
@@ -297,6 +300,34 @@ def test_images_starts_the_compose_postgres_for_the_psycopg2_check():
     assert run.index("docker network create worker-probe") < run.index("--network worker-probe \\\n")
 
 
+# --------------------------------------------------------------------------- row 36
+
+AIOHTTP_FAMILY = {"aiohttp", "aiohappyeyeballs", "aiosignal", "frozenlist", "multidict", "propcache", "yarl"}
+
+
+def test_aiohttp_and_its_helpers_leave_the_lock_and_starlette_and_uvicorn_are_direct():
+    requirements = _requirement_lines()
+    assert not [line for line in requirements if line.startswith("aiohttp")]
+    assert "starlette>=1.0.1,<2.0.0" in requirements, "1.0.1 fixes GHSA-86qp-5c8j-p5mr"
+    assert "uvicorn>=0.50.1,<1.0.0" in requirements
+    for name in ("requirements.lock", "requirements-browser.lock"):
+        assert not _lock_pins(name) & AIOHTTP_FAMILY, name
+    assert {"starlette", "uvicorn", "h11"} <= _lock_pins("requirements.lock")
+
+
+def test_no_worker_module_imports_aiohttp():
+    assert "aiohttp" not in _worker_imports()
+    vendored = (WORKER / "automatos_metrics.py").read_text()
+    assert "add_aiohttp_metrics" not in vendored and "def add_starlette_metrics" in vendored
+
+
+def test_the_in_image_check_builds_the_app_without_aiohttp():
+    assert {name for name, row in site_packages.REMOVED.items() if row == "row 36"} == AIOHTTP_FAMILY
+    routes = re.findall(r'^\s+\("(?:GET|POST|DELETE)", ', (WORKER / "worker_http.py").read_text(), re.M)
+    assert site_packages.WORKER_APP_ROUTES == len(routes) + 1, "every route, and /metrics"
+    assert any("worker_http.build_app" in code for code in site_packages.REPLACEMENT_IMPORTS)
+
+
 # --------------------------------------------------------------------------- rows 40 and 47
 
 
@@ -431,7 +462,7 @@ def test_images_runs_the_site_packages_check_as_the_worker_user():
     assert "docker run --rm -i --user 1000 --network worker-probe" in step["run"]
     assert f'--entrypoint python "${{IMAGE}}@${{DIGEST}}" - < {SITE_PACKAGES_SCRIPT}' in step["run"]
     assert [title.split(":")[0] for title, _ in site_packages.CHECKS] == [
-        "row 40", "row 47", "row 27", "row 27", "rows 27 and 47"]
+        "row 40", "row 47", "row 27", "row 27", "rows 27, 36 and 47"]
 
 
 def test_every_toolchain_check_names_its_breakdown_row():

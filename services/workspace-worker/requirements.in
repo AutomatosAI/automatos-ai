@@ -20,8 +20,13 @@
 # in Python instead, which the worker's queue rate never notices.
 redis>=5.0.0,<8.0.0
 
-# HTTP server for health check
-aiohttp>=3.9.0,<3.14.0
+# The HTTP server (health, metrics, files, tools, the canvas): Starlette on uvicorn,
+# which mcp brings anyway, instead of aiohttp and its six helper packages (PRD-262,
+# row 36). Listed because the worker imports them. starlette>=1.0.1 for
+# GHSA-86qp-5c8j-p5mr, as orchestrator/requirements.txt; uvicorn>=0.50.1, the release
+# the platform's tests run the worker's server on.
+starlette>=1.0.1,<2.0.0
+uvicorn>=0.50.1,<1.0.0
 
 # Shared with orchestrator (already in main requirements). No python-dotenv: no worker
 # module imports it (PRD-262, row 47).

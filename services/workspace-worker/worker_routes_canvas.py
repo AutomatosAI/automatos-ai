@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import json
 
-from aiohttp import web
-
-from worker_http import WORKER_HTTP
+from worker_http import json_response, read_json, worker_http_of
 
 # The per-workspace Redis channel the platform proxy re-emits over SSE
 # (mirrored by orchestrator/api/workspace_files.py _CANVAS_EVENTS_CHANNEL).
@@ -37,56 +35,56 @@ def make_canvas_event_sink(worker_self):
 
 async def canvas_session_start_handler(request):
     """POST /workspaces/{workspace_id}/canvas/session — start/resume."""
-    volume_path = request.app[WORKER_HTTP].volume_path
-    _canvas_event_sink = request.app[WORKER_HTTP].canvas_event_sink
+    volume_path = worker_http_of(request).volume_path
+    _canvas_event_sink = worker_http_of(request).canvas_event_sink
     from canvas_session_service import get_canvas_manager
 
-    workspace_id = request.match_info["workspace_id"]
+    workspace_id = request.path_params["workspace_id"]
     manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
     result = await manager.start_session(workspace_id)
     if not result.get("success"):
         status = 409 if result.get("conflict") else 500
-        return web.json_response(
+        return json_response(
             {"error": result.get("error", "Canvas session error")},
             status=status,
         )
-    return web.json_response(result)
+    return json_response(result)
 
 
 async def canvas_session_status_handler(request):
     """GET /workspaces/{workspace_id}/canvas/session — status."""
-    volume_path = request.app[WORKER_HTTP].volume_path
-    _canvas_event_sink = request.app[WORKER_HTTP].canvas_event_sink
+    volume_path = worker_http_of(request).volume_path
+    _canvas_event_sink = worker_http_of(request).canvas_event_sink
     from canvas_session_service import get_canvas_manager
 
-    workspace_id = request.match_info["workspace_id"]
+    workspace_id = request.path_params["workspace_id"]
     manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
     result = await manager.get_status(workspace_id)
     if not result.get("success"):
         status = 404 if result.get("not_found") else 500
-        return web.json_response(
+        return json_response(
             {"error": result.get("error", "Canvas session error")},
             status=status,
         )
-    return web.json_response(result)
+    return json_response(result)
 
 
 async def canvas_session_stop_handler(request):
     """DELETE /workspaces/{workspace_id}/canvas/session — stop."""
-    volume_path = request.app[WORKER_HTTP].volume_path
-    _canvas_event_sink = request.app[WORKER_HTTP].canvas_event_sink
+    volume_path = worker_http_of(request).volume_path
+    _canvas_event_sink = worker_http_of(request).canvas_event_sink
     from canvas_session_service import get_canvas_manager
 
-    workspace_id = request.match_info["workspace_id"]
+    workspace_id = request.path_params["workspace_id"]
     manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
     result = await manager.stop_session(workspace_id)
     if not result.get("success"):
         status = 404 if result.get("not_found") else 500
-        return web.json_response(
+        return json_response(
             {"error": result.get("error", "Canvas session error")},
             status=status,
         )
-    return web.json_response(result)
+    return json_response(result)
 
 
 async def canvas_decision_handler(request):
@@ -95,32 +93,32 @@ async def canvas_decision_handler(request):
     Resolve a pending approval so the awaiting can_use_tool callback
     proceeds. Body: {"request_id": "...", "approved": true|false}.
     """
-    volume_path = request.app[WORKER_HTTP].volume_path
-    _canvas_event_sink = request.app[WORKER_HTTP].canvas_event_sink
+    volume_path = worker_http_of(request).volume_path
+    _canvas_event_sink = worker_http_of(request).canvas_event_sink
     from canvas_session_service import get_canvas_manager
 
-    workspace_id = request.match_info["workspace_id"]
+    workspace_id = request.path_params["workspace_id"]
     try:
-        body = await request.json()
+        body = await read_json(request)
     except Exception:  # noqa: BLE001 — any unreadable body is a 400, as before the move (O2b)
-        return web.json_response({"error": "Invalid JSON body"}, status=400)
+        return json_response({"error": "Invalid JSON body"}, status=400)
 
     request_id = (body.get("request_id") or "").strip()
     approved = body.get("approved")
     if not request_id:
-        return web.json_response({"error": "request_id is required"}, status=400)
+        return json_response({"error": "request_id is required"}, status=400)
     if not isinstance(approved, bool):
-        return web.json_response({"error": "approved must be a boolean"}, status=400)
+        return json_response({"error": "approved must be a boolean"}, status=400)
 
     manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
     result = await manager.decide(workspace_id, request_id, approved)
     if not result.get("success"):
         status = 404 if result.get("not_found") else 500
-        return web.json_response(
+        return json_response(
             {"error": result.get("error", "Canvas decision error")},
             status=status,
         )
-    return web.json_response(result)
+    return json_response(result)
 
 
 async def canvas_auto_accept_handler(request):
@@ -129,29 +127,29 @@ async def canvas_auto_accept_handler(request):
     Toggle session-scoped auto-accept for FILE EDITS (never bash).
     Body: {"enabled": true|false}.
     """
-    volume_path = request.app[WORKER_HTTP].volume_path
-    _canvas_event_sink = request.app[WORKER_HTTP].canvas_event_sink
+    volume_path = worker_http_of(request).volume_path
+    _canvas_event_sink = worker_http_of(request).canvas_event_sink
     from canvas_session_service import get_canvas_manager
 
-    workspace_id = request.match_info["workspace_id"]
+    workspace_id = request.path_params["workspace_id"]
     try:
-        body = await request.json()
+        body = await read_json(request)
     except Exception:  # noqa: BLE001 — any unreadable body is a 400, as before the move (O2b)
-        return web.json_response({"error": "Invalid JSON body"}, status=400)
+        return json_response({"error": "Invalid JSON body"}, status=400)
 
     enabled = body.get("enabled")
     if not isinstance(enabled, bool):
-        return web.json_response({"error": "enabled must be a boolean"}, status=400)
+        return json_response({"error": "enabled must be a boolean"}, status=400)
 
     manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
     result = await manager.set_auto_accept(workspace_id, enabled)
     if not result.get("success"):
         status = 404 if result.get("not_found") else 500
-        return web.json_response(
+        return json_response(
             {"error": result.get("error", "Canvas auto-accept error")},
             status=status,
         )
-    return web.json_response(result)
+    return json_response(result)
 
 
 async def canvas_message_handler(request):
@@ -161,26 +159,26 @@ async def canvas_message_handler(request):
     the agent actually works. The pump streams the resulting turns back as
     canvas events. Body: {"prompt": "..."}.
     """
-    volume_path = request.app[WORKER_HTTP].volume_path
-    _canvas_event_sink = request.app[WORKER_HTTP].canvas_event_sink
+    volume_path = worker_http_of(request).volume_path
+    _canvas_event_sink = worker_http_of(request).canvas_event_sink
     from canvas_session_service import get_canvas_manager
 
-    workspace_id = request.match_info["workspace_id"]
+    workspace_id = request.path_params["workspace_id"]
     try:
-        body = await request.json()
+        body = await read_json(request)
     except Exception:  # noqa: BLE001 — any unreadable body is a 400, as before the move (O2b)
-        return web.json_response({"error": "Invalid JSON body"}, status=400)
+        return json_response({"error": "Invalid JSON body"}, status=400)
 
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
-        return web.json_response({"error": "prompt is required"}, status=400)
+        return json_response({"error": "prompt is required"}, status=400)
 
     manager = get_canvas_manager(volume_path, event_sink=_canvas_event_sink)
     result = await manager.send_message(workspace_id, prompt)
     if not result.get("success"):
         status = 404 if result.get("not_found") else 500
-        return web.json_response(
+        return json_response(
             {"error": result.get("error", "Canvas message error")},
             status=status,
         )
-    return web.json_response(result)
+    return json_response(result)

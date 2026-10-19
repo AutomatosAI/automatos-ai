@@ -3,17 +3,18 @@ Automatos Shared Metrics — Prometheus Exporter for All Services
 ===============================================================
 
 Exposes a /metrics endpoint compatible with Prometheus scraping.
-Works with both FastAPI and aiohttp.
+Works with FastAPI and with plain Starlette.
 
 FastAPI usage:
     from automatos_metrics import add_fastapi_metrics
     app = FastAPI()
     add_fastapi_metrics(app, service="my-service")
 
-aiohttp usage:
-    from automatos_metrics import add_aiohttp_metrics
-    app = web.Application()
-    add_aiohttp_metrics(app, service="my-service")
+Starlette usage (the workspace worker, PRD-262: it left aiohttp for the Starlette
+and uvicorn its image already carries):
+    from automatos_metrics import add_starlette_metrics
+    app = Starlette(routes=[...])
+    add_starlette_metrics(app, service="my-service")
 
 Requires: prometheus_client
 
@@ -68,10 +69,19 @@ def _fastapi_route_label(scope) -> str:
     return path if isinstance(path, str) and path else UNMATCHED
 
 
-def _aiohttp_route_label(request) -> str:
-    """The canonical path of the resource aiohttp resolved, or "unmatched" (404 and 405)."""
-    resource = request.match_info.route.resource
-    return resource.canonical if resource is not None else UNMATCHED
+def _starlette_route_label(scope) -> str:
+    """The template of the route that fully matches, or "unmatched" (404 and 405).
+
+    Starlette routes after the middleware runs, so the label is matched here the way
+    the router will match it; it never reads the URL or the Host header.
+    """
+    from starlette.routing import Match
+
+    for route in scope["app"].routes:
+        match, _ = route.matches(scope)
+        if match == Match.FULL:
+            return route.path
+    return UNMATCHED
 
 
 def _create_metrics(service: str, registry=None):
@@ -168,14 +178,55 @@ def add_fastapi_metrics(app, service: str = "unknown"):
 
 
 # ---------------------------------------------------------------------------
-# aiohttp integration
+# Starlette integration
 # ---------------------------------------------------------------------------
 
-def add_aiohttp_metrics(app, service: str = "unknown"):
-    """Add Prometheus /metrics endpoint + request middleware to an aiohttp app.
+class _StatusRecorder:
+    """The ASGI ``send`` of a request, passed on, keeping the status it answered.
+
+    "500" until a response starts: a request that raises first is a server error.
+    """
+
+    def __init__(self, send):
+        self.send = send
+        self.code = "500"
+
+    async def __call__(self, message):
+        if message["type"] == "http.response.start":
+            self.code = str(message["status"])
+        await self.send(message)
+
+
+class _StarlettePrometheusMiddleware:
+    """Counts, times and gauges every request but /metrics, by method and route template."""
+
+    def __init__(self, app, metrics):
+        self.app = app
+        self.metrics = metrics
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"] == METRICS_PATH:
+            await self.app(scope, receive, send)
+            return
+        method = _method_label(scope["method"])
+        endpoint = _starlette_route_label(scope)
+        recorder = _StatusRecorder(send)
+        self.metrics["in_progress"].inc()
+        start = time.monotonic()
+        try:
+            await self.app(scope, receive, recorder)
+        finally:
+            duration = time.monotonic() - start
+            self.metrics["in_progress"].dec()
+            self.metrics["requests_total"].labels(method, endpoint, recorder.code).inc()
+            self.metrics["request_duration"].labels(method, endpoint).observe(duration)
+
+
+def add_starlette_metrics(app, service: str = "unknown"):
+    """Add Prometheus /metrics endpoint + request middleware to a Starlette app.
 
     Args:
-        app: aiohttp.web.Application instance
+        app: starlette.applications.Starlette instance, before it serves
         service: Service name for metric prefixes
     """
     if not HAS_PROMETHEUS:
@@ -185,46 +236,21 @@ def add_aiohttp_metrics(app, service: str = "unknown"):
         )
         return
 
-    from aiohttp import web
+    from starlette.responses import Response
 
     metrics = _create_metrics(service)
     metrics["info"].info({"service": service})
 
-    @web.middleware
-    async def prometheus_middleware(request, handler):
-        if request.path == METRICS_PATH:
-            return await handler(request)
-
-        # aiohttp resolves the route before any middleware runs.
-        method = _method_label(request.method)
-        endpoint = _aiohttp_route_label(request)
-
-        metrics["in_progress"].inc()
-        start = time.monotonic()
-        try:
-            response = await handler(request)
-            status = str(response.status)
-            return response
-        except Exception:
-            status = "500"
-            raise
-        finally:
-            duration = time.monotonic() - start
-            metrics["in_progress"].dec()
-            metrics["requests_total"].labels(method, endpoint, status).inc()
-            metrics["request_duration"].labels(method, endpoint).observe(duration)
-
-    # Prepend middleware
-    app.middlewares.insert(0, prometheus_middleware)
+    # Outermost of the middleware added so far.
+    app.add_middleware(_StarlettePrometheusMiddleware, metrics=metrics)
 
     # prometheus_client's content type carries a charset ("text/plain;
-    # version=...; charset=utf-8"). aiohttp refuses a charset in content_type
-    # with a ValueError, so /metrics answered 500; as a header it goes out
-    # exactly as the client library names it (PRD-262 US-045).
+    # version=...; charset=utf-8"); as a header it goes out exactly as the
+    # client library names it (PRD-262 US-045).
     async def metrics_handler(request):
-        return web.Response(
-            body=generate_latest(REGISTRY),
+        return Response(
+            content=generate_latest(REGISTRY),
             headers={"Content-Type": CONTENT_TYPE_LATEST},
         )
 
-    app.router.add_get(METRICS_PATH, metrics_handler)
+    app.add_route(METRICS_PATH, metrics_handler, methods=["GET"])

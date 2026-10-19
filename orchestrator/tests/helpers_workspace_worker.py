@@ -4,7 +4,8 @@ runner over a recorded Redis. Shared by F173 and F178.
 
 The worker's logging and Prometheus metrics are stubbed: its logging setup
 reconfigures the root logger, and metrics register once per process, so a
-second server would collide. main.py edits sys.path at import, so the loader
+second server would collide. The server is the worker's own uvicorn (PRD-262, row
+36), on a real port; the client is aiohttp's, from the orchestrator's requirements. main.py edits sys.path at import, so the loader
 gives it a copy that monkeypatch restores.
 """
 from __future__ import annotations
@@ -28,7 +29,7 @@ def load_worker_main(monkeypatch, volume):
     monkeypatch.setattr(sys, "path", [str(WORKER_DIR), *sys.path])
     monkeypatch.setitem(sys.modules, "automatos_logging", types.SimpleNamespace(setup_logging=lambda **_: None))
     monkeypatch.setitem(sys.modules, "automatos_metrics",
-                        types.SimpleNamespace(add_aiohttp_metrics=lambda app, **_: None))
+                        types.SimpleNamespace(add_starlette_metrics=lambda app, **_: None))
     monkeypatch.setenv("WORKSPACE_VOLUME_PATH", str(volume))
     spec = importlib.util.spec_from_file_location("workspace_worker_main_under_test", WORKER_DIR / "main.py")
     worker_main = importlib.util.module_from_spec(spec)

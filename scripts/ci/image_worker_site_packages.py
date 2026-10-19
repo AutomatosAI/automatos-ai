@@ -19,7 +19,9 @@ Each check names the row of the 19 Oct size breakdown it proves:
   later), and psycopg2 connects to the Postgres at ``PROBE_DATABASE_URL`` (the compose
   stack's image, which images.yml starts) and runs a parameterised query;
 - the distributions a cut removed (``REMOVED``, each with its row) are not installed,
-  and what replaced them imports: redis.asyncio without hiredis's parser.
+  and what replaced them imports: redis.asyncio without hiredis's parser, and the
+  worker's HTTP server on Starlette and uvicorn with no aiohttp (row 36): its modules
+  import from /app and build the app with every route and /metrics.
 
 binutils (readelf) comes with build-essential, which the worker keeps for its agents.
 Standard library only. Exit 0 when every check passes, 1 otherwise.
@@ -73,12 +75,26 @@ ECHO = "probe"
 # Distributions a cut took out of the lock, by the breakdown row that took it.
 REMOVED = {
     "psycopg2-binary": "row 27",
+    "aiohttp": "row 36",
+    "aiohappyeyeballs": "row 36",
+    "aiosignal": "row 36",
+    "frozenlist": "row 36",
+    "multidict": "row 36",
+    "propcache": "row 36",
+    "yarl": "row 36",
     "hiredis": "row 47",
     "python-dotenv": "row 47",
 }
-# What the worker imports in their place, each in a fresh interpreter.
+# What the worker imports in their place, each in a fresh interpreter. The worker's app
+# has 15 routes and /metrics (worker_http._routes and automatos_metrics).
+WORKER_APP_ROUTES = 16
 REPLACEMENT_IMPORTS = (
     "import redis.asyncio, redis.utils; assert not redis.utils.HIREDIS_AVAILABLE",
+    # PYTHONPATH=/app (the image's ENV) finds the worker's modules from any directory.
+    "import types, starlette, uvicorn, worker_http, worker_otel; "
+    "app = worker_http.build_app(types.SimpleNamespace(_worker_id='probe', _active_tasks={}, concurrency=1, "
+    "_redis=None, health_port=8081, _running=True)); "
+    f"assert len(app.routes) == {WORKER_APP_ROUTES}, [route.path for route in app.routes]",
 )
 
 Check = Callable[[], List[str]]
@@ -226,7 +242,7 @@ CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 47: no tests directories in site-packages", check_tests_dirs),
     ("row 27: psycopg2 is built against Debian's libpq", check_psycopg2_build),
     ("row 27: psycopg2 connects to Postgres and runs a query", check_psycopg2_connects),
-    ("rows 27 and 47: the removed distributions are gone, their replacements import", check_removed),
+    ("rows 27, 36 and 47: the removed distributions are gone, their replacements import", check_removed),
 )
 
 
