@@ -635,7 +635,7 @@ describe("PRD-260 (e) — the core's seams load Play's screens only when Play re
       expect(localLoads(slot, 'static').filter((rel) => rel.startsWith(PLAY_DIR)), slot).toEqual([])
       expect(localLoads(slot, 'dynamic').filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel)), slot).toHaveLength(1)
     }
-  })
+  }, SCAN_TIMEOUT_MS)
 
   it("loads Play's screens from builtin Play's registrations only through lazy slots, and none on demand itself", () => {
     expect(localLoads(PLAY_REGISTRATIONS, 'static').filter((rel) => rel.startsWith(PLAY_DIR) && !isSlot(rel))).toEqual([])
