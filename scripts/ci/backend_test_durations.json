@@ -608,7 +608,6 @@
 "tests/test_harness_power_mode.py": 0.24,
 "tests/test_harness_routing_rule.py": 0.14,
 "tests/test_harness_self_management.py": 0.54,
-"tests/test_harness_tool_failure_signal.py": 0.16,
 "tests/test_heartbeat_primitive_findings.py": 1.11,
 "tests/test_heartbeat_routes_workspace_gate.py": 1.04,
 "tests/test_heartbeat_webhook_pinned.py": 0.59,
