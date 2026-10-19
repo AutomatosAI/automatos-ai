@@ -167,7 +167,8 @@ def test_post_jpeg_answers_a_signed_jpeg_and_its_record_in_the_headers(settings,
         async with TestClient(TestServer(app)) as client:
             response = await client.post("/jpeg", data=png.read_bytes(), headers=AUTH)
             assert response.status == 200 and response.content_type == "image/jpeg"
-            return dict(response.headers), await response.read()
+            named = {name: response.headers.get(name) for name in (SHA256_HEADER, SOURCE_TYPE_HEADER, MANIFEST_HEADER)}
+            return named, await response.read()
 
     headers, body = asyncio.run(go())
     out = tmp_path / "answer.jpg"
