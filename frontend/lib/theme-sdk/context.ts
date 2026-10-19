@@ -7,7 +7,9 @@
  * the host's React) and hands back a small, theme-neutral copy: never the provider's whole value,
  * so a theme sees no webhook key, plan limits or settings, and the host can change its providers
  * without changing the SDK. Outside a provider each hook answers "unknown" (null, or the same
- * fail-open default the host's own chrome uses), never throws.
+ * fail-open default the host's own chrome uses), never throws. The one exception is useHealth: it
+ * reads react-query, so it needs the host's QueryClientProvider (components/providers.tsx) above it, as
+ * every page and theme the host draws has; in an isolated mount without one, react-query throws.
  */
 import { useMemo } from 'react'
 import { useTheme } from 'next-themes'
@@ -117,10 +119,16 @@ export function useTrial(): HostTrial | null {
 
 /**
  * Whether the backend answers. `poll: true` makes this caller the page's one poller (the asleep
- * screen); every other caller reads the same answer.
+ * screen); every other caller reads the same answer. A frozen copy of the host's answer: the
+ * connection, whether an ask is in flight, the backend's host name when it can be read, and
+ * `check`. Needs the host's QueryClientProvider (see the header).
  */
 export function useHealth(options: HostHealthOptions = {}): HostHealth {
-  return useBackendHealth(options)
+  const { connection, checking, host, check } = useBackendHealth(options)
+  return useMemo(
+    () => Object.freeze(host === undefined ? { connection, checking, check } : { connection, checking, host, check }),
+    [connection, checking, host, check],
+  )
 }
 
 /** The user's media preferences. */

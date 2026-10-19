@@ -48,7 +48,7 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/components/widgets/FileWidget/FilePreview` | c/play/deliverables/deliverable-content.tsx, c/play/deliverables/shelf-card.tsx | SDK | `deliverables.useAuthenticatedBlobUrl` | A file the backend serves only with the caller's token, as a blob URL; a theme cannot send the token. The preview component itself is `cards.FilePreview`. |
 | `@/components/widgets/MissionApprovalWidget` | c/play/chat/approval-cards.tsx | SDK | `cards.MissionApproval` | A protected surface: the host draws it (A-12c). |
 | `@/components/widgets/ToolApprovalWidget` | c/play/chat/approval-cards.tsx | SDK | `cards.ToolApproval` | A protected surface: the host draws it (A-12c). |
-| `@/components/widgets/types` | c/play/chat/approvals.ts, c/play/chat/approval-cards.tsx | copied into Play | — | Types only (`ToolApprovalWidgetData`, `MissionApprovalWidgetData`, `MissionApprovalTask`, `WidgetMetadata`). |
+| `@/components/widgets/types` | c/play/chat/approval-cards.tsx, l/chat/approvals.ts | copied into Play | — | Types only (`ToolApprovalWidgetData`, `MissionApprovalWidgetData`, `MissionApprovalTask`, `WidgetMetadata`). |
 | `@/components/workspace-provider` | c/play/deliverables/play-shelf.tsx, c/play/chat/turn-end.tsx, c/play/shell/play-sidebar.tsx, c/play/shell/play-nav.ts, c/looks/account-look-scope.tsx; /documents (document-management.tsx) | SDK | `context.useWorkspace`, `navigation.useCoreNav` | The workspace a theme may see; the plan exposure (`WorkspaceExposure`) is applied inside `useCoreNav`. account-look-scope is host code from A-13c (the look runtime). |
 | `@/components/workspace/gallery-view/made-by` | l/play/detail.ts | SDK | `cards.MadeBy` | Who made a deliverable; Play reads the source labels (`MADE_BY_SOURCE`) to build the line, which `MadeBy` gives whole. |
 | `@/contexts/role-context` | c/play/shell/play-sidebar.tsx | SDK | `context.useRole` | The caller's workspace and platform roles. |
@@ -64,39 +64,44 @@ Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/
 | `@/hooks/use-media-preferences` | c/looks/look-provider.tsx, c/mascot/auto-mascot.tsx | SDK | `context.useMediaPreferences` | `usePrefersReducedMotion` is `useMediaPreferences().reducedMotion`. `useVideoFormat` is copied into Play: it reads Play's own `lib/mascot/media`. |
 | `@/hooks/use-notice-seq` | c/looks/look-import.tsx, c/looks/look-manager.tsx, c/looks/look-notice.tsx, c/looks/style/style-screen.tsx | copied into Play | — | A pure React helper (a ref counter) for live-region notices. |
 | `@/hooks/use-online` | c/play/edges/asleep-screen.tsx | SDK | `context.useOnline` | Whether the browser is online. |
-| `@/hooks/use-play-conversation` | c/play/chat/play-chat.tsx, c/play/chat/play-chat-view.tsx | SDK | `chat.useChatController` | The conversation on screen; A-11a moves its logic into `lib/chat-controller`. |
-| `@/hooks/use-play-turn` | c/play/chat/play-chat-view.tsx | SDK | `chat.useChatController` | The turn's approvals, deliverables and suggestion; A-11a moves it into the controller. |
+| `@/hooks/use-play-conversation` | c/play/chat/play-chat.tsx | SDK | `chat.useChatController` | The conversation on screen; its logic is `lib/chat-controller/conversation.ts` (A-11a), and this hook adds only Play's `?draft=` link and its fresh-chat count. |
+| `@/hooks/use-play-turn` | c/play/chat/play-chat-view.tsx | SDK | `chat.useChatController` | The turn's approvals, deliverables and suggestion: Play's adapter over the controller's `useChatTurn` (`lib/chat-controller/turn.ts`, A-11a). |
 | `@/hooks/use-recent-chats` | c/play/shell/play-sidebar.tsx | SDK | `chat.useRecentChats` | The latest conversations for a sidebar. |
 | `@/hooks/use-recheck-countdown` | c/play/edges/asleep-screen.tsx | copied into Play | — | A pure timer for the asleep screen. |
-| `@/hooks/use-refresh-history-on-turn-end` | c/play/chat/play-chat-view.tsx | SDK | `chat.useChatController` | The controller refreshes the history lists when a turn ends; a theme has no query client. |
+| `@/hooks/use-refresh-history-on-turn-end` | l/chat-controller/controller.ts | SDK | `chat.useChatController` | The controller refreshes the history lists when a turn ends; a theme has no query client. |
 | `@/hooks/use-shelf-mascot` | c/play/deliverables/play-shelf.tsx | copied into Play | — | Play's own mascot code; its reads go through `context.useHealth` and `deliverables.useDeliverables`. |
 | `@/hooks/use-start-chat` | c/play/conversations/play-conversations.tsx, c/play/deliverables/shelf-body.tsx, c/play/shell/play-sidebar.tsx | SDK | `chat.useStartChat` | New chat: a fresh draft in the host's chat session, then the chat page. |
-| `@/hooks/use-stopped-reply` | c/play/chat/play-chat-view.tsx | SDK | `chat.useChatController` | Stop keeps the partial reply (FX-30); the controller owns it (A-11a). |
+| `@/hooks/use-stopped-reply` | l/chat-controller/controller.ts | SDK | `chat.useChatController` | Stop keeps the partial reply (FX-30); the controller owns it (A-11a). |
 | `@/hooks/use-studio-theme` | c/play/play-route-switch.tsx, c/play/conversations/play-conversations.tsx, c/play/edges/not-found-view.tsx, c/looks/play-only-route.tsx | host-only | — | The host renders a theme's pages and slots only when the layout is `theme` (ThemeSlot, A-04b); a theme never branches on the layout or the width. |
 | `@/lib/auth-edition` | c/play/shell/play-nav.ts, c/play/edges/asleep-gate.tsx | SDK | `context.useEdition`, `navigation.useCoreNav` | `isLocal` is `useEdition() === 'local'`; the edition's nav filters run inside `useCoreNav`. |
 | `@/lib/auth-hooks` | c/looks/account-look-scope.tsx | host-only | — | Whose looks to show is the host look runtime's job (A-13c); a theme reads the active look with `looks.useLook`. |
-| `@/lib/chat/receipts` | c/play/chat/receipts.tsx, c/play/chat/auto-reply.tsx, c/play/chat/deliverables.ts, l/mascot/events.ts | SDK | `chat.useChatController`, `chat.receiptLine`, `chat.receiptLink`, `chat.movedSomethingOnTheBoard` | Each reply's receipts, live ones included (`receiptsOf`, `liveReceiptsFromToolData`, `LIVE_KEY`), come on the controller's view model; the line, the checked link (`safeLink`) and the board test stay the host's so every theme tells the same truth. `NO_ACTIONS` and `NOTHING_ON_THE_BOARD` are wording, copied into Play. |
-| `@/lib/chat/tool-calls` | c/play/chat/message-text.ts | host-only | — | Called by the message parser A-11a moves into `lib/chat`; task cards come on the controller's view model. |
-| `@/lib/chat/use-chat-with-receipts` | c/play/chat/play-chat-view.tsx | SDK | `chat.useChatController` | The stream itself. |
+| `@/lib/chat-controller/*` | c/play/chat/play-chat-view.tsx, hooks/use-play-conversation.ts, hooks/use-play-turn.ts | SDK | `chat.useChatController` | The controller itself (A-11a); a theme reaches it only through the SDK (A-11b). |
+| `@/lib/chat/approvals` | c/play/chat/approval-cards.tsx, l/chat-controller/approvals.ts, l/chat-controller/view-model.ts | SDK | `chat.useChatController` | A-11a moved `components/play/chat/approvals.ts` here; the view model carries the filed approvals. |
+| `@/lib/chat/deliverables` | c/play/chat/auto-reply.tsx, c/play/chat/deliverable-card.tsx, c/play/chat/message-list.tsx, c/play/deliverables/play-shelf.tsx, c/play/deliverables/shelf-card.tsx, c/looks/style/style-components.tsx, l/play/detail.ts, l/chat-controller/turn.ts, l/chat-controller/view-model.ts | SDK | `chat.useChatController` | A-11a moved the deliverables parser here; the view model carries each turn's deliverables. |
+| `@/lib/chat/message-text` | c/play/chat/auto-reply.tsx, c/play/chat/message-list.tsx, c/play/chat/play-chat-view.tsx, c/play/chat/reply-cards.tsx, l/chat-controller/turn.ts | SDK | `chat.useChatController` | A-11a moved the message-text parser here; the view model carries each reply's text. |
+| `@/lib/chat/receipts` | c/play/chat/receipts.tsx, c/play/chat/auto-reply.tsx, l/chat/deliverables.ts, l/mascot/events.ts | SDK | `chat.useChatController`, `chat.receiptLine`, `chat.receiptLink`, `chat.movedSomethingOnTheBoard` | Each reply's receipts, live ones included (`receiptsOf`, `liveReceiptsFromToolData`, `LIVE_KEY`), come on the controller's view model; the line, the checked link (`safeLink`) and the board test stay the host's so every theme tells the same truth. `NO_ACTIONS` and `NOTHING_ON_THE_BOARD` are wording, copied into Play. |
+| `@/lib/chat/suggestion` | c/play/chat/mission-suggestion.tsx, c/play/chat/turn-end.tsx, l/chat-controller/turn.ts, l/chat-controller/view-model.ts | SDK | `chat.useChatController` | A-11a moved the Mission-suggestion parser here; the view model carries the suggestion. |
+| `@/lib/chat/tool-calls` | l/chat/message-text.ts | host-only | — | Called by the message parser A-11a moved into `lib/chat`; task cards come on the controller's view model. |
+| `@/lib/chat/use-chat-with-receipts` | l/chat-controller/controller.ts, l/chat-controller/view-model.ts | SDK | `chat.useChatController` | The stream itself. |
 | `@/lib/cookies` | l/looks/tone.ts | host-only | — | The host forces the tone from the theme's tone policy (`ThemeTonePolicy`); a theme never writes cookies. |
 | `@/lib/deliverables/download` | c/play/deliverables/deliverable-content.tsx, c/play/deliverables/detail-panel.tsx, c/play/deliverables/play-deliverable.tsx, l/play/detail.ts | SDK | `deliverables.deliverableDownloadUrl`, `deliverables.deliverableFileUrl`, `deliverables.deliverableFilename`, `deliverables.fileDownloadUrl` | The URLs go through the backend client's base URL. `DOWNLOAD_FAILED` is wording, copied into Play. |
 | `@/lib/deliverables/tabs` | c/play/deliverables/play-shelf.tsx | SDK | `deliverables.visibleDeliverableTabs`, `deliverables.DELIVERABLE_TAB_LABELS`, `navigation.DELIVERABLE_EXPLORER_HREF` | The tabs this workspace shows, their labels (`TAB_LABELS`) and the explorer's route (`EXPLORER_HREF`). |
 | `@/lib/download-text` | c/looks/look-manager.tsx | copied into Play | — | A pure browser helper (a Blob URL on a throwaway link). |
 | `@/lib/global-search-event` | c/play/shell/play-frame.tsx | SDK | `events.openGlobalSearch` | Opens the host's ⌘K search. |
 | `@/lib/nav-exposure` | c/play/shell/play-nav.ts | SDK | `navigation.useCoreNav` | The plan-tier filter runs inside `useCoreNav`. |
-| `@/lib/page-context` | c/play/chat/play-chat-view.tsx | SDK | `chat.useChatController` | The controller sends the page's context with each turn; a theme does not build it. |
+| `@/lib/page-context` | l/chat-controller/controller.ts | SDK | `chat.useChatController` | The controller sends the page's context with each turn; a theme does not build it. |
 | `@/lib/studio-menu` | c/play/shell/play-nav.ts | SDK | `navigation.useCoreNav`, `navigation.resolveActiveNavId` | The Studio menu after the host's filters, without icons (`StudioMenuItem` is the SDK's `CoreNavItem`). |
 | `@/lib/text/plain-line` | l/play/draft.ts, l/looks/validate.ts | copied into Play | — | Pure text helpers (`oneLine`). `UNSAFE_TEXT` is read by `lib/looks/validate.ts`, which A-13a moves into core's `lib/look-kit`. |
 | `@/lib/theme-host/boot-sanitize` | l/looks/tone.ts | host-only | — | The boot data's tone parser; the host applies the tone before first paint (A-03). |
 | `@/lib/theme-host/boot-types` | l/looks/prepaint.ts | host-only | — | Builtin Play's first-paint tables (A-03, PA-7); an installed theme ships them as data in its package, not code. |
 | `@/lib/theme-host/builtin/play-entry` | c/looks/look-provider.tsx, c/looks/play-only-route.tsx | host-only | — | Builtin Play's registry entry (PA-7); deleted at A-19. |
-| `@/lib/ticket-links` | c/play/*, c/looks/*, l/play/draft.ts | SDK | `navigation.CHAT_HREF`, `navigation.chatHref`, `navigation.DELIVERABLES_HREF`, `navigation.DELIVERABLE_PARAM`, `navigation.LOOKS_HREF`, `navigation.LOOK_STYLE_HREF` | Core's route builders. |
+| `@/lib/ticket-links` | c/play/*, c/looks/*, l/play/draft.ts, l/chat/deliverables.ts, l/chat-controller/view-model.ts | SDK | `navigation.CHAT_HREF`, `navigation.chatHref`, `navigation.DELIVERABLES_HREF`, `navigation.DELIVERABLE_PARAM`, `navigation.LOOKS_HREF`, `navigation.LOOK_STYLE_HREF` | Core's route builders. |
 | `@/lib/trial` | c/play/chat/turn-end.tsx | SDK | `chat.useChatController`, `context.useTrial` | A turn that ends on an exhausted trial says so on the view model (today `errorCode === TRIAL_EXHAUSTED_CODE`); the ledger is `useTrial`. |
 | `@/lib/ui-style` | l/looks/tone.ts | host-only | — | The tone cookie's age; the host owns the cookie (PA-12) and forces the tone. |
 | `@/lib/utils` | c/looks/look-manager.tsx | copied into Play | — | A pure utility (`copyToClipboard`). |
-| `@/stores/chat-session-store` | c/play/chat/play-chat-view.tsx, c/play/shell/play-sidebar.tsx | SDK | `chat.useChatController`, `chat.useRecentChats` | A store is never exposed; the controller tells the host a new chat's id, and the active chat id comes with the recent list. |
+| `@/stores/chat-session-store` | c/play/shell/play-sidebar.tsx, l/chat-controller/controller.ts, l/chat-controller/conversation.ts | SDK | `chat.useChatController`, `chat.useRecentChats` | A store is never exposed; the controller tells the host a new chat's id, and the active chat id comes with the recent list. |
 | `@/stores/mission-store` | c/play/chat/mission-suggestion.tsx | SDK | `chat.useChatController` | The Mission the chat is planning comes on the view model. |
-| `@/types` | c/play/chat/*, l/play/conversations.ts, l/mascot/types.ts | copied into Play | — | Types only (`ChatMessage`, `Chat`, `Receipt`, `ToolCall`, `TaskCardData`); the SDK's own types are in its `.d.ts` (A-10b). |
+| `@/types` | c/play/chat/*, hooks/use-play-turn.ts, l/chat-controller/*, l/chat/deliverables.ts, l/chat/message-text.ts, l/chat/suggestion.ts, l/play/conversations.ts, l/mascot/types.ts | copied into Play | — | Types only (`ChatMessage`, `Chat`, `Receipt`, `ToolCall`, `TaskCardData`); the SDK's own types are in its `.d.ts` (A-10b). |
 
 ## 2. Imports the lanes in flight will add
 
@@ -105,12 +110,6 @@ the move lands.
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
-| `@/lib/chat/approvals` | Play's chat after A-11a | SDK | `chat.useChatController` | A-11a moves `components/play/chat/approvals.ts` here; the view model carries the filed approvals. |
-| `@/lib/chat/deliverables` | Play's chat after A-11a | SDK | `chat.useChatController` | A-11a moves the deliverables parser here; the view model carries each turn's deliverables. |
-| `@/lib/chat/message-text` | Play's chat after A-11a | SDK | `chat.useChatController` | A-11a moves the message-text parser here; the view model carries each reply's text. |
-| `@/lib/chat/suggestion` | Play's chat after A-11a | SDK | `chat.useChatController` | A-11a moves the Mission-suggestion parser here; the view model carries the suggestion. |
-| `@/lib/chat-controller/*` | Play's chat after A-11a | SDK | `chat.useChatController` | The controller itself (A-11a); a theme reaches it only through the SDK (A-11b). |
-| `@/stores/play-approvals-store` | Play's tests today; Play's chat until A-11a | SDK | `chat.useChatController` | A-11a moves it into `lib/chat-controller/approvals.ts`. |
 | `@/stores/play-chat-store` | hooks/use-start-chat.ts, hooks/use-play-conversation.ts | SDK | `chat.useStartChat` | "Show a fresh chat" is part of New chat. |
 | `@/hooks/use-celebrate-new` | hooks/use-shelf-mascot.ts | copied into Play | — | Play's own code in core's `hooks/` (§0); it moves with Play. |
 | `@/hooks/use-idle-timeout` | hooks/use-auto-mascot.ts | copied into Play | — | A pure timer the mascot driver uses; it moves with it. |
@@ -151,7 +150,7 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 | `next/dynamic` | c/play/*-lazy.tsx | host-only | — | It needs Next's compiler; a theme splits its own bundle with `React.lazy` and `import()`. |
 | `lucide-react` | c/play/shell/play-frame.tsx, c/play/shell/play-sidebar.tsx | copied into Play | — | Icons are bundled into the theme's package. |
 | `@tanstack/react-query` | c/looks/account-look-scope.tsx | host-only | — | A theme has no query client; account-look-scope is host code from A-13c, and every query a theme needs is an SDK hook. |
-| `sonner` | hooks/use-play-conversation.ts, hooks/use-api-file-download.ts | SDK | `notices.notify`, `notices.dismissNotice` | Only the host's toaster renders notices (A-10a); a theme never bundles sonner. |
+| `sonner` | l/chat-controller/conversation.ts, hooks/use-api-file-download.ts | SDK | `notices.notify`, `notices.dismissNotice` | Only the host's toaster renders notices (A-10a); a theme never bundles sonner. |
 | `zustand` | the stores above | host-only | — | A store is never exposed; each one's data comes through its area's hook. |
 
 ## 5. SDK names no import above maps to

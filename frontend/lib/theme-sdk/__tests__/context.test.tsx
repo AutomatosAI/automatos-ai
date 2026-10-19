@@ -11,7 +11,7 @@ const host = vi.hoisted(() => ({
   role: null as unknown,
   theme: {} as { forcedTheme?: string; resolvedTheme?: string },
   reducedMotion: false,
-  health: { connection: 'connected', checking: false, check: () => undefined },
+  health: { connection: 'connected', checking: false, check: () => undefined } as Record<string, unknown>,
   healthOptions: [] as unknown[],
 }))
 
@@ -47,6 +47,7 @@ afterEach(() => {
   host.role = null
   host.theme = {}
   host.reducedMotion = false
+  host.health = { connection: 'connected', checking: false, check: () => undefined }
   host.healthOptions.length = 0
 })
 
@@ -112,10 +113,23 @@ describe('PRD-261 A-10a — edition, trial, health, media and tone', () => {
     expect(renderHook(() => useTrial()).result.current).toBeNull()
   })
 
-  it("hands over the host's backend health, passing poll through", () => {
-    expect(renderHook(() => useHealth({ poll: true })).result.current).toBe(host.health)
-    expect(renderHook(() => useHealth()).result.current).toBe(host.health)
+  it("hands over a frozen copy of the host's backend health, passing poll through", () => {
+    const polled = renderHook(() => useHealth({ poll: true }))
+    expect(polled.result.current).toEqual(host.health)
+    expect(polled.result.current).not.toBe(host.health)
+    expect(Object.isFrozen(polled.result.current)).toBe(true)
+    expect(renderHook(() => useHealth()).result.current).toEqual(host.health)
     expect(host.healthOptions).toEqual([{ poll: true }, {}])
+  })
+
+  it('keeps only connection, checking, host and check, and keeps its identity while they hold', () => {
+    host.health = { ...host.health, host: 'api.example.test', baseUrl: 'not-for-themes' }
+    const { result, rerender } = renderHook(() => useHealth())
+    expect(Object.keys(result.current).sort()).toEqual(['check', 'checking', 'connection', 'host'])
+    expect(result.current.host).toBe('api.example.test')
+    const first = result.current
+    rerender()
+    expect(result.current).toBe(first)
   })
 
   it('reads reduced motion', () => {
