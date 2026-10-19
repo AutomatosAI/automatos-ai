@@ -15,24 +15,32 @@ theme code and cut to fit:
   every chunk, capped at ``MAX_FINDINGS``; tokens summed.
 * **Thresholds:** as the plugin scanner (``plugin_security_scanner.py:500-503``): ``BLOCK_AT``
   or more is an error (``blocked``), ``REVIEW_AT`` or more a warning (``review_required``).
+* **A reply is checked before it counts:** ``risk_score`` must be a whole number from 0 to 100
+  and ``findings`` a list of objects, else the chunk got no usable answer. A ``critical``
+  finding lifts the chunk's score to at least ``BLOCK_AT`` and a ``high`` one to ``REVIEW_AT``,
+  so a reply that names a threat but scores it low (or a steered one) never reads as clean.
+* **One deadline:** the whole stage stops after ``THEME_LLM_STAGE_SECONDS``; parts still unread
+  then count as unread, so one slow upload holds a request (and its claim) for a bounded time.
 * **Never safe by default:** a missing key, a missing client library, a call that fails, a reply
-  that isn't the JSON asked for, or chunks left over the cap mean the stage did not run on all
-  of the code. That is a warning with the reason "LLM stage did not run" (so the verdict is at
+  that isn't the JSON asked for, the deadline, or chunks left over the cap mean the stage did not
+  run on all of the code. That is a warning with the reason "LLM stage did not run" (so the verdict is at
   least ``review_required``), never a pass and never ``not_run``.
 
-The config names ``THEME_LLM_CHUNK_TOKENS``, ``THEME_LLM_MAX_CHUNKS`` and
-``THEME_LLM_TIMEOUT_SECONDS`` are in ``config.py`` (C1-wire); a missing or non-positive value
+The config names ``THEME_LLM_CHUNK_TOKENS``, ``THEME_LLM_MAX_CHUNKS``, ``THEME_LLM_STAGE_SECONDS``
+and ``THEME_LLM_TIMEOUT_SECONDS`` are in ``config.py`` (C1-wire); a missing or non-positive value
 falls back to the default here.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 from config import config
-from core.services.plugin_security_scanner import LLMScanResult, _scan_result_from_response
+from core.services.plugin_security_scanner import LLMScanResult, _scan_result_from_response, _strip_code_fence
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +50,7 @@ DIST_CODE_PREFIXES: Tuple[str, ...] = ("dist/entry.js", "dist/chunks/", "dist/th
 DEFAULT_CHUNK_TOKENS = 8000
 DEFAULT_MAX_CHUNKS = 48
 DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_STAGE_SECONDS = 300
 # Minified JavaScript runs nearer three characters a token than four; the lower estimate keeps a
 # chunk under its token cap.
 CHARS_PER_TOKEN = 3
@@ -51,6 +60,8 @@ MAX_RETRIES = 1
 BLOCK_AT = 70
 REVIEW_AT = 20
 RISK_MIN, RISK_MAX = 0, 100
+# A finding's severity sets a floor under its chunk's score, whatever score the reply gave.
+SEVERITY_FLOOR = {"critical": BLOCK_AT, "high": REVIEW_AT}
 MAX_FINDINGS = 50
 EVIDENCE_MAX = 300
 SUMMARY_MAX = 600
@@ -185,15 +196,64 @@ def _client_call() -> Tuple[Optional[ChunkCall], Optional[str]]:
     return call, None
 
 
-async def _scan_chunk(call: ChunkCall, model: str, chunk: Chunk, gate: asyncio.Semaphore) -> Optional[LLMScanResult]:
+def _reply_text(response: Any) -> str:
+    return "".join(getattr(block, "text", "") for block in response.content if getattr(block, "type", "") == "text")
+
+
+def _reply_problem(response: Any) -> Optional[str]:
+    """Why the reply is not the JSON the prompt asked for, or None when it is."""
+    try:
+        parsed = json.loads(_strip_code_fence(_reply_text(response)))
+    except ValueError:
+        return "not JSON"
+    if not isinstance(parsed, dict):
+        return "not a JSON object"
+    score, findings = parsed.get("risk_score"), parsed.get("findings")
+    if isinstance(score, bool) or not isinstance(score, int) or not RISK_MIN <= score <= RISK_MAX:
+        return "no whole-number risk_score from 0 to 100"
+    if not isinstance(findings, list) or not all(isinstance(item, dict) for item in findings):
+        return "findings is not a list of objects"
+    return None
+
+
+def _severity_floor(result: LLMScanResult) -> int:
+    """The lowest score the chunk's findings allow: ``BLOCK_AT`` for a critical one, ``REVIEW_AT`` for a high one."""
+    floors = (SEVERITY_FLOOR.get(str(raw.severity).strip().lower(), RISK_MIN) for raw in result.findings)
+    return max(floors, default=RISK_MIN)
+
+
+def _chunk_result(response: Any, model: str, chunk: Chunk) -> Optional[LLMScanResult]:
+    """The chunk's checked verdict, its score raised to its findings' floor; None for a reply that isn't usable."""
+    problem = _reply_problem(response)
+    if problem is not None:
+        logger.warning("[Themes] LLM review of %s part %d/%d: the reply is unusable (%s)",
+                       chunk.path, chunk.part, chunk.parts, problem)
+        return None
+    result = _scan_result_from_response(response, model)
+    return result.model_copy(update={"risk_score": max(result.risk_score, _severity_floor(result))})
+
+
+async def _scan_chunk(call: ChunkCall, model: str, chunk: Chunk, gate: asyncio.Semaphore,
+                      pool: ThreadPoolExecutor) -> Optional[LLMScanResult]:
     """One chunk's verdict, or None when the call or its reply failed (logged with the file)."""
     async with gate:
         try:
-            response = await asyncio.get_running_loop().run_in_executor(None, call, model, _prompt(chunk))
-            return _scan_result_from_response(response, model)
+            response = await asyncio.get_running_loop().run_in_executor(pool, call, model, _prompt(chunk))
+            return _chunk_result(response, model, chunk)
         except Exception:
             logger.exception("[Themes] LLM review of %s part %d/%d failed", chunk.path, chunk.part, chunk.parts)
             return None
+
+
+async def _within(coroutines: List[Any], seconds: float) -> Tuple[List[Optional[LLMScanResult]], int]:
+    """Every chunk's verdict in order, None for one still unread at the deadline; and how many timed out."""
+    tasks = [asyncio.ensure_future(coroutine) for coroutine in coroutines]
+    if not tasks:
+        return [], 0
+    done, pending = await asyncio.wait(tasks, timeout=seconds)
+    for task in pending:
+        task.cancel()
+    return [task.result() if task in done else None for task in tasks], len(pending)
 
 
 def _finding(raw: Any, chunk: Chunk) -> Dict[str, str]:
@@ -227,11 +287,27 @@ def _not_run(read: str, texts: Mapping[str, str], chunks: List[Chunk], model: st
     return _combine(read, texts, chunks, [], model, f"{DID_NOT_RUN}: {why}.")
 
 
-def _partial_reason(failed: int, left_over: int, limit: int) -> Optional[str]:
+def _partial_reason(failed: int, timed_out: int, left_over: int, limit: int) -> Optional[str]:
     """Why some of the code went unread, or None when every part was read."""
     gaps = [f"{failed} part(s) got no usable answer"] if failed else []
+    gaps += [f"{timed_out} part(s) were still unread when the stage ran out of time"] if timed_out else []
     gaps += [f"{left_over} part(s) were over the limit of {limit} parts per package"] if left_over else []
     return f"{DID_NOT_RUN} on all of the code: {'; '.join(gaps)}." if gaps else None
+
+
+async def _scan_chunks(call: ChunkCall, model: str, chunks: List[Chunk]) -> Tuple[List[Optional[LLMScanResult]], int]:
+    """Each chunk on its own call, ``CONCURRENCY`` at a time, within the stage's deadline.
+
+    The calls run on a pool of their own that is never waited for, so a call still in flight at the
+    deadline (it ends at its own timeout) never holds the request back.
+    """
+    gate = asyncio.Semaphore(CONCURRENCY)
+    pool = ThreadPoolExecutor(max_workers=CONCURRENCY, thread_name_prefix="theme-llm")
+    try:
+        coroutines = [_scan_chunk(call, model, chunk, gate, pool) for chunk in chunks]
+        return await _within(coroutines, float(_setting("THEME_LLM_STAGE_SECONDS", DEFAULT_STAGE_SECONDS)))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 async def scan_theme_code(
@@ -246,10 +322,10 @@ async def scan_theme_code(
         if call is None:
             return _not_run(read, texts, chunks, model, why)
     limit = _setting("THEME_LLM_MAX_CHUNKS", DEFAULT_MAX_CHUNKS)
-    gate = asyncio.Semaphore(CONCURRENCY)
-    results = await asyncio.gather(*(_scan_chunk(call, model, chunk, gate) for chunk in chunks[:limit]))
+    results, timed_out = await _scan_chunks(call, model, chunks[:limit])
     answered = [(chunk, result) for chunk, result in zip(chunks, results) if result is not None]
-    reason = _partial_reason(len(chunks[:limit]) - len(answered), max(len(chunks) - limit, 0), limit)
+    failed = len(chunks[:limit]) - len(answered) - timed_out
+    reason = _partial_reason(failed, timed_out, max(len(chunks) - limit, 0), limit)
     if reason is not None:
         logger.warning("[Themes] %s", reason)
     return _combine(read, texts, chunks, answered, model, reason)

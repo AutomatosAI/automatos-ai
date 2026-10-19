@@ -54,12 +54,12 @@ from config import config  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from core.models.themes import ThemePackage, ThemeReviewEvent, ThemeRevocation  # noqa: E402
+from core.models.themes import ThemeInstallation, ThemePackage, ThemeReviewEvent, ThemeRevocation  # noqa: E402
 from services.themes import revocations, signing  # noqa: E402
 from services.themes.digest import package_digest  # noqa: E402
 
 ADMIN_PK, MEMBER_PK = 7, 8
-TABLES = [m.__table__ for m in (ThemePackage, ThemeReviewEvent, ThemeRevocation)]
+TABLES = [m.__table__ for m in (ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeInstallation)]
 GOOD_SIGNATURE = base64.b64encode(bytes(range(64))).decode("ascii")
 PASSING_NOTE = {"summary": "isolated job: build reproducible, digests equal, JS rules clean", "outcome": "pass"}
 BASE = "/api/admin/themes"

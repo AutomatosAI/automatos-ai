@@ -456,13 +456,29 @@ def test_a_version_not_newer_than_the_installed_one_is_409(env):
     assert len(_rows(env, ThemePackage)) == 1
 
 
+@pytest.mark.parametrize("second, message", [({"name": "Hello, changed"}, "Raise the version"),
+                                             ({"version": "0.9.0"}, "higher version")])
+def test_a_version_clash_is_409_before_the_review_stage_runs(env, monkeypatch, second, message):
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    client = _client(env, _local_ctx(uuid4()))
+    assert _upload(client, _hello()).status_code == 201 and len(calls) == 1
+    response = _upload(client, _hello(**second))
+
+    assert response.status_code == 409 and message in response.json()["detail"]
+    assert len(calls) == 1 and len(_rows(env, ThemePackage)) == 1
+
+
 def _stale_first_check(monkeypatch):
-    """The losing upload's pre-insert check ran before the winner committed: it saw nothing."""
+    """The losing upload's checks (before the stage, then pre-insert) ran before the winner committed.
+
+    Both saw nothing; only the check after the unique index fired sees the winner's rows.
+    """
     real, calls = records._check_new_version, []
 
     def check(*args):
         calls.append(args)
-        return None if len(calls) == 1 else real(*args)
+        return None if len(calls) <= 2 else real(*args)
 
     monkeypatch.setattr(records, "_check_new_version", check)
 

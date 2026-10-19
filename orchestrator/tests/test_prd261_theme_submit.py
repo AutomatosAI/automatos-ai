@@ -265,6 +265,49 @@ def test_the_same_bytes_again_return_the_existing_submission(env):
     assert len(_rows(env, ThemePackage)) == 1 and len(_rows(env, ThemeReviewEvent)) == 2
 
 
+def test_the_same_bytes_again_never_run_the_review_stage_twice(env):
+    stage = _stage("review_required")
+    client = _client(env, _ctx(), stage=stage)
+    assert _submit(client, _hello()).status_code == 201
+    again = _submit(client, _hello())
+
+    assert again.status_code == 200 and again.json()["package"]["scanVerdict"] == "review_required"
+    assert len(stage.calls) == 1
+
+
+def test_a_submission_overlapping_one_of_the_same_bytes_is_409_and_never_runs_the_stage(env):
+    from api.marketplace_themes_submit import BUSY, CLAIM_SCOPE
+    from services.themes.package import read_theme_package
+    from services.themes.upload_claim import upload_claim
+
+    stage = _stage("review_required")
+    client = _client(env, _ctx(), stage=stage)
+    session = env.sessions()
+    try:
+        with upload_claim(session, CLAIM_SCOPE, read_theme_package(_hello()).digest) as claimed:
+            assert claimed
+            overlapping = _submit(client, _hello())
+    finally:
+        session.close()
+
+    assert overlapping.status_code == 409 and overlapping.json()["detail"] == BUSY
+    assert stage.calls == [] and _rows(env, ThemePackage) == [] and env.s3.objects == {}
+    assert _submit(client, _hello()).status_code == 201 and len(stage.calls) == 1
+
+
+@pytest.mark.parametrize("edition, read", [("saas", "source"), ("local", "dist")])
+def test_the_llm_check_reads_source_only_where_the_isolated_rebuild_exists(env, monkeypatch, edition, read):
+    from api.marketplace_themes_submit import marketplace_review
+    from services.themes.package import read_theme_package
+
+    monkeypatch.setattr(config, "AUTH_EDITION", edition)
+    data = build.build_package(replace={"source/src/index.tsx": b"export default {}\n"})
+    llm = marketplace_review(read_theme_package(data), len(data))["checks"]["llm"]
+
+    assert llm["read"] == read
+    assert ("dist/entry.js" in llm["files"]) is (read == "dist")
+
+
 def test_a_private_upload_and_then_a_submit_of_the_same_bytes_both_succeed(env):
     data = _hello()
     client = _client(env, _ctx())

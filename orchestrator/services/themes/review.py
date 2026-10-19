@@ -39,7 +39,7 @@ from config import config
 from core.models.themes import ThemePackage, ThemeReviewEvent, ThemeRevocation
 from services.themes import signing
 from services.themes.choices import CONFLICT, NOT_FOUND, ThemeInstallError
-from services.themes.listing_updates import offer_listed_update
+from services.themes.listing_updates import offer_listed_update, withdraw_offers
 from services.themes.revocations import REVOKE_DISABLE, is_disabled
 
 MARKETPLACE_OWNER = "marketplace"
@@ -274,7 +274,8 @@ def _has_live_disable(db: Session, digest: str) -> bool:
 
 
 def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[int]) -> Dict[str, Any]:
-    """Take an approved version off the Marketplace and write a ``disable`` revocation of its digest."""
+    """Take an approved version off the Marketplace, write a ``disable`` revocation of its digest and
+    withdraw the update offers its approval made (``withdraw_offers``)."""
     package = queued_package(db, package_id, lock=True)
     if package.status != STATUS_APPROVED:
         raise ThemeReviewError(CONFLICT, NOT_APPROVED)
@@ -282,8 +283,10 @@ def deactivate(db: Session, package_id: UUID, reason: str, actor_pk: Optional[in
     package.status = STATUS_DEACTIVATED
     if not _has_live_disable(db, package.digest):
         db.add(ThemeRevocation(digest=package.digest, level=REVOKE_DISABLE, reason=text, created_by=actor_pk))
+    db.flush()
+    withdrawn = withdraw_offers(db, package)
     _record(db, package, EVENT_DEACTIVATED, STATUS_APPROVED, actor_pk, reason=text,
-            detail={"revocation": REVOKE_DISABLE, "digest": package.digest})
+            detail={"revocation": REVOKE_DISABLE, "digest": package.digest, "offersWithdrawn": withdrawn})
     return {**package_summary(package), "reason": text, "revocation": REVOKE_DISABLE}
 
 

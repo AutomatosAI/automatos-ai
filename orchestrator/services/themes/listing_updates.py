@@ -9,7 +9,13 @@ Wired at C1-wire: C-03a's ``review.approve`` calls ``offer_listed_update(db, pac
 set ``status='approved'`` and ``reviewed=True``, in the same transaction. Only installs that run a
 Marketplace version of the theme are offered it (a workspace's own upload is not a listing
 install), and an install that already waits on a version at least as new keeps that one. The
-install never switches by itself. Nothing here commits.
+install never switches by itself.
+
+A version taken off the Marketplace (``review.deactivate``) withdraws its offers through
+``withdraw_offers``: each install it was offered to is offered the newest listed version newer
+than the one it runs instead, or nothing. A pending version that is no longer listed never counts
+as a newer offer still waiting, so a later fix numbered below it is still offered. Nothing here
+commits.
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from core.models.themes import ThemeInstallation, ThemePackage
 from services.themes.choices import MARKETPLACE_OWNER
-from services.themes.listings import APPROVED, is_compatible
+from services.themes.listings import APPROVED, is_compatible, listed_versions, newer_compatible
 from services.themes.records import version_key
 from services.themes.revocations import is_disabled
 
@@ -37,10 +43,14 @@ def is_listed(db: Session, package: ThemePackage) -> bool:
 
 
 def _waits_on_newer(db: Session, install: ThemeInstallation, package: ThemePackage) -> bool:
+    """True when the install's pending version is at least as new as ``package`` and still on offer:
+    a workspace's own upload, or a Marketplace version that is still listed."""
     pending: Optional[ThemePackage] = (
         db.get(ThemePackage, install.pending_package_id) if install.pending_package_id else None
     )
-    return pending is not None and version_key(pending.version) >= version_key(package.version)
+    if pending is None or (pending.owner_type == MARKETPLACE_OWNER and not is_listed(db, pending)):
+        return False
+    return version_key(pending.version) >= version_key(package.version)
 
 
 def offer_listed_update(db: Session, package: ThemePackage) -> int:
@@ -65,3 +75,16 @@ def offer_listed_update(db: Session, package: ThemePackage) -> int:
         offered += 1
     db.flush()
     return offered
+
+
+def withdraw_offers(db: Session, package: ThemePackage) -> int:
+    """Re-point every install offered ``package`` (just taken off the Marketplace) at the newest listed
+    version newer than the one it runs, or clear its offer; how many installs it changed."""
+    installs = db.query(ThemeInstallation).filter(ThemeInstallation.pending_package_id == package.id).all()
+    versions = [row for row in listed_versions(db, package.theme_id) if row.id != package.id]
+    for install in installs:
+        current = db.get(ThemePackage, install.package_id)
+        newer = newer_compatible(versions, current) if current is not None else None
+        install.pending_package_id = newer.id if newer is not None else None
+    db.flush()
+    return len(installs)

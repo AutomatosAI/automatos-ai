@@ -48,6 +48,7 @@ import api.themes_install as install_api  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 import core.models  # noqa: E402,F401  (registers every table the FKs name)
 import services.themes.listings as listings_mod  # noqa: E402
+from services.themes import review  # noqa: E402
 from services.themes.listing_updates import offer_listed_update  # noqa: E402
 from config import config  # noqa: E402
 from core.auth import step_up  # noqa: E402
@@ -62,6 +63,7 @@ from core.models.themes import (  # noqa: E402
     ThemeOptIn,
     ThemePackage,
     ThemePublisher,
+    ThemeReviewEvent,
     ThemeRevocation,
     ThemeWorkspaceSettings,
 )
@@ -73,7 +75,7 @@ PLAY = "automatos/play"
 PLAY_LISTING = "automatos.play"
 TABLES = [m.__table__ for m in (
     ThemePackage, ThemeInstallation, ThemeChoice, ThemeLook, ThemeOptIn, ThemeWorkspaceSettings, ThemeRevocation,
-    ThemePublisher,
+    ThemePublisher, ThemeReviewEvent,
 )]
 ENGINES = {"automatos": "^1.0.0", "sdk": "^1.0.0"}
 FUTURE_ENGINES = {"automatos": "^2.0.0", "sdk": "^1.0.0"}
@@ -262,6 +264,52 @@ def test_an_install_waiting_on_a_newer_version_keeps_it_and_a_newer_install_is_n
     assert _installed(api)[PLAY]["pendingPackageId"] is None
     api.ctx = _ctx(WS_A)
     assert _installed(api)[PLAY]["pendingPackageId"] == str(newest.id)
+
+
+def _offered(api, package):
+    offered = offer_listed_update(api.db, package)
+    api.db.commit()
+    return offered
+
+
+def test_deactivating_an_offered_version_withdraws_the_offer_and_a_lower_fix_is_offered(api):
+    old = _package(api.db, "1.0.0")
+    assert _install(api, packageId=old.id).status_code == 201
+    broken = _package(api.db, "1.1.0")
+    assert _offered(api, broken) == 1
+    review.deactivate(api.db, broken.id, "sends tokens off-site", OPERATOR_PK)
+    api.db.commit()
+    assert _installed(api)[PLAY]["pendingPackageId"] is None
+
+    fix = _package(api.db, "1.0.1")
+    assert _offered(api, fix) == 1
+    row = _installed(api)[PLAY]
+    assert row["pendingPackageId"] == str(fix.id) and row["pendingVersion"] == "1.0.1"
+
+
+def test_deactivating_the_newest_offer_falls_back_to_the_newest_listed_one_still_newer(api):
+    old = _package(api.db, "1.0.0")
+    assert _install(api, packageId=old.id).status_code == 201
+    middle = _package(api.db, "1.1.0")
+    assert _offered(api, middle) == 1
+    newest = _package(api.db, "1.2.0")
+    assert _offered(api, newest) == 1
+    review.deactivate(api.db, newest.id, "broken", OPERATOR_PK)
+    api.db.commit()
+    assert _installed(api)[PLAY]["pendingPackageId"] == str(middle.id)
+
+
+def test_a_pending_version_no_longer_listed_never_blocks_a_lower_fix(api):
+    old = _package(api.db, "1.0.0")
+    assert _install(api, packageId=old.id).status_code == 201
+    gone = _package(api.db, "1.1.0")
+    assert _offered(api, gone) == 1
+    gone.status = "deactivated"  # taken off without its offers withdrawn (data from before withdraw_offers)
+    api.db.commit()
+
+    fix = _package(api.db, "1.0.1")
+    assert _offered(api, fix) == 1
+    assert _installed(api)[PLAY]["pendingPackageId"] == str(fix.id)
 
 
 # ---------------------------------------------------------------------------

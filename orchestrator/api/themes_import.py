@@ -9,7 +9,9 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
 3. an id under a reserved publisher (``automatos/…``) needs ``caller_is_admin``, else 403;
 4. the automated review stage runs inline (C-02a, ``services/themes/review_stage.py``; the LLM
    stage reads ``dist/``, the code that runs, since no isolated rebuild ever checks a private
-   upload's ``source/``) unless these bytes are already here; one upload of the same bytes runs at
+   upload's ``source/``) unless these bytes are already here, and never for a version that would be
+   refused (409, checked read-only first); the request's read transaction ends before the stage,
+   so no connection waits idle in transaction while it runs; one upload of the same bytes runs at
    a time (``services/themes/upload_claim.py``: an overlapping one is 409, try again, so a resent
    request never pays for the stage twice); the files are stored under
    ``themes/_workspace/<ws>/<publisher>/<slug>/<version>/`` before the commit, so a failed
@@ -49,8 +51,8 @@ from core.models.themes import ThemeInstallation, ThemePackage
 from services.themes.package import ThemePackage as CheckedThemePackage
 from services.themes.package import ThemePackageError, cap_bytes, read_theme_package
 from services.themes.records import (
-    SavedUpload, UploadConflict, active_installation, conflict_after_race, package_by_digest, private_upload_refusal,
-    reserved_publisher_refusal, save_private_upload,
+    SavedUpload, UploadConflict, active_installation, package_by_digest, private_upload_refusal,
+    reserved_publisher_refusal, save_private_upload, upload_conflict,
 )
 from services.themes.review_stage import run_review_stage
 from services.themes.settings import require_install_role
@@ -153,7 +155,7 @@ def _after_integrity_error(db: Session, ctx: RequestContext, checked: CheckedThe
     existing = package_by_digest(db, ctx.workspace_id, checked.digest)
     if existing is None:
         logger.warning("[Themes] Concurrent upload of %s in workspace %s", checked.manifest["id"], ctx.workspace_id)
-        raise _refuse(409, conflict_after_race(db, ctx.workspace_id, checked.manifest) or BUSY) from exc
+        raise _refuse(409, upload_conflict(db, ctx.workspace_id, checked.manifest) or BUSY) from exc
     return SavedUpload(existing, active_installation(db, ctx.workspace_id, existing.theme_id), created=False)
 
 
@@ -161,12 +163,21 @@ def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, pack
     """The automated stage's report (C-02a), skipped when these bytes are already in this workspace.
 
     Their existing row is reused as it is (``save_private_upload``), so a second run would only
-    spend an LLM call. Called under the upload claim, so an overlapping upload of the same bytes
-    never runs it too. The route is a plain ``def``: this runs in a threadpool thread, with no loop.
+    spend an LLM call; a version ``save_private_upload`` would refuse is 409 before the stage.
+    The read transaction ends before the stage, so the session holds no connection while it runs
+    (``save_private_upload`` checks again under its row lock). Called under the upload claim, so
+    an overlapping upload of the same bytes never runs it too. The route is a plain ``def``: this
+    runs in a threadpool thread, with no loop.
     """
     existing = package_by_digest(db, ctx.workspace_id, checked.digest)
     if existing is not None:
         return dict(existing.scan_report or {"verdict": existing.scan_verdict})
+    conflict = upload_conflict(db, ctx.workspace_id, checked.manifest)
+    db.rollback()
+    if conflict is not None:
+        logger.info("[Themes] Upload of %s in workspace %s refused before the review stage: version clash",
+                    checked.manifest["id"], ctx.workspace_id)
+        raise _refuse(409, conflict)
     return run_review_stage(checked, package_bytes, prefer_source=False)
 
 

@@ -192,3 +192,62 @@ def test_parts_over_the_limit_are_not_read_and_the_stage_says_so(small_chunks, m
 
     assert len(fake.prompts) == 2 and result.chunks > 2 and result.ran is False
     assert "over the limit of 2 parts" in result.reason and llm_check(result)["level"] == "warning"
+
+
+# ---------------------------------------------------------------------------
+# A reply is checked before it counts; one deadline for the whole stage
+# ---------------------------------------------------------------------------
+
+CRITICAL = {"category": "Exfiltration", "severity": "critical", "description": "sends cookies off-site",
+            "file": "dist/entry.js", "evidence": EVIL}
+
+
+@pytest.mark.parametrize("raw", [
+    {"findings": [CRITICAL], "summary": "sends cookies off-site"},
+    {"summary": "ok"},
+    {"risk_score": "0", "findings": []},
+    {"risk_score": True, "findings": []},
+    {"risk_score": 140, "findings": []},
+    {"risk_score": 0, "findings": "none"},
+    {"risk_score": 0},
+    ["not", "an", "object"],
+])
+def test_a_reply_without_a_valid_score_or_findings_list_counts_as_unread(small_chunks, raw):
+    result = run_llm_stage(_files(), call=FakeLLM(raw=json.dumps(raw)))
+    check = llm_check(result)
+
+    assert (result.ran, result.calls, check["status"], check["level"]) == (False, 0, "did_not_run", "warning")
+    assert "got no usable answer" in check["reason"]
+
+
+@pytest.mark.parametrize("severity, level", [("critical", "error"), ("CRITICAL", "error"), ("high", "warning")])
+def test_a_severe_finding_scored_low_still_raises_the_level(small_chunks, severity, level):
+    raw = {"risk_score": 0, "findings": [{**CRITICAL, "severity": severity}], "summary": "fine"}
+    check = llm_check(run_llm_stage(_files(), call=FakeLLM(raw=json.dumps(raw))))
+
+    assert (check["status"], check["level"]) == ("ran", level)
+    assert check["riskScore"] >= (llm_stage.BLOCK_AT if level == "error" else llm_stage.REVIEW_AT)
+
+
+def test_a_reply_in_a_code_fence_still_counts(small_chunks):
+    fenced = "```json\n" + json.dumps({"risk_score": 0, "findings": [], "summary": "clean"}) + "\n```"
+    assert llm_check(run_llm_stage(_files(), call=FakeLLM(raw=fenced)))["status"] == "ran"
+
+
+def test_the_stage_stops_at_its_deadline_and_says_parts_went_unread(small_chunks, monkeypatch):
+    monkeypatch.setattr(config, "THEME_LLM_STAGE_SECONDS", 1, raising=False)
+    release = threading.Event()
+
+    def slow(model, text):
+        if "slow.js" in text:
+            release.wait(30)
+        return _reply(0, "No security issues found.")
+
+    try:
+        result = run_llm_stage(_files(**{"dist/chunks/slow.js": b"// slow"}), call=slow)
+    finally:
+        release.set()
+    check = llm_check(result)
+
+    assert result.ran is False and check["status"] == "partial" and check["level"] == "warning"
+    assert "1 part(s) were still unread when the stage ran out of time" in check["reason"]

@@ -1530,9 +1530,12 @@ class Config:
         os.getenv("THEMES_ONE_OPEN_SUBMISSION", "false").strip().lower() in ("true", "1", "yes", "on")
     )
     # The automated stage's LLM check (services/themes/llm_stage.py), on PLUGIN_LLM_SCAN_MODEL:
-    # tokens per chunk, chunks per package (more is "LLM stage did not run"), seconds per call.
+    # tokens per chunk, chunks per package (more is "LLM stage did not run"), seconds for the whole
+    # stage (parts unread by then are "did not run", so one upload holds its request for a bounded
+    # time), seconds per call.
     THEME_LLM_CHUNK_TOKENS: int = int(os.getenv("THEME_LLM_CHUNK_TOKENS", "8000"))
     THEME_LLM_MAX_CHUNKS: int = int(os.getenv("THEME_LLM_MAX_CHUNKS", "48"))
+    THEME_LLM_STAGE_SECONDS: int = int(os.getenv("THEME_LLM_STAGE_SECONDS", "300"))
     THEME_LLM_TIMEOUT_SECONDS: int = int(os.getenv("THEME_LLM_TIMEOUT_SECONDS", "60"))
     # No signing key here, ever: the kit repo's sign workflow holds it (D3-c, services/themes/signing.py).
 
