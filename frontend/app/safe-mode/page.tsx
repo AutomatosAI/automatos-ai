@@ -7,13 +7,25 @@
  * next page is safe even where this tab's sessionStorage cannot be written.
  *
  * The page stands alone, outside MainLayout: it draws none of the chrome a theme replaces and
- * calls no backend route, so nothing here can fail the way the theme did.
+ * calls no backend route, so nothing here can fail the way the theme did. The root layout's boot
+ * has already painted the installed theme's classes and prepaint variables on <html> before this
+ * page; the constant script first in the page takes them off again and puts Studio's on, before
+ * the page paints. A client-side visit, where React never runs that script, does the same in its
+ * effect.
  */
 import Link from 'next/link'
 import { useEffect } from 'react'
 
 import { PageHeader } from '@/components/shared/page-header'
-import { requestSafeModeForThisTab, SAFE_MODE_QUERY } from '@/components/theme-host/theme-host-provider'
+import {
+  requestSafeModeForThisTab,
+  SAFE_MODE_ADD_CLASSES,
+  SAFE_MODE_QUERY,
+  SAFE_MODE_REMOVE_CLASSES,
+  SAFE_MODE_UNPAINT_ID,
+  SAFE_MODE_UNPAINT_SCRIPT,
+  unpaintThemeBoot,
+} from '@/components/theme-host/theme-host-provider'
 import { Button } from '@/components/ui/button'
 
 /** Back into the app, still in safe mode. */
@@ -28,10 +40,17 @@ const STEPS: readonly string[] = [
 export default function SafeModePage() {
   useEffect(() => {
     requestSafeModeForThisTab()
+    unpaintThemeBoot()
   }, [])
 
   return (
     <main className="min-h-screen bg-background px-6 py-10">
+      <script
+        id={SAFE_MODE_UNPAINT_ID}
+        data-add={SAFE_MODE_ADD_CLASSES.join(' ')}
+        data-remove={SAFE_MODE_REMOVE_CLASSES.join(' ')}
+        dangerouslySetInnerHTML={{ __html: SAFE_MODE_UNPAINT_SCRIPT }}
+      />
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
         <PageHeader
           eyebrow="Recovery"

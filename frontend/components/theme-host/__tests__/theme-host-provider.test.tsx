@@ -15,6 +15,7 @@ import React, { useEffect, useState } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { THEME_BOOT_ELEMENT_ID } from '@/lib/theme-host/boot'
 import { SAFE_MODE_STORAGE_KEY, THEME_NOTICE_ID } from '@/lib/theme-host/constants'
 import { FAILURE_LEDGER_KEY } from '@/lib/theme-host/failure-ledger'
 import type { SlotId } from '@/lib/theme-host/registry-types'
@@ -45,6 +46,7 @@ vi.mock('framer-motion', () => ({
 import { PageHeader } from '@/components/shared/page-header'
 import { PAGE_HEADER_MASCOT_SLOT, PLACEMENT_SLOT_ATTR } from '../placement-slot'
 import {
+  SAFE_MODE_ADD_CLASSES,
   THEME_FALLBACK_NOTICE,
   THEME_REVERT_NOTICE_ID,
   THEME_REVERTED_NOTICE,
@@ -456,6 +458,29 @@ describe('PRD-261 A-04c — three failures in ten minutes send the member back t
     expect(ledgerTimes()).toHaveLength(3)
     await failOnce('load')
     expect(mocks.putThemeChoice).toHaveBeenCalledTimes(2)
+  })
+
+  it('safe mode takes the installed theme\'s first paint off <html> (the boot\'s classes and prepaint)', async () => {
+    const boot = document.createElement('script')
+    boot.type = 'application/json'
+    boot.id = THEME_BOOT_ELEMENT_ID
+    boot.textContent = JSON.stringify({ addClasses: [...SAFE_MODE_ADD_CLASSES, MANIFEST.htmlClass] })
+    document.head.appendChild(boot)
+    const root = document.documentElement
+    root.classList.add(MANIFEST.htmlClass)
+    root.style.setProperty('--background', '0 0% 0%')
+    window.history.replaceState(null, '', '/agents?safe_mode=themes')
+    try {
+      render(app())
+      await waitFor(() => expect(hostStatus()).toBe('safe-mode'))
+      expect(root.classList.contains(MANIFEST.htmlClass)).toBe(false)
+      SAFE_MODE_ADD_CLASSES.forEach((name) => expect(root.classList.contains(name)).toBe(true))
+      expect(root.style.getPropertyValue('--background')).toBe('')
+    } finally {
+      boot.remove()
+      root.className = ''
+      root.removeAttribute('style')
+    }
   })
 
   it('/safe-mode is safe mode: no load, and the tab remembers it', async () => {

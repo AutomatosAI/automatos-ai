@@ -22,14 +22,18 @@
  * theme in this browser; the third within ten minutes sends the member back to Studio: the
  * server's choice (PUT /api/themes/choice), the style cookie, this document's style, and a notice
  * of its own that stays after the host turns off. The /safe-mode page is safe mode too: it loads
- * no theme code, and turns safe mode on for the rest of the tab.
+ * no theme code, and turns safe mode on for the rest of the tab. Safe mode also takes the theme's
+ * first paint (the root layout's boot: its classes and prepaint variables) off <html>, so what
+ * shows is Studio's look, not only Studio's code.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { useUiStyleOptional, type UiStyleContextValue } from '@/contexts/ui-style-context'
 import { apiClient } from '@/lib/api-client'
 import { writeCookie } from '@/lib/cookies'
+import { THEME_BOOT_ELEMENT_ID } from '@/lib/theme-host/boot'
 import {
+  HTML_CLASS_PATTERN,
   SAFE_MODE_PARAM,
   SAFE_MODE_VALUE,
   THEME_HOST_REASON_ATTR,
@@ -46,7 +50,13 @@ import {
 import { isInstalledThemeStyle } from '@/lib/theme-host/registry'
 import { isSafeModeRequested, safeSessionStorage } from '@/lib/theme-host/safe-mode'
 import type { ThemeFailureReason, ThemeHostStatus, ThemeLoadOk, ThemeLoadResult } from '@/lib/theme-host/types'
-import { UI_STYLE_COOKIE, UI_STYLE_COOKIE_MAX_AGE_S, type UiStyle } from '@/lib/ui-style'
+import {
+  STYLE_HTML_CLASS_NAMES,
+  styleHtmlClasses,
+  UI_STYLE_COOKIE,
+  UI_STYLE_COOKIE_MAX_AGE_S,
+  type UiStyle,
+} from '@/lib/ui-style'
 import { ThemeHostContext, type ThemeHostContextValue } from './theme-host-context'
 
 interface HostState {
@@ -109,6 +119,61 @@ export const SAFE_MODE_PATH = '/safe-mode'
 /** The query that asks for safe mode (PRD-261 §6), as the /safe-mode page asks for it. */
 export const SAFE_MODE_QUERY = `?${SAFE_MODE_PARAM}=${SAFE_MODE_VALUE}`
 
+/**
+ * Safe mode shows Studio, so it takes the installed theme's first paint off <html>: the root
+ * layout's boot (THEME_BOOT_SCRIPT) has already put the theme's classes and its prepaint
+ * variables there before any page code runs. Studio's classes go on, every other style's class
+ * and the boot's own classes come off, and so does every custom property on <html>'s inline
+ * style: in safe mode nothing else writes one there (no theme look runs, and the Play look
+ * document runs only under Play).
+ */
+export const SAFE_MODE_ADD_CLASSES: readonly string[] = styleHtmlClasses(REVERT_STYLE)
+export const SAFE_MODE_REMOVE_CLASSES: readonly string[] = STYLE_HTML_CLASS_NAMES.filter(
+  (name) => !SAFE_MODE_ADD_CLASSES.includes(name),
+)
+/** The id of the /safe-mode page's script; its data attributes carry the two lists above. */
+export const SAFE_MODE_UNPAINT_ID = 'automatos-safe-mode-unpaint'
+
+/**
+ * The same as unpaintThemeBoot, as the one constant script /safe-mode puts first in its HTML, so
+ * the page's first paint is Studio's. It is never built from data: the lists come from its own
+ * element's data attributes and the boot's JSON element, every class is checked as the boot
+ * checks it, and it writes with classList and style.removeProperty only.
+ */
+export const SAFE_MODE_UNPAINT_SCRIPT = `(function(){
+var d=document.documentElement,C=/${HTML_CLASS_PATTERN.source}/,e=document.getElementById("${SAFE_MODE_UNPAINT_ID}"),b=null;
+try{var j=document.getElementById("${THEME_BOOT_ELEMENT_ID}");b=j?JSON.parse(j.textContent||"null"):null;}catch(x){b=null;}
+function list(n){var v=e?e.getAttribute(n):null;return v?v.split(" "):[];}
+var add=list("data-add"),drop=list("data-remove").concat(b!==null&&typeof b==="object"&&Array.isArray(b.addClasses)?b.addClasses:[]);
+for(var i=0;i<drop.length;i++){if(typeof drop[i]==="string"&&C.test(drop[i])&&add.indexOf(drop[i])<0){d.classList.remove(drop[i]);}}
+for(var k=0;k<add.length;k++){if(C.test(add[k])){d.classList.add(add[k]);}}
+var s=d.style,n=[];for(var m=0;m<s.length;m++){if(s[m].indexOf("--")===0){n.push(s[m]);}}
+for(var p=0;p<n.length;p++){s.removeProperty(n[p]);}
+})();`
+
+/** The classes the root layout's boot put on <html>, read from its JSON element; none if unreadable. */
+function bootAddedClasses(): string[] {
+  try {
+    const boot: unknown = JSON.parse(document.getElementById(THEME_BOOT_ELEMENT_ID)?.textContent || 'null')
+    const added = boot !== null && typeof boot === 'object' ? (boot as { addClasses?: unknown }).addClasses : null
+    return Array.isArray(added) ? added.filter((name): name is string => typeof name === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** Takes the installed theme's first paint off <html> and puts Studio's on (see SAFE_MODE_ADD_CLASSES). */
+export function unpaintThemeBoot(): void {
+  const root = document.documentElement
+  const drop = [...SAFE_MODE_REMOVE_CLASSES, ...bootAddedClasses()]
+  drop
+    .filter((name) => HTML_CLASS_PATTERN.test(name) && !SAFE_MODE_ADD_CLASSES.includes(name))
+    .forEach((name) => root.classList.remove(name))
+  SAFE_MODE_ADD_CLASSES.forEach((name) => root.classList.add(name))
+  const custom = Array.from(root.style).filter((name) => name.startsWith('--'))
+  custom.forEach((name) => root.style.removeProperty(name))
+}
+
 /** Turns safe mode on for this tab, as `?safe_mode=themes` does; the /safe-mode page calls it. */
 export function requestSafeModeForThisTab(): void {
   isSafeModeRequested(SAFE_MODE_QUERY, safeSessionStorage())
@@ -154,6 +219,7 @@ function useThemeLoad(themeStyle: UiStyle | null) {
       return undefined
     }
     if (isSafeModeHere()) {
+      unpaintThemeBoot()
       setState({ status: 'safe-mode', reason: null, active: null, style: themeStyle })
       return undefined
     }
