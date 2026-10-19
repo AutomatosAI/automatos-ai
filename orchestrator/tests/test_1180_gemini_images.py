@@ -86,6 +86,16 @@ def test_an_image_gemini_cant_take_or_only_has_a_url_for_is_left_out_and_logged(
     assert "'image/gif' has no Gemini form" in caplog.text and "given only by URL" in caplog.text
 
 
+@pytest.mark.parametrize("url", [
+    f"data:IMAGE/PNG;BASE64,{PNG}",                                 # any case
+    f"data:image/png;charset=utf-8;base64,{PNG}",                   # a parameter
+    f"data:image/png;base64,{PNG[:8]}\n{PNG[8:]}",                  # MIME-wrapped base64
+])
+def test_a_data_url_written_another_valid_way_still_reaches_gemini(sent, url):
+    _ask({"type": "image_url", "image_url": {"url": url}})
+    assert _parts(sent[0]) == [("image/png", base64.b64decode(PNG))]
+
+
 def test_a_malformed_image_block_is_left_out_not_a_failed_request(sent):
     _ask({"type": "text", "text": "Here."}, {"type": "image_url", "image_url": "https://files.example/cat.png"},
          {"type": "image", "source": "not-a-mapping"})
