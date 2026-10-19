@@ -157,11 +157,14 @@ FROM base as development
 #
 # The user and the directories the app writes, owned by it (no -R: they are empty), so
 # a fresh backend_logs or backend_data named volume mounted on one starts writable
-# (PRD-209: the credential key lives in /app/data). The production stage's first RUN,
-# word for word, so the two stages share the layer.
+# (PRD-209: the credential key lives in /app/data). /workspaces too (PRD-262 US-040): a
+# fresh automatos_workspaces_data volume takes the owner of the directory it is first
+# mounted on, so it is uid 1000 whether the backend or the workspace worker mounts it
+# first. The core stack (docker-compose.core.yml) starts the backend without the worker.
+# The production stage's first RUN, word for word, so the two stages share the layer.
 RUN useradd -m -u 1000 automatos && \
-    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
-    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
+    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces && \
+    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces
 
 # The wait-migrate-seed entrypoint. It runs the lifecycle only for `migrate` or
 # AUTOMATOS_MIGRATE_ON_BOOT=true (compose sets it); otherwise it runs the CMD
@@ -211,10 +214,12 @@ FROM base as production
 # mounted on one starts writable (PRD-209: the credential key lives in /app/data).
 # The code arrives already owned by the user (the last COPY below), so no
 # `chown -R /app` layer stores every file a second time (PRD-262 US-016).
-# useradd gives the automatos group the user's id, 1000.
+# useradd gives the automatos group the user's id, 1000. /workspaces is the mount point
+# of the workspaces volume: owned by 1000 here, a fresh volume is the user's whichever
+# service mounts it first (PRD-262 US-040, as in the development stage).
 RUN useradd -m -u 1000 automatos && \
-    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data && \
-    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data
+    mkdir -p /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces && \
+    chown automatos:automatos /app /app/logs /app/vector_stores /app/projects /app/exports /app/data /workspaces
 
 # The stdlib's bytecode, compiled once as root (PRD-262 US-014): the python base
 # ships none, and the automatos user can't write to /usr/local, so without it

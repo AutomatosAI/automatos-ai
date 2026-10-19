@@ -35,6 +35,11 @@ the official tag found) and make up says why. A non-default ``API_PORT`` or
 ``MINIO_PORT`` whose ``NEXT_PUBLIC_*`` values still point at the default port stops
 here as a misconfiguration: the web app would call a port nothing listens on.
 
+The core stack (``make up CORE=1``, PRD-262 US-040) runs five containers without the
+workspace worker: ``COMPOSE_FILE`` names ``docker-compose.core.yml``, which puts the
+worker behind its ``workspace`` profile. make up then picks the tag by the same rule but
+pulls, re-tags and builds only the backend's and the frontend's images.
+
 ``build`` (make build) only picks and records ``local-<sha7>`` (or a pinned
 ``local-*`` tag); the Makefile runs the build. ``tree-tag`` and ``published`` are what
 images.yml's merge job runs to push ``tree-<12>`` once per tree.
@@ -52,7 +57,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, FrozenSet, List, Mapping, NamedTuple, Optional, Protocol, Sequence, Tuple
 
@@ -92,6 +97,12 @@ APP_IMAGES = (
 )
 SERVICES = tuple(app.service for app in APP_IMAGES)
 FRONTEND = "frontend"
+WORKER = "workspace-worker"
+# The core stack's override (PRD-262 US-040), the profile it puts the worker behind, and
+# compose's name for every profile.
+CORE_OVERRIDE = "docker-compose.core.yml"
+WORKER_PROFILE = "workspace"
+ALL_PROFILES = "*"
 
 # images.yml's frontend build args: the values the published web app was built with.
 # An unset or empty value in .env is compose's default, which is the same.
@@ -137,6 +148,7 @@ class Plan:
     pull: bool = False  # `docker compose pull` the three: edge, which compose never re-pulls
     retag: Tuple[Tuple[str, str], ...] = ()  # (service, the published ref it is re-tagged from)
     build: Tuple[Tuple[str, str], ...] = ()  # (service, why it is built here)
+    services: Tuple[str, ...] = SERVICES  # the app services the stack runs; the rest are left alone
 
 
 class Lookup(Protocol):
@@ -306,9 +318,36 @@ def read_dotenv(text: str) -> Dict[str, str]:
     return values
 
 
+def compose_setting(key: str, dotenv: Mapping[str, str], environ: Mapping[str, str]) -> str:
+    """A variable as compose reads it: the shell's value wins over .env's."""
+    return environ[key] if key in environ else dotenv.get(key, "")
+
+
 def settings(dotenv: Mapping[str, str], environ: Mapping[str, str]) -> Dict[str, str]:
     """The frontend build args and ports compose will use: the shell's value wins over .env's."""
-    return {key: environ[key] if key in environ else dotenv.get(key, "") for key in SETTING_KEYS}
+    return {key: compose_setting(key, dotenv, environ) for key in SETTING_KEYS}
+
+
+def stack_services(dotenv: Mapping[str, str], environ: Mapping[str, str]) -> Tuple[str, ...]:
+    """The app services compose runs here (PRD-262 US-040).
+
+    All three, unless COMPOSE_FILE names docker-compose.core.yml (make up CORE=1 sets it):
+    that override puts the worker behind the ``workspace`` profile, which COMPOSE_PROFILES
+    can still turn on. COMPOSE_FILE is split as compose splits it.
+    """
+    separator = compose_setting("COMPOSE_PATH_SEPARATOR", dotenv, environ) or os.pathsep
+    files = {Path(part.strip()).name for part in compose_setting("COMPOSE_FILE", dotenv, environ).split(separator)}
+    profiles = {part.strip() for part in compose_setting("COMPOSE_PROFILES", dotenv, environ).split(",")}
+    if CORE_OVERRIDE not in files or profiles & {WORKER_PROFILE, ALL_PROFILES}:
+        return SERVICES
+    return tuple(service for service in SERVICES if service != WORKER)
+
+
+def only(plan: Plan, services: Sequence[str]) -> Plan:
+    """``plan`` for the app services the stack runs: the others' images are neither pulled, re-tagged nor built."""
+    keep = tuple(service for service in SERVICES if service in services)
+    return replace(plan, services=keep, retag=tuple(step for step in plan.retag if step[0] in keep),
+                   build=tuple(step for step in plan.build if step[0] in keep))
 
 
 def frontend_reasons(values: Mapping[str, str]) -> List[str]:
@@ -484,19 +523,21 @@ def describe(plan: Plan) -> List[str]:
     """What make up prints: the tag and why, then what it pulls, re-tags and builds."""
     lines = [f"make up: {TAG_KEY}={plan.tag} ({plan.reason})"]
     if plan.pull:
-        lines.append(f"  pulling {', '.join(SERVICES)} at {plan.tag}")
+        lines.append(f"  pulling {', '.join(plan.services)} at {plan.tag}")
     lines += [f"  {service}: {source}, re-tagged {plan.tag}" for service, source in plan.retag]
     lines += [f"  {service}: built here, because {why}" for service, why in plan.build]
+    lines += [f"  {service}: not run ({CORE_OVERRIDE}), so its image is left alone"
+              for service in SERVICES if service not in plan.services]
     if not plan.build:
         lines.append("  nothing is built")
     return lines
 
 
 def _pull_all(plan: Plan, docker: Docker, env: Mapping[str, str]) -> None:
-    """``docker compose pull`` the three; a failed pull is fine only when all three are here."""
-    if docker.run("compose", "pull", *SERVICES, env=env) == 0:
+    """``docker compose pull`` the stack's app images; a failed pull is fine only when all are here."""
+    if docker.run("compose", "pull", *plan.services, env=env) == 0:
         return
-    if all(docker.local(image_ref(app, plan.tag)) for app in APP_IMAGES):
+    if all(docker.local(image_ref(app_for(service), plan.tag)) for service in plan.services):
         print(f"warning: could not pull {plan.tag}; starting the {plan.tag} images this machine already has",
               file=sys.stderr)
         return
@@ -515,10 +556,15 @@ def execute(plan: Plan, docker: Docker, env: Mapping[str, str]) -> None:
         docker.check("compose", "build", *[service for service, _ in plan.build], env=env)
 
 
-def _settings(root: Path) -> Dict[str, str]:
-    """The checkout's frontend settings; a misconfigured port stops here."""
+def _dotenv(root: Path) -> Dict[str, str]:
+    """The checkout's .env, as compose reads it; none is empty."""
     env_file = root / ENV_FILE
-    values = settings(read_dotenv(env_file.read_text(encoding="utf-8") if env_file.exists() else ""), os.environ)
+    return read_dotenv(env_file.read_text(encoding="utf-8") if env_file.exists() else "")
+
+
+def _settings(dotenv: Mapping[str, str]) -> Dict[str, str]:
+    """The checkout's frontend settings; a misconfigured port stops here."""
+    values = settings(dotenv, os.environ)
     problems = misconfigurations(values)
     if problems:
         raise Stop("; ".join(problems))
@@ -528,11 +574,13 @@ def _settings(root: Path) -> Dict[str, str]:
 def cmd_up(args: argparse.Namespace) -> int:
     """make up: pick the tag, get the images, write the tag to .env."""
     root = args.root
-    values = _settings(root)
+    dotenv = _dotenv(root)
+    values = _settings(dotenv)
     pinned = pinned_tag(os.environ)
     print("make up: picking the app images' tag (this checkout, this machine and ghcr.io)...")
     docker = Docker()
     plan = plan_up(pinned, read_checkout(root), frontend_reasons(values), Images(docker, Registry()))
+    plan = only(plan, stack_services(dotenv, os.environ))
     for line in describe(plan):
         print(line)
     execute(plan, docker, {**os.environ, TAG_KEY: plan.tag})
@@ -543,7 +591,7 @@ def cmd_up(args: argparse.Namespace) -> int:
 
 def cmd_build(args: argparse.Namespace) -> int:
     """make build: pick the local-* tag and write it to .env; the Makefile builds."""
-    _settings(args.root)
+    _settings(_dotenv(args.root))
     tag = plan_build(pinned_tag(os.environ), read_checkout(args.root))
     write_tag(args.root / ENV_FILE, tag)
     print(f"make build: building backend, frontend and workspace-worker from this checkout as {TAG_KEY}={tag} "

@@ -59,6 +59,13 @@
 #   - All: Add --profile all (adminer, the database GUI)
 #   - Media: Add --profile media (media-render, the Socials video/image renderer;
 #     PRD-251 D3). Without it, rendering a post says it needs the media profile.
+#   - Core, five containers (PRD-262 US-040): `make up CORE=1`, or
+#     docker compose -f docker-compose.yml -f docker-compose.core.yml up -d
+#     The override puts the workspace-worker behind a `workspace` profile, so
+#     postgres, redis, minio, backend and frontend run without it. Agents' workspace
+#     tools, the Deliverables file browser and Code Canvas then answer "Workspace
+#     worker not running". The default stays six containers, the worker included,
+#     for every .env old or new: no key turns the worker off.
 # =============================================================================
 
 services:
@@ -221,9 +228,14 @@ services:
       minio:
         condition: service_healthy
       # F220: the worker mounts workspaces_data first, so a fresh volume takes the
-      # worker image's /workspaces ownership (uid 1000), never root's.
+      # worker image's /workspaces ownership (uid 1000), never root's; the backend
+      # image's /workspaces is uid 1000 too, for a stack without the worker (PRD-262
+      # US-040). required: false lets docker-compose.core.yml (make up CORE=1) leave the
+      # worker out: the backend then starts without it and its workspace calls answer
+      # "Workspace worker not running".
       workspace-worker:
         condition: service_started
+        required: false
     # Local-edition topology + edition defaults (AUTH_EDITION=local,
     # DEFAULT_WORKSPACE_ID, MinIO/mem0/qdrant wiring). NO secrets — those stay in
     # `environment:` below as `:?`-required. `environment:` overrides env_file, so

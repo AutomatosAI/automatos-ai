@@ -19,6 +19,11 @@
 #                not published, and writes the tag to .env (AUTOMATOS_IMAGE_TAG)
 #                so plain docker compose runs the same images. Pin a tag with
 #                AUTOMATOS_IMAGE_TAG=sha-xxxxxxx make up (edge follows edge).
+#   make up CORE=1
+#                the core five: postgres, redis, minio, backend and frontend, without
+#                the workspace worker or its image (docker-compose.core.yml, PRD-262
+#                US-040). A worker an earlier make up started is stopped and removed;
+#                its files stay. make up without CORE=1 brings it back.
 #   make build   build the three app images from your checkout instead, as the
 #                production stages CI publishes, under a local-<sha7> tag. postgres,
 #                redis and minio start first, so they come up while the images build
@@ -64,6 +69,24 @@ export AUTOMATOS_REVISION
 ifeq ($(strip $(AUTOMATOS_IMAGE_TAG)),)
 unexport AUTOMATOS_IMAGE_TAG
 endif
+
+# CORE=1: the core stack, five containers without the workspace worker (PRD-262
+# US-040). Every docker compose command then reads docker-compose.core.yml on top of
+# docker-compose.yml, through COMPOSE_FILE: make's own, and the ones make up runs through
+# scripts/stack_images.py, which reads COMPOSE_FILE to leave the worker's image alone.
+# make dev names its files with -f, so it always runs all six.
+CORE_COMPOSE_FILE := docker-compose.yml:docker-compose.core.yml
+ifeq ($(CORE),1)
+export COMPOSE_FILE := $(CORE_COMPOSE_FILE)
+endif
+
+# Under the core override compose leaves alone a worker that an earlier six-container run
+# started, so CORE=1 stops and removes it before the stack starts; its files stay in the
+# automatos_workspaces_data volume. It is named through docker-compose.yml, where the
+# worker has no profile. Without CORE=1 this line is empty.
+define remove_core_worker
+$(if $(filter 1,$(CORE)),@$(COMPOSE) -f docker-compose.yml rm --stop --force workspace-worker)
+endef
 
 # PRD-234 S2: LOCAL_PROJECTS_DIR (root .env) is the owner's projects folder; the
 # default bind source ./workspaces/projects must exist before compose mounts it.
@@ -115,6 +138,7 @@ up:
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
 	@$(STACK_IMAGES) up
+	$(remove_core_worker)
 	$(COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
@@ -134,6 +158,7 @@ build:
 	@$(STACK_IMAGES) build
 	$(COMPOSE) up -d postgres redis minio
 	$(COMPOSE) build backend frontend workspace-worker
+	$(remove_core_worker)
 	$(COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
