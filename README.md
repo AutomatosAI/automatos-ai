@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/8e02444e-f05e-439c-a718-b4032ba7790e
 Automatos is an operating system for AI work. You command a workforce of specialised agents — equipped with skills, tools and knowledge — through one voice, **Auto**, and they produce real **Deliverables**: reports, code, content, analysis. Self-host it with `docker compose up`, bring any model (paid APIs, free hosted open models, or your own Claude Code subscription), and keep your agents, data and Deliverables on infrastructure you control.
 
 ```bash
-git clone https://github.com/AutomatosAI/automatos-ai.git && cd automatos-ai
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git && cd automatos-ai
 make up                # writes .env with three random secrets, then → http://localhost:3000, no login
 ```
 
@@ -190,7 +190,7 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 > **New to Docker, or on Windows?** [SETUP.md](SETUP.md) walks through every step for macOS, Linux and Windows (WSL2), and an AI coding agent can follow it for you: *"Install Automatos by following SETUP.md"*. Prefer nothing to install? The hosted edition opens as a beta in November — [join the waitlist](https://studio.automatos.app/#waitlist).
 
 ```bash
-git clone https://github.com/AutomatosAI/automatos-ai.git
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 make up                 # writes .env with POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY generated, pulls the images
                         # CI published for this commit (about 1.3 GB), then starts the stack

@@ -58,6 +58,8 @@
 #     automatos_workspaces_data, so it survives `docker compose up --build` too
 #     (F220); only `docker compose down -v` removes it.
 #   - All: Add --profile all (adminer, the database GUI)
+#   - Memory: Add --profile memory (qdrant, durable memory; also QDRANT_URL, below)
+#   - Search: Add --profile search (searxng, web search for agents; also SEARXNG_URL)
 #   - Media: Add --profile media (media-render, the Socials video/image renderer;
 #     PRD-251 D3). Without it, rendering a post says it needs the media profile.
 #   - Core, five containers (PRD-262 US-040): `make up CORE=1`, or
@@ -67,6 +69,8 @@
 #     tools, the Deliverables file browser and Code Canvas then answer "Workspace
 #     worker not running". The default stays six containers, the worker included,
 #     for every .env old or new: no key turns the worker off.
+#   docs/getting-started/self-hosting.md §3 lists every service, profile and the core
+#   override; orchestrator/tests/test_prd262_self_host_docs.py holds it to this file.
 # =============================================================================
 
 services:

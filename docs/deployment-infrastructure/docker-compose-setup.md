@@ -250,12 +250,13 @@ Sources: [docker-compose.yml:42,72,102,131,249](), [orchestrator/Dockerfile:108]
 ## Deployment and Setup
 
 ### Prerequisites
-1. Copy `.env.example` to `.env` and set required values (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`) [docker-compose.yml:14-15]().
-2. Ensure Docker and Docker Compose are installed.
+1. Docker Engine 25 or later with Docker Compose 2.24.4 or later (`make up` checks both).
+2. `.env` with the required values (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`): `make up` creates it from `.env.example` and generates the three ([self-hosting.md §2](../getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)).
 
 ### Launch Commands
 
-- **Standard (Core Only)**: `docker compose up --build` [docker-compose.yml:9]().
+- **Standard (six containers)**: `make up`, which pulls the images CI published for the commit and starts the stack; plain `docker compose up -d` runs the tag in `.env` ([self-hosting.md §1b](../getting-started/self-hosting.md#1b-the-commands-behind-make)).
+- **Core (five containers, no workspace worker)**: `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`.
 - **With Qdrant (Memory Profile)**: `docker compose --profile memory up -d` [docker-compose.yml:118]().
 - **Development Mode**: `make dev` (`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`) uses the `development` target in the Dockerfile for hot-reloading, with the source mounted [orchestrator/Dockerfile:91-131]().
 

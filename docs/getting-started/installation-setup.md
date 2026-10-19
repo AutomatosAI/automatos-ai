@@ -41,7 +41,7 @@ Before installing Automatos AI, ensure your host environment satisfies the follo
 - **Docker Engine** (25+) and **Docker Compose** (2.24.4+): the compose file's healthchecks use `start_interval`, which Compose refuses on an older engine
 - **Git** for repository cloning
 - **Minimum 8GB RAM** (16GB recommended for running local workers, MinIO, and Qdrant)
-- **10GB free disk space** for persistent volumes and container images
+- **Disk** for the images (the first `make up` downloads about 1.33 GB on amd64, measured 16 Oct 2026, and Docker unpacks them to more) and your data volumes; [self-hosting.md §1](self-hosting.md#1-prerequisites) has the breakdown
 - **Port Availability**: `3000` (frontend), `8000` (backend), `5432` (PostgreSQL), `6379` (Redis), `9000`/`9001` (MinIO)
 
 Sources for service ports: [docker-compose.yml:41-129](../../docker-compose.yml#L41-L129), [docker-compose.yml:293-370](../../docker-compose.yml#L293-L370)
@@ -52,30 +52,17 @@ Sources for service ports: [docker-compose.yml:41-129](../../docker-compose.yml#
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/AutomatosAI/automatos-ai.git
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 ```
 
-### 2. Configure Environment Variables
-Copy the template environment file to the project root:
+### 2. Start Services
 ```bash
-cp .env.example .env
+make up
 ```
-Ensure required variables are populated in `.env`:
-- `POSTGRES_PASSWORD`: PostgreSQL root password [docker-compose.yml:48](../../docker-compose.yml#L48)
-- `REDIS_PASSWORD`: Redis authentication token [docker-compose.yml:74](../../docker-compose.yml#L74)
-- `API_KEY`: Backend API access token [.env.example:28](../../.env.example#L28)
+`make up` creates `.env` from `.env.example` and fills `POSTGRES_PASSWORD`, `REDIS_PASSWORD` and `API_KEY` with random values before the first start, pulls the images CI published for your commit (`ghcr.io/automatosai/automatos-api`, `-frontend`, `-workspace-worker`) and starts the stack. `make up CORE=1` runs it without the workspace worker. Without `make`, [self-hosting.md §1b](self-hosting.md#1b-the-commands-behind-make) gives the commands. Access the web frontend at `http://localhost:3000`.
 
-Sources: [docker-compose.yml:4-16](../../docker-compose.yml#L4-L16), [.env.example:1-30](../../.env.example#L1-L30)
-
-### 3. Start Services
-Launch the core stack using Docker Compose:
-```bash
-docker compose up --build -d
-```
-Access the web frontend at `http://localhost:3000`.
-
-Sources: [docker-compose.yml:4-16](../../docker-compose.yml#L4-L16), [docker-compose.yml:329-370](../../docker-compose.yml#L329-L370)
+Sources: [Makefile](../../Makefile), [scripts/stack_env.sh](../../scripts/stack_env.sh), [scripts/stack_images.py](../../scripts/stack_images.py)
 
 ---
 
@@ -90,14 +77,17 @@ graph TB
     subgraph "Data Persistence"
         pg["postgres<br/>(\"pgvector/pgvector:pg16\")"]
         rd["redis<br/>(\"redis:7-alpine\")"]
-        mi["minio<br/>(\"cgr.dev/chainguard/minio:latest\")"]
+        mo["minio-volume-owner<br/>(one-shot, \"redis:7-alpine\")"]
+        mi["minio<br/>(\"cgr.dev/chainguard/minio:latest\", uid 65532)"]
     end
     
     subgraph "Application Services"
-        be["backend<br/>(\"orchestrator/Dockerfile\")"]
-        fe["frontend<br/>(\"frontend/Dockerfile\")"]
-        wk["workspace-worker<br/>(\"services/workspace-worker/Dockerfile\")"]
+        be["backend<br/>(\"ghcr.io/automatosai/automatos-api\")"]
+        fe["frontend<br/>(\"ghcr.io/automatosai/automatos-frontend\")"]
+        wk["workspace-worker<br/>(\"ghcr.io/automatosai/automatos-workspace-worker\", not in make up CORE=1)"]
     end
+
+    mo -->|re-owns a root-owned volume once, then exits| mi
 
     fe -->|HTTP/WS| be
     be -->|SQL/pgvector| pg

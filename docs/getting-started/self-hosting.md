@@ -18,8 +18,8 @@ disagree, the file wins — open an issue.
 | Need | Notes |
 |---|---|
 | Docker Engine 25 or later with Docker Compose 2.24.4 or later: Docker Desktop (macOS / Windows) or Docker Engine (Linux) | Check with `docker version --format '{{.Server.Version}}'` and `docker compose version --short`. The compose file probes each service every second while it starts (healthcheck `start_interval`), which Compose refuses on an engine older than 25, and it uses Compose v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. `make up` checks both versions first and stops, naming this floor, on an older Docker. A Linux distribution's own `docker.io` package can be older: install from Docker's repository (docs.docker.com/engine/install). |
-| Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
-| Git | to clone and to pull updates. |
+| Disk | The first `make up` downloads about 1.33 GB of images on amd64 and 1.28 GB on arm64, compressed: the API 521 MB, the workspace worker 507 MB and the web app 94 MB (CI's measurement, 16 Oct 2026), Postgres 159 MB, MinIO 64 MB and Redis 16 MB (the digests `docker-compose.yml` pins), less about 30 MB of base layers the API and the worker share. Docker unpacks what it downloads, so the images take more disk than that; `make status` shows the figure on your machine. `make up CORE=1` leaves out the worker and its image (§1b). Your data volumes come on top and grow with use. |
+| Git | to clone and to pull updates. `git clone --depth 1` fetches only the current commit, under 80 MB, where the full history is about 700 MB; `git pull` updates a shallow clone as usual, and `git fetch --unshallow` fetches the history if you ever want it. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
 | Windows | The stack runs under Docker Desktop. `make` is not installed on Windows: §1b lists the commands behind every `make` target. The smooth path is everything inside WSL2: §1a has the recipe, and [SETUP.md](../../SETUP.md) walks through it step by step. Session mode runs inside WSL2, or natively on Windows 10 1809 or later (§1a). |
 
@@ -106,7 +106,7 @@ Desktop (the *Docker Desktop, native Windows* row in the table below).
    this distro works too. With Docker Engine inside the distro, the containers
    stop whenever the distro stops (step 7).
 4. **Clone inside the distro,** in your Linux home: `cd ~` and then
-   `git clone https://github.com/AutomatosAI/automatos-ai.git`. Not under
+   `git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git`. Not under
    `/mnt/c`: file access across the Windows drive is slow, and session file
    paths stop lining up with Deliverables → Explorer.
 5. **Create `.env`** with the three secrets (§2), then set the paths and ports
@@ -390,7 +390,7 @@ password it was created with; it never changes any other value, nor one you
 export in the shell. So the whole install is:
 
 ```bash
-git clone https://github.com/AutomatosAI/automatos-ai.git
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 make up
 ```
@@ -454,40 +454,55 @@ marketplace skill you can enable per agent; re-import later to pick up updates.
 
 ## 3. What runs where
 
-`docker compose up` starts the default profile. Nothing in it needs the
-internet after the images are pulled, except the LLM provider you chose (and
-Composio, if you add a key).
+`make up` and plain `docker compose up` start the default stack: six
+long-running containers, and `minio-volume-owner`, a one-shot that runs before
+MinIO and exits. Nothing in it needs the internet after the images are pulled,
+except the LLM provider you chose (and Composio, if you add a key).
 
 | Service | Container | Image / build | Host port (variable) | What it does |
 |---|---|---|---|---|
 | `postgres` | `automatos_postgres` | `pgvector/pgvector:pg16` | 5432 (`POSTGRES_PORT`) | Relational data and the pgvector chunk store the local RAG leg searches (`S3_VECTORS_ENABLED=false`). |
 | `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
-| `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. |
-| `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and exits. |
+| `minio-volume-owner` | `automatos_minio_volume_owner` | `redis:7-alpine`, the same image as `redis` | none, and no network | One-shot, before MinIO starts: when root owns MinIO's volume, as on an install made while MinIO still ran as root, it re-owns the volume to uid 65532 once, says so in its log and exits; otherwise it exits at once. It runs as root with only the capabilities `chown` needs. MinIO starts only after it succeeds. |
+| `minio` | `automatos_minio` | `cgr.dev/chainguard/minio` (Chainguard's maintained MinIO build) | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. Runs as the image's own user, uid 65532, never root. The backend creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and the others the first time it uses them. |
 | `backend` | `automatos_backend` | `ghcr.io/automatosai/automatos-api`, pulled: CI's build of `./orchestrator` (`production` target); `make build` builds it here | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
 | `frontend` | `automatos_frontend` | `ghcr.io/automatosai/automatos-frontend`, pulled: CI's build of `./frontend` (`production` target); built here when `.env` changes its `NEXT_PUBLIC_*` values (§1b) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
 | `workspace-worker` | `automatos_workspace_worker` | `ghcr.io/automatosai/automatos-workspace-worker`, pulled: CI's build of `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
 
-`docker compose --profile all up` adds one more:
+**The core stack.** An override file runs the default stack without the
+workspace worker, five containers instead of six (§1b, §5):
 
-| Service | Host port (variable) | What it does |
-|---|---|---|
-| `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
+| Override | Command | Leaves out | Profile that brings it back |
+|---|---|---|---|
+| `docker-compose.core.yml` | `make up CORE=1`, or `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d` | `workspace-worker` | `workspace`: name the service with the same two files (`... up -d workspace-worker`), or run `make up` without `CORE=1` |
 
-`docker compose --profile media up -d media-render` adds the Socials renderer:
+**Optional profiles.** Each profile adds its services to the default stack:
+`docker compose --profile <profile> up -d`, or name the service, as below. All
+but `media` pull a published image.
 
-| Service | Host port | What it does |
-|---|---|---|
-| `media-render` | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG. See [Media rendering](#7b-media-rendering-the-media-profile). |
+| Profile | Service | Container | Image / build | Host port (variable) | What it does |
+|---|---|---|---|---|---|
+| `all` | `adminer` | `automatos_adminer` | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI, pre-pointed at `postgres`. |
+| `memory` | `qdrant` | `automatos_qdrant` | `qdrant/qdrant` | 6333 (`QDRANT_PORT`) | Durable and field memory. Also set `QDRANT_URL=http://qdrant:6333` in `envs/api.local`; without it the backend keeps memory off (§9). |
+| `search` | `searxng` | `automatos_searxng` | `searxng/searxng` | 8888 (`SEARXNG_PORT`) | Web search for agents, with no key. Also set `SEARXNG_URL=http://searxng:8080` in `.env` ([§7a](#7a-web-access-for-agents-prd-240)). |
+| `media` | `media-render` | `automatos_media_render` | built here from `./services/media-render`; nothing publishes it | none — port 8090 stays inside the compose network | Renders a Socials post (a template, your brand kit, the Kokoro voice and the music) into an MP4 or PNG: `docker compose --profile media up -d media-render`, which builds it the first time. See [Media rendering](#7b-media-rendering-the-media-profile). |
+
+Every third-party image above is pinned by digest in `docker-compose.yml`, and
+Dependabot moves the pins once a week. The CI test
+`orchestrator/tests/test_prd262_self_host_docs.py` holds these three tables to
+`docker compose config --services`, profile by profile and with the core
+override.
 
 Named volumes: `automatos_postgres_data`, `automatos_redis_data`,
 `automatos_minio_data`, `automatos_backend_logs`, `automatos_workspaces_data`,
 and `backend_data`, which holds the auto-generated credential-encryption key
-(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`). Your workspace's directory is a
-**bind mount** of a host folder, not a volume (§5). `automatos_workspaces_data`
-holds the files of every other workspace on the stack (a second or a test
-workspace), so they survive `docker compose up --build`; `make reset` removes
-it with the rest.
+(`CREDENTIAL_KEY_FILE` in `envs/api.defaults`), uploaded documents and the local
+copy of generated documents (object storage keeps theirs). The `memory` profile
+adds `automatos_qdrant_data`, the `search` profile `searxng_cache`. Your
+workspace's directory is a **bind mount** of a host folder, not a volume (§5).
+`automatos_workspaces_data` holds the files of every other workspace on the
+stack (a second or a test workspace), so they survive recreating the
+containers; `make reset` removes it with the rest.
 
 ### Where configuration lives
 
@@ -515,7 +530,9 @@ You should not need to open the last three for a standard install.
    several minutes.
 2. **Data services.** Postgres initialises an empty cluster with
    `POSTGRES_PASSWORD` — this password is baked into the volume at that moment
-   (see §10). MinIO starts and `minio-init` creates the documents bucket.
+   (see §10). `minio-volume-owner` checks MinIO's volume and exits (§3), then
+   MinIO starts; the backend creates the documents bucket the first time it
+   stores a file.
    While a service starts, Docker probes its health every second
    (`start_interval: 1s` in `docker-compose.yml`, Docker Engine 25 or later), so
    a service that waits on another starts within a second or two of it being
@@ -549,6 +566,13 @@ You should not need to open the last three for a standard install.
    about a second after it first answers `/health`, and compose starts the
    frontend about a second after that (CI holds this to 3 s). The check allows
    up to 300 s of start-up for a first boot (F228), then probes every 30 s.
+
+**How long, measured.** On CI's runners on 16 Oct 2026, before the one-second
+probes of step 2, the datastores turned healthy 5.5 to 6.1 s after they started,
+and the backend's first boot on an empty database took 30 to 50 s from its start
+to `/health` 200, 45 s at the median. A laptop can take longer: one Mac took
+147 s (F228), which is why the frontend's wait allows 300 s. The targets are 2 s
+for the datastores and 30 s for the backend's first boot.
 
 Readiness, not liveness, is the signal that it is usable:
 
@@ -765,6 +789,9 @@ docker compose --profile media up -d media-render
 ```
 
 Or add the profile for good: `COMPOSE_PROFILES=media` in `.env`, then `make up` / `docker compose up -d`.
+No registry publishes this image, and `make up` starts the stack with `--no-build`, so
+it never builds it: run the command above once first, and again with `--build` after a
+`git pull` that changes `services/media-render` (§10).
 
 - **Wiring.** The backend already points at it: `SOCIALS_RENDER_URL=http://media-render:8090`
   in `envs/api.defaults`. An optional shared secret, `SOCIALS_RENDER_TOKEN` in `.env`,
@@ -971,6 +998,42 @@ Never update with `down -v`: it deletes the database (§11).
 Changing a value in `.env` or `envs/*` needs the container recreated
 (`docker compose up -d`), not just restarted.
 
+### The first update of an install that built its own images
+
+Before `make up` pulled the published images, it built the three app images from
+your checkout and ran the backend from your source. The first `git pull && make up`
+after that change differs in four ways. Your data stays where it is.
+
+- **`make up` pulls instead of building.** It downloads the images CI published
+  for your commit (§1b; about 1.33 GB the first time, §1) and builds only one CI
+  has not published. The images your checkout built stay on disk under their old
+  names, `<folder>-backend`, `<folder>-frontend` and `<folder>-workspace-worker`,
+  where `<folder>` is the directory you cloned into; with the default name,
+  `docker image rm automatos-ai-backend automatos-ai-frontend automatos-ai-workspace-worker`
+  removes them (`docker image ls` lists them). `make up-images` is gone: `make up`
+  does what it did. `make build` builds from your checkout, as `make up` used to.
+- **The source mount moves to `make dev`.** `make up` and plain `docker compose up`
+  run the code inside the images, so an edit in your checkout changes nothing
+  there; `make dev` runs the development stages with your source mounted and
+  reloading (§13). Generated documents now live on the `backend_data` volume: the
+  files the old backend wrote into `orchestrator/documents` in your checkout are
+  no longer read, and a download falls back to MinIO's copy of a document that
+  is not on the volume.
+- **`.env` gains one line,** `AUTOMATOS_IMAGE_TAG=…`: the tag the last `make up` or
+  `make build` ran, so later plain `docker compose` commands run the same images.
+  `make` owns that line, rewrites it on every run and changes no other value in
+  `.env`. Pin a tag in the shell or on the command line instead (§1b).
+- **MinIO's volume is re-owned, once.** MinIO now runs as uid 65532, not root.
+  On the first start `minio-volume-owner` finds the volume owned by root, changes
+  its owner to 65532, logs
+  `minio-volume-owner: /data was owned by 0:0; re-owned it to 65532:65532`
+  (`docker compose logs minio-volume-owner`) and exits; every later start, it exits
+  at once. Your buckets and objects stay as they were. Plain `docker compose up`
+  does the same, so it needs no `make`.
+
+An `.env` written before the change still runs all six containers; `make up CORE=1`
+runs five (§3).
+
 ## 11. Stopping and resetting
 
 ```bash
@@ -1024,11 +1087,13 @@ the repository root:
 git ls-files --eol orchestrator/docker-entrypoint.sh services/workspace-worker/entrypoint.sh
 ```
 
-If either reports `w/crlf`, change its line-ending setting to LF in your editor
-and save, preserving any local edits. Then run
-`docker compose up -d --build backend workspace-worker`. Rebuilding alone
-cannot repair the backend script: the build copies your checkout's file into
-the image, and `make dev` also mounts it over the image's copy.
+The published images that `make up` pulls carry CI's copies, so this hits only
+images built from your checkout (`make build`, `make dev`). If either reports
+`w/crlf`, change its line-ending setting to LF in your editor and save,
+preserving any local edits. Then run `make build` (or `make dev`) again.
+Rebuilding alone cannot repair the backend script: the build copies your
+checkout's file into the image, and `make dev` also mounts it over the image's
+copy.
 
 **`password authentication failed for user "postgres"` after changing
 `POSTGRES_PASSWORD`.** Postgres applies the password only when it initialises
@@ -1104,10 +1169,11 @@ repository's Apache-2.0 licence with a DCO sign-off — see
 
 ### Keeping it small
 
-Rebuilding leaves the previous image untagged and grows the build cache, and
-Docker keeps both indefinitely — that is what turns 3.7 GB of images into 12 GB
-of disk. `make up`, `make build` and `make dev` clean up after themselves, so
-this stays bounded on its own. To reclaim at any time:
+Rebuilding (`make build`, `make dev`) leaves the previous image untagged and
+grows the build cache, and Docker keeps both until something prunes them, so a
+source-built install grows on disk with every rebuild. `make up`, `make build`
+and `make dev` clean up after themselves, so this stays bounded on its own. To
+reclaim at any time:
 
 ```bash
 make clean     # or: docker image prune -f && docker builder prune -f --filter until=168h

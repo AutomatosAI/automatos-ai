@@ -91,7 +91,7 @@ forwards the ports.
 | Docker is running | `docker info` shows no error | Start Docker Desktop, or `sudo systemctl start docker` |
 | git | `git --version` | macOS: `xcode-select --install` · Linux: your package manager |
 | make | `make --version` | macOS: comes with the Xcode tools · Linux: `sudo apt install make` |
-| ~5 GB free disk | `df -h .` | The images are about 3.7 GB |
+| ~5 GB free disk | `df -h .` | The first `make up` downloads about 1.33 GB of images (amd64, compressed; 1.28 GB on arm64), which Docker unpacks to more; your data comes on top |
 | Free ports 3000, 8000, 5432, 6379, 9000, 9001 | `lsof -i :3000 -i :8000 -i :5432 -i :6379 -i :9000 -i :9001` prints nothing | Pick other ports in step 3 |
 
 On Linux, if `docker info` says *permission denied*, add the user to the `docker`
@@ -101,7 +101,7 @@ group (`sudo usermod -aG docker $USER`), then log out and back in.
 
 ```bash
 cd ~
-git clone https://github.com/AutomatosAI/automatos-ai.git
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 ```
 

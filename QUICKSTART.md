@@ -6,6 +6,11 @@ This is the short path; the full reference (every service, every dial,
 troubleshooting, how the editions relate) is
 [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).
 
+```bash
+git clone --depth 1 https://github.com/AutomatosAI/automatos-ai.git   # the current commit only: under 80 MB, not 700 MB of history
+cd automatos-ai
+```
+
 You need Docker Engine 25 or later with Docker Compose 2.24.4 or later (a
 current Docker Desktop on macOS and Windows); `make up` checks both first and
 stops, naming that floor, on an older Docker.
