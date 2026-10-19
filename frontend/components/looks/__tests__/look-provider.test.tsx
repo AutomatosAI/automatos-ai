@@ -29,6 +29,8 @@ import { blockedStorage, clearRoot, lookNamesLeft, myLook, rootVars } from '@/li
 /** next-themes' storage key in components/providers.tsx: the user's own tone. */
 const TONE_STORAGE_KEY = 'automatos-theme'
 const PROVIDERS = path.resolve(__dirname, '../../providers.tsx')
+/** PRD-261 A-13c: the host component that mounts this provider (components/providers.tsx mounts it). */
+const LOOK_RUNTIME = path.resolve(__dirname, '../../theme-host/theme-look-runtime.tsx')
 /** No AccountLookScope above the provider here, so the looks are kept under the default scope (F5). */
 const KEYS = lookKeys(DEFAULT_LOOK_SCOPE)
 
@@ -210,27 +212,37 @@ describe('LookProvider — the tone follows the ground (K4)', () => {
     await waitFor(() => expect(htmlTone()).toBe('light'))
   })
 
-  it('is wired the same way in components/providers.tsx', () => {
+  // PRD-261 A-13c moved the mount: components/providers.tsx mounts ThemeLookRuntime with the same tone
+  // setter, and ThemeLookRuntime mounts this provider (at every width) while the theme declares looks.
+  // These two pin the same wiring through both files; theme-look-runtime.test.tsx renders it.
+  it('is wired the same way in components/providers.tsx, through the host look runtime', () => {
     const src = readFileSync(PROVIDERS, 'utf8')
+    const runtime = readFileSync(LOOK_RUNTIME, 'utf8')
     // At every width, as this file's harness renders it: the look paints below 1024 px too (K4, P260-SEAM).
     expect(src).toContain('forcedTheme={playTone}')
-    expect(src).toContain('<LookProvider onToneChange={setPlayTone}>')
+    expect(src).toContain('<ThemeLookRuntime onToneChange={setPlayTone}>')
     expect(src).toContain('useState<ThemeTone | undefined>(initialTone)')
+    expect(runtime).toContain('<LookProvider onToneChange={onToneChange}>')
   })
 
   it('reads the account inside the WorkspaceProvider in components/providers.tsx (F5)', () => {
-    const src = readFileSync(PROVIDERS, 'utf8')
-    const order = [
+    const inOrder = (src: string, order: readonly string[]) => {
+      const at = order.map((tag) => src.indexOf(tag))
+      expect(at.every((index) => index >= 0), order.join(' ')).toBe(true)
+      expect([...at].sort((a, b) => a - b)).toEqual(at)
+    }
+    inOrder(readFileSync(PROVIDERS, 'utf8'), [
       '<WorkspaceProvider>',
+      '<ThemeLookRuntime onToneChange={setPlayTone}>',
+      '</ThemeLookRuntime>',
+      '</WorkspaceProvider>',
+    ])
+    inOrder(readFileSync(LOOK_RUNTIME, 'utf8'), [
       '<AccountLookScope>',
-      '<LookProvider onToneChange={setPlayTone}>',
+      '<LookProvider onToneChange={onToneChange}>',
       '</LookProvider>',
       '</AccountLookScope>',
-      '</WorkspaceProvider>',
-    ]
-    const at = order.map((tag) => src.indexOf(tag))
-    expect(at.every((index) => index >= 0)).toBe(true)
-    expect([...at].sort((a, b) => a - b)).toEqual(at)
+    ])
   })
 })
 
