@@ -156,17 +156,18 @@ def test_the_in_image_check_looks_for_exactly_what_the_trim_deletes():
 NODE_STRIPPED_STAGE = (
     "# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile\n"
     "# and services/media-render/Dockerfile, so the two images share one node layer on a host.\n"
-    "# strip renames its output into /usr/local/bin, which stamps the directory with the build\n"
-    "# time, and COPY --link keeps that time in the layer: the directory takes the binary's\n"
-    "# upstream time back, or every build makes a different node layer.\n"
+    "# The binary goes into the /node-layer tree, every directory of it at the binary's upstream\n"
+    "# time, and the images copy that tree to /. A COPY of the file alone stamps /usr/local/bin\n"
+    "# with the time of the build, so each build made a different layer.\n"
     "FROM node AS node-stripped\n"
     "RUN apt-get update \\\n"
     " && apt-get install -y --no-install-recommends binutils \\\n"
-    " && strip --strip-unneeded --preserve-dates /usr/local/bin/node \\\n"
-    " && touch -r /usr/local/bin/node /usr/local/bin \\\n"
+    " && mkdir -p /node-layer/usr/local/bin \\\n"
+    " && strip --strip-unneeded --preserve-dates -o /node-layer/usr/local/bin/node /usr/local/bin/node \\\n"
+    " && touch -r /usr/local/bin/node /node-layer/usr/local/bin /node-layer/usr/local /node-layer/usr /node-layer \\\n"
     " && rm -rf /var/lib/apt/lists/*\n"
 )
-NODE_COPY = "COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node"
+NODE_COPY = "COPY --link --from=node-stripped /node-layer/ /"
 NODE_DOCKERFILES = ("services/workspace-worker/Dockerfile", "services/media-render/Dockerfile")
 
 
@@ -195,7 +196,10 @@ def test_every_dockerfile_with_the_stage_carries_it_byte_for_byte():
 def test_the_worker_copies_node_first_with_link_and_only_from_the_stripped_stage():
     production = _stage_lines("production")
     assert production[0].startswith("FROM python:3.12-slim@sha256:") and production[1] == NODE_COPY
-    assert [line for line in INSTRUCTIONS if "/usr/local/bin/node " in line and line.startswith("COPY")] == [NODE_COPY]
+    # The one COPY that brings the binary, by its path or from the stage's /node-layer tree.
+    node_copies = [line for line in INSTRUCTIONS
+                   if line.startswith("COPY") and ("/usr/local/bin/node " in line or "--from=node-stripped " in line)]
+    assert node_copies == [NODE_COPY]
     assert INSTRUCTIONS[-1] == "CMD []" and production[-1] == "CMD []", "production stays the last stage"
 
 

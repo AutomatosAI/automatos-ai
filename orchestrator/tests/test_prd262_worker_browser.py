@@ -87,7 +87,7 @@ def test_the_headless_shell_runs_on_the_image_node():
     assert env and env.group(1) == "/usr/local/bin/node"
     assert _index(lambda line: line.startswith("ENV") and "PLAYWRIGHT_NODEJS_PATH" in line) < BROWSER_AT
     # PRD-262 (row 21): the binary is the node-stripped stage's (test_prd262_worker_diet.py).
-    assert "COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node" in INSTRUCTIONS
+    assert "COPY --link --from=node-stripped /node-layer/ /" in INSTRUCTIONS
 
 
 def test_the_user_comes_first_the_browser_next_and_the_code_last_worker_owned():

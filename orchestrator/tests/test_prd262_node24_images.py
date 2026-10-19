@@ -56,6 +56,9 @@ NODE_DOCKERFILES = (
 )
 DIGEST = r"@sha256:[0-9a-f]{64}"
 NODE_INSTALL = "/usr/local/"  # where the official image keeps node, npm and corepack
+# The node-stripped stage's tree, copied to /: Node's binary alone, at its own path
+# (test_prd262_worker_diet.py, test_prd262_media_render_node_strip.py).
+NODE_LAYER = {"/node-layer/": "/usr/local/bin/node"}
 BUILD_TOOLS = {"python3", "make", "g++", "curl"}
 
 _FROM = re.compile(r"^FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$", re.M | re.I)
@@ -151,8 +154,9 @@ def test_the_debian_images_take_node_24_from_the_official_image(path):
     instructions = _instructions(dockerfile)
     # Node's own files, wherever a node-based stage keeps them; a stage like media-render's
     # js also copies its build output out, which is not Node.
-    copied = sorted(source for stage in _node_stages(dockerfile) for source in _copies_from(instructions, stage)
-                    if source.startswith(NODE_INSTALL))
+    sources = [NODE_LAYER.get(source, source)
+               for stage in _node_stages(dockerfile) for source in _copies_from(instructions, stage)]
+    copied = sorted(source for source in sources if source.startswith(NODE_INSTALL))
     assert copied == NODE_COPIES[path]
     code = "\n".join(_instructions(dockerfile)).lower()
     for gone in ("nodesource", "/usr/local/include", "gnupg", "python3.13"):

@@ -9,14 +9,15 @@ FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b
 
 # Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
-# strip renames its output into /usr/local/bin, which stamps the directory with the build
-# time, and COPY --link keeps that time in the layer: the directory takes the binary's
-# upstream time back, or every build makes a different node layer.
+# The binary goes into the /node-layer tree, every directory of it at the binary's upstream
+# time, and the images copy that tree to /. A COPY of the file alone stamps /usr/local/bin
+# with the time of the build, so each build made a different layer.
 FROM node AS node-stripped
 RUN apt-get update \
  && apt-get install -y --no-install-recommends binutils \
- && strip --strip-unneeded --preserve-dates /usr/local/bin/node \
- && touch -r /usr/local/bin/node /usr/local/bin \
+ && mkdir -p /node-layer/usr/local/bin \
+ && strip --strip-unneeded --preserve-dates -o /node-layer/usr/local/bin/node /usr/local/bin/node \
+ && touch -r /usr/local/bin/node /node-layer/usr/local/bin /node-layer/usr/local /node-layer/usr /node-layer \
  && rm -rf /var/lib/apt/lists/*
 
 # npm without its docs and man pages (PRD-262, row 47: 2.67 MB). The image has no `man`,
@@ -79,7 +80,7 @@ FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0
 # 20 MB). .dynsym stays, so native addons still resolve Node's N-API symbols
 # (scripts/ci/image_worker_toolchain.py loads one). First, and with --link, so the layer
 # is the same blob, on the same base, as media-render's: a host with both keeps one copy.
-COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node
+COPY --link --from=node-stripped /node-layer/ /
 
 WORKDIR /app
 
