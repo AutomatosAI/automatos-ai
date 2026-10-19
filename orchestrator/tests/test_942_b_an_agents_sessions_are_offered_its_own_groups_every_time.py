@@ -18,7 +18,7 @@ from services import session_tools as st
 from services import session_tools_rpc as rpc
 
 CORE = ("board_summary", "list_tasks", "update_ticket", "submit_report", "ask_human", "composio_execute",
-        "search_knowledge", "search_documents", "record_memory", "read_step_file")
+        "search_knowledge", "search_documents", "read_document", "record_memory", "read_step_file")
 
 
 def _agent(**config):
@@ -39,7 +39,7 @@ def _listed(ctx):
     return reply["result"]["tools"]
 
 
-def test_the_catalogue_is_the_agreed_six_and_core_is_the_agreed_ten():
+def test_the_catalogue_is_the_agreed_six_and_core_is_the_agreed_eleven():
     assert groups.GROUP_IDS == ("data", "graph", "documents", "playbooks", "reports", "missions")
     assert groups.DEFAULT_SESSION_TOOL_GROUPS == groups.GROUP_IDS
     assert groups.CORE_TOOLS == CORE

@@ -48,7 +48,9 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
     names = st.tool_names()
     assert names == ("board_summary", "list_tasks", "update_ticket", "submit_report",
                      "ask_human", "composio_execute", "search_knowledge",
-                     "search_documents", "record_memory",       # night-1 95f261a1f: document + memory parity
+                     "search_documents",                        # night-1 95f261a1f: document + memory parity
+                     "read_document",                           # F448: a file the brief names, read whole
+                     "record_memory",
                      "read_step_file",                          # F161: a later step reads an earlier step's file
                      "query_database", "query_graph",           # F329: the owner's database and the graph
                      "generate_document",                       # #942: the owner-chosen groups' tools,

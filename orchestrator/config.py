@@ -732,6 +732,10 @@ class Config:
     # burst waits for a slot holding no pool connection; keep it well under the
     # pool (10 + 20), since each call can hold its own connection plus one more.
     SESSION_TOOL_CONCURRENCY: int = int(os.getenv("SESSION_TOOL_CONCURRENCY", "6"))
+    # P256-FIX-N17-9 (F448): how long, from the call's arrival, a session's document or memory
+    # read (services/session_read_deadline.DEADLINED_TOOLS) may take before it answers with a
+    # worded failure, so the session's own client never gives up first ("The operation timed out.").
+    SESSION_TOOL_READ_DEADLINE_S: float = float(os.getenv("SESSION_TOOL_READ_DEADLINE_S", "45"))
     # F161 (night 5): the most of one file an earlier mission step saved that a
     # session reads in one read_step_file call; a longer file comes back cut,
     # with a note saying so. Held under the bridge's own result cap.

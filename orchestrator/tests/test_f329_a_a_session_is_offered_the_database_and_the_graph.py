@@ -18,8 +18,8 @@ from tests import test_prd239_session_prompt as prompt_tests
 
 CTX = st.SessionContext(task_id=1995, agent_id=268, agent_name="Business Analyst", workspace_id="ws-shop")
 EARLIER = ("board_summary", "list_tasks", "update_ticket", "submit_report", "ask_human",
-           "composio_execute", "search_knowledge", "search_documents", "record_memory",
-           "read_step_file")
+           "composio_execute", "search_knowledge", "search_documents", "read_document",
+           "record_memory", "read_step_file")
 
 
 async def _unused(tool, arguments, ctx):
@@ -27,7 +27,7 @@ async def _unused(tool, arguments, ctx):
 
 
 def test_the_list_ends_with_the_two_data_tools_after_every_earlier_one():
-    assert st.tool_names()[:12] == EARLIER + ("query_database", "query_graph")   # #942 appends groups' tools after
+    assert st.tool_names()[:13] == EARLIER + ("query_database", "query_graph")   # #942 appends groups' tools after
     assert st.get_tool("query_database").action == "platform_query_data"
     assert st.get_tool("query_graph").action == "platform_query_graph"
 

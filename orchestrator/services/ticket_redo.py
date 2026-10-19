@@ -335,6 +335,19 @@ def _corrections(data: Dict[str, Any], since: Optional[datetime] = None) -> List
             if isinstance(c, dict) and c.get("note") and _after(c.get("at"), since)]
 
 
+def owner_corrections(task: Any) -> List[str]:
+    """The owner's own corrections on THIS ticket since its brief was agreed, and the note
+    waiting to be consumed (P256-FIX-N17-9, F448: the text that may name a card). Never the
+    standing rules from other cards, the draft, or a note the platform wrote."""
+    data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
+    notes = _corrections(data, _brief_agreed_at(data))
+    latest = getattr(task, "review_feedback", None)
+    platform_notes = (SENT_BACK_WITHOUT_A_NOTE, BRIEF_AGREED, GIVEN_TO_YOU)
+    if latest and latest not in platform_notes and latest not in notes:
+        return [*notes, latest]
+    return notes
+
+
 def _sent_back_draft(data: Dict[str, Any], since: Optional[datetime] = None) -> Optional[str]:
     for run in reversed(data.get("previous_runs") or []):
         if isinstance(run, dict) and run.get("why") == SENT_BACK and _after(run.get("at"), since):
