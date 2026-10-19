@@ -1,15 +1,15 @@
-"""PRD-256 Wave 2, US-009: Auto's default model is one constant.
+"""PRD-256 Wave 2, US-009: Auto's default model is one setting, with one fallback.
 
-The owner's four-arm run picks Auto's default model; the decision must stay a
-one-line change in core/llm/defaults.py (plus the Settings row for agent 1 in
-an existing workspace, which the seed never rewrites). These tests pin that:
+The owner's four-arm run picked Auto's default model. Since 19 Oct 2026 (Gerard) that
+decision is data: system_settings ``orchestrator_llm`` provider and model. The code
+keeps one last-resort pair, in core/llm/defaults.py. These tests pin that:
 
-  * a newly seeded Auto row carries DEFAULT_LLM_PROVIDER / DEFAULT_LLM_MODEL;
-  * changing the constant changes the seeded row, with no second copy;
+  * a newly seeded Auto row with no setting carries DEFAULT_LLM_PROVIDER / DEFAULT_LLM_MODEL;
+  * with the setting, the seeded row carries the setting, with no second copy;
   * an existing Auto row keeps the model the owner chose in Settings;
   * the seed module names no model id of its own.
 
-PURE (no database): the seed runs against a MagicMock session.
+PURE (no database): the seed runs against a MagicMock session; settings are faked.
 """
 from __future__ import annotations
 
@@ -25,9 +25,18 @@ if str(_ORCH) not in sys.path:
 
 import core.llm.defaults as llm_defaults  # noqa: E402
 import core.seeds.seed_auto_agent as auto_seed  # noqa: E402
+from core.llm import manager as llm_manager  # noqa: E402
 from core.models.core import Agent  # noqa: E402
 
 OWNER_CHOSEN = {"provider": "anthropic", "model_id": "claude-sonnet-5", "max_tokens": 4000}
+
+
+def _settings(monkeypatch, rows):
+    """These system-settings rows, and no stored key for any provider."""
+    stored = dict(rows)
+    monkeypatch.setattr(llm_manager, "get_system_setting", lambda c, k, d=None: stored.get((c, k), d))
+    monkeypatch.setattr(llm_manager, "get_credential_data",
+                        lambda provider, environment=None, service_name="orchestrator": {})
 
 
 def _seed_session(monkeypatch, existing=None):
@@ -39,16 +48,17 @@ def _seed_session(monkeypatch, existing=None):
     return db
 
 
-def test_a_new_auto_is_seeded_with_the_default_constants(monkeypatch):
+def test_a_new_auto_with_no_setting_is_seeded_with_the_default_constants(monkeypatch):
+    _settings(monkeypatch, {})
     db = _seed_session(monkeypatch)
     agent = auto_seed.seed_auto_agent(db, uuid.uuid4())
     assert agent.model_config["provider"] == llm_defaults.DEFAULT_LLM_PROVIDER
     assert agent.model_config["model_id"] == llm_defaults.DEFAULT_LLM_MODEL
 
 
-def test_the_owners_decision_is_a_one_line_change_in_defaults(monkeypatch):
-    monkeypatch.setattr(llm_defaults, "DEFAULT_LLM_PROVIDER", "anthropic")
-    monkeypatch.setattr(llm_defaults, "DEFAULT_LLM_MODEL", "claude-sonnet-5")
+def test_the_owners_decision_is_the_orchestrator_setting(monkeypatch):
+    _settings(monkeypatch, {("orchestrator_llm", "provider"): "anthropic",
+                            ("orchestrator_llm", "model"): "claude-sonnet-5"})
     db = _seed_session(monkeypatch)
     agent = auto_seed.seed_auto_agent(db, uuid.uuid4())
     assert agent.model_config["provider"] == "anthropic"

@@ -1,15 +1,19 @@
 /**
- * Single source of truth for LLM defaults across the frontend.
+ * The frontend's copy of the backend's last-resort LLM default.
  *
- * The REAL source of truth is Settings > Orchestrator (Auto agent row).
- * These defaults are only used as fallbacks when the API hasn't responded
- * yet or when creating brand-new agents before the user picks a model.
+ * The live default is data: system_settings orchestrator_llm (Settings >
+ * Orchestrator), which each Auto row carries in its model_config. These values
+ * are only fallbacks while the API hasn't answered, and the pair "reset to
+ * defaults" writes.
  *
- * Change here → changes everywhere.
+ * provider and model_id MUST equal DEFAULT_LLM_PROVIDER / DEFAULT_LLM_MODEL in
+ * orchestrator/core/llm/defaults.py until this copy is replaced by an API read;
+ * orchestrator/tests/test_auto_model_from_config_frontend_parity.py fails when
+ * they differ.
  */
 export const LLM_DEFAULTS = {
-  provider: 'openrouter',
-  model_id: 'google/gemini-2.5-flash',
+  provider: 'anthropic',
+  model_id: 'claude-haiku-5-5',
   temperature: 0.7,
   max_tokens: 2000,
   top_p: 1.0,

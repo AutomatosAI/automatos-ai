@@ -29,6 +29,7 @@ from .actions_diagnostics import register_diagnostics_actions  # 9 Oct: errors g
 from .actions_search import register_search_actions
 from .actions_tools_llms import register_tools_llms_actions
 from .actions_marketplace import register_marketplace_actions
+from .actions_model_install import register_model_install_action  # 19 Oct: left actions_marketplace.py
 from .actions_skills import register_skills_actions
 from .actions_assignments import register_assignments_actions
 from .actions_board_tasks import register_board_task_actions
@@ -91,6 +92,12 @@ def _register_observability_actions(registry: ActionRegistry) -> None:
     register_diagnostics_actions(registry)
 
 
+def _register_marketplace_actions(registry: ActionRegistry) -> None:
+    """The marketplace actions, and installing a model by its OpenRouter id (19 Oct)."""
+    register_marketplace_actions(registry)
+    register_model_install_action(registry)
+
+
 def register_all_actions(registry: ActionRegistry) -> None:
     """Register all platform actions with the registry."""
     register_agents_actions(registry)
@@ -103,7 +110,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     _register_observability_actions(registry)
     register_search_actions(registry)
     register_tools_llms_actions(registry)
-    register_marketplace_actions(registry)
+    _register_marketplace_actions(registry)
     register_skills_actions(registry)
     register_assignments_actions(registry)
     register_board_task_actions(registry)

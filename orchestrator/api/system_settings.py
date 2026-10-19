@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import logging
 import uuid
@@ -45,6 +45,55 @@ def _require_admin(ctx: RequestContext) -> None:
     if ctx.user and getattr(ctx.user, "system_role", "user") in ("admin", "super_admin"):
         return
     raise HTTPException(status_code=403, detail="Admin access required")
+
+
+# The orchestrator_llm keys core/llm/new_agent_model.default_route reads for the
+# platform's default Auto model (the legacy names too).
+ORCHESTRATOR_ROUTE_KEYS = frozenset({"provider", "model", "llm_provider", "llm_model"})
+RESTAMP_UNDONE = ("The Auto agents on the platform default could not be moved to the new "
+                  "model, so nothing was saved. Try again.")
+RESTAMP_FAILED = ("The setting was saved, but the Auto agents on the platform default were "
+                  "not moved to it. Run scripts/restamp_auto_models.py --apply.")
+
+Changed = List[Tuple[SystemSetting, Optional[str]]]  # (setting, its value before)
+
+
+def _moves_auto_default(setting: SystemSetting, old_value: Optional[str]) -> bool:
+    """Did this update change the provider or model of the platform's default Auto model?"""
+    return (setting.category == SettingCategory.ORCHESTRATOR_LLM.value and setting.key in ORCHESTRATOR_ROUTE_KEYS
+            and (old_value or "") != (setting.value or ""))
+
+
+def _undo(db: Session, changed: Changed) -> str:
+    """Put ``changed`` back as it was, so the same save retries the move (the
+    restamp fires on a changed value only); the message for the admin."""
+    try:
+        for setting, old_value in changed:
+            setting.value = old_value
+        db.commit()
+        return RESTAMP_UNDONE
+    except Exception:
+        db.rollback()
+        logger.exception("Could not undo the settings saved before a failed Auto model restamp")
+        return RESTAMP_FAILED
+
+
+def _restamp_auto_models(db: Session, changed: Changed) -> Dict[str, Any]:
+    """Move the Auto rows still on the platform default to the one just saved
+    (core/llm/auto_model_sync), in this request. The setting is committed first:
+    ``default_route`` reads it on its own connection. If the move fails, the saved
+    settings in ``changed`` are put back, so the setting and the rows never part."""
+    from core.llm.auto_model_sync import restamp_inheriting_auto_agents
+
+    try:
+        counts = restamp_inheriting_auto_agents(db)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Auto model restamp failed after an orchestrator_llm change")
+        raise HTTPException(status_code=500, detail=_undo(db, changed)) from exc
+    logger.info("orchestrator_llm changed: Auto model restamp %s", counts)
+    return counts
 
 
 @router.get("/", response_model=List[SystemSettingResponse])
@@ -160,13 +209,14 @@ async def get_system_setting(
 
 
 @router.put("/{setting_id}", response_model=SystemSettingResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_system_setting(
+def update_system_setting(
     setting_id: int,
     update_data: SystemSettingUpdate,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
-    """Update a system setting"""
+    """Update a system setting. A plain ``def`` (AGENTS.md: no sync session on the
+    event loop): FastAPI runs it, and the Auto restamp it may trigger, in its threadpool."""
     _require_admin(ctx)
 
     try:
@@ -174,11 +224,14 @@ async def update_system_setting(
         if not setting:
             raise HTTPException(status_code=404, detail="Setting not found")
         
+        old_value = setting.value
         setting.value = update_data.value
         if update_data.description is not None:
             setting.description = update_data.description
         
         db.commit()
+        if _moves_auto_default(setting, old_value):
+            _restamp_auto_models(db, [(setting, old_value)])
         db.refresh(setting)
 
         _val = "****" if setting.is_sensitive else setting.value
@@ -261,13 +314,13 @@ async def delete_system_setting(
 
 
 @router.post("/bulk-update", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def bulk_update_settings(
+def bulk_update_settings(
     request: Request,
     updates: List[BulkUpdateItem] = None,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
-    """Bulk update multiple settings"""
+    """Bulk update multiple settings (a plain ``def``, as update_system_setting)."""
     _require_admin(ctx)
 
     try:
@@ -277,6 +330,8 @@ async def bulk_update_settings(
         logger.info(f"Received bulk update request with {len(updates)} items")
         updated_count = 0
         updated_settings = []
+        changed: Changed = []
+        moves_auto_default = False
 
         for update in updates:
             setting = db.query(SystemSetting).filter(SystemSetting.id == update.id).first()
@@ -289,7 +344,9 @@ async def bulk_update_settings(
                 # Explicitly update timestamp (onupdate may not always trigger)
                 setting.updated_at = datetime.utcnow()
                 updated_settings.append(setting)
+                changed.append((setting, old_value))
                 updated_count += 1
+                moves_auto_default = moves_auto_default or _moves_auto_default(setting, old_value)
 
                 _old = "****" if setting.is_sensitive else old_value
                 _new = "****" if setting.is_sensitive else new_value
@@ -306,7 +363,10 @@ async def bulk_update_settings(
         else:
             logger.info("No settings were updated (all values unchanged)")
         
-        return {"message": f"Updated {updated_count} settings successfully"}
+        response: Dict[str, Any] = {"message": f"Updated {updated_count} settings successfully"}
+        if moves_auto_default:
+            response["auto_models"] = _restamp_auto_models(db, changed)
+        return response
     except HTTPException:
         raise
     except Exception as e:

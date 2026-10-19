@@ -38,8 +38,10 @@ The platform boots and serves without any LLM key, but agents, chat, and
 embeddings need one to actually think.
 
 **Recommended: OpenRouter.** One key, 400+ models, and — since PRD-240 — web
-search for every model your agents run on. It is already the default route
-(Auto starts on `google/gemini-2.5-flash` via OpenRouter). Get a key at
+search for every model your agents run on. Auto starts on Claude Haiku 5.5
+(`anthropic` / `claude-haiku-5-5`), and so does the internal System LLM; with no
+Anthropic key, both send their calls through OpenRouter as
+`anthropic/claude-haiku-5.5`. Get a key at
 openrouter.ai/keys and add it under **Settings → API Keys**. Add **NVIDIA**
 beside it for free open models (Kimi, DeepSeek, Nemotron — see below).
 

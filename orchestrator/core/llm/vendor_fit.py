@@ -11,12 +11,18 @@ provider that doesn't host vendor ids, or a bare id that names another vendor
 with none, the call runs on the category's own model and one warning names the
 service, the model and the provider. The defaults the verifier reads when no
 setting names its models are picked here for the System LLM's vendor.
+
+``keyless_via_openrouter`` is the managers' twin of the agent path's no-key fallback
+(``agent_factory``, 19 Oct 2026): a settings tier on a vendor with no key runs on
+OpenRouter when OpenRouter has one. A fresh install seeds both tiers on the Anthropic
+default; with only an OpenRouter key (QUICKSTART's recommended path) the System LLM
+would otherwise build an Anthropic client with no key.
 """
 from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 from core.llm.defaults import (
     ANTHROPIC_VERIFIER_FALLBACK_MODEL,
@@ -34,6 +40,7 @@ from core.llm.providers import (
     get_spec,
     mismatched_vendor,
     normalize_slug,
+    openrouter_model_id,
     openrouter_prefix_for,
     routable_provider_names,
 )
@@ -77,8 +84,8 @@ def _routes(spec: ProviderSpec, model: str) -> Optional[List[Route]]:
     vendor = mismatched_vendor(spec.slug, model.lower(), routable_provider_names())
     if vendor is None:
         return None
-    prefix = openrouter_prefix_for(vendor)
-    return [(vendor, model)] + ([(OPENROUTER, f"{prefix}{model}")] if prefix else [])
+    prefix = openrouter_prefix_for(vendor)  # OpenRouter's own id form: a Claude is dotted
+    return [(vendor, model)] + ([(OPENROUTER, openrouter_model_id(vendor, model))] if prefix else [])
 
 
 def _has_key(slug: str, service_name: str) -> bool:
@@ -131,6 +138,27 @@ def fitted(service_name: str, model: Optional[str]) -> Tuple[Optional[str], Opti
     return provider, own_model
 
 
+ConfigLoader = Callable[[str, Optional[str], Optional[str]], Any]  # (service, provider, model) -> LLMConfig
+
+
+def keyless_via_openrouter(load: ConfigLoader, service_name: str, provider: Optional[str] = None,
+                           model: Optional[str] = None) -> Any:
+    """``load(service_name, provider, model)``, re-loaded on OpenRouter (the model in
+    OpenRouter's id form: a Claude is dotted) when the provider it names has no key,
+    OpenRouter lists that vendor and OpenRouter has a key. Unchanged otherwise, so a
+    keyless call with no OpenRouter key fails as it did."""
+    config = load(service_name, provider, model)
+    slug = normalize_slug(config.provider.value) or config.provider.value
+    if config.api_key or slug == OPENROUTER or not openrouter_prefix_for(slug):
+        return config
+    if not _has_key(OPENROUTER, service_name):
+        return config
+    routed = openrouter_model_id(slug, config.model)
+    logger.warning("[vendor_fit] service '%s': no key for '%s', running '%s' on OpenRouter as '%s'",
+                   service_name, slug, config.model, routed)
+    return load(service_name, OPENROUTER, routed)
+
+
 def _system_vendor() -> Optional[str]:
     from core.llm.manager import get_system_setting
 
@@ -148,4 +176,4 @@ def default_verifier_fallback() -> str:
     return ANTHROPIC_VERIFIER_FALLBACK_MODEL if _system_vendor() == ANTHROPIC else VERIFIER_FALLBACK_MODEL
 
 
-__all__ = ["default_verifier_fallback", "default_verifier_mapping", "fitted"]
+__all__ = ["default_verifier_fallback", "default_verifier_mapping", "fitted", "keyless_via_openrouter"]
