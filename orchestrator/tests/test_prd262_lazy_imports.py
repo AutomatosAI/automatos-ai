@@ -12,7 +12,8 @@ those import at module level, every worker loads at boot. This suite checks:
   first PDF a user uploads;
 - the Composio availability probe finds the SDK with `importlib.util.find_spec`
   and never imports it: the boot's TOOL_SYNC stage asks the probe, and only a real
-  call needs the SDK.
+  call needs the SDK. client.py imports the finder by name, so the tests stand in for
+  it there and nowhere else.
 
 test.yml's backend job holds `import main` to FR-6 (scripts/ci/import_main_report.py,
 tested in test_prd262_import_main_report.py). Pure file reads here, except the probe
@@ -124,7 +125,8 @@ def _probe_body() -> ast.FunctionDef:
 def test_the_probe_never_calls_the_sdk_importer():
     called = {node.func.id for node in ast.walk(_probe_body())
               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
-    assert "_get_composio" not in called and "_composio_sdk_installed" in called
+    assert "_get_composio" not in called and "find_spec" in called
+    assert cc.find_spec is importlib.util.find_spec
 
 
 @pytest.fixture
@@ -147,7 +149,7 @@ def _finder(monkeypatch, found: bool) -> list[str]:
         asked.append(name)
         return importlib.machinery.ModuleSpec(name, None) if found else None
 
-    monkeypatch.setattr(importlib.util, "find_spec", find_spec)
+    monkeypatch.setattr(cc, "find_spec", find_spec)
     return asked
 
 

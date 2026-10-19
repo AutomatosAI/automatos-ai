@@ -30,6 +30,7 @@ for _name in [n for n, m in list(_sys_guard.modules.items())
               and getattr(m, "__spec__", None) is None]:
     _sys_guard.modules.pop(_name, None)
 
+import importlib.machinery  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import uuid  # noqa: E402
@@ -58,8 +59,9 @@ class _FakeSDK:
 
 
 def _sdk_installed(monkeypatch, installed: bool) -> None:
-    """The probe's one question about the SDK: is it on the import path (PRD-262 US-032)."""
-    monkeypatch.setattr(cc, "_composio_sdk_installed", lambda: installed)
+    """The probe's one question about the SDK: can find_spec find it (PRD-262 US-032)."""
+    spec = importlib.machinery.ModuleSpec(cc.COMPOSIO_SDK_PACKAGE, None) if installed else None
+    monkeypatch.setattr(cc, "find_spec", lambda name, package=None: spec)
 
 
 @pytest.fixture

@@ -348,22 +348,20 @@ class ImageProcessor:
             for page_num in pages_to_process:
                 if page_num >= len(pdf.pages):
                     continue
-                
-                page = pdf.pages[page_num]
-                
-                # Extract images from page
-                if hasattr(page, 'images'):
-                    for i, img_info in enumerate(page.images):
-                        try:
-                            extraction = self._process_pdf_image(
-                                page, img_info, page_num, i
-                            )
-                            extracted_images.append(extraction)
-                            logger.info(f"Extracted image from page {page_num+1}, index {i}")
-                        except Exception as e:
-                            logger.warning(f"Failed to extract image: {e}")
+                extracted_images.extend(self._page_images(pdf.pages[page_num], page_num))
         
         return extracted_images
+
+    def _page_images(self, page: Any, page_num: int) -> List[ImageExtraction]:
+        """The images on one pdfplumber page. One that fails to extract is logged and skipped."""
+        extracted = []
+        for i, img_info in enumerate(getattr(page, 'images', [])):
+            try:
+                extracted.append(self._process_pdf_image(page, img_info, page_num, i))
+                logger.info(f"Extracted image from page {page_num+1}, index {i}")
+            except Exception:
+                logger.exception(f"Failed to extract image {i} from page {page_num+1}")
+        return extracted
     
     def _process_pdf_image(
         self, 
