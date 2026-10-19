@@ -26,8 +26,14 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 const SKIPPED = new Set(['default', '__esModule'])
 const STATUSES = ['built', 'stub']
 const BUILT_BY_THIS_STORY = ['theme', 'context', 'navigation', 'notices', 'events']
-/** The stubbed areas whose W-A4P lane has landed since (A-12d, A-12e, A-12f, A-12g). */
-const BUILT_BY_LATER_LANES = ['pages/agents', 'pages/assignments', 'pages/documents', 'pages/playbooks']
+/** The stubbed areas whose W-A4P lane has landed since (A-12d, A-12e, A-12f, A-12g, A-12h). */
+const BUILT_BY_LATER_LANES = [
+  'pages/agents',
+  'pages/assignments',
+  'pages/documents',
+  'pages/playbooks',
+  'pages/command-center',
+]
 /** A stub's body: an area still calling it is not built. */
 const STUB_CALL = /\bnotInThisBuild\(/
 
