@@ -28,6 +28,7 @@ from core.models.harness import RUN_COMPLETED, RUN_DORMANT_AGENTS, RUN_FAILED, R
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from core.models.workspaces import Workspace
     from services.harness_metrics import HarnessMetrics
 
 logger = logging.getLogger(__name__)

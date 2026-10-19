@@ -3,7 +3,8 @@ Tests for orchestrator/config.py — PRD-138 US-001
 ==================================================
 
 Verifies SEMANTIC_TOOL_ROUTING_TOP_K is exposed via the canonical Config
-module, defaults to 15 when unset, and honours environment overrides.
+module, defaults to 15 when unset, and honours environment overrides; and that
+HARNESS_SELF_MANAGEMENT_ENABLED defaults to False.
 
 The config module reads env vars at class definition time, so each test
 reloads it after manipulating os.environ.
@@ -45,12 +46,12 @@ def _restore_config_module():
             sys.modules.pop("config", None)
 
 
-def _reload_config(monkeypatch, env_value):
-    """Set/clear SEMANTIC_TOOL_ROUTING_TOP_K and reload the config module."""
+def _reload_config(monkeypatch, env_value, name="SEMANTIC_TOOL_ROUTING_TOP_K"):
+    """Set/clear the env var ``name`` and reload the config module."""
     if env_value is None:
-        monkeypatch.delenv("SEMANTIC_TOOL_ROUTING_TOP_K", raising=False)
+        monkeypatch.delenv(name, raising=False)
     else:
-        monkeypatch.setenv("SEMANTIC_TOOL_ROUTING_TOP_K", env_value)
+        monkeypatch.setenv(name, env_value)
 
     # If already imported, drop it so the class-level os.getenv re-runs
     sys.modules.pop("config", None)
@@ -74,3 +75,12 @@ def test_semantic_tool_routing_top_k_override(monkeypatch):
 
     assert config_module.config.SEMANTIC_TOOL_ROUTING_TOP_K == 20
     assert isinstance(config_module.config.SEMANTIC_TOOL_ROUTING_TOP_K, int)
+
+
+def test_harness_self_management_defaults_false(monkeypatch):
+    """HARNESS_SELF_MANAGEMENT_ENABLED is off when unset (PRD-141, HIGH RISK). Moved here
+    from test_harness_self_management.py, which PRD-263 US-048 deleted; the setting stays
+    until US-054 redefines it as the switch for approval grants."""
+    config_module = _reload_config(monkeypatch, None, name="HARNESS_SELF_MANAGEMENT_ENABLED")
+
+    assert config_module.config.HARNESS_SELF_MANAGEMENT_ENABLED is False

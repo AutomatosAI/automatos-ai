@@ -96,4 +96,3 @@ def test_create_routing_rule_coerces_bad_priority(_targets_are_ours):
     }))
     assert res["success"] is True
     assert db.added[0].priority == 0  # defaults rather than raising
-

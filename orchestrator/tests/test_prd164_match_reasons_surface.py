@@ -18,7 +18,7 @@ import os
 import sys as _sys
 
 # Dummy POSTGRES_* satisfies the config chain (blessed pattern, see
-# tests/test_harness_self_management.py) — the port points at nothing so the
+# tests/test_harness_routing_rule.py) — the port points at nothing so the
 # modules.tools import chain's fail-soft DB connect refuses instantly instead
 # of hanging on a wedged local proxy. CI exports real POSTGRES_* so these
 # setdefaults no-op there. Nothing in this file touches a DB.
