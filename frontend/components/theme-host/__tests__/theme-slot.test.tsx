@@ -60,6 +60,7 @@ import type { ThemeHostStatus } from '@/lib/theme-host/types'
 
 import { ThemeHostContext, type ThemeHostContextValue } from '../theme-host-context'
 import { corePageAsked, routeMatches, ThemeSlot, type ThemeServedValues } from '../theme-slot'
+import { INSTALLED_FRAME_MIN_WIDTH_PX } from '../theme-slot-registrations'
 
 /** An installed theme's registry entry (A-02c): its own width, the theme layout from 1024 px. */
 const INSTALLED_ENTRY: ThemeEntry = {
@@ -231,12 +232,30 @@ describe('ThemeSlot, a page entry', () => {
     shows('page')
   })
 
-  it("renders an installed theme's page wherever the host shows it while the registry has no entry for it (A-02c)", () => {
+  it("renders an installed theme's page from the desktop width up while the registry has no entry for it (A-02c)", () => {
     underInstalledTheme()
     state.entry = null
     state.layout = 'fallback'
     renderPage()
     shows('theme')
+  })
+
+  it("renders the core page on a phone, where MainLayout draws no installed theme's frame (W-A2 review L3)", () => {
+    const queries: string[] = []
+    vi.stubGlobal('matchMedia', (query: string) => {
+      queries.push(query)
+      return { matches: true, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() }
+    })
+    try {
+      underInstalledTheme()
+      state.entry = null
+      state.layout = 'fallback'
+      renderPage()
+      shows('page')
+      expect(queries).toContain(`(max-width: ${INSTALLED_FRAME_MIN_WIDTH_PX - 1}px)`)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('matches a page entry with a dynamic segment on any one value of it', () => {

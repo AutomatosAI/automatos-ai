@@ -11,10 +11,12 @@
  * off, failed or in safe mode: the core draws), 'pending' (the width is not known yet, the server
  * and hydration; or the host is still loading an installed theme, whose registrations are not
  * known yet), 'narrow' (below the theme's minWidth: the core draws inside the fallback chrome) and
- * 'theme'. An installed theme with no registry entry yet (A-02c adds them) draws wherever the host
- * shows it, as its frame does (theme-frame-slot.tsx).
+ * 'theme'. An installed theme with no registry entry yet (A-02c adds them) draws where MainLayout
+ * draws its frame (theme-frame-slot.tsx): from the desktop width up (INSTALLED_FRAME_MIN_WIDTH_PX);
+ * below it, as builtin Play below its minWidth, the core's pages, slots and notes ('narrow'), so a
+ * phone never gets a theme page cut for a frame it does not have.
  */
-import { useMemo, type ComponentType, type ReactNode } from 'react'
+import { useCallback, useMemo, useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 
 import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
 import { builtinRegistrationsOf } from '@/lib/theme-host/builtin/slots'
@@ -44,6 +46,38 @@ const INSTALLED_LOADING: ActiveThemeSlots = { layout: 'pending', registrations: 
 const NO_SLOTS: ReadonlyMap<SlotId, unknown> = new Map()
 const NO_PAGES: ReadonlyMap<string, unknown> = new Map()
 
+/**
+ * Where MainLayout draws an installed theme's frame: its desktop shell, from useIsTabletOrBelow's
+ * 1024 px (hooks/use-mobile.ts). An installed theme always has the Studio base (DEFAULT_THEME_BASE).
+ */
+export const INSTALLED_FRAME_MIN_WIDTH_PX = 1024
+const BELOW_INSTALLED_FRAME_QUERY = `(max-width: ${INSTALLED_FRAME_MIN_WIDTH_PX - 1}px)`
+
+function hasMatchMedia(): boolean {
+  return typeof window.matchMedia === 'function'
+}
+
+/** Below the frame's width now; a browser that can't say is a wide one, as hooks/use-mobile.ts reads it. */
+function belowInstalledFrameNow(): boolean | null {
+  return hasMatchMedia() && window.matchMedia(BELOW_INSTALLED_FRAME_QUERY).matches
+}
+
+/** The server has no window: not known. */
+const widthOnServer = (): boolean | null => null
+
+/** 'theme' from the desktop width up, 'narrow' below it, 'pending' on the server and while hydrating (M69). */
+function useInstalledFrameLayout(): ThemeSlotLayout {
+  const subscribe = useCallback((onChange: () => void) => {
+    if (!hasMatchMedia()) return () => undefined
+    const query = window.matchMedia(BELOW_INSTALLED_FRAME_QUERY)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+  const below = useSyncExternalStore(subscribe, belowInstalledFrameNow, widthOnServer)
+  if (below === null) return 'pending'
+  return below ? 'narrow' : 'theme'
+}
+
 function layoutOf(layout: ThemeLayout): ThemeSlotLayout {
   if (layout === 'fallback') return 'narrow'
   return layout
@@ -72,9 +106,10 @@ export function useActiveThemeSlots(): ActiveThemeSlots {
   const entry = useActiveTheme()
   const layout = useThemeLayout()
   const host = useThemeHost()
+  const installedFrameLayout = useInstalledFrameLayout()
   const builtin = builtinRegistrationsOf(entry)
   if (builtin !== null) return { layout: layoutOf(layout), registrations: builtin, framesPages: false }
-  return installedSlots(host, entry === null ? 'theme' : layoutOf(layout))
+  return installedSlots(host, entry === null ? installedFrameLayout : layoutOf(layout))
 }
 
 /** A registered component as React renders it, or null for nothing registered. */
