@@ -29,6 +29,8 @@ import styles from './chat.module.css'
  * he answers. A failed turn the server saved is that failure, never an answer.
  * A reply you stopped keeps what it had and says so last (P260-FX-30, as the
  * approved Play app does; hooks/use-stopped-reply.ts keeps it on screen).
+ * PRD-264 EUAI-09 (Art. 50(2)): the reply's root carries `data-ai-generated="true"`,
+ * the same machine-readable mark the core chat puts on each assistant message.
  */
 
 export const SPEAKER = 'Auto'
@@ -115,7 +117,12 @@ export function AutoReply({
   const provenance = provenanceOf(message)
   const savedError = savedTurnError(message)
   return (
-    <article className={styles.reply} aria-label={`${SPEAKER} said`} aria-busy={streaming}>
+    <article
+      className={styles.reply}
+      aria-label={`${SPEAKER} said`}
+      aria-busy={streaming}
+      data-ai-generated="true"
+    >
       <h2 className={styles.speaker}>{SPEAKER}</h2>
       <Lines lines={provenance ? [provenance] : []} className={styles.notice} />
       <Lines lines={message.receiptsAbove ?? []} className={styles.above} />
