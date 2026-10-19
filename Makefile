@@ -5,9 +5,11 @@
 # previous image untagged and grows the build cache, which is what turns a
 # 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind.
 #
-#   make env     create .env from .env.example and fill POSTGRES_PASSWORD,
-#                REDIS_PASSWORD and API_KEY with random values while they are
-#                empty or CHANGE_ME, before the first start only (PRD-262 US-037).
+#   make env     check Docker first: Engine 25 or later and Compose 2.24.4 or
+#                later, or stop and say so (PRD-262 US-038). Then create .env
+#                from .env.example and fill POSTGRES_PASSWORD, REDIS_PASSWORD and
+#                API_KEY with random values while they are empty or CHANGE_ME,
+#                before the first start only (PRD-262 US-037).
 #                make up, make build and make dev run it first.
 #   make up      the published images for this checkout, pulled from GHCR, then
 #                start and tidy up (PRD-262 US-036). It picks one tag for the
@@ -36,6 +38,9 @@ DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
 STACK_IMAGES ?= python3 scripts/stack_images.py
 # Writes .env's three secrets for make env (PRD-262 US-037).
 STACK_ENV    ?= sh scripts/stack_env.sh
+# Stops make env, and so make up, build and dev, on a Docker older than the floor:
+# Engine 25 and Compose 2.24.4, which the compose healthchecks need (PRD-262 US-038).
+STACK_FLOOR  ?= sh scripts/stack_docker_floor.sh
 
 .PHONY: env up build dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
 
@@ -89,11 +94,16 @@ define migrate_workspace_layout
 fi
 endef
 
-# .env with the three secrets (scripts/stack_env.sh): generated before the first
-# start, never changed after it. An install that started on a CHANGE_ME placeholder
-# stops here with how to rotate it. up, build and dev run it as their first recipe
-# line, not as a prerequisite, so the #818 guide test still parses `up:`.
+# First the Docker floor (scripts/stack_docker_floor.sh): docker-compose.yml's
+# healthchecks probe every second while a service starts (start_interval), which
+# Compose refuses on an engine older than 25, so an older Docker stops here with the
+# floor named, before anything else runs. Then .env with the three secrets
+# (scripts/stack_env.sh): generated before the first start, never changed after it.
+# An install that started on a CHANGE_ME placeholder stops here with how to rotate it.
+# up, build and dev run it as their first recipe line, not as a prerequisite, so the
+# #818 guide test still parses `up:`.
 env:
+	@$(STACK_FLOOR)
 	@$(STACK_ENV)
 
 up:

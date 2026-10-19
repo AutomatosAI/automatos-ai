@@ -253,9 +253,10 @@ def _recipe(target: str) -> list[str]:
 
 
 def test_make_env_runs_the_script():
+    """PRD-262 US-038 puts the Docker floor check first (test_prd262_health_gates.py)."""
     makefile = _MAKEFILE.read_text(encoding="utf-8")
     assert re.search(r"^STACK_ENV\s*\?=\s*sh scripts/stack_env\.sh$", makefile, re.M)
-    assert _recipe("env") == ["@$(STACK_ENV)"]
+    assert _recipe("env") == ["@$(STACK_FLOOR)", "@$(STACK_ENV)"]
     phony = next(line for line in makefile.splitlines() if line.startswith(".PHONY:"))
     assert "env" in phony.split()
 

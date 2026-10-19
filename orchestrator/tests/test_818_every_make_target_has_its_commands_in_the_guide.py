@@ -15,9 +15,9 @@ MAKEFILE = REPO / "Makefile"
 GUIDE = REPO / "docs" / "getting-started" / "self-hosting.md"
 SECTION_START = "## 1b. "
 # The Makefile variables whose recipe lines the guide must show expanded: the two compose
-# commands, the tag picker make up and make build run (PRD-262 US-036) and make env's
-# secrets script (PRD-262 US-037).
-COMPOSE_VARS = ("COMPOSE", "DEV_COMPOSE", "STACK_IMAGES", "STACK_ENV")
+# commands, the tag picker make up and make build run (PRD-262 US-036), make env's
+# secrets script (PRD-262 US-037) and its Docker floor check (PRD-262 US-038).
+COMPOSE_VARS = ("COMPOSE", "DEV_COMPOSE", "STACK_IMAGES", "STACK_ENV", "STACK_FLOOR")
 TARGET_HEADER = re.compile(r"^([a-z][a-z-]*):\s*$")
 DOCKER_COMMAND = re.compile(r"\bdocker (?:image|builder|system) [a-z]+(?: -f)?")
 HOST_FLAG = re.compile(r"(--[a-z][a-z-]*)")
