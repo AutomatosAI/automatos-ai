@@ -94,8 +94,9 @@ describe("the floating Auto widget on Play's pages (PRD-260 M70)", () => {
     expect(screen.queryByText(/Dashboard/)).toBeNull()
   })
 
-  it("says 'Chat' on Conversations, not 'Dashboard'", async () => {
-    const greeting = await openWidgetOn('/conversations')
+  // PRD-261 A-04b: Conversations is builtin Play's theme route at /x/conversations; the old address redirects there.
+  it.each(['/conversations', '/x/conversations'])("says 'Chat' on Conversations (%s), not 'Dashboard'", async (pathname) => {
+    const greeting = await openWidgetOn(pathname)
     expect(greeting).toHaveTextContent('Ask me anything about Chat, or tell me what you need help with.')
     expect(screen.queryByText(/Dashboard/)).toBeNull()
   })

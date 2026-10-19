@@ -42,6 +42,11 @@ vi.mock('@/components/layout/main-layout', () => ({
     </div>
   ),
 }))
+// PRD-261 A-04b: builtin Play's style sheet comes through its lazy slot (styleSheet@1); here as it
+// is once its chunk has loaded, so the sheet renders in the same pass (and on the server).
+vi.mock('@/components/looks/style/style-screen-lazy', async () => ({
+  StyleScreen: (await import('@/components/looks/style/style-screen')).StyleScreen,
+}))
 
 import LookStylePage from '@/app/looks/style/page'
 import { LookProvider, useLook } from '@/components/looks/look-provider'
