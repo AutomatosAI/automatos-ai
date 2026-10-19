@@ -129,6 +129,7 @@ create_env_file() {
 }
 
 main() {
+    [ -f "$GUARD" ] || stop "$GUARD is missing: make env runs it to refuse placeholder secrets"
     [ -f "$ENV_FILE" ] || create_env_file
     fill=$(keys_to_fill)
     fill=${fill% }
@@ -146,7 +147,7 @@ main() {
         [ "$started" = no ] || stop "the $DATABASE_VOLUME volume exists, so this install has started (from this checkout or another one on this machine), and Postgres keeps the password it was created with. .env is unchanged: rotate as above, or copy in the .env of the checkout that created it."
         stop "the shell or the make command line sets a CHANGE_ME value (above): unset it, or set a real one."
     fi
-    [ "$started" = no ] || stop "$fill is empty in .env, and the $DATABASE_VOLUME volume exists, so this install has started. make env generates secrets only before the first start: set the value this install was created with (from the .env that started it). .env is unchanged."
+    [ "$started" = no ] || stop "empty in .env: $fill. The $DATABASE_VOLUME volume exists, so this install has started, and make env generates secrets only before the first start: set the value this install was created with (from the .env that started it). .env is unchanged."
 }
 
 main

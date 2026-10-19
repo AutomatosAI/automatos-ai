@@ -213,7 +213,7 @@ def test_a_started_install_with_an_empty_secret_stops_without_generating_one(che
     code, calls, out = _make_env(checkout, FAKE_VOLUMES=_VOLUME)
     assert code != 0
     assert env.read_bytes() == before and "openssl rand -hex 24" not in calls
-    assert f"POSTGRES_PASSWORD is empty in .env, and the {_VOLUME} volume exists" in out
+    assert f"empty in .env: POSTGRES_PASSWORD. The {_VOLUME} volume exists, so this install has started" in out
 
 
 def test_real_secrets_on_a_started_install_pass_without_asking_docker(checkout):
