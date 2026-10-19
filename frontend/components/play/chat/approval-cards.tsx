@@ -3,8 +3,8 @@
 import { MissionApprovalWidget } from '@/components/widgets/MissionApprovalWidget'
 import { ToolApprovalWidget } from '@/components/widgets/ToolApprovalWidget'
 import type { WidgetMetadata } from '@/components/widgets/types'
+import { type FiledApproval, isWaitingCard, MISSION_APPROVAL_TITLE, sourceName, TOOL_APPROVAL_TITLE } from '@/lib/chat/approvals'
 
-import { type FiledApproval, isWaitingCard, MISSION_APPROVAL_TITLE, sourceName, TOOL_APPROVAL_TITLE } from './approvals'
 import styles from './approval-cards.module.css'
 
 /**

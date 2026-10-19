@@ -77,5 +77,6 @@
     "/api/usage/analytics": "/api/usage/analytics?timeRange=${timeRange}",
     "/api/workflows/*/execute": "/api/workflows/${workflowId}/execute",
     "/api/workflows/execute": "/api/workflows/execute"
-  }
+  },
+  "_notes": {}
 }

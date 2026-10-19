@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { apiClient, type WorkspaceSocialsState } from '@/lib/api-client'
-import { feedItemHref, LOOK_STYLE_HREF, LOOKS_HREF } from '@/lib/ticket-links'
+import type { ThemeNavItem } from '@/lib/theme-host/registry-types'
+import { feedItemHref } from '@/lib/ticket-links'
 import { SOCIAL_STATUS_LABELS } from '@/components/deliverables/socials/socials-status'
 import { GLOBAL_SEARCH_OPEN_EVENT } from '@/lib/global-search-event'
 
@@ -43,12 +44,16 @@ const NAVIGATION_PAGES: SearchResult[] = [
   { id: 'nav-explorer', label: 'Explorer', category: 'pages', path: '/deliverables/explorer' },
 ]
 
-/** PRD-260 M90: Play's own pages, listed only while Play is the style (elsewhere they show a note). */
-const PLAY_PAGES: SearchResult[] = [
-  { id: 'nav-play-conversations', label: 'Conversations', category: 'pages', path: '/conversations' },
-  { id: 'nav-play-looks', label: 'Make it yours', category: 'pages', path: LOOKS_HREF },
-  { id: 'nav-play-style-sheet', label: 'Style sheet', category: 'pages', path: LOOK_STYLE_HREF },
-]
+/** No theme is the style: no theme pages. */
+const NO_THEME_NAV: readonly ThemeNavItem[] = []
+
+/**
+ * PRD-260 M90, PRD-261 A-02b: the active theme's own pages (its registry entry's `nav`), listed
+ * only while that theme is the style (elsewhere they show a note), after the core pages.
+ */
+function themePages(nav: readonly ThemeNavItem[]): SearchResult[] {
+  return nav.map((item) => ({ id: item.id, label: item.label, category: 'pages' as const, path: item.path }))
+}
 
 /** The query waits this long after the last keystroke, and needs this many characters. */
 const SEARCH_DEBOUNCE_MS = 300
@@ -56,9 +61,9 @@ const MIN_QUERY_CHARS = 2
 /** Posts listed per search, as the other sources ask for `limit=5`. */
 const SOCIAL_POSTS_SHOWN = 5
 
-function filterPages(query: string, socialsAvailable: boolean, isPlay: boolean): SearchResult[] {
+function filterPages(query: string, socialsAvailable: boolean, themeNav: readonly ThemeNavItem[]): SearchResult[] {
   const core = socialsAvailable ? NAVIGATION_PAGES : NAVIGATION_PAGES.filter((p) => p.id !== SOCIALS_PAGE_ID)
-  const pages = isPlay ? [...core, ...PLAY_PAGES] : core
+  const pages = [...core, ...themePages(themeNav)]
   if (!query) return pages
   const lower = query.toLowerCase()
   return pages.filter((p) => p.label.toLowerCase().includes(lower))
@@ -200,15 +205,15 @@ function useSearchShortcut(setOpen: Dispatch<SetStateAction<boolean>>) {
 /**
  * The global search. `socials` is the workspace's Socials state (PRD-251 D1): the
  * Socials page is listed while the platform offers it, and posts are searched while
- * this workspace has it on too. Without it (outside a workspace), neither. `isPlay`
- * (PRD-260 M90) lists Play's own pages too.
+ * this workspace has it on too. Without it (outside a workspace), neither. `themeNav`
+ * (PRD-260 M90, PRD-261 A-02b) is the active theme's own pages, listed too.
  */
-export function useGlobalSearch(socials?: WorkspaceSocialsState | null, isPlay = false) {
+export function useGlobalSearch(socials?: WorkspaceSocialsState | null, themeNav: readonly ThemeNavItem[] = NO_THEME_NAV) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const socialsAvailable = socials?.available === true
   const socialsOn = socialsAvailable && socials?.enabled === true
-  const pages = useMemo(() => filterPages(query, socialsAvailable, isPlay), [query, socialsAvailable, isPlay])
+  const pages = useMemo(() => filterPages(query, socialsAvailable, themeNav), [query, socialsAvailable, themeNav])
   const { results, loading, error } = useSourceResults(query, socialsOn)
   useSearchShortcut(setOpen)
 

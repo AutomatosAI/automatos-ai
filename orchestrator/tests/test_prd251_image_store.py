@@ -503,6 +503,14 @@ def test_a_storage_failure_is_503_not_a_misleading_404(client, s3):
     ("bytes=10-2", None),
     ("bytes=0-1,4-5", None),
     ("bits=0-9", None),
+    # S1: an unbounded number would hit Python's int() digit limit (ValueError -> 500).
+    ("bytes=" + "9" * 5000 + "-", None),
+    ("bytes=0-" + "9" * 5000, None),
+    ("bytes=-" + "9" * 5000, None),
+    ("bytes=" + "9" * 16 + "-", None),
+    ("bytes=\u0661-\u0662", None),  # non-ASCII digits
+    ("bytes=" + "9" * 15 + "-", "bytes=" + "9" * 15 + "-"),
+    ("bytes=0-9\nx", None),
 ])
 def test_parse_byte_range(header, expected):
     assert image_store.parse_byte_range(header) == expected

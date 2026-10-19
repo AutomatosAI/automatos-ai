@@ -1,0 +1,13 @@
+/* PRD-261 A-12b: the placement-slot hello theme's one stylesheet. Every rule sits under
+   html.hello-a12b-live, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a12b-live .hello-a12b-live-frame {
+  min-height: 100vh;
+  background: var(--hello-a12b-live-ground);
+  color: var(--hello-a12b-live-ink);
+}
+
+html.hello-a12b-live .hello-a12b-live-mascot {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+}

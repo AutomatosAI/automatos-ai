@@ -1,5 +1,5 @@
 {
-  "route_count": 914,
+  "route_count": 930,
   "routes": [
     {
       "method": "GET",
@@ -2588,6 +2588,70 @@
     {
       "method": "GET",
       "path": "/api/templates/templates/{agent_type}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/active"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/boot/{install_id}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/themes/choice"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/themes/default"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/files/{digest}/{path:path}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/themes/import"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/installed"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/themes/installs/{install_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/installs/{install_id}/compare/{package_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/themes/installs/{install_id}/opt-in"
+    },
+    {
+      "method": "POST",
+      "path": "/api/themes/installs/{install_id}/rollback"
+    },
+    {
+      "method": "POST",
+      "path": "/api/themes/installs/{install_id}/update"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/looks/{theme_id:path}"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/themes/looks/{theme_id:path}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/themes/settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/themes/settings"
     },
     {
       "method": "GET",

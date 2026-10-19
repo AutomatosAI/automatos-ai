@@ -2,11 +2,11 @@
 
 import { type ReactNode, type RefObject, useEffect, useRef } from 'react'
 
+import type { DeliverableRef } from '@/lib/chat/deliverables'
+import { messageText } from '@/lib/chat/message-text'
 import type { ChatMessage } from '@/types'
 
 import { AutoReply } from './auto-reply'
-import type { DeliverableRef } from './deliverables'
-import { messageText } from './message-text'
 import styles from './chat.module.css'
 
 /**

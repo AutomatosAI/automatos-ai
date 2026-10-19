@@ -4,9 +4,9 @@ import { useMemo } from 'react'
 
 import { TaskCard } from '@/components/chatbot/task-card'
 import { WithdrawOfferCard } from '@/components/chatbot/withdraw-offer-card'
+import { taskCardsOf } from '@/lib/chat/message-text'
 import type { ChatMessage } from '@/types'
 
-import { taskCardsOf } from './message-text'
 import styles from './reply-cards.module.css'
 
 /**

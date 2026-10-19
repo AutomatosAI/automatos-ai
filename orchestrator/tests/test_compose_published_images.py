@@ -8,6 +8,7 @@ would quietly run local code under a published tag).
 """
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -69,10 +70,17 @@ def test_each_service_runs_its_published_image(override, service, image):
 
 
 def test_names_match_what_the_images_workflow_publishes():
-    """The workflow publishes automatos-<name>; a rename there must break this file's names."""
+    """The workflow publishes automatos-<name>; a rename there must break this file's names.
+
+    The image list is the changes job's IMAGES (PRD-262 US-001: it picks the build
+    matrix); only the entries with ``publish: true`` reach GHCR.
+    """
     workflow = yaml.safe_load(_IMAGES_WORKFLOW.read_text(encoding="utf-8"))
-    names = {entry["name"] for entry in workflow["jobs"]["build"]["strategy"]["matrix"]["image"]}
+    pick = next(step for step in workflow["jobs"]["changes"]["steps"] if step.get("id") == "pick")
+    names = {image["name"] for image in json.loads(pick["env"]["IMAGES"]) if image["publish"]}
     assert {f"automatos-{name}" for name in names} == set(_PUBLISHED.values())
+    merged = {entry["name"] for entry in workflow["jobs"]["merge"]["strategy"]["matrix"]["image"]}
+    assert merged == names, "the merge job publishes exactly the images built for GHCR"
 
 
 def test_backend_never_mounts_the_checkout_over_the_image(override):
