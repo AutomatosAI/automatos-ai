@@ -1,8 +1,8 @@
 /**
  * PRD-260 P260-FX-25 (M69) — one width source for Play. The five places that
- * pick Play's version or the core's (MainLayout, PlayRouteSwitch through the
+ * pick Play's version or the core's (MainLayout, ThemeSlot through the
  * chat layout, the 404, the Play-only pages /looks and /looks/style, and
- * Conversations) read usePlayLayout, which knows the width on a browser
+ * Conversations) read useThemeLayout, which knows the width on a browser
  * mount's first render. useIsTabletOrBelow starts false, so under Play on a
  * phone each of them used to mount Play's version for one render before the
  * width flipped it: Play's chat opened a linked conversation and the event

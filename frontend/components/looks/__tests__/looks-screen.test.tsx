@@ -14,7 +14,7 @@
  * Switch to Play hands focus to the screen's heading as the note goes
  * (P260-FX-22, M21).
  * The width is a real window's (window-width.ts) read by Play's width source,
- * usePlayLayout (P260-FX-25, M69): on a phone the editor never mounts at all.
+ * useThemeLayout (P260-FX-25, M69): on a phone the editor never mounts at all.
  * Roles, attributes and text only (CSS modules are proxies under css: false).
  */
 import React from 'react'

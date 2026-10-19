@@ -19,7 +19,7 @@
  * (P260-FX-24, M74). Copy tokens twice, or refused twice, is announced twice:
  * a new node each time (M22).
  * The width is a real window's (window-width.ts) read by Play's width source,
- * usePlayLayout (P260-FX-25, M69): on a phone the sheet never mounts at all.
+ * useThemeLayout (P260-FX-25, M69): on a phone the sheet never mounts at all.
  * Roles, attributes, inline custom properties and text only: CSS modules are
  * proxies.
  */
