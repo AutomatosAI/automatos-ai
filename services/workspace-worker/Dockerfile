@@ -85,8 +85,8 @@ COPY --link --from=node-stripped /node-layer/ /
 WORKDIR /app
 
 # System dependencies — DevOps toolchain for agent workspaces. The same layer drops
-# what no agent build or clone runs (scripts/ci/image_worker_toolchain.py proves the
-# rest still works):
+# what no agent build or clone runs, and the two parts of gcc that §3-D5 gave up
+# (scripts/ci/image_worker_toolchain.py proves the rest still works):
 # - PRD-262 (row 16): gcc's lto-dump (29.4 MB on arm64). `gcc -flto` runs lto1,
 #   lto-wrapper and the linker plugin, never lto-dump, which only prints LTO objects.
 # - PRD-262 (row 19), the API's git trim (US-019): git's server-side and mail
@@ -97,6 +97,10 @@ WORKDIR /app
 #   setpriv, which util-linux in the base image already carries.
 # - PRD-262 (row 27): libpq5, the libpq the psycopg2 stage's build links. Its own
 #   dependencies (libssl3t64, libgssapi-krb5-2, libldap2) are already here.
+# - PRD-262 §3-D5 (row 12): the sanitizer runtimes, their .a and gcc's links; -fsanitize stops linking.
+# - PRD-262 §3-D5 (row 31): libc.a and libstdc++.a; gcc -static and -static-libstdc++ stop linking.
+#   dpkg -L lists both on each arch, and a list that comes back empty fails the RUN. Only
+#   files go, no package, so dpkg records no broken dependency for a later apt-get install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl wget openssh-client ca-certificates \
     build-essential \
@@ -107,6 +111,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         /usr/lib/git-core/git-http-push /usr/lib/git-core/git-imap-send \
         /usr/lib/git-core/git-shell /usr/lib/git-core/scalar \
     && ln -sf /usr/bin/git /usr/lib/git-core/git \
+    && sanitizers=$(dpkg-query -W -f '${db:Status-Abbrev} ${binary:Package}\n' 'libgcc-[0-9]*-dev' \
+            'libasan[0-9]*' 'libhwasan[0-9]*' 'liblsan[0-9]*' 'libtsan[0-9]*' 'libubsan[0-9]*' 2>/dev/null \
+        | awk '$1 == "ii" {print $2}' | xargs -r dpkg -L \
+        | grep -E '^/usr/lib/.+/lib(asan|hwasan|lsan|tsan|ubsan)[._][^/]*$') \
+    && rm -f $sanitizers \
+    && libc_a=$(dpkg -L libc6-dev | grep '/libc\.a$') \
+    && libstdcxx_a=$(dpkg-query -W -f '${db:Status-Abbrev} ${binary:Package}\n' 'libstdc++-[0-9]*-dev' 2>/dev/null \
+        | awk '$1 == "ii" {print $2}' | xargs -r dpkg -L | grep '/libstdc++\.a$') \
+    && rm -f $libc_a $libstdcxx_a \
+    && ldconfig \
     && rm -rf /var/lib/apt/lists/*
 
 # npm (from the `npm` stage, without its docs) and corepack for Node.js 24, whose binary

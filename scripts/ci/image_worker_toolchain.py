@@ -15,6 +15,12 @@ Each check names the row of the 19 Oct size breakdown it proves:
 - row 16, gcc's lto-dump: nothing named lto-dump is left in /usr/bin, and two units
   compiled with ``-flto`` still link (lto-wrapper, lto1 and the linker plugin) into a
   program that runs;
+- rows 12 and 31, PRD-262 §3-D5 (decided 19 Oct 2026: the toolchain stays, trimmed): no
+  sanitizer runtime, archive or gcc link to one is left in /usr/lib or in ld.so's
+  cache; gcc finds neither libc.a nor libstdc++.a, but still finds every file a dynamic
+  link needs (libgcc*.a, libc_nonshared.a, libssp_nonshared.a, crt*.o, the libc.so,
+  libgcc_s.so and libstdc++.so links); and make builds a C and a C++ hello world with
+  gcc and g++ that link libc.so.6 and libstdc++.so.6 dynamically and run;
 - row 19, the API's git trim: git's server-side and mail binaries are gone, git-core's
   ``git`` is a link to /usr/bin/git, and a repository can still be made, committed to,
   branched, checked out, cloned and pulled; an HTTPS clone works (git-remote-https), and
@@ -50,6 +56,31 @@ LTO_UNITS = {
     "answer.c": "int answer(void) { return 42; }\n",
 }
 LTO_OUTPUT = "lto 42"
+
+# Rows 12 and 31: what the apt layer deletes, found the way the Dockerfile's grep finds it.
+SANITIZER_NAMES = ("asan", "hwasan", "lsan", "tsan", "ubsan")
+SANITIZER_FILE = re.compile(rf"^lib(?:{'|'.join(SANITIZER_NAMES)})[._]")
+LIBRARY_ROOT = "/usr/lib"
+# gcc -print-file-name prints the bare name when no directory the linker searches holds it.
+STATIC_ARCHIVES_REMOVED = (("gcc", "libc.a"), ("g++", "libstdc++.a"))
+LINK_FILES_KEPT = (
+    "libgcc.a", "libgcc_eh.a", "libgcc_s.so", "libc_nonshared.a", "libssp_nonshared.a",
+    "libc.so", "libstdc++.so", "Scrt1.o", "crt1.o", "crti.o", "crtn.o", "crtbeginS.o", "crtendS.o",
+)
+HELLO_SOURCES = {
+    "hello.c": '#include <stdio.h>\nint main(void) { puts("hello c"); return 0; }\n',
+    "hello.cpp": (
+        "#include <iostream>\n#include <string>\n"
+        'int main() { std::cout << std::string("hello c++") << std::endl; return 0; }\n'
+    ),
+    "Makefile": "all: hello-c hello-cpp\nhello-c: hello.c\n\tgcc -O2 -o $@ $<\nhello-cpp: hello.cpp\n\tg++ -O2 -o $@ $<\n",
+}
+# Each program, what it prints, and the shared libraries it must name as NEEDED.
+HELLO_PROGRAMS = {
+    "hello-c": ("hello c", frozenset({"libc.so.6"})),
+    "hello-cpp": ("hello c++", frozenset({"libstdc++.so.6", "libc.so.6"})),
+}
+NEEDED_LIBRARY = re.compile(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]")
 
 # Row 19: what the Dockerfile's git trim deletes, as orchestrator/Dockerfile's US-019 does.
 GIT_REMOVED = (
@@ -155,6 +186,56 @@ def check_lto(work: Path) -> List[str]:
     output = must(["./lto-probe"], work)
     if output != LTO_OUTPUT:
         failures.append(f"the -flto program printed {output!r}, not {LTO_OUTPUT!r}")
+    return failures
+
+
+# --------------------------------------------------------------------------- rows 12 and 31
+
+
+def sanitizer_files(root: str) -> List[str]:
+    """Every file, link or directory under ``root`` named like a sanitizer runtime or archive."""
+    found = []
+    for directory, subdirectories, files in os.walk(root):
+        found += [os.path.join(directory, name) for name in subdirectories + files if SANITIZER_FILE.match(name)]
+    return sorted(found)
+
+
+def check_sanitizers_gone(work: Path) -> List[str]:
+    """No sanitizer runtime, archive or gcc link is left, and ld.so's cache lists none."""
+    failures = [f"{path} is still in the image" for path in sanitizer_files(LIBRARY_ROOT)]
+    # The first line counts the libraries; each one after names one: "\tlibfoo.so.1 (libc6,...) => ...".
+    cached = [line.split()[0] for line in must(["ldconfig", "-p"], work).splitlines()[1:] if line.strip()]
+    failures += [f"ld.so's cache still lists {name}" for name in cached if SANITIZER_FILE.match(name)]
+    return failures
+
+
+def check_static_archives(work: Path) -> List[str]:
+    """gcc finds neither libc.a nor libstdc++.a, and still finds what a dynamic link needs."""
+    failures = []
+    for compiler, name in STATIC_ARCHIVES_REMOVED:
+        found = must([compiler, f"-print-file-name={name}"], work)
+        if found != name:
+            failures.append(f"{compiler} still finds {found}")
+    for name in LINK_FILES_KEPT:
+        found = must(["gcc", f"-print-file-name={name}"], work)
+        if not os.path.isfile(found):
+            failures.append(f"gcc no longer finds {name}, which a dynamic link needs")
+    return failures
+
+
+def check_hello_dynamic(work: Path) -> List[str]:
+    """make builds hello world with gcc and g++; each runs, linked against shared libraries."""
+    for name, text in HELLO_SOURCES.items():
+        (work / name).write_text(text, encoding="utf-8")
+    must(["make", "-s"], work)
+    failures = []
+    for program, (greeting, libraries) in HELLO_PROGRAMS.items():
+        output = must([f"./{program}"], work)
+        if output != greeting:
+            failures.append(f"{program} printed {output!r}, not {greeting!r}")
+        needed = set(NEEDED_LIBRARY.findall(must(["readelf", "-d", program], work)))
+        if not libraries <= needed:
+            failures.append(f"{program} does not link {sorted(libraries - needed)} dynamically; NEEDED: {sorted(needed)}")
     return failures
 
 
@@ -267,6 +348,9 @@ def check_setpriv(work: Path) -> List[str]:
 CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 47: no npm docs, compile cache or npm logs", check_node_leftovers),
     ("row 16: no lto-dump, and gcc -flto links", check_lto),
+    ("row 12: no sanitizer runtime, archive or link is left", check_sanitizers_gone),
+    ("row 31: no libc.a or libstdc++.a, and what a dynamic link needs is kept", check_static_archives),
+    ("rows 12 and 31: make, gcc and g++ build hello world, linked dynamically", check_hello_dynamic),
     ("row 19: git's server-side binaries are gone", check_git_trim),
     ("row 19: git init, commit, clone, branch, checkout and pull", check_git_local),
     ("row 19: an HTTPS clone and git's credential protocol", check_git_https),

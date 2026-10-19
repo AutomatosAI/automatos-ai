@@ -28,6 +28,9 @@ runs on the image it built, on both arches:
   (test_prd262_worker_boot.py runs the entrypoint, and test.yml's parity job checks the
   worker's uid and HOME in the Railway build).
 
+Rows 12 and 31, the gcc trims §3-D5 accepted (sanitizer runtimes, libc.a and libstdc++.a),
+are pinned in test_prd262_worker_d5_trims.py.
+
 scripts/ci/image_worker_toolchain.py proves inside the image that ``gcc -flto`` still
 links, that git still commits, branches, clones, pulls and clones over HTTPS, that the
 stripped node runs, keeps .dynsym and loads a native N-API addon, and that setpriv drops
@@ -133,10 +136,12 @@ GIT_TRIM = {
     "/usr/lib/git-core/git-http-push", "/usr/lib/git-core/git-imap-send",
     "/usr/lib/git-core/git-shell", "/usr/lib/git-core/scalar",
 }
+# Rows 12 and 31 delete what dpkg -L lists, through these variables (test_prd262_worker_d5_trims.py).
+D5_TRIMS = {"$sanitizers", "$libc_a", "$libstdcxx_a"}
 
 
 def test_the_git_trim_deletes_the_server_side_binaries_and_links_git_core_git():
-    removed = set(_rm_paths(APT_RUN)) - {"/usr/bin/*lto-dump*"}
+    removed = set(_rm_paths(APT_RUN)) - {"/usr/bin/*lto-dump*"} - D5_TRIMS
     assert removed == GIT_TRIM
     assert ["ln", "-sf", "/usr/bin/git", "/usr/lib/git-core/git"] in _commands(APT_RUN)
     # git-remote-http(s) clones, pulls and pushes over HTTPS: it stays.
@@ -475,4 +480,5 @@ def test_images_runs_the_site_packages_check_as_the_worker_user():
 
 def test_every_toolchain_check_names_its_breakdown_row():
     rows = [title.split(":")[0] for title, _ in toolchain.CHECKS]
-    assert rows == ["row 47", "row 16", "row 19", "row 19", "row 19", "row 21", "row 21", "row 21", "row 47"]
+    assert rows == ["row 47", "row 16", "row 12", "row 31", "rows 12 and 31",
+                    "row 19", "row 19", "row 19", "row 21", "row 21", "row 21", "row 47"]
