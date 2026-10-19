@@ -7,15 +7,21 @@ naming Helvetica, Times, Courier, Palatino or Bookman prints in. libgdk-pixbuf w
 them, and only tesseract brought them), and the same RUN deletes tesseract's orientation
 model and git's server-side binaries, linking git-core's copy of git to /usr/bin/git.
 
-This suite checks:
+The same RUN deletes ICU's libraries and tesseract's 15 training tools, which alone
+link ICU (the 19 Oct breakdown's row #13), and fonts-urw-base35's Type1 copies, which
+Pango can't use (row #35). This suite checks:
 
 - the Dockerfile's apt RUN: what it installs, deletes and links, in the one layer, and
-  that scripts/ci/image_system_tools.py looks for exactly what it changed;
+  that scripts/ci/image_system_tools.py looks for exactly what it changed; after the
+  ICU deletion the build itself fails if ldd finds a library tesseract needs missing or
+  tesseract can't list its languages, and fontconfig's cache is rebuilt after the fonts
+  go;
 - every CI list that mirrors the image's (test.yml, nl2sql-eval-scheduled.yml,
   .oss-scanner/Dockerfile) installs fonts-urw-base35 and not ghostscript;
 - test.yml's prod-image-parity checks the built image: no gs, the system tools, an HTTPS
   clone, the Helvetica render against `edge`, and the clone tests in the throwaway test
-  image (scripts/ci/image_test_image.py), which is never pushed;
+  image (scripts/ci/image_test_image.py), which is never pushed; images.yml runs the
+  system tools on every API build, on both arches;
 - scripts/ci/image_pdf_fixture.py: its comparison, and one real render here.
 
 File reads and pure functions, plus one WeasyPrint render; no Docker, no network.
@@ -107,6 +113,44 @@ def test_the_same_layer_deletes_the_osd_model_and_trims_git():
     assert run.rstrip().endswith("apt-get clean")
 
 
+def _parts(run: str) -> list[str]:
+    return [" ".join(part.split()) for part in run.split("&&")]
+
+
+def test_the_same_layer_deletes_icu_and_the_training_tools_and_proves_tesseract_still_runs():
+    """PRD-262 row #13: only the training tools link ICU; tesseract and libtesseract don't."""
+    parts = _parts(_base_apt_run())
+    icu = parts.index("icu=$(dpkg -L libicu76 | grep -E '/libicu[a-z0-9]*\\.so\\.')")
+    assert parts[icu + 1] == "rm -f $icu", "an empty match fails the RUN instead of deleting nothing"
+    tools = next(part for part in parts if part.startswith("rm -f /usr/bin/ambiguous_words"))
+    assert tools.split()[2:] == [f"/usr/bin/{tool}" for tool in system_tools.TRAINING_TOOLS]
+    assert "/usr/bin/tesseract" not in tools.split()
+    ldd, langs = parts.index("! ldd /usr/bin/tesseract | grep 'not found'"), parts.index("tesseract --list-langs")
+    assert icu < parts.index(tools) < parts.index("ldconfig") < ldd < langs
+    assert "dpkg --purge" not in _base_apt_run() and "--force-depends" not in _base_apt_run(), (
+        "deleted like the other files, so dpkg records no broken dependency")
+
+
+def test_the_same_layer_deletes_the_type1_fonts_and_rebuilds_fontconfigs_cache():
+    """PRD-262 row #35: Pango can't use Type1; the OpenType faces of fonts-urw-base35 stay."""
+    parts = _parts(_base_apt_run())
+    fonts = parts.index("rm -rf /usr/share/fonts/type1/urw-base35 /usr/share/fonts/X11/Type1")
+    assert parts.index("fc-cache -f") == fonts + 1
+    assert "opentype" not in _base_apt_run()
+    assert system_tools.URW_OPENTYPE.as_posix() == "/usr/share/fonts/opentype/urw-base35"
+    assert set(system_tools.URW_ALIASED) == {"Helvetica", "Times", "Courier", "Palatino", "Bookman"}
+    assert {".t1", ".pfb", ".afm"} <= set(system_tools.TYPE1_SUFFIXES)
+
+
+def test_the_icu_scan_reads_only_elf_files_that_name_icu(tmp_path):
+    script = tmp_path / "script.sh"
+    script.write_bytes(b"#!/bin/sh\n# libicuuc.so.76 named in a comment\n")
+    unrelated = tmp_path / "libunrelated.so"
+    unrelated.write_bytes(system_tools.ELF_MAGIC + b"\0" * 64)
+    assert not system_tools._links_missing_icu(script)
+    assert not system_tools._links_missing_icu(unrelated), "no ICU name, so ldd never runs"
+
+
 def test_the_dockerfile_no_longer_installs_ghostscript_or_gdk_pixbuf():
     code = "\n".join(_instructions(DOCKERFILE))
     assert "ghostscript" not in code and "gdk-pixbuf" not in code
@@ -182,6 +226,18 @@ def test_ci_finds_no_gs_in_the_image():
 def test_ci_runs_the_system_tools_script_in_the_image():
     step = _after_the_api_build(lambda step: "image_system_tools.py" in step.get("run", ""))
     assert step["run"].strip() == "docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_system_tools.py"
+
+
+def test_images_yml_runs_the_system_tools_script_in_every_api_build():
+    """PRD-262 rows #13 and #35 change the apt layer on both arches, so both are checked."""
+    steps = _workflow("images.yml")["jobs"]["build"]["steps"]
+    built = next(i for i, step in enumerate(steps) if step.get("id") == "build")
+    at, step = next((i, step) for i, step in enumerate(steps) if "image_system_tools.py" in step.get("run", ""))
+    assert built < at
+    assert "matrix.name == 'api'" in step["if"] and "!cancelled()" in step["if"]
+    assert ('docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_system_tools.py'
+            in step["run"])
+    assert "continue-on-error" not in step
 
 
 def test_ci_clones_a_public_repository_over_https_in_the_image():

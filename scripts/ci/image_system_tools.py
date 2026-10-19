@@ -14,9 +14,16 @@ It checks what US-019 changed in the base stage's apt RUN (orchestrator/Dockerfi
   makes (modules/rag/ingestion/multimodal/processors.py);
 - git: its server-side and mail binaries are gone, git-core's copy of git is a link to
   /usr/bin/git, the builtins in git-core reach /usr/bin/git through it, and the HTTPS
-  helper is there.
+  helper is there;
+- ICU (the 19 Oct breakdown's row #13): ICU's libraries and tesseract's training tools
+  are gone, ldd finds every library /usr/bin/tesseract needs, and no binary or library
+  in the image links ICU any more (ldd on each ELF file that names it);
+- fonts (row #35): no Type1 font is left under /usr/share/fonts, fontconfig lists every
+  OpenType face of fonts-urw-base35, and Helvetica, Times, Courier, Palatino and Bookman
+  resolve to one of them, not to DejaVu.
 
-test.yml's prod-image-parity runs it. ``! command -v gs``, an HTTPS clone, the Helvetica
+test.yml's prod-image-parity runs it on the Railway build, and images.yml on every API
+build, on both arches. ``! command -v gs``, an HTTPS clone, the Helvetica
 render (scripts/ci/image_pdf_fixture.py) and the clone tests in the test image
 (scripts/ci/image_test_image.py) are steps of their own there. Standard library apart
 from the image's Pillow and pytesseract. Exit 0 when every check passes, 1 otherwise.
@@ -56,6 +63,23 @@ GIT_REMOVED = (
 # Builtins a clone and a pull run from git-core, and the helper an HTTPS remote needs.
 GIT_BUILTINS = ("git-clone", "git-upload-pack", "git-fetch")
 GIT_HTTPS_HELPER = "git-remote-https"
+# What orchestrator/Dockerfile deletes for row #13; tests/test_prd262_system_packages.py
+# holds the tool list equal to the Dockerfile's rm.
+ICU_LIBRARIES = "*-linux-gnu/libicu*.so*"
+TESSERACT = Path("/usr/bin/tesseract")
+TRAINING_TOOLS = (
+    "ambiguous_words", "classifier_tester", "cntraining", "combine_lang_model", "combine_tessdata",
+    "dawg2wordlist", "lstmeval", "lstmtraining", "merge_unicharsets", "mftraining", "set_unicharset_properties",
+    "shapeclustering", "text2image", "unicharset_extractor", "wordlist2dawg",
+)
+ELF_ROOTS = (Path("/usr/bin"), Path("/usr/sbin"), Path("/usr/lib"), Path("/usr/local/bin"), Path("/usr/local/lib"))
+ELF_MAGIC = b"\x7fELF"
+ICU_NAME = b"libicu"
+# Row #35: Pango can't use Type1, so fonts-urw-base35's OpenType copies are the faces.
+FONTS = Path("/usr/share/fonts")
+TYPE1_SUFFIXES = (".t1", ".pfb", ".pfa", ".afm")
+URW_OPENTYPE = FONTS / "opentype" / "urw-base35"
+URW_ALIASED = ("Helvetica", "Times", "Courier", "Palatino", "Bookman")
 TIMEOUT_S = 120
 
 
@@ -127,8 +151,57 @@ def git_problems() -> List[str]:
     return problems
 
 
+def _links_missing_icu(path: Path) -> bool:
+    """True when ``path`` is an ELF file that names ICU and ldd can't find it."""
+    with path.open("rb") as handle:
+        if handle.read(len(ELF_MAGIC)) != ELF_MAGIC:
+            return False
+        if ICU_NAME not in handle.read():
+            return False
+    done = _run(["ldd", str(path)])
+    return any(ICU_NAME.decode() in line and "not found" in line for line in done.stdout.splitlines())
+
+
+def _elf_candidates() -> List[Path]:
+    """Every regular file under ELF_ROOTS, symlinks aside."""
+    return [path for root in ELF_ROOTS if root.is_dir() for path in root.rglob("*")
+            if path.is_file() and not path.is_symlink()]
+
+
+def icu_problems() -> List[str]:
+    """ICU and the training tools are gone, and nothing left needs them (PRD-262 row #13)."""
+    problems = [f"{path} is still in the image" for path in sorted(Path("/usr/lib").glob(ICU_LIBRARIES))]
+    problems += [f"/usr/bin/{tool} is still in the image" for tool in TRAINING_TOOLS
+                 if os.path.lexists(f"/usr/bin/{tool}")]
+    done = _run(["ldd", str(TESSERACT)])
+    missing = [line.strip() for line in done.stdout.splitlines() if "not found" in line]
+    if done.returncode != 0 or missing:
+        problems.append(f"ldd {TESSERACT}: exit {done.returncode}, missing {missing}: {done.stderr.strip()}")
+    problems += [f"{path} links ICU, which the image no longer has" for path in _elf_candidates()
+                 if _links_missing_icu(path)]
+    return problems
+
+
+def _font_file(family: str) -> str:
+    return _run(["fc-match", "--format=%{file}", family]).stdout.strip()
+
+
+def font_problems() -> List[str]:
+    """No Type1 font is left, and fontconfig serves fonts-urw-base35's OpenType faces (PRD-262 row #35)."""
+    problems = [f"{path} is still in the image" for path in sorted(FONTS.rglob("*"))
+                if path.suffix.lower() in TYPE1_SUFFIXES]
+    faces = sorted(str(path) for path in URW_OPENTYPE.glob("*.otf"))
+    listed = set(_run(["fc-list", "--format=%{file}\\n"]).stdout.split())
+    if not faces:
+        problems.append(f"no OpenType face under {URW_OPENTYPE}")
+    problems += [f"fontconfig does not list {face}" for face in faces if face not in listed]
+    problems += [f"fontconfig gives {family} {_font_file(family) or 'nothing'}, not a face under {URW_OPENTYPE}"
+                 for family in URW_ALIASED if not _font_file(family).startswith(f"{URW_OPENTYPE}/")]
+    return problems
+
+
 CHECKS = (("packages", package_problems), ("tesseract", tesseract_problems),
-          ("OCR fixture", ocr_problems), ("git", git_problems))
+          ("OCR fixture", ocr_problems), ("git", git_problems), ("ICU", icu_problems), ("fonts", font_problems))
 
 
 def main() -> int:

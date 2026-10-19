@@ -1180,6 +1180,9 @@ jobs:
       # PRD-262 US-019: the packages the apt layer drops are gone and the ones it names are
       # installed, tesseract reads an OCR fixture without its orientation model, and git's
       # trim left its builtins and HTTPS helper working (scripts/ci/image_system_tools.py).
+      # Rows #13 and #35 of the 19 Oct breakdown: ICU and tesseract's training tools are
+      # gone and nothing links them, and fontconfig serves fonts-urw-base35's OpenType
+      # faces with its Type1 copies gone. images.yml runs it on both arches.
       - name: Backend — the system packages the code calls work, and the rest are gone
         run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_system_tools.py
       - name: Backend — git clones a public repository over HTTPS

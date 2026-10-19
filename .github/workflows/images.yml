@@ -541,6 +541,23 @@ jobs:
           docker pull --quiet "${IMAGE}@${DIGEST}"
           docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_scipy.py
 
+      # PRD-262 US-019 and the 19 Oct breakdown's rows #13 and #35: the base stage's apt
+      # layer installs what the code calls and deletes the rest. In the same image, on
+      # this arch, tesseract reads an OCR fixture without ICU and its training tools, which
+      # nothing links any more, git's trim leaves its builtins and HTTPS helper working,
+      # and fontconfig serves fonts-urw-base35's OpenType faces for Helvetica, Times,
+      # Courier, Palatino and Bookman with its Type1 copies gone
+      # (scripts/ci/image_system_tools.py). Same conditions as the step above; test.yml's
+      # prod-image-parity runs it on the Railway build.
+      - name: The system packages the code calls work, and the rest are gone
+        if: ${{ !cancelled() && matrix.name == 'api' && steps.build.outcome == 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          docker run --rm -i --entrypoint python "${IMAGE}@${DIGEST}" - < scripts/ci/image_system_tools.py
+
       # PRD-262 rows #11 and #47: the lock pins them, but orchestrator/scripts/split_lock.py
       # leaves them out of the production image: LEFT_OUT, the 12 tree-sitter grammars only
       # graphify.extract imports, and DEVELOPMENT_ONLY, watchfiles, which only the

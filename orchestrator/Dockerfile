@@ -185,6 +185,16 @@ WORKDIR /app
 # git's server-side and mail binaries, both copies. git-core's second copy of git,
 # which every builtin there links to, becomes a link to /usr/bin/git.
 # git-remote-http, which clones over HTTPS, stays.
+# It deletes ICU's libraries and tesseract's 15 training tools too (PRD-262, the 19 Oct
+# breakdown's row #13, about 41 MB): tesseract-ocr depends on libicu76 for the training
+# tools, and in the image only four of them link it; /usr/bin/tesseract, which
+# pytesseract runs, and libtesseract do not. Deleted like the files above, so dpkg still
+# lists both packages and records no broken dependency. The RUN fails if ldd then finds
+# a library tesseract needs missing, or tesseract can't list its languages.
+# And it deletes fonts-urw-base35's Type1 copies (row #35, about 12.5 MB): Pango, which
+# WeasyPrint draws with, can't use Type1, and fontconfig gives Helvetica, Times,
+# Courier, Palatino and Bookman the package's OpenType faces, which stay; fc-cache then
+# rebuilds fontconfig's cache without them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
@@ -203,6 +213,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         /usr/lib/git-core/git-http-push /usr/lib/git-core/git-imap-send \
         /usr/lib/git-core/git-shell /usr/lib/git-core/scalar \
     && ln -sf /usr/bin/git /usr/lib/git-core/git \
+    && icu=$(dpkg -L libicu76 | grep -E '/libicu[a-z0-9]*\.so\.') && rm -f $icu \
+    && rm -f /usr/bin/ambiguous_words /usr/bin/classifier_tester /usr/bin/cntraining \
+        /usr/bin/combine_lang_model /usr/bin/combine_tessdata /usr/bin/dawg2wordlist /usr/bin/lstmeval \
+        /usr/bin/lstmtraining /usr/bin/merge_unicharsets /usr/bin/mftraining /usr/bin/set_unicharset_properties \
+        /usr/bin/shapeclustering /usr/bin/text2image /usr/bin/unicharset_extractor /usr/bin/wordlist2dawg \
+    && ldconfig \
+    && ! ldd /usr/bin/tesseract | grep 'not found' \
+    && tesseract --list-langs \
+    && rm -rf /usr/share/fonts/type1/urw-base35 /usr/share/fonts/X11/Type1 \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
