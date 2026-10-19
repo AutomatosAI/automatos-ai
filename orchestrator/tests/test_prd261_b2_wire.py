@@ -7,8 +7,9 @@ Pins (plan §2.4 W-B2 row, §2.6 B2-wire; Gerard D1-a/d/e):
   ``test_route_manifest.py`` / authZ-sweep precedent);
 * every W-B2 route is in ``reports/route-manifest.json`` and ``route_count == len(routes)``;
 * the step-up dependency (A-07c) is on EXACTLY the theme routes §2.2 marks (import, opt-in,
-  default, update, rollback, the settings PUT) and the workspace role change A-07f adds (Gerard D1-d,
-  #1157; the invite and SDK key creation carry none, outside D1-d), each after its permission gate, and the app renders its refusal with ``clerk_error`` at the top level;
+  default, update, rollback, the settings PUT) and the three account routes A-07f adds (the
+  workspace role change, the invite and SDK key creation; Gerard D1-d, #1157), each after its
+  permission gate, and the app renders its refusal with ``clerk_error`` at the top level;
 * "who may install" (A-07e) gates import, update and rollback;
 * every W-B2 mutating route carries ``require_workspace_permission`` (authZ-sweep bucket a);
   the files and boot routes carry none: they authorise by membership, never by
@@ -67,10 +68,9 @@ STEP_UP_ROUTES = {
     ("POST", "/api/themes/installs/{install_id}/rollback"),
     ("PUT", "/api/themes/settings"),
 }
-# PRD-261 A-07f (Gerard D1-d, #1157): the role change is the ONLY account route with step-up;
-# the invite and SDK key creation stay without it until a maintainer decision adds them.
-ACCOUNT_STEP_UP_ROUTES = {ROLE_CHANGE}
-ACCOUNT_ROUTES_WITHOUT_STEP_UP = {
+# PRD-261 A-07f (Gerard D1-d, #1157): the routes that grant a person or a key rights here.
+ACCOUNT_STEP_UP_ROUTES = {
+    ROLE_CHANGE,
     ("POST", "/api/workspaces/{workspace_id}/team/invite"),
     ("POST", "/api/api-keys"),
 }
@@ -151,7 +151,7 @@ def test_every_w_b2_route_is_in_the_manifest_and_the_count_holds():
     expected = set(_theme_routes())
     assert len(expected) == 16
     assert not expected - served, sorted(expected - served)
-    assert ACCOUNT_STEP_UP_ROUTES | ACCOUNT_ROUTES_WITHOUT_STEP_UP <= served
+    assert ACCOUNT_STEP_UP_ROUTES <= served
 
 
 def test_every_theme_config_name_is_on_config_and_in_the_config_surface():
@@ -190,8 +190,8 @@ def test_step_up_is_on_exactly_the_marked_theme_routes_after_the_gate():
     assert marked == STEP_UP_ROUTES
 
 
-def test_step_up_is_on_exactly_the_role_change_after_the_gate():
-    # A-07f: team-management answers it with Clerk's prompt; invite and key creation carry none (D1-d).
+def test_step_up_is_on_exactly_the_role_change_invite_and_key_creation_after_the_gate():
+    # A-07f: the clients (team-management, invite-modal, ApiKeyManager) answer it with Clerk's prompt.
     marked = set()
     for router in ACCOUNT_ROUTERS:
         for route in router.routes:

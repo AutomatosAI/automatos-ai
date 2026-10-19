@@ -17,13 +17,22 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission
+from core.auth.step_up import require_step_up
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
 from core.services.api_key_service import ApiKeyService
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/api-keys", tags=["API Keys"])
+
+# PRD-261 A-07f (Gerard D1-d, #1157): a new SDK key is a standing credential for this
+# workspace, so in SaaS minting one needs a sign-in from the last STEP_UP_MAX_AGE_MINUTES
+# minutes (core/auth/step_up.py; the local edition passes), after the permission gate.
+# Theme code runs in the page as the signed-in user; this stops it minting a key silently.
+# A key or anonymous caller cannot reverify, so in SaaS it is refused (step_up_unavailable).
+STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
 # PRD-195 S8 (G1): SDK scopes speak the canonical vocabulary — the legacy
 # workflows:* strings are renamed to missions:* + playbooks:* (CLAUDE.md §10).
@@ -120,7 +129,12 @@ class RevokeResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=ApiKeyCreateResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+@router.post(
+    "",
+    response_model=ApiKeyCreateResponse,
+    status_code=201,
+    dependencies=[Depends(require_workspace_permission("workspace:manage")), Depends(STEP_UP)],
+)
 async def create_api_key(
     body: ApiKeyCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
