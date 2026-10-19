@@ -290,6 +290,39 @@ def test_a_failed_adapter_send_keeps_the_notice_for_the_next_reply(state):
     assert sent == [_with_notice(REPLY)]
 
 
+class _RefusedResp(_HttpResp):
+    status_code = 400
+    text = "refused"
+
+
+class _RefusingHttpClient(_HttpClient):
+    """The Graph API refusing the message."""
+
+    async def post(self, url: str, json: Any = None, **_kwargs: Any) -> _HttpResp:
+        self.bodies.append(json)
+        return _RefusedResp()
+
+
+def test_a_refused_whatsapp_send_keeps_the_notice_for_the_next_reply(state, monkeypatch):
+    import httpx
+
+    from channels.whatsapp_adapter import WhatsAppAdapter
+
+    bodies: list = []
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _RefusingHttpClient(bodies))
+    adapter = WhatsAppAdapter("conn-wa", WS, {"access_token": "test-token", "phone_number_id": "100"})
+
+    assert asyncio.run(adapter.send_message(CHAT_ID, REPLY)) is False
+    _reply(adapter)
+    assert state.redis.values == {}
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _HttpClient(bodies))
+    state.clock.now = T0 + 60
+    _reply(adapter)
+    assert bodies[-1]["text"]["body"] == _with_notice(REPLY)
+    assert state.redis.values
+
+
 def test_whatsapp_webhook_replies_to_the_sender_through_the_base_reply_point(monkeypatch):
     from channels.whatsapp_adapter import WhatsAppAdapter
 

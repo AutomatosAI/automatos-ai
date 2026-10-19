@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _WA_MAX_LEN = 4096
 _GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
+_HTTP_ERROR_STATUS = 400
 
 
 class WhatsAppAdapter(BaseChannelAdapter):
@@ -87,8 +88,12 @@ class WhatsAppAdapter(BaseChannelAdapter):
 
     async def send_message(
         self, channel_id: str, text: str, **kwargs: Any
-    ) -> None:
-        """Send a text message to a WhatsApp user by phone number."""
+    ) -> bool:
+        """Send a text message to a WhatsApp user by phone number.
+
+        Returns False when the Graph API refuses any chunk, so the base reply
+        point doesn't record an AI notice the person never got (PRD-264 EUAI-03).
+        """
         import httpx
 
         url = f"{_GRAPH_API_BASE}/{self._phone_number_id}/messages"
@@ -98,6 +103,7 @@ class WhatsAppAdapter(BaseChannelAdapter):
         }
 
         chunks = self._chunk_text(text, _WA_MAX_LEN)
+        delivered = True
         async with httpx.AsyncClient(timeout=30) as client:
             for chunk in chunks:
                 payload = {
@@ -107,8 +113,10 @@ class WhatsAppAdapter(BaseChannelAdapter):
                     "text": {"body": chunk},
                 }
                 resp = await client.post(url, json=payload, headers=headers)
-                if resp.status_code >= 400:
+                if resp.status_code >= _HTTP_ERROR_STATUS:
                     logger.error("WhatsApp send failed: %s", resp.text)
+                    delivered = False
+        return delivered
 
     # ------------------------------------------------------------------
     # Envelope conversion
