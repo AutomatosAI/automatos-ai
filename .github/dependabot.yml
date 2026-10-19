@@ -19,8 +19,11 @@
 # Python lock files: Dependabot's pip and uv updaters read only *.txt and *.in
 # files, and both recompile without uv's --overrides. They cannot update
 # services/agent-opt-worker/requirements.lock, so it has no entry here; the test
-# lists it with that reason. Security alerts and security updates for the npm and
-# pip manifests are repository settings and stay on.
+# lists it with that reason. The same goes for the API's requirements.lock,
+# requirements-leiden.lock and requirements-dev.lock (PRD-262 US-022): an entry for
+# /orchestrator would bump requirements.in and leave the locks behind. Security
+# alerts and security updates for the npm and pip manifests are repository
+# settings and stay on.
 version: 2
 updates:
   - package-ecosystem: github-actions

@@ -1,0 +1,10 @@
+# Railway's build only: the [leiden] extra on graphifyy (PRD-262 US-022), compiled
+# with requirements.in into requirements-leiden.lock, which the Dockerfile's pybuild
+# installs when INSTALL_GRAPH_EXTRAS=true (its default, Railway's build). The extra
+# pulls graspologic, and with it POT, llvmlite, numba, statsmodels, gensim,
+# scikit-learn and matplotlib, for one feature: Leiden clustering in the Knowledge
+# Graph (graphify.cluster falls back to Louvain without it). The lock is compiled
+# against requirements.lock, so every package the two share has the same version on
+# Railway as in the published image and CI. PRD-262 US-027 deletes this file, its
+# lock and the build arg.
+graphifyy[leiden]==0.8.31

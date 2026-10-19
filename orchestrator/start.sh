@@ -24,10 +24,11 @@ fi
 echo "🔌 Activating virtual environment..."
 source venv/bin/activate
 
-# Install/update dependencies
+# Install/update dependencies: the lock the image installs, every pin with its
+# hashes (PRD-262 US-022). requirements.in is its input, not an install list.
 echo "📥 Installing dependencies..."
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
 
 # Start the server with hot reload
 echo "🚀 Starting Automatos AI backend on port $PORT..."
