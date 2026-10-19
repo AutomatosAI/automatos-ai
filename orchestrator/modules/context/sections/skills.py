@@ -21,6 +21,7 @@ longer taxes every turn with thousands of tokens.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Optional
 
@@ -31,6 +32,22 @@ logger = logging.getLogger(__name__)
 # Fail-safe default when config cannot be imported (e.g. isolated unit tests).
 # The authoritative source is config.SKILL_CORE_ALWAYS_ON.
 _DEFAULT_CORE_ALWAYS_ON = ("platform-management",)
+
+# PRD-263 US-062: the ``ctx.kwargs`` key under which the section records the core
+# bodies it rendered, [{"name", "content_hash"}]. ContextService copies it into
+# ContextResult.skill_bodies, and so into the turn's messages.context_trace.
+SKILL_BODIES_KEY = "_skill_bodies"
+
+
+def _body_hash(body: str) -> str:
+    """PRD-263 US-062: the sha256 of the body as rendered.
+
+    For a seeded body this is the row's ``content_hash`` (``read_seed`` hashes the
+    same stripped body). The column itself is not trusted: a fork on edit leaves
+    it NULL, an in-place edit leaves it stale, and the loader fallback can render
+    text it does not describe.
+    """
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 class SkillsSection(BaseSection):
@@ -67,25 +84,17 @@ class SkillsSection(BaseSection):
     # ------------------------------------------------------------------
 
     def _build(self, ctx: SectionContext) -> str:
-        agent = ctx.agent
-        if agent is None:
-            return ""
-
-        skills = getattr(agent, "skills", None)
-        if not skills:
-            return ""
-
-        active_skills = [s for s in skills if getattr(s, "is_active", True)]
+        active_skills = self._active_skills(ctx.agent)
         if not active_skills:
             return ""
 
-        active_skills = self._dedup(active_skills)
         core_names = self._core_always_on_names()
 
         core_bodies: list[str] = []
         l1_entries: list[str] = []
         activated_core: list[str] = []
         offered_l1: list[str] = []
+        served_bodies: list[dict[str, str]] = []
 
         for s in active_skills:
             name = getattr(s, "name", None) or "skill"
@@ -96,6 +105,7 @@ class SkillsSection(BaseSection):
                 if body:
                     core_bodies.append(body)
                     activated_core.append(name)
+                    served_bodies.append({"name": name, "content_hash": _body_hash(body)})
             else:
                 l1_entries.append(self._l1_metadata_line(s))
                 offered_l1.append(name)
@@ -108,17 +118,15 @@ class SkillsSection(BaseSection):
 
         skill_tool_names = self._extract_skill_tool_names(active_skills)
         if skill_tool_names:
-            parts.append(
-                "## Using Your Skill Tools\n"
-                f"You have access to: {', '.join(skill_tool_names)}\n"
-                "When your task requires capabilities provided by these tools, "
-                "you MUST use them via function calling. "
-                "Analyze your task, check if any tools match, and CALL them — "
-                "do not just describe what you would do."
-            )
+            parts.append(self._render_skill_tools(skill_tool_names))
 
         if not parts:
             return ""
+
+        # PRD-263 US-062: the body that served this turn, by the hash of what was
+        # rendered, for the turn's context trace. The render returns text only, so
+        # the section records it on the context bag.
+        ctx.kwargs[SKILL_BODIES_KEY] = served_bodies
 
         # Skill-activation signal (S2 measurement): which skills stayed always-on
         # (core) vs were offered at L1 this turn. The cost delta / activation rate
@@ -133,6 +141,12 @@ class SkillsSection(BaseSection):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @classmethod
+    def _active_skills(cls, agent) -> list:
+        """The agent's active skills, deduplicated, in attachment-priority order."""
+        skills = getattr(agent, "skills", None) if agent is not None else None
+        return cls._dedup([s for s in skills or [] if getattr(s, "is_active", True)])
 
     @staticmethod
     def _dedup(active_skills: list) -> list:
@@ -193,6 +207,18 @@ class SkillsSection(BaseSection):
         )
 
     @staticmethod
+    def _render_skill_tools(tool_names: list[str]) -> str:
+        """The instruction to call the attached skills' own tools."""
+        return (
+            "## Using Your Skill Tools\n"
+            f"You have access to: {', '.join(tool_names)}\n"
+            "When your task requires capabilities provided by these tools, "
+            "you MUST use them via function calling. "
+            "Analyze your task, check if any tools match, and CALL them — "
+            "do not just describe what you would do."
+        )
+
+    @staticmethod
     def _extract_skill_tool_names(skills) -> list[str]:
         """Extract tool names from skill tools_schema fields."""
         names: list[str] = []
@@ -211,8 +237,10 @@ class SkillsSection(BaseSection):
         """Full L2 body for a CORE always-on skill only.
 
         Reads ``prompt_template`` (the SKILL.md body in the DB); falls back to
-        the loader's ``load_skill_core`` only when the template is empty and a
-        real session is available. Never called for non-core skills.
+        the loader only when the template is empty and a real session is
+        available. Never called for non-core skills. The fallback reads this same
+        row (``load_core_for_skill``), never a lookup by name, which can resolve
+        another workspace's row of the same name (PRD-263 US-062).
         """
         content = getattr(skill, "prompt_template", None)
         if content and str(content).strip():
@@ -224,7 +252,7 @@ class SkillsSection(BaseSection):
                 from modules.agents.services.skill_loader import get_skill_loader
 
                 loader = get_skill_loader(ctx.db_session)
-                loaded = loader.load_skill_core(skill_name, db=ctx.db_session)
+                loaded = loader.load_core_for_skill(skill, db=ctx.db_session)
                 if loaded and str(loaded).strip():
                     return str(loaded).strip()
             except Exception:

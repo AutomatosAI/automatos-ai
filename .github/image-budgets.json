@@ -1,0 +1,18 @@
+{
+  "about": "Compressed-size budget per image and arch, in MB (1 MB = 1,000,000 bytes, the sum of the manifest's layer sizes). images.yml checks every build against it (scripts/ci/image_report.py budget). In mode \"warn\" an over-budget build prints a warning; in mode \"fail\" it fails. PRD-262 US-004 sets each budget to the five-run median plus 2% and switches the mode to \"fail\". Raise a budget only in the pull request that needs it, and say why in its reason.",
+  "mode": "warn",
+  "budgets": {
+    "api": {
+      "amd64": {"max_mb": 520.5, "reason": "edge at 0d9f0ac, 16 Oct 2026 (520.48 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."},
+      "arm64": {"max_mb": 490.8, "reason": "edge at 0d9f0ac, 16 Oct 2026 (490.71 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."}
+    },
+    "frontend": {
+      "amd64": {"max_mb": 93.9, "reason": "edge at 0d9f0ac, 16 Oct 2026 (93.85 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."},
+      "arm64": {"max_mb": 95.1, "reason": "edge at 0d9f0ac, 16 Oct 2026 (95.04 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."}
+    },
+    "workspace-worker": {
+      "amd64": {"max_mb": 506.6, "reason": "edge at 0d9f0ac, 16 Oct 2026 (506.56 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."},
+      "arm64": {"max_mb": 496.6, "reason": "edge at 0d9f0ac, 16 Oct 2026 (496.51 MB), rounded up to 0.1 MB: report only until US-004 sets the baseline."}
+    }
+  }
+}

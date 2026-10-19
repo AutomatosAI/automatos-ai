@@ -1,9 +1,10 @@
 /**
- * PRD-261 A-01 — the spike's theme SDK, shared with a theme as '@automatos/theme-sdk'.
- *
- * Two exports only: the SDK version and defineTheme. Its runtime exports must equal the
- * `exports` list of its entry in shared-modules.json, because the shim re-exports exactly those
- * names (shim-generator.test.ts checks it). The SDK proper is PRD-261 A-10.
+ * PRD-261 A-01, A-10a — the SDK version and defineTheme. They live here, not in lib/theme-sdk,
+ * because the loader (sources.ts) and the manifest check (package-manifest.ts) read them. A theme
+ * reaches them through '@automatos/theme-sdk': lib/theme-sdk/theme.ts re-exports both, and the
+ * SDK the host exposes is lib/theme-sdk/index.ts. The shim's names are not listed in
+ * shared-modules.json: generate-shims.js (namesFromSurface) takes the union of
+ * lib/theme-sdk/surface/*.json, and surface.test.ts holds the runtime to those files.
  */
 import sharedModules from './shared-modules.json'
 import type { ThemeDefinition } from './types'

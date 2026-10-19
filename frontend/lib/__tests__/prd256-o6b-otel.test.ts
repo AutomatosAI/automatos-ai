@@ -4,15 +4,16 @@
  *
  * Off (the default) or in the Edge runtime, register() loads nothing from
  * OpenTelemetry. On, the provider names the web app, follows a sampled caller,
- * keeps new traces by OTEL_TRACES_SAMPLER_RATIO, and never exports a query value.
+ * keeps new traces by OTEL_TRACES_SAMPLER_RATIO, and never exports a query value, or an
+ * error's text: an error leaves as its type (#1107).
  * Spans go to an in-memory exporter here.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { InMemorySpanExporter } from '@opentelemetry/sdk-trace-node'
 import { context, SpanStatusCode, trace, TraceFlags, type Span } from '@opentelemetry/api'
 
-import { otelEnabled, redactQuery, redactQueryValuesIn, redactedAttributes, samplerRatio } from '../otel/settings'
-import { buildProvider } from '../otel/node'
+import { otelEnabled, redactQuery, redactedAttributes, samplerRatio } from '../otel/settings'
+import { buildProvider, RedactingExporter } from '../otel/node'
 
 const { startTracing } = vi.hoisted(() => ({ startTracing: vi.fn() }))
 vi.mock('../otel/node', async (importOriginal) => ({ ...(await importOriginal<object>()), startTracing }))
@@ -43,13 +44,6 @@ describe('settings, read as the API reads them', () => {
     ['/x?', '/x?'],
   ])('a query value never leaves on a URL: %s', (url, expected) => {
     expect(redactQuery(url)).toBe(expected)
-  })
-
-  it('redacts the query values in free text and keeps the words around them', () => {
-    expect(redactQueryValuesIn('fetch failed: http://backend:8000/x?token=SECRET&page=2 (ECONNREFUSED)'))
-      .toBe('fetch failed: http://backend:8000/x?token=REDACTED&page=REDACTED (ECONNREFUSED)')
-    expect(redactQueryValuesIn('at GET "/api/chat?id=SECRET"')).toBe('at GET "/api/chat?id=REDACTED"')
-    expect(redactQueryValuesIn('No query here. Why? Because.')).toBe('No query here. Why? Because.')
   })
 
   it('redacts every URL attribute and leaves the rest', () => {
@@ -96,23 +90,59 @@ describe('the provider', () => {
     expect(JSON.stringify(span.attributes)).not.toContain('SECRET')
   })
 
-  it('exports no query value from a failure: status message, exception message or stack', async () => {
+  it('exports a failure as its type: no message or stack trace (#1107)', async () => {
     // As Next.js records a failed request (recordException, then an ERROR status).
-    const failure = new Error('fetch failed: http://backend:8000/api/chat?token=SECRET&page=2')
+    const failure = new TypeError('fetch failed: http://backend:8000/api/chat?token=SECRET for SECRET@bank.example')
     const [span] = await exported({}, (tracer) => {
       const failing = tracer.startSpan('POST /api/chat')
       failing.recordException(failure)
       failing.setStatus({ code: SpanStatusCode.ERROR, message: failure.message })
       return failing
     })
-    expect(span.status).toEqual({
-      code: SpanStatusCode.ERROR, message: 'fetch failed: http://backend:8000/api/chat?token=REDACTED&page=REDACTED',
-    })
+    expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: 'TypeError' })
     const [exception] = span.events
     expect(exception.name).toBe('exception')
-    expect(exception.attributes?.['exception.message']).toBe(span.status.message)
-    expect(String(exception.attributes?.['exception.stacktrace'])).toContain('token=REDACTED')
+    expect(exception.attributes).toEqual({ 'exception.type': 'TypeError' })
     expect(JSON.stringify([span.status, span.events])).not.toContain('SECRET')
+  })
+
+  it("keeps a status that names the span's error.type and other events; drops any other status", async () => {
+    const [named] = await exported({}, (tracer) => {
+      const span = tracer.startSpan('GET /chat', { attributes: { 'error.type': 'agent_error' } })
+      span.addEvent('retry', { attempt: 2 })
+      span.setStatus({ code: SpanStatusCode.ERROR, message: 'agent_error' })
+      return span
+    })
+    expect(named.status).toEqual({ code: SpanStatusCode.ERROR, message: 'agent_error' })
+    expect(named.events.map((event) => [event.name, event.attributes])).toEqual([['retry', { attempt: 2 }]])
+    const [free] = await exported({}, (tracer) =>
+      tracer.startSpan('GET /chat').setStatus({ code: SpanStatusCode.ERROR, message: 'no account for SECRET@bank.example' }))
+    expect(free.status).toEqual({ code: SpanStatusCode.ERROR })
+    const [lookalike] = await exported({}, (tracer) =>
+      tracer.startSpan('GET /files').setStatus({ code: SpanStatusCode.ERROR, message: 'SECRET_report.xlsx' }))
+    expect(lookalike.status).toEqual({ code: SpanStatusCode.ERROR })
+  })
+
+  it('keeps only the type on an exception event, whatever else was recorded with it', async () => {
+    const [span] = await exported({}, (tracer) => tracer.startSpan('POST /api/chat').addEvent('exception', {
+      'exception.type': 'TypeError', 'exception.escaped': false, 'exception.message': 'SECRET', detail: 'SECRET',
+    }))
+    expect(span.events[0].attributes).toEqual({ 'exception.type': 'TypeError', 'exception.escaped': false })
+  })
+
+  it('drops a span it cannot redact, never sends it as it was, and still sends the rest', async () => {
+    const [good] = await exported({}, (tracer) => tracer.startSpan('GET /chat'))
+    const memory = new InMemorySpanExporter()
+    const broken = {
+      events: [], attributes: {}, status: { code: SpanStatusCode.UNSET },
+      get name(): string { throw new Error('unreadable') },   // the redaction itself fails, nothing earlier
+    } as unknown as typeof good
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const result = await new Promise((done) => new RedactingExporter(memory).export([broken, good], done))
+    expect(result).toEqual({ code: 0 })
+    expect(memory.getFinishedSpans().map((span) => span.name)).toEqual(['GET /chat'])
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
   })
 
   it('keeps no new trace at ratio 0, but follows a sampled caller', async () => {

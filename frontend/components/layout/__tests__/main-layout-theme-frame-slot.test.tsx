@@ -111,7 +111,7 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
   })
 
   it("draws the active theme's frame around the page instead of the shell", () => {
-    host.current = { status: 'active', reason: null, frame: HelloFrame, reportRenderFailure: vi.fn() }
+    host.current = { status: 'active', reason: null, frame: HelloFrame, slots: null, reportRenderFailure: vi.fn() }
     const { container } = render(
       <MainLayout>
         <div data-testid="page" />
@@ -122,7 +122,7 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
   })
 
   it("hands the active theme's frame the full-bleed flag and Auto's widget", () => {
-    host.current = { status: 'active', reason: null, frame: PropsFrame, reportRenderFailure: vi.fn() }
+    host.current = { status: 'active', reason: null, frame: PropsFrame, slots: null, reportRenderFailure: vi.fn() }
     render(
       <MainLayout fullBleed>
         <div data-testid="page" />
@@ -134,7 +134,7 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
   })
 
   it('draws nothing, neither the shell nor the page, while the host loads an installed theme (M69)', () => {
-    host.current = { status: 'loading', reason: null, frame: null, reportRenderFailure: vi.fn() }
+    host.current = { status: 'loading', reason: null, frame: null, slots: null, reportRenderFailure: vi.fn() }
     const { container } = renderPage()
     expect(container.innerHTML).toBe('')
   })
@@ -142,7 +142,7 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
   it("draws an installed theme's frame through the slot, never builtin Play's, under the theme layout", () => {
     theme.entry = INSTALLED_ENTRY
     theme.layout = 'theme'
-    host.current = { status: 'active', reason: null, frame: HelloFrame, reportRenderFailure: vi.fn() }
+    host.current = { status: 'active', reason: null, frame: HelloFrame, slots: null, reportRenderFailure: vi.fn() }
     renderPage()
     expect(screen.getByTestId('theme-frame')).toContainElement(screen.getByTestId('page'))
     expect(screen.queryByTestId('play-frame')).toBeNull()
@@ -151,7 +151,7 @@ describe('MainLayout at desktop width in the Studio style, through the theme fra
   it("draws nothing while an installed theme with a layout loads, never builtin Play's frame", () => {
     theme.entry = INSTALLED_ENTRY
     theme.layout = 'theme'
-    host.current = { status: 'loading', reason: null, frame: null, reportRenderFailure: vi.fn() }
+    host.current = { status: 'loading', reason: null, frame: null, slots: null, reportRenderFailure: vi.fn() }
     const { container } = renderPage()
     expect(container.innerHTML).toBe('')
   })

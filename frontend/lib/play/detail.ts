@@ -1,4 +1,4 @@
-import { UNTITLED } from '@/components/play/chat/deliverables'
+import { UNTITLED } from '@/lib/chat/deliverables'
 import { MADE_BY_SOURCE } from '@/components/workspace/gallery-view/made-by'
 import type { Deliverable } from '@/hooks/use-deliverables-api'
 import { deliverableFileUrl } from '@/lib/deliverables/download'

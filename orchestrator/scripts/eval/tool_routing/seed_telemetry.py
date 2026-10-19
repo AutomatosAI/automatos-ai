@@ -444,6 +444,17 @@ async def verify_edge_build() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _configure_logging() -> None:
+    """Console logging for this script, with the request-log guard on it (#1178)."""
+    from core.monitoring.request_log_guard import guard_request_logs
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    guard_request_logs()  # no request URL or SDK request body in this script's logs
+
+
 def main() -> None:
     """Entry point for python -m scripts.eval.tool_routing.seed_telemetry."""
     parser = argparse.ArgumentParser(
@@ -461,10 +472,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    _configure_logging()
 
     # Load eval set
     eval_set = _load_eval_set()
