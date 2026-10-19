@@ -426,6 +426,17 @@ def test_re_tags_pull_only_what_is_missing_and_builds_go_through_compose():
     assert docker.calls[-1][1] == LOCAL, "compose builds under the plan's tag"
 
 
+def test_a_machine_without_docker_gets_a_message_not_a_traceback(monkeypatch):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(stack.subprocess, "run", missing)
+    monkeypatch.setattr(stack.subprocess, "call", missing)
+    for attempt in (lambda: stack.Docker().local("x"), lambda: stack.Docker().run("compose", "pull")):
+        with pytest.raises(stack.Stop, match="docker command is not installed"):
+            attempt()
+
+
 def test_make_up_says_the_tag_why_and_what_it_builds():
     lines = stack.describe(stack.Plan(LOCAL, "reason", build=(("frontend", "args differ"),)))
     assert lines[0] == f"make up: AUTOMATOS_IMAGE_TAG={LOCAL} (reason)"

@@ -391,15 +391,24 @@ def read_checkout(root: Path, run_git=git) -> Checkout:
     return Checkout(head, dirty, trees)
 
 
+NO_DOCKER = "the docker command is not installed or not on PATH: install Docker (self-hosting.md §1)"
+
+
 class Docker:
     """This machine's Docker CLI."""
 
     def local(self, ref: str) -> bool:
         command = ["docker", "image", "inspect", "--format", "{{.Id}}", ref]
-        return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        try:
+            return subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        except OSError as error:
+            raise Stop(NO_DOCKER) from error
 
     def run(self, *args: str, env: Optional[Mapping[str, str]] = None) -> int:
-        return subprocess.call(["docker", *args], env=dict(env) if env is not None else None)
+        try:
+            return subprocess.call(["docker", *args], env=dict(env) if env is not None else None)
+        except OSError as error:
+            raise Stop(NO_DOCKER) from error
 
     def check(self, *args: str, env: Optional[Mapping[str, str]] = None) -> None:
         code = self.run(*args, env=env)
