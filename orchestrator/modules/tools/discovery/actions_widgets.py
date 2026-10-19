@@ -54,8 +54,10 @@ def register_widgets_actions(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": (
                         "The widget-config key to set — one of the public whitelist "
-                        "(currently 'widget_proactive', 'cart_idle', 'callback'; "
-                        "platform_get_widget_config returns the live list)."
+                        "(currently 'widget_proactive', 'cart_idle', 'callback', "
+                        "'ai_disclosure'; platform_get_widget_config returns the live "
+                        "list). 'ai_disclosure' takes only {'line': ...}, which must "
+                        "say it is an AI; the AI badge is fixed."
                     ),
                 },
                 "config": {

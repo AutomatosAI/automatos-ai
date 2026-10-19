@@ -374,7 +374,11 @@ def test_get_widget_config_returns_public_slice_only():
     }))
     out = _run(get_widget_config(db, _WS, {}))
     assert out["success"] is True
-    assert out["widget_config"] == {"widget_proactive": {"enabled": True}}
+    assert out["widget_config"] == {
+        "widget_proactive": {"enabled": True},
+        # PRD-264 EUAI-02a: the server-built AI notice is always in the slice.
+        "ai_disclosure": {"badge": "AI", "line": "You are chatting with an AI assistant.", "locale": "en"},
+    }
     assert "integrations" not in out["widget_config"]
     assert out["configurable_keys"] == list(PUBLIC_WIDGET_CONFIG_KEYS)
     assert _WS in _bound_values(db.q), "query must filter by workspace_id"
@@ -395,6 +399,31 @@ def test_update_widget_config_happy_path():
     assert ws.settings is not original_settings, "must reassign a fresh dict (JSONB change detection)"
     assert db.committed is True
     assert _WS in _bound_values(db.q)
+
+
+def test_update_widget_config_refuses_an_ai_notice_without_the_term():
+    """PRD-264 D17: the AI notice line must say it is an AI, here as in Sites."""
+    ws = _FakeWorkspace(settings={"locale": "de-DE"})
+    db = _ORMDB(first=ws)
+    out = _run(update_widget_config(db, _WS, {
+        "key": "ai_disclosure",
+        "config": {"line": "An AI assistant answers here."},
+    }))
+    assert out == {"success": False, "error": "The AI notice must say it is an AI (for this language: 'KI')."}
+    assert ws.settings == {"locale": "de-DE"}
+    assert db.committed is False
+
+
+def test_update_widget_config_stores_an_ai_notice_with_the_term():
+    ws = _FakeWorkspace(settings={"locale": "pt-PT"})
+    db = _ORMDB(first=ws)
+    out = _run(update_widget_config(db, _WS, {
+        "key": "ai_disclosure",
+        "config": {"line": "Olá! Sou o assistente de IA da loja."},
+    }))
+    assert out["success"] is True
+    assert ws.settings["ai_disclosure"] == {"line": "Olá! Sou o assistente de IA da loja."}
+    assert db.committed is True
 
 
 def test_update_widget_config_rejects_non_whitelisted_key():
