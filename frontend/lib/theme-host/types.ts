@@ -34,8 +34,17 @@ export interface ThemeDefinition {
   unregister?(): void
 }
 
-/** Why a theme did not start, or stopped: each reason has its own notice text. */
+/**
+ * Why a theme did not start, or stopped: each reason has its own notice text.
+ *
+ * - `auth` (A-08b): the session was refused (401/403) on the active-theme read, the entry or a
+ *   theme file, as when it expired. It is the session's fault, not the theme's, so it never
+ *   counts toward the three-failure revert (A-04c).
+ * - `revoked`: the installed version was revoked.
+ * - `opt-in`: private code the member has not opted in to (PRD-261 Q6).
+ */
 export type ThemeFailureReason = 'manifest' | 'engines' | 'load' | 'register' | 'look' | 'render'
+  | 'auth' | 'revoked' | 'opt-in'
 
 /** What the host is doing: no theme here, loading one, showing one, fell back, or safe mode. */
 export type ThemeHostStatus = 'off' | 'loading' | 'active' | 'failed' | 'safe-mode'

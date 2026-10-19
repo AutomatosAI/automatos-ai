@@ -15,6 +15,11 @@ const isPublicRoute = createRouteMatcher([
   "/sso-callback(.*)",
   "/accept-invitation(.*)",
   "/api/webhooks(.*)",
+  // PRD-261 A-08b (maintainer OK at D1-g, 18 Oct): an installed theme's files proxy. Its
+  // handler authenticates (signed out → 401); auth.protect() would answer a module import()
+  // or a <video> range request with a 404 before the handler runs, which reads as a broken
+  // theme instead of an expired session.
+  "/api/themes/files(.*)",
 ]);
 
 const saasMiddleware = clerkMiddleware(async (auth, request) => {
