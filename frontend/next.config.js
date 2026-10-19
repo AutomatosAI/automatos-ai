@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const path = require('path')
-const { mediaOrigins } = require('./csp-sources')
+const {
+  mediaOrigins,
+  clerkFrontendApiOrigin,
+  CLERK_PROTECT_SOURCE,
+  CLERK_PROTECT_CONNECT_SOURCE,
+} = require('./csp-sources')
 
 // PRD-209 (local edition): the API's origin must be an allowed connect-src.
 const apiOrigin = (() => {
@@ -13,6 +18,14 @@ const apiOrigin = (() => {
 
 // F237: presigned media (Socials thumbnails, a post's files) loads from object storage's public origin.
 const mediaSources = mediaOrigins(process.env.NEXT_PUBLIC_MEDIA_ORIGINS).join(' ')
+
+// Clerk production readiness: a pk_live_ key loads clerk-js from the instance's own Frontend API
+// (clerk.automatos.app), not *.clerk.accounts.dev, so the sign-in page would not render without it.
+// Derived from the publishable key the build ships with; '' for the local edition (no key).
+const clerkFrontendApi = clerkFrontendApiOrigin(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
+
+/** One CSP directive: the given parts, empty ones dropped, space-separated. */
+const directive = (...parts) => parts.filter(Boolean).join(' ')
 
 // SECURITY: HTTP response headers for all routes (OWASP A05:2021 - Security Misconfiguration)
 const SECURITY_HEADERS_RULE = {
@@ -51,7 +64,12 @@ const SECURITY_HEADERS_RULE = {
       key: 'Content-Security-Policy',
       value: [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com https://cdn.jsdelivr.net",
+        directive(
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev",
+          clerkFrontendApi,
+          CLERK_PROTECT_SOURCE,
+          'https://challenges.cloudflare.com https://cdn.jsdelivr.net',
+        ),
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
         `img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev ${mediaSources}`.trim(),
         `media-src 'self' blob: ${mediaSources}`.trim(),
@@ -60,13 +78,18 @@ const SECURITY_HEADERS_RULE = {
         // (http://localhost:8000) is allowed too — without it the browser refuses
         // every API call ("Failed to fetch") before it leaves the page. In SaaS the
         // value is https://api.automatos.app, already covered by the wildcard.
-        `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev https://api.clerk.com https://cdn.jsdelivr.net wss: ws:`,
+        directive(
+          `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev`,
+          clerkFrontendApi,
+          CLERK_PROTECT_CONNECT_SOURCE,
+          'https://api.clerk.com https://cdn.jsdelivr.net wss: ws:',
+        ),
         // F352 (night 10b): a PDF preview (Deliverables side panel, Explorer, chat file card)
         // is fetched with the Bearer header and shown as a blob: URL in an <iframe>
         // (useAuthenticatedBlobUrl). 'self' never matches blob:, so frame-src names it. The
         // blob document inherits this policy, and the browser's PDF viewer is a plugin, so
         // object-src allows blob: too. Only this page's own script can mint a blob: URL.
-        "frame-src 'self' blob: https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+        directive("frame-src 'self' blob: https://*.clerk.accounts.dev", CLERK_PROTECT_SOURCE, 'https://challenges.cloudflare.com'),
         "worker-src 'self' blob:",
         "object-src blob:",
         "base-uri 'self'",
