@@ -109,7 +109,7 @@ from api.workspace_files import router as workspace_files_router
 from api.analytics_api import router as analytics_api_router
 from api.analytics_real import router as analytics_real_router
 from api.analytics_real import ws_router as analytics_ws_router  # PRD-185 S12: own-workspace health tiles
-from api.harness import router as harness_router  # PRD-142 Wave 4: HARNESS approve/reject (W4-S1)
+from api.harness import router as harness_router  # HARNESS: the Self-Learning tile (PRD-263 US-021)
 from api.kpi_api import router as kpi_router  # KPI Command Centre Widgets
 from api.knowledge import router as knowledge_router
 from api.knowledge_multimodal import router as knowledge_multimodal_router
@@ -1246,7 +1246,7 @@ app.include_router(context_summarization_router)  # Context Engineering 2.0: Sel
 app.include_router(analytics_api_router)
 app.include_router(analytics_real_router)
 app.include_router(analytics_ws_router)  # PRD-185 S12: own-workspace health tiles (workspace-admin gated)
-app.include_router(harness_router)  # PRD-142 Wave 4: HARNESS approve/reject (W4-S1)
+app.include_router(harness_router)  # HARNESS: the Self-Learning tile (PRD-263 US-021)
 app.include_router(kpi_router)  # KPI Command Centre Widgets
 app.include_router(knowledge_router)
 app.include_router(knowledge_multimodal_router)

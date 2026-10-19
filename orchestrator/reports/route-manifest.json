@@ -1,5 +1,5 @@
 {
-  "route_count": 942,
+  "route_count": 940,
   "routes": [
     {
       "method": "GET",
@@ -1356,14 +1356,6 @@
     {
       "method": "POST",
       "path": "/api/github/webhook"
-    },
-    {
-      "method": "POST",
-      "path": "/api/harness/prescriptions/{rx_id}/approve"
-    },
-    {
-      "method": "POST",
-      "path": "/api/harness/prescriptions/{rx_id}/reject"
     },
     {
       "method": "GET",

@@ -58,8 +58,8 @@ DISABLED_MESSAGE = (
 # emitted it (model, description) until PRD-263 PR-1D, so [HARNESS] cards filed
 # before then can still carry it. The apply layer MUST refuse it: writing it
 # literally would set an agent's model/description to the string "review_needed".
-# _auto_apply_prescription refuses it; an owner's /approve (api.harness_commands,
-# until PRD-263 US-047) is the one path left that applies a change.
+# _auto_apply_prescription refuses it. That method has had no caller since PRD-263
+# US-047 deleted the owner's /approve, and US-048 deletes it.
 _PLACEHOLDER_PROPOSED_VALUE = "review_needed"
 # PRD-263 US-019: a "reconnect <app>" suggestion changes no agent setting (the owner
 # reconnects the app), so it carries the lowest risk score.

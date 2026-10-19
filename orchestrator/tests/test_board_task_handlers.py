@@ -1,11 +1,9 @@
 """PRD-141: list_board_tasks projection must surface `tags` and `description`.
 
-The HARNESS command path keys on these two fields: rx_id lives ONLY in a task's
-tags (`rx:{id}`), and _parse_harness_task reads Current/Proposed out of the
-description. Before this fix the projection dropped both, so _find_task_by_rx
-always returned "no pending change" and _parse_harness_task saw an empty body —
-the bug only stayed hidden because the unit suites used an in-memory fake
-executor instead of this real handler.
+The HARNESS command path (deleted by PRD-263 US-047) keyed on these fields: rx_id
+in a task's tags (`rx:{id}`), Current/Proposed in its description. Before this fix
+the projection dropped both, so its rx lookup found "no pending change" and its
+parser an empty body; unit suites with an in-memory fake executor hid it.
 
 The handler is loaded directly from its file: importing the `modules.tools`
 package pulls in the RAG/multimodal chain (camelot) that isn't installed in the
@@ -157,14 +155,14 @@ def test_list_board_tasks_projects_tags_and_description():
     assert result["success"] is True
     assert result["total"] == 1
     task = result["tasks"][0]
-    # The two fields the HARNESS command path depends on must be present.
+    # The two fields the HARNESS command path depended on must be present.
     assert task["tags"] == ["harness", "org-review", "risk-4", "rx:rx-esc-1"]
     assert task["description"] == "**Current:** {...}\n**Proposed:** {...}"
 
 
 def test_list_board_tasks_tags_default_empty_list():
-    """A row with NULL tags projects to [] (never None), so `"harness" in tags`
-    in _find_task_by_rx is always a safe membership test."""
+    """A row with NULL tags projects to [] (never None), so a tag membership test
+    such as `"harness" in tags` is always safe."""
     rows = [_FakeRow(id=8, title="plain task", description="d", tags=None, assigned_agent_id=None)]
     db = _FakeDB(rows)
 
