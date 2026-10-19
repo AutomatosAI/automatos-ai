@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Mail, ShieldAlert } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
+import { themeErrorMessage, useStepUp } from '@/lib/theme-host/api'
 import {
   Dialog,
   DialogContent,
@@ -11,6 +12,15 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+
+/**
+ * PRD-261 A-07f (#1157): every invitation grants access, so in SaaS it needs a sign-in from the
+ * last few minutes (orchestrator/api/team.py `STEP_UP`). Called through `useStepUp`, so a refusal
+ * opens Clerk's "confirm it's you" and the invitation is sent once more; local sends it as is.
+ */
+function postInvite(workspaceId: string, email: string, role: string) {
+    return apiClient.post(`/api/workspaces/${workspaceId}/team/invite`, { email, role })
+}
 
 interface InviteModalProps {
     isOpen: boolean
@@ -24,6 +34,7 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
     const [role, setRole] = useState('editor')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const sendInvite = useStepUp(postInvite)
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -31,17 +42,14 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
         setLoading(true)
 
         try {
-            await apiClient.request(`/api/workspaces/${workspaceId}/team/invite`, {
-                method: 'POST',
-                body: { email, role }
-            })
+            await sendInvite(workspaceId, email, role)
             onInvite()
             onClose()
             setEmail('')
             setRole('editor')
-        } catch (err: any) {
+        } catch (err) {
             console.error("Invite failed:", err)
-            setError(err.message || "Failed to send invitation")
+            setError(themeErrorMessage(err))
         } finally {
             setLoading(false)
         }
