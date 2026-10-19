@@ -247,6 +247,23 @@ def test_the_tree_check_wants_no_tests_directory_and_every_kept_testing_package(
     ]
 
 
+def test_the_tree_check_leaves_the_base_images_own_packages_alone(tmp_path):
+    """python:3.11-slim installs setuptools 79.0.1 after it sweeps test directories, so its
+    tests sit in the base layer, where pybuild's prune never reaches; deleting them later
+    would add whiteouts and save nothing. A package pybuild installs is still judged."""
+    for package in site_packages.KEPT_TESTING:
+        (tmp_path / package).mkdir(parents=True)
+        (tmp_path / package / "__init__.py").write_text("")
+    for path in ("setuptools/tests", "setuptools/_distutils/tests", "setuptools/_distutils/compilers/C/tests",
+                 "pkg_resources/tests"):
+        (tmp_path / path).mkdir(parents=True)
+    assert site_packages.tree_problems(tmp_path) == []
+    assert {"setuptools", "pkg_resources"} <= set(site_packages.BASE_IMAGE_PACKAGES)
+
+    (tmp_path / "setuptools_scm" / "tests").mkdir(parents=True)  # a name that only starts like one
+    assert site_packages.tree_problems(tmp_path) == ["site-packages still has setuptools_scm/tests/"]
+
+
 def test_every_expected_failure_says_why():
     assert "PIL._imagingtk" in site_packages.EXPECTED_FAILURES
     for key, reason in site_packages.EXPECTED_FAILURES.items():

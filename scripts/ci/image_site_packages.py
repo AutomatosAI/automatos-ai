@@ -20,13 +20,14 @@ binutils):
 
 The failures must be exactly the ``EXPECTED_FAILURES`` whose files this image has: any
 other ImportError or OSError fails, and so does a listed one that now loads, so the
-list stays true. It also checks that no ``tests`` directory is left and that the
-``testing`` packages other code imports (numpy, SQLAlchemy, alembic) are still there,
-then runs ``import main`` in a fresh interpreter in /app, with throwaway database
-settings (nothing connects on import), under ``python -v``: no line may say ``bytecode is
-stale`` (PRD-262 US-022: images.yml's reproducible build clamps every file's mtime, and
-only unchecked-hash bytecode ignores that). The probe's own imports read site-packages
-only, so the app's directories (``alembic/``) shadow nothing.
+list stays true. It also checks that no ``tests`` directory is left (the base image's
+own setuptools, pip and wheel aside: they sit in its layers, out of pybuild's reach)
+and that the ``testing`` packages other code imports (numpy, SQLAlchemy, alembic) are
+still there, then runs ``import main`` in a fresh interpreter in /app, with throwaway
+database settings (nothing connects on import), under ``python -v``: no line may say
+``bytecode is stale`` (PRD-262 US-022: images.yml's reproducible build clamps every
+file's mtime, and only unchecked-hash bytecode ignores that). The probe's own imports
+read site-packages only, so the app's directories (``alembic/``) shadow nothing.
 
 Standard library only. Exit 0 when every check passes, 1 otherwise.
 """
@@ -71,6 +72,14 @@ AUDITWHEEL_SUFFIX = ".libs"  # auditwheel's vendored libraries: not stripped, no
 DEBUG_PREFIXES = (".debug_", ".zdebug_")
 TESTS_DIR = "tests"
 KEPT_TESTING = ("numpy/testing", "sqlalchemy/testing", "alembic/testing")
+# The python base image's own packages, in its own layers, which pybuild's prune never
+# reaches. docker-library's Dockerfile sweeps test directories out of /usr/local and then
+# pip-installs setuptools and wheel, so setuptools/tests, setuptools/_distutils/tests and
+# pkg_resources/tests (setuptools 79.0.1) sit in the base layer. A RUN in a later stage
+# deleting them would add whiteouts and save no byte of the download, and a lock that
+# pinned one would not hide the base layer's copy either. US-058's Python 3.12 base has
+# no setuptools.
+BASE_IMAGE_PACKAGES = ("pip", "setuptools", "pkg_resources", "_distutils_hack", "wheel")
 APP_DIR = "/app"
 APP_IMPORT = "import main"
 # Importing the app builds its database engine (core/database/database.py), which needs
@@ -331,8 +340,10 @@ def problems_with(results: Sequence[Result], expected: Dict[str, str]) -> List[s
 
 
 def tree_problems(site: Path) -> List[str]:
-    """A ``tests`` directory left under ``site``, or a kept ``testing`` package gone."""
-    left = sorted(path.relative_to(site).as_posix() for path in site.rglob(TESTS_DIR) if path.is_dir())
+    """A ``tests`` directory pybuild left under ``site``, or a kept ``testing`` package gone.
+    The base image's own packages (BASE_IMAGE_PACKAGES) are not pybuild's, so not judged."""
+    left = sorted(path.relative_to(site).as_posix() for path in site.rglob(TESTS_DIR)
+                  if path.is_dir() and path.relative_to(site).parts[0] not in BASE_IMAGE_PACKAGES)
     problems = [f"site-packages still has {path}/" for path in left]
     problems += [f"site-packages lost {path}/: only directories named exactly {TESTS_DIR} go"
                  for path in KEPT_TESTING if not (site / path / "__init__.py").is_file()]
