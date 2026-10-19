@@ -19,6 +19,7 @@ budget once one is set. This suite checks:
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -102,11 +103,13 @@ def _run(tmp_path: Path, main_source: str, *extra: str) -> tuple[int, str]:
 
 
 def test_a_main_that_loads_no_fr6_module_passes_and_reports_its_time(tmp_path, capsys):
-    code, summary = _run(tmp_path, "import json\n", "--budget-seconds", "")
+    # The sleep makes main the slowest import, whatever the interpreter loads at start-up.
+    code, summary = _run(tmp_path, "import json\nimport time\ntime.sleep(0.3)\n", "--budget-seconds", "")
     assert code == 0, capsys.readouterr().out
     assert "FR-6 modules loaded by `import main`: none." in summary
     assert "no budget yet: it is set from the first week's numbers" in summary
-    assert "| 1 |" in summary and "`main`" in summary
+    assert re.search(r"^\| 1 \| [\d,.]+ ms \| [\d,.]+ ms \| `main` \|$", summary, re.M), summary
+    assert len(re.findall(r"^\| \d+ \|", summary, re.M)) <= report.TOP_IMPORTS
 
 
 def test_a_main_that_loads_one_fails_and_names_the_chain(tmp_path, capsys):
