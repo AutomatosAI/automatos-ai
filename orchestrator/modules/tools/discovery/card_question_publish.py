@@ -9,25 +9,33 @@ is a ``post_id``, which the card's subject line does not show (F091 keeps ids of
 Both actions now have card lines (``card_question.READERS``):
 - a blog post: whether it goes live (the handler's own reading, ``handlers_blog.goes_live``),
   its excerpt, category, tags, first line and length;
-- a social post sent for approval: the post this workspace holds under that id (its title,
-  channels, format, caption and when it is planned or scheduled), the note for the reviewer,
-  and that nothing posts until it is approved in Socials. An id that is not a UUID, or a post
-  of another workspace, gives no lines: the card asks on its act alone.
+- a social post sent for approval: the post this workspace holds under that id (its title and
+  id, its status as the click moves it, its channels, format, caption, rendered files and when
+  it is planned or scheduled), the note for the reviewer, and that it publishes only after a
+  person approves it in Socials. An id that is not a post of this workspace gives no lines: the
+  card asks on its act alone.
+
+P256-FIX-SOC-4 (F431-b/c, card #2648): the channels are the post's targets alone. Its copy's
+per-channel text is not where it goes (Auto wrote copy.channels.instagram on a post with no
+channel), so a post with none says it would publish nowhere.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-from uuid import UUID
 
-from modules.tools.discovery.card_question_text import said_line, value_line
+from modules.tools.discovery.card_question_text import change_line, said_line, value_line
 
 GOES_LIVE = "goes live: yes, on this workspace's blog"
 STAYS_A_DRAFT = "goes live: no, saved as a draft; nothing is published"
 NO_EXCERPT = "excerpt: none given; the post's opening is used"
 LENGTH = "length: {words} words"
-POST = "post: '{title}'"
-AFTER_THE_CLICK = "after the click: it waits in Socials for approval; nothing posts until it is approved there"
+POST = "post: '{title}' ({id})"
+AFTER_THE_CLICK = ("the click sends it for approval; it publishes only after a person approves it in the "
+                   "Socials tab")
+NO_CHANNELS = "none: it would publish nowhere"
+RENDERED = "rendered files: {count}"
+WAITING = "needs approval"
 WHEN = "{moment:%H:%M} on {moment.day} {moment:%b} UTC"
 HEADING = "#"
 
@@ -49,24 +57,22 @@ def blog_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) 
 
 
 def social_submit_lines(db: Any, workspace_id: Any, action: str, params: Dict[str, Any]) -> List[str]:
-    """The post this workspace holds under ``post_id``: its title, channels, format, caption and
-    when it is planned or scheduled; the reviewer's note; what the click does. [] when the id
-    is not a post of this workspace."""
-    from modules.socials.service import get_post
+    """The post this workspace holds under ``post_id`` (``social_post_ref``, the tool's own reader):
+    its title and id, status, channels, format, caption, rendered files and when it is planned or
+    scheduled; the reviewer's note; what the click does. [] when the id names no post of this workspace."""
+    from modules.tools.discovery.social_post_ref import post_named
 
-    try:
-        key = UUID(str(params.get("post_id")))
-    except (TypeError, ValueError, AttributeError):
-        return []
-    post = get_post(db, workspace_id, key)
+    post = post_named(db, workspace_id, params.get("post_id"))[0]
     if post is None:
         return []
     copy = post.copy if isinstance(post.copy, dict) else {}
     return [
-        value_line(POST.format(title=post.title)),
-        said_line("channels", _channels(post, copy)),
+        value_line(POST.format(title=post.title, id=post.id)),
+        change_line("status", str(post.status).replace("_", " "), WAITING),
+        said_line("channels", _channels(post)),
         said_line("format", post.format),
         said_line("caption", first_line(str(copy.get("base") or ""))),
+        value_line(RENDERED.format(count=_rendered_files(post))),
         *_when_lines(post),
         said_line("note", params.get("note")),
         value_line(AFTER_THE_CLICK),
@@ -79,11 +85,17 @@ def first_line(text: str) -> str:
                  if line.strip() and not line.strip().startswith(HEADING)), "")
 
 
-def _channels(post: Any, copy: Dict[str, Any]) -> List[str]:
-    """The post's target channels, else the channels its copy is written for, in name order."""
-    targets = sorted({target.toolkit for target in (post.targets or []) if getattr(target, "toolkit", None)})
-    channels = copy.get("channels")
-    return targets or (sorted(channels) if isinstance(channels, dict) else [])
+def _channels(post: Any) -> Any:
+    """Where the post publishes: each target as 'instagram carousel', in name order, or that it has none."""
+    targets = sorted(f"{target.toolkit} {target.post_kind}" for target in (post.targets or [])
+                     if getattr(target, "toolkit", None))
+    return targets or NO_CHANNELS
+
+
+def _rendered_files(post: Any) -> int:
+    """How many files the post's render made (``media``: aspect → its files)."""
+    media = post.media if isinstance(post.media, dict) else {}
+    return sum(len(files) for files in media.values() if isinstance(files, list))
 
 
 def _when_lines(post: Any) -> List[str]:

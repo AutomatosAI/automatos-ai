@@ -455,12 +455,14 @@ def _bound_and_checked(db: Any, workspace_id: Any, action: str, params: Dict[str
     from modules.tools.discovery.agent_binding import bound_to_the_agent
     from modules.tools.discovery.agent_runtime import refused_before_the_card
     from modules.tools.discovery.card_question_skills import bound_to_the_subject
+    from modules.tools.discovery.card_question_socials import bound_to_the_post, submit_refused_before_the_card
     from modules.tools.discovery.mission_targets import bound_to_the_mission
     from modules.tools.discovery.playbook_binding import bound_to_the_playbook
     from modules.tools.discovery.send_back_checks import sendable_back
     from modules.tools.discovery.ticket_edit_moves import rebrief_that_closes
 
     params = bound_to_the_mission(db, workspace_id, action, params)  # FX-009: the click runs on the mission shown
+    params = bound_to_the_post(db, workspace_id, action, params)  # SOC-4: and on the social post shown
     params, refused = bound_to_the_agent(db, workspace_id, action, params)  # FX-010: and on the agent shown
     if not refused:  # RVW-14: and on the plugin or skill shown
         params, refused = bound_to_the_subject(db, workspace_id, action, params)
@@ -468,6 +470,7 @@ def _bound_and_checked(db: Any, workspace_id: Any, action: str, params: Dict[str
         params, refused = bound_to_the_playbook(db, workspace_id, action, params)
     refused = refused or refused_before_the_card(db, workspace_id, action, params)  # FX-016: a runtime it can't set
     refused = refused or rebrief_that_closes(db, workspace_id, action, params)  # RVW-10: re-brief or close, not both
+    refused = refused or submit_refused_before_the_card(db, workspace_id, action, params)  # SOC-4: a post it can't send
     if refused:
         return params, refused, []
     return sendable_back(db, workspace_id, action, params)  # N17-2 (F444): only cards the board's Reject takes

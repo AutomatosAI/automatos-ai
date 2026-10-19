@@ -59,7 +59,8 @@ def _post_copy_fields() -> dict:
                 "The post's text: {\"base\": the text every channel gets, \"channels\": {channel: "
                 "its own text}}, or simply {channel: text}, keyed by toolkit (linkedin, twitter, "
                 "instagram, tiktok, youtube). An update keeps what it does not send; a channel "
-                "sent as \"\" drops its own text."
+                "sent as \"\" drops its own text. Text keyed by a channel does not publish the post "
+                "there: channels does."
             ),
             "properties": {
                 "base": {"type": "string"},
@@ -80,6 +81,23 @@ def _post_copy_fields() -> dict:
             "description": (
                 "A video's length in seconds: one of the lengths its template declares "
                 "(platform_get_template_schema). Leave it out for the template's own length."
+            ),
+        },
+    }
+
+
+def _post_channel_fields() -> dict:
+    """P256-FIX-SOC-4 (F431-b): where a post publishes: its channels, which REST sets as its targets."""
+    return {
+        "channels": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Where the post publishes: connected channels by name, such as [\"instagram\"]. Text for one "
+                "channel goes in copy.channels; this list is where it goes out. A post with no channels "
+                "publishes nowhere. Each channel posts it as the kind its format fits (a carousel as a "
+                "carousel); an update replaces the list, and [] clears it. Give them when you make the post, "
+                "so its render makes each channel's size."
             ),
         },
     }
@@ -198,8 +216,10 @@ def _post_chart_field() -> dict:
 
 
 def post_fields() -> dict:
-    """What a post carries: the REST body's fields, plus template (id or name) and chart_report."""
-    return {**_post_copy_fields(), **_post_template_fields(), **_post_media_fields(), **_post_chart_field()}
+    """What a post carries: the REST body's fields, plus template (id or name), chart_report and
+    channels (its targets, which REST sets with PUT /posts/{id}/targets)."""
+    return {**_post_copy_fields(), **_post_channel_fields(), **_post_template_fields(), **_post_media_fields(),
+            **_post_chart_field()}
 
 
 def create_properties() -> dict:

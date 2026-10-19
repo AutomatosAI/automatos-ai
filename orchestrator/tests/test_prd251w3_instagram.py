@@ -114,7 +114,11 @@ async def to_jpeg(image):
 
 
 def _receipt(env, post_id, kind):
+    """A target's receipt: its status, the platform's id and the link. A published one also records
+    when it went out (P256-FIX-SOC-4, F432-a: the night read 'external_id', a key no receipt has)."""
     target = _targets(env, post_id)["instagram", kind]
+    if target["status"] == "published":
+        assert target["published_at"], target
     return target["status"], target["remote_id"], target["permalink"]
 
 
@@ -141,6 +145,8 @@ def test_an_instagram_image_is_a_jpeg_container_waited_on_then_published(env, mo
     assert executor.calls[4].params == {"ig_user_id": ACCOUNT, "creation_id": CONTAINER}
     assert env.sleeps == [4]
     assert _receipt(env, post_id, "image") == ("published", MEDIA, LINK)
+    image = _targets(env, post_id)["instagram", "image"]
+    assert image["published_at"] and "external_id" not in image   # the platform's id is remote_id
 
 
 def test_a_jpeg_still_is_not_converted_again(env):

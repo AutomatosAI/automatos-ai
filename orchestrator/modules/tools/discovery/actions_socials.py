@@ -50,9 +50,10 @@ def _register_create_social_post(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_create_social_post",
         description=(
-            "Draft a Socials post for the workspace's channels: a title, its copy (the text for "
-            "every channel and any channel's own text), a social template (a video or an image) "
-            "with its variables, the sources of its facts and figures, and files already made. "
+            "Draft a Socials post for the workspace's channels: a title, its channels (where it "
+            "publishes), its copy (the text for every channel and any channel's own text), a social "
+            "template (a video or an image) with its variables, the sources of its facts and figures, "
+            "and files already made. "
             "By default the template is rendered at once, within the plan's render minutes: when "
             "the render finishes the post waits for approval, or is failed with the reason in its "
             "history; a render refused at once fails the call, which says why and how to fix the "
@@ -79,7 +80,8 @@ def _register_update_social_post(registry: ActionRegistry) -> None:
         name="platform_update_social_post",
         description=(
             "Change a Socials post: send its post_id and only what changes; copy, variables and "
-            "sources merge into the post's own. Changing an approved or scheduled post voids its "
+            "sources merge into the post's own, and channels replaces where it publishes. Changing an "
+            "approved or scheduled post (its channels included) voids its "
             "approval, so a person approves it again in the Socials tab. With render true the post "
             "is rendered again after the change, which is how a failed render is fixed. Never "
             "approves, schedules or publishes."
@@ -122,9 +124,10 @@ def _register_get_social_post(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_get_social_post",
         description=(
-            "Read one Socials post: its status, copy, template and variables, sources, rendered "
-            "media, voice and footage, and its history (who drafted or changed it, a reviewer's "
-            "comments, and why a render failed)."
+            "Read one Socials post: where it publishes and each channel's receipt (when it went out, "
+            "the platform's id and the link), its status, times, approval and what it still needs, then "
+            "its copy, template and variables, sources, rendered media, voice and footage, and its last "
+            "history entries (who drafted or changed it, a reviewer's comments, why a render failed)."
         ),
         category="socials",
         parameters={"type": "object", "properties": get_properties(), "required": ["post_id"]},
@@ -248,7 +251,9 @@ def _register_history_action(registry: ActionRegistry) -> None:
             "people made by hand. Each has its title, topic and angle, format, channels, opening line, "
             "date and state, and its numbers and engagement once read. Read it before researching or "
             "writing, so a topic or a hook the workspace already used is not used again, and more like "
-            "what did best is found."
+            "what did best is found. With went_out true it lists only the posts that went out in the last "
+            "days, newest first by when they went out, each with its receipts: the channel, when, the "
+            "platform's id and the link."
         ),
         category="socials",
         parameters={
@@ -266,14 +271,24 @@ def _register_history_action(registry: ActionRegistry) -> None:
                     "maximum": HISTORY_MAX_LIMIT,
                     "description": "How many posts at most, newest first (the platform's default when left out).",
                 },
+                # P256-FIX-SOC-4 (F432-b): what went out, by when, with its receipts.
+                "went_out": {
+                    "type": "boolean",
+                    "description": (
+                        "Only the posts that went out in the last days (days 1 for today), newest first by "
+                        "when they went out, each with when, where, the platform's id and the link."
+                    ),
+                },
             },
             "required": [],
         },
         permission_level="read",
-        tags=["socials", "history", "posts", "research", "repeats"],
+        tags=["socials", "history", "posts", "research", "repeats", "went out", "receipts"],
         examples=[
             "what have we already posted on social media?",
             "show our social posting history",
             "did we post about this before?",
+            "what did I post today and when?",
+            "which posts went out this week, and where are the links?",
         ],
     ))

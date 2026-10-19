@@ -10,7 +10,11 @@
  * or partially published post offers Retry, which publishes only the failed
  * targets again (POST /retry). Before it publishes, a TikTok target shows the
  * privacy level and AI label publish will use (US-304).
+ *
+ * P256-FIX-SOC-4 (F432-a): a published target also says when it went out and the
+ * id the platform gave it (`published_at`, `remote_id`), which the publish records.
  */
+import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { badgeVariants } from '@/components/ui/badge'
 import type { Workspace } from '@/components/workspace-provider'
@@ -27,6 +31,7 @@ const TARGET_STATUS_LABELS: Record<SocialPostTarget['status'], string> = {
 const RETRYABLE: ReadonlySet<SocialPost['status']> = new Set(['failed', 'partially_published'])
 const BEFORE_PUBLISH: ReadonlySet<SocialPost['status']> = new Set(['approved', 'scheduled', 'missed'])
 const MOST_PRIVATE = 'the most private level the account allows'
+const PUBLISHED_AT_FORMAT = 'd MMM yyyy, HH:mm'
 
 /** Whether a render recorded AI-made footage for the post (D12): TikTok's AI label. */
 function hasGeneratedFootage(post: SocialPost): boolean {
@@ -59,6 +64,14 @@ function Receipt({ post, target }: { post: SocialPost; target: SocialPostTarget 
           <a href={target.permalink} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">
             View the post
           </a>
+        )}
+        {target.published_at && (
+          <span className="text-xs text-muted-foreground">Published {format(new Date(target.published_at), PUBLISHED_AT_FORMAT)}</span>
+        )}
+        {target.remote_id && (
+          <span className="text-xs text-muted-foreground">
+            {channelLabel(target.toolkit)} id {target.remote_id}
+          </span>
         )}
       </div>
       {target.error && <p className="text-xs text-destructive">{target.error}</p>}

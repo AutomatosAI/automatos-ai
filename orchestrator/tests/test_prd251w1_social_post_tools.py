@@ -718,7 +718,8 @@ def test_the_schemas_speak_the_lifecycles_own_vocabulary():
     assert social_post_schema.CHART_KINDS == list(CHART_KINDS)
     assert social_post_schema.CHART_PARTS == list(PARTS)
     create = get_action_registry().get("platform_create_social_post")
-    fields = set(create.parameters["properties"]) - {"template", "chart_report", "render"}
+    # channels: the post's targets; REST sets them with PUT /posts/{id}/targets (P256-FIX-SOC-4).
+    fields = set(create.parameters["properties"]) - {"template", "chart_report", "render", "channels"}
     # The REST body's own fields, template_id taken as ``template`` (an id or a name).
     rest = {f.alias or name for name, f in socials_api.CreateSocialPostRequest.model_fields.items()} - {"template_id"}
     assert fields == rest

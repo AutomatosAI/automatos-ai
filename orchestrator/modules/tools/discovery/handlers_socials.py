@@ -50,6 +50,9 @@ logger = logging.getLogger(__name__)
 AGENT_ACTOR = "agent"
 CHART_REPORT_KEYS = ("report_id", "chart", "column", "part")
 SUBMIT_FIELDS = frozenset({"post_id", "note"})
+CHANNELS = "channels"  # P256-FIX-SOC-4: where the post publishes, by channel name (its targets)
+WENT_OUT = "went_out"  # P256-FIX-SOC-4: platform_get_social_history reads only what went out
+WENT_OUT_LIMIT = 10
 # F383: how a refused topic is fixed, said when none was added.
 TOPIC_FIX = (
     "Fix and resend: take each fact's ref from your tool results (a search_knowledge source's document "
@@ -108,18 +111,22 @@ def _open(db: Session, workspace_id: UUID) -> Tuple[Any, Optional[Dict[str, Any]
 
 
 def _post(db: Session, workspace_id: UUID, post_id: Any) -> Any:
-    from modules.socials import service
+    """The post ``post_id`` names: its id, or a unique prefix of it (``social_post_ref``, P256-FIX-SOC-4)."""
+    from modules.tools.discovery.social_post_ref import post_named
 
-    if post_id in (None, ""):
-        raise _Refused("Missing required parameter: post_id")
-    try:
-        key = UUID(str(post_id))
-    except (TypeError, ValueError, AttributeError):
-        raise _Refused(f"post_id {post_id!r} is not a post's id: platform_list_social_posts lists them.") from None
-    post = service.get_post(db, workspace_id, key)
-    if post is None:
-        raise _Refused("Post not found in this workspace: platform_list_social_posts lists them.")
+    post, problem = post_named(db, workspace_id, post_id)
+    if problem:
+        raise _Refused(problem)
     return post
+
+
+def _channel_targets(db: Session, workspace_id: UUID, channels: Any, post_format: Any) -> Optional[List[Dict[str, Any]]]:
+    """P256-FIX-SOC-4 (F431-b): the channels a call names (``["instagram"]``) as the post's targets,
+    each with its kind for the post's format (``socials_targets.resolve_channels``); None when the
+    call names none, [] to clear them. The registry may commit: read before anything is staged."""
+    from api.socials_targets import resolve_channels
+
+    return None if channels is None else resolve_channels(db, workspace_id, channels, post_format)
 
 
 def _flag(fields: Dict[str, Any], name: str, default: bool) -> bool:
@@ -427,13 +434,13 @@ async def create_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     fields = _fields(params)
     try:
         render_now = _flag(fields, "render", True)
+        channels = fields.pop(CHANNELS, None)
         template = await _create_fields(db, workspace_id, fields, render_now)
         body = socials_api.CreateSocialPostRequest.model_validate(
             {**fields, "template_id": template.id if template is not None else None}
-        )
-        post = await socials_api.create_post(
-            db, workspace_id, actor, body.model_dump(by_alias=True), agent=agent
-        )
+        ).model_dump(by_alias=True)
+        targets = _channel_targets(db, workspace_id, channels, body.get("format"))  # before anything is staged
+        post = await socials_api.create_post(db, workspace_id, actor, {**body, "targets": targets}, agent=agent)
     except _Refused as exc:
         return _refused(str(exc))
     except ValidationError as exc:
@@ -495,10 +502,13 @@ async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
     try:
         post = _post(db, workspace_id, fields.pop("post_id", None))
         render_now = _flag(fields, "render", False)
+        channels = fields.pop(CHANNELS, None)
         template = await _update_fields(db, workspace_id, post, fields)
         changes = socials_api.UpdateSocialPostRequest.model_validate(fields).model_dump(
             exclude_unset=True, by_alias=True
         )
+        targets = _channel_targets(db, workspace_id, channels, changes.get("format", post.format))
+        changes = changes if targets is None else {**changes, "targets": targets}  # one compare-and-set commit
         if not changes and not render_now:
             raise _Refused("Nothing to change: send the fields to change, or render true.")
         if changes:
@@ -515,14 +525,16 @@ async def update_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
 
 async def submit_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """draft or changes_requested → needs_approval, through ``submit_post``; the
-    note, when sent, tells the reviewer what to look at."""
+    note, when sent, tells the reviewer what to look at. A submit the owner's click ran is
+    signed by who clicked (P256-FIX-SOC-4, ``owner_only.signed_by``), never by Auto alone."""
     from api import socials as socials_api
     from modules.socials import service
+    from modules.tools.discovery.owner_only import signed_by
 
     _, refusal = _open(db, workspace_id)
     if refusal:
         return refusal
-    actor, _ = _agent(params)
+    actor = signed_by(params) or _agent(params)[0]
     unknown = sorted(set(_fields(params)) - SUBMIT_FIELDS)
     if unknown:
         return _refused(f"platform_submit_social_post takes post_id and note; not {', '.join(unknown)}. Nothing was sent.")
@@ -538,7 +550,10 @@ async def submit_social_post(db: Session, workspace_id: UUID, params: Dict[str, 
 
 
 async def get_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """One post of the workspace, as GET /api/socials/posts/{id} returns it."""
+    """One post of the workspace, as GET /api/socials/posts/{id} returns it, read for an agent
+    (``social_post_results.read_view``, P256-FIX-SOC-4): its receipts first, its history trimmed."""
+    from modules.tools.discovery.social_post_results import read_view
+
     _, refusal = _open(db, workspace_id)
     if refusal:
         return refusal
@@ -546,7 +561,7 @@ async def get_social_post(db: Session, workspace_id: UUID, params: Dict[str, Any
         post = _post(db, workspace_id, params.get("post_id"))
     except _Refused as exc:
         return _refused(str(exc))
-    return {"success": True, "post": post.to_dict()}
+    return {"success": True, "post": read_view(post.to_dict())}
 
 
 def _statuses(value: Any) -> Optional[List[str]]:
@@ -682,7 +697,9 @@ def _whole(value: Any, name: str, most: int) -> Optional[int]:
 
 
 async def get_social_history(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """What the workspace posted, newest first (``modules/socials/history.py``)."""
+    """What the workspace posted, newest first (``modules/socials/history.py``). With ``went_out``
+    (P256-FIX-SOC-4, F432-b): only what went out in the last ``days``, newest first by when it went
+    out, each with its receipts (``modules/socials/posted.py``)."""
     from modules.socials import history
 
     _, refusal = _open(db, workspace_id)
@@ -691,7 +708,20 @@ async def get_social_history(db: Session, workspace_id: UUID, params: Dict[str, 
     try:
         days = _whole(params.get("days"), "days", HISTORY_MAX_DAYS)
         limit = _whole(params.get("limit"), "limit", HISTORY_MAX_LIMIT)
+        went_out = _flag(dict(params), WENT_OUT, False)
     except _Refused as exc:
         return _refused(str(exc))
-    posts = history.history(db, workspace_id, days=days, limit=limit)
+    posts = (_went_out(db, workspace_id, days, limit) if went_out
+             else history.history(db, workspace_id, days=days, limit=limit))
     return {"success": True, "posts": posts, "count": len(posts)}
+
+
+def _went_out(db: Session, workspace_id: UUID, days: Optional[int], limit: Optional[int]) -> List[Dict[str, Any]]:
+    """The posts that went out in the last ``days`` (the history's own default when left out)."""
+    from datetime import datetime, timedelta, timezone
+
+    from config import config
+    from modules.socials import posted
+
+    since = datetime.now(timezone.utc) - timedelta(days=days or config.SOCIALS_HISTORY_DAYS)
+    return posted.posted(db, workspace_id, since=since, limit=limit or WENT_OUT_LIMIT)

@@ -9,7 +9,7 @@ the string 'false' as true.
 Now a blog card says whether the post goes live and shows its excerpt, category, tags, first line
 and length; its verb says "save … as a draft (nothing is published)" when it is one. A social
 card names the post this workspace holds under the id, its channels, format, caption and time,
-the reviewer's note, and that nothing posts until it is approved in Socials. An id that is not a
+the reviewer's note, and that it publishes only after it is approved in Socials. An id that is not a
 post of this workspace gives no lines: the card asks on its act alone. post_id stays off the
 card's subject line (F091).
 """
@@ -128,17 +128,21 @@ def test_a_social_submit_card_names_the_post_its_channels_and_caption(posts):
     assert act == "send a social post for approval (nothing posts yet)"
     assert asked.splitlines() == [
         "Send a social post for approval (nothing posts yet):",
-        "- post: 'Guji Uraga launch'",
-        "- channels: instagram, linkedin",
+        f"- post: 'Guji Uraga launch' ({posts.ours.id})",
+        "- status: draft → needs approval",
+        "- channels: instagram image, linkedin image",
         "- format: image",
         f"- caption: {CAPTION}",
+        "- rendered files: 0",
         "- planned for: 09:00 on 20 Oct UTC",
         "- note: Check the tasting notes against the cupping sheet.",
-        "- after the click: it waits in Socials for approval; nothing posts until it is approved there",
+        "- the click sends it for approval; it publishes only after a person approves it in the Socials tab",
     ]
     bare = _card(SOCIAL, {"post_id": str(posts.bare.id)}, posts.db, posts.ws)[1]
-    assert "- channels: bluesky, threads" in bare and "- planned for: (empty)" in bare   # no targets: its copy's
-    assert str(posts.ours.id) not in act                                                  # F091: no id on the card
+    # P256-FIX-SOC-4 (F431-b): text written for a channel is not a channel; no targets publish nowhere.
+    assert "- channels: none: it would publish nowhere" in bare and "- planned for: (empty)" in bare
+    assert "bluesky" not in bare and "threads" not in bare
+    assert str(posts.ours.id) not in act                                                  # F091: no id on the subject
 
 
 def test_a_social_card_never_reads_another_workspaces_post(posts):

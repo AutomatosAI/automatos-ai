@@ -57,6 +57,7 @@ from core.social_cuts import cut_to_length
 from modules.socials import batches, compose, plan_notify, plan_store, plan_visuals, plans, render, service, topics, upload_crops
 from modules.socials.capabilities import social_channels
 from modules.socials.settings import socials_off_reason
+from modules.socials.targets import kind_for  # P256-FIX-SOC-4: one choice of kind, an agent's channels too
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +67,6 @@ MADE, TAKEN, GONE, NO_TOPIC, SKIPPED, FAILED = "made", "taken", "gone", "no_topi
 READY_NOTE = "Made from the plan's content bank: {topic}."
 # PRD-251C (C1): why a batch slot whose time came before the tick made it is recorded as skipped.
 PASSED_UNMADE = "its time came before it could be made"
-# The post kinds a post format publishes as, most fitting first (the composer's order).
-FORMAT_KINDS: Mapping[str, Tuple[str, ...]] = {
-    "video": ("video", "reel", "short"),
-    "image": ("image",),
-    "carousel": ("carousel", "image"),
-    "fact_card": ("image",),
-    "infographic": ("image",),
-    "text": ("text",),
-}
 # A fact's source kind (B8) → the post source kind a claim binds to (D7). A note backs no claim.
 FACT_SOURCE_KINDS = {"knowledge": "document", "deliverable": "deliverable", "web": "url", "github": "url"}
 STILL_FORMATS = ("image", "carousel", "fact_card", "infographic")
@@ -156,18 +148,10 @@ def collect_due(now: datetime) -> List[Tuple[UUID, str]]:
 # ── one slot ───────────────────────────────────────────────────────────────
 
 
-def _kind_for(channel: Any, post_format: str, row_kind: Optional[str] = None) -> Optional[str]:
-    """The kind a channel posts the slot as: a story row's story (PRD-251C), else the
-    format's most fitting kind the channel offers now."""
-    available = [kind.kind for kind in channel.post_kinds if kind.available]
-    wanted = (row_kind,) if row_kind else FORMAT_KINDS.get(post_format, ())
-    return next((kind for kind in wanted if kind in available), None)
-
-
 def slot_targets(db: Any, workspace_id: UUID, slot: plans.Slot) -> List[Dict[str, Any]]:
     """The slot's channels that are connected and post its format (or its row's kind), each with its kind."""
     channels = {channel.toolkit: channel for channel in social_channels(db, workspace_id)}
-    found = [(toolkit, _kind_for(channels[toolkit], slot.format, slot.kind)) for toolkit in slot.channels if toolkit in channels]
+    found = [(toolkit, kind_for(channels[toolkit], slot.format, slot.kind)) for toolkit in slot.channels if toolkit in channels]
     return [{"toolkit": toolkit, "post_kind": kind, "options": {}} for toolkit, kind in found if kind]
 
 
