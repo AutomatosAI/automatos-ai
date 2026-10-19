@@ -140,7 +140,9 @@ def test_prescribe_queues_removal_for_clean_app():
     )
     assert len(rxs) == 1
     rx = rxs[0]
-    assert rx["prescription_id"] == "rx-41-001"   # rx-<run_id>-<seq>, from the harness_runs row
+    # Pins the id format only: that the number is the harness_runs id (rx-<run_id>-<seq>)
+    # is proven end to end by test_prd263_harness_report_only._assert_reported_only.
+    assert rx["prescription_id"] == "rx-41-001"
     assert rx["change_type"] == "tool_assignment_remove"
     assert rx["risk_score"] == 3            # reported in the audit report only (PRD-263 US-016)
     assert rx["target_id"] == 7

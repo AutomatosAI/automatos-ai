@@ -36,7 +36,7 @@ import core.auth.workspace_permission as permission_mod  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
-from services.harness_mode import HARNESS_MODES, harness_mode  # noqa: E402
+from services.harness_mode import HARNESS_MODES, HARNESS_SCHEDULES, harness_mode, merge_harness_update  # noqa: E402
 
 WS_ID = uuid.uuid4()
 ROUTE = "/api/workspaces/current/orchestrator"
@@ -159,11 +159,20 @@ def test_get_reads_the_mode_through_the_mapping_and_returns_no_retired_key(clien
 # ── the vocabulary ───────────────────────────────────────────────────────────
 
 def test_the_mode_is_the_only_switch_and_weekly_the_only_schedule():
+    # The vocabularies live in services.harness_mode with the read-time mapping, so
+    # api/workspaces.py (over 800 lines) does not grow (AGENTS.md, code shape).
     assert HARNESS_MODES == ("report_only", "propose", "disabled")
-    assert workspaces_api._VALID_HARNESS_MODES == HARNESS_MODES
-    assert workspaces_api._VALID_HARNESS_SCHEDULES == ["weekly"]
+    assert HARNESS_SCHEDULES == ("weekly",)
     assert workspaces_api._ORCHESTRATOR_DEFAULTS["harness"] == {"schedule": "weekly", "mode": "report_only"}
     assert harness_mode(None) == harness_mode({"orchestrator": None}) == "report_only"
+
+
+def test_the_harness_merge_returns_a_new_block_and_leaves_both_inputs_alone():
+    stored, update = {"enabled": False, "mode": "full_auto"}, {"mode": "disabled", "disabled": True}
+
+    assert merge_harness_update(stored, update) == {"enabled": False, "mode": "disabled"}
+    assert stored == {"enabled": False, "mode": "full_auto"}
+    assert update == {"mode": "disabled", "disabled": True}
 
 
 def test_the_routes_are_plain_def_over_their_sync_session():

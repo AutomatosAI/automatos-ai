@@ -19,7 +19,7 @@ from core.database.database import get_db
 from core.models import Agent
 from core.models.workspaces import Workspace
 from services.onboarding_state import public_snapshot
-from services.harness_mode import DEFAULT_HARNESS_MODE, HARNESS_MODES, harness_mode
+from services.harness_mode import harness_settings_view, merge_harness_update, validate_harness_update
 from services.orchestrator_auto_agent import (
     AUTO_CONFIG_FIELDS,
     auto_llm_view,
@@ -572,17 +572,9 @@ _ORCHESTRATOR_DEFAULTS = {
         "checklist": "- Check agent health status\n- Review pending webhook failures\n- Summarize today's activity",
         "notification_channel": "in_app",
     },
-    "harness": {
-        "schedule": "weekly",
-        "mode": DEFAULT_HARNESS_MODE,
-    },
+    # PRD-263 US-016: the one schedule and the mode a workspace with nothing stored reads.
+    "harness": harness_settings_view(None),
 }
-
-# PRD-263 US-016: the mode (services.harness_mode) is the one per-workspace HARNESS switch and
-# weekly on HARNESS_SWEEP_CRON the one schedule (§11-Q12); the retired keys are not validated or written.
-_VALID_HARNESS_SCHEDULES = ["weekly"]
-_VALID_HARNESS_MODES = HARNESS_MODES
-_RETIRED_HARNESS_KEYS = ("enabled", "disabled")
 
 # Each top-level orchestrator field a save validates, and its vocabulary.
 _ORCHESTRATOR_VOCABULARIES = {
@@ -798,14 +790,13 @@ def save_orchestrator_settings(
 
 def _orchestrator_view(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The orchestrator block GET and PUT return: the stored fields over the defaults,
-    heartbeat merged key by key, and HARNESS as the one schedule plus the mode read through
-    services.harness_mode (PRD-263 US-016); the retired ``enabled``/``disabled`` keys are never returned."""
+    heartbeat merged key by key, and HARNESS as services.harness_mode returns it (PRD-263 US-016)."""
     orchestrator = (settings or {}).get("orchestrator", {})
     return {
         **_ORCHESTRATOR_DEFAULTS,
         **orchestrator,
         "heartbeat": {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **orchestrator.get("heartbeat", {})},
-        "harness": {**_ORCHESTRATOR_DEFAULTS["harness"], "mode": harness_mode(settings)},
+        "harness": harness_settings_view(settings),
     }
 
 
@@ -833,12 +824,10 @@ def _validate_orchestrator_payload(payload: Dict[str, Any]) -> None:
     hb = payload.get("heartbeat")
     if hb and isinstance(hb, dict):
         _validate_heartbeat(hb)
-    harness = payload.get("harness")
-    if harness and isinstance(harness, dict):
-        if "schedule" in harness and harness["schedule"] not in _VALID_HARNESS_SCHEDULES:
-            raise HTTPException(400, f"harness.schedule must be one of {_VALID_HARNESS_SCHEDULES}")
-        if "mode" in harness and harness["mode"] not in _VALID_HARNESS_MODES:
-            raise HTTPException(400, f"harness.mode must be one of {list(_VALID_HARNESS_MODES)}")
+    try:
+        validate_harness_update(payload.get("harness"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 def _validate_heartbeat(hb: Dict[str, Any]) -> None:
@@ -892,15 +881,14 @@ def _validate_orchestrator_model(db: Session, workspace_id, llm_payload: Any) ->
 
 def _merge_orchestrator(existing: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
     """The stored orchestrator block with the payload's fields over it. Heartbeat and HARNESS
-    merge key by key rather than replace; HARNESS's retired keys are not written (PRD-263 US-016)."""
+    merge key by key rather than replace (HARNESS through services.harness_mode, PRD-263 US-016)."""
     merged = {**existing, **{key: payload[key] for key in _ORCHESTRATOR_FIELDS if key in payload}}
     hb = payload.get("heartbeat")
     if hb and isinstance(hb, dict):
         merged["heartbeat"] = {**existing.get("heartbeat", {}), **hb}
     harness = payload.get("harness")
     if harness and isinstance(harness, dict):
-        written = {key: value for key, value in harness.items() if key not in _RETIRED_HARNESS_KEYS}
-        merged["harness"] = {**existing.get("harness", {}), **written}
+        merged["harness"] = merge_harness_update(existing.get("harness", {}), harness)
     return merged
 
 
