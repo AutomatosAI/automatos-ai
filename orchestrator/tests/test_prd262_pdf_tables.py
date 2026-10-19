@@ -35,6 +35,7 @@ import pytest
 import yaml
 
 from tests.fixtures.pdf_tables import FIXTURES, HELVETICA_WIDTHS, build_pdf, write_fixtures
+from tests.fixtures.reference_locks import pins as _pins, unhashed as _unhashed
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCESSORS = ROOT / "orchestrator" / "modules" / "rag" / "ingestion" / "multimodal" / "processors.py"
@@ -42,7 +43,6 @@ GRIDS = json.loads((ROOT / "orchestrator" / "tests" / "fixtures" / "pdf_table_gr
                    .read_text(encoding="utf-8"))["fixtures"]
 REFERENCE = ROOT / "scripts" / "ci" / "reference"
 WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
-_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)")
 
 
 def _load(name: str, path: Path):
@@ -166,23 +166,6 @@ def test_a_fixture_is_the_same_pdf_every_time_and_every_cell_reads_back(fixture_
 
 
 # --------------------------------------------------------------------------- the reference and CI
-
-
-def _pins(path: Path) -> dict:
-    lines = (line.split("#", 1)[0].strip() for line in path.read_text(encoding="utf-8").splitlines())
-    return {re.sub(r"[-_.]+", "-", m.group(1)).lower(): m.group(2).rstrip(" \\")
-            for m in map(_PIN.match, lines) if m}
-
-
-def _unhashed(text: str) -> list:
-    """The pins in a lock with no --hash line before the next pin."""
-    unhashed, pin, hashed = [], None, True
-    for line in text.splitlines():
-        if _PIN.match(line):
-            unhashed += [] if hashed else [pin]
-            pin, hashed = line.split()[0], False
-        hashed = hashed or "--hash=sha256:" in line
-    return unhashed + ([] if hashed else [pin])
 
 
 def test_the_reference_lock_is_its_input_pinned_and_hashed():
