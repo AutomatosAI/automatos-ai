@@ -12,7 +12,8 @@ This suite checks:
 
 - the Dockerfile: the prune RUN in pybuild, after the install and before the base stage
   copies /install's two halves (PRD-262 US-022), with the glob and the ``*.libs``
-  exclusion the script also uses;
+  exclusion the script also uses; and the RUN after it that deletes the C, C++ and
+  Cython sources and headers (row #37), with the patterns the script looks for;
 - the script's ELF reader, on ELF files built here (32- and 64-bit, both byte orders)
   and, on Linux, on this interpreter's own extension modules: it finds the debug
   sections and the ``.symtab`` the strip removes;
@@ -281,6 +282,26 @@ def test_the_tree_check_leaves_the_base_images_own_packages_alone(tmp_path):
     assert site_packages.tree_problems(tmp_path) == ["site-packages still has setuptools_scm/tests/"]
 
 
+def test_the_source_check_finds_what_pybuild_deletes(tmp_path):
+    """PRD-262 row #37: a C, C++ or Cython source or header left in site-packages fails; the
+    modules, stubs and libraries beside it, and the base image's own packages, do not."""
+    for relative in ("numpy/__init__.py", "numpy/__init__.pyi", "lxml/etree.cpython-311-x86_64-linux-gnu.so",
+                     "fontTools/cu2qu/cu2qu.py", "setuptools/_vendor/thing.h"):
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text("")
+    assert site_packages.compiler_source_problems(tmp_path) == []
+
+    left = ["numpy/_core/include/numpy/ndarraytypes.h", "fontTools/cu2qu/cu2qu.c", "scipy/linalg/cython_blas.pxd",
+            "lxml/includes/etree_defs.h", "lxml/public-api.pxi", "sqlalchemy/cyextension/util.pyx",
+            "greenlet/TGreenlet.cpp", "pkg/vendor.hpp"]
+    for relative in left:
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text("")
+    (problem,) = site_packages.compiler_source_problems(tmp_path)
+    assert problem.startswith(f"site-packages still has {len(left)} C, C++ or Cython sources or headers: "), problem
+    assert "fontTools/cu2qu/cu2qu.c" in problem and "setuptools" not in problem
+
+
 def test_every_expected_failure_says_why():
     assert "PIL._imagingtk" in site_packages.EXPECTED_FAILURES
     for key, reason in site_packages.EXPECTED_FAILURES.items():
@@ -415,6 +436,27 @@ def test_pybuild_strips_debug_info_and_deletes_tests_after_the_install():
     assert "|| true" not in run and "--strip-all" not in run and "--strip-debug" not in run
     assert "-name testing" not in DOCKERFILE, "numpy.testing, sqlalchemy.testing and alembic.testing stay"
     assert sum("strip" in line for line in _instructions(DOCKERFILE)) == 1, "only pybuild strips"
+
+
+def _source_find() -> str:
+    runs = [line for line in _pybuild() if line.startswith("RUN ") and "-name '*.pyx'" in line]
+    assert len(runs) == 1, runs
+    return runs[0]
+
+
+def test_pybuild_deletes_the_compiler_sources_after_the_strip_and_before_the_compile():
+    """PRD-262 row #37: the find names exactly the patterns the check looks for, under
+    site-packages only, and deletes them; site-packages' bytecode is compiled after it."""
+    stage = _pybuild()
+    run = _source_find()
+    at = stage.index(run)
+    names = re.findall(r"-name '([^']+)'", run)
+
+    assert sorted(names) == sorted(site_packages.COMPILER_SOURCES), names
+    assert run.startswith("RUN find /install -type f -path '*/site-packages/*' \\( ") and run.endswith(" \\) -delete")
+    assert next(i for i, line in enumerate(stage) if "strip" in line) < at
+    assert at < next(i for i, line in enumerate(stage) if "compileall" in line)
+    assert "|| true" not in run
 
 
 def test_the_strip_names_the_files_the_check_loads():

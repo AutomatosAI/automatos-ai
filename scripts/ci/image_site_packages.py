@@ -21,10 +21,11 @@ binutils):
 
 The failures must be exactly the ``EXPECTED_FAILURES`` whose files this image has: any
 other ImportError or OSError fails, and so does a listed one that now loads, so the
-list stays true. It also checks that no ``tests`` directory is left (the base image's
-own setuptools, pip and wheel aside: they sit in its layers, out of pybuild's reach)
-and that the ``testing`` packages other code imports (numpy, SQLAlchemy, alembic) are
-still there, then runs ``import main`` in a fresh interpreter in /app, with throwaway
+list stays true. It also checks that no ``tests`` directory and no C, C++ or Cython
+source or header (``COMPILER_SOURCES``, PRD-262 row #37) is left (the base image's own
+setuptools, pip and wheel aside: they sit in its layers, out of pybuild's reach) and
+that the ``testing`` packages other code imports (numpy, SQLAlchemy, alembic) are still
+there, then runs ``import main`` in a fresh interpreter in /app, with throwaway
 database settings (nothing connects on import), under ``python -v``: no line may say
 ``bytecode is stale`` (PRD-262 US-022: images.yml's reproducible build clamps every
 file's mtime, and only unchecked-hash bytecode ignores that). The probe's own imports
@@ -65,6 +66,11 @@ DEBUG_PREFIXES = (".debug_", ".zdebug_")
 # row #25); .dynsym, which the loader and ctypes read, is a section of its own and stays.
 SYMBOL_TABLE = ".symtab"
 TESTS_DIR = "tests"
+# What only a compiler reads, which pybuild deletes from site-packages (PRD-262 row #37);
+# orchestrator/tests/test_prd262_site_packages_pruned.py holds this list and the
+# Dockerfile's find equal.
+COMPILER_SOURCES = ("*.c", "*.cpp", "*.h", "*.hpp", "*.pyx", "*.pxd", "*.pxi")
+SOURCES_LISTED = 5
 KEPT_TESTING = ("numpy/testing", "sqlalchemy/testing", "alembic/testing")
 # The python base image's own packages, in its own layers, which pybuild's prune never
 # reaches. docker-library's Dockerfile sweeps test directories out of /usr/local and then
@@ -351,6 +357,17 @@ def tree_problems(site: Path) -> List[str]:
     return problems
 
 
+def compiler_source_problems(site: Path) -> List[str]:
+    """C, C++ and Cython sources or headers pybuild left under ``site`` (PRD-262 row #37). The
+    base image's own packages (BASE_IMAGE_PACKAGES) are not pybuild's, so not judged."""
+    left = sorted(path.relative_to(site).as_posix() for pattern in COMPILER_SOURCES for path in site.rglob(pattern)
+                  if path.is_file() and path.relative_to(site).parts[0] not in BASE_IMAGE_PACKAGES)
+    if not left:
+        return []
+    return [f"site-packages still has {len(left)} C, C++ or Cython sources or headers: "
+            f"{', '.join(left[:SOURCES_LISTED])}"]
+
+
 def stale_bytecode(verbose_stderr: str) -> List[str]:
     """The ``bytecode is stale`` lines of a ``python -v`` run's stderr. Pure."""
     return [line.strip() for line in verbose_stderr.splitlines() if STALE_BYTECODE in line]
@@ -400,12 +417,13 @@ def main() -> int:
     for result in results:
         if result.error and result.key in EXPECTED_FAILURES:
             print(f"::notice::{result.key} fails as expected ({EXPECTED_FAILURES[result.key]})")
-    problems = problems_with(results, EXPECTED_FAILURES) + tree_problems(site) + app_problems()
+    problems = (problems_with(results, EXPECTED_FAILURES) + tree_problems(site) + compiler_source_problems(site)
+                + app_problems())
     for problem in problems:
         print(f"::error title=site-packages (PRD-262 US-020)::{problem}")
     if not problems:
-        print(f"every file loads as expected, none carries debug sections or {SYMBOL_TABLE}, no {TESTS_DIR}/ is left, "
-              f"and `{APP_IMPORT}` works with no stale bytecode")
+        print(f"every file loads as expected, none carries debug sections or {SYMBOL_TABLE}, no {TESTS_DIR}/ "
+              f"and no C or Cython source is left, and `{APP_IMPORT}` works with no stale bytecode")
     return 1 if problems else 0
 
 

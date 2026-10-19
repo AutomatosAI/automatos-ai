@@ -87,6 +87,14 @@ RUN python split_lock.py requirements.lock stable.txt rest.txt && \
 RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-unneeded {} + && \
     find /install -type d -name tests -path '*/site-packages/*' -prune -exec rm -rf {} +
 
+# The C, C++ and Cython sources and headers in site-packages go (PRD-262, the 19 Oct
+# breakdown's row #37, about 11.6 MB): fontTools' generated .c, scipy's .pyx and .pxd,
+# lxml's .h and .pxi, numpy's headers. Only a compiler reads them (numpy.get_include(),
+# Cython's cimport), the runtime has none, and no package opens one when it imports or
+# runs; scripts/ci/image_site_packages.py fails on one left behind.
+RUN find /install -type f -path '*/site-packages/*' \( -name '*.c' -o -name '*.cpp' -o -name '*.h' \
+        -o -name '*.hpp' -o -name '*.pyx' -o -name '*.pxd' -o -name '*.pxi' \) -delete
+
 # botocore keeps the models of the services we call, and no others (PRD-262 US-021).
 # botocore/data holds one for every AWS service, 437 directories and about 18.6 MB.
 # The app builds s3, s3vectors and bedrock-runtime clients; botocore's credential
