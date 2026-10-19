@@ -143,8 +143,14 @@ Optional, in the same way:
   (9000), `MINIO_CONSOLE_PORT` (9001). Two of them need a companion setting:
   - `API_PORT`: also set `NEXT_PUBLIC_API_URL=http://localhost:<port>` and
     `NEXT_PUBLIC_WS_URL=ws://localhost:<port>/ws` in `.env`.
-  - `MINIO_PORT`: also set `S3_PUBLIC_ENDPOINT_URL=http://localhost:<port>` in
+  - `MINIO_PORT`: also set `NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:<port>` in
+    `.env`, and `S3_PUBLIC_ENDPOINT_URL=http://localhost:<port>` in
     `envs/api.local` (create the file if it doesn't exist).
+
+  The published web app is built for ports 8000 and 9000, so with these set
+  `make up` builds the web app on this machine instead (a few minutes), and says
+  so. A moved port without its companion setting stops `make up` with the line
+  to add.
 
   The rest of this guide uses the defaults, 3000 and 8000; use your ports
   wherever it shows those.
@@ -158,14 +164,17 @@ prints `3`, and `grep -c CHANGE_ME .env` prints `0`.
 make up
 ```
 
-The first run builds the images and the database, which takes 5–15 minutes
-depending on the machine. Later starts take seconds.
+`make up` downloads the images CI publishes for this commit instead of
+building them: about 1.3 GB the first time, so about a minute at 200 Mbit/s or
+three to four at 50 Mbit/s, plus the first boot, which builds the database. It
+prints the image tag it picked and why. Later starts take seconds.
 
-No `make`? Run the equivalent, from the repository folder:
+No `make`? Run the equivalent, from the repository folder. It runs the `edge`
+images, the newest main build that booted in CI:
 
 ```bash
 mkdir -p "$HOME/automatos-deliverables/projects"
-docker compose up -d --build --remove-orphans
+docker compose up -d --remove-orphans
 ```
 
 *Check:* `docker compose ps` shows every service `running` or `healthy`, and
@@ -265,7 +274,8 @@ Details: [self-hosting guide → Session mode](docs/getting-started/self-hosting
 - [ ] Optional: session mode paired, and `make cli-host-status` shows running
 
 Day to day: `make up` starts it, `make down` stops it (your data is kept), and
-`make status` shows what's running.
+`make status` shows what's running. To update: `git pull && make up`, which also
+brings the weekly rebuild with fresh OS packages.
 
 ---
 

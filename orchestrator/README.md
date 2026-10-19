@@ -100,11 +100,11 @@ Alongside it: `smoke-fresh-clone` (a real `docker compose up` from an empty
 checkout must reach a green `/health` and `/health/ready` and a frontend that
 answers on `:3000`, and the boots are timed; `scripts/ci/smoke-fresh-clone.sh`
 refuses to run on a Docker host with its own Automatos containers or volumes,
-because its teardown deletes the stack's volumes), `smoke-images` (the
-published images, pulled into an empty Docker cache and booted through the
-same script after each main publish, before `edge` moves to them; outside CI
-the pull refuses to empty the host's image cache unless
-`SMOKE_EMPTY_IMAGE_CACHE=true`), `import-linter`
+because its teardown deletes the stack's volumes), `smoke-images` (`make up`
+on a clean checkout pulls the published images into an empty Docker cache and
+boots them through the same script after each main publish, before `edge`
+moves to them, and must build nothing; outside CI it refuses to empty the
+host's image cache unless `SMOKE_EMPTY_IMAGE_CACHE=true`), `import-linter`
 (module-boundary contracts in `orchestrator/.importlinter`), `dco`,
 `gitleaks`, `CodeQL`, `malware-scan` and `check-shopify-isolation`.
 

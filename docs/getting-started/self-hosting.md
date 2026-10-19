@@ -167,15 +167,17 @@ what each target runs, from the repository root. On native Windows, run the
 the repository when it is not set.
 
 ```bash
-# make up: build if needed, start, then tidy up
+# make up: the published images for this checkout, then start and tidy up
 mkdir -p <deliverables>/projects     # PowerShell: New-Item -ItemType Directory -Force <deliverables>\projects
-docker compose up -d --build --remove-orphans
+python3 scripts/stack_images.py up   # picks the tag (below), gets the images, writes AUTOMATOS_IMAGE_TAG to .env
+docker compose up -d --no-build --remove-orphans
 docker image prune -f
 docker builder prune -f
 
-# make up-images: the published images, no build
-docker compose -f docker-compose.yml -f docker-compose.images.yml pull backend frontend workspace-worker
-docker compose -f docker-compose.yml -f docker-compose.images.yml up -d --no-build --remove-orphans
+# make build: the three app images built from your checkout instead, as local-<sha7>
+python3 scripts/stack_images.py build   # writes AUTOMATOS_IMAGE_TAG=local-<sha7> to .env
+docker compose build backend frontend workspace-worker
+docker compose up -d --no-build --remove-orphans
 
 # make dev: for editing the code (the development stages, your source mounted, hot reload)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --remove-orphans
@@ -199,11 +201,85 @@ docker compose logs -f --tail=200 $(s)
 docker compose down -v --remove-orphans
 ```
 
-`make up` and `make up-images` do three more things. They move a
+`make up` and `make build` do three more things. They move a
 deliverables folder laid out before 2026-09-09 up one level, once (`make dev`
 does this too); a fresh install never needs it. They print `make status`. And
 they tell a running session host to pick up the new code
-(`make cli-host-nudge`, below).
+(`make cli-host-nudge`, below). `make up`, `make build` and `make dev` also pass
+`AUTOMATOS_REVISION` (`git rev-parse HEAD`, with `-dirty` when `orchestrator`,
+`frontend` or `services/workspace-worker` has uncommitted changes) to compose,
+which stamps it on every image it builds as `org.opencontainers.image.revision`,
+the label CI's images carry too. A build without it is stamped `unknown`.
+
+### The tag `make up` picks
+
+The three app images run one tag, `AUTOMATOS_IMAGE_TAG`: `backend` is
+`ghcr.io/automatosai/automatos-api`, `frontend` is
+`ghcr.io/automatosai/automatos-frontend` and `workspace-worker` is
+`ghcr.io/automatosai/automatos-workspace-worker`. `make up` prints the tag it
+picked and why, by this rule (`scripts/stack_images.py`, Python 3.9 or later,
+nothing to install):
+
+1. **A tag you set** in the shell or on the command line
+   (`AUTOMATOS_IMAGE_TAG=sha-1a2b3c4 make up`) is used as given. An official tag
+   that is neither on this machine nor on GHCR stops `make up`; a `local-*` tag
+   that is not on this machine is built. `AUTOMATOS_IMAGE_TAG=edge make up`
+   follows `edge` and pulls it on every call. The line `make up` writes to `.env`
+   is not a pin: it is rewritten on every run.
+2. **On a clean checkout** (`git status --porcelain -- orchestrator frontend
+   services/workspace-worker` prints nothing): `edge`, pulled first because
+   compose never re-pulls a tag it already has, when `edge`'s images are a build
+   of this very commit (their `org.opencontainers.image.revision` label is
+   `git rev-parse HEAD`), such as the weekly rebuild with fresh OS packages.
+   Otherwise `sha-<7>`, the first seven characters of `git rev-parse HEAD`, when
+   CI has published it. A `sha-*` or `tree-*` image already on this machine
+   counts as published, so a machine that has its images starts offline.
+3. **Otherwise** `local-<sha7>`, or `local-<sha7>-dirty` when one of those
+   folders has uncommitted changes. Each image whose folder is unchanged and
+   whose `tree-<12>` CI has published (the first twelve characters of
+   `git rev-parse HEAD:<folder>`; CI publishes one per tree) is pulled and
+   re-tagged; the others are built here, and `make up` names them. That covers a
+   `[skip ci]` merge and the few minutes before CI publishes a new commit.
+
+The web app has its addresses built in: the published one is the local edition,
+calling the API at `http://localhost:8000` and loading media from
+`http://localhost:9000`. When `.env` sets `NEXT_PUBLIC_API_URL`,
+`NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MEDIA_ORIGINS`, `NEXT_PUBLIC_AUTH_EDITION` or
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to anything else, `make up` builds the
+frontend here (under step 3's tag, with the other two re-tagged) and says why.
+A moved `API_PORT` or `MINIO_PORT` whose `NEXT_PUBLIC_*` values still point at
+8000 or 9000 stops `make up` before it starts anything: set them as SETUP.md
+step 3 shows.
+
+Without `make` or Python, do the same by hand. For a clean checkout of a main
+commit CI has published:
+
+```bash
+tag=sha-$(git rev-parse HEAD | cut -c1-7)
+docker manifest inspect ghcr.io/automatosai/automatos-api:$tag > /dev/null && echo published
+# make keeps exactly one such line at the end of .env, and replaces it each run
+echo "AUTOMATOS_IMAGE_TAG=$tag" >> .env
+docker compose up -d --no-build --remove-orphans
+```
+
+For `edge`, run `docker compose pull backend frontend workspace-worker` before
+`up`. For a `local-<sha7>` tag, re-tag each published tree and build the rest:
+
+```bash
+docker pull ghcr.io/automatosai/automatos-api:tree-<first 12 of git rev-parse HEAD:orchestrator>
+docker tag ghcr.io/automatosai/automatos-api:tree-<…> ghcr.io/automatosai/automatos-api:local-<sha7>
+AUTOMATOS_IMAGE_TAG=local-<sha7> AUTOMATOS_REVISION=$(git rev-parse HEAD) docker compose build frontend
+```
+
+Plain `docker compose up` without `make` runs the tag in `.env`, or `edge` when
+`.env` has none, and builds an image only when it cannot pull it. Running your
+own unmerged code next to it, as a retest stack does:
+`AUTOMATOS_IMAGE_TAG=local-<ref> docker compose up -d --build` builds the
+production stages under a tag no pull ever replaces (no `local-*` tag is
+published). Image names are shared by every stack on one Docker engine, so a
+second stack sets its own `local-<ref>` in its own `.env`, not only in the shell.
+A plain `docker compose up --build` with no tag at all names its build `:edge`,
+which the next `make up` that picks `edge` pulls over.
 
 The session-host targets run Python 3.9 or later, with nothing to install, on
 macOS, Linux, WSL2 or Windows 10 1809 and later (there, type `py` for `python3`
@@ -283,7 +359,7 @@ marketplace skill you can enable per agent; re-import later to pick up updates.
 ## 3. What runs where
 
 `docker compose up` starts the default profile. Nothing in it needs the
-internet after the images are built, except the LLM provider you chose (and
+internet after the images are pulled, except the LLM provider you chose (and
 Composio, if you add a key).
 
 | Service | Container | Image / build | Host port (variable) | What it does |
@@ -292,9 +368,9 @@ Composio, if you add a key).
 | `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
 | `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. |
 | `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and exits. |
-| `backend` | `automatos_backend` | built from `./orchestrator` (`production` target) | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
-| `frontend` | `automatos_frontend` | built from `./frontend` (`production` target) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
-| `workspace-worker` | `automatos_workspace_worker` | built from `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
+| `backend` | `automatos_backend` | `ghcr.io/automatosai/automatos-api`, pulled: CI's build of `./orchestrator` (`production` target); `make build` builds it here | 8000 (`API_PORT`) | The FastAPI API, as CI builds and scans it: the code is inside the image and nothing reloads. `make dev` runs the `development` target instead, with the source bind-mounted and served by `uvicorn --reload`. |
+| `frontend` | `automatos_frontend` | `ghcr.io/automatosai/automatos-frontend`, pulled: CI's build of `./frontend` (`production` target); built here when `.env` changes its `NEXT_PUBLIC_*` values (§1b) | 3000 (`FRONTEND_PORT`) | The Next.js UI (the standalone server). Starts once the backend health check passes. `make dev` runs the `development` target instead (`npm run dev`, source bind-mounted). |
+| `workspace-worker` | `automatos_workspace_worker` | `ghcr.io/automatosai/automatos-workspace-worker`, pulled: CI's build of `./services/workspace-worker` | none — port 8081 stays inside the compose network | The Code Canvas runtime: the container in which agents read, write and run things, confined to your workspace directory (§5). |
 
 `docker compose --profile all up` adds one more:
 
@@ -331,10 +407,16 @@ You should not need to open the last three for a standard install.
 
 ## 4. First boot — what happens and how long it takes
 
-1. **Image builds.** Backend (Python dependencies plus system libraries for
-   OCR and PDF rendering), frontend (`npm install`), workspace-worker (Node,
-   Claude Code CLI, Python tooling, Chromium). This is the slow part and only
-   happens once per dependency change.
+1. **Images.** `make up` pulls the app images CI built, scanned and published
+   for your commit (§1b). The whole default stack is about 1.33 GB compressed on
+   amd64 and 1.28 GB on arm64 (measured 16 Oct 2026; the target is under 1 GB),
+   so the download is the slow part: about a minute at 200 Mbit/s, three to four
+   at 50 Mbit/s, plus unpacking. CI times `make up` to a working UI on every
+   main publish against a 150-second bar. A later update downloads only the
+   layers that changed. `make build` builds the images from your checkout
+   instead (Python dependencies plus system libraries for OCR and PDF
+   rendering, `npm install`, the worker's Node and Claude Code CLI), which takes
+   several minutes.
 2. **Data services.** Postgres initialises an empty cluster with
    `POSTGRES_PASSWORD` — this password is baked into the volume at that moment
    (see §10). MinIO starts and `minio-init` creates the documents bucket.
@@ -732,13 +814,22 @@ Deliverable feature that exists in the code runs locally.
 
 ```bash
 git pull
-docker compose up -d --build                 # 1. rebuild; migrations run as the new backend boots
+make up                                      # 1. the new commit's images; migrations run as the new backend boots
 docker compose exec backend alembic current  # 2. one revision, marked (head)
 ```
 
-The default stack runs the production images, with the code inside them, so a
-pull changes nothing until `--build` rebuilds them and recreates the
-containers; the new backend migrates before it serves.
+The default stack runs the published images, with the code inside them, so a
+pull changes nothing until `make up` fetches the new commit's images (§1b) and
+recreates the containers; the new backend migrates before it serves.
+
+**OS security fixes.** Every Monday CI rebuilds the images with fresh Debian and
+Alpine packages (`weekly-<yyyymmdd>`) and moves `edge` to that rebuild once it
+boots. A checkout keeps the OS packages its `sha-<7>` was built with;
+`git pull && make up` picks up the weekly fixes, because `make up` then runs
+`edge` when it is a rebuild of your commit, or the newer commit's `sha-<7>`,
+which CI built on the fresh packages. `AUTOMATOS_IMAGE_TAG=edge make up` follows
+`edge` and pulls it on every call; `AUTOMATOS_IMAGE_TAG=sha-<7> make up` pins one
+build.
 
 **Under `make dev`, stop the backend before you pull.** That stack runs the
 backend in reload mode with `./orchestrator` bind-mounted, so a pull under a
@@ -753,15 +844,9 @@ git pull
 make dev
 ```
 
-**Running the published images** (`make up-images`, see
-[QUICKSTART](../../QUICKSTART.md#or-run-the-published-images-no-build))? Update
-with `make up-images` again: it pulls the newer `edge` (or the
-`AUTOMATOS_IMAGE_TAG` you pin) and recreates the containers. Nothing is
-bind-mounted from your checkout, so there's no reload-mode ordering to worry
-about; migrations run as the new backend boots. Every Monday CI also rebuilds
-the images with fresh Debian and Alpine packages and moves `edge` to that
-rebuild (`weekly-<yyyymmdd>`) once it boots, so updating on `edge` picks up
-OS security fixes; a pinned `sha-<7>` keeps the packages it was built with.
+Building from source (`make build`)? Update with `git pull && make build`.
+Nothing is bind-mounted from your checkout outside `make dev`, so there's no
+reload-mode ordering to worry about; migrations run as the new backend boots.
 Database migrations run on every backend boot (`alembic upgrade heads`,
 fail-closed — a failing migration stops the backend rather than serving a
 half-built schema), and the seeds are idempotent. If you use media
@@ -890,8 +975,8 @@ repository's Apache-2.0 licence with a DCO sign-off — see
 
 Rebuilding leaves the previous image untagged and grows the build cache, and
 Docker keeps both indefinitely — that is what turns 3.7 GB of images into 12 GB
-of disk. `make up` and `make dev` clean up after themselves, so this stays flat
-on its own. To reclaim at any time:
+of disk. `make up`, `make build` and `make dev` clean up after themselves, so
+this stays flat on its own. To reclaim at any time:
 
 ```bash
 make clean     # or: docker image prune -f && docker builder prune -f

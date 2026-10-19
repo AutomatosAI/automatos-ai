@@ -94,34 +94,39 @@ for you, once.
 make up
 ```
 
-That builds what changed, starts the stack, and clears the images and build
-cache the rebuild superseded — Docker keeps those forever otherwise, which is
-what quietly turns a 3.7 GB stack into 12 GB of disk. `make status` shows what
-is running and what it costs; `make down` stops it; `make clean` reclaims space
-at any time (it never touches your data). Plain `docker compose up` still works
-if you prefer it.
+`make up` downloads the images CI builds, scans and publishes for your
+checkout's commit (`ghcr.io/automatosai/automatos-api`, `-frontend`,
+`-workspace-worker`; multi-arch and signed) instead of building them, then
+starts the stack. It says which tag it picked and why (`sha-<7>` of your commit,
+or `edge` when that is a rebuild of it), and writes it to `.env` as
+`AUTOMATOS_IMAGE_TAG=…`, so later `docker compose` commands run the same images.
+On a checkout with your own changes it builds only the images whose folder you
+changed and pulls the rest.
 
-### Or: run the published images (no build)
+The first run downloads about 1.3 GB (the whole stack, compressed, amd64;
+1.28 GB on arm64): about a minute at 200 Mbit/s, three to four at 50 Mbit/s,
+plus unpacking and the first boot. CI times `make up` to a working UI on every
+main publish against a 150-second bar. Updates download only the layers that
+changed.
 
-```bash
-make up-images
-```
+**OS security fixes.** Every Monday CI rebuilds the images with fresh OS
+packages and moves `edge` to the rebuild once it boots. A checkout keeps the OS
+packages its `sha-<7>` was built with; `git pull && make up` picks up the
+weekly fixes. `AUTOMATOS_IMAGE_TAG=edge make up` follows `edge` and pulls on
+every call; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up` pins one build.
 
-This pulls the images CI publishes from `main` to GHCR
-(`ghcr.io/automatosai/automatos-api`, `-frontend`, `-workspace-worker`;
-multi-arch and signed) instead of building them: about a minute instead of ten.
-The default tag is `edge`, the latest `main` build whose published images have
-booted in CI; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up-images` pins one build.
-Every Monday CI rebuilds them with fresh OS packages (`weekly-<yyyymmdd>`) and
-moves `edge` there once they boot, so OS security fixes arrive on `edge` too.
-Everything else is the same as `make up`: your
-`.env`, the database, the workspace folder and session mode. Your checkout's
-source code isn't used. The published web app calls the API at
-`http://localhost:8000`, fixed when the image was built, so keep `API_PORT` at
-8000. Needs Docker Compose 2.24.4 or newer. To update, run `make up-images` again.
+The published web app calls the API at `http://localhost:8000` and MinIO at
+`http://localhost:9000`, fixed when it was built. If `.env` changes those
+(`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MEDIA_ORIGINS`),
+`make up` builds the web app on your machine instead, a few minutes, and says
+why. `make build` builds all three images from your checkout; `make dev` is for
+editing the code with hot reload. `make status` shows what is running and what
+it costs; `make down` stops it; `make clean` reclaims space at any time (it
+never touches your data). Plain `docker compose up` works too: it runs the tag
+in `.env`, or `edge`.
 
-First run builds the images, builds the database schema, runs the seeds and
-then serves. `http://localhost:8000/health` answers as soon as the API process
+The first boot builds the database schema, runs the seeds and then serves.
+`http://localhost:8000/health` answers as soon as the API process
 is up; `http://localhost:8000/health/ready` returns 503 until the full boot has
 finished and 200 once the instance is usable.
 

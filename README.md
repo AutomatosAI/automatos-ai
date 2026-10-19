@@ -194,11 +194,14 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 cp .env.example .env    # set the 3 required secrets: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
-make up                 # first run builds the images and the database schema
+make up                 # pulls the images CI published for this commit (about 1.3 GB), then starts the stack
 ```
 
 Then open http://localhost:3000 (API reference at http://localhost:8000/docs).
-To update later: stop the backend, pull, and rebuild ([Updating](docs/getting-started/self-hosting.md#10-updating)).
+`make up` pulls instead of building: the first run downloads about 1.3 GB, about a
+minute at 200 Mbit/s or three to four at 50 Mbit/s, and builds the database schema.
+To update later: `git pull && make up`, which also brings the weekly rebuild with
+fresh OS packages ([Updating](docs/getting-started/self-hosting.md#10-updating)).
 No login. Add one model key and run the seeded *Two-minute brief* Playbook:
 
 - `OPENROUTER_API_KEY` (400+ models), or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`;
