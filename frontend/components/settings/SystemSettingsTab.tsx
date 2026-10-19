@@ -195,7 +195,7 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="llm_models">
             <BrainCircuit className="w-3.5 h-3.5 mr-1 shrink-0" />
-            LLM Tiers
+            System &amp; Embeddings
           </TabsTrigger>
           <TabsTrigger value="system_logging">Logging</TabsTrigger>
           <TabsTrigger value="api_rate_limiting">Rate Limiting</TabsTrigger>
@@ -264,10 +264,8 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
 
         <TabsContent value="llm_models">
           <LLMModelsSettingsTab
-            orchestratorSettings={settingsByCategory.find(cat => cat.category === 'orchestrator_llm')?.settings || []}
             systemSettings={settingsByCategory.find(cat => cat.category === 'system_llm')?.settings || []}
             embeddingsSettings={settingsByCategory.find(cat => cat.category === 'embeddings')?.settings || []}
-            onSaveOrchestrator={(updates) => saveCategorySettings('orchestrator_llm', updates)}
             onSaveSystem={(updates) => saveCategorySettings('system_llm', updates)}
             onSaveEmbeddings={(updates) => saveCategorySettings('embeddings', updates)}
             onResetSystem={() => resetToDefaults('system_llm')}

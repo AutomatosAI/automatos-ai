@@ -3,7 +3,7 @@
 import * as React from 'react'
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { getDefaultModelConfig, savableModelConfig } from '@/lib/llm-defaults'
+import { getDefaultModelConfig, LLM_DEFAULTS } from '@/lib/llm-defaults'
 import {
   X,
   Save,
@@ -56,7 +56,7 @@ import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddS
 import { useWorkspace } from '@/components/workspace-provider'
 import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
-import { useAgentModelConfig, usePlatformDefaultRoute, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
+import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useTools } from '@/hooks/use-tools-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
@@ -118,10 +118,8 @@ export function AgentConfigurationModal({
   // Get system icons
   const { data: iconMappings = {} } = useSystemIcons()
 
-  // PRD-15: Model configuration hooks; an agent with no model_config runs on the platform default
-  // isInitialLoading (react-query 4): a first fetch in flight, never true for a disabled query
-  const { data: agentModelConfig, isInitialLoading: modelConfigLoading } = useAgentModelConfig(agentId)
-  const { data: platformRoute } = usePlatformDefaultRoute()
+  // PRD-15: Model configuration hooks
+  const { data: agentModelConfig } = useAgentModelConfig(agentId)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
   // Tools API
   const { data: toolsData } = useTools({ status: 'active', limit: 100 })
@@ -395,12 +393,11 @@ export function AgentConfigurationModal({
     // useAgent polls every 10s — without this guard, refetches overwrite
     // the user's in-progress edits and reset hasChanges to false.
     if (formInitializedRef.current) return
-    // Wait for the agent's stored model: initializing first would lock in a blank one
-    if (modelConfigLoading) return
     if (agentConfig && agent && typeof agent === 'object') {
       formInitializedRef.current = true
 
-      const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig(platformRoute)
+      // PRD-15: Get model config from agentModelConfig or use defaults
+      const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
 
       // Initialize form data with real agent data
       const dbAgentType = (agent as any).agent_type || 'custom'
@@ -438,7 +435,7 @@ export function AgentConfigurationModal({
       })
       setHasChanges(false)
     }
-  }, [agentConfig, agent, agentModelConfig, modelConfigLoading, platformRoute])
+  }, [agentConfig, agent, agentModelConfig])
 
 
   const updateFormData = (key: string, value: any) => {
@@ -688,12 +685,10 @@ export function AgentConfigurationModal({
       })
 
       // PRD-15: Save model configuration
-      // A model_config that still names no model (the platform default not loaded) is not sent
-      const modelConfigToSave = savableModelConfig(formData.model_config, platformRoute)
-      if (modelConfigToSave) {
+      if (formData.model_config) {
         await updateModelConfigMutation.mutateAsync({
           agentId: agentId,
-          modelConfig: modelConfigToSave
+          modelConfig: formData.model_config
         })
       }
 
@@ -1551,7 +1546,7 @@ export function AgentConfigurationModal({
 
                       {/* Model Selection */}
                       <ModelSelector
-                        value={formData.model_config?.model_id || platformRoute?.model_id || ''}
+                        value={formData.model_config?.model_id || LLM_DEFAULTS.model_id}
                         provider={formData.model_config?.provider}
                         onChange={(modelId, servingProvider) => {
                           // PRD-239 S5: the pick is a route — store the model AND who serves it

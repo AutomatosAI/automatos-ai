@@ -1,27 +1,24 @@
 /**
- * LLM Tiers Settings Tab (PRD-136)
- * ================================
+ * System & Embeddings Settings Tab (PRD-136)
+ * ==========================================
  *
  * Three tier cards. "Platform default for Auto" is system_settings orchestrator_llm
  * provider + model: the model every new workspace's Auto, and every new agent given
- * no model, starts on. Saving it goes through bulk-update, which moves the Auto
- * agents still on the platform default to it (a workspace that chose its own model
- * in Settings > Orchestrator keeps it). System and Embeddings follow.
+ * no model, starts on. The card sources its own rows (hooks/use-auto-platform-default)
+ * and saves through bulk-update, which moves the Auto agents still on the platform
+ * default to it (a workspace that chose its own model in Settings > Orchestrator keeps
+ * it). System and Embeddings follow, on the rows SystemSettingsTab passes.
  */
 
 import React from 'react'
 import { Bot, Cog, Database } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
+import { useAutoPlatformDefault } from '@/hooks/use-auto-platform-default'
 import LLMTierCard from './LLMTierCard'
 
-/** The orchestrator_llm keys the platform default card shows: its route. */
-const AUTO_DEFAULT_KEYS = ['provider', 'model']
-
 interface LLMModelsSettingsTabProps {
-  orchestratorSettings: SystemSetting[]
   systemSettings: SystemSetting[]
   embeddingsSettings: SystemSetting[]
-  onSaveOrchestrator: (updates: Record<string, string>) => Promise<void> | void
   onSaveSystem: (updates: Record<string, string>) => Promise<void> | void
   onSaveEmbeddings: (updates: Record<string, string>) => Promise<void> | void
   onResetSystem: () => Promise<void> | void
@@ -30,20 +27,15 @@ interface LLMModelsSettingsTabProps {
 }
 
 export default function LLMModelsSettingsTab({
-  orchestratorSettings,
   systemSettings,
   embeddingsSettings,
-  onSaveOrchestrator,
   onSaveSystem,
   onSaveEmbeddings,
   onResetSystem,
   onResetEmbeddings,
   saving,
 }: LLMModelsSettingsTabProps) {
-  const autoDefaultSettings = orchestratorSettings.filter((s) => AUTO_DEFAULT_KEYS.includes(s.key))
-  // Reset saves the shipped default through the same path as Save, so the Auto agents move too.
-  const resetAutoDefault = () =>
-    onSaveOrchestrator(Object.fromEntries(autoDefaultSettings.map((s) => [s.key, s.default_value || ''])))
+  const autoDefault = useAutoPlatformDefault()
 
   return (
     <div className="space-y-6">
@@ -60,10 +52,10 @@ export default function LLMModelsSettingsTab({
         title="Platform default for Auto"
         description="Provider and model for every Auto that has not picked its own, and for new agents given no model. Workspaces that chose a model keep it."
         icon={Bot}
-        settings={autoDefaultSettings}
-        onSave={onSaveOrchestrator}
-        onReset={resetAutoDefault}
-        saving={saving}
+        settings={autoDefault.settings}
+        onSave={autoDefault.save}
+        onReset={autoDefault.reset}
+        saving={autoDefault.saving || autoDefault.loading}
       />
 
       <LLMTierCard

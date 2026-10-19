@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { getDefaultModelConfig, savableModelConfig } from '@/lib/llm-defaults'
+import { getDefaultModelConfig } from '@/lib/llm-defaults'
 import {
   X,
   Bot,
@@ -34,7 +34,7 @@ import { PremiumIcon } from '@/components/shared'
 
 // API hooks
 import { useCreateAgent } from '@/hooks/use-agent-api'
-import { useModels, useNewAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
+import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ModelSelector } from './model-selector'
 import { RuntimeSection, DEFAULT_RUNTIME_FIELDS, runtimeConfiguration, type RuntimeFields } from './runtime-section'
@@ -78,8 +78,8 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     shareToMarketplace: false
   })
 
-  // PRD-15: Model configuration state, pre-filled with the platform default once the API answers
-  const { modelConfig, setModelConfig, platformRoute } = useNewAgentModelConfig()
+  // PRD-15: Model configuration state
+  const [modelConfig, setModelConfig] = useState(getDefaultModelConfig())
 
   // PRD-234: runtime — API model (default) or the user's own Claude Code session (local edition)
   const [runtimeFields, setRuntimeFields] = useState<RuntimeFields>(DEFAULT_RUNTIME_FIELDS)
@@ -222,22 +222,18 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
       console.log('Agent created successfully:', newAgent)
 
-      // PRD-15: Update model configuration (no model picked: the platform default's; still
-      // none loaded: nothing sent, and the agent runs on the platform default, agent_factory)
-      const modelConfigToSave = savableModelConfig(modelConfig, platformRoute)
+      // PRD-15: Update model configuration
       if (newAgent?.id) {
-        if (modelConfigToSave) {
-          try {
-            console.log('Setting model config for agent:', newAgent.id)
-            await (updateModelConfigMutation as any).mutateAsync({
-              agentId: newAgent.id,
-              modelConfig: modelConfigToSave
-            })
-            console.log('Model config set successfully')
-          } catch (error) {
-            console.error('Failed to set model config:', error)
-            // Don't alert, just log - non-critical
-          }
+        try {
+          console.log('Setting model config for agent:', newAgent.id)
+          await (updateModelConfigMutation as any).mutateAsync({
+            agentId: newAgent.id,
+            modelConfig
+          })
+          console.log('Model config set successfully')
+        } catch (error) {
+          console.error('Failed to set model config:', error)
+          // Don't alert, just log - non-critical
         }
 
         // US-021: Set persona if selected
@@ -316,7 +312,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         specializations: [],
         shareToMarketplace: false
       })
-      setModelConfig(getDefaultModelConfig(platformRoute))
+      setModelConfig(getDefaultModelConfig())
       setRuntimeFields(DEFAULT_RUNTIME_FIELDS)
       setPersonaMode('none')
       setSelectedPersonaId(null)

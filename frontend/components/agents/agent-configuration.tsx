@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { getDefaultModelConfig, savableModelConfig } from '@/lib/llm-defaults'
+import { getDefaultModelConfig, LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { Settings, Save, RotateCcw, AlertTriangle, Info, Zap, Bot, Wrench, Sparkles, Terminal, Coins } from 'lucide-react'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { runtimeBadge, runtimeFieldsFromConfiguration, useCliAvailability } from './runtime-section'
@@ -30,7 +30,7 @@ import { toast } from 'sonner'
 
 // API hooks
 import { useAgent, useAgentConfig, useUpdateAgentConfig } from '@/hooks/use-agent-api'
-import { useAgentModelConfig, usePlatformDefaultRoute, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
+import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { ModelSelector } from './model-selector'
 import { Checkbox } from '@/components/ui/checkbox'
 import { apiClient } from '@/lib/api-client'
@@ -77,9 +77,8 @@ export function AgentConfiguration({
   const { data: agentConfig, isLoading: configLoading, refetch: refetchConfig } = useAgentConfig(selectedAgentId)
   const updateConfigMutation = useUpdateAgentConfig()
 
-  // PRD-15: Model configuration hooks; an agent with no model_config runs on the platform default
+  // PRD-15: Model configuration hooks
   const { data: agentModelConfig, refetch: refetchModelConfig } = useAgentModelConfig(selectedAgentId ? Number(selectedAgentId) : null)
-  const { data: platformRoute } = usePlatformDefaultRoute()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
 
   // Tools API
@@ -185,8 +184,9 @@ export function AgentConfiguration({
     const key = selectedAgentId ? String(selectedAgentId) : null
     if (modelConfigInitFor.current === key) return
     modelConfigInitFor.current = key
-    setModelConfigData((agentModelConfig as any)?.model_config || getDefaultModelConfig(platformRoute))
-  }, [agentModelConfig, selectedAgentId, platformRoute])
+    const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
+    setModelConfigData(modelConfig)
+  }, [agentModelConfig, selectedAgentId])
 
   // Handle form changes
   const handleConfigChange = (key: string, value: any) => {
@@ -324,13 +324,11 @@ export function AgentConfiguration({
       // 2. Save model configuration (PRD-15)
       // Note: Plugin assignments are saved immediately via togglePluginAssignment
       let modelConfigFailed = false
-      // A model_config that still names no model (the platform default not loaded) is not sent
-      const modelConfigToSave = savableModelConfig(modelConfigData, platformRoute)
-      if (modelConfigToSave) {
+      if (modelConfigData && Object.keys(modelConfigData).length > 0) {
         try {
           await updateModelConfigMutation.mutateAsync({
             agentId: Number(selectedAgentId),
-            modelConfig: modelConfigToSave
+            modelConfig: modelConfigData
           })
           // PRD-239 S5: let the refetch apply the stored (route-resolved) config.
           modelConfigInitFor.current = null
@@ -366,7 +364,8 @@ export function AgentConfiguration({
       setHasUnsavedChanges(false)
     }
     if (agentModelConfig) {
-      setModelConfigData((agentModelConfig as any)?.model_config || getDefaultModelConfig(platformRoute))
+      const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
+      setModelConfigData(modelConfig)
     }
     if (agent && (agent as any).tools && Array.isArray((agent as any).tools)) {
       const toolIds = (agent as any).tools.map((tool: any) => tool.id)
@@ -866,7 +865,7 @@ export function AgentConfiguration({
           <div className="space-y-3">
             <Label>AI Model</Label>
             <ModelSelector
-              value={modelConfigData?.model_id || platformRoute?.model_id || ''}
+              value={modelConfigData?.model_id || LLM_DEFAULTS.model_id}
               provider={modelConfigData?.provider}
               onChange={(modelId, servingProvider) => {
                 // PRD-239 S5: the pick is a route — store the model AND who serves it
