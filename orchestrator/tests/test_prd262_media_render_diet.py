@@ -110,8 +110,10 @@ def test_the_chrome_stage_installs_binutils_first_and_strips_the_arm64_shell():
     amd64 = run.index("else", arm64)
     assert binutils < arm64
     assert 'strip --strip-unneeded "$BIN";' in run[arm64:amd64]
-    # On either arch, after the branches: a .symtab left fails the build.
-    assert 'fi; test -x "$BIN"; if readelf -SW "$BIN" | grep -F .symtab; then' in run
+    # On either arch, after the branches: a .symtab left in the shell or a library
+    # beside it (PRD-262 #38) fails the build.
+    assert 'fi; test -x "$BIN"; for elf in "$BIN" $(find "$(dirname "$BIN")" -maxdepth 1 -type f' in run
+    assert 'do if readelf -SW "$elf" | grep -F .symtab; then' in run
     check = run.index("readelf -SW")
     assert "exit 1" in run[check : run.index("mv ", check)]
     # strip and readelf stay in the builder stages; the runtime only names the

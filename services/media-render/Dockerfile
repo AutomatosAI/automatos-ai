@@ -139,6 +139,9 @@ ENV PATH=/opt/media-render/js/node_modules/.bin:$PATH
 #   .strtab), so it is stripped (the amd64 build ships stripped). Neither the
 #   runtime nor python:3.12-slim has strip, so binutils comes first, in this stage
 #   alone, and the build fails if readelf still lists a .symtab on either arch.
+# - PRD-262 #38: the arm64 shell's own libraries (SwiftShader, ANGLE's GLESv2 and
+#   EGL, the Vulkan loader: about 9.8 MB of .symtab) are stripped the same way; the
+#   amd64 ones ship stripped, and the .symtab check covers them on both arches.
 # - Of the locales, Chrome's UI strings, only en-US.pak is kept (amd64; about 51 MB
 #   in 220 files). Chrome falls back to it. The arm64 build has no locales.
 FROM js AS chrome
@@ -151,15 +154,18 @@ RUN set -eux; \
         PLAYWRIGHT_BROWSERS_PATH=/tmp/pw playwright-core install chromium-headless-shell; \
         BIN="$(find /tmp/pw \( -name chrome-headless-shell -o -name headless_shell \) -type f | head -n1)"; \
         strip --strip-unneeded "$BIN"; \
+        find "$(dirname "$BIN")" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded {} +; \
     else \
         apt-get install -y --no-install-recommends unzip; \
         HOME=/tmp/hf hyperframes browser ensure; \
         BIN="$(HOME=/tmp/hf hyperframes browser path | tail -n1)"; \
     fi; \
     test -x "$BIN"; \
-    if readelf -SW "$BIN" | grep -F .symtab; then \
-        echo "$BIN still carries its symbol table (.symtab)" >&2; exit 1; \
-    fi; \
+    for elf in "$BIN" $(find "$(dirname "$BIN")" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \)); do \
+        if readelf -SW "$elf" | grep -F .symtab; then \
+            echo "$elf still carries its symbol table (.symtab)" >&2; exit 1; \
+        fi; \
+    done; \
     mv "$(dirname "$BIN")" /opt/chrome; \
     if [ ! -e /opt/chrome/chrome-headless-shell ]; then ln -s "$(basename "$BIN")" /opt/chrome/chrome-headless-shell; fi; \
     if [ -d /opt/chrome/locales ]; then \
