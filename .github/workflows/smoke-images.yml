@@ -89,6 +89,7 @@ on:
       - "frontend/csp-sources.js"
       - "frontend/.npmrc"
       - "frontend/public/**"
+      - "frontend/scripts/check-standalone-image.sh"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
 
