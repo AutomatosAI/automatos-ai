@@ -15,6 +15,7 @@ import io
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -29,17 +30,18 @@ if str(ORCH_ROOT) not in sys.path:
 import core.models  # noqa: E402,F401  (registers every table the FKs name)
 from config import config  # noqa: E402
 from core.auth import workspace_permission  # noqa: E402
-from core.models.themes import (  # noqa: E402
-    THEME_SCAN_VERDICT_DEFAULT, ThemeInstallation, ThemePackage, ThemeWorkspaceSettings,
-)
+from core.models.themes import ThemeInstallation, ThemePackage, ThemeWorkspaceSettings  # noqa: E402
 from core.workspaces.models import WorkspaceMember  # noqa: E402
 from services.themes import records, storage  # noqa: E402
 from services.themes import settings as theme_settings  # noqa: E402
+from services.themes.llm_stage import DID_NOT_RUN  # noqa: E402
 from services.themes.package import THEME_IMPORT_ROUTE  # noqa: E402
-from services.themes.scan import CONTRAST_NOT_RUN, VERDICT_NOT_RUN  # noqa: E402
+from services.themes.scan import CONTRAST_NOT_RUN  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
 MB = 1024 * 1024
+# C-02a: with no LLM key the review stage runs every check but the LLM, which "did not run".
+VERDICT_NO_LLM = "review_required"
 HELLO_ID = "automatos-e2e/hello"
 SWITCH = records.PRIVATE_UPLOAD_SETTING
 # The member table's own DDL: its model's postgresql UUID column has NUMERIC affinity on SQLite,
@@ -88,6 +90,8 @@ def env(monkeypatch):
     monkeypatch.setattr(themes_import, "resolve_user_pk", lambda db, ctx: None)
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     monkeypatch.setattr(config, SWITCH, "auto", raising=False)
+    # The review stage (C-02a) runs inline: no key here, so no test ever calls the Anthropic API.
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "")
     yield type("Env", (), {"sessions": sessionmaker(bind=engine), "s3": fake})
     engine.dispose()
 
@@ -214,10 +218,10 @@ def test_a_good_package_is_201_stored_privately_and_installed(env):
     body = response.json()
     assert body["status"] == "installed" and body["duplicate"] is False
     assert body["package"]["themeId"] == HELLO_ID and body["package"]["ownerType"] == "workspace"
-    assert body["package"]["reviewed"] is False and body["package"]["scanVerdict"] == VERDICT_NOT_RUN
+    assert body["package"]["reviewed"] is False and body["package"]["scanVerdict"] == VERDICT_NO_LLM
     (row,) = _rows(env, ThemePackage)
     assert (row.owner_type, row.workspace_id, row.reviewed) == ("workspace", workspace_a, False)
-    assert row.scan_verdict == THEME_SCAN_VERDICT_DEFAULT and row.storage_prefix == _prefix(workspace_a)
+    assert row.scan_verdict == VERDICT_NO_LLM and row.storage_prefix == _prefix(workspace_a)
     assert set(env.s3.objects) == {_prefix(workspace_a) + path for path in row.file_manifest}
     (install,) = _rows(env, ThemeInstallation)
     assert (install.workspace_id, install.package_id, install.pending_package_id) == (workspace_a, row.id, None)
@@ -225,19 +229,107 @@ def test_a_good_package_is_201_stored_privately_and_installed(env):
     assert install.is_default is False and install.uninstalled_at is None
 
 
-def test_the_scan_report_holds_the_server_checks_and_the_stages_not_run(env):
+def test_the_scan_report_holds_the_server_checks_and_the_review_stage(env):
     body = _upload(_client(env, _local_ctx(uuid4())), _hello()).json()
-    report = body["package"]["scanReport"]
+    shown = body["package"]["scanReport"]
+    (row,) = _rows(env, ThemePackage)
+    report = row.scan_report
     checks = report["checks"]
+    # The uploader sees the verdict and the plain checks; the LLM check is the platform reviewer's.
+    assert shown["verdict"] == report["verdict"] and "summary" not in shown
+    assert shown["checks"] == {name: check for name, check in checks.items() if name != "llm"}
 
-    assert report["verdict"] == VERDICT_NOT_RUN
+    assert report["schema"] == "automatos-theme-scan/v2" and report["verdict"] == VERDICT_NO_LLM
     assert checks["sizes"]["status"] == "pass" and checks["sizes"]["entryBytes"] > 0
+    assert {name: checks[name]["level"] for name in ("sizes", "cssScope", "looks")} == dict.fromkeys(
+        ("sizes", "cssScope", "looks"), "pass")
     assert checks["sizes"]["limits"] == {"package": 10 * MB, "code": 3072 * 1024, "entry": 300 * 1024, "clip": 1024 * 1024}
-    assert checks["cssScope"] == {"status": "pass", "path": "dist/theme.css"}
-    assert checks["looks"] == {"status": "pass", "presets": ["default", "night"]}
+    assert checks["cssScope"] == {"status": "pass", "path": "dist/theme.css", "level": "pass"}
+    assert checks["looks"] == {"status": "pass", "presets": ["default", "night"], "level": "pass"}
     assert checks["contrast"]["status"] == "not_run" and checks["contrast"]["reason"] == CONTRAST_NOT_RUN
+    assert checks["contrast"]["level"] == "not_measured"
     assert [preset["id"] for preset in checks["contrast"]["presets"]] == ["default", "night"]
-    assert checks["automated"]["status"] == "not_run" and checks["automated"]["reason"]
+    # The hello entry imports defineTheme while its theme.json declares no "uses".
+    assert checks["uses"]["level"] == "warning" and checks["clonedFrom"]["level"] == "pass"
+    llm = checks["llm"]
+    assert (llm["level"], llm["status"], llm["calls"]) == ("warning", "did_not_run", 0)
+    assert llm["reason"].startswith(DID_NOT_RUN) and llm["read"] == "dist"
+    assert "automated" not in checks
+
+
+def _risky_llm(monkeypatch, calls):
+    """The route's review stage with an LLM that scores every part 85; ``calls`` counts the stage runs."""
+    import api.themes_import as themes_import
+    from services.themes import review_stage
+
+    def reply(model, text):
+        body = '{"risk_score": 85, "findings": [], "summary": "Sends data to another host."}'
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=body)],
+                               usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+
+    def stage(checked, package_bytes, **kwargs):
+        calls.append(kwargs)
+        return review_stage.run_review_stage(checked, package_bytes, llm_call=reply, **kwargs)
+
+    monkeypatch.setattr(themes_import, "run_review_stage", stage)
+
+
+def test_a_blocked_verdict_is_stored_with_the_upload_never_hidden(env, monkeypatch):
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    response = _upload(_client(env, _local_ctx(uuid4())), _hello())
+
+    assert response.status_code == 201 and response.json()["package"]["scanVerdict"] == "blocked"
+    assert [sorted(call) for call in calls] == [["include_source", "token_budget"]]
+    assert calls[0]["include_source"] is False and calls[0]["token_budget"].budget > 0
+    from services.themes import review_limits
+
+    assert review_limits.tokens_reserved() == 0  # the request's hold ended with it
+    (row,) = _rows(env, ThemePackage)
+    assert row.scan_verdict == "blocked" and row.scan_report["checks"]["llm"]["level"] == "error"
+
+
+def test_the_same_bytes_again_never_run_the_stage_twice(env, monkeypatch):
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    client = _client(env, _local_ctx(uuid4()))
+    _upload(client, _hello())
+    again = _upload(client, _hello())
+
+    assert again.status_code == 200 and len(calls) == 1
+    assert again.json()["package"]["scanVerdict"] == "blocked"
+
+
+def test_an_upload_overlapping_one_of_the_same_bytes_is_409_and_never_runs_the_stage(env, monkeypatch):
+    from api.themes_import import BUSY
+    from services.themes.package import read_theme_package
+    from services.themes.upload_claim import upload_claim
+
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    workspace_a = uuid4()
+    client = _client(env, _local_ctx(workspace_a))
+    session = env.sessions()
+    try:
+        with upload_claim(session, workspace_a, read_theme_package(_hello()).digest) as claimed:
+            assert claimed
+            overlapping = _upload(client, _hello())
+    finally:
+        session.close()
+
+    assert overlapping.status_code == 409 and overlapping.json()["detail"] == BUSY
+    assert calls == [] and _rows(env, ThemePackage) == [] and env.s3.objects == {}
+    assert _upload(client, _hello()).status_code == 201 and len(calls) == 1
+
+
+def test_a_package_the_reader_refuses_never_reaches_the_review_stage(env, monkeypatch):
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    css = b"html.hello .hello-frame { color: red !important; }\n"
+    response = _upload(_client(env, _local_ctx(uuid4())), build.build_package(replace={"dist/theme.css": css}))
+
+    assert response.status_code == 400 and "CSS_IMPORTANT" in [e["code"] for e in response.json()["detail"]["errors"]]
+    assert calls == [] and _rows(env, ThemePackage) == []
 
 
 # ---------------------------------------------------------------------------
@@ -373,13 +465,29 @@ def test_a_version_not_newer_than_the_installed_one_is_409(env):
     assert len(_rows(env, ThemePackage)) == 1
 
 
+@pytest.mark.parametrize("second, message", [({"name": "Hello, changed"}, "Raise the version"),
+                                             ({"version": "0.9.0"}, "higher version")])
+def test_a_version_clash_is_409_before_the_review_stage_runs(env, monkeypatch, second, message):
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    client = _client(env, _local_ctx(uuid4()))
+    assert _upload(client, _hello()).status_code == 201 and len(calls) == 1
+    response = _upload(client, _hello(**second))
+
+    assert response.status_code == 409 and message in response.json()["detail"]
+    assert len(calls) == 1 and len(_rows(env, ThemePackage)) == 1
+
+
 def _stale_first_check(monkeypatch):
-    """The losing upload's pre-insert check ran before the winner committed: it saw nothing."""
+    """The losing upload's checks (before the stage, then pre-insert) ran before the winner committed.
+
+    Both saw nothing; only the check after the unique index fired sees the winner's rows.
+    """
     real, calls = records._check_new_version, []
 
     def check(*args):
         calls.append(args)
-        return None if len(calls) == 1 else real(*args)
+        return None if len(calls) <= 2 else real(*args)
 
     monkeypatch.setattr(records, "_check_new_version", check)
 
@@ -537,3 +645,55 @@ def test_storage_keys_stay_under_the_workspace_prefix():
     for bad_path in ("../x", "a//b", "/abs", "a\\b", "./a", ""):
         with pytest.raises(ValueError):
             storage.theme_key(_prefix(workspace_a), bad_path)
+
+
+# ---------------------------------------------------------------------------
+# H1: what a private upload may spend
+# ---------------------------------------------------------------------------
+
+
+def test_a_full_review_slot_is_503_with_retry_after_and_never_runs_the_stage(env, monkeypatch):
+    from services.themes import review_limits
+
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    monkeypatch.setattr(config, "THEME_REVIEW_MAX_CONCURRENT", 1, raising=False)
+    client = _client(env, _local_ctx(uuid4()))
+    with review_limits.review_slot() as held:
+        assert held
+        response = _upload(client, _hello())
+    assert response.status_code == 503 and response.json()["detail"] == review_limits.REVIEWS_BUSY
+    assert response.headers["Retry-After"] == str(review_limits.BUSY_RETRY_SECONDS)
+    assert calls == [] and _rows(env, ThemePackage) == []
+    assert _upload(client, _hello()).status_code == 201 and len(calls) == 1
+
+
+def test_a_workspace_past_the_daily_uploads_is_429_before_the_stage(env, monkeypatch):
+    from services.themes import review_limits
+
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    monkeypatch.setattr(config, "THEME_UPLOADS_PER_DAY", 2, raising=False)
+    workspace = uuid4()
+    client = _client(env, _local_ctx(workspace))
+    for version in ("1.0.0", "1.0.1"):
+        assert _upload(client, _hello(version=version)).status_code == 201
+    response = _upload(client, _hello(version="1.0.2"))
+    assert response.status_code == 429
+    assert response.json()["detail"] == review_limits.UPLOADS_QUOTA.format(limit=2)
+    assert len(calls) == 2
+    assert _upload(client, _hello(version="1.0.1")).status_code == 200  # the same bytes cost nothing
+    assert _upload(_client(env, _local_ctx(uuid4())), _hello(version="1.0.2")).status_code == 201  # per workspace
+
+
+def test_the_upload_stage_gets_what_is_left_of_the_days_review_tokens(env, monkeypatch):
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    monkeypatch.setattr(config, "THEME_REVIEW_DAILY_TOKENS", 1, raising=False)
+    client = _client(env, _local_ctx(uuid4()))
+    assert _upload(client, _hello()).status_code == 201
+    (row,) = _rows(env, ThemePackage)
+    llm = row.scan_report["checks"]["llm"]
+    assert calls[0]["token_budget"].budget == 1
+    assert row.scan_verdict == "review_required" and llm["calls"] == 0
+    assert llm["reason"] == "LLM stage did not run: daily budget reached."

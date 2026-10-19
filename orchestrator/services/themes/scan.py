@@ -15,11 +15,13 @@ Two checks are recorded as ``not_run``, each with a plain reason, never as passe
 * ``contrast`` (AA per preset): a look is knob values, and neither ``looks/schema.json`` nor
   ``boot/prepaint.json`` declares which painted colours are text on which ground, so the server
   has no pairs to measure. Each preset is listed so the report shows what is unmeasured;
-* ``automated``: the review stage (C-02a, W-C1) runs inline here once it lands.
+* ``automated``: the review stage, as this base report records it.
 
-The package's ``scan_verdict`` is ``not_run`` until the automated stage runs. A private upload is
-never blocked by the verdict (PRD §5: the admin sees the report; the theme shows as
-"Private · not reviewed").
+Since W-C1 the routes store ``services/themes/review_stage.py``'s report instead (C-02a): it
+starts from these checks, drops ``automated`` and adds the ``uses``, ``clonedFrom`` and LLM
+checks and a real verdict. Rows stored before it keep this report and the ``not_run`` verdict.
+A private upload is never blocked by the verdict (PRD §5: the admin sees the report; the theme
+shows as "Private · not reviewed").
 """
 
 from __future__ import annotations

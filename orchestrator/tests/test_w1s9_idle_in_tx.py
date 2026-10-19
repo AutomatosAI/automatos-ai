@@ -525,11 +525,7 @@ async def test_harness_commits_before_each_phase(monkeypatch):
 
     monkeypatch.setattr(
         svc, "_sufficiency_breakdown",
-        lambda _db, _ws: {
-            "agents_ok": True, "data_ok": True,
-            "active_agents": 1, "min_required_agents": 1,
-            "heartbeat_days_available": 7, "min_required_days": 1,
-        },
+        lambda _db, _ws: {"agents_ok": True, "active_agents": 1, "min_required_agents": 1},
     )
     monkeypatch.setattr(svc, "_workspace_allows_auto_apply", lambda _s: True)
 
@@ -550,15 +546,15 @@ async def test_harness_commits_before_each_phase(monkeypatch):
     monkeypatch.setattr(harness_runs, "close_run", lambda _db, run_id, status, **fields: closed.append(
         {"run_id": run_id, "status": status, **fields}))
 
-    async def _collect(_ws, _db):
+    async def _collect(_ws, _db, _window):
         events.append("collect")
-        return {}
+        return SimpleNamespace(agent_rows=())
 
     async def _diagnose(_ws, _metrics, _db):
         events.append("diagnose")
-        return {}
+        return {"coverage": None, "convergence": "insufficient_data", "counts": {}, "agents": {}, "issues": []}
 
-    async def _prescribe(_ws, _diag, _metrics, _db):
+    async def _prescribe(_ws, _diag):
         events.append("prescribe")
         return []
 
@@ -566,15 +562,15 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         events.append("apply")
         return {"applied": [], "queued": []}
 
-    async def _baseline(_ws, _metrics, _diag, _rx, _changelog, _db, _iteration):
-        events.append("baseline")
+    async def _report(_ws, _diag, _changelog, _db, _iteration):
+        events.append("report")
         return ("# report", "ok")
 
     monkeypatch.setattr(svc, "_phase_collect", _collect)
     monkeypatch.setattr(svc, "_phase_diagnose", _diagnose)
     monkeypatch.setattr(svc, "_phase_prescribe", _prescribe)
     monkeypatch.setattr(svc, "_phase_apply", _apply)
-    monkeypatch.setattr(svc, "_phase_baseline", _baseline)
+    monkeypatch.setattr(svc, "_phase_report", _report)
 
     await svc._harness_tick("ws-1")
 
@@ -583,7 +579,9 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         "commit", "diagnose",
         "commit", "prescribe",
         "commit", "apply",
-        "commit", "baseline",
+        "commit", "report",
     ], events
-    # The run is closed on its row, once, after the last phase.
+    # The run is closed on its row, once, after the last phase, with DIAGNOSE's coverage
+    # and verdicts (PRD-263 US-014a).
     assert [(c["run_id"], c["status"], c["report_status"]) for c in closed] == [(1, "completed", "ok")]
+    assert closed[0]["verdicts"] == {"convergence": "insufficient_data", "agents": {}}
