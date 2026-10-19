@@ -19,7 +19,7 @@ const isPublicRoute = createRouteMatcher([
   // handler authenticates (signed out → 401); auth.protect() would answer a module import()
   // or a <video> range request with a 404 before the handler runs, which reads as a broken
   // theme instead of an expired session.
-  "/api/themes/files(.*)",
+  "/api/themes/files/(.*)",
 ]);
 
 const saasMiddleware = clerkMiddleware(async (auth, request) => {
