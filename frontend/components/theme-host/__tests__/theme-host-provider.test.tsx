@@ -6,14 +6,19 @@
  * install, falls back with a notice, keeps the loaded result as an object (a frame that uses hooks renders
  * cleanly), cleans the theme up when the style changes or it unmounts, and runs loads one after
  * another so a cancelled load cannot strip the live one's look.
+ *
+ * A-04c: the theme's own failures are recorded per theme; the third within ten minutes sends the
+ * member back to Studio (the server choice, the cookie, the style, a notice that outlives the
+ * host's), `auth` never counts, and /safe-mode is safe mode.
  */
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { THEME_NOTICE_ID } from '@/lib/theme-host/constants'
+import { SAFE_MODE_STORAGE_KEY, THEME_NOTICE_ID } from '@/lib/theme-host/constants'
+import { FAILURE_LEDGER_KEY } from '@/lib/theme-host/failure-ledger'
 import type { SlotId } from '@/lib/theme-host/registry-types'
-import type { SpikeManifest, ThemeLoadResult } from '@/lib/theme-host/types'
+import type { SpikeManifest, ThemeFailureReason, ThemeLoadResult } from '@/lib/theme-host/types'
 import { UI_STYLES, type UiStyle } from '@/lib/ui-style'
 
 const INSTALLED_STYLE: UiStyle = 'theme:install:00000000-0000-4000-8000-00000000e2e1'
@@ -22,12 +27,15 @@ const OTHER_INSTALLED_STYLE: UiStyle = 'theme:install:00000000-0000-4000-8000-00
 const mocks = vi.hoisted(() => ({
   style: { current: 'studio' as string | null },
   loadThemeForStyle: vi.fn(),
+  setStyle: vi.fn(),
+  putThemeChoice: vi.fn(),
   toast: Object.assign(vi.fn(), { error: vi.fn(), dismiss: vi.fn() }),
 }))
 
 vi.mock('@/contexts/ui-style-context', () => ({
-  useUiStyleOptional: () => (mocks.style.current === null ? null : { style: mocks.style.current }),
+  useUiStyleOptional: () => (mocks.style.current === null ? null : { style: mocks.style.current, setStyle: mocks.setStyle }),
 }))
+vi.mock('@/lib/api-client', () => ({ apiClient: { putThemeChoice: mocks.putThemeChoice } }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
 vi.mock('@/lib/theme-host/sources', () => ({ loadThemeForStyle: mocks.loadThemeForStyle }))
 vi.mock('framer-motion', () => ({
@@ -36,7 +44,13 @@ vi.mock('framer-motion', () => ({
 
 import { PageHeader } from '@/components/shared/page-header'
 import { PAGE_HEADER_MASCOT_SLOT, PLACEMENT_SLOT_ATTR } from '../placement-slot'
-import { THEME_FALLBACK_NOTICE, THEME_SAFE_MODE_NOTICE, ThemeHostProvider } from '../theme-host-provider'
+import {
+  THEME_FALLBACK_NOTICE,
+  THEME_REVERT_NOTICE_ID,
+  THEME_REVERTED_NOTICE,
+  THEME_SAFE_MODE_NOTICE,
+  ThemeHostProvider,
+} from '../theme-host-provider'
 import { useThemeHost } from '../theme-host-context'
 
 const HOST_GLOBAL = '__AUTOMATOS_THEME_HOST__'
@@ -123,6 +137,9 @@ function hostStatus(): string | null {
 beforeEach(() => {
   mocks.style.current = INSTALLED_STYLE
   mocks.loadThemeForStyle.mockReset()
+  mocks.setStyle.mockReset()
+  mocks.putThemeChoice.mockReset()
+  mocks.putThemeChoice.mockResolvedValue({ choice: 'studio', theme: null })
   mocks.toast.mockReset()
   mocks.toast.error.mockReset()
   mocks.toast.dismiss.mockReset()
@@ -131,6 +148,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   window.sessionStorage.clear()
+  // A-04c: every failed load is recorded in localStorage; each test starts with no failures.
+  window.localStorage.clear()
+  document.cookie = 'automatos-style=; Path=/; Max-Age=0'
   window.history.replaceState(null, '', '/')
 })
 
@@ -325,5 +345,124 @@ describe('PRD-261 A-12b — ThemeHostProvider hands the theme\'s placement slots
     await act(async () => undefined)
     expect(container.querySelector(`[${PLACEMENT_SLOT_ATTR}]`)).toBeNull()
     expect(mocks.loadThemeForStyle).not.toHaveBeenCalled()
+  })
+})
+
+describe('PRD-261 A-04c — three failures in ten minutes send the member back to Studio', () => {
+  const MINUTE_MS = 60_000
+
+  /** One page load that fails with `reason`: mount, wait for the fallback, unmount (as a reload does). */
+  async function failOnce(reason: ThemeFailureReason): Promise<void> {
+    mocks.loadThemeForStyle.mockResolvedValueOnce({ ok: false, reason, detail: `failed by the test (${reason})` })
+    const { unmount } = render(app())
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+    unmount()
+  }
+
+  function seedFailures(times: readonly number[]): void {
+    window.localStorage.setItem(FAILURE_LEDGER_KEY, JSON.stringify({ [INSTALLED_STYLE]: times }))
+  }
+
+  function ledgerTimes(): unknown {
+    const ledger = JSON.parse(window.localStorage.getItem(FAILURE_LEDGER_KEY) ?? '{}') as Record<string, unknown>
+    return ledger[INSTALLED_STYLE]
+  }
+
+  /** Reports a render failure as soon as the theme is active, as the frame slot's boundary does. */
+  function FrameThrowsOnceActive() {
+    const host = useThemeHost()
+    useEffect(() => {
+      if (host?.status === 'active') host.reportRenderFailure(new Error('the frame threw'))
+    }, [host])
+    return null
+  }
+
+  it('two failures fall back and leave the choice alone', async () => {
+    await failOnce('load')
+    await failOnce('register')
+    expect(mocks.putThemeChoice).not.toHaveBeenCalled()
+    expect(mocks.setStyle).not.toHaveBeenCalled()
+    expect(ledgerTimes()).toHaveLength(2)
+  })
+
+  it('the third reverts: the server choice, the cookie, the style and a notice of its own', async () => {
+    await failOnce('load')
+    await failOnce('look')
+    await failOnce('engines')
+    expect(mocks.putThemeChoice).toHaveBeenCalledTimes(1)
+    expect(mocks.putThemeChoice).toHaveBeenCalledWith('studio')
+    expect(mocks.setStyle).toHaveBeenCalledWith('studio')
+    expect(document.cookie).toContain('automatos-style=studio')
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      THEME_REVERTED_NOTICE,
+      expect.objectContaining({ id: THEME_REVERT_NOTICE_ID, duration: Infinity }),
+    )
+    // Its own id: the host turning off dismisses THEME_NOTICE_ID, never the revert's notice.
+    expect(THEME_REVERT_NOTICE_ID).not.toBe(THEME_NOTICE_ID)
+    expect(mocks.toast.dismiss).not.toHaveBeenCalledWith(THEME_REVERT_NOTICE_ID)
+    // The server took the choice, so the failures are forgotten.
+    await waitFor(() => expect(window.localStorage.getItem(FAILURE_LEDGER_KEY)).toBeNull())
+  })
+
+  it('counts a frame that throws while drawing (render)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    seedFailures([Date.now() - 2_000, Date.now() - 1_000])
+    mocks.loadThemeForStyle.mockResolvedValue(okResult())
+    render(
+      <ThemeHostProvider>
+        <FrameThrowsOnceActive />
+      </ThemeHostProvider>,
+    )
+    await waitFor(() => expect(mocks.putThemeChoice).toHaveBeenCalledWith('studio'))
+    expect(document.documentElement.getAttribute('data-theme-host-reason')).toBe('render')
+  })
+
+  it('never counts a refused session (auth), however often it happens', async () => {
+    await failOnce('auth')
+    await failOnce('auth')
+    await failOnce('auth')
+    await failOnce('auth')
+    expect(mocks.putThemeChoice).not.toHaveBeenCalled()
+    expect(mocks.setStyle).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem(FAILURE_LEDGER_KEY)).toBeNull()
+  })
+
+  it('forgets failures older than ten minutes', async () => {
+    const elevenMinutesAgo = Date.now() - 11 * MINUTE_MS
+    seedFailures([elevenMinutesAgo, elevenMinutesAgo + 1])
+    await failOnce('load')
+    expect(mocks.putThemeChoice).not.toHaveBeenCalled()
+    expect(ledgerTimes()).toHaveLength(1)
+  })
+
+  it('records one failure per failed load, however often the provider renders again', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue({ ok: false, reason: 'load', detail: 'failed by the test' })
+    const { rerender } = render(app())
+    await waitFor(() => expect(hostStatus()).toBe('failed'))
+    rerender(app())
+    rerender(app())
+    await act(async () => undefined)
+    expect(ledgerTimes()).toHaveLength(1)
+  })
+
+  it('keeps the failures when the server refuses the Studio choice, so the next failure tries again', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mocks.putThemeChoice.mockRejectedValue(new Error('HTTP 403: members may not choose'))
+    await failOnce('load')
+    await failOnce('load')
+    await failOnce('load')
+    await waitFor(() => expect(error).toHaveBeenCalledWith('[theme-host]', 'the Studio choice was not saved', expect.any(Error)))
+    expect(document.cookie).toContain('automatos-style=studio')
+    expect(ledgerTimes()).toHaveLength(3)
+    await failOnce('load')
+    expect(mocks.putThemeChoice).toHaveBeenCalledTimes(2)
+  })
+
+  it('/safe-mode is safe mode: no load, and the tab remembers it', async () => {
+    window.history.replaceState(null, '', '/safe-mode')
+    render(app())
+    await waitFor(() => expect(hostStatus()).toBe('safe-mode'))
+    expect(mocks.loadThemeForStyle).not.toHaveBeenCalled()
+    expect(window.sessionStorage.getItem(SAFE_MODE_STORAGE_KEY)).toBe('1')
   })
 })
