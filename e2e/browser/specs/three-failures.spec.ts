@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { expect, test, type APIRequestContext, type Page, type Request } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page, type Request } from '@playwright/test'
 import { fulfillBackendJson } from '../support/backend-route'
 import { THEME_E2E_PATH, THEME_SDK_ROOT } from '../support/hello-theme'
 import '../support/page-globals'
@@ -39,6 +39,7 @@ const ACTIVE_ROUTE = '**/api/themes/active'
 const CHOICE_PATH = '/api/themes/choice'
 const FILES_PATH = '/api/themes/files/'
 const WORKSPACE_PATH = '/api/workspaces/current'
+const COMPOSER_PLACEHOLDER = 'Send a message...'
 const SAFE_MODE_PAGE = '/safe-mode'
 const SAFE_MODE_BACK = /\/chat\?safe_mode=themes$/
 const REVERTED_NOTICE = /failed three times in ten minutes/
@@ -142,6 +143,11 @@ async function expectFailedLoad(page: Page): Promise<void> {
   await expect(html).toHaveAttribute(REASON_ATTR, 'load')
 }
 
+/** Studio's chat composer: /chat has mounted. */
+function studioComposer(page: Page): Locator {
+  return page.getByPlaceholder(COMPOSER_PLACEHOLDER).filter({ visible: true }).first()
+}
+
 /** The app's first GET of its workspace: the client has mounted, so the host's effect has run. */
 function waitForWorkspace(page: Page): Promise<unknown> {
   return page.waitForResponse((response) => response.url().endsWith(WORKSPACE_PATH) && response.request().method() === 'GET')
@@ -197,10 +203,14 @@ test.describe('PRD-261 A-04c — three failures in ten minutes, and safe mode', 
     expect(themeCodePaths(watch.requests)).toEqual([])
     expect(await page.evaluate(() => typeof window.__AUTOMATOS_THEME_HOST__)).toBe('undefined')
 
+    // The link back is a client-side navigation: the URL changes before /chat has mounted. A reload
+    // sent before then failed in WebKit with "internal error" (CI, 19 Oct), so wait for Studio's composer.
     await page.getByTestId(SAFE_MODE_BACK_TEST_ID).click()
     await page.waitForURL(SAFE_MODE_BACK)
+    await expect(studioComposer(page)).toBeVisible()
     await expect(html).toHaveAttribute(STATUS_ATTR, 'safe-mode')
     await page.reload()
+    await expect(studioComposer(page)).toBeVisible()
     await expect(html).toHaveAttribute(STATUS_ATTR, 'safe-mode')
     expect(themeCodePaths(watch.requests)).toEqual([])
     expect(await page.evaluate(() => typeof window.__AUTOMATOS_THEME_HOST__)).toBe('undefined')
