@@ -6,15 +6,17 @@ check and the trace (PRD-256 O2b) keep their own suites (test_prd256_o2b_worker_
 F173, F178, F333, the binary pieces). This one pins what aiohttp did without being
 asked, so the move changes no answer:
 
-- a JSON body is read up to aiohttp's 1 MiB ``client_max_size``; one byte more is the
-  handler's 400 "Invalid JSON body", as before;
+- a JSON body is read while it stays under aiohttp's 1 MiB ``client_max_size``: one of
+  1 MiB or more is the handler's 400 "Invalid JSON body", as before (aiohttp 3.13's
+  ``read()`` refused at ``len(body) >= client_max_size``);
 - a JSON answer is ``json.dumps`` sent as ``application/json; charset=utf-8``;
 - GET routes answer HEAD, and a trailing slash is a 404, never a redirect;
 - a download is an attachment named after the file, whatever its name;
 - Prometheus's middleware sits outside the token check, so /metrics needs the token
   and counts the 401s;
-- the server holds idle connections 75 s, aiohttp's keep-alive, never takes the
-  worker's signals, and stops when the worker stops.
+- the server holds idle connections 3630 s, aiohttp 3.13's keep-alive, never takes the
+  worker's signals, stops when the worker stops, and a port it cannot bind leaves the
+  worker running, as aiohttp's failed start did.
 """
 from __future__ import annotations
 
@@ -73,15 +75,15 @@ def _exec_body(size: int) -> bytes:
     return head + b"x" * (size - len(head) - len(tail)) + tail
 
 
-def test_a_body_at_aiohttps_limit_is_read_and_one_byte_more_is_the_handlers_400(worker_http):
+def test_a_body_under_aiohttps_limit_is_read_and_one_at_it_is_the_handlers_400(worker_http):
     limit = worker_http.MAX_BODY_BYTES
     assert limit == 1024 ** 2, "aiohttp's client_max_size"
     headers = {"Content-Type": "application/json"}
     with _client(worker_http) as client:
+        under = client.post(f"/workspaces/{WS}/exec", content=_exec_body(limit - 1), headers=headers)
         at_limit = client.post(f"/workspaces/{WS}/exec", content=_exec_body(limit), headers=headers)
-        over = client.post(f"/workspaces/{WS}/exec", content=_exec_body(limit + 1), headers=headers)
-    assert (at_limit.status_code, at_limit.json()) == (400, {"error": "command is required"})  # parsed
-    assert (over.status_code, over.json()) == (400, {"error": "Invalid JSON body"})
+    assert (under.status_code, under.json()) == (400, {"error": "command is required"})  # parsed
+    assert (at_limit.status_code, at_limit.json()) == (400, {"error": "Invalid JSON body"})
 
 
 def test_a_body_that_is_not_json_is_the_handlers_400(worker_http):
@@ -167,7 +169,7 @@ def test_metrics_sit_outside_the_token_check(monkeypatch, tmp_path):
 def test_the_server_keeps_aiohttps_keep_alive_and_leaves_the_signals_to_the_worker(worker_http):
     server = worker_http.make_server(_worker(8081))
     assert isinstance(server, worker_http.EmbeddedServer)
-    assert server.config.timeout_keep_alive == 75, "longer than httpx's 5 s pool expiry, as aiohttp's 75 s was"
+    assert server.config.timeout_keep_alive == 3630, "aiohttp 3.13's keepalive_timeout; well past httpx's 5 s"
     assert server.config.timeout_graceful_shutdown == 60 and server.config.log_config is None
     before = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
     with server.capture_signals():
@@ -199,3 +201,19 @@ def test_serve_answers_on_its_port_and_stops_when_the_worker_stops(worker_http, 
         return status
 
     assert asyncio.run(run()) == 200
+
+
+def test_a_port_already_taken_leaves_the_worker_running(worker_http, monkeypatch, caplog):
+    """uvicorn exits the process when it cannot bind; aiohttp's site.start() only raised
+    in the health task. serve() logs it and returns, and the worker carries on."""
+    monkeypatch.setenv("WORKER_BIND_HOST", "127.0.0.1")
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        worker = _worker(taken.getsockname()[1])
+
+        async def run() -> None:
+            await asyncio.wait_for(worker_http.serve(worker), timeout=15)
+
+        asyncio.run(run())
+    assert "Health server could not start" in caplog.text

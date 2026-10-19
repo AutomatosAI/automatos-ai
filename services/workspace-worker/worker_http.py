@@ -16,15 +16,17 @@ packages (12.2 MB). Every route keeps its path, its methods (GET also answers
 HEAD), the X-Internal-Token check and its answers. What aiohttp did on its own is
 spelt out here:
 
-* a JSON body is read up to aiohttp's 1 MiB ``client_max_size``; a bigger one is the
-  handler's 400 "Invalid JSON body", as it was (:func:`read_json`);
+* a JSON body is read as aiohttp's ``client_max_size`` (1 MiB) allowed: a body of 1 MiB
+  or more is the handler's 400 "Invalid JSON body", as it was (:func:`read_json`);
 * a JSON answer is aiohttp's ``json_response`` byte for byte: ``json.dumps``, sent
   as ``application/json; charset=utf-8`` (:func:`json_response`);
 * no redirect for a trailing slash, which aiohttp never sent;
-* idle keep-alive connections are held 75 s, aiohttp's default, so the API's pooled
-  connections (httpx keeps an idle one 5 s) never race the worker closing them;
+* idle keep-alive connections are held 3630 s, aiohttp 3.13's default, never uvicorn's
+  5 s, which would race the API's pooled connections (httpx keeps an idle one 5 s);
 * uvicorn never takes SIGTERM or SIGINT: main.py's handlers stop the worker, and
-  :func:`serve` then stops the server, as the aiohttp runner was stopped.
+  :func:`serve` then stops the server, as the aiohttp runner was stopped;
+* a server that cannot start (its port taken) logs the error and leaves the worker
+  running, as aiohttp's failed ``site.start()`` did; uvicorn would exit the process.
 """
 from __future__ import annotations
 
@@ -53,8 +55,8 @@ logger = logging.getLogger("workspace-worker")
 HEALTH_PATH = "/health"
 TOKEN_HEADER = "x-internal-token"
 JSON_CONTENT_TYPE = "application/json; charset=utf-8"
-MAX_BODY_BYTES = 1024 ** 2       # aiohttp's client_max_size, the limit the worker always had
-KEEP_ALIVE_SECONDS = 75          # aiohttp's keepalive_timeout
+MAX_BODY_BYTES = 1024 ** 2       # aiohttp's client_max_size: a body this size or larger is refused
+KEEP_ALIVE_SECONDS = 3630        # aiohttp 3.13's keepalive_timeout, the worker's until PRD-262
 SHUTDOWN_GRACE_SECONDS = 60      # aiohttp's AppRunner shutdown_timeout
 STOP_POLL_SECONDS = 1.0
 
@@ -70,7 +72,7 @@ class WorkerHttp:
 
 
 class BodyTooLarge(ValueError):
-    """A request body over :data:`MAX_BODY_BYTES`."""
+    """A request body of :data:`MAX_BODY_BYTES` or more."""
 
 
 def worker_http_of(request: Request) -> WorkerHttp:
@@ -84,16 +86,17 @@ def json_response(data: Any, status: int = 200) -> Response:
 
 
 async def read_json(request: Request) -> Any:
-    """The body as JSON, read up to :data:`MAX_BODY_BYTES`.
+    """The body as JSON, read while it stays under :data:`MAX_BODY_BYTES`.
 
-    A bigger body raises :class:`BodyTooLarge` as soon as it passes the limit, and an
+    A body that reaches the limit raises :class:`BodyTooLarge` there (aiohttp's
+    ``read()`` compared with ``>=``), and an
     unreadable one raises too: each handler answers both with its 400
     "Invalid JSON body", as it answered aiohttp's ``HTTPRequestEntityTooLarge``."""
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > MAX_BODY_BYTES:
-            raise BodyTooLarge(f"request body over {MAX_BODY_BYTES} bytes")
+        if len(body) >= MAX_BODY_BYTES:
+            raise BodyTooLarge(f"request body of {MAX_BODY_BYTES} bytes or more")
     return json.loads(body.decode("utf-8"))
 
 
@@ -221,10 +224,20 @@ async def _serve_while_running(worker, server: EmbeddedServer, serving: asyncio.
         await asyncio.sleep(STOP_POLL_SECONDS)
 
 
+async def _serve_or_log(server: EmbeddedServer, port: int) -> None:
+    """``server.serve()``, with uvicorn's exit on a failed start (a taken port) logged
+    instead: asyncio would re-raise that SystemExit out of the worker's event loop."""
+    try:
+        await server.serve()
+    except SystemExit as exc:
+        logger.error("Health server could not start on port %d (exit %s); the worker runs without it",
+                     port, exc.code)
+
+
 async def serve(worker) -> None:
     """Serve the app on the worker's health port until the worker stops."""
     server = make_server(worker)
-    serving = asyncio.create_task(server.serve())
+    serving = asyncio.create_task(_serve_or_log(server, worker.health_port))
     try:
         await _serve_while_running(worker, server, serving)
     except asyncio.CancelledError:

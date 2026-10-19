@@ -5,8 +5,9 @@ runner over a recorded Redis. Shared by F173 and F178.
 The worker's logging and Prometheus metrics are stubbed: its logging setup
 reconfigures the root logger, and metrics register once per process, so a
 second server would collide. The server is the worker's own uvicorn (PRD-262, row
-36), on a real port; the client is aiohttp's, from the orchestrator's requirements. main.py edits sys.path at import, so the loader
-gives it a copy that monkeypatch restores.
+36), on a real port; the client is aiohttp's, from the orchestrator's requirements.
+main.py edits sys.path at import, so the loader gives it a copy that monkeypatch
+restores.
 """
 from __future__ import annotations
 
