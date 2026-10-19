@@ -11,8 +11,10 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 // it is uploaded to the local backend and opted in to, and the standalone server proxies it.
 //
 // 1. A Range request for the clip comes back 206 with its Content-Range, through the proxy.
-// 2. A <video> on the app's page loads the clip through the proxy over 206 (WebKit asks for
-//    ranges and plays MP4 only that way) and plays it, where this browser build decodes the clip.
+// 2. A <video> on the app's page loads the clip through the proxy, with no failed answer, and
+//    plays it where this browser build decodes the clip. Chromium's media loader asks in ranges,
+//    so there the 206 is required; Playwright's Linux WebKit loads the clip with one plain request
+//    (the CI run saw [0, 200]), so there the Range proof is test 1's explicit request only.
 // 3. A request made to register a service worker (Service-Worker: script) is refused with 403.
 
 const BACKEND_URL = process.env.E2E_BACKEND_URL ?? 'http://localhost:8000'
@@ -27,6 +29,11 @@ const FIRST_BYTES = 'bytes=0-99'
 const FIRST_BYTES_LENGTH = 100
 const PAGE_PATH = '/chat'
 const PARTIAL_CONTENT = 206
+const OK = 200
+/** Playwright's status for a media response the browser served without a status line (WebKit). */
+const NO_STATUS = 0
+/** The project whose media loader sends Range for a <video>, so the 206 is proven in a browser. */
+const RANGED_MEDIA_PROJECT = 'chromium'
 const PLAY_TIMEOUT_MS = 10_000
 
 interface UploadAnswer {
@@ -107,7 +114,7 @@ test.describe('PRD-261 A-08b — the same-origin files proxy', () => {
     expect((await response.body()).length).toBe(FIRST_BYTES_LENGTH)
   })
 
-  test('loads a clip in <video> through the proxy over 206', { tag: '@host' }, async ({ page, request }) => {
+  test('loads a clip in <video> through the proxy, over 206 where the browser asks in ranges', { tag: '@host' }, async ({ page, request }, testInfo) => {
     const src = clipUrl(await installClip(request))
     const statuses: number[] = []
     page.on('response', (response) => {
@@ -115,8 +122,14 @@ test.describe('PRD-261 A-08b — the same-origin files proxy', () => {
     })
     await page.goto(PAGE_PATH)
     const outcome = await playVideo(page, src)
-    await expect.poll(() => statuses).toContain(PARTIAL_CONTENT)
-    expect(statuses.filter((status) => status !== PARTIAL_CONTENT && status !== 200)).toEqual([])
+    await expect.poll(() => statuses.length, 'the <video> asked the proxy for the clip').toBeGreaterThan(0)
+    if (testInfo.project.name === RANGED_MEDIA_PROJECT) {
+      await expect.poll(() => statuses).toContain(PARTIAL_CONTENT)
+      expect(statuses.filter((status) => status !== PARTIAL_CONTENT && status !== OK)).toEqual([])
+    } else {
+      expect(statuses.filter((status) => status !== PARTIAL_CONTENT && status !== OK && status !== NO_STATUS)).toEqual([])
+      testInfo.annotations.push({ type: 'unproven', description: `${testInfo.project.name} loaded the <video> without Range; test 1 proves the 206` })
+    }
     if (outcome.decodable) {
       expect(outcome, 'a browser that decodes the clip plays it through the proxy').toMatchObject({ played: true })
     } else {

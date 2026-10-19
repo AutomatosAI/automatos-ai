@@ -182,6 +182,8 @@ test.describe('PRD-261 A-08c — first paint for an installed theme, with integr
   test("puts the theme's class on <html> before the first frame", { tag: '@host' }, async ({ page, request }) => {
     const theme = await install(request)
     await chooseInstalled(page, theme)
+    // The server holds no choice of this install, so ThemeChoiceSync would reload the tab mid-read.
+    await answerActive(page, theme)
     await page.addInitScript(() => {
       requestAnimationFrame(() => {
         ;(window as FirstFrameWindow).__firstFrameClasses = Array.from(document.documentElement.classList)

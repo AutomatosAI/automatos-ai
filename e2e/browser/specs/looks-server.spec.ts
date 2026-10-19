@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { fulfillBackendJson } from '../support/backend-route'
 import { chooseStyle } from '../support/hello-theme'
 
 // PRD-261 A-09b (@host): builtin Play's looks are kept on the server, so a look saved in one
@@ -16,6 +17,13 @@ const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
 const PLAY_STYLE = 'theme:builtin:play'
 const LOOKS_URL = `${APP_URL}/looks`
 const LOOKS_API_PATH = '/api/themes/looks/automatos/play'
+const ACTIVE_ROUTE = '**/api/themes/active'
+/**
+ * GET /api/themes/active naming builtin Play. The projects share one backend user, so the real
+ * answer can name a choice or default another spec stored; ThemeChoiceSync would then move the tab
+ * off Play (or reload it into an install) before the Looks page shows.
+ */
+const PLAY_CHOICE = { choice: 'builtin:play', theme: null }
 const FIXTURE = path.resolve(__dirname, '..', 'fixtures', 'hello-a09b', 'look.json')
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
 const ONLY_PROJECT = 'chromium'
@@ -41,6 +49,7 @@ function lookCard(page: Page, name: string): Locator {
 
 async function openLooks(page: Page): Promise<void> {
   await chooseStyle(page, PLAY_STYLE, APP_URL)
+  await page.route(ACTIVE_ROUTE, (route) => fulfillBackendJson(route, OK, PLAY_CHOICE))
   await page.goto(LOOKS_URL)
   await expect(page.getByRole('region', { name: 'Import a look' })).toBeVisible()
 }
