@@ -97,7 +97,7 @@ export function useOrchestratorConfig() {
   const handleHeartbeatChange = (key: string, value: string | boolean | number) => {
     if (orchConfig) setOrchConfig({ ...orchConfig, heartbeat: { ...orchConfig.heartbeat, [key]: value } })
   }
-  const handleHarnessChange = (key: string, value: string | boolean) => {
+  const handleHarnessChange = (key: string, value: string) => {
     if (orchConfig) setOrchConfig({ ...orchConfig, harness: { ...orchConfig.harness, [key]: value } })
   }
   return {

@@ -6,7 +6,7 @@ is gated behind two checks, in this order, BEFORE any state is touched:
 
   1. ``HARNESS_SELF_MANAGEMENT_ENABLED`` — Phase 5 stays inert by default, so a
      disabled platform answers every command with a plain "disabled" message
-     and changes nothing (mirrors ``_apply_approved_board_tasks``).
+     and changes nothing.
   2. A workspace-ADMIN authorization check on the *calling user*. A caller who
      is not an active ``owner``/``admin`` member of the workspace can never
      mutate state — the command is refused before any task or agent is read or
@@ -16,7 +16,8 @@ is gated behind two checks, in this order, BEFORE any state is touched:
 the existing ``HarnessService._auto_apply_prescription`` and records the board
 task id in the shared US-021 ledger, so the next tick never re-applies it.
 ``/reject`` marks the board task ``rejected``, so the card is closed and never
-applied: ``/approve`` refuses it, and the card-to-Done path reads ``done`` cards only.
+applied: ``/approve`` refuses it. (The weekly tick's card-to-Done path, which
+applied ``done`` cards, went in PRD-263 US-016.)
 
 Wiring into the live channel inbound path is done in US-026 (the gate that
 enables the flag on a canary workspace and exercises this path end-to-end).

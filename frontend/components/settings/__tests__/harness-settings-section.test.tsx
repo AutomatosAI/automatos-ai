@@ -1,11 +1,14 @@
 /**
- * PRD-263 PR-1E-a — the HARNESS section, moved out of SystemLLMSettingsTab.tsx, shows
- * and sends what the tab did: an Enable switch, and once enabled a Run Schedule
- * (weekly, biweekly, monthly) and an Approval Mode (Full Auto, Manual).
+ * PRD-263 US-017 — Settings offers the HARNESS modes that exist and says what each does.
+ *
+ * The tab offered "Full Auto — low-risk changes applied automatically" and "Manual",
+ * behind an "Enable HARNESS" switch, with a Run Schedule of weekly (Sunday 2 AM UTC),
+ * biweekly or monthly. HARNESS now reports and changes nothing (US-016): one mode
+ * select, always shown, with Report only and Disabled in P1, no switch and no schedule.
  *
  * The <Select> is mocked as a native <select> (Radix's listbox needs pointer capture
  * and scrollIntoView, which jsdom does not implement), and the collapsible renders
- * its content so the controls are reachable without opening the card.
+ * its content so the select is reachable without opening the card.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
@@ -17,7 +20,7 @@ type MockSelectItemProps = { value: string; children: React.ReactNode }
 
 vi.mock('@/components/ui/select', () => ({
   Select: ({ value, onValueChange, children }: MockSelectProps) => (
-    <select data-testid="harness-select" value={value} onChange={(e) => onValueChange(e.target.value)}>
+    <select data-testid="harness-mode-select" value={value} onChange={(e) => onValueChange(e.target.value)}>
       {children}
     </select>
   ),
@@ -33,82 +36,61 @@ vi.mock('@/components/ui/collapsible', () => ({
 }))
 
 import { HarnessSettingsSection } from '../harness-settings-section'
-import { HarnessConfig, fallbackOrchestratorConfig } from '../orchestrator-settings-config'
+import { HARNESS_HELP_TEXT, HarnessConfig, fallbackOrchestratorConfig } from '../orchestrator-settings-config'
 
 const config = (harness: HarnessConfig) => ({ ...fallbackOrchestratorConfig(), harness })
-const options = (select: HTMLElement) => within(select).getAllByRole('option').map((option) => option.textContent)
+const select = () => screen.getByTestId('harness-mode-select') as HTMLSelectElement
 
-describe('HarnessSettingsSection (PRD-263 PR-1E-a, behaviour unchanged)', () => {
-  it('shows the Enable switch and no schedule or mode while HARNESS is off', () => {
+describe('HarnessSettingsSection (PRD-263 US-017)', () => {
+  it('offers exactly the two modes P1 has, with no switch and no Full Auto', () => {
     render(
-      <HarnessSettingsSection
-        orchConfig={config({ enabled: false, schedule: 'weekly', mode: 'full_auto' })}
-        onHarnessChange={vi.fn()}
-      />,
+      <HarnessSettingsSection orchConfig={config({ schedule: 'weekly', mode: 'report_only' })} onHarnessChange={vi.fn()} />,
     )
 
-    expect(screen.getByText('Enable HARNESS')).toBeTruthy()
-    expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
-    expect(screen.queryAllByTestId('harness-select')).toHaveLength(0)
-    expect(screen.queryByText('Active')).toBeNull()
-  })
-
-  it('sends enabled when the switch is turned on', () => {
-    const onHarnessChange = vi.fn()
-    render(
-      <HarnessSettingsSection
-        orchConfig={config({ enabled: false, schedule: 'weekly', mode: 'full_auto' })}
-        onHarnessChange={onHarnessChange}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('switch'))
-
-    expect(onHarnessChange).toHaveBeenCalledWith('enabled', true)
-  })
-
-  it('offers the three schedules and the two approval modes once enabled', () => {
-    render(
-      <HarnessSettingsSection
-        orchConfig={config({ enabled: true, schedule: 'biweekly', mode: 'full_auto' })}
-        onHarnessChange={vi.fn()}
-      />,
-    )
-
-    const [schedule, mode] = screen.getAllByTestId('harness-select') as HTMLSelectElement[]
-    expect(options(schedule)).toEqual(['Weekly (Sunday 2 AM UTC)', 'Biweekly', 'Monthly'])
-    expect(schedule.value).toBe('biweekly')
-    expect(options(mode)).toEqual([
-      'Full Auto — low-risk changes applied automatically',
-      'Manual — all changes require your approval',
+    expect(within(select()).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Report only',
+      'Disabled',
     ])
-    expect(mode.value).toBe('full_auto')
-    expect(screen.getByText('Active')).toBeTruthy()
-    expect(screen.getByText('Changes with risk score 1-2 are applied automatically; risk 3+ queued for review')).toBeTruthy()
+    expect(screen.queryByText(/full auto/i)).toBeNull()
+    expect(screen.queryByRole('switch')).toBeNull()
+    expect(screen.queryByText(/enable harness/i)).toBeNull()
   })
 
-  it('sends the schedule and mode picked, and says what Manual does', () => {
+  it('shows an unknown stored value as Report only, with what Report only does', () => {
+    render(<HarnessSettingsSection orchConfig={config({ mode: 'full_auto' })} onHarnessChange={vi.fn()} />)
+
+    expect(select().value).toBe('report_only')
+    expect(screen.getByText('HARNESS writes a weekly report on your agents and changes nothing.')).toBeTruthy()
+  })
+
+  it('sends the mode picked', () => {
     const onHarnessChange = vi.fn()
     render(
       <HarnessSettingsSection
-        orchConfig={config({ enabled: true, schedule: 'weekly', mode: 'manual' })}
+        orchConfig={config({ schedule: 'weekly', mode: 'report_only' })}
         onHarnessChange={onHarnessChange}
       />,
     )
 
-    const [schedule, mode] = screen.getAllByTestId('harness-select')
-    fireEvent.change(schedule, { target: { value: 'monthly' } })
-    fireEvent.change(mode, { target: { value: 'full_auto' } })
+    fireEvent.change(select(), { target: { value: 'disabled' } })
 
-    expect(onHarnessChange).toHaveBeenNthCalledWith(1, 'schedule', 'monthly')
-    expect(onHarnessChange).toHaveBeenNthCalledWith(2, 'mode', 'full_auto')
-    expect(screen.getByText('Every proposed change will be queued as a board task for your review')).toBeTruthy()
+    expect(onHarnessChange).toHaveBeenCalledWith('mode', 'disabled')
   })
 
-  it('shows no controls until the orchestrator config has loaded', () => {
+  it('says when HARNESS runs and what it judges, and offers no schedule', () => {
+    const { container } = render(
+      <HarnessSettingsSection orchConfig={config({ schedule: 'weekly', mode: 'disabled' })} onHarnessChange={vi.fn()} />,
+    )
+
+    expect(screen.getByText(HARNESS_HELP_TEXT)).toBeTruthy()
+    expect(screen.getByText('HARNESS does not run for this workspace.')).toBeTruthy()
+    expect(screen.getAllByTestId('harness-mode-select')).toHaveLength(1)
+    expect(container.textContent).not.toMatch(/sunday|biweekly|monthly|risk 3\+|applied automatically/i)
+  })
+
+  it('shows no select until the settings have loaded', () => {
     render(<HarnessSettingsSection orchConfig={null} onHarnessChange={vi.fn()} />)
 
-    expect(screen.queryByRole('switch')).toBeNull()
-    expect(screen.queryByText('Enable HARNESS')).toBeNull()
+    expect(screen.queryByTestId('harness-mode-select')).toBeNull()
   })
 })

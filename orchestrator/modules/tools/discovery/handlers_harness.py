@@ -28,11 +28,16 @@ async def harness_status(
 async def harness_trigger(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Manually trigger a HARNESS run."""
-    from services.harness_service import get_harness_service
+    """Manually trigger a HARNESS run. A workspace whose mode is disabled runs
+    nothing, so the reply says that instead of reporting a run (PRD-263 US-016)."""
+    from services.harness_mode import DISABLED
+    from services.harness_service import DISABLED_MESSAGE, get_harness_service
 
     try:
-        await get_harness_service().trigger_now(workspace_id)
+        service = get_harness_service()
+        if not service.workspace_enabled(db, workspace_id):
+            return {"success": True, "data": {"status": DISABLED, "message": DISABLED_MESSAGE}}
+        await service.trigger_now(workspace_id)
         return {
             "success": True,
             "data": {
