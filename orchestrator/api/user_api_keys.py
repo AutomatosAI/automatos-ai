@@ -162,11 +162,19 @@ def _check_anthropic(_provider: str, raw_key: str, _base_url: Optional[str], wor
     return KEY_VALID
 
 
+def _check_google(_provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None) -> str:
+    """A models-list call with this key's own client, never a process-wide one (#1169)."""
+    from core.llm.clients.google_client import gemini_client
+
+    with gemini_client(raw_key) as client:
+        client.models.list()
+    return KEY_VALID
+
+
 def _check_openai_compatible(
     provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None,
 ) -> str:
-    """OpenRouter, NVIDIA, DeepSeek, Google: a models-list call against the provider's own base URL
-    (PRD-236 S0.3; Gemini's OpenAI-compatible endpoint since PRD-262 US-024)."""
+    """OpenRouter, NVIDIA, DeepSeek: a models-list call against the provider's own base URL (PRD-236 S0.3)."""
     from openai import OpenAI
     spec = provider_registry.get_spec(provider)
     kwargs = {"api_key": raw_key, "base_url": provider_registry.base_url_for(spec.slug)}
@@ -204,7 +212,7 @@ def _check_azure(_provider: str, raw_key: str, base_url: Optional[str], _workspa
     return KEY_VALID
 
 
-_LIVE_CHECKS = {"openai": _check_openai, "anthropic": _check_anthropic, "azure": _check_azure}
+_LIVE_CHECKS = {"openai": _check_openai, "anthropic": _check_anthropic, "google": _check_google, "azure": _check_azure}
 
 
 def _live_check_for(provider: str):

@@ -18,12 +18,14 @@
 # fresh process and checks that every router of router_manifest.py answers and that
 # no route of reports/route-manifest.json is lost. PRD-262 US-008.
 # - starlette 1.0.1 fixes GHSA-86qp-5c8j-p5mr (on CISA's KEV list).
-# - uvicorn 0.50.1 is the newest release that accepts websockets 12.0 (0.50.2 needs
-#   >=13). Its --workers manager restarts a worker that dies (since 0.30).
+# - uvicorn 0.50.1: its [standard] extra takes websockets>=11.0, so it runs with the
+#   13.1 below. Its --workers manager restarts a worker that dies (since 0.30).
 fastapi==0.146.0
 starlette==1.8.0
 uvicorn[standard]==0.50.1
-websockets==12.0
+# google-genai needs websockets>=13 (#1169). 13.1 is the last release before 14 deprecated
+# the legacy API that uvicorn's default WebSocket protocol (websockets_impl) serves with.
+websockets==13.1
 
 # Database
 sqlalchemy==2.0.23
@@ -103,9 +105,9 @@ openpyxl>=3.1.5
 
 # AI provider clients (API-based, no local models)
 tiktoken>=0.5.0  # Token counting for context management (RAG, context_guard)
-openai>=1.45.0
+openai>=3.26.0  # 3.x sends through httpx2: the log guard (#1051) and the httpx2 spans (#1112) expect it
 anthropic>=0.40.0,<1.0.0
-# Gemini goes through its OpenAI-compatible endpoint on the openai client (PRD-262 US-024).
+google-genai>=2.31.0  # Google Gemini native API (google-generativeai is retired, #1169)
 
 # Data & ML (actively used in multi-agent optimization + RAG). scikit-learn and nltk
 # were never imported (PRD-262 US-015), and pandas left with US-025: create_xlsx reads
@@ -178,9 +180,11 @@ graspologic-native==1.3.1
 # always, imported only when enabled (core/observability/otel.py). OTLP over HTTP only:
 # every collector takes it, and it needs no grpcio. Versions resolved against the
 # fastapi/starlette/uvicorn pins above. FastAPI itself requires opentelemetry-api
-# (>=1.44), and its own tracing stays off while this instrumentation's middleware is in
-# the stack, so a request still makes one server span. 0.66b1 reads FastAPI's route
-# tree through iter_route_contexts, so http.route keeps the full template.
+# (>=1.44) and imports the API at `import fastapi` (fastapi.telemetry), so the off-path
+# test takes that as its baseline and checks our code adds nothing. FastAPI's own tracing
+# stays off while this instrumentation's middleware is in the stack, so a request still
+# makes one server span. 0.66b1 reads FastAPI's route tree through iter_route_contexts,
+# so http.route keeps the full template.
 opentelemetry-api==1.45.1
 opentelemetry-sdk==1.45.1
 opentelemetry-exporter-otlp-proto-http==1.45.1

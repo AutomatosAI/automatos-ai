@@ -16,7 +16,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { MessagesSquare, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useBoardTask } from '@/hooks/use-board-tasks'
-import { usePlayLayout } from '@/hooks/use-studio-theme'
+import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
 import { CHAT_ROUTE, discussionHint, discussionLabel, discussionOf, type Discussion } from '@/lib/discussion'
 import { missionHref, ticketHref } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -29,7 +29,7 @@ const BAR_CLASS =
 
 export function DiscussionBar() {
   const { discussion, missing } = useDiscussionFromLink()
-  const inPlayChat = usePlayChatOnScreen()
+  const inThemeChat = useThemeChatOnScreen()
   const end = useEndDiscussion()
   useEndOnAnotherConversation(end)
   const [rebriefing, setRebriefing] = useState(false)
@@ -43,7 +43,7 @@ export function DiscussionBar() {
   }
   if (!discussion) return null
   const label = discussionLabel(discussion)
-  const hint = discussionHint(discussion, inPlayChat)
+  const hint = discussionHint(discussion, inThemeChat)
   return (
     <div role="region" aria-label="Discussion" className={BAR_CLASS} data-testid="discussion-bar">
       <MessagesSquare className="h-4 w-4 shrink-0 text-primary" />
@@ -83,11 +83,13 @@ function EndButton({ onEnd }: { onEnd: () => void }) {
   )
 }
 
-/** Play's chat is what /chat shows: Play at >= 1024 px (PRD-260 D7, the PlayRouteSwitch in
- * app/chat/layout.tsx), read from the switch's own width source (P260-FX-25). Its message
- * box has no agent picker, so the hint differs there. */
-function usePlayChatOnScreen(): boolean {
-  return usePlayLayout() === 'play'
+/** The theme's own chat is what /chat shows: the active theme owns /chat and its layout renders
+ * (PRD-260 D7, the PlayRouteSwitch in app/chat/layout.tsx), read from the switch's own width
+ * source (P260-FX-25; PRD-261 A-02b). Its message box has no agent picker, so the hint differs there. */
+function useThemeChatOnScreen(): boolean {
+  const ownsChat = useActiveTheme()?.ownsPages.includes(CHAT_ROUTE) ?? false
+  const layout = useThemeLayout()
+  return ownsChat && layout === 'theme'
 }
 
 /** `/chat?ticket=<id>` without `repo` (with it, the link opens a session's canvas)

@@ -101,8 +101,12 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # Anthropic key carries the workspace it bills.
 # 2026-10-11 (PRD-258 Wave 1): prd258_voice_timings chains onto that — the ONE migration of
 # the voice-measure wave (the voice_turns timings, voice_calls.vendor_latency).
-# 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto that — the two columns
-# main.py added with an ALTER on every boot (system_prompts.futureagi_eval_enabled,
+# 2026-10-17 (PRD-261 W-B1, A-05): prd261_themes chains onto that — the ONE migration of
+# installable themes, Phase A and C (theme_packages, theme_installations and seven more).
+# 2026-10-18 (PRD-263 PR-1B): prd263_harness_runs chains onto prd261_themes — the HARNESS
+# run table (harness_runs) that replaces the last_run and trace JSON files.
+# 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto prd263_harness_runs — the
+# two columns main.py added with an ALTER on every boot (system_prompts.futureagi_eval_enabled,
 # skills.content_hash) become a revision.
 EXPECTED_HEAD = "prd262_boot_columns"
 

@@ -68,8 +68,11 @@ WORKSPACE_LIST_PAGE_SIZE = 5
 
 _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
 _INVALID_RANGE_CODE = "InvalidRange"
-# One range, RFC 9110 form: bytes=a-b, bytes=a- or bytes=-n.
-_SINGLE_BYTE_RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+# One range, RFC 9110 form: bytes=a-b, bytes=a- or bytes=-n. ASCII digits only, at most
+# RANGE_MAX_DIGITS each: a longer number is past any stored body, and thousands of digits
+# would hit Python's int() digit limit (a ValueError, a 500). Anything else serves the whole body.
+RANGE_MAX_DIGITS = 15
+_SINGLE_BYTE_RANGE = re.compile(rf"bytes=([0-9]{{0,{RANGE_MAX_DIGITS}}})-([0-9]{{0,{RANGE_MAX_DIGITS}}})")
 
 
 class UnstorableImageType(ValueError):
@@ -117,7 +120,7 @@ def parse_byte_range(header: Optional[str]) -> Optional[str]:
     """
     if not header:
         return None
-    match = _SINGLE_BYTE_RANGE.match(header.strip())
+    match = _SINGLE_BYTE_RANGE.fullmatch(header.strip())
     if not match:
         return None
     start, end = match.groups()

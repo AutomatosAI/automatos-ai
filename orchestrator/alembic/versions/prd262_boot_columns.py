@@ -20,7 +20,7 @@ downgrade returns to (which added them on every boot) and ``add_content_hash_to_
 all expect them.
 
 Revision ID: prd262_boot_columns
-Revises: prd258_voice_timings
+Revises: prd263_harness_runs
 Create Date: 2026-10-19
 """
 
@@ -28,7 +28,7 @@ from alembic import op
 
 
 revision = "prd262_boot_columns"
-down_revision = "prd258_voice_timings"
+down_revision = "prd263_harness_runs"
 branch_labels = None
 depends_on = None
 

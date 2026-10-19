@@ -4,8 +4,7 @@ OpenAI-compatible provider adapter (PRD-236 S0.2)
 
 One client for every provider that speaks the OpenAI chat-completions
 protocol behind its own base URL: OpenRouter, NVIDIA (build.nvidia.com),
-DeepSeek and, since PRD-262 US-024, Google's Gemini (its OpenAI-compatible
-endpoint, which replaced the google-generativeai SDK). Which one is decided by ``LLMConfig.provider`` through the
+DeepSeek. Which one is decided by ``LLMConfig.provider`` through the
 registry (``core/llm/providers.py``): base URL, env key, attribution headers
 and the rate-limit note all come from the spec, never from a per-provider
 subclass. This file is the former ``openrouter_client.py`` generalised; the
@@ -33,7 +32,6 @@ except ImportError:  # pragma: no cover — the SDK is a hard dependency in prod
 
 from core.llm.web_citations import citations_from_annotations, sources_markdown  # PRD-240
 from core.llm.clients.search_recovery import SearchRecoveringClient  # F264
-from core.llm.clients.tool_call_extras import ExtrasKeepingClient  # PRD-262 US-024
 
 logger = logging.getLogger(__name__)
 
@@ -242,43 +240,20 @@ class _StreamAssembler:
         for ann in raw.get("annotations") or []:
             self.annotations.append(ann)
         for tc in raw.get("tool_calls") or []:
-            if isinstance(tc, dict):
-                self._fold_tool_call(tc)
+            if not isinstance(tc, dict):
+                continue
+            index = int(tc.get("index") or 0)
+            slot = self.tool_calls.setdefault(index, {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
+            if tc.get("id"):
+                slot["id"] = tc["id"]
+            if tc.get("type"):
+                slot["type"] = tc["type"]
+            fn = tc.get("function") or {}
+            if fn.get("name"):
+                slot["function"]["name"] += fn["name"]
+            if fn.get("arguments"):
+                slot["function"]["arguments"] += fn["arguments"]
         return out
-
-    def _slot_for(self, tc: Dict[str, Any]) -> int:
-        """The call a tool-call fragment belongs to.
-
-        OpenAI numbers every fragment (``index``). Gemini's OpenAI-compatible endpoint
-        sends each call whole, in one chunk, with no index (PRD-262 US-024); read as
-        index 0, two parallel calls became one call with both names run together. A
-        fragment with no index continues the call its id names, starts a new call when
-        it brings a new id, and continues the last call when it brings none.
-        """
-        if tc.get("index") is not None:
-            return int(tc["index"])
-        call_id = tc.get("id")
-        known = [i for i, slot in self.tool_calls.items() if call_id and slot["id"] == call_id]
-        if known:
-            return known[0]
-        if not self.tool_calls:
-            return 0
-        last = max(self.tool_calls)
-        return last + 1 if call_id else last
-
-    def _fold_tool_call(self, tc: Dict[str, Any]) -> None:
-        """Add one tool-call fragment to its call: id and type as sent, name and arguments appended."""
-        slot = self.tool_calls.setdefault(
-            self._slot_for(tc), {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
-        if tc.get("id"):
-            slot["id"] = tc["id"]
-        if tc.get("type"):
-            slot["type"] = tc["type"]
-        fn = tc.get("function") or {}
-        if fn.get("name"):
-            slot["function"]["name"] += fn["name"]
-        if fn.get("arguments"):
-            slot["function"]["arguments"] += fn["arguments"]
 
     def sources(self) -> str:
         """The Sources footer for the citations seen so far ("" when none)."""
@@ -343,9 +318,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         headers = registry.headers_for(self.spec.slug)
         if headers:
             client_kwargs["default_headers"] = headers
-        # F264: a failed web search fails no call. PRD-262 US-024: each tool call's
-        # extras (Gemini's thought signature) go back with the call on the next request.
-        self.client = SearchRecoveringClient(ExtrasKeepingClient(OpenAI(**client_kwargs)))
+        self.client = SearchRecoveringClient(OpenAI(**client_kwargs))  # F264: a failed web search fails no call
         logger.info("Initialized %s client with model: %s", self.spec.label, self.config.model)
 
     def _require_client(self):

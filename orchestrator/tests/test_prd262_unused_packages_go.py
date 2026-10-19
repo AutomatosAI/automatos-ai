@@ -9,11 +9,12 @@ which serves Leiden from graspologic-native and removed that build. US-018 remov
 gotenberg-client with the Gotenberg sidecar and its only client, ConversionService,
 which nothing called. US-023 replaced camelot-py with pdfplumber's
 text strategy, and opencv-python-headless, which only camelot imported, went with it.
-US-024 moved Gemini onto the OpenAI-compatible adapter: google-generativeai left, with
-google-ai-generativelanguage and google-api-python-client (Google's API discovery
-documents), which only it brought. US-025 removed pandas: create_xlsx reads CSV and JSON
-with the standard library, and PandasAIService, which cannot run (pandasai was never
-installed), imports it only inside its methods. US-026 vendored the two text splitters
+#1169 moved Gemini onto google-genai, and US-024's own route through the OpenAI-compatible
+adapter yielded to it: google-generativeai left, with google-ai-generativelanguage and
+google-api-python-client (Google's API discovery documents), which only it brought.
+US-025 removed pandas: create_xlsx reads CSV and JSON with the standard library, and
+PandasAIService, which cannot run (pandasai was never installed), imports it only inside
+its methods. US-026 vendored the two text splitters
 the ingest uses: langchain-text-splitters and langchain-core left, and with them
 langsmith and zstandard, which only langchain-core brought. US-027 serves graphify's
 Leiden calls from graspologic-native: graspologic left with graphifyy's [leiden] extra,
@@ -78,7 +79,7 @@ FORBIDDEN_IMPORTS = {
     "gotenberg_client": "gotenberg-client",  # US-018
     "camelot": "camelot-py",  # US-023
     "cv2": "opencv-python-headless",  # US-023: only camelot imported it
-    "google.generativeai": "google-generativeai",  # US-024: Gemini is on the openai client
+    "google.generativeai": "google-generativeai",  # US-024 / #1169: Gemini is on google-genai
     "google.ai.generativelanguage": "google-ai-generativelanguage",  # US-024: only the SDK
     "googleapiclient": "google-api-python-client",  # US-024: brought these two
     "pandas": "pandas",  # US-025: create_xlsx reads CSV and JSON with the standard library

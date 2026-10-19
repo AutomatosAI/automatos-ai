@@ -190,6 +190,17 @@ function loadBaseline() {
   }
 }
 
+// Why a path is baselined and when it leaves, by normalised path. Kept across
+// --update-baseline for every path still in the baseline.
+function loadBaselineNotes() {
+  try {
+    const data = JSON.parse(fs.readFileSync(BASELINE, 'utf8'))
+    return data._notes && typeof data._notes === 'object' ? data._notes : {}
+  } catch (err) {
+    return {}
+  }
+}
+
 function fail(msg) {
   console.error(msg)
   process.exit(1)
@@ -245,6 +256,8 @@ function main() {
 
   if (updateBaseline) {
     const normalised = [...currentViolations.keys()].sort()
+    const notes = loadBaselineNotes()
+    const keptNotes = normalised.filter((n) => typeof notes[n] === 'string')
     const payload = {
       _comment:
         'PRD-182 S3 (F044) route-contract baseline. Pre-existing api-client ' +
@@ -256,6 +269,7 @@ function main() {
       examples: Object.fromEntries(
         normalised.map((n) => [n, currentViolations.get(n)])
       ),
+      _notes: Object.fromEntries(keptNotes.map((n) => [n, notes[n]])),
     }
     fs.writeFileSync(BASELINE, JSON.stringify(payload, null, 2) + '\n')
     console.log(

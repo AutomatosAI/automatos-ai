@@ -7,6 +7,7 @@ import { usePrefersReducedMotion } from '@/hooks/use-media-preferences'
 import { applyLook, applyMotion, clearLook } from '@/lib/looks/document'
 import { DEFAULT_LOOK } from '@/lib/looks/presets'
 import { browserStorage, readPrepaintLook, rememberLookScope, type StorageSource } from '@/lib/looks/storage'
+import { BUILTIN_PLAY_HTML_CLASS } from '@/lib/theme-host/builtin/play-entry'
 import { clearPlayToneCookie, toneOfGround, writePlayToneCookie, type PlayTone } from '@/lib/looks/tone'
 import type { Look, ValidationResult } from '@/lib/looks/types'
 
@@ -140,7 +141,8 @@ export function LookProvider({ children, storage = browserStorage, onToneChange 
   const store = useLookStore(storage, useLookScope())
   const { scope, loaded, persisted, look, saved, setLook, saveLook, deleteLook, renameLook } = store
   const reducedMotion = usePrefersReducedMotion()
-  const active = useUiStyleOptional()?.isPlay ?? false
+  // PRD-261 A-02b, PA-8: Play's look runs under the theme whose <html> class is Play's.
+  const active = useUiStyleOptional()?.activeTheme?.htmlClass === BUILTIN_PLAY_HTML_CLASS
   const prepaint = usePrepaintLook(storage, active && !loaded)
   const painted = loaded ? look : prepaint
   const tone = active && painted !== null ? toneOfGround(painted.ground) : undefined

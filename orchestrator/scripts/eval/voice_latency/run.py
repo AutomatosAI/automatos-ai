@@ -390,6 +390,8 @@ def _validate_sim_args(parser: argparse.ArgumentParser, args: argparse.Namespace
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

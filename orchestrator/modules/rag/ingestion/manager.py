@@ -45,8 +45,6 @@ except ImportError:
 from psycopg2.extras import RealDictCursor
 import numpy as np
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # F063: whether the legacy entity table exists, read once per process. The

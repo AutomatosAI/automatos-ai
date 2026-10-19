@@ -26,6 +26,8 @@ from core.seeds.marketplace_personas import restore_seeded_personas
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+from core.monitoring.request_log_guard import guard_request_logs
+guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

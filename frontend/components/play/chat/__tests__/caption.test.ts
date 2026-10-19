@@ -22,7 +22,7 @@ import {
   runningToolInput,
   SAVED_ERROR,
   savedTurnError,
-} from '@/components/play/chat/message-text'
+} from '@/lib/chat/message-text'
 import { formatDuration } from '@/lib/chat/tool-calls'
 import { NO_REPLY } from '@/lib/mascot/events'
 import { captionFor } from '@/lib/mascot/media'

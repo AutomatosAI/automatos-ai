@@ -9,6 +9,7 @@ from .base import BaseLLMProvider, LLMProvider, LLMConfig, LLMResponse
 from .base import BaseEmbeddingProvider, EmbeddingProvider, EmbeddingConfig, DeterministicEmbeddingProvider
 from .openai_client import OpenAIProvider
 from .anthropic_client import AnthropicProvider
+from .google_client import GoogleProvider
 from .azure_client import AzureProvider
 from .huggingface_client import HuggingFaceProvider
 from .bedrock_client import BedrockProvider
@@ -29,11 +30,12 @@ __all__ = [
     # LLM Providers
     'OpenAIProvider',
     'AnthropicProvider',
+    'GoogleProvider',
     'AzureProvider',
     'HuggingFaceProvider',
     'BedrockProvider',
     'GrokProvider',
-    'OpenAICompatibleProvider',  # OpenRouter / NVIDIA / DeepSeek (PRD-236), Google (PRD-262 US-024)
+    'OpenAICompatibleProvider',  # OpenRouter / NVIDIA / DeepSeek (PRD-236)
     'ProviderRateLimitError',
 ]
 

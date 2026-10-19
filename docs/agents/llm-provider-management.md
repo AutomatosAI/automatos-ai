@@ -73,6 +73,7 @@ graph TB
     subgraph "Client Implementations"
         OpenAIProvider["core.llm.clients.openai_client.OpenAIProvider"]
         AnthropicProvider["core.llm.clients.anthropic_client.AnthropicProvider"]
+        GoogleProvider["core.llm.clients.google_client.GoogleProvider"]
         OpenAICompatibleProvider["core.llm.clients.openai_compatible_client.OpenAICompatibleProvider"]
     end
     
@@ -120,7 +121,7 @@ Services are mapped to three primary categories in `SERVICE_CATEGORY_MAP`:
 |----------|-------------------|--------------|----------------------|
 | **OpenAI** | `LLMProvider.OPENAI` | `OpenAIProvider` | Supports native tool calling and strict schema sanitization `[orchestrator/core/llm/clients/openai_client.py:21-22]`. |
 | **Anthropic** | `LLMProvider.ANTHROPIC` | `AnthropicProvider` | Handles Claude prompt caching and multi-block formatting. |
-| **Google** | `LLMProvider.GOOGLE` | `OpenAICompatibleProvider` | Gemini through its OpenAI-compatible endpoint (`GOOGLE_BASE_URL`), with streaming and tool calls; the `google-generativeai` SDK is gone (PRD-262 US-024). |
+| **Google** | `LLMProvider.GOOGLE` | `GoogleProvider` | Integrates Gemini models and multimodal payload blocks through the `google-genai` SDK, one client per key (#1169). |
 | **OpenRouter** | `LLMProvider.OPENROUTER` | `OpenRouterProvider` | Aggregator for 200+ models. Includes logic to extract Gemini-style images from `images` fields `[orchestrator/core/llm/clients/openrouter_client.py:26-27]`. |
 | **Grok** | `LLMProvider.GROK` | `GrokProvider` | xAI Grok models via OpenAI-compatible wrapper `[orchestrator/core/llm/clients/grok_client.py:22-26]`. |
 | **HuggingFace** | `LLMProvider.HUGGINGFACE` | `HuggingFaceProvider` | Used for TGI or local inference endpoints. |

@@ -3,5 +3,3 @@ node_modules/
 test-results/
 playwright-report/
 records/
-# CI writes a lockfile on install and uploads it; it is committed once reviewed (PRD-261 wave A1).
-package-lock.json

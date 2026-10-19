@@ -10,7 +10,8 @@
  * Upstream OpenTelemetry packages only (vendor-neutral, decided on #847). The OTLP
  * exporter reads OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_EXPORTER_OTLP_HEADERS itself;
  * OTEL_RESOURCE_ATTRIBUTES (the chart's pod and namespace) joins the resource.
- * Principle 5: every query value on a URL attribute is redacted before export.
+ * Principle 5: every query value on a URL attribute is redacted before export, and an
+ * error leaves as its type only, never its message or stack trace (#1107), as the API's do.
  */
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { UndiciInstrumentation } from '@opentelemetry/instrumentation-undici'
@@ -24,37 +25,61 @@ import {
   type SpanExporter,
 } from '@opentelemetry/sdk-trace-node'
 
-import { DEFAULT_SERVICE_NAME, redactQuery, redactQueryValuesIn, redactedAttributes, samplerRatio } from './settings'
+import { DEFAULT_SERVICE_NAME, EXCEPTION_KEPT, redactQuery, redactedAttributes, samplerRatio } from './settings'
 
 /** The environment the settings are read from (process.env, or a test's own). */
 type Env = Record<string, string | undefined>
 
-/** An event's string attributes with their query values redacted: Next.js records a
- * failure as an `exception` event whose message and stack trace can hold a URL. */
-function redactedEvent(event: ReadableSpan['events'][number]): ReadableSpan['events'][number] {
-  const attributes = Object.fromEntries(Object.entries(event.attributes ?? {}).map(([key, value]) =>
-    [key, typeof value === 'string' ? redactQueryValuesIn(value) : value]))
+type SpanEvent = ReadableSpan['events'][number]
+
+/** An `exception` event keeps its type and drops its text: Next.js records a failure
+ * with the error's message and stack trace, which can hold a URL or a user's data. */
+function typeOnlyEvent(event: SpanEvent): SpanEvent {
+  if (event.name !== 'exception') return event
+  const attributes = Object.fromEntries(Object.entries(event.attributes ?? {})
+    .filter(([key]) => (EXCEPTION_KEPT as readonly string[]).includes(key)))
   return { ...event, attributes }
 }
 
-/** The span as exported: no query value in its name, URL attributes, status message or
- * events. The span itself stays the prototype, so spanContext() and the rest still answer. */
+/** What an ERROR status may say: the recorded exception's type, else the message when it
+ * is the span's own `error.type`; never the error's text (Next.js copies its message there),
+ * nor a word that merely looks like a type ("report_q3.xlsx"). */
+function failedType(events: SpanEvent[], attributes: ReadableSpan['attributes'], message: string): string | undefined {
+  const typed = events.find((event) => event.name === 'exception' && event.attributes?.['exception.type'])
+  if (typed) return String(typed.attributes?.['exception.type'])
+  const errorType = attributes['error.type']
+  return errorType !== undefined && message === String(errorType) ? message : undefined
+}
+
+/** The span as exported: no query value in its name or URL attributes, and an error as
+ * its type only. The span itself stays the prototype, so spanContext() still answers. */
 function redactedSpan(span: ReadableSpan): ReadableSpan {
-  const status = span.status.message ? { ...span.status, message: redactQueryValuesIn(span.status.message) } : span.status
+  const events = span.events.map(typeOnlyEvent)
+  const status = span.status.message ? { ...span.status, message: failedType(events, span.attributes, span.status.message) } : span.status
   return Object.create(span, {
     name: { value: redactQuery(span.name), enumerable: true },
     attributes: { value: redactedAttributes({ ...span.attributes }), enumerable: true },
     status: { value: status, enumerable: true },
-    events: { value: span.events.map(redactedEvent), enumerable: true },
+    events: { value: events, enumerable: true },
   })
 }
 
-/** Wraps an exporter: each span goes out with its query values redacted (redactedSpan). */
+/** The span redacted, or none: a span that can't be redacted is dropped, never sent as it was. */
+function exportable(span: ReadableSpan): ReadableSpan[] {
+  try {
+    return [redactedSpan(span)]
+  } catch (error) {
+    console.warn('[otel] a span could not be redacted and was dropped', error)
+    return []
+  }
+}
+
+/** Wraps an exporter: each span goes out redacted (redactedSpan), or not at all. */
 export class RedactingExporter implements SpanExporter {
   constructor(private readonly inner: SpanExporter) {}
 
   export(spans: ReadableSpan[], done: Parameters<SpanExporter['export']>[1]): void {
-    this.inner.export(spans.map(redactedSpan), done)
+    this.inner.export(spans.flatMap(exportable), done)
   }
 
   shutdown(): Promise<void> {

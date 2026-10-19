@@ -19,7 +19,7 @@
  * frame's <main> once it answers) and the gate's own live region, outside the
  * swap, says each change.
  *
- * P260-FX-25 (M69): the 404 reads Play's width from usePlayLayout (stood in for
+ * P260-FX-25 (M69): the 404 reads Play's width from useThemeLayout (stood in for
  * here); under Play while it isn't known (the server, hydration) it renders
  * nothing, so neither the lost screen nor the plain page shows first.
  */
@@ -39,14 +39,17 @@ import {
 } from '@/hooks/use-backend-health'
 
 const look = vi.hoisted(() => ({ play: true, narrow: false, widthUnknown: false }))
-vi.mock('@/hooks/use-studio-theme', () => ({
-  useIsStudio: () => true,
-  useIsPlay: () => look.play,
-  usePlayLayout: () => {
-    if (!look.play || look.narrow) return 'fallback'
-    return look.widthUnknown ? 'pending' : 'play'
-  },
-}))
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => true,
+    useActiveTheme: () => (look.play ? BUILTIN_PLAY_ENTRY : null),
+    useThemeLayout: () => {
+      if (!look.play || look.narrow) return 'fallback'
+      return look.widthUnknown ? 'pending' : 'theme'
+    },
+  }
+})
 
 const api = vi.hoisted(() => ({ request: vi.fn(), getBaseUrl: () => 'http://localhost:8000' }))
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))

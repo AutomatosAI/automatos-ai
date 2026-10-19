@@ -48,6 +48,7 @@ import {
   stored,
   stubDownloads,
 } from './looks-harness'
+import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 
 type User = ReturnType<typeof userEvent.setup>
 
@@ -406,7 +407,7 @@ describe("When this browser isn't keeping looks (M98)", () => {
 
   it('with storage blocked, Duplicate, Rename and Import say the look lasts until the tab closes', async () => {
     const user = userEvent.setup()
-    renderLooks('play', blockedStorage)
+    renderLooks(BUILTIN_PLAY_STYLE, blockedStorage)
     await lookOnPage(EMBER)
 
     await user.click(manage().getByRole('button', { name: 'Duplicate' }))
@@ -426,7 +427,7 @@ describe("When this browser isn't keeping looks (M98)", () => {
   it('with storage full, the refused write after Duplicate is told in its notice', async () => {
     const user = userEvent.setup()
     const full = fullStorage()
-    renderLooks('play', () => full)
+    renderLooks(BUILTIN_PLAY_STYLE, () => full)
     await lookOnPage(EMBER)
     await user.click(manage().getByRole('button', { name: 'Duplicate' }))
     expect(await manage().findByText(`Duplicated as Ember copy. ${LOOKS_NOT_KEPT}`)).toBeInTheDocument()
@@ -437,7 +438,7 @@ describe("When this browser isn't keeping looks (M98)", () => {
     const user = userEvent.setup()
     const stub = stubDownloads()
     try {
-      renderLooks('play', blockedStorage)
+      renderLooks(BUILTIN_PLAY_STYLE, blockedStorage)
       await lookOnPage(EMBER)
       await user.click(manage().getByRole('button', { name: 'Export' }))
       // Exact text: Export changes no look, so it never adds LOOKS_NOT_KEPT.

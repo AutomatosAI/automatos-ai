@@ -416,6 +416,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     status = main()
     # PRD-262 US-031: the interpreter's own teardown took about 6 s on the Mac after the
     # last line was written (module and extension finalisation). Nothing it does matters

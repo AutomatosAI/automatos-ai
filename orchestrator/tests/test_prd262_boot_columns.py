@@ -4,7 +4,7 @@ Every boot of every worker ran ``ALTER TABLE … ADD COLUMN IF NOT EXISTS`` for
 ``system_prompts.futureagi_eval_enabled`` and ``skills.content_hash``, each taking an
 ACCESS EXCLUSIVE lock on its table. Pins:
 
-* **One revision.** It chains onto the head it found (``prd258_voice_timings``) and is
+* **One revision.** It chains onto the head it found (``prd263_harness_runs``) and is
   the only revision chained there; the head pins (test_prd209_alembic_single_head,
   test_prd236_w1_routes) follow it.
 * **main.py runs no ALTER.** The block is gone from the lifespan, and ``text``, which
@@ -36,7 +36,7 @@ from sqlalchemy import create_engine, text  # noqa: E402
 VERSIONS = _ORCH / "alembic" / "versions"
 REVISION = VERSIONS / "prd262_boot_columns.py"
 MAIN = _ORCH / "main.py"
-PARENT = "prd258_voice_timings"
+PARENT = "prd263_harness_runs"
 FLAG = ("system_prompts", "futureagi_eval_enabled")
 HASH = ("skills", "content_hash")
 A_HASH = "ab" * 32

@@ -42,11 +42,9 @@ export function redactQuery(url: string): string {
   return `${url.slice(0, start + 1)}${query}${url.slice(end)}`
 }
 
-/** Free text (an error message, a stack trace) with every query value in it redacted:
- * each `key=value` after a `?` or `&` becomes `key=REDACTED`; the rest is kept. */
-export function redactQueryValuesIn(text: string): string {
-  return text.replace(/([?&][^=&?#\s]+=)[^&#\s'"<>)]*/g, `$1${REDACTED}`)
-}
+/** All an exception event keeps on an exported span (#1107): its type, never its text,
+ * nor anything else recorded with it. Next.js still writes the error to the web app's log. */
+export const EXCEPTION_KEPT = ['exception.type', 'exception.escaped'] as const
 
 /** A span's attributes with the query values on its URL attributes redacted. */
 export function redactedAttributes<T extends Record<string, unknown>>(attributes: T): T {
