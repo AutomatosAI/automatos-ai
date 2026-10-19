@@ -27,7 +27,7 @@ services:
     image: ghcr.io/automatosai/automatos-api:${AUTOMATOS_IMAGE_TAG:-edge}
     build: !reset null
     # The image carries the code and its entrypoint. Mounting the checkout over
-    # /app (as docker-compose.yml does for hot reload) would run your local
+    # /app (as docker-compose.dev.yml does for hot reload) would run your local
     # source instead of the published build.
     volumes: !override
       - backend_data:/app/data

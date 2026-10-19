@@ -5,10 +5,13 @@
 # previous image untagged and grows the build cache, which is what turns a
 # 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind.
 #
-#   make up      build (if needed), start, tidy up
+#   make up      build (if needed), start, tidy up: the production images,
+#                with the code inside them and nothing reloading
 #   make up-images  start the PUBLISHED images instead of building (no source
 #                build; AUTOMATOS_IMAGE_TAG=sha-xxxxxxx pins one, default edge)
-#   make dev     the same with hot reload (source-mounted dev images)
+#   make dev     for editing the code: the development stages with your source
+#                mounted, uvicorn --reload and the Next.js dev server
+#                (docker-compose.dev.yml)
 #   make down    stop the stack, keep your data
 #   make clean   reclaim dangling images + unused build cache (never your data)
 #   make reset   DESTRUCTIVE — stop and delete all data volumes

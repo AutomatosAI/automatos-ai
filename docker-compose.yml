@@ -11,6 +11,11 @@
 #   4. Add an LLM key: Settings → API Keys in the UI, or OPENAI_API_KEY /
 #      ANTHROPIC_API_KEY / OPENROUTER_API_KEY in .env (passed through below)
 #
+# This file runs the production images, the ones CI builds and scans: the code is
+# inside them and nothing reloads (PRD-262 US-035). Editing the code instead:
+# `make dev` (docker-compose.dev.yml) builds the development stages, mounts your
+# source and runs uvicorn --reload and the Next.js dev server.
+#
 # A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
 # LLM keys live in the database (Settings → API Keys) or in .env; the stored key
 # also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
@@ -158,7 +163,11 @@ services:
         # The Dockerfile defaults are PRODUCTION values (Railway builds it). The
         # local edition opts out of the ~660 MB Leiden clustering stack here.
         INSTALL_GRAPH_EXTRAS: "false"
-      target: development
+      # PRD-262 US-035: the stage CI builds, scans and publishes, with the code inside
+      # the image. Its worker count comes from WEB_CONCURRENCY (envs/api.defaults).
+      # Hot reload is `make dev`: docker-compose.dev.yml builds the development stage
+      # and mounts the source, the entrypoint and the healthcheck.
+      target: production
     container_name: automatos_backend
     restart: unless-stopped
     depends_on:
@@ -181,7 +190,9 @@ services:
       - envs/api.defaults
       # Personal overrides for ANY backend var (gitignored, optional) — the
       # deep-override lane: .env only reaches vars this file references, while
-      # api.local reaches all ~360 config.py dials. Later file wins.
+      # api.local reaches all ~360 config.py dials. Later file wins. An edit applies
+      # with `docker compose up -d --no-deps backend`, which recreates the backend
+      # (the night tooling's path; the fresh-clone smoke checks it, PRD-262 US-035).
       - path: envs/api.local
         required: false
     environment:
@@ -290,12 +301,13 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     volumes:
-      # Mount source for hot-reload in development
-      - ./orchestrator:/app
-      - ./orchestrator/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
-      - ./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro
+      # No checkout over the image (PRD-262 US-035): the code, the entrypoint and the
+      # healthcheck are the image's own. Only data mounts here; `make dev` adds the
+      # source mounts (docker-compose.dev.yml).
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
+      # The backend's log files, on a named volume that outlives a recreate (kept for
+      # the night and test tooling, PRD-262 §9-Q1).
       - backend_logs:/app/logs
       # The workspace-worker's files, read-only (PRD-233 S1): the backend's
       # WORKSPACE_VOLUME_PATH view of agent deliverables (session files it adopts,

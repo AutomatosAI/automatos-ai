@@ -1,13 +1,18 @@
 # =============================================================================
-# Contributor override — hot reload instead of the shipped standalone build
+# Contributor override — `make dev`: hot reload from your source
 # =============================================================================
-# The default stack runs the production images: small and fast, what a user
-# downloads. Working ON the code instead of with it:
+# The default stack (`make up`, plain `docker compose up`) runs the published
+# production images, pulled from GHCR (PRD-262 US-036): the code is inside the
+# image, nothing is mounted over it and nothing reloads. Working ON the code
+# instead of with it:
 #
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   make dev    # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 #
-# That swaps the frontend and backend to their development stages and mounts
-# the source, so edits reload live. Railway never reads either file.
+# That builds the frontend's and the backend's development stages from your
+# checkout and mounts the source over /app: the backend runs `uvicorn --reload`
+# and the frontend the Next.js dev server, so edits reload live. The backend's
+# entrypoint and healthcheck scripts are mounted too, so an edit to either
+# applies on the next start without a rebuild. Railway never reads either file.
 # =============================================================================
 services:
   frontend:
@@ -24,5 +29,8 @@ services:
     build:
       target: development
     volumes:
+      # The development stage carries no code (PRD-262 US-017): this mount is it.
       - ./orchestrator:/app
+      - ./orchestrator/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+      - ./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro
       - backend_data:/app/data

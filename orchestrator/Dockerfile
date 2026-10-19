@@ -3,7 +3,8 @@
 # =============================================================================
 # Stages:
 #   - base: Common dependencies
-#   - development: Hot reload; no code (compose mounts the source over /app)
+#   - development: Hot reload; no code (docker-compose.dev.yml, `make dev`, mounts
+#     the source over /app)
 #   - production: Optimized, minimal image
 # =============================================================================
 
@@ -147,10 +148,11 @@ COPY --from=pybuild /install /usr/local
 # =============================================================================
 FROM base as development
 
-# No application code (PRD-262 US-017). Both compose files bind-mount ./orchestrator
-# over /app, which hid a baked copy, while `COPY . .` and a `chown -R /app` stored the
-# whole build context twice on every build, a checkout's uploads and caches included.
-# Run this stage with the source mounted at /app.
+# No application code (PRD-262 US-017). docker-compose.dev.yml (`make dev`) bind-mounts
+# ./orchestrator over /app, which hid a baked copy, while `COPY . .` and a `chown -R /app`
+# stored the whole build context twice on every build, a checkout's uploads and caches
+# included. Run this stage with the source mounted at /app. The default compose stack
+# runs the production stage below (PRD-262 US-035).
 #
 # The user and the directories the app writes, owned by it (no -R: they are empty), so
 # a fresh backend_logs or backend_data named volume mounted on one starts writable
