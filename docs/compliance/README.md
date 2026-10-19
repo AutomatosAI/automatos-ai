@@ -21,6 +21,7 @@ PRD-181 (Wave 11) on top of the merged enforcement substrate (Wave 4 policy plan
 | **EU-AI-Act Art.14 oversight → approval cards** | **Real (mapping)** | `orchestrator/modules/policy/ai_act.py`; the card reads the risk tier + rationale. |
 | **EU-AI-Act Annex-IV technical file** | **Scaffold** | [`EU-AI-ACT-ANNEX-IV.md`](./EU-AI-ACT-ANNEX-IV.md) — sections mapped to real components; formal write-up is a **flagged fast-follow**. |
 | **Formal risk-classification (is the system high-risk?)** | **Fast-follow** | Not done. See the Annex-IV §5 and its checklist. |
+| **EU-AI-Act Art.50(2) detection** | **Real (route and record)** | [`DETECTION.md`](./DETECTION.md): the public `/verify` page and `GET /api/public/provenance/{sha256}` over `content_provenance` (PRD-264 EUAI-10). Rows are written by the marking stories (EUAI-09, EUAI-06b). |
 
 ## Known GDPR gaps (documented, not silently skipped)
 

@@ -102,6 +102,7 @@
       { "name": "a host-owned page below its root", "set": { "pages": { "/settings/security": { "mode": "own" } } }, "code": "HOST_OWNED_PAGE" },
       { "name": "the Marketplace", "set": { "pages": { "/marketplace": { "mode": "own" } } }, "code": "HOST_OWNED_PAGE" },
       { "name": "the look pages", "set": { "pages": { "/looks": { "mode": "own" } } }, "code": "HOST_OWNED_PAGE" },
+      { "name": "the public AI-content check (PRD-264)", "set": { "pages": { "/verify": { "mode": "own" } } }, "code": "HOST_OWNED_PAGE" },
       { "name": "a clone without clonedFrom", "set": { "pages": { "/agents": { "mode": "clone" } } }, "code": "BAD_CLONED_FROM" },
       { "name": "clonedFrom on an own page", "set": { "pages": { "/agents": { "mode": "own", "clonedFrom": { "path": "app/agents/page.tsx", "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" } } } }, "code": "BAD_CLONED_FROM" },
       { "name": "clonedFrom with a short sha", "set": { "pages": { "/agents": { "mode": "clone", "clonedFrom": { "path": "app/agents/page.tsx", "sha": "e3b0c442" } } } }, "code": "BAD_CLONED_FROM" },

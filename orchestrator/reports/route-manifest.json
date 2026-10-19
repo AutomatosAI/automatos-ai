@@ -2054,6 +2054,10 @@
       "path": "/api/profile"
     },
     {
+      "method": "GET",
+      "path": "/api/public/provenance/{sha256}"
+    },
+    {
       "method": "POST",
       "path": "/api/query/platform-help"
     },
