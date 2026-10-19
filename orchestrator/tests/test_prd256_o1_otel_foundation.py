@@ -236,6 +236,7 @@ def test_a_query_value_never_reaches_the_collector(traced):
     spans = _server_spans(provider, exporter)
     values = [str(v) for s in spans for v in s.attributes.values()]
     assert spans and not [v for v in values if "SECRET" in v]
+    assert spans[0].attributes["http.url"].endswith("/api/things/7?code=REDACTED&token=REDACTED&page=REDACTED")
 
 
 def test_a_file_hash_in_the_path_never_reaches_the_collector(traced):
@@ -247,7 +248,7 @@ def test_a_file_hash_in_the_path_never_reaches_the_collector(traced):
     spans = _server_spans(provider, exporter)
     values = [str(v) for s in spans for v in s.attributes.values()] + [s.name for s in spans]
     assert spans and not [v for v in values if digest in v or "SECRET" in v]
-    assert spans[0].attributes["http.url"].endswith("/api/things/7?code=REDACTED&token=REDACTED&page=REDACTED")
+    assert spans[0].attributes["http.url"].endswith("/api/things/{sha256}?code=REDACTED")
 
 
 def test_the_probes_are_never_traced(traced):
