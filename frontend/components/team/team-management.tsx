@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
+import { themeErrorMessage, useStepUp } from '@/lib/theme-host/api'
 import { formatAbsoluteDate, formatRelative, isWithinDays } from '@/lib/format-relative'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { InviteModal } from './invite-modal'
@@ -45,6 +46,15 @@ function displayName(member: Pick<TeamMember, 'name' | 'email'>): string {
     return member.name || member.email.split('@')[0]
 }
 
+/**
+ * PRD-261 A-07f (#1157): a role change needs, in SaaS, a sign-in from the last few minutes
+ * (orchestrator/api/team.py `STEP_UP`). Called through `useStepUp`, so a refusal opens Clerk's
+ * "confirm it's you" and the change is sent once more; the local edition sends it as is.
+ */
+function patchMemberRole(workspaceId: string, memberId: number, role: string) {
+    return apiClient.patch(`/api/workspaces/${workspaceId}/team/members/${memberId}/role`, { role })
+}
+
 interface PendingInvitation {
     id: number
     email: string
@@ -63,6 +73,7 @@ export function TeamManagement() {
     const [isInviteOpen, setIsInviteOpen] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
     const [error, setError] = useState<string | null>(null)
+    const changeRole = useStepUp(patchMemberRole)
 
     // Combined loading state
     const loading = workspaceLoading || loadingMembers
@@ -105,15 +116,14 @@ export function TeamManagement() {
     }, [workspaceId])
 
     const handleRoleChange = async (memberId: number, newRole: string) => {
+        if (!workspaceId) return
         try {
-            await apiClient.request(`/api/workspaces/${workspaceId}/team/members/${memberId}/role`, {
-                method: 'PATCH',
-                body: { role: newRole }
-            })
+            await changeRole(workspaceId, memberId, newRole)
             fetchMembers()
         } catch (err) {
             console.error("Failed to update role:", err)
-            alert("Failed to update role")
+            // The server's sentence, the closed confirmation, or "couldn't confirm it's you".
+            alert(themeErrorMessage(err))
         }
     }
 

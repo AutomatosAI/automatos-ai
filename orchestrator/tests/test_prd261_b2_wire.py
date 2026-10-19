@@ -6,10 +6,9 @@ Pins (plan §2.4 W-B2 row, §2.6 B2-wire; Gerard D1-a/d/e):
   every W-B2 route once (a probe in a clean subprocess with an unreachable Postgres, the
   ``test_route_manifest.py`` / authZ-sweep precedent);
 * every W-B2 route is in ``reports/route-manifest.json`` and ``route_count == len(routes)``;
-* the step-up dependency (A-07c) is on EXACTLY the routes §2.2 marks (import, opt-in,
-  default, update, rollback, the settings PUT), each after its permission gate, and NOT on the
-  workspace role change (its step-up lands with the client flow, PRD-261 W-A2, #1157), and the app renders its refusal with ``clerk_error`` at the
-  top level;
+* the step-up dependency (A-07c) is on EXACTLY the theme routes §2.2 marks (import, opt-in,
+  default, update, rollback, the settings PUT) and the workspace role change A-07f adds (Gerard D1-d,
+  #1157; the invite and SDK key creation carry none, outside D1-d), each after its permission gate, and the app renders its refusal with ``clerk_error`` at the top level;
 * "who may install" (A-07e) gates import, update and rollback;
 * every W-B2 mutating route carries ``require_workspace_permission`` (authZ-sweep bucket a);
   the files and boot routes carry none: they authorise by membership, never by
@@ -44,6 +43,7 @@ if str(ORCH) not in sys.path:
 
 from fastapi.routing import APIRoute  # noqa: E402
 
+import api.api_keys as api_keys_api  # noqa: E402
 import api.team as team_api  # noqa: E402
 import api.themes_files as files_api  # noqa: E402
 import api.themes_import as import_api  # noqa: E402
@@ -67,6 +67,14 @@ STEP_UP_ROUTES = {
     ("POST", "/api/themes/installs/{install_id}/rollback"),
     ("PUT", "/api/themes/settings"),
 }
+# PRD-261 A-07f (Gerard D1-d, #1157): the role change is the ONLY account route with step-up;
+# the invite and SDK key creation stay without it until a maintainer decision adds them.
+ACCOUNT_STEP_UP_ROUTES = {ROLE_CHANGE}
+ACCOUNT_ROUTES_WITHOUT_STEP_UP = {
+    ("POST", "/api/workspaces/{workspace_id}/team/invite"),
+    ("POST", "/api/api-keys"),
+}
+ACCOUNT_ROUTERS = (team_api.router, api_keys_api.router)
 INSTALL_ROLE_ROUTES = {
     ("POST", "/api/themes/import"),
     ("POST", "/api/themes/installs/{install_id}/update"),
@@ -143,7 +151,7 @@ def test_every_w_b2_route_is_in_the_manifest_and_the_count_holds():
     expected = set(_theme_routes())
     assert len(expected) == 16
     assert not expected - served, sorted(expected - served)
-    assert ROLE_CHANGE in served
+    assert ACCOUNT_STEP_UP_ROUTES | ACCOUNT_ROUTES_WITHOUT_STEP_UP <= served
 
 
 def test_every_theme_config_name_is_on_config_and_in_the_config_surface():
@@ -182,14 +190,21 @@ def test_step_up_is_on_exactly_the_marked_theme_routes_after_the_gate():
     assert marked == STEP_UP_ROUTES
 
 
-def test_no_team_route_carries_step_up_until_w_a2():
-    # The role change's only client cannot show Clerk's reverification prompt yet (W-A2, #1157).
+def test_step_up_is_on_exactly_the_role_change_after_the_gate():
+    # A-07f: team-management answers it with Clerk's prompt; invite and key creation carry none (D1-d).
     marked = set()
-    for route in team_api.router.routes:
-        for method in route.methods - {"HEAD", "OPTIONS"}:
-            if _index(_calls(route.dependant), _is_step_up) is not None:
+    for router in ACCOUNT_ROUTERS:
+        for route in router.routes:
+            for method in route.methods - {"HEAD", "OPTIONS"}:
+                calls = _calls(route.dependant)
+                at = _index(calls, _is_step_up)
+                if at is None:
+                    continue
                 marked.add((method, route.path))
-    assert marked == set()
+                assert getattr(calls[at], step_up.STEP_UP_MARKER_ATTR) == config.STEP_UP_MAX_AGE_MINUTES
+                gate = _index(calls, _is_gate)
+                assert gate is not None and gate < at, f"{method} {route.path}: the permission gate must run first"
+    assert marked == ACCOUNT_STEP_UP_ROUTES
 
 
 def test_who_may_install_gates_import_update_and_rollback():
@@ -289,7 +304,7 @@ def test_the_app_serves_every_w_b2_route_exactly_once(live_app):
 
 
 def test_the_app_carries_step_up_on_exactly_the_planned_routes(live_app):
-    assert {_key(name) for name in live_app["step_up"]} == STEP_UP_ROUTES
+    assert {_key(name) for name in live_app["step_up"]} == STEP_UP_ROUTES | ACCOUNT_STEP_UP_ROUTES
     assert live_app["handler"] is True
 
 
@@ -297,7 +312,7 @@ def test_the_app_classifies_every_w_b2_mutating_route_in_bucket_a(live_app):
     gated = {_key(name) for name in live_app["gated"]}
     mutating = {key for key in _theme_routes() if key[0] in MUTATING}
     assert mutating <= gated
-    assert ROLE_CHANGE in gated
+    assert ACCOUNT_STEP_UP_ROUTES <= gated  # A-07f's step-up kept each in authZ-sweep bucket (a)
 
 
 def test_the_import_body_limit_is_sized_from_the_package_cap(live_app):
