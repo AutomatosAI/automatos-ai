@@ -3,7 +3,9 @@
 # =============================================================================
 # Every target that builds also cleans up after itself: a rebuild leaves the
 # previous image untagged and grows the build cache, which is what turns a
-# 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind.
+# 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind. The
+# build cache of the last week stays, so the next source build after a git pull
+# reuses its dependency installs (PRD-262 US-039).
 #
 #   make env     check Docker first: Engine 25 or later and Compose 2.24.4 or
 #                later, or stop and say so (PRD-262 US-038). Then create .env
@@ -18,12 +20,14 @@
 #                so plain docker compose runs the same images. Pin a tag with
 #                AUTOMATOS_IMAGE_TAG=sha-xxxxxxx make up (edge follows edge).
 #   make build   build the three app images from your checkout instead, as the
-#                production stages CI publishes, under a local-<sha7> tag
+#                production stages CI publishes, under a local-<sha7> tag. postgres,
+#                redis and minio start first, so they come up while the images build
+#                (PRD-262 US-039)
 #   make dev     for editing the code: the development stages with your source
 #                mounted, uvicorn --reload and the Next.js dev server
 #                (docker-compose.dev.yml)
 #   make down    stop the stack, keep your data
-#   make clean   reclaim dangling images + unused build cache (never your data)
+#   make clean   reclaim dangling images + build cache unused for a week (never your data)
 #   make reset   DESTRUCTIVE — stop and delete all data volumes
 #   make status  what is running, and what it costs on disk
 #   make logs    follow the logs (make logs s=backend for one service)
@@ -119,11 +123,16 @@ up:
 # Builds the three app images from this checkout (the production stages CI
 # publishes) under local-<sha7>, written to .env first so the build and every
 # later compose command use it. Compose never builds under an official tag.
+# postgres, redis and minio start before the build (PRD-262 US-039), so their
+# first-run initdb and health gate pass while the images build, not after them;
+# the backend still waits for all three to be healthy (depends_on). A failed
+# build leaves those three running: make down stops them.
 build:
 	@$(MAKE) --no-print-directory env
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
 	@$(STACK_IMAGES) build
+	$(COMPOSE) up -d postgres redis minio
 	$(COMPOSE) build backend frontend workspace-worker
 	$(COMPOSE) up -d --no-build --remove-orphans
 	@$(MAKE) --no-print-directory clean
@@ -143,15 +152,22 @@ down:
 # Safe at any time, stack up or down:
 #   - dangling images only. NEVER `-a`, which deletes images your other
 #     projects still need.
-#   - unused build cache. Cached layers still referenced by a live build stay.
+#   - build cache nothing has used for a week (until=168h). A plain
+#     `docker builder prune -f` deletes every cache record no image holds, and
+#     the dependency installs are in no image: the frontend's npm install and
+#     the backend's pip install run in build stages whose output the production
+#     images only copy. The next make build or make dev after a git pull then
+#     installed every dependency again. The week keeps them; CI's
+#     source-build-cache job rebuilds after this target and needs both CACHED
+#     (PRD-262 US-039). `docker builder prune -f` alone still reclaims it all.
 #   - NO volume pruning. A stopped stack's named volumes look "unused" to
 #     Docker, so `docker volume prune` here would delete your database. Data is
 #     only ever removed by `make reset`, which asks first.
 clean:
 	@before=$$(docker system df --format '{{.Type}} {{.Size}}' 2>/dev/null | tr '\n' ' '); \
 	docker image prune -f >/dev/null; \
-	docker builder prune -f >/dev/null; \
-	echo "→ cleaned: dangling images and unused build cache reclaimed."
+	docker builder prune -f --filter until=168h >/dev/null; \
+	echo "→ cleaned: dangling images and build cache unused for a week reclaimed."
 
 reset:
 	@echo "This deletes the database, object storage and all local data. Ctrl-C to abort."
