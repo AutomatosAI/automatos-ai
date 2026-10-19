@@ -275,11 +275,15 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # run table (harness_runs), a new table only.
     harness_runs = (versions / "prd263_harness_runs.py").read_text()
     assert 'down_revision = "prd261_themes"' in harness_runs
-    # 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto prd263_harness_runs —
+    # 2026-10-19: auto_haiku_default_20261019 chains onto it — a data migration (the
+    # platform default for Auto becomes Haiku 5.5, the Auto rows on it move).
+    haiku_default = (versions / "auto_haiku_default_20261019.py").read_text()
+    assert 'down_revision = "prd263_harness_runs"' in haiku_default
+    # 2026-10-19 (PRD-262 US-030): prd262_boot_columns chains onto auto_haiku_default_20261019 —
     # main.py's per-boot ALTERs (futureagi_eval_enabled, skills.content_hash) become a
     # revision; the guard follows it.
     boot_columns = (versions / "prd262_boot_columns.py").read_text()
-    assert 'down_revision = "prd263_harness_runs"' in boot_columns
+    assert 'down_revision = "auto_haiku_default_20261019"' in boot_columns
     assert 'EXPECTED_HEAD = "prd262_boot_columns"' in guard
 
 

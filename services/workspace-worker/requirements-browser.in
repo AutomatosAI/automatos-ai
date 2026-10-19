@@ -1,0 +1,8 @@
+# Headless browser rendering for the workspace_html_to_png tool (PRD-262 US-043).
+# Installed only when the image is built with INSTALL_BROWSER=true (the Dockerfile
+# default, which Railway builds); the local edition and the GHCR image carry no
+# Playwright. Pinned to the current release: the old <1.53 cap held Chromium at
+# 136 with no recorded reason. The image installs requirements-browser.lock,
+# never this file: it is compiled from this file against requirements.lock
+# (PRD-262 US-044; the command is in requirements.in).
+playwright==1.64.0

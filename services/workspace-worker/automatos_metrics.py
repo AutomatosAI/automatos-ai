@@ -217,10 +217,14 @@ def add_aiohttp_metrics(app, service: str = "unknown"):
     # Prepend middleware
     app.middlewares.insert(0, prometheus_middleware)
 
+    # prometheus_client's content type carries a charset ("text/plain;
+    # version=...; charset=utf-8"). aiohttp refuses a charset in content_type
+    # with a ValueError, so /metrics answered 500; as a header it goes out
+    # exactly as the client library names it (PRD-262 US-045).
     async def metrics_handler(request):
         return web.Response(
             body=generate_latest(REGISTRY),
-            content_type=CONTENT_TYPE_LATEST,
+            headers={"Content-Type": CONTENT_TYPE_LATEST},
         )
 
     app.router.add_get(METRICS_PATH, metrics_handler)

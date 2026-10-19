@@ -15,6 +15,13 @@ from core.models.personas import Persona
 
 logger = logging.getLogger(__name__)
 
+# The models a persona suggests, best first, as core/seeds/seed_claude_list_prices
+# names the current Claude routes. A suggestion only: an agent's model is its own
+# model_config, and a new agent's default is Settings > Orchestrator. The seed below
+# rewrites a predefined persona's suggestions when they differ from these.
+DEEP_WORK_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5")
+EVERYDAY_MODELS = ("claude-sonnet-5-5", "claude-haiku-5-5")
+
 
 PREDEFINED_PERSONAS = [
     # --- Engineering ---
@@ -32,7 +39,7 @@ PREDEFINED_PERSONAS = [
         "category": "Engineering",
         "tags": ["engineering", "code-quality", "architecture", "mentoring"],
         "suggested_temperature": 0.5,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-opus-20240229"],
+        "suggested_models": list(DEEP_WORK_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -50,7 +57,7 @@ PREDEFINED_PERSONAS = [
         "category": "Engineering",
         "tags": ["engineering", "code-review", "security", "quality"],
         "suggested_temperature": 0.3,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-opus-20240229"],
+        "suggested_models": list(DEEP_WORK_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -68,7 +75,7 @@ PREDEFINED_PERSONAS = [
         "category": "Engineering",
         "tags": ["engineering", "devops", "sre", "infrastructure", "ci-cd"],
         "suggested_temperature": 0.4,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-sonnet-20240229"],
+        "suggested_models": list(EVERYDAY_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -87,7 +94,7 @@ PREDEFINED_PERSONAS = [
         "category": "Sales",
         "tags": ["sales", "outreach", "prospecting", "lead-qualification"],
         "suggested_temperature": 0.7,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-sonnet-20240229"],
+        "suggested_models": list(EVERYDAY_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -105,7 +112,7 @@ PREDEFINED_PERSONAS = [
         "category": "Sales",
         "tags": ["sales", "closing", "enterprise", "negotiation"],
         "suggested_temperature": 0.6,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-opus-20240229"],
+        "suggested_models": list(DEEP_WORK_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -123,7 +130,7 @@ PREDEFINED_PERSONAS = [
         "category": "Sales",
         "tags": ["sales", "customer-success", "retention", "adoption"],
         "suggested_temperature": 0.6,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-sonnet-20240229"],
+        "suggested_models": list(EVERYDAY_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -142,7 +149,7 @@ PREDEFINED_PERSONAS = [
         "category": "Marketing",
         "tags": ["marketing", "content", "strategy", "writing"],
         "suggested_temperature": 0.8,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-opus-20240229"],
+        "suggested_models": list(DEEP_WORK_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -160,7 +167,7 @@ PREDEFINED_PERSONAS = [
         "category": "Marketing",
         "tags": ["marketing", "seo", "analytics", "organic-traffic"],
         "suggested_temperature": 0.5,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-sonnet-20240229"],
+        "suggested_models": list(EVERYDAY_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -179,7 +186,7 @@ PREDEFINED_PERSONAS = [
         "category": "Support",
         "tags": ["support", "technical", "troubleshooting", "debugging"],
         "suggested_temperature": 0.4,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-sonnet-20240229"],
+        "suggested_models": list(EVERYDAY_MODELS),
         "source": "manual",
         "scope": "global",
     },
@@ -197,7 +204,7 @@ PREDEFINED_PERSONAS = [
         "category": "Support",
         "tags": ["support", "customer-experience", "advocacy", "satisfaction"],
         "suggested_temperature": 0.6,
-        "suggested_models": ["gpt-4-turbo-preview", "claude-3-sonnet-20240229"],
+        "suggested_models": list(EVERYDAY_MODELS),
         "source": "manual",
         "scope": "global",
     },

@@ -12,20 +12,17 @@ Rev 2 inverts exclusion for everything but the obs tier, so this suite proves
   * the dial works both ways — the same action stops with
     ``requires_confirmation`` at standard autonomy;
   * the kill-switch halts mid-flow — flipping the autonomy dial off re-imposes
-    confirmation on the very next call (no caching), and flipping
-    ``HARNESS_SELF_MANAGEMENT_ENABLED`` off refuses further auto-apply;
+    confirmation on the very next call (no caching);
   * every autonomous invocation lands in the Wave 4 audit trail
     (``tool_execution_logs.router_decision->>'autonomous'``) distinctly and
     queryably.
 
 Idioms: S2's fake-POSTGRES preamble (closed port 59432 so a wedged local
 proxy can't hang the fail-soft import-time connect), the manifest suite's
-real-catalogue registry fixture, W3's autonomy/rate-limit patches, and the
-Wave 4 harness helpers from tests/test_harness_self_management.py. No DB.
+real-catalogue registry fixture and W3's autonomy/rate-limit patches. No DB.
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 import types
@@ -85,7 +82,6 @@ pytestmark = pytest.mark.asyncio
 _DESTRUCTIVE = "platform_delete_agent"
 _READ = "platform_list_agents"
 _MEMBER_CTX = {"workspace_role": "member", "user_id": 7}
-_WS_ID = "00000000-0000-0000-0000-000000000001"
 
 
 @pytest.fixture(scope="module")
@@ -192,51 +188,19 @@ async def test_same_action_requires_confirmation_when_autonomy_standard(real_reg
 
 
 # ---------------------------------------------------------------------------
-# 3. Kill-switch: both flags halt mid-flow
+# 3. Kill-switch: the autonomy dial halts mid-flow
 # ---------------------------------------------------------------------------
 
-def _harness_task(task_id=7, current=None, proposed=None):
-    """Board task exactly as HARNESS _phase_apply() produces it (Wave 4 idiom,
-    see tests/test_harness_self_management.py)."""
-    current = {"interval_minutes": 30} if current is None else current
-    proposed = {"interval_minutes": 90} if proposed is None else proposed
-    return {
-        "id": task_id,
-        "title": "[HARNESS] heartbeat_tune for ScribeAgent",
-        "description": (
-            "**Risk Score:** 2/5\n\n"
-            "**Change Type:** heartbeat_tune\n\n"
-            f"**Current:** {json.dumps(current)}\n\n"
-            f"**Proposed:** {json.dumps(proposed)}\n\n"
-            "**Rationale:** because reasons\n\n"
-            "**Expected Improvement:** save tokens"
-        ),
-        "tags": ["harness", "org-review", "risk-2"],
-    }
+async def test_kill_switch_halts(monkeypatch, real_registry):
+    """Flipping the autonomy dial off MID-FLOW takes effect on the very next
+    call: it re-imposes confirmation, and it is not cached.
 
-
-class _FakeHarnessExecutor:
-    def __init__(self, tasks, agents):
-        self._tasks = tasks
-        self._agents = agents
-        self.calls = []
-        self.db = None  # the task ledger is the harness_ledger fixture (F156)
-
-    async def execute(self, action, params, caller_context=None):
-        self.calls.append((action, params))
-        if action == "platform_list_tasks":
-            return {"data": self._tasks}
-        if action == "platform_list_agents":
-            return {"data": self._agents}
-        return {"success": True}
-
-
-async def test_kill_switch_halts(monkeypatch, tmp_path, real_registry, harness_ledger):
-    """Flipping either kill-switch flag off MID-FLOW takes effect on the very
-    next call — the autonomy dial re-imposes confirmation, the HARNESS flag
-    refuses auto-apply. Neither is cached."""
-    # --- Half 1: the autonomy dial, read fresh through the canonical service
-    # on EVERY execute() — flipping it off mid-flow halts the next action.
+    Its second half, the HARNESS_SELF_MANAGEMENT_ENABLED flag refusing the
+    card-to-Done auto-apply, went with that path in PRD-263 US-016: the weekly
+    run is report_only and applies nothing whatever the flag says, which
+    test_prd263_harness_report_only.py asserts with the flag on."""
+    # The autonomy dial, read fresh through the canonical service on EVERY
+    # execute() — flipping it off mid-flow halts the next action.
     import core.services.auto_autonomy as autonomy_mod
 
     state = {"full": True}
@@ -263,30 +227,6 @@ async def test_kill_switch_halts(monkeypatch, tmp_path, real_registry, harness_l
     assert second["success"] is False
     assert second.get("requires_confirmation") is True
     ex._handlers[_DESTRUCTIVE].assert_awaited_once()  # only the first ran
-
-    # --- Half 2: the HARNESS self-management flag — on applies, off refuses.
-    from config import config
-    from services.harness_service import HarnessService
-
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
-    monkeypatch.setattr(config, "WORKSPACE_VOLUME_PATH", str(tmp_path))
-    svc = HarnessService()
-    agents = [{"id": 42, "name": "ScribeAgent"}]
-
-    fake_on = _FakeHarnessExecutor(tasks=[_harness_task(task_id=7)], agents=agents)
-    changelog_on = {}
-    await svc._apply_approved_board_tasks(fake_on, _WS_ID, changelog_on)
-    assert (
-        "platform_configure_agent_heartbeat",
-        {"agent_id": 42, "interval_minutes": 90},
-    ) in fake_on.calls
-
-    monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", False)
-    fake_off = _FakeHarnessExecutor(tasks=[_harness_task(task_id=8)], agents=agents)
-    changelog_off = {}
-    await svc._apply_approved_board_tasks(fake_off, _WS_ID, changelog_off)
-    assert fake_off.calls == []  # flag off → no listing, no apply
-    assert changelog_off == {}
 
 
 # ---------------------------------------------------------------------------

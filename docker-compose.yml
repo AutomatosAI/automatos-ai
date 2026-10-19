@@ -199,7 +199,7 @@ services:
     # `docker compose up` and the fresh-clone smoke lane. Chainguard publishes a
     # maintained build; its free tier offers only `latest`, so the digest pins it
     # and Dependabot moves the digest weekly (.github/dependabot.yml, PRD-262).
-    image: cgr.dev/chainguard/minio:latest@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
+    image: cgr.dev/chainguard/minio:latest@sha256:2915cb406f38ed6ff9634de0a3e4a9423e2dda06a6f1aca18f8c968aa37a01f6
     container_name: automatos_minio
     restart: unless-stopped
     # No user: key. MinIO runs as the image's own user, uid 65532, never root
@@ -636,7 +636,8 @@ services:
           cpus: '4.0'
           memory: 8G
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/health"]
+      # Python's urllib: the image carries no curl (PRD-262 US-051).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3

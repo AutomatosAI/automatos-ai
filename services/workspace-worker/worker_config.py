@@ -123,3 +123,14 @@ def otel_headers() -> str:
 def otel_sampler_ratio() -> str:
     """``OTEL_TRACES_SAMPLER_RATIO``, as text: parsed when tracing starts."""
     return os.environ.get("OTEL_TRACES_SAMPLER_RATIO", DEFAULT_OTEL_SAMPLER_RATIO)
+
+
+# The platform's Postgres, for the worker's one write: a task's lifecycle in
+# task_executions (task_executions_db.py). SQLAlchemy's driver form
+# (postgresql+psycopg2://) is accepted; the write normalises it for libpq.
+DATABASE_URL_ENV = "DATABASE_URL"
+
+
+def database_url() -> str:
+    """``DATABASE_URL``; empty when unset or blank."""
+    return os.environ.get(DATABASE_URL_ENV, "").strip()

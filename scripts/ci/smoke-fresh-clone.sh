@@ -39,8 +39,9 @@
 # service from Docker's start and health_status events, the /health/bootstrap
 # stage table of each boot and the alembic runs per boot. scripts/ci/smoke_boot.py
 # does the polling and scripts/ci/smoke_report.py the report; the records and logs
-# land in $SMOKE_OUT_DIR, which the workflow uploads. No time is a bar yet: the lane fails only when a
-# boot or the frontend never answers 200 (PRD-262 US-004 records the baselines).
+# land in $SMOKE_OUT_DIR, which the workflow uploads. No backend or frontend time is a bar yet: the
+# lane fails when a boot or the frontend never answers 200 (PRD-262 US-004 records the baselines).
+# The one time bar is the workspace worker's 20 s to healthy (PRD-262 US-045, below).
 #
 # PRD-262 US-005: once the frontend answers, scripts/ci/smoke-loopback-ports.sh asserts
 # that it, and every other published port, listens on 127.0.0.1 (`docker compose port
@@ -166,15 +167,20 @@
 # the one-shot may have re-owned it; either way the document below is stored by a MinIO
 # that is not root. scripts/ci/smoke-minio-upgrade.sh covers a volume root wrote before.
 #
+# PRD-262 US-045, in every variant: scripts/ci/smoke_worker_health.py needs the workspace
+# worker healthy within 20 s of its start (from the same Docker events) and its /metrics
+# answering 200.
+#
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, MinIO ran as uid 65532, the document came back, the backend ran as the
-# production stage should, the health gates held their bars, every boot ran alembic at
-# most once (and only the behind-head boot ran it at all), and the warm restarts redid
-# no seed work.
-# Exit 1 = a boot failed, a port listens beyond this machine, the backend's build context
-# is over its budget, MinIO ran as root or minio-volume-owner failed (US-041), the
-# document did not come back from object storage, a US-035 check failed, make up
-# wrote no generated secrets to .env (US-037), a health gate
+# loopback, the workspace worker turned healthy within 20 s and answered /metrics, MinIO
+# ran as uid 65532, the document came back, the backend ran as the production stage
+# should, the health gates held their bars, every boot ran alembic at most once (and only
+# the behind-head boot ran it at all), and the warm restarts redid no seed work.
+# Exit 1 = a boot failed, a port listens beyond this machine, the workspace worker was not
+# healthy within 20 s of its start or its /metrics did not answer 200 (US-045), the
+# backend's build context is over its budget, MinIO ran as root or minio-volume-owner
+# failed (US-041), the document did not come back from object storage, a US-035 check
+# failed, make up wrote no generated secrets to .env (US-037), a health gate
 # missed its bar (US-038), make build or make up failed, or postgres was not healthy
 # before make build had built the backend's image (US-039); or a boot ran alembic twice
 # (or the CMD ran it), or ran it at head, or the behind-head boot did not, or a warm
@@ -279,6 +285,11 @@ MINIO_FILE="${OUT_DIR}/minio-user.json"
 # Where compose publishes MinIO on this host: presigned links must point here
 # (S3_PUBLIC_ENDPOINT_URL in envs/api.defaults).
 STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
+# PRD-262 US-045: the workspace worker, its health bar and smoke_worker_health.py's record.
+WORKER_CONTAINER="automatos_workspace_worker"
+WORKER_HEALTH_TOOL="scripts/ci/smoke_worker_health.py"
+WORKER_HEALTHY_MAX_SECONDS=20
+WORKER_HEALTH_FILE="${OUT_DIR}/worker-health.json"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
 # PRD-262 US-037: the .env make up writes, and a secret line as make env writes it.
@@ -644,6 +655,16 @@ check_worker_restart() {
     || fail "uvicorn did not replace a killed worker within 30s with /health 200 and no container restart"
 }
 
+# PRD-262 US-045: the workspace worker, started with the backend, reported healthy within
+# WORKER_HEALTHY_MAX_SECONDS of its start (its HEALTHCHECK probes every 2 s while it
+# starts), and its /metrics answers 200.
+check_workspace_worker() {
+  python3 "$WORKER_HEALTH_TOOL" --events "$EVENTS_FILE" --service workspace-worker \
+    --container "$WORKER_CONTAINER" --max-seconds "$WORKER_HEALTHY_MAX_SECONDS" \
+    --out "$WORKER_HEALTH_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "the workspace worker was not healthy within ${WORKER_HEALTHY_MAX_SECONDS}s of its start, or its /metrics did not answer 200"
+}
+
 # Every mode: every app container runs the image compose names for it, with this
 # commit's revision label. With `pull`, its RepoDigests prove it was pulled and nothing
 # was built; a source build must carry a local-* tag (PRD-262 US-036).
@@ -819,6 +840,8 @@ dump_failure_logs() {
   compose logs --tail 150 backend >&2 || true
   echo "----- frontend logs (tail) -----" >&2
   compose logs --tail 80 frontend >&2 || true
+  echo "----- workspace-worker logs (tail) -----" >&2
+  compose logs --tail 80 workspace-worker >&2 || true
 }
 
 # The log of the backend container check_api_local_reaches_backend replaced, if it did.
@@ -893,6 +916,7 @@ main() {
   check_build_overlap
   check_loopback_ports
   check_images
+  check_workspace_worker
   check_minio_user
   check_document_storage
   snapshot_credential_types "$CREDENTIAL_TYPES_BEFORE"

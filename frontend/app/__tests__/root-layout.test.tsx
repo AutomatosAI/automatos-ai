@@ -21,10 +21,19 @@ vi.mock('next/headers', () => ({
     },
   }),
 }))
-// next/font is a compile-time transform; under vitest each loader is a plain function.
-vi.mock('next/font/google', () => {
-  const loader = (name: string) => () => ({ variable: `font-${name}`, className: `font-${name}-face`, style: {} })
-  return { Geist: loader('geist'), Geist_Mono: loader('geist-mono'), Newsreader: loader('newsreader') }
+// next/font is a compile-time transform; under vitest the local loader is a plain function, so
+// app/core-fonts.ts runs for real and each face's class is named by the CSS variable it binds.
+vi.mock('next/font/local', () => {
+  const names: Readonly<Record<string, string>> = {
+    '--font-geist-sans': 'geist',
+    '--font-geist-mono': 'geist-mono',
+    '--font-newsreader': 'newsreader',
+  }
+  const loader = ({ variable }: { readonly variable: string }) => {
+    const name = names[variable] ?? `unknown${variable}`
+    return { variable: `font-${name}`, className: `font-${name}-face`, style: {} }
+  }
+  return { default: loader }
 })
 vi.mock('@/app/play-fonts', () => ({ PLAY_FONT_VARIABLE_CLASSES: ['font-instrument', 'font-bricolage', 'font-fredoka'] }))
 vi.mock('@/components/providers', () => ({ Providers: ({ children }: { children: ReactNode }) => children }))

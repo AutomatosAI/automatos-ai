@@ -17,6 +17,16 @@ GHCR; ``registry`` names that service's image, and is empty when nothing needs i
 ``edge`` is the published tag the update delta is measured against; an image that
 is never published has none.
 
+The build cache (PRD-262 §9-Q13): every run reads it, and only publishing runs write
+it (``cache_from``, ``cache_to``). An image's ``cache`` is ``gha`` (the default), the
+Actions cache with one scope per image and arch, or ``registry``: a private GHCR ref,
+``ghcr.io/<owner>/automatos-<name>:buildcache-<arch>``, for an image too big for the
+10 GB Actions cache (media-render, PRD-262 US-054). Its write ignores errors, so a
+cache GHCR refuses never fails the build that main's publish waits on; the job logs
+in to GHCR to read it (``ghcr_login``). Two flags pass through for the build job:
+``on_disk`` (measure the image on disk too, PRD-262 §8) and ``scan_report_only``
+(an image scanned for the first time is judged report only, PRD-262 US-054).
+
 The weekly OS rebuild (PRD-262 US-011): with ``--no-cache true`` (a schedule run, or a
 dispatch with ``no_cache``), each entry's ``no_cache_filters`` joins the stages its
 image definition lists under ``no_cache_filters``: the stages whose OS packages ship.
@@ -47,7 +57,7 @@ import json
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Sequence, Tuple
 
 LOCAL_REGISTRY_HOST = "localhost:5000"
 # GitHub gives these a meaning this picker does not copy (``?`` and ``+`` repeat the
@@ -58,6 +68,8 @@ GLOB_PART = re.compile(r"\*\*|\*|\?|[^*?]+")
 WEEKLY_TAG_PREFIX = "weekly-"
 WEEKLY_DATE_FORMAT = "%Y%m%d"
 REWRITE_TIMESTAMP = ",rewrite-timestamp=true"
+CACHE_BACKENDS = ("gha", "registry")
+BUILDCACHE_TAG_PREFIX = "buildcache-"
 
 
 def glob_regex(pattern: str) -> re.Pattern:
@@ -92,6 +104,24 @@ def selected(images: List[dict], shared_inputs: List[str], files: Sequence[str],
     return [image["name"] for image in images if touches(files, image["inputs"])]
 
 
+def cache_refs(image: dict, arch: str, publish_run: bool, published: str) -> Tuple[str, str]:
+    """BuildKit's ``cache-from`` and ``cache-to`` for one build: every run reads, publishing runs write.
+
+    ``published`` is the image's GHCR name; a ``registry`` cache lives beside it, in the
+    same private package, as ``buildcache-<arch>``. A ``cache`` other than ``gha`` or
+    ``registry`` raises ValueError instead of building with no cache.
+    """
+    backend = image.get("cache", "gha")
+    if backend not in CACHE_BACKENDS:
+        raise ValueError(f"{image['name']}: cache {backend!r} is not one of {', '.join(CACHE_BACKENDS)}")
+    mode = image["cache_mode"]
+    if backend == "registry":
+        ref = f"type=registry,ref={published}:{BUILDCACHE_TAG_PREFIX}{arch}"
+        return ref, (f"{ref},mode={mode},ignore-error=true" if publish_run else "")
+    scope = f"scope={image['name']}-{arch}"
+    return f"type=gha,{scope}", (f"type=gha,mode={mode},{scope}" if publish_run else "")
+
+
 def entry(image: dict, arch: str, runner: str, publish_run: bool, owner: str, local_registry: str,
           no_cache: bool = False) -> dict:
     """One build job: what to build, where it runs, where it pushes, what it is compared with."""
@@ -99,20 +129,25 @@ def entry(image: dict, arch: str, runner: str, publish_run: bool, owner: str, lo
     published = f"ghcr.io/{owner.lower()}/automatos-{name}"
     to_ghcr = publish_run and image["publish"]
     epoch = image.get("source_date_epoch")
+    cache_from, cache_to = cache_refs(image, arch, publish_run, published)
     return {
         "name": name,
         "context": image["context"],
         "target": image["target"],
         "build_args": "\n".join(image["build_args"] + ([f"SOURCE_DATE_EPOCH={int(epoch)}"] if epoch else [])),
         "rewrite_timestamp": REWRITE_TIMESTAMP if epoch else "",
-        "cache_mode": image["cache_mode"],
+        "cache_from": cache_from,
+        "cache_to": cache_to,
         "no_cache_filters": ",".join(image["no_cache_filters"]) if no_cache else "",
         "arch": arch,
         "runner": runner,
         "publish": to_ghcr,
+        "ghcr_login": to_ghcr or cache_from.startswith("type=registry,"),
         "image": published if to_ghcr else f"{LOCAL_REGISTRY_HOST}/automatos-{name}",
         "edge": f"{published}:edge" if image["publish"] else "",
         "registry": "" if to_ghcr else local_registry,
+        "on_disk": bool(image.get("on_disk", False)),
+        "scan_report_only": bool(image.get("scan_report_only", False)),
     }
 
 

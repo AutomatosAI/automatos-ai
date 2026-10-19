@@ -9,7 +9,9 @@ edit could quietly undo:
   runtime on the same Alpine release with only the node binary copied in (no npm,
   yarn, corepack, C headers or curl); a busybox wget health check on /favicon.ico;
 - the worker and media-render: Node from a stage named `node`, pinned as tag@digest,
-  never NodeSource; npm and corepack copied, the C headers not; production last;
+  never NodeSource; the C headers never copied; production last. The worker copies
+  npm and corepack too; media-render the node binary alone, because Hyperframes
+  comes from its js stage's npm ci (US-053);
 - the worker's pnpm pinned exactly, its npm cache cleaned in the same RUN;
 - every Dockerfile that runs Node takes it through a named stage, never a bare
   `COPY --from=<image>`, because an updater reads FROM lines only;
@@ -33,6 +35,15 @@ MEDIA_RENDER = (ROOT / "services" / "media-render" / "Dockerfile").read_text()
 DEBIAN_NODE_IMAGES = {
     "services/workspace-worker/Dockerfile": WORKER,
     "services/media-render/Dockerfile": MEDIA_RENDER,
+}
+# What each copies from the `node` stage.
+NODE_COPIES = {
+    "services/workspace-worker/Dockerfile": [
+        "/usr/local/bin/node",
+        "/usr/local/lib/node_modules/corepack",
+        "/usr/local/lib/node_modules/npm",
+    ],
+    "services/media-render/Dockerfile": ["/usr/local/bin/node"],
 }
 NODE_DOCKERFILES = (
     "frontend/Dockerfile",
@@ -129,11 +140,7 @@ def test_the_debian_images_take_node_24_from_the_official_image(path):
     assert re.fullmatch(rf"node:24-trixie-slim{DIGEST}", images.get("node", "")), images
     assert _stages(dockerfile)[-1][1] == "production", "production must stay the last stage"
     copied = sorted(_copies_from(_instructions(dockerfile), "node"))
-    assert copied == [
-        "/usr/local/bin/node",
-        "/usr/local/lib/node_modules/corepack",
-        "/usr/local/lib/node_modules/npm",
-    ]
+    assert copied == NODE_COPIES[path]
     code = "\n".join(_instructions(dockerfile)).lower()
     for gone in ("nodesource", "/usr/local/include", "gnupg", "python3.13"):
         assert gone not in code, gone

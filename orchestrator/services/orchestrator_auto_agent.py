@@ -4,8 +4,8 @@
 orchestrator's LLM and Soul on the workspace's Auto agent row, the single source of
 truth for both. This module reads that row's model_config as the LLM block the
 routes return, and writes a save's LLM and configuration fields to it. Moved out of
-api/workspaces.py unchanged (PRD-263 PR-1E-a) so the save route fits the 50-line
-function rule.
+api/workspaces.py (PRD-263 PR-1E-a) so the save route fits the 50-line function
+rule. Since 19 Oct 2026 a save writes only that row (``sync_auto_llm``).
 """
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ LLM_KEYS = (
     "provider", "model_id", "temperature", "max_tokens", "top_p", "frequency_penalty",
     "presence_penalty", "stop", "timeout", "fallback_model_id",
 )
+# The route keys: a save that names no model leaves both as stored.
+ROUTE_KEYS = ("provider", "model_id")
 
 
 def auto_llm_view(mc: Dict[str, Any]) -> Dict[str, Any]:
@@ -45,43 +47,36 @@ def auto_llm_view(mc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def sync_auto_llm(db: Session, auto_agent: Agent, llm: Any) -> None:
-    """LLM config → the Auto agent's model_config, and provider/model → system_settings."""
+    """LLM config → this workspace's Auto agent model_config, and nothing else.
+
+    The save never writes the platform default (system_settings orchestrator_llm):
+    that is a platform admin's setting (System Settings > LLM tiers). Until 19 Oct
+    2026 this save wrote its provider and model there too, so one workspace's choice
+    became every workspace's default. The row is marked
+    (``auto_model_sync.workspace_saved_model_config``): saving the platform default's
+    own pair, or leaving a following row's model as it was, keeps it following the
+    platform default; any other pair is this workspace's choice. ``db`` stays in the
+    signature for api/workspaces.py's call. A save whose model_id is blank (a page
+    that could not load the config) names no model: the stored provider and model
+    stay, and only the other keys are written (``llm_update``)."""
     if not (llm and isinstance(llm, dict)):
         return
     from sqlalchemy.orm.attributes import flag_modified
 
-    auto_agent.model_config = {**(auto_agent.model_config or {}), **{key: llm[key] for key in LLM_KEYS if key in llm}}
-    _sync_orchestrator_llm_settings(db, llm)
+    from core.llm.auto_model_sync import workspace_saved_model_config
+    from core.llm.new_agent_model import default_route
+
+    update = llm_update(llm)
+    auto_agent.model_config = workspace_saved_model_config(auto_agent.model_config or {}, update, default_route())
     flag_modified(auto_agent, "model_config")
 
 
-def _sync_orchestrator_llm_settings(db: Session, llm: Dict[str, Any]) -> None:
-    """Sync to system_settings so config.LLM_PROVIDER/LLM_MODEL stay in sync (used by
-    internal orchestrator operations: agent_factory, chatbot, etc.). Best-effort: a
-    failure is logged and the Auto agent's own model_config still saves."""
-    # Moved unchanged from api/workspaces.py: the global orchestrator_llm write predates PRD-263.
-    try:
-        from core.models.system_settings import SystemSetting
-        for ss_key, llm_key in [("provider", "provider"), ("model", "model_id")]:
-            if llm_key not in llm:
-                continue
-            ss = db.query(SystemSetting).filter(
-                SystemSetting.category == "orchestrator_llm",
-                SystemSetting.key == ss_key,
-            ).first()
-            if ss:
-                ss.value = llm[llm_key]
-            else:
-                db.add(SystemSetting(
-                    category="orchestrator_llm",
-                    key=ss_key,
-                    value=llm[llm_key],
-                    default_value=llm[llm_key],
-                    value_type="string",
-                    is_required=True,
-                ))
-    except Exception:
-        logger.warning("Failed to sync LLM settings to system_settings table", exc_info=True)
+def llm_update(llm: Dict[str, Any]) -> Dict[str, Any]:
+    """The model_config keys a save of ``llm`` writes: every ``LLM_KEYS`` key it
+    carries, less the route keys when it names no model_id, so a blank model is
+    never written over the Auto row's."""
+    skipped = () if llm.get("model_id") else ROUTE_KEYS
+    return {key: llm[key] for key in LLM_KEYS if key in llm and key not in skipped}
 
 
 def sync_auto_configuration(auto_agent: Agent, payload: Dict[str, Any]) -> None:

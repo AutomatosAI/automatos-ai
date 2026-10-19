@@ -1,17 +1,21 @@
 """Image size, layers, update delta and budget reports for images.yml (PRD-262 US-001).
 
-Four commands, each run by one images.yml step:
+Five commands, each run by one images.yml step:
 
 * ``measure`` (each build job, after the push) reads the pushed digest back from its
   registry, picks the job's architecture out of the index, and writes a JSON report:
   compressed size, every layer with the instruction that made it and its heaviest
   paths, and the update delta against the published ``edge``. It appends a
   Markdown table to the step summary.
+* ``disk`` (the build jobs of an image §8 bars on disk: media-render, PRD-262 US-054)
+  adds ``on_disk_bytes``, the Size ``docker image inspect`` reports once the image is
+  pulled from the job's registry, to that report.
 * ``budget`` (each build job) checks that report against ``.github/image-budgets.json``:
-  its compressed size against the image's budget, and its update delta against the
-  image's update bar, if it has one (PRD-262 US-016: a code-only API update is one
-  layer of 6 MB or less). In the file's ``warn`` mode a miss prints a warning;
-  ``fail`` mode (PRD-262 US-004) fails the job.
+  the compressed size against ``max_mb``, the on-disk size against ``on_disk_max_mb``
+  where an entry has one, and its update delta against the image's update bar, if it
+  has one (PRD-262 US-016: a code-only API update is one layer of 6 MB or less). In
+  the file's ``warn`` mode a miss prints a warning; ``fail`` mode (PRD-262 US-004)
+  fails the job.
 * ``layer`` (the API's build jobs, PRD-262 US-014) checks that one layer of that
   report holds only files of one suffix below one directory: the stdlib compile's
   layer holds stdlib ``.pyc`` and nothing under site-packages. It fails the job
@@ -189,20 +193,40 @@ def measure(args: argparse.Namespace) -> int:
     return 0
 
 
+def disk(args: argparse.Namespace) -> int:
+    """Add the image's on-disk size (``docker image inspect``'s Size) to its report."""
+    path = Path(args.report)
+    report = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**report, "on_disk_bytes": args.bytes}, indent=1), encoding="utf-8")
+    _append(args.summary, f"**On disk** ({report['name']}, {report['arch']}): {layers.mb(args.bytes)}, "
+                          "the Size `docker image inspect` reports for the image pulled from the registry.")
+    return 0
+
+
 def budget(args: argparse.Namespace) -> int:
+    """The compressed size against its budget, the on-disk size against an on-disk bar, and
+    the update delta against the image's update bar."""
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
     budgets = json.loads(Path(args.budgets).read_text(encoding="utf-8"))
     mode = budgets.get("mode", "warn")
-    checks = (
-        ("Image size budget", "Budget",
-         layers.budget_verdict(report["name"], report["arch"], report["bytes"], budgets)),
+    name, arch = report["name"], report["arch"]
+    checks = [(title, label, verdict) for title, label, verdict in (
+        ("Image size budget", "Budget", layers.budget_verdict(name, arch, report["bytes"], budgets)),
+        ("Image size budget", "Budget", layers.on_disk_verdict(name, arch, report.get("on_disk_bytes"), budgets)),
         ("Update budget", "Update bar", layers.update_verdict(report, budgets)),
-    )
+    ) if verdict]
     for title, label, verdict in checks:
         if verdict.level != "ok":
             print(f"::{verdict.level} title={title}::{verdict.message}")
         _append(args.summary, f"**{label}** ({mode} mode): {verdict.message}.")
     return 1 if any(verdict.level == "error" for _, _, verdict in checks) else 0
+
+
+def _byte_count(value: str) -> int:
+    count = int(value)
+    if count <= 0:
+        raise argparse.ArgumentTypeError(f"{value} is not a size in bytes")
+    return count
 
 
 def layer(args: argparse.Namespace) -> int:
@@ -298,6 +322,10 @@ def parser() -> argparse.ArgumentParser:
         one.add_argument(flag, required=True)
     one.add_argument("--edge", default="", help="the published edge tag; empty when there is none")
     one.add_argument("--summary", help="append Markdown here ($GITHUB_STEP_SUMMARY)")
+    on_disk = commands.add_parser("disk", help="add the on-disk size to one report")
+    on_disk.add_argument("--report", required=True)
+    on_disk.add_argument("--bytes", required=True, type=_byte_count, help="docker image inspect's Size")
+    on_disk.add_argument("--summary")
     check = commands.add_parser("budget", help="check one report against the budgets")
     check.add_argument("--report", required=True)
     check.add_argument("--budgets", required=True)
@@ -317,7 +345,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: List[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    return {"measure": measure, "budget": budget, "layer": layer, "report": report}[args.command](args)
+    return {"measure": measure, "disk": disk, "budget": budget, "layer": layer, "report": report}[args.command](args)
 
 
 if __name__ == "__main__":

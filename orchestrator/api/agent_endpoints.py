@@ -22,6 +22,7 @@ from modules.agents import (
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from api.agent_model_config import checked_model_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agent-endpoints"])
@@ -557,6 +558,9 @@ async def update_agent_model_config(
         "fallback_model_id": "google/gemini-2.5-flash"
     }
     
+    The body replaces the whole model_config, so one naming no model_id is refused
+    (422, ``api.agent_model_config.checked_model_config``).
+
     Note: Agent must be recreated for changes to take effect in runtime.
     """
     try:
@@ -567,60 +571,9 @@ async def update_agent_model_config(
                 detail=f"Agent {agent_id} not found"
             )
 
-        # Validate model exists and auto-resolve provider from registry.
-        # Uses _get_or_create_from_cache so any marketplace model (including
-        # those only in the OpenRouter cache) can be assigned to an agent.
-        model_id = model_config.get("model_id")
-        if model_id:
-            from api.llm_marketplace import _get_or_create_from_cache
-            model = _get_or_create_from_cache(db, model_id, model_config.get("provider"))
-            if not model:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid model_id: {model_id}"
-                )
-            # PRD-239 S5: a route the provider no longer offers is refused with the
-            # reason — saving it would only fail at the first chat turn.
-            if getattr(model, "status", "active") == "deprecated":
-                from core.llm import providers as _registry
-                _spec = _registry.get_spec(model.serving_provider)
-                _route = _spec.label if _spec else (model.serving_provider or "the provider")
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=(
-                        f"{getattr(model, 'display_name', None) or model_id} is no longer offered by "
-                        f"{_route}. Pick another model."
-                    ),
-                )
-            # PRD-236 W1: the stored provider is the ROUTE that serves the row
-            # (openrouter / nvidia / openai …), never the vendor — the factory
-            # routes to it as tagged.
-            model_config["provider"] = model.serving_provider
-
-            # PRD-223 W1: policy gate. The Auto agent row is the orchestrator
-            # seat — quarantined/unapproved models are rejected at write time
-            # (the factory fail-closes at runtime as the last line).
-            from core.llm.model_policy import check_model_for_agent
-            _is_auto_seat = (
-                getattr(agent, "name", "") == "Auto"
-                and bool(getattr(agent, "is_system_agent", False))
-            )
-            _allowed, _reason = check_model_for_agent(
-                db, ctx.workspace_id, model_id, orchestrator_seat=_is_auto_seat,
-                provider=model.serving_provider,
-            )
-            if not _allowed:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Model rejected: {_reason}",
-                )
-
-        # Update model config. F141: a model the catalog just vouched for drops a
-        # provider-refusal stamp (the form echoes back what it loaded).
-        if model_id:
-            from core.llm.model_refusals import without_refusal
-
-            model_config = without_refusal(model_config)
+        # Validated, on the route that serves it, without a refusal stamp (a NEW dict).
+        model_config = checked_model_config(db, ctx.workspace_id, agent, model_config)
+        model_id = model_config["model_id"]
         agent.model_config = model_config
         
         # Mark for modification tracking

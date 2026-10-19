@@ -35,8 +35,10 @@ PROD_DEFAULTS = {
     # build, so no arg picks a second dependency set.
     "orchestrator/Dockerfile": {},
     "services/workspace-worker/Dockerfile": {"INSTALL_BROWSER": "true"},
-    # PRD-251 W1: no defaulted ARG (TARGETARCH is BuildKit's, never defaulted).
-    "services/media-render/Dockerfile": {},
+    # TARGETARCH is BuildKit's, never defaulted. PRD-262 US-053: the Kokoro files and
+    # the music tracks are fetched (sha256-checked) until the media assets image is
+    # published and public; then its own stage, and this value, become `image`.
+    "services/media-render/Dockerfile": {"MEDIA_ASSETS": "fetch"},
 }
 
 # What the LOCAL edition must pass explicitly (docker-compose.yml build args).

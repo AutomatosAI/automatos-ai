@@ -6,6 +6,14 @@ Night 14 (12–13 Oct, F416): build_edges loaded every tool_execution_logs row o
 included) and the backend was OOMKilled at 03:50. The read now pages through the
 window by id, loads only the columns the edges and affinities use, and keeps one
 slim dict per row; a page's ORM rows are dropped before the next is read.
+
+PRD-263 US-018: the read keeps production rows, the synthetic signal rows (PRD-232
+gap and shown markers) and untagged rows, and no other tag: rows tagged ``eval`` or
+``replay``, and the ``synthetic`` rows scripts/eval/tool_routing/seed_telemetry writes
+from the eval queries, stay out of the Knowledge Graph builder. Replay traffic is still
+logged as production until it is tagged, so today this removes no replay row. A wait
+for the owner's click (``asked``) is never read: build_edges counts every status but
+``success`` as a failure, so an ask would become a ``fails_for_intent`` for its tool.
 """
 
 from __future__ import annotations
@@ -13,11 +21,20 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, load_only
 
 from core.models.composio_cache import ToolExecutionLog
 
 _DEFAULT_LOG_PAGE_SIZE = 1000  # config.EDGE_BUILDER_LOG_PAGE_SIZE overrides
+
+# The telemetry_source values the builder reads, besides untagged (NULL) rows: the
+# literals modules/tools/execution/telemetry.py writes (its default and
+# SYNTHETIC_SIGNAL_SOURCE). An allowlist, so any other tag (eval, replay, synthetic)
+# stays out. Kept literal so this read never loads the tool package.
+READ_SOURCES = ("production", "synthetic_signal")
+# telemetry.ASKED_STATUS: a call that waited for the owner's click, never read.
+ASKED_STATUS = "asked"
 
 # The columns _log_dict reads; the JSON payloads (input_parameters, output_result,
 # token_usage) are never loaded.
@@ -71,12 +88,16 @@ def _read_page(
     after_id: int,
     page_size: int,
 ) -> List[Any]:
-    """One page of the window: rows with id > after_id, the slim columns only."""
+    """One page of the window: rows with id > after_id, the slim columns only, from
+    the sources the builder reads and never an ask."""
     query = (
         db.query(ToolExecutionLog)
         .options(load_only(*_LOG_COLUMNS))
         .filter(ToolExecutionLog.executed_at >= cutoff)
         .filter(ToolExecutionLog.id > after_id)
+        .filter(or_(ToolExecutionLog.telemetry_source.in_(READ_SOURCES),
+                    ToolExecutionLog.telemetry_source.is_(None)))
+        .filter(ToolExecutionLog.status != ASKED_STATUS)
     )
     if workspace_id:
         query = query.filter(ToolExecutionLog.workspace_id == workspace_id)

@@ -17,7 +17,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from helpers import TOKEN, bundle
+from helpers import TOKEN, VOICES, bundle
 from media_render.bundle import MediaInput, parse_bundle
 from media_render.fixture import COMPOSITION, fixture_bundle
 from media_render.media_urls import parse_prefixes
@@ -132,7 +132,7 @@ def test_the_fetcher_stops_at_the_size_limit(settings, tmp_path):
 
 
 def test_staging_writes_the_composition_its_files_and_gsap(settings, tmp_path):
-    parsed = parse_bundle(fixture_bundle(), settings, {})
+    parsed = parse_bundle(fixture_bundle(), settings, {}, VOICES)
     project = tmp_path / "project"
     stage_project(parsed, project, settings.gsap_path)
     index = (project / "index.html").read_text()

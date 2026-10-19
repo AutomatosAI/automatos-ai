@@ -11,7 +11,8 @@ Pure functions over registry JSON, so the tests feed them recorded manifests:
   change is reported apart from a code-only change.
 * ``shared_layers`` and ``unique_bytes`` say what two or more images share, and
   what pulling them together costs.
-* ``budget_verdict`` checks a compressed size against ``.github/image-budgets.json``.
+* ``budget_verdict`` checks a compressed size against ``.github/image-budgets.json``,
+  and ``on_disk_verdict`` an image's on-disk size against its ``on_disk_max_mb``.
 * ``update_verdict`` checks an update delta against the same file's update bars: a
   code-only API update is one layer of 6 MB or less (PRD-262 US-016).
 * ``list_paths`` sums one layer's files by path prefix and by file suffix, from its
@@ -154,20 +155,45 @@ def unique_bytes(layer_lists: Iterable[List[dict]]) -> int:
     return sum(sizes.values())
 
 
+def _failing(budgets: dict) -> str:
+    """The level a finding gets: ``error`` in mode ``fail``, ``warning`` otherwise."""
+    return "error" if budgets.get("mode") == "fail" else "warning"
+
+
+def _against(label: str, size: int, limit: int, failing: str) -> Verdict:
+    if size <= limit:
+        return Verdict("ok", f"{label} is {mb(size)}, within its {mb(limit)} budget")
+    return Verdict(failing, f"{label} is {mb(size)}, {mb(size - limit)} over its {mb(limit)} budget")
+
+
 def budget_verdict(name: str, arch: str, size: int, budgets: dict) -> Verdict:
     """``size`` against ``budgets["budgets"][name][arch]["max_mb"]``, in the file's mode.
 
     Mode ``warn`` (report only, until PRD-262 US-004) turns every finding into a
     warning; mode ``fail`` makes it an error.
     """
-    failing = "error" if budgets.get("mode") == "fail" else "warning"
+    failing = _failing(budgets)
     entry = budgets.get("budgets", {}).get(name, {}).get(arch)
     if not entry:
         return Verdict(failing, f"{name} ({arch}) has no budget in .github/image-budgets.json")
-    limit = round(entry["max_mb"] * MB)
-    if size <= limit:
-        return Verdict("ok", f"{name} ({arch}) is {mb(size)}, within its {mb(limit)} budget")
-    return Verdict(failing, f"{name} ({arch}) is {mb(size)}, {mb(size - limit)} over its {mb(limit)} budget")
+    return _against(f"{name} ({arch})", size, round(entry["max_mb"] * MB), failing)
+
+
+def on_disk_verdict(name: str, arch: str, size: Optional[int], budgets: dict) -> Optional[Verdict]:
+    """``size`` on disk against the entry's ``on_disk_max_mb``, in the file's mode (PRD-262 US-054).
+
+    ``size`` is the Size ``docker image inspect`` reports, or None when the build did
+    not measure it. §8 bars media-render on disk, because it is never published. An
+    entry with an on-disk bar and no measured size is a finding, so a build that
+    stopped measuring cannot pass unseen. None when there is neither a bar nor a size.
+    """
+    entry = budgets.get("budgets", {}).get(name, {}).get(arch) or {}
+    label = f"{name} ({arch}) on disk"
+    if "on_disk_max_mb" not in entry:
+        return None if size is None else Verdict("ok", f"{label} is {mb(size)}, with no on-disk budget")
+    if size is None:
+        return Verdict(_failing(budgets), f"{label} was not measured, but it has an on-disk budget")
+    return _against(label, size, round(entry["on_disk_max_mb"] * MB), _failing(budgets))
 
 
 def update_verdict(report: dict, budgets: dict) -> Verdict:

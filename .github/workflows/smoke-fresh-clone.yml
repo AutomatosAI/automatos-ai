@@ -83,7 +83,9 @@ name: smoke-fresh-clone
 # the frontend's :3000, Started → Healthy per service, the /health/bootstrap
 # stages and the alembic runs per boot. The step summary shows them on every run;
 # the records and logs are uploaded as the smoke-fresh-clone-boot artifact, which
-# PRD-262 US-004 takes its five-run medians from. No time is a bar here yet.
+# PRD-262 US-004 takes its five-run medians from. No backend or frontend time is a
+# bar here yet; the workspace worker must report healthy within 20 s of its start
+# and answer /metrics 200 (PRD-262 US-045).
 #
 # PRD-262 US-033 — the API boots with no internet egress (FR-7). Unlike the measurements
 # above, the egress-boot job holds one time to a bar. It boots the backend twice with its
@@ -140,6 +142,7 @@ on:
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
+      - "scripts/ci/smoke_worker_health.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_alembic.py"
@@ -194,6 +197,7 @@ on:
       - "scripts/ci/smoke-loopback-ports.sh"
       - "scripts/ci/smoke_boot.py"
       - "scripts/ci/smoke_report.py"
+      - "scripts/ci/smoke_worker_health.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_alembic.py"
@@ -262,7 +266,7 @@ jobs:
       # stack's logs, pass or fail. The values in them are the throwaway ones above.
       - name: Upload boot measurements
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-fresh-clone-boot
           path: ${{ runner.temp }}/smoke-fresh-clone/

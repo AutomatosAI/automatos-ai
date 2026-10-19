@@ -50,7 +50,7 @@ Run through this every tick:
 1. What changed in the last 24h? (`platform_get_activity_feed period=1d`)
 2. What's blocked? (`platform_list_tasks status=blocked`)
 3. What needs my call? (reports with requires_approval=true and not acknowledged; missions with escalation_level >= 2)
-4. What did I handle for the owner? — surface the autonomous actions (auto-applied HARNESS prescriptions, etc.)
+4. What did I handle for the owner? — surface the actions you took on the owner's behalf
 5. What am I watching? — heartbeats with objective_met=False, agents trending toward warning
 Reply with five short lines, one per item. If a section is empty, say "clear"."""
 
@@ -64,14 +64,17 @@ Run this when today is the configured weekly review day:
 5. File a `summary` report with type=summary, status=ok|warning, recommendations + action_items populated."""
 
 
-_HARNESS_REVIEW = """## Monday HARNESS Review
-HARNESS runs Sunday 02:00 UTC. Review the audit:
-1. `platform_harness_status` — confirm status=completed and artifacts.audit_report=ok.
-   If status is failed, dormant_*, or any artifact failed: surface as a platform issue (NOT agent issue).
+# PRD-263 US-023: HARNESS is report-only and runs on the installation's weekday cron, so
+# this text names no day or time and asks for no queued cards. {judged_week} is filled
+# in when the block is built: the ISO week this week's run judges.
+_HARNESS_REVIEW = """## Weekly HARNESS Review
+HARNESS reviews the team once a week and only reports: it changes nothing and queues nothing. This week's run judges {judged_week}.
+1. `platform_harness_status`. If status is scheduled_not_run_yet, or cur_window is not {judged_week}, this week's run has not happened yet: tell the owner the review waits for it, and stop.
+   If status is failed, or artifacts.audit_report is not ok: surface it as a platform issue (NOT an agent issue).
+   If status is dormant_insufficient_agents: say HARNESS waits for more active agents, and stop.
 2. `platform_get_latest_report agent_name=Auto report_type=audit` — pull the audit.
-3. Summarise for the owner: convergence trend, top 3 issues, applied count, queued-for-review count, any failed artifacts.
-4. `platform_list_tasks tag=harness status=todo` — list queued prescriptions with risk + rationale.
-5. Send via `platform_send_notification` with severity=approval (if asks present) or info (if green).
+3. Summarise for the owner: coverage (judged agents out of active agents) and the INSUFFICIENT_DATA, WATCH and REGRESSION counts, naming the agents behind each WATCH and REGRESSION. If convergence is insufficient_data, say most agents had too little work to judge; never call an unjudged agent stable.
+4. Send via `platform_send_notification` with severity=info, status=warning if any agent is in REGRESSION, else ok.
 Short message, not a wall of text."""
 
 
@@ -163,17 +166,26 @@ def build_cadence_block(
     # Always-on cadences
     for key in ("daily_brief", "post_change_validation", "incident_review"):
         if cadence[key].get("enabled"):
-            blocks.append(_PROMPT_MAP[key])
+            blocks.append(_prompt(key, now))
 
     # Day-gated cadences
     for key in ("weekly_org_review", "harness_review", "team_review"):
         cfg = cadence[key]
         if cfg.get("enabled") and cfg.get("day", "mon") == today_code:
-            blocks.append(_PROMPT_MAP[key])
+            blocks.append(_prompt(key, now))
 
     if not blocks:
         return ""
     return "\n\n" + "\n\n".join(blocks)
+
+
+def _prompt(key: str, now: datetime) -> str:
+    """The cadence's prompt text; the HARNESS review names the ISO week this week's run judges."""
+    if key != "harness_review":
+        return _PROMPT_MAP[key]
+    from services.harness_runs import last_complete_iso_week
+
+    return _PROMPT_MAP[key].format(judged_week=last_complete_iso_week(now))
 
 
 _DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]

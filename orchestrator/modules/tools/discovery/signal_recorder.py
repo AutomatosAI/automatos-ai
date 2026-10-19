@@ -148,7 +148,9 @@ class ToolSignalRecorder:
         # PRD-232 US-009: set by stop() so the drain loop exits after flushing
         # its in-flight batch (clean-shutdown flush, no lost queued signals).
         self._stopping: bool = False
-        # Process-lifetime observability counters for the self-learning tile.
+        # Process-lifetime observability counters (stats()). The self-learning tile
+        # no longer reads them: its Signals figure is a per-workspace count of
+        # production tool logs (PRD-263 US-021).
         # Restart note: these and the queue are in-memory, so a restart loses any
         # *queued* signals — safe by design: the nightly edge_builder RECOMPUTES
         # authoritative edges/affinities from the durable tool_execution_logs, so
@@ -170,8 +172,8 @@ class ToolSignalRecorder:
     def stats(self) -> Dict[str, int]:
         """Observability snapshot: signals recorded vs dropped, flush successes
         vs failures, selection outcomes (narrowed vs fallback, PRD-143 S14),
-        and live queue depth — the numbers the self-learning tile
-        (W4-S16) reads to answer 'is tool-routing learning healthy?'."""
+        and live queue depth, for this process only. Not a per-workspace figure:
+        the self-learning tile counts production tool logs instead (PRD-263 US-021)."""
         depth = self._queue.qsize() if self._queue is not None else 0
         return {**self._stats, "queue_depth": depth}
 

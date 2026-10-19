@@ -62,6 +62,7 @@ from core.models.themes import ThemeInstallation, ThemePackage, ThemeReviewEvent
 from services.themes import llm_stage, review, review_limits, submissions  # noqa: E402
 from services.themes.digest import package_digest  # noqa: E402
 from tests.test_p2w2_authz_boundary_sweep import ADMIN_GATED_IN_HANDLER  # noqa: E402
+from tests.test_prd261_b2_wire import ACCOUNT_STEP_UP_ROUTES  # noqa: E402
 from tests.test_prd261_b2_wire import STEP_UP_ROUTES as B2_STEP_UP_ROUTES  # noqa: E402
 
 C1_MODULES = {
@@ -310,8 +311,10 @@ def test_no_earlier_route_shadows_a_w_c1_route(live_app):
         assert handler.startswith(modules[key] + ".") and path == key[1], f"{key} is answered by {answer}"
 
 
-def test_the_app_carries_step_up_on_the_w_b2_routes_and_the_w_c1_ones_only(live_app):
-    assert {_key(name) for name in live_app["step_up"]} == B2_STEP_UP_ROUTES | C1_STEP_UP_ROUTES
+def test_the_app_carries_step_up_on_the_w_b2_account_and_w_c1_routes_only(live_app):
+    # W-B2's theme routes, A-07f's account routes (role change, invite, API key) and W-C1's.
+    expected = B2_STEP_UP_ROUTES | ACCOUNT_STEP_UP_ROUTES | C1_STEP_UP_ROUTES
+    assert {_key(name) for name in live_app["step_up"]} == expected
 
 
 def test_the_capped_paths_count_their_body_on_the_wire(live_app):

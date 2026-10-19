@@ -46,6 +46,11 @@ SUCCESS_RATE_TARGET = 99.0          # percent, value must be >=
 DISPATCH_LATENCY_P95_TARGET = 5.0   # seconds, value must be <=
 EVENT_FRESHNESS_TARGET = 30.0       # seconds, value must be <=
 
+# PRD-263 US-018 (§11-Q8): a call that waited for the owner's click is logged with
+# this status (modules/tools/execution/telemetry.py ASKED_STATUS). It did not run and
+# did not fail, so it is no tool execution for SLI 1.
+ASKED_STATUS = "asked"
+
 
 def _meets(value: Optional[float], target: float, comparator: str) -> Optional[bool]:
     """Judge ``value`` against ``target``. ``None`` value → ``None`` (no data)."""
@@ -67,14 +72,16 @@ def tool_call_success_rate(
     """SLI 1 — production tool-call success rate (%) over the window.
 
     Only ``telemetry_source == 'production'`` rows count, so eval/replay traffic
-    never skews the objective. ``value`` is ``None`` when no tool ran (no data to
-    judge), never 0% — an honest empty measurement.
+    never skews the objective, and an ask for the owner's click (``asked``) is not
+    an execution, so it is in neither count. ``value`` is ``None`` when no tool ran
+    (no data to judge), never 0% — an honest empty measurement.
     """
     since = datetime.utcnow() - timedelta(seconds=window_seconds)
     base = db.query(ToolExecutionLog).filter(
         ToolExecutionLog.workspace_id == workspace_id,
         ToolExecutionLog.executed_at >= since,
         ToolExecutionLog.telemetry_source == "production",
+        ToolExecutionLog.status != ASKED_STATUS,
     )
     total = base.count()
     value: Optional[float] = None

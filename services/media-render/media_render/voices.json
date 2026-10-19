@@ -1,0 +1,32 @@
+{
+ "about": "The Kokoro voices media-render carries (PRD-262 US-052): the ids of the catalogue the platform offers, KOKORO_VOICES in orchestrator/modules/socials/kokoro_voices.py, in its order. They are copied here because the media-render build context (services/media-render, for compose and Railway alike) cannot read the orchestrator; orchestrator/tests/test_prd262_media_render_voices.py keeps the two equal. The image build rewrites voices-v1.0.bin to these voices alone after its sha256 check (media_render/voices_build.py), and the service refuses any voice its voices file does not hold.",
+ "voices": [
+  "af_heart",
+  "af_bella",
+  "af_nicole",
+  "af_sarah",
+  "af_sky",
+  "af_nova",
+  "af_river",
+  "af_jessica",
+  "af_kore",
+  "af_alloy",
+  "af_aoede",
+  "am_adam",
+  "am_michael",
+  "am_eric",
+  "am_liam",
+  "am_onyx",
+  "am_echo",
+  "am_fenrir",
+  "am_puck",
+  "bf_emma",
+  "bf_isabella",
+  "bf_alice",
+  "bf_lily",
+  "bm_george",
+  "bm_lewis",
+  "bm_daniel",
+  "bm_fable"
+ ]
+}

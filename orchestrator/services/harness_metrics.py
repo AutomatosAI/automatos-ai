@@ -31,7 +31,9 @@ The data traps, one per source (design section 4.1 #1):
 * ``orchestration_tasks``: no ``workspace_id`` of its own; scoped through
   ``orchestration_runs.workspace_id``.
 * ``tool_execution_logs``: ``telemetry_source='production'`` and status success,
-  error or timeout, grouped per app and per error class from ``error_code``.
+  error or timeout (so ``asked``, ``gap``, ``shown`` and ``refused`` rows never
+  count), grouped per app. Failures are grouped by ``error_code`` and the start of
+  ``error_message``, then classed by :func:`classify_tool_error` (PRD-263 US-019).
 
 Six statements on one session, not one: each source has its own grain (agent-week,
 agent-week-run, agent-week-app-class) and its own trap filters, and a fixed set
@@ -51,7 +53,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from operator import itemgetter
-from typing import Any, Dict, Iterable, List, Mapping, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import text
@@ -135,8 +137,53 @@ _USAGE_TOTAL_COLUMNS = ("calls", "plan_calls", "billed_cost_usd", "billed_tokens
 PRODUCTION_TELEMETRY = "production"
 TOOL_SUCCESS = "success"
 TOOL_STATUSES = (TOOL_SUCCESS, "error", "timeout")
-ERROR_CLASS_NONE = "none"        # a successful run
-ERROR_CLASS_UNCODED = "uncoded"  # a failed run with no error_code
+# A tool row's error class: ``none`` for a successful run, else classify_tool_error's.
+ERROR_CLASS_NONE = "none"
+ERROR_CLASS_AUTH = "auth"
+ERROR_CLASS_CONNECTION = "connection"
+ERROR_CLASS_RATE_LIMIT = "rate_limit"
+ERROR_CLASS_OTHER = "other"
+# The classes a "reconnect <app>" line answers (US-019): the app's sign-in or its connection.
+RECONNECT_CLASSES = frozenset({ERROR_CLASS_AUTH, ERROR_CLASS_CONNECTION})
+# How much of a failure's error_message is grouped and classed, lower-cased and trimmed.
+ERROR_MESSAGE_PREFIX_CHARS = 200
+
+# error_code -> class. A code is classed here only where the code that writes it is known.
+RECONNECT_CODES: Dict[str, str] = {
+    # modules/tools/tool_router.py:131 (the constant), written at :202 and :1875: a
+    # Composio call refused because the server has no Composio connection.
+    "integrations_unavailable": ERROR_CLASS_CONNECTION,
+}
+# (pattern, class); the first match classes a failure, so the server's own exact words come
+# before the generic ones. Each reads the code and the message together, so a row with no
+# code (every row written before US-018) still classes.
+RECONNECT_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
+    # Integrations are off on the server (modules/tools/tool_router.py:197), for rows
+    # written before US-018 stored the integrations_unavailable code.
+    (re.compile(r"integrations are disabled on this server", re.IGNORECASE), ERROR_CLASS_CONNECTION),
+    # The app has no connection: core/composio/tool_executor.py:537 and :769, and Composio's
+    # ConnectedAccountNotFound (its words as api/workspace_github.py:72-74 reads them).
+    (re.compile(r"is not connected for this workspace|no composio entity id found|connectedaccountnotfound"
+                r"|no connected account found|no active connection exists", re.IGNORECASE), ERROR_CLASS_CONNECTION),
+    # A platform's rate limit, passed through from Composio's execute
+    # (core/composio/tool_executor.py:845; an exception's text at :865). The same words
+    # modules/socials/publish_steps.py:65 reads as "the platform did nothing".
+    (re.compile(r"\b429\b|too many requests|rate.?limit", re.IGNORECASE), ERROR_CLASS_RATE_LIMIT),
+    # A platform refusing the connection's credentials, passed through at
+    # core/composio/tool_executor.py:845 and :865; modules/socials/publish_steps.py:68
+    # reads the same words as an auth refusal.
+    (re.compile(r"\b40[13]\b|unauthori[sz]ed|forbidden|authenticat|credential|invalid.?token|expired.?token",
+                re.IGNORECASE), ERROR_CLASS_AUTH),
+    # An expired token or connection: core/composio/linkedin_image_workaround.py:228
+    # ("access token may be expired"), core/credentials/tester.py:728 ("invalid or
+    # expired"), a Composio connection in state EXPIRED (core/composio/pending_connections.py:30).
+    (re.compile(r"(?:token|auth\w*|connected.?account|connection)[^.]{0,60}expired\b", re.IGNORECASE),
+     ERROR_CLASS_AUTH),
+    # The network refused or dropped the call (an exception's text, core/composio/
+    # tool_executor.py:865); the words modules/socials/publish_steps.py:58 and :65 read.
+    (re.compile(r"connection (?:error|reset|refused|aborted)|connecterror", re.IGNORECASE),
+     ERROR_CLASS_CONNECTION),
+)
 
 UTC_ZONE = "UTC"
 _ISO_WEEK = re.compile(r"^(\d{4})-W(\d{2})$")
@@ -250,9 +297,9 @@ _USAGE_SQL = text("""
 
 _TOOLS_SQL = text("""
     SELECT tl.agent_id, date_trunc('week', tl.executed_at) AS week_start, tl.app_name, tl.status,
-           CASE WHEN tl.status = :success THEN :class_none
-                WHEN NULLIF(btrim(tl.error_code), '') IS NULL THEN :class_uncoded
-                ELSE lower(btrim(tl.error_code)) END AS error_class,
+           CASE WHEN tl.status <> :success THEN tl.error_code END AS error_code,
+           CASE WHEN tl.status <> :success
+                THEN lower(btrim(left(tl.error_message, :message_chars))) END AS error_said,
            COUNT(*) AS calls
     FROM tool_execution_logs tl
     WHERE tl.workspace_id = CAST(:workspace_id AS uuid)
@@ -260,7 +307,7 @@ _TOOLS_SQL = text("""
       AND tl.telemetry_source = :production
       AND tl.status = ANY(:tool_statuses)
       AND tl.executed_at >= :start AND tl.executed_at < :end
-    GROUP BY 1, 2, 3, 4, 5
+    GROUP BY 1, 2, 3, 4, 5, 6
 """)
 
 
@@ -433,14 +480,35 @@ def _usage_counts(db: Session, params: Mapping[str, Any]) -> Dict[AgentWeek, Dic
     }
 
 
+def classify_tool_error(error_code: Optional[str], error_message: Optional[str]) -> str:
+    """A failed tool run's class: ``auth``, ``connection``, ``rate_limit`` or ``other``.
+
+    A code in ``RECONNECT_CODES`` decides; otherwise the first of ``RECONNECT_PATTERNS``
+    to match the code and the message read together, so a row written before US-018
+    (its ``error_code`` always NULL) classes from its message alone.
+    """
+    code = (error_code or "").strip().lower()
+    if code in RECONNECT_CODES:
+        return RECONNECT_CODES[code]
+    said = f"{code} {error_message or ''}"
+    for pattern, error_class in RECONNECT_PATTERNS:
+        if pattern.search(said):
+            return error_class
+    return ERROR_CLASS_OTHER
+
+
 def _tool_rows(db: Session, params: Mapping[str, Any]) -> Tuple[Dict[str, Any], ...]:
+    """Production tool runs per agent, week, app, status and error class (classed here, in
+    Python, from each failure group's code and message start)."""
     extra = {
-        "success": TOOL_SUCCESS, "class_none": ERROR_CLASS_NONE, "class_uncoded": ERROR_CLASS_UNCODED,
-        "production": PRODUCTION_TELEMETRY, "tool_statuses": list(TOOL_STATUSES),
+        "success": TOOL_SUCCESS, "production": PRODUCTION_TELEMETRY, "tool_statuses": list(TOOL_STATUSES),
+        "message_chars": ERROR_MESSAGE_PREFIX_CHARS,
     }
-    rows = db.execute(_TOOLS_SQL, {**params, **extra})
-    out = [{"agent_id": r.agent_id, "iso_week": _week_of(r.week_start), "app_name": r.app_name,
-            "status": r.status, "error_class": r.error_class, "calls": r.calls} for r in rows]
+    calls: Dict[Tuple[Any, ...], int] = defaultdict(int)
+    for r in db.execute(_TOOLS_SQL, {**params, **extra}):
+        error_class = ERROR_CLASS_NONE if r.status == TOOL_SUCCESS else classify_tool_error(r.error_code, r.error_said)
+        calls[(r.agent_id, _week_of(r.week_start), r.app_name, r.status, error_class)] += r.calls
+    out = [dict(zip(TOOL_ROW_FIELDS, (*key, count))) for key, count in calls.items()]
     return tuple(sorted(out, key=itemgetter(*TOOL_ROW_FIELDS[:-1])))
 
 
@@ -516,9 +584,13 @@ async def read(db: Session, workspace_id: Union[UUID, str], cur_week: str,
 __all__ = [
     "AGENT_ROW_FIELDS",
     "HarnessMetrics",
+    "RECONNECT_CLASSES",
+    "RECONNECT_CODES",
+    "RECONNECT_PATTERNS",
     "TOOL_ROW_FIELDS",
     "Window",
     "build_window",
+    "classify_tool_error",
     "iso_week_label",
     "read",
     "read_sync",

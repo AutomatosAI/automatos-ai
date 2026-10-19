@@ -89,7 +89,7 @@ The platform maintains structured processes for audits and reviews to guarantee 
 - **Memory Write Contract Validation:** Dual-path memory writes (distill and platform tool paths) conform to a unified metadata contract to prevent secret leakage or inconsistent data. Tests validate that private data scopes and user consent are respected across memory writes.
 - **Code Reviews & PRD-Driven Development:** PRDs (Product Requirement Documents) in `docs/PRDS` drive implementation with enforced acceptance by automation scripts (`ralph acceptance scripts`, `prd_parity`).
 - **Security Hardening:** Includes CORS guards, webhook HMAC verification, and strict permission enforcement with hierarchical capabilities and bypass audit logging.
-- **Compliance with AI Act & GDPR:** Modules enforce policy constraints, consent management, and erasure cascades.
+- **AI Act & GDPR (partial):** Art. 12 audit logging and Art. 14 oversight mapping exist (scaffold); Article 50 notices and marking are in progress (PRD-264). GDPR export and erasure cascades are real (`docs/compliance/README.md`).
   
 These systems are crucial for delivering a trustworthy platform in customer environments.
 

@@ -35,7 +35,7 @@ import styles from './shelf.module.css'
  * grid with the newest in the spotlight, and Load more (the hook's next page:
  * its offset, buildListQuery). A card opens /deliverables?deliverable=<id> (K8).
  *
- * app/deliverables/layout.tsx renders it through PlayRouteSwitch under Play at
+ * app/deliverables/layout.tsx renders it through ThemeSlot (PRD-261 A-04b) under Play at
  * >= 1024 px on /deliverables (K7); a link into one of the page's other
  * sections (?tab=, a post, a type drill-down) keeps the core's page inside
  * Play's frame (D8), and the shelf links to those sections, so none of them

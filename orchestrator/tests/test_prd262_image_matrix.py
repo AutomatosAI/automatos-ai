@@ -9,7 +9,7 @@ lists:
 * a frontend-only PR builds only the frontend, on both arches;
 * PR and branch builds push to the job's ``registry:2`` (buildx on the host
   network), main pushes to GHCR, and only publishing runs write the GHA cache,
-  ``mode=min`` for the API;
+  ``mode=min`` for the API (the picker writes the cache settings);
 * every image and arch has a budget with a reason;
 * only the API builds reproducibly: a fixed SOURCE_DATE_EPOCH build arg and
   ``rewrite-timestamp=true`` on its outputs (PRD-262 US-022).
@@ -84,6 +84,9 @@ def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
         assert "NEXT_PUBLIC_AUTH_EDITION=local\nNEXT_PUBLIC_API_URL=http://localhost:8000" in entry["build_args"]
 
 
+EVERY_IMAGE = ["api", "frontend", "workspace-worker", "agent-opt-worker", "media-render"]
+
+
 @pytest.mark.parametrize("path,names", [
     ("orchestrator/requirements.in", ["api"]),  # PRD-262 US-022: the input and its locks
     ("orchestrator/requirements.lock", ["api"]),
@@ -92,9 +95,10 @@ def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
     ("orchestrator/requirements-dev.txt", ["api"]),  # PRD-262 US-014
     ("services/workspace-worker/executor.py", ["workspace-worker"]),
     ("services/agent-opt-worker/main.py", ["agent-opt-worker"]),
-    (".github/image-budgets.json", ["api", "frontend", "workspace-worker", "agent-opt-worker"]),
-    ("scripts/ci/image_report.py", ["api", "frontend", "workspace-worker", "agent-opt-worker"]),
-    ("scripts/ci/image_scan_policy.py", ["api", "frontend", "workspace-worker", "agent-opt-worker"]),
+    ("services/media-render/Dockerfile", ["media-render"]),
+    (".github/image-budgets.json", EVERY_IMAGE),
+    ("scripts/ci/image_report.py", EVERY_IMAGE),
+    ("scripts/ci/image_scan_policy.py", EVERY_IMAGE),
     ("frontend/app/page.tsx", []),
     ("scripts/ci/sub/image_x.py", []),
 ])
@@ -184,11 +188,20 @@ def test_the_build_step_appends_rewrite_timestamp_to_its_outputs():
 
 
 def test_only_publishing_runs_write_the_cache_and_the_api_writes_min():
-    assert BUILD_STEP["with"]["cache-from"] == "type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}"
-    cache_to = BUILD_STEP["with"]["cache-to"]
-    assert cache_to.startswith("${{ env.PUBLISH == 'true' && format(") and "matrix.cache_mode" in cache_to
+    """The picker writes both cache settings; the GHA images keep one scope per image and arch."""
+    assert BUILD_STEP["with"]["cache-from"] == "${{ matrix.cache_from }}"
+    assert BUILD_STEP["with"]["cache-to"] == "${{ matrix.cache_to }}"
     modes = {image["name"]: image["cache_mode"] for image in IMAGES}
     assert modes["api"] == "min" and modes["frontend"] == "max"
+    gha = {image["name"] for image in IMAGES if image.get("cache", "gha") == "gha"}
+    assert gha == {"api", "frontend", "workspace-worker", "agent-opt-worker"}
+    for publish in (False, True):
+        for entry in _pick([], publish=publish, every=True):
+            if entry["name"] not in gha:
+                continue  # media-render's registry cache: test_prd262_media_render_images.py
+            scope = f"scope={entry['name']}-{entry['arch']}"
+            assert entry["cache_from"] == f"type=gha,{scope}"
+            assert entry["cache_to"] == (f"type=gha,mode={modes[entry['name']]},{scope}" if publish else "")
 
 
 def test_every_build_measures_and_checks_its_budget():

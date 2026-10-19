@@ -92,8 +92,9 @@ name: smoke-images
 #   older than Engine 25 or Compose 2.24.4 (scripts/stack_docker_floor.sh).
 #
 # Report only until PRD-262 US-004 sets the bars: no time or size fails a job, except
-# US-035's stop in under 8 s and US-038's health gates. A boot that never answers 200,
-# an image built instead of pulled, a missing or wrong revision label, a backend with
+# US-035's stop in under 8 s, US-038's health gates and the workspace worker's 20 s to
+# healthy (PRD-262 US-045, in smoke-fresh-clone.sh). A boot that never answers 200, an
+# image built instead of pulled, a missing or wrong revision label, a backend with
 # --reload or the wrong worker count, a boot that runs alembic twice, or a failed US-035
 # check fails it from day one.
 #
@@ -133,6 +134,7 @@ on:
       - "scripts/ci/smoke_images.py"
       - "scripts/ci/smoke_images_report.py"
       - "scripts/ci/smoke_worker_restart.py"
+      - "scripts/ci/smoke_worker_health.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_alembic.py"
       - "scripts/ci/smoke_alembic_behind.py"
@@ -176,6 +178,7 @@ on:
       - "frontend/public/**"
       - "services/workspace-worker/**"
       - "services/agent-opt-worker/**"
+      - "services/media-render/**"
 
 # A newer push to a pull request cancels its older run. Main and manual runs are
 # measurements, so they finish; a re-run of one commit waits for the run before it.
@@ -189,13 +192,16 @@ permissions:
 jobs:
   smoke-images:
     name: smoke-images (${{ matrix.arch }}) — pull and boot the published images (non-required)
-    # Only a successful images.yml run that published from this repository's main.
+    # Only a successful images.yml run that published from this repository's main. A
+    # media-assets run (PRD-262 US-053; images.yml's run-name titles it) publishes no
+    # app image, so there is nothing new to boot and `edge` must not move.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.display_title != 'Publish the media assets image' &&
        (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'schedule' ||
         github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ${{ matrix.runner }}
@@ -251,7 +257,7 @@ jobs:
       # fail: PRD-262 US-004 takes its five-run medians from them.
       - name: Upload the measurements
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-images-${{ matrix.arch }}
           path: ${{ runner.temp }}/smoke-images/
@@ -463,7 +469,7 @@ jobs:
 
       - name: Upload the measurements
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-images-pr
           path: ${{ runner.temp }}/smoke-images/

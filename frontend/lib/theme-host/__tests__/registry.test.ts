@@ -77,7 +77,7 @@ describe('PRD-261 A-02a — builtin Play is one registry entry', () => {
       ownsPages: ['/chat', '/deliverables'],
       routes: ['conversations'],
     })
-    expect(BUILTIN_PLAY_ENTRY.nav.map((item) => item.path)).toEqual(['/conversations', '/looks', '/looks/style'])
+    expect(BUILTIN_PLAY_ENTRY.nav.map((item) => item.path)).toEqual(['/x/conversations', '/looks', '/looks/style'])
     expect(BUILTIN_PLAY_ENTRY.slots).toEqual(expect.arrayContaining(['frame@1', 'lookEditor@1', 'styleSheet@1']))
   })
 

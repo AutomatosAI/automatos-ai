@@ -4,8 +4,9 @@ Every boot of every worker ran ``ALTER TABLE … ADD COLUMN IF NOT EXISTS`` for
 ``system_prompts.futureagi_eval_enabled`` and ``skills.content_hash``, each taking an
 ACCESS EXCLUSIVE lock on its table. Pins:
 
-* **One revision.** It chains onto the head it found (``prd263_harness_runs``) and is
-  the only revision chained there; the head pins (test_prd209_alembic_single_head,
+* **One revision.** It chains onto the head it found (``auto_haiku_default_20261019``,
+  main's head when the API branch merged it; it first chained onto ``prd263_harness_runs``)
+  and is the only revision chained there; the head pins (test_prd209_alembic_single_head,
   test_prd236_w1_routes) follow it.
 * **main.py runs no ALTER.** The block is gone from the lifespan, and ``text``, which
   the block used to import, still resolves for the SQL left in that function.
@@ -36,7 +37,7 @@ from sqlalchemy import create_engine, text  # noqa: E402
 VERSIONS = _ORCH / "alembic" / "versions"
 REVISION = VERSIONS / "prd262_boot_columns.py"
 MAIN = _ORCH / "main.py"
-PARENT = "prd263_harness_runs"
+PARENT = "auto_haiku_default_20261019"
 FLAG = ("system_prompts", "futureagi_eval_enabled")
 HASH = ("skills", "content_hash")
 A_HASH = "ab" * 32

@@ -1,5 +1,5 @@
 {
-  "about": "Compressed-size budget per image and arch, in MB (1 MB = 1,000,000 bytes, the sum of the manifest's layer sizes). images.yml checks every build against it (scripts/ci/image_report.py budget). In mode \"warn\" an over-budget build prints a warning; in mode \"fail\" it fails. PRD-262 US-004 sets each budget to the five-run median plus 2% and switches the mode to \"fail\". Raise a budget only in the pull request that needs it, and say why in its reason. `updates` holds the update bars, per image and kind of update as the update delta files it (`code-only`, `dependencies`, `system`): the most an existing user downloads to move from `edge` to the build, and optionally how many of the new layers may be over 1 MB. The same mode applies.",
+  "about": "Compressed-size budget per image and arch, in MB (1 MB = 1,000,000 bytes, the sum of the manifest's layer sizes). images.yml checks every build against it (scripts/ci/image_report.py budget). In mode \"warn\" an over-budget build prints a warning; in mode \"fail\" it fails. PRD-262 US-004 sets each budget to the five-run median plus 2% and switches the mode to \"fail\". Raise a budget only in the pull request that needs it, and say why in its reason. An entry may also hold on_disk_max_mb, a bar on the size docker image inspect reports for the image pulled from the job's registry, in the same unit and mode: media-render, which is never published, is barred on disk (PRD-262 §8, US-054). `updates` holds the update bars, per image and kind of update as the update delta files it (`code-only`, `dependencies`, `system`): the most an existing user downloads to move from `edge` to the build, and optionally how many of the new layers may be over 1 MB. The same mode applies.",
   "mode": "warn",
   "budgets": {
     "api": {
@@ -16,6 +16,10 @@
     },
     "agent-opt-worker": {
       "amd64": {"max_mb": 150.0, "reason": "PRD-262 US-006: never built in CI before, so an estimate (16 Oct): python:3.11-slim 45.6 MB plus the locked dependencies, 103.7 MB as a gzip-6 layer, less uvicorn[standard]'s extras. Report only until US-004 sets the baseline from measured builds."}
+    },
+    "media-render": {
+      "amd64": {"max_mb": 800.0, "on_disk_max_mb": 1300.0, "reason": "PRD-262 US-054: never built in images.yml before. on_disk_max_mb is the §8 bar, 1.30 GB as docker image inspect reports it (1.81 GB in media-render.yml run 37612086159, before W8). max_mb is an estimate (18 Oct) of the W8 image, about 740 MB: python:3.12-slim 43.3 MB, the Kokoro model 302 MB at its measured gzip ratio of 0.929 and the cut voices file 13 MB, the CfT headless shell less its locales 103 MB, the node binary about 47 MB, the apt layer less Mesa about 130 MB, the venv about 42 MB, Hyperframes' locked tree about 40 MB and the music 13 MB. Replace it with the W8 pull request's measured size plus 2% before that PR merges."},
+      "arm64": {"max_mb": 800.0, "reason": "PRD-262 US-054: never built in images.yml before, so an estimate (18 Oct), about 710 MB: the amd64 sum with Playwright's arm64 headless shell, stripped (about 78 MB), in place of the CfT build. §8 sets no arm64 on-disk bar, so the build reports its on-disk size without one. Replace max_mb with the W8 pull request's measured size plus 2% before that PR merges."}
     }
   },
   "updates": {

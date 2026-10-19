@@ -22,7 +22,8 @@ from uuid import UUID
 import pytest
 from sqlalchemy import text
 
-from core.llm.defaults import DEFAULT_LLM_MODEL
+from core.llm.defaults import DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER
+from core.llm.providers import openrouter_model_id
 from core.models import Agent
 from modules.tools.discovery.handlers_agents import create_agent, update_agent
 
@@ -144,11 +145,17 @@ def test_create_agent_puts_a_retired_route_on_the_default_and_says_so(db, seed_w
 
 # ── the copy that taught the id ─────────────────────────────────────────────
 
-@pytest.mark.parametrize("name", ["platform_create_agent", "platform_update_agent", "platform_install_model"])
-def test_the_tool_copy_names_a_model_openrouter_offers(name):
+# create/update name the id as the workspace's model list does; install takes
+# OpenRouter's id, so its example is the default's OpenRouter twin (19 Oct 2026).
+@pytest.mark.parametrize("name, example", [
+    ("platform_create_agent", DEFAULT_LLM_MODEL),
+    ("platform_update_agent", DEFAULT_LLM_MODEL),
+    ("platform_install_model", openrouter_model_id(DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL)),
+])
+def test_the_tool_copy_names_a_model_openrouter_offers(name, example):
     from modules.tools.discovery.action_registry import get_action_registry
 
     action = get_action_registry().get(name)
     copy = json.dumps([action.description, action.parameters, action.examples])
     assert "claude-sonnet-4-20250514" not in copy and "Defaults to 'gpt-4o'" not in copy
-    assert DEFAULT_LLM_MODEL in copy
+    assert example in copy
