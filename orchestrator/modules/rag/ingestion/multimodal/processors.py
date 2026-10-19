@@ -15,10 +15,13 @@ Implementation is original Automatos code built on our Context Engineering frame
 Integrates with Automatos Context Engineering framework.
 """
 
+from __future__ import annotations
+
 import logging
 import re
 import hashlib
 from typing import Dict, List, Optional, Any, Tuple
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
@@ -27,10 +30,11 @@ from io import BytesIO
 
 from config import config
 
-# PDF and image processing
-import pdfplumber
-from PIL import Image
-import pytesseract
+# PDF and image processing (pdfplumber, Pillow, pytesseract) load in the methods that
+# use them, not when the app imports this module (PRD-262 US-032): it is on the boot
+# path, main → api.knowledge_multimodal → modules.rag → ingestion → multimodal.
+if TYPE_CHECKING:
+    from PIL import Image
 
 # Table extraction
 import camelot  # For table extraction from PDFs
@@ -334,6 +338,8 @@ class ImageProcessor:
         Returns:
             List of extracted images
         """
+        import pdfplumber
+
         extracted_images = []
         
         with pdfplumber.open(pdf_path) as pdf:
@@ -367,7 +373,8 @@ class ImageProcessor:
         index: int
     ) -> ImageExtraction:
         """Process a single PDF image"""
-        
+        from PIL import Image
+
         # Get image object from page
         # Note: This is simplified - actual implementation depends on PDF structure
         x0, y0, x1, y1 = img_info['x0'], img_info['top'], img_info['x1'], img_info['bottom']
@@ -423,6 +430,8 @@ class ImageProcessor:
     
     def _extract_text_with_ocr(self, image: Image.Image) -> Optional[str]:
         """Extract text from image using OCR"""
+        import pytesseract
+
         try:
             text = pytesseract.image_to_string(image)
             return text.strip() if text.strip() else None
@@ -642,6 +651,8 @@ class MultimodalDocumentProcessor:
         Returns:
             Dictionary with extracted content by modality
         """
+        import pdfplumber
+
         results = {
             'tables': [],
             'images': [],

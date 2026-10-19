@@ -28,6 +28,7 @@ def gate(monkeypatch):
     """Composio up; the gate refuses whatever it is asked, and records the action id."""
     monkeypatch.setattr(config, "COMPOSIO_API_KEY", "test-key-not-a-secret")
     monkeypatch.setattr(cc, "_get_composio", lambda: _SDK)
+    monkeypatch.setattr(cc, "_composio_sdk_installed", lambda: True)  # the probe finds, never imports (PRD-262 US-032)
     cc.reset_composio_availability()
     asked = []
 
