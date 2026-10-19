@@ -396,7 +396,7 @@ def heartbeat_setting(raw: Any, agent_id: int) -> Dict[str, Any]:
 
 def _roster(db: Session, workspace_id: str) -> List[Dict[str, Any]]:
     """Active, non-system agents of this workspace (Auto is the workspace's system agent:
-    every candidate ``HarnessService._resolve_auto_agent`` can return is one)."""
+    every candidate ``harness_grants.resolve_auto_agent`` can return is one)."""
     rows = db.execute(_ROSTER_SQL, {"workspace_id": workspace_id, "active_status": ACTIVE_AGENT_STATUS})
     roster = []
     for row in rows:

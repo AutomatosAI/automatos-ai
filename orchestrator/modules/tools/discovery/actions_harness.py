@@ -1,4 +1,5 @@
-"""HARNESS ActionDefinitions (PRD-121): the weekly report-only review of the team (PRD-263)."""
+"""HARNESS ActionDefinitions (PRD-121): the weekly report-only review of the team (PRD-263),
+and platform_harness_apply, which makes one change its owner approved (PRD-263 US-052)."""
 
 from .action_registry import ActionDefinition, ActionRegistry
 
@@ -8,6 +9,7 @@ def register_harness_actions(registry: ActionRegistry) -> None:
     _register_status(registry)
     _register_trigger(registry)
     _register_history(registry)
+    _register_apply(registry)
 
 
 def _register_status(registry: ActionRegistry) -> None:
@@ -109,4 +111,35 @@ def _register_history(registry: ActionRegistry) -> None:
             "past optimization runs",
             "harness changelog",
         ],
+    ))
+
+
+def _register_apply(registry: ActionRegistry) -> None:
+    # PRD-263 US-052: no card, because the owner's click on the change's Approvals card is its consent.
+    registry.register(ActionDefinition(
+        name="platform_harness_apply",
+        description=(
+            "Makes one HARNESS change that the owner approved on its Approvals card "
+            "(Command Center > Governance > Approvals, or the card's evidence ticket). "
+            "It runs when the owner clicks Approve: never call it to make a change "
+            "yourself. It acts only while that approval is granted and has not "
+            "expired, and only if the setting still reads the value it had when "
+            "HARNESS proposed the change; otherwise it changes nothing and says why. "
+            "The change (an agent's heartbeat interval, a tool taken from an agent, "
+            "or the undoing of an earlier HARNESS change) is made as the workspace's Auto."
+        ),
+        category="harness",
+        parameters={
+            "type": "object",
+            "properties": {
+                "rx_id": {
+                    "type": "string",
+                    "description": "The id of the HARNESS change the Approvals card is for (rx-<run>-<n>).",
+                },
+            },
+            "required": ["rx_id"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["harness", "approval"],
     ))

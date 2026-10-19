@@ -19,6 +19,10 @@ ReportService, so harness_service.py joins GATED and names none of them again.
 US-049 moves PRESCRIBE onto the change-kind registry (services.harness_changes), which
 joins GATED. The placeholder kinds and their constants are gone from every service:
 grep ``review_needed`` in orchestrator/services returns 0 (section 11-Q9).
+
+US-052 and US-053 add services.harness_grants (the apply rail's ledger moves, then
+reconciliation and the daily grant sweep), which joins GATED: it reads and moves ledger
+rows and grants, and applies nothing.
 """
 from __future__ import annotations
 
@@ -35,6 +39,7 @@ GATED = (
     "core/stats/harness_verdicts.py",
     HARNESS_SERVICE,
     "services/harness_changes.py",
+    "services/harness_grants.py",
 )
 EXECUTORS = re.compile(r"\b(PlatformActionExecutor|UnifiedToolExecutor|execute_tool)\b")
 # An import of any of these modules, or of these names, is an LLM client import.
