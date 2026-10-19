@@ -126,6 +126,8 @@ describe('PRD-261 A-04c — the /safe-mode page', () => {
     render(<SafeModePage />)
     const boot = document.createElement('script')
     boot.id = THEME_BOOT_ELEMENT_ID
+    // A JSON element, like the real boot element: without the type, jsdom would run the text as code.
+    boot.type = 'application/json'
     boot.textContent = '{not json'
     document.head.appendChild(boot)
     document.documentElement.classList.add(...SAFE_MODE_REMOVE_CLASSES)
