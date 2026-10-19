@@ -79,6 +79,11 @@
 # entrypoint's banner is there, no alembic line follows it (the CMD runs none), no boot
 # runs alembic twice, and the behind-head boot runs it exactly once.
 #
+# PRD-262 US-030: a boot whose alembic_version already holds the code's head runs no
+# alembic at all. The fresh boot (init_fresh_db stamps the head) and the warm restarts
+# must each log `schema at head — alembic skipped` and run none: no `Context impl` line
+# after `init_fresh_db: done`, and none at all on a warm restart.
+#
 # PRD-262 US-017, when it builds from this checkout: the build log is kept, and
 # scripts/ci/build_context.py reads what the backend's build sent as its context off it.
 # The workflow first seeds dummy uploads and caches where a self-hoster's checkout
@@ -91,10 +96,11 @@
 # presigned URL the Documents page's download call answers with.
 #
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, the document came back, and every boot ran alembic at most once. Exit 1 = a
-# boot failed, a port listens beyond this machine, the backend's build context is over
-# its budget, the document did not come back from object storage, or a boot ran alembic
-# twice (or the CMD ran it).
+# loopback, the document came back, and every boot ran alembic at most once (and only
+# the behind-head boot ran it at all). Exit 1 = a boot failed, a port listens beyond
+# this machine, the backend's build context is over its budget, the document did not
+# come back from object storage, or a boot ran alembic twice (or the CMD ran it), or
+# ran it at head, or the behind-head boot did not.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -407,13 +413,20 @@ boot_behind_head() {
 }
 
 # PRD-262 US-029: every boot shows the entrypoint's banner and no alembic after it, none
-# runs alembic twice, and the behind-head boot runs it exactly once.
+# runs alembic twice, and the behind-head boot runs it exactly once. US-030: the fresh
+# boot and the warm restarts, at head, run none and log `schema at head — alembic skipped`.
 check_alembic_runs() {
+  local i
+  # The labels boot_fresh and warm_restarts give wait_backend.
+  local expects=(--expect "fresh=0" --expect "${BEHIND_HEAD_LABEL}=1")
+  for i in $(seq 1 "$WARM_RESTARTS"); do
+    expects+=(--expect "warm-${i}=0")
+  done
   docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || fail "could not read the backend's log"
   python3 "$ALEMBIC_TOOL" --results "$BOOTS_FILE" --backend-log "${OUT_DIR}/backend.log" \
-    --backend-container "$BACKEND_CONTAINER" --expect "${BEHIND_HEAD_LABEL}=1" \
+    --backend-container "$BACKEND_CONTAINER" "${expects[@]}" \
     --out "$ALEMBIC_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
-    || fail "a backend boot ran alembic more than once, the CMD ran it, or the behind-head boot did not run it once"
+    || fail "a backend boot ran alembic more than once or at head, the CMD ran it, or the behind-head boot did not run it once"
 }
 
 dump_failure_logs() {
@@ -487,7 +500,7 @@ main() {
   outcome="pass"
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot," \
-    "${WARM_RESTARTS} warm restarts and a behind-head boot, each ran alembic at most once," \
+    "${WARM_RESTARTS} warm restarts and a behind-head boot; only the behind-head boot ran alembic, once;" \
     ":3000 answered 200 and a document came back from object storage — the local" \
     "edition serves with NO external credentials"
 }

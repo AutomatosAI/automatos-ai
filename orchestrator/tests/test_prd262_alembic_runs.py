@@ -10,6 +10,11 @@ The smokes (smoke-fresh-clone and smoke-images) prove it on a real stack:
   PRD-262 §8 count), and exactly one on the behind-head boot;
 * ``scripts/ci/smoke-fresh-clone.sh`` runs both after the warm restarts.
 
+PRD-262 US-030: a boot whose ``alembic_version`` already holds the code's head runs no
+alembic and logs ``schema at head — alembic skipped``. Every boot's migration step
+either runs alembic or skips it, exactly once; the fresh boot (init_fresh_db stamps the
+head) and the warm restarts expect 0 runs, and the behind-head boot 1.
+
 These tests hold the parts; the lanes run them only in CI.
 """
 from __future__ import annotations
@@ -35,6 +40,7 @@ BACKEND, FRONTEND = "automatos_backend", "automatos_frontend"
 CONTEXT_IMPL = "INFO  [alembic.runtime.migration] Context impl PostgresqlImpl."
 BANNER = "🚀 Starting Backend Application"
 STEP = "🗄️  Running database migrations (alembic upgrade heads)..."
+SKIP = "⏭️  schema at head — alembic skipped"
 FRESH_DONE = "init_fresh_db: done — 167 tables, alembic at heads."
 STARTED = "INFO:     Application startup complete."
 
@@ -70,11 +76,17 @@ def _log(at_s: float, text: str) -> str:
     return f"{stamp}.{fraction:09d}Z {text}"
 
 
-def _boot_lines(*, fresh=False, migrations=1, banner=True, cmd_alembic=False) -> list[str]:
-    """One boot's log: the entrypoint's steps, its banner, then the server."""
+def _boot_lines(*, fresh=False, migrations=1, banner=True, cmd_alembic=False, skipped=None) -> list[str]:
+    """One boot's log: the entrypoint's steps, its banner, then the server.
+
+    ``skipped``: the head check's skip line (US-030); by default, on a boot whose
+    entrypoint ran (the banner) and ran no migration.
+    """
+    skipped = banner and migrations == 0 if skipped is None else skipped
     lines = ["Automatos AI Backend Starting..."]
     if fresh:
         lines += [CONTEXT_IMPL] * 200 + [FRESH_DONE]  # init_fresh_db's replay: one per revision
+    lines += [SKIP] if skipped else []
     lines += [STEP, CONTEXT_IMPL] * migrations
     lines += [BANNER] if banner else []
     lines += [CONTEXT_IMPL] if cmd_alembic else []  # what the old CMD's alembic logged
@@ -129,6 +141,34 @@ def test_the_expected_count_is_exact(migrations, ok):
     assert (problems == []) is ok, problems
 
 
+# --------------------------------------------------------------------------- at head (US-030)
+
+
+def test_a_boot_at_head_logs_the_skip_and_runs_nothing():
+    facts = runs.boot_facts(_boot_lines(migrations=0))
+    assert (facts["runs"], facts["migration_steps"], facts["skips"], facts["context_impl_lines"]) == (0, 0, 1, 0)
+    assert _problems("warm-1", _boot_lines(migrations=0), expected=0) == []
+
+
+def test_a_fresh_boot_runs_no_alembic_after_init_fresh_db():
+    """init_fresh_db stamps the head, so the head check skips alembic: its replay lines do not count."""
+    facts = runs.boot_facts(_boot_lines(fresh=True, migrations=0))
+    assert (facts["runs"], facts["context_impl_lines"], facts["skips"]) == (0, 200, 1)
+    assert _problems("fresh", _boot_lines(fresh=True, migrations=0), expected=0) == []
+
+
+def test_a_boot_that_ran_alembic_at_head_fails():
+    problems = _problems("warm-2", _boot_lines(migrations=1), expected=0)
+    assert problems == ["warm-2: expected 0 alembic run(s) and 0 `Running database migrations` line(s), "
+                        "found 1 and 1"]
+
+
+@pytest.mark.parametrize("migrations,skipped", [(0, False), (1, True)])
+def test_a_migration_step_that_neither_ran_nor_skipped_or_did_both_fails(migrations, skipped):
+    problems = _problems("warm-1", _boot_lines(migrations=migrations, skipped=skipped))
+    assert any("the migration step runs alembic or skips it, exactly once" in p for p in problems), problems
+
+
 # --------------------------------------------------------------------------- a run
 
 
@@ -140,21 +180,31 @@ RECORDS = [
 ]
 
 
-def _run_log(behind_migrations: int = 1) -> list[str]:
-    boots = [(0.0, _boot_lines(fresh=True)), (100.0, _boot_lines()),
+# What smoke-fresh-clone.sh expects of these boots: none at head, one behind it.
+EXPECTED = {"fresh": 0, "warm-1": 0, "behind-head": 1}
+
+
+def _run_log(behind_migrations: int = 1, warm_migrations: int = 0) -> list[str]:
+    boots = [(0.0, _boot_lines(fresh=True, migrations=0)), (100.0, _boot_lines(migrations=warm_migrations)),
              (200.0, _boot_lines(migrations=behind_migrations))]
     return [_log(start + index * 0.01, text) for start, lines in boots for index, text in enumerate(lines)]
 
 
 def test_the_log_is_cut_at_each_backend_boot_and_the_frontend_is_ignored():
-    result = runs.check(RECORDS, _run_log(), {"behind-head": 1}, BACKEND)
+    result = runs.check(RECORDS, _run_log(), EXPECTED, BACKEND)
     assert result["failures"] == []
-    assert [(boot["label"], boot["runs"]) for boot in result["boots"]] == [("fresh", 1), ("warm-1", 1),
-                                                                           ("behind-head", 1)]
+    assert [(boot["label"], boot["runs"], boot["skips"]) for boot in result["boots"]] == [
+        ("fresh", 0, 1), ("warm-1", 0, 1), ("behind-head", 1, 0)]
+
+
+def test_a_warm_restart_that_ran_alembic_fails():
+    result = runs.check(RECORDS, _run_log(warm_migrations=1), EXPECTED, BACKEND)
+    assert result["failures"] == ["warm-1: expected 0 alembic run(s) and 0 `Running database migrations` "
+                                  "line(s), found 1 and 1"]
 
 
 def test_a_behind_head_boot_that_ran_no_migration_fails():
-    result = runs.check(RECORDS, _run_log(behind_migrations=0), {"behind-head": 1}, BACKEND)
+    result = runs.check(RECORDS, _run_log(behind_migrations=0), EXPECTED, BACKEND)
     assert result["failures"] == ["behind-head: expected 1 alembic run(s) and 1 `Running database migrations` "
                                   "line(s), found 0 and 0"]
 
@@ -169,7 +219,8 @@ def _write_run(tmp_path: Path, log: list[str]) -> list[str]:
     results, backend_log = tmp_path / "boots.jsonl", tmp_path / "backend.log"
     results.write_text("".join(json.dumps(record) + "\n" for record in RECORDS), encoding="utf-8")
     backend_log.write_text("\n".join(log) + "\n", encoding="utf-8")
-    return ["--results", str(results), "--backend-log", str(backend_log), "--expect", "behind-head=1",
+    expects = [arg for label, count in EXPECTED.items() for arg in ("--expect", f"{label}={count}")]
+    return ["--results", str(results), "--backend-log", str(backend_log), *expects,
             "--out", str(tmp_path / "alembic-runs.json"), "--summary", str(tmp_path / "summary.md")]
 
 
@@ -178,10 +229,11 @@ def test_the_command_writes_its_record_and_summary(tmp_path, behind_migrations, 
     assert runs.main(_write_run(tmp_path, _run_log(behind_migrations))) == code
     record = json.loads((tmp_path / "alembic-runs.json").read_text(encoding="utf-8"))
     assert [boot["label"] for boot in record["boots"]] == ["fresh", "warm-1", "behind-head"]
-    assert record["expected"] == {"behind-head": 1}
+    assert record["expected"] == EXPECTED
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert f"### {runs.TITLE}: {verdict}" in summary
     assert "| behind-head |" in summary
+    assert f"`{runs.SKIP_LINE}`" in summary and "| warm-1 | 0 | 0 | 1 |" in summary
 
 
 @pytest.mark.parametrize("text", ["behind-head", "=1", "behind-head=one", "behind-head="])
@@ -248,9 +300,30 @@ def test_the_smoke_boots_behind_head_and_checks_every_boot_after_the_warm_restar
     check = _function(text, "check_alembic_runs")
     assert 'docker logs -t "$BACKEND_CONTAINER"' in check
     assert '--expect "${BEHIND_HEAD_LABEL}=1"' in check and "|| fail " in check
+    assert '"${expects[@]}"' in check
     main = _function(text, "main")
     order = [main.index(call) for call in ("warm_restarts", "boot_behind_head", "check_alembic_runs", 'outcome="pass"')]
     assert order == sorted(order)
+
+
+def test_the_smoke_expects_no_alembic_on_the_boots_at_head():
+    """US-030: the fresh boot and every warm restart, under the labels wait_backend gives them, expect 0."""
+    text = _SMOKE.read_text(encoding="utf-8")
+    check = _function(text, "check_alembic_runs")
+    assert '--expect "fresh=0"' in check
+    assert 'for i in $(seq 1 "$WARM_RESTARTS"); do' in check and 'expects+=(--expect "warm-${i}=0")' in check
+    assert "wait_backend fresh" in _function(text, "boot_fresh")
+    assert 'wait_backend "warm-${i}"' in _function(text, "warm_restarts")
+    assert 'for i in $(seq 1 "$WARM_RESTARTS"); do' in _function(text, "warm_restarts")
+
+
+@pytest.mark.parametrize("workflow,events", [("smoke-fresh-clone.yml", ("push", "pull_request")),
+                                             ("smoke-images.yml", ("pull_request",))])
+def test_both_smokes_watch_the_entrypoints_head_reader(workflow, events):
+    data = yaml.safe_load((_WORKFLOWS / workflow).read_text(encoding="utf-8"))
+    triggers = data.get("on", data.get(True))  # PyYAML reads the bare `on:` key as True
+    for event in events:
+        assert "orchestrator/scripts/alembic_heads.py" in triggers[event]["paths"]
 
 
 @pytest.mark.parametrize("workflow,events", [("smoke-fresh-clone.yml", ("push", "pull_request")),

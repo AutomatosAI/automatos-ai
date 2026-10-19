@@ -869,6 +869,33 @@ jobs:
           echo "v_workspace_outputs answers (rows=${ROWS})"
           echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
 
+      # PRD-262 US-030: the entrypoint runs no alembic when alembic_version already holds
+      # the code's head(s), which scripts/alembic_heads.py reads from the migration
+      # scripts with no import. Its heads must be the ones `alembic heads` prints, the
+      # database init_fresh_db just stamped must read as at head through the same
+      # `psql -tA` the entrypoint pipes in, and a version this code does not know (a
+      # database ahead of it) must not.
+      - name: The entrypoint's static head check agrees with alembic
+        env:
+          PGPASSWORD: test
+        run: |
+          STATIC="$(python scripts/alembic_heads.py --print | sort)"
+          ALEMBIC="$(alembic heads 2>/dev/null | awk '{print $1}' | sort)"
+          echo "static heads: [${STATIC}] alembic heads: [${ALEMBIC}]"
+          if [ -z "${STATIC}" ] || [ "${STATIC}" != "${ALEMBIC}" ]; then
+            echo "::error::scripts/alembic_heads.py reads the heads [${STATIC}], alembic heads prints [${ALEMBIC}]"
+            exit 1
+          fi
+          STAMPED="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT version_num FROM alembic_version')"
+          if ! printf '%s\n' "${STAMPED}" | python scripts/alembic_heads.py; then
+            echo "::error::the database init_fresh_db stamped at heads does not read as at head"
+            exit 1
+          fi
+          if printf 'a_revision_this_code_does_not_know\n' | python scripts/alembic_heads.py; then
+            echo "::error::a database ahead of the code read as at head, so alembic would not run and fail loudly"
+            exit 1
+          fi
+
       # A first boot whose build dies partway (Postgres restarting, the host
       # stopping) leaves alembic_version behind. The next boot must finish the
       # build, not serve it: before the incomplete-build marker it skipped the

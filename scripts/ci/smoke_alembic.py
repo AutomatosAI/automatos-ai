@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""One migration run per backend boot, checked from the smoke's log (PRD-262 US-029).
+"""One migration run per backend boot, none at head, checked from the smoke's log.
 
-The entrypoint is the only owner of migrations: before a server command it runs the
-migration step once, and the image CMD runs no alembic. ``smoke-fresh-clone.sh``
+PRD-262 US-029: the entrypoint is the only owner of migrations. Before a server command
+it runs the migration step once, and the image CMD runs no alembic. PRD-262 US-030: that
+step runs no alembic either when ``alembic_version`` already holds the code's head(s); it
+logs ``schema at head — alembic skipped`` instead. ``smoke-fresh-clone.sh``
 calls this after its last backend boot, with the records ``smoke_boot.py`` appended
 and the backend's ``docker logs -t``. It cuts the log at each boot's start
 (``smoke_report.split_log``) and counts each boot's alembic runs the PRD-262 §8 way
@@ -13,11 +15,16 @@ Every backend boot must show:
 * the entrypoint's ``🚀 Starting Backend Application`` banner: the boot steps ran
   before the server command, so the stage's CMD was recognised as one;
 * no ``Context impl PostgresqlImpl`` line after that banner: the CMD ran no alembic;
-* at most one alembic run, and at most one ``Running database migrations`` line.
+* at most one alembic run, and at most one ``Running database migrations`` line;
+* its migration step either ran alembic or skipped it, once: exactly one ``Running
+  database migrations`` or ``schema at head — alembic skipped`` line.
 
 ``--expect LABEL=N``: that boot counts exactly N alembic runs and N ``Running
-database migrations`` lines. The smoke's ``behind-head`` boot, on a database stamped
-one revision behind head (``smoke_alembic_behind.py``), expects 1.
+database migrations`` lines, so N=0 also means the boot logged the skip line. The
+smoke's fresh boot (init_fresh_db stamps the head) and its warm restarts expect 0,
+with no ``Context impl`` line after ``init_fresh_db: done``; its ``behind-head``
+boot, on a database stamped one revision behind head (``smoke_alembic_behind.py``),
+expects 1.
 
 The standard library only, like the other smoke tools. Exit 0 = every boot passed.
 
@@ -47,8 +54,9 @@ smoke_report = _sibling("smoke_report")
 
 BANNER_LINE = "Starting Backend Application"
 MIGRATION_STEP_LINE = "Running database migrations"
+SKIP_LINE = "schema at head — alembic skipped"
 MAX_RUNS_PER_BOOT = 1
-TITLE = "One migration run per backend boot (PRD-262 US-029)"
+TITLE = "One migration run per backend boot, none at head (PRD-262 US-029, US-030)"
 
 
 def boot_facts(lines: Sequence[str]) -> dict:
@@ -60,6 +68,7 @@ def boot_facts(lines: Sequence[str]) -> dict:
         "banner": bool(banners),
         "context_impl_after_banner": sum(smoke_report.ALEMBIC_RUN_LINE in line for line in after),
         "migration_steps": sum(MIGRATION_STEP_LINE in line for line in lines),
+        "skips": sum(SKIP_LINE in line for line in lines),
     }
 
 
@@ -75,6 +84,9 @@ def boot_problems(label: str, facts: dict, expected: Optional[int]) -> List[str]
     if max(runs, steps) > MAX_RUNS_PER_BOOT:
         problems.append(f"{label}: {runs} alembic run(s) and {steps} `{MIGRATION_STEP_LINE}` line(s); "
                         f"at most {MAX_RUNS_PER_BOOT} per boot")
+    if facts["banner"] and steps + facts["skips"] != 1:
+        problems.append(f"{label}: {steps} `{MIGRATION_STEP_LINE}` and {facts['skips']} `{SKIP_LINE}` line(s); "
+                        "the migration step runs alembic or skips it, exactly once")
     if expected is not None and (runs, steps) != (expected, expected):
         problems.append(f"{label}: expected {expected} alembic run(s) and {expected} `{MIGRATION_STEP_LINE}` "
                         f"line(s), found {runs} and {steps}")
@@ -101,11 +113,11 @@ def summary_markdown(result: dict) -> str:
     lines = [
         f"### {TITLE}: {verdict}",
         "",
-        f"| Boot | alembic runs | `{MIGRATION_STEP_LINE}` | `Context impl` after the banner | banner |",
-        "|---|---|---|---|---|",
+        f"| Boot | alembic runs | `{MIGRATION_STEP_LINE}` | `{SKIP_LINE}` | `Context impl` after the banner | banner |",
+        "|---|---|---|---|---|---|",
     ]
-    lines += [f"| {boot['label']} | {boot['runs']} | {boot['migration_steps']} | {boot['context_impl_after_banner']} "
-              f"| {'yes' if boot['banner'] else 'no'} |" for boot in result["boots"]]
+    lines += [f"| {boot['label']} | {boot['runs']} | {boot['migration_steps']} | {boot['skips']} "
+              f"| {boot['context_impl_after_banner']} | {'yes' if boot['banner'] else 'no'} |" for boot in result["boots"]]
     lines += [""] + [f"- **FAIL**: {failure}" for failure in result["failures"]]
     return "\n".join(lines) + "\n\n"
 

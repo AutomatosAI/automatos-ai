@@ -43,7 +43,9 @@ name: smoke-images
 # - Both jobs, after the warm restarts (PRD-262 US-029): the database is stamped one
 #   revision behind head and the backend boots once more; every boot must show the
 #   entrypoint's banner, no alembic after it, at most one alembic run, and the
-#   behind-head boot exactly one (scripts/ci/smoke_alembic.py).
+#   behind-head boot exactly one (scripts/ci/smoke_alembic.py). PRD-262 US-030: the
+#   fresh boot and the warm restarts, at head, log `schema at head — alembic skipped`
+#   and run none (the entrypoint's static check, orchestrator/scripts/alembic_heads.py).
 #
 # Report only until PRD-262 US-004 sets the bars: no time or size fails a job. A boot
 # that never answers 200, an image built instead of pulled, a missing or wrong revision
@@ -98,6 +100,7 @@ on:
       - "orchestrator/requirements-dev.txt"
       - "orchestrator/docker-entrypoint.sh"
       - "orchestrator/docker-healthcheck.sh"
+      - "orchestrator/scripts/alembic_heads.py"
       - "frontend/Dockerfile"
       - "frontend/.dockerignore"
       - "frontend/package.json"
