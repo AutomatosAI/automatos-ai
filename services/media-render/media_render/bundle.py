@@ -15,7 +15,9 @@
                 "music": {"track": "<library id>", "start": 32.0},
                 "sfx": [{"path": "assets/sfx/click.ogg", "at": 10.44, "volume": 0.5}]},
       "preview": {"at": [1.2, 10.0, 36.5]},     optional: snapshot these moments, not the full render
-      "still": {"at": [0.5, 1.5]}               optional: an image, one full-size PNG per moment
+      "still": {"at": [0.5, 1.5]},              optional: an image, one full-size PNG per moment
+      "ai_inputs": {"footage": true, "stills": false, "voice": true,
+                    "uploads": false, "template": true}   optional: which inputs are AI-made
     }
 
 ``files`` are inlined as data: URIs (the brand kit's logo and font files, small
@@ -35,6 +37,11 @@ A ``still`` is an image (US-107): the job is staged, mixed and checked the same
 way, then its render is a full-size PNG of the composition at each moment
 (pipeline.RenderPipeline.still): one for a card, one per slide for a carousel.
 A still has no sound, so it takes no audio plan, and it is its own preview.
+
+``ai_inputs`` (PRD-264 EUAI-06a) says which of the render's inputs are AI-made (AI
+footage, AI stills, a synthetic voice) and which are not (the person's own uploads, the
+template). Every output with an AI element carries the IPTC "AI-generated" mark that
+follows from it (provenance.py). A bundle without it (an older caller) is still taken.
 """
 
 from __future__ import annotations
@@ -49,6 +56,7 @@ from .composition import VARIABLE_NAME, Composition, FontFace, brand_stylesheet,
 from .config import Settings
 from .media_urls import redact, url_allowed
 from .music import Track
+from .provenance import UNDECLARED, AiInputs, parse_ai_inputs
 from .validate import BundleError
 
 ASSETS_ROOT = "assets/"
@@ -158,6 +166,7 @@ class Bundle:
     audio: AudioPlan
     preview: Optional[Preview] = None
     still: Optional[Still] = None
+    ai_inputs: AiInputs = UNDECLARED
 
 
 def _file_path(value: Any, where: str, extensions: FrozenSet[str]) -> str:
@@ -361,7 +370,7 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track],
         body,
         "the bundle",
         required=("workspace_id", "composition"),
-        optional=("reference", "variables", "brand", "files", "media", "audio", "preview", "still"),
+        optional=("reference", "variables", "brand", "files", "media", "audio", "preview", "still", "ai_inputs"),
     )
     if body.get("still") is not None:
         if body.get("preview") is not None:
@@ -390,4 +399,5 @@ def parse_bundle(payload: Any, settings: Settings, library: Mapping[str, Track],
         audio=_audio(body.get("audio"), composition.duration, audio_paths, settings, library, voices),
         preview=_preview(body.get("preview"), composition.duration, settings),
         still=_still(body.get("still"), composition.duration, settings),
+        ai_inputs=parse_ai_inputs(body.get("ai_inputs")),
     )
