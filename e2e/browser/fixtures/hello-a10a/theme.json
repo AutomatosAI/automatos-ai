@@ -1,0 +1,13 @@
+{
+  "schema": "automatos-theme-spike/v1",
+  "id": "automatos-e2e/hello-a10a",
+  "name": "Hello SDK context",
+  "version": "0.0.1",
+  "engines": { "sdk": "^1.0.0" },
+  "base": "studio",
+  "htmlClass": "hello-a10a",
+  "entry": "entry.js",
+  "styleSheet": "theme.css",
+  "preset": "presets/default.look.json",
+  "slots": ["frame@1"]
+}

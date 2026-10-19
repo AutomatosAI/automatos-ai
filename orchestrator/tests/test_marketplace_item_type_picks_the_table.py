@@ -116,5 +116,6 @@ def test_every_item_route_requires_the_type():
     for route in router.routes:
         for method in route.methods:
             if (method, route.path) in paths:
-                required = {p.alias for p in route.dependant.query_params if p.required}
+                # ModelField.required (FastAPI 0.115) was field_info.is_required(); 0.146 has only the latter.
+                required = {p.alias for p in route.dependant.query_params if p.field_info.is_required()}
                 assert "type" in required, f"{method} {route.path} must require ?type="

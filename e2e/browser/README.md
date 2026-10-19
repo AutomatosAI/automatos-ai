@@ -17,35 +17,37 @@ It is separate from the Python scenario runner in `e2e/` (`e2e/run.py`), which i
 2. Installs and builds the frontend on the runner (`npm install`, `npm run build`, local edition),
    stages the standalone output as `frontend/Dockerfile` does, and serves it with
    `node .next/standalone/server.js` on `http://localhost:3000`, the backend's CORS default.
-3. Installs this package (`npm install --no-package-lock`), the browsers
-   (`npx playwright install --with-deps`), type-checks the specs (`npx tsc`) and runs them.
+3. Installs this package (`npm ci`), the browsers (`npx playwright install --with-deps`),
+   type-checks the specs (`npx tsc`) and runs them.
 4. On a failure, uploads the Playwright report, traces, screenshots, videos and the backend and
-   frontend server logs as `browser-e2e-<build>-report` (kept 7 days).
+   frontend server logs as `browser-e2e-report` (kept 7 days).
 
 The package pins `@playwright/test`, `typescript`, `@types/node`, `@types/react` and
-`@types/react-dom` exactly and commits no lockfile, so `frontend/package-lock.json` never changes
-for it.
+`@types/react-dom` exactly and commits its own `package-lock.json` (every package from
+registry.npmjs.org with its integrity hash), so `frontend/package-lock.json` never changes for it.
+To change a pin, change `package.json` and the lockfile together.
 
-## The two builds
+## One build
 
-| Build | Spike flag | Runs |
-|---|---|---|
-| `default` | `AUTOMATOS_THEME_HOST_SPIKE=0`, as every shipped image | `@smoke`, `@off` |
-| `spike` | `AUTOMATOS_THEME_HOST_SPIKE=1`, this lane only | `@smoke`, `@spike`, `@record` |
-
-The `spike` build also runs `node scripts/theme-sdk/generate-shims.js` in `frontend/` before
-`npm run build`, so the shims under `public/theme-sdk/v1/` are generated from the React that install
-vendors. They are never committed, and the `default` build has none.
+The lane builds the frontend once, exactly as every image does (PRD-261 A-04a): the theme host has
+no build flag. `npm run build` runs `prebuild` first, which generates the theme-sdk shims under
+`public/theme-sdk/v1/` from the React that install vendors (`scripts/theme-sdk/generate-shims.js`);
+they are never committed. The host loads a theme only under an installed theme's style
+(`theme:install:<uuid>`), so a browser on Studio or Classic meets none of it.
 
 ## The hello theme
 
-`fixtures/hello-theme/` is the spike's theme: `theme.json`, an entry with a frame, one stylesheet
+`fixtures/hello-theme/` is the test theme: `theme.json`, an entry with a frame, one stylesheet
 and one preset, plus the variants the specs need (`entry.throws.js`, `entry.render-throws.js`,
 `theme.engines-mismatch.json`). It reaches the browser only through route interception
-(`support/hello-theme.ts`) at the host's fixed path `/theme-spike/hello/`; nothing under
-`frontend/` serves that path, so no image can carry it. The lane type-checks it against
-`@types/react` 19 and the spike SDK's types (`types/theme-sdk.d.ts`) with
-`npx tsc -p fixtures/hello-theme/tsconfig.json`.
+(`support/hello-theme.ts`), as an installed theme: `GET /api/themes/active` answers with the
+install and the fixture's `theme.json` as its manifest, and `/api/themes/files/<digest>/**` serves
+the fixture's files. A spec puts the browser on the install's style first (`chooseStyle`). The
+lane type-checks the theme against `@types/react` 19 and the test SDK's types
+(`types/theme-sdk.d.ts`) with `npx tsc -p fixtures/hello-theme/tsconfig.json`.
+
+`support/hello-theme.ts` is read-only after A-04a (PA-17): a later story adds its own fixture under
+`fixtures/hello-<story>/` and its own spec, and serves it with `serveInstalledTheme`.
 
 ## Tags
 
@@ -53,11 +55,12 @@ Every test carries one tag through the `tag` option, for example
 `test('…', { tag: '@smoke' }, async ({ page }) => { … })`. The workflow selects by tag with
 `--grep`.
 
-- `@smoke` — the lane itself works: the app loads, reaches the backend and draws the Studio shell. Both builds.
-- `@off` — with the spike off, none of the theme host is on the page. Default build only.
-- `@spike` — the theme host loads, falls back and stays off where it should. Spike build only.
+- `@smoke` — the lane itself works: the app loads, reaches the backend and draws the Studio shell.
+- `@off` — a fresh browser on Studio loads none of the theme host.
+- `@host` — the theme host loads an installed theme, falls back on the theme's own failures, keeps
+  the theme when the page inside its frame fails, and stays off where it should.
 - `@record` — writes measured facts (React version, import-map support and integrity) to `records/`.
-  Spike build only, and the only tag Firefox runs (the `firefox` project has `grep: /@record/`).
+  The only tag Firefox runs (the `firefox` project has `grep: /@record/`).
   `scripts/summarise-records.mjs` turns the folder into the job summary's table; the folder is
   uploaded as `theme-host-record`.
 
@@ -66,9 +69,10 @@ Specs live in `specs/`, shared helpers in `support/`.
 ## When it runs
 
 On a pull request (any base branch) or a push to `main` that changes one of the paths in the
-workflow's `paths:` list: the root layout, `/agents`, the providers and workspace provider, the
-layout components, the theme host, the Style axis files, `next.config.js`, the middleware, the
-frontend's package files, the compose boot files and this folder. It does not watch the rest of
+workflow's `paths:` list: the root layout, the pages and components PRD-261 Phase A touches (PA-6:
+the Q3 pages, the theme host, Play, the looks, the Style axis files, the theme routes and services
+on the backend), `next.config.js`, the middleware, the frontend's package files, the compose boot
+files and this folder. It does not watch the rest of
 the backend or the other pages, so a change there can break the lane without running it.
 
 Until the workflow is on `main`, it runs only on a `pull_request` whose HEAD commit has no

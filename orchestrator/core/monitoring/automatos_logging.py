@@ -46,6 +46,9 @@ from contextvars import ContextVar
 from typing import Optional
 
 from config import config
+# The request-log guard (#1051, #1178): its own module, which imports nothing but logging,
+# so a script that sets up logging itself can use it without config.
+from core.monitoring.request_log_guard import REQUEST_LIBRARIES, guard_request_logs
 
 
 # ─────────────────────────────────────────────
@@ -369,7 +372,11 @@ def setup_logging(
     # https://api.telegram.org/bot<token>/getUpdates. After #783 enabled the
     # Telegram driver, the bot token reached the console and log-relay (Loki) on
     # every poll (prod, 23 Sep). The request lines are noise; warnings still show.
-    for noisy in ("httpx", "httpcore"):
+    # openai 3.x sends through httpx's fork, httpx2 (with httpcore2), which logs
+    # the same request line under its own name: every model call's URL (#1051).
+    # urllib3 (requests) logs a redirect's full URL at INFO, so it is held too.
+    # The levels skip the work; RequestLogGuard on the handlers is what holds (#1178).
+    for noisy in REQUEST_LIBRARIES:
         logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
 
     # Console handler (always present)
@@ -392,6 +399,7 @@ def setup_logging(
         relay.setLevel(level)
         root.addHandler(relay)
 
+    guard_request_logs()
     return root
 
 

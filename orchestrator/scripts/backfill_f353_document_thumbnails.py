@@ -50,6 +50,8 @@ def main() -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     with SessionLocal() as db:
         candidates = find_candidates(db, workspace_id=args.workspace_id, limit=args.limit)
     print(f"F353 thumbnail backfill: {len(candidates)} documents, sheets and reports to look at")

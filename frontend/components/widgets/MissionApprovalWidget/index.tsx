@@ -7,6 +7,17 @@
  * summary, cost vs ceiling, an optional auto-proceed countdown, and
  * Approve / Reject. Approving starts execution; rejecting returns structured
  * feedback to the mission. Rendered via the widget router.
+ *
+ * PRD-261 A-12c: the card is a protected surface. The exported widget wraps it
+ * in ProtectedSurface (components/theme-host/protected-surface.tsx). What is
+ * guaranteed: the card's own two boxes (the host and its inner wrapper) keep
+ * every guarded property (display, visibility, opacity, clicks, position, the
+ * transforms, masks, zoom, size) against every stylesheet rule, and the
+ * server's scope check refuses any theme selector that names either wrapper,
+ * so no theme rule reaches the card, or anything inside it, by name. What is a
+ * review rule (docs/theme-host/css-layer-model.md): a generic selector such as
+ * `button` that matches the card's elements without naming the card, a rule on
+ * an ancestor, an element drawn over the card, and a theme's code in the page.
  */
 
 import { useState, useEffect } from 'react'
@@ -15,6 +26,7 @@ import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
+import { ProtectedSurface } from '@/components/theme-host/protected-surface'
 import { useApproveMission, useRejectMission, useUpdateMissionPlan } from '@/hooks/use-missions-api'
 import type { WidgetBaseProps, MissionApprovalTask, MissionApprovalWidgetData, WidgetDefinition } from '../types'
 import { roleEdit, withPlanPicks } from './role-edit'
@@ -39,7 +51,16 @@ function useCountdown(deadlineIso?: string): number | null {
   return secsLeft
 }
 
-export function MissionApprovalWidget({
+/** Every place the card renders gets it guarded (the canvas, a chat reply, a theme's page). */
+export function MissionApprovalWidget(props: WidgetBaseProps<MissionApprovalWidgetData>) {
+  return (
+    <ProtectedSurface surface="mission-approval">
+      <MissionApprovalCard {...props} />
+    </ProtectedSurface>
+  )
+}
+
+function MissionApprovalCard({
   title,
   data,
   metadata,

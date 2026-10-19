@@ -1,0 +1,26 @@
+{
+  "_comment": "PRD-261 A-10a: the planned runtime export names of one @automatos/theme-sdk area (the surface snapshot). lib/theme-sdk/__tests__/surface.test.ts holds the area's module to exactly these names; scripts/theme-sdk/generate-shims.js builds the SDK shim from the union of every file here. A name is added or removed only with an sdk-surface-map.md row (A-10c) and an SDK version bump (PRD §4.3 item 7).",
+  "area": "navigation",
+  "story": "A-10a",
+  "status": "built",
+  "names": [
+    "BOARD_HREF",
+    "CHAT_HREF",
+    "DELIVERABLES_HREF",
+    "DELIVERABLE_EXPLORER_HREF",
+    "DELIVERABLE_PARAM",
+    "HostLink",
+    "LOOKS_HREF",
+    "LOOK_STYLE_HREF",
+    "QUESTIONS_HREF",
+    "chatHref",
+    "missionHref",
+    "questionHref",
+    "resolveActiveNavId",
+    "ticketHref",
+    "useCoreNav",
+    "useHostPathname",
+    "useHostRouter",
+    "useHostSearchParams"
+  ]
+}

@@ -120,12 +120,6 @@ const nextConfig = {
     ignoreDuringBuilds: true
   },
   typedRoutes: true,
-  // PRD-261 A-01 (D3): the theme-host spike is fixed when the app is BUILT, as '1' or '0', in the
-  // server and client bundles alike. Only the browser lane's spike job builds with '1'; the
-  // Dockerfile, Railway and the image workflow never set it, so every shipped build has '0'.
-  env: {
-    AUTOMATOS_THEME_HOST_SPIKE: process.env.AUTOMATOS_THEME_HOST_SPIKE === '1' ? '1' : '0',
-  },
   turbopack: {
     root: __dirname,
   },
