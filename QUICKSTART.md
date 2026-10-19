@@ -6,6 +6,10 @@ This is the short path; the full reference (every service, every dial,
 troubleshooting, how the editions relate) is
 [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).
 
+You need Docker Engine 25 or later with Docker Compose 2.24.4 or later (a
+current Docker Desktop on macOS and Windows); `make up` checks both first and
+stops, naming that floor, on an older Docker.
+
 **On Windows, or setting up with an AI coding agent?** Use [SETUP.md](SETUP.md):
 the step-by-step install for macOS, Linux and Windows (WSL2), with a check
 after each step.

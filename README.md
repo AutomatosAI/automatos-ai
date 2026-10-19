@@ -196,6 +196,7 @@ make up                 # writes .env with POSTGRES_PASSWORD, REDIS_PASSWORD and
                         # CI published for this commit (about 1.3 GB), then starts the stack
 ```
 
+`make up` needs Docker Engine 25 or later with Docker Compose 2.24.4 or later, and checks both first.
 Then open http://localhost:3000 (API reference at http://localhost:8000/docs).
 `make up` pulls instead of building: the first run downloads about 1.3 GB, about a
 minute at 200 Mbit/s or three to four at 50 Mbit/s, and builds the database schema.

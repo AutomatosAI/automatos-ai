@@ -17,7 +17,7 @@ disagree, the file wins — open an issue.
 
 | Need | Notes |
 |---|---|
-| Docker Desktop (macOS / Windows) or Docker Engine (Linux) | with the Compose v2 plugin — the `docker compose` subcommand. The compose file uses v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. |
+| Docker Engine 25 or later with Docker Compose 2.24.4 or later: Docker Desktop (macOS / Windows) or Docker Engine (Linux) | Check with `docker version --format '{{.Server.Version}}'` and `docker compose version --short`. The compose file probes each service every second while it starts (healthcheck `start_interval`), which Compose refuses on an engine older than 25, and it uses Compose v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. `make up` checks both versions first and stops, naming this floor, on an older Docker. A Linux distribution's own `docker.io` package can be older: install from Docker's repository (docs.docker.com/engine/install). |
 | Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
 | Git | to clone and to pull updates. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
@@ -167,7 +167,9 @@ what each target runs, from the repository root. On native Windows, run the
 the repository when it is not set.
 
 ```bash
-# make env: .env with the three secrets (section 2). make up, make build and make dev run it first.
+# make env: the Docker floor, then .env with the three secrets (section 2). make up, make build and
+# make dev run it first.
+sh scripts/stack_docker_floor.sh     # stops unless Docker Engine is 25 or later and Compose 2.24.4 or later
 sh scripts/stack_env.sh              # creates .env from .env.example; fills the three while empty or CHANGE_ME,
                                      # before the first start only
 
@@ -205,7 +207,15 @@ docker compose logs -f --tail=200 $(s)
 docker compose down -v --remove-orphans
 ```
 
-`make env` is `scripts/stack_env.sh` (POSIX sh, `openssl` and the `docker`
+`make env` first runs `scripts/stack_docker_floor.sh` (POSIX sh and the `docker`
+CLI), so it is the first thing `make up`, `make build` and `make dev` check. It
+stops when Docker does not answer, or when it is older than the floor in §1:
+the engine's API older than 1.44 (Docker Engine 25), or Compose older than
+2.24.4. Without it, check the two by hand:
+`docker version --format '{{.Server.Version}}'` prints 25 or later, and
+`docker compose version --short` prints 2.24.4 or later.
+
+Then `make env` runs `scripts/stack_env.sh` (POSIX sh, `openssl` and the `docker`
 CLI). Without it, the same by hand, from the repository root:
 
 ```bash
@@ -476,6 +486,12 @@ You should not need to open the last three for a standard install.
 2. **Data services.** Postgres initialises an empty cluster with
    `POSTGRES_PASSWORD` — this password is baked into the volume at that moment
    (see §10). MinIO starts and `minio-init` creates the documents bucket.
+   While a service starts, Docker probes its health every second
+   (`start_interval: 1s` in `docker-compose.yml`, Docker Engine 25 or later), so
+   a service that waits on another starts within a second or two of it being
+   ready; CI holds Redis and MinIO to 2 s from start to healthy. Postgres's
+   probe goes over TCP (`pg_isready -h 127.0.0.1`), so on a fresh volume it passes
+   only once the real server runs, after initdb's temporary one has stopped.
 3. **Backend entrypoint** (`docker-entrypoint.sh`), in order, each step
    fail-closed unless noted:
    - wait for Postgres, verify the connection;
@@ -498,8 +514,11 @@ You should not need to open the last three for a standard install.
      Workspace*) and the operator user exist;
    - start `uvicorn`. The application then runs its own boot stages,
      including the Composio catalogue bootstrap (§7).
-4. **Frontend** starts after the backend's health check passes (the check
-   allows 40 s of start-up and probes every 30 s).
+4. **Frontend** starts after the backend's health check passes. The check
+   probes every second while the backend starts, so the backend turns healthy
+   about a second after it first answers `/health`, and compose starts the
+   frontend about a second after that (CI holds this to 3 s). The check allows
+   up to 300 s of start-up for a first boot (F228), then probes every 30 s.
 
 Readiness, not liveness, is the signal that it is usable:
 
@@ -939,6 +958,15 @@ placeholder from `.env.example`, on an install that has already started, so
 nothing generated a value for it. Rotate it as §2 shows, or, with no data to
 keep, `docker compose down -v` and `make up` again. `make env` changes nothing
 on its own once the database volume exists.
+
+**`Automatos needs Docker Engine 25 or later and Docker Compose 2.24.4 or later`**
+from `make up` (or `make env`, `make build`, `make dev`), or **`can't set
+healthcheck.start_interval as feature require Docker Engine v25 or later`**
+from plain `docker compose up`. This Docker is older than the floor (§1): the
+compose file probes each service every second while it starts, which needs
+Engine 25. Update Docker Desktop, or on Linux install Docker Engine and its
+compose plugin from Docker's repository (docs.docker.com/engine/install); a
+distribution's `docker.io` package can be older. Your data volumes are kept.
 
 **Logs.** `make logs` follows the whole stack (`make logs s=backend` for one
 service). The same with plain compose: `docker compose logs -f backend` (boot

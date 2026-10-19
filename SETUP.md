@@ -67,7 +67,8 @@ session paths won't line up with Explorer.
    - **Docker Engine inside Ubuntu**: follow Docker's *Install Docker Engine on
      Ubuntu* guide, inside the Ubuntu terminal.
 
-   *Check:* in the Ubuntu terminal, `docker compose version` prints `v2.x` or later.
+   *Check:* in the Ubuntu terminal, `docker version --format '{{.Server.Version}}'`
+   prints 25 or later, and `docker compose version --short` prints 2.24.4 or later.
 3. **Install git and make inside Ubuntu:**
    ```bash
    sudo apt update && sudo apt install -y git make python3
@@ -86,7 +87,7 @@ forwards the ports.
 
 | Need | Check | Install if missing |
 |---|---|---|
-| Docker with Compose v2 | `docker compose version` | macOS: Docker Desktop · Linux: Docker Engine + compose plugin |
+| Docker Engine 25 or later with Compose 2.24.4 or later | `docker version --format '{{.Server.Version}}'` prints 25 or later; `docker compose version --short` prints 2.24.4 or later | macOS: Docker Desktop (update it if older) · Linux: Docker Engine + compose plugin from Docker's repository (docs.docker.com/engine/install); a distribution's `docker.io` package can be older |
 | Docker is running | `docker info` shows no error | Start Docker Desktop, or `sudo systemctl start docker` |
 | git | `git --version` | macOS: `xcode-select --install` · Linux: your package manager |
 | make | `make --version` | macOS: comes with the Xcode tools · Linux: `sudo apt install make` |
@@ -294,6 +295,7 @@ brings the weekly rebuild with fresh OS packages.
 |---|---|---|
 | `exec /usr/local/bin/docker-entrypoint.sh: no such file or directory` | The code was checked out on Windows with CRLF line endings | Clone inside WSL2 (Path W). An old Windows checkout: re-clone inside Ubuntu |
 | `make: command not found` | make isn't installed | `sudo apt install make`, or use the plain `docker compose` command in step 4 |
+| `Automatos needs Docker Engine 25 or later and Docker Compose 2.24.4 or later` (from `make up`), or `can't set healthcheck.start_interval as feature require Docker Engine v25 or later` (from `docker compose up`) | Docker is older than the floor | Update Docker Desktop, or install Docker Engine and its compose plugin from Docker's repository (step 1), then run `make up` again |
 | `port is already allocated` / `address already in use` | Something else uses 5432, 3000 or 8000 (often a local Postgres) | Set `POSTGRES_PORT`, `FRONTEND_PORT` or `API_PORT` in `.env` (step 3) |
 | `required variable POSTGRES_PASSWORD is missing` | `.env` is missing or the secrets are empty | Redo step 3 |
 | `Placeholder secrets: … Each still starts with CHANGE_ME` (from `make env`, or the backend keeps restarting with it in its log) | An install that already started on the `.env.example` placeholders | Rotate them as it prints ([self-hosting guide §2](docs/getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)). On the install you just made, with nothing in it yet: `docker compose down -v`, then `make up` |

@@ -38,7 +38,7 @@ This page guides developers and operators through the installation, configuratio
 ## Prerequisites
 
 Before installing Automatos AI, ensure your host environment satisfies the following requirements:
-- **Docker Engine** (20.10+) and **Docker Compose** (2.0+)
+- **Docker Engine** (25+) and **Docker Compose** (2.24.4+): the compose file's healthchecks use `start_interval`, which Compose refuses on an older engine
 - **Git** for repository cloning
 - **Minimum 8GB RAM** (16GB recommended for running local workers, MinIO, and Qdrant)
 - **10GB free disk space** for persistent volumes and container images
