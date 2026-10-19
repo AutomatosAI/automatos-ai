@@ -13,15 +13,20 @@ upload, and its LLM check can make dozens of paid calls. Four limits cap that sp
   review together, in a rolling 24 hours. What was spent is read from the rows' own scan reports
   (``checks.llm.tokensUsed``), so no new table: ``llm_usage`` is a per-workspace billing ledger
   (cost columns, no index on its type or time) and the review's tokens are the platform's, not
-  the workspace's. A stage reserves its estimate in this process before its calls
-  (``reserve_tokens``), so two stages at once never both spend the last of the budget here; one
-  that doesn't fit doesn't call the LLM ("LLM stage did not run: daily budget reached", so
-  ``review_required``, never safe).
+  the workspace's.
+* **A hold per request** (``token_hold``): the route opens it before it reads what is left today
+  and keeps it until the request ends, after the row is committed. Before each LLM call the
+  stage holds that call's upper bound (``TokenHold.try_hold``); when the reply comes back the
+  bound becomes what the reply says it cost (``TokenHold.settle``). A call that doesn't fit what
+  is left, less what every other request in this process holds or spent, is not made ("daily
+  budget reached", so ``review_required``, never safe). A hold released after this request
+  opened its own still counts against it (its row may have been committed after this request
+  read the database), so one worker never spends the same tokens twice.
 
-Not counted: a stage whose row is never saved (a lost race, a store failure; the claim and the
-read-only checks before the stage keep that rare), and a call still in flight at the stage's
-deadline (at most ``llm_stage.CONCURRENCY`` per stage, each ending at its own timeout). An
-unusable reply's tokens are counted.
+Not counted: a stage whose row is never saved (a lost race, a store failure) once its request
+has ended; and every uvicorn worker keeps its own holds, so workers that start stages at the same
+moment can each spend what is left once. An unusable reply's tokens are counted, and a call still
+in flight at the stage's deadline counts at its upper bound.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterator, Mapping, Optional
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -92,7 +97,6 @@ class _Gauge:
 
 
 _STAGES = _Gauge()
-_RESERVED_TOKENS = _Gauge()
 
 
 @contextmanager
@@ -164,21 +168,92 @@ def tokens_left_today(db: Session) -> int:
     return max(budget - tokens_used_today(db), 0)
 
 
+class TokenHold:
+    """One request's LLM tokens in this process: the bounds of its calls in flight and what its
+    answered calls cost, against ``budget`` (what was left today when it opened; None is no cap)."""
+
+    def __init__(self, seq: int) -> None:
+        self.seq = seq
+        self.budget: Optional[int] = None
+        self.in_flight = 0
+        self.spent = 0
+
+    @property
+    def total(self) -> int:
+        """What this request holds: its calls in flight at their bound, and its answered calls."""
+        return self.in_flight + self.spent
+
+    def try_hold(self, bound: int) -> bool:
+        """Hold ``bound`` for one call when it fits; False (nothing held) when it doesn't."""
+        return _LEDGER.try_hold(self, bound)
+
+    def settle(self, bound: int, cost: int) -> None:
+        """A call held at ``bound`` came back having cost ``cost``."""
+        _LEDGER.settle(self, bound, cost)
+
+
+class _Ledger:
+    """Every open hold in this process, and the holds released while another was open."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._open: Dict[int, TokenHold] = {}
+        self._released: List[Tuple[int, int]] = []  # (seq at release, tokens it held)
+
+    def open(self) -> TokenHold:
+        with self._lock:
+            self._seq += 1
+            hold = TokenHold(self._seq)
+            self._open[hold.seq] = hold
+            return hold
+
+    def _others(self, hold: TokenHold) -> int:
+        """What other requests hold now, plus what those released since ``hold`` opened held."""
+        live = sum(other.total for seq, other in self._open.items() if seq != hold.seq)
+        return live + sum(tokens for seq, tokens in self._released if seq > hold.seq)
+
+    def try_hold(self, hold: TokenHold, bound: int) -> bool:
+        with self._lock:
+            if hold.budget is not None and hold.total + self._others(hold) + bound > hold.budget:
+                return False
+            hold.in_flight += bound
+            return True
+
+    def settle(self, hold: TokenHold, bound: int, cost: int) -> None:
+        with self._lock:
+            hold.in_flight = max(hold.in_flight - bound, 0)
+            hold.spent += max(cost, 0)
+
+    def release(self, hold: TokenHold) -> None:
+        with self._lock:
+            self._open.pop(hold.seq, None)
+            self._seq += 1
+            if hold.total:
+                self._released.append((self._seq, hold.total))
+            oldest = min(self._open, default=self._seq)
+            self._released = [(seq, tokens) for seq, tokens in self._released if seq > oldest]
+
+    def held(self) -> int:
+        with self._lock:
+            return sum(hold.total for hold in self._open.values())
+
+
+_LEDGER = _Ledger()
+
+
 @contextmanager
-def reserve_tokens(estimate: int, tokens_left: Optional[int]) -> Iterator[bool]:
-    """Yields True with ``estimate`` held for the block when it fits in ``tokens_left`` less what
-    other stages in this process hold; False (nothing held) when it doesn't. ``None`` is no cap."""
-    if tokens_left is None:
-        yield True
-        return
-    held = _RESERVED_TOKENS.try_add(estimate, tokens_left)
+def token_hold(tokens_left: Callable[[], Optional[int]]) -> Iterator[TokenHold]:
+    """This request's hold: opened first, then ``tokens_left()`` is read as its budget (``None``
+    is no cap), released when the block ends. Keep it open until the stage's row is committed."""
+    hold = _LEDGER.open()
     try:
-        yield held
+        hold.budget = tokens_left()
+        yield hold
     finally:
-        if held:
-            _RESERVED_TOKENS.take(estimate)
+        _LEDGER.release(hold)
 
 
 def tokens_reserved() -> int:
-    """Tokens the stages running in this process hold now."""
-    return _RESERVED_TOKENS.value
+    """Tokens the requests open in this process hold now (in flight and spent)."""
+    return _LEDGER.held()

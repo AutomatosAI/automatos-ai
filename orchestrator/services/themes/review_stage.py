@@ -37,7 +37,7 @@ import logging
 from typing import Any, Dict, Mapping, Optional
 
 from services.themes.drift import stale_clones
-from services.themes.llm_stage import ChunkCall, llm_check, run_llm_stage
+from services.themes.llm_stage import ChunkCall, TokenBudget, llm_check, run_llm_stage
 from services.themes.package import ThemePackage
 from services.themes.scan import build_scan_report
 from services.themes.sdk_uses import SurfaceAreas, uses_check
@@ -94,14 +94,15 @@ def _counts(checks: Mapping[str, Mapping[str, Any]]) -> Dict[str, int]:
 def run_review_stage(
     checked: ThemePackage, package_bytes: int, *, include_source: bool = True,
     llm_call: Optional[ChunkCall] = None, surface: Optional[SurfaceAreas] = None,
-    token_budget: Optional[int] = None,
+    token_budget: TokenBudget = None,
 ) -> Dict[str, Any]:
     """The scan report of a checked package, with its verdict; see the module docstring.
 
     ``include_source``: the LLM stage reads ``source/`` too when shipped (a Marketplace
     submission, whose ``dist/`` the isolated job rebuilds), never instead of ``dist/``; a private
-    upload passes False. ``token_budget``: what theme reviews may still spend today
-    (``review_limits.tokens_left_today``; the routes always pass it). ``llm_call`` and ``surface``
+    upload passes False. ``token_budget``: the request's ``review_limits.TokenHold``, opened on
+    what theme reviews may still spend today (the routes always pass it, and keep it until the
+    row is committed); a bare number is held for the stage alone. ``llm_call`` and ``surface``
     replace the Anthropic call and this host's SDK names (tests).
     Call it from a thread with no running event loop (``asyncio.run``).
     """

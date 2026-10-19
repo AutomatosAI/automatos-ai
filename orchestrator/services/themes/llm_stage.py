@@ -9,16 +9,22 @@ theme code and cut to fit:
   ``source/`` never replaces ``dist/``: one score, the highest of every part of both. A private
   upload never has that rebuild, so its caller reads ``dist/`` alone.
 * **How:** one call per chunk, never the whole bundle in one prompt. Each file is cut into
-  chunks of at most ``THEME_LLM_CHUNK_TOKENS`` tokens (estimated at ``CHARS_PER_TOKEN``
-  characters each, on line ends where it can); at most ``THEME_LLM_MAX_CHUNKS`` chunks run per
+  chunks of at most ``THEME_LLM_CHUNK_TOKENS`` × ``CHARS_PER_TOKEN`` bytes of UTF-8 (about
+  ``THEME_LLM_CHUNK_TOKENS`` tokens of ordinary code, never more tokens than bytes), on line ends
+  where it can and never inside a character; at most ``THEME_LLM_MAX_CHUNKS`` chunks run per
   package, ``CONCURRENCY`` at a time, on the scanner's model (``PLUGIN_LLM_SCAN_MODEL``), on one
   thread pool this process shares (``CONCURRENCY`` threads per stage ``THEME_REVIEW_MAX_CONCURRENT``
   allows at once), never a new pool per request.
 * **Steering:** each part sits between delimiters carrying a fresh random nonce the prompt names,
   and text aimed at the reviewer holds the score at ``REVIEW_AT`` at least (``llm_guard.py``).
-* **Spend:** before any call the stage estimates its tokens (``estimated_tokens``) and reserves
-  them against the caller's ``token_budget`` (``review_limits.reserve_tokens``); one that doesn't
-  fit makes no call: "LLM stage did not run: daily budget reached".
+* **Spend:** a token is never shorter than one byte of UTF-8, so a call's prompt bytes (the
+  system prompt's too) plus a full reply bound what it may cost (``chunk_bound``), whatever the
+  text: CJK, emoji or base64 included. Before each call the stage holds that bound in the
+  caller's ``review_limits.TokenHold`` and, when the reply comes back, settles it to the reply's
+  ``usage`` (the bound when it gives none). A call whose bound doesn't fit what is left is not
+  made and its part counts as unread: "daily budget reached" (none made: "LLM stage did not run:
+  daily budget reached"). So the stage stops scheduling the moment what it spent and holds
+  reaches the budget, and never spends past it.
 * **One score:** the highest chunk's risk score, so one hostile chunk decides; the findings of
   every chunk, capped at ``MAX_FINDINGS``; tokens summed.
 * **Thresholds:** as the plugin scanner (``plugin_security_scanner.py:500-503``): ``BLOCK_AT``
@@ -30,9 +36,9 @@ theme code and cut to fit:
 * **One deadline:** the whole stage stops after ``THEME_LLM_STAGE_SECONDS``; parts still unread
   then count as unread, so one slow upload holds a request (and its claim) for a bounded time.
 * **Never safe by default:** a missing key, a missing client library, a call that fails, a reply
-  that isn't the JSON asked for, the deadline, the day's token budget, or chunks left over the cap mean the stage did not
-  run on all of the code. That is a warning with the reason "LLM stage did not run" (so the verdict is at
-  least ``review_required``), never a pass and never ``not_run``.
+  that isn't the JSON asked for, the deadline, the day's token budget, or chunks left over the cap
+  mean the stage did not run on all of the code. That is a warning with the reason "LLM stage did
+  not run" (so the verdict is at least ``review_required``), never a pass and never ``not_run``.
 
 The config names ``THEME_LLM_CHUNK_TOKENS``, ``THEME_LLM_MAX_CHUNKS``, ``THEME_LLM_STAGE_SECONDS``
 and ``THEME_LLM_TIMEOUT_SECONDS`` are in ``config.py`` (C1-wire); a missing or non-positive value
@@ -46,12 +52,12 @@ import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple, Union
 
 from config import config
 from core.services.plugin_security_scanner import LLMScanResult, _scan_result_from_response, _strip_code_fence
 from services.themes.llm_guard import new_nonce, steering_findings, wrap_part
-from services.themes.review_limits import DEFAULT_MAX_CONCURRENT, reserve_tokens
+from services.themes.review_limits import DEFAULT_MAX_CONCURRENT, TokenHold, token_hold
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +68,13 @@ DEFAULT_CHUNK_TOKENS = 8000
 DEFAULT_MAX_CHUNKS = 48
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_STAGE_SECONDS = 300
-# Minified JavaScript runs nearer three characters a token than four; the lower estimate keeps a
-# chunk under its token cap.
+# Minified JavaScript runs nearer three bytes a token than four: a chunk is cut at the token cap
+# times this many bytes. What a call may cost is bounded by bytes, never by this ratio.
 CHARS_PER_TOKEN = 3
+UTF8 = "utf-8"
+UTF8_CHAR_MAX_BYTES = 4
+# The message's own framing (roles, turn markers) on top of the prompt's bytes.
+CALL_OVERHEAD_TOKENS = 64
 CONCURRENCY = 4
 MAX_OUTPUT_TOKENS = 2048
 MAX_RETRIES = 1
@@ -126,10 +136,15 @@ class Chunk(NamedTuple):
 
 
 class ChunkOutcome(NamedTuple):
-    """One answered call: its checked verdict (None when the reply was unusable) and the tokens it cost."""
+    """One chunk: its checked verdict (None when the call failed or the reply was unusable), and
+    whether it was left unread because its bound didn't fit the day's budget."""
 
     result: Optional[LLMScanResult]
-    tokens: int
+    over_budget: bool = False
+
+
+# What the stage may spend: a request's hold, a bare number held for the stage alone, or None (no cap).
+TokenBudget = Union[TokenHold, int, None]
 
 
 class ThemeLLMResult(NamedTuple):
@@ -162,22 +177,35 @@ def code_files(files: Mapping[str, bytes], include_source: bool) -> Tuple[str, D
     return (READ_DIST_AND_SOURCE if source else READ_DIST), texts
 
 
-def _cut(text: str, max_chars: int) -> List[str]:
-    """``text`` in pieces of at most ``max_chars``, cut after a line end where one is in reach."""
+def _piece_end(data: bytes, at: int, max_bytes: int) -> int:
+    """Where the piece starting at ``at`` ends: after a line end in reach, else at the cap, backed
+    off to the start of a character (a UTF-8 continuation byte is ``0b10xxxxxx``)."""
+    end = min(at + max_bytes, len(data))
+    if end == len(data):
+        return end
+    newline = data.rfind(b"\n", at, end)
+    if newline > at:
+        return newline + 1
+    while end > at + 1 and data[end] & 0xC0 == 0x80:
+        end -= 1
+    return end
+
+
+def _cut(text: str, max_bytes: int) -> List[str]:
+    """``text`` in pieces of at most ``max_bytes`` of UTF-8, cut after a line end where one is in reach."""
+    data = text.encode(UTF8)
+    max_bytes = max(max_bytes, UTF8_CHAR_MAX_BYTES)
     pieces: List[str] = []
     at = 0
-    while at < len(text):
-        end = min(at + max_chars, len(text))
-        if end < len(text):
-            newline = text.rfind("\n", at, end)
-            end = newline + 1 if newline > at else end
-        pieces.append(text[at:end])
+    while at < len(data):
+        end = _piece_end(data, at, max_bytes)
+        pieces.append(data[at:end].decode(UTF8))
         at = end
     return pieces or [""]
 
 
 def chunk_files(texts: Mapping[str, str], max_tokens: int) -> List[Chunk]:
-    """Every file cut to fit ``max_tokens`` each, in file order."""
+    """Every file cut to at most ``max_tokens`` × ``CHARS_PER_TOKEN`` bytes a piece, in file order."""
     chunks: List[Chunk] = []
     for path, text in texts.items():
         pieces = _cut(text, max_tokens * CHARS_PER_TOKEN)
@@ -190,13 +218,16 @@ def _prompt(chunk: Chunk, nonce: str) -> str:
     return wrap_part(f"--- FILE: {chunk.path} (part {chunk.part} of {chunk.parts}) ---", chunk.text, nonce)
 
 
-def estimated_tokens(chunks: List[Chunk]) -> int:
-    """What ``chunks`` may cost at most: each one's prompt with the system prompt, plus a full reply.
+def chunk_bound(chunk: Chunk) -> int:
+    """The most one chunk's call may cost: its prompt's UTF-8 bytes and the system prompt's (no
+    token is shorter than a byte), the message framing, and a full reply."""
+    prompt_bytes = len(THEME_SCAN_PROMPT.encode(UTF8)) + len(_prompt(chunk, NONCE_SIZED).encode(UTF8))
+    return prompt_bytes + CALL_OVERHEAD_TOKENS + MAX_OUTPUT_TOKENS
 
-    ``CHARS_PER_TOKEN`` (3) over-counts most code, so the estimate errs high.
-    """
-    return sum(len(THEME_SCAN_PROMPT + _prompt(chunk, NONCE_SIZED)) // CHARS_PER_TOKEN + 1 + MAX_OUTPUT_TOKENS
-               for chunk in chunks)
+
+def estimated_tokens(chunks: List[Chunk]) -> int:
+    """The most ``chunks`` may cost together (``chunk_bound`` of each)."""
+    return sum(chunk_bound(chunk) for chunk in chunks)
 
 
 _POOL_GUARD = threading.Lock()
@@ -278,26 +309,48 @@ def _chunk_result(response: Any, model: str, chunk: Chunk) -> Optional[LLMScanRe
     return result.model_copy(update={"risk_score": max(result.risk_score, _severity_floor(result))})
 
 
-def _usage_tokens(response: Any) -> int:
-    """The tokens a reply cost (input and output), whatever its text; 0 when it doesn't say."""
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _usage_tokens(response: Any, bound: int) -> int:
+    """The tokens a reply cost (input and output), whatever its text; ``bound`` when it doesn't say."""
     usage = getattr(response, "usage", None)
-    counts = (getattr(usage, "input_tokens", 0), getattr(usage, "output_tokens", 0))
-    return sum(count for count in counts if isinstance(count, int) and not isinstance(count, bool) and count > 0)
+    counts = [getattr(usage, "input_tokens", None), getattr(usage, "output_tokens", None)]
+    counts = [count for count in counts if _is_count(count)]
+    return sum(counts) if counts else bound
+
+
+def _checked_result(response: Any, model: str, chunk: Chunk) -> Optional[LLMScanResult]:
+    try:
+        return _chunk_result(response, model, chunk)
+    except Exception:
+        logger.exception("[Themes] LLM review of %s part %d/%d: the reply could not be read",
+                         chunk.path, chunk.part, chunk.parts)
+        return None
 
 
 async def _scan_chunk(call: ChunkCall, model: str, chunk: Chunk, gate: asyncio.Semaphore,
-                      pool: ThreadPoolExecutor) -> ChunkOutcome:
-    """One chunk's verdict and cost; no verdict when the call or its reply failed (logged with the file).
+                      pool: ThreadPoolExecutor, hold: TokenHold) -> ChunkOutcome:
+    """One chunk's verdict; none when the call or its reply failed (logged with the file), and no
+    call when its bound doesn't fit what ``hold`` may still spend.
 
-    An unusable reply still counts its tokens, so a package can't spend the day's budget unseen.
+    An unusable reply still counts its tokens, so a package can't spend the day's budget unseen. A
+    call cancelled at the deadline (``CancelledError`` is not an ``Exception``) stays held at its
+    bound: it is still running and will be billed.
     """
     async with gate:
+        bound = chunk_bound(chunk)
+        if not hold.try_hold(bound):
+            return ChunkOutcome(None, over_budget=True)
         try:
             response = await asyncio.get_running_loop().run_in_executor(pool, call, model, _prompt(chunk, new_nonce()))
-            return ChunkOutcome(_chunk_result(response, model, chunk), _usage_tokens(response))
         except Exception:
             logger.exception("[Themes] LLM review of %s part %d/%d failed", chunk.path, chunk.part, chunk.parts)
-            return ChunkOutcome(None, 0)
+            hold.settle(bound, 0)
+            return ChunkOutcome(None)
+        hold.settle(bound, _usage_tokens(response, bound))
+        return ChunkOutcome(_checked_result(response, model, chunk))
 
 
 async def _within(coroutines: List[Any], seconds: float) -> Tuple[List[Optional[ChunkOutcome]], int]:
@@ -347,15 +400,27 @@ def _not_run(read: str, texts: Mapping[str, str], chunks: List[Chunk], model: st
     return _combine(read, texts, chunks, [], model, f"{DID_NOT_RUN}: {why}.")
 
 
-def _partial_reason(failed: int, timed_out: int, left_over: int, limit: int) -> Optional[str]:
+class Unread(NamedTuple):
+    """How many parts went unread, by why."""
+
+    failed: int
+    over_budget: int
+    timed_out: int
+    left_over: int
+
+
+def _partial_reason(unread: Unread, limit: int) -> Optional[str]:
     """Why some of the code went unread, or None when every part was read."""
+    failed, timed_out, left_over = unread.failed, unread.timed_out, unread.left_over
     gaps = [f"{failed} part(s) got no usable answer"] if failed else []
+    gaps += [f"{unread.over_budget} part(s) were not read: {BUDGET_REACHED}"] if unread.over_budget else []
     gaps += [f"{timed_out} part(s) were still unread when the stage ran out of time"] if timed_out else []
     gaps += [f"{left_over} part(s) were over the limit of {limit} parts per package"] if left_over else []
     return f"{DID_NOT_RUN} on all of the code: {'; '.join(gaps)}." if gaps else None
 
 
-async def _scan_chunks(call: ChunkCall, model: str, chunks: List[Chunk]) -> Tuple[List[Optional[ChunkOutcome]], int]:
+async def _scan_chunks(call: ChunkCall, model: str, chunks: List[Chunk],
+                       hold: TokenHold) -> Tuple[List[Optional[ChunkOutcome]], int]:
     """Each chunk on its own call, ``CONCURRENCY`` at a time, within the stage's deadline.
 
     The calls run on the process's shared pool (``_pool``), which the stage never waits for, so a
@@ -363,32 +428,39 @@ async def _scan_chunks(call: ChunkCall, model: str, chunks: List[Chunk]) -> Tupl
     """
     gate = asyncio.Semaphore(CONCURRENCY)
     pool = _pool()
-    coroutines = [_scan_chunk(call, model, chunk, gate, pool) for chunk in chunks]
+    coroutines = [_scan_chunk(call, model, chunk, gate, pool, hold) for chunk in chunks]
     return await _within(coroutines, float(_setting("THEME_LLM_STAGE_SECONDS", DEFAULT_STAGE_SECONDS)))
 
 
 async def _scan_read(call: ChunkCall, model: str, read: str, texts: Mapping[str, str], chunks: List[Chunk],
-                     limit: int) -> ThemeLLMResult:
-    """The calls over the first ``limit`` chunks, combined; the reason names every part left unread."""
-    outcomes, timed_out = await _scan_chunks(call, model, chunks[:limit])
+                     limit: int, hold: TokenHold) -> ThemeLLMResult:
+    """The calls over the first ``limit`` chunks, combined; the reason names every part left unread.
+
+    The tokens are what ``hold`` spent, with any call still in flight at the deadline at its bound.
+    """
+    spent_before = hold.total
+    outcomes, timed_out = await _scan_chunks(call, model, chunks[:limit], hold)
     answered = [(chunk, outcome.result) for chunk, outcome in zip(chunks, outcomes)
                 if outcome is not None and outcome.result is not None]
-    tokens = sum(outcome.tokens for outcome in outcomes if outcome is not None)
-    failed = len(chunks[:limit]) - len(answered) - timed_out
-    reason = _partial_reason(failed, timed_out, max(len(chunks) - limit, 0), limit)
+    over_budget = sum(1 for outcome in outcomes if outcome is not None and outcome.over_budget)
+    if over_budget and over_budget == len(outcomes):
+        return _not_run(read, texts, chunks, model, BUDGET_REACHED)
+    failed = len(outcomes) - len(answered) - over_budget - timed_out
+    reason = _partial_reason(Unread(failed, over_budget, timed_out, max(len(chunks) - limit, 0)), limit)
     if reason is not None:
         logger.warning("[Themes] %s", reason)
-    return _combine(read, texts, chunks, answered, model, reason, tokens)
+    return _combine(read, texts, chunks, answered, model, reason, hold.total - spent_before)
 
 
 async def scan_theme_code(
     files: Mapping[str, bytes], *, include_source: bool = True, call: Optional[ChunkCall] = None,
-    token_budget: Optional[int] = None,
+    token_budget: TokenBudget = None,
 ) -> ThemeLLMResult:
     """Run the LLM stage over a package's code, chunk by chunk; see the module docstring.
 
-    ``token_budget``: the tokens theme reviews may still spend today (``review_limits.tokens_left_today``);
-    None is no cap (tests). A stage whose estimate doesn't fit makes no call.
+    ``token_budget``: the request's ``review_limits.TokenHold`` (the routes'), or a number of
+    tokens held for this stage alone; None is no cap (tests). A call whose bound doesn't fit is
+    not made.
     """
     model = config.PLUGIN_LLM_SCAN_MODEL
     read, texts = code_files(files, include_source)
@@ -398,15 +470,15 @@ async def scan_theme_code(
         if call is None:
             return _not_run(read, texts, chunks, model, why)
     limit = _setting("THEME_LLM_MAX_CHUNKS", DEFAULT_MAX_CHUNKS)
-    with reserve_tokens(estimated_tokens(chunks[:limit]), token_budget) as reserved:
-        if not reserved:
-            return _not_run(read, texts, chunks, model, BUDGET_REACHED)
-        return await _scan_read(call, model, read, texts, chunks, limit)
+    if isinstance(token_budget, TokenHold):
+        return await _scan_read(call, model, read, texts, chunks, limit, token_budget)
+    with token_hold(lambda: token_budget) as hold:
+        return await _scan_read(call, model, read, texts, chunks, limit, hold)
 
 
 def run_llm_stage(
     files: Mapping[str, bytes], *, include_source: bool = True, call: Optional[ChunkCall] = None,
-    token_budget: Optional[int] = None,
+    token_budget: TokenBudget = None,
 ) -> ThemeLLMResult:
     """The stage from a plain ``def`` route: ``asyncio.run`` in the threadpool thread, which has no loop running."""
     return asyncio.run(scan_theme_code(files, include_source=include_source, call=call, token_budget=token_budget))

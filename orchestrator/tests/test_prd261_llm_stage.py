@@ -217,34 +217,100 @@ def test_ordinary_theme_code_trips_no_pre_check():
 # ---------------------------------------------------------------------------
 
 
-def test_a_stage_whose_estimate_does_not_fit_the_budget_makes_no_call(small_chunks):
+def _chunks_of(files):
+    return llm_stage.chunk_files(llm_stage.code_files(files, True)[1], 100)
+
+
+def test_a_call_whose_bound_does_not_fit_the_budget_is_not_made(small_chunks):
     fake = FakeLLM()
     files = _files(**{"dist/chunks/big.js": _bundle(200)})
-    texts = llm_stage.code_files(files, True)[1]
-    estimate = llm_stage.estimated_tokens(llm_stage.chunk_files(texts, 100))
+    chunks = _chunks_of(files)
+    smallest = min(llm_stage.chunk_bound(chunk) for chunk in chunks)
 
-    result = run_llm_stage(files, call=fake, token_budget=estimate - 1)
-    assert fake.prompts == [] and result.ran is False and result.calls == 0
+    result = run_llm_stage(files, call=fake, token_budget=smallest - 1)
+    assert fake.prompts == [] and result.ran is False and result.calls == 0 and result.tokens_used == 0
     assert result.reason == f"{DID_NOT_RUN}: daily budget reached." and llm_check(result)["level"] == "warning"
-    assert run_llm_stage(files, call=fake, token_budget=estimate).ran is True
-    assert review_limits.tokens_reserved() == 0  # the reservation ends with the stage
+    assert run_llm_stage(files, call=fake, token_budget=llm_stage.estimated_tokens(chunks)).ran is True
+    assert review_limits.tokens_reserved() == 0  # a bare number is held for the stage alone
 
 
-def test_the_estimate_errs_high_against_the_real_prompt_size(small_chunks):
-    fake = FakeLLM()
-    files = _files(**{"dist/chunks/big.js": _bundle(200)})
-    chunks = llm_stage.chunk_files(llm_stage.code_files(files, True)[1], 100)
-    run_llm_stage(files, call=fake)
-    sent = sum(len(llm_stage.THEME_SCAN_PROMPT) + len(prompt) for prompt in fake.prompts) // llm_stage.CHARS_PER_TOKEN
-    assert llm_stage.estimated_tokens(chunks) >= sent + llm_stage.MAX_OUTPUT_TOKENS * len(chunks)
+# Nine CJK lines of 298 bytes each, so every chunk (at most 300 bytes at 100 tokens) is one line,
+# and every prompt ("part N of 9") is the same size.
+DENSE = ("中" * 99 + "\n") * 9
 
 
-def test_two_stages_at_once_never_both_spend_the_last_of_the_budget(small_chunks):
-    with review_limits.reserve_tokens(900, 1000) as first:
-        with review_limits.reserve_tokens(200, 1000) as second:
-            assert (first, second) == (True, False)
-            assert review_limits.tokens_reserved() == 900
+class DenseLLM(FakeLLM):
+    """Bills one token per byte of the prompt and system prompt plus a full reply: the worst case."""
+
+    def __call__(self, model, text):
+        reply = super().__call__(model, text)
+        cost = len((llm_stage.THEME_SCAN_PROMPT + text).encode("utf-8"))
+        reply.usage = SimpleNamespace(input_tokens=cost, output_tokens=llm_stage.MAX_OUTPUT_TOKENS)
+        return reply
+
+
+def test_dense_text_is_cut_by_bytes_never_inside_a_character(small_chunks):
+    chunks = llm_stage.chunk_files({"dist/entry.js": DENSE + "\U0001F600" * 200}, 100)
+    assert all(len(chunk.text.encode("utf-8")) <= 100 * llm_stage.CHARS_PER_TOKEN for chunk in chunks)
+    assert "".join(chunk.text for chunk in chunks) == DENSE + "\U0001F600" * 200
+
+
+def test_the_bound_covers_a_dense_chunk_billed_a_token_a_byte(small_chunks):
+    # H1(c): chars/3 under-counts CJK, emoji or base64; the bound is bytes, so it holds anyway.
+    fake = DenseLLM()
+    files = {"dist/entry.js": DENSE.encode("utf-8")}
+    chunks = _chunks_of(files)
+    result = run_llm_stage(files, call=fake)
+    chars_over_three = sum(len(llm_stage.THEME_SCAN_PROMPT + prompt) // 3 for prompt in fake.prompts)
+    assert result.tokens_used > chars_over_three + llm_stage.MAX_OUTPUT_TOKENS * len(chunks)  # the old estimate
+    assert result.tokens_used <= llm_stage.estimated_tokens(chunks)
+
+
+def test_the_stage_stops_scheduling_once_what_it_spent_and_holds_reaches_the_budget(small_chunks):
+    fake = DenseLLM()
+    files = {"dist/entry.js": DENSE.encode("utf-8")}
+    chunks = _chunks_of(files)
+    bound = llm_stage.chunk_bound(chunks[0])
+    assert {llm_stage.chunk_bound(chunk) for chunk in chunks} == {bound} and len(chunks) == 9
+
+    result = run_llm_stage(files, call=fake, token_budget=2 * bound + bound // 2)
+    assert len(fake.prompts) == 2 and result.calls == 2 and result.ran is False
+    assert result.tokens_used <= 2 * bound + bound // 2
+    assert "7 part(s) were not read: daily budget reached" in result.reason
+    assert llm_check(result)["status"] == "partial" and review_limits.tokens_reserved() == 0
+
+
+def test_a_reply_that_does_not_say_what_it_cost_counts_at_its_bound(small_chunks):
+    files = _files()
+    reply = SimpleNamespace(content=[SimpleNamespace(type="text", text="Looks fine.")])  # no usage
+    result = run_llm_stage(files, call=lambda model, text: reply)
+    assert result.calls == 0 and result.tokens_used == llm_stage.estimated_tokens(_chunks_of(files))
+
+
+def test_two_requests_at_once_never_both_spend_the_last_of_the_budget():
+    with review_limits.token_hold(lambda: 1000) as first:
+        assert first.try_hold(900) is True
+        with review_limits.token_hold(lambda: 1000) as second:
+            assert second.try_hold(200) is False and second.try_hold(100) is True
+            assert review_limits.tokens_reserved() == 1000
     assert review_limits.tokens_reserved() == 0
+
+
+def test_a_hold_released_after_another_request_read_the_budget_still_counts_against_it():
+    # H1(c): A's row is committed (and its hold released) after B read what was left, so B's
+    # reading never saw A's spend; the ledger still counts it until B ends.
+    a_hold = review_limits.token_hold(lambda: 1000)
+    a = a_hold.__enter__()
+    assert a.try_hold(700) is True
+    a.settle(700, 600)
+    b_hold = review_limits.token_hold(lambda: 1000)
+    b = b_hold.__enter__()
+    a_hold.__exit__(None, None, None)
+    assert review_limits.tokens_reserved() == 0  # B holds nothing yet
+    assert b.try_hold(500) is False and b.try_hold(400) is True
+    b_hold.__exit__(None, None, None)
+    with review_limits.token_hold(lambda: 1000) as later:  # opened after both: its read sees both rows
+        assert later.try_hold(1000) is True
 
 
 def test_every_stage_shares_one_pool(small_chunks, monkeypatch):
@@ -362,11 +428,15 @@ def test_the_stage_stops_at_its_deadline_and_says_parts_went_unread(small_chunks
             release.wait(30)
         return _reply(0, "No security issues found.")
 
+    files = _files(**{"dist/chunks/slow.js": b"// slow"})
     try:
-        result = run_llm_stage(_files(**{"dist/chunks/slow.js": b"// slow"}), call=slow)
+        result = run_llm_stage(files, call=slow)
     finally:
         release.set()
     check = llm_check(result)
 
     assert result.ran is False and check["status"] == "partial" and check["level"] == "warning"
     assert "1 part(s) were still unread when the stage ran out of time" in check["reason"]
+    (slow_part,) = [chunk for chunk in _chunks_of(files) if chunk.path.endswith("slow.js")]
+    # the call still in flight will be billed: it counts at its bound
+    assert result.tokens_used == 110 * result.calls + llm_stage.chunk_bound(slow_part)

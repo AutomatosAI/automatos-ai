@@ -556,7 +556,7 @@ def test_the_stage_gets_what_is_left_of_the_days_review_tokens(env, monkeypatch)
         session.close()
     stage = _stage("pass")
     assert _submit(_client(env, _ctx(), stage=stage), _hello()).status_code == 201
-    assert stage.budgets == [3800]
+    assert [hold.budget for hold in stage.budgets] == [3800]
 
 
 def test_with_the_days_tokens_spent_the_llm_check_never_runs_and_the_verdict_is_review_required(env, monkeypatch):

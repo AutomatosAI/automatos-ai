@@ -154,12 +154,13 @@ def _refusal(db: Session, exc: Exception) -> HTTPException:
 
 
 def _report(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage: ReviewStage,
-            package_bytes: int) -> Dict[str, Any]:
+            package_bytes: int, tokens: review_limits.TokenHold) -> Dict[str, Any]:
     """The stage's report; the existing one when these bytes were submitted already (reused as it is).
 
-    A person past ``THEME_SUBMISSIONS_PER_DAY`` is 429 before the stage; the stage gets what is
-    left of the day's review tokens. The read transaction ends before the stage, so the session
-    holds no connection while it runs; ``save_submission`` checks everything again under its row lock.
+    A person past ``THEME_SUBMISSIONS_PER_DAY`` is 429 before the stage; the stage spends from
+    ``tokens``, the request's hold on what is left of the day's review tokens. The read
+    transaction ends before the stage, so the session holds no connection while it runs;
+    ``save_submission`` checks everything again under its row lock.
     """
     existing = submission_by_digest(db, checked.digest)
     if existing is not None:
@@ -168,24 +169,28 @@ def _report(db: Session, checked: CheckedThemePackage, submitter: Submitter, sta
     if refusal is not None:
         db.rollback()
         raise HTTPException(status_code=429, detail=refusal)
-    tokens_left = review_limits.tokens_left_today(db)
     db.rollback()
-    return stage(checked, package_bytes, token_budget=tokens_left)
+    return stage(checked, package_bytes, token_budget=tokens)
 
 
 def _save_claimed(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage: ReviewStage,
                   package_bytes: int) -> SavedSubmission:
-    """Refuse early (before the review stage spends anything), run the stage inline, then store."""
+    """Refuse early (before the review stage spends anything), run the stage inline, then store.
+
+    One token hold (``review_limits.token_hold``) spans the stage and the store: what the stage
+    spent stays held in this process until its row is committed, when ``tokens_used_today`` sees it.
+    """
     manifest = checked.manifest
     prefix = theme_prefix(manifest["id"], manifest["version"])
-    try:
-        check_submission(db, manifest, checked.digest, submitter)
-        report = _report(db, checked, submitter, stage, package_bytes)
-        return save_submission(db, checked, submitter, prefix, report, store=lambda: _store(prefix, checked))
-    except (PublisherReserved, SubmissionConflict) as exc:
-        raise _refusal(db, exc) from exc
-    except IntegrityError as exc:
-        return _after_integrity_error(db, checked, submitter, exc)
+    with review_limits.token_hold(lambda: review_limits.tokens_left_today(db)) as tokens:
+        try:
+            check_submission(db, manifest, checked.digest, submitter)
+            report = _report(db, checked, submitter, stage, package_bytes, tokens)
+            return save_submission(db, checked, submitter, prefix, report, store=lambda: _store(prefix, checked))
+        except (PublisherReserved, SubmissionConflict) as exc:
+            raise _refusal(db, exc) from exc
+        except IntegrityError as exc:
+            return _after_integrity_error(db, checked, submitter, exc)
 
 
 def _save(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage: ReviewStage,

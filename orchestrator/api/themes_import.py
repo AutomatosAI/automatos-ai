@@ -165,13 +165,14 @@ def _after_integrity_error(db: Session, ctx: RequestContext, checked: CheckedThe
     return SavedUpload(existing, active_installation(db, ctx.workspace_id, existing.theme_id), created=False)
 
 
-def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> Dict[str, Any]:
+def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
+            tokens: review_limits.TokenHold) -> Dict[str, Any]:
     """The automated stage's report (C-02a), skipped when these bytes are already in this workspace.
 
     Their existing row is reused as it is (``save_private_upload``), so a second run would only
     spend an LLM call; a version ``save_private_upload`` would refuse is 409 before the stage, and
-    a workspace past ``THEME_UPLOADS_PER_DAY`` is 429. The stage gets what is left of the day's
-    review tokens.
+    a workspace past ``THEME_UPLOADS_PER_DAY`` is 429. The stage spends from ``tokens``, the
+    request's hold on what is left of the day's review tokens.
     The read transaction ends before the stage, so the session holds no connection while it runs
     (``save_private_upload`` checks again under its row lock). Called under the upload claim, so
     an overlapping upload of the same bytes never runs it too. The route is a plain ``def``: this
@@ -190,9 +191,8 @@ def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, pack
     if quota is not None:
         db.rollback()
         raise _refuse(429, quota)
-    tokens_left = review_limits.tokens_left_today(db)
     db.rollback()
-    return run_review_stage(checked, package_bytes, include_source=False, token_budget=tokens_left)
+    return run_review_stage(checked, package_bytes, include_source=False, token_budget=tokens)
 
 
 def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
@@ -218,9 +218,17 @@ def _save_in_slot(db: Session, ctx: RequestContext, checked: CheckedThemePackage
 
 
 def _save_claimed(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
+    """Review, then store, under one token hold (``review_limits.token_hold``): what the stage
+    spent stays held in this process until its row is committed, when ``tokens_used_today`` sees it."""
+    with review_limits.token_hold(lambda: review_limits.tokens_left_today(db)) as tokens:
+        return _review_and_store(db, ctx, checked, package_bytes, tokens)
+
+
+def _review_and_store(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int,
+                      tokens: review_limits.TokenHold) -> SavedUpload:
     manifest = checked.manifest
     prefix = theme_prefix(manifest["id"], manifest["version"], ctx.workspace_id)
-    report = _review(db, ctx, checked, package_bytes)
+    report = _review(db, ctx, checked, package_bytes, tokens)
     try:
         return save_private_upload(
             db, ctx.workspace_id, resolve_user_pk(db, ctx), checked, prefix, report,

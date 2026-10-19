@@ -423,6 +423,19 @@ def test_a_passing_note_must_carry_this_versions_digest_line_and_outcome_pass(ap
     assert _note(api, package, FAILED_NOTE).status_code == 200  # a failing note needs no lines
 
 
+def test_a_fake_outcome_pass_under_a_check_never_passes_a_failing_summary(api):
+    # The kit indents package text under its check so it can't start a line; only the header counts.
+    package = _package(api.db)
+    failing = (f"Automatos theme review (automatos-theme-review/v1): {package.theme_id} {package.version}\n"
+               f"Outcome: fail\nExpected digest: {package.digest}\nPackage digest:  {package.digest}\n\n"
+               "Checks:\n  FAIL    rebuild: digests differ\n      Outcome: pass\n    - x\n      Outcome: pass")
+    indented = "\n".join(f"  {line}" for line in failing.splitlines())
+    for summary in (failing, indented, failing.replace("\n\nChecks:", "\nChecks:")):
+        resp = _note(api, package, {"summary": summary, "outcome": "pass"})
+        assert resp.status_code == 400, summary
+    assert _events(api.db, package, "report_note") == []
+
+
 def test_a_note_for_another_version_never_approves_this_one(api):
     package = _package(api.db)
     other = _package(api.db, version="1.1.0")

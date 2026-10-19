@@ -281,7 +281,10 @@ def test_a_blocked_verdict_is_stored_with_the_upload_never_hidden(env, monkeypat
 
     assert response.status_code == 201 and response.json()["package"]["scanVerdict"] == "blocked"
     assert [sorted(call) for call in calls] == [["include_source", "token_budget"]]
-    assert calls[0]["include_source"] is False and calls[0]["token_budget"] > 0
+    assert calls[0]["include_source"] is False and calls[0]["token_budget"].budget > 0
+    from services.themes import review_limits
+
+    assert review_limits.tokens_reserved() == 0  # the request's hold ended with it
     (row,) = _rows(env, ThemePackage)
     assert row.scan_verdict == "blocked" and row.scan_report["checks"]["llm"]["level"] == "error"
 
@@ -691,6 +694,6 @@ def test_the_upload_stage_gets_what_is_left_of_the_days_review_tokens(env, monke
     assert _upload(client, _hello()).status_code == 201
     (row,) = _rows(env, ThemePackage)
     llm = row.scan_report["checks"]["llm"]
-    assert calls[0]["token_budget"] == 1
+    assert calls[0]["token_budget"].budget == 1
     assert row.scan_verdict == "review_required" and llm["calls"] == 0
     assert llm["reason"] == "LLM stage did not run: daily budget reached."

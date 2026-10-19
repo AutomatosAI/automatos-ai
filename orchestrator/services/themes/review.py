@@ -73,6 +73,9 @@ NUL_IN_TEXT = "The text has a NUL character in it. Paste plain text."
 # "Package digest:" so the digests line up.
 NOTE_DIGEST_LINE = "Package digest:  {digest}"
 NOTE_OUTCOME_PASS_LINE = "Outcome: pass"
+NOTE_OUTCOME_PREFIX = "Outcome:"
+# The kit's header block ends at its first blank line, before "Checks:" (summary.ts ``summaryText``).
+NOTE_CHECKS_LINE = "Checks:"
 NOTE_NOT_THIS_VERSION = (
     "A passing note must be the isolated review job's summary for this version: paste it as the kit "
     "printed it, with the lines \"Package digest:  {digest}\" and \"Outcome: pass\"."
@@ -233,14 +236,29 @@ def _record(
     ))
 
 
-def note_names_this_version(summary: str, digest: str) -> bool:
-    """True when the kit's summary holds this digest's line and ``Outcome: pass``, each as a whole line.
+def note_header(summary: str) -> List[str]:
+    """The kit's header block: the lines before the first blank line (or ``Checks:``), with trailing
+    whitespace and CR dropped, dedented by the block's common indentation (``plain_text`` already
+    trimmed the first line). Never per line: the kit indents text from the package by six spaces
+    so that it can't pass for a header line, and a per-line trim would undo that."""
+    header: List[str] = []
+    for line in (raw.rstrip() for raw in summary.splitlines()):
+        if not line or line.strip() == NOTE_CHECKS_LINE:
+            break
+        header.append(line)
+    indent = min((len(line) - len(line.lstrip()) for line in header[1:]), default=0)
+    return header[:1] + [line[indent:] for line in header[1:]]
 
-    Lines are compared with their ends trimmed (a paste may indent them or carry CRLF); the
-    text inside each line must be exactly the kit's.
+
+def note_names_this_version(summary: str, digest: str) -> bool:
+    """True when the kit's header block holds this digest's line and one ``Outcome:`` line, ``Outcome: pass``.
+
+    Only the header counts (``note_header``): an ``Outcome: pass`` under a check, or a second
+    ``Outcome:`` line of any other value in the header, never passes.
     """
-    lines = {line.strip() for line in summary.splitlines()}
-    return NOTE_DIGEST_LINE.format(digest=digest) in lines and NOTE_OUTCOME_PASS_LINE in lines
+    header = note_header(summary)
+    outcomes = [line for line in header if line.startswith(NOTE_OUTCOME_PREFIX)]
+    return NOTE_DIGEST_LINE.format(digest=digest) in header and outcomes == [NOTE_OUTCOME_PASS_LINE]
 
 
 def add_report_note(
