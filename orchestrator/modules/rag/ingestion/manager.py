@@ -28,18 +28,12 @@ from enum import Enum
 import magic
 import pdfplumber
 from docx import Document as DocxDocument
-from langchain_text_splitters import (
-    RecursiveCharacterTextSplitter,
-    MarkdownTextSplitter,
-    MarkdownHeaderTextSplitter,
-    PythonCodeTextSplitter
-)
-from langchain_core.documents import Document
 # OpenAI embeddings handled by centralized manager
 import psycopg2
 from botocore.exceptions import ClientError
 
 from core.storage import FAST_FAIL, ensure_bucket, get_s3_client
+from modules.rag.chunking.text_splitters import PythonCodeTextSplitter, RecursiveCharacterTextSplitter  # PRD-262 US-026
 from modules.rag.ingestion.section_chunks import sections_first  # F311 (night 9)
 
 # Use SemanticChunker from RAG module
@@ -167,10 +161,6 @@ class DocumentProcessor:
             chunk_size=1000,
             chunk_overlap=200,
             length_function=len,
-        )
-        self.markdown_splitter = MarkdownTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
         )
         self.code_splitter = PythonCodeTextSplitter(
             chunk_size=1000,
