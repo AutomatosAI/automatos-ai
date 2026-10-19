@@ -349,6 +349,11 @@ run_supervised() {
 # =============================================================================
 # Main Execution
 # =============================================================================
+# PRD-262 US-037: no command but `migrate` starts on a CHANGE_ME placeholder secret.
+# The guard, next to this script, names the placeholders, prints how to rotate them
+# and exits 1; an unset or empty value passes.
+[ "${1:-}" = "migrate" ] || "$(dirname "$0")/docker-secrets-guard.sh"
+
 if [ "${1:-}" = "migrate" ]; then
     LIFECYCLE_MODE=migrate
     run_lifecycle

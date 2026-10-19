@@ -53,7 +53,8 @@ def _sibling(name: str):
 images = _sibling("smoke_images")  # docker top's parser and the uvicorn test, shared with US-003
 
 APP_DIR = "/app"
-SCRIPT_MOUNTS = ("/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh")
+SCRIPT_MOUNTS = ("/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh",
+                 "/usr/local/bin/docker-secrets-guard.sh")
 ENTRYPOINT = "docker-entrypoint.sh"
 BIND = "bind"
 EVENT_STREAM = "text/event-stream"

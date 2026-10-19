@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # Automatos AI - Backend Dockerfile (Multi-stage)
 # =============================================================================
@@ -168,6 +169,8 @@ RUN useradd -m -u 1000 automatos && \
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
+# The placeholder-secret guard the entrypoint runs before a command (PRD-262 US-037).
+COPY --chmod=0755 docker-secrets-guard.sh /usr/local/bin/docker-secrets-guard.sh
 USER automatos
 
 # Expose port
@@ -224,6 +227,8 @@ RUN python -m compileall -q -x '/site-packages/' --invalidation-mode unchecked-h
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
+# The placeholder-secret guard the entrypoint runs before a command (PRD-262 US-037).
+COPY --chmod=0755 docker-secrets-guard.sh /usr/local/bin/docker-secrets-guard.sh
 
 # The application code: the stage's last filesystem layer, so a code-only update
 # downloads this one layer (PRD-262 US-016; images.yml judges it against

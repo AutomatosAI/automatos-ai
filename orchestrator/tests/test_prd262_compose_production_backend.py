@@ -29,7 +29,9 @@ _DOCKERFILE = _REPO / "orchestrator" / "Dockerfile"
 _API_DEFAULTS = _REPO / "envs" / "api.defaults"
 _LOCAL_ROOT = "/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
 _SOURCE = "./orchestrator"
-_SCRIPTS = ("/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh")
+# The entrypoint, the healthcheck and the placeholder-secret guard (PRD-262 US-037).
+_SCRIPTS = ("/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh",
+            "/usr/local/bin/docker-secrets-guard.sh")
 _DEV_COMMAND = "docker compose -f docker-compose.yml -f docker-compose.dev.yml"
 
 

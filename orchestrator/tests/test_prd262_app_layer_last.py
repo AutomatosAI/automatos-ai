@@ -141,10 +141,12 @@ def test_the_code_is_the_last_filesystem_layer_and_only_metadata_follows():
     assert [line for line in PRODUCTION if _word(line) == "USER"] == ["USER automatos"]
 
 
-def test_the_compile_and_the_two_scripts_sit_between_the_user_and_the_code():
+def test_the_compile_and_the_three_scripts_sit_between_the_user_and_the_code():
+    """The entrypoint, the healthcheck and the placeholder-secret guard (PRD-262 US-037)."""
     middle = PRODUCTION[1:PRODUCTION.index(APP_COPY)]
     copies = [line.split()[-1] for line in middle if _word(line) == "COPY"]
-    assert copies == ["/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh"]
+    assert copies == ["/usr/local/bin/docker-entrypoint.sh", "/usr/local/bin/docker-healthcheck.sh",
+                      "/usr/local/bin/docker-secrets-guard.sh"]
     assert sum("compileall" in line for line in middle) == 1
 
 

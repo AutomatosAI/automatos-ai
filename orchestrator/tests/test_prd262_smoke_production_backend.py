@@ -88,7 +88,8 @@ def test_volumes_under_app_and_the_workspace_folder_are_not_source_mounts():
 
 
 @pytest.mark.parametrize("destination", ["/app", "/app/core", "/usr/local/bin/docker-entrypoint.sh",
-                                         "/usr/local/bin/docker-healthcheck.sh"])
+                                         "/usr/local/bin/docker-healthcheck.sh",
+                                         "/usr/local/bin/docker-secrets-guard.sh"])
 def test_a_bind_mount_over_the_code_or_a_script_is_found(destination):
     mount = {"Type": "bind", "Source": "/home/runner/work/automatos-ai/orchestrator", "Destination": destination}
     assert tool.source_mounts(VOLUMES + [mount]) == [f"{mount['Source']} -> {destination}"]
