@@ -188,3 +188,32 @@ export function mergeLooks(server: LookSet, local: LookSet): LookSet {
 export function sameLookSet(a: LookSet, b: LookSet): boolean {
   return sameValue(a.active, b.active) && sameValue(a.saved, b.saved)
 }
+
+/** Sends a store's saves to the server (createLookOutbox). */
+export interface LookOutbox {
+  /** Queues a save of the set under `key` (its theme and scope); `send` runs once the saves before it have their answers. */
+  queue(key: string, send: () => Promise<unknown>): void
+}
+
+/**
+ * PRD-261 A-09b — one save at a time, in the order they were queued: two in flight can be handled
+ * in either order (the backend runs each in its own thread, and a PUT replaces the whole set), so
+ * an older one landing last would put back what a newer one replaced, with the newer one's answer
+ * already taken as kept. A save still waiting when a newer one is queued under the same key is
+ * dropped: the newer one carries the whole set.
+ */
+export function createLookOutbox(): LookOutbox {
+  let tail: Promise<unknown> = Promise.resolve()
+  let queued = 0
+  const newest = new Map<string, number>()
+  return {
+    queue(key, send) {
+      queued += 1
+      const ticket = queued
+      newest.set(key, ticket)
+      tail = tail
+        .then(() => (newest.get(key) === ticket ? send() : undefined))
+        .catch((error: unknown) => console.warn("[looks] a save's answer couldn't be handled:", error))
+    },
+  }
+}

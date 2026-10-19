@@ -1,4 +1,4 @@
-import { type Dispatch, type MutableRefObject, useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
+import { type Dispatch, type MutableRefObject, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 
 import { useUiStyleOptional } from '@/contexts/ui-style-context'
 import { apiClient } from '@/lib/api-client'
@@ -18,8 +18,10 @@ import {
   type StorageSource,
 } from '@/lib/looks/storage'
 import {
+  createLookOutbox,
   INITIAL_LOOK_STATE,
   type LookAction,
+  type LookOutbox,
   type LookSet,
   type LookState,
   lookReducer,
@@ -213,17 +215,18 @@ interface SyncContext {
   readonly dispatch: Dispatch<LookAction>
   /** Counts the changes made here: a save clears the pending mark only when none came after it. */
   readonly changes: MutableRefObject<number>
+  /** The store's saves, one at a time: an older one never lands after a newer one. */
+  readonly outbox: LookOutbox
 }
 
 /**
- * Sends the set. Kept: the pending mark goes. Not reached (offline, asleep, signed out): the
- * change stays in this browser, marked, and is sent on the next load. Refused: the user is told
- * it isn't kept (the Looks page's notice, M98) and it isn't sent again.
+ * Sends the set. Kept: the pending mark goes, unless a change came after it was queued. Not reached
+ * (offline, asleep, signed out): the change stays in this browser, marked, and is sent on the next
+ * load. Refused: the user is told it isn't kept (the Looks page's notice, M98) and it isn't sent again.
  */
-function sendLooks(ctx: SyncContext, set: LookSet): void {
+function writeLooks(ctx: SyncContext, set: LookSet, sentAfter: number): Promise<void> {
   const { storage, theme, scope, server, dispatch, changes } = ctx
-  const sentAfter = changes.current
-  server.write(theme.themeId, lookBody(set)).then(
+  return server.write(theme.themeId, lookBody(set)).then(
     () => {
       if (changes.current === sentAfter) setLookMark(storage, scope, theme.keys, 'pending', false)
     },
@@ -234,6 +237,12 @@ function sendLooks(ctx: SyncContext, set: LookSet): void {
       dispatch({ type: 'written', ok: false })
     },
   )
+}
+
+/** Queues the set: it is sent once the saves before it have their answers, so none lands out of order. */
+function sendLooks(ctx: SyncContext, set: LookSet): void {
+  const sentAfter = ctx.changes.current
+  ctx.outbox.queue(JSON.stringify([ctx.theme.themeId, ctx.scope]), () => writeLooks(ctx, set, sentAfter))
 }
 
 /** The server's copy into this browser's and the state; on a first meeting, this browser's own looks join it first. */
@@ -326,12 +335,13 @@ function useLookServerSync(
   dispatch: Dispatch<LookAction>,
 ): void {
   const changes = useRef(0)
+  const [outbox] = useState(createLookOutbox)
   const { scope } = state
   const ctx = useMemo<SyncContext | null>(
     () => (enabled && server !== null && scope !== null && scopeHasWorkspace(scope)
-      ? { storage, theme, scope, server, dispatch, changes }
+      ? { storage, theme, scope, server, dispatch, changes, outbox }
       : null),
-    [enabled, server, scope, storage, theme, dispatch],
+    [enabled, server, scope, storage, theme, dispatch, outbox],
   )
   useServerRead(ctx)
   useServerWrite(ctx, state)

@@ -4,10 +4,11 @@
  * hasn't changed since the read, never over a change made here; it belongs to one scope and one
  * theme; and the first meeting with it loses none of this browser's own looks (mergeLooks).
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { AURORA, DAYLIGHT, EMBER, OBSIDIAN } from '@/lib/looks/presets'
 import {
+  createLookOutbox,
   INITIAL_LOOK_STATE,
   type LookAction,
   type LookState,
@@ -101,5 +102,55 @@ describe('mergeLooks (the first meeting)', () => {
     expect(mergeLooks({ active: null, saved: [] }, local)).toEqual(local)
     expect(sameLookSet(mergeLooks({ active: null, saved: [] }, local), local)).toBe(true)
     expect(sameLookSet(local, { active: DAYLIGHT, saved: [] })).toBe(false)
+  })
+})
+
+describe('createLookOutbox (one save at a time)', () => {
+  /** A send the test answers by hand, noting when it started. */
+  function heldSend(log: string[], name: string): { readonly send: () => Promise<unknown>; readonly answer: () => void } {
+    let resolveIt: () => void = () => undefined
+    const send = () => {
+      log.push(name)
+      return new Promise<void>((resolve) => {
+        resolveIt = resolve
+      })
+    }
+    return { send, answer: () => resolveIt() }
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('starts a save only once the one before it has its answer', async () => {
+    const outbox = createLookOutbox()
+    const log: string[] = []
+    const first = heldSend(log, 'first')
+    const second = heldSend(log, 'second')
+    outbox.queue('a', first.send)
+    outbox.queue('b', second.send)
+    await settle()
+    expect(log).toEqual(['first'])
+    first.answer()
+    await settle()
+    expect(log).toEqual(['first', 'second'])
+  })
+
+  it('drops a waiting save when a newer one comes for the same key, and keeps going after a failure', async () => {
+    const outbox = createLookOutbox()
+    const log: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const first = heldSend(log, 'first')
+    outbox.queue('k', first.send)
+    outbox.queue('k', () => Promise.resolve(log.push('stale')))
+    outbox.queue('k', () => Promise.resolve(log.push('newest')))
+    await settle()
+    first.answer()
+    await settle()
+    expect(log).toEqual(['first', 'newest'])
+    outbox.queue('k', () => Promise.reject(new Error('handler broke')))
+    outbox.queue('other', () => Promise.resolve(log.push('after')))
+    await settle()
+    expect(log).toEqual(['first', 'newest', 'after'])
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
   })
 })

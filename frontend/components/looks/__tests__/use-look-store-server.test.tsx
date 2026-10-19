@@ -27,6 +27,8 @@ const PLAY_KEYS = lookKeys(SCOPE, BUILTIN_PLAY_LOOK_KEYS)
 const HELLO_KEYS = lookKeys(SCOPE, HELLO.keys)
 /** The debounce, plus room for the promise callbacks. */
 const SENT_WITHIN = { timeout: LOOK_SEND_DELAY_MS + 2000 }
+/** A test that waits out the debounce more than once. */
+const SLOW_TEST_MS = 10_000
 
 interface FakeServer extends LookServer {
   readonly read: Mock<(themeId: string) => Promise<unknown>>
@@ -179,6 +181,59 @@ describe('write-through', () => {
     expect(hasLookMark(() => store, SCOPE, HELLO.keys, 'pending')).toBe(false)
     expect(stored(store, HELLO_KEYS.active)).toEqual(AURORA)
   })
+})
+
+describe('one save at a time', () => {
+  /** A server whose first save waits until the test answers it. */
+  function slowFirstSave(server: FakeServer): () => void {
+    let answerIt: () => void = () => undefined
+    server.write.mockImplementationOnce((_themeId, body) => new Promise((resolve) => {
+      answerIt = () => resolve(body)
+    }))
+    return () => answerIt()
+  }
+
+  const pause = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, LOOK_SEND_DELAY_MS + 200)))
+
+  it("sends a new change only once the save left from the last load has its answer, so it can't be put back", async () => {
+    const store = memoryStorage({ [HELLO_KEYS.active]: JSON.stringify(DAYLIGHT) })
+    metServer(store, HELLO.keys)
+    setLookMark(() => store, SCOPE, HELLO.keys, 'pending', true)
+    const server = fakeServer()
+    const answerFirst = slowFirstSave(server)
+    const { result } = renderInstalled(store, server)
+    await waitFor(() => expect(server.write).toHaveBeenCalledWith('acme/hello', { looks: [], active: DAYLIGHT }))
+    act(() => result.current.setLook(AURORA))
+    await pause()
+    expect(server.write).toHaveBeenCalledTimes(1)
+    await act(async () => answerFirst())
+    await waitFor(() => expect(server.write).toHaveBeenCalledTimes(2))
+    expect(server.write).toHaveBeenLastCalledWith('acme/hello', { looks: [], active: AURORA })
+    await waitFor(() => expect(hasLookMark(() => store, SCOPE, HELLO.keys, 'pending')).toBe(false))
+    expect(result.current.persisted).toBe(true)
+  }, SLOW_TEST_MS)
+
+  it('sends only the newest of the saves that waited, and keeps the mark until it is kept', async () => {
+    const store = memoryStorage()
+    metServer(store, HELLO.keys)
+    const server = fakeServer()
+    const answerFirst = slowFirstSave(server)
+    const { result } = renderInstalled(store, server)
+    await waitFor(() => expect(server.read).toHaveBeenCalled())
+    act(() => result.current.setLook(AURORA))
+    await waitFor(() => expect(server.write).toHaveBeenCalledTimes(1), SENT_WITHIN)
+    act(() => result.current.setLook(OBSIDIAN))
+    await pause()
+    act(() => result.current.setLook(DAYLIGHT))
+    await pause()
+    expect(server.write).toHaveBeenCalledTimes(1)
+    expect(hasLookMark(() => store, SCOPE, HELLO.keys, 'pending')).toBe(true)
+    await act(async () => answerFirst())
+    await waitFor(() => expect(server.write).toHaveBeenCalledTimes(2))
+    expect(server.write).toHaveBeenLastCalledWith('acme/hello', { looks: [], active: DAYLIGHT })
+    await waitFor(() => expect(hasLookMark(() => store, SCOPE, HELLO.keys, 'pending')).toBe(false))
+    expect(server.write).toHaveBeenCalledTimes(2)
+  }, SLOW_TEST_MS)
 })
 
 describe('the first meeting with the server', () => {
