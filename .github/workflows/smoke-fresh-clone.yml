@@ -1,7 +1,8 @@
 name: smoke-fresh-clone
 
 # PRD-176 Headline B / PRD-209 S3 — the deployability bar: a fresh clone boots to
-# a green /health with NO external credentials via `docker compose up`.
+# a green /health with NO external credentials, built from source by `make build`
+# (PRD-262 US-039; smoke-images.yml boots the published images through `make up`).
 #
 # HARD (fails red on boot death) as of PRD-209 US-004: W5 (AUTH_EDITION) has landed,
 # US-001 committed the entrypoint exec bit, US-002 stamped the initdb schema, and
@@ -35,9 +36,10 @@ name: smoke-fresh-clone
 # PRD-262 US-038 — compose probes each service every second while it starts
 # (start_interval). Once the frontend answers, scripts/ci/smoke_health_gates.py reads
 # Docker's start and health_status events: redis and minio must turn healthy within 2 s
-# of their start, and postgres's time on this fresh volume is reported. The smoke starts
-# the frontend itself here, after its checks, so the frontend's gap is reported; the
-# make up lanes (smoke-images.yml) gate it.
+# of their start, and postgres's time on this fresh volume is reported. make build's
+# compose starts the frontend once the backend is healthy, so the frontend must start
+# within 3 s of that (US-039, below); only smoke-images.yml's pull-request boot, which
+# starts the frontend itself after its own checks, reports the gap instead.
 #
 # PRD-262 US-036 — docker-compose.yml names the published images, so the build here is
 # tagged local-<sha7> and labelled org.opencontainers.image.revision=HEAD, as make build

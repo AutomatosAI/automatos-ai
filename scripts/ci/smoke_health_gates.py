@@ -14,9 +14,9 @@ frontend answers:
   only after initdb's restart, and Gerard sets its bar in PRD-262 §8 from this number;
 * with ``--frontend gate``, the frontend's first start comes within
   ``FRONTEND_BAR_SECONDS`` of the backend's last ``healthy`` before it. Only compose
-  starts the frontend that way, the moment the backend turns healthy (``make up``). A
-  lane that starts the frontend itself, after checks of its own, passes
-  ``--frontend report``: the gap is shown, not gated.
+  starts the frontend that way, the moment the backend turns healthy (``make up``, and
+  ``make build`` since PRD-262 US-039). A lane that starts the frontend itself, after
+  checks of its own, passes ``--frontend report``: the gap is shown, not gated.
 
 Every time is the difference between two of the daemon's event timestamps
 (``timeNano``), never this script's clock. It writes one JSON record to ``--out`` and a
