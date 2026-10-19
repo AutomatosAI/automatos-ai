@@ -35,7 +35,7 @@ function BrokenPage(): React.ReactElement {
 }
 
 function hostWith(frame: FrameComponent | null, reportRenderFailure = vi.fn(), status?: ThemeHostStatus): ThemeHostContextValue {
-  return { status: status ?? (frame ? 'active' : 'failed'), reason: frame ? null : 'load', frame, reportRenderFailure }
+  return { status: status ?? (frame ? 'active' : 'failed'), reason: frame ? null : 'load', frame, slots: null, reportRenderFailure }
 }
 
 function renderSlot(host: ThemeHostContextValue | null, page: React.ReactNode = <p>page</p>) {

@@ -12,6 +12,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { THEME_NOTICE_ID } from '@/lib/theme-host/constants'
+import type { SlotId } from '@/lib/theme-host/registry-types'
 import type { SpikeManifest, ThemeLoadResult } from '@/lib/theme-host/types'
 import { UI_STYLES, type UiStyle } from '@/lib/ui-style'
 
@@ -29,7 +30,12 @@ vi.mock('@/contexts/ui-style-context', () => ({
 }))
 vi.mock('sonner', () => ({ toast: mocks.toast }))
 vi.mock('@/lib/theme-host/sources', () => ({ loadThemeForStyle: mocks.loadThemeForStyle }))
+vi.mock('framer-motion', () => ({
+  motion: { div: ({ children, className }: { children?: React.ReactNode; className?: string }) => <div className={className}>{children}</div> },
+}))
 
+import { PageHeader } from '@/components/shared/page-header'
+import { PAGE_HEADER_MASCOT_SLOT, PLACEMENT_SLOT_ATTR } from '../placement-slot'
 import { THEME_FALLBACK_NOTICE, THEME_SAFE_MODE_NOTICE, ThemeHostProvider } from '../theme-host-provider'
 import { useThemeHost } from '../theme-host-context'
 
@@ -58,13 +64,13 @@ function FrameConsumer() {
   return Frame === null ? <p>no frame</p> : <Frame><p>page</p></Frame>
 }
 
-function okResult(cleanup = vi.fn()): ThemeLoadResult {
+function okResult(cleanup = vi.fn(), slots: ReadonlyMap<SlotId, unknown> = new Map()): ThemeLoadResult {
   return {
     ok: true,
     ref: 'install:00000000-0000-4000-8000-00000000e2e1',
     manifest: MANIFEST,
     frame: StatefulFrame,
-    slots: new Map(),
+    slots,
     pages: new Map(),
     routes: new Map(),
     cleanup,
@@ -220,7 +226,8 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     mocks.loadThemeForStyle.mockResolvedValue(okResult())
     render(app())
     expect(await screen.findByTestId('f')).toHaveTextContent('page')
-    expect(hostStatus()).toBe('active')
+    // The status attribute is set in an effect after the frame commits, so wait for it.
+    await waitFor(() => expect(hostStatus()).toBe('active'))
     expect(error).not.toHaveBeenCalled()
   })
 
@@ -229,7 +236,7 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     mocks.loadThemeForStyle.mockResolvedValue(okResult(cleanup))
     const { rerender } = render(app())
     await screen.findByTestId('f')
-    expect(hostStatus()).toBe('active')
+    await waitFor(() => expect(hostStatus()).toBe('active'))
     mocks.style.current = 'studio'
     rerender(app())
     await waitFor(() => expect(hostStatus()).toBeNull())
@@ -287,5 +294,36 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     unmount()
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(hostStatus()).toBeNull()
+  })
+})
+
+describe('PRD-261 A-12b — ThemeHostProvider hands the theme\'s placement slots to PageHeader', () => {
+  function HeaderMascot({ title }: { title: string }) {
+    return <span data-testid="header-mascot">{title}</span>
+  }
+
+  function headerApp() {
+    return (
+      <ThemeHostProvider>
+        <FrameConsumer />
+        <PageHeader title="Knowledge" titleAccent="Bases" />
+      </ThemeHostProvider>
+    )
+  }
+
+  it('a registered page-header.mascot@1 draws in the header once the theme is active', async () => {
+    const slots = new Map<SlotId, unknown>([['frame@1', StatefulFrame], [PAGE_HEADER_MASCOT_SLOT, HeaderMascot]])
+    mocks.loadThemeForStyle.mockResolvedValue(okResult(vi.fn(), slots))
+    const { container } = render(headerApp())
+    expect(await screen.findByTestId('header-mascot')).toHaveTextContent('Knowledge')
+    expect(container.querySelector(`[${PLACEMENT_SLOT_ATTR}="${PAGE_HEADER_MASCOT_SLOT}"]`)).toContainElement(screen.getByTestId('header-mascot'))
+  })
+
+  it('draws no slot host under a style with no installed theme', async () => {
+    mocks.style.current = 'studio'
+    const { container } = render(headerApp())
+    await act(async () => undefined)
+    expect(container.querySelector(`[${PLACEMENT_SLOT_ATTR}]`)).toBeNull()
+    expect(mocks.loadThemeForStyle).not.toHaveBeenCalled()
   })
 })

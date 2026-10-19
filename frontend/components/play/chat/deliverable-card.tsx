@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 
-import { type DeliverableRef, deliverableHref, isDeliverableId, KIND_WORDS } from './deliverables'
+import { type DeliverableRef, deliverableHref, isDeliverableId, KIND_WORDS } from '@/lib/chat/deliverables'
+
 import styles from './turn.module.css'
 
 /**

@@ -1,25 +1,26 @@
 /**
- * PRD-260 P260-FX-08 (M46) — the approval cards Play's chat filed this page
- * session, by conversation: each change is approvals.ts' pure fileApprovals or
- * withStatus on that conversation's cards, and a new chat's cards ('') go with
- * the name the backend gives it.
+ * PRD-260 P260-FX-08 (M46), PRD-261 A-11a — the approval cards a theme's chat
+ * filed this page session, by conversation (lib/chat-controller/approvals.ts):
+ * each change is lib/chat/approvals.ts' pure fileApprovals or withStatus on
+ * that conversation's cards, and a new chat's cards ('') go with the name the
+ * backend gives it.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { approvalsInPart } from '@/components/play/chat/approvals'
-import { cardsOfChat, usePlayApprovalsStore } from '@/stores/play-approvals-store'
+import { approvalsInPart } from '@/lib/chat/approvals'
+import { cardsOfChat, useChatApprovalsStore } from '@/lib/chat-controller/approvals'
 
 const TOOL_PART = { type: 'tool-data', data: { tool_approval: { grant_id: 42, action: 'platform_delete_document' } } }
 const MISSION_PART = { type: 'tool-data', data: { mission_approval: { mission_id: 'm-1', goal: 'Refund the customer', tasks: [] } } }
 const AT = new Date(0)
-const store = () => usePlayApprovalsStore.getState()
+const store = () => useChatApprovalsStore.getState()
 const keysOf = (chatId: string) => cardsOfChat(store().filed, chatId).map((card) => card.key)
 
 beforeEach(() => {
-  usePlayApprovalsStore.setState({ filed: [] })
+  useChatApprovalsStore.setState({ filed: [] })
 })
 
-describe('play-approvals-store', () => {
+describe('the chat approvals store', () => {
   it('files a card once, under the reply that raised it, waiting, in its own conversation', () => {
     expect(store().file('c1', approvalsInPart(TOOL_PART), 'r1', AT)).toBe(true)
     const filed = store().filed

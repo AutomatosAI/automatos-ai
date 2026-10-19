@@ -3,10 +3,11 @@
 /**
  * PRD-261 A-01, A-04a — the theme host, in every build (no build flag). It loads a theme only
  * while the style is an installed theme (`theme:install:<uuid>`): it reads that install from the
- * server, hands the theme's frame to the frame slot, and on any failure falls back to Studio with
- * a notice; in safe mode it loads no theme code at all. When the server names no theme for the
- * install (GET /api/themes/active answers `theme: null`, another install or 404: a stale cookie)
- * it turns off, and Studio shows with no notice.
+ * server, hands the theme's frame to the frame slot and its other registered slots to the
+ * placement slots (A-12b), and on any failure falls back to Studio with a notice; in safe mode
+ * it loads no theme code at all. When the server names no theme for the install (GET
+ * /api/themes/active answers `theme: null`, another install or 404: a stale cookie) it turns
+ * off, and Studio shows with no notice.
  * Under an installed theme's style it reports 'loading' from the first render, before its effect
  * starts the load, so the frame slot never mounts the page in the fallback first (M69). Under
  * Classic, Studio and builtin Play (which keeps its compiled path until A-04b) it is off: it loads
@@ -189,7 +190,13 @@ export function ThemeHostProvider({ children }: { children: ReactNode }) {
   useThemeHostAttributes(state.status, state.reason)
   useThemeNotice(state.status, state.reason)
   const value = useMemo<ThemeHostContextValue>(
-    () => ({ status: state.status, reason: state.reason, frame: state.active?.frame ?? null, reportRenderFailure }),
+    () => ({
+      status: state.status,
+      reason: state.reason,
+      frame: state.active?.frame ?? null,
+      slots: state.active?.slots ?? null,
+      reportRenderFailure,
+    }),
     [state, reportRenderFailure],
   )
   return <ThemeHostContext.Provider value={value}>{children}</ThemeHostContext.Provider>

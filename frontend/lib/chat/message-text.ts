@@ -3,12 +3,12 @@ import { NO_REPLY, type ReplyProgress } from '@/lib/mascot/events'
 import type { ChatMessage, TaskCardData } from '@/types'
 
 /**
- * PRD-260 §4 — the core's chat messages (types/chat.ts ChatMessage, as
- * useChat and getChatMessages hand them over) read for Play's chat: the words
- * of a message, the conversation's name, the newest reply, the lines a reply
- * shows above its answer, the tickets it filed or checked, a failed turn the
- * server saved, who wrote a reply when the turn didn't, and the reply being
- * written as Auto reads it. Pure.
+ * PRD-260 §4, PRD-261 A-11a (M28) — the core's chat messages (types/chat.ts
+ * ChatMessage, as useChat and getChatMessages hand them over) read for any
+ * theme's chat: the words of a message, the conversation's name, the newest
+ * reply, the lines a reply shows above its answer, the tickets it filed or
+ * checked, a failed turn the server saved, who wrote a reply when the turn
+ * didn't, and the reply being written as Auto reads it. Pure.
  * (The frontend compiles against ES2020, so no findLast: the newest is found
  * from the end by hand.)
  */
@@ -19,7 +19,7 @@ const TITLE_CHARS = 60
 const TURN_ERROR_ORIGIN = 'turn_error'
 /** The core puts this in front of a saved turn error's words; the snag box has its own mark. */
 const WARNING_PREFIX = /^\s*⚠️?\s*/u
-/** A saved turn error with no words of its own (the Play reference's SAVED_ERROR). */
+/** A saved turn error with no words of its own (the PRD-260 reference app's SAVED_ERROR). */
 export const SAVED_ERROR = 'This answer failed.'
 
 /** A part as it arrives: useChat's own and the stored ones share `type`. */
