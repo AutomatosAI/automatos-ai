@@ -24,7 +24,7 @@ spec:
       containers:
         - name: api
           image: {{ include "automatos.image" (dict "ctx" $ "image" .Values.api.image) }}
-          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          imagePullPolicy: {{ include "automatos.imagePullPolicy" (dict "ctx" $ "image" .Values.api.image) }}
           # uvicorn directly: the image CMD would run `alembic upgrade heads` first,
           # and the migration Job is the only thing that may change the schema.
           args:
