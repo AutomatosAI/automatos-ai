@@ -198,6 +198,33 @@ async def unpublish_post(
     return post_view(post, include_content=False)
 
 
+def _reviewer(ctx: RequestContext) -> str:
+    """The person marking a post reviewed: their user id, else their email. 401 without either."""
+    user = getattr(ctx, "user", None)
+    reviewer = getattr(user, "id", None) or getattr(user, "email", None)
+    if not reviewer:
+        raise HTTPException(status_code=401, detail="A signed-in user is required")
+    return str(reviewer)
+
+
+@router.post("/posts/{post_id}/review", dependencies=[Depends(require_workspace_permission("documents:update"))])
+def mark_post_reviewed(
+    post_id: UUID,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Mark a post reviewed by the caller, who takes editorial responsibility (PRD-264 EUAI-08b).
+
+    Records who and when; the post then reads ``ai_generated: false`` until an edit
+    changes it. Only the caller's own workspace's posts are found (404 otherwise).
+    """
+    svc = BlogService(db, ctx.workspace_id)
+    post = svc.mark_reviewed(post_id, _reviewer(ctx))
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post_view(post, include_content=False)
+
+
 # ---------------------------------------------------------------------------
 # Create Blog Mission — single entry point used by the "Create Blog" UI button.
 # Same code path as the platform_create_blog_post agent tool: builds the

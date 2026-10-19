@@ -631,6 +631,10 @@
     },
     {
       "method": "POST",
+      "path": "/api/blog/posts/{post_id}/review"
+    },
+    {
+      "method": "POST",
       "path": "/api/blog/posts/{post_id}/unpublish"
     },
     {

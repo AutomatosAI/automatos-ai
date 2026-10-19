@@ -283,7 +283,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # record (content_provenance), a new table only; the guard follows it.
     provenance = (versions / "prd264_content_provenance.py").read_text()
     assert 'down_revision = "auto_haiku_default_20261019"' in provenance
-    assert 'EXPECTED_HEAD = "prd264_content_provenance"' in guard
+    # 2026-10-20 (PRD-264 EUAI-08b): prd264_blog_review chains onto it — blog_posts gains
+    # reviewed_by_user_id and reviewed_at (two nullable columns); the guard follows it.
+    blog_review = (versions / "prd264_blog_review.py").read_text()
+    assert 'down_revision = "prd264_content_provenance"' in blog_review
+    assert 'EXPECTED_HEAD = "prd264_blog_review"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

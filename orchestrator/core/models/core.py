@@ -1755,6 +1755,8 @@ class BlogPost(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     author_agent_id = Column(Integer, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     author_name = Column(String(255), nullable=False)
+    reviewed_by_user_id = Column(String(255), nullable=True)  # PRD-264 EUAI-08b: who reviewed it
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)  # cleared when the post is edited
 
     title = Column(String(500), nullable=False)
     slug = Column(String(500), nullable=False)

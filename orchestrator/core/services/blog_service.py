@@ -22,6 +22,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from core.models.core import BlogPost
+from core.services.blog_review import REVIEW_CLEARED, edits_change_the_post
 from core.workspace_client import WorkspaceClient
 
 logger = logging.getLogger(__name__)
@@ -212,6 +213,8 @@ class BlogService:
         if not post:
             return None
 
+        kwargs = await self._clear_review_on_edit(post, kwargs)  # PRD-264 EUAI-08b
+
         # If content is being updated, write to workspace file
         if "content" in kwargs:
             new_content = kwargs["content"]
@@ -240,6 +243,34 @@ class BlogService:
                         post.file_path = new_file_path
                 post.slug = new_slug
 
+        self.db.commit()
+        self.db.refresh(post)
+        return post
+
+    async def _clear_review_on_edit(self, post: BlogPost, updates: dict[str, Any]) -> dict[str, Any]:
+        """``updates``, plus the cleared review when they change the post (PRD-264 EUAI-08b).
+
+        A review covers the text as it was reviewed (``core.services.blog_review``).
+        """
+        current_content = await self.get_content(post) if "content" in updates else None
+        if edits_change_the_post(post, updates, current_content):
+            return {**updates, **REVIEW_CLEARED}
+        return dict(updates)
+
+    # ------------------------------------------------------------------
+    # Editorial review (PRD-264 EUAI-08b)
+    # ------------------------------------------------------------------
+    def mark_reviewed(self, post_id: UUID, reviewer: str) -> BlogPost | None:
+        """Record that ``reviewer`` reviewed this workspace's post and took editorial responsibility.
+
+        The post then reads ``ai_generated: false`` until an edit changes it. Another
+        workspace's post is not found (``get_post`` is workspace-scoped): ``None``.
+        """
+        post = self.get_post(post_id)
+        if not post:
+            return None
+        post.reviewed_by_user_id = reviewer
+        post.reviewed_at = datetime.now(timezone.utc)
         self.db.commit()
         self.db.refresh(post)
         return post
