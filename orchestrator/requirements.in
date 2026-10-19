@@ -92,11 +92,12 @@ qdrant-client>=1.12.0
 paramiko>=2.9.0
 jsonschema>=4.0.0
 
-# Document processing & OCR
+# Document processing & OCR. pdfplumber also extracts PDF tables (PRD-262 US-023).
 pdfplumber>=0.11.7
 pdfminer.six>=20251230
-camelot-py==0.11.0
-opencv-python-headless>=4.10.0  # Upgraded for numpy 2.x compat (needed by camelot)
+# Reads .xlsx: attachments, RAG ingest, document thumbnails, the spreadsheet workspace.
+# Until PRD-262 US-023 it came only through the old PDF table extractor.
+openpyxl>=3.1.5
 
 # AI provider clients (API-based, no local models)
 tiktoken>=0.5.0  # Token counting for context management (RAG, context_guard)

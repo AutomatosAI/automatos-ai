@@ -861,7 +861,6 @@ class DocumentManager:
                 tables = []
                 try:
                     if file_type == DocumentType.PDF or file_type == DocumentType.DOCX:
-                        # Use camelot for PDFs
                         table_processor = TableProcessor()
                         tables = table_processor.extract_tables_from_pdf(file_path)
                     elif file_type == DocumentType.MARKDOWN or file_type == DocumentType.TEXT:
