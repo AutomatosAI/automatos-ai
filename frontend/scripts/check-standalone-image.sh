@@ -83,7 +83,7 @@ const pages = [...new Set(Object.entries(manifest).filter(([entry, path]) => ent
 const origin = `http://127.0.0.1:${process.env.PORT || 3000}`;
 (async () => {
   for (const path of pages) {
-    const status = await fetch(origin + path, { redirect: "manual", signal: AbortSignal.timeout(60000) }).then((r) => r.status, () => 0);
+    const status = await fetch(origin + path, { redirect: "manual", signal: AbortSignal.timeout(20000) }).then((r) => r.status, () => 0);
     console.log(`${status} ${path}`);
   }
 })();'
