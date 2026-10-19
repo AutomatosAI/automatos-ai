@@ -1018,13 +1018,14 @@ jobs:
           echo "requirements-dev.txt names: ${tools[*]}"
           if [ "${#tools[@]}" -eq 0 ]; then echo "::error::no tool read from orchestrator/requirements-dev.txt"; exit 1; fi
           docker run --rm -i --entrypoint python parity-be - "${tools[@]}" < scripts/ci/image_dists_absent.py
-      # PRD-262 US-015 and US-018: no package the code never imports is installed.
-      # This is the Railway build ([leiden]), which keeps scikit-learn through
-      # graspologic until US-027; smoke-images.yml's smoke-images-pr checks the GHCR
-      # build, which has none of them.
+      # PRD-262 US-015, US-018 and US-023: no package the code never imports is
+      # installed, nor camelot and its opencv, which pdfplumber replaced. This is the
+      # Railway build ([leiden]), which keeps scikit-learn through graspologic until
+      # US-027; smoke-images.yml's smoke-images-pr checks the GHCR build, which has none
+      # of them.
       - name: Backend — no package the code never imports
         env:
-          REMOVED: nltk passlib python-jose ecdsa rsa pgvector futureagi gotenberg-client
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector futureagi gotenberg-client camelot-py opencv-python-headless
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py

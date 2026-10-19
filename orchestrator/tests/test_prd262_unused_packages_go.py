@@ -6,7 +6,9 @@ Dockerfile's separate `--no-deps futureagi==0.6.0` install, a PRD-58 leftover, w
 too: the API calls agent-opt-worker over HTTP and never imports futureagi (its module
 is `fi`). Railway's [leiden] build still gets scikit-learn through graspologic until
 US-027. US-018 removed gotenberg-client with the Gotenberg sidecar and its only client,
-ConversionService, which nothing called. This suite checks:
+ConversionService, which nothing called. US-023 replaced camelot-py with pdfplumber's
+text strategy, and opencv-python-headless, which only camelot imported, went with it.
+This suite checks:
 
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
@@ -21,13 +23,14 @@ ConversionService, which nothing called. This suite checks:
   `--only-binary :all:` (pip's `:all:` cleared an exception named before it; uv, which
   installs the lock since US-022, takes them either way and the order stays);
 - CI looks inside both built variants (scripts/ci/image_dists_absent.py): test.yml's
-  prod-image-parity checks the Railway build, smoke-images-pr the GHCR build.
+  prod-image-parity checks the Railway build, smoke-images-pr the GHCR build;
+- `git grep -i camelot -- orchestrator` lists this file alone (US-023): the test stubs,
+  comments and code that named it are gone, and this file has to name it to forbid it.
 
-FORBIDDEN_IMPORTS is meant to grow: W3 adds camelot and cv2 (US-023),
-google.generativeai (US-024), pandas outside pandas_ai_service.py's methods (US-025,
-which can filter on ImportSite.scope), langchain_text_splitters and langchain_core
-(US-026) and tree_sitter_language_pack (US-028). A dotted name forbids that module
-and everything under it.
+FORBIDDEN_IMPORTS is meant to grow: W3 adds google.generativeai (US-024), pandas
+outside pandas_ai_service.py's methods (US-025, which can filter on ImportSite.scope),
+langchain_text_splitters and langchain_core (US-026) and tree_sitter_language_pack
+(US-028). A dotted name forbids that module and everything under it.
 
 Pure file reads, plus the check script run with this Python: no Docker, no network.
 """
@@ -61,6 +64,8 @@ FORBIDDEN_IMPORTS = {
     "sklearn": "scikit-learn",
     "fi": "futureagi",
     "gotenberg_client": "gotenberg-client",  # US-018
+    "camelot": "camelot-py",  # US-023
+    "cv2": "opencv-python-headless",  # US-023: only camelot imported it
 }
 # Distributions no image installs: the ones above plus python-jose's closure.
 REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa"}
@@ -188,6 +193,18 @@ def test_no_module_under_orchestrator_imports_a_removed_package():
     assert len(files) > 1000, f"the walk found only {len(files)} files"
     offenders = _offenders(files)
     assert not offenders, "the image no longer installs these:\n" + "\n".join(offenders)
+
+
+def test_only_this_guard_still_names_the_old_table_extractor():
+    """PRD-262 US-023: the stubs, comments and code that named camelot are gone.
+
+    `git grep -i camelot -- orchestrator` lists this file alone, which names it in
+    FORBIDDEN_IMPORTS. The reference script and its pins live in scripts/ci/reference/.
+    """
+    proc = subprocess.run(["git", "grep", "-il", "camelot", "--", "orchestrator"],
+                          cwd=str(ROOT), capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode in (0, 1), proc.stderr  # git grep exits 1 when nothing matches
+    assert proc.stdout.split() == ["orchestrator/tests/test_prd262_unused_packages_go.py"], proc.stdout
 
 
 # --------------------------------------------------------------------------- requirements
