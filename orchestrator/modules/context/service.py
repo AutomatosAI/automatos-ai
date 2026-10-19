@@ -51,6 +51,7 @@ from modules.context.result import ContextResult
 from modules.context.sections import SECTION_REGISTRY, SectionContext
 from core.observability.tracer import fire_assembly_trace
 from modules.context.sections.conversation import ConversationSection
+from modules.context.sections.skills import SKILL_BODIES_KEY, SkillsSection
 from modules.context.sections.tools import ToolLoadingStrategy, ToolsSection
 
 # PRD-127: Ephemeral attachments
@@ -99,6 +100,18 @@ class _Assembly:
     prompt_tokens: int
     tools: list[dict[str, Any]]
     tool_choice: str
+
+
+def _served_skill_bodies(ctx: SectionContext, sections_included: list[str]) -> list[dict[str, Any]]:
+    """PRD-263 US-062: the core skill bodies that served the turn, by content hash.
+
+    The skills section records them as it renders (its render returns text only).
+    A skills section the budget dropped put no body in the prompt, so it
+    records nothing in the trace.
+    """
+    if SkillsSection.name not in sections_included:
+        return []
+    return [dict(body) for body in ctx.kwargs.get(SKILL_BODIES_KEY) or []]
 
 
 class ContextService:
@@ -355,6 +368,7 @@ class ContextService:
             budget_total=assembly.budget.total,
             sections=section_trace,
             injected_memory_ids=list(ctx.kwargs.get("_injected_memory_ids") or []),
+            skill_bodies=_served_skill_bodies(ctx, sections_included),
             cacheable_prefix=assembly.cacheable_prefix,
             attachment_failures=attachment_failures,
         )
