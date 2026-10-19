@@ -11,7 +11,8 @@ The lane itself runs only in CI, against a real stack. These tests hold its part
   the alembic runs counted the §8 way, the /health/bootstrap stages, the frontend's
   address, and a summary on a failed run too;
 * ``scripts/ci/smoke-fresh-clone.sh`` starts the frontend, restarts the backend twice
-  with the database kept, and writes the report on every exit;
+  with the database kept, and writes the report on every exit. Since PRD-262 US-039 the
+  source build is ``make build`` itself, whose failure is the run's failure;
 * ``smoke-fresh-clone.yml`` watches the boot inputs US-002 names, runs nightly, pins
   its Actions by SHA and uploads the records.
 """
@@ -462,11 +463,14 @@ def test_script_restarts_the_backend_twice_with_the_database_kept():
 
 def test_script_starts_the_frontend_and_records_its_address():
     text = _script()
-    assert "compose build backend workspace-worker frontend" in text
     frontend = _function(text, "boot_frontend")
+    # make build and make up start it once the backend is healthy (PRD-262 US-039, US-036);
+    # the prebuilt images' run starts it here.
+    assert 'if [ -n "$MAKE_TARGET" ]; then\n    boot_frontend_from_make' in frontend
     assert "compose up -d --no-build frontend" in frontend
     assert 'address="$(compose port frontend 3000)"' in frontend
     assert f'--url "{boot.UI}=${{FRONTEND_URL}}" --meta "address=${{address}}"' in frontend
+    assert "--published-port 3000" in _function(text, "boot_frontend_from_make")
     assert re.search(r'^FRONTEND_URL="http://localhost:\$\{FRONTEND_PORT:-3000\}/"$', text, re.M)
 
 
@@ -494,16 +498,21 @@ def test_script_checks_the_host_before_it_sets_the_teardown_trap():
     assert re.search(r"^STACK_NAME_PATTERN='\^automatos_'$", _script(), re.M)
 
 
-# A docker that records its calls, lists FAKE_CONTAINERS and FAKE_VOLUMES, and fails
-# every compose build; python3 is the interpreter running these tests.
+# A docker that records its calls and lists FAKE_CONTAINERS and FAKE_VOLUMES, and a make
+# that records its call and fails, as a make build whose build failed would; python3 is
+# the interpreter running these tests.
 _FAKE_DOCKER = """#!/bin/bash
 echo "docker $*" >> "$CALL_LOG"
 case "$*" in
   "ps -a --format"*) [ -z "${FAKE_CONTAINERS:-}" ] || printf '%s\\n' $FAKE_CONTAINERS ;;
   "volume ls --format"*) [ -z "${FAKE_VOLUMES:-}" ] || printf '%s\\n' $FAKE_VOLUMES ;;
-  "compose "*" build "*) exit 1 ;;
 esac
 exit 0
+"""
+_FAKE_MAKE = """#!/bin/bash
+echo "make $*" >> "$CALL_LOG"
+echo "make-tag ${AUTOMATOS_IMAGE_TAG-unset} make-revision ${AUTOMATOS_REVISION-unset}" >> "$CALL_LOG"
+exit 1
 """
 
 
@@ -511,7 +520,7 @@ def _run_script(tmp_path: Path, **fake: str) -> tuple[int, list[str], str]:
     """Run smoke-fresh-clone.sh against the fake docker; (exit code, docker calls, output)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    stubs = {"docker": _FAKE_DOCKER, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}
+    stubs = {"docker": _FAKE_DOCKER, "make": _FAKE_MAKE, "python3": f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'}
     for name, body in stubs.items():
         (bin_dir / name).write_text(body, encoding="utf-8")
         (bin_dir / name).chmod((bin_dir / name).stat().st_mode | stat.S_IXUSR)
@@ -546,17 +555,22 @@ def test_script_refuses_a_host_with_its_own_automatos_stack(tmp_path, fake):
 
 
 @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
-def test_script_reports_and_tears_down_when_the_build_fails(tmp_path):
+def test_script_reports_and_tears_down_when_make_build_fails(tmp_path):
+    """The source build is make build itself (PRD-262 US-039): its failure fails the run."""
     code, calls, out = _run_script(tmp_path)
     assert code == 1, out
-    assert "docker compose -f docker-compose.yml build backend workspace-worker frontend" in calls
-    assert not any(" up " in call for call in calls), "nothing boots after a failed build"
+    assert "make build" in calls, "the smoke runs make build, not its own compose build"
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_REPO, capture_output=True, text=True).stdout.strip()
+    if head:  # the build is tagged local-<sha7> and labelled with HEAD, exported for make build
+        assert f"make-tag local-{head[:7]} make-revision {head}" in calls
+    docker = [call for call in calls if call.startswith("docker ")]
+    assert not any(" build" in call or " up " in call for call in docker), "the smoke itself builds and starts nothing"
     assert calls[-1] == "docker compose -f docker-compose.yml down -v"
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
-    assert "**FAIL**: docker compose build failed" in summary
+    assert "**FAIL**: make build failed" in summary
     assert "No backend boot was timed." in summary
     report_json = json.loads((tmp_path / "out" / "smoke-report.json").read_text(encoding="utf-8"))
-    assert (report_json["outcome"], report_json["failure"]) == ("fail", "docker compose build failed")
+    assert (report_json["outcome"], report_json["failure"]) == ("fail", "make build failed")
 
 
 # --------------------------------------------------------------------------- the workflow

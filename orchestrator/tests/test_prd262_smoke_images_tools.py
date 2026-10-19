@@ -533,6 +533,14 @@ def test_a_source_build_reports_no_pull_and_its_images(monkeypatch):
     assert "- No compose-built image: ok." in text and "only under the tag" not in text
 
 
+def test_a_source_build_times_the_first_run_from_the_start_of_make_build():
+    """PRD-262 US-039: the fresh-clone lane runs make build, and its first run starts with it."""
+    data = section.build({"mode": "build", "tag": "local-0d9f0ac", "up_started_ns": (T0 + 41) * NS},
+                         pull=None, processes=None, images=None, boots=_boots())
+    assert data["first_run"] == {"since": "build", "ready_s": 25.5, "ui_s": 42.0}
+    assert "- First run, from the start of `make build`: `/health/ready` 200 after **25.5 s**" in section.markdown(data)
+
+
 def test_a_prebuilt_run_times_the_first_run_from_compose_up():
     data = section.build({"mode": "prebuilt", "tag": "pr-0d9f0ac", "up_started_ns": (T0 + 41) * NS},
                          pull=None, processes=None, images=None, boots=_boots())

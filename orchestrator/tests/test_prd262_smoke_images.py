@@ -182,7 +182,7 @@ def test_the_pull_exports_no_secret_and_finds_three_generated_in_env():
     assert 'grep -cE "$GENERATED_SECRET" "$ENV_FILE"' in check and '= "3" ]' in check
     main = _function(text, "main")
     assert '[ ! -e "$ENV_FILE" ] || env_existed="true"' in main
-    order = ["trap finish EXIT", "env_existed=", "prepare_images", "finish_make_up", "check_generated_secrets",
+    order = ["trap finish EXIT", "env_existed=", "prepare_images", "finish_make", "check_generated_secrets",
              "warm_restarts"]
     assert [main.index(step) for step in order] == sorted(main.index(step) for step in order)
 
@@ -365,26 +365,30 @@ def test_the_pull_is_make_up_from_an_empty_cache_and_image_modes_never_build():
     pull = _function(text, "pull_images")
     assert pull.index("empty_docker_cache") < pull.index('"$IMAGES_TOOL" pull')
     assert '--log "$MAKE_UP_LOG" -- \\\n      make up\n' in pull, "make up runs, its output kept for the 429 search"
-    assert 'echo "$?" > "$MAKE_UP_EXIT"' in pull and "make_up_pid=$!" in pull, "in the background, its exit kept"
+    assert 'echo "$?" > "$MAKE_EXIT"' in pull and "make_pid=$!" in pull, "in the background, its exit kept"
     assert "docker image prune -af" in _function(text, "empty_docker_cache")
     assert "compose up -d --no-build postgres redis minio backend" in _function(text, "boot_fresh")
 
 
 def test_the_boots_are_timed_while_make_up_runs_and_make_up_must_exit_0():
-    """make up returns only after the frontend started, so polling after it would overstate both boots."""
+    """make up returns only after the frontend started, so polling after it would overstate both boots.
+
+    make build (the source build, PRD-262 US-039) runs the same way.
+    """
     text = _script()
-    assert "boot_fresh_from_make_up" in _function(text, "boot_fresh")
-    fresh = _function(text, "boot_fresh_from_make_up")
-    assert 'wait_backend fresh --wait-start --stop-file "$MAKE_UP_EXIT"' in fresh
-    frontend = _function(text, "boot_frontend_from_make_up")
-    assert '--wait-start --stop-file "$MAKE_UP_EXIT" --published-port 3000' in frontend
-    finish = _function(text, "finish_make_up")
-    assert 'wait "$make_up_pid"' in finish and '= "0" ] || fail "make up failed"' in finish
+    assert re.search(r'^  pull\) MAKE_TARGET="up" ;;$', text, re.M)
+    assert 'if [ -n "$MAKE_TARGET" ]; then\n    boot_fresh_from_make' in _function(text, "boot_fresh")
+    fresh = _function(text, "boot_fresh_from_make")
+    assert 'wait_backend fresh --wait-start --start-timeout "$start_wait" --stop-file "$MAKE_EXIT"' in fresh
+    frontend = _function(text, "boot_frontend_from_make")
+    assert '--wait-start --stop-file "$MAKE_EXIT" --published-port 3000' in frontend
+    finish = _function(text, "finish_make")
+    assert 'wait "$make_pid"' in finish and '= "0" ] || fail "make ${MAKE_TARGET} failed"' in finish
     main = _function(text, "main")
-    order = ["start_event_log", "prepare_images", "boot_fresh", "boot_frontend", "finish_make_up",
+    order = ["start_event_log", "prepare_images", "boot_fresh", "boot_frontend", "finish_make",
              "check_images", "warm_restarts"]
     assert [main.index(step) for step in order] == sorted(main.index(step) for step in order)
-    assert 'wait "$make_up_pid"' in _function(text, "finish"), "the teardown waits for a make up still running"
+    assert 'wait "$make_pid"' in _function(text, "finish"), "the teardown waits for a make up still running"
 
 
 def test_a_source_build_is_tagged_local_and_labelled_with_head():

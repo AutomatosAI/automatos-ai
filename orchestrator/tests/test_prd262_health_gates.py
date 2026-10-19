@@ -15,8 +15,9 @@
   and ``FAKE_COMPOSE_RC`` make either fail).
 * CI reads the gates off Docker's start and health_status events
   (``scripts/ci/smoke_health_gates.py``): redis and minio healthy within 2 s of their
-  start, postgres reported, and, where compose starts the frontend (make up), the
-  frontend started within 3 s of the backend turning healthy. Both smoke lanes run it.
+  start, postgres reported, and, where compose starts the frontend (make up, and make
+  build since PRD-262 US-039), the frontend started within 3 s of the backend turning
+  healthy. Both smoke lanes run it.
 """
 from __future__ import annotations
 
@@ -365,14 +366,19 @@ def _steps(text: str) -> list:
     return [line.strip() for line in _function(text, "main").splitlines()]
 
 
-def test_the_fresh_clone_smoke_gates_once_the_frontend_is_up_and_gates_it_only_after_make_up():
+def test_the_fresh_clone_smoke_gates_once_the_frontend_is_up_and_gates_it_where_make_started_it():
+    """make up (pull) and make build (the source build, PRD-262 US-039) let compose start the
+    frontend, so its gap is gated; only the prebuilt images' run starts it itself."""
     text = _FRESH_SMOKE.read_text(encoding="utf-8")
     steps = _steps(text)
-    order = [steps.index(step) for step in ("start_event_log", "boot_frontend", "finish_make_up",
+    order = [steps.index(step) for step in ("start_event_log", "boot_frontend", "finish_make",
                                              "check_health_gates", "warm_restarts")]
     assert order == sorted(order)
+    targets = re.search(r'^case "\$SMOKE_IMAGES" in\n(.*?)^esac$', text, re.M | re.S).group(1)
+    assert {'"") MAKE_TARGET="build" ;;', 'pull) MAKE_TARGET="up" ;;', '*) MAKE_TARGET="" ;;'} == {
+        line.strip() for line in targets.splitlines()}
     check = _function(text, "check_health_gates")
-    assert 'if [ "$SMOKE_IMAGES" = "pull" ]; then\n    frontend="gate"' in check
+    assert 'if [ -n "$MAKE_TARGET" ]; then\n    frontend="gate"' in check
     assert '"$GATES_TOOL" --events "$EVENTS_FILE" --frontend "$frontend"' in check
     assert "|| fail " in check
     assert f'GATES_TOOL="{_GATES_PATH}"' in text
