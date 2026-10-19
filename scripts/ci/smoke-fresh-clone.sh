@@ -130,7 +130,8 @@
 #
 # PRD-262 US-041, in every mode, before the document check: MinIO runs as its image's own
 # user, uid 65532, never root, and the one-shot minio-volume-owner that runs before it
-# exited 0 (scripts/ci/smoke_minio.py server). Docker creates this fresh volume root's, so
+# exited 0 (scripts/ci/smoke_minio.py server). Docker gives this fresh volume the owner of
+# an image's /data as it creates the containers that mount it, which need not be 65532, so
 # the one-shot may have re-owned it; either way the document below is stored by a MinIO
 # that is not root. scripts/ci/smoke-minio-upgrade.sh covers a volume root wrote before.
 #
@@ -587,8 +588,9 @@ check_images() {
 }
 
 # PRD-262 US-041: MinIO is healthy as its image's user, uid 65532, on the fresh volume, and
-# minio-volume-owner exited 0. A fresh volume is root's until the one-shot runs, so whether
-# it re-owned this one is recorded, not required.
+# minio-volume-owner exited 0. Before the one-shot runs, a fresh volume has the owner of an
+# image's /data (Docker copies it in), not necessarily 65532, so whether it re-owned this
+# one is recorded, not required.
 check_minio_user() {
   python3 "$MINIO_TOOL" server --container "$MINIO_CONTAINER" --owner-container "$MINIO_OWNER_CONTAINER" \
     --reowned any --out "$MINIO_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \

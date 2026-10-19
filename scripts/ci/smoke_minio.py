@@ -10,8 +10,10 @@ step:
 * ``server``: MinIO's container is healthy and runs as 65532 (its ``Config.User``, and
   the uid of every process ``docker top`` lists), and minio-volume-owner exited 0.
   ``--reowned yes`` needs the one-shot's log to say it re-owned the volume (an upgrade
-  from a root-owned volume), ``no`` needs it silent, and ``any`` leaves it: Docker
-  creates a fresh volume root's, so a first start may re-own it too;
+  from a root-owned volume), ``no`` needs it silent, and ``any`` leaves it: a fresh
+  volume takes the owner of an image's ``/data`` when Docker creates the containers
+  that mount it (the one-shot's redis image, uid 999, then MinIO's), which need not be
+  65532, so a first start may re-own it too;
 * ``volume``: every path in a named volume is owned by ``--owner`` (``uid:gid``). A
   throwaway container of ``--image`` (the one-shot's image, the stack's redis, whose
   busybox has find and stat) lists them, with the volume mounted read-only and no

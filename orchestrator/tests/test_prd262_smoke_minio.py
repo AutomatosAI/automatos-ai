@@ -307,7 +307,8 @@ def test_the_fresh_clone_smoke_checks_minios_user_before_the_document_round_trip
     assert _shell_value(FRESH, "MINIO_CONTAINER") == COMPOSE["services"]["minio"]["container_name"]
     assert _shell_value(FRESH, "MINIO_OWNER_CONTAINER") == COMPOSE["services"]["minio-volume-owner"]["container_name"]
     step = _shell_function(FRESH, "check_minio_user")
-    assert "--reowned any" in step and "|| fail " in step, "a fresh volume is root's until the one-shot runs"
+    assert "--reowned any" in step and "|| fail " in step, (
+        "a fresh volume has an image's /data owner, not necessarily 65532, until the one-shot runs")
     main = _shell_function(FRESH, "main")
     order = [re.search(rf"^[ \t]+{call}$", main, re.M).start()
              for call in ("check_images", "check_minio_user", "check_document_storage")]
