@@ -12,8 +12,9 @@
 #
 # A container with no network publishes no port, so each request is made from inside
 # it, with the image's own node (fetch, redirects not followed). test.yml's
-# prod-image-parity job runs this against the SaaS and the local build; it needs only
-# Docker. frontend/lib/__tests__/standalone-diet.test.ts holds TRACE_EXCLUDED equal to
+# prod-image-parity job runs this against the SaaS and the local build (amd64), and
+# images.yml against the frontend image each build job pushed (amd64 and arm64); it needs
+# only Docker. frontend/lib/__tests__/standalone-diet.test.ts holds TRACE_EXCLUDED equal to
 # next.config.js's STANDALONE_TRACE_EXCLUDES.
 set -euo pipefail
 

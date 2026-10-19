@@ -10,6 +10,10 @@ No CI build passes Clerk keys, and clerkMiddleware and ClerkProvider throw witho
 them, so the SaaS build gets format-valid production-instance dummies, made at run
 time and never committed (gitleaks' Stripe rule matches a literal sk_live_ key).
 
+images.yml runs the same script against the frontend image each build job pushed, on amd64
+and arm64, after the scan and whenever the build pushed one, and a change to the script
+builds and checks that image.
+
 The config and the brand mark are checked by frontend/lib/__tests__/standalone-diet.test.ts.
 Pure file reads: no Docker, no network.
 """
@@ -48,11 +52,17 @@ def _build_args(script: str, tag: str) -> list[str]:
     return [words[i + 1] for i, word in enumerate(words) if word == "--build-arg"]
 
 
+def _images_yml() -> dict:
+    return yaml.safe_load((WORKFLOWS / "images.yml").read_text())
+
+
+def _published_frontend() -> dict:
+    pick = next(step for step in _images_yml()["jobs"]["changes"]["steps"] if step.get("id") == "pick")
+    return next(image for image in json.loads(pick["env"]["IMAGES"]) if image["name"] == "frontend")
+
+
 def _published_frontend_args() -> list[str]:
-    images_yml = yaml.safe_load((WORKFLOWS / "images.yml").read_text())
-    pick = next(step for step in images_yml["jobs"]["changes"]["steps"] if step.get("id") == "pick")
-    frontend = next(image for image in json.loads(pick["env"]["IMAGES"]) if image["name"] == "frontend")
-    return frontend["build_args"]
+    return _published_frontend()["build_args"]
 
 
 def test_the_saas_build_gets_a_dummy_production_publishable_key():
@@ -104,3 +114,29 @@ def test_the_check_script_boots_with_no_network_and_reads_the_log():
     assert 'expect_status "$OPTIMISER_PATH" 404' in script
     assert 'grep -qi sharp <<< "$logs"' in script
     assert 'exit "$bad"' in script.rstrip().splitlines()[-1]
+
+
+# ── images.yml: the published image, on both arches ─────────────────────────
+
+IMAGES_CHECK = 'bash frontend/scripts/check-standalone-image.sh "${IMAGE}@${DIGEST}" /chat'
+
+
+def test_images_yml_checks_the_frontend_image_each_build_pushed():
+    steps = _images_yml()["jobs"]["build"]["steps"]
+    found = [(i, step) for i, step in enumerate(steps) if IMAGES_CHECK in step.get("run", "")]
+    assert len(found) == 1, "expected one images.yml build step running the standalone check"
+    position, step = found[0]
+    # The published frontend is the local edition, so /chat is its page.
+    assert "NEXT_PUBLIC_AUTH_EDITION=local" in _published_frontend_args()
+    assert step["if"] == "${{ !cancelled() && matrix.name == 'frontend' && steps.build.outcome == 'success' }}"
+    assert step["env"] == {"IMAGE": "${{ matrix.image }}", "DIGEST": "${{ steps.build.outputs.digest }}"}
+    lines = step["run"].strip().splitlines()
+    assert lines == ['docker pull --quiet "${IMAGE}@${DIGEST}"', IMAGES_CHECK]
+    policy = next(i for i, other in enumerate(steps) if other.get("name") == "Scan policy")
+    assert position > policy, "the scan and its policy run first"
+
+
+def test_a_change_to_the_check_script_builds_and_checks_the_frontend_image():
+    script = "frontend/scripts/check-standalone-image.sh"
+    assert script in _published_frontend()["inputs"]
+    assert script in _images_yml()[True]["pull_request"]["paths"]  # PyYAML reads `on` as True
