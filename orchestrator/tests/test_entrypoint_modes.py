@@ -495,8 +495,10 @@ def test_the_entrypoint_reads_the_fingerprint_the_loader_stores():
 
 
 def _real_loader_fingerprint(env: dict) -> str:
-    """The loader's fingerprint as the check computes it in this environment (config reads it)."""
-    code = "from core.seeds.fingerprint import seed_fingerprint; print(seed_fingerprint('loader'))"
+    """The loader's fingerprint as the check computes it in this environment (config reads it,
+    after orchestrator/.env, as the check does)."""
+    code = ("from dotenv import load_dotenv; load_dotenv('.env'); "
+            "from core.seeds.fingerprint import seed_fingerprint; print(seed_fingerprint('loader'))")
     proc = subprocess.run([sys.executable, "-c", code], cwd=_ORCH, env=env, capture_output=True, text=True,
                           timeout=120)
     assert proc.returncode == 0, proc.stderr

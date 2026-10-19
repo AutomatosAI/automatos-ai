@@ -153,17 +153,25 @@ def test_the_config_values_are_read_through_config():
 # --------------------------------------------------------------------------- the entrypoint's check
 
 
-def test_the_check_skips_when_the_stored_fingerprint_matches(monkeypatch, caplog):
+@pytest.fixture
+def dotenv_reads(monkeypatch):
+    """The check's own .env read, recorded instead of done (it would change this process's environment)."""
+    reads = []
+    monkeypatch.setattr("dotenv.load_dotenv", lambda path=None, **kwargs: reads.append(path))
     monkeypatch.setattr(fp, "config_values", lambda: dict(SETTINGS))
+    return reads
+
+
+def test_the_check_skips_when_the_stored_fingerprint_matches(dotenv_reads, caplog):
     current = fp.seed_fingerprint(fp.LOADER)
     with caplog.at_level(logging.INFO, logger=fp.__name__):
         assert fp.main(["loader"], stdin=io.StringIO(f"{current}\n")) == fp.UNCHANGED
     assert f"⏭️  seed_fingerprint.loader: seeds unchanged (fingerprint {current[:12]}) — skipped" in caplog.text
+    assert dotenv_reads == [_ORCH / ".env"], "the check reads orchestrator/.env, as main.py and the loader do"
 
 
 @pytest.mark.parametrize("stored", ["", "\n", "0" * 64 + "\n"])
-def test_the_check_runs_the_seeds_on_anything_else(monkeypatch, caplog, stored):
-    monkeypatch.setattr(fp, "config_values", lambda: dict(SETTINGS))
+def test_the_check_runs_the_seeds_on_anything_else(dotenv_reads, caplog, stored):
     with caplog.at_level(logging.INFO, logger=fp.__name__):
         assert fp.main(["loader"], stdin=io.StringIO(stored)) == fp.CHANGED
     assert "seeds unchanged" not in caplog.text
@@ -183,7 +191,8 @@ def test_the_check_imports_config_but_not_the_app():
     local = {module for module in modules if module.split(".")[0] in _orchestrator_tops()}
     assert local == {"config"}, local
     third_party = {module.split(".")[0] for module in modules} - set(sys.stdlib_module_names) - {"__future__"}
-    assert third_party <= {"config", "sqlalchemy"}, third_party  # sqlalchemy: inside the storage functions
+    # dotenv: the check reads orchestrator/.env as the app does; sqlalchemy: inside the storage functions.
+    assert third_party <= {"config", "dotenv", "sqlalchemy"}, third_party
 
 
 # --------------------------------------------------------------------------- clean runs

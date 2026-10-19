@@ -9,8 +9,8 @@ is needed:
 * ``seed_fingerprint.loader``: the entrypoint's seed loader, ``python -m
   core.database.load_seed_data --boot`` (compose: ``AUTOMATOS_MIGRATE_ON_BOOT``).
   Before it starts the loader, the entrypoint pipes the stored value into ``python -m
-  core.seeds.fingerprint loader``, which imports this module and ``config`` (the
-  standard library and python-dotenv), not the app.
+  core.seeds.fingerprint loader``, which imports this module, python-dotenv and
+  ``config`` (itself the standard library and python-dotenv), not the app.
 * ``seed_fingerprint.leader``: the lifespan leader's seed block and the starters pass
   after it (``core/seeds/leader_stage.py``, ``main.py``).
 
@@ -202,9 +202,9 @@ def store_fingerprint(db, stage: str, fingerprint: str) -> None:
     """Record that a stage ran clean with these inputs; the caller's session commits."""
     from sqlalchemy import text
 
-    params = {**_params(stage), "value": fingerprint, "description": SETTING_DESCRIPTION}
+    params = {**_params(stage), "value": fingerprint}
     if db.execute(text(UPDATE_SQL), params).rowcount == 0:
-        db.execute(text(INSERT_SQL), params)
+        db.execute(text(INSERT_SQL), {**params, "description": SETTING_DESCRIPTION})
 
 
 # --------------------------------------------------------------------------- clean runs
@@ -268,8 +268,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None, stdin: Optional[TextIO] = None) -> int:
-    """Exit 0 (and log the skip line) when the stored fingerprint matches, else 1."""
+    """Exit 0 (and log the skip line) when the stored fingerprint matches, else 1.
+
+    It reads ``orchestrator/.env`` first, as the app (``main.py``) and the seed loader
+    (``load_dotenv()``) do before ``config`` is imported, so all three see the same
+    config values; values already in the environment win, as in both of them.
+    """
+    from dotenv import load_dotenv
+
     args = build_parser().parse_args(argv)
+    load_dotenv(ORCHESTRATOR / ".env")
     current = seed_fingerprint(args.stage)
     stored = stored_from(stdin if stdin is not None else sys.stdin)
     if stored == current:
