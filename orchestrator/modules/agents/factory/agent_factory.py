@@ -372,15 +372,11 @@ class AgentFactory:
         return min(value, ceiling) if ceiling else value
 
     def _openrouter_model_id(self, vendor_provider: str, model_id: str) -> str:
-        """Vendor model id -> its OpenRouter form (no-op when already prefixed).
-
-        The vendor → prefix map lives in the provider registry (PRD-236).
-        """
-        if "/" in model_id:
-            return model_id
-        from core.llm.providers import openrouter_prefix_for
-        prefix = openrouter_prefix_for(vendor_provider)
-        return f"{prefix}{model_id}" if prefix else model_id
+        """Vendor model id -> its OpenRouter form (no-op when already prefixed); a
+        direct Claude id -> its dotted twin. The rule lives in the provider registry
+        (``providers.openrouter_model_id``, PRD-236)."""
+        from core.llm.providers import openrouter_model_id
+        return openrouter_model_id(vendor_provider, model_id)
 
     def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> tuple[str, str]:
         """Auto-detect and correct provider-model mismatches.

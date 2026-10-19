@@ -105,7 +105,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # installable themes, Phase A and C (theme_packages, theme_installations and seven more).
 # 2026-10-18 (PRD-263 PR-1B): prd263_harness_runs chains onto prd261_themes — the HARNESS
 # run table (harness_runs) that replaces the last_run and trace JSON files.
-EXPECTED_HEAD = "prd263_harness_runs"
+# 2026-10-19: auto_haiku_default_20261019 chains onto prd263_harness_runs — a data
+# migration: the platform default for Auto becomes Haiku 5.5 and the Auto rows on it move.
+EXPECTED_HEAD = "auto_haiku_default_20261019"
 
 
 def _literal(node: ast.AST):

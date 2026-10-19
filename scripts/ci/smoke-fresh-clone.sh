@@ -39,8 +39,9 @@
 # service from Docker's start and health_status events, the /health/bootstrap
 # stage table of each boot and the alembic runs per boot. scripts/ci/smoke_boot.py
 # does the polling and scripts/ci/smoke_report.py the report; the records and logs
-# land in $SMOKE_OUT_DIR, which the workflow uploads. No time is a bar yet: the lane fails only when a
-# boot or the frontend never answers 200 (PRD-262 US-004 records the baselines).
+# land in $SMOKE_OUT_DIR, which the workflow uploads. No backend or frontend time is a bar yet: the
+# lane fails when a boot or the frontend never answers 200 (PRD-262 US-004 records the baselines).
+# The one time bar is the workspace worker's 20 s to healthy (PRD-262 US-045, below).
 #
 # PRD-262 US-005: once the frontend answers, scripts/ci/smoke-loopback-ports.sh asserts
 # that it, and every other published port, listens on 127.0.0.1 (`docker compose port
@@ -68,6 +69,10 @@
 # checks out, scripts/ci/smoke_worker_restart.py kills one uvicorn worker of the
 # production-stage backend and needs uvicorn to start a replacement within 30 s, with
 # /health 200 and no container restart. uvicorn 0.24 never replaced a dead worker.
+#
+# PRD-262 US-045, in every variant: scripts/ci/smoke_worker_health.py needs the workspace
+# worker healthy within 20 s of its start (from the same Docker events) and its /metrics
+# answering 200.
 #
 # Exit 0 = every boot answered 200 with no external creds and every published port is
 # on loopback. Exit 1 = a boot failed, or a port listens beyond this machine.
@@ -113,6 +118,11 @@ PROCESSES_FILE="${OUT_DIR}/processes.json"
 IMAGES_FILE="${OUT_DIR}/images.json"
 # smoke_worker_restart.py's record (PRD-262 US-008).
 WORKER_RESTART_FILE="${OUT_DIR}/worker-restart.json"
+# PRD-262 US-045: the workspace worker, its health bar and smoke_worker_health.py's record.
+WORKER_CONTAINER="automatos_workspace_worker"
+WORKER_HEALTH_TOOL="scripts/ci/smoke_worker_health.py"
+WORKER_HEALTHY_MAX_SECONDS=20
+WORKER_HEALTH_FILE="${OUT_DIR}/worker-health.json"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
 # The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
@@ -303,6 +313,16 @@ check_worker_restart() {
     || fail "uvicorn did not replace a killed worker within 30s with /health 200 and no container restart"
 }
 
+# PRD-262 US-045: the workspace worker, started with the backend, reported healthy within
+# WORKER_HEALTHY_MAX_SECONDS of its start (its HEALTHCHECK probes every 2 s while it
+# starts), and its /metrics answers 200.
+check_workspace_worker() {
+  python3 "$WORKER_HEALTH_TOOL" --events "$EVENTS_FILE" --service workspace-worker \
+    --container "$WORKER_CONTAINER" --max-seconds "$WORKER_HEALTHY_MAX_SECONDS" \
+    --out "$WORKER_HEALTH_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "the workspace worker was not healthy within ${WORKER_HEALTHY_MAX_SECONDS}s of its start, or its /metrics did not answer 200"
+}
+
 # Image modes: every app container runs the image compose names for it, with this
 # commit's revision label; with `pull`, its RepoDigests prove it was pulled.
 check_images() {
@@ -330,6 +350,8 @@ dump_failure_logs() {
   compose logs --tail 150 backend >&2 || true
   echo "----- frontend logs (tail) -----" >&2
   compose logs --tail 80 frontend >&2 || true
+  echo "----- workspace-worker logs (tail) -----" >&2
+  compose logs --tail 80 workspace-worker >&2 || true
 }
 
 # The step summary is written on every exit, pass or fail.
@@ -386,6 +408,7 @@ main() {
   boot_frontend
   check_loopback_ports
   check_images
+  check_workspace_worker
   # Further checks against the running stack go here, before the warm restarts
   # (PRD-262 US-021: upload a document and fetch its presigned URL).
   warm_restarts

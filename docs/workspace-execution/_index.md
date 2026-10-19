@@ -19,7 +19,7 @@ The following files were used as context for generating this wiki page:
 - [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
 - [services/workspace-worker/executor.py](services/workspace-worker/executor.py)
 - [services/workspace-worker/main.py](services/workspace-worker/main.py)
-- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
+- [services/workspace-worker/requirements.in](services/workspace-worker/requirements.in)
 - [services/workspace-worker/worker_config.py](services/workspace-worker/worker_config.py)
 - [services/workspace-worker/workspace_manager.py](services/workspace-worker/workspace_manager.py)
 
@@ -38,7 +38,7 @@ The `workspace-worker` is an independent service implemented as an ARQ-style Red
 *   **Lifecycle**: Includes a heartbeat reporter for monitoring and a graceful shutdown handler that waits for active tasks to complete [services/workspace-worker/main.py:118-144]().
 *   **Worker ID**: Each worker instance generates a unique identifier using its PID and timestamp for tracking [services/workspace-worker/main.py:82]().
 *   **Canvas Integration**: The worker manages headless Claude Agent SDK sessions, persisting state and transcripts to the workspace volume [services/workspace-worker/canvas_session_service.py:4-17]().
-*   **Toolchain**: The worker Docker image includes essential development tools like `git`, `curl`, Node.js 24 with `npm` and `corepack`, `pnpm` (pinned exactly), and `uv` for Python package management [services/workspace-worker/Dockerfile:1-45](). It also conditionally installs headless Chromium for the `workspace_html_to_png` tool [services/workspace-worker/Dockerfile:65-80]().
+*   **Toolchain**: The worker Docker image includes essential development tools like `git`, `curl`, Node.js 24 with `npm` and `corepack`, `pnpm` (pinned exactly), and `uv` for Python package management [services/workspace-worker/Dockerfile:1-45](). It also conditionally installs headless Chromium for the `workspace_html_to_png` tool [services/workspace-worker/Dockerfile]().
 
 For details, see [Workspace Worker Architecture](#21.1).
 
@@ -141,7 +141,7 @@ For details, see [Task Management & Board Integration](#21.5).
 
 The Outputs Hub provides a centralized repository for agent deliverables.
 
-*   **Headless Rendering**: The worker includes a `html_to_png` tool using Playwright for generating visual artifacts [services/workspace-worker/requirements.txt:21-22](). The Dockerfile conditionally installs Chromium for this purpose [services/workspace-worker/Dockerfile:65-80]().
+*   **Headless Rendering**: The worker includes a `html_to_png` tool using Playwright for generating visual artifacts [services/workspace-worker/requirements-browser.in](). The Dockerfile conditionally installs Chromium for this purpose [services/workspace-worker/Dockerfile]().
 *   **Directory Structure**: The `WorkspaceManager` provisions standard subdirectories for `repos`, `reports`, `content`, `artifacts`, `analytics`, and `graph` [services/workspace-worker/workspace_manager.py:62-70](). These directories are used to organize agent-generated outputs.
 
 For details, see [Workspace Outputs Hub & Deliverables](#21.6).
@@ -156,7 +156,7 @@ Sources:
 - [frontend/components/widgets/TerminalWidget/InteractiveTerminal.tsx:1-170]()
 - [services/workspace-worker/canvas_session_service.py:1-189]()
 - [services/workspace-worker/Dockerfile:1-74]()
-- [services/workspace-worker/requirements.txt:21-22]()
+- [services/workspace-worker/requirements-browser.in]()
 - [services/workspace-worker/canvas_confinement.py]()
 
 ---

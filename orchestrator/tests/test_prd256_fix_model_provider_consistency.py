@@ -16,7 +16,6 @@ from core.llm import create_llm_manager, output_budget, vendor_fit
 from core.llm import manager as llm_manager
 from core.llm import workspace_keys
 from core.llm.clients.base import LLMProvider
-from core.llm.defaults import DEFAULT_LLM_MODEL
 
 ANTHROPIC_SYSTEM = {("system_llm", "provider"): "anthropic", ("system_llm", "model"): "claude-sonnet-5-5"}
 OPENROUTER_SYSTEM = {("system_llm", "provider"): "openrouter", ("system_llm", "model"): "google/gemini-2.5-flash"}
@@ -95,10 +94,10 @@ def test_an_openrouter_system_llm_keeps_todays_models_and_routes(platform):
     from config import config
 
     platform(OPENROUTER_SYSTEM, keyed={"openrouter"})
-    assert config.MEMORY_DISTILL_MODEL == DEFAULT_LLM_MODEL == "google/gemini-2.5-flash"
+    assert config.MEMORY_DISTILL_MODEL == OPENROUTER_SYSTEM[("system_llm", "model")]  # the tier's own model
     assert _sent("memory_integration", config.MEMORY_DISTILL_MODEL) == (LLMProvider.OPENROUTER, "google/gemini-2.5-flash")
     assert _verifier_for("claude-opus-5-5") == "openai/gpt-4o-mini"
-    assert _verifier_for("gpt-4o") == "anthropic/claude-haiku-4-5"
+    assert _verifier_for("gpt-4o") == "anthropic/claude-haiku-4.5"  # OpenRouter's dotted id
     assert _verifier_for(None) == "openai/gpt-4o-mini"
     assert _sent("verifier", "openai/gpt-4o-mini") == (LLMProvider.OPENROUTER, "openai/gpt-4o-mini")
 
@@ -137,7 +136,7 @@ def test_with_no_serving_key_one_warning_names_service_model_and_provider(platfo
 
 @pytest.mark.parametrize("keyed, expected", [
     ({"openrouter", "anthropic"}, (LLMProvider.ANTHROPIC, "claude-haiku-5-5")),
-    ({"openrouter"}, (LLMProvider.OPENROUTER, "anthropic/claude-haiku-5-5")),
+    ({"openrouter"}, (LLMProvider.OPENROUTER, "anthropic/claude-haiku-5.5")),             # OpenRouter's dotted id
 ])
 def test_a_bare_claude_id_on_openrouter_runs_where_it_is_served(platform, keyed, expected):
     platform(OPENROUTER_SYSTEM, keyed=keyed)

@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
+import { fetchPlatformDefaultRoute, getDefaultModelConfig } from '@/lib/llm-defaults'
 import { SystemSetting, getSettingsForCategory } from '@/lib/api/system-settings'
 import {
   ConnectedChannel,
@@ -97,7 +97,7 @@ export function useOrchestratorConfig() {
   const handleHeartbeatChange = (key: string, value: string | boolean | number) => {
     if (orchConfig) setOrchConfig({ ...orchConfig, heartbeat: { ...orchConfig.heartbeat, [key]: value } })
   }
-  const handleHarnessChange = (key: string, value: string | boolean) => {
+  const handleHarnessChange = (key: string, value: string) => {
     if (orchConfig) setOrchConfig({ ...orchConfig, harness: { ...orchConfig.harness, [key]: value } })
   }
   return {
@@ -112,6 +112,11 @@ export function useLLMSave(orchConfig: OrchestratorConfig | null, setOrchConfig:
 
   const handleSaveLLM = async () => {
     if (!orchConfig?.llm) return
+    // A blank model (the config could not be loaded, or none picked yet) is never saved over Auto's
+    if (!orchConfig.llm.model_id) {
+      toast.error('Pick a model before saving the LLM settings')
+      return
+    }
     try {
       setSelfSaving(true)
       await apiClient.request(ORCHESTRATOR_ROUTE, { method: 'PUT', body: JSON.stringify({ llm: orchConfig.llm }) })
@@ -123,14 +128,12 @@ export function useLLMSave(orchConfig: OrchestratorConfig | null, setOrchConfig:
     }
   }
 
-  // Reset LLM to defaults by saving empty llm object — backend will use config defaults
+  // Reset LLM to the platform default: saving its pair keeps this workspace's Auto following it
   const handleReset = async () => {
     try {
       setSelfSaving(true)
-      await apiClient.request(ORCHESTRATOR_ROUTE, {
-        method: 'PUT',
-        body: JSON.stringify({ llm: { ...LLM_DEFAULTS, max_tokens: 4000, stop: null, timeout: null } }),
-      })
+      const llm = { ...getDefaultModelConfig(await fetchPlatformDefaultRoute()), max_tokens: 4000, stop: null, timeout: null }
+      await apiClient.request(ORCHESTRATOR_ROUTE, { method: 'PUT', body: JSON.stringify({ llm }) })
       // Reload orchestrator config to get fresh values
       setOrchConfig(await apiClient.request<OrchestratorConfig>(ORCHESTRATOR_ROUTE))
       toast.success('LLM settings reset to defaults')
@@ -151,8 +154,14 @@ export function useOrchestratorSave(orchConfig: OrchestratorConfig | null, conne
     if (!orchConfig) return
     try {
       setOrchSaving(true)
-      // Parse channel key to extract platform + channel_id for heartbeat delivery
-      const payload = { ...orchConfig, heartbeat: heartbeatPayload(orchConfig.heartbeat, connectedChannels) }
+      // Parse channel key to extract platform + channel_id for heartbeat delivery; an llm
+      // block with no model (the config could not be loaded) is left out, not saved over Auto's
+      const { llm, ...rest } = orchConfig
+      const payload = {
+        ...rest,
+        ...(llm?.model_id ? { llm } : {}),
+        heartbeat: heartbeatPayload(orchConfig.heartbeat, connectedChannels),
+      }
       await apiClient.request(ORCHESTRATOR_ROUTE, { method: 'PUT', body: JSON.stringify(payload) })
       toast.success('Orchestrator settings saved')
     } catch (err) {

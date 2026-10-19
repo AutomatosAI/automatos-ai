@@ -35,9 +35,11 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY . /src
 WORKDIR /src
 
-# Backend (orchestrator) and the Python services, as CI installs them.
+# Backend (orchestrator) and the Python services, as CI installs them. The
+# worker's direct dependencies, not its lock: the lock is resolved for the
+# worker's Python 3.12, and this image runs 3.11 (PRD-262 US-044).
 RUN pip install -r orchestrator/requirements.txt \
-    && pip install -r services/workspace-worker/requirements.txt \
+    && pip install -r services/workspace-worker/requirements.in \
     && pip install pytest-timeout
 
 # Frontend: `npm install`, not `npm ci` (CI does the same; see frontend-ci in test.yml).

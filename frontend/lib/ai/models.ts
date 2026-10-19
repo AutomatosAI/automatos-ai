@@ -4,9 +4,8 @@
 
 import type { Model } from '@/types'
 
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
-export { LLM_DEFAULTS }
-export const DEFAULT_CHAT_MODEL = LLM_DEFAULTS.model_id
+// No default chat model here: chat runs on the workspace's Auto, whose model is the
+// platform default unless the workspace chose one (GET /api/models/platform-default).
 
 export const chatModels: Model[] = [
   {

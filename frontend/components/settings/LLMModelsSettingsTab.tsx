@@ -2,14 +2,18 @@
  * System & Embeddings Settings Tab (PRD-136)
  * ==========================================
  *
- * Two tier cards (System / Embeddings). The third tier — Auto — is configured
- * in the top-level Orchestrator tab and writes to the Auto agent's
- * model_config (per-workspace), NOT to system_settings.
+ * Three tier cards. "Platform default for Auto" is system_settings orchestrator_llm
+ * provider + model: the model every new workspace's Auto, and every new agent given
+ * no model, starts on. The card sources its own rows (hooks/use-auto-platform-default)
+ * and saves through bulk-update, which moves the Auto agents still on the platform
+ * default to it (a workspace that chose its own model in Settings > Orchestrator keeps
+ * it). System and Embeddings follow, on the rows SystemSettingsTab passes.
  */
 
 import React from 'react'
-import { Cog, Database } from 'lucide-react'
+import { Bot, Cog, Database } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
+import { useAutoPlatformDefault } from '@/hooks/use-auto-platform-default'
 import LLMTierCard from './LLMTierCard'
 
 interface LLMModelsSettingsTabProps {
@@ -31,16 +35,28 @@ export default function LLMModelsSettingsTab({
   onResetEmbeddings,
   saving,
 }: LLMModelsSettingsTabProps) {
+  const autoDefault = useAutoPlatformDefault()
+
   return (
     <div className="space-y-6">
       <div className="rounded-lg bg-secondary/30 p-4 text-sm text-muted-foreground">
         <p>
-          Two tiers handle every background LLM call.
+          <strong className="text-foreground">Platform default for Auto</strong> is the model each workspace&apos;s Auto runs on until that workspace picks its own in the <strong className="text-foreground">Orchestrator</strong> tab, and the model a new agent gets when none is picked. Changing it moves every Auto still on the platform default.
           <strong className="text-foreground"> System</strong> powers background work — codegraph, RAG, knowledge extraction, planners, verifiers, memory.
           <strong className="text-foreground"> Embeddings</strong> is the vector model used wherever vectors are needed (RAG, memory, semantic search).
-          {' '}Auto (the brain that talks to users) is configured in the <strong className="text-foreground">Orchestrator</strong> tab.
         </p>
       </div>
+
+      <LLMTierCard
+        category="orchestrator_llm"
+        title="Platform default for Auto"
+        description="Provider and model for every Auto that has not picked its own, and for new agents given no model. Workspaces that chose a model keep it."
+        icon={Bot}
+        settings={autoDefault.settings}
+        onSave={autoDefault.save}
+        onReset={autoDefault.reset}
+        saving={autoDefault.saving || autoDefault.loading}
+      />
 
       <LLMTierCard
         category="system_llm"

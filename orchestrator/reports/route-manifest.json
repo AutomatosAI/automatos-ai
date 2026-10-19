@@ -1,5 +1,5 @@
 {
-  "route_count": 941,
+  "route_count": 942,
   "routes": [
     {
       "method": "GET",
@@ -1920,6 +1920,10 @@
     {
       "method": "POST",
       "path": "/api/models/estimate-cost"
+    },
+    {
+      "method": "GET",
+      "path": "/api/models/platform-default"
     },
     {
       "method": "GET",
