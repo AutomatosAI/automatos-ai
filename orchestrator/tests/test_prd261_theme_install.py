@@ -417,7 +417,9 @@ def test_a_default_never_moves_to_unreviewed_code(api):
 def test_update_to_an_older_or_equal_version_is_409(api):
     # L1: update only moves forward; rollback is the way back.
     v1, v2 = _package(api.db), _package(api.db, version="1.1.0")
-    twin = _package(api.db, version="1.1.0")
+    # An equal version can only coexist as this workspace's own upload (the Marketplace copy holds
+    # the unique theme_id+version among Marketplace packages).
+    twin = _package(api.db, workspace_id=WS_A, version="1.1.0")
     install = _install(api.db, v2)
     for target in (v1, twin):
         resp = api.client.post(f"/api/themes/installs/{install.id}/update", json={"packageId": str(target.id)})
