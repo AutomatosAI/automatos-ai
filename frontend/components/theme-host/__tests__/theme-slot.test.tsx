@@ -6,9 +6,11 @@
  * below the theme's width ('narrow'), on another path, for a link into a surface only the core
  * page has (`keepCorePage`, P260-FX-11 M13/M14: a value the theme's page serves keeps it), and
  * where the theme registered no such page. While the width isn't known, or an installed theme is
- * still loading, nothing renders where the theme decides (P260-FX-25, M69). The choice reads the
- * search params inside its own Suspense boundary whose fallback is the core page (a static
- * prerender). A slot: the theme's version where it registered one, else the core's.
+ * still loading, nothing renders where the theme decides (P260-FX-25, M69). The page entry reads
+ * the search params with no Suspense boundary of its own, so the core page is never a fallback
+ * (theme-slot-server.test.tsx proves the server's HTML), and the core page sits at one place in the
+ * tree: it mounts once when the width becomes known, an installed theme settles or fails, or the
+ * style switches in place (M69). A slot: the theme's version where it registered one, else the core's.
  *
  * An installed theme's registrations come from the theme host (provided here as the provider
  * provides it, with its pages); builtin Play's from its module constants, through the chat layout
@@ -17,7 +19,7 @@
  * for here); builtin Play's pages draw MainLayout themselves, so ThemeSlot never frames them, and
  * a slot is drawn where it is placed, never framed.
  */
-import React from 'react'
+import React, { Suspense, useEffect } from 'react'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -30,6 +32,8 @@ const state = vi.hoisted(() => ({
   search: '',
   /** While set, reading the search params suspends on it (Next's static-prerender bailout). */
   pending: null as Promise<void> | null,
+  /** How many times the counted core page mounted. */
+  mounts: 0,
 }))
 
 vi.mock('next/navigation', () => ({
@@ -106,13 +110,18 @@ interface PageProps {
   readonly themeServes?: ThemeServedValues
 }
 
-function renderPage(props: PageProps = {}) {
+/** A page entry around `core`, under the theme host when one is set. */
+function pageTree(props: PageProps = {}, core: React.ReactNode = <div data-testid="page">The core page</div>) {
   const slot = (
     <ThemeSlot page={props.page ?? '/chat'} keepCorePage={props.keepCorePage} themeServes={props.themeServes}>
-      <div data-testid="page">The core page</div>
+      {core}
     </ThemeSlot>
   )
-  return render(host === null ? slot : <ThemeHostContext.Provider value={host}>{slot}</ThemeHostContext.Provider>)
+  return host === null ? slot : <ThemeHostContext.Provider value={host}>{slot}</ThemeHostContext.Provider>
+}
+
+function renderPage(props: PageProps = {}) {
+  return render(pageTree(props))
 }
 
 function shows(testId: 'theme' | 'page') {
@@ -135,7 +144,7 @@ function underInstalledTheme(status: ThemeHostStatus = 'active') {
 afterEach(() => {
   cleanup()
   host = null
-  Object.assign(state, { entry: null, layout: 'fallback', pathname: '/chat', search: '', pending: null })
+  Object.assign(state, { entry: null, layout: 'fallback', pathname: '/chat', search: '', pending: null, mounts: 0 })
 })
 
 describe('routeMatches and corePageAsked', () => {
@@ -297,20 +306,92 @@ describe('ThemeSlot, a page entry', () => {
     })
   })
 
-  it("renders the core page as the fallback while the search params suspend (a static prerender), then the theme's", async () => {
+  it("adds no Suspense boundary of its own: a read that suspends reaches the route's, the core page never a fallback", async () => {
     underInstalledTheme()
     let release = () => {}
     state.pending = new Promise<void>((resolve) => {
       release = resolve
     })
-    renderPage()
-    shows('page')
+    render(<Suspense fallback={<div data-testid="route-fallback" />}>{pageTree()}</Suspense>)
+    expect(screen.getByTestId('route-fallback')).toBeInTheDocument()
+    showsNothing()
     state.pending = null
     await act(async () => {
       release()
     })
     expect(await screen.findByTestId('theme')).toBeInTheDocument()
     expect(screen.queryByTestId('page')).toBeNull()
+    expect(screen.queryByTestId('route-fallback')).toBeNull()
+  })
+})
+
+/** The core page, counting its mounts: a page mounted twice ran its effects twice (M69). */
+function CountedPage() {
+  useEffect(() => {
+    state.mounts += 1
+  }, [])
+  return <div data-testid="page">The core page</div>
+}
+
+/** The page entry around the counted core page; `rerender` renders it again with the state as it is now. */
+function renderCounted(props: PageProps) {
+  const view = render(pageTree(props, <CountedPage />))
+  return { rerender: () => view.rerender(pageTree(props, <CountedPage />)) }
+}
+
+describe('ThemeSlot keeps the core page in one place: it mounts once (P260-FX-25, M69)', () => {
+  it('when the width becomes known, on a link into a surface only the core page has', () => {
+    state.entry = BUILTIN_PLAY_ENTRY
+    state.layout = 'pending'
+    state.search = 'repo=projects%2Fsite'
+    const view = renderCounted({ keepCorePage: ['repo'] })
+    shows('page')
+    for (const layout of ['fallback', 'theme'] as const) {
+      state.layout = layout
+      view.rerender()
+      shows('page')
+    }
+    expect(state.mounts).toBe(1)
+  })
+
+  it('when an installed theme settles with no page here, or fails, on a link the core page keeps', () => {
+    underInstalledTheme('loading')
+    state.pathname = '/deliverables'
+    state.search = 'tab=brand'
+    const view = renderCounted({ page: '/deliverables', keepCorePage: ['tab'] })
+    shows('page')
+    for (const status of ['active', 'failed'] as const) {
+      host = installedHost(status)
+      view.rerender()
+      shows('page')
+    }
+    expect(state.mounts).toBe(1)
+  })
+
+  // A style switch reaches ThemeSlot as the active theme's entry (useActiveTheme) and the host's status.
+  it("when the style switches in place between Studio and builtin Play, below Play's width", () => {
+    const view = renderCounted({})
+    shows('page')
+    for (const entry of [BUILTIN_PLAY_ENTRY, null]) {
+      state.entry = entry
+      view.rerender()
+      shows('page')
+    }
+    expect(state.mounts).toBe(1)
+  })
+
+  it('when the style moves off a failed installed theme to Studio, on a link the core page keeps', () => {
+    underInstalledTheme('failed')
+    state.pathname = '/deliverables'
+    state.search = 'tab=brand'
+    const view = renderCounted({ page: '/deliverables', keepCorePage: ['tab'] })
+    shows('page')
+    state.entry = null
+    state.layout = 'fallback'
+    host = installedHost('off')
+    view.rerender()
+    shows('page')
+    expect(state.mounts).toBe(1)
   })
 })
 

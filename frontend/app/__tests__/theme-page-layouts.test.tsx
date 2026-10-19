@@ -8,7 +8,9 @@
  * these pages) and under an installed theme that registers none, the layout renders its children
  * unchanged, the same DOM. An installed theme's registered page draws instead, full bleed inside
  * MainLayout (its frame), unless the link asks for a surface only the core page has. Every route
- * the host lets a theme register (THEME_PAGE_ROUTES) has its seam.
+ * the host lets a theme register (THEME_PAGE_ROUTES) has its seam. With no theme the server sends
+ * the core page in no Suspense boundary (a boundary around it streamed the page twice, see
+ * components/theme-host/theme-slot.tsx).
  *
  * Home: the core has no page there. Under Classic, Studio and builtin Play the server forwards to
  * /chat as before; under an installed theme the page renders ThemeSlot, the theme's `/` page
@@ -18,6 +20,7 @@ import fs from 'fs'
 import path from 'path'
 import React, { type ComponentType, type ReactNode } from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
+import { renderToString } from 'react-dom/server'
 import ts from 'typescript'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -178,6 +181,18 @@ describe.each(LAYOUTS)('%s', (_seam, Layout, route, address) => {
     const core = coreHtml()
     state.pathname = address
     expect(renderLayout(Layout)).toBe(core)
+  })
+
+  it('sends its children from the server in no Suspense boundary, with no theme (theme-slot.tsx)', () => {
+    state.pathname = address
+    const core = renderToString(<CorePage />)
+    expect(
+      renderToString(
+        <Layout>
+          <CorePage />
+        </Layout>,
+      ),
+    ).toBe(core)
   })
 
   it('renders its children unchanged under builtin Play, which registers no page here', () => {

@@ -15,11 +15,9 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  *
  * - a **page** entry (`page="/chat"`, registerPage): on that route only, unless the link asks for
  *   a surface only the core page has (`keepCorePage` names those query parameters; `themeServes`
- *   names values of one that the theme's page still is). The choice reads the search params, so
- *   it sits inside its own Suspense boundary whose fallback is the core page: a static prerender
- *   renders the core page. An installed theme's page draws full bleed inside MainLayout (the
- *   theme's frame), as its routes at /x/<route> do (A-04d); builtin Play's pages draw MainLayout
- *   themselves (ActiveThemeSlots.framesPages).
+ *   names values of one that the theme's page still is). An installed theme's page draws full
+ *   bleed inside MainLayout (the theme's frame), as its routes at /x/<route> do (A-04d); builtin
+ *   Play's pages draw MainLayout themselves (ActiveThemeSlots.framesPages).
  * - a **slot** (`slot="notFound@1"`, registerSlot): wherever it is placed.
  *
  * Where the theme decides (it registered this page or slot, or an installed theme is still
@@ -27,6 +25,25 @@ import { registeredComponent, useActiveThemeSlots, type ActiveThemeSlots } from 
  * the server and hydration), so neither version mounts for a render it then loses (P260-FX-25,
  * M69). With no theme, below the theme's width ('narrow'), or with nothing registered here, the
  * core's version renders, exactly as before. The core's page files are never edited.
+ *
+ * The page entry adds no Suspense boundary of its own, and the core page is never a fallback.
+ * React's streaming server renderer outlines a finished boundary over 500 bytes once the bytes
+ * flushed before it and its own pass 12,800 (progressiveChunkSize): it streams the fallback first
+ * and the content again in a hidden <div id="S:…">, which a script swaps in on a later frame. With
+ * the core page as the fallback of a boundary around it (/agents and /chat are about 17 KB), the
+ * server sent the page twice, and when a provider above the boundary changed before the swap,
+ * React gave up hydrating the boundary and rendered the page again in the browser beside the
+ * hidden copy (react/react#37014): two Studio shells.
+ *
+ * So the choice reads the search params with no boundary around it (PRD-260's M14 added one
+ * against a static prerender). Next asks for one only where a route is prerendered, where reading
+ * them bails out to the browser; none is (app/layout.tsx is force-dynamic and reads cookies()), so
+ * they never suspend, and the core pages under this seam read them with no boundary of their own
+ * (app/playbooks/page.tsx, app/chat/page.tsx). Were a route prerendered, `next build` would stop
+ * on it (missing-suspense-with-csr-bailout) rather than ship a broken page. And the core page sits
+ * at one place in the tree in every state: a style switched in place (Studio and builtin Play, an
+ * installed theme and Studio), the width becoming known, an installed theme settling or failing,
+ * never remounts it (M69).
  */
 
 /** Values of a `keepCorePage` parameter that the theme's page still serves. Serializable: a server layout passes it. */
@@ -103,7 +120,8 @@ function ThemeVersion({ component: Component, framed }: ThemeVersionProps) {
   return framed ? <MainLayout fullBleed>{version}</MainLayout> : version
 }
 
-function ThemePageChoice({ page, keepCorePage = NO_PARAMS, themeServes = NO_SERVED_VALUES, children }: ThemePageSlotProps) {
+/** A page entry: the theme's page on its route, nothing yet, or the core page, always at the same place in the tree. */
+function ThemePageSlot({ page, keepCorePage = NO_PARAMS, themeServes = NO_SERVED_VALUES, children }: ThemePageSlotProps) {
   const active = useActiveThemeSlots()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -119,9 +137,5 @@ function ThemeNamedSlot({ slot, children }: ThemeNamedSlotProps) {
 
 export function ThemeSlot(props: ThemeSlotProps) {
   if ('slot' in props) return <ThemeNamedSlot {...props} />
-  return (
-    <Suspense fallback={props.children}>
-      <ThemePageChoice {...props} />
-    </Suspense>
-  )
+  return <ThemePageSlot {...props} />
 }
