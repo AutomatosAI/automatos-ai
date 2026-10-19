@@ -61,6 +61,16 @@ def _append_jsonl(name: str, record: dict[str, Any]) -> None:
             fh.write(json.dumps(record, default=str) + "\n")
 
 
+def turn_trace(turn: Any) -> dict[str, Any]:
+    """P256-FIX-N17-11 (F443): what a night's row could not tell before: the turn's thinking, each
+    tool's result as the stream shows it (its first 500 characters), and the order of the call,
+    result and end frames."""
+    return {"reasoning": turn.reasoning,
+            "tool_results": [{"id": r.get("toolCallId"), "name": r.get("toolName"), "result": r.get("result")}
+                             for r in turn.tool_results],
+            "frame_order": [f"{f['frame']}:{f['toolName']}#{f['toolCallId']}" for f in turn.tool_frames]}
+
+
 def cmd_chat(args: argparse.Namespace) -> int:
     api, settings = _api(args)
     response, chat_id = api.stream_chat(args.text, chat_id=args.chat_id, agent_id=args.agent_id, timeout_s=settings.chat_timeout_s)
@@ -68,7 +78,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
     record = {"ts": time.time(), "prompt": args.text, "chat_id": turn.chat_id, "status": response.status, "ms": response.ms,
               "text": turn.text, "text_raw": turn.text_raw, "receipts": list(turn.receipts), "above": list(turn.above),
               "tool_calls": [{"name": c.get("toolName"), "args": c.get("args")} for c in turn.tool_calls],
-              "errors": list(turn.errors), "usage": turn.usage}
+              "errors": list(turn.errors), "usage": turn.usage, **turn_trace(turn)}
     _append_jsonl("chats.jsonl", record)
     if args.json:
         print(json.dumps(record, default=str, indent=2))

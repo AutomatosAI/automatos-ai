@@ -45,8 +45,11 @@ ASK_DATA = ("For the business's own records (counts, totals, stock, orders, memb
             "columns with its answer, so never ask the owner for table, column or schema names.")
 NUMBERS_TO_ONE = f"{ASK_DATA} With one database no name is needed."
 NUMBERS_TO_ONE_OF = f"{ASK_DATA} Name the database (database_id); it lists them when none is named."
+# P256-FIX-N17-11 (F443): and the absence rule after it.
 DOCUMENTS_BESIDE_DATA = ("For what a document says or how the product works, search them with "
-                         "search_knowledge first and name the file you used.")
+                         "search_knowledge first and name the file you used. Never tell the owner a document does "
+                         "not give something until search_knowledge, in the thing's own words, finds nothing "
+                         "either; platform_search_documents calls do not count.")
 
 
 @pytest.fixture

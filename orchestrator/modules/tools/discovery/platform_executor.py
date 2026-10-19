@@ -93,8 +93,8 @@ from modules.tools.discovery.handlers_monitoring import (
     get_alerts,
     get_system_health,
 )
+from modules.tools.discovery.chat_history_read import search_chat_history  # N17-11 (F443): by words or window
 from modules.tools.discovery.handlers_search import (
-    search_chat_history,
     search_memory,
     browse_memories,
     delete_memory,

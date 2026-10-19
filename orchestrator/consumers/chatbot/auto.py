@@ -361,7 +361,7 @@ _PLATFORM_KEYWORDS = {
         "what did we talk about", "what did i say about",
         "chat history search", "find conversation",
         "did i mention", "when did i say", "previous chat",
-        "search my chats", "look through chats",
+        "search my chats", "look through chats", "what did i ask first", "first thing i asked",
     ],
     # PRD-73: Monitoring tools
     "platform_query_loki_logs": [

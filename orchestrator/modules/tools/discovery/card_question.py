@@ -20,6 +20,8 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
 - P256-FIX-T4: a playbook run: the playbook, each input it is given and its "wait for me".
 - P256-FIX-N13-7: a mission's plan changed: the mission, each step's change and the check.
 - P256-FIX-N14-7: a skill made: its name, what it does and its instructions' first line.
+- P256-FIX-N17-11: a blog post: whether it goes live, its excerpt, category, tags, first line and
+  length; a social post sent for approval: the post, its channels, caption and time, the note.
 
 The question is what the owner reads before the click; the click still runs the exact
 call it was asked about (the grant's params hash). A question that cannot be read in
@@ -32,6 +34,7 @@ from typing import Any, Callable, Dict, List
 
 from modules.tools.discovery import card_question_agents as agents
 from modules.tools.discovery import card_question_plans as plans
+from modules.tools.discovery import card_question_publish as publish
 from modules.tools.discovery import card_question_playbooks as playbooks
 from modules.tools.discovery import card_question_rows as rows
 from modules.tools.discovery import card_question_sends as sends
@@ -145,6 +148,9 @@ READERS: Dict[str, Lines] = {
     "platform_update_mission_plan": plans.plan_lines,
     # P256-FIX-N14-7: a skill made from the chat: its name, what it does, its instructions' first line.
     "platform_create_workspace_skill": skill_create.create_skill_lines,
+    # P256-FIX-N17-11 (F443): a blog post (live or a draft) and a social post sent for approval, shown.
+    "platform_publish_blog_post": publish.blog_lines,
+    "platform_submit_social_post": publish.social_submit_lines,
 }
 
 

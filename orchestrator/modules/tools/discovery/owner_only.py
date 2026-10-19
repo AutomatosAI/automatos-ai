@@ -107,7 +107,7 @@ VERBS = {
     "platform_approve_mission": "approve a mission's plan",
     "platform_cancel_mission": "cancel a mission",
     "platform_publish_blog_post": "publish a blog post",
-    "platform_submit_social_post": "submit a social post to publish",
+    "platform_submit_social_post": "send a social post for approval (nothing posts yet)",  # N17-11 (F443)
     "platform_configure_agent_heartbeat": "change an agent's heartbeat",
     "platform_delete_agent": "delete an agent",
     "platform_assign_skill_to_agent": "give a skill to an agent",
@@ -127,6 +127,9 @@ VERBS = {
     "platform_update_mission_plan": "change a mission's plan",
 }
 SEND_VERB = "send, publish or order through"  # P256-FIX-RVW-3: an order asks too
+# P256-FIX-N17-11 (F443, night 16 #2705): a blog call that saves a draft says so, never "publish".
+BLOG_POST = "platform_publish_blog_post"
+BLOG_DRAFT = "save a blog post as a draft (nothing is published)"
 QUESTION = "question_md"
 
 
@@ -478,7 +481,17 @@ def _act(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], what: 
     if status:
         return f"{CLOSING_VERBS[status]} {what}".strip()
     sent_back = send_back_act(db, workspace_id, action, params, what) if action in CARD_MOVES else None
-    return sent_back or f"{VERBS.get(action, action)} {what}".strip()
+    return sent_back or f"{_verb(action, params)} {what}".strip()
+
+
+def _verb(action: str, params: Dict[str, Any]) -> str:
+    """The action's verb; a blog post the call does not put live is saved as a draft (handlers_blog.goes_live)."""
+    if action == BLOG_POST:
+        from modules.tools.discovery.handlers_blog import goes_live
+
+        if not goes_live(params):
+            return BLOG_DRAFT
+    return VERBS.get(action, action)
 
 
 def send_ask(db: Any, workspace_id: Any, tool: str, slug: str, params: Any, caller_context: Any, *,

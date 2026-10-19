@@ -13,6 +13,7 @@ from services.chat_messenger import strip_caller_narration_origin
 logger = logging.getLogger(__name__)
 
 MIN_CONTENT_CHARS = 500
+PUBLISH_IMMEDIATELY = "publish_immediately"
 PLACEHOLDER_PATTERNS = (
     re.compile(r"^\s*\[[^\[\]]+\]\s*$", re.IGNORECASE),
     re.compile(r"\[(blog post|article|post)\s+content[^\]]*\]", re.IGNORECASE),
@@ -71,6 +72,14 @@ def _normalize_tags(raw) -> List[str]:
     return []
 
 
+def goes_live(params: Dict[str, Any]) -> bool:
+    """Whether a publish_blog_post call puts the post live: ``publish_immediately`` true, or the
+    string 'true'. P256-FIX-N17-11 (F443): the string 'false' was truthy here, so a call that
+    asked for a draft published the post; its card now says which (``card_question_publish``)."""
+    said = params.get(PUBLISH_IMMEDIATELY)
+    return said is True or (isinstance(said, str) and said.strip().lower() == "true")
+
+
 async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create and optionally publish a blog post."""
     from core.services.blog_service import BlogService
@@ -85,8 +94,7 @@ async def publish_blog_post(db: Session, workspace_id: UUID, params: Dict[str, A
         logger.warning("publish_blog_post rejected: %s | title=%r", content_error, title)
         return {"success": False, "error": content_error}
 
-    publish_immediately = params.get("publish_immediately", False)
-    status = "published" if publish_immediately else "draft"
+    status = "published" if goes_live(params) else "draft"
 
     agent_name = params.get("_agent_name", "AI Agent")
     agent_id = params.get("_agent_id")
