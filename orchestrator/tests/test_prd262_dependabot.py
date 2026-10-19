@@ -80,6 +80,13 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "re-record the chunks the vendored splitters are judged against. A bump would "
         "change the reference, not fix anything that ships; no image installs it."
     ),
+    "scripts/ci/reference/requirements-leiden-partitions.lock": (
+        "Frozen on purpose: the Leiden clustering Railway's API ran before PRD-262 US-027 "
+        "(graphifyy with graspologic 3.3.0 over graspologic-native), at the versions its "
+        "[leiden] lock installed, which test.yml's reference-goldens job runs in a throwaway "
+        "venv to re-record the partitions the graspologic-native adapter is judged against. "
+        "A bump would change the reference, not fix anything that ships; no image installs it."
+    ),
 }
 
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
