@@ -286,18 +286,28 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
 # amd64's alone). dpkg then records libgbm1's and libglx-mesa0's dependency on
 # mesa-libgallium as unmet, so no later stage runs apt. ffmpeg and ffprobe must
 # still find every library they link, or the build fails here.
+# PRD-262 #47: no libcups2t64 (with the avahi libraries it pulls in) and no
+# libxshmfence1 on the list: neither headless shell links them (DT_NEEDED, arm64
+# and amd64), and libxshmfence1, now only Mesa's, goes with Mesa. libatk-bridge
+# stays: the amd64 shell links libatk-bridge-2.0.so.0.
+# PRD-262 #34: X and MIME data no render reads (about 12.7 MB) is purged the same
+# way: shared-mime-info (gdk-pixbuf's), xkb-data (libxkbcommon's keymaps) and
+# libx11-data (libX11's locales). The headless shell opens no X display and no
+# keymap, and the renders and the smoke test below prove the rest.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates ffmpeg libimage-exiftool-perl tini fontconfig libstdc++6 \
-        libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
+        libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libdrm2 \
         libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-        libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \
+        libpango-1.0-0 libcairo2 libasound2t64 \
         fonts-liberation fonts-dejavu-core fonts-noto-color-emoji; \
     rm -rf /var/lib/apt/lists/*; \
-    mesa_only="mesa-libgallium libllvm19 libz3-4 libelf1t64 libedit2 libdrm-amdgpu1 libsensors5 libsensors-config libxcb-randr0 libxcb-sync1"; \
+    mesa_only="mesa-libgallium libllvm19 libz3-4 libelf1t64 libedit2 libdrm-amdgpu1 libsensors5 libsensors-config libxcb-randr0 libxcb-sync1 libxshmfence1"; \
     if [ "$(dpkg --print-architecture)" = amd64 ]; then mesa_only="$mesa_only libdrm-intel1 libpciaccess0"; fi; \
     dpkg --purge --force-depends $mesa_only; \
+    unread_data="shared-mime-info xkb-data libx11-data"; \
+    dpkg --purge --force-depends $unread_data; \
     if ldd /usr/bin/ffmpeg /usr/bin/ffprobe | grep 'not found'; then \
         echo "ffmpeg or ffprobe lost a shared library to the purge above" >&2; exit 1; \
     fi; \

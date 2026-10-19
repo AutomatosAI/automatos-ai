@@ -31,10 +31,11 @@ from tests.test_prd262_media_render_stages import DOCKERFILE, MEDIA_RENDER, ROOT
 # The packages only mesa-libgallium needs, from the Depends/Pre-Depends closure of
 # the runtime's apt line over trixie main, updates and security, on top of
 # python:3.12-slim's own packages (18 Oct 2026). libdrm-intel1 and libpciaccess0
-# are amd64's alone.
+# are amd64's alone. libxshmfence1 joined when it left the apt line (PRD-262 #47,
+# 19 Oct): only mesa-libgallium depends on it there.
 MESA_ONLY = {
     "mesa-libgallium", "libllvm19", "libz3-4", "libelf1t64", "libedit2", "libdrm-amdgpu1",
-    "libsensors5", "libsensors-config", "libxcb-randr0", "libxcb-sync1",
+    "libsensors5", "libsensors-config", "libxcb-randr0", "libxcb-sync1", "libxshmfence1",
 }
 MESA_ONLY_AMD64 = {"libdrm-intel1", "libpciaccess0"}
 SIZE_STEP = "The image is at most 1.30 GB on disk (amd64)"
