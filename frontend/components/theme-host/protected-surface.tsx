@@ -13,11 +13,12 @@ import type { ReactNode } from 'react'
  * declaration attached to the element beats every important or normal stylesheet declaration
  * (CSS Cascade 4: author important inline > author important sheet > author normal), and the
  * server's scope check refuses `!important` in theme CSS anyway, so no theme rule can hide,
- * fade, move off-screen or switch off clicks on these two elements. `visibility` and
- * `pointer-events` inherit, so the host also gives the card back what a theme takes from an
- * ancestor; `display`, `opacity` and position on an ancestor outside the host are not reachable
- * from here, which is why, for code inside the page, this is a review rule and not a guarantee
- * (PRD §4.4; e2e/browser/fixtures/hello-a12c/README.md).
+ * fade, move, shrink or switch off clicks on these two elements. The scope check also refuses
+ * every theme selector that names either attribute (css_scope.py), so no rule reaches the card
+ * or what it holds by name. `visibility` and `pointer-events` inherit, so the host also gives the
+ * card back what a theme takes from an ancestor. Review rules, not guarantees (PRD §4.4;
+ * docs/theme-host/css-layer-model.md): `display`, `opacity` or position on an ancestor, a generic
+ * selector such as `button` matching the card's elements, an overlay, and code in the page.
  *
  * React writes inline styles only from a `style` prop and cannot mark one `!important`, so the
  * guard is set through CSSStyleDeclaration.setProperty in a ref callback (it runs at commit,
@@ -37,8 +38,14 @@ const FILL_CLASS = 'h-full w-full'
 
 /**
  * The inline guard, every value `!important`. The first five are PA-15's; `static` position
- * also voids any top/left/right/bottom a theme sets (an off-screen move), and transform, filter
- * and clip-path close the other ways to move, fade or cut away an element of the theme's choosing.
+ * also voids any top/left/right/bottom a theme sets (an off-screen move). The rest close every
+ * other property that hides, moves, shrinks, cuts away or skips painting an element on its own:
+ * transform and its individual properties (translate, scale, rotate) and offset-path; filter,
+ * clip-path, mask and -webkit-mask; content-visibility, contain and zoom; margin (a negative
+ * margin moves a static box); z-index (a flex item stacks even when static); and width and
+ * height, the same 100% as FILL_CLASS, so a theme cannot collapse the box the card's `h-full`
+ * reads. Both wrappers are the only child of a core element (WidgetWrapper's `h-full` div, Play's
+ * card cell), so no core rule sets these on them and the guard changes no layout.
  */
 export const PROTECTED_SURFACE_GUARD: Readonly<Record<string, string>> = Object.freeze({
   display: 'block',
@@ -47,8 +54,21 @@ export const PROTECTED_SURFACE_GUARD: Readonly<Record<string, string>> = Object.
   'pointer-events': 'auto',
   position: 'static',
   transform: 'none',
+  translate: 'none',
+  scale: 'none',
+  rotate: 'none',
+  'offset-path': 'none',
   filter: 'none',
   'clip-path': 'none',
+  mask: 'none',
+  '-webkit-mask': 'none',
+  'content-visibility': 'visible',
+  contain: 'none',
+  zoom: '1',
+  margin: '0px',
+  'z-index': 'auto',
+  width: '100%',
+  height: '100%',
   overflow: 'visible',
 })
 

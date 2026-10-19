@@ -274,7 +274,15 @@
       { "name": "an unclosed string", "css": "html.hello .a { content: \"x; }", "code": "CSS_SYNTAX" },
       { "name": "a brace that closes nothing", "css": "html.hello .a { color: red; } }", "code": "CSS_SYNTAX" },
       { "name": "an escaped letter", "css": "html.hello .a { background: u\\72l(x); }", "code": "CSS_SYNTAX" },
-      { "name": "a selector with no block", "css": "html.hello .a { color: red; } body", "code": "CSS_SYNTAX" }
+      { "name": "a selector with no block", "css": "html.hello .a { color: red; } body", "code": "CSS_SYNTAX" },
+      { "name": "a rule on a protected surface (A-12c)", "css": "html.hello [data-protected-surface] { display: none; }", "code": "CSS_UNSCOPED" },
+      { "name": "a rule on what a protected surface holds", "css": "html.hello [data-protected-surface-inner] button { pointer-events: none; }", "code": "CSS_UNSCOPED" },
+      { "name": "a protected surface's ancestor through :has()", "css": "html.hello :has(> [data-protected-surface]) { visibility: hidden; }", "code": "CSS_UNSCOPED" },
+      { "name": "a protected surface named in upper case", "css": "html.hello [DATA-PROTECTED-SURFACE] { opacity: 0; }", "code": "CSS_UNSCOPED" },
+      { "name": "a protected surface named with escaped hyphens", "css": "html.hello [data\\-protected\\-surface] { opacity: 0; }", "code": "CSS_UNSCOPED" },
+      { "name": "a protected surface in a nested rule", "css": "html.hello { [data-protected-surface] { display: none; } }", "code": "CSS_UNSCOPED" },
+      { "name": "a protected surface inside @media", "css": "@media (min-width: 1px) { html.hello [data-protected-surface-inner] { translate: -9999px; } }", "code": "CSS_UNSCOPED" },
+      { "name": "the protected surface's name in a declaration value, not a selector", "css": "html.hello .a::after { content: \"data-protected-surface\"; }", "code": null }
     ]
   },
   "packages": {

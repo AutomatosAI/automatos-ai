@@ -7,12 +7,13 @@ import { chooseStyle, serveInstalledTheme, THEME_E2E_PATH } from '../support/hel
 // PRD-261 A-12c (@host): protected surfaces and the CSS layer model (PA-15).
 //
 // 1. Under an installed theme whose stylesheet attacks the approval cards (fixtures/hello-a12c/
-//    theme.css: display:none, opacity:0, visibility:hidden, off-screen, pointer-events:none on the
-//    cards' two protected elements, and visibility and clicks taken from every ancestor), a tool
-//    approval card and a Mission approval card are still drawn, on screen, and their Approve &
-//    run button still posts the decision. The cards arrive the way they do in the app: a chat
-//    turn (recorded, fixtures/hello-a12c/chat-turns.json) carries the tool-data that chat.tsx
-//    turns into the widget on the canvas.
+//    theme.css: display:none, opacity:0, visibility:hidden, off-screen, pointer-events:none, and
+//    translate, scale, rotate, offset-path, margin, mask, content-visibility, contain, zoom, size
+//    and z-index on the cards' two protected elements, and visibility and clicks taken from every
+//    ancestor), a tool approval card and a Mission approval card are still drawn, on screen, and
+//    their Approve & run button still posts the decision. The cards arrive the way they do in the
+//    app: a chat turn (recorded, fixtures/hello-a12c/chat-turns.json) carries the tool-data that
+//    chat.tsx turns into the widget on the canvas.
 // 2. Under the Play cookie, the body takes Play's page background (play-theme.css:204-209), not
 //    Studio's bg-background: theme CSS is unlayered, so a theme rule meets core's unlayered
 //    Tailwind output on specificity and order. In a cascade layer it would lose to it outright.
@@ -45,21 +46,37 @@ const PLAY_PAGE_BACKGROUND = '--pl-page-background'
 const TRANSPARENT = 'rgba(0, 0, 0, 0)'
 const SENTINEL = 'rgb(1, 2, 3)'
 
-/** What each protected element keeps, computed, under the hostile sheet. */
-const KEPT = {
+/** What each protected element keeps, computed, under the hostile sheet (CSS property → value). */
+const KEPT: Readonly<Record<string, string>> = {
   display: 'block',
   visibility: 'visible',
   opacity: '1',
-  pointerEvents: 'auto',
+  'pointer-events': 'auto',
   position: 'static',
   transform: 'none',
+  translate: 'none',
+  scale: 'none',
+  rotate: 'none',
+  'offset-path': 'none',
   filter: 'none',
-  clipPath: 'none',
+  'clip-path': 'none',
+  'mask-image': 'none',
+  'content-visibility': 'visible',
+  contain: 'none',
+  zoom: '1',
+  'margin-top': '0px',
+  'margin-left': '0px',
+  'z-index': 'auto',
 }
 /** What the sheet takes from every ancestor of a card: proof its parent rule landed. */
 const ANCESTOR_TAKEN = { visibility: 'hidden', pointerEvents: 'none' }
 /** The properties the sheet's rules declare on each protected element: proof they matched. */
-const ATTACKED = ['display', 'opacity', 'filter', 'visibility', 'position', 'left', 'top', 'transform', 'clip-path', 'pointer-events']
+const ATTACKED = [
+  'display', 'opacity', 'filter', 'visibility', 'position', 'left', 'top', 'transform', 'clip-path', 'pointer-events',
+  'translate', 'scale', 'rotate', 'offset-path', 'margin-left', 'content-visibility', 'contain', 'zoom', 'width', 'height', 'z-index',
+]
+/** mask and -webkit-mask expand to mask-image in one engine and -webkit-mask-image in the other. */
+const MASK_IMAGE = /(^|-)mask-image$/
 
 type SurfaceName = 'tool-approval' | 'mission-approval'
 
@@ -147,20 +164,11 @@ async function ask(page: Page): Promise<void> {
   await composer.press('Enter')
 }
 
-function keptStyle(element: Locator): Promise<typeof KEPT> {
-  return element.evaluate((node) => {
+function keptStyle(element: Locator): Promise<Record<string, string>> {
+  return element.evaluate((node, names) => {
     const style = getComputedStyle(node)
-    return {
-      display: style.display,
-      visibility: style.visibility,
-      opacity: style.opacity,
-      pointerEvents: style.pointerEvents,
-      position: style.position,
-      transform: style.transform,
-      filter: style.filter,
-      clipPath: style.clipPath,
-    }
-  })
+    return Object.fromEntries(names.map((name) => [name, style.getPropertyValue(name)]))
+  }, Object.keys(KEPT))
 }
 
 function parentStyle(element: Locator): Promise<typeof ANCESTOR_TAKEN | null> {
@@ -199,7 +207,9 @@ async function expectCardStands(page: Page, card: Locator): Promise<void> {
   await expect(card).toBeVisible()
   await expect(inner).toBeVisible()
   for (const element of [card, inner]) {
-    expect(await attackedProperties(element)).toEqual(expect.arrayContaining(ATTACKED))
+    const attacked = await attackedProperties(element)
+    expect(attacked).toEqual(expect.arrayContaining(ATTACKED))
+    expect(attacked.some((name) => MASK_IMAGE.test(name))).toBe(true)
     expect(await keptStyle(element)).toEqual(KEPT)
   }
   expect(await parentStyle(card)).toEqual(ANCESTOR_TAKEN)

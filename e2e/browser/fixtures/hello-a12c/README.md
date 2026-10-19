@@ -7,7 +7,7 @@ The fixture behind `specs/protected-surfaces.spec.ts`. It is served as an instal
 |---|---|
 | `theme.json` | The manifest: `htmlClass` `hello-a12c`, base Studio, one frame slot. |
 | `entry.js` | A frame that only wraps the page. |
-| `theme.css` | The hostile sheet. Every rule is under `html.hello-a12c`, with no `!important` and no layer, as the server's scope check requires. |
+| `theme.css` | The hostile sheet. Every rule is under `html.hello-a12c`, with no `!important` and no layer. The server's scope check would still refuse it, because its selectors name `data-protected-surface`; the lane serves it directly, to prove the inline guard holds on its own. |
 | `presets/default.look.json` | The preset the manifest needs. |
 | `chat-turns.json` | One recorded chat turn per card, in the stream format `lib/chat/hooks.ts` reads. The spec answers `POST /api/chat` with it, so the cards reach the canvas the way they do in the app. Test data only. |
 
@@ -20,7 +20,11 @@ wrapper (`[data-protected-surface-inner]`), it sets:
 - `opacity: 0` and `filter: opacity(0)`;
 - `visibility: hidden`;
 - an off-screen move: `position: fixed` at -10000 px, a -10000 px `transform` and `clip-path: inset(50%)`;
-- `pointer-events: none`.
+- `pointer-events: none`;
+- a move, shrink or turn with `translate`, `scale`, `rotate`, `offset-path` and a -10000 px margin;
+- `mask` and `-webkit-mask` with a transparent gradient;
+- `content-visibility: hidden`, `contain: strict` with `width: 0` and `height: 0`, `zoom: 0.01` and
+  `z-index: -1`.
 
 On every ancestor of a card it sets `visibility: hidden` and `pointer-events: none`.
 
@@ -32,7 +36,10 @@ is on screen, and posts its decision when you click Approve & run.
 The guard is an inline `!important` declaration on the two elements
 (`frontend/components/theme-host/protected-surface.tsx`). An important declaration attached to the
 element wins over every stylesheet declaration, and theme CSS cannot use `!important` at all.
-So no theme **rule** can hide those two elements or switch off their clicks. Because `visibility`
+So no theme **rule** can hide, move or shrink those two elements or switch off their clicks.
+And no uploaded theme can even aim a rule at them: the server's scope check
+(`orchestrator/services/themes/css_scope.py`) refuses every selector that names
+`data-protected-surface` or `data-protected-surface-inner`. Because `visibility`
 and `pointer-events` inherit, the host also gives the card back what a rule takes away from an
 ancestor.
 
@@ -42,8 +49,10 @@ Some things are outside what this proves:
   card hides the card with it. Nothing inside the card can undo that. The region that holds a card
   is drawn by core or by the theme's frame, and the frame is reviewed.
 - **Elements inside the card.** The guard covers the host and the inner wrapper only. This is
-  option (2) of PA-15: no shadow root. The card's own elements (its buttons, its text) can still
-  be reached by a scoped theme rule. That is a review item for every theme that ships CSS.
+  option (2) of PA-15: no shadow root. A rule that names the card to reach them is refused, but a
+  generic scoped rule (`html.<htmlClass> button`) still matches the card's buttons and text. That
+  is a review item for every theme that ships CSS.
+- **Overlays.** An element a theme draws over the card can cover it or take its clicks.
 - **Code in the page.** A theme's JavaScript runs in the same page. It can remove the inline
   style, the element, or the whole card. **For in-page code this is a review rule, not a
   guarantee (PRD §4.4).** A theme is reviewed before it is listed, and a private upload is the

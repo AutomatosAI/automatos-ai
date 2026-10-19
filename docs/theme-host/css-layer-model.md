@@ -38,6 +38,10 @@ The check is `orchestrator/services/themes/css_scope.py` (A-06a, wave W-B1). Eve
 - a selector that does not start with `html.<htmlClass>`, or with `:where(…)` or `:is(…)` whose
   every argument does (the wrap form is D2-c, so both forms pass);
 - a nested selector that uses `&` anywhere but at its start, such as `:not(&)`;
+- a selector that names a protected surface's attribute, `data-protected-surface` or
+  `data-protected-surface-inner`, anywhere in it: in an attribute selector, inside `:has()` or
+  `:not()`, in any case, escaped or not (A-12c, code `CSS_UNSCOPED`). So no theme rule can reach
+  the approval cards, or the buttons and text inside them, by name;
 - an `@keyframes` name or an `@font-face` `font-family` that does not start with `<htmlClass>-`;
 - `!important`, which is any `!` outside a string or a comment;
 - `@import`, and every at-rule except `@media`, `@supports`, `@layer`, `@container`, `@font-face`
@@ -64,18 +68,32 @@ each carry these declarations inline, each marked `!important`:
 | `opacity` | `1` |
 | `pointer-events` | `auto` |
 | `position` | `static` |
-| `transform` | `none` |
+| `transform`, `translate`, `scale`, `rotate` | `none` |
+| `offset-path` | `none` |
 | `filter` | `none` |
 | `clip-path` | `none` |
+| `mask`, `-webkit-mask` | `none` |
+| `content-visibility` | `visible` |
+| `contain` | `none` |
+| `zoom` | `1` |
+| `margin` | `0px` |
+| `z-index` | `auto` |
+| `width`, `height` | `100%` |
 | `overflow` | `visible` |
 
 The first five are PA-15's. `static` also voids any `top` or `left` a theme sets, so a theme
-cannot move the card off-screen that way.
+cannot move the card off-screen that way. The rest close every other property that hides, moves,
+shrinks, cuts away or skips painting a box on its own: the transform properties and a motion
+path, a mask, `content-visibility: hidden`, `contain` with a zero size, `zoom`, a negative margin,
+a negative `z-index` on a flex item, and a zero width or height. `width` and `height` are the same
+`100%` the wrappers' `h-full w-full` classes set, and both wrappers are the only child of a core
+element (WidgetWrapper's `h-full` div on the canvas, the card cell in Play's chat), so no core
+rule sets any of these on them and the guard changes no layout.
 
 An important declaration attached to the element comes before every stylesheet declaration in
 the cascade. That includes important ones and layered ones, because element-attached styles are
-sorted before layers. Theme CSS cannot be important at all, so no theme rule can hide these two
-elements or switch off their clicks.
+sorted before layers. Theme CSS cannot be important at all, so no theme rule can hide, move or
+shrink these two elements or switch off their clicks.
 
 `visibility` and `pointer-events` inherit. A rule that takes them from an ancestor is therefore
 undone at the host.
@@ -92,19 +110,34 @@ The cards would render through a portal into each root as well. All of that chan
 cards look and behave in every style, Classic included, to defend against the one attack that
 option (2) leaves open: a scoped rule aimed at an element *inside* the card.
 
-That attack stays a review item, below. If the hostile spec fails in CI on option (2), option (1)
-is the fallback, and this page changes with it.
+The scope check refuses that attack when the rule names the card. A generic selector that
+matches the card's elements stays a review item, below. If the hostile spec fails in CI on
+option (2), option (1) is the fallback, and this page changes with it.
 
-## What stays a review rule (PRD §4.4)
+## What is guaranteed, and what stays a review rule (PRD §4.4)
 
+Guaranteed, against theme CSS:
+
+- **The card's own two boxes.** The host and the inner wrapper keep every value in the table
+  above, whatever a stylesheet rule says, and `visibility` and `pointer-events` taken from an
+  ancestor are given back at the host.
+- **Rules that name the card.** The scope check refuses every selector that names
+  `data-protected-surface` or `data-protected-surface-inner`, so a theme cannot aim a rule at the
+  card, at anything inside it through it (`[data-protected-surface-inner] button`), or at its
+  ancestors through it (`:has([data-protected-surface])`).
+
+A review rule, not a guarantee:
+
+- **Generic selectors.** A rule such as `html.<htmlClass> button` matches the card's buttons and
+  text too, without naming the card. Under option (2) nothing stops that: no shadow root.
 - **Ancestors.** `display: none`, `opacity: 0` or an off-screen move on an element around the card
   hides the card with it, and nothing inside the card can undo that. Core or the theme's frame
   draws that region, and the frame is reviewed. This narrows the A-12c proof line in the phase A
   plan (§2.6), which lists `display`, `opacity` and off-screen on the parents too. The spec takes
   only `visibility` and `pointer-events` from ancestors, because neither PA-15 option can beat the
   other three there. The narrowing waits for Gerard's acceptance in the W-A3 PR.
-- **The card's own elements.** A scoped rule can still reach the card's buttons and text, under
-  option (2).
+- **Overlays.** An element the theme draws over the card (its frame, a pseudo-element, a fixed
+  layer) can cover it or take its clicks.
 - **In-page code.** A theme's JavaScript runs in the same page. It can remove the guard, the
   element or the card. For in-page code this is a review rule, not a guarantee.
 

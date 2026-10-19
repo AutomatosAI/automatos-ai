@@ -1,6 +1,8 @@
-/* PRD-261 A-12c: the hostile stylesheet. It is what a theme may ship: every rule sits under
-   html.hello-a12c (the server's scope check), no declaration is marked important (the check
-   refuses that), and it stays unlayered like all theme CSS (docs/theme-host/css-layer-model.md).
+/* PRD-261 A-12c: the hostile stylesheet. Every rule sits under html.hello-a12c, no declaration
+   is marked important, and it stays unlayered like all theme CSS (docs/theme-host/css-layer-model.md).
+   A real upload could not carry it: the server's scope check refuses every selector that names
+   data-protected-surface. The lane serves it directly (route interception), to prove the inline
+   guard holds on its own.
    It aims every way to hide a card or switch off its buttons at the two protected elements of
    each approval card (the host, [data-protected-surface], and its inner wrapper), with doubled
    attribute selectors (specificity is not what decides), and it takes visibility and clicks
@@ -40,6 +42,26 @@ html.hello-a12c body [data-protected-surface-inner][data-protected-surface-inner
   top: -10000px;
   transform: translate(-10000px, -10000px);
   clip-path: inset(50%);
+}
+
+/* Moved, shrunk or turned away with the individual transform properties, a motion path or a
+   negative margin; masked out; skipped (content-visibility, contain); zoomed to a speck; and
+   collapsed to no size behind the page. */
+html.hello-a12c body [data-protected-surface][data-protected-surface],
+html.hello-a12c body [data-protected-surface-inner][data-protected-surface-inner] {
+  translate: -10000px -10000px;
+  scale: 0;
+  rotate: 90deg;
+  offset-path: path("M 0 0 L -10000 -10000");
+  margin: -10000px 0 0 -10000px;
+  mask: linear-gradient(transparent, transparent);
+  -webkit-mask: linear-gradient(transparent, transparent);
+  content-visibility: hidden;
+  contain: strict;
+  zoom: 0.01;
+  width: 0;
+  height: 0;
+  z-index: -1;
 }
 
 /* Not clickable. */

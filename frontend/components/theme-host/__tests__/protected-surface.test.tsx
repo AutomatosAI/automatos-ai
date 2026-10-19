@@ -37,8 +37,17 @@ const PA15_PROPERTIES = ['display', 'visibility', 'opacity', 'pointer-events', '
 const APPROVE_BUTTON = /Approve & run/
 const metadata: WidgetMetadata = { source: { type: 'tool', name: 'platform_action' }, createdAt: new Date() }
 
+/**
+ * The guarded property jsdom's CSSStyleDeclaration (cssstyle 4) does not know, so setProperty
+ * drops it: the browser lane checks it (e2e/browser/specs/protected-surfaces.spec.ts).
+ */
+const JSDOM_UNKNOWN = new Set(['-webkit-mask'])
+/** The ones a theme moves, shrinks, masks or skips a card with, beyond PA-15's five (review M2). */
+const MOVE_AND_HIDE_PROPERTIES = ['translate', 'scale', 'rotate', 'offset-path', 'mask', '-webkit-mask', 'content-visibility', 'zoom']
+
 function expectGuarded(element: HTMLElement): void {
-  for (const [property, value] of Object.entries(PROTECTED_SURFACE_GUARD)) {
+  const checked = Object.entries(PROTECTED_SURFACE_GUARD).filter(([property]) => !JSDOM_UNKNOWN.has(property))
+  for (const [property, value] of checked) {
     expect({ property, value: element.style.getPropertyValue(property) }).toEqual({ property, value })
     expect({ property, priority: element.style.getPropertyPriority(property) }).toEqual({ property, priority: IMPORTANT })
   }
@@ -64,6 +73,14 @@ describe('ProtectedSurface (PRD-261 A-12c)', () => {
     expect(PROTECTED_SURFACE_GUARD['pointer-events']).toBe('auto')
     // static voids every top/left a theme sets: no off-screen move
     expect(PROTECTED_SURFACE_GUARD.position).toBe('static')
+  })
+
+  it('guards every property that moves, shrinks, masks or skips the card on its own', () => {
+    expect(Object.keys(PROTECTED_SURFACE_GUARD)).toEqual(expect.arrayContaining(MOVE_AND_HIDE_PROPERTIES))
+    expect(PROTECTED_SURFACE_GUARD['content-visibility']).toBe('visible')
+    expect(PROTECTED_SURFACE_GUARD.zoom).toBe('1')
+    expect(PROTECTED_SURFACE_GUARD.mask).toBe('none')
+    expect(PROTECTED_SURFACE_GUARD['-webkit-mask']).toBe('none')
   })
 
   it('puts the guard inline, important, on the host and on the inner wrapper', () => {
