@@ -7,7 +7,9 @@ A workspace admin (``workspace:manage``) uploads a ``.autotheme`` into THIS work
 2. the package is read and checked (``services/themes/package.py``: zip, manifest, engines,
    htmlClass, sizes, CSS scope, looks): 413 over the package cap, 400 with the codes;
 3. an id under a reserved publisher (``automatos/…``) needs ``caller_is_admin``, else 403;
-4. the scan report is built (``services/themes/scan.py``); the files are stored under
+4. the automated review stage runs inline (C-02a, ``services/themes/review_stage.py``; the LLM
+   stage reads ``dist/``, the code that runs, since no isolated rebuild ever checks a private
+   upload's ``source/``) unless these bytes are already here; the files are stored under
    ``themes/_workspace/<ws>/<publisher>/<slug>/<version>/`` before the commit, so a failed
    write leaves no row (503);
 5. the package row (``owner_type`` 'workspace', ``reviewed`` false) and an install row are
@@ -47,7 +49,7 @@ from services.themes.records import (
     SavedUpload, UploadConflict, active_installation, conflict_after_race, package_by_digest, private_upload_refusal,
     reserved_publisher_refusal, save_private_upload,
 )
-from services.themes.scan import build_scan_report
+from services.themes.review_stage import run_review_stage
 from services.themes.settings import require_install_role
 from services.themes.storage import theme_prefix, write_theme_files
 
@@ -151,10 +153,22 @@ def _after_integrity_error(db: Session, ctx: RequestContext, checked: CheckedThe
     return SavedUpload(existing, active_installation(db, ctx.workspace_id, existing.theme_id), created=False)
 
 
+def _review(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> Dict[str, Any]:
+    """The automated stage's report (C-02a), skipped when these bytes are already in this workspace.
+
+    Their existing row is reused as it is (``save_private_upload``), so a second run would only
+    spend an LLM call. The route is a plain ``def``: this runs in a threadpool thread, with no loop.
+    """
+    existing = package_by_digest(db, ctx.workspace_id, checked.digest)
+    if existing is not None:
+        return dict(existing.scan_report or {"verdict": existing.scan_verdict})
+    return run_review_stage(checked, package_bytes, prefer_source=False)
+
+
 def _save(db: Session, ctx: RequestContext, checked: CheckedThemePackage, package_bytes: int) -> SavedUpload:
     manifest = checked.manifest
     prefix = theme_prefix(manifest["id"], manifest["version"], ctx.workspace_id)
-    report = build_scan_report(checked.files, package_bytes)
+    report = _review(db, ctx, checked, package_bytes)
     try:
         return save_private_upload(
             db, ctx.workspace_id, resolve_user_pk(db, ctx), checked, prefix, report,
