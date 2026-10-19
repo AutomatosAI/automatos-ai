@@ -33,7 +33,6 @@ KIND_HOSTED_OPEN = "hosted_open"  # open models hosted by a third party (NVIDIA)
 
 ADAPTER_OPENAI = "openai"
 ADAPTER_ANTHROPIC = "anthropic"
-ADAPTER_GOOGLE = "google"
 ADAPTER_AZURE = "azure"
 ADAPTER_BEDROCK = "bedrock"
 ADAPTER_GROK = "grok"
@@ -132,8 +131,10 @@ _SPECS: Tuple[ProviderSpec, ...] = (
         setup_note=_ANTHROPIC_SETUP, workspace_id_placeholder=_ANTHROPIC_WORKSPACE_PLACEHOLDER,
     ),
     ProviderSpec(
-        slug="google", label="Google", kind=KIND_DIRECT, adapter=ADAPTER_GOOGLE,
-        enum_value="google", env_key="GOOGLE_API_KEY", validation=VALIDATION_MODELS_LIST,
+        # PRD-262 US-024: Gemini through its OpenAI-compatible endpoint, not Google's SDK.
+        slug="google", label="Google", kind=KIND_DIRECT, adapter=ADAPTER_OPENAI_COMPATIBLE,
+        enum_value="google", env_key="GOOGLE_API_KEY", base_url_key="GOOGLE_BASE_URL",
+        validation=VALIDATION_MODELS_LIST,
         openrouter_prefix="google/", embeddings=True, key_placeholder="AIza…",
         docs_url="https://aistudio.google.com/app/apikey",
     ),

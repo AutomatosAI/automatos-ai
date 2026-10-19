@@ -162,17 +162,11 @@ def _check_anthropic(_provider: str, raw_key: str, _base_url: Optional[str], wor
     return KEY_VALID
 
 
-def _check_google(_provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None) -> str:
-    import google.generativeai as genai
-    genai.configure(api_key=raw_key)
-    genai.list_models()
-    return KEY_VALID
-
-
 def _check_openai_compatible(
     provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None,
 ) -> str:
-    """OpenRouter, NVIDIA, DeepSeek: a models-list call against the provider's own base URL (PRD-236 S0.3)."""
+    """OpenRouter, NVIDIA, DeepSeek, Google: a models-list call against the provider's own base URL
+    (PRD-236 S0.3; Gemini's OpenAI-compatible endpoint since PRD-262 US-024)."""
     from openai import OpenAI
     spec = provider_registry.get_spec(provider)
     kwargs = {"api_key": raw_key, "base_url": provider_registry.base_url_for(spec.slug)}
@@ -210,7 +204,7 @@ def _check_azure(_provider: str, raw_key: str, base_url: Optional[str], _workspa
     return KEY_VALID
 
 
-_LIVE_CHECKS = {"openai": _check_openai, "anthropic": _check_anthropic, "google": _check_google, "azure": _check_azure}
+_LIVE_CHECKS = {"openai": _check_openai, "anthropic": _check_anthropic, "azure": _check_azure}
 
 
 def _live_check_for(provider: str):

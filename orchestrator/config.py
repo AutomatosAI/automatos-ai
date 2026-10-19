@@ -598,6 +598,8 @@ class Config:
     # PRD-236 — base URLs of the other OpenAI-compatible providers (registry reads these).
     NVIDIA_BASE_URL: str = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
     DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    # PRD-262 US-024: Gemini's OpenAI-compatible endpoint (replaced the google-generativeai SDK).
+    GOOGLE_BASE_URL: str = os.getenv("GOOGLE_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
     OPENROUTER_SITE_URL: str = os.getenv("OPENROUTER_SITE_URL", "https://automatos.app")
     # OpenRouter routes embeddings by PRICE by default, so the slowest upstream
     # can win ties (qwen3-embedding-8b measured 37-67s/call, 2026-07-09).

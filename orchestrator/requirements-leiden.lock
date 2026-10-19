@@ -1067,7 +1067,6 @@ cryptography==50.0.2 \
     # via
     #   -c orchestrator/requirements.lock
     #   -r orchestrator/requirements.in
-    #   google-auth
     #   paramiko
     #   pdfminer-six
 cssselect2==0.10.1 \
@@ -1387,54 +1386,11 @@ gitpython==3.2.1 \
     # via
     #   -c orchestrator/requirements.lock
     #   -r orchestrator/requirements.in
-google-ai-generativelanguage==0.6.15 \
-    --hash=sha256:5a03ef86377aa184ffef3662ca28f19eeee158733e45d7947982eb953c6ebb6c \
-    --hash=sha256:8f6d9dc4c12b065fe2d0289026171acea5183ebf2d0b11cefe12f3821e159ec3
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-generativeai
-google-api-core==2.25.2 \
-    --hash=sha256:1c63aa6af0d0d5e37966f157a77f9396d820fba59f9e43e9415bc3dc5baff300 \
-    --hash=sha256:e9a8f62d363dc8424a8497f4c2a47d6bcda6c16514c935629c257ab5d10210e7
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-ai-generativelanguage
-    #   google-api-python-client
-    #   google-generativeai
-google-api-python-client==2.201.0 \
-    --hash=sha256:2d9bf1ba3f12eee8ed3d0f1791ce0605d163432f496baa72d3677faa2cf097d6 \
-    --hash=sha256:d5691982abd7287f53cb0b0e0c6a9984d4103cf864ea0a88cb6e4347bbaf70de
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-generativeai
-google-auth==2.62.0 \
-    --hash=sha256:0bef0ce54bdf9ce226c5d66e4264413bd918141c31bbe49fb52eac882f513d69 \
-    --hash=sha256:4ff4319aeb4ad128409759d397a9fcafad126d0031d241cc0dd6b9a00b43e3f3
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-ai-generativelanguage
-    #   google-api-core
-    #   google-api-python-client
-    #   google-auth-httplib2
-    #   google-generativeai
-google-auth-httplib2==0.4.4 \
-    --hash=sha256:b931de392c20cfaa351cd789274922bd8cdc001e0e9e96de31b39d71347f8e16 \
-    --hash=sha256:bbe5d7b2401bb3a4017f4720e1e91bd273ab9a2bb60b84e65edbc0de127852da
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-api-python-client
-google-generativeai==0.8.6 \
-    --hash=sha256:37a0eaaa95e5bbf888828e20a4a1b2c196cc9527d194706e58a68ff388aeb0fa
-    # via
-    #   -c orchestrator/requirements.lock
-    #   -r orchestrator/requirements.in
 googleapis-common-protos==1.75.0 \
     --hash=sha256:53a062ff3c32552fbd62c11fe23768b78e4ddf0494d5e5fd97d3f4689c75fbbd \
     --hash=sha256:961ed60399c457ceb0ee8f285a84c870aabc9c6a832b9d37bb281b5bebde43ed
     # via
     #   -c orchestrator/requirements.lock
-    #   google-api-core
-    #   grpcio-status
     #   opentelemetry-exporter-otlp-proto-http
 graphifyy==0.8.31 \
     --hash=sha256:349a86379f780a49ae7c3ed55c424aec43a6b3646419becd41839414588e280f \
@@ -1604,15 +1560,7 @@ grpcio==1.84.0 \
     --hash=sha256:fff5ef3fe1bba7d6147e5f19e01e5e122ac2c076486887ddcb8d42e663400fbe
     # via
     #   -c orchestrator/requirements.lock
-    #   google-api-core
-    #   grpcio-status
     #   qdrant-client
-grpcio-status==1.71.2 \
-    --hash=sha256:803c98cb6a8b7dc6dbb785b1111aed739f241ab5e9da0bba96888aa74704cfd3 \
-    --hash=sha256:c7a97e176df71cdc2c179cd1847d7fc86cca5832ad12e9798d7fed6b7a1aab50
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-api-core
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
@@ -1646,13 +1594,6 @@ httpcore2==2.14.0 ; sys_platform != 'emscripten' \
     # via
     #   -c orchestrator/requirements.lock
     #   httpx2
-httplib2==0.32.0 \
-    --hash=sha256:48a0ef30a42db65d8f3399045e1d09ab0ba66e3b9efc360d07f80ea55d286025 \
-    --hash=sha256:dc6705cacdf3fb0a2aba7629fa33c90fd93e30035db0c157325826be177e4816
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-api-python-client
-    #   google-auth-httplib2
 httptools==0.9.0 \
     --hash=sha256:02bc5b3dcb6394b9d825fd62a7bfa0b2943063a3c89abc4492ad45e334a20eb5 \
     --hash=sha256:050f7ab098121873c8f13e35857f97ab60a76185c8302bde9a384939bb7c3b96 \
@@ -3636,13 +3577,6 @@ propcache==0.5.4 \
     #   -c orchestrator/requirements.lock
     #   aiohttp
     #   yarl
-proto-plus==1.28.2 \
-    --hash=sha256:26d843eb99c1e32fdf1d20ff0faae56607f7748fe774acf9ecd5cfe6c6472501 \
-    --hash=sha256:b874236fcac2358f601e4330bcb76cb8b89c851303ccf4078408b3d4774d1c52
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-ai-generativelanguage
-    #   google-api-core
 protobuf==5.29.6 \
     --hash=sha256:36ade6ff88212e91aef4e687a971a11d7d24d6948a66751abc1b3238648f5d05 \
     --hash=sha256:62e8a3114992c7c647bce37dcc93647575fc52d50e48de30c6fcb28a6a291eb1 \
@@ -3657,13 +3591,8 @@ protobuf==5.29.6 \
     --hash=sha256:e3387f44798ac1106af0233c04fb8abf543772ff241169946f698b3a9a3d3ab9
     # via
     #   -c orchestrator/requirements.lock
-    #   google-ai-generativelanguage
-    #   google-api-core
-    #   google-generativeai
     #   googleapis-common-protos
-    #   grpcio-status
     #   opentelemetry-proto
-    #   proto-plus
     #   qdrant-client
 psutil==7.2.2 \
     --hash=sha256:0746f5f8d406af344fd547f1c8daa5f5c33dbc293bb8d6a16d80b4bb88f59372 \
@@ -3766,18 +3695,6 @@ psycopg2-binary==2.9.9 \
     # via
     #   -c orchestrator/requirements.lock
     #   -r orchestrator/requirements.in
-pyasn1==0.6.4 \
-    --hash=sha256:9c447d8431c947fe4c8febc4ed9e760bc29011a5b01e5c74b67025bd9fb8ce81 \
-    --hash=sha256:deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b
-    # via
-    #   -c orchestrator/requirements.lock
-    #   pyasn1-modules
-pyasn1-modules==0.4.2 \
-    --hash=sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a \
-    --hash=sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-auth
 pycparser==3.11 ; implementation_name != 'PyPy' \
     --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80 \
     --hash=sha256:d875f09c3507d00e1aba0eecc6dcadc1352f30fff09dc6bff2f1c2935e97c2bc
@@ -3794,7 +3711,6 @@ pydantic==2.14.1 \
     #   composio
     #   composio-client
     #   fastapi
-    #   google-generativeai
     #   json-schema-to-pydantic
     #   langchain-core
     #   langsmith
@@ -3993,13 +3909,10 @@ pynndescent==0.6.0 ; python_full_version < '3.13' \
     --hash=sha256:7ffde0fb5b400741e055a9f7d377e3702e02250616834231f6c209e39aac24f5 \
     --hash=sha256:dc8c74844e4c7f5cbd1e0cd6909da86fdc789e6ff4997336e344779c3d5538ef
     # via umap-learn
-pyparsing==3.3.3 \
+pyparsing==3.3.3 ; python_full_version < '3.13' \
     --hash=sha256:928ae7e20211f3b6f3915a72f06a0cfd29ab9d24279dd6346b6b1a7146397d36 \
     --hash=sha256:ece8c00a69cf01b45d0b1dedabb469c90d8caf996d4fda40f147627a122849a4
-    # via
-    #   -c orchestrator/requirements.lock
-    #   httplib2
-    #   matplotlib
+    # via matplotlib
 pypdf==6.21.1 \
     --hash=sha256:2d62c383acd6e0dff0a96322ba8b1135229343b084d73c6f6cfd947fd291afcb \
     --hash=sha256:553e2d42f5bb3bb2a785a7d3de8ef90bb7df74b5413eff5a7b4388007ea9254b
@@ -4468,7 +4381,6 @@ requests==2.34.2 \
     # via
     #   -c orchestrator/requirements.lock
     #   -r orchestrator/requirements.in
-    #   google-api-core
     #   langsmith
     #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-http
@@ -5089,13 +5001,10 @@ tinyhtml5==2.1.0 \
     # via
     #   -c orchestrator/requirements.lock
     #   weasyprint
-tqdm==4.70.1 \
+tqdm==4.70.1 ; python_full_version < '3.13' \
     --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73 \
     --hash=sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-generativeai
-    #   umap-learn
+    # via umap-learn
 tree-sitter==0.26.0 \
     --hash=sha256:00289bfe7978f3e0dc0ce69813a20fa9f44ea4c100b3ec62043e5eb74ccfc3a2 \
     --hash=sha256:0f8793fd18ad7eec276ed4b51c097b4bf2002b357259b66b0d75db1f3f41c754 \
@@ -5492,7 +5401,6 @@ typing-extensions==4.16.0 \
     #   composio-client
     #   fastapi
     #   formulaic
-    #   google-generativeai
     #   graspologic
     #   grpcio
     #   httpx2
@@ -5536,12 +5444,6 @@ umap-learn==0.5.12 ; python_full_version < '3.13' \
     --hash=sha256:6aff02ecac5f2aad9f3c65ee518d7ae93e1a985ae38721fdcffceee4232c33c7 \
     --hash=sha256:f2a85d2a2adcb52b541bed9b27a23ca169b56bb1b23283abeebfb8dfb8a42fe5
     # via graspologic
-uritemplate==4.2.0 \
-    --hash=sha256:480c2ed180878955863323eea31b0ede668795de182617fef9c6ca09e6ec9d0e \
-    --hash=sha256:962201ba1c4edcab02e60f9a0d3821e82dfc5d2d6662a21abd533879bdb8a686
-    # via
-    #   -c orchestrator/requirements.lock
-    #   google-api-python-client
 urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
     --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63

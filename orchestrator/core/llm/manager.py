@@ -18,7 +18,6 @@ from core.llm.owner_words_stream import in_owner_words
 from .clients.base import LLMProvider, LLMConfig
 from .clients.openai_client import OpenAIProvider
 from .clients.anthropic_client import AnthropicProvider
-from .clients.google_client import GoogleProvider
 from .turn_order import reprompts_in_the_users_turn
 from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
@@ -542,8 +541,6 @@ class LLMManager:
         elif provider == LLMProvider.ANTHROPIC:
             api_key = cred_data.get("api_key")
             base_url = cred_data.get("base_url")
-        elif provider == LLMProvider.GOOGLE:
-            api_key = cred_data.get("api_key")
         elif provider == LLMProvider.AZURE:
             api_key = cred_data.get("api_key")
             base_url = cred_data.get("endpoint_url") or cred_data.get("base_url")
@@ -626,8 +623,6 @@ class LLMManager:
             return OpenAIProvider(config)
         elif config.provider == LLMProvider.ANTHROPIC:
             return AnthropicProvider(config)
-        elif config.provider == LLMProvider.GOOGLE:
-            return GoogleProvider(config)
         elif config.provider == LLMProvider.AZURE:
             return AzureProvider(config)
         elif config.provider == LLMProvider.HUGGINGFACE:
