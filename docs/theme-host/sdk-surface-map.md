@@ -29,7 +29,7 @@ W-A3, so the names A-10c added on top of A-10a's need no version bump; any chang
 
 Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/`.
 
-## 1. The core modules Play's folders import (64: 61 in §0, plus W-A1's three)
+## 1. The core modules Play's folders import (73: 61 in §0, W-A1's three, and the rows W-A2 added)
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
