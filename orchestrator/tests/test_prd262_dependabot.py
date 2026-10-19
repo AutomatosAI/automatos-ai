@@ -18,7 +18,8 @@ A pin with nothing to move it freezes security fixes, so the two travel together
   moves;
 * every Python lock file has an updater, or is listed below with the reason
   Dependabot cannot update it. A new lock (US-044) fails here until one or the
-  other is true; US-022's three API locks are listed.
+  other is true; US-022's three API locks and US-023's frozen reference lock are
+  listed.
 
 Pure file reads: no Docker, no network.
 """
@@ -65,6 +66,12 @@ LOCKS_DEPENDABOT_CANNOT_UPDATE = {
         "which test_prd262_api_locks.py then fails because the lock no longer satisfies it. "
         "A bump is an edit to the input plus the compile command at the top of each lock "
         "(PRD-262 US-022); which updater keeps them current is open for Gerard and Dave.",
+    ),
+    "scripts/ci/reference/requirements-pdf-tables.lock": (
+        "Frozen on purpose: the PDF table extractor the API ran before PRD-262 US-023, at "
+        "the versions its W2 lock installed, which test.yml's reference-goldens job runs "
+        "in a throwaway venv to re-record the grids pdfplumber is judged against. A bump "
+        "would change the reference, not fix anything that ships; no image installs it."
     ),
 }
 

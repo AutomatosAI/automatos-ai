@@ -18,8 +18,9 @@ name: test
 # Concurrency cancels superseded runs on the same ref so rapid pushes don't queue.
 #
 # The path-gated lanes (the backend test shards, the image build, the frontend,
-# the CLI host, the sim units, agent-opt-worker) run on a PR only when it touches
-# what they read — the `changes` job decides — and always on main.
+# the CLI host, the sim units, agent-opt-worker, the W3 reference goldens) run on a
+# PR only when it touches what they read — the `changes` job decides — and always
+# on main.
 #
 # Introduced NON-REQUIRED on purpose. The net is expected to surface
 # pre-existing gaps that Wave 2 (WS-G golden journeys, WS-H untested
@@ -64,6 +65,7 @@ jobs:
       cli_host: ${{ steps.match.outputs.cli_host }}
       sim: ${{ steps.match.outputs.sim }}
       agent_opt: ${{ steps.match.outputs.agent_opt }}
+      references: ${{ steps.match.outputs.references }}
       backend_mode: ${{ steps.match.outputs.backend_mode }}
       backend_keywords: ${{ steps.match.outputs.backend_keywords }}
       backend_shards: ${{ steps.match.outputs.backend_shards }}
@@ -98,6 +100,9 @@ jobs:
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
           SIM_PATHS: ^tests/sim/|^\.github/workflows/test\.yml$
           AGENT_OPT_PATHS: ^services/agent-opt-worker/|^\.github/workflows/test\.yml$
+          # PRD-262 W3: the goldens each code swap is judged against, the fixtures they
+          # are recorded from, and the pinned libraries that record them.
+          REFERENCE_PATHS: ^scripts/ci/reference/|^orchestrator/tests/fixtures/pdf_table|^\.github/workflows/test\.yml$
         run: |
           set -euo pipefail
           full_backend() {
@@ -107,7 +112,7 @@ jobs:
             echo "backend_shard_count=$BACKEND_SHARDS"
           }
           all() {
-            { printf '%s=true\n' prod_images frontend cli_host sim agent_opt; full_backend; } | tee -a "$GITHUB_OUTPUT"
+            { printf '%s=true\n' prod_images frontend cli_host sim agent_opt references; full_backend; } | tee -a "$GITHUB_OUTPUT"
             echo "every lane runs: $1"
           }
           if [ "$EVENT" != "pull_request" ]; then all "$EVENT"; exit 0; fi
@@ -123,6 +128,7 @@ jobs:
             lane cli_host "$CLI_HOST_PATHS"
             lane sim "$SIM_PATHS"
             lane agent_opt "$AGENT_OPT_PATHS"
+            lane references "$REFERENCE_PATHS"
           } | tee -a "$GITHUB_OUTPUT"
           scope=$(python3 scripts/ci/backend_test_plan.py scope <<< "$files")
           echo "backend scope: $scope"
@@ -1526,3 +1532,45 @@ jobs:
         run: pip install pytest==8.3.4
       - name: Run sim unit tests
         run: python -m pytest tests/sim/tests --noconftest --import-mode=importlib -q -p no:cacheprovider
+
+  # PRD-262 W3: each code swap is judged against a golden that the library it replaces
+  # records on committed fixtures. The goldens are committed, and the permanent tests
+  # read only them. This job installs each replaced library, pinned and hashed, in a
+  # throwaway venv, records the goldens again and fails on any difference, so every
+  # reference is proven in the run that ships its swap. A failed run uploads what was
+  # recorded.
+  reference-goldens:
+    name: W3 reference goldens re-recorded with the replaced libraries (PRD-262) (non-required)
+    needs: changes
+    if: needs.changes.outputs.references == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: PDF table grids (US-023) are what camelot-py 0.11.0's stream mode records
+        env:
+          RECORDED: ${{ runner.temp }}/references
+          VENV: ${{ runner.temp }}/pdf-tables
+          LOCK: scripts/ci/reference/requirements-pdf-tables.lock
+          GRIDS: orchestrator/tests/fixtures/pdf_table_grids.json
+        run: |
+          set -euo pipefail
+          python -m venv "$VENV"
+          "$VENV/bin/pip" install --no-deps --require-hashes --only-binary :all: -r "$LOCK"
+          mkdir -p "$RECORDED"
+          "$VENV/bin/python" scripts/ci/reference/pdf_tables.py --out "$RECORDED/pdf_table_grids.json"
+          if ! diff -u <(jq -S . "$GRIDS") <(jq -S . "$RECORDED/pdf_table_grids.json"); then
+            echo "::error file=$GRIDS::the committed grids are not what the reference extractor records (diff above; the recorded file is this run's reference-goldens artifact)"
+            exit 1
+          fi
+          echo "the committed PDF table grids are what the reference extractor records: PASS"
+      - name: Upload what the references recorded
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reference-goldens
+          path: ${{ runner.temp }}/references/
+          if-no-files-found: ignore
