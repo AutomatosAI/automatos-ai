@@ -99,7 +99,7 @@ from modules.socials.music import with_music
 from core.social_templates import (
     SOCIAL_VIDEO, SocialTemplateError, empty_required_slots, is_social_format, resolve_variables, validate_social_blocks,
 )
-from modules.socials import channel_sizes, notify, service, spoken_fields
+from modules.socials import ai_media, channel_sizes, notify, service, spoken_fields
 from modules.socials.media_store import MediaNameError, MediaStore, content_type_for, media_key, media_route
 from modules.socials.recipes import footage as footage_recipes
 from modules.socials.recipes import voice as voice_recipes
@@ -705,9 +705,9 @@ def _finish(
             return None
         if failure is None:
             try:
-                service.finish_render(
-                    post, job.actor, media or {}, summary=_summary(media or {}), report=report, credits=credits,
-                    keep=job.keep_media,
+                service.finish_render(  # PRD-264 EUAI-05: the report carries the render record (ai_media.py)
+                    post, job.actor, media or {}, summary=_summary(media or {}), credits=credits, keep=job.keep_media,
+                    report=ai_media.with_record(report, post, job.bundle, media or {}),
                 )
             except service.InvalidPost as exc:
                 failure = RenderFailure("bad_output", f"The rendered files could not be recorded: {exc}")

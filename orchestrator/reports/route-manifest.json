@@ -2362,6 +2362,10 @@
       "path": "/api/socials/posts/{post_id}"
     },
     {
+      "method": "GET",
+      "path": "/api/socials/posts/{post_id}/ai-labels"
+    },
+    {
       "method": "POST",
       "path": "/api/socials/posts/{post_id}/ai-options"
     },
