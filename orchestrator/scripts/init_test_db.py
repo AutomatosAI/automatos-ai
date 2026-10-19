@@ -460,5 +460,51 @@ def init_db():
         for table in missing:
             print(f"   ❌ {table}")
 
+
+HEARTBEAT_RESULTS_DDL = """
+    CREATE TABLE IF NOT EXISTS heartbeat_results (
+        id SERIAL PRIMARY KEY,
+        source_type VARCHAR(20) NOT NULL,
+        source_id VARCHAR(255) NOT NULL,
+        workspace_id UUID NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'success',
+        findings JSONB DEFAULT '[]',
+        actions_taken JSONB DEFAULT '[]',
+        tokens_used INTEGER DEFAULT 0,
+        cost FLOAT DEFAULT 0.0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        objective_met BOOLEAN,
+        evidence_ref TEXT
+    )
+"""
+HEARTBEAT_RESULTS_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS ix_heartbeat_results_workspace_id ON heartbeat_results (workspace_id)",
+    "CREATE INDEX IF NOT EXISTS ix_heartbeat_results_source ON heartbeat_results (source_type, source_id)",
+    "CREATE INDEX IF NOT EXISTS ix_heartbeat_results_created_at ON heartbeat_results (created_at)",
+)
+
+
+def create_heartbeat_results() -> None:
+    """Build ``heartbeat_results`` for the test database.
+
+    It has no SQLAlchemy model: prod gets it from
+    alembic/versions/20260215_add_heartbeat_and_channels.py plus
+    wave1b_heartbeat_completion.py (objective_met, evidence_ref), and the fresh path
+    (generate_schema_baseline: init_db() then the migration replay) builds it from
+    those migrations. The test database runs no migration, so without this the
+    real-DB tests of its readers (services/harness_metrics.py) have no table. Same
+    columns and indexes as the two migrations; tests/test_prd263_harness_metrics_realdb.py
+    holds them together. Kept out of init_db() so the fresh path is unchanged.
+    """
+    from sqlalchemy import text as _raw_sql
+
+    with engine.begin() as conn:
+        conn.execute(_raw_sql(HEARTBEAT_RESULTS_DDL))
+        for stmt in HEARTBEAT_RESULTS_INDEXES:
+            conn.execute(_raw_sql(stmt))
+    print("   ✅ heartbeat_results (migration-only table) built for the test database")
+
+
 if __name__ == "__main__":
     init_db()
+    create_heartbeat_results()

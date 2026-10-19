@@ -12,18 +12,26 @@ import React from 'react'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ThemeEntry } from '@/lib/theme-host/registry-types'
 
 const api = vi.hoisted(() => ({ request: vi.fn(), getBaseUrl: () => 'http://localhost:8000' }))
 vi.mock('@/lib/api-client', () => ({ apiClient: api }))
 
-const layout = vi.hoisted(() => ({ current: 'fallback' as 'pending' | 'play' | 'fallback' }))
+// PRD-261 A-02b: the tab reads the frame's poll where the theme's layout renders and its entry
+// has the asleep slot (builtin Play's does); `theme` stands in for the active entry.
+const layout = vi.hoisted(() => ({
+  current: 'fallback' as 'pending' | 'theme' | 'fallback',
+  theme: null as ThemeEntry | null,
+}))
 vi.mock('@/hooks/use-studio-theme', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-studio-theme')>()),
-  usePlayLayout: () => layout.current,
+  useThemeLayout: () => layout.current,
+  useActiveTheme: () => layout.theme,
 }))
 
 import { SessionModeTab } from '@/components/settings/SessionModeTab'
 import { BACKEND_HEALTH_POLL_MS, useBackendHealth } from '@/hooks/use-backend-health'
+import { BUILTIN_PLAY_ENTRY } from '@/lib/theme-host/builtin/play-entry'
 
 /** How long after the poller the reader mounts: well inside one period, out of phase with it. */
 const READER_LATE_MS = 5_000
@@ -69,6 +77,7 @@ afterEach(() => {
   vi.useRealTimers()
   api.request.mockReset()
   layout.current = 'fallback'
+  layout.theme = null
 })
 
 describe('useBackendHealth — one poll owner, every other caller reads', () => {
@@ -114,7 +123,8 @@ describe('Settings → Session mode reads the same /health query', () => {
   })
 
   it("inside Play's frame it reads the frame's poll: one /health per period, mounted 5 s apart", async () => {
-    layout.current = 'play'
+    layout.current = 'theme'
+    layout.theme = BUILTIN_PLAY_ENTRY
     const client = newClient()
     renderWith(client, <FramePoll />)
     await elapse(READER_LATE_MS)
@@ -122,6 +132,16 @@ describe('Settings → Session mode reads the same /health query', () => {
     await elapse(2 * BACKEND_HEALTH_POLL_MS)
     expect(healthCalls()).toBe(1 + 2)
     expect(screen.getByText(SESSION_MODE_OFF)).toBeInTheDocument()
+  })
+
+  it("under a theme at its width whose entry has no asleep slot, the tab still polls /health itself", async () => {
+    layout.current = 'theme'
+    layout.theme = { ...BUILTIN_PLAY_ENTRY, slots: BUILTIN_PLAY_ENTRY.slots.filter((slot) => slot !== 'asleep@1') }
+    renderWith(newClient(), <SessionModeTab />)
+    await elapse(0)
+    expect(healthCalls()).toBe(1)
+    await elapse(BACKEND_HEALTH_POLL_MS)
+    expect(healthCalls()).toBe(2)
   })
 
   it('outside it (Classic, Studio, Play below its width) the tab polls /health itself, as before', async () => {

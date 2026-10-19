@@ -1,10 +1,15 @@
 /**
- * PRD-260 D4, K3 — the pre-paint script: run as the browser runs it, in the
+ * PRD-260 D4, K3 — the pre-paint look: run as the browser runs it, in the
  * page, it puts the stored look's --pl-* variables AND Studio's tokens on
- * <html>, only under the 'play' class, and anything stored that isn't a
- * catalogue look gets the default look. Looks are kept per account (F5): it
- * paints the active look of the scope the pointer names, or with no pointer
- * the unscoped key a browser kept before.
+ * <html>, only under Play, and anything stored that isn't a catalogue look
+ * gets the default look. Looks are kept per account (F5): it paints the
+ * active look of the scope the pointer names, or with no pointer the unscoped
+ * key a browser kept before.
+ *
+ * PRD-261 A-03: the look is painted by the one constant THEME_BOOT_SCRIPT from
+ * builtin Play's boot data (lib/theme-host/builtin/play-boot.ts, the table from
+ * lookPrepaintTable()); every case below runs against that pair with its
+ * assertions unchanged. Under Studio and Classic the boot carries no table.
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -13,22 +18,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ACCENTS } from '@/lib/looks/catalogue'
 import { GLOW_SCALE, GLOW_VAR, lookToCssVars, rgba, safeGlow } from '@/lib/looks/css'
 import { lookDocumentVars } from '@/lib/looks/document'
-import { LOOK_PREPAINT_SCRIPT, scriptSafeJson } from '@/lib/looks/prepaint'
 import { DAYLIGHT, DEFAULT_LOOK, EMBER, PRESETS } from '@/lib/looks/presets'
 import { lookScope } from '@/lib/looks/scope'
 import { ACTIVE_LOOK_KEY, LOOK_SCOPE_KEY, lookKeys } from '@/lib/looks/storage'
 import { lookToStudioTokens } from '@/lib/looks/studio-tokens'
 import { GLOW_MAX } from '@/lib/looks/types'
-import { PLAY_HTML_CLASS, STUDIO_HTML_CLASS } from '@/lib/ui-style'
+import { THEME_BOOT_SCRIPT, builtinThemeBoot } from '@/lib/theme-host/boot'
+import { BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS, BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
+import { scriptSafeJson } from '@/lib/theme-host/script-safe-json'
+import { STUDIO_HTML_CLASS } from '@/lib/ui-style'
 
+import { cookieReader, runThemeBoot } from '@/lib/theme-host/__tests__/boot-harness'
 import { clearRoot, lookNamesLeft, myLook, rootVars } from './helpers'
 
 const LAYOUT = path.resolve(__dirname, '../../../app/layout.tsx')
+const PLAY_BOOT = builtinThemeBoot(BUILTIN_PLAY_STYLE, cookieReader())
 
-// Runs the script the way the browser does, as a classic script in the page. Only in
-// tests: the app itself never evaluates strings.
+// Runs builtin Play's boot the way the browser does: its JSON element, then the constant
+// script as a classic script in the page. Only in tests: the app itself never evaluates strings.
 function runPrepaint(): void {
-  new Function(LOOK_PREPAINT_SCRIPT)()
+  runThemeBoot(PLAY_BOOT)
 }
 
 function store(value: unknown): void {
@@ -137,24 +146,25 @@ describe('the pre-paint look script under Play', () => {
 })
 
 describe('the pre-paint look script outside Play', () => {
-  it('sets nothing on <html> without the play class (Studio and Classic)', () => {
+  it("sets nothing on <html> under Studio's and Classic's boot", () => {
     store(myLook())
-    for (const classes of [[STUDIO_HTML_CLASS], []]) {
+    for (const style of ['studio', 'classic'] as const) {
       clearRoot()
-      document.documentElement.classList.add(...classes)
-      runPrepaint()
-      expect({ classes, left: lookNamesLeft() }).toEqual({ classes, left: [] })
+      runThemeBoot(builtinThemeBoot(style, cookieReader()))
+      expect({ style, left: lookNamesLeft() }).toEqual({ style, left: [] })
       expect(document.documentElement.style.length).toBe(0)
     }
   })
 })
 
 describe('the pre-paint look script as markup', () => {
-  it('is safe inside a <script> element', () => {
-    expect(LOOK_PREPAINT_SCRIPT).not.toMatch(/<\/?script/i)
-    expect(LOOK_PREPAINT_SCRIPT).not.toContain('<!--')
-    expect(LOOK_PREPAINT_SCRIPT).not.toContain('</')
-    expect(LOOK_PREPAINT_SCRIPT).not.toMatch(/[\u2028\u2029]/)
+  it("is safe inside a <script> element: the constant script, and Play's boot as its JSON element body", () => {
+    for (const body of [THEME_BOOT_SCRIPT, scriptSafeJson(PLAY_BOOT)]) {
+      expect(body).not.toMatch(/<\/?script/i)
+      expect(body).not.toContain('<!--')
+      expect(body).not.toContain('</')
+      expect(body).not.toMatch(/[\u2028\u2029]/)
+    }
   })
 
   it('escapes what would end a script element or a line inside it', () => {
@@ -163,10 +173,11 @@ describe('the pre-paint look script as markup', () => {
     expect(JSON.parse(json)).toEqual({ text: '</script><!-- \u2028 \u2029' })
   })
 
-  it('is rendered in the <head> of the root layout, only when the style is play', () => {
+  it("is rendered in the <head> of the root layout, as the style's boot (Play's carries the look)", () => {
     const layout = readFileSync(LAYOUT, 'utf8')
-    const tag = "{uiStyle === 'play' && <script dangerouslySetInnerHTML={{ __html: LOOK_PREPAINT_SCRIPT }} />}"
+    const tag = '<ThemeBootScripts boot={boot} />'
     expect(layout).toContain(tag)
+    expect(layout).not.toContain('LOOK_PREPAINT_SCRIPT')
     expect(layout.indexOf('<head>')).toBeLessThan(layout.indexOf(tag))
     expect(layout.indexOf(tag)).toBeLessThan(layout.indexOf('</head>'))
     expect(layout.indexOf('</head>')).toBeLessThan(layout.indexOf('<body>'))

@@ -37,6 +37,13 @@ class ContextResult:
     sections: list[dict[str, Any]] = field(default_factory=list)
     injected_memory_ids: list[Any] = field(default_factory=list)
 
+    # PRD-263 US-062: the always-on skill bodies that served the turn, as
+    # [{"name", "content_hash"}] (Auto's platform-management; the hash is the
+    # sha256 of the body as rendered), so a shipped skill edit can be compared
+    # before and after in production (scripts/skill_signal_report.py). Empty
+    # when no such body was in the prompt.
+    skill_bodies: list[dict[str, Any]] = field(default_factory=list)
+
     # PRD-223 S0.3: attachments that could NOT be loaded this turn —
     # [{"attachment_id", "filename", "reason"}]. The model-facing marker is
     # already injected into ``messages``; this field is for user-facing
@@ -56,7 +63,8 @@ class ContextResult:
 
         This is the record the answerability win rides on (PRD-201 S1): mode,
         the driving model, the resolved budget ceiling, per-section token/trim
-        detail, injected memory ids, prep time, and the assembled token
+        detail, injected memory ids, the skill bodies that served the turn (by
+        content hash, PRD-263 US-062), prep time, and the assembled token
         estimate. Deliberately small — no rendered content, only shape.
         """
         return {
@@ -70,4 +78,5 @@ class ContextResult:
             "sections_included": self.sections_included,
             "sections_trimmed": self.sections_trimmed,
             "injected_memory_ids": self.injected_memory_ids,
+            "skill_bodies": self.skill_bodies,
         }

@@ -11,7 +11,7 @@
  * prerender) renders the page.
  * P260-FX-23 (M17): the layout hands the switch Play's chat through its lazy
  * slot, so the chat arrives a moment after the first render (findBy*).
- * P260-FX-25 (M69): the width comes from usePlayLayout (stood in for here;
+ * P260-FX-25 (M69): the width comes from useThemeLayout (stood in for here;
  * play-layout-phone.test.tsx runs the real one): while it isn't known (the
  * server, hydration) the switch renders neither Play's screen nor the page
  * where the width decides, and the page where it doesn't.
@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const state = vi.hoisted(() => ({
   play: true,
   narrow: false,
-  /** The width isn't known yet (the server, hydration): usePlayLayout is 'pending' under Play. */
+  /** The width isn't known yet (the server, hydration): useThemeLayout is 'pending' under Play. */
   widthUnknown: false,
   pathname: '/chat',
   search: '',
@@ -38,14 +38,17 @@ vi.mock('next/navigation', () => ({
     return new URLSearchParams(state.search)
   },
 }))
-vi.mock('@/hooks/use-studio-theme', () => ({
-  useIsStudio: () => true,
-  useIsPlay: () => state.play,
-  usePlayLayout: () => {
-    if (!state.play || state.narrow) return 'fallback'
-    return state.widthUnknown ? 'pending' : 'play'
-  },
-}))
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => true,
+    useActiveTheme: () => (state.play ? BUILTIN_PLAY_ENTRY : null),
+    useThemeLayout: () => {
+      if (!state.play || state.narrow) return 'fallback'
+      return state.widthUnknown ? 'pending' : 'theme'
+    },
+  }
+})
 vi.mock('@/components/play/chat/play-chat', () => ({ PlayChat: () => <div data-testid="play-chat">Play chat</div> }))
 vi.mock('@/components/chatbot/discussion-bar', () => ({ DiscussionBar: () => <div data-testid="discussion-bar" /> }))
 

@@ -88,7 +88,7 @@ vi.mock('@/stores/chat-session-store', async () => {
 })
 
 import { APPROVALS_LABEL, LOOSE_APPROVALS_LABEL } from '@/components/play/chat/approval-cards'
-import { MISSION_APPROVAL_TITLE, TOOL_APPROVAL_TITLE } from '@/components/play/chat/approvals'
+import { MISSION_APPROVAL_TITLE, TOOL_APPROVAL_TITLE } from '@/lib/chat/approvals'
 import { STOPPED_NOTICE } from '@/components/play/chat/auto-reply'
 import { AWAITING_ANSWER } from '@/components/play/chat/caption'
 import { PLACEHOLDER } from '@/components/play/chat/message-box'
@@ -99,7 +99,7 @@ import { TURN_END_LABEL } from '@/components/play/chat/turn-end'
 import { apiClient } from '@/lib/api-client'
 import { useChatWithReceipts } from '@/lib/chat/use-chat-with-receipts'
 import { HELLO_KEY } from '@/lib/mascot/session'
-import { usePlayApprovalsStore } from '@/stores/play-approvals-store'
+import { useChatApprovalsStore as usePlayApprovalsStore } from '@/lib/chat-controller/approvals'
 
 // --- the wire: useChat's data stream (`0:` words, `d:` data, `e:` a failure), one stream per request -----------
 

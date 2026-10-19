@@ -62,6 +62,7 @@ import {
 } from '@/lib/looks/storage'
 import { PLAY_TONE_COOKIE } from '@/lib/looks/tone'
 import { SEEN_KEY, seenKey } from '@/lib/play/seen'
+import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, type UiStyle } from '@/lib/ui-style'
 
 const A = lookScope('ws-1', 'user_a')
@@ -104,7 +105,7 @@ function Probe() {
       <button type="button" onClick={() => setLook(DAYLIGHT)}>
         Use Daylight
       </button>
-      <button type="button" onClick={() => setStyle('play')}>
+      <button type="button" onClick={() => setStyle(BUILTIN_PLAY_STYLE)}>
         Go Play
       </button>
     </div>
@@ -118,7 +119,7 @@ function Shelf({ items }: { readonly items: readonly Deliverable[] }) {
 }
 
 /** The providers as components/providers.tsx nests them: the account's scope above the LookProvider. */
-function Providers({ style = 'play', children }: { readonly style?: UiStyle; readonly children: ReactNode }) {
+function Providers({ style = BUILTIN_PLAY_STYLE, children }: { readonly style?: UiStyle; readonly children: ReactNode }) {
   return (
     <UiStyleProvider initialStyle={style}>
       <QueryClientProvider client={queryClient}>

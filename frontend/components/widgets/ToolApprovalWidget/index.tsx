@@ -17,6 +17,17 @@
  * PRD-260 T-005c: Play's chat renders this same card inline in Auto's reply and
  * passes onDecided, told once an approve or a deny went through, so Auto stops
  * waiting on the owner. Studio's canvas passes none.
+ *
+ * PRD-261 A-12c: the card is a protected surface. The exported widget wraps it
+ * in ProtectedSurface (components/theme-host/protected-surface.tsx). What is
+ * guaranteed: the card's own two boxes (the host and its inner wrapper) keep
+ * every guarded property (display, visibility, opacity, clicks, position, the
+ * transforms, masks, zoom, size) against every stylesheet rule, and the
+ * server's scope check refuses any theme selector that names either wrapper,
+ * so no theme rule reaches the card, or anything inside it, by name. What is a
+ * review rule (docs/theme-host/css-layer-model.md): a generic selector such as
+ * `button` that matches the card's elements without naming the card, a rule on
+ * an ancestor, an element drawn over the card, and a theme's code in the page.
  */
 
 import { useState } from 'react'
@@ -25,6 +36,7 @@ import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
+import { ProtectedSurface } from '@/components/theme-host/protected-surface'
 import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
@@ -58,7 +70,16 @@ export interface ToolApprovalWidgetProps extends WidgetBaseProps<ToolApprovalWid
   onDecided?: (decision: ApprovalDecision) => void
 }
 
-export function ToolApprovalWidget({
+/** Every place the card renders gets it guarded (the canvas, a chat reply, a theme's page). */
+export function ToolApprovalWidget(props: ToolApprovalWidgetProps) {
+  return (
+    <ProtectedSurface surface="tool-approval">
+      <ToolApprovalCard {...props} />
+    </ProtectedSurface>
+  )
+}
+
+function ToolApprovalCard({
   title,
   data,
   metadata,

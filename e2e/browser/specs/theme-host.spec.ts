@@ -1,13 +1,17 @@
 import { expect, test, type Page } from '@playwright/test'
-import { serveHelloTheme, THEME_E2E_PATH } from '../support/hello-theme'
+import { fulfillBackendJson } from '../support/backend-route'
+import { chooseStyle, HELLO_STYLE, serveHelloTheme, THEME_E2E_PATH, type HelloThemeVariant, type ServedTheme } from '../support/hello-theme'
 import '../support/page-globals'
 import { expectedImportMap, readSharedModules } from '../support/shared-modules'
 import { themeRequestPaths, watchPage } from '../support/watch'
 
-// PRD-261 A-01 (@spike): a build with the theme-host spike on. The hello theme loads at runtime
-// through the import map against the host's own React, survives a reload, falls back to Studio on
-// every failure, and loads no theme code in safe mode or under Classic. The import map comes
-// before every module script. Each test opens its own page.
+// PRD-261 A-01, A-04a (@host): the theme host in the build every image ships. Under an installed
+// theme's style, the hello theme comes from the intercepted install routes (/api/themes/active,
+// /api/themes/files/**) and loads at runtime through the import map against the host's own React;
+// it survives a reload, falls back to Studio on every failure of its own (and shows Studio with no
+// notice when the server has no active install), keeps its frame when the page inside it throws,
+// and loads no theme code in safe mode or under Classic. The import map comes before every module
+// script. Each test opens its own page.
 
 const STATUS_ATTR = 'data-theme-host'
 const REASON_ATTR = 'data-theme-host-reason'
@@ -20,8 +24,14 @@ const ACCENT_RGB = 'rgb(47, 111, 237)'
 const SHIMS_THE_THEME_IMPORTS = ['react.js', 'react-jsx-runtime.js', 'react-dom.js', 'sdk.js']
 const SAFE_MODE_PATH = `${THEME_E2E_PATH}?safe_mode=themes`
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:3000'
-const STYLE_COOKIE = 'automatos-style'
-const APPEARANCE_DEFAULTS = { key: 'automatos-appearance-defaults', value: '2026-09-17-studio-dark' }
+const ACTIVE_PATH = '/api/themes/active'
+const WORKSPACE_PATH = '/api/workspaces/current'
+const PAGE_ERROR_TEST_ID = 'theme-page-error'
+// The /agents page renders the roster total as text, so an object there throws while the page
+// draws ("Objects are not valid as a React child"): a page failure, not the theme's.
+const AGENT_STATS_ROUTE = '**/api/system/agent-statistics'
+const MALFORMED_AGENT_STATS = { total_agents: { not: 'a number' } }
+const OK = 200
 const IMPORT_MAP_OPEN = '<script type="importmap">'
 const SCRIPT_CLOSE = '</script>'
 const MODULE_SCRIPT_TAG = /<script\b[^>]*\btype="module"[^>]*>/gi
@@ -67,16 +77,49 @@ async function expectStudioFallback(page: Page, reason: string): Promise<void> {
   await expect(page.locator('link[data-theme-host-style]')).toHaveCount(0)
 }
 
+/**
+ * The app's first GET of its workspace: the client has mounted, so the host's effect has run by
+ * then. Registered before the navigation; the method check skips the CORS preflight.
+ */
+function waitForWorkspace(page: Page): Promise<unknown> {
+  return page.waitForResponse((response) => response.url().endsWith(WORKSPACE_PATH) && response.request().method() === 'GET')
+}
+
 function hostGlobalType(page: Page): Promise<string> {
   return page.evaluate(() => typeof window.__AUTOMATOS_THEME_HOST__)
 }
 
-test.describe('the theme host (spike build)', () => {
-  test('renders the hello theme on the host React', { tag: '@spike' }, async ({ page }) => {
+/** Chooses the hello theme's install as the style, serves it in `variant`, and opens the page. */
+async function openWithHello(page: Page, variant: HelloThemeVariant): Promise<ServedTheme> {
+  await chooseStyle(page, HELLO_STYLE, APP_URL)
+  const served = await serveHelloTheme(page, variant)
+  await page.goto(THEME_E2E_PATH)
+  return served
+}
+
+/**
+ * Answers the page's agent statistics with a value it cannot draw, once the theme is active, so
+ * the page throws inside the theme's frame (never in the Studio chrome, should a load fall back).
+ */
+async function breakTheAgentsPageOnceActive(page: Page): Promise<void> {
+  await page.route(AGENT_STATS_ROUTE, async (route) => {
+    if (route.request().method() === 'GET') {
+      const isActive = (attr: string) => document.documentElement.getAttribute(attr) === 'active'
+      // A page closed first (the test already failed, or ended) leaves the request unanswered.
+      const active = await page.waitForFunction(isActive, STATUS_ATTR).then(() => true, () => false)
+      if (!active) return
+    }
+    await fulfillBackendJson(route, OK, MALFORMED_AGENT_STATS)
+  })
+}
+
+test.describe('the theme host', () => {
+  test('renders the hello theme on the host React', { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
-    await serveHelloTheme(page, 'ok')
-    await page.goto(THEME_E2E_PATH)
+    const served = await openWithHello(page, 'ok')
     await expectActive(page)
+    expect(served.requested).toContain(ACTIVE_PATH)
+    expect(served.requested).toContain(`${served.filesRoot}entry.js`)
 
     await expect(page.locator('.sh-shell')).toHaveCount(0)
     await expect(page.getByTestId('hello-theme-content').locator('*:visible').first()).toBeVisible()
@@ -96,10 +139,9 @@ test.describe('the theme host (spike build)', () => {
     expect(watch.consoleErrors.filter((text) => SHARING_FAILURE.test(text))).toEqual([])
   })
 
-  test('shares the host React: every shim export is the instance on the global', { tag: '@spike' }, async ({ page }) => {
+  test('shares the host React: every shim export is the instance on the global', { tag: '@host' }, async ({ page }) => {
     const table = readSharedModules()
-    await serveHelloTheme(page, 'ok')
-    await page.goto(THEME_E2E_PATH)
+    await openWithHello(page, 'ok')
     await expectActive(page)
 
     const specs = table.modules.map((entry) => entry.specifier)
@@ -119,10 +161,9 @@ test.describe('the theme host (spike build)', () => {
     expect(liveReact).toBe(process.env.EXPECTED_REACT_VERSION)
   })
 
-  test('survives a reload', { tag: '@spike' }, async ({ page }) => {
+  test('survives a reload', { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
-    await serveHelloTheme(page, 'ok')
-    await page.goto(THEME_E2E_PATH)
+    await openWithHello(page, 'ok')
     await expectActive(page)
     await page.getByTestId('hello-theme-count').click()
     await expect(page.getByTestId('hello-theme-count')).toHaveText('Clicks: 1')
@@ -134,33 +175,47 @@ test.describe('the theme host (spike build)', () => {
     expect(watch.pageErrors).toEqual([])
   })
 
-  test('falls back to Studio when the entry throws', { tag: '@spike' }, async ({ page }) => {
-    await serveHelloTheme(page, 'entry-throws')
-    await page.goto(THEME_E2E_PATH)
+  test('falls back to Studio when the entry throws', { tag: '@host' }, async ({ page }) => {
+    await openWithHello(page, 'entry-throws')
     await expectStudioFallback(page, 'load')
   })
 
-  test('falls back to Studio when the frame throws while drawing', { tag: '@spike' }, async ({ page }) => {
-    await serveHelloTheme(page, 'render-throws')
-    await page.goto(THEME_E2E_PATH)
+  test('falls back to Studio when the frame throws while drawing', { tag: '@host' }, async ({ page }) => {
+    await openWithHello(page, 'render-throws')
     await expectStudioFallback(page, 'render')
   })
 
-  test('refuses an SDK mismatch without requesting the entry', { tag: '@spike' }, async ({ page }) => {
-    const requested = await serveHelloTheme(page, 'engines-mismatch')
-    await page.goto(THEME_E2E_PATH)
+  test('refuses an SDK mismatch without requesting the entry', { tag: '@host' }, async ({ page }) => {
+    const served = await openWithHello(page, 'engines-mismatch')
     await expectStudioFallback(page, 'engines')
-    expect(requested).toContain('/theme-spike/hello/theme.json')
-    expect(requested).not.toContain('/theme-spike/hello/entry.js')
+    expect(served.requested).toContain(ACTIVE_PATH)
+    expect(served.requested).not.toContain(`${served.filesRoot}entry.js`)
   })
 
-  test('falls back to Studio when no theme is served', { tag: '@spike' }, async ({ page }) => {
-    await serveHelloTheme(page, 'missing')
-    await page.goto(THEME_E2E_PATH)
-    await expectStudioFallback(page, 'manifest')
+  test('shows Studio with no notice when the workspace has no active install (a 404)', { tag: '@host' }, async ({ page }) => {
+    const served = await openWithHello(page, 'missing')
+    await expect(page.locator('.sh-shell')).toBeVisible()
+    await expect(page.locator('html')).not.toHaveAttribute(STATUS_ATTR)
+    await expect(page.getByTestId('hello-theme-frame')).toHaveCount(0)
+    await expect(page.getByText(FALLBACK_NOTICE)).toHaveCount(0)
+    expect(served.requested).toContain(ACTIVE_PATH)
+    expect(served.requested).not.toContain(`${served.filesRoot}entry.js`)
   })
 
-  test('puts the import map first: no module script before it', { tag: '@spike' }, async ({ page, request }, testInfo) => {
+  test('keeps the theme when the page inside its frame throws', { tag: '@host' }, async ({ page }) => {
+    await breakTheAgentsPageOnceActive(page)
+    await openWithHello(page, 'ok')
+    await expect(page.getByTestId(PAGE_ERROR_TEST_ID)).toBeVisible()
+    const html = page.locator('html')
+    await expect(html).toHaveAttribute(STATUS_ATTR, 'active')
+    await expect(html).not.toHaveAttribute(REASON_ATTR)
+    await expect(page.getByTestId('hello-theme-frame')).toBeVisible()
+    await expect(page.getByTestId('hello-theme-content').getByTestId(PAGE_ERROR_TEST_ID)).toBeVisible()
+    await expect(page.locator('.sh-shell')).toHaveCount(0)
+    await expect(page.getByText(FALLBACK_NOTICE)).toHaveCount(0)
+  })
+
+  test('puts the import map first: no module script before it', { tag: '@host' }, async ({ page, request }, testInfo) => {
     const html = await (await request.get(THEME_E2E_PATH)).text()
     const mapAt = html.indexOf(IMPORT_MAP_OPEN)
     expect(html.split(IMPORT_MAP_OPEN).length - 1).toBe(1)
@@ -180,8 +235,7 @@ test.describe('the theme host (spike build)', () => {
       contentType: 'text/plain',
     })
 
-    await serveHelloTheme(page, 'ok')
-    await page.goto(THEME_E2E_PATH)
+    await openWithHello(page, 'ok')
     await expectActive(page)
     const order = await page.evaluate(() => {
       const maps = Array.from(document.scripts).filter((script) => script.type === 'importmap')
@@ -194,8 +248,9 @@ test.describe('the theme host (spike build)', () => {
     expect(order.allAfter).toBe(true)
   })
 
-  test('safe mode loads no theme code, and stays on in the tab', { tag: '@spike' }, async ({ page }) => {
+  test('safe mode loads no theme code, and stays on in the tab', { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
+    await chooseStyle(page, HELLO_STYLE, APP_URL)
     await serveHelloTheme(page, 'ok')
     await page.goto(SAFE_MODE_PATH)
     await expect(page.locator('html')).toHaveAttribute(STATUS_ATTR, 'safe-mode')
@@ -211,16 +266,16 @@ test.describe('the theme host (spike build)', () => {
     expect(await hostGlobalType(page)).toBe('undefined')
   })
 
-  test('loads no theme code under Classic', { tag: '@spike' }, async ({ page }) => {
+  // A-04a: the host is off under every style but an installed theme's, and off writes no status
+  // on <html> (the spike wrote 'off' here because only its build carried the host).
+  test('loads no theme code under Classic', { tag: '@host' }, async ({ page }) => {
     const watch = watchPage(page)
-    // Without the defaults marker, a fresh browser is moved to Studio once (ui-style-context.tsx).
-    await page.addInitScript(({ key, value }) => {
-      window.localStorage.setItem(key, value)
-    }, APPEARANCE_DEFAULTS)
-    await page.context().addCookies([{ name: STYLE_COOKIE, value: 'classic', url: APP_URL }])
+    await chooseStyle(page, 'classic', APP_URL)
     await serveHelloTheme(page, 'ok')
+    const appRan = waitForWorkspace(page)
     await page.goto(THEME_E2E_PATH)
-    await expect(page.locator('html')).toHaveAttribute(STATUS_ATTR, 'off')
+    await appRan
+    await expect(page.locator('html')).not.toHaveAttribute(STATUS_ATTR)
     await expect(page.locator('html')).not.toHaveClass(STUDIO_CLASS)
     expect(themeRequestPaths(watch.requests)).toEqual([])
     expect(await hostGlobalType(page)).toBe('undefined')

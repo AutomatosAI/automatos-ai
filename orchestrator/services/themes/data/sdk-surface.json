@@ -1,0 +1,147 @@
+{
+  "_comment": "PRD-261 PA-18: the runtime export names of @automatos/theme-sdk by area, from frontend/lib/theme-sdk/surface/*.json. Generated: python3 orchestrator/tests/test_prd261_sdk_surface_drift.py --write. Don't edit by hand.",
+  "areas": {
+    "assets": [
+      "assetUrl"
+    ],
+    "cards": [
+      "CorePage",
+      "FilePreview",
+      "FirstRunNudge",
+      "HeaderUtilities",
+      "MadeBy",
+      "MarkdownView",
+      "MissionApproval",
+      "MissionCreatedCard",
+      "MissionSuggestionCard",
+      "TaskCard",
+      "ToolApproval",
+      "TrialExhaustedBanner",
+      "WithdrawOfferCard"
+    ],
+    "chat": [
+      "movedSomethingOnTheBoard",
+      "receiptLine",
+      "receiptLink",
+      "useChatController",
+      "useConversationList",
+      "useRecentChats",
+      "useStartChat"
+    ],
+    "context": [
+      "useEdition",
+      "useHealth",
+      "useMediaPreferences",
+      "useOnline",
+      "useRole",
+      "useTone",
+      "useTrial",
+      "useWorkspace"
+    ],
+    "deliverables": [
+      "DELIVERABLE_FEED_FILTERS",
+      "DELIVERABLE_TAB_LABELS",
+      "deliverableDownloadUrl",
+      "deliverableFileUrl",
+      "deliverableFilename",
+      "deliverableLabel",
+      "fileDownloadUrl",
+      "useAuthenticatedBlobUrl",
+      "useDeliverable",
+      "useDeliverables",
+      "useFileDownload",
+      "visibleDeliverableTabs"
+    ],
+    "events": [
+      "HOST_EVENT_NAMES",
+      "onHostEvent",
+      "openGlobalSearch",
+      "useHostEvent"
+    ],
+    "looks": [
+      "exportLook",
+      "importLook",
+      "listLooks",
+      "saveLook",
+      "useLook"
+    ],
+    "navigation": [
+      "BOARD_HREF",
+      "CHAT_HREF",
+      "DELIVERABLES_HREF",
+      "DELIVERABLE_EXPLORER_HREF",
+      "DELIVERABLE_PARAM",
+      "HostLink",
+      "LOOKS_HREF",
+      "LOOK_STYLE_HREF",
+      "QUESTIONS_HREF",
+      "chatHref",
+      "missionHref",
+      "questionHref",
+      "resolveActiveNavId",
+      "ticketHref",
+      "useCoreNav",
+      "useHostPathname",
+      "useHostRouter",
+      "useHostSearchParams"
+    ],
+    "notices": [
+      "dismissNotice",
+      "notify"
+    ],
+    "pages/agents": [
+      "useAgentStats",
+      "useAgents"
+    ],
+    "pages/assignments": [
+      "useApproveMission",
+      "useCancelMission",
+      "useFieldQuery",
+      "useMission",
+      "useMissionField",
+      "useMissions",
+      "usePauseMission",
+      "useRecommendedAssignments",
+      "useRejectMission",
+      "useReplanMission",
+      "useRerunMission",
+      "useResumeMission",
+      "useSaveAsRoutine",
+      "useUpdateMissionSettings"
+    ],
+    "pages/command-center": [
+      "useActivityFeed",
+      "useActivitySchedule",
+      "useActivityStats",
+      "useBoardEventStream",
+      "useNeedsYou",
+      "useQuestions",
+      "useWatches"
+    ],
+    "pages/documents": [
+      "useCloudConnections",
+      "useDatabaseKnowledge",
+      "useDeleteDocument",
+      "useDocumentStats",
+      "useDocumentTeamCounts",
+      "useDocuments",
+      "useSelectRootFolder",
+      "useTeams",
+      "useTriggerSync",
+      "useUploadDocument"
+    ],
+    "pages/playbooks": [
+      "useCreatePlaybook",
+      "useDeletePlaybook",
+      "useExecutePlaybook",
+      "usePlaybookExecutions",
+      "useUpdatePlaybook",
+      "useWorkflowPlaybook",
+      "useWorkflowPlaybooks"
+    ],
+    "theme": [
+      "SDK_VERSION",
+      "defineTheme"
+    ]
+  }
+}
