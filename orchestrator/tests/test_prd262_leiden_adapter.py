@@ -40,10 +40,10 @@ import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
+import graphify.cluster as graphify_cluster
 import networkx as nx
 import pytest
 import yaml
-from graphify import cluster as graphify_cluster
 
 from modules.knowledge import leiden_partition as adapter
 from tests.fixtures.leiden_graphs import GRAPHS, resolution_limit

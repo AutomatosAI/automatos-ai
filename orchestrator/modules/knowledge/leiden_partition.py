@@ -33,9 +33,9 @@ import inspect
 import json
 from typing import Any, Dict, Hashable, Iterable, List, Tuple
 
+import graphify.cluster as graphify_cluster
 import graspologic_native
 import networkx as nx
-from graphify import cluster as graphify_cluster
 
 # graphify.cluster._partition passes these to graspologic.partition.leiden.
 RANDOM_SEED = 42
