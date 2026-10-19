@@ -9,7 +9,8 @@ subject and the change (``owner_only._ask`` stores it on the grant and in the ch
 - a new mission: its goal and the steps the owner gave;
 - approving or cancelling a mission: its title and its ticket number;
 - a Composio send: every recipient (to, cc, bcc), the subject, the body's first line, each
-  attachment and every other field it carries (P256-FIX-RVW-26, ``card_question_sends``);
+  attachment and every other field it carries (P256-FIX-RVW-26, ``card_question_sends``); the
+  AI line an agent's send starts with on its own line before the first (PRD-264 EUAI-07);
 - FX-010: a heartbeat's fields, an agent's skills or plugins before and after, a new
   playbook's name and purpose, a playbook's timer, or what a delete takes for good;
 - P256-FIX-RVW-14: a timer set through a playbook update, and a plugin or skill taken
@@ -51,7 +52,9 @@ STAFFED = "{agent} does: {does}"
 # A Composio send's subject and body, by the names its actions use (its recipients: card_question_sends).
 SUBJECT_KEYS = ("subject", "title")
 BODY_KEYS = ("body", "message", "text", "content", "commentary", "markdown_text", "caption")
-SEND_FIELDS = (("subject", SUBJECT_KEYS), ("first line", BODY_KEYS))
+FIRST_LINE = "first line"
+AI_NOTICE = "AI notice"   # PRD-264 EUAI-07: the line an agent's send starts with
+SEND_FIELDS = (("subject", SUBJECT_KEYS), (FIRST_LINE, BODY_KEYS))
 
 
 def platform_question(db: Any, workspace_id: Any, action: str, params: Dict[str, Any], act: str) -> str:
@@ -77,8 +80,19 @@ def send_question(act: str, params: Any) -> str:
         if key is not None:
             used.add(key)
             said = params[key]
-            lines.append(said_line(label, _first_line(said) if label == "first line" else said))
+            lines.extend(body_lines(said) if label == FIRST_LINE else [said_line(label, said)])
     return question(act, [*lines, *sends.attachment_lines(params), *sends.other_lines(params, used)])
+
+
+def body_lines(body: Any) -> List[str]:
+    """The card's lines for a send's body: its first line, and before it, on a line of its own,
+    the AI line every agent's send starts with (PRD-264 EUAI-07), so the owner sees both what
+    goes out at the top and how the message itself begins."""
+    from modules.policy.ai_disclosure import split_send_notice
+
+    notice, rest = split_send_notice(str(body).strip())
+    first = said_line(FIRST_LINE, _first_line(rest))
+    return [said_line(AI_NOTICE, notice), first] if notice else [first]
 
 
 def first_key(params: Dict[str, Any], keys: tuple) -> Any:
@@ -147,4 +161,4 @@ READERS: Dict[str, Lines] = {
 }
 
 
-__all__ = ["BODY_KEYS", "READERS", "SUBJECT_KEYS", "first_key", "mission_create_lines", "platform_question", "send_question"]
+__all__ = ["AI_NOTICE", "BODY_KEYS", "READERS", "SUBJECT_KEYS", "body_lines", "first_key", "mission_create_lines", "platform_question", "send_question"]

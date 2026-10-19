@@ -39,7 +39,7 @@ from modules.tools.discovery.agent_sends import AGENT_SEND
 from modules.tools.discovery.agent_sends import CARD_RAISED as SEND_CARD_RAISED
 from modules.tools.discovery.owner_only import asks_before_a_send
 from tests.test_prd251_composio_deny import _execution_sites, _function, _Playbook
-from tests.test_prd256_fix_agent_sends_wait_for_the_click import _auto_run, _click, _grants
+from tests.test_prd256_fix_agent_sends_wait_for_the_click import _auto_run, _click, _grants, _told
 
 LINKEDIN_POST = "LINKEDIN_CREATE_LINKED_IN_POST"
 IMAGES = {"text": "Launch day", "images": ["/workspace/launch.png"]}
@@ -145,7 +145,8 @@ def test_a_step_of_an_auto_started_run_raises_the_card_and_posts_nothing(desk):
     assert call[WAITING] is True                                   # F401: waiting, not "Error executing …"
     (grant,) = _grants(desk)
     assert grant.details[AGENT_SEND]["lane"] == "playbook"
-    assert grant.details["params"] == {"action": LINKEDIN_POST, "params": IMAGES}
+    told = {**IMAGES, "text": _told(desk, IMAGES["text"])}   # PRD-264 EUAI-07: the post starts with the AI line
+    assert grant.details["params"] == {"action": LINKEDIN_POST, "params": told}
 
 
 def test_the_owners_click_posts_once_with_the_images_as_given(desk):

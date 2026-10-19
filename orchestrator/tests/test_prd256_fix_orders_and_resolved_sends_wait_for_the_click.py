@@ -33,6 +33,9 @@ from tests.test_prd256_fix_agent_sends_wait_for_the_click import _click, _grants
 
 SUPPLIER = "orders@kerbside.example"
 EMAIL = {"recipient_email": SUPPLIER, "subject": "Order confirmation", "body": "Hi Kerbside,\nPlease confirm."}
+# PRD-264 EUAI-07: a send the executor resolves from another name can't take the AI line, so one that
+# carries words of its own is refused (test_prd264_euai07_agent_sends_say_ai.py); one with none still asks.
+UNWRITTEN = {"recipient_email": SUPPLIER, "subject": "Order confirmation"}
 ORDER = {"email": SUPPLIER, "title": "40 Christmas boxes", "line_items": [{"variant_id": 1, "quantity": 40}]}
 FETCH = {"query": "from:kerbside"}
 NEAR_MISS = "GMAIL_SNED_EMAIL"   # no send word: the executor auto-maps it onto GMAIL_SEND_EMAIL
@@ -131,7 +134,7 @@ def _ran(desk):
 CALLS = [
     pytest.param("SHOPIFY_CREATE_ORDER", ORDER, None, "SHOPIFY_CREATE_ORDER", id="an order"),
     pytest.param("gmail-send-email", EMAIL, "GMAIL", "GMAIL_SEND_EMAIL", id="a slug form"),
-    pytest.param(NEAR_MISS, EMAIL, None, "GMAIL_SEND_EMAIL", id="a near-miss the executor auto-maps"),
+    pytest.param(NEAR_MISS, UNWRITTEN, None, "GMAIL_SEND_EMAIL", id="a near-miss the executor auto-maps"),
 ]
 
 
@@ -152,17 +155,17 @@ def test_a_near_miss_card_names_the_action_that_would_run(desk):
     """The gate let the near-miss by (no send word); the executor's re-check of the action it
     resolved to raised the card, so the card names GMAIL_SEND_EMAIL, the action the click runs."""
     assert not is_composio_send(NEAR_MISS)
-    _call(desk, _session(desk), NEAR_MISS, EMAIL)
+    _call(desk, _session(desk), NEAR_MISS, UNWRITTEN)
 
     (grant,) = _grants(desk)
     assert "GMAIL_SEND_EMAIL" in grant.question_md
-    assert grant.details["params"] == {"action": NEAR_MISS, "params": EMAIL}
+    assert grant.details["params"] == {"action": NEAR_MISS, "params": UNWRITTEN}
 
 
 def test_the_click_on_a_near_miss_card_runs_the_resolved_send_once(desk):
     from api.approval_grants import _resume_tool_call
 
-    _call(desk, _session(desk), NEAR_MISS, EMAIL)
+    _call(desk, _session(desk), NEAR_MISS, UNWRITTEN)
     (grant,) = _grants(desk)
     _click(desk, grant)
 
@@ -173,7 +176,7 @@ def test_the_click_on_a_near_miss_card_runs_the_resolved_send_once(desk):
 
 
 def test_a_near_miss_in_a_persons_chat_asks_the_owner(desk):
-    reply = _call(desk, {"driving_user_id": "7", "conversation_id": "chat-1"}, NEAR_MISS, EMAIL)
+    reply = _call(desk, {"driving_user_id": "7", "conversation_id": "chat-1"}, NEAR_MISS, UNWRITTEN)
 
     assert _ran(desk) == [] and reply["requires_confirmation"] is True and reply["owner_only"] is True
     assert len(_grants(desk)) == 1

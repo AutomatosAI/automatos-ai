@@ -7,6 +7,8 @@ import logging
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from modules.tools.execution.agent_request import marks_an_agent_request
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +43,7 @@ def _get_allowed_http_domains():
     }
 
 
+@marks_an_agent_request  # PRD-264 EUAI-07: the platform's email routes know an agent asked
 async def execute_http_request(
     executor,
     tool_name: str,

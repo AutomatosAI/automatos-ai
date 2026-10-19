@@ -10,6 +10,10 @@ D17: a deployer may reword the widget's first-turn line, but the badge is
 fixed, comes from :data:`BADGE_BY_LANGUAGE`, and a reworded line must contain
 the locale's badge term as a whole word. The server refuses any other line.
 
+EUAI-07: every body an agent sends or publishes through Composio starts with
+:data:`SEND_NOTICE`; :data:`SEND_BODY_PARAMS` names each send action's body
+parameter (``modules/tools/discovery/send_notice.py`` puts the line on).
+
 Pure: no DB, no config, no network. Whether a name is public enough to show
 (FR-15) is decided in ``core/public_principal.py``, the one copy every
 surface shares.
@@ -19,6 +23,8 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from html import escape as html_escape
+from html import unescape as html_unescape
 from types import MappingProxyType
 from typing import Any, Mapping, Optional
 
@@ -323,3 +329,164 @@ def voice_greeting(configured: Any, locale: Any) -> str:
             return stripped
     logger.warning("ai_disclosure: voice greeting refused (no AI term); speaking the default")
     return VOICE_GREETING
+
+
+# ── Agent-sent email and messages (EUAI-07, PRD-264 §8, Guidelines ¶36) ────
+# The first line of every body an agent sends or publishes through Composio. The owner's click
+# never removes it (D9, until counsel says otherwise).
+SEND_NOTICE = "Written and sent by an AI agent on behalf of {principal}."
+SEND_NOTICE_UNNAMED = "Written and sent by an AI agent on behalf of the sender."
+SEND_NOTICE_PARAGRAPH = "<p>{notice}</p>"
+# Each send action's body parameter: the words it delivers to a person. ``None``: the action
+# sends no words of its own (an order, a payment, a booking, a delete, a container published
+# by id whose caption went on the container, or a draft or campaign sent by reference, which
+# the send card refuses before any grant: card_question_sends.refused_as_sent_by_reference).
+SEND_BODY_PARAMS: Mapping[str, Optional[str]] = MappingProxyType({
+    # Email
+    "GMAIL_SEND_EMAIL": "body",
+    "GMAIL_REPLY_TO_THREAD": "message_body",
+    "GMAIL_REPLY_TO_EMAIL": "body",
+    "GMAIL_FORWARD_MESSAGE": "additional_text",
+    "OUTLOOK_SEND_EMAIL": "body",
+    "OUTLOOK_REPLY_EMAIL": "comment",
+    "OUTLOOK_CREATE_DRAFT_REPLY": "comment",
+    # Messages
+    "SLACK_SEND_MESSAGE": "text",
+    "SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL": "text",
+    "SLACK_CHAT_POST_MESSAGE": "text",
+    "SLACK_SCHEDULE_MESSAGE": "text",
+    "DISCORDBOT_CREATE_MESSAGE": "content",
+    "TELEGRAM_SEND_MESSAGE": "text",
+    "WHATSAPP_SEND_MESSAGE": "text",
+    "TWILIO_CREATE_MESSAGE": "Body",
+    "TWILIO_SEND_SMS": "body",
+    "TWITTER_CREATE_A_NEW_DM_CONVERSATION": "text",
+    "GITHUB_CREATE_AN_ISSUE_COMMENT": "body",
+    "FACEBOOK_REPLY_TO_POST_COMMENT": "message",
+    "PUSHOVER_NOTIFY_USER": "message",
+    # Posts (the seeded channels' "$copy" parameter, modules/socials/channel_adapters.py)
+    "LINKEDIN_CREATE_LINKED_IN_POST": "commentary",
+    "LINKEDIN_CREATE_VIDEO_POST": "commentary",
+    "LINKEDIN_CREATE_POST": "commentary",
+    "LINKEDIN_CREATE_IMAGE_POST": "commentary",
+    "LINKEDIN_CREATE_SHARE": "commentary",
+    "LINKEDIN_CREATE_ARTICLE_OR_URL_SHARE": "commentary",
+    "TWITTER_CREATION_OF_A_POST": "text",
+    "TWITTER_CREATE_TWEET": "text",
+    "INSTAGRAM_POST_IG_USER_MEDIA": "caption",
+    "INSTAGRAM_CREATE_CAROUSEL_CONTAINER": "caption",
+    "INSTAGRAM_CREATE_POST": "caption",
+    "TIKTOK_UPLOAD_VIDEO": "caption",
+    "TIKTOK_PUBLISH_VIDEO": "caption",
+    "TIKTOK_POST_PHOTO": "description",
+    "YOUTUBE_UPLOAD_VIDEO": "description",
+    "REDDIT_CREATE_REDDIT_POST": "text",
+    "MASTODON_CREATE_POST": "status",
+    # No words of their own
+    "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH": None,
+    "INSTAGRAM_MEDIA_PUBLISH": None,
+    "INSTAGRAM_PUBLISH_MEDIA": None,
+    "THREADS_PUBLISH_MEDIA": None,
+    "TWITTER_POST_DELETE_BY_POST_ID": None,
+    "LINKEDIN_DELETE_POST": None,
+    "GMAIL_SEND_DRAFT": None,
+    "OUTLOOK_SEND_DRAFT": None,
+    "MAILCHIMP_SEND_CAMPAIGN": None,
+    "MAILCHIMP_SCHEDULE_CAMPAIGN": None,
+    "SHOPIFY_CREATE_ORDER": None,
+    "SHOPIFY_CANCEL_ORDER": None,
+    "SHOPIFY_CREATE_REFUND": None,
+    "SQUARE_PLACE_ORDER": None,
+    "AMAZON_PURCHASE_ITEM": None,
+    "STRIPE_CREATE_PAYMENT_INTENT": None,
+    "STRIPE_CREATE_INVOICE": None,
+    "STRIPE_CREATE_CHARGE": None,
+    "STRIPE_CREATE_REFUND": None,
+    "STRIPE_CREATE_PAYOUT": None,
+    "STRIPE_CREATE_TRANSFER": None,
+    "PAYPAL_CREATE_PAYOUT": None,
+    "CALENDLY_BOOK_MEETING": None,
+    "CALCOM_CREATE_BOOKING": None,
+})
+# A send the map does not name, or one whose call carries its body under another name: the body
+# is the first of these the call fills with text (the approval card's body names,
+# card_question.BODY_KEYS, and the generic channel adapter's text fields but "status", which is often an
+# enum). Fail toward telling.
+SEND_BODY_FALLBACK: tuple[str, ...] = (
+    "body", "message_body", "message", "text", "content", "commentary", "markdown_text", "caption",
+    "description", "comment",
+)
+# A toolkit's per-action tool may be named with this prefix (composio_SLACK_SEND_MESSAGE).
+COMPOSIO_TOOL_PREFIX = "COMPOSIO_"
+HTML_FLAG = "is_html"
+_SLUG_SEPARATOR = re.compile(r"[^A-Z0-9]+")
+_HTML_TAG = re.compile(r"<\s*(?:html|body|p|div|br|table|span|h[1-6]|ul|ol|li|a|strong|em)\b[^>]*>", re.IGNORECASE)
+_HTML_BODY_OPEN = re.compile(r"<body\b[^>]*>", re.IGNORECASE)
+_SEND_NOTICE_PREFIX = re.escape(SEND_NOTICE.split("{principal}", maxsplit=1)[0])
+_PLAIN_SEND_NOTICE = re.compile(rf"\A({_SEND_NOTICE_PREFIX}[^\n]*?)(?:{NOTICE_SEPARATOR}|\Z)")
+_HTML_SEND_NOTICE = re.compile(rf"\A\s*<p>({_SEND_NOTICE_PREFIX}[^<]*)</p>")
+
+
+def send_notice(principal: Optional[str]) -> str:
+    """The first line of an agent's send (FR-15 decides ``principal``, a public name or ``None``)."""
+    if principal:
+        return SEND_NOTICE.format(principal=principal)
+    return SEND_NOTICE_UNNAMED
+
+
+def send_action_key(slug: Any) -> str:
+    """A send action as :data:`SEND_BODY_PARAMS` keys it: 'gmail-send-email' → GMAIL_SEND_EMAIL;
+    a per-action tool named composio_SLACK_SEND_MESSAGE → SLACK_SEND_MESSAGE."""
+    key = "_".join(word for word in _SLUG_SEPARATOR.split(str(slug or "").upper()) if word)
+    bare = key.removeprefix(COMPOSIO_TOOL_PREFIX)
+    return bare if bare != key and bare in SEND_BODY_PARAMS else key
+
+
+def send_body_key(slug: Any, params: Any) -> Optional[str]:
+    """The parameter of ``params`` that holds the body ``slug`` sends, or ``None`` (the action
+    sends no words of its own, or the call carries no text body)."""
+    if not isinstance(params, Mapping):
+        return None
+    action = send_action_key(slug)
+    if action in SEND_BODY_PARAMS and SEND_BODY_PARAMS[action] is None:
+        return None
+    named = SEND_BODY_PARAMS.get(action)
+    keys = (named, *SEND_BODY_FALLBACK) if named else SEND_BODY_FALLBACK
+    return next((key for key in keys if isinstance(params.get(key), str) and params[key].strip()), None)
+
+
+def is_html_body(text: str, params: Mapping[str, Any]) -> bool:
+    """Whether a body is HTML: the call's own ``is_html`` flag when it sets one, else its tags."""
+    flag = params.get(HTML_FLAG)
+    if isinstance(flag, bool):
+        return flag
+    return _HTML_TAG.search(text) is not None
+
+
+def with_send_notice(text: str, notice: str, html: bool) -> str:
+    """``text`` with ``notice`` as its first line, or for HTML its first paragraph (inside
+    ``<body>`` when the document has one). A body that already starts with this exact notice
+    (a call sent again on the owner's click) is returned as it is, so the line is never doubled;
+    any other line, one naming someone else included, gets the notice above it."""
+    if not html:
+        if text == notice or text.startswith(f"{notice}{NOTICE_SEPARATOR}"):
+            return text
+        return prepend_notice(notice, text)
+    paragraph = SEND_NOTICE_PARAGRAPH.format(notice=html_escape(notice, quote=False))
+    opened = _HTML_BODY_OPEN.search(text)
+    at = opened.end() if opened else 0
+    if text[at:].lstrip().startswith(paragraph):
+        return text
+    return f"{text[:at]}{paragraph}{text[at:]}"
+
+
+def split_send_notice(text: str) -> tuple[Optional[str], str]:
+    """``(notice, rest)`` when ``text`` starts with a send notice (plain or a first HTML
+    paragraph), so a card can show it on its own line; ``(None, text)`` otherwise."""
+    plain = _PLAIN_SEND_NOTICE.match(text)
+    if plain:
+        return plain.group(1), text[plain.end():]
+    tagged = _HTML_SEND_NOTICE.match(text)
+    if tagged:
+        return html_unescape(tagged.group(1)), text[tagged.end():]
+    return None, text
