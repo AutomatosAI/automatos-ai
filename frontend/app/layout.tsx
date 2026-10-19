@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'Automatos AI Platform',
-  description: 'Enterprise AI automation and agent management platform',
+  description: 'Automatos Studio: agents, documents, socials and a marketplace on the open-source Automatos OS',
 }
 
 // PRD-260 M07: <html className> is the font variables only, the same string on every render, so

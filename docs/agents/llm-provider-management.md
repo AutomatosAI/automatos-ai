@@ -122,7 +122,7 @@ Services are mapped to three primary categories in `SERVICE_CATEGORY_MAP`:
 | **OpenAI** | `LLMProvider.OPENAI` | `OpenAIProvider` | Supports native tool calling and strict schema sanitization `[orchestrator/core/llm/clients/openai_client.py:21-22]`. |
 | **Anthropic** | `LLMProvider.ANTHROPIC` | `AnthropicProvider` | Handles Claude prompt caching and multi-block formatting. |
 | **Google** | `LLMProvider.GOOGLE` | `GoogleProvider` | Integrates Gemini models and multimodal payload blocks. |
-| **OpenRouter** | `LLMProvider.OPENROUTER` | `OpenRouterProvider` | Aggregator for 200+ models. Includes logic to extract Gemini-style images from `images` fields `[orchestrator/core/llm/clients/openrouter_client.py:26-27]`. |
+| **OpenRouter** | `LLMProvider.OPENROUTER` | `OpenRouterProvider` | Aggregator for 400+ models. Includes logic to extract Gemini-style images from `images` fields `[orchestrator/core/llm/clients/openrouter_client.py:26-27]`. |
 | **Grok** | `LLMProvider.GROK` | `GrokProvider` | xAI Grok models via OpenAI-compatible wrapper `[orchestrator/core/llm/clients/grok_client.py:22-26]`. |
 | **HuggingFace** | `LLMProvider.HUGGINGFACE` | `HuggingFaceProvider` | Used for TGI or local inference endpoints. |
 

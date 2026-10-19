@@ -71,9 +71,10 @@ the models you want — "Kimi K3 · NVIDIA" is a different route from
 route in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*, model
 *Kimi K3*. (PRD-236)
 
-**Skills.** A fresh install has none. **Marketplace → Capabilities → Import from
-GitHub**, then *Use baseline repo* to import the free library at
-`https://github.com/AutomatosAI/automatos-skills`.
+**Skills.** A fresh install ships the platform's 12 built-in skills (Auto's
+platform skill and the Socials and design skills). For more, **Marketplace →
+Capabilities → Import from GitHub**, then *Use baseline repo* to import the free
+library of 140+ skills at `https://github.com/AutomatosAI/automatos-skills`.
 
 **Your files.** Everything your agents write lives in one folder on your
 machine: `AUTOMATOS_WORKSPACE_DIR` in `.env` (default `./workspaces` next to
@@ -141,10 +142,11 @@ finished and 200 once the instance is usable.
 - **No login.** `AUTH_EDITION=local` — you land straight in a single default
   workspace, no accounts to create. The one operator is you: set your name
   under **Settings → Profile** and Auto greets you by it.
-- **Something to run on the first boot.** The local edition seeds Auto, a
-  starter roster (Researcher, Writer, Analyst), one Playbook — *Two-minute
-  brief* — and a welcome Deliverable under **Deliverables → Blogs**. Run the
-  Playbook from the Playbooks page with a topic of your own.
+- **Something to run on the first boot.** The local edition seeds five agents
+  (Auto, a Brand Designer and a starter roster of Researcher, Writer and
+  Analyst), one Playbook — *Two-minute brief* — and a welcome Deliverable under
+  **Deliverables → Blogs**. Run the Playbook from the Playbooks page with a
+  topic of your own.
 - **Web access for your agents (PRD-240).** Reading a page works out of the
   box — every agent has `platform_web_fetch`, no key, no app to connect, nothing to
   assign. Private and internal addresses are always refused. Searching the
