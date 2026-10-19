@@ -915,16 +915,15 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 That swaps the frontend and backend to their development stages and mounts your
 source. It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
 
-Two things are opt-in to keep the default install small:
+One thing is opt-in to keep the default install small:
 
 ```bash
 # headless Chromium for the workspace_html_to_png tool (+1.2 GB)
 docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
-
-# Leiden clustering for the Knowledge Graph (+660 MB; without it the graph
-# still clusters, using networkx's Louvain — lower partition quality)
-docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
 ```
+
+The Knowledge Graph's Leiden clustering is in every install: it runs on
+graspologic-native, about 1 MB, so it needs no build option (PRD-262 US-027).
 
 [CONTRIBUTING.md](../../CONTRIBUTING.md).
 

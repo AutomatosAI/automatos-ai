@@ -26,7 +26,9 @@ the adapter to graspologic without graspologic installed:
   the API lock's graspologic-native and networkx; the reference script refuses to
   record without graspologic; CI re-records whenever any of it changes;
 - test.yml's prod-image-parity runs the adapter inside the default-argument (Railway)
-  build and fails if graspologic imports there; its snippet runs here too.
+  build and fails if graspologic imports there; its snippet runs here too;
+- no file outside docs/PRDS names the graph-extras build argument any more: the
+  Dockerfile, compose, the workflows, the kind script and the docs stopped offering it.
 
 The adapter and graspologic-native run here; graspologic never does.
 """
@@ -350,3 +352,12 @@ def test_prod_image_parity_clusters_with_graspologic_native_and_cannot_import_gr
                           timeout=120, check=False)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "graspologic-native clusters in the image" in done.stdout
+
+
+def test_no_file_outside_the_prds_names_the_graph_extras_build_argument():
+    """PRD-262 US-027: git grep for the argument's name, outside docs/PRDS, finds nothing."""
+    name = "INSTALL_GRAPH" + "_EXTRAS"  # in two pieces, so this guard is not itself a match
+    proc = subprocess.run(["git", "grep", "-l", name, "--", ".", ":!docs/PRDS"], cwd=str(ROOT),
+                          capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode in (0, 1), proc.stderr  # git grep exits 1 when nothing matches
+    assert proc.stdout.split() == [], proc.stdout

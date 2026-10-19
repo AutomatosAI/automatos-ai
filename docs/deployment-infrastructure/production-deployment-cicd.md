@@ -111,7 +111,7 @@ The codebase utilizes multi-stage Docker builds to ensure development agility an
 
 ### Backend Dockerfile (`orchestrator/Dockerfile`)
 The backend build is split into multiple stages:
-1.  **pybuild**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and the locked Python packages from `requirements.lock`, with uv, every pin hash-checked (PRD-262 US-022). When `INSTALL_GRAPH_EXTRAS` is `true` (default for production) it installs `requirements-leiden.lock`, which adds `graphifyy[leiden]` [orchestrator/Dockerfile]().
+1.  **pybuild**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and the locked Python packages from `requirements.lock`, with uv, every pin hash-checked (PRD-262 US-022). Production installs the same lock as every other build: the Knowledge Graph's Leiden clustering runs on `graspologic-native`, which the lock pins (PRD-262 US-027) [orchestrator/Dockerfile]().
 2.  **base**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`, `libcairo2`, `fonts-dejavu-core`, `fonts-urw-base35` [orchestrator/Dockerfile:63-107](). It copies the installed Python packages from the `pybuild` stage [orchestrator/Dockerfile:83]().
 3.  **development**: Includes hot-reload via `--reload` and mounts source code for active development [orchestrator/Dockerfile:91-131]().
 4.  **production**: An optimized stage that copies only necessary application code, creates directories, and sets up the entrypoint for production execution [orchestrator/Dockerfile:136-150]().
