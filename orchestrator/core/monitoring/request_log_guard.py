@@ -39,7 +39,8 @@ class RequestLogGuard(logging.Filter):
 def guard_request_logs() -> None:
     """Put the guard on every handler the root logger has: ours, one an SDK's own
     basicConfig added first, or a script's ``logging.basicConfig``. A script that
-    configures logging itself calls this right after."""
+    configures logging itself calls this right after. It covers the handlers there
+    now: code that adds a root handler later (a log exporter, say) calls it again."""
     for handler in logging.getLogger().handlers:
         if not any(isinstance(f, RequestLogGuard) for f in handler.filters):
             handler.addFilter(RequestLogGuard())

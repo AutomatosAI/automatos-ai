@@ -99,15 +99,34 @@ def test_a_scripts_own_handler_is_guarded_once():
         logging.getLogger("httpx").setLevel(logging.NOTSET)
 
 
-def _configures_logging(path: Path) -> bool:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-               and node.func.attr == "basicConfig" for node in ast.walk(tree))
+_CONFIGURERS = {"basicConfig", "fileConfig", "dictConfig"}
+
+
+def _calls(node: ast.AST, name: str) -> bool:
+    return any(isinstance(n, ast.Call) and getattr(n.func, "attr", getattr(n.func, "id", None)) == name
+               for n in ast.walk(node))
+
+
+def _unguarded_configs(path: Path) -> list:
+    """Each logging-config call in ``path`` with no ``guard_request_logs()`` after it in
+    the same block of statements, as ``file:line``."""
+    found = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        body = getattr(node, "body", None)
+        if not isinstance(body, list):
+            continue
+        for index, statement in enumerate(body):
+            if any(_calls(statement, name) for name in _CONFIGURERS) and not isinstance(
+                    statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.If, ast.With, ast.Try)):
+                if not any(_calls(later, "guard_request_logs") for later in body[index:]):
+                    found.append(f"{path.relative_to(_ORCH)}:{statement.lineno}")
+    return found
 
 
 def test_every_script_that_configures_logging_puts_the_guard_on_its_handlers():
-    """A new script with logging.basicConfig and no guard fails here."""
-    unguarded = [str(path.relative_to(_ORCH)) for path in sorted(_ORCH.rglob("*.py"))
-                 if "tests" not in path.parts and ".venv" not in path.parts and _configures_logging(path)
-                 and "guard_request_logs()" not in path.read_text(encoding="utf-8")]
+    """A script, job or migration that sets up logging itself (basicConfig, fileConfig,
+    dictConfig) calls guard_request_logs() after it, in the same block. A new one fails here."""
+    unguarded = [hit for path in sorted(_ORCH.rglob("*.py"))
+                 if "tests" not in path.parts and ".venv" not in path.parts
+                 for hit in _unguarded_configs(path)]
     assert unguarded == []
