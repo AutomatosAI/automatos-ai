@@ -43,7 +43,8 @@ FAIL_MODE = {**BUDGETS, "mode": "fail"}
 WARN_MODE = {**BUDGETS, "mode": "warn"}  # report only, as until US-004
 EDGE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "prd262_edge_images.json"
 EDGE = json.loads(EDGE_FIXTURE.read_text(encoding="utf-8"))
-COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml", "docker-compose.images.yml")
+# docker-compose.images.yml went with PRD-262 US-036: docker-compose.yml names the published images.
+COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml")
 
 APP_COPY = "COPY --chown=1000:1000 . ."
 WRITABLE = ("/app/logs", "/app/vector_stores", "/app/projects", "/app/exports", "/app/data")

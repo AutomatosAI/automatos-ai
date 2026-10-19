@@ -70,10 +70,11 @@ def test_the_worker_keeps_every_workspace_in_a_named_volume(base):
     assert mounts[_LOCAL_ROOT][0].startswith("${AUTOMATOS_WORKSPACE_DIR")
 
 
-@pytest.mark.parametrize("compose_file", ["docker-compose.yml", "docker-compose.images.yml"])
-def test_the_backend_sees_the_same_files_read_only(compose_file):
+# docker-compose.yml runs the published images itself since PRD-262 US-036, so the
+# images overlay this case also read is gone; make dev's overlay adds no workspace mount.
+def test_the_backend_sees_the_same_files_read_only(base):
     """Session adoption, deliverable sizes and HARNESS read /workspaces/<id> directly."""
-    mounts = _targets(_compose(compose_file)["services"]["backend"]["volumes"])
+    mounts = _targets(base["services"]["backend"]["volumes"])
 
     assert mounts["/workspaces"] == (_VOLUME, "ro")
     assert mounts[_LOCAL_ROOT][1] == "ro"

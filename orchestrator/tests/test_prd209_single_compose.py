@@ -11,12 +11,14 @@ guard below proves it declares no service the canonical file does not, and
 carries no ``image:`` of its own — so it can never become a rival source of
 truth the way the infrastructure/ files did.
 
-``docker-compose.images.yml`` (``make up-images``) is the one override allowed an
-``image:``, and only a narrow one: for a service the canonical file BUILDS from
-source, the image this repo's own ``.github/workflows/images.yml`` publishes from
-that same Dockerfile (``ghcr.io/automatosai/automatos-<name>:${AUTOMATOS_IMAGE_TAG:-edge}``).
-It swaps where the same build comes from; it cannot add a service or point a
-service at anything else.
+Since PRD-262 US-036 the canonical file itself names the images this repo's
+``.github/workflows/images.yml`` publishes (``ghcr.io/automatosai/automatos-<name>:
+${AUTOMATOS_IMAGE_TAG:-edge}``), next to their ``build:``, and
+``docker-compose.images.yml`` is gone. The dev override may name an image in one
+narrow way only: a local name for its own development build of a service the
+canonical file builds (``automatos-<name>:dev``), with ``pull_policy: build``, so
+``make dev`` never tags a build with a published name and never pulls one. It
+cannot add a service or point a service at anything else.
 
 Pure/static — reads the git index (`git ls-files`); no Docker.
 """
@@ -42,10 +44,11 @@ def _tracked_compose_files() -> list[str]:
     return [ln for ln in proc.stdout.splitlines() if _COMPOSE.search(ln)]
 
 
-_PUBLISHED_IMAGES_OVERRIDE = "docker-compose.images.yml"
-_ALLOWED_OVERRIDES = {"docker-compose.dev.yml", _PUBLISHED_IMAGES_OVERRIDE}
-# The only image an override may set: this repo's published build of a service.
-_PUBLISHED_IMAGE = re.compile(r"^ghcr\.io/automatosai/automatos-[a-z0-9-]+:\$\{AUTOMATOS_IMAGE_TAG:-edge\}$")
+_DEV_OVERRIDE = "docker-compose.dev.yml"
+_ALLOWED_OVERRIDES = {_DEV_OVERRIDE}
+# The only image an override may set: the dev override's local name for its own build.
+_DEV_IMAGE = re.compile(r"^automatos-[a-z0-9-]+:dev$")
+_BUILD_ONLY = "build"
 
 
 def _load_override(path: Path) -> dict:
@@ -67,11 +70,12 @@ def _load_override(path: Path) -> dict:
     return yaml.load(path.read_text(), Loader=_Loader) or {}
 
 
-def _image_allowed(name: str, svc: str, image: str, canonical_services: dict) -> bool:
-    """Only the published-images override, only this repo's published build of a
-    service the canonical file builds from source."""
+def _image_allowed(name: str, svc: str, body: dict, canonical_services: dict) -> bool:
+    """Only the dev override, only a local ``automatos-<name>:dev`` that is always built,
+    only for a service the canonical file builds from source."""
     builds_from_source = "build" in (canonical_services.get(svc) or {})
-    return name == _PUBLISHED_IMAGES_OVERRIDE and builds_from_source and bool(_PUBLISHED_IMAGE.match(image))
+    local_build = bool(_DEV_IMAGE.match(body.get("image") or "")) and body.get("pull_policy") == _BUILD_ONLY
+    return name == _DEV_OVERRIDE and builds_from_source and local_build
 
 
 def test_exactly_one_tracked_stack_file():
@@ -103,19 +107,32 @@ def test_the_dev_override_is_only_an_override():
         assert not unknown, f"{name} defines services absent from the canonical stack: {sorted(unknown)}"
         for svc, body in (override.get("services") or {}).items():
             image = (body or {}).get("image")
-            assert image is None or _image_allowed(name, svc, image, canonical_services), (
+            assert image is None or _image_allowed(name, svc, body, canonical_services), (
                 f"{name}:{svc} pins image {image!r} — overrides must not choose what the stack runs "
-                f"(only {_PUBLISHED_IMAGES_OVERRIDE} may swap a source-built service for its own "
-                f"published build, ghcr.io/automatosai/automatos-<name>:${{AUTOMATOS_IMAGE_TAG:-edge}})"
+                f"(only {_DEV_OVERRIDE} may name its own build of a source-built service, "
+                f"automatos-<name>:dev with pull_policy: build)"
             )
 
 
 def test_the_image_exception_stays_narrow():
-    """The published-images rule refuses everything but this repo's own build."""
+    """The dev-image rule refuses everything but a local, always-built name in the dev override."""
     services = {"backend": {"build": {"context": "./orchestrator"}}, "postgres": {"image": "pgvector/pgvector:pg16"}}
-    published = "ghcr.io/automatosai/automatos-api:${AUTOMATOS_IMAGE_TAG:-edge}"
-    assert _image_allowed(_PUBLISHED_IMAGES_OVERRIDE, "backend", published, services)
-    assert not _image_allowed("docker-compose.dev.yml", "backend", published, services)
-    assert not _image_allowed(_PUBLISHED_IMAGES_OVERRIDE, "postgres", published, services)
-    assert not _image_allowed(_PUBLISHED_IMAGES_OVERRIDE, "backend", "ghcr.io/someone/else:latest", services)
-    assert not _image_allowed(_PUBLISHED_IMAGES_OVERRIDE, "backend", "ghcr.io/automatosai/automatos-api:latest", services)
+    dev = {"image": "automatos-api:dev", "pull_policy": "build"}
+    assert _image_allowed(_DEV_OVERRIDE, "backend", dev, services)
+    assert not _image_allowed("docker-compose.core.yml", "backend", dev, services)
+    assert not _image_allowed(_DEV_OVERRIDE, "postgres", dev, services)
+    assert not _image_allowed(_DEV_OVERRIDE, "backend", {"image": "automatos-api:dev"}, services)
+    for image in ("ghcr.io/automatosai/automatos-api:${AUTOMATOS_IMAGE_TAG:-edge}", "ghcr.io/someone/else:latest",
+                  "automatos-api:latest"):
+        assert not _image_allowed(_DEV_OVERRIDE, "backend", {**dev, "image": image}, services), image
+
+
+def test_the_canonical_file_names_only_this_repos_published_images_for_what_it_builds():
+    """docker-compose.yml's source-built services name images.yml's published image (PRD-262 US-036)."""
+    import yaml
+
+    published = re.compile(r"^ghcr\.io/automatosai/automatos-[a-z0-9-]+:\$\{AUTOMATOS_IMAGE_TAG:-edge\}$")
+    services = yaml.safe_load((_REPO_ROOT / "docker-compose.yml").read_text())["services"]
+    named = {svc: body["image"] for svc, body in services.items() if "build" in body and "image" in body}
+    assert set(named) == {"backend", "frontend", "workspace-worker"}
+    assert all(published.match(image) for image in named.values()), named

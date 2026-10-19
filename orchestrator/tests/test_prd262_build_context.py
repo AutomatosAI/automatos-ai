@@ -47,7 +47,8 @@ DOCKERFILE = (ORCHESTRATOR / "Dockerfile").read_text(encoding="utf-8")
 API_DEFAULTS = (ROOT / "envs" / "api.defaults").read_text(encoding="utf-8")
 SMOKE_SCRIPT = ROOT / "scripts" / "ci" / "smoke-fresh-clone.sh"
 WORKFLOWS = ROOT / ".github" / "workflows"
-COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml", "docker-compose.images.yml")
+# docker-compose.images.yml went with PRD-262 US-036: docker-compose.yml names the published images.
+COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml")
 WORKDIR = "/app"
 US017_RULES = (
     "**/__pycache__",

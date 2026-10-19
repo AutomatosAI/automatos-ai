@@ -10,7 +10,9 @@ A pin with nothing to move it freezes security fixes, so the two travel together
   updater reads FROM lines only, so Node comes through a named ``FROM … AS node``
   stage (US-007);
 * every third-party compose image is ``name:tag@sha256:<digest>``; only this
-  repository's published images follow ``AUTOMATOS_IMAGE_TAG``;
+  repository's own images are not: the published ones follow ``AUTOMATOS_IMAGE_TAG``,
+  and make dev's local build names (``automatos-<name>:dev``) are never pulled. The
+  docker-compose updater ignores both (PRD-262 US-036);
 * .github/dependabot.yml: docker covers exactly the directories that hold a
   tracked Dockerfile, docker-compose every compose file, github-actions the
   workflows; every entry is weekly and puts every dependency in a group; docker
@@ -36,7 +38,10 @@ DEPENDABOT = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
 
 # name:tag@sha256:<64 hex>; the name may carry a registry host and port.
 PINNED = re.compile(r"^[^\s@]+:[\w][\w.-]{0,127}@sha256:[0-9a-f]{64}$")
-FIRST_PARTY = re.compile(r"^ghcr\.io/automatosai/automatos-[a-z-]+:\$\{AUTOMATOS_IMAGE_TAG:-edge\}$")
+# This repository's own images: the published ones (docker-compose.yml) and make dev's local
+# build names (docker-compose.dev.yml), which are never pulled (PRD-262 US-036).
+FIRST_PARTY = re.compile(r"^(?:ghcr\.io/automatosai/automatos-[a-z-]+:\$\{AUTOMATOS_IMAGE_TAG:-edge\}"
+                         r"|automatos-[a-z-]+:dev)$")
 # The same file names test_prd262_production_last_stage.py and test_prd234_s1a_compose_bind.py read.
 DOCKERFILE_NAME = re.compile(
     r"(?:^|/)(?:Dockerfile(?:\.(?!md$|txt$|dockerignore$)[\w-]+)?|[\w.-]+\.[Dd]ockerfile)$"
@@ -173,6 +178,24 @@ def test_every_third_party_compose_image_is_pinned_as_tag_at_digest():
     third_party = {where: image for where, image in images.items() if not FIRST_PARTY.match(image)}
     assert len(third_party) >= 6, f"the compose search found too few images: {sorted(images)}"
     assert {where: image for where, image in third_party.items() if not PINNED.match(image)} == {}
+
+
+
+def test_this_repositorys_own_compose_images_are_its_published_and_dev_names():
+    """docker-compose.yml names the three published images, docker-compose.dev.yml their dev builds."""
+    own = {where: image for where, image in _compose_images().items() if FIRST_PARTY.match(image)}
+    published = {where for where, image in own.items() if image.startswith("ghcr.io/")}
+    dev = {where for where, image in own.items() if image.endswith(":dev")}
+    services = ("backend", "frontend", "workspace-worker")
+    assert published == {f"docker-compose.yml:{service}" for service in services}
+    assert dev == {f"docker-compose.dev.yml:{service}" for service in services}
+
+
+def test_the_compose_updater_ignores_this_repositorys_own_images():
+    """Neither name is a registry pin: the tag moves with AUTOMATOS_IMAGE_TAG, and a dev build is local."""
+    (entry,) = _entries("docker-compose")
+    whole = {rule["dependency-name"] for rule in entry.get("ignore") or [] if not rule.get("update-types")}
+    assert {"automatos-*", "ghcr.io/automatosai/automatos-*"} <= whole
 
 
 # ── the updater ─────────────────────────────────────────────────────────────

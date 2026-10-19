@@ -4,13 +4,17 @@
 tests feed it recorded shapes instead of Docker:
 
 * ``target`` picks ``sha-<7>`` after a main publish, ``pr-<7>`` on a pull request, and a
-  manual run's tag, refusing anything that is not a tag;
-* ``pull`` times the pull and counts the bytes the default-route interface received;
+  manual run's tag, refusing anything that is not a tag, and the tag to pin for
+  ``make up`` (none after a push: make up picks it, PRD-262 US-036);
+* ``base`` finds the merge base's published ``sha-<7>``, or its nearest published ancestor;
+* ``pull`` times the pull (``make up``) and counts the bytes the default-route interface
+  received; with ``--log`` it keeps the output and counts registry rate limits (429);
 * ``workers`` reads ``docker top``: the production command runs 4 uvicorn workers
   without ``--reload``; the development stage's ``--reload`` and a wrong count fail;
 * ``images`` passes a pulled image whose ``RepoDigests`` holds the GHCR index digest,
-  and fails a locally built one, a ``local-*`` tag, a compose-built image, and a
-  missing or wrong revision label;
+  and fails a locally built one, a ``local-*`` tag, a compose-built image, an app image
+  also present under another tag, and a missing or wrong revision label; a source build
+  (mode ``build``) must be tagged ``local-*``;
 * ``report`` works out the first run (pull start to ``/health/ready`` and ``:3000``)
   and writes the summary section, also for a run that stopped early;
 * ``image_registry.resolve`` reads the digest a tag points at.
@@ -23,6 +27,7 @@ import importlib.util
 import io
 import json
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -86,8 +91,62 @@ def test_target_refuses_what_it_cannot_boot(event, sha, tag):
 def test_the_target_command_writes_the_job_outputs(tmp_path, capsys):
     outputs = tmp_path / "out"
     assert tool.main(["target", "--event", "workflow_run", "--sha", SHA, "--outputs", str(outputs)]) == 0
-    assert outputs.read_text().splitlines() == [f"tag={TAG}", f"revision={SHA}"]
+    assert outputs.read_text().splitlines() == [f"tag={TAG}", f"revision={SHA}", "pin="]
     assert f"tag={TAG}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("event,trigger,tag,pin", [
+    ("workflow_run", "push", TAG, ""),  # make up picks the commit's own images
+    ("workflow_run", "workflow_dispatch", TAG, ""),
+    ("workflow_run", "schedule", "weekly-20261019", "weekly-20261019"),  # make up would pick the sha, not the rebuild
+    ("workflow_dispatch", "", "edge", "edge"),
+    ("pull_request", "", "pr-0d9f0ac", "pr-0d9f0ac"),
+])
+def test_make_up_picks_the_tag_only_after_a_push(event, trigger, tag, pin):
+    assert tool.pin_for(event, trigger, tag) == pin
+
+
+# --------------------------------------------------------------------------- base
+
+
+def _published_sha_tags(monkeypatch, published: set):
+    def resolve(ref):
+        if ref.rsplit(":", 1)[1] in published:
+            return "sha256:" + "a" * 64
+        raise urllib.error.HTTPError(ref, 404, "manifest unknown", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr(tool.registry, "resolve", resolve)
+
+
+OLDER = "1" * 40
+
+
+def test_the_merge_base_runs_its_own_sha_when_ci_published_it(monkeypatch):
+    _published_sha_tags(monkeypatch, {TAG})
+    assert tool.published_base([SHA, OLDER]) == {"tag": TAG, "revision": SHA}
+
+
+def test_a_merge_base_without_images_falls_back_to_its_nearest_published_ancestor(monkeypatch, tmp_path, capsys):
+    _published_sha_tags(monkeypatch, {"sha-1111111"})
+    candidates, outputs = tmp_path / "candidates", tmp_path / "out"
+    candidates.write_text(f"{SHA}\n{OLDER}\n")
+    assert tool.main(["base", "--merge-base", SHA, "--candidates", str(candidates), "--outputs", str(outputs)]) == 0
+    assert outputs.read_text().splitlines() == ["tag=sha-1111111", f"revision={OLDER}"]
+    assert "::warning title=smoke-images::CI published no images for the merge base 0d9f0ac594c3" in capsys.readouterr().out
+
+
+def test_no_published_candidate_fails_and_an_unreadable_registry_raises(monkeypatch, tmp_path):
+    _published_sha_tags(monkeypatch, set())
+    candidates = tmp_path / "candidates"
+    candidates.write_text(f"{OLDER}\n")
+    assert tool.main(["base", "--merge-base", SHA, "--candidates", str(candidates)]) == 1
+
+    def unreachable(ref):
+        raise urllib.error.HTTPError(ref, 503, "unavailable", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr(tool.registry, "resolve", unreachable)
+    with pytest.raises(urllib.error.HTTPError):
+        tool.published_base([SHA])
 
 
 # --------------------------------------------------------------------------- pull
@@ -148,6 +207,30 @@ def test_the_pull_command_runs_what_follows_the_separator(monkeypatch, tmp_path)
     assert tool.main(args) == 0
     assert seen == {"command": ["docker", "compose", "-f", "a.yml", "pull", "--quiet"], "images_before": 3}
     assert json.loads(out.read_text())["received_bytes"] == 2_000_000
+
+
+LIMITED = "Error response from daemon: toomanyrequests: You have reached your pull rate limit."
+
+
+def test_the_pull_keeps_make_ups_output_and_records_a_docker_hub_429(monkeypatch, tmp_path, capsys):
+    def fake_run_pull(command, images_before, runner):
+        return runner(command), {"seconds": 1.0, "received_bytes": 5, "interface": "eth0"}
+
+    monkeypatch.setattr(tool, "run_pull", fake_run_pull)
+    out, log = tmp_path / "pull.json", tmp_path / "make-up.log"
+    script = f"print('pulling redis'); print({LIMITED!r}); raise SystemExit(3)"
+    assert tool.main(["pull", "--out", str(out), "--log", str(log), "--", sys.executable, "-c", script]) == 3
+    assert log.read_text().splitlines() == ["pulling redis", LIMITED]
+    record = json.loads(out.read_text())
+    assert (record["rate_limited"], record["rate_limit_lines"]) == (1, [LIMITED])
+    shown = capsys.readouterr().out
+    assert "pulling redis" in shown, "make up's output still shows in the job log"
+    assert f"::warning title=smoke-images::a registry refused a pull over its rate limit: {LIMITED}" in shown
+
+
+def test_only_rate_limit_lines_count():
+    text = "Pulled\n429 Too Many Requests\nredis Pulled\nTOOMANYREQUESTS: slow down\n"
+    assert tool.rate_limited(text) == ["429 Too Many Requests", "TOOMANYREQUESTS: slow down"]
 
 
 # --------------------------------------------------------------------------- workers
@@ -326,6 +409,35 @@ def test_a_container_running_another_image_than_compose_names_fails(monkeypatch)
            "ghcr.io/automatosai/automatos-api:sha-0d9f0ac" in failures
 
 
+def test_an_app_image_also_present_under_another_tag_fails_a_pull(monkeypatch):
+    """make up ran one tag: the app images exist only under it (PRD-262 US-036)."""
+    rows = [{"Repository": _ref(s, TAG).rsplit(":", 1)[0], "Tag": TAG} for s in tool.APP_SERVICES]
+    extra = {"Repository": "ghcr.io/automatosai/automatos-api", "Tag": "edge"}
+    dangling = {"Repository": "ghcr.io/automatosai/automatos-api", "Tag": "<none>"}
+    _docker(monkeypatch, listing=rows + [extra, dangling])
+    _registry(monkeypatch)
+    found = tool.check_images(_config(), "pull", SHA, "amd64")
+    assert found["other_tags"] == [f"ghcr.io/automatosai/automatos-api:edge is here too: the app images must "
+                                   f"exist only under {TAG}"]
+    assert found["failures"] == found["other_tags"] and found["stray"] == []
+
+
+def test_a_source_build_must_carry_a_local_tag_and_head(monkeypatch):
+    local = "local-0d9f0ac"
+    _docker(monkeypatch, digests=lambda service: [], tag=local)
+
+    def no_registry(*args):
+        raise AssertionError("a source build is never looked up on the registry")
+
+    monkeypatch.setattr(tool.registry, "resolve", no_registry)
+    found = tool.check_images(_config(local), "build", SHA, "amd64")
+    assert found["failures"] == [] and found["other_tags"] == []
+    _docker(monkeypatch, digests=lambda service: [])
+    failures = tool.check_images(_config(), "build", SHA, "amd64")["failures"]
+    assert failures == [f"{service}: {_ref(service)} was built here under an official tag: a local build is "
+                        f"tagged local-*" for service in tool.APP_SERVICES]
+
+
 def test_images_built_in_the_job_need_no_repo_digest_and_nothing_is_resolved(monkeypatch):
     _docker(monkeypatch, digests=lambda service: [], tag="pr-0d9f0ac")
 
@@ -399,6 +511,26 @@ def test_the_report_writes_the_section_and_the_json(monkeypatch, tmp_path):
     assert "workers: 4 (expected 4). ok." in text
     assert f"| backend | `{_ref('backend')}` | `0d9f0ac594c3` | `{INDEX['backend'][:19]}…` | ok |" in text
     assert "- No `local-*` tag and no compose-built image: ok." in text
+
+
+def test_the_report_says_make_up_ran_and_what_rate_limits_it_met():
+    pull = {**PULL, "rate_limited": 1, "rate_limit_lines": ["toomanyrequests: rate limit"]}
+    data = section.build({"mode": "pull", "tag": TAG}, pull=pull, processes=None, images=None, boots=_boots())
+    text = section.markdown(data)
+    assert "- `make up` into an empty Docker cache" in text and "from the start of `make up`" in text
+    assert "Registry rate limits (Docker Hub's 429): **1 line(s)**: `toomanyrequests: rate limit`" in text
+    clean = section.markdown(section.build({"mode": "pull", "tag": TAG}, PULL | {"rate_limited": 0,
+                                                                                 "rate_limit_lines": []},
+                                           None, None, []))
+    assert "Registry rate limits (Docker Hub's 429): none." in clean
+
+
+def test_a_source_build_reports_no_pull_and_its_images(monkeypatch):
+    _docker(monkeypatch, digests=lambda service: [], tag="local-0d9f0ac")
+    images = tool.check_images(_config("local-0d9f0ac"), "build", SHA, "amd64")
+    text = section.markdown(section.build({"mode": "build", "tag": "local-0d9f0ac"}, None, None, images, []))
+    assert "- Pull: none. The app images were built from this checkout." in text
+    assert "- No compose-built image: ok." in text and "only under the tag" not in text
 
 
 def test_a_prebuilt_run_times_the_first_run_from_compose_up():

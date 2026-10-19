@@ -3,7 +3,9 @@
 The lane itself runs only in CI, against a real stack. These tests hold its parts:
 
 * ``scripts/ci/smoke_boot.py`` times each URL from the container's ``StartedAt``, not
-  from its own sleeps, polls once a second, and times liveness and readiness apart;
+  from its own sleeps, polls once a second, and times liveness and readiness apart. For
+  a container another process starts (``make up``, PRD-262 US-036) it first waits for
+  the start, and stops waiting once that process has ended without starting it;
 * ``scripts/ci/smoke_report.py`` turns the boot records, Docker's events and the
   backend log into the step summary: Started → Healthy per service, the warm median,
   the alembic runs counted the §8 way, the /health/bootstrap stages, the frontend's
@@ -182,6 +184,47 @@ def test_wait_refuses_a_container_that_never_started(tmp_path, monkeypatch):
     monkeypatch.setattr(boot, "container_started_at", lambda container: "0001-01-01T00:00:00Z")
     out = tmp_path / "boots.jsonl"
     assert boot.main(["--label", "fresh", "--container", BACKEND, "--url", "health=http://x", "--out", str(out)]) == 1
+    assert not out.exists()
+
+
+def test_wait_for_start_waits_for_a_container_another_process_starts():
+    clock = FakeClock(_at(0))
+    answers = iter([None, "0001-01-01T00:00:00Z", _started_at(_at(3))])
+    assert boot.wait_for_start(BACKEND, 60, read=lambda name: next(answers), clock=clock, sleep=clock.sleep)
+    assert clock.sleeps == [1, 1], "polled once a second until it started"
+
+
+def test_wait_for_start_stops_when_the_starter_ended_or_time_ran_out(tmp_path):
+    clock = FakeClock(_at(0))
+    ended = tmp_path / "make-up.exit"
+    ended.write_text("2\n")
+    assert not boot.wait_for_start(BACKEND, 60, ended, read=lambda name: None, clock=clock, sleep=clock.sleep)
+    assert clock.sleeps == [], "a start that will never come is not waited for"
+    assert not boot.wait_for_start(BACKEND, 3, read=lambda name: None, clock=clock, sleep=clock.sleep)
+    assert boot.wait_for_start(BACKEND, 60, ended, read=lambda name: _started_at(_at(1)), clock=clock,
+                               sleep=clock.sleep), "started before its starter ended"
+
+
+def test_wait_with_wait_start_times_from_the_start_and_records_the_published_address(tmp_path, monkeypatch):
+    started_at = "2026-10-16T12:44:21.98Z"
+    monkeypatch.setattr(boot, "wait_for_start", lambda container, timeout, stop_file: True)
+    monkeypatch.setattr(boot, "container_started_at", lambda container: started_at)
+    monkeypatch.setattr(boot, "probe", lambda url: (200, url))
+    monkeypatch.setattr(boot, "published_address", lambda container, port: f"127.0.0.1:{port}")
+    out = tmp_path / "boots.jsonl"
+    code = boot.main(["--label", "frontend", "--container", "automatos_frontend", "--url", "ui=http://x/",
+                      "--wait-start", "--stop-file", str(tmp_path / "exit"), "--published-port", "3000",
+                      "--timeout", "5", "--out", str(out)])
+    assert code == 0
+    assert json.loads(out.read_text())["meta"] == {"address": "127.0.0.1:3000"}
+
+
+def test_wait_with_wait_start_fails_when_the_container_never_starts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(boot, "wait_for_start", lambda container, timeout, stop_file: False)
+    out = tmp_path / "boots.jsonl"
+    assert boot.main(["--label", "fresh", "--container", BACKEND, "--url", "health=http://x", "--wait-start",
+                      "--timeout", "5", "--out", str(out)]) == 1
+    assert "did not start within 5s, or the process that starts it ended first" in capsys.readouterr().out
     assert not out.exists()
 
 

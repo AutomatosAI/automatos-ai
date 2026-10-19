@@ -14,7 +14,9 @@ REPO = Path(__file__).resolve().parents[2]
 MAKEFILE = REPO / "Makefile"
 GUIDE = REPO / "docs" / "getting-started" / "self-hosting.md"
 SECTION_START = "## 1b. "
-COMPOSE_VARS = ("COMPOSE", "DEV_COMPOSE", "IMAGES_COMPOSE")
+# The Makefile variables whose recipe lines the guide must show expanded: the two compose
+# commands and the tag picker make up and make build run (PRD-262 US-036).
+COMPOSE_VARS = ("COMPOSE", "DEV_COMPOSE", "STACK_IMAGES")
 TARGET_HEADER = re.compile(r"^([a-z][a-z-]*):\s*$")
 DOCKER_COMMAND = re.compile(r"\bdocker (?:image|builder|system) [a-z]+(?: -f)?")
 HOST_FLAG = re.compile(r"(--[a-z][a-z-]*)")
