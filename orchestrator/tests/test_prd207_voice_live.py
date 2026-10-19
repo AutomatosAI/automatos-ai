@@ -1200,6 +1200,14 @@ class _FakeWebSocket:
         return self.incoming.pop(0)
 
 
+def _first_socket_of_call(monkeypatch) -> None:
+    """PRD-264 EUAI-04: this socket is the call's first, not an automatic
+    reconnect (which would open the next response with the AI reminder)."""
+    from modules.voice import ai_notice
+
+    monkeypatch.setattr(ai_notice, "_mark_socket_open_sync", lambda call_id: False)
+
+
 def _ws_db(minted: bool):
     from contextlib import contextmanager
 
@@ -1268,6 +1276,7 @@ def test_ws_superseded_call_closes_without_speaking(monkeypatch):
         yield db
 
     monkeypatch.setattr(vr, "get_db_session", fake_session)
+    _first_socket_of_call(monkeypatch)
 
     async def must_not_stream(req):
         raise AssertionError("a superseded call must never reach the brain")
@@ -1317,11 +1326,14 @@ def test_ws_rejects_superseded_call_at_open(monkeypatch):
     assert ws.accepted is False
 
 
-def test_ws_user_speaks_first_then_answers_with_call_details_vars(monkeypatch):
+def test_ws_auto_greets_first_then_answers_with_call_details_vars(monkeypatch):
     import api.voice_retell as vr
+    from config import config as app_config
 
     monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
     monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
+    monkeypatch.setattr(app_config, "VOICE_AI_GREETING", "Hi, this is Auto, your AI assistant.")
+    _first_socket_of_call(monkeypatch)
 
     seen_reqs = []
 
@@ -1353,12 +1365,14 @@ def test_ws_user_speaks_first_then_answers_with_call_details_vars(monkeypatch):
     )
     asyncio.run(vr.retell_llm_websocket(ws, "call_ws1"))
 
-    # handshake per Retell's demo: config FIRST; the empty floor-yielding
-    # begin goes out only AFTER call_details arrives (not at accept)
+    # handshake per Retell's demo: config FIRST; the begin frame goes out only
+    # AFTER call_details arrives (not at accept), and Auto speaks first: it
+    # says it is an AI (PRD-264 EUAI-04, Art. 50(1))
     assert ws.sent[0] == {
         "response_type": "config", "config": {"auto_reconnect": True, "call_details": True},
     }
-    begin = {"response_type": "response", "response_id": 0, "content": "", "content_complete": True}
+    begin = {"response_type": "response", "response_id": 0,
+             "content": "Hi, this is Auto, your AI assistant.", "content_complete": True}
     assert begin in ws.sent
     ping_reply_idx = next(i for i, m in enumerate(ws.sent) if m.get("response_type") == "ping_pong")
     assert ws.sent.index(begin) > ping_reply_idx  # begin followed call_details, not accept
@@ -1378,6 +1392,7 @@ def test_ws_new_turn_supersedes_streaming_one(monkeypatch):
 
     monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
     monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
+    _first_socket_of_call(monkeypatch)
 
     events = []
 

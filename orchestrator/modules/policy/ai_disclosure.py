@@ -66,6 +66,10 @@ TELEGRAM_START_INTRO = "I'm an AI assistant for {principal}."
 TELEGRAM_START_INTRO_UNNAMED = "I'm an AI assistant."
 NOTICE_SEPARATOR = "\n\n"
 
+# ── Auto Live voice (EUAI-04, PRD-264 §8, Guidelines ¶37) ──────────────────
+VOICE_GREETING = "Hi, this is Auto, your AI assistant."
+VOICE_REMINDER = "Just so you know, I'm an AI assistant."
+
 # FR-15: an auto-created workspace is named "{name or email}'s Workspace"
 # (core/auth/hybrid.py), so that form, or any name with an "@", may carry the
 # owner's name or email and is never used as a public name.
@@ -305,3 +309,39 @@ def prepend_notice(notice: Optional[str], text: str) -> str:
     if not notice:
         return text
     return f"{notice}{NOTICE_SEPARATOR}{text}"
+
+
+# ── Auto Live voice (EUAI-04) ──────────────────────────────────────────────
+
+def voice_greeting(configured: Any, locale: Any) -> str:
+    """The line Auto speaks first on a call: ``configured`` when it says it is an AI.
+
+    A configured greeting that is empty, not text, or lacks the AI term for
+    the call's language (:func:`badge_for`) is never spoken: the default
+    :data:`VOICE_GREETING` is, and the refusal is logged. The greeting can be
+    reworded, never silenced.
+    """
+    if isinstance(configured, str) and configured.strip():
+        stripped = configured.strip()
+        if contains_badge_term(stripped, badge_for(locale)):
+            return stripped
+    logger.warning("ai_disclosure: voice greeting refused (no AI term); speaking the default")
+    return VOICE_GREETING
+
+
+def voice_reminder_due(
+    *,
+    reconnected: bool,
+    last_notice_at: float,
+    now: float,
+    interval_seconds: float,
+) -> bool:
+    """Whether Auto's next spoken response opens with :data:`VOICE_REMINDER`.
+
+    After an automatic reconnect, and once ``interval_seconds`` of call time
+    have passed since the caller last heard that Auto is an AI. An interval of
+    0 or less reminds on every response: the reminder never turns off.
+    """
+    if reconnected:
+        return True
+    return now - last_notice_at >= interval_seconds

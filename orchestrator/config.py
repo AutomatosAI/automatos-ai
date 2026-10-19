@@ -1956,6 +1956,17 @@ class Config:
     VOICE_LIVE_FIRST_FRAME_ACK_TEXT: str = os.getenv(
         "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment."
     )
+    # PRD-264 EUAI-04 (EU AI Act Art. 50(1)): Auto Live speaks first, and its
+    # opening line says it is an AI. A greeting that is empty or lacks the AI
+    # term for VOICE_LIVE_LANGUAGE ("AI", "IA", "KI") is never spoken; the
+    # default is (modules/policy/ai_disclosure.py). No setting silences it.
+    VOICE_AI_GREETING: str = os.getenv(
+        "VOICE_AI_GREETING", "Hi, this is Auto, your AI assistant."
+    )
+    # Every this many minutes of call time, and after an automatic reconnect,
+    # the next response opens with "Just so you know, I'm an AI assistant."
+    # (Guidelines ¶37). 0 or less reminds on every response; it never turns off.
+    VOICE_AI_REMINDER_MINUTES: float = float(os.getenv("VOICE_AI_REMINDER_MINUTES", "10"))
     # PRD-207: Retell agent STT / turn-taking tuning — set at agent creation
     # AND re-applied on every one-click re-arm. Pinning the language stops
     # multilingual STT from hallucinating confident nonsense; background-speech

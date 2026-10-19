@@ -10,6 +10,10 @@
  * audio levels ref) let the chat render the ambient background itself.
  * What remains visible here is a slim strip above the message box —
  * state · timer · mic · mute · end — plus honest failure copy.
+ *
+ * PRD-264 EUAI-04 (EU AI Act Art. 50(1)): the strip opens with "AI voice
+ * assistant" for the whole call. The mute toggle and the failure box are
+ * small components below, so this one stays inside the component size limit.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -17,6 +21,7 @@ import { motion } from 'framer-motion'
 import { Mic, MicOff, PhoneOff, X } from 'lucide-react'
 import type { MutableRefObject } from 'react'
 import { Button } from '@/components/ui/button'
+import { AiVoiceLabel } from '@/components/voice/AiVoiceLabel'
 import { MicDevicePicker, MicSilentBanner } from '@/components/voice/MicHealthControl'
 import { useRetellCall, type VoiceLevels } from '@/hooks/use-retell-call'
 import type { OrbState } from '@/lib/voice/orb-state'
@@ -52,6 +57,50 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
   return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-7 w-7 rounded-full"
+      onClick={onToggle}
+      aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
+      aria-pressed={muted}
+    >
+      {muted ? (
+        <MicOff className="h-3.5 w-3.5 text-destructive" />
+      ) : (
+        <Mic className="h-3.5 w-3.5" />
+      )}
+    </Button>
+  )
+}
+
+/** Failure states — honest copy, always a way out. */
+function LiveCallFailure({
+  message,
+  onRetry,
+  onClose,
+}: {
+  message: string
+  onRetry: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="mx-auto max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-center">
+      <p className="text-xs text-destructive">{message}</p>
+      <div className="mt-2 flex justify-center gap-2">
+        <Button size="sm" variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 export function LiveVoiceMode({
@@ -148,6 +197,7 @@ export function LiveVoiceMode({
           only the quiet facts and the two buttons that matter. */}
       {!failure && (
         <div className="mx-auto flex w-fit items-center gap-3 px-2 py-0.5">
+          <AiVoiceLabel />
           <p aria-live="polite" className="text-[11px] tracking-wide text-muted-foreground/60">
             {stateLabel}
             {isLive && (
@@ -166,22 +216,7 @@ export function LiveVoiceMode({
               {muted ? 'Mic muted' : 'Mic live'}
             </span>
           )}
-          {isLive && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-full"
-              onClick={toggleMute}
-              aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
-              aria-pressed={muted}
-            >
-              {muted ? (
-                <MicOff className="h-3.5 w-3.5 text-destructive" />
-              ) : (
-                <Mic className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          )}
+          {isLive && <MuteToggle muted={muted} onToggle={toggleMute} />}
           {isLive && (
             <MicDevicePicker
               devices={inputDevices}
@@ -223,20 +258,7 @@ export function LiveVoiceMode({
         />
       )}
 
-      {/* Failure states — honest copy, always a way out. */}
-      {failure && (
-        <div className="mx-auto max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-center">
-          <p className="text-xs text-destructive">{failure}</p>
-          <div className="mt-2 flex justify-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => void start()}>
-              Try again
-            </Button>
-            <Button size="sm" variant="ghost" onClick={handleExit}>
-              Close
-            </Button>
-          </div>
-        </div>
-      )}
+      {failure && <LiveCallFailure message={failure} onRetry={() => void start()} onClose={handleExit} />}
     </motion.div>
   )
 }
