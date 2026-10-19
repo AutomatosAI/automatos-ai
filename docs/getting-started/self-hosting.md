@@ -180,6 +180,15 @@ docker compose up -d --no-build --remove-orphans
 docker image prune -f
 docker builder prune -f --filter until=168h
 
+# make up CORE=1: the core five (postgres, redis, minio, backend, frontend), without the
+# workspace worker. Every compose command reads docker-compose.core.yml too, through COMPOSE_FILE.
+export COMPOSE_FILE=docker-compose.yml:docker-compose.core.yml   # PowerShell: $env:COMPOSE_FILE="docker-compose.yml;docker-compose.core.yml"
+python3 scripts/stack_images.py up   # the same tag; gets the backend and frontend images only
+docker compose -f docker-compose.yml rm --stop --force workspace-worker   # one an earlier make up started
+docker compose up -d --no-build --remove-orphans
+# The plain command, without make or the tag picker:
+docker compose -f docker-compose.yml -f docker-compose.core.yml up -d
+
 # make build: the three app images built from your checkout instead, as local-<sha7>
 python3 scripts/stack_images.py build   # writes AUTOMATOS_IMAGE_TAG=local-<sha7> to .env
 docker compose up -d postgres redis minio   # first, so they start while the images build
@@ -249,6 +258,21 @@ they tell a running session host to pick up the new code
 `frontend` or `services/workspace-worker` has uncommitted changes) to compose,
 which stamps it on every image it builds as `org.opencontainers.image.revision`,
 the label CI's images carry too. A build without it is stamped `unknown`.
+
+**The core stack, five containers.** `make up CORE=1` runs postgres, redis,
+minio, the backend and the frontend, and leaves out the workspace worker and
+its image: `docker-compose.core.yml` puts the worker behind a profile of its
+own, and `make` passes that file to every compose command through
+`COMPOSE_FILE`. Without the worker, agents' workspace tools, the Deliverables
+file browser and Code Canvas answer *Workspace worker not running*; the rest
+works as before. A worker an earlier `make up` started is stopped and removed,
+and its files stay in the `automatos_workspaces_data` volume. To start it
+later, name it with the same two files:
+`docker compose -f docker-compose.yml -f docker-compose.core.yml up -d workspace-worker`,
+or run `make up` without `CORE=1`, which brings back all six. Plain
+`docker compose up` always runs six, whatever your `.env` holds: no key turns the
+worker off. `make build CORE=1` still builds all three images and then runs
+five; `make dev` always runs six.
 
 ### The tag `make up` picks
 
@@ -593,11 +617,21 @@ profile and its files live **on your machine**:
   no key, because the terminal it shows is your own Claude Code, launched by
   the host on your machine.
 - **Linux ownership note.** The worker process runs as uid 1000 (`worker`).
-  Its entrypoint `chown -R`s the mounted directory to that uid whenever it is
-  owned by anyone else, so on a Linux host the files under
-  `AUTOMATOS_WORKSPACE_DIR` end up owned by uid 1000. If that is not your
-  user, expect to need `sudo` to edit or delete them, or pre-create the
-  directory owned by uid 1000.
+  Its entrypoint re-owns everything under `/workspaces` to that uid, except
+  `projects/`, whenever the volume's root belongs to anyone else, and that
+  includes your files under `AUTOMATOS_WORKSPACE_DIR`. On this stack it does not
+  happen: a new `automatos_workspaces_data` volume takes the owner of the
+  directory it is first mounted on, and both the worker's image and the
+  backend's give `/workspaces` to uid 1000, so the volume is uid 1000 whichever
+  starts first (the core stack, below, starts the backend without the worker).
+  A volume created root-owned some other way would trigger it; then expect to
+  need `sudo` to edit or delete those files, or pre-create the directory owned by
+  uid 1000.
+- **Running without it.** `make up CORE=1` (or
+  `docker compose -f docker-compose.yml -f docker-compose.core.yml up -d`) runs
+  the five other containers and not the worker (§1b). Code Canvas, the
+  Deliverables file browser and agents' workspace tools then answer *Workspace
+  worker not running*.
 - Limits and knobs: the service is capped at 2 CPUs and 2 GB;
   `WORKER_CONCURRENCY` (default 3) and `WORKSPACE_DEFAULT_QUOTA_GB` (default
   5) are overridable in `.env`. `WORKER_INTERNAL_TOKEN` is an optional shared
@@ -1092,6 +1126,10 @@ nothing, so it has no build cache to keep.
 `make clean` never prunes volumes: a stopped stack's database volume looks
 "unused" to Docker, so `docker volume prune` would delete your data. Only
 `make reset` removes data, and it asks first.
+
+On a small machine, `make up CORE=1` runs five containers instead of six and
+never downloads the workspace worker's image; Code Canvas, the Deliverables
+file browser and agents' workspace tools need the worker (§1b, §5).
 
 **Docker Desktop's own cache limit.** Docker garbage-collects the build cache
 only once it passes `defaultKeepStorage` — 20 GB by default, so in practice it
