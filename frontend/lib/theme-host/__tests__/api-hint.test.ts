@@ -19,6 +19,7 @@ vi.mock('@clerk/nextjs', () => ({ useReverification: vi.fn() }))
 
 import { apiClient } from '@/lib/api-client'
 import {
+  SIGNED_OUT_MESSAGE,
   STEP_UP_CANCELLED_MESSAGE,
   STEP_UP_FAILED_MESSAGE,
   STEP_UP_REQUIRED_CODE,
@@ -169,6 +170,20 @@ describe('themeErrorMessage', () => {
   it('says nothing changed when the person closed the confirmation', () => {
     const cancelled = new ClerkRuntimeError('User cancelled attempted verification', { code: STEP_UP_CANCELLED_CODE })
     expect(themeErrorMessage(cancelled)).toBe(STEP_UP_CANCELLED_MESSAGE)
+  })
+
+  it("asks to sign in again on apiClient's 401, never its developer text (W-A2 review L5)", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const response = new Response(JSON.stringify({ detail: 'Invalid or expired token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    const error = await apiClient.putThemeSettings({ membersMayChoose: false }).catch((e: unknown) => e)
+
+    expect(themeErrorMessage(error)).toBe(SIGNED_OUT_MESSAGE)
+    expect(themeErrorMessage(apiError(401))).toBe(SIGNED_OUT_MESSAGE)
   })
 
   it('falls back to the error message, then to a plain sentence', () => {

@@ -42,6 +42,11 @@ export const STEP_UP_CANCELLED_CODE = 'reverification_cancelled'
 export const STEP_UP_FAILED_MESSAGE = "We couldn't confirm it's you. Sign in again, then try once more."
 export const STEP_UP_CANCELLED_MESSAGE = 'Nothing was changed: the confirmation was closed.'
 const FALLBACK_MESSAGE = 'Something went wrong. Try again.'
+/** A 401: the session ended. apiClient's own 401 text is for developers (missing Clerk token). */
+export const SIGNED_OUT_MESSAGE = 'Your session has ended. Sign in again, then try once more.'
+const UNAUTHORIZED_STATUS = 401
+/** apiClient throws a 401 without `status`; its message opens with this (lib/api-client.ts httpErrorOf). */
+const UNAUTHORIZED_MESSAGE_PREFIX = `HTTP ${UNAUTHORIZED_STATUS}:`
 
 // @clerk/shared authorization-errors: REVERIFICATION_REASON and the error type.
 const REVERIFICATION_REASON = 'reverification-error'
@@ -115,9 +120,19 @@ export class StepUpFailedError extends Error {
   }
 }
 
-/** The sentence a theme route's refusal shows: `detail` (string or `{message}`), else the error's own. */
+/** Whether `error` is apiClient's 401 (signed out, or the session token expired). */
+function isUnauthorized(error: unknown): boolean {
+  if (isRecord(error) && error.status === UNAUTHORIZED_STATUS) return true
+  return error instanceof Error && error.message.startsWith(UNAUTHORIZED_MESSAGE_PREFIX)
+}
+
+/**
+ * The sentence a theme route's refusal (or a step-up flow's: role change, invitation, API key)
+ * shows: sign in again on a 401, `detail` (string or `{message}`), else the error's own.
+ */
 export function themeErrorMessage(error: unknown): string {
   if (isStepUpCancelled(error)) return STEP_UP_CANCELLED_MESSAGE
+  if (isUnauthorized(error)) return SIGNED_OUT_MESSAGE
   const body = isRecord(error) && 'body' in error ? error.body : null
   const detail = isRecord(body) ? body.detail : null
   if (typeof detail === 'string' && detail) return detail
