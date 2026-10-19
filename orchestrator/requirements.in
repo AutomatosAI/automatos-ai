@@ -63,6 +63,9 @@ psutil==7.2.2
 # Scheduling (heartbeat service)
 apscheduler>=3.10
 croniter>=2.0  # PRD-162: stateless next_run math for the calendar/schedule truth
+# services/heartbeat_service.py imports pytz for active hours; only pandas brought it until
+# PRD-262 US-025 removed pandas (apscheduler 3.11 uses zoneinfo and tzlocal instead).
+pytz>=2024.1
 
 # Network & async
 aiofiles==23.2.1
@@ -106,10 +109,11 @@ anthropic>=0.40.0,<1.0.0
 # Gemini goes through its OpenAI-compatible endpoint on the openai client (PRD-262 US-024).
 
 # Data & ML (actively used in multi-agent optimization + RAG). scikit-learn and nltk
-# were never imported (PRD-262 US-015); Railway's [leiden] build still gets
-# scikit-learn through graspologic until PRD-262 US-027.
+# were never imported (PRD-262 US-015), and pandas left with US-025: create_xlsx reads
+# CSV and JSON with the standard library and writes with xlsxwriter. Railway's [leiden]
+# build still gets scikit-learn through graspologic, and pandas through statsmodels and
+# seaborn, until PRD-262 US-027.
 numpy>=1.26.2,<3.0.0
-pandas>=2.2.0,<3.0
 networkx==3.1
 
 # RAG chunking (only text-splitters + core are actually imported)
