@@ -66,7 +66,8 @@ async def test_a_tick_writes_one_run_row_and_no_run_file(workspace, calls, new_s
     assert run["finished_at"] is not None and run["finished_at"] >= run["started_at"]
     assert run["report_md"].startswith("# HARNESS Weekly Org Review — Run #1")
     assert run["counts"]["prescriptions"] == 0 and run["prescriptions"] == []
-    assert run["verdicts"] is None and run["coverage"] is None  # DIAGNOSE fills them (US-014a/b)
+    # DIAGNOSE fills the verdicts (US-014a/b); with no agent but Auto there is no coverage to report.
+    assert run["verdicts"] == {"convergence": "insufficient_data", "agents": {}} and run["coverage"] is None
     assert hr.reports(calls, workspace) == 1
 
     from config import config

@@ -2,11 +2,12 @@
 
 A tick commits as it goes (its run row, each phase), so these suites seed a
 committed workspace and sweep it afterwards. The platform actions a tick calls
-are faked: no agents are listed and every action succeeds, so the audit report
-is "ok". The dormancy check is stubbed to "ready", because it reads
-heartbeat_results, which the test database may not build. The judged week is
-pinned so a run can never straddle a week boundary. Shared by
-test_prd263_harness_run_record.py and test_prd263_harness_advisory_lock.py.
+are faked: every action succeeds, so the audit report is "ok". COLLECT reads the
+real tables (services.harness_metrics). The dormancy check is stubbed to "ready",
+because a seeded workspace holds fewer than its three active agents. The judged
+week is pinned so a run can never straddle a week boundary. Shared by
+test_prd263_harness_run_record.py, test_prd263_harness_advisory_lock.py and
+test_prd263_harness_diagnose_realdb.py.
 """
 from __future__ import annotations
 
@@ -18,10 +19,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 WINDOW = "2026-W42"
-READY = {
-    "active_agents": 3, "min_required_agents": 3, "agents_ok": True,
-    "heartbeat_days_available": 30, "min_required_days": 7, "data_ok": True,
-}
+READY = {"active_agents": 3, "min_required_agents": 3, "agents_ok": True}
 REPORT = "platform_submit_report"
 # How long a faked platform action takes: a running tick yields while it holds the lock.
 ACTION_SECONDS = 0.01
@@ -43,6 +41,9 @@ def seed_workspace(new_session) -> UUID:
 def sweep_workspace(new_session, ws: UUID) -> None:
     s = new_session.sweep()
     for sql in ("DELETE FROM harness_runs WHERE workspace_id = CAST(:id AS uuid)",
+                "DELETE FROM harness_task_ledger WHERE workspace_id = CAST(:id AS uuid)",
+                "DELETE FROM board_tasks WHERE workspace_id = CAST(:id AS uuid)",
+                "DELETE FROM llm_usage WHERE workspace_id = CAST(:id AS uuid)",
                 "DELETE FROM agents WHERE workspace_id = CAST(:id AS uuid)",
                 "DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"):
         s.execute(text(sql), {"id": str(ws)})
