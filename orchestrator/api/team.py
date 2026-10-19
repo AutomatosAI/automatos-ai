@@ -513,9 +513,9 @@ async def accept_invitation(
 
     invitation, workspace = _acceptable_invitation(db, payload.token)
 
-    # Resolve or create the User row for this Clerk user: by Clerk ID, else an
-    # unlinked row with the same email (case-insensitive), else a new row. A row
-    # that belongs to another Clerk ID is a 409, never moved or used.
+    # Resolve or create the User row for this Clerk user: by Clerk ID, else a new
+    # row. A row that already has the email (case-insensitive), linked to a Clerk
+    # ID or not, is a 409: the token's email never attaches an existing row.
     user_id = user_id_for_invitee(db, clerk_user_id, user_email or None, name=user_name)
     already_member = _join_from_invitation(db, invitation, user_id)
 

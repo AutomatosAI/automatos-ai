@@ -20,7 +20,10 @@ nothing. ``--rollback`` moves every recorded relink back to its development ID
     python -m scripts.clerk_cutover_relink --rollback            # rollback plan only
     python -m scripts.clerk_cutover_relink --rollback --apply    # roll back
 
-The report prints users.id and Clerk IDs, never an email.
+The report prints users.id and Clerk IDs, never an email. So does a failed run: it
+logs the error's type and the failing decision's IDs, never the error's message (an
+``IntegrityError`` carries the statement's bound parameters, and the relink record's
+include the verified email), and its session's engine hides bound parameters too.
 """
 
 from __future__ import annotations
@@ -29,14 +32,18 @@ import argparse
 import logging
 import os
 import sys
-from typing import Dict, List
+from contextlib import contextmanager
+from typing import Dict, Iterator, List, Optional
 
 # Make orchestrator package imports work when run directly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
+
 from core.auth import clerk_cutover as cutover  # noqa: E402
 from core.auth.clerk import get_clerk_auth  # noqa: E402
-from core.database.database import SessionLocal  # noqa: E402
+from core.database.database import DATABASE_URL  # noqa: E402
 
 logger = logging.getLogger("clerk_cutover_relink")
 
@@ -80,6 +87,49 @@ def _report(decisions: List[cutover.Decision]) -> None:
             print(f"  [{d.outcome}] users.id={d.user_id} old={d.old_clerk_user_id} new={d.new_clerk_user_id}")
 
 
+@contextmanager
+def _session() -> Iterator[Session]:
+    """A session on this run's own engine, which keeps bound parameters (the verified
+    email the relink record is written with) out of every SQLAlchemy error message."""
+    engine = create_engine(DATABASE_URL, hide_parameters=True, pool_pre_ping=True)
+    try:
+        with Session(engine, autoflush=False) as db:
+            yield db
+    finally:
+        engine.dispose()
+
+
+def _failure_line(exc: BaseException, decision: Optional[cutover.Decision]) -> str:
+    """The log line for a failed write: the error's type and the decision's IDs only."""
+    where = (
+        f"users.id={decision.user_id} old={decision.old_clerk_user_id} new={decision.new_clerk_user_id}"
+        if decision else "the commit"
+    )
+    return f"Clerk cutover run failed ({type(exc).__name__}) at {where}; rolled back, nothing was written"
+
+
+def _write(db, decisions: List[cutover.Decision], rollback: bool) -> Optional[int]:
+    """Write the plan in one transaction and commit: the rows moved, or None when it failed.
+
+    Each decision is written in turn so a failure names the one that failed. It is
+    logged by type and IDs only, never ``str(exc)`` or a traceback: an
+    ``IntegrityError``'s message carries the statement's bound parameters, the
+    verified email among them.
+    """
+    write = cutover.apply_rollback if rollback else cutover.apply_relinks
+    moved, current = 0, None
+    try:
+        for current in decisions:
+            moved += write(db, [current])
+        current = None
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 — logged by type and IDs: its message can carry an email
+        db.rollback()
+        logger.error(_failure_line(exc, current))
+        return None
+    return moved
+
+
 def _plan(db, rollback: bool) -> List[cutover.Decision]:
     if rollback:
         return cutover.plan_rollback(db)
@@ -97,7 +147,7 @@ def main() -> int:
     )
     from core.monitoring.request_log_guard import guard_request_logs
     guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
-    with SessionLocal() as db:
+    with _session() as db:
         decisions = _plan(db, args.rollback)
         print("Rollback plan:" if args.rollback else "Relink plan:")
         _report(decisions)
@@ -106,12 +156,8 @@ def main() -> int:
             db.rollback()
             print(f"Plan only: {writes} rows would move. Nothing was written; add --apply to write.")
             return 0
-        try:
-            moved = cutover.apply_rollback(db, decisions) if args.rollback else cutover.apply_relinks(db, decisions)
-            db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception("Clerk cutover run failed; rolled back, nothing was written")
+        moved = _write(db, decisions, args.rollback)
+        if moved is None:
             return 1
     print(f"Done: {moved} rows moved and recorded in clerk_user_relinks (committed).")
     return 0

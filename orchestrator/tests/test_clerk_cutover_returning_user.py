@@ -13,6 +13,11 @@ now finds a row by Clerk ID or inserts one; an email already held by another row
 a clear 409 and nothing moves. Returning users are relinked once by the cutover
 step (``core/auth/clerk_cutover.py``, tested in ``test_clerk_cutover_relink.py``).
 
+Accepting an invitation follows the same rule (security review, 19 Oct 2026): it used
+to attach a row with no Clerk ID to the caller because the email in their token
+matched. That email is not proof of owning the row, so an invitee now gets the same
+409 and the row stays unlinked.
+
 These tests pin ``core/auth/user_link.py`` and the resolver. The real-Postgres
 journey is ``test_clerk_cutover_returning_user_realdb.py``.
 """
@@ -60,7 +65,7 @@ class _UsersTable:
 
     The unique columns are clerk_user_id, email and username, as in
     ``core/models/core.py`` ``User`` (case-sensitive, as Postgres compares them).
-    Any other statement fails the test.
+    Any other statement, an ``UPDATE users`` included, fails the test.
     """
 
     def __init__(self, *rows):
@@ -77,17 +82,9 @@ class _UsersTable:
         if sql.startswith("SELECT id, clerk_user_id FROM users WHERE LOWER(email) = LOWER(:email)"):
             hits = sorted((r for r in self.rows if r["email"].lower() == params["email"].lower()), key=lambda r: r["id"])
             return _Result([(r["id"], r["clerk_user_id"]) for r in hits])
-        if sql == "UPDATE users SET clerk_user_id = :cid WHERE id = :id AND clerk_user_id IS NULL":
-            return self._claim(params)
         if sql.startswith("INSERT INTO users"):
             return self._insert(sql, params)
         raise AssertionError(f"unexpected SQL: {sql}")
-
-    def _claim(self, params):
-        hits = [r for r in self.rows if r["id"] == params["id"] and r["clerk_user_id"] is None]
-        for row in hits:
-            row["clerk_user_id"] = params["cid"]
-        return _Result([], rowcount=len(hits))
 
     def _insert(self, sql, params):
         assert sql.endswith("ON CONFLICT DO NOTHING"), "the insert must skip on ANY unique conflict"
@@ -218,13 +215,19 @@ def test_an_invitee_with_a_known_clerk_id_uses_their_row():
     assert db.updates() == [] and db.inserts() == []
 
 
-def test_an_invitee_claims_an_unlinked_row_whatever_the_case_of_its_email():
-    """team.py matched User.email == the lowercased email, so a mixed-case row got a twin."""
-    db = _UsersTable(_returning_user(clerk_user_id=None, email="Returning@Example.TEST"))
-    assert user_id_for_invitee(db, NEW_CLERK_ID, EMAIL) == 7
-    assert db.rows[0]["clerk_user_id"] == NEW_CLERK_ID
-    assert db.inserts() == []
-    assert db.commits == 0, "the caller commits with the membership"
+@pytest.mark.parametrize("stored_email", [EMAIL, "Returning@Example.TEST"])
+def test_an_invitee_never_claims_an_unlinked_row_with_their_email(stored_email):
+    """The token's email is not proof of owning the row: a 409, and the row stays unlinked."""
+    unlinked = _returning_user(clerk_user_id=None, email=stored_email, username=stored_email)
+    db = _UsersTable(unlinked)
+    _conflict(lambda: user_id_for_invitee(db, NEW_CLERK_ID, EMAIL, name="Invitee"))
+    assert db.rows == [unlinked], "the row is not attached to the invitee's Clerk ID"
+    assert db.inserts() == [] and db.updates() == []
+    assert db.commits == 0
+
+
+def test_the_invitee_claim_is_gone_not_just_unused():
+    assert not hasattr(user_link, "_claim_unlinked_row")
 
 
 def test_an_invitee_never_takes_a_row_that_belongs_to_another_clerk_id():
@@ -234,7 +237,11 @@ def test_an_invitee_never_takes_a_row_that_belongs_to_another_clerk_id():
     assert db.inserts() == [] and db.updates() == []
 
 
-def test_a_new_invitee_gets_one_row():
-    db = _UsersTable()
-    assert user_id_for_invitee(db, NEW_CLERK_ID, EMAIL, name="New") == 1
-    assert db.rows == [{"id": 1, "clerk_user_id": NEW_CLERK_ID, "email": EMAIL, "username": EMAIL}]
+def test_a_new_invitee_gets_one_row_through_the_sign_in_insert():
+    other = _returning_user(clerk_user_id=None, email="someone-else@example.test", username="someone-else@example.test")
+    db = _UsersTable(other)
+    assert user_id_for_invitee(db, NEW_CLERK_ID, EMAIL, name="New") == 8
+    assert db.rows == [other, {"id": 8, "clerk_user_id": NEW_CLERK_ID, "email": EMAIL, "username": EMAIL}]
+    assert len(db.inserts()) == 1 and db.updates() == []
+    assert user_id_for_invitee(db, NEW_CLERK_ID, EMAIL) == 8, "a second call finds the same row"
+    assert db.commits == 0, "the caller commits with the membership"

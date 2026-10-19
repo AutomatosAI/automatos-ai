@@ -2,13 +2,17 @@
 
 The hold on PR #1198 set the rules: old-instance IDs only, verified email only, each
 row relinked at most once, every relink audited. These pin the decision for each
-case, the compare-and-set write, the rollback plan and the operator script's
-paging. The real-Postgres journey (moves, records, rollback, re-apply) is in
+case, the compare-and-set write, the rollback plan, the operator script's paging
+and its failure log, which never carries the verified email. The real-Postgres
+journey (moves, records, rollback, re-apply) is in
 ``test_clerk_cutover_returning_user_realdb.py``.
 """
 from __future__ import annotations
 
+import argparse
+import logging
 import os
+from contextlib import contextmanager
 
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
@@ -192,6 +196,52 @@ def test_the_script_pages_through_every_production_user_once():
     assert [c.args for c in clerk.list_users_page.call_args_list] == [
         (script.PAGE_SIZE, 0), (script.PAGE_SIZE, script.PAGE_SIZE),
     ]
+
+
+def test_a_failed_run_logs_the_error_type_and_ids_never_the_email(caplog, capsys):
+    """Security review, 19 Oct 2026: an IntegrityError's message carries the statement's
+    bound parameters, and the relink record's include the verified email."""
+    from sqlalchemy.exc import IntegrityError
+
+    from scripts import clerk_cutover_relink as script
+
+    error = IntegrityError(
+        "INSERT INTO clerk_user_relinks (user_id, old_clerk_user_id, new_clerk_user_id, verified_email) "
+        "VALUES (%(uid)s, %(old)s, %(new)s, %(email)s)",
+        {"uid": 7, "old": OLD, "new": NEW, "email": EMAIL},
+        Exception("duplicate key value violates unique constraint"),
+    )
+    assert EMAIL in str(error), "the premise: the error's own message carries the email"
+    db = MagicMock()
+    db.execute.side_effect = [MagicMock(rowcount=1), error]  # the move, then the record
+
+    @contextmanager
+    def session():
+        yield db
+
+    move = Decision(cutover.RELINK, NEW, OLD, user_id=7, verified_email=EMAIL)
+    args = argparse.Namespace(apply=True, rollback=False, verbose=False)
+    with patch.object(script, "_args", return_value=args), patch.object(script, "_session", session), \
+            patch.object(script, "_plan", return_value=[move]), \
+            patch("core.monitoring.request_log_guard.guard_request_logs"), caplog.at_level(logging.DEBUG):
+        assert script.main() == 1
+
+    db.rollback.assert_called_once()
+    db.commit.assert_not_called()
+    failures = [r for r in caplog.records if r.name == "clerk_cutover_relink"]
+    assert [r.getMessage() for r in failures] == [
+        f"Clerk cutover run failed (IntegrityError) at users.id=7 old={OLD} new={NEW}; rolled back, nothing was written",
+    ]
+    assert all(r.exc_info is None for r in failures), "no traceback: it would print the message"
+    assert EMAIL not in caplog.text
+    assert EMAIL not in capsys.readouterr().out
+
+
+def test_the_scripts_session_hides_bound_parameters_from_error_messages():
+    from scripts import clerk_cutover_relink as script
+
+    with script._session() as db:
+        assert db.get_bind().hide_parameters is True
 
 
 @patch("core.auth.clerk.httpx.Client")

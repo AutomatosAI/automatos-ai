@@ -12,6 +12,8 @@ back with a production-instance Clerk ID and the same email.
   ``clerk_user_relinks``. After it they land in the workspace they had.
 - A second run moves nothing; a rollback moves the row back and a retried cutover
   re-applies the same pair, still one record.
+- Accepting an invitation never attaches a row with no Clerk ID to the invitee by
+  their token's email: a 409, and the row stays unlinked.
 
 Skips cleanly when no Postgres is reachable (CI runs it). The unit-level pins are in
 test_clerk_cutover_returning_user.py and test_clerk_cutover_relink.py.
@@ -277,18 +279,31 @@ def test_a_new_person_gets_one_row_however_often_they_arrive(people, new_session
     assert _clerk_id_of(check, first) == clerk_id
 
 
-def test_an_invitee_claims_an_unlinked_mixed_case_row_instead_of_making_a_twin(people, new_session):
+def test_an_invitee_never_claims_an_unlinked_row_with_their_email(people, new_session):
     email = f"Cutover-Invitee-{people.tag}@Example.test"
     person = people.person("invitee", email=email)
     unlink = new_session()
     unlink.execute(text("UPDATE users SET clerk_user_id = NULL WHERE id = :id"), {"id": person["id"]})
     unlink.commit()
 
+    with pytest.raises(HTTPException) as raised:
+        user_id_for_invitee(new_session(), person["new_clerk_id"], email.lower())
+
+    check = new_session()
+    assert raised.value.status_code == 409
+    assert _clerk_id_of(check, person["id"]) is None, "the row is not attached to the invitee's Clerk ID"
+    assert _rows_with_email(check, email) == 1, "and no twin row is made"
+
+
+def test_a_new_invitee_gets_their_own_row(people, new_session):
+    email = f"cutover-new-invitee-{people.tag}@example.test"
+    clerk_id = f"user_prod_new_invitee_{people.tag}"
+
     db = new_session()
-    claimed = user_id_for_invitee(db, person["new_clerk_id"], email.lower())
+    created = user_id_for_invitee(db, clerk_id, email, name="New Invitee")
+    people.users.append(created)
     db.commit()
 
     check = new_session()
-    assert claimed == person["id"]
+    assert _clerk_id_of(check, created) == clerk_id
     assert _rows_with_email(check, email) == 1
-    assert _clerk_id_of(check, person["id"]) == person["new_clerk_id"]

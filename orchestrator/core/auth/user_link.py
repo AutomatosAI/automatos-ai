@@ -7,12 +7,15 @@ with ``ON CONFLICT (clerk_user_id) DO NOTHING``, swallow the email
 on ``uid_row[0]``: a 500 for anyone whose email already had a row under another
 Clerk ID (every returning user after the Clerk production cutover).
 
-Sign-in never moves a row from one Clerk ID to another. A row is found by Clerk ID
-or a new one is inserted; when the email or username is already held by another
-row, the caller gets a clear 409, never a 500. Returning users are moved to their
-production Clerk IDs once, by the cutover's operator step
-(``scripts/clerk_cutover_relink.py``, ``core.auth.clerk_cutover``), which matches on
-the import's own ID link and a verified email and records every move.
+No request path ever attaches an existing row to a different identity: not
+sign-in, not accepting an invitation, and not a row that has no Clerk ID yet. The
+email in a caller's token is not proof that they own a row with that email. A row
+is found by Clerk ID or a new one is inserted; when the email or username is
+already held by another row, the caller gets a clear 409, never a 500, and no row
+changes. Returning users are moved to their production Clerk IDs once, by the
+cutover's operator step (``scripts/clerk_cutover_relink.py``,
+``core.auth.clerk_cutover``), which matches on the import's own ID link and a
+verified email and records every move.
 """
 from __future__ import annotations
 
@@ -65,11 +68,12 @@ def ensure_user_row(
 
     A row that already has the email (case-insensitive: the unique index is not,
     so ``Jane@Example.com`` would otherwise get a second row) belongs to someone
-    else, or to a returning user the cutover step has not relinked yet: the caller
-    gets a 409 with a clear message, never a 500, and no row changes. Idempotent,
-    and safe when two first requests race: the insert skips on ANY unique conflict
-    (Clerk ID, email or username) and the row is read back by Clerk ID; nothing
-    found then (another row holds the username) is the same 409.
+    else, or to a returning user the cutover step has not relinked yet, whether or
+    not it has a Clerk ID: the caller gets a 409 with a clear message, never a 500,
+    and no row changes. Idempotent, and safe when two first requests race: the
+    insert skips on ANY unique conflict (Clerk ID, email or username) and the row
+    is read back by Clerk ID; nothing found then (another row holds the username)
+    is the same 409.
     """
     existing = user_id_for_clerk_id(db, clerk_user_id)
     if existing is not None:
@@ -97,42 +101,14 @@ def ensure_user_row(
     raise _link_conflict(clerk_user_id, "another row holds its email or username")
 
 
-def _claim_unlinked_row(db, clerk_user_id: str, email: str) -> Optional[int]:
-    """The row with this email (case-insensitive) once claimed for this Clerk ID, or None.
-
-    Only a row with no Clerk ID is claimed. One that belongs to another Clerk ID is
-    a 409: it is never moved or used.
-    """
-    row = _row_with_email(db, email)
-    if not row:
-        return None
-    if row[1] is None:
-        claimed = db.execute(
-            text("UPDATE users SET clerk_user_id = :cid WHERE id = :id AND clerk_user_id IS NULL"),
-            {"cid": clerk_user_id, "id": row[0]},
-        )
-        if claimed.rowcount == 1:
-            return row[0]
-    raise _link_conflict(clerk_user_id, f"users.id={row[0]} with its email belongs to another Clerk ID")
-
-
 def user_id_for_invitee(
     db, clerk_user_id: str, email: Optional[str], name: Optional[str] = None,
 ) -> int:
-    """The ``users.id`` that accepts an invitation for this Clerk user.
+    """The ``users.id`` that accepts an invitation for this Clerk user: ``ensure_user_row``.
 
-    Found by Clerk ID; else the row with the same email (case-insensitive, so a
-    stored ``Jane@Example.com`` is found for ``jane@example.com`` and no second row
-    is made) is claimed when it has no Clerk ID yet; else a new row is inserted.
-    A row with the same email that belongs to another Clerk ID is never moved or
-    used: the invitee gets a 409. Not committed: the caller commits with the
-    membership.
+    Found by Clerk ID, else a new row is inserted. A row that already has the
+    email (case-insensitive) is never attached to this Clerk ID, even one with no
+    Clerk ID yet: the invitee gets the sign-in path's 409 and nothing moves. Not
+    committed: the caller commits with the membership.
     """
-    existing = user_id_for_clerk_id(db, clerk_user_id)
-    if existing is not None:
-        return existing
-    if email:
-        claimed = _claim_unlinked_row(db, clerk_user_id, email)
-        if claimed is not None:
-            return claimed
     return ensure_user_row(db, clerk_user_id, email=email, name=name)
