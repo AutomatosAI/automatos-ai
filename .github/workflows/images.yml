@@ -4,13 +4,61 @@ name: images
 # publishes them to GHCR as ghcr.io/<owner>/automatos-<image>.
 #
 # - Only main and `v*` tags publish. Pull requests, and manual runs on any
-#   other branch, build both architectures but never push or sign.
-# - A push to main publishes `edge` and `sha-<short>`; a `v*` tag publishes
-#   `X.Y.Z` and `X.Y`.
+#   other branch, build both architectures and push them by digest to a
+#   throwaway `registry:2` service inside the job (localhost:5000), never to
+#   GHCR, so they are measured without publishing. Only publishing runs write
+#   the build cache; every run reads it (PRD-262 §9-Q13).
+# - A push to main publishes `sha-<short>`; a `v*` tag publishes `X.Y.Z` and
+#   `X.Y`. This workflow never moves `edge`: smoke-images.yml pulls and boots
+#   each main publish on both arches, and its promote-edge job then points
+#   `edge` at that `sha-<short>` (PRD-262 US-003). An image that cannot boot
+#   never reaches `edge`, the tag plain compose and the Helm chart pull.
 # - Each architecture builds on its own native runner (no QEMU), pushes by
-#   digest and scans that digest (report only), so amd64 and arm64 are both
-#   scanned. The merge job joins the digests into one multi-arch index and
-#   signs it with cosign (keyless, through GitHub OIDC).
+#   digest and scans that digest with Grype, straight from the registry it was
+#   pushed to, so amd64 and arm64 are both scanned, on pull requests as on main.
+#   The scan policy (scripts/ci/image_scan_policy.py, PRD-262 US-013) blocks a
+#   fixable Critical, or a match on CISA's Known Exploited Vulnerabilities list
+#   at any severity, that .grype.yaml does not allowlist with a reason and an
+#   expiry. The merge job needs every build job, so on main a failing scan
+#   leaves the digest untagged and unsigned. The merge job joins the digests
+#   into one multi-arch index and signs it with cosign (keyless, through
+#   GitHub OIDC).
+# - agent-opt-worker (PRD-262 US-006) builds for amd64 only, on pull requests
+#   that touch it and on main. It is measured and scanned like the others and
+#   pushed only to the job's registry, never to GHCR: Railway builds it itself.
+# - media-render (PRD-262 US-054) builds for amd64 and arm64, on pull requests
+#   that touch it and on main, and is pushed only to the job's registry, never
+#   published: it carries GPL-3.0 espeak-ng and phonemizer and GPL x264, and
+#   Railway builds it itself (§9-Q6). It is too big for the GHA cache, so its
+#   cache is a private GHCR ref, ghcr.io/<owner>/automatos-media-render:
+#   buildcache-<arch>, which publishing runs write and every run reads (§9-Q13).
+#   Keep that package private. Its budget also bars it on disk, as `docker image
+#   inspect` reports the image pulled from the job's registry (§8). Its scan is
+#   report only (`scan_report_only`) until its first findings are fixed or
+#   allowlisted.
+# - Every build reports its size, its layers (with the Dockerfile instruction
+#   and the heaviest paths of each) and its update delta, the MB an existing
+#   user downloads to move from `edge` to it, in the step summary and as a
+#   `layers-<image>-<arch>` artifact, and checks its size against
+#   .github/image-budgets.json (scripts/ci/image_report.py, PRD-262 US-001).
+#   The report job adds the layers the API and the worker share and the app
+#   images' first pull.
+# - The weekly OS rebuild (PRD-262 US-011): every Monday at 05:00 UTC a schedule
+#   run rebuilds each image's `no_cache_filters` stages (those whose apt or apk
+#   packages ship) without the cache, so Debian and Alpine fixes reach the
+#   images without a code change. It publishes `weekly-<yyyymmdd>` and never
+#   `sha-<short>`, so a sha tag keeps the packages it was built with, and it
+#   writes the cache, so every later `sha-<short>` builds on the fresh layers.
+#   smoke-images.yml boots the weekly tag and moves `edge` to it. A manual run
+#   with `no_cache` applies the same filters: on a branch it builds, pushes to
+#   the job's registry and never publishes; on main it publishes `sha-<short>`,
+#   as any manual run there does. Railway builds from source with its own
+#   layer cache, so it gets these fixes only once it deploys the published
+#   images (PRD-262 D2, held until after WebSummit).
+# - The media assets image (PRD-262 US-053): a manual run on main with
+#   `media_assets` publishes ghcr.io/<owner>/automatos-media-assets, the Kokoro
+#   model files and the music library media-render builds from, and nothing else.
+#   The image jobs skip; the run's title says so, and smoke-images skips it too.
 #
 # Build args match docker-compose.yml, i.e. the local edition: no graph extras,
 # no bundled Chromium, and the frontend built for AUTH_EDITION=local against
@@ -20,14 +68,20 @@ name: images
 # because its Clerk key is per deployment. Railway builds its own images and
 # is unaffected.
 #
-# PRs build only when the image inputs change (Dockerfiles, dependencies,
-# this file): test.yml's prod-image-parity job already builds all three
-# production images on amd64 for every PR.
+# PRs build only when an image's inputs change (Dockerfiles, dependencies, the
+# frontend's public files and build config, this file, the budgets): the
+# changes job builds just the images whose inputs the PR touches, on both
+# arches. test.yml's prod-image-parity job builds the three Railway-equivalent
+# images on amd64 for PRs that touch its PROD_IMAGE_PATHS.
 #
 # The owner comes from the repository, so a fork publishes to its own
 # namespace. New packages are private until an org owner makes them public.
 #
 # Third-party actions are pinned to a commit; the comment names the release.
+
+# A media-assets run (PRD-262 US-053) is titled so, which is how smoke-images knows
+# it published no app image; every other run keeps its default title.
+run-name: ${{ inputs.media_assets && 'Publish the media assets image' || '' }}
 
 on:
   push:
@@ -38,8 +92,13 @@ on:
   pull_request:
     branches:
       - main
+    # Exactly the changes job's SHARED_INPUTS plus every image's `inputs`
+    # (orchestrator/tests/test_prd262_image_matrix.py holds them equal).
     paths:
       - ".github/workflows/images.yml"
+      - ".github/image-budgets.json"
+      - ".grype.yaml"
+      - "scripts/ci/image_*.py"
       - "orchestrator/Dockerfile"
       - "orchestrator/.dockerignore"
       - "orchestrator/requirements.txt"
@@ -47,11 +106,31 @@ on:
       - "frontend/.dockerignore"
       - "frontend/package.json"
       - "frontend/package-lock.json"
+      - "frontend/next.config.js"
+      - "frontend/csp-sources.js"
+      - "frontend/.npmrc"
+      - "frontend/public/**"
       - "services/workspace-worker/**"
+      - "services/agent-opt-worker/**"
+      - "services/media-render/**"
+  # The weekly OS rebuild (PRD-262 US-011).
+  schedule:
+    - cron: "0 5 * * 1"
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: "Rebuild the OS-package stages from fresh packages, as the weekly run does (on a branch: never publishes)"
+        type: boolean
+        default: false
+      media_assets:
+        description: "Publish only the media assets image, automatos-media-assets (main only; PRD-262 US-053)"
+        type: boolean
+        default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A media-assets run has its own group: GitHub keeps one pending run per group,
+  # so sharing main's would let it replace a queued publish, or be replaced by one.
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.media_assets && '-media-assets' || '' }}
   # Supersede stale PR builds; never cancel a publish half-way.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -61,42 +140,147 @@ permissions:
 env:
   # The merge job's `if:` repeats this: job-level `if:` can't read `env`.
   PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+  # Schedule runs, and manual runs with `no_cache`, rebuild each image's
+  # `no_cache_filters` stages from fresh packages (PRD-262 US-011).
+  NO_CACHE: ${{ github.event_name == 'schedule' || inputs.no_cache == true }}
 
 jobs:
+  # Which images this run builds, as the build job's matrix
+  # (scripts/ci/image_matrix.py). A PR builds the images whose `inputs` it
+  # touches, on both arches, or every image when it touches a SHARED_INPUTS
+  # path; a push, a schedule or a manual run builds every image. If the PR's
+  # file list can't be read, every image builds: a gap here only costs time.
+  # A schedule run also gets its `weekly-<yyyymmdd>` tag here, from the run's
+  # created_at (actions: read), which smoke-images.yml reads too.
+  changes:
+    name: Which images this change builds
+    # A media-assets run builds no image here; build, report and merge need this
+    # job, so they skip with it.
+    if: inputs.media_assets != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      any: ${{ steps.pick.outputs.any }}
+      weekly_tag: ${{ steps.pick.outputs.weekly_tag }}
+    steps:
+      - name: Checkout (the picker)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Pick the images
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          # The images this workflow builds. `inputs` are the on.pull_request
+          # paths that change the image. `publish: false` builds, measures and
+          # scans an image without ever pushing the image to GHCR, so it has no
+          # `edge`.
+          # cache_mode: `min` for the API, whose pybuild output `max` would
+          # export and never reuse; `max` for the frontend's builder
+          # node_modules, and for the worker as before; `min` for
+          # agent-opt-worker, whose one stage is all the image.
+          # no_cache_filters: the stages whose apt or apk packages ship in the
+          # image, which the weekly run rebuilds without the cache (PRD-262
+          # US-011; orchestrator/tests/test_prd262_weekly_rebuild.py reads them
+          # against each Dockerfile). The API's pybuild is not one: its compilers
+          # never ship.
+          # media-render (PRD-262 US-054) adds three keys the others leave at
+          # their defaults: `cache: registry` (a private GHCR buildcache ref, not
+          # the GHA cache, which a 1.8 GB image on two arches would evict; `max`,
+          # so its builder stages are cached too), `on_disk` (§8 bars it on disk)
+          # and `scan_report_only` (its first scans warn, whatever POLICY_MODE
+          # says; the wave's last commit drops it).
+          IMAGES: |
+            [
+              {"name": "api", "context": "orchestrator", "target": "production",
+               "build_args": ["INSTALL_GRAPH_EXTRAS=false"],
+               "cache_mode": "min", "no_cache_filters": ["base"],
+               "arches": ["amd64", "arm64"], "publish": true,
+               "inputs": ["orchestrator/Dockerfile", "orchestrator/.dockerignore",
+                          "orchestrator/requirements.txt"]},
+              {"name": "frontend", "context": "frontend", "target": "production",
+               "build_args": ["NEXT_PUBLIC_AUTH_EDITION=local",
+                              "NEXT_PUBLIC_API_URL=http://localhost:8000",
+                              "NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws",
+                              "NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000"],
+               "cache_mode": "max", "no_cache_filters": ["production"],
+               "arches": ["amd64", "arm64"], "publish": true,
+               "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
+                          "frontend/package.json", "frontend/package-lock.json",
+                          "frontend/next.config.js", "frontend/csp-sources.js",
+                          "frontend/.npmrc", "frontend/public/**"]},
+              {"name": "workspace-worker", "context": "services/workspace-worker", "target": "",
+               "build_args": ["INSTALL_BROWSER=false"],
+               "cache_mode": "max", "no_cache_filters": ["production"],
+               "arches": ["amd64", "arm64"], "publish": true,
+               "inputs": ["services/workspace-worker/**"]},
+              {"name": "agent-opt-worker", "context": "services/agent-opt-worker", "target": "production",
+               "build_args": [],
+               "cache_mode": "min", "no_cache_filters": [],
+               "arches": ["amd64"], "publish": false,
+               "inputs": ["services/agent-opt-worker/**"]},
+              {"name": "media-render", "context": "services/media-render", "target": "production",
+               "build_args": [],
+               "cache_mode": "max", "cache": "registry", "no_cache_filters": ["runtime"],
+               "arches": ["amd64", "arm64"], "publish": false,
+               "on_disk": true, "scan_report_only": true,
+               "inputs": ["services/media-render/**"]}
+            ]
+          # What every image is built or judged by: a change here builds them all.
+          SHARED_INPUTS: |
+            [".github/workflows/images.yml", ".github/image-budgets.json", ".grype.yaml",
+             "scripts/ci/image_*.py"]
+          RUNNERS: '{"amd64": "ubuntu-24.04", "arm64": "ubuntu-24.04-arm"}'
+          LOCAL_REGISTRY: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 # 2.8.3
+        run: |
+          set -euo pipefail
+          weekly=()
+          if [ "$EVENT" = "schedule" ]; then
+            created=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            weekly=(--created "$created")
+          fi
+          pick() {
+            python3 scripts/ci/image_matrix.py --images "$IMAGES" --shared-inputs "$SHARED_INPUTS" \
+              --runners "$RUNNERS" --owner "$GITHUB_REPOSITORY_OWNER" --publish "$PUBLISH" \
+              --no-cache "$NO_CACHE" --local-registry "$LOCAL_REGISTRY" "${weekly[@]}" "$@" | tee -a "$GITHUB_OUTPUT"
+          }
+          if [ "$EVENT" != "pull_request" ]; then pick --every < /dev/null; exit 0; fi
+          if ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)'); then
+            echo "::warning::the PR's file list could not be read: every image builds"
+            pick --every < /dev/null; exit 0
+          fi
+          if [ "$(wc -l <<< "$files")" -ge 3000 ]; then pick --every < /dev/null; exit 0; fi
+          pick <<< "$files"
+
   build:
-    name: build ${{ matrix.image.name }} (${{ matrix.platform.arch }})
-    runs-on: ${{ matrix.platform.runner }}
+    name: build ${{ matrix.name }} (${{ matrix.arch }})
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
-      matrix:
-        image:
-          - name: api
-            context: orchestrator
-            target: production
-            build-args: |
-              INSTALL_GRAPH_EXTRAS=false
-          - name: frontend
-            context: frontend
-            target: production
-            build-args: |
-              NEXT_PUBLIC_AUTH_EDITION=local
-              NEXT_PUBLIC_API_URL=http://localhost:8000
-              NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
-              NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000
-          - name: workspace-worker
-            context: services/workspace-worker
-            target: ""
-            build-args: |
-              INSTALL_BROWSER=false
-        platform:
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    # The throwaway registry PR and branch builds push to (localhost:5000). A
+    # build that publishes to GHCR leaves `registry` empty, so none starts.
+    services:
+      registry:
+        image: ${{ matrix.registry }}
+        ports:
+          - 5000:5000
 
     steps:
       - name: Checkout
@@ -104,50 +288,81 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Image name
+      # PRD-262 US-013: Grype comes first, so its database download and load (73
+      # to 120 s on 16 Oct) overlap the build instead of following it. Pinned to
+      # 0.118.0, whose JSON the scan policy reads (`knownExploited` on a match).
+      - name: Install Grype
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.118.0
+
+      # In the background, outside the checkout (Grype reads a .grype.yaml in its
+      # working directory). The scan step waits for db.status.
+      - name: Download the Grype database (background)
         env:
-          NAME: ${{ matrix.image.name }}
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-${NAME}" >> "$GITHUB_ENV"
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/grype"
+          cd "${RUNNER_TEMP}/grype"
+          nohup bash -c '"$GRYPE" db update > db.log 2>&1; echo "$?" > db.status.tmp && mv db.status.tmp db.status' \
+            > /dev/null 2>&1 < /dev/null &
 
       - name: Metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ${{ env.IMAGE }}
+          images: ${{ matrix.image }}
           # GitHub classifies LICENSE as "Other", so the default licence would be
           # NOASSERTION; the repository is Apache-2.0.
           labels: |
-            org.opencontainers.image.title=automatos-${{ matrix.image.name }}
+            org.opencontainers.image.title=automatos-${{ matrix.name }}
             org.opencontainers.image.licenses=Apache-2.0
 
+      # network=host lets BuildKit's container reach the registry service on
+      # localhost:5000.
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: network=host
 
+      # To publish, and to read or write a registry build cache (media-render,
+      # PRD-262 US-054), which lives in a private GHCR package.
       - name: Log in to GHCR
-        if: env.PUBLISH == 'true'
+        if: matrix.ghcr_login
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build (and push by digest when publishing)
+      # Pushes by digest: to GHCR when publishing, to the job's registry
+      # otherwise. Every run reads the cache; only publishing runs write it, so
+      # PR and branch caches (which main can never read) stop crowding main's
+      # out of the 10 GB GHA cache. The picker (scripts/ci/image_matrix.py)
+      # writes both cache settings: the GHA cache, one scope per image and arch,
+      # or media-render's GHCR buildcache ref. On a weekly or `no_cache` run,
+      # no-cache-filters rebuilds the image's OS-package stages, and every step
+      # after them, from fresh packages; the weekly run's cache-to then hands
+      # those layers to the builds that follow.
+      - name: Build and push by digest
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: ${{ matrix.image.context }}
-          target: ${{ matrix.image.target }}
-          platforms: linux/${{ matrix.platform.arch }}
-          build-args: ${{ matrix.image.build-args }}
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: ${{ matrix.build_args }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ env.PUBLISH }}
+          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-from: ${{ matrix.cache_from }}
+          cache-to: ${{ matrix.cache_to }}
+          no-cache-filters: ${{ matrix.no_cache_filters }}
 
       - name: Export digest
-        if: env.PUBLISH == 'true'
+        if: matrix.publish
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
@@ -155,33 +370,197 @@ jobs:
           touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
-        if: env.PUBLISH == 'true'
+        if: matrix.publish
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: digests-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          name: digests-${{ matrix.name }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
 
+      # Reads the pushed digest back: compressed size, each layer with its
+      # Dockerfile instruction and heaviest paths, and the update delta against
+      # the published `edge` (none for an image that is never published).
+      - name: Size, layers and update delta
+        env:
+          NAME: ${{ matrix.name }}
+          ARCH: ${{ matrix.arch }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          EDGE: ${{ matrix.edge }}
+          # Only a brand-new, still-private GHCR package needs these; reads are
+          # anonymous otherwise.
+          REGISTRY_USER: ${{ matrix.publish && github.actor || '' }}
+          REGISTRY_TOKEN: ${{ matrix.publish && secrets.GITHUB_TOKEN || '' }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/layers"
+          python3 scripts/ci/image_report.py measure --name "$NAME" --arch "$ARCH" \
+            --image "$IMAGE" --digest "$DIGEST" --edge "$EDGE" \
+            --out "${RUNNER_TEMP}/layers/${NAME}-${ARCH}.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      # PRD-262 US-054: an image that is never published has no download a user
+      # pays for, so §8 bars media-render on disk. This arch's image is pulled from
+      # the job's registry, and the Size `docker image inspect` reports (what
+      # media-render.yml's 1.30 GB check reads) joins the report, which the budget
+      # step checks against the image's `on_disk_max_mb`.
+      - name: On-disk size
+        if: matrix.on_disk
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REPORT: ${{ runner.temp }}/layers/${{ matrix.name }}-${{ matrix.arch }}.json
+        run: |
+          docker pull --quiet "${IMAGE}@${DIGEST}"
+          size=$(docker image inspect -f '{{.Size}}' "${IMAGE}@${DIGEST}")
+          echo "Docker's image store: $(docker info -f '{{.Driver}}')"
+          docker image ls --digests "$IMAGE"
+          python3 scripts/ci/image_report.py disk --report "$REPORT" --bytes "$size" --summary "$GITHUB_STEP_SUMMARY"
+          # The scan reads the registry, not this copy.
+          docker image rm "${IMAGE}@${DIGEST}" > /dev/null
+
+      # Report only: .github/image-budgets.json's `mode` is `warn` until
+      # PRD-262 US-004 sets the baseline and switches it to `fail`.
+      - name: Size budget
+        env:
+          REPORT: ${{ runner.temp }}/layers/${{ matrix.name }}-${{ matrix.arch }}.json
+        run: |
+          python3 scripts/ci/image_report.py budget --report "$REPORT" \
+            --budgets .github/image-budgets.json --summary "$GITHUB_STEP_SUMMARY"
+
+      # Each image and arch builds in its own job, and a PR's registry ends with
+      # it, so the report job reads the layers from here.
+      - name: Upload the layer report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: layers-${{ matrix.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/layers/${{ matrix.name }}-${{ matrix.arch }}.json
+          if-no-files-found: error
+          retention-days: 30
+
       # Scans this architecture's image on its own runner: Grype picks one
       # platform from a multi-arch index, so scanning the merged index would
-      # miss arm64. Report only: findings go to the log, and even a scanner
-      # error never blocks the publish.
-      - name: Vulnerability scan (report only)
-        if: env.PUBLISH == 'true'
-        continue-on-error: true
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+      # miss arm64. Every build is scanned, read straight from the registry it
+      # pushed to: the job's registry:2 over plain HTTP on a PR or branch, GHCR
+      # (with the login above) when publishing. No docker pull or save. It runs
+      # outside the checkout, so Grype applies no allowlist: its table shows
+      # every row, and the policy step below applies .grype.yaml. A scanner
+      # error fails the job; on main the merge job then never runs (PRD-262
+      # US-013).
+      - name: Vulnerability scan
+        working-directory: ${{ runner.temp }}/grype
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+          GRYPE_REGISTRY_INSECURE_USE_HTTP: ${{ matrix.registry != '' }}
+          GRYPE_DB_AUTO_UPDATE: "false"
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+          DB_WAIT_SECONDS: "600"
+        run: |
+          waited=0
+          until [ -f db.status ]; do
+            if [ "$waited" -ge "$DB_WAIT_SECONDS" ]; then
+              cat db.log
+              echo "::error title=Grype database::not downloaded after ${DB_WAIT_SECONDS} s"
+              exit 1
+            fi
+            sleep 5
+            waited=$((waited + 5))
+          done
+          if [ "$(cat db.status)" != "0" ]; then
+            cat db.log
+            echo "::error title=Grype database::the download failed"
+            exit 1
+          fi
+          echo "The Grype database was ready after ${waited} s of waiting."
+          "$GRYPE" "registry:${IMAGE}@${DIGEST}" --platform "linux/${ARCH}" -o table -o json=report.json
+
+      - name: Upload the scan report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
-          fail-build: false
-          severity-cutoff: high
-          only-fixed: true
-          output-format: table
+          name: grype-${{ matrix.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/grype/report.json
+          if-no-files-found: error
+          retention-days: 30
+
+      # The policy reads .grype.yaml, so it needs PyYAML.
+      - name: Set up Python (the scan policy)
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # PRD-262 US-013 (D1, FR-3): fails on a fixable Critical, or a KEV match of
+      # any severity, that no unexpired .grype.yaml entry covers. POLICY_MODE is
+      # `report` (warnings only) until the W1 wave's last commit sets `fail`, once
+      # every current finding is fixed or allowlisted. An allowlist entry without
+      # a reason or an expiry, or one more than 90 days out, fails in either mode.
+      - name: Scan policy
+        env:
+          POLICY_MODE: report
+          REPORT: ${{ runner.temp }}/grype/report.json
+          NAME: ${{ matrix.name }}
+          ARCH: ${{ matrix.arch }}
+          # PRD-262 US-054: an image scanned here for the first time (IMAGES'
+          # `scan_report_only`: media-render) is judged report only, whatever
+          # POLICY_MODE says, until each finding it shows is fixed or allowlisted.
+          # It can only lower the mode, never raise it.
+          SCAN_REPORT_ONLY: ${{ matrix.scan_report_only }}
+        run: |
+          if [ "$SCAN_REPORT_ONLY" = "true" ]; then POLICY_MODE=report; fi
+          python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
+          python scripts/ci/image_scan_policy.py check --report "$REPORT" --allowlist .grype.yaml \
+            --mode "$POLICY_MODE" --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
+
+  # Across the build jobs: the layers the API and the worker share, and what the
+  # app images cost to pull together, per arch. An image this run did not build
+  # counts as its current `edge`. PRD-262 US-058's shared-layer check reads it.
+  report:
+    name: image report
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      shared_layers_amd64: ${{ steps.report.outputs.shared_layers_amd64 }}
+      shared_layers_arm64: ${{ steps.report.outputs.shared_layers_arm64 }}
+      first_pull_bytes_amd64: ${{ steps.report.outputs.first_pull_bytes_amd64 }}
+      first_pull_bytes_arm64: ${{ steps.report.outputs.first_pull_bytes_arm64 }}
+    steps:
+      - name: Checkout (the report script)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Download the layer reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/layers
+          pattern: layers-*
+          merge-multiple: true
+
+      - name: Shared layers and first pull
+        id: report
+        run: |
+          python3 scripts/ci/image_report.py report --dir "${RUNNER_TEMP}/layers" \
+            --edge-prefix "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-" \
+            --out "${RUNNER_TEMP}/image-report.json" \
+            --summary "$GITHUB_STEP_SUMMARY" --outputs "$GITHUB_OUTPUT"
+
+      - name: Upload the image report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-report
+          path: ${{ runner.temp }}/image-report.json
+          if-no-files-found: error
+          retention-days: 30
 
   merge:
     name: publish ${{ matrix.image.name }}
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: build
+    needs: [changes, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -235,12 +614,17 @@ jobs:
             org.opencontainers.image.title=automatos-${{ matrix.image.name }}
             org.opencontainers.image.description=${{ matrix.image.description }}
             org.opencontainers.image.licenses=Apache-2.0
-          # No `latest` until the maintainers choose to publish one.
+          # No `latest` until the maintainers choose to publish one. No `edge`
+          # either: smoke-images.yml's promote-edge job moves it once this
+          # `sha-<short>` has booted on both arches (PRD-262 US-003).
+          # A schedule run publishes only `weekly-<yyyymmdd>` (PRD-262 US-011):
+          # every other tag is off for it, so a `sha-<short>` is never re-pushed
+          # with other packages.
           flavor: |
             latest=false
           tags: |
-            type=edge,branch=main
-            type=sha
+            type=sha,enable=${{ github.event_name != 'schedule' }}
+            type=schedule,pattern=${{ needs.changes.outputs.weekly_tag }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -274,3 +658,154 @@ jobs:
         env:
           DIGEST: ${{ steps.index.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+  # PRD-262 US-053: the media assets image, ghcr.io/<owner>/automatos-media-assets.
+  # media-render's build is to copy the Kokoro model and voices and the music tracks
+  # from it, pinned as its own stage (`FROM …automatos-media-assets:<tag>@sha256:…
+  # AS assets-image`, FR-9, picked by its MEDIA_ASSETS build arg), instead of fetching
+  # them from GitHub releases and ende.app on every build. PR builds never push to
+  # GHCR, so this job publishes it, and only on a manual run on main with
+  # `media_assets`.
+  # - scripts/ci/media_assets.py fetches every file services/media-render/kokoro/
+  #   assets.json and music/manifest.json name and checks each sha256 before the
+  #   build; after the push it reads the image back, per platform, and checks every
+  #   file again, and only then is the image signed.
+  # - Until Gerard picks the D4 model by ear (US-050), every candidate is in it: the
+  #   fp32 model media-render runs today, the v1.1 release's fp16 and the v1.0
+  #   release's fp16, with the voices file and the music tracks.
+  # - Its licence label is the stage step's expression, `Apache-2.0 AND CC-BY-4.0`
+  #   (the Kokoro weights; the CC BY tracks), not the Apache-2.0 the image jobs stamp.
+  #   /NOTICE carries the Kokoro notice and every track's attribution line. It holds
+  #   data only, no GPL code, so publishing it is separate from §9-Q6.
+  # - FROM scratch, one layer per file, timestamps at SOURCE_DATE_EPOCH=0: a file that
+  #   did not change keeps its layer digest when the image is published again.
+  # - A new GHCR package is private. An org owner makes it public once (PRD-262 §10),
+  #   so Railway and self-hosters' `--profile media` builds pull it with no login; the
+  #   last step reports whether an anonymous pull works yet.
+  media-assets:
+    name: publish media-assets
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.media_assets == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      # cosign keyless signing exchanges the job's OIDC token for a certificate.
+      id-token: write
+    env:
+      DESCRIPTION: Data only, the Kokoro voice model files and the music library that Automatos media-render builds from. Licences and attributions are in /NOTICE.
+    steps:
+      - name: Checkout (the tool and the lists)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Cone mode keeps the root files, so LICENSE comes too.
+          sparse-checkout: |
+            scripts/ci
+            services/media-render
+
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automatos-media-assets" >> "$GITHUB_ENV"
+
+      - name: Fetch every file and check its sha256
+        id: stage
+        run: |
+          python3 scripts/ci/media_assets.py stage --out "${RUNNER_TEMP}/media-assets" \
+            --outputs "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action adds the revision, source and created labels every image
+      # carries; the title, description and licences are this image's own.
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          labels: |
+            org.opencontainers.image.title=automatos-media-assets
+            org.opencontainers.image.description=${{ env.DESCRIPTION }}
+            org.opencontainers.image.licenses=${{ steps.stage.outputs.licences }}
+          annotations: |
+            org.opencontainers.image.title=automatos-media-assets
+            org.opencontainers.image.description=${{ env.DESCRIPTION }}
+            org.opencontainers.image.licenses=${{ steps.stage.outputs.licences }}
+          flavor: |
+            latest=false
+          tags: |
+            type=sha
+
+      # Data only, so both platforms build on this runner with no emulation and share
+      # every layer.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          SOURCE_DATE_EPOCH: "0"
+        with:
+          context: ${{ runner.temp }}/media-assets
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          outputs: type=image,push=true,rewrite-timestamp=true
+          provenance: mode=max
+          sbom: false
+
+      # What was published, not what was staged: each platform's files, exported from
+      # the registry by digest, against the same lists.
+      - name: Check the published files again
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          for arch in amd64 arm64; do
+            dest="${RUNNER_TEMP}/published-${arch}"
+            printf 'FROM %s@%s\n' "$IMAGE" "$DIGEST" \
+              | docker buildx build --platform "linux/${arch}" --provenance=false --sbom=false \
+                  --output "type=local,dest=${dest}" -
+            python3 scripts/ci/media_assets.py verify --dir "$dest" --summary "$GITHUB_STEP_SUMMARY"
+            rm -rf "$dest"
+          done
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign (keyless)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # The line media-render's Dockerfile pins (FR-9: name:tag@sha256), and whether
+      # the package is public yet. Report only: the first publish is always private.
+      - name: Pin line and anonymous pull
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          tag=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          {
+            echo "Published \`${tag}@${DIGEST}\`. media-render's Dockerfile pins it as its own stage, and its MEDIA_ASSETS default becomes image:"
+            echo
+            echo '```dockerfile'
+            echo "FROM ${tag}@${DIGEST} AS assets-image"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          repository="${IMAGE#ghcr.io/}"
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repository}:pull" | jq -r '.token // empty') || token=""
+          if [ -n "$token" ] && curl -fsS -o /dev/null -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json" "https://ghcr.io/v2/${repository}/manifests/${DIGEST}"; then
+            echo "An anonymous pull of the digest works: the package is public." >> "$GITHUB_STEP_SUMMARY"
+          else
+            message="${IMAGE} is private, so Railway's media-render build and --profile media builds cannot pull it. An org owner makes it public once (PRD-262 §10): https://github.com/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/automatos-media-assets/settings"
+            echo "::warning title=media-assets is private::${message}"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+          fi

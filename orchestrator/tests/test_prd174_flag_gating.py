@@ -117,9 +117,11 @@ def test_policy_plane_enabled_reads_config(flag):
 
 def test_f040_middleware_registration_is_flag_guarded():
     main_src = (_ORCH / "main.py").read_text()
-    # The middleware is registered, and only under the flag guard.
-    assert "SlowAPIMiddleware" in main_src
-    assert "if _policy_plane_on:" in main_src
+    # The middleware is registered, and only under the flag guard. It is slowapi's
+    # middleware with a lookup that sees included routers (PRD-262 US-008): the stock
+    # one finds no endpoint for their routes under FastAPI 0.137+ and exempts them.
+    assert "if _policy_plane_on:\n    app.add_middleware(RouteTreeSlowAPIMiddleware)\n" in main_src
+    assert "app.add_middleware(SlowAPIMiddleware)" not in main_src
     # Fail-closed swallow_errors follows the flag (closed when the plane is on).
     assert "swallow_errors=not _policy_plane_on" in main_src
 

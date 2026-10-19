@@ -185,9 +185,9 @@ Automatos AI uses multi-stage Docker builds to decouple build-time compilers and
 3. **`development` & `production` Stages**: Installs application code, creates non-root user `automatos`, and exposes port `8000` running Uvicorn with reload in development or multiple workers in production [orchestrator/Dockerfile:95-189](../../orchestrator/Dockerfile#L95-L189).
 
 ### Frontend Container (`frontend/Dockerfile`)
-- Uses `node:20-alpine` as base, supporting Next.js standalone output mode by copying traced dependencies into `/app` to minimize final image size [frontend/Dockerfile:14-132](../../frontend/Dockerfile#L14-L132).
+- Builds on `node:24-alpine3.24` and runs on `alpine:3.24` with only the node binary copied in, supporting Next.js standalone output mode by copying traced dependencies into `/app` to minimize final image size [frontend/Dockerfile:14-145](../../frontend/Dockerfile#L14-L145).
 
-Sources: [orchestrator/Dockerfile:1-189](../../orchestrator/Dockerfile#L1-L189), [frontend/Dockerfile:1-136](../../frontend/Dockerfile#L1-L136)
+Sources: [orchestrator/Dockerfile:1-189](../../orchestrator/Dockerfile#L1-L189), [frontend/Dockerfile:1-145](../../frontend/Dockerfile#L1-L145)
 
 ---
 

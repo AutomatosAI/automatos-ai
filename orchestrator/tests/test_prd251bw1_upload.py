@@ -37,7 +37,7 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from fastapi.routing import APIRoute  # noqa: E402
+from fastapi.routing import APIRoute, iter_route_contexts  # noqa: E402
 
 import api.socials as socials_api  # noqa: E402
 import api.socials_media_upload as upload_api  # noqa: E402
@@ -163,7 +163,10 @@ def test_an_upload_to_an_approved_post_voids_the_approval(uploads):
 
 
 def test_the_route_limits_and_client_are_wired():
-    (route,) = [r for r in socials_api.router.routes if isinstance(r, APIRoute) and r.path == ROUTE and "POST" in r.methods]
+    (route,) = [
+        r for r in iter_route_contexts(socials_api.router.routes)  # the included upload router's routes too
+        if isinstance(r.original_route, APIRoute) and r.path == ROUTE and "POST" in r.methods
+    ]
     assert not inspect.iscoroutinefunction(route.endpoint), "a route over a sync Session is a plain def (F105)"
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     assert {"method": "POST", "path": ROUTE} in manifest["routes"]

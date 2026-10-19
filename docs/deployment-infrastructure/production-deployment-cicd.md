@@ -118,12 +118,12 @@ The backend build is split into multiple stages:
 
 ### Frontend Dockerfile (`frontend/Dockerfile`)
 The frontend build uses a four-stage process:
-1.  **base**: Sets up Node.js 20 environment and installs build dependencies like `python3`, `make`, `g++`, `curl` [frontend/Dockerfile:14-23]().
-2.  **development**: Installs all dependencies and runs `npm run dev` [frontend/Dockerfile:31-48]().
-3.  **builder**: Injects `NEXT_PUBLIC_*` build arguments (like `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_AUTH_EDITION`) and executes `npm run build` [frontend/Dockerfile:53-98](). The default `NEXT_PUBLIC_AUTH_EDITION` for production is `saas` [frontend/Dockerfile:60]().
-4.  **production**: Uses the `standalone` output from the builder stage, running directly with `node server.js` to bypass `npm` overhead [frontend/Dockerfile:103-132]().
+1.  **base**: `node:24-alpine3.24`, pinned by tag and digest, with the package files. It installs no apk build tools: every native package ships a prebuilt binary [frontend/Dockerfile:11-25]().
+2.  **development**: Installs all dependencies and runs `npm run dev` [frontend/Dockerfile:27-47]().
+3.  **builder**: Injects `NEXT_PUBLIC_*` build arguments (like `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_AUTH_EDITION`) and executes `npm run build` [frontend/Dockerfile:49-101](). The default `NEXT_PUBLIC_AUTH_EDITION` for production is `saas` [frontend/Dockerfile:65]().
+4.  **production**: `alpine:3.24` plus `libstdc++` and the node binary copied from `base`, with no npm, yarn, corepack or curl. It uses the `standalone` output from the builder stage, running directly with `node server.js`; the health check is busybox `wget` on `/favicon.ico` [frontend/Dockerfile:103-145]().
 
-Sources: [orchestrator/Dockerfile:1-184](), [frontend/Dockerfile:1-132]()
+Sources: [orchestrator/Dockerfile:1-184](), [frontend/Dockerfile:1-145]()
 
 ---
 

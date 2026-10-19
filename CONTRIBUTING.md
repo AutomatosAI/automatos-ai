@@ -89,12 +89,16 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 | `test` · `schema-drift` | No migration `ALTER`s a table that no writer `CREATE`s (`scripts/ci/schema_drift_check.py`). |
 | `test` · `frontend-ci` | vitest, baselined `tsc`, an ESLint report, the code-shape rules and `apiClient`-only calls on changed lines, and the route contract (every backend path the frontend calls exists in the route manifest). |
 | `test` · eval lanes | Self-tests of the NL2SQL, retrieval-recall, memory-recall and graph-uplift harnesses (informational). |
-| `smoke-fresh-clone` | `docker compose up` from an empty checkout, with only the three secrets, reaches a green `/health` and `/health/ready`. |
+| `smoke-fresh-clone` | `docker compose up` from an empty checkout, with only the three secrets, reaches a green `/health` and `/health/ready`, and the frontend answers on `:3000`. It times the fresh boot and two warm restarts from the container's start and writes them, with the alembic runs and the boot stages, to the step summary. It also runs every night. |
+| `smoke-images` | Boots the images CI publishes. After each main publish it pulls `sha-<7>` into an empty Docker cache on amd64 and arm64, boots it, and asserts nothing was built, every image carries its commit's revision label, and the backend runs the production command; then it moves `edge` to that tag. Every Monday it does the same for `weekly-<yyyymmdd>`, the images' weekly rebuild with fresh OS packages. On pull requests that touch compose, the Makefile, `envs/` or an image input, it builds the three amd64 images in the job and boots them the same way. It reports the pull, the boots and the first run to `:3000` in the step summary. |
+| `images` | Builds the container images whose inputs a pull request touches (all of them on `main`), pushes them to a registry inside the job, and reports each one's size, layers and update delta. Scans each image with Grype: a fixable Critical, or a match on CISA's Known Exploited Vulnerabilities list at any severity, fails it unless `.grype.yaml` allowlists the row with a reason and an expiry at most 90 days out (`POLICY_MODE` in `images.yml`: `report` only warns, `fail` blocks). On `main` it then publishes to GHCR and signs. `agent-opt-worker` and `media-render` are built, measured and scanned the same way but never published; `media-render` is also held to an on-disk size, and its first scans only warn. |
+| `scan-allowlist` | Every `.grype.yaml` entry has a reason and an expiry at most 90 days out. Runs every day and fails once an entry has expired, and on pull requests that change the allowlist. |
 | `import-linter` | The module-boundary contracts (`orchestrator/.importlinter`). **Required.** |
 | `dco` | A `Signed-off-by:` trailer on every commit. **Required.** |
 | `gitleaks` | No secret anywhere in the pull request's history. **Required.** |
 | `malware-scan` | Known malicious payloads and hidden loaders. **Required.** |
 | `CodeQL`, `check-shopify-isolation` | Static analysis, and the Shopify package's isolation. |
+| `action-pins` | Every `uses:` names a 40-hex commit, and so does every `uses:` inside a composite action or reusable workflow those commits point at, read from GitHub at that commit. Exceptions, each with its reason, are in `.github/action-pin-exceptions.json`. It runs when a workflow, the check or that list changes. |
 
 Lanes marked non-required in their workflow file still run and still report. Treat red as red.
 

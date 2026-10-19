@@ -27,7 +27,7 @@ from .clients.grok_client import GrokProvider
 from .clients.openai_compatible_client import OpenAICompatibleProvider
 from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 from .byok_endpoint import with_key_endpoint
-from .vendor_fit import fitted
+from .vendor_fit import fitted, keyless_via_openrouter
 from .list_prices import list_rates
 
 from core.llm import failover, output_budget, usage_status
@@ -431,7 +431,7 @@ class LLMManager:
         
         built_from_settings = config is None
         if config is None:
-            config = self._load_config_from_settings(service_name, provider, model)
+            config = keyless_via_openrouter(self._load_config_from_settings, service_name, provider, model)
         elif not config.api_key:
             config = self._with_stored_credential(config, service_name)
         if is_byok and not config.base_url:

@@ -35,10 +35,10 @@ export function extractCodeChild(children: ReactNode): { code: string; language:
 
 export const chatMarkdownComponents = {
   p: ({ children }: any) => (
-    <p className="text-foreground leading-relaxed tracking-[0.01em] dark:text-gray-100">{children}</p>
+    <p className="text-foreground leading-relaxed tracking-[0.01em]">{children}</p>
   ),
   strong: ({ children }: any) => (
-    <strong className="text-foreground font-semibold dark:text-gray-100">{children}</strong>
+    <strong className="text-foreground font-semibold">{children}</strong>
   ),
   em: ({ children }: any) => <em className="text-muted-foreground italic dark:text-foreground/90">{children}</em>,
   a: ({ href, children }: any) => (
@@ -52,20 +52,20 @@ export const chatMarkdownComponents = {
     </a>
   ),
   ul: ({ children }: any) => (
-    <ul className="list-disc pl-5 space-y-1.5 text-foreground dark:text-gray-100">{children}</ul>
+    <ul className="list-disc pl-5 space-y-1.5 text-foreground">{children}</ul>
   ),
   ol: ({ children }: any) => (
-    <ol className="list-decimal pl-5 space-y-1.5 text-foreground dark:text-gray-100">{children}</ol>
+    <ol className="list-decimal pl-5 space-y-1.5 text-foreground">{children}</ol>
   ),
   li: ({ children }: any) => (
-    <li className="text-foreground dark:text-gray-100 pl-1">{children}</li>
+    <li className="text-foreground pl-1">{children}</li>
   ),
   // Inline code ONLY — block code never reaches this because `pre` below
   // renders fenced blocks itself via CodeBlock. Neutral tones on purpose:
   // audit-style replies carry dozens of inline spans per message, and a
   // brand-orange pill at that density floods the whole transcript.
   code: ({ children }: any) => (
-    <code className="rounded bg-secondary/60 px-1.5 py-0.5 text-[13px] font-mono text-foreground/90 border border-border/50 dark:bg-white/[0.06] dark:text-gray-200 dark:border-white/10">
+    <code className="rounded bg-secondary/60 px-1.5 py-0.5 text-[13px] font-mono text-foreground/90 border border-border/50">
       {children}
     </code>
   ),
@@ -82,31 +82,31 @@ export const chatMarkdownComponents = {
     </blockquote>
   ),
   h1: ({ children }: any) => (
-    <h1 className="text-lg font-semibold text-foreground dark:text-gray-100 pb-1 border-b border-border/30 mb-2">{children}</h1>
+    <h1 className="text-lg font-semibold text-foreground pb-1 border-b border-border/30 mb-2">{children}</h1>
   ),
   h2: ({ children }: any) => (
-    <h2 className="text-base font-semibold text-foreground dark:text-gray-100 pb-1 border-b border-border/20 mb-2">{children}</h2>
+    <h2 className="text-base font-semibold text-foreground pb-1 border-b border-border/20 mb-2">{children}</h2>
   ),
   h3: ({ children }: any) => (
-    <h3 className="text-sm font-semibold text-foreground dark:text-gray-100 mb-1">{children}</h3>
+    <h3 className="text-sm font-semibold text-foreground mb-1">{children}</h3>
   ),
   hr: () => (
     <hr className="border-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent my-4" />
   ),
   table: ({ children }: any) => (
-    <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-background/40">
-      <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
+    <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:bg-background/40">
+      <table className="min-w-full divide-y divide-border/60 text-sm text-foreground">
         {children}
       </table>
     </div>
   ),
   thead: ({ children }: any) => (
-    <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-background/60 dark:text-muted-foreground">
+    <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-background/60">
       {children}
     </thead>
   ),
   tbody: ({ children }: any) => (
-    <tbody className="divide-y divide-border/50 dark:divide-gray-800/70">{children}</tbody>
+    <tbody className="divide-y divide-border/50">{children}</tbody>
   ),
   tr: ({ children }: any) => (
     <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-background/60">{children}</tr>
@@ -117,7 +117,7 @@ export const chatMarkdownComponents = {
     </th>
   ),
   td: ({ children }: any) => (
-    <td className="px-4 py-3 align-top text-foreground dark:text-gray-200">{children}</td>
+    <td className="px-4 py-3 align-top text-foreground">{children}</td>
   ),
   // Images handled by ImageGallery — strip from markdown
   img: () => null,
@@ -140,6 +140,6 @@ export const chatMarkdownComponents = {
 export const questionMarkdownComponents = {
   ...chatMarkdownComponents,
   a: ({ children }: any) => (
-    <span className="text-foreground dark:text-gray-100">{children}</span>
+    <span className="text-foreground">{children}</span>
   ),
 }

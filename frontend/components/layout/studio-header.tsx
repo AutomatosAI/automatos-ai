@@ -7,6 +7,7 @@ import { NotificationBell } from '@/components/notifications/notification-bell';
 import { ProfileMenu } from '@/components/auth/profile-menu';
 import { UserProfileButton } from '@/components/auth/user-profile-button';
 import { isSaaS } from '@/lib/auth-edition';
+import { openGlobalSearch } from '@/lib/global-search-event';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,19 +25,13 @@ import {
  */
 
 export function StudioHeader() {
-  const openSearch = () => {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('automatos:global-search-open'));
-    }
-  };
-
   return (
     <header className="sh-headbar">
       {/* Search cmdK — dispatches the global search open event */}
       <button
         type="button"
         className="sh-cmdk"
-        onClick={openSearch}
+        onClick={openGlobalSearch}
         aria-label="Open search (⌘K)"
       >
         <Search style={{ width: 12, height: 12 }} />
@@ -47,64 +42,73 @@ export function StudioHeader() {
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
-      {/* Utilities cluster */}
-      <div className="sh-utils">
-        {/* Docs + Help dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="sh-icon-btn"
-              aria-label="Help & documentation"
-              title="Help"
-            >
-              <HelpCircle style={{ width: 15, height: 15, strokeWidth: 1.6 }} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem asChild>
-              <a
-                href="https://docs.automatos.app"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between"
-              >
-                <span className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4" />
-                  Documentation
-                </span>
-                <ExternalLink className="w-3 h-3 opacity-50" />
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a
-                href="https://docs.automatos.app/automatos-ai-docs/api-reference"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between"
-              >
-                <span className="flex items-center gap-2">
-                  <Code2 className="w-4 h-4" />
-                  API Reference
-                </span>
-                <ExternalLink className="w-3 h-3 opacity-50" />
-              </a>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Notifications */}
-        <NotificationBell />
-
-        <span className="sh-sep" />
-
-        {/* Theme toggle */}
-        <ThemeToggle />
-
-        {/* Profile menu — hosted edition only (PRD-233 S7): signed-out it is a
-            sign-in affordance, and the local edition has no accounts. */}
-        {isSaaS ? <ProfileMenu /> : <UserProfileButton />}
-      </div>
+      <StudioHeaderUtilities />
     </header>
+  );
+}
+
+/**
+ * The header's utilities cluster — Help, notifications, the theme menu and the
+ * profile control by edition. Play's frame (PRD-260 T-004) keeps the same one.
+ */
+export function StudioHeaderUtilities() {
+  return (
+    <div className="sh-utils">
+      {/* Docs + Help dropdown */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="sh-icon-btn"
+            aria-label="Help & documentation"
+            title="Help"
+          >
+            <HelpCircle style={{ width: 15, height: 15, strokeWidth: 1.6 }} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem asChild>
+            <a
+              href="https://docs.automatos.app"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between"
+            >
+              <span className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4" />
+                Documentation
+              </span>
+              <ExternalLink className="w-3 h-3 opacity-50" />
+            </a>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a
+              href="https://docs.automatos.app/automatos-ai-docs/api-reference"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between"
+            >
+              <span className="flex items-center gap-2">
+                <Code2 className="w-4 h-4" />
+                API Reference
+              </span>
+              <ExternalLink className="w-3 h-3 opacity-50" />
+            </a>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Notifications */}
+      <NotificationBell />
+
+      <span className="sh-sep" />
+
+      {/* Theme toggle */}
+      <ThemeToggle />
+
+      {/* Profile menu — hosted edition only (PRD-233 S7): signed-out it is a
+          sign-in affordance, and the local edition has no accounts. */}
+      {isSaaS ? <ProfileMenu /> : <UserProfileButton />}
+    </div>
   );
 }

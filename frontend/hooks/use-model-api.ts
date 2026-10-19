@@ -8,6 +8,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import { ModelRoute, fetchPlatformDefaultRoute, setPlatformDefaultRoute } from '@/lib/llm-defaults'
 import { useWorkspace } from '@/hooks/use-workspace'
 
 // Types
@@ -110,6 +111,24 @@ export function useWorkspaceModels(options?: { enabled?: boolean }) {
     },
     staleTime: 5 * 60 * 1000,
     enabled: (options?.enabled ?? true) && !!workspaceId,
+  })
+}
+
+/**
+ * The platform default model route (GET /api/models/platform-default): what a new
+ * agent, and an Auto that follows the platform default, runs on. Short-lived, so an
+ * admin's change shows within a minute. Each answer also refreshes the cache behind
+ * LLM_DEFAULTS (lib/llm-defaults), which the agent forms read.
+ */
+export function usePlatformDefaultRoute() {
+  return useQuery<ModelRoute>({
+    queryKey: ['platform-default-route'],
+    queryFn: async () => {
+      const route = await fetchPlatformDefaultRoute()
+      setPlatformDefaultRoute(route)
+      return route
+    },
+    staleTime: 60 * 1000,
   })
 }
 

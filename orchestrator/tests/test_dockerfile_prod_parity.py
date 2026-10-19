@@ -1,7 +1,7 @@
 """Dockerfile ARG defaults are PRODUCTION values; compose opts the local edition out.
 
-Railway builds the three Dockerfiles (railway.json: builder DOCKERFILE, target
-production). On 2026-08-30 a `NEXT_PUBLIC_AUTH_EDITION=local` default shipped the
+Railway builds the Dockerfiles (railway.json: builder DOCKERFILE, no target, so the
+last stage, production). On 2026-08-30 a `NEXT_PUBLIC_AUTH_EDITION=local` default shipped the
 Clerk-less local edition to production (#650 -> #668), and the same slim pass
 left the graph-extras and browser installs defaulted OFF. This guard makes the
 rule mechanical: every build ARG with a default must be registered here with
@@ -33,8 +33,10 @@ PROD_DEFAULTS = {
     },
     "orchestrator/Dockerfile": {"INSTALL_GRAPH_EXTRAS": "true"},
     "services/workspace-worker/Dockerfile": {"INSTALL_BROWSER": "true"},
-    # PRD-251 W1: no defaulted ARG (TARGETARCH is BuildKit's, never defaulted).
-    "services/media-render/Dockerfile": {},
+    # TARGETARCH is BuildKit's, never defaulted. PRD-262 US-053: the Kokoro files and
+    # the music tracks are fetched (sha256-checked) until the media assets image is
+    # published and public; then its own stage, and this value, become `image`.
+    "services/media-render/Dockerfile": {"MEDIA_ASSETS": "fetch"},
 }
 
 # What the LOCAL edition must pass explicitly (docker-compose.yml build args).
@@ -85,7 +87,6 @@ def test_the_local_edition_passes_its_choices_explicitly():
 def test_deploy_config_builds_the_dockerfiles():
     railway = json.loads((_ROOT / "railway.json").read_text())
     assert railway["build"]["builder"] == "DOCKERFILE"
-    assert railway["build"]["dockerfileTarget"] == "production"
     manifest = json.loads((_ROOT / "infrastructure" / "railway-manifest.json").read_text())
     builders = set()
 

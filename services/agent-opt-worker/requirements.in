@@ -1,0 +1,29 @@
+# agent-opt-worker's direct dependencies (PRD-262 US-006). The image installs
+# requirements.lock, never this file: every pin there carries its hashes, and the
+# Dockerfile installs it with --require-hashes --no-deps. Regenerate the lock from
+# the repository root after changing this file:
+#
+#   uv pip compile services/agent-opt-worker/requirements.in \
+#     --overrides services/agent-opt-worker/overrides.txt \
+#     --python-version 3.11 --python-platform x86_64-unknown-linux-gnu \
+#     --generate-hashes -o services/agent-opt-worker/requirements.lock
+#
+# overrides.txt keeps the PyPI package `fi` out: agent-opt 0.0.1 requires
+# `fi>=0.0.2`, an unrelated 2019 sdist that runs setup.py at build. The `fi.*`
+# modules the worker imports come from ai-evaluation (fi.evals) and agent-opt
+# (fi.opt). CI fails on a `fi==` line in the lock.
+#
+# litellm stays at 1.80.0 in the lock: ai-evaluation 1.1.0 requires openai<2,
+# and litellm 1.80.5 and later require openai>=2.8.0.
+fastapi==0.146.0
+# GHSA-86qp-5c8j-p5mr (a forged Host header rewrites request.url.path) is fixed in 1.0.1.
+starlette>=1.0.1
+# Plain uvicorn: [standard]'s uvloop, httptools, watchfiles and websockets add
+# 17.8 MB installed and this service needs none of them.
+uvicorn==0.34.0
+agent-opt==0.0.1
+# 1.x provides fi.evals itself; 0.1.x still required the `fi` package.
+ai-evaluation>=1.1.0
+litellm>=1.61.0
+httpx>=0.27.0
+prometheus_client>=0.20.0

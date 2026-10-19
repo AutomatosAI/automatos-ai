@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -44,8 +45,9 @@ def test_off_instruments_no_library_and_imports_no_instrumentation():
         "otel.instrument_libraries(engine=object())\n"
         "bad = [m for m in sys.modules if m.startswith(('opentelemetry.instrumentation', 'opentelemetry.sdk.trace'))]\n"
         "assert not bad, bad\n"
-        "import httpx\n"
+        "import httpx, httpx2\n"
         "assert not hasattr(httpx.HTTPTransport.handle_request, '__wrapped__')\n"
+        "assert not hasattr(httpx2.HTTPTransport.handle_request, '__wrapped__')\n"
     )
     env = {k: v for k, v in os.environ.items() if k != "OTEL_ENABLED"}
     done = subprocess.run([sys.executable, "-c", script], cwd=_ORCH, env=env, capture_output=True, text=True,
@@ -89,12 +91,12 @@ def spans(monkeypatch):
 
 def _uninstrument_all():
     from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
     from opentelemetry.instrumentation.redis import RedisInstrumentor
     from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
-    for instrumentor in (SQLAlchemyInstrumentor(), HTTPXClientInstrumentor(), RedisInstrumentor(),
-                         BotocoreInstrumentor()):
+    for instrumentor in (SQLAlchemyInstrumentor(), HTTPXClientInstrumentor(), HTTPX2ClientInstrumentor(),
+                         RedisInstrumentor(), BotocoreInstrumentor()):
         instrumentor.uninstrument()
 
 
@@ -113,6 +115,17 @@ def http_server():
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"{}")
+
+        def do_POST(self):   # a chat completion, as an OpenAI-compatible provider answers
+            self.rfile.read(int(self.headers.get("content-length", 0)))
+            seen.append(self.headers.get("traceparent"))
+            body = json.dumps({"id": "c", "object": "chat.completion", "created": 0, "model": "m", "choices": [
+                {"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -146,6 +159,48 @@ def test_an_outbound_request_is_a_child_span_that_carries_traceparent(spans, htt
     assert len(seen) == 2 and all(tp and tp.split("-")[1] == trace_id for tp in seen)   # the callee continues it
     assert clients[0].attributes["http.url"].endswith("/v1/models?key=REDACTED&page=REDACTED")
     assert _leaks(exporter.get_finished_spans()) == []
+
+
+def test_a_model_call_through_the_openai_sdk_is_a_client_span_too(spans, http_server):
+    """#1112: openai 3.x sends through httpx2, which the httpx instrumentation doesn't patch."""
+    import openai
+    from opentelemetry import trace
+    from opentelemetry.trace import SpanKind
+
+    exporter, _ = spans
+    base, seen = http_server
+    client = openai.OpenAI(api_key="test-key", base_url=f"{base}/v1", default_query={"key": SECRET}, max_retries=0)
+    with trace.get_tracer("t").start_as_current_span("chat m") as parent:
+        reply = client.chat.completions.create(model="m", messages=[{"role": "user", "content": "hi"}])
+    assert reply.choices[0].message.content == "ok"
+    [call] = [s for s in exporter.get_finished_spans() if s.kind == SpanKind.CLIENT]
+    assert call.parent.span_id == parent.get_span_context().span_id
+    assert seen[0] and seen[0].split("-")[1] == format(parent.get_span_context().trace_id, "032x")
+    assert call.attributes["http.url"].endswith("/v1/chat/completions?key=REDACTED")
+    assert _leaks(exporter.get_finished_spans()) == []
+
+
+def test_an_async_model_call_through_the_openai_sdk_is_a_client_span_too(spans, http_server):
+    """The embedding clients (and any async caller) use AsyncOpenAI: httpx2's async transport."""
+    import openai
+    from opentelemetry import trace
+    from opentelemetry.trace import SpanKind
+
+    exporter, _ = spans
+    base, seen = http_server
+
+    async def call():
+        client = openai.AsyncOpenAI(api_key="test-key", base_url=f"{base}/v1", default_query={"key": SECRET},
+                                    max_retries=0)
+        with trace.get_tracer("t").start_as_current_span("chat m") as parent:
+            await client.chat.completions.create(model="m", messages=[{"role": "user", "content": "hi"}])
+        return parent
+
+    parent = asyncio.run(call())
+    [span] = [s for s in exporter.get_finished_spans() if s.kind == SpanKind.CLIENT]
+    assert span.parent.span_id == parent.get_span_context().span_id
+    assert seen[0] and seen[0].split("-")[1] == format(parent.get_span_context().trace_id, "032x")
+    assert span.attributes["http.url"].endswith("?key=REDACTED") and _leaks(exporter.get_finished_spans()) == []
 
 
 def test_a_sql_statement_is_a_span_without_its_bound_values(spans):

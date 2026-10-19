@@ -35,7 +35,10 @@ describe('PRD-244 W3 — Style × Tone', () => {
     const src = read('app/layout.tsx')
     expect(src).toContain("from 'next/headers'")
     expect(src).toContain('UI_STYLE_COOKIE')
-    expect(src).toContain('STUDIO_HTML_CLASS')
+    // PRD-260 D1, M07; PRD-261 A-03: the classes come from styleHtmlClasses (['studio'] for
+    // Studio), put on <html> before first paint by the style's theme boot in <head> (run and
+    // asserted in lib/__tests__/ui-style-play.test.ts and app/__tests__/root-layout.test.tsx).
+    expect(src).toContain('<ThemeBootScripts boot={boot} />')
     expect(src).toContain('initialUiStyle={uiStyle}')
   })
 

@@ -7,12 +7,19 @@ futureagi-worker service. No SDK dependency in the orchestrator.
 
 The worker handles: assess, safety, optimize, live scoring.
 This module handles: DB reads/writes, fire-and-forget dispatch, dataset collection.
+
+PRD-262 US-006: every worker call carries X-Internal-Token (AGENT_OPT_WORKER_TOKEN).
+No database session is checked out while the worker is awaited: the per-turn hook
+reads a cached "any prompt has scoring on" flag, and the database work runs in
+threads, each in its own short session (``get_db_session``).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +32,17 @@ logger = logging.getLogger(__name__)
 WORKER_URL = config.AGENT_OPT_WORKER_URL
 WORKER_TIMEOUT = 120  # seconds for assess/safety
 OPTIMIZE_TIMEOUT = 300  # seconds for optimization
+TOKEN_HEADER = "X-Internal-Token"
+# How long a chat turn trusts the cached "does any prompt have live scoring on?"
+# answer. Each API process re-reads it at most this often, in a thread; a toggle
+# on this process clears it at once (admin_prompts.toggle_futureagi).
+SCORING_FLAG_TTL_SECONDS = 60.0
+
+
+def _worker_headers() -> Dict[str, str]:
+    """X-Internal-Token when a token is configured: the worker answers 401 without it."""
+    token = config.AGENT_OPT_WORKER_TOKEN
+    return {TOKEN_HEADER: token} if token else {}
 
 
 def _extract_text(parts) -> str:
@@ -42,6 +60,141 @@ def _extract_text(parts) -> str:
     return ""
 
 
+@dataclass(frozen=True)
+class _ScoringFlag:
+    """The cached answer to "does any prompt have live scoring on?" and when it was read."""
+
+    enabled: bool
+    read_at: float
+
+    def fresh(self, now: float) -> bool:
+        return now - self.read_at < SCORING_FLAG_TTL_SECONDS
+
+
+@dataclass(frozen=True)
+class _RunInputs:
+    """What run_assessment needs from the database, read before the worker is called."""
+
+    run_type: str
+    prompt_content: str
+    version_id: Any
+    settings: Dict[str, Any]
+
+
+def _any_prompt_scoring_enabled() -> bool:
+    """Is live scoring on for any prompt? One short session; runs in a thread."""
+    from core.database.database import get_db_session
+    from core.models.system_prompts import SystemPrompt
+
+    with get_db_session() as db:
+        first = db.query(SystemPrompt).filter(SystemPrompt.futureagi_eval_enabled.is_(True)).first()
+        return first is not None
+
+
+def _store_live_runs(scores: Dict[str, Any]) -> int:
+    """Store a live run for every prompt with scoring on, against its active version.
+
+    One short session, opened after the worker answered; runs in a thread.
+    """
+    from core.database.database import get_db_session
+    from core.models.system_prompts import SystemPrompt, SystemPromptEvalRun, SystemPromptVersion
+
+    summary = ", ".join(f"{k}={v.get('score')}" for k, v in scores.items())
+    stored = 0
+    with get_db_session() as db:
+        for prompt in db.query(SystemPrompt).filter(SystemPrompt.futureagi_eval_enabled.is_(True)).all():
+            version = db.query(SystemPromptVersion).filter(
+                SystemPromptVersion.prompt_id == prompt.id,
+                SystemPromptVersion.status == "active",
+            ).first()
+            if not version:
+                continue
+            now = datetime.utcnow()
+            db.add(SystemPromptEvalRun(
+                prompt_id=prompt.id,
+                version_id=version.id,
+                run_type="live",
+                status="completed",
+                scores={"scores": scores, "metrics_run": len(scores), "source": "live_traffic"},
+                started_at=now,
+                completed_at=now,
+            ))
+            stored += 1
+            logger.info("[live] Scored %s: %s", prompt.slug, summary)
+    return stored
+
+
+def _mark_failed(run: Any, message: str) -> None:
+    run.status = "failed"
+    run.error_message = message
+    run.completed_at = datetime.utcnow()
+
+
+def _start_run(run_id: str) -> Optional[_RunInputs]:
+    """Mark the run running and read what the worker needs. The session commits and
+    closes before the worker is called; runs in a thread."""
+    from core.database.database import get_db_session
+    from core.models.system_prompts import SystemPromptEvalRun, SystemPromptVersion
+
+    with get_db_session() as db:
+        run = db.query(SystemPromptEvalRun).filter(SystemPromptEvalRun.id == run_id).first()
+        if not run:
+            logger.error("Assessment run %s not found", run_id)
+            return None
+        run.status = "running"
+        run.started_at = datetime.utcnow()
+        version = db.query(SystemPromptVersion).filter(SystemPromptVersion.id == run.version_id).first()
+        if not version:
+            _mark_failed(run, "Version not found")
+            return None
+        return _RunInputs(
+            run_type=run.run_type,
+            prompt_content=version.content,
+            version_id=version.id,
+            settings=dict(run.metadata_ or {}),
+        )
+
+
+def _save_version_scores(db: Any, version_id: Any, scores: Dict[str, Any]) -> None:
+    from core.models.system_prompts import SystemPromptVersion
+
+    version = db.query(SystemPromptVersion).filter(SystemPromptVersion.id == version_id).first()
+    if version:
+        version.eval_scores = scores
+
+
+def _finish_run(run_id: str, inputs: _RunInputs, result: Dict[str, Any]) -> None:
+    """Write the worker's result in a new session; runs in a thread."""
+    from core.database.database import get_db_session
+    from core.models.system_prompts import SystemPromptEvalRun
+
+    with get_db_session() as db:
+        run = db.query(SystemPromptEvalRun).filter(SystemPromptEvalRun.id == run_id).first()
+        if not run:
+            logger.error("Assessment run %s vanished before its result was saved", run_id)
+            return
+        if result.get("status") == "failed" or ("error" in result and not result.get("scores")):
+            _mark_failed(run, result.get("error", "Unknown worker error"))
+        else:
+            run.status = "completed"
+            run.scores = result
+            run.completed_at = datetime.utcnow()
+            if inputs.run_type == "assess" and result.get("scores"):
+                _save_version_scores(db, inputs.version_id, result["scores"])
+        logger.info("Assessment run %s -> %s", run_id, run.status)
+
+
+def _fail_run(run_id: str, message: str) -> None:
+    """Mark the run failed in its own session; runs in a thread."""
+    from core.database.database import get_db_session
+    from core.models.system_prompts import SystemPromptEvalRun
+
+    with get_db_session() as db:
+        run = db.query(SystemPromptEvalRun).filter(SystemPromptEvalRun.id == run_id).first()
+        if run:
+            _mark_failed(run, message)
+
+
 class FutureAGIService:
     """
     Routes all FutureAGI calls to the isolated worker service.
@@ -52,6 +205,9 @@ class FutureAGIService:
 
     def __init__(self) -> None:
         self._available = False
+        self._scoring_flag: Optional[_ScoringFlag] = None
+        # The scheduled live-scoring tasks, held so none is collected before it ends.
+        self._live_tasks: set = set()
         self._init()
 
     @classmethod
@@ -80,7 +236,7 @@ class FutureAGIService:
         """POST to the worker service and return JSON response."""
         url = f"{WORKER_URL}{path}"
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout, headers=_worker_headers()) as client:
                 resp = await client.post(url, json=payload)
             if resp.status_code != 200:
                 error_text = resp.text[:300]
@@ -101,7 +257,7 @@ class FutureAGIService:
         """GET from the worker service and return JSON response."""
         url = f"{WORKER_URL}{path}"
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout, headers=_worker_headers()) as client:
                 resp = await client.get(url)
             if resp.status_code != 200:
                 error_text = resp.text[:300]
@@ -232,31 +388,51 @@ class FutureAGIService:
 
     LIVE_METRICS = ["completeness", "is_helpful", "is_concise"]
 
+    def schedule_live_eval(self, input_text: str, output_text: str, context_text: Optional[str] = None) -> None:
+        """The chat pipeline's per-turn hook: score the exchange in the background.
+
+        PRD-262 US-006: the turn reads only the cached flag, never the database. While
+        the flag is fresh and says no prompt has scoring on, nothing is scheduled.
+        """
+        if not (input_text and output_text) or not self.is_available:
+            return
+        flag = self._scoring_flag
+        if flag is not None and flag.fresh(time.monotonic()) and not flag.enabled:
+            return
+        task = asyncio.create_task(self.eval_live_traffic(input_text, output_text, context_text))
+        self._live_tasks.add(task)
+        task.add_done_callback(self._live_tasks.discard)
+
+    def forget_scoring_flag(self) -> None:
+        """Drop the cached flag (an admin toggled scoring), so the next turn re-reads it."""
+        self._scoring_flag = None
+
+    async def _scoring_enabled(self) -> bool:
+        """The cached flag, re-read in a thread once it is older than SCORING_FLAG_TTL_SECONDS."""
+        flag = self._scoring_flag
+        if flag is None or not flag.fresh(time.monotonic()):
+            enabled = await asyncio.to_thread(_any_prompt_scoring_enabled)
+            flag = _ScoringFlag(enabled=enabled, read_at=time.monotonic())
+            self._scoring_flag = flag
+        return flag.enabled
+
     async def eval_live_traffic(
         self,
         input_text: str,
         output_text: str,
         context_text: Optional[str] = None,
     ) -> None:
-        """
-        Fire-and-forget after each chat response.
-        Finds all prompts with eval enabled, scores via worker, stores results.
+        """Score one chat exchange through the worker and store a live run per scored prompt.
+
+        Scheduled by schedule_live_eval. The flag read and the writes run in threads,
+        each in its own short session, so no pooled connection waits on the worker
+        (up to WORKER_TIMEOUT seconds).
         """
         if not self.is_available:
             return
-
-        from core.database.database import SessionLocal
-        from core.models.system_prompts import SystemPrompt, SystemPromptEvalRun, SystemPromptVersion
-
-        db = SessionLocal()
         try:
-            enabled_prompts = db.query(SystemPrompt).filter(
-                SystemPrompt.futureagi_eval_enabled == True  # noqa: E712
-            ).all()
-            if not enabled_prompts:
+            if not await self._scoring_enabled():
                 return
-
-            # Call worker to score the exchange
             payload: Dict[str, Any] = {
                 "input_text": input_text,
                 "output_text": output_text,
@@ -264,42 +440,13 @@ class FutureAGIService:
             }
             if context_text:
                 payload["context_text"] = context_text
-
             result = await self._call_worker("/score", payload)
-
             if "error" in result:
-                logger.warning(f"[live] worker scoring failed: {result['error']}")
+                logger.warning("[live] worker scoring failed: %s", result["error"])
                 return
-
-            scores = result.get("scores", {})
-
-            # Store a run for each enabled prompt
-            for prompt in enabled_prompts:
-                version = db.query(SystemPromptVersion).filter(
-                    SystemPromptVersion.prompt_id == prompt.id,
-                    SystemPromptVersion.status == "active",
-                ).first()
-                if not version:
-                    continue
-
-                run = SystemPromptEvalRun(
-                    prompt_id=prompt.id,
-                    version_id=version.id,
-                    run_type="live",
-                    status="completed",
-                    scores={"scores": scores, "metrics_run": len(scores), "source": "live_traffic"},
-                    started_at=datetime.utcnow(),
-                    completed_at=datetime.utcnow(),
-                )
-                db.add(run)
-                db.commit()
-                score_summary = ", ".join(f"{k}={v.get('score')}" for k, v in scores.items())
-                logger.info(f"[live] Scored {prompt.slug}: {score_summary}")
-
-        except Exception as e:
-            logger.warning(f"[live] eval_live_traffic failed: {e}")
-        finally:
-            db.close()
+            await asyncio.to_thread(_store_live_runs, result.get("scores", {}))
+        except Exception:
+            logger.exception("[live] eval_live_traffic failed")
 
     # ------------------------------------------------------------------
     # Dataset collection for optimization
@@ -348,84 +495,43 @@ class FutureAGIService:
     # ------------------------------------------------------------------
 
     async def run_assessment(self, run_id: str) -> None:
-        """
-        Process a SystemPromptEvalRun by its ID.
-        Loads the run from DB, calls the worker, saves results.
-        """
-        from core.database.database import SessionLocal
-        from core.models.system_prompts import SystemPromptEvalRun, SystemPromptVersion
+        """Process one SystemPromptEvalRun by its ID (admin_prompts.py, in a background thread).
 
-        db = SessionLocal()
+        PRD-262 US-006: no session is checked out while the worker is awaited; an
+        optimisation polls it for up to 25 minutes. The run is read and marked running
+        in one short session that commits and closes, and the result is written in a
+        new one. Before, one pooled connection and one threadpool token were held for
+        the whole wait.
+        """
         try:
-            run = db.query(SystemPromptEvalRun).filter(
-                SystemPromptEvalRun.id == run_id
-            ).first()
-            if not run:
-                logger.error(f"Assessment run {run_id} not found")
+            inputs = await asyncio.to_thread(_start_run, run_id)
+            if inputs is None:
                 return
+            result = await self._run_on_worker(inputs)
+            await asyncio.to_thread(_finish_run, run_id, inputs, result)
+        except Exception as exc:
+            logger.exception("Assessment run %s failed", run_id)
+            await asyncio.to_thread(_fail_run, run_id, str(exc) or type(exc).__name__)
 
-            run.status = "running"
-            run.started_at = datetime.utcnow()
-            db.commit()
-
-            version = db.query(SystemPromptVersion).filter(
-                SystemPromptVersion.id == run.version_id
-            ).first()
-            if not version:
-                run.status = "failed"
-                run.error_message = "Version not found"
-                run.completed_at = datetime.utcnow()
-                db.commit()
-                return
-
-            prompt_content = version.content
-            config = run.metadata_ or {}
-
-            if run.run_type == "assess":
-                result = await self.assess_prompt(
-                    prompt_content,
-                    test_cases=config.get("test_cases"),
-                    metrics=config.get("metrics"),
-                )
-            elif run.run_type == "optimize":
-                result = await self.optimize_prompt(
-                    prompt_content,
-                    algorithm=config.get("algorithm", "meta_prompt"),
-                    target_metric=config.get("target_metric", "is_helpful"),
-                    num_iterations=config.get("num_iterations", 2),
-                )
-            elif run.run_type == "safety":
-                result = await self.safety_check(prompt_content)
-            else:
-                result = await self.assess_prompt(prompt_content)
-
-            if result.get("status") == "failed" or (
-                "error" in result and not result.get("scores")
-            ):
-                run.status = "failed"
-                run.error_message = result.get("error", "Unknown worker error")
-            else:
-                run.status = "completed"
-                run.scores = result
-
-                if run.run_type == "assess" and result.get("scores"):
-                    version.eval_scores = result["scores"]
-
-            run.completed_at = datetime.utcnow()
-            logger.info(f"Assessment run {run_id} -> {run.status}")
-            db.commit()
-
-        except Exception as e:
-            logger.error(f"Assessment run {run_id} failed: {e}")
-            try:
-                run.status = "failed"
-                run.error_message = str(e)
-                run.completed_at = datetime.utcnow()
-                db.commit()
-            except Exception:
-                pass
-        finally:
-            db.close()
+    async def _run_on_worker(self, inputs: _RunInputs) -> Dict[str, Any]:
+        """Send the run to the worker by its type. No database session is open here."""
+        settings = inputs.settings
+        if inputs.run_type == "optimize":
+            return await self.optimize_prompt(
+                inputs.prompt_content,
+                algorithm=settings.get("algorithm", "meta_prompt"),
+                target_metric=settings.get("target_metric", "is_helpful"),
+                num_iterations=settings.get("num_iterations", 2),
+            )
+        if inputs.run_type == "safety":
+            return await self.safety_check(inputs.prompt_content)
+        if inputs.run_type == "assess":
+            return await self.assess_prompt(
+                inputs.prompt_content,
+                test_cases=settings.get("test_cases"),
+                metrics=settings.get("metrics"),
+            )
+        return await self.assess_prompt(inputs.prompt_content)
 
 
 # Module-level singleton

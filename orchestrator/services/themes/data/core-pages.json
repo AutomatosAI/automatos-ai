@@ -1,0 +1,20 @@
+{
+  "_comment": "PRD-261 PA-18: sha256 (CRLF read as LF) of every PAGE_SOURCES file under frontend/. Generated: python3 orchestrator/tests/test_prd261_core_pages_drift.py --write. Don't edit by hand.",
+  "files": {
+    "app/agents/page.tsx": "ec826b23e72a4f0547294406172c10e70190919fd9ad2f619fb7cd655b1e83b5",
+    "app/assignments/page.tsx": "b60e8d030a3772855c7a921052f6547cb904e4920c49fcacb5ad191d416800d2",
+    "app/chat/page.tsx": "6aa8a56f6d73d0b446886b38640123092cd6b54583b05021adaca7e6124e1b58",
+    "app/command-center/page.tsx": "659ffbfd0633626c02fa3f87aba4ee66539c2806acab84dc52e7da19f5515af2",
+    "app/deliverables/page.tsx": "8d6daee8922c2619cc71e7bd3bb23e177f5fc6b22bb14e9eedd49225a5b96d55",
+    "app/documents/page.tsx": "c9f4e8544bcee335de2a26132cb6d7f1945e1ec0dd1c467e19116702beadf808",
+    "app/missions/[id]/page.tsx": "f254b860faa9566479ee3a53c8d12ddeaaba1295e932c0518cc33f8c8f2d0e89",
+    "app/page.tsx": "da72491fc863f00521ac024f4c43c7e9810ac206cb7f61dcb619453adcbfe533",
+    "app/playbooks/page.tsx": "6bd7522e1268fd3cec737df995e1ea8e82debca5d6ed1221e2de653981697b27",
+    "components/agents/studio/agent-management-studio.tsx": "4bbcef4e09158bc526623c85574771867895efa3007b55cd537b98379be3427b",
+    "components/chatbot/studio-chat-shell.tsx": "eb0aa1b42b3c6971037935b10b7a0e74e257758f7ed3c7a1ba728a0a4887b492",
+    "components/command-center/command-center-shell.tsx": "1174b8244e56b8ef154fda5d41b7d37ba912fc8d566b961a0fc9a6b06c2ce084",
+    "components/deliverables/studio/deliverables-studio.tsx": "2e01340bc230e3563970e429d470608a181c11d93c488fbc796e769c5c8b5e87",
+    "components/documents/document-management.tsx": "d4588f5172ea070ebeaa1b012236fd45d0263638e7694b4c1c3e319ce11e7d38",
+    "components/playbooks/PlaybooksPanel.tsx": "f3486c7ab9d5abc6fa66eb5a7d40be9b27ff60b71bcaff7697f411608b9cf2b6"
+  }
+}

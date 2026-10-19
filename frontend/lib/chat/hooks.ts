@@ -145,15 +145,6 @@ export function useChat({
     return () => window.removeEventListener('automatos:chat-changed', onChatChanged)
   }, [chatId])
 
-  const reload = useCallback(() => {
-    const lastUserMessageIndex = messages.findLastIndex(m => m.role === 'user')
-    if (lastUserMessageIndex >= 0) {
-      const lastUserMessage = messages[lastUserMessageIndex]
-      setMessages(messages.slice(0, lastUserMessageIndex))
-      sendMessage(lastUserMessage.content || '')
-    }
-  }, [messages])
-
   const sendMessage = useCallback(
     async (message: any) => {
       if (isLoading || awaitingRef.current) return
@@ -593,7 +584,6 @@ export function useChat({
     messages,
     setMessages,
     sendMessage,
-    reload,
     // PRD-237 S7: an awaited detached reply reads as streaming to the surfaces.
     status: awaitingReply ? 'streaming' : status,
     stop,

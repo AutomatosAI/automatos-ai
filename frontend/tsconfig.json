@@ -26,6 +26,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@automatos/theme-sdk": [
+        "./lib/theme-sdk/index.ts"
       ]
     }
   },

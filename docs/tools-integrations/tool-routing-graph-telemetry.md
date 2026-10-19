@@ -111,6 +111,7 @@ The nightly edge builder service (`core/services/edge_builder.py`) processes his
 
 * **Idempotency & Determinism**: K-means clustering operates with a fixed `random_state=42`. Upserts prevent duplicate key violations across unique constraints (`uq_tre_full_key`, `uq_tra_full_key`).
 * **Confidence Scoring**: Uses the Wilson lower bound (95% confidence interval) rather than raw frequencies.
+* **Rows Read (PRD-263 US-018)**: only `telemetry_source` `production`, `synthetic_signal` (the PRD-232 gap and shown markers) or NULL, and never a row with status `asked` (a wait for the owner's click, which the builder would otherwise count as a failure). Rows tagged `eval`, `replay` or `synthetic` stay out (`core/services/edge_builder_logs.py`, `READ_SOURCES`).
 * **Two-Layer Graph (PRD-232 §6.5)**: 
   * Tenant-specific rows (`workspace_id == X`) operate at full weight.
   * A text-free global prior (`workspace_id IS NULL`) aggregates cross-tenant counts at a reduced weight factor (`TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR`). This allows zero-telemetry tenants to benefit from global routing priors without exposing tenant-specific data or raw user queries.
@@ -170,7 +171,7 @@ Sources: [orchestrator/modules/tools/discovery/signal_recorder.py:1-60]()
 To solve cold-start problems before sufficient production telemetry accumulates, the platform loads domain-specific seed utterances and evaluation sets.
 
 * **Seed Files**: Located under `core/seeds/utterances/` (e.g., `analytics.yaml`, `api_keys.yaml`).
-* **Bootstrap Script**: `scripts/eval/tool_routing/seed_telemetry.py` generates synthetic `ToolExecutionLog` rows from eval queries with realistic agent biases, success/failure ratios (~80/20), and multi-action pairing sequences.
+* **Bootstrap Script**: `scripts/eval/tool_routing/seed_telemetry.py` generates synthetic `ToolExecutionLog` rows from eval queries with realistic agent biases, success/failure ratios (~80/20), and multi-action pairing sequences. The rows are tagged `synthetic`, so since PRD-263 US-018 the edge builder does not read them and they no longer seed the routing graph.
 
 Sources: [orchestrator/scripts/eval/tool_routing/seed_telemetry.py:1-68]()
 

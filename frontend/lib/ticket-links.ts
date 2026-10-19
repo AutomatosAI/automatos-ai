@@ -46,6 +46,27 @@ export function missionHref(missionId: string | number): string {
   return `/missions/${encodeURIComponent(String(missionId))}`
 }
 
+/** The chat. */
+export const CHAT_HREF = '/chat'
+
+/** The Deliverables page. */
+export const DELIVERABLES_HREF = '/deliverables'
+/** The query parameter that opens one Deliverable on it: /deliverables?deliverable=<id> (F298, PRD-260 K8). */
+export const DELIVERABLE_PARAM = 'deliverable'
+
+/** Make it yours, Play's looks (PRD-260 K9). */
+export const LOOKS_HREF = '/looks'
+/** The active look's style sheet. */
+export const LOOK_STYLE_HREF = '/looks/style'
+
+/**
+ * A conversation's link: a query param on /chat, so client-side auth loads the
+ * thread (the /chat/[id] server route 404s without a server-side auth context).
+ */
+export function chatHref(chatId: string): string {
+  return `${CHAT_HREF}?chatId=${encodeURIComponent(chatId)}`
+}
+
 /**
  * Where an activity row opens: the thing itself (the Activity tab, the classic
  * feed, the Activity widget and global search). Only playbooks (recipes) belong
@@ -58,9 +79,7 @@ export function feedItemHref(item: ActivityFeedItem): string | null {
     case 'mission':
       return id ? missionHref(id) : null
     case 'chat':
-      // A query param, so client-side auth loads the thread; the /chat/[id]
-      // server route 404s without a server-side auth context.
-      return id ? `/chat?chatId=${encodeURIComponent(id)}` : null
+      return id ? chatHref(id) : null
     case 'recipe':
       // The feed id is "recipe-<execId>"; source_id is the recipe id.
       return id

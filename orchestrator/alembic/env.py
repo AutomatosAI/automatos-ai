@@ -19,6 +19,8 @@ config = context.config
 # This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in the migration logs (#1178)
 
 # add your model's MetaData object here
 # for 'autogenerate' support

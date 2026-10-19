@@ -1,0 +1,46 @@
+{
+  "_comment": "PRD-261 A-12c: one recorded chat turn per protected card, in the stream format lib/chat/hooks.ts reads (a '0:' text line, then 'd:' data lines). The payloads have the shapes chat.tsx turns into the cards (result_formatter.py builds them). Test data only.",
+  "tool-approval": {
+    "text": "This action needs your approval before it runs.",
+    "events": [
+      {
+        "type": "tool-data",
+        "data": {
+          "tool_approval": {
+            "grant_id": 12001,
+            "action": "platform_delete_document",
+            "message": "This action (destructive) requires confirmation.",
+            "permission_level": "destructive",
+            "params": { "document_id": "e2e-a12c-doc" },
+            "risk_tier": "human_in_the_loop",
+            "oversight_rationale": "Deletes a document. A human must approve before it runs."
+          }
+        }
+      },
+      { "type": "finish" }
+    ]
+  },
+  "mission-approval": {
+    "text": "I drafted a Mission plan for you to approve.",
+    "events": [
+      {
+        "type": "tool-data",
+        "data": {
+          "mission_approval": {
+            "mission_id": "e2e-a12c-mission",
+            "goal": "Refund the customer and email them",
+            "state": "awaiting_approval",
+            "task_count": 2,
+            "tasks": [
+              { "title": "Issue the refund", "agent_role": "ops", "sequence": 1 },
+              { "title": "Email the customer", "agent_role": "comms", "sequence": 2 }
+            ],
+            "cost_estimate_usd": 0.12,
+            "cost_ceiling_usd": 1
+          }
+        }
+      },
+      { "type": "finish" }
+    ]
+  }
+}

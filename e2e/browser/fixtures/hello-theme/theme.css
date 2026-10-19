@@ -1,0 +1,40 @@
+/* PRD-261 A-01: the hello theme's one stylesheet. Every rule sits under html.hello-spike, the
+   theme's own class, and its colours come from the preset's variables. */
+html.hello-spike .hello-frame {
+  min-height: 100vh;
+  background: var(--hello-ground);
+  color: var(--hello-ink);
+}
+
+html.hello-spike .hello-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background-color: var(--hello-accent);
+  color: var(--hello-ground);
+}
+
+html.hello-spike .hello-bar button {
+  padding: 6px 12px;
+  border: 1px solid var(--hello-ground);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+html.hello-spike .hello-content {
+  padding: 24px;
+}
+
+html.hello-spike .hello-portal {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--hello-accent);
+  color: var(--hello-ground);
+  font-size: 12px;
+}

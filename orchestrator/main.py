@@ -80,6 +80,19 @@ from api.notifications import (  # PRD-128: Unified notification system
     router as notifications_router,
     preferences_router as notification_preferences_router,
 )
+# PRD-261 W-B2: installable themes (import, install/choice, files/boot, looks, settings).
+from api.themes_import import router as themes_import_router
+from api.themes_install import router as themes_install_router
+from api.themes_files import router as themes_files_router
+from api.themes_looks import router as themes_looks_router
+from api.themes_settings import router as themes_settings_router
+from core.auth.step_up import install_step_up_handler  # PRD-261 A-07c: the reverification 403 body
+from services.themes.package import THEME_IMPORT_ROUTE, cap_bytes as theme_cap_bytes
+# PRD-261 W-C1: the theme Marketplace (submit, the Themes tab listings, the admin review queue).
+from api.marketplace_themes_submit import router as marketplace_themes_submit_router
+from api.marketplace_themes import router as marketplace_themes_router
+from api.admin_themes import router as admin_themes_router
+from services.themes.submissions import THEME_SUBMIT_ROUTE
 
 # PRD-56's /api/tasks direct-step router was DELETED (PRD-192 S6, locked #5):
 # an ungoverned side-effecting ingress with zero product callers (grep-proven
@@ -132,6 +145,7 @@ from api.dashboard_integration import (
 
 # WebSocket manager removed - using AI SDK SSE streaming instead
 from core.observability.otel import annotate_request, instrument_app, instrument_libraries, with_tracing
+from core.route_tree import route_template  # PRD-262 US-008: API stats key by the full template
 from core.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
@@ -999,7 +1013,7 @@ app.add_middleware(WidgetRateLimitMiddleware)
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
+from core.security.rate_limit_middleware import RouteTreeSlowAPIMiddleware  # PRD-262 US-008
 
 def _get_real_client_ip(request) -> str:
     """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
@@ -1021,11 +1035,13 @@ limiter = Limiter(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# PRD-261 A-07c: StepUpRequired renders Clerk's reverification body with clerk_error at the top level.
+install_step_up_handler(app)
 # F040: actually enforce the limits — without this middleware the limiter above
 # is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
 # today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
 if _policy_plane_on:
-    app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(RouteTreeSlowAPIMiddleware)
 
 # Request body size limit middleware (10MB default, 50MB for uploads)
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
@@ -1041,6 +1057,10 @@ from modules.documents.brand_logo import BRAND_LOGO_ROUTE, MAX_LOGO_BYTES
 PATH_BODY_LIMITS = {
     BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024,
     BRAND_FONTS_ROUTE: MAX_FONT_BYTES + 512 * 1024,
+    # PRD-261 A-07a: a .autotheme up to THEME_MAX_PACKAGE_MB, plus the multipart envelope.
+    THEME_IMPORT_ROUTE: theme_cap_bytes("package") + 512 * 1024,
+    # PRD-261 C-01a: a Marketplace submission is the same .autotheme, under the same cap.
+    THEME_SUBMIT_ROUTE: theme_cap_bytes("package") + 512 * 1024,
 }
 
 
@@ -1049,6 +1069,13 @@ def _body_limit_for(path: str) -> int:
         if path.startswith(prefix):
             return limit
     return MAX_UPLOAD_SIZE if any(path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
+
+
+# PRD-261 W-C1 (M4): on the capped upload paths the body is counted as it arrives, so a chunked
+# upload past the cap is 413 and one with no length or chunking is 411, before FastAPI parses the
+# form (which happens before any auth dependency runs). Every other path passes through untouched.
+from core.security.body_limit import CappedBodyMiddleware
+app.add_middleware(CappedBodyMiddleware, limits=PATH_BODY_LIMITS)
 
 
 @app.middleware("http")
@@ -1065,6 +1092,30 @@ async def limit_request_body(request, call_next):
     return await call_next(request)
 
 # Security headers middleware
+DEFAULT_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'"
+FRAME_ANCESTORS_NONE = "frame-ancestors 'none'"
+DEFAULT_SRC_NONE = "default-src 'none'"
+
+
+def content_security_policy(route_policy: Optional[str]) -> str:
+    """The app's CSP for a response: a route's own policy is kept, never overwritten.
+
+    Routes that serve stored files (theme files, generated images, widget attachments) set
+    ``sandbox`` so a file opened as a page runs nothing; the app only adds what the route's
+    policy leaves out: ``default-src 'none'`` in front when it names no ``default-src`` (so a
+    bare ``sandbox`` still loads nothing), and ``frame-ancestors 'none'`` at the end when it
+    does not already say who may frame it.
+    """
+    policy = (route_policy or "").strip().rstrip("; ")
+    if not policy:
+        return DEFAULT_CONTENT_SECURITY_POLICY
+    if "default-src" not in policy:
+        policy = f"{DEFAULT_SRC_NONE}; {policy}"
+    if "frame-ancestors" not in policy:
+        policy = f"{policy}; {FRAME_ANCESTORS_NONE}"
+    return policy
+
+
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
@@ -1072,7 +1123,8 @@ async def add_security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    response.headers["Content-Security-Policy"] = content_security_policy(
+        response.headers.get("Content-Security-Policy"))
     if config.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
@@ -1130,8 +1182,7 @@ async def api_tracking_middleware(request, call_next):
         # Use route template (e.g. /api/agents/{agent_id}) instead of raw path
         # to avoid unbounded memory growth from path parameters
         try:
-            route = request.scope.get("route")
-            route_path = getattr(route, "path", None) if route else None
+            route_path = route_template(request.scope)  # with include prefixes (PRD-262 US-008)
             endpoint = f"{request.method} {route_path or request.url.path}"
 
             # Cap stats dict size to prevent unbounded memory growth
@@ -1233,6 +1284,14 @@ app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
 app.include_router(notifications_router)  # PRD-128: Unified notification system
 app.include_router(notification_preferences_router)  # PRD-128: Notification preferences
+app.include_router(themes_import_router)  # PRD-261 A-07a: POST /api/themes/import (private upload)
+app.include_router(themes_install_router)  # PRD-261 A-07b: installed, active, choice, opt-in, default, versions
+app.include_router(themes_files_router)  # PRD-261 A-08a: files by digest + boot data (membership, not ctx.workspace_id)
+app.include_router(themes_looks_router)  # PRD-261 A-09a: a member's own looks per theme
+app.include_router(themes_settings_router)  # PRD-261 A-07e: workspace theme settings
+app.include_router(marketplace_themes_submit_router)  # PRD-261 C-01a: POST /api/marketplace/themes/submit
+app.include_router(marketplace_themes_router)  # PRD-261 C-04a: the Themes tab listings + install by reference
+app.include_router(admin_themes_router)  # PRD-261 C-03a: admin review queue (caller_is_admin in each handler)
 
 # PRD-155 S3: conditionally-mounted routers — previously a wall of silent
 # import guards that swallowed failures into `x_router = None` (two of which,

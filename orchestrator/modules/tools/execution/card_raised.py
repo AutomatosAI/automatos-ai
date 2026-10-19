@@ -14,6 +14,12 @@ What the card asks (``ACT``) is set by the ask itself (``owner_only._ask``: "cha
 'Scout' (agent #12)"); an ask that does not say is named from the call's name ("delete the
 document"). P256-FIX-N17-3 (F439): an ask that met a card raised on an earlier turn of the chat
 (``already_waiting``) is never "Card raised": each reading says it still waits, raised at its time.
+
+PRD-263 US-018: the routing graph does not read an ask as a failure either. The tool router
+recorded every call's outcome, so each ask became a failure signal for its tool, which the
+GraphRouter then penalised (``fails_for_intent``). ``holds_the_signal`` and
+``signals_unless_it_asked`` hold a router call's signals until its answer is known and drop
+them when it asked; the router's body (over the length limit) is not touched.
 """
 from __future__ import annotations
 
@@ -21,7 +27,7 @@ import functools
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Dict, Iterator, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterator, List, Optional
 
 from .call_effects import answers_in
 from .stale_cards import ALREADY_WAITING
@@ -56,9 +62,13 @@ ASKED_ACCOUNT_LINE = "- Asked for your OK: {act}. Nothing changes until you say 
 WAITING = "waiting"
 # The flagged tool-end event the loop is handing to its callback, while it does (``emit_flagged``).
 _STREAMING: ContextVar[Optional[Dict[str, Any]]] = ContextVar("card_raised_streaming", default=None)
+# The routing signals the router call in progress has recorded, held until its answer is known.
+_HELD_SIGNALS: ContextVar[Optional[List[Callable[[], None]]]] = ContextVar("card_raised_held_signals",
+                                                                          default=None)
 
 Envelope = Dict[str, Any]
 Backfill = Callable[[Envelope, Dict[str, Any]], Envelope]
+Routed = Callable[..., Awaitable[Envelope]]
 
 
 def the_ask(result: Any) -> Optional[Dict[str, Any]]:
@@ -153,6 +163,46 @@ def the_model_reads_the_card(backfill: Backfill) -> Backfill:
     return wrapped
 
 
+def asked_instead(envelope: Any) -> bool:
+    """Whether a router envelope is a call that did not run because it asked for the owner's
+    click (its own result, ``raw_result``, is an ask). A call that succeeded never is."""
+    return isinstance(envelope, dict) and not envelope.get("success") and is_waiting(envelope.get("raw_result"))
+
+
+def holds_the_signal(record: Callable[..., None]) -> Callable[..., None]:
+    """Wrap ``ToolRouter._record_tool_signal`` (PRD-263 US-018): inside a router call the
+    signal waits for the call's answer (``signals_unless_it_asked``); outside one it is
+    recorded at once, as before."""
+    @functools.wraps(record)
+    def wrapped(*args: Any, **kwargs: Any) -> None:
+        held = _HELD_SIGNALS.get()
+        if held is None:
+            return record(*args, **kwargs)
+        held.append(functools.partial(record, *args, **kwargs))
+        return None
+    return wrapped
+
+
+def signals_unless_it_asked(execute_and_format: Routed) -> Routed:
+    """Wrap ``ToolRouter.execute_and_format`` (PRD-263 US-018): the routing signals its call
+    records go to the recorder when it returns, unless the call asked for the owner's click
+    instead of running. An ask is not a failure, so no tool is penalised for waiting on the
+    owner. Each call holds its own signals, so a nested call's never mix with its caller's."""
+    @functools.wraps(execute_and_format)
+    async def wrapped(*args: Any, **kwargs: Any) -> Envelope:
+        held: List[Callable[[], None]] = []
+        token = _HELD_SIGNALS.set(held)
+        try:
+            envelope = await execute_and_format(*args, **kwargs)
+        finally:
+            _HELD_SIGNALS.reset(token)
+        if not asked_instead(envelope):
+            for send in held:
+                send()
+        return envelope
+    return wrapped
+
+
 def the_results_flag(event: Dict[str, Any]) -> Dict[str, Any]:
     """FX-005: a tool-end event's ``success`` is its result's own. The loop marks a call that did
     not raise as a success; a refusal (``success: False``) or an ask is not one, so the screen
@@ -211,6 +261,7 @@ def already_waiting(result: Any) -> bool:
 
 
 __all__ = ["ACCOUNT_LINE", "ACT", "ALREADY_FOR_THE_MODEL", "ALREADY_WAITING", "FOR_THE_MODEL", "RECEIPT_EFFECT",
-           "TOOL_END", "WAITING", "account_line", "act_of", "already_waiting", "emit_flagged", "for_the_model",
-           "has_a_card", "is_waiting", "raised_at", "receipt_effect", "streams_the_wait", "the_ask",
-           "the_model_reads_the_card", "the_results_flag", "tool_end_summary"]
+           "TOOL_END", "WAITING", "account_line", "act_of", "already_waiting", "asked_instead", "emit_flagged",
+           "for_the_model", "has_a_card", "holds_the_signal", "is_waiting", "raised_at", "receipt_effect",
+           "signals_unless_it_asked", "streams_the_wait", "the_ask", "the_model_reads_the_card", "the_results_flag",
+           "tool_end_summary"]

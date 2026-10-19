@@ -1,0 +1,59 @@
+# The vulnerability scan allowlist (PRD-262 US-013, D1, FR-3).
+#
+# images.yml scans every image it builds with Grype. A row blocks the image when it is
+# a fixable Critical, or when it is on CISA's Known Exploited Vulnerabilities list,
+# whatever its severity, unless an entry below matches it.
+# scripts/ci/image_scan_policy.py applies this file. images.yml runs Grype outside the
+# checkout, so Grype never reads it itself, and its table in the log shows every row.
+#
+# Each entry names the vulnerability, says why it is accepted (`reason`) and until
+# when (`expires`: the last day it applies, at most 90 days out). Narrow it with
+# `package` (name, version, type) so it covers only the rows it was written for.
+# `include-aliases: true` also matches a row whose related ids hold the vulnerability
+# (a GHSA row, for a CVE entry), and `fix-state` narrows it to one fix state. Any
+# other key fails the policy. The scan-allowlist workflow fails every day once an
+# entry has expired: fix the image, or renew the entry with a current reason.
+
+ignore:
+  # API and workspace worker. PR builds take the apt layer from the GHA cache written
+  # on 6 Oct, which holds curl 8.14.1-2+deb13u5. Only the weekly uncached rebuild
+  # (PRD-262 US-011) installs deb13u7, which fixes both CVEs (DSA-6558-1). Remove
+  # these after the first schedule run.
+  - vulnerability: CVE-2026-8924
+    package: {version: 8.14.1-2+deb13u5, type: deb}
+    reason: >-
+      curl 8.14.1-2+deb13u5 comes from the apt layer PR builds read from the 6 Oct GHA
+      cache; only the weekly uncached rebuild (PRD-262 US-011) installs the fixed deb13u7.
+    expires: 2026-11-17
+  - vulnerability: CVE-2026-8927
+    package: {version: 8.14.1-2+deb13u5, type: deb}
+    reason: >-
+      curl 8.14.1-2+deb13u5 comes from the apt layer PR builds read from the 6 Oct GHA
+      cache; only the weekly uncached rebuild (PRD-262 US-011) installs the fixed deb13u7.
+    expires: 2026-11-17
+
+  # agent-opt-worker (PRD-262 US-006). litellm cannot move past 1.80.0 while
+  # ai-evaluation 1.1.0 requires openai<2: litellm 1.80.5 and later require
+  # openai>=2.8.0. The worker imports litellm as a library through agent-opt
+  # (LiteLLMGenerator) and starts no LiteLLM proxy server.
+  - vulnerability: GHSA-6wvf-77m9-58rm
+    package: {name: litellm, version: 1.80.0, type: python}
+    reason: >-
+      litellm is held at 1.80.0: ai-evaluation 1.1.0 requires openai<2 and litellm 1.80.5+
+      requires openai>=2.8.0. The advisory is in the proxy's /prompts/test endpoint; the
+      worker runs no proxy.
+    expires: 2027-01-15
+  - vulnerability: GHSA-4xpc-pv4p-pm3w
+    package: {name: litellm, version: 1.80.0, type: python}
+    reason: >-
+      litellm is held at 1.80.0: ai-evaluation 1.1.0 requires openai<2 and litellm 1.80.5+
+      requires openai>=2.8.0. The advisory is an authentication bypass in the proxy; the
+      worker runs no proxy.
+    expires: 2027-01-15
+  - vulnerability: GHSA-jjhc-v7c2-5hh6
+    package: {name: litellm, version: 1.80.0, type: python}
+    reason: >-
+      litellm is held at 1.80.0: ai-evaluation 1.1.0 requires openai<2 and litellm 1.80.5+
+      requires openai>=2.8.0. The advisory is an authentication bypass in the proxy's OIDC
+      handling; the worker runs no proxy.
+    expires: 2027-01-15

@@ -1,0 +1,60 @@
+/*
+ * PRD-260 §4 — the empty chat (Ember mock 06): Auto big and centred, the serif
+ * headline and the example chips, ported from Automatos Play's
+ * components/chat/first-open.module.css. Every variable is --pl-* (K2).
+ */
+
+/* The hero grows into the column and never shrinks below Auto and the headline: on a short
+   window (a laptop, or 125% zoom) the page scrolls in PageColumns' .main instead of the hero
+   overlapping the header, the chips and the box, as the approved app does (P260-FX-14, M31). */
+.hero {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: var(--pl-space-3);
+  padding: var(--pl-space-6);
+  text-align: center;
+}
+
+/* html.play outranks Studio's element rules (globals.css .studio h1/h2): <html> carries both. */
+:global(html.play) .title {
+  margin: var(--pl-space-3) 0 0;
+  font: var(--pl-text-hero);
+  letter-spacing: var(--pl-display-letter-spacing);
+  color: var(--pl-color-text);
+}
+
+.line {
+  margin: 0;
+  font: var(--pl-text-lead);
+  color: var(--pl-color-text-2);
+}
+
+.chips {
+  width: 100%;
+  max-width: var(--pl-content-max);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--pl-space-2);
+}
+
+.chip {
+  min-height: var(--pl-tap-min);
+  padding: 0 var(--pl-space-4);
+  border: 1px solid var(--pl-line-button);
+  border-radius: var(--pl-radius-pill);
+  background: transparent;
+  color: var(--pl-color-text);
+  font: var(--pl-text-small);
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--pl-tint-hover);
+}

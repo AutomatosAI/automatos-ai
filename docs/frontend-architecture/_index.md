@@ -130,9 +130,9 @@ The "Studio" theme introduces an editorial-first design language characterized b
 *   **Typography:** Serif headlines (`Tiempos Headline`) paired with Mono detail surfaces (`JetBrains Mono`) [frontend/tailwind.config.ts:17-30]().
 *   **Editorial Headers:** The `PageHeader` component supports an `eyebrow` (mono uppercase) and a `lede` (relaxed paragraph) to establish context [frontend/components/shared/page-header.tsx:38-86]().
 *   **Color Palette:** A "Cream Paper" aesthetic using CSS variables like `--background` and `--primary` (near-black) [frontend/app/globals.css:210-225]().
-*   **Shadcn/ui:** The project leverages Shadcn/ui primitives for consistent and accessible UI components [frontend/package.json:58-83]().
+*   **Shadcn/ui:** The project leverages Shadcn/ui primitives for consistent and accessible UI components [frontend/package.json:51-77]().
 
-**Sources:** [frontend/tailwind.config.ts:17-30](), [frontend/components/shared/page-header.tsx:38-86](), [frontend/app/globals.css:210-225](), [frontend/package.json:58-83]()
+**Sources:** [frontend/tailwind.config.ts:17-30](), [frontend/components/shared/page-header.tsx:38-86](), [frontend/app/globals.css:210-225](), [frontend/package.json:51-77]()
 
 ### Navigation Mapping
 
@@ -203,6 +203,7 @@ For deep technical details on specific frontend subsystems, refer to the followi
 *   [UI Component Patterns & Design System](#19.4) — Shared components (StatsBar, page-header, item-card, empty-state), Shadcn/ui primitives, Tailwind theme, premium icons and icon registry, glossary tooltips, DESIGN_SYSTEM.md.
 *   [Navigation & Layout](#19.5) — Sidebar navigation, role-based filtering, and page context tracking.
 *   [Settings UI](#19.6) — SettingsPanel and its tabs: System, LLM models, system LLM, credentials, channels, webhooks, notifications, API keys, session mode, widget SDK, icons.
+*   [Play Theme](play-theme.md) — PRD-260: Play on the Style axis (`studio play`, `useIsStudio`/`useIsPlay`), the pages with a Play design and the route switch, the look format and catalogue, how a look becomes `--pl-*` variables and Studio's HSL tokens, the pre-paint script, the tone following the ground, the fonts, and Auto. Local test: [PRD-260 RUN checklist](../testing/PRD-260-PLAY-RUN-CHECKLIST.md).
 
 **Sources:** [frontend/components/providers.tsx:1-114]()
 

@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, TypeVar
 
+from .espeak_build import LANGUAGES
 from .media_urls import UrlPrefix, parse_prefixes
 
 # The image switches these off (Dockerfile ENV) and boot refuses to start
@@ -260,7 +261,14 @@ def _voice(env: _Env) -> Dict[str, Any]:
             lambda v: 0.5 <= v <= 2.0,
             "a speed between 0.5 and 2.0",
         ),
-        "kokoro_lang": env.text("MEDIA_RENDER_KOKORO_LANG", "en-us"),
+        # PRD-262 US-052: the image's espeak-ng data speaks these alone (espeak_build.py).
+        "kokoro_lang": _parse(
+            "MEDIA_RENDER_KOKORO_LANG",
+            env.text("MEDIA_RENDER_KOKORO_LANG", "en-us"),
+            str,
+            lambda v: v in LANGUAGES,
+            "one of " + ", ".join(LANGUAGES),
+        ),
         "voice_max_tempo": _parse(
             "MEDIA_RENDER_VOICE_MAX_TEMPO",
             env.text("MEDIA_RENDER_VOICE_MAX_TEMPO", "1.25"),

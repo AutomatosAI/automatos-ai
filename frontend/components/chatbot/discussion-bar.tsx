@@ -16,7 +16,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { MessagesSquare, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useBoardTask } from '@/hooks/use-board-tasks'
-import { CHAT_ROUTE, discussionLabel, discussionOf, type Discussion } from '@/lib/discussion'
+import { useActiveTheme, useThemeLayout } from '@/hooks/use-studio-theme'
+import { CHAT_ROUTE, discussionHint, discussionLabel, discussionOf, type Discussion } from '@/lib/discussion'
 import { missionHref, ticketHref } from '@/lib/ticket-links'
 import { useChatSessionStore } from '@/stores/chat-session-store'
 import { useDiscussionStore } from '@/stores/discussion-store'
@@ -28,6 +29,7 @@ const BAR_CLASS =
 
 export function DiscussionBar() {
   const { discussion, missing } = useDiscussionFromLink()
+  const inThemeChat = useThemeChatOnScreen()
   const end = useEndDiscussion()
   useEndOnAnotherConversation(end)
   const [rebriefing, setRebriefing] = useState(false)
@@ -41,6 +43,7 @@ export function DiscussionBar() {
   }
   if (!discussion) return null
   const label = discussionLabel(discussion)
+  const hint = discussionHint(discussion, inThemeChat)
   return (
     <div role="region" aria-label="Discussion" className={BAR_CLASS} data-testid="discussion-bar">
       <MessagesSquare className="h-4 w-4 shrink-0 text-primary" />
@@ -61,11 +64,7 @@ export function DiscussionBar() {
         </Button>
       )}
       <EndButton onEnd={end} />
-      {discussion.agentName && !discussion.missionId && (
-        <span className="basis-full text-muted-foreground">
-          You are talking to Auto. To ask {discussion.agentName} instead, pick them in the message box.
-        </span>
-      )}
+      {hint && <span className="basis-full text-muted-foreground">{hint}</span>}
       {rebriefing && <RebriefDialog discussion={discussion} open onOpenChange={setRebriefing} onDone={end} />}
     </div>
   )
@@ -82,6 +81,16 @@ function EndButton({ onEnd }: { onEnd: () => void }) {
       <X className="h-3.5 w-3.5" />
     </button>
   )
+}
+
+/** The theme's own chat is what /chat shows: the active theme owns /chat and its layout renders
+ * it (PRD-260 D7, the ThemeSlot page entry in app/chat/layout.tsx, PRD-261 A-04b), read from the
+ * same width source, useThemeLayout (P260-FX-25; PRD-261 A-02b). Its message box has no agent
+ * picker, so the hint differs there. */
+function useThemeChatOnScreen(): boolean {
+  const ownsChat = useActiveTheme()?.ownsPages.includes(CHAT_ROUTE) ?? false
+  const layout = useThemeLayout()
+  return ownsChat && layout === 'theme'
 }
 
 /** `/chat?ticket=<id>` without `repo` (with it, the link opens a session's canvas)

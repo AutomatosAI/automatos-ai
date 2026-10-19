@@ -1,0 +1,32 @@
+/*
+ * PRD-260 T-004 — the connection pill, ported from Automatos Play's
+ * components/shell/shell.module.css. Every variable is --pl-* (K2).
+ */
+
+.connection {
+  display: flex;
+  align-items: center;
+  gap: var(--pl-space-2);
+  padding: var(--pl-space-2);
+  font: var(--pl-text-mono-sm);
+  color: var(--pl-color-text-3);
+}
+
+/* Auto's light is for "connected" only; a dead connection is a filled error dot plus words. */
+.dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: var(--pl-radius-round);
+  border: 1.5px solid var(--pl-color-text-3);
+}
+
+.dot[data-status="connected"] {
+  border-color: var(--pl-color-light);
+  background: var(--pl-color-light);
+}
+
+.dot[data-status="down"] {
+  border-color: var(--pl-color-error);
+  background: var(--pl-color-error);
+}

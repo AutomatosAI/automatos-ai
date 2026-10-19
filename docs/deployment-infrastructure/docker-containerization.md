@@ -30,6 +30,8 @@ Automatos AI utilizes a distributed container architecture to isolate core platf
 
 **Key Design Principles:**
 - **Multi-stage builds** to minimize final image size by separating build tools from runtimes [orchestrator/Dockerfile:4-8]().
+- **Production is the last stage.** Railway's config has no target key, so Railway builds each Dockerfile's last stage. `orchestrator/tests/test_prd262_production_last_stage.py` fails CI when a stage follows `production` in any Dockerfile Railway builds.
+- **Pinned, and kept current.** Every `FROM` image and every third-party compose image is pinned as `name:tag@sha256:<digest>`, and every workflow `uses:` as a 40-hex commit. Node reaches an image through a named `FROM … AS node` stage, never a bare `COPY --from=<image>`. Dependabot (`.github/dependabot.yml`) opens one grouped pull request a week per ecosystem. It moves image digests along their tag, so a tag move such as Python 3.12 or Postgres 17 is made by hand. `orchestrator/tests/test_prd262_dependabot.py` and the `action-pins` workflow enforce both.
 - **Service Isolation**: Distinct containers for the Next.js frontend, FastAPI orchestrator, and specialized workers [docker-compose.yml:18-200]().
 - **Non-root execution**: All production images switch to low-privilege users (`automatos` or `nextjs`) [orchestrator/Dockerfile:103-109](), [frontend/Dockerfile:110-112]().
 - **Health Monitoring**: Integrated Docker health checks for automated service recovery [orchestrator/Dockerfile:115-117](), [frontend/Dockerfile:43-45]().
@@ -98,18 +100,18 @@ The frontend utilizes a 4-stage build process to handle Next.js static generatio
 
 | Stage | Description | Key Files / Commands |
 | :--- | :--- | :--- |
-| **base** | Node 20-alpine foundation, installs build tools like `python3`, `make`, `g++` | `package.json` [frontend/Dockerfile:14-26]() |
-| **development** | Hot-reload dev server, installs all dependencies including devDependencies | `npm install --legacy-peer-deps`, `npm run dev` [frontend/Dockerfile:31-48]() |
-| **builder** | Production build stage, installs all dependencies, copies source, runs `npm run build` | `npm install --legacy-peer-deps`, `npm run build` [frontend/Dockerfile:53-99]() |
-| **production** | Minimal standalone runner, copies built assets, creates `nextjs` user, runs `node server.js` | `node server.js` [frontend/Dockerfile:103-132]() |
+| **base** | `node:24-alpine3.24`, pinned by tag and digest. No apk build tools: every native package ships a prebuilt binary | `package.json` [frontend/Dockerfile:11-25]() |
+| **development** | Hot-reload dev server, installs all dependencies including devDependencies | `npm install --legacy-peer-deps`, `npm run dev` [frontend/Dockerfile:27-47]() |
+| **builder** | Production build stage, installs all dependencies, copies source, runs `npm run build` | `npm install --legacy-peer-deps`, `npm run build` [frontend/Dockerfile:49-101]() |
+| **production** | `alpine:3.24` plus `libstdc++` and the node binary from `base`, with no npm, yarn, corepack or curl. `apk upgrade` runs in the same layer, so the weekly uncached rebuild takes Alpine's fixes. Copies the standalone build, creates the `nextjs` user, runs `node server.js`; the health check is busybox `wget` on `/favicon.ico` | `node server.js` [frontend/Dockerfile:103-145]() |
 
 ### Build-time Environment Variables
-Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:58-71](). The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:60-66]().
+Next.js requires `NEXT_PUBLIC_*` variables (like `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`) to be available during the `builder` stage to bake them into the client-side bundle [frontend/Dockerfile:57-70](). The default values for these arguments are set for the SaaS production environment, and local development overrides them via `docker-compose.yml` build arguments [frontend/Dockerfile:58-65]().
 
 ### Cache Invalidation
-A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:88-92]().
+A `FRONTEND_CACHE_BUST` build argument is provided to force a clean rebuild of the `COPY` and `npm run build` layers, preventing stale `.next/static` chunks in environments like Railway [frontend/Dockerfile:90-95]().
 
-Sources: [frontend/Dockerfile:1-132]()
+Sources: [frontend/Dockerfile:1-145]()
 
 ## 3. Worker Services & Auth (PRD-203)
 
@@ -134,8 +136,8 @@ Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/test
 
 | | |
 |---|---|
-| **Image** | `python:3.12-slim` + Node 22 + Hyperframes **0.8.62** (pinned) + chrome-headless-shell (installed at build) + ffmpeg + Kokoro v1.0 (fetched at build, hash-checked). Hyperframes telemetry, skill installs and update checks are switched off, and boot refuses to start without those switches. |
-| **Build** | No build args (`orchestrator/tests/test_dockerfile_prod_parity.py` registers none). The last stage, `production`, is what Railway builds; CI also builds `test`, which adds pytest. |
+| **Image** | `python:3.12-slim` + Node 24 (the binary alone, from the official image's `node` stage) + Hyperframes **0.8.62** (pinned, installed with `npm ci` from `js/package-lock.json`) + chrome-headless-shell (installed at build) + ffmpeg + Kokoro v1.0 (hash-checked at build, loaded in the background at boot) + the Python packages from the hash-checked `requirements.lock`. Hyperframes telemetry, skill installs and update checks are switched off, and boot refuses to start without those switches. |
+| **Build** | Each part is built in its own stage (assets, kokoro, js, chrome, py, music) and `COPY --link`ed into the runtime, so a change to one part leaves the others' layers alone (PRD-262 US-053; the README's "How the image is built"). One build arg, `MEDIA_ASSETS`, defaults to its production value `fetch` (`orchestrator/tests/test_dockerfile_prod_parity.py`): the Kokoro files and the music tracks are fetched and hash-checked until the media assets image is published. The last stage, `production`, is what Railway builds; CI also builds `test`, which adds pytest. What renders never load is left out (PRD-262 US-051): the Mesa/LLVM packages only `mesa-libgallium` needs, Chrome's locales but `en-US.pak`, a second copy of the espeak data, onnxruntime's unlinked library, numpy's tests, and curl and unzip (the health check is Python's `urllib`). It carries the languages the product speaks (PRD-262 US-052): the voices file cut to the catalogue's 27 English voices (`media_render/voices.json`), and espeak-ng's `en_dict` alone among its dictionaries; a voice the image lacks, or a language other than `en-us` or `en-gb`, is a 400 naming the field. `media-render.yml` and `images.yml` hold the amd64 image to 1.30 GB on disk. |
 | **Port** | 8090 (`MEDIA_RENDER_PORT`), internal only. Every route but `/health` needs `X-Internal-Token`. |
 | **Token** | `SOCIALS_RENDER_TOKEN`: the same name on the service and on the backend, which sends it (`orchestrator/core/media_render_client.py`). Boot refuses production without one. |
 | **Media inputs** | Presigned GETs on our own storage only: `MEDIA_RENDER_MEDIA_URL_PREFIXES`. Any other URL is refused before a fetch. |
@@ -157,7 +159,7 @@ Sources: [services/workspace-worker/worker_config.py:1-45](), [orchestrator/test
 
 **SaaS.** Its own Railway service, 4 vCPU / 8 GB, one replica (`infrastructure/railway-manifest.json`). The owner's setup steps are in [self-hosting](../getting-started/self-hosting.md#media-render-on-railway-saas).
 
-**CI.** The `media-render` job in `.github/workflows/test.yml` checks that `docker compose --profile media config` carries the service (and the default profile does not), builds the image as Railway does, runs the service's suite inside it, proves the boot assertion and `/health`, renders the fixture bundle through the API with the token, and asserts the MP4 with ffprobe and its loudness with ebur128.
+**CI.** The `media-render` job in `.github/workflows/media-render.yml`, run on demand, checks that `docker compose --profile media config` carries the service (and the default profile does not), builds the image as Railway does, runs the service's suite inside it, proves the boot assertion and `/health`, renders the fixture bundle through the API with the token, and asserts the MP4 with ffprobe and its loudness with ebur128. `images.yml` builds the `production` stage for amd64 and arm64 on every pull request that touches `services/media-render/` and on `main` (PRD-262 US-054). It pushes the image only to a registry inside the job and never publishes it, because the image carries GPL-3.0 espeak-ng and phonemizer and GPL x264 (PRD-262 §9-Q6). It reports the image's size and layers, holds it to its compressed budget and, on amd64, to the 1.30 GB on-disk bar in `.github/image-budgets.json`, and scans it with Grype under the same policy as the published images. Its build cache is a private GHCR package, `automatos-media-render`, tagged `buildcache-<arch>`.
 
 Sources: [services/media-render/Dockerfile](), [services/media-render/README.md](), [orchestrator/core/media_render_client.py](), [orchestrator/modules/socials/render.py](), [docker-compose.yml]()
 

@@ -13,6 +13,21 @@
  * Approving resumes the interrupted execution server-side (PRD-193 S4); the
  * card reflects the executed result honestly — a failed resume is shown as a
  * failure, never a fake success.
+ *
+ * PRD-260 T-005c: Play's chat renders this same card inline in Auto's reply and
+ * passes onDecided, told once an approve or a deny went through, so Auto stops
+ * waiting on the owner. Studio's canvas passes none.
+ *
+ * PRD-261 A-12c: the card is a protected surface. The exported widget wraps it
+ * in ProtectedSurface (components/theme-host/protected-surface.tsx). What is
+ * guaranteed: the card's own two boxes (the host and its inner wrapper) keep
+ * every guarded property (display, visibility, opacity, clicks, position, the
+ * transforms, masks, zoom, size) against every stylesheet rule, and the
+ * server's scope check refuses any theme selector that names either wrapper,
+ * so no theme rule reaches the card, or anything inside it, by name. What is a
+ * review rule (docs/theme-host/css-layer-model.md): a generic selector such as
+ * `button` that matches the card's elements without naming the card, a rule on
+ * an ancestor, an element drawn over the card, and a theme's code in the page.
  */
 
 import { useState } from 'react'
@@ -21,6 +36,7 @@ import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
 import { OversightNote } from '../oversight-note'
+import { ProtectedSurface } from '@/components/theme-host/protected-surface'
 import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
@@ -29,7 +45,24 @@ import { executedOutcomeLine, executedResultOf, refusedClickLine } from '@/lib/g
 // P256-FIX-N17-2: the outcome line lives in lib/grant-outcome, shared with the Governance inbox.
 export { executedOutcomeLine }
 
-export function ToolApprovalWidget({
+/** What the owner decided on the card. */
+export type ApprovalDecision = 'approved' | 'denied'
+
+export interface ToolApprovalWidgetProps extends WidgetBaseProps<ToolApprovalWidgetData> {
+  /** Told once an approve or a deny went through (never after a failed call). */
+  onDecided?: (decision: ApprovalDecision) => void
+}
+
+/** Every place the card renders gets it guarded (the canvas, a chat reply, a theme's page). */
+export function ToolApprovalWidget(props: ToolApprovalWidgetProps) {
+  return (
+    <ProtectedSurface surface="tool-approval">
+      <ToolApprovalCard {...props} />
+    </ProtectedSurface>
+  )
+}
+
+function ToolApprovalCard({
   title,
   data,
   metadata,
@@ -39,7 +72,8 @@ export function ToolApprovalWidget({
   onClose,
   onMaximize,
   onRefresh,
-}: WidgetBaseProps<ToolApprovalWidgetData>) {
+  onDecided,
+}: ToolApprovalWidgetProps) {
   const grantApproval = useGrantApproval()
   const denyApproval = useDenyApproval()
   const [done, setDone] = useState<'approved' | 'denied' | null>(null)
@@ -54,6 +88,7 @@ export function ToolApprovalWidget({
       const line = executedOutcomeLine(executed)
       setOutcome(line)
       setDone('approved')
+      onDecided?.('approved')
       if (executed && executed.success === false) {
         toast.error(line)
       } else {
@@ -69,6 +104,7 @@ export function ToolApprovalWidget({
       await denyApproval.mutateAsync(data.grant_id)
       setOutcome('Denied — the action will not run.')
       setDone('denied')
+      onDecided?.('denied')
       toast.info('Action denied')
     } catch {
       toast.error('Failed to deny the action')

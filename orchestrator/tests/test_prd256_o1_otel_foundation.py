@@ -1,7 +1,7 @@
 """PRD-256 O1 (#847): OpenTelemetry traces over OTLP, default off.
 
-Off: nothing from ``opentelemetry`` is imported, and the app's lifespan is the
-one it was. On: a server span per request (not the probes) carrying the
+Off: our code imports nothing from ``opentelemetry`` (FastAPI 0.142+ imports the
+API itself), and the app's lifespan is the one it was. On: a server span per request (not the probes) carrying the
 request's own IDs, sampled by ratio, exported in batches, and a tracing fault
 never fails a request or the boot. Spans go to an in-memory exporter here.
 """
@@ -36,23 +36,61 @@ WS = "00000000-0000-0000-0000-0000000000c1"
 
 # ── off ──────────────────────────────────────────────────────────────────────
 
+# FastAPI 0.142+ requires opentelemetry-api and imports its API modules itself, at
+# ``import fastapi`` (fastapi/applications.py, routing.py and background.py import
+# fastapi.telemetry._api / ._asgi, which import opentelemetry.context, .trace, .metrics,
+# ._logs and .propagate). That chain is third-party, so it is the measured baseline,
+# not a hard-coded list: it must be the API alone (no SDK, exporter or instrumentation).
+# Our off path must then load no further opentelemetry module, and no import statement
+# outside FastAPI and opentelemetry itself may name one, even one already loaded.
+_OFF_PATH_SCRIPT = """
+import builtins, sys
+import fastapi
+from fastapi import FastAPI
+
+def otel_modules():
+    return {m for m in sys.modules if m.split('.')[0] == 'opentelemetry'}
+
+baseline = otel_modules()
+heavy = sorted(m for m in baseline if m.startswith(
+    ('opentelemetry.sdk', 'opentelemetry.exporter', 'opentelemetry.instrumentation')))
+assert not heavy, ('import fastapi loaded more than the OpenTelemetry API', heavy)
+
+asked = []
+real_import = builtins.__import__
+
+def watch(name, globals=None, locals=None, fromlist=(), level=0):
+    caller = (globals or {}).get('__name__') or ''
+    if name.split('.')[0] == 'opentelemetry' and caller.split('.')[0] not in ('fastapi', 'opentelemetry'):
+        asked.append((caller, name))
+    return real_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = watch
+# The control: an import of a module FastAPI already loaded, from code that is not
+# FastAPI's, is caught. Without it a broken watcher would pass every run.
+exec('import opentelemetry.trace', {'__name__': 'control'})
+assert asked == [('control', 'opentelemetry.trace')], asked
+asked.clear()
+from core.observability import otel
+app = FastAPI(lifespan=otel.with_tracing(None))
+otel.instrument_app(app)
+assert otel.start_tracing() is False
+otel.annotate_request('req-1', 'ws-1')
+otel.flush_tracing()
+builtins.__import__ = real_import
+
+assert not asked, ('our off path imported OpenTelemetry', asked)
+added = sorted(otel_modules() - baseline)
+assert not added, ('the off path loaded OpenTelemetry modules', added)
+"""
+
+
 def test_off_imports_nothing_from_opentelemetry():
-    """The whole off path, in a fresh interpreter: no ``opentelemetry`` module loads."""
-    script = (
-        "import sys\n"
-        "from fastapi import FastAPI\n"
-        "from core.observability import otel\n"
-        "app = FastAPI(lifespan=otel.with_tracing(None))\n"
-        "otel.instrument_app(app)\n"
-        "assert otel.start_tracing() is False\n"
-        "otel.annotate_request('req-1', 'ws-1')\n"
-        "otel.flush_tracing()\n"
-        "loaded = sorted(m for m in sys.modules if m.startswith('opentelemetry'))\n"
-        "assert not loaded, loaded\n"
-    )
+    """The whole off path, in a fresh interpreter: our code imports nothing from
+    ``opentelemetry``, and nothing beyond the API that FastAPI itself imports loads."""
     env = {k: v for k, v in os.environ.items() if k != "OTEL_ENABLED"}
-    done = subprocess.run([sys.executable, "-c", script], cwd=_ORCH, env=env, capture_output=True, text=True,
-                          timeout=120)
+    done = subprocess.run([sys.executable, "-c", _OFF_PATH_SCRIPT], cwd=_ORCH, env=env, capture_output=True,
+                          text=True, timeout=120)
     assert done.returncode == 0, done.stderr[-2000:]
 
 

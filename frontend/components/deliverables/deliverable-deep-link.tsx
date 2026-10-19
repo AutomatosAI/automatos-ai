@@ -17,8 +17,7 @@ import { useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import { DeliverablePreview } from '@/components/workspace/gallery-view/deliverable-preview'
-
-export const DELIVERABLE_PARAM = 'deliverable'
+import { DELIVERABLE_PARAM, DELIVERABLES_HREF } from '@/lib/ticket-links'
 
 export function DeliverableDeepLink() {
   const searchParams = useSearchParams()
@@ -31,7 +30,7 @@ export function DeliverableDeepLink() {
       const rest = new URLSearchParams(searchParams?.toString() ?? '')
       rest.delete(DELIVERABLE_PARAM)
       const query = rest.toString()
-      router.replace(query ? `/deliverables?${query}` : '/deliverables')
+      router.replace(query ? `${DELIVERABLES_HREF}?${query}` : DELIVERABLES_HREF)
     },
     [router, searchParams],
   )

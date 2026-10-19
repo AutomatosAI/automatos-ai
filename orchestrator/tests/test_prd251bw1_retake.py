@@ -37,7 +37,7 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from fastapi.routing import APIRoute  # noqa: E402
+from fastapi.routing import APIRoute, iter_route_contexts  # noqa: E402
 
 import api.socials as socials_api  # noqa: E402
 import api.socials_compose as compose_api  # noqa: E402
@@ -161,7 +161,10 @@ def test_a_model_failure_is_502_and_nothing_changes(retakes):
 
 
 def test_the_route_is_wired():
-    (route,) = [r for r in socials_api.router.routes if isinstance(r, APIRoute) and r.path == ROUTE]
+    (route,) = [
+        r for r in iter_route_contexts(socials_api.router.routes)  # the included retake router's routes too
+        if isinstance(r.original_route, APIRoute) and r.path == ROUTE
+    ]
     assert route.methods == {"POST"} and route.status_code == 202
     assert not inspect.iscoroutinefunction(route.endpoint), "a route over a sync Session is a plain def (F105)"
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

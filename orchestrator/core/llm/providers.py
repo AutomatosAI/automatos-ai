@@ -332,6 +332,21 @@ def openrouter_prefix_for(provider: Optional[str]) -> Optional[str]:
     return spec.openrouter_prefix if spec else None
 
 
+def openrouter_model_id(vendor_provider: Optional[str], model_id: str) -> str:
+    """A vendor's model id in OpenRouter's form (unchanged when already prefixed, or
+    when the vendor has no OpenRouter prefix). A direct Claude id becomes OpenRouter's
+    dotted twin (``claude-haiku-5-5`` → ``anthropic/claude-haiku-5.5``): OpenRouter
+    lists no hyphenated Claude id."""
+    from core.llm.anthropic_ids import DIRECT_ID_PREFIX, OPENROUTER_PREFIX, openrouter_twin_id
+
+    if "/" in model_id:
+        return model_id
+    prefix = openrouter_prefix_for(vendor_provider)
+    if prefix == OPENROUTER_PREFIX and model_id.startswith(DIRECT_ID_PREFIX):
+        return openrouter_twin_id(model_id)
+    return f"{prefix}{model_id}" if prefix else model_id
+
+
 def price_multiplier_for(provider: Optional[str]) -> float:
     """W0 interim pricing: a free route books zero. Unknown providers price as-is."""
     spec = get_spec(provider)

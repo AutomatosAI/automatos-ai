@@ -1292,20 +1292,12 @@ class StreamingChatService:
         async for chunk in self._remember_the_turn(latest_text, full_response, chat_id, user_id):
             yield chunk
 
-        # FutureAGI live traffic eval (fire-and-forget)
-        if latest_text and full_response:
-            try:
-                from core.services.futureagi_service import futureagi_service
-                if futureagi_service.is_available:
-                    asyncio.create_task(
-                        futureagi_service.eval_live_traffic(
-                            input_text=latest_text,
-                            output_text=full_response,
-                            context_text=orchestrated.system_prompt if orchestrated else "",
-                        )
-                    )
-            except Exception:
-                pass
+        # FutureAGI live scoring, in the background. The turn reads a cached flag and
+        # never the database (PRD-262 US-006).
+        from core.services.futureagi_service import futureagi_service
+        futureagi_service.schedule_live_eval(
+            latest_text, full_response, getattr(orchestrated, "system_prompt", "") or "",
+        )
 
         _update_runtime_metrics(agent_runtime, response)
 

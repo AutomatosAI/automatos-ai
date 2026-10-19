@@ -9,10 +9,15 @@ import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
-import { UiStyleProvider } from '../contexts/ui-style-context'
+import { UiStyleProvider, useUiStyle } from '../contexts/ui-style-context'
+import { LookProvider } from './looks/look-provider'
+import { AccountLookScope } from './looks/account-look-scope'
 import type { UiStyle } from '@/lib/ui-style'
+import type { ThemeTone } from '@/lib/theme-host/boot'
+import { BUILTIN_THEME_CLIENTS } from '@/lib/theme-host/builtin/clients'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
+import { ThemeHostProvider } from './theme-host/theme-host-provider'
 import { isSaaS } from '@/lib/auth-edition'
 
 // PRD-244 W0: the `?theme=studio-preview` URL flag is gone — Studio is a
@@ -72,13 +77,28 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** PRD-261 A-03: the active builtin theme's client module (its stylesheet chunk), or nothing. */
+function BuiltinThemeClient() {
+  const { activeTheme } = useUiStyle()
+  const Client = activeTheme === null ? undefined : BUILTIN_THEME_CLIENTS.get(activeTheme.ref)
+  return Client === undefined ? null : <Client />
+}
+
 interface ProvidersProps {
   children: React.ReactNode
   /** PRD-244 D1: the Style axis, read from its cookie by app/layout.tsx. */
   initialUiStyle?: UiStyle
+  /** PRD-260 K4, PRD-261 A-03: the boot's tone (a theme whose tone follows its look), forced from the first paint. */
+  initialTone?: ThemeTone
 }
 
-export function Providers({ children, initialUiStyle }: ProvidersProps) {
+export function Providers({ children, initialUiStyle, initialTone }: ProvidersProps) {
+  // PRD-260 K4: under Play the look's ground sets the tone (LookProvider hands it up).
+  // forcedTheme forces it without overwriting the user's stored tone, which returns when
+  // they leave Play; it starts from the server's tone cookie, so next-themes' script
+  // forces it before paint. Forced at every width: the look paints <html> under Play below
+  // 1024 px too, and Studio's semantic tokens and dark: classes must match its ground there.
+  const [playTone, setPlayTone] = useState<ThemeTone | undefined>(initialTone)
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -98,16 +118,24 @@ export function Providers({ children, initialUiStyle }: ProvidersProps) {
           themes={['light', 'dark']}
           storageKey="automatos-theme"
           disableTransitionOnChange
+          forcedTheme={playTone}
         >
           <UiStyleProvider initialStyle={initialUiStyle}>
+          <BuiltinThemeClient />
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
+              {/* PRD-260 F5: looks are the signed-in user's in this workspace,
+                  so the LookProvider sits inside the WorkspaceProvider. */}
+              <AccountLookScope>
+              <LookProvider onToneChange={setPlayTone}>
               {/* PRD-222: a new workspace lands directly in the conversation
                   where Auto opens (OnboardingOpener) — no first-login modal or
                   guided tour (both retired in W2·S5). */}
-              {children}
+              <ThemeHostProvider>{children}</ThemeHostProvider>
               <GlobalSearch />
               <Toaster position="top-right" richColors closeButton />
+              </LookProvider>
+              </AccountLookScope>
             </WorkspaceProvider>
           </QueryClientProvider>
           </UiStyleProvider>

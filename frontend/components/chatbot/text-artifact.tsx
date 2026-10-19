@@ -72,7 +72,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
               </span>
             )}
             {metadata.model && (
-              <span className="inline-flex items-center rounded-full border border-info/40 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info dark:text-info/70">
+              <span className="inline-flex items-center rounded-full border border-info/40 bg-info/10 px-3 py-1 text-xs font-semibold uppercase text-info">
                 {metadata.model}
               </span>
             )}
@@ -81,27 +81,27 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
 
           <div className="grid grid-cols-1 gap-3 text-sm text-muted-foreground md:grid-cols-2">
             {metadata.row_count !== undefined && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Rows</div>
-                <div className="text-lg font-semibold text-foreground dark:text-gray-100">{metadata.row_count}</div>
+                <div className="text-lg font-semibold text-foreground">{metadata.row_count}</div>
               </div>
             )}
             {metadata.execution_time_ms !== undefined && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Execution Time</div>
-                <div className="text-lg font-semibold text-foreground dark:text-gray-100">{Number(metadata.execution_time_ms).toFixed(0)} ms</div>
+                <div className="text-lg font-semibold text-foreground">{Number(metadata.execution_time_ms).toFixed(0)} ms</div>
               </div>
             )}
             {metadata.similarity !== undefined && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Similarity</div>
-                <div className="text-lg font-semibold text-foreground dark:text-gray-100">{(metadata.similarity * 100).toFixed(1)}%</div>
+                <div className="text-lg font-semibold text-foreground">{(metadata.similarity * 100).toFixed(1)}%</div>
               </div>
             )}
             {metadata.document_id && (
-              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-background/40">
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:bg-background/40">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Document</div>
-                <div className="text-base font-semibold text-foreground dark:text-gray-100">{metadata.document_id}</div>
+                <div className="text-base font-semibold text-foreground">{metadata.document_id}</div>
               </div>
             )}
           </div>
@@ -120,7 +120,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                 key={idx}
                 className="rounded-xl border border-info/20 bg-info/5 p-4"
               >
-                <summary className="cursor-pointer text-sm font-medium text-foreground dark:text-gray-200">
+                <summary className="cursor-pointer text-sm font-medium text-foreground">
                   Chunk {idx + 1}: {chunk.excerpt ? chunk.excerpt.slice(0, 120) : 'Open'}
                   {chunk.excerpt && chunk.excerpt.length > 120 ? '…' : ''}
                 </summary>
@@ -146,7 +146,7 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                       Copy chunk
                     </button>
                   </div>
-                  <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 whitespace-pre-wrap text-foreground dark:bg-background/70 dark:border-gray-800/60 dark:text-gray-100">
+                  <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 whitespace-pre-wrap text-foreground dark:bg-background/70">
                     {chunk.content}
                   </pre>
                 </div>

@@ -38,8 +38,10 @@ The platform boots and serves without any LLM key, but agents, chat, and
 embeddings need one to actually think.
 
 **Recommended: OpenRouter.** One key, 400+ models, and — since PRD-240 — web
-search for every model your agents run on. It is already the default route
-(Auto starts on `google/gemini-2.5-flash` via OpenRouter). Get a key at
+search for every model your agents run on. Auto starts on Claude Haiku 5.5
+(`anthropic` / `claude-haiku-5-5`), and so does the internal System LLM; with no
+Anthropic key, both send their calls through OpenRouter as
+`anthropic/claude-haiku-5.5`. Get a key at
 openrouter.ai/keys and add it under **Settings → API Keys**. Add **NVIDIA**
 beside it for free open models (Kimi, DeepSeek, Nemotron — see below).
 
@@ -110,8 +112,11 @@ make up-images
 This pulls the images CI publishes from `main` to GHCR
 (`ghcr.io/automatosai/automatos-api`, `-frontend`, `-workspace-worker`;
 multi-arch and signed) instead of building them: about a minute instead of ten.
-The default tag is `edge`, the latest `main`; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07
-make up-images` pins one build. Everything else is the same as `make up`: your
+The default tag is `edge`, the latest `main` build whose published images have
+booted in CI; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up-images` pins one build.
+Every Monday CI rebuilds them with fresh OS packages (`weekly-<yyyymmdd>`) and
+moves `edge` there once they boot, so OS security fixes arrive on `edge` too.
+Everything else is the same as `make up`: your
 `.env`, the database, the workspace folder and session mode. Your checkout's
 source code isn't used. The published web app calls the API at
 `http://localhost:8000`, fixed when the image was built, so keep `API_PORT` at

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from helpers import STORAGE, bundle, page
+from helpers import STORAGE, VOICES, bundle, page
 from media_render import fit, probe
 from media_render.bundle import parse_bundle
 from media_render.config import ConfigError, load_settings
@@ -125,7 +125,7 @@ def _speaker(settings, lengths):
 
 
 def _job(settings, tmp_path, body):
-    parsed = parse_bundle(body, settings, {})
+    parsed = parse_bundle(body, settings, {}, VOICES)
     return Job(id="c" * 32, bundle=parsed, dir=tmp_path / "job", status="preparing", created_at=0.0)
 
 

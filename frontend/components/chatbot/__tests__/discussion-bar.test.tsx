@@ -10,6 +10,8 @@ import type { BoardTask } from '@/types/board'
 const nav = vi.hoisted(() => ({ query: 'ticket=612', replace: vi.fn() }))
 const board = vi.hoisted(() => ({ task: undefined as unknown, isError: false }))
 const session = vi.hoisted(() => ({ newDraft: vi.fn() }))
+// PRD-260 M67: which chat /chat shows (Play's at >= 1024 px under Play, else the core's).
+const look = vi.hoisted(() => ({ play: false, narrow: false, ownsChat: true }))
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(nav.query),
@@ -17,6 +19,16 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTask: () => ({ data: board.task, isError: board.isError }) }))
+// The theme's width source, the one ThemeSlot reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
+// PRD-261 A-02b: the bar asks whether the active theme's entry owns /chat; builtin Play's does.
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => true,
+    useActiveTheme: () => (look.play ? { ...BUILTIN_PLAY_ENTRY, ownsPages: look.ownsChat ? BUILTIN_PLAY_ENTRY.ownsPages : [] } : null),
+    useThemeLayout: () => (look.play && !look.narrow ? 'theme' : 'fallback'),
+  }
+})
 // A small stand-in for the chat-session store: an open tab, and a draft Discuss opens.
 const { OPEN_TAB } = vi.hoisted(() => ({
   OPEN_TAB: { activeChatId: 'chat-old', openChatIds: ['chat-old'], titles: { 'chat-old': 'Rota questions' }, draftOpen: false },
@@ -57,6 +69,9 @@ beforeEach(() => {
   session.newDraft.mockReset()
   board.task = ticket()
   board.isError = false
+  look.play = false
+  look.narrow = false
+  look.ownsChat = true
   useDiscussionStore.getState().end()
   ;(useChatSessionStore as any).setState({ session: OPEN_TAB })
 })
@@ -117,5 +132,43 @@ describe('DiscussionBar', () => {
     activate('chat-old')                                     // back to the tab that was open
     expect(useDiscussionStore.getState().discussion).toBeNull()
     expect(nav.replace).toHaveBeenCalledWith('/chat')
+  })
+})
+
+const STUDIO_HINT = 'You are talking to Auto. To ask Words instead, pick them in the message box.'
+const PLAY_HINT = "You are talking to Auto in Play's chat. To ask Words, switch to Studio from the theme menu."
+
+describe("DiscussionBar's hint (PRD-260 M67)", () => {
+  it("under Play, never sends the owner to an agent picker Play's message box doesn't have", () => {
+    look.play = true
+    render(<DiscussionBar />)
+    expect(screen.queryByText(/pick them in the message box/)).toBeNull()
+    expect(screen.getByText(PLAY_HINT)).toBeInTheDocument()
+  })
+
+  it("keeps Studio's hint under Studio, and under Play below 1024 px where /chat is the core's chat (D7)", () => {
+    render(<DiscussionBar />)
+    expect(screen.getByText(STUDIO_HINT)).toBeInTheDocument()
+    cleanup()
+    look.play = true
+    look.narrow = true
+    render(<DiscussionBar />)
+    expect(screen.getByText(STUDIO_HINT)).toBeInTheDocument()
+    expect(screen.queryByText(PLAY_HINT)).toBeNull()
+  })
+
+  it("keeps Studio's hint under a theme at its width whose entry doesn't own /chat (PRD-261 A-02b)", () => {
+    look.play = true
+    look.ownsChat = false
+    render(<DiscussionBar />)
+    expect(screen.getByText(STUDIO_HINT)).toBeInTheDocument()
+    expect(screen.queryByText(PLAY_HINT)).toBeNull()
+  })
+
+  it("shows no hint on a mission's ticket, under Play as under Studio (D4)", () => {
+    look.play = true
+    board.task = ticket({ type: 'mission', mission_id: 'run-9' })
+    render(<DiscussionBar />)
+    expect(screen.queryByText(/You are talking to Auto/)).toBeNull()
   })
 })

@@ -8,7 +8,10 @@ if [ -d "$WORKSPACE_VOLUME_PATH" ] && [ "$(stat -c '%u' "$WORKSPACE_VOLUME_PATH"
     # PRD-239: <workspace>/projects is the OWNER'S folder bind-mounted in (LOCAL_PROJECTS_DIR)
     # — never re-own it: on a Linux host its files would change owner, and the crawl over a
     # 40 GB development folder alone kept the worker unhealthy for minutes.
-    find "$WORKSPACE_VOLUME_PATH" -mindepth 1 -path '*/projects' -prune -o -exec chown worker:worker {} + 2>/dev/null || true
+    # PRD-262 US-045: chown -h re-owns a symlink itself, never the file it points to (an
+    # agent or a cloned repo can link to /etc/passwd); ! -user worker skips what the worker
+    # already owns. A chown that fails is logged, and the worker still starts.
+    find "$WORKSPACE_VOLUME_PATH" -mindepth 1 -path '*/projects' -prune -o ! -user worker -exec chown -h worker:worker {} + || echo "[entrypoint] some files could not be re-owned" >&2
     chown worker:worker "$WORKSPACE_VOLUME_PATH" 2>/dev/null || true
 fi
 

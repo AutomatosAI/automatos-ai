@@ -19,7 +19,7 @@ The following files were used as context for generating this wiki page:
 - [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
 - [services/workspace-worker/executor.py](services/workspace-worker/executor.py)
 - [services/workspace-worker/main.py](services/workspace-worker/main.py)
-- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
+- [services/workspace-worker/requirements.in](services/workspace-worker/requirements.in)
 - [services/workspace-worker/worker_config.py](services/workspace-worker/worker_config.py)
 - [services/workspace-worker/workspace_manager.py](services/workspace-worker/workspace_manager.py)
 

@@ -1,0 +1,327 @@
+name: browser-e2e
+
+# PRD-261 A-00 — the browser lane: Playwright on Chromium and WebKit against the
+# local edition. Frontend tests elsewhere are vitest on jsdom; this lane proves
+# what only a real browser shows (module loading, import maps, real rendering).
+#
+# How it runs:
+# - The backend boots the way smoke-fresh-clone.yml does (postgres, redis, minio,
+#   backend through docker compose, no external credentials), so the app has a
+#   real local workspace.
+# - The frontend is built and served on the runner from its standalone output,
+#   the same build every image ships (PRD-261 A-04a: the theme host has no build
+#   flag; `npm run build` generates the theme-sdk shims in its prebuild step).
+#   The page origin is http://localhost:3000, the backend's CORS default.
+# - Playwright lives in its own package (e2e/browser/package.json, exact pins and
+#   its own committed lockfile, installed with npm ci), so frontend/package-lock.json
+#   never changes for it.
+#
+# It watches only the paths below (the app shell, the theme host and every folder
+# PRD-261 Phase A touches (PA-6), the boot substrate and itself). A change to the
+# rest of the backend or to other pages can break it without running it. See
+# e2e/browser/README.md.
+#
+# workflow_dispatch works only once this file is on main: GitHub dispatches only
+# workflows that exist on the default branch. Before that, the lane runs on a
+# pull_request whose HEAD commit has no [skip ci].
+#
+# NON-REQUIRED at introduction; making it a required check is the repo admin's call.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/app/layout.tsx"
+      - "frontend/app/page.tsx"
+      - "frontend/app/not-found.tsx"
+      - "frontend/app/play-theme.css"
+      - "frontend/app/play-fonts.ts"
+      - "frontend/app/agents/**"
+      - "frontend/app/assignments/**"
+      - "frontend/app/chat/**"
+      - "frontend/app/command-center/**"
+      - "frontend/app/conversations/**"
+      - "frontend/app/deliverables/**"
+      - "frontend/app/documents/**"
+      - "frontend/app/looks/**"
+      - "frontend/app/missions/**"
+      - "frontend/app/playbooks/**"
+      - "frontend/app/safe-mode/**"
+      - "frontend/app/x/**"
+      - "frontend/app/api/themes/**"
+      - "frontend/app/admin/themes/**"
+      - "frontend/components/providers.tsx"
+      - "frontend/components/workspace-provider.tsx"
+      - "frontend/components/layout/**"
+      - "frontend/components/theme-host/**"
+      - "frontend/components/play/**"
+      - "frontend/components/looks/**"
+      - "frontend/components/mascot/**"
+      - "frontend/components/settings/themes/**"
+      - "frontend/components/marketplace/themes/**"
+      - "frontend/components/admin/themes/**"
+      - "frontend/components/ui/theme-toggle.tsx"
+      - "frontend/components/shared/**"
+      - "frontend/lib/theme-host/**"
+      - "frontend/lib/theme-sdk/**"
+      - "frontend/lib/look-kit/**"
+      - "frontend/lib/looks/**"
+      - "frontend/lib/ui-style.ts"
+      - "frontend/lib/api-client.ts"
+      - "frontend/lib/auth-edition.ts"
+      - "frontend/packages/theme-sdk/**"
+      - "frontend/contexts/ui-style-context.tsx"
+      - "frontend/hooks/use-studio-theme.ts"
+      - "frontend/hooks/use-mobile.ts"
+      - "frontend/hooks/use-global-search.ts"
+      - "frontend/hooks/use-installed-themes.ts"
+      - "frontend/scripts/theme-sdk/**"
+      - "frontend/next.config.js"
+      - "frontend/middleware.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "orchestrator/api/themes_*.py"
+      - "orchestrator/api/marketplace_themes*.py"
+      - "orchestrator/api/admin_themes.py"
+      - "orchestrator/services/themes/**"
+      - "orchestrator/core/models/themes.py"
+      - "orchestrator/core/auth/step_up.py"
+      - "orchestrator/alembic/versions/prd261_*.py"
+      - "orchestrator/tests/fixtures/themes/**"
+      - "docker-compose.yml"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/Dockerfile"
+      - "envs/api.defaults"
+      - "e2e/browser/**"
+      - ".github/workflows/browser-e2e.yml"
+  # No branches filter: a stacked pull request runs the lane too.
+  pull_request:
+    paths:
+      - "frontend/app/layout.tsx"
+      - "frontend/app/page.tsx"
+      - "frontend/app/not-found.tsx"
+      - "frontend/app/play-theme.css"
+      - "frontend/app/play-fonts.ts"
+      - "frontend/app/agents/**"
+      - "frontend/app/assignments/**"
+      - "frontend/app/chat/**"
+      - "frontend/app/command-center/**"
+      - "frontend/app/conversations/**"
+      - "frontend/app/deliverables/**"
+      - "frontend/app/documents/**"
+      - "frontend/app/looks/**"
+      - "frontend/app/missions/**"
+      - "frontend/app/playbooks/**"
+      - "frontend/app/safe-mode/**"
+      - "frontend/app/x/**"
+      - "frontend/app/api/themes/**"
+      - "frontend/app/admin/themes/**"
+      - "frontend/components/providers.tsx"
+      - "frontend/components/workspace-provider.tsx"
+      - "frontend/components/layout/**"
+      - "frontend/components/theme-host/**"
+      - "frontend/components/play/**"
+      - "frontend/components/looks/**"
+      - "frontend/components/mascot/**"
+      - "frontend/components/settings/themes/**"
+      - "frontend/components/marketplace/themes/**"
+      - "frontend/components/admin/themes/**"
+      - "frontend/components/ui/theme-toggle.tsx"
+      - "frontend/components/shared/**"
+      - "frontend/lib/theme-host/**"
+      - "frontend/lib/theme-sdk/**"
+      - "frontend/lib/look-kit/**"
+      - "frontend/lib/looks/**"
+      - "frontend/lib/ui-style.ts"
+      - "frontend/lib/api-client.ts"
+      - "frontend/lib/auth-edition.ts"
+      - "frontend/packages/theme-sdk/**"
+      - "frontend/contexts/ui-style-context.tsx"
+      - "frontend/hooks/use-studio-theme.ts"
+      - "frontend/hooks/use-mobile.ts"
+      - "frontend/hooks/use-global-search.ts"
+      - "frontend/hooks/use-installed-themes.ts"
+      - "frontend/scripts/theme-sdk/**"
+      - "frontend/next.config.js"
+      - "frontend/middleware.ts"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "orchestrator/api/themes_*.py"
+      - "orchestrator/api/marketplace_themes*.py"
+      - "orchestrator/api/admin_themes.py"
+      - "orchestrator/services/themes/**"
+      - "orchestrator/core/models/themes.py"
+      - "orchestrator/core/auth/step_up.py"
+      - "orchestrator/alembic/versions/prd261_*.py"
+      - "orchestrator/tests/fixtures/themes/**"
+      - "docker-compose.yml"
+      - "orchestrator/docker-entrypoint.sh"
+      - "orchestrator/Dockerfile"
+      - "envs/api.defaults"
+      - "e2e/browser/**"
+      - ".github/workflows/browser-e2e.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  browser-e2e:
+    name: Browser e2e (non-required)
+    # Pinned, not -latest: the browsers' system packages are installed for this image.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    # Job level, not step level: docker-compose.yml interpolates its `:?` variables
+    # on every subcommand (up, logs and down alike). Throwaway values for an
+    # ephemeral stack, the same ones smoke-fresh-clone.yml uses; no external
+    # credential is set. DEFAULT_WORKSPACE_ID is the local edition's required workspace.
+    env:
+      POSTGRES_PASSWORD: smoke_pg_pw
+      REDIS_PASSWORD: smoke_redis_pw
+      API_KEY: smoke_api_key
+      AUTH_EDITION: local
+      REQUIRE_AUTH: "false"
+      DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Start the local backend (postgres, redis, minio, backend)
+        run: docker compose up -d --build postgres redis minio backend
+
+      - name: Wait for the backend to be ready
+        run: bash e2e/browser/scripts/wait-for-url.sh http://localhost:8000/health/ready 300
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/browser/package-lock.json
+
+      # The same install as test.yml's frontend-ci (the lockfile is reconciled, not enforced).
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+
+      # The React the App Router renders with (Next's vendored copy) and the Next version,
+      # for the specs that compare the live page against this install.
+      - name: Record the React and Next versions of this install
+        working-directory: frontend
+        run: |
+          echo "EXPECTED_REACT_VERSION=$(node -p "require('next/dist/compiled/react').version")" >> "$GITHUB_ENV"
+          echo "NEXT_VERSION=$(node -p "require('next/package.json').version")" >> "$GITHUB_ENV"
+
+      # `npm run build` runs `prebuild` first, which generates the theme-sdk shims from the React
+      # this install vendors (PRD-261 PA-3), as every image build does.
+      - name: Build the frontend (local edition)
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_AUTH_EDITION: local
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_WS_URL: ws://localhost:8000/ws
+          NEXT_PUBLIC_MEDIA_ORIGINS: http://localhost:9000
+          NEXT_TELEMETRY_DISABLED: "1"
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run build
+
+      # Staged the way frontend/Dockerfile's production stage lays it out.
+      - name: Stage the standalone server
+        working-directory: frontend
+        run: cp -r public .next/standalone/public && cp -r .next/static .next/standalone/.next/static
+
+      - name: Start the frontend (standalone server on :3000)
+        working-directory: frontend
+        run: |
+          PORT=3000 HOSTNAME=0.0.0.0 NODE_ENV=production \
+            nohup node .next/standalone/server.js > "$RUNNER_TEMP/frontend-server.log" 2>&1 &
+
+      - name: Wait for the frontend
+        run: bash e2e/browser/scripts/wait-for-url.sh http://localhost:3000/agents 120
+
+      # Exact pins and the committed lockfile (PRD-261 A-04a: the one #1143's run resolved,
+      # every package from registry.npmjs.org with its integrity hash).
+      - name: Install Playwright (isolated package, npm ci)
+        working-directory: e2e/browser
+        run: npm ci --no-audit --no-fund
+
+      # Firefox runs the @record specs only (playwright.config.ts gives it grep /@record/).
+      - name: Install the browsers and their system packages
+        working-directory: e2e/browser
+        run: npx playwright install --with-deps chromium webkit firefox
+
+      - name: Type-check the specs
+        working-directory: e2e/browser
+        run: npx tsc -p tsconfig.json
+
+      # The hello theme against @types/react 19 and the test SDK's types (PRD-261 A-01).
+      - name: Type-check the hello theme
+        working-directory: e2e/browser
+        run: npx tsc -p fixtures/hello-theme/tsconfig.json
+
+      # PRD-261 A-07d (PA-6): the .autotheme packages the install specs upload, built with the
+      # backend's own fixture builder (bare python3, no orchestrator dependencies). The specs read
+      # the folder from E2E_THEME_PACKAGES: hello (A-07d), hello-clip (A-08b), hello-throws (A-04c).
+      - name: Build the test theme packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/theme-packages"
+          for variant in hello hello-clip hello-throws; do
+            python3 orchestrator/tests/fixtures/themes/build.py --variant "$variant" \
+              --out "$RUNNER_TEMP/theme-packages/$variant.autotheme"
+          done
+          echo "E2E_THEME_PACKAGES=$RUNNER_TEMP/theme-packages" >> "$GITHUB_ENV"
+
+      # EXPECTED_REACT_VERSION and NEXT_VERSION come from $GITHUB_ENV (set above).
+      - name: Run the browser specs
+        working-directory: e2e/browser
+        env:
+          E2E_APP_URL: http://localhost:3000
+          RECORD_DIR: records
+        run: npx playwright test --grep "@smoke|@off|@host|@record" --project=chromium --project=webkit --project=firefox
+
+      # The theme-host record (React version, import-map integrity support), pass or fail.
+      - name: Summarise the theme-host record
+        if: always()
+        working-directory: e2e/browser
+        run: node scripts/summarise-records.mjs records >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the theme-host record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: theme-host-record
+          path: e2e/browser/records
+          if-no-files-found: ignore
+
+      # The folder may not exist when the job failed before Playwright ran.
+      - name: Collect server logs
+        if: failure()
+        run: |
+          mkdir -p e2e/browser/test-results
+          docker compose logs --tail 300 backend > e2e/browser/test-results/backend.log || true
+          cp "$RUNNER_TEMP/frontend-server.log" e2e/browser/test-results/ || true
+
+      - name: Upload the Playwright report, traces and logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-e2e-report
+          path: |
+            e2e/browser/playwright-report
+            e2e/browser/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # `|| true`: a cleanup hiccup never turns a passing job red.
+      - name: Stop the local backend
+        if: always()
+        run: docker compose down -v || true

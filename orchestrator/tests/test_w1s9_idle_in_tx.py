@@ -458,10 +458,15 @@ async def test_heartbeat_commits_before_each_generate(monkeypatch):
 # ---------------------------------------------------------------------------
 # Task #64 — the harness weekly pipeline
 #
-# _harness_tick() reads dormancy/config and then awaits five phases (collect,
-# diagnose, prescribe, apply, baseline) on one shared session. Pre-fix that
-# session stayed idle-in-transaction across every phase. The fix commits before
-# each phase. We assert a commit immediately precedes each phase.
+# _harness_tick() reads dormancy and then awaits its phases (collect, diagnose,
+# prescribe, report since PRD-263 US-016 deleted apply) on one shared session.
+# Pre-fix that session stayed idle-in-transaction across every phase. The fix
+# commits before each phase. We assert a commit immediately precedes each phase.
+#
+# PRD-263 PR-1B: the tick runs under the workspace's advisory lock and records
+# itself in a harness_runs row (services.harness_runs) instead of last_run.json.
+# The lock and the run-row helpers are stubbed here; they have real-DB suites of
+# their own (test_prd263_harness_advisory_lock.py, test_prd263_harness_run_record.py).
 # ---------------------------------------------------------------------------
 
 
@@ -470,14 +475,6 @@ class _GetQuery:
         self._obj = obj
 
     def get(self, *a, **k):
-        return self._obj
-
-    # §12.3: the tick now reads the autonomy level via
-    # db.query(Workspace).filter(...).first() — serve the same workspace.
-    def filter(self, *a, **k):
-        return self
-
-    def first(self):
         return self._obj
 
 
@@ -504,7 +501,7 @@ class _HarnessDB:
 
 @pytest.mark.asyncio
 async def test_harness_commits_before_each_phase(monkeypatch):
-    """A commit must precede every one of the five awaited phases.
+    """A commit must precede every one of the four awaited phases.
 
     Asserts the exact commit/phase interleaving, proving the connection is never
     idle-in-transaction across a phase await.
@@ -520,40 +517,46 @@ async def test_harness_commits_before_each_phase(monkeypatch):
 
     monkeypatch.setattr(
         svc, "_sufficiency_breakdown",
-        lambda _db, _ws: {
-            "agents_ok": True, "data_ok": True,
-            "active_agents": 1, "min_required_agents": 1,
-            "heartbeat_days_available": 7, "min_required_days": 1,
-        },
+        lambda _db, _ws: {"agents_ok": True, "active_agents": 1, "min_required_agents": 1},
     )
-    monkeypatch.setattr(svc, "_workspace_allows_auto_apply", lambda _s: True)
-    monkeypatch.setattr(svc, "_write_last_run", lambda *a, **k: None)
 
-    async def _collect(_ws, _db):
+    import contextlib
+
+    from services import harness_runs
+
+    @contextlib.contextmanager
+    def _lock(_engine, _ws):
+        yield True
+
+    closed: list[dict] = []
+    monkeypatch.setattr(harness_runs, "workspace_lock", _lock)
+    monkeypatch.setattr(harness_runs, "close_interrupted", lambda _db, _ws: 0)
+    monkeypatch.setattr(harness_runs, "week_is_settled", lambda _db, _ws, _window: False)
+    monkeypatch.setattr(harness_runs, "completed_runs", lambda _db, _ws: 0)
+    monkeypatch.setattr(harness_runs, "open_run", lambda _db, _ws, _window: 1)
+    monkeypatch.setattr(harness_runs, "close_run", lambda _db, run_id, status, **fields: closed.append(
+        {"run_id": run_id, "status": status, **fields}))
+
+    async def _collect(_ws, _db, _window):
         events.append("collect")
-        return {}
+        return SimpleNamespace(agent_rows=())
 
     async def _diagnose(_ws, _metrics, _db):
         events.append("diagnose")
-        return {}
+        return {"coverage": None, "convergence": "insufficient_data", "counts": {}, "agents": {}, "issues": []}
 
-    async def _prescribe(_ws, _diag, _metrics, _db):
+    async def _prescribe(_ws, _diag, _run_id):
         events.append("prescribe")
         return []
 
-    async def _apply(_ws, _rx, _db, allow_auto_apply=True, max_risk=None):
-        events.append("apply")
-        return {"applied": [], "queued": []}
-
-    async def _baseline(_ws, _metrics, _diag, _rx, _changelog, _db):
-        events.append("baseline")
-        return ({"iteration": 1}, {})
+    async def _report(_ws, _diag, _prescriptions, _db, _iteration):
+        events.append("report")
+        return ("# report", "ok")
 
     monkeypatch.setattr(svc, "_phase_collect", _collect)
     monkeypatch.setattr(svc, "_phase_diagnose", _diagnose)
     monkeypatch.setattr(svc, "_phase_prescribe", _prescribe)
-    monkeypatch.setattr(svc, "_phase_apply", _apply)
-    monkeypatch.setattr(svc, "_phase_baseline", _baseline)
+    monkeypatch.setattr(svc, "_phase_report", _report)
 
     await svc._harness_tick("ws-1")
 
@@ -561,6 +564,9 @@ async def test_harness_commits_before_each_phase(monkeypatch):
         "commit", "collect",
         "commit", "diagnose",
         "commit", "prescribe",
-        "commit", "apply",
-        "commit", "baseline",
+        "commit", "report",
     ], events
+    # The run is closed on its row, once, after the last phase, with DIAGNOSE's coverage
+    # and verdicts (PRD-263 US-014a).
+    assert [(c["run_id"], c["status"], c["report_status"]) for c in closed] == [(1, "completed", "ok")]
+    assert closed[0]["verdicts"] == {"convergence": "insufficient_data", "agents": {}}

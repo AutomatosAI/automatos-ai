@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import { Badge } from '@/components/ui/badge'
+import { downloadText } from '@/lib/download-text'
 import { cn } from '@/lib/utils'
 import type { DocumentWidgetData } from '../types'
 import { DOCUMENT_MARKDOWN_COMPONENTS } from './markdown-components'
@@ -87,15 +88,13 @@ export function DocumentInfoBar({ data }: { data: DocumentWidgetData }) {
   )
 }
 
-/** Save text the widget already holds (a knowledge document with no file route) as markdown. */
+const MARKDOWN_TYPE = 'text/markdown'
+
+/**
+ * Save text the widget already holds (a knowledge document with no file route) as markdown,
+ * through the one text download (lib/download-text.ts), which lets the URL go only once the
+ * download has started (P260-FX-27, M88).
+ */
 export function downloadMarkdownFile(content: string, filename: string): void {
-  const blob = new Blob([content], { type: 'text/markdown' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  document.body.removeChild(anchor)
-  URL.revokeObjectURL(url)
+  downloadText(filename, content, MARKDOWN_TYPE)
 }

@@ -2,6 +2,18 @@
 export const DELIVERABLE_TABS = ['outputs', 'blogs', 'templates', 'brand', 'socials'] as const
 export type DeliverableTab = (typeof DELIVERABLE_TABS)[number]
 
+/** Each tab's name on the strip (the Studio page, and Play's shelf linking to them). */
+export const TAB_LABELS: Record<DeliverableTab, string> = {
+  outputs: 'Outputs',
+  blogs: 'Blogs',
+  templates: 'Templates',
+  brand: 'Brand kit',
+  socials: 'Socials',
+}
+
+/** The file explorer is its own route; it sits on the strip as the last tab. */
+export const EXPLORER_HREF = '/deliverables/explorer'
+
 /** PRD-251B US-B301: the Brand kit tab, always visible; Template Studio and Socials link here. */
 export const BRAND_KIT_HREF = '/deliverables?tab=brand'
 

@@ -16,6 +16,7 @@
     --card-foreground: 0 0% 10%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 10%;
+    --radius: 0.5rem;
     --primary: 16 100% 50%;
     --primary-foreground: 0 0% 98%;
     --secondary: 0 0% 94%;
@@ -165,6 +166,7 @@
     --card-foreground: 30 12% 9%;
     --popover: 0 0% 100%;
     --popover-foreground: 30 12% 9%;
+    --radius: 8px;
 
     /* Brand — POSITIVE PRIMARY IS NEAR-BLACK (locked semantic) */
     --primary: 30 12% 9%;            /* #1a1814 — default CTA */
@@ -272,9 +274,10 @@
   }
 
   /* Studio typography — Geist sans, Geist Mono, Newsreader serif.
-     Fonts load via next/font/google in app/layout.tsx and bind to the
-     --font-* CSS variables. Falls back through Tiempos → Charter →
-     Georgia when fonts can't reach the CDN. */
+     Fonts are self-hosted (app/fonts/core) and load via next/font/local in
+     app/core-fonts.ts, bound to the --font-* CSS variables on <html> by
+     app/layout.tsx. Falls back through Tiempos → Charter → Georgia when a
+     font file fails to load. */
   /* PRD-244 W3 (D1) — Studio Dark: the Studio system in its dark tone. Paper and
      ink invert; burnt orange, olive and navy lift a step for contrast on ink.
      A DRAFT for Gerard's judgement on local; the per-page Studio waves (D8)

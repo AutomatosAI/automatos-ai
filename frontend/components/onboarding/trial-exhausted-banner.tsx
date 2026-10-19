@@ -33,7 +33,7 @@ export function TrialExhaustedBanner({ errorCode }: { errorCode?: string | null 
       className="bg-amber-500/5 border border-amber-500/30 rounded-xl p-4 space-y-3 max-w-md"
     >
       <div className="flex items-center gap-2">
-        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 shrink-0" />
+        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-warning shrink-0" />
         <span className="text-sm font-medium text-foreground">
           Your trial credit is used up
         </span>

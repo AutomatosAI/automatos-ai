@@ -1,0 +1,5 @@
+# PRD-261 A-00: what the browser lane writes. Installed and run in CI only.
+node_modules/
+test-results/
+playwright-report/
+records/
