@@ -9,10 +9,14 @@ FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b
 
 # Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
 # and services/media-render/Dockerfile, so the two images share one node layer on a host.
+# strip renames its output into /usr/local/bin, which stamps the directory with the build
+# time, and COPY --link keeps that time in the layer: the directory takes the binary's
+# upstream time back, or every build makes a different node layer.
 FROM node AS node-stripped
 RUN apt-get update \
  && apt-get install -y --no-install-recommends binutils \
  && strip --strip-unneeded --preserve-dates /usr/local/bin/node \
+ && touch -r /usr/local/bin/node /usr/local/bin \
  && rm -rf /var/lib/apt/lists/*
 
 # npm without its docs and man pages (PRD-262, row 47: 2.67 MB). The image has no `man`,

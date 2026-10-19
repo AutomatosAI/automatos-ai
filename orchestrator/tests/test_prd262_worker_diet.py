@@ -156,10 +156,14 @@ def test_the_in_image_check_looks_for_exactly_what_the_trim_deletes():
 NODE_STRIPPED_STAGE = (
     "# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile\n"
     "# and services/media-render/Dockerfile, so the two images share one node layer on a host.\n"
+    "# strip renames its output into /usr/local/bin, which stamps the directory with the build\n"
+    "# time, and COPY --link keeps that time in the layer: the directory takes the binary's\n"
+    "# upstream time back, or every build makes a different node layer.\n"
     "FROM node AS node-stripped\n"
     "RUN apt-get update \\\n"
     " && apt-get install -y --no-install-recommends binutils \\\n"
     " && strip --strip-unneeded --preserve-dates /usr/local/bin/node \\\n"
+    " && touch -r /usr/local/bin/node /usr/local/bin \\\n"
     " && rm -rf /var/lib/apt/lists/*\n"
 )
 NODE_COPY = "COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node"
