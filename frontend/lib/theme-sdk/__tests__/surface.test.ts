@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 
-import { NOT_IN_THIS_BUILD } from '../internal/stub'
+import { NOT_IN_THIS_BUILD, notInThisBuild } from '../internal/stub'
 
 interface SurfaceFile {
   readonly area: string
@@ -163,6 +163,15 @@ describe('PRD-261 A-10a — the surface snapshot', () => {
 
 describe('PRD-261 A-10a — stubbed areas', () => {
   const stubs = SURFACES.filter((surface) => surface.status === 'stub')
+
+  // Every area is built once W-A4 and W-A4P both land, so the it.each below can register no test; this one keeps
+  // the suite non-empty (vitest fails an empty suite) and proves the stub a future area would start from.
+  it('a stub is named after its name, and throws "not in this SDK build" naming its name and area', () => {
+    const stub = notInThisBuild('pages/agents', 'useAgentRoster')
+    expect(stub.name).toBe('useAgentRoster')
+    expect(() => stub()).toThrow(`Automatos theme SDK: useAgentRoster (pages/agents) is ${NOT_IN_THIS_BUILD}.`)
+    expect(STUB_CALL.test("notInThisBuild('pages/agents', 'useAgentRoster')")).toBe(true)
+  })
 
   it.each(stubs.map(areaCase))('%s: every name throws "not in this SDK build"', async (area, surface) => {
     const module = await loadArea(area)
