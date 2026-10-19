@@ -55,13 +55,15 @@ class ClaimedFiles:
 
 def owner_text(task: Any) -> List[str]:
     """The owner's own words on ``task``: its brief, their answers to its questions and
-    this ticket's corrections (``ticket_redo.owner_corrections``)."""
+    this ticket's corrections (``ticket_redo.owner_corrections``). A mission step's brief is
+    the coordinator's, listing the other steps' tickets ("ticket #0051.3"), so it names none."""
     from services.cli_host_service import session_asks
     from services.ticket_redo import owner_corrections
 
     ref = task.runtime_ref if isinstance(getattr(task, "runtime_ref", None), dict) else {}
     data = task.planning_data if isinstance(getattr(task, "planning_data", None), dict) else {}
-    texts = [getattr(task, "raw_prompt", None) or getattr(task, "description", None) or ""]
+    in_a_mission = getattr(task, "orchestration_run_id", None) is not None
+    texts = [] if in_a_mission else [getattr(task, "raw_prompt", None) or getattr(task, "description", None) or ""]
     texts += [str(ask.get("answer") or "") for ask in session_asks(ref)]
     texts += [str(entry.get("a") or "") for entry in data.get("human_qa") or [] if isinstance(entry, dict)]
     texts += owner_corrections(task)

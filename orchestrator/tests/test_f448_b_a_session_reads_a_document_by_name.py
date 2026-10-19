@@ -96,6 +96,29 @@ def test_a_spreadsheet_arrives_as_a_copy_in_the_tickets_folder(executor):
     assert f370._Folder.written == {("ws-harbourline", copy): CSV}
 
 
+def test_every_sheet_of_a_workbook_arrives_as_a_copy(executor):
+    executor["answer"] = {**SHEET, "sheets": [{"workspace_path": "knowledge/x.csv", "row_count": 2},
+                                              {"workspace_path": "knowledge/x-prices.csv", "row_count": 5}]}
+    executor["stored"][("ws-harbourline", "workspace", "knowledge/x-prices.csv")] = b"coffee,kilos\n"
+
+    result = _call({"filename": "x.xlsx"})
+
+    copies = ["sessions/3044/doc-708-x.csv", "sessions/3044/doc-708-x-prices.csv"]
+    assert result["workspace_path"] == copies[0]
+    assert [sheet["workspace_path"] for sheet in result["sheets"]] == copies
+    assert set(f370._Folder.written) == {("ws-harbourline", copy) for copy in copies}
+
+
+def test_a_workbook_with_a_sheet_that_cannot_be_copied_says_to_read_every_page(executor):
+    executor["answer"] = {**SHEET, "sheets": [{"workspace_path": "knowledge/x.csv", "row_count": 2},
+                                              {"workspace_path": "knowledge/gone.csv", "row_count": 5}]}
+
+    result = _call({"filename": "x.xlsx"})
+
+    assert not {"workspace_path", "count_with_code", "sheets"} & set(result)
+    assert result["note"] == NO_SPREADSHEET_COPY
+
+
 def test_a_spreadsheet_that_cannot_be_copied_says_to_read_every_page(executor):
     executor["stored"].clear()
 

@@ -31,7 +31,7 @@ from services import session_tools as st
 from services import session_tools_rpc as rpc
 from services.deliverable_service import DeliverableService
 from services.named_cards import claimed_files, named_cards, owner_text
-from services.step_files import CARD_STATUS_WORDS, NAMED_FILES_HEADER, READ_FRAME_LINE
+from services.step_files import CARD_STATUS_WORDS, NAMED_FILES_HEADER, NAMED_FILES_PER_CARD, READ_FRAME_LINE
 from services.ticket_numbers import format_number
 from services.ticket_redo import BRIEF_AGREED
 from tests import test_f161_a_later_step_reads_an_earlier_steps_file as f161
@@ -197,6 +197,20 @@ def test_only_the_owners_own_words_name_a_card(board):
     assert board["other"].id not in named                                         # #4242 is another workspace's
 
 
+def test_a_mission_steps_brief_is_the_coordinators_and_names_no_card(board):
+    """The coordinator lists the other steps' files as "(ticket #0051.3, …)" in a step's brief:
+    those are listed as the mission's already, never again as cards the owner named."""
+    db, cards = board["db"], board["cards"]
+    run, (step,) = f161._mission(db, board["ws"], board["agent"], "Tidewater quote", 1)
+    ticket = f161._claimed(db, run, step, board["agent"])
+    ticket.raw_prompt = ticket.description = (
+        f"Work on the quote.\n\n- `{board['files']['a_new']}` quote-v2.pdf (ticket {_number(cards['A'])}, \"Quote\")")
+    ticket.planning_data = {"human_qa": [{"q": "Which price notes?", "a": f"It is card {_number(cards['D'])}."}]}
+    db.flush()
+
+    assert named_cards(db, board["ws"], ticket.id, owner_text(ticket)) == [cards["D"].id]
+
+
 def test_the_claim_lists_the_named_cards_files_newest_first(board):
     db, cards, files = board["db"], board["cards"], board["files"]
     _host, ticket = _claim(db, board["ws"])
@@ -246,6 +260,19 @@ def test_a_brief_agreed_anew_with_no_naming_text_lists_none(board):
     assert (listed.block, listed.rows) == ("", ())                   # the earlier claim's rows go too
     kept = claimed_files(db, cards["E"], carried)                      # any other claim keeps them
     assert [row["deliverable_id"] for row in kept.rows] == [files["a_new"]] and files["a_new"] in kept.block
+
+
+def test_a_card_with_more_files_than_the_cap_says_how_many_more(board):
+    db, cards = board["db"], board["cards"]
+    for n in range(NAMED_FILES_PER_CARD + 1):                          # D held one file; now twelve
+        _text_file(db, board["ws"], cards["D"], board["agent"], f"note-{n}.md", f"note {n}")
+
+    listed = claimed_files(db, cards["B"], ())
+
+    on_d = [line for line in listed.block.splitlines() if f"ticket {_number(cards['D'])}" in line]
+    assert len(on_d) == NAMED_FILES_PER_CARD + 1
+    assert on_d[-1] == f"- …and 2 more on ticket {_number(cards['D'])}, not listed here."
+    assert {row["files_on_card"] for row in listed.rows if row["task_id"] == cards["D"].id} == {12}
 
 
 def test_the_named_pdf_is_copied_into_the_tickets_folder_from_its_own_storage(board):

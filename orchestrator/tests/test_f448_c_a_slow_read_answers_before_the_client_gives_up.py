@@ -19,7 +19,7 @@ import pytest
 
 import api.session_tools as api_st
 from services import session_tools as st
-from services.session_read_deadline import DEADLINED_TOOLS
+from services.session_read_deadline import DEADLINED_TOOLS, within_read_deadline
 from services.session_tool_slots import session_tool_slot
 
 DEADLINE_S = 0.2
@@ -144,3 +144,22 @@ def test_a_slow_write_is_never_cut_off(route, monkeypatch):
     result, _elapsed = _timed("generate_document", {"title": "Quote", "format": "pdf", "data": {"total": 1}})
 
     assert result["isError"] is False and route["ran"] == ["generate_document"]
+
+
+def test_a_deadline_of_zero_is_no_deadline(route, monkeypatch):
+    monkeypatch.setattr(api_st.config, "SESSION_TOOL_READ_DEADLINE_S", 0, raising=False)
+    route["tool_s"] = 0.05
+
+    result, _elapsed = _timed("search_documents", QUESTION)
+
+    assert result["isError"] is False and route["ran"] == ["search_documents"]
+
+
+def test_a_tools_own_timeout_is_not_reported_as_ours(monkeypatch):
+    monkeypatch.setattr(api_st.config, "SESSION_TOOL_READ_DEADLINE_S", 5.0, raising=False)
+
+    async def times_out_itself():
+        raise TimeoutError("the worker's socket")
+
+    with pytest.raises(TimeoutError, match="socket"):
+        asyncio.run(within_read_deadline("search_documents", None, times_out_itself))

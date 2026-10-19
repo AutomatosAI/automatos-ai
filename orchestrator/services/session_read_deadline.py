@@ -56,18 +56,22 @@ def _late(tool_name: str) -> Dict[str, Any]:
 
 async def within_read_deadline(tool_name: str, arrived: Optional[float],
                                run: Callable[[], Awaitable[Dict[str, Any]]]) -> Dict[str, Any]:
-    """``run()``, cut off for a deadlined read once the budget from ``arrived`` is spent."""
-    if tool_name not in DEADLINED_TOOLS:
+    """``run()``, cut off for a deadlined read once the budget from ``arrived`` is spent. A
+    budget of 0 means no deadline. The calls of one JSON-RPC batch share their request's
+    arrival, so a later call in a batch has what the earlier ones left."""
+    budget = float(getattr(config, "SESSION_TOOL_READ_DEADLINE_S", 0) or 0)
+    if tool_name not in DEADLINED_TOOLS or budget <= 0:
         return await run()
     loop = asyncio.get_running_loop()
-    budget = float(getattr(config, "SESSION_TOOL_READ_DEADLINE_S", 0) or 0)
     remaining = budget - (loop.time() - (arrived if arrived is not None else loop.time()))
     if remaining <= 0:
         logger.warning("[F448] %s: no time left of its %.0f s when it reached its slot", tool_name, budget)
         return _late(tool_name)
     try:
-        async with asyncio.timeout(remaining):
+        async with asyncio.timeout(remaining) as deadline:
             return await run()
     except TimeoutError:
+        if not deadline.expired():
+            raise          # the tool's own timeout, not ours: it surfaces as it always has
         logger.warning("[F448] %s did not answer within %.0f s of arriving; answered in words", tool_name, budget)
         return _late(tool_name)

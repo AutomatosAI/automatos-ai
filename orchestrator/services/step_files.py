@@ -111,7 +111,7 @@ class StepFile:
     card_status: str = ""
     named: bool = False
     latest: bool = False
-    more_on_card: int = 0      # on a named card's last listed file: how many more the card has
+    files_on_card: int = 0     # on a named card's file: how many Deliverables that card has in all
 
     @property
     def shown_name(self) -> str:
@@ -202,7 +202,7 @@ def _named_file(row: Mapping[str, Any], latest: bool) -> StepFile:
                     f"ticket {number}" if number else "",
                     storage_type=str(row.get("storage_type") or SESSION_FILE_STORAGE),
                     created_at=str(row.get("created_at") or ""), card_status=str(row.get("card_status") or ""),
-                    named=True, latest=latest)
+                    named=True, latest=latest, files_on_card=int(row.get("files_on_card") or 0))
 
 
 def card_status_words(card: Any) -> str:
@@ -245,19 +245,18 @@ def named_card_files(db: Session, *, workspace_id: Any, ticket_id: int, card_ids
         listed = listed_or_raise(db, workspace_id, source_type=SESSION_FILE_SOURCE_TYPE, source_id=str(card_id),
                                  limit=NAMED_FILES_PER_CARD)
         rows = [r for r in listed.get("deliverables") or [] if r.get("id")]
-        more = max(0, int(listed.get("total") or 0) - len(rows))
-        files += _card_files(by_id[card_id], names.get(card_id, ""), rows, more)
+        files += _card_files(by_id[card_id], names.get(card_id, ""), rows, int(listed.get("total") or 0))
     return files
 
 
-def _card_files(card: Any, ticket: str, rows: Sequence[Mapping[str, Any]], more: int) -> List[StepFile]:
-    """One card's Deliverables (newest first, as listed) as the ticket lists them."""
+def _card_files(card: Any, ticket: str, rows: Sequence[Mapping[str, Any]], total: int) -> List[StepFile]:
+    """One card's Deliverables (newest first, as listed, of ``total``) as the ticket lists them."""
     status = card_status_words(card)
     return [StepFile(str(row["id"]), str(row.get("file_path") or row.get("file_name") or row.get("title") or ""),
                      int(card.id), str(card.title or ""), ticket,
                      storage_type=str(row.get("storage_type") or SESSION_FILE_STORAGE),
                      created_at=str(row.get("created_at") or ""), card_status=status, named=True,
-                     latest=index == 0, more_on_card=more if index == len(rows) - 1 else 0)
+                     latest=index == 0, files_on_card=max(total, len(rows)))
             for index, row in enumerate(rows)]
 
 
@@ -265,7 +264,8 @@ def named_rows(files: Sequence[StepFile]) -> List[Dict[str, Any]]:
     """The rows a claim keeps on ``runtime_ref.named_card_files``, one per listed file."""
     return [{"task_id": f.ticket_id, "number": f.ticket[len("ticket "):] if f.ticket else "",
              "deliverable_id": f.deliverable_id, "storage_type": f.storage_type, "file_path": f.file_path,
-             "name": f.shown_name, "created_at": f.created_at, "card_status": f.card_status, "title": f.step_title}
+             "name": f.shown_name, "created_at": f.created_at, "card_status": f.card_status, "title": f.step_title,
+             "files_on_card": f.files_on_card}
             for f in files if f.named]
 
 
@@ -278,8 +278,9 @@ def named_files_block(files: Sequence[StepFile], cards_not_listed: int = 0) -> s
     lines = [NAMED_FILES_HEADER, NAMED_FILES_INTRO]
     for card_id in dict.fromkeys(f.ticket_id for f in named):
         of_card = sorted((f for f in named if f.ticket_id == card_id), key=lambda f: f.created_at, reverse=True)
-        lines += [_named_line(f) for f in of_card[:NAMED_FILES_PER_CARD]]
-        more = len(of_card) - NAMED_FILES_PER_CARD + sum(f.more_on_card for f in of_card[:NAMED_FILES_PER_CARD])
+        shown = of_card[:NAMED_FILES_PER_CARD]
+        lines += [_named_line(f) for f in shown]
+        more = max(len(of_card), *(f.files_on_card for f in of_card)) - len(shown)
         if more > 0:
             lines.append(f"- …and {more} more on {of_card[0].ticket_name}, not listed here.")
     if cards_not_listed > 0:

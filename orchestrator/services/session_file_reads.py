@@ -115,11 +115,15 @@ async def run_read_document(db: Any, params: Dict[str, Any], ctx: Any) -> Dict[s
 
 
 async def _with_session_copy(result: Dict[str, Any], ctx: Any) -> Dict[str, Any]:
-    """A spreadsheet's answer with its ``workspace_path`` replaced by a copy in the ticket's
-    folder, so counting it with code works there; without a copy, no path and the honest note."""
-    copied = await _session_copy(ctx, result.get("document_id"), str(result["workspace_path"]))
-    if copied is not None:
-        return {**result, "workspace_path": copied}
+    """A spreadsheet's answer with its ``workspace_path`` (and each of a workbook's ``sheets``)
+    replaced by a copy in the ticket's folder, so counting it with code works there; without
+    every copy, no path and the honest note."""
+    sheets = [s for s in result.get("sheets") or [] if isinstance(s, dict) and s.get("workspace_path")]
+    paths = dict.fromkeys([str(result["workspace_path"]), *(str(s["workspace_path"]) for s in sheets)])
+    copied = {path: await _session_copy(ctx, result.get("document_id"), path) for path in paths}
+    if all(copied.values()):
+        moved = {"sheets": [{**s, "workspace_path": copied[str(s["workspace_path"])]} for s in sheets]} if sheets else {}
+        return {**result, "workspace_path": copied[str(result["workspace_path"])], **moved}
     kept = {k: v for k, v in result.items() if k not in ("workspace_path", "count_with_code", "sheets")}
     return {**kept, "note": NO_SPREADSHEET_COPY}
 
