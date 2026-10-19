@@ -48,6 +48,7 @@ import api.themes_install as install_api  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 import core.models  # noqa: E402,F401  (registers every table the FKs name)
 import services.themes.listings as listings_mod  # noqa: E402
+from services.themes.listing_updates import offer_listed_update  # noqa: E402
 from config import config  # noqa: E402
 from core.auth import step_up  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
@@ -192,6 +193,75 @@ def test_update_to_a_newer_approved_version_then_rollback(api):
     assert back.status_code == 200, back.text
     assert back.json()["version"] == "1.0.0" and back.json()["previousPackageId"] == str(new.id)
     assert api.db.query(ThemeInstallation).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# "Update available" on the installed-themes list (pending_package_id)
+# ---------------------------------------------------------------------------
+
+
+def _installed(api):
+    resp = api.client.get("/api/themes/installed")
+    assert resp.status_code == 200, resp.text
+    return {row["themeId"]: row for row in resp.json()["installs"]}
+
+
+def test_installing_an_older_version_offers_the_newest_on_the_installed_list(api):
+    old = _package(api.db, "1.0.0")
+    new = _package(api.db, "1.1.0")
+    _package(api.db, "1.2.0", engines=FUTURE_ENGINES)
+    assert _install(api, packageId=old.id).status_code == 201
+    row = _installed(api)[PLAY]
+    assert row["pendingPackageId"] == str(new.id) and row["pendingVersion"] == "1.1.0"
+
+
+def test_installing_the_newest_version_offers_nothing(api):
+    _package(api.db, "1.0.0")
+    _package(api.db, "1.1.0")
+    assert _install(api).status_code == 201
+    assert _installed(api)[PLAY]["pendingPackageId"] is None
+
+
+def test_a_version_approved_later_is_offered_to_listing_installs_only(api):
+    old = _package(api.db, "1.0.0")
+    assert _install(api, packageId=old.id).status_code == 201
+    private = _package(api.db, "0.5.0", workspace_id=WS_B)
+    api.db.add(ThemeInstallation(workspace_id=WS_B, theme_id=PLAY, package_id=private.id))
+    api.db.commit()
+    new = _package(api.db, "1.1.0")
+    assert offer_listed_update(api.db, new) == 1
+    api.db.commit()
+    assert _installed(api)[PLAY]["pendingPackageId"] == str(new.id)
+    api.ctx = _ctx(WS_B)
+    assert _installed(api)[PLAY]["pendingPackageId"] is None
+
+
+@pytest.mark.parametrize("kind", ["pending", "unreviewed", "incompatible", "private"])
+def test_a_version_that_is_not_listed_is_offered_to_no_one(api, kind):
+    old = _package(api.db, "1.0.0")
+    assert _install(api, packageId=old.id).status_code == 201
+    extra = {
+        "pending": {"status": "pending"},
+        "unreviewed": {"reviewed": False},
+        "incompatible": {"engines": FUTURE_ENGINES},
+        "private": {"workspace_id": WS_A},
+    }[kind]
+    assert offer_listed_update(api.db, _package(api.db, "1.1.0", **extra)) == 0
+    assert _installed(api)[PLAY]["pendingPackageId"] is None
+
+
+def test_an_install_waiting_on_a_newer_version_keeps_it_and_a_newer_install_is_not_offered_an_older_one(api):
+    old = _package(api.db, "1.0.0")
+    newest = _package(api.db, "1.2.0")
+    assert _install(api, packageId=old.id).status_code == 201
+    api.ctx = _ctx(WS_B)
+    assert _install(api, packageId=newest.id).status_code == 201
+    middle = _package(api.db, "1.1.0")
+    assert offer_listed_update(api.db, middle) == 0
+    api.db.commit()
+    assert _installed(api)[PLAY]["pendingPackageId"] is None
+    api.ctx = _ctx(WS_A)
+    assert _installed(api)[PLAY]["pendingPackageId"] == str(newest.id)
 
 
 # ---------------------------------------------------------------------------

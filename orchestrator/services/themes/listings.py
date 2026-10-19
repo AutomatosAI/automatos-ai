@@ -20,7 +20,10 @@ The listing id is the theme id with its one ``/`` written as ``.`` (``automatos/
 * **Pricing** is a label only in v1 (Q12): the manifest's ``pricing``, else "Free".
 * **Install** writes a ``theme_installations`` row that **references** the approved package:
   every workspace that installs a version shares its one package row. Update, compare and
-  rollback of a listing install are A-07b's routes; this module only creates the row.
+  rollback of a listing install are A-07b's routes; this module only creates the row. An
+  install of an older version gets the newest compatible one as its ``pending_package_id``, so
+  ``GET /api/themes/installed`` shows the update too; a version approved later is offered to
+  existing installs by ``listing_updates.offer_listed_update``.
 
 Services raise ``ThemeInstallError`` (status and plain message); nothing here commits.
 """
@@ -144,6 +147,14 @@ def all_listings(db: Session) -> Dict[str, List[ThemePackage]]:
 def newest_compatible(versions: Sequence[ThemePackage]) -> Optional[ThemePackage]:
     """The newest version this host can run, or None."""
     return next((row for row in versions if is_compatible(row)), None)
+
+
+def newer_compatible(versions: Sequence[ThemePackage], package: ThemePackage) -> Optional[ThemePackage]:
+    """The newest compatible listed version when it is newer than ``package``, else None."""
+    latest = newest_compatible(versions)
+    if latest is None or version_key(latest.version) <= version_key(package.version):
+        return None
+    return latest
 
 
 # ---------------------------------------------------------------------------
@@ -336,12 +347,15 @@ def install_listing(
     other install of the theme in this workspace is a 409 naming the way forward (update, or
     uninstall a private upload). The row is flushed, not committed: the router commits once.
     """
-    target = _install_target(_versions_or_404(db, listing_id), package_id)
+    versions = _versions_or_404(db, listing_id)
+    target = _install_target(versions, package_id)
     existing = active_installation(db, workspace_id, target.theme_id, lock=True)
     if existing is not None:
         return _existing_or_refusal(db, existing, target), False
+    newer = newer_compatible(versions, target)
     install = ThemeInstallation(
         workspace_id=workspace_id, theme_id=target.theme_id, package_id=target.id, installed_by=user_pk,
+        pending_package_id=None if newer is None else newer.id,
     )
     db.add(install)
     try:
