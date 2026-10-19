@@ -46,6 +46,8 @@ name: smoke-images
 #   behind-head boot exactly one (scripts/ci/smoke_alembic.py). PRD-262 US-030: the
 #   fresh boot and the warm restarts, at head, log `schema at head — alembic skipped`
 #   and run none (the entrypoint's static check, orchestrator/scripts/alembic_heads.py).
+#   PRD-262 US-031: the warm restarts skip both seed stages, start no seed loader and
+#   leave credential_types' rows as they were (scripts/ci/smoke_seeds.py).
 #
 # Report only until PRD-262 US-004 sets the bars: no time or size fails a job. A boot
 # that never answers 200, an image built instead of pulled, a missing or wrong revision
@@ -91,6 +93,7 @@ on:
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_alembic.py"
       - "scripts/ci/smoke_alembic_behind.py"
+      - "scripts/ci/smoke_seeds.py"
       - "docker-compose*.yml"
       - "Makefile"
       - "envs/**"

@@ -29,6 +29,11 @@ name: smoke-fresh-clone
 # The fresh boot and the warm restarts must log `schema at head — alembic skipped` and
 # run none.
 #
+# PRD-262 US-031 — a warm restart redoes no seed work: each warm restart must log
+# `seeds unchanged (fingerprint …) — skipped` for the entrypoint's seed loader and the
+# lifespan leader's seeds, start no seed loader, and leave credential_types' rows as
+# they were (scripts/ci/smoke_seeds.py; the fingerprints, orchestrator/core/seeds/).
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -82,6 +87,7 @@ on:
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_alembic.py"
       - "scripts/ci/smoke_alembic_behind.py"
+      - "scripts/ci/smoke_seeds.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -117,6 +123,7 @@ on:
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_alembic.py"
       - "scripts/ci/smoke_alembic_behind.py"
+      - "scripts/ci/smoke_seeds.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual

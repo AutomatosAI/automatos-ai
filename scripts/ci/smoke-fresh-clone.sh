@@ -84,6 +84,13 @@
 # must each log `schema at head — alembic skipped` and run none: no `Context impl` line
 # after `init_fresh_db: done`, and none at all on a warm restart.
 #
+# PRD-262 US-031: a warm restart redoes no seed work. The fresh boot runs the seed loader
+# and stores each seed stage's fingerprint; each warm restart must log `seeds unchanged
+# (fingerprint …) — skipped` for both stages (the entrypoint's loader and the lifespan
+# leader's seeds) and start no seed loader, and credential_types (its rows' updated_at,
+# read in the postgres container) must be the same after the warm restarts as before
+# them (scripts/ci/smoke_seeds.py).
+#
 # PRD-262 US-017, when it builds from this checkout: the build log is kept, and
 # scripts/ci/build_context.py reads what the backend's build sent as its context off it.
 # The workflow first seeds dummy uploads and caches where a self-hoster's checkout
@@ -96,11 +103,13 @@
 # presigned URL the Documents page's download call answers with.
 #
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, the document came back, and every boot ran alembic at most once (and only
-# the behind-head boot ran it at all). Exit 1 = a boot failed, a port listens beyond
-# this machine, the backend's build context is over its budget, the document did not
-# come back from object storage, or a boot ran alembic twice (or the CMD ran it), or
-# ran it at head, or the behind-head boot did not.
+# loopback, the document came back, every boot ran alembic at most once (and only
+# the behind-head boot ran it at all), and the warm restarts redid no seed work. Exit 1
+# = a boot failed, a port listens beyond this machine, the backend's build context is
+# over its budget, the document did not come back from object storage, a boot ran
+# alembic twice (or the CMD ran it), or ran it at head, or the behind-head boot did
+# not, or a warm restart ran a seed stage, started the seed loader or rewrote
+# credential_types.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -155,6 +164,13 @@ DOCUMENT_FILE="${OUT_DIR}/document-presign.json"
 # smoke_alembic.py's record (PRD-262 US-029).
 ALEMBIC_FILE="${OUT_DIR}/alembic-runs.json"
 BEHIND_HEAD_LABEL="behind-head"
+# PRD-262 US-031: smoke_seeds.py's record, and credential_types before and after the
+# warm restarts: the row count and a digest of every row's updated_at.
+SEEDS_TOOL="scripts/ci/smoke_seeds.py"
+SEEDS_FILE="${OUT_DIR}/seed-stages.json"
+CREDENTIAL_TYPES_BEFORE="${OUT_DIR}/credential-types-before.txt"
+CREDENTIAL_TYPES_AFTER="${OUT_DIR}/credential-types-after.txt"
+CREDENTIAL_TYPES_SQL="SELECT count(*) || ' ' || coalesce(md5(string_agg(name || '=' || coalesce(updated_at::text, 'null'), ',' ORDER BY name)), '') FROM credential_types"
 # Where compose publishes MinIO on this host: presigned links must point here
 # (S3_PUBLIC_ENDPOINT_URL in envs/api.defaults).
 STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
@@ -429,6 +445,30 @@ check_alembic_runs() {
     || fail "a backend boot ran alembic more than once or at head, the CMD ran it, or the behind-head boot did not run it once"
 }
 
+# PRD-262 US-031: credential_types' rows, read in the postgres container (its local socket
+# needs no password). $1 = the file the snapshot goes to.
+snapshot_credential_types() {
+  compose exec -T postgres psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-orchestrator_db}" \
+    -tAc "$CREDENTIAL_TYPES_SQL" > "$1" || fail "could not read credential_types into ${1##*/}"
+}
+
+# PRD-262 US-031: the fresh boot runs the seed loader; each warm restart skips both seed
+# stages, starts no seed loader and leaves credential_types as it was.
+check_seed_stages() {
+  local i
+  # The labels boot_fresh and warm_restarts give wait_backend.
+  local expects=(--expect-loaded "fresh")
+  for i in $(seq 1 "$WARM_RESTARTS"); do
+    expects+=(--expect-skipped "warm-${i}")
+  done
+  docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || fail "could not read the backend's log"
+  python3 "$SEEDS_TOOL" --results "$BOOTS_FILE" --backend-log "${OUT_DIR}/backend.log" \
+    --backend-container "$BACKEND_CONTAINER" "${expects[@]}" \
+    --credential-types "$CREDENTIAL_TYPES_BEFORE" "$CREDENTIAL_TYPES_AFTER" \
+    --out "$SEEDS_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a warm restart ran a seed stage again, started the seed loader or rewrote credential_types"
+}
+
 dump_failure_logs() {
   echo "----- postgres logs (tail) — initdb/schema errors surface here -----" >&2
   compose logs --tail 200 postgres >&2 || true
@@ -494,13 +534,17 @@ main() {
   check_loopback_ports
   check_images
   check_document_storage
+  snapshot_credential_types "$CREDENTIAL_TYPES_BEFORE"
   warm_restarts
+  snapshot_credential_types "$CREDENTIAL_TYPES_AFTER"
   boot_behind_head
   check_alembic_runs
+  check_seed_stages
   outcome="pass"
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot," \
     "${WARM_RESTARTS} warm restarts and a behind-head boot; only the behind-head boot ran alembic, once;" \
+    "the warm restarts redid no seed work;" \
     ":3000 answered 200 and a document came back from object storage — the local" \
     "edition serves with NO external credentials"
 }
