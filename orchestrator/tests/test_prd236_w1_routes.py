@@ -279,7 +279,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # platform default for Auto becomes Haiku 5.5, the Auto rows on it move); the guard follows it.
     haiku_default = (versions / "auto_haiku_default_20261019.py").read_text()
     assert 'down_revision = "prd263_harness_runs"' in haiku_default
-    assert 'EXPECTED_HEAD = "auto_haiku_default_20261019"' in guard
+    # 2026-10-19 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto it — the HARNESS
+    # ledger gains the governed apply columns and its held rows become expired; the guard follows it.
+    ledger_grants = (versions / "prd263_harness_ledger_grants.py").read_text()
+    assert 'down_revision = "auto_haiku_default_20261019"' in ledger_grants
+    assert 'EXPECTED_HEAD = "prd263_harness_ledger_grants"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

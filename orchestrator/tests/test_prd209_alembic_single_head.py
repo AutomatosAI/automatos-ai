@@ -107,7 +107,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # run table (harness_runs) that replaces the last_run and trace JSON files.
 # 2026-10-19: auto_haiku_default_20261019 chains onto prd263_harness_runs — a data
 # migration: the platform default for Auto becomes Haiku 5.5 and the Auto rows on it move.
-EXPECTED_HEAD = "auto_haiku_default_20261019"
+# 2026-10-19 (PRD-263 PR-3D): prd263_harness_ledger_grants chains onto auto_haiku_default_20261019
+# — harness_task_ledger gains the governed apply columns, and its held rows become expired.
+EXPECTED_HEAD = "prd263_harness_ledger_grants"
 
 
 def _literal(node: ast.AST):
