@@ -55,7 +55,7 @@ if str(_ORCH) not in sys.path:
 
 import sqlalchemy as sa  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
-from fastapi.routing import APIRoute  # noqa: E402
+from fastapi.routing import APIRoute, iter_route_contexts  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
@@ -595,7 +595,10 @@ def test_no_channel_slug_literal_outside_the_adapter_data():
 
 
 def test_the_route_is_a_plain_def_behind_the_gate_and_in_the_committed_manifest(channels):
-    (route,) = [r for r in socials_api.router.routes if isinstance(r, APIRoute) and r.path == "/api/socials/channels"]
+    (route,) = [
+        r for r in iter_route_contexts(socials_api.router.routes)  # the included channels router's routes too
+        if isinstance(r.original_route, APIRoute) and r.path == "/api/socials/channels"
+    ]
     assert route.methods == {"GET"}
     assert not inspect.iscoroutinefunction(route.endpoint)  # F105: FastAPI runs it in the threadpool
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

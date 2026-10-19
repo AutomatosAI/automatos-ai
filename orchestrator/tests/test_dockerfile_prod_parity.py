@@ -1,7 +1,7 @@
 """Dockerfile ARG defaults are PRODUCTION values; compose opts the local edition out.
 
-Railway builds the three Dockerfiles (railway.json: builder DOCKERFILE, target
-production). On 2026-08-30 a `NEXT_PUBLIC_AUTH_EDITION=local` default shipped the
+Railway builds the Dockerfiles (railway.json: builder DOCKERFILE, no target, so the
+last stage, production). On 2026-08-30 a `NEXT_PUBLIC_AUTH_EDITION=local` default shipped the
 Clerk-less local edition to production (#650 -> #668), and the same slim pass
 left the graph-extras and browser installs defaulted OFF. This guard makes the
 rule mechanical: every build ARG with a default must be registered here with
@@ -85,7 +85,6 @@ def test_the_local_edition_passes_its_choices_explicitly():
 def test_deploy_config_builds_the_dockerfiles():
     railway = json.loads((_ROOT / "railway.json").read_text())
     assert railway["build"]["builder"] == "DOCKERFILE"
-    assert railway["build"]["dockerfileTarget"] == "production"
     manifest = json.loads((_ROOT / "infrastructure" / "railway-manifest.json").read_text())
     builders = set()
 

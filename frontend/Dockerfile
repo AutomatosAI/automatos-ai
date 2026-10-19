@@ -2,25 +2,24 @@
 # Automatos AI - Frontend Dockerfile (Multi-stage)
 # =============================================================================
 # Stages:
-#   - base: Dependencies installation
+#   - base: Node 24 on Alpine, with the package files
 #   - development: Hot-reload development server
 #   - builder: Production build
-#   - production: Optimized production image
+#   - production: Alpine, the node binary and the standalone build
 # =============================================================================
 
 # =============================================================================
 # Base Stage - Dependencies
 # =============================================================================
-FROM node:20-alpine as base
+# PRD-262 US-007: Node 24 (LTS until April 2028), pinned as tag@digest so an
+# updater moves both together. No apk build tools: no package's install script
+# compiles on Linux (each native one ships a prebuilt binary).
+# The production stage copies this stage's node binary, which is built against
+# musl for Alpine 3.24, so the alpine3.24 suffix here and alpine:3.24 below name
+# the same release: bump them together.
+FROM node:24-alpine3.24@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS base
 
 WORKDIR /app
-
-# Install dependencies for node-gyp and other native modules
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    curl
 
 # Copy package files (Dockerfile is in frontend/, so copy from current dir)
 COPY package*.json ./
@@ -28,7 +27,7 @@ COPY package*.json ./
 # =============================================================================
 # Development Stage - Hot Reload
 # =============================================================================
-FROM base as development
+FROM base AS development
 
 # Install all dependencies (including devDependencies)
 # Use npm install instead of npm ci for development (more forgiving with lock file)
@@ -50,7 +49,7 @@ CMD ["npm", "run", "dev"]
 # =============================================================================
 # Builder Stage - Production Build
 # =============================================================================
-FROM base as builder
+FROM base AS builder
 
 # Accept build arguments for environment variables
 # NOTE: NEXT_PUBLIC_* variables are embedded in the client bundle and must NOT contain secrets
@@ -104,12 +103,19 @@ RUN npm run build
 # =============================================================================
 # Production Stage - Optimized (Next.js standalone)
 # =============================================================================
-FROM node:20-alpine as production
+# PRD-262 US-007: plain Alpine plus the one file the standalone server needs from
+# Node, /usr/local/bin/node. No npm, yarn, corepack, C headers or curl.
+# libstdc++ (which brings libgcc) is the binary's only library beyond musl.
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS production
 
 WORKDIR /app
 
-# Install curl for healthcheck
-RUN apk add --no-cache curl
+# PRD-262 US-011: images.yml's weekly run rebuilds this stage without the cache, and
+# `apk upgrade` then takes Alpine's fixes (OpenSSL and the rest) before the pinned digest moves.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache libstdc++
+
+COPY --from=base /usr/local/bin/node /usr/local/bin/node
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
@@ -125,9 +131,12 @@ USER nextjs
 # Expose port
 EXPOSE 3000
 
-# Health check
+# Health check: busybox wget on a static file. /favicon.ico skips the middleware
+# (its matcher ignores paths with an extension) and server rendering, so a probe
+# never renders a page or calls Clerk. 127.0.0.1, not localhost: the server
+# listens on IPv4 (HOSTNAME=0.0.0.0) and localhost can resolve to ::1.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3000 || exit 1
+    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-3000}/favicon.ico" || exit 1
 
 # Standalone server uses server.js directly — no npm needed
 ENV NODE_ENV=production

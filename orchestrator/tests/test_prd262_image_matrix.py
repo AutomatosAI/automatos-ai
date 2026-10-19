@@ -84,8 +84,10 @@ def test_a_frontend_only_pr_builds_only_the_frontend_on_both_arches():
 @pytest.mark.parametrize("path,names", [
     ("orchestrator/requirements.txt", ["api"]),
     ("services/workspace-worker/executor.py", ["workspace-worker"]),
-    (".github/image-budgets.json", ["api", "frontend", "workspace-worker"]),
-    ("scripts/ci/image_report.py", ["api", "frontend", "workspace-worker"]),
+    ("services/agent-opt-worker/main.py", ["agent-opt-worker"]),
+    (".github/image-budgets.json", ["api", "frontend", "workspace-worker", "agent-opt-worker"]),
+    ("scripts/ci/image_report.py", ["api", "frontend", "workspace-worker", "agent-opt-worker"]),
+    ("scripts/ci/image_scan_policy.py", ["api", "frontend", "workspace-worker", "agent-opt-worker"]),
     ("frontend/app/page.tsx", []),
     ("scripts/ci/sub/image_x.py", []),
 ])
@@ -93,12 +95,18 @@ def test_each_change_builds_the_images_that_read_it(path, names):
     assert picker.selected(IMAGES, SHARED, [path], every=False) == names
 
 
-def test_a_push_publishes_every_image_to_ghcr():
+def test_a_push_publishes_every_published_image_to_ghcr():
     entries = _pick([], publish=True, every=True)
-    assert len(entries) == 2 * len(IMAGES)
+    assert len(entries) == sum(len(image["arches"]) for image in IMAGES)
+    published = {image["name"] for image in IMAGES if image["publish"]}
+    assert published == {"api", "frontend", "workspace-worker"}
     for entry in entries:
-        assert entry["publish"] is True and entry["registry"] == ""
-        assert entry["image"] == f"ghcr.io/automatosai/automatos-{entry['name']}"
+        if entry["name"] in published:
+            assert entry["publish"] is True and entry["registry"] == ""
+            assert entry["image"] == f"ghcr.io/automatosai/automatos-{entry['name']}"
+        else:
+            assert entry["publish"] is False and entry["registry"] == LOCAL
+            assert entry["image"] == f"localhost:5000/automatos-{entry['name']}"
 
 
 def test_an_image_that_is_never_published_has_no_edge_and_stays_local():

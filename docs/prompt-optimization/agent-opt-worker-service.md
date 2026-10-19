@@ -11,7 +11,7 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
 - [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
 - [services/agent-opt-worker/main.py](services/agent-opt-worker/main.py)
-- [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
+- [services/agent-opt-worker/requirements.in](services/agent-opt-worker/requirements.in)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
@@ -91,6 +91,8 @@ The worker requires FutureAGI API credentials and OpenAI keys for optimization:
 
 | Variable | Required By | Purpose |
 |----------|-------------|---------|
+| `AGENT_OPT_WORKER_TOKEN` | Start-up | The shared secret the API sends as `X-Internal-Token`. The worker refuses to start without it. Set the same value on the API service. |
+| `AGENT_OPT_MAX_CONCURRENT_JOBS` | `/optimize` | How many optimisation jobs run at once (default 2). |
 | `FUTUREAGI_API_KEY` or `FI_API_KEY` | All endpoints | FutureAGI API authentication |
 | `FUTUREAGI_SECRET_KEY` or `FI_SECRET_KEY` | All endpoints | FutureAGI secret key |
 | `OPENAI_API_KEY` | `/optimize` only | Teacher model for prompt optimization |
@@ -136,6 +138,14 @@ Sources: [services/agent-opt-worker/main.py:129-141](), [services/agent-opt-work
 ---
 
 ## HTTP API Endpoints
+
+### Access (PRD-262 US-006)
+
+Only the platform's API may call the worker. Every route except `GET /health` and `GET /metrics` requires the `X-Internal-Token` header to equal `AGENT_OPT_WORKER_TOKEN`; anything else gets 401. The check is a dependency on the router that holds those routes ([services/agent-opt-worker/worker_auth.py]()), not a comparison of request paths, so a forged `Host` header cannot get past it. The API reads the same variable and sends the header on every call ([orchestrator/core/services/futureagi_service.py]()).
+
+The worker serves no API docs (`/docs`, `/redoc` and `/openapi.json` are off). Requests are capped at what the platform sends: `metrics` names known templates only, at most one per template (11); `teacher_model` must be `gpt-4o-mini`; `dataset` holds at most 10 examples; and at most `AGENT_OPT_MAX_CONCURRENT_JOBS` optimisation jobs run at once (429 beyond that).
+
+`/metrics` stays open for the Prometheus scrape, which sends no credentials; with the public domain removed it is reachable only on Railway's private network.
 
 ### GET /health
 
@@ -214,10 +224,10 @@ Sources: [services/agent-opt-worker/main.py:32-40](), [services/agent-opt-worker
 The service is containerized using a slim Python 3.11 base image: [services/agent-opt-worker/Dockerfile:1-15]().
 
 **Key Characteristics**:
-*   **Non-root User**: Created at build time for security: [services/agent-opt-worker/Dockerfile:10-11]().
-*   **Dependencies**: Includes `agent-opt`, `ai-evaluation`, and `litellm`: [services/agent-opt-worker/requirements.txt:1-7]().
+*   **Non-root User**: Created before the code is copied in, so the files arrive owned by it: [services/agent-opt-worker/Dockerfile]().
+*   **Dependencies**: `agent-opt`, `ai-evaluation`, and `litellm`, listed in [services/agent-opt-worker/requirements.in]() and installed from the hash-locked `requirements.lock` with `--require-hashes`. `overrides.txt` keeps the unrelated PyPI package `fi` out of the lock.
 *   **Runtime**: Executed via `uvicorn` on port 8080: [services/agent-opt-worker/Dockerfile:15]().
 
-Sources: [services/agent-opt-worker/Dockerfile:1-15](), [services/agent-opt-worker/requirements.txt:1-7]()
+Sources: [services/agent-opt-worker/Dockerfile:1-15](), [services/agent-opt-worker/requirements.in:1-7]()
 
 ---

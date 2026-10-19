@@ -11,7 +11,7 @@ The following files were used as context for generating this wiki page:
 - [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
 - [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
 - [services/agent-opt-worker/main.py](services/agent-opt-worker/main.py)
-- [services/agent-opt-worker/requirements.txt](services/agent-opt-worker/requirements.txt)
+- [services/agent-opt-worker/requirements.in](services/agent-opt-worker/requirements.in)
 - [services/shared/automatos_logging.py](services/shared/automatos_logging.py)
 - [services/shared/automatos_metrics.py](services/shared/automatos_metrics.py)
 - [services/workspace-worker/automatos_logging.py](services/workspace-worker/automatos_logging.py)
@@ -308,11 +308,13 @@ Each metric displays a color indicator, the metric name, score percentage, and a
 | Variable | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `AGENT_OPT_WORKER_URL` | Yes | N/A | Worker service base URL |
+| `AGENT_OPT_WORKER_TOKEN` | Yes | empty | Sent as `X-Internal-Token`; must match the worker's own value |
 
 **Worker Service** (`services/agent-opt-worker/main.py`):
 
 | Variable | Required | Description |
 | :--- | :--- | :--- |
+| `AGENT_OPT_WORKER_TOKEN` | Yes | The token every route but `/health` and `/metrics` requires; the worker will not start without it |
 | `FUTUREAGI_API_KEY` | Yes | FutureAGI platform API key |
 | `FUTUREAGI_SECRET_KEY` | Yes | FutureAGI platform secret key |
 
@@ -320,9 +322,9 @@ Each metric displays a color indicator, the metric name, score percentage, and a
 
 ### Worker Dependencies
 
-The `agent-opt-worker` requires the `agent-opt` and `ai-evaluation` packages to interface with the FutureAGI platform. [services/agent-opt-worker/requirements.txt:3-4]()
+The `agent-opt-worker` requires the `agent-opt` and `ai-evaluation` packages to interface with the FutureAGI platform. [services/agent-opt-worker/requirements.in:3-4]()
 
-**Sources**: [services/agent-opt-worker/requirements.txt:3-4]()
+**Sources**: [services/agent-opt-worker/requirements.in:3-4]()
 
 ### Docker Setup
 

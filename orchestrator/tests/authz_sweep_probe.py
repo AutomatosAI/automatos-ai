@@ -43,7 +43,7 @@ def _flatten_calls(dependant, acc):
 
 
 def main() -> None:
-    from fastapi.routing import APIRoute
+    from fastapi.routing import APIRoute, iter_route_contexts
 
     from core.auth.hybrid import get_request_context_hybrid
     from core.auth.super_admin import require_super_admin
@@ -52,8 +52,10 @@ def main() -> None:
     from main import app
 
     records = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    # FastAPI 0.137+ keeps an included router as one node of app.routes; the walk
+    # gives each served route with its full path and inherited dependencies.
+    for route in iter_route_contexts(app.routes):
+        if not isinstance(route.original_route, APIRoute):
             continue
         calls: list = []
         _flatten_calls(route.dependant, calls)

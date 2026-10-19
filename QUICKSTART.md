@@ -114,6 +114,8 @@ This pulls the images CI publishes from `main` to GHCR
 multi-arch and signed) instead of building them: about a minute instead of ten.
 The default tag is `edge`, the latest `main` build whose published images have
 booted in CI; `AUTOMATOS_IMAGE_TAG=sha-1bc4c07 make up-images` pins one build.
+Every Monday CI rebuilds them with fresh OS packages (`weekly-<yyyymmdd>`) and
+moves `edge` there once they boot, so OS security fixes arrive on `edge` too.
 Everything else is the same as `make up`: your
 `.env`, the database, the workspace folder and session mode. Your checkout's
 source code isn't used. The published web app calls the API at

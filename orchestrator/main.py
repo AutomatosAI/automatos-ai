@@ -145,6 +145,7 @@ from api.dashboard_integration import (
 
 # WebSocket manager removed - using AI SDK SSE streaming instead
 from core.observability.otel import annotate_request, instrument_app, instrument_libraries, with_tracing
+from core.route_tree import route_template  # PRD-262 US-008: API stats key by the full template
 from core.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
@@ -1012,7 +1013,7 @@ app.add_middleware(WidgetRateLimitMiddleware)
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
+from core.security.rate_limit_middleware import RouteTreeSlowAPIMiddleware  # PRD-262 US-008
 
 def _get_real_client_ip(request) -> str:
     """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
@@ -1040,7 +1041,7 @@ install_step_up_handler(app)
 # is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
 # today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
 if _policy_plane_on:
-    app.add_middleware(SlowAPIMiddleware)
+    app.add_middleware(RouteTreeSlowAPIMiddleware)
 
 # Request body size limit middleware (10MB default, 50MB for uploads)
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
@@ -1181,8 +1182,7 @@ async def api_tracking_middleware(request, call_next):
         # Use route template (e.g. /api/agents/{agent_id}) instead of raw path
         # to avoid unbounded memory growth from path parameters
         try:
-            route = request.scope.get("route")
-            route_path = getattr(route, "path", None) if route else None
+            route_path = route_template(request.scope)  # with include prefixes (PRD-262 US-008)
             endpoint = f"{request.method} {route_path or request.url.path}"
 
             # Cap stats dict size to prevent unbounded memory growth

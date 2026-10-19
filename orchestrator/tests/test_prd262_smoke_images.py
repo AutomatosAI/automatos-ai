@@ -140,7 +140,8 @@ def test_the_merge_job_no_longer_pushes_edge():
     merge = IMAGES_WORKFLOW["jobs"]["merge"]
     meta = next(step for step in merge["steps"] if step.get("id") == "meta")
     tags = [line.strip() for line in meta["with"]["tags"].splitlines() if line.strip()]
-    assert "type=sha" in tags
+    # On for every run but the weekly schedule (test_prd262_weekly_rebuild.py pins the switch).
+    assert any(tag.split(",", 1)[0] == "type=sha" for tag in tags)
     assert not any(tag.startswith("type=edge") for tag in tags), "edge moves only after smoke-images passes"
 
 

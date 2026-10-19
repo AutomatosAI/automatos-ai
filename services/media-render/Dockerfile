@@ -4,13 +4,20 @@
 # is a licensed library fetched and hash-checked at build (S1.6), never generated.
 #
 # Patterns from services/workspace-worker/Dockerfile: the python:3.12-slim base,
-# NodeSource, the chrome library list, HEALTHCHECK/EXPOSE/ENTRYPOINT.
+# Node from the official image's stage, the chrome library list,
+# HEALTHCHECK/EXPOSE/ENTRYPOINT.
 # The GPL boundary: phonemizer and espeak-ng (GPL-3.0, pulled in by kokoro-onnx)
 # live ONLY in this image. The orchestrator never imports them.
 #
 # Railway builds this file with no build args and no target, so the LAST stage
 # is production. CI also builds `test`, which adds pytest on top of the runtime.
-FROM python:3.12-slim AS runtime
+
+# PRD-262 US-007: Node.js 24 (LTS until April 2028) comes from the official image.
+# It gets its own stage so the tag@digest pin sits on a FROM line, which is the
+# only place an updater reads (it never reads a bare `COPY --from=<image>`).
+FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
+
+FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS runtime
 
 WORKDIR /app
 
@@ -27,10 +34,11 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # ffmpeg (encode, mix, ffprobe), unzip (the managed Chrome download), tini (PID 1
-# reaps Chrome's orphans), fonts, and the libraries chrome-headless-shell needs on
-# Debian trixie: the worker's list (services/workspace-worker/Dockerfile:53-57).
+# reaps Chrome's orphans), fonts, libstdc++6 (the node binary's one library beyond
+# glibc and libgcc-s1), and the libraries chrome-headless-shell needs on Debian
+# trixie: the worker's list (services/workspace-worker/Dockerfile, INSTALL_BROWSER).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl unzip ffmpeg tini fontconfig \
+        ca-certificates curl unzip ffmpeg tini fontconfig libstdc++6 \
         libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
         libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
         libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \
@@ -38,10 +46,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -f
 
-# Node.js 22: Hyperframes needs >= 22 (the worker's image runs 20)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+# Node.js 24 (Hyperframes needs >= 22) with npm and corepack, from the `node`
+# stage: no NodeSource, so no extra apt updates, Debian python3.13 or gnupg, and
+# no /usr/local/include. npm stays for the global Hyperframes install below.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=node /usr/local/lib/node_modules/corepack /usr/local/lib/node_modules/corepack
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack
 
 # Hyperframes pinned EXACTLY (Apache-2.0), and GSAP for each composition's one
 # paused timeline. gsap.min.js is staged into every render from /opt/media-render.

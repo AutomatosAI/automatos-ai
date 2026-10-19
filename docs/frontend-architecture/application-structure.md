@@ -78,13 +78,13 @@ The `RootLayout` serves as the entry point, wrapping the application in a `Provi
 
 | Provider | Responsibility |
 | :--- | :--- |
-| `ClerkProvider` | Authentication and user session management [frontend/package.json:50-50]() |
-| `QueryClientProvider` | Server state management via React Query [frontend/package.json:84-84]() |
+| `ClerkProvider` | Authentication and user session management [frontend/package.json:44-44]() |
+| `QueryClientProvider` | Server state management via React Query [frontend/package.json:78-78]() |
 | `WorkspaceProvider` | Multi-tenancy context and workspace switching |
 | `ThemeProvider` | Dark/Light/Matte/Studio mode management |
 | `RoleProvider` | RBAC (Role-Based Access Control) state |
 
-**Sources**: [frontend/package.json:50-50](), [frontend/package.json:84-84]()
+**Sources**: [frontend/package.json:44-44](), [frontend/package.json:78-78]()
 
 ### Main Layout & Navigation
 
@@ -101,7 +101,7 @@ The fallback layout used for non-studio users or mobile views:
 - **Sidebar**: Standard desktop sidebar with collapse state.
 - **Mobile Navigation**: Uses a Shadcn `Sheet` to wrap the `MobileSidebar`.
 
-**Sources**: [frontend/package.json:52-52]()
+**Sources**: [frontend/package.json:58-58]()
 
 ---
 

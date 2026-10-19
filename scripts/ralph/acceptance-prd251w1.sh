@@ -309,7 +309,7 @@ no_marketplace_items_writes() {
 # ── S1.1a the media-render service and its CI job (US-101) ──────────────────
 check "media-render has a Dockerfile" "[ -f $MR/Dockerfile ]"
 check "hyperframes pinned at exactly 0.8.62" "hyperframes_pinned"
-check "Node 22 in the image" "grep -qE 'setup_22|node:22|NODE_MAJOR=22' $MR/Dockerfile"
+check "Node 22 or later in the image (PRD-262 US-007 moved it to 24)" "grep -qE '^FROM node:(2[2-9]|[3-9][0-9])-' $MR/Dockerfile"
 check "ffmpeg in the image" "grep -q 'ffmpeg' $MR/Dockerfile"
 check "telemetry, skills and update checks off in the image" "media_render_env_off"
 check "a fixture composition is committed" "git ls-files $MR/fixtures | grep -q '\.html$'"

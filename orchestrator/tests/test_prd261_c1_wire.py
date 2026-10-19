@@ -219,7 +219,7 @@ def test_every_other_mutating_w_c1_route_is_workspace_gated():
 
 _PROBE = """
 import collections, json
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from core.auth import step_up
 import main
 
@@ -241,16 +241,21 @@ def calls(dependant):
         out += [sub.call] + calls(sub)
     return out
 
+# FastAPI 0.137+ keeps an included router as one node of app.routes (PRD-262 US-008). The
+# walk gives each served route, in the order the app tries them, with its full path and
+# its inherited dependencies.
+served_routes = list(iter_route_contexts(main.app.routes))
+
 def first_handler(method, path):
-    for route in main.app.routes:
-        if isinstance(route, APIRoute) and method in route.methods and route.path_regex.match(path):
+    for route in served_routes:
+        if isinstance(route.original_route, APIRoute) and method in route.methods and route.path_regex.match(path):
             return route.endpoint.__module__ + "." + route.endpoint.__name__ + " " + route.path
     return None
 
 served = collections.Counter()
 step_up_routes = []
-for route in main.app.routes:
-    if not isinstance(route, APIRoute):
+for route in served_routes:
+    if not isinstance(route.original_route, APIRoute):
         continue
     marked = any(getattr(c, step_up.STEP_UP_MARKER_ATTR, None) for c in calls(route.dependant))
     for method in sorted(route.methods - {"HEAD", "OPTIONS"}):

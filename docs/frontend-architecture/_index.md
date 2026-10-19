@@ -130,9 +130,9 @@ The "Studio" theme introduces an editorial-first design language characterized b
 *   **Typography:** Serif headlines (`Tiempos Headline`) paired with Mono detail surfaces (`JetBrains Mono`) [frontend/tailwind.config.ts:17-30]().
 *   **Editorial Headers:** The `PageHeader` component supports an `eyebrow` (mono uppercase) and a `lede` (relaxed paragraph) to establish context [frontend/components/shared/page-header.tsx:38-86]().
 *   **Color Palette:** A "Cream Paper" aesthetic using CSS variables like `--background` and `--primary` (near-black) [frontend/app/globals.css:210-225]().
-*   **Shadcn/ui:** The project leverages Shadcn/ui primitives for consistent and accessible UI components [frontend/package.json:58-83]().
+*   **Shadcn/ui:** The project leverages Shadcn/ui primitives for consistent and accessible UI components [frontend/package.json:51-77]().
 
-**Sources:** [frontend/tailwind.config.ts:17-30](), [frontend/components/shared/page-header.tsx:38-86](), [frontend/app/globals.css:210-225](), [frontend/package.json:58-83]()
+**Sources:** [frontend/tailwind.config.ts:17-30](), [frontend/components/shared/page-header.tsx:38-86](), [frontend/app/globals.css:210-225](), [frontend/package.json:51-77]()
 
 ### Navigation Mapping
 

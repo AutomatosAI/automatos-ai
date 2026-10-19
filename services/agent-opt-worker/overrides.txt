@@ -1,0 +1,7 @@
+# uv overrides for requirements.lock (PRD-262 US-006; the compile command is in
+# requirements.in). A marker that is never true removes the PyPI package `fi`
+# from the resolution: agent-opt 0.0.1 requires `fi>=0.0.2`, an unrelated 2019
+# sdist that runs setup.py at build and would install any future upload of that
+# name. The worker's fi.evals and fi.opt modules come from ai-evaluation and
+# agent-opt themselves.
+fi ; sys_platform == 'never'

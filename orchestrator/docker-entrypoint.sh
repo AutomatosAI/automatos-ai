@@ -254,8 +254,8 @@ run_lifecycle() {
 # =============================================================================
 # Liveness watchdog (F416)
 # =============================================================================
-# uvicorn's supervisors (--reload, and --workers in 0.24) outlive a worker the
-# kernel kills: the container stays "running" and unhealthy with nothing
+# uvicorn's --reload supervisor (and its --workers one before 0.30) outlives a worker
+# the kernel kills: the container stays "running" and unhealthy with nothing
 # serving, and Docker's restart policy never applies to an unhealthy container
 # (night 14: ~5 h dark after an OOM kill). With AUTOMATOS_LIVENESS_WATCHDOG=true
 # the entrypoint runs the command as its child and probes it with the

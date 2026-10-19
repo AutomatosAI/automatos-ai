@@ -14,9 +14,18 @@ name: images
 #   `edge` at that `sha-<short>` (PRD-262 US-003). An image that cannot boot
 #   never reaches `edge`, the tag plain compose and the Helm chart pull.
 # - Each architecture builds on its own native runner (no QEMU), pushes by
-#   digest and scans that digest (report only), so amd64 and arm64 are both
-#   scanned. The merge job joins the digests into one multi-arch index and
-#   signs it with cosign (keyless, through GitHub OIDC).
+#   digest and scans that digest with Grype, straight from the registry it was
+#   pushed to, so amd64 and arm64 are both scanned, on pull requests as on main.
+#   The scan policy (scripts/ci/image_scan_policy.py, PRD-262 US-013) blocks a
+#   fixable Critical, or a match on CISA's Known Exploited Vulnerabilities list
+#   at any severity, that .grype.yaml does not allowlist with a reason and an
+#   expiry. The merge job needs every build job, so on main a failing scan
+#   leaves the digest untagged and unsigned. The merge job joins the digests
+#   into one multi-arch index and signs it with cosign (keyless, through
+#   GitHub OIDC).
+# - agent-opt-worker (PRD-262 US-006) builds for amd64 only, on pull requests
+#   that touch it and on main. It is measured and scanned like the others and
+#   pushed only to the job's registry, never to GHCR: Railway builds it itself.
 # - Every build reports its size, its layers (with the Dockerfile instruction
 #   and the heaviest paths of each) and its update delta, the MB an existing
 #   user downloads to move from `edge` to it, in the step summary and as a
@@ -24,6 +33,18 @@ name: images
 #   .github/image-budgets.json (scripts/ci/image_report.py, PRD-262 US-001).
 #   The report job adds the layers the API and the worker share and the app
 #   images' first pull.
+# - The weekly OS rebuild (PRD-262 US-011): every Monday at 05:00 UTC a schedule
+#   run rebuilds each image's `no_cache_filters` stages (those whose apt or apk
+#   packages ship) without the cache, so Debian and Alpine fixes reach the
+#   images without a code change. It publishes `weekly-<yyyymmdd>` and never
+#   `sha-<short>`, so a sha tag keeps the packages it was built with, and it
+#   writes the cache, so every later `sha-<short>` builds on the fresh layers.
+#   smoke-images.yml boots the weekly tag and moves `edge` to it. A manual run
+#   with `no_cache` applies the same filters: on a branch it builds, pushes to
+#   the job's registry and never publishes; on main it publishes `sha-<short>`,
+#   as any manual run there does. Railway builds from source with its own
+#   layer cache, so it gets these fixes only once it deploys the published
+#   images (PRD-262 D2, held until after WebSummit).
 #
 # Build args match docker-compose.yml, i.e. the local edition: no graph extras,
 # no bundled Chromium, and the frontend built for AUTH_EDITION=local against
@@ -72,7 +93,16 @@ on:
       - "frontend/.npmrc"
       - "frontend/public/**"
       - "services/workspace-worker/**"
+      - "services/agent-opt-worker/**"
+  # The weekly OS rebuild (PRD-262 US-011).
+  schedule:
+    - cron: "0 5 * * 1"
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: "Rebuild the OS-package stages from fresh packages, as the weekly run does (on a branch: never publishes)"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -85,23 +115,30 @@ permissions:
 env:
   # The merge job's `if:` repeats this: job-level `if:` can't read `env`.
   PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+  # Schedule runs, and manual runs with `no_cache`, rebuild each image's
+  # `no_cache_filters` stages from fresh packages (PRD-262 US-011).
+  NO_CACHE: ${{ github.event_name == 'schedule' || inputs.no_cache == true }}
 
 jobs:
   # Which images this run builds, as the build job's matrix
   # (scripts/ci/image_matrix.py). A PR builds the images whose `inputs` it
   # touches, on both arches, or every image when it touches a SHARED_INPUTS
-  # path; a push or a manual run builds every image. If the PR's file list
-  # can't be read, every image builds: a gap here only costs time.
+  # path; a push, a schedule or a manual run builds every image. If the PR's
+  # file list can't be read, every image builds: a gap here only costs time.
+  # A schedule run also gets its `weekly-<yyyymmdd>` tag here, from the run's
+  # created_at (actions: read), which smoke-images.yml reads too.
   changes:
     name: Which images this change builds
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
       any: ${{ steps.pick.outputs.any }}
+      weekly_tag: ${{ steps.pick.outputs.weekly_tag }}
     steps:
       - name: Checkout (the picker)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,12 +158,19 @@ jobs:
           # scans an image without ever pushing it to GHCR, so it has no `edge`.
           # cache_mode: `min` for the API, whose pybuild output `max` would
           # export and never reuse; `max` for the frontend's builder
-          # node_modules, and for the worker as before.
+          # node_modules, and for the worker as before; `min` for
+          # agent-opt-worker, whose one stage is all the image.
+          # no_cache_filters: the stages whose apt or apk packages ship in the
+          # image, which the weekly run rebuilds without the cache (PRD-262
+          # US-011; orchestrator/tests/test_prd262_weekly_rebuild.py reads them
+          # against each Dockerfile). The API's pybuild is not one: its compilers
+          # never ship.
           IMAGES: |
             [
               {"name": "api", "context": "orchestrator", "target": "production",
                "build_args": ["INSTALL_GRAPH_EXTRAS=false"],
-               "cache_mode": "min", "arches": ["amd64", "arm64"], "publish": true,
+               "cache_mode": "min", "no_cache_filters": ["base"],
+               "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["orchestrator/Dockerfile", "orchestrator/.dockerignore",
                           "orchestrator/requirements.txt"]},
               {"name": "frontend", "context": "frontend", "target": "production",
@@ -134,15 +178,22 @@ jobs:
                               "NEXT_PUBLIC_API_URL=http://localhost:8000",
                               "NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws",
                               "NEXT_PUBLIC_MEDIA_ORIGINS=http://localhost:9000"],
-               "cache_mode": "max", "arches": ["amd64", "arm64"], "publish": true,
+               "cache_mode": "max", "no_cache_filters": ["production"],
+               "arches": ["amd64", "arm64"], "publish": true,
                "inputs": ["frontend/Dockerfile", "frontend/.dockerignore",
                           "frontend/package.json", "frontend/package-lock.json",
                           "frontend/next.config.js", "frontend/csp-sources.js",
                           "frontend/.npmrc", "frontend/public/**"]},
               {"name": "workspace-worker", "context": "services/workspace-worker", "target": "",
                "build_args": ["INSTALL_BROWSER=false"],
-               "cache_mode": "max", "arches": ["amd64", "arm64"], "publish": true,
-               "inputs": ["services/workspace-worker/**"]}
+               "cache_mode": "max", "no_cache_filters": ["production"],
+               "arches": ["amd64", "arm64"], "publish": true,
+               "inputs": ["services/workspace-worker/**"]},
+              {"name": "agent-opt-worker", "context": "services/agent-opt-worker", "target": "production",
+               "build_args": [],
+               "cache_mode": "min", "no_cache_filters": [],
+               "arches": ["amd64"], "publish": false,
+               "inputs": ["services/agent-opt-worker/**"]}
             ]
           # What every image is built or judged by: a change here builds them all.
           SHARED_INPUTS: |
@@ -152,10 +203,15 @@ jobs:
           LOCAL_REGISTRY: registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 # 2.8.3
         run: |
           set -euo pipefail
+          weekly=()
+          if [ "$EVENT" = "schedule" ]; then
+            created=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            weekly=(--created "$created")
+          fi
           pick() {
             python3 scripts/ci/image_matrix.py --images "$IMAGES" --shared-inputs "$SHARED_INPUTS" \
               --runners "$RUNNERS" --owner "$GITHUB_REPOSITORY_OWNER" --publish "$PUBLISH" \
-              --local-registry "$LOCAL_REGISTRY" "$@" | tee -a "$GITHUB_OUTPUT"
+              --no-cache "$NO_CACHE" --local-registry "$LOCAL_REGISTRY" "${weekly[@]}" "$@" | tee -a "$GITHUB_OUTPUT"
           }
           if [ "$EVENT" != "pull_request" ]; then pick --every < /dev/null; exit 0; fi
           if ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)'); then
@@ -191,6 +247,26 @@ jobs:
         with:
           persist-credentials: false
 
+      # PRD-262 US-013: Grype comes first, so its database download and load (73
+      # to 120 s on 16 Oct) overlap the build instead of following it. Pinned to
+      # 0.118.0, whose JSON the scan policy reads (`knownExploited` on a match).
+      - name: Install Grype
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          grype-version: v0.118.0
+
+      # In the background, outside the checkout (Grype reads a .grype.yaml in its
+      # working directory). The scan step waits for db.status.
+      - name: Download the Grype database (background)
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/grype"
+          cd "${RUNNER_TEMP}/grype"
+          nohup bash -c '"$GRYPE" db update > db.log 2>&1; echo "$?" > db.status.tmp && mv db.status.tmp db.status' \
+            > /dev/null 2>&1 < /dev/null &
+
       - name: Metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -220,7 +296,10 @@ jobs:
       # Pushes by digest: to GHCR when publishing, to the job's registry
       # otherwise. Every run reads the cache; only publishing runs write it, so
       # PR and branch caches (which main can never read) stop crowding main's
-      # out of the 10 GB GHA cache.
+      # out of the 10 GB GHA cache. On a weekly or `no_cache` run,
+      # no-cache-filters rebuilds the image's OS-package stages, and every step
+      # after them, from fresh packages; the weekly run's cache-to then hands
+      # those layers to the builds that follow.
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -235,6 +314,7 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
           cache-to: ${{ env.PUBLISH == 'true' && format('type=gha,mode={0},scope={1}-{2}', matrix.cache_mode, matrix.name, matrix.arch) || '' }}
+          no-cache-filters: ${{ matrix.no_cache_filters }}
 
       - name: Export digest
         if: matrix.publish
@@ -294,18 +374,72 @@ jobs:
 
       # Scans this architecture's image on its own runner: Grype picks one
       # platform from a multi-arch index, so scanning the merged index would
-      # miss arm64. Report only: findings go to the log, and even a scanner
-      # error never blocks the publish.
-      - name: Vulnerability scan (report only)
-        if: matrix.publish
-        continue-on-error: true
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+      # miss arm64. Every build is scanned, read straight from the registry it
+      # pushed to: the job's registry:2 over plain HTTP on a PR or branch, GHCR
+      # (with the login above) when publishing. No docker pull or save. It runs
+      # outside the checkout, so Grype applies no allowlist: its table shows
+      # every row, and the policy step below applies .grype.yaml. A scanner
+      # error fails the job; on main the merge job then never runs (PRD-262
+      # US-013).
+      - name: Vulnerability scan
+        working-directory: ${{ runner.temp }}/grype
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+          GRYPE_REGISTRY_INSECURE_USE_HTTP: ${{ matrix.registry != '' }}
+          GRYPE_DB_AUTO_UPDATE: "false"
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+          DB_WAIT_SECONDS: "600"
+        run: |
+          waited=0
+          until [ -f db.status ]; do
+            if [ "$waited" -ge "$DB_WAIT_SECONDS" ]; then
+              cat db.log
+              echo "::error title=Grype database::not downloaded after ${DB_WAIT_SECONDS} s"
+              exit 1
+            fi
+            sleep 5
+            waited=$((waited + 5))
+          done
+          if [ "$(cat db.status)" != "0" ]; then
+            cat db.log
+            echo "::error title=Grype database::the download failed"
+            exit 1
+          fi
+          echo "The Grype database was ready after ${waited} s of waiting."
+          "$GRYPE" "registry:${IMAGE}@${DIGEST}" --platform "linux/${ARCH}" -o table -o json=report.json
+
+      - name: Upload the scan report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          image: ${{ matrix.image }}@${{ steps.build.outputs.digest }}
-          fail-build: false
-          severity-cutoff: high
-          only-fixed: true
-          output-format: table
+          name: grype-${{ matrix.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/grype/report.json
+          if-no-files-found: error
+          retention-days: 30
+
+      # The policy reads .grype.yaml, so it needs PyYAML.
+      - name: Set up Python (the scan policy)
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # PRD-262 US-013 (D1, FR-3): fails on a fixable Critical, or a KEV match of
+      # any severity, that no unexpired .grype.yaml entry covers. POLICY_MODE is
+      # `report` (warnings only) until the W1 wave's last commit sets `fail`, once
+      # every current finding is fixed or allowlisted. An allowlist entry without
+      # a reason or an expiry, or one more than 90 days out, fails in either mode.
+      - name: Scan policy
+        env:
+          POLICY_MODE: report
+          REPORT: ${{ runner.temp }}/grype/report.json
+          NAME: ${{ matrix.name }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          python -m pip install --disable-pip-version-check --quiet "pyyaml==6.0.3"
+          python scripts/ci/image_scan_policy.py check --report "$REPORT" --allowlist .grype.yaml \
+            --mode "$POLICY_MODE" --name "$NAME" --arch "$ARCH" --summary "$GITHUB_STEP_SUMMARY"
 
   # Across the build jobs: the layers the API and the worker share, and what the
   # app images cost to pull together, per arch. An image this run did not build
@@ -355,7 +489,7 @@ jobs:
   merge:
     name: publish ${{ matrix.image.name }}
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: build
+    needs: [changes, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -412,10 +546,14 @@ jobs:
           # No `latest` until the maintainers choose to publish one. No `edge`
           # either: smoke-images.yml's promote-edge job moves it once this
           # `sha-<short>` has booted on both arches (PRD-262 US-003).
+          # A schedule run publishes only `weekly-<yyyymmdd>` (PRD-262 US-011):
+          # every other tag is off for it, so a `sha-<short>` is never re-pushed
+          # with other packages.
           flavor: |
             latest=false
           tags: |
-            type=sha
+            type=sha,enable=${{ github.event_name != 'schedule' }}
+            type=schedule,pattern=${{ needs.changes.outputs.weekly_tag }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 

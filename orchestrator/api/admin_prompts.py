@@ -359,6 +359,10 @@ def toggle_futureagi(
     prompt.futureagi_eval_enabled = not prompt.futureagi_eval_enabled
     db.commit()
     db.refresh(prompt)
+    # PRD-262 US-006: chat turns read a cached flag; this process re-reads it on the next
+    # turn, the other API processes within futureagi_service.SCORING_FLAG_TTL_SECONDS.
+    from core.services.futureagi_service import futureagi_service
+    futureagi_service.forget_scoring_flag()
     state = "enabled" if prompt.futureagi_eval_enabled else "disabled"
     logger.info(f"FutureAGI scoring {state} for {prompt.slug}")
     return _prompt_to_response(prompt)

@@ -35,10 +35,10 @@ def test_the_espeak_data_sits_at_a_short_real_path():
     assert Path(path, "phontab").is_file()
 
 
-def test_hyperframes_is_pinned_exactly_and_runs_on_node_22():
+def test_hyperframes_is_pinned_exactly_and_runs_on_node_24():
     versions = read_versions(load_settings().versions_path)
     assert versions["hyperframes"] == HYPERFRAMES_PIN
-    assert versions["node"].startswith("v22.")
+    assert versions["node"].startswith("v24.")
     live = subprocess.run(["hyperframes", "--version"], capture_output=True, text=True, timeout=60)
     assert live.returncode == 0 and HYPERFRAMES_PIN in live.stdout
 
