@@ -12,7 +12,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'
 import { useGlobalSearch, type SearchResult } from '@/hooks/use-global-search'
-import { useIsPlay } from '@/hooks/use-studio-theme'
+import { useActiveTheme } from '@/hooks/use-studio-theme'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
 
 const CATEGORY_META = {
@@ -68,8 +68,8 @@ export function GlobalSearch() {
   const router = useRouter()
   // PRD-251 D1: the Socials page and posts are searched only where Socials is offered and on.
   const socials = useWorkspaceOptional()?.workspace?.socials
-  // PRD-260 M90: under Play, its own pages (Conversations, Make it yours, the style sheet) are found too.
-  const isPlay = useIsPlay()
+  // PRD-260 M90, PRD-261 A-02b: under a theme, its own pages (its registry entry's nav) are found too.
+  const themeNav = useActiveTheme()?.nav
   const {
     open,
     query,
@@ -82,7 +82,7 @@ export function GlobalSearch() {
     memories,
     socials: posts,
     handleOpenChange,
-  } = useGlobalSearch(socials, isPlay)
+  } = useGlobalSearch(socials, themeNav)
 
   const handleSelect = (result: SearchResult) => {
     handleOpenChange(false)

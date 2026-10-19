@@ -1,0 +1,68 @@
+{
+  "schema": "automatos-look-schema/v1",
+  "look": {
+    "schema": "automatos-interface-look/v1",
+    "interface": "play"
+  },
+  "knobs": {
+    "ground": {
+      "kind": "choice",
+      "choices": [
+        "graphite",
+        "obsidian",
+        "indigo",
+        "paper"
+      ],
+      "default": "graphite"
+    },
+    "accent": {
+      "kind": "choice",
+      "choices": [
+        "molten",
+        "cream",
+        "mint",
+        "gold",
+        "periwinkle",
+        "rose"
+      ],
+      "default": "molten"
+    },
+    "font": {
+      "kind": "choice",
+      "choices": [
+        "serif",
+        "clean",
+        "bric",
+        "round"
+      ],
+      "default": "serif"
+    },
+    "shell": {
+      "kind": "choice",
+      "choices": [
+        "bronze",
+        "gold",
+        "silver",
+        "cobalt"
+      ],
+      "default": "bronze"
+    },
+    "light": {
+      "kind": "choice",
+      "choices": [
+        "mint",
+        "amber",
+        "ice",
+        "rose"
+      ],
+      "default": "mint"
+    },
+    "glow": {
+      "kind": "number",
+      "min": 0,
+      "max": 40,
+      "integer": true,
+      "default": 24
+    }
+  }
+}

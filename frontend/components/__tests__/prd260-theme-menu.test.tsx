@@ -2,8 +2,13 @@
  * PRD-260 D1/D2/K9 — the theme menu reads Classic · Studio · Play. Choosing
  * Play writes the cookie and puts both classes on <html>; leaving it takes
  * 'play' off (and 'studio' too for Classic). "Customise look…" shows only
- * while Play is the style. useIsStudio stays true under Play; useIsPlay is
- * true only there.
+ * while Play is the style. useIsStudio stays true under Play; useActiveTheme is
+ * Play's entry only there.
+ *
+ * PRD-261 A-02b: the menu lists Classic, Studio, then the theme registry's entries;
+ * Play's item is its entry and sets `theme:builtin:play`. The tone rests under a
+ * theme whose entry's tone policy is the look's, and 'Customise look…' follows the
+ * theme's layout (its entry's minWidth), so the narrow case stubs the window width.
  *
  * P260-FX-06: Play survives a browser whose localStorage is unreadable (M87);
  * under the look's tone the Tone items stay in the keyboard's reach, described
@@ -15,7 +20,7 @@
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, onTestFinished } from 'vitest'
 import { render, renderHook, screen, cleanup, waitFor, fireEvent, act } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 
@@ -55,16 +60,22 @@ import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
 import { LookProvider } from '@/components/looks/look-provider'
 import { ThemeProvider } from '@/components/theme-provider'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
-import { useIsPlay, useIsStudio } from '@/hooks/use-studio-theme'
+import { useActiveTheme, useIsStudio } from '@/hooks/use-studio-theme'
+import { PHONE_WIDTH_PX, stubWindowWidth } from '@/hooks/__tests__/window-width'
 import { clearRoot } from '@/lib/looks/__tests__/helpers'
 import { DAYLIGHT } from '@/lib/looks/presets'
 import { DEFAULT_LOOK_SCOPE } from '@/lib/looks/scope'
 import { lookKeys } from '@/lib/looks/storage'
 import { PLAY_TONE_COOKIE, type PlayTone } from '@/lib/looks/tone'
 import {
+  BUILTIN_PLAY_HTML_CLASS as PLAY_HTML_CLASS,
+  BUILTIN_PLAY_REF,
+  BUILTIN_PLAY_STYLE as PLAY,
+} from '@/lib/theme-host/builtin/play-entry'
+import { BUILTIN_THEMES } from '@/lib/theme-host/registry'
+import {
   APPEARANCE_DEFAULTS_KEY,
   APPEARANCE_DEFAULTS_VERSION,
-  PLAY_HTML_CLASS,
   STUDIO_HTML_CLASS,
   UI_STYLE_COOKIE,
   type UiStyle,
@@ -192,11 +203,27 @@ describe('PRD-260 — the theme menu', () => {
     expect(items).toEqual(['Classic', 'Studio', 'Play', 'Light', 'Dark', 'System'])
   })
 
+  it("lists the registry's themes after Classic and Studio, by their entries' names", async () => {
+    renderMenu('studio')
+    await openMenu()
+    const items = screen.getAllByRole('menuitemradio').map((el) => el.textContent?.trim())
+    expect(items.slice(0, 2 + BUILTIN_THEMES.length)).toEqual(['Classic', 'Studio', ...BUILTIN_THEMES.map((entry) => entry.name)])
+  })
+
+  it("choosing Play sets the style to builtin Play's (theme:builtin:play) and checks it", async () => {
+    render(<UiStyleProvider initialStyle="studio"><ThemeToggle /><StyleProbe /></UiStyleProvider>)
+    await openMenu()
+    choose('Play')
+    expect(screen.getByTestId('style')).toHaveTextContent(PLAY)
+    await openMenu()
+    expect(screen.getByRole('menuitemradio', { name: 'Play' })).toHaveAttribute('aria-checked', 'true')
+  })
+
   it('choosing Play writes the cookie and puts studio and play on <html>, without touching the tone', async () => {
     renderMenu('studio')
     await openMenu()
     choose('Play')
-    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=play`)
+    expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=${PLAY}`)
     expect(html().contains(STUDIO_HTML_CLASS)).toBe(true)
     expect(html().contains(PLAY_HTML_CLASS)).toBe(true)
     expect(tone.setTheme).not.toHaveBeenCalled()
@@ -221,7 +248,7 @@ describe('PRD-260 — the theme menu', () => {
   })
 
   it('offers "Customise look…" (to /looks) only while Play is the style', async () => {
-    renderMenu('play')
+    renderMenu(PLAY)
     await openMenu()
     const link = screen.getByRole('menuitem', { name: 'Customise look…' })
     expect(link).toHaveAttribute('href', '/looks')
@@ -245,15 +272,15 @@ describe('PRD-260 — the theme menu', () => {
   })
 })
 
-describe('PRD-260 D2 — useIsStudio and useIsPlay under each style', () => {
+describe('PRD-260 D2 — useIsStudio and useActiveTheme under each style', () => {
   const wrap = (style: UiStyle) => ({ children }: { children: ReactNode }) => (
     <UiStyleProvider initialStyle={style}>{children}</UiStyleProvider>
   )
-  const both = () => ({ studio: useIsStudio(), play: useIsPlay() })
+  const both = () => ({ studio: useIsStudio(), play: useActiveTheme()?.ref === BUILTIN_PLAY_REF })
   const cases: Array<[UiStyle, { studio: boolean; play: boolean }]> = [
     ['classic', { studio: false, play: false }],
     ['studio', { studio: true, play: false }],
-    ['play', { studio: true, play: true }],
+    [PLAY, { studio: true, play: true }],
   ]
 
   it.each(cases)('%s → %o', (style, expected) => {
@@ -269,7 +296,7 @@ describe('PRD-260 D2 — useIsStudio and useIsPlay under each style', () => {
 
 describe('PRD-260 K4 — under Play the look sets the tone', () => {
   it('shows the Tone items disabled with "Set by your look", and choosing one changes nothing', async () => {
-    renderMenu('play')
+    renderMenu(PLAY)
     await openMenu()
     expect(screen.getByText('Set by your look')).toBeInTheDocument()
     for (const name of ['Light', 'Dark', 'System']) {
@@ -282,7 +309,7 @@ describe('PRD-260 K4 — under Play the look sets the tone', () => {
   it('checks the tone the look forces, not the stored one it keeps for later', async () => {
     tone.forcedTheme = 'light'
     try {
-      renderMenu('play')
+      renderMenu(PLAY)
       await openMenu()
       expect(screen.getByRole('menuitemradio', { name: 'Light' })).toHaveAttribute('aria-checked', 'true')
       expect(screen.getByRole('menuitemradio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'false')
@@ -306,7 +333,7 @@ describe('PRD-260 K4 — under Play the look sets the tone', () => {
 
 describe('PRD-260 M85 — at desktop width the resting Tone items stay in reach', () => {
   it('ArrowDown reaches Dark, described by the note; Enter keeps the stored tone and the menu open', async () => {
-    renderMenu('play')
+    renderMenu(PLAY)
     await openMenu()
     const menu = screen.getByRole('menu')
     expect(menu).toContainElement(document.activeElement as HTMLElement)
@@ -324,10 +351,13 @@ describe('PRD-260 M85 — at desktop width the resting Tone items stay in reach'
 describe('PRD-260 K4, D7 — below 1024 px the look still sets the tone (P260-SEAM)', () => {
   it("keeps Daylight's Light over a stored Dark: the Tone items rest under the note, and 'Customise look…' waits for 1024 px", async () => {
     width.narrow = true
+    // The theme's layout reads the window against Play's entry's minWidth (PRD-261 A-02b).
+    const phone = stubWindowWidth(PHONE_WIDTH_PX)
+    onTestFinished(() => phone.restore())
     // Daylight's Paper ground forces Light; the user's own tone, kept for when they leave Play, is Dark.
     window.localStorage.setItem(lookKeys(DEFAULT_LOOK_SCOPE).active, JSON.stringify(DAYLIGHT))
     window.localStorage.setItem(TONE_STORAGE_KEY, 'dark')
-    renderApp('play', 'light')
+    renderApp(PLAY, 'light')
     await openMenu()
     await settle()
     expect(htmlTone()).toBe('light')
@@ -359,7 +389,7 @@ describe('PRD-260 M87 — Play in a browser whose localStorage is unreadable', (
     await openMenu()
     choose('Play')
     await settle()
-    expect(screen.getByTestId('style')).toHaveTextContent('play')
+    expect(screen.getByTestId('style')).toHaveTextContent(PLAY)
     expect(html().contains(PLAY_HTML_CLASS)).toBe(true)
     // Ember's Graphite ground forced Dark: the change that hands out a new setTheme happened.
     expect(toneCookie()).toBe('dark')

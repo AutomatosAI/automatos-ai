@@ -90,8 +90,10 @@ jobs:
           # frontend builds (PRD-262 US-046, US-048).
           PROD_IMAGE_PATHS: >-
             ^frontend/(Dockerfile|\.dockerignore|\.npmrc|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts|scripts/check-(standalone-image|layer-reuse)\.sh)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^\.github/workflows/test\.yml$
-          # The frontend lane also reads the committed route manifest (route-contract).
-          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
+          # The frontend lane also reads the committed route manifest (route-contract), and
+          # PRD-261's theme corpus, host contract and the validators lib/theme-host's
+          # validator-parity.test.ts reads as text.
+          FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^orchestrator/tests/fixtures/themes/|^orchestrator/services/themes/(contract|manifest|look_schema|css_value)\.py$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
           SIM_PATHS: ^tests/sim/|^\.github/workflows/test\.yml$
           AGENT_OPT_PATHS: ^services/agent-opt-worker/|^\.github/workflows/test\.yml$

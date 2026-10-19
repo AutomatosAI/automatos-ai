@@ -999,51 +999,51 @@ class SkillLoader:
                 logger.warning(f"Skill not found: {skill_name}")
                 return None
 
-            # Runtime freshness check for builtin skills. PRD-202 S1: resolve
-            # the provenance through the canonical scheme so BOTH the legacy
-            # tags (``builtin-core``/``builtin-seeds``) and the canonical
-            # ``builtin:<name>`` form match — no bare-string compare survives.
-            from modules.agents.services.skill_source_scheme import scheme_of
-            if scheme_of(skill.skill_source) == "builtin":
-                core_content = self._refresh_builtin_if_stale(skill, db)
-                if core_content:
-                    self.core_content_cache[skill_name] = core_content
-                    return core_content
-
-            # Get core content
-            core_content = None
-
-            if skill.prompt_template:
-                # PRD-22 skill - use prompt_template
-                core_content = skill.prompt_template
-            elif skill.filesystem_path:
-                # Try to read SKILL.md from filesystem
-                skill_md_path = Path(skill.filesystem_path) / "SKILL.md"
-                if skill_md_path.exists():
-                    content = skill_md_path.read_text(encoding='utf-8')
-                    yaml_data, markdown_body = parse_yaml_frontmatter(content)
-                    core_content = markdown_body
-            
-            if not core_content:
-                # Legacy skill - use implementation field
-                core_content = skill.implementation or skill.description
-            
-            # Cache it
+            core_content = self.load_core_for_skill(skill, db)
             self.core_content_cache[skill_name] = core_content
-            
-            # Log token estimate
-            if core_content:
-                tokens = estimate_tokens(core_content)
-                logger.info(f"Loaded core content for {skill_name}: ~{tokens} tokens")
-            else:
-                logger.warning(f"No core content found for {skill_name}")
-            
             return core_content
-            
         except Exception as e:
             logger.error(f"Error loading skill core content: {e}", exc_info=True)
             return None
-    
+
+    def load_core_for_skill(self, skill: Skill, db: Session) -> Optional[str]:
+        """Level 2 body of a row the caller already resolved: no name lookup, no cache.
+
+        A lookup by name can return another row of that name (a workspace fork, a git
+        import); Auto's skills section reads its own linked row here (PRD-263 US-062).
+        """
+        # Builtin freshness check. PRD-202 S1: the canonical scheme matches the legacy
+        # tags (``builtin-core``/``builtin-seeds``) and ``builtin:<name>`` alike.
+        from modules.agents.services.skill_source_scheme import scheme_of
+        if scheme_of(skill.skill_source) == "builtin":
+            core_content = self._refresh_builtin_if_stale(skill, db)
+            if core_content:
+                return core_content
+
+        core_content = None
+        if skill.prompt_template:
+            # PRD-22 skill - use prompt_template
+            core_content = skill.prompt_template
+        elif skill.filesystem_path:
+            # Try to read SKILL.md from filesystem
+            skill_md_path = Path(skill.filesystem_path) / "SKILL.md"
+            if skill_md_path.exists():
+                content = skill_md_path.read_text(encoding='utf-8')
+                yaml_data, markdown_body = parse_yaml_frontmatter(content)
+                core_content = markdown_body
+
+        if not core_content:
+            # Legacy skill - use implementation field
+            core_content = skill.implementation or skill.description
+
+        if core_content:
+            tokens = estimate_tokens(core_content)
+            logger.info(f"Loaded core content for {skill.name}: ~{tokens} tokens")
+        else:
+            logger.warning(f"No core content found for {skill.name}")
+
+        return core_content
+
     # ========================================================================
     # Progressive Disclosure - Level 3: Resources
     # ========================================================================

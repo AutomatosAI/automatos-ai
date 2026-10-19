@@ -206,8 +206,8 @@ def test_an_admins_approval_applies_as_that_admin(monkeypatch, harness_ledger):
 
 
 def test_handle_reject_command(monkeypatch):
-    """Admin /reject flips the board task to 'rejected' and commits, so
-    _get_rejected_signatures suppresses re-proposal next tick."""
+    """Admin /reject flips the board task to 'rejected' and commits, so the
+    card is closed and nothing is applied."""
     monkeypatch.setattr(config, "HARNESS_SELF_MANAGEMENT_ENABLED", True)
     task = _harness_task(task_id=7)
     ex = _FakeExecutor(tasks=[task], agents=[{"id": 42, "name": "ScribeAgent"}])

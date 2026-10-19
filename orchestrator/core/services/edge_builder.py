@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -52,6 +51,10 @@ from core.services.edge_builder_clusters import (
     upsert_clusters,
 )
 from core.services.edge_builder_logs import load_logs as _load_logs
+# PRD-263 US-008: the Wilson bound lives with the HARNESS statistics, which are
+# standard-library only so the local Skill Lab can use them without this
+# module's SQLAlchemy and embedding-manager imports.
+from core.stats.harness_verdicts import wilson_lower_bound
 
 logger = logging.getLogger(__name__)
 
@@ -151,17 +154,6 @@ def derive_embedding_model_key(embedding_manager) -> str:
         model = getattr(cfg, "model", None)
     dimension = info.get("dimension") or embedding_manager.get_dimension()
     return f"{provider}:{model}:{dimension}"
-
-
-def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
-    """Wilson lower bound at 95% confidence."""
-    if total == 0:
-        return 0.0
-    p = successes / total
-    denominator = 1 + z**2 / total
-    centre = p + z**2 / (2 * total)
-    spread = z * math.sqrt((p * (1 - p) + z**2 / (4 * total)) / total)
-    return (centre - spread) / denominator
 
 
 async def build_edges(

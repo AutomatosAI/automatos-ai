@@ -134,6 +134,7 @@ import { OPENING } from '@/components/play/chat/play-chat'
 import { PlayConversations } from '@/components/play/conversations/play-conversations'
 import { UiStyleProvider } from '@/contexts/ui-style-context'
 import { LAPTOP_WIDTH_PX, PHONE_WIDTH_PX, stubWindowWidth, type WindowWidth } from '@/hooks/__tests__/window-width'
+import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION } from '@/lib/ui-style'
 
 const CHAT_PAGE = 'The core chat page'
@@ -147,7 +148,7 @@ function underPlay(ui: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return (
     <QueryClientProvider client={client}>
-      <UiStyleProvider initialStyle="play">{ui}</UiStyleProvider>
+      <UiStyleProvider initialStyle={BUILTIN_PLAY_STYLE}>{ui}</UiStyleProvider>
     </QueryClientProvider>
   )
 }

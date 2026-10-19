@@ -163,9 +163,11 @@ def _check_anthropic(_provider: str, raw_key: str, _base_url: Optional[str], wor
 
 
 def _check_google(_provider: str, raw_key: str, _base_url: Optional[str], _workspace_id: Optional[str] = None) -> str:
-    import google.generativeai as genai
-    genai.configure(api_key=raw_key)
-    genai.list_models()
+    """A models-list call with this key's own client, never a process-wide one (#1169)."""
+    from core.llm.clients.google_client import gemini_client
+
+    with gemini_client(raw_key) as client:
+        client.models.list()
     return KEY_VALID
 
 

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyUiStyleToDocument } from '@/contexts/ui-style-context'
 import { writeCookie } from '@/lib/cookies'
 import { PLAY_TONE_COOKIE, writePlayToneCookie } from '@/lib/looks/tone'
+import { BUILTIN_PLAY_STYLE } from '@/lib/theme-host/builtin/play-entry'
 import { STYLE_HTML_CLASS_NAMES, UI_STYLE_COOKIE, UI_STYLE_COOKIE_MAX_AGE_S } from '@/lib/ui-style'
 
 const TEST_COOKIE = 'fx27-cookie'
@@ -31,10 +32,10 @@ describe('writeCookie', () => {
 
   it('the style cookie and the tone cookie carry the same flags', () => {
     const write = vi.spyOn(Document.prototype, 'cookie', 'set')
-    applyUiStyleToDocument('play')
+    applyUiStyleToDocument(BUILTIN_PLAY_STYLE)
     writePlayToneCookie('dark')
     const lines = write.mock.calls.map(([line]) => String(line))
-    expect(lines.map((line) => line.split(';')[0])).toEqual([`${UI_STYLE_COOKIE}=play`, `${PLAY_TONE_COOKIE}=dark`])
+    expect(lines.map((line) => line.split(';')[0])).toEqual([`${UI_STYLE_COOKIE}=${BUILTIN_PLAY_STYLE}`, `${PLAY_TONE_COOKIE}=dark`])
     const expected = `Path=/; Max-Age=${UI_STYLE_COOKIE_MAX_AGE_S}; SameSite=Lax`
     expect(lines.map(flagsOf)).toEqual([expected, expected])
   })
