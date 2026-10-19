@@ -205,26 +205,17 @@ Sources: [orchestrator/services/gdpr_service.py](), [orchestrator/modules/contex
 
 ## AI Act Compliance
 
-The European Union's AI Act introduces stringent requirements for AI systems, particularly those classified as "high-risk." The Automatos AI platform addresses these requirements through its policy module and compliance documentation.
+What exists today and what is planned, from [docs/compliance/README.md](../compliance/README.md). Nothing here is a claim of compliance or certification.
 
-### `modules/policy/ai_act`
+| Area | Status | Where |
+|---|---|---|
+| Art. 12 record-keeping (audit log) | Real | `orchestrator/modules/policy/audit_handler.py`, `orchestrator/core/workspaces/audit.py` |
+| Art. 14 human oversight mapped to approval cards | Real (mapping) | `orchestrator/modules/policy/ai_act.py` maps the policy plane's risk classes to three oversight tiers that the approval card shows |
+| Annex IV technical file | Scaffold | [EU-AI-ACT-ANNEX-IV.md](../compliance/EU-AI-ACT-ANNEX-IV.md) |
+| Formal high-risk classification | Not done | Annex IV §5 and its checklist |
+| Article 50 transparency (AI-interaction notices, marking of generated content, detection) | In progress | [PRD-264](../PRDS/PRD-264-EU-AI-ACT-ARTICLE-50.md) |
 
-The `modules/policy/ai_act` module is intended to encapsulate logic and configurations related to AI Act compliance. While the specific implementation details are not fully provided in the given snippets, this module would typically contain:
-*   **Risk Assessment Logic**: Mechanisms to classify AI systems or their components based on the risk categories defined by the AI Act.
-*   **Transparency and Explainability**: Logic to ensure that AI system outputs are understandable and traceable, potentially by integrating with the audit logging system.
-*   **Human Oversight Mechanisms**: Integration with approval workflows and human-in-the-loop processes, such as mission approvals [frontend/components/missions/mission-detail-page.tsx:176-180]() and task verification [orchestrator/modules/coordination/verification.py:1-16](), to ensure human control over high-risk AI decisions.
-*   **Data Governance**: Policies and checks related to the quality, integrity, and bias of data used for training and operating AI models.
-
-### `docs/compliance/Annex IV`
-
-The `docs/compliance/Annex IV` documentation [docs/compliance/README.md]() refers to a specific annex of the AI Act, which typically lists high-risk AI systems. This documentation would outline how the Automatos AI platform categorizes its AI systems, the measures taken to comply with the requirements for high-risk systems, and potentially provide evidence of compliance.
-
-This documentation serves as a critical resource for internal teams and external auditors to understand the platform's adherence to AI Act regulations. It would likely detail:
-*   **Technical Documentation**: How the platform's technical documentation meets the requirements of the AI Act.
-*   **Quality Management System**: Description of the quality management system in place for AI development and deployment.
-*   **Conformity Assessment Procedures**: The procedures followed to assess the conformity of AI systems with the AI Act.
-
-The governance dashboard in the frontend, specifically the `governance-tab` [frontend/components/command-center/governance-tab.tsx](), `policy plane` [frontend/components/command-center/governance/policy-pane.tsx](), and `compliance pane` [frontend/components/command-center/governance/compliance-pane.tsx](), would provide user interfaces to manage and monitor these compliance aspects.
+The governance tab in the Command Center (`frontend/components/command-center/governance-tab.tsx`, with `governance/policy-pane.tsx` and `governance/compliance-pane.tsx`) shows the policy plane and the audit log.
 
 Sources: [docs/compliance/README.md](), [frontend/components/command-center/governance-tab.tsx](), [frontend/components/command-center/governance/policy-pane.tsx](), [frontend/components/command-center/governance/compliance-pane.tsx](), [frontend/components/missions/mission-detail-page.tsx:176-180](), [orchestrator/modules/coordination/verification.py:1-16]()
 
