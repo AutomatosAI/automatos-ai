@@ -70,7 +70,11 @@ PUBLIC_WIDGET_CONFIG_KEYS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class WidgetSettingsSource:
-    """The settings a widget is configured from, and the name it speaks for."""
+    """The settings a widget is configured from, and the Site name it speaks for.
+
+    ``name`` is the Site's ``display_name`` or ``None``; never the workspace's
+    name (PRD-264 FR-15).
+    """
 
     settings: Optional[dict]
     name: Optional[str]
@@ -80,6 +84,8 @@ def project_public_config(settings: Optional[Mapping[str, Any]], site_name: Any)
     """The public widget config: the stored public keys plus ``ai_disclosure``.
 
     ``ai_disclosure`` is always present, so a widget never starts unlabelled.
+    ``site_name`` is a Site's ``display_name`` or ``None``; callers never pass
+    a workspace name (PRD-264 FR-15).
     """
     stored = settings if isinstance(settings, Mapping) else {}
     public = {key: stored[key] for key in STORED_PUBLIC_WIDGET_CONFIG_KEYS if key in stored}
@@ -90,11 +96,12 @@ def build_widget_config(workspace: Optional[Workspace]) -> dict:
     """Project the public widget-config slice from ``workspace.settings``.
 
     PRD-007 callers pass a Workspace; endpoints go through
-    ``resolve_widget_config``, which prefers a Site. The workspace's name is
-    the name the AI notice speaks for.
+    ``resolve_widget_config``, which prefers a Site. The AI notice here is
+    the unnamed line: a workspace's name may carry its owner's name or email
+    (PRD-264 FR-15), so it never reaches public widget output.
     """
     settings = workspace.settings if workspace is not None else None
-    return project_public_config(settings, getattr(workspace, "name", None))
+    return project_public_config(settings, None)
 
 
 def resolve_widget_source(db: Session, workspace_id: UUID) -> WidgetSettingsSource:
@@ -105,8 +112,11 @@ def resolve_widget_source(db: Session, workspace_id: UUID) -> WidgetSettingsSour
     PRD-007 widgets keep working on workspaces whose migration hasn't
     populated a Site yet — e.g. a freshly-restored backup, or a workspace
     that pre-dates the backfill. Remove the fallback once the migration
-    is verified live everywhere. The name is the Site's, falling back to
-    the workspace's (PRD-264 EUAI-02a).
+    is verified live everywhere.
+
+    The name is only ever the Site's ``display_name`` (PRD-264 FR-15). The
+    workspace's name is never used, even when its settings are: an
+    auto-created workspace is named "{name or email}'s Workspace".
     """
     site = (
         db.query(Site)
@@ -116,16 +126,13 @@ def resolve_widget_source(db: Session, workspace_id: UUID) -> WidgetSettingsSour
     )
     site_settings = site.settings if site is not None else None
     site_name = site.display_name if site is not None else None
-    if site_settings and site_name:
+    if site_settings:
         return WidgetSettingsSource(settings=site_settings, name=site_name)
 
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
-    workspace_name = getattr(workspace, "name", None)
-    if site_settings:
-        return WidgetSettingsSource(settings=site_settings, name=workspace_name)
     return WidgetSettingsSource(
         settings=workspace.settings if workspace is not None else None,
-        name=site_name or workspace_name,
+        name=site_name,
     )
 
 

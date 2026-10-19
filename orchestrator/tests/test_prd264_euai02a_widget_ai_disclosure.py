@@ -151,11 +151,14 @@ def _site(settings=None, display_name=SHOP, workspace_id=None):
 
 @pytest.mark.parametrize("settings", [None, {}])
 def test_the_config_carries_the_notice_when_the_workspace_has_no_widget_settings(edition, settings):
+    """With no Site, the notice is the unnamed line: the workspace's name is
+    never a public name (FR-15)."""
     from api.widgets.config import resolve_widget_config
 
     workspace = NS(id=uuid4(), name="Harbour Coffee Ltd", settings=settings)
     config = resolve_widget_config(_db(site=None, workspace=workspace), workspace.id)
-    assert config == {"ai_disclosure": _notice("You are chatting with an AI assistant for Harbour Coffee Ltd.")}
+    assert config == {"ai_disclosure": _notice("You are chatting with an AI assistant.")}
+    assert "Harbour Coffee Ltd" not in str(config)
 
 
 def test_the_config_endpoint_always_returns_the_notice(edition):
@@ -175,6 +178,93 @@ def test_the_site_name_wins_over_the_workspace_name(edition):
         "cart_idle": {"enabled": True},
         "ai_disclosure": _notice(f"You are chatting with an AI assistant for {SHOP}."),
     }
+
+
+# ── FR-15: the workspace name never reaches public widget output ──────────
+
+PERSONAL_WORKSPACE_NAME = "jane@example.com's Workspace"
+_LEAKS = (PERSONAL_WORKSPACE_NAME, "jane", "example.com", "@")
+
+
+def _assert_no_leak(output) -> None:
+    text = str(output)
+    for leaked in _LEAKS:
+        assert leaked not in text, leaked
+
+
+@pytest.mark.parametrize("settings", [None, {}, {"cart_idle": {"enabled": True}}])
+def test_a_workspace_named_after_its_owner_never_reaches_the_public_config(edition, settings):
+    """An auto-created workspace is "{name or email}'s Workspace"; with no Site
+    the resolved config, ``GET /api/widgets/config`` and the PRD-007 builder
+    all carry the unnamed line and neither the email nor the name. (The
+    session token and the platform tool have their own tests.)"""
+    from api.widgets.config import build_widget_config, get_widget_config, resolve_widget_config
+
+    workspace = NS(id=uuid4(), name=PERSONAL_WORKSPACE_NAME, settings=settings)
+    unnamed = _notice("You are chatting with an AI assistant.")
+
+    config = resolve_widget_config(_db(site=None, workspace=workspace), workspace.id)
+    assert config["ai_disclosure"] == unnamed
+    _assert_no_leak(config)
+
+    response = get_widget_config(auth=NS(workspace_id=workspace.id), db=_db(site=None, workspace=workspace))
+    assert response.config["ai_disclosure"] == unnamed
+    _assert_no_leak(response.config)
+
+    assert build_widget_config(workspace)["ai_disclosure"] == unnamed
+    _assert_no_leak(build_widget_config(workspace))
+
+
+def test_the_session_token_config_never_carries_the_workspace_name(edition, monkeypatch):
+    """The session token exchange (``api/widgets/session.py``) hands the
+    browser ``widget_config``: the unnamed notice, with neither the owner's
+    email nor the workspace name."""
+    import asyncio
+    import secrets
+
+    import api.widgets.session as session_mod
+
+    workspace = NS(id=uuid4(), name=PERSONAL_WORKSPACE_NAME, settings={})
+    key_record = NS(
+        id=uuid4(), workspace_id=workspace.id, key_type="server", permissions=[],
+        default_agent_id=None, team=None,
+    )
+    monkeypatch.setattr(session_mod, "WIDGET_TOKEN_SECRET", secrets.token_hex(32))  # throwaway, per run
+    monkeypatch.setattr(session_mod, "ApiKeyService", NS(validate_api_key=lambda db, raw_key: key_record))
+
+    response = asyncio.run(session_mod.exchange_session_token(
+        request=session_mod.SessionTokenRequest(api_key="throwaway-test-key"),
+        db=_db(site=None, workspace=workspace),
+    ))
+    assert response.widget_config == {"ai_disclosure": _notice("You are chatting with an AI assistant.")}
+    _assert_no_leak(response.widget_config)
+
+
+@pytest.mark.parametrize("display_name", [
+    PERSONAL_WORKSPACE_NAME,       # a Site backfilled from an auto-created workspace
+    "Jane Doe's Workspace",
+    "jane@example.com",
+])
+def test_a_site_named_after_the_owner_is_not_shown(edition, display_name):
+    """Sites created from a workspace copy its name (the PRD-008-A backfill,
+    ``ensure_shopify_site``), so the Site name passes the same FR-15 test."""
+    from api.widgets.config import resolve_widget_config
+
+    site = _site(settings={"cart_idle": {"enabled": True}}, display_name=display_name)
+    config = resolve_widget_config(_db(site=site), site.workspace_id)
+    assert config["ai_disclosure"] == _notice("You are chatting with an AI assistant.")
+    assert display_name not in str(config)
+    assert "Jane" not in str(config) and "jane" not in str(config)
+
+
+def test_a_site_with_settings_but_no_name_does_not_fall_back_to_the_workspace(edition):
+    from api.widgets.config import resolve_widget_config
+
+    workspace = NS(id=uuid4(), name="Harbour Holdings", settings={})
+    site = _site(settings={"cart_idle": {"enabled": True}}, display_name="", workspace_id=workspace.id)
+    config = resolve_widget_config(_db(site=site, workspace=workspace), workspace.id)
+    assert config["ai_disclosure"] == _notice("You are chatting with an AI assistant.")
+    assert "Harbour Holdings" not in str(config)
 
 
 def test_a_badge_or_unknown_field_in_settings_is_never_copied(edition):

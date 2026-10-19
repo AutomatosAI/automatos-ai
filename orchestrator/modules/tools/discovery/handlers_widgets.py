@@ -33,7 +33,8 @@ async def get_widget_config(db: Session, workspace_id: UUID, params: Dict[str, A
 
         return {
             "success": True,
-            "widget_config": project_public_config(ws.settings, getattr(ws, "name", None)),
+            # PRD-264 FR-15: never the workspace name in a widget notice.
+            "widget_config": project_public_config(ws.settings, None),
             "configurable_keys": list(PUBLIC_WIDGET_CONFIG_KEYS),
         }
     except Exception as exc:

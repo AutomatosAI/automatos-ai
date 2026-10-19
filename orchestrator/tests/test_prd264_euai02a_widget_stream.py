@@ -129,13 +129,16 @@ def test_the_callback_form_signal_becomes_one_event_with_the_tool_start_context(
 
 # ── POST /api/widgets/chat end to end (chat services faked) ────────────────
 
-def _db_with_site(site):
+def _db_with_site(site, workspace=None):
+    """A db whose Site query returns ``site`` and Workspace query ``workspace``."""
     db = MagicMock()
 
     def query(model):
         chain = MagicMock()
         if "Site" in repr(model):
             chain.filter.return_value.order_by.return_value.first.return_value = site
+        elif "Workspace" in repr(model):
+            chain.filter.return_value.first.return_value = workspace
         else:
             chain.filter.return_value.first.return_value = None
         return chain
@@ -144,7 +147,8 @@ def _db_with_site(site):
     return db
 
 
-def test_the_widget_chat_endpoint_streams_the_notice_first(monkeypatch, edition):
+def _endpoint_events(monkeypatch, db) -> list[tuple[str, dict]]:
+    """One ``POST /api/widgets/chat`` turn on ``db``, chat services faked."""
     import api.widgets.chat as chat_mod
     import consumers.chatbot as chatbot
     from api.widgets.auth import WidgetAuthContext
@@ -176,17 +180,21 @@ def test_the_widget_chat_endpoint_streams_the_notice_first(monkeypatch, edition)
     monkeypatch.setattr(chat_mod, "_effective_agent_id", lambda *args: 7)
     monkeypatch.setattr(chat_mod, "_retrieval_team", lambda *args: None)
 
-    site = NS(display_name=SHOP, settings={"cart_idle": {"enabled": True}})
     auth = WidgetAuthContext(workspace_id=uuid4(), api_key_id=uuid4(), permissions=["chat"])
 
     async def _turn():
         response = await chat_mod.widget_chat(
             body=chat_mod.WidgetChatRequest(message="hi"), request=NS(headers={}),
-            auth=auth, db=_db_with_site(site),
+            auth=auth, db=db,
         )
         return [frame async for frame in response.body_iterator]
 
-    events = _parse(asyncio.run(_turn()))
+    return _parse(asyncio.run(_turn()))
+
+
+def test_the_widget_chat_endpoint_streams_the_notice_first(monkeypatch, edition):
+    site = NS(display_name=SHOP, settings={"cart_idle": {"enabled": True}})
+    events = _endpoint_events(monkeypatch, _db_with_site(site))
     name, payload = events[0]
     assert name == "ai_disclosure"
     assert {key: payload[key] for key in NOTICE} == NOTICE
@@ -194,3 +202,22 @@ def test_the_widget_chat_endpoint_streams_the_notice_first(monkeypatch, edition)
         "content": "Welcome to Harbour Coffee", "conversation_id": payload["conversation_id"], "ai_generated": True,
     })
     assert events[-1][0] == "done"
+
+
+# ── FR-15: the workspace name never reaches the stream ─────────────────────
+
+PERSONAL_WORKSPACE_NAME = "jane@example.com's Workspace"
+
+
+def test_the_first_event_never_carries_the_workspace_name(monkeypatch, edition):
+    """An auto-created workspace is named after its owner; with no Site, the
+    first event is the unnamed notice and holds neither the name nor the email."""
+    workspace = NS(id=uuid4(), name=PERSONAL_WORKSPACE_NAME, settings={})
+    events = _endpoint_events(monkeypatch, _db_with_site(None, workspace))
+
+    name, payload = events[0]
+    assert name == "ai_disclosure"
+    assert payload["line"] == "You are chatting with an AI assistant."
+    first = json.dumps(payload)
+    for leaked in (PERSONAL_WORKSPACE_NAME, "jane", "example.com", "@"):
+        assert leaked not in first

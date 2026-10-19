@@ -379,6 +379,24 @@ def test_telegram_start_without_a_public_name_still_says_ai(monkeypatch):
     assert text.startswith("I'm an AI assistant. ")
 
 
+def test_telegram_start_never_names_an_auto_created_workspace(monkeypatch):
+    """FR-15: the /start reply names the principal through
+    ``public_principal_name``, never the raw workspace name."""
+    owner_named = "jane@example.com's Workspace"
+
+    class OwnerNamed(FakeDb):
+        def execute(self, statement, params=None):
+            if "business_profiles" in str(statement):
+                return _Result(None)
+            return _Result((owner_named,))
+
+    text = _start_reply(monkeypatch, OwnerNamed())
+
+    assert text.startswith("I'm an AI assistant. ")
+    for leaked in (owner_named, "jane", "example.com", "@"):
+        assert leaked not in text
+
+
 # ── the driver path (channels.sender.send_to_channel) ──────────────────────
 
 CHAT_DRIVERS = {

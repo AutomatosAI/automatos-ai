@@ -384,6 +384,20 @@ def test_get_widget_config_returns_public_slice_only():
     assert _WS in _bound_values(db.q), "query must filter by workspace_id"
 
 
+def test_get_widget_config_never_shows_the_workspace_name():
+    """PRD-264 FR-15: an auto-created workspace is named after its owner, so
+    the notice in the tool's widget config is the unnamed line."""
+    ws = _FakeWorkspace(settings={"cart_idle": {"enabled": True}})
+    ws.name = "jane@example.com's Workspace"
+    out = _run(get_widget_config(_ORMDB(first=ws), _WS, {}))
+    assert out["success"] is True
+    assert out["widget_config"]["ai_disclosure"] == {
+        "badge": "AI", "line": "You are chatting with an AI assistant.", "locale": "en",
+    }
+    for leaked in (ws.name, "jane", "example.com", "@"):
+        assert leaked not in str(out["widget_config"])
+
+
 def test_update_widget_config_happy_path():
     ws = _FakeWorkspace(settings={"cart_idle": {"enabled": False}, "other": 1})
     original_settings = ws.settings

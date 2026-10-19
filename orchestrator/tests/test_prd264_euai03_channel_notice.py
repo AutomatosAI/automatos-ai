@@ -177,6 +177,62 @@ def test_an_ordinary_message_is_not_a_human_question(text):
     assert asks_if_human(text) is False
 
 
+@pytest.mark.parametrize("question", [
+    "estou a falar com um humano?", "estou falando com uma pessoa?", "Estás a falar com um bot?",
+    "Rede ich mit einem Menschen?", "Spreche ich mit einer KI?", "Bist du eine KI?",
+])
+def test_the_rewritten_patterns_still_match(question):
+    from modules.policy.ai_disclosure import asks_if_human
+
+    assert asks_if_human(question) is True
+
+
+class _SpyPattern:
+    """Wraps the compiled pattern and records the length of each text searched."""
+
+    def __init__(self, real) -> None:
+        self.real = real
+        self.lengths: list[int] = []
+
+    def search(self, text: str):
+        self.lengths = [*self.lengths, len(text)]
+        return self.real.search(text)
+
+
+def test_a_huge_message_is_matched_only_on_its_capped_window(monkeypatch):
+    """Channel messages are attacker-controlled: 100,000 spaces after a
+    Portuguese prefix are never scanned past HUMAN_QUESTION_MAX_CHARS."""
+    import modules.policy.ai_disclosure as ai_disclosure
+
+    assert ai_disclosure.HUMAN_QUESTION_MAX_CHARS == 2000
+    message = "estou" + " " * 100_000
+    assert len(ai_disclosure.human_question_window(message)) == ai_disclosure.HUMAN_QUESTION_MAX_CHARS
+
+    spy = _SpyPattern(ai_disclosure._HUMAN_QUESTION)
+    monkeypatch.setattr(ai_disclosure, "_HUMAN_QUESTION", spy)
+    assert ai_disclosure.asks_if_human(message) is False
+    assert spy.lengths == [ai_disclosure.HUMAN_QUESTION_MAX_CHARS]
+
+
+def test_a_question_inside_the_window_of_a_long_message_still_counts():
+    from modules.policy.ai_disclosure import HUMAN_QUESTION_MAX_CHARS, asks_if_human
+
+    padding = " " * (HUMAN_QUESTION_MAX_CHARS * 50)
+    assert asks_if_human("estou a falar com um humano?" + padding) is True
+    assert asks_if_human(padding + "are you human?") is False  # past the window: not scanned
+
+
+def test_no_pattern_puts_overlapping_whitespace_quantifiers_side_by_side():
+    """The shape behind the ReDoS (``\\s+a?\\s*``): two whitespace quantifiers
+    that can match the same run, with only an optional letter between them."""
+    import re
+
+    from modules.policy.ai_disclosure import HUMAN_QUESTION_PATTERNS
+
+    overlapping = re.compile(r"\\s[+*](?:\w\?)?\\s[+*]")
+    assert [p for p in HUMAN_QUESTION_PATTERNS if overlapping.search(p)] == []
+
+
 # ── the principal's public name (FR-15) ────────────────────────────────────
 
 @pytest.mark.parametrize("company, workspace, expected", [
@@ -211,6 +267,16 @@ def test_the_principal_is_looked_up_profile_first_then_workspace():
     assert principal_name(FakeDb(company=None, workspace_name="Ops Team"), WS) == "Ops Team"
     assert principal_name(FakeDb(company=None, workspace_name="Ada's Workspace"), WS) is None
     assert principal_name(FakeDb(company=SHOP), "not-a-uuid") is None
+
+
+def test_the_channel_notice_never_names_an_auto_created_workspace(notice_state):
+    """FR-15: the notice goes through ``public_principal_name``, so a workspace
+    named after its owner gives the unnamed notice."""
+    ai_notice, _redis, _clock = notice_state
+
+    for owner_named in ("jane@example.com's Workspace", "Jane Doe's Workspace"):
+        notice = _decide(ai_notice, FakeDb(company=None, workspace_name=owner_named))
+        assert notice.text == "AI assistant."
 
 
 def test_a_failed_principal_lookup_names_no_one_and_rolls_back():

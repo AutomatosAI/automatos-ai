@@ -78,21 +78,26 @@ PERSONAL_DATA_MARK = "@"
 
 # A message asking whether the other side is a person or a bot: the reply to it
 # always carries the notice. English, Portuguese, Spanish, French, German and
-# Italian, matched case-insensitively anywhere in the message.
+# Italian, matched case-insensitively in the first HUMAN_QUESTION_MAX_CHARS
+# characters of the message. Channel messages are attacker-controlled, so no
+# pattern puts two quantifiers that can match the same characters side by side
+# (``\s+a?\s*`` backtracks quadratically on a run of spaces), and the scan is
+# capped so its cost is bounded whatever the message length.
+HUMAN_QUESTION_MAX_CHARS = 2000
 HUMAN_QUESTION_PATTERNS: tuple[str, ...] = (
     r"\bare\s+you\s+(?:an?\s+)?(?:real\s+)?(?:human|person|bot|robot|machine|ai|real)\b",
     r"\b(?:am\s+i|are\s+we)\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+(?:an?\s+)?"
     r"(?:real\s+)?(?:human|person|bot|robot|machine|ai)\b",
     r"\bis\s+(?:this|that)\s+(?:an?\s+)?(?:real\s+)?(?:human|person|bot|robot|ai)\b",
     r"\b(?:voc[eê]|tu)\s+[eé]s?\s+(?:uma?\s+)?(?:humano|humana|pessoa|rob[oô]|bot|ia)\b",
-    r"\b(?:estou|est[aá]s?)\s+a?\s*(?:falar|falando|conversar)\s+com\s+(?:uma?\s+)?"
+    r"\b(?:estou|est[aá]s?)\s+(?:a\s+)?(?:falar|falando|conversar)\s+com\s+(?:uma?\s+)?"
     r"(?:humano|pessoa|rob[oô]|bot|ia)\b",
     r"\b(?:eres|es\s+usted)\s+(?:una?\s+)?(?:humano|humana|persona|robot|bot|ia)\b",
     r"\bestoy\s+hablando\s+con\s+(?:una?\s+)?(?:humano|persona|robot|bot|ia)\b",
     r"\b(?:es-tu|êtes-vous|tu\s+es|vous\s+êtes)\s+(?:une?\s+)?(?:humain|humaine|personne|robot|bot|ia)\b",
     r"\bje\s+parle\s+(?:à|a|avec)\s+(?:une?\s+)?(?:humain|personne|robot|bot|ia)\b",
-    r"\b(?:bist\s+du|sind\s+sie)\s+(?:ein\s+|eine\s+)?(?:mensch|bot|roboter|ki)\b",
-    r"\b(?:rede|spreche|chatte)\s+ich\s+mit\s+(?:einem\s+|einer\s+)?(?:menschen|mensch|bot|roboter|ki)\b",
+    r"\b(?:bist\s+du|sind\s+sie)\s+(?:eine?\s+)?(?:mensch|bot|roboter|ki)\b",
+    r"\b(?:rede|spreche|chatte)\s+ich\s+mit\s+(?:eine[mr]\s+)?(?:menschen?|bot|roboter|ki)\b",
     r"\bsei\s+(?:una?\s+|un'\s*)?(?:umano|umana|persona|robot|bot|ia)\b",
     r"\bsto\s+parlando\s+con\s+(?:una?\s+|un'\s*)?(?:umano|persona|robot|bot|ia)\b",
 )
@@ -145,9 +150,15 @@ def contains_badge_term(line: str, term: str) -> bool:
 
 
 def default_line(site_name: Any) -> str:
-    """The default first-turn line, naming the site when it has a name."""
-    if isinstance(site_name, str) and site_name.strip():
-        return WIDGET_NOTICE_LINE.format(site=site_name.strip())
+    """The default first-turn line, naming the site when it has a public name.
+
+    ``site_name`` is a Site's ``display_name``. Sites backfilled from a
+    workspace carry the workspace's name, so it passes the same FR-15 test as
+    any public name (:func:`public_site_name`); otherwise the unnamed line.
+    """
+    name = public_site_name(site_name)
+    if name:
+        return WIDGET_NOTICE_LINE.format(site=name)
     return WIDGET_NOTICE_LINE_UNNAMED
 
 
@@ -213,8 +224,9 @@ def _stored_line(settings: Mapping[str, Any]) -> Optional[str]:
 def build_disclosure(settings: Optional[Mapping[str, Any]], site_name: Any) -> AIDisclosure:
     """Build the widget notice from settings; never copies a badge from them.
 
-    ``site_name`` is the site's name, or the workspace's when the site has
-    none. Missing or non-dict settings give the English default.
+    ``site_name`` is the Site's ``display_name`` or ``None``, never the
+    workspace's name (FR-15). Missing or non-dict settings give the English
+    default.
     """
     stored = settings if isinstance(settings, Mapping) else {}
     locale = stored.get(LOCALE_SETTINGS_KEY)
@@ -247,6 +259,14 @@ def _public_text(value: Any) -> Optional[str]:
     return stripped
 
 
+def _public_chosen_name(value: Any) -> Optional[str]:
+    """``value`` stripped when it is public text and not the auto-created form."""
+    text = _public_text(value)
+    if text and not text.casefold().endswith(AUTO_WORKSPACE_NAME_SUFFIX):
+        return text
+    return None
+
+
 def public_principal_name(company_name: Any, workspace_name: Any) -> Optional[str]:
     """The public name a notice may give for whom the AI acts (FR-15), or ``None``.
 
@@ -254,13 +274,18 @@ def public_principal_name(company_name: Any, workspace_name: Any) -> Optional[st
     unless it is the auto-created "{name or email}'s Workspace" form. A name
     holding an "@" is never used: it may be the owner's email.
     """
-    company = _public_text(company_name)
-    if company:
-        return company
-    workspace = _public_text(workspace_name)
-    if workspace and not workspace.casefold().endswith(AUTO_WORKSPACE_NAME_SUFFIX):
-        return workspace
-    return None
+    return _public_text(company_name) or _public_chosen_name(workspace_name)
+
+
+def public_site_name(display_name: Any) -> Optional[str]:
+    """A Site's ``display_name`` when a widget notice may show it (FR-15), or ``None``.
+
+    The deployer sets it, but Sites created from a workspace (the PRD-008-A
+    backfill, ``ensure_shopify_site``) copy the workspace's name, which may be
+    the auto-created "{name or email}'s Workspace". That form, and any name
+    holding an "@", is never shown.
+    """
+    return _public_chosen_name(display_name)
 
 
 def channel_notice(principal: Optional[str]) -> str:
@@ -277,9 +302,21 @@ def telegram_start_intro(principal: Optional[str]) -> str:
     return TELEGRAM_START_INTRO_UNNAMED
 
 
+def human_question_window(text: str) -> str:
+    """The part of a message :func:`asks_if_human` checks: its first
+    :data:`HUMAN_QUESTION_MAX_CHARS` characters."""
+    return text[:HUMAN_QUESTION_MAX_CHARS]
+
+
 def asks_if_human(text: Any) -> bool:
-    """True when a message asks whether it is talking to a person or a bot."""
-    return isinstance(text, str) and _HUMAN_QUESTION.search(text) is not None
+    """True when a message asks whether it is talking to a person or a bot.
+
+    Only :func:`human_question_window` of the message is scanned, so the cost
+    stays bounded on an arbitrarily long, attacker-written message.
+    """
+    if not isinstance(text, str):
+        return False
+    return _HUMAN_QUESTION.search(human_question_window(text)) is not None
 
 
 def channel_notice_due(
