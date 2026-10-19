@@ -19,11 +19,17 @@ from core.database.database import get_db
 from core.models import Agent
 from core.models.workspaces import Workspace
 from services.onboarding_state import public_snapshot
+from services.orchestrator_auto_agent import (
+    AUTO_CONFIG_FIELDS,
+    auto_llm_view,
+    sync_auto_configuration,
+    sync_auto_llm,
+)
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
-from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
+from core.llm.defaults import get_default_model_config
 from core.seeds.seed_auto_agent import (
     _PERSONALITY_BASE_VOICES,
     compose_persona_with_doctrine,
@@ -575,6 +581,19 @@ _ORCHESTRATOR_DEFAULTS = {
 _VALID_HARNESS_SCHEDULES = ["weekly", "biweekly", "monthly"]
 _VALID_HARNESS_MODES = ["full_auto", "manual"]
 
+# Each top-level orchestrator field a save validates, and its vocabulary.
+_ORCHESTRATOR_VOCABULARIES = {
+    "personality_mode": _VALID_PERSONALITY_MODES,
+    "communication_style": _VALID_COMMUNICATION_STYLES,
+    "proactive_level": _VALID_PROACTIVE_LEVELS,
+    "thinking_level": _VALID_THINKING_LEVELS,
+}
+# The top-level fields a save writes to workspace.settings.orchestrator.
+_ORCHESTRATOR_FIELDS = (
+    "personality_mode", "custom_soul", "communication_style", "proactive_level", "thinking_level",
+    "preferred_channel",
+)
+
 # Personality preset base voices — the doctrine-FREE tone strings; legacy GET
 # detection matches against them. Defined ONCE in core.seeds.seed_auto_agent (so
 # the persona backfill there can reach the professional/technical voices without
@@ -664,32 +683,14 @@ async def get_orchestrator_settings(
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    settings = workspace.settings or {}
-    orchestrator = settings.get("orchestrator", {})
-
     # Merge with defaults so frontend always gets a complete object
-    result = {**_ORCHESTRATOR_DEFAULTS, **orchestrator}
-    result["heartbeat"] = {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **orchestrator.get("heartbeat", {})}
-    result["harness"] = {**_ORCHESTRATOR_DEFAULTS["harness"], **orchestrator.get("harness", {})}
+    result = _orchestrator_view(workspace.settings)
 
     # Pull LLM + persona from the Auto agent (single source of truth)
     try:
         auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
         if auto_agent:
-            # LLM config
-            mc = auto_agent.model_config or {}
-            result["llm"] = {
-                "provider": mc.get("provider", DEFAULT_LLM_PROVIDER),
-                "model_id": mc.get("model_id", DEFAULT_LLM_MODEL),
-                "temperature": mc.get("temperature", 0.7),
-                "max_tokens": mc.get("max_tokens", 4000),
-                "top_p": mc.get("top_p", 1.0),
-                "frequency_penalty": mc.get("frequency_penalty", 0.0),
-                "presence_penalty": mc.get("presence_penalty", 0.0),
-                "stop": mc.get("stop"),
-                "timeout": mc.get("timeout"),
-                "fallback_model_id": mc.get("fallback_model_id"),
-            }
+            result["llm"] = auto_llm_view(auto_agent.model_config or {})
             # Persona / Soul — read from Auto agent configuration. Single-source
             # read-side detection (P226-RVW-5): a stored personality_mode wins;
             # only rows without one fall through to legacy preset-by-text match
@@ -700,12 +701,7 @@ async def get_orchestrator_settings(
             )
 
             # Configuration (thinking, proactive, communication style)
-            if agent_cfg.get("communication_style"):
-                result["communication_style"] = agent_cfg["communication_style"]
-            if agent_cfg.get("proactive_level"):
-                result["proactive_level"] = agent_cfg["proactive_level"]
-            if agent_cfg.get("thinking_level"):
-                result["thinking_level"] = agent_cfg["thinking_level"]
+            result.update({key: agent_cfg[key] for key in AUTO_CONFIG_FIELDS if agent_cfg.get(key)})
 
             logger.info(
                 "Orchestrator GET for ws=%s: personality_mode=%s, llm_model=%s, auto_agent_id=%s, "
@@ -754,99 +750,12 @@ async def save_orchestrator_settings(
     workspace = db.query(Workspace).get(ctx.workspace_id)
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
-
-    # Validate top-level fields
-    if "personality_mode" in payload and payload["personality_mode"] not in _VALID_PERSONALITY_MODES:
-        raise HTTPException(400, f"personality_mode must be one of {_VALID_PERSONALITY_MODES}")
-    if "communication_style" in payload and payload["communication_style"] not in _VALID_COMMUNICATION_STYLES:
-        raise HTTPException(400, f"communication_style must be one of {_VALID_COMMUNICATION_STYLES}")
-    if "proactive_level" in payload and payload["proactive_level"] not in _VALID_PROACTIVE_LEVELS:
-        raise HTTPException(400, f"proactive_level must be one of {_VALID_PROACTIVE_LEVELS}")
-    if "thinking_level" in payload and payload["thinking_level"] not in _VALID_THINKING_LEVELS:
-        raise HTTPException(400, f"thinking_level must be one of {_VALID_THINKING_LEVELS}")
-    if "preferred_channel" in payload and payload["preferred_channel"] is not None:
-        # Allow stored channel keys (e.g. "channel:<uuid>") in addition to platform names.
-        pc = payload["preferred_channel"]
-        if not isinstance(pc, str):
-            raise HTTPException(400, "preferred_channel must be a string")
-
-    # Validate heartbeat
-    hb = payload.get("heartbeat")
-    if hb and isinstance(hb, dict):
-        if "interval_minutes" in hb and hb["interval_minutes"] not in _VALID_HEARTBEAT_INTERVALS:
-            raise HTTPException(400, f"heartbeat.interval_minutes must be one of {_VALID_HEARTBEAT_INTERVALS}")
-        if "notification_channel" in hb and hb["notification_channel"] not in _VALID_NOTIFICATION_CHANNELS:
-            raise HTTPException(400, f"heartbeat.notification_channel must be one of {_VALID_NOTIFICATION_CHANNELS}")
-        # Validate time format (HH:MM)
-        for field in ("active_hours_start", "active_hours_end"):
-            val = hb.get(field)
-            if val:
-                try:
-                    parts = val.split(":")
-                    assert len(parts) == 2
-                    assert 0 <= int(parts[0]) <= 23
-                    assert 0 <= int(parts[1]) <= 59
-                except (ValueError, AssertionError):
-                    raise HTTPException(400, f"heartbeat.{field} must be HH:MM format")
-
-    # Validate harness
-    harness = payload.get("harness")
-    if harness and isinstance(harness, dict):
-        if "schedule" in harness and harness["schedule"] not in _VALID_HARNESS_SCHEDULES:
-            raise HTTPException(400, f"harness.schedule must be one of {_VALID_HARNESS_SCHEDULES}")
-        if "mode" in harness and harness["mode"] not in _VALID_HARNESS_MODES:
-            raise HTTPException(400, f"harness.mode must be one of {_VALID_HARNESS_MODES}")
-
-    # PRD-223 S0.1: validate the orchestrator model. This route was the
-    # platform's only model-write path with no validation at all — the door
-    # the 2026-07-31 quarantine incident walked through. Unknown model → 422;
-    # model quarantined for the orchestrator seat → 422 with the policy reason.
-    llm_payload = payload.get("llm")
-    if llm_payload and isinstance(llm_payload, dict) and llm_payload.get("model_id"):
-        requested_model = str(llm_payload["model_id"]).strip()
-        from api.llm_marketplace import _get_or_create_from_cache
-        from core.llm.model_policy import check_model_for_agent
-
-        requested_provider = llm_payload.get("provider")
-        if not requested_model or _get_or_create_from_cache(db, requested_model, requested_provider) is None:
-            raise HTTPException(
-                422,
-                f"Unknown model '{requested_model}' — not found in the model catalog. "
-                "Sync the OpenRouter catalog or pick a listed model.",
-            )
-        allowed, reason = check_model_for_agent(
-            db, ctx.workspace_id, requested_model, orchestrator_seat=True,
-            provider=requested_provider,
-        )
-        if not allowed:
-            raise HTTPException(
-                422,
-                f"Model rejected for the orchestrator (Auto) role: {reason}. "
-                "See Settings → System → model_policy.",
-            )
+    _validate_orchestrator_payload(payload)
+    _validate_orchestrator_model(db, ctx.workspace_id, payload.get("llm"))
 
     # Merge into workspace settings
     settings = dict(workspace.settings or {})
-    existing_orch = dict(settings.get("orchestrator", {}))
-
-    # Update top-level orchestrator fields
-    for key in ("personality_mode", "custom_soul", "communication_style", "proactive_level", "thinking_level", "preferred_channel"):
-        if key in payload:
-            existing_orch[key] = payload[key]
-
-    # Update heartbeat (merge, don't replace)
-    if hb and isinstance(hb, dict):
-        existing_hb = dict(existing_orch.get("heartbeat", {}))
-        existing_hb.update(hb)
-        existing_orch["heartbeat"] = existing_hb
-
-    # Update harness (merge, don't replace)
-    if harness and isinstance(harness, dict):
-        existing_harness = dict(existing_orch.get("harness", {}))
-        existing_harness.update(harness)
-        existing_orch["harness"] = existing_harness
-
-    settings["orchestrator"] = existing_orch
+    settings["orchestrator"] = _merge_orchestrator(settings.get("orchestrator", {}), payload)
     workspace.settings = settings
 
     from sqlalchemy.orm.attributes import flag_modified
@@ -855,42 +764,7 @@ async def save_orchestrator_settings(
     # ── Sync to Auto agent row (single source of truth for LLM + Soul) ──
     try:
         auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
-
-        # LLM config → Auto agent model_config
-        llm = payload.get("llm")
-        if llm and isinstance(llm, dict):
-            new_mc = dict(auto_agent.model_config or {})
-            for key in ("provider", "model_id", "temperature", "max_tokens",
-                        "top_p", "frequency_penalty", "presence_penalty",
-                        "stop", "timeout", "fallback_model_id"):
-                if key in llm:
-                    new_mc[key] = llm[key]
-            auto_agent.model_config = new_mc
-
-            # Sync to system_settings so config.LLM_PROVIDER/LLM_MODEL stay in sync
-            # (used by internal orchestrator operations: agent_factory, chatbot, etc.)
-            try:
-                from core.models.system_settings import SystemSetting
-                for ss_key, llm_key in [("provider", "provider"), ("model", "model_id")]:
-                    if llm_key in llm:
-                        ss = db.query(SystemSetting).filter(
-                            SystemSetting.category == "orchestrator_llm",
-                            SystemSetting.key == ss_key,
-                        ).first()
-                        if ss:
-                            ss.value = llm[llm_key]
-                        else:
-                            db.add(SystemSetting(
-                                category="orchestrator_llm",
-                                key=ss_key,
-                                value=llm[llm_key],
-                                default_value=llm[llm_key],
-                                value_type="string",
-                                is_required=True,
-                            ))
-            except Exception:
-                logger.warning("Failed to sync LLM settings to system_settings table")
-            flag_modified(auto_agent, "model_config")
+        sync_auto_llm(db, auto_agent, payload.get("llm"))
 
         # Soul / Personality → Auto agent custom_persona_prompt
         # Defensive: only overwrite custom_persona_prompt when the caller
@@ -906,24 +780,7 @@ async def save_orchestrator_settings(
                 auto_agent.custom_persona_prompt = resolved_persona
             auto_agent.use_custom_persona = True
 
-        # Configuration fields → Auto agent configuration JSONB
-        config_fields = {}
-        # Store personality_mode in configuration so GET can read it back
-        # without fragile text comparison
-        if personality_mode:
-            config_fields["personality_mode"] = personality_mode
-        if "communication_style" in payload:
-            config_fields["communication_style"] = payload["communication_style"]
-        if "proactive_level" in payload:
-            config_fields["proactive_level"] = payload["proactive_level"]
-        if "thinking_level" in payload:
-            config_fields["thinking_level"] = payload["thinking_level"]
-        if config_fields:
-            new_cfg = dict(auto_agent.configuration or {})
-            new_cfg.update(config_fields)
-            auto_agent.configuration = new_cfg
-            flag_modified(auto_agent, "configuration")
-
+        sync_auto_configuration(auto_agent, payload)
     except Exception:
         logger.exception("Failed to sync orchestrator settings to Auto agent for workspace %s", ctx.workspace_id)
 
@@ -931,32 +788,113 @@ async def save_orchestrator_settings(
 
     logger.info("Updated orchestrator settings for workspace %s", workspace.id)
 
-    # Return merged result with defaults
-    result = {**_ORCHESTRATOR_DEFAULTS, **existing_orch}
-    result["heartbeat"] = {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **existing_orch.get("heartbeat", {})}
-    result["harness"] = {**_ORCHESTRATOR_DEFAULTS["harness"], **existing_orch.get("harness", {})}
+    # Return merged result with defaults, and the LLM from the Auto agent
+    return {"status": "saved", "orchestrator": {**_orchestrator_view(settings), **_saved_llm(db, ctx.workspace_id)}}
 
-    # Include LLM from Auto agent in response
+
+def _orchestrator_view(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The orchestrator block GET and PUT return: the stored fields over the defaults,
+    with heartbeat and HARNESS each merged key by key over their defaults."""
+    orchestrator = (settings or {}).get("orchestrator", {})
+    return {
+        **_ORCHESTRATOR_DEFAULTS,
+        **orchestrator,
+        "heartbeat": {**_ORCHESTRATOR_DEFAULTS["heartbeat"], **orchestrator.get("heartbeat", {})},
+        "harness": {**_ORCHESTRATOR_DEFAULTS["harness"], **orchestrator.get("harness", {})},
+    }
+
+
+def _saved_llm(db: Session, workspace_id) -> Dict[str, Any]:
+    """``{"llm": ...}`` for the PUT response, from the Auto agent's model_config;
+    {} when it has none or cannot be read (the save itself has already committed)."""
     try:
-        auto_agent = _get_or_seed_auto_agent(db, ctx.workspace_id)
+        auto_agent = _get_or_seed_auto_agent(db, workspace_id)
         if auto_agent and auto_agent.model_config:
-            mc = auto_agent.model_config
-            result["llm"] = {
-                "provider": mc.get("provider", DEFAULT_LLM_PROVIDER),
-                "model_id": mc.get("model_id", DEFAULT_LLM_MODEL),
-                "temperature": mc.get("temperature", 0.7),
-                "max_tokens": mc.get("max_tokens", 4000),
-                "top_p": mc.get("top_p", 1.0),
-                "frequency_penalty": mc.get("frequency_penalty", 0.0),
-                "presence_penalty": mc.get("presence_penalty", 0.0),
-                "stop": mc.get("stop"),
-                "timeout": mc.get("timeout"),
-                "fallback_model_id": mc.get("fallback_model_id"),
-            }
+            return {"llm": auto_llm_view(auto_agent.model_config)}
     except Exception:
-        pass
+        logger.exception("Failed to read the Auto agent's LLM config for workspace %s", workspace_id)
+    return {}
 
-    return {"status": "saved", "orchestrator": result}
+
+def _validate_orchestrator_payload(payload: Dict[str, Any]) -> None:
+    """400 on any value outside its field's vocabulary, in the order the save checked them."""
+    for key, valid in _ORCHESTRATOR_VOCABULARIES.items():
+        if key in payload and payload[key] not in valid:
+            raise HTTPException(400, f"{key} must be one of {valid}")
+    # Allow stored channel keys (e.g. "channel:<uuid>") in addition to platform names.
+    if payload.get("preferred_channel") is not None and not isinstance(payload["preferred_channel"], str):
+        raise HTTPException(400, "preferred_channel must be a string")
+    hb = payload.get("heartbeat")
+    if hb and isinstance(hb, dict):
+        _validate_heartbeat(hb)
+    harness = payload.get("harness")
+    if harness and isinstance(harness, dict):
+        if "schedule" in harness and harness["schedule"] not in _VALID_HARNESS_SCHEDULES:
+            raise HTTPException(400, f"harness.schedule must be one of {_VALID_HARNESS_SCHEDULES}")
+        if "mode" in harness and harness["mode"] not in _VALID_HARNESS_MODES:
+            raise HTTPException(400, f"harness.mode must be one of {_VALID_HARNESS_MODES}")
+
+
+def _validate_heartbeat(hb: Dict[str, Any]) -> None:
+    """400 on a heartbeat interval or channel outside its vocabulary, or an active hour not HH:MM."""
+    if "interval_minutes" in hb and hb["interval_minutes"] not in _VALID_HEARTBEAT_INTERVALS:
+        raise HTTPException(400, f"heartbeat.interval_minutes must be one of {_VALID_HEARTBEAT_INTERVALS}")
+    if "notification_channel" in hb and hb["notification_channel"] not in _VALID_NOTIFICATION_CHANNELS:
+        raise HTTPException(400, f"heartbeat.notification_channel must be one of {_VALID_NOTIFICATION_CHANNELS}")
+    # Validate time format (HH:MM)
+    for field in ("active_hours_start", "active_hours_end"):
+        val = hb.get(field)
+        if val:
+            try:
+                parts = val.split(":")
+                assert len(parts) == 2
+                assert 0 <= int(parts[0]) <= 23
+                assert 0 <= int(parts[1]) <= 59
+            except (ValueError, AssertionError):
+                raise HTTPException(400, f"heartbeat.{field} must be HH:MM format") from None
+
+
+def _validate_orchestrator_model(db: Session, workspace_id, llm_payload: Any) -> None:
+    """PRD-223 S0.1: validate the orchestrator model. This route was the
+    platform's only model-write path with no validation at all — the door
+    the 2026-07-31 quarantine incident walked through. Unknown model → 422;
+    model quarantined for the orchestrator seat → 422 with the policy reason."""
+    if not (llm_payload and isinstance(llm_payload, dict) and llm_payload.get("model_id")):
+        return
+    requested_model = str(llm_payload["model_id"]).strip()
+    from api.llm_marketplace import _get_or_create_from_cache
+    from core.llm.model_policy import check_model_for_agent
+
+    requested_provider = llm_payload.get("provider")
+    if not requested_model or _get_or_create_from_cache(db, requested_model, requested_provider) is None:
+        raise HTTPException(
+            422,
+            f"Unknown model '{requested_model}' — not found in the model catalog. "
+            "Sync the OpenRouter catalog or pick a listed model.",
+        )
+    allowed, reason = check_model_for_agent(
+        db, workspace_id, requested_model, orchestrator_seat=True,
+        provider=requested_provider,
+    )
+    if not allowed:
+        raise HTTPException(
+            422,
+            f"Model rejected for the orchestrator (Auto) role: {reason}. "
+            "See Settings → System → model_policy.",
+        )
+
+
+def _merge_orchestrator(existing: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The stored orchestrator block with the payload's fields over it. Heartbeat and
+    HARNESS merge key by key rather than replace."""
+    merged = {**existing, **{key: payload[key] for key in _ORCHESTRATOR_FIELDS if key in payload}}
+    hb = payload.get("heartbeat")
+    if hb and isinstance(hb, dict):
+        merged["heartbeat"] = {**existing.get("heartbeat", {}), **hb}
+    harness = payload.get("harness")
+    if harness and isinstance(harness, dict):
+        merged["harness"] = {**existing.get("harness", {}), **harness}
+    return merged
 
 
 # ── What Automatos Knows (Memory Stats) ─────────────────────────────
