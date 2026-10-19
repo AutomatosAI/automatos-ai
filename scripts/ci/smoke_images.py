@@ -5,23 +5,34 @@
 through ``scripts/ci/smoke-fresh-clone.sh`` in one of two modes:
 
 * ``SMOKE_IMAGES=pull`` (after images.yml publishes on main, or by hand with a tag):
-  the app images are pulled from GHCR into an empty Docker cache;
+  ``make up`` on the clean checkout pulls the app images from GHCR into an empty Docker
+  cache (PRD-262 US-036). After a push it picks the tag itself; a weekly or manual run
+  pins it;
 * ``SMOKE_IMAGES=prebuilt`` (the pull-request variant): the job built the three amd64
   images and tagged them with the GHCR names, so compose neither pulls nor builds them.
+
+The fresh-clone lane's source build (``SMOKE_IMAGES`` unset) has its images checked in
+mode ``build``: each is tagged ``local-*`` and labelled with the checkout's commit.
 
 The script times the boots with ``smoke_boot.py``, as the fresh-clone smoke does. This
 tool does the rest, one command per step:
 
 * ``target``: the tag a run boots and the commit its images must carry: ``sha-<7>``, or
-  ``weekly-<yyyymmdd>`` after images.yml's weekly OS rebuild (PRD-262 US-011);
-* ``pull``: runs ``docker compose pull``, timing it and counting the bytes the runner
-  received meanwhile;
+  ``weekly-<yyyymmdd>`` after images.yml's weekly OS rebuild (PRD-262 US-011), and the
+  tag to pin for ``make up`` (``pin``; none after a push, so make up picks it);
+* ``base``: for the pull-request ``make up`` job, ``sha-<7>`` of the merge base, or of
+  the nearest ancestor whose three images CI published;
+* ``pull``: runs the pull (``make up``), timing it, counting the bytes the runner
+  received meanwhile and, with ``--log``, keeping its output and counting the lines
+  where a registry refused a pull for its rate limit (Docker Hub's 429);
 * ``workers``: the backend's processes. This is the first CI boot of the production
   stage, so it must run without ``--reload`` and with the expected worker count;
 * ``images``: each app container runs its ``ghcr.io/automatosai/automatos-*`` image,
   which carries the commit's ``org.opencontainers.image.revision``. A pulled image's
   ``RepoDigests`` holds the index digest its tag resolves to on GHCR (a local build
-  has none). No tag is ``local-*``, and no compose-built ``<project>-*`` image exists;
+  has none), and the app images exist only under that tag. No tag is ``local-*``, and
+  no compose-built ``<project>-*`` image exists. A local build (mode ``build``) is
+  tagged ``local-*``, never with an official tag;
 * ``report``: the step-summary section, and the JSON PRD-262 US-004 takes medians from.
 
 The standard library only, like the other smoke tools.
@@ -37,6 +48,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.error
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -55,8 +67,16 @@ layers = _sibling("image_layers")
 registry = _sibling("image_registry")
 image_matrix = _sibling("image_matrix")  # images.yml's picker, which also names the weekly tag
 
-MODES = ("pull", "prebuilt")
+MODES = ("pull", "prebuilt", "build")
 APP_SERVICES = ("backend", "frontend", "workspace-worker")
+PUBLISHED_NAMES = ("api", "frontend", "workspace-worker")  # automatos-<name> on GHCR
+NOT_FOUND = 404
+DANGLING = "<none>"
+# How a registry refuses a pull over its rate limit: Docker Hub answers 429
+# `toomanyrequests: You have reached your pull rate limit` (PRD-262 §9, Docker Hub on
+# the first run).
+RATE_LIMITED = re.compile(r"toomanyrequests|429 Too Many Requests|pull rate limit", re.I)
+RATE_LIMIT_LINES_KEPT = 5
 PUBLISHED_PREFIX = "ghcr.io/automatosai/automatos-"
 REVISION_LABEL = "org.opencontainers.image.revision"
 LOCAL_TAG_PREFIX = "local-"
@@ -105,6 +125,41 @@ def target(event: str, sha: str = "", tag: str = "", trigger: str = "", created:
     return {"tag": tag, "revision": named.group(1) if named else ""}
 
 
+def pin_for(event: str, trigger: str, tag: str) -> str:
+    """The tag smoke-images exports as AUTOMATOS_IMAGE_TAG; empty lets ``make up`` pick.
+
+    After a push to main (or a manual images run there), ``make up`` on that clean
+    checkout must pick the commit's ``sha-<7>`` itself (PRD-262 US-036). The weekly
+    rebuild's tag, a manual run's tag and a pull request's prebuilt tag are pinned:
+    make up would pick the commit's own build over the weekly one.
+    """
+    if event == "workflow_run" and trigger != SCHEDULE_TRIGGER:
+        return ""
+    return tag
+
+
+def _published(ref: str) -> bool:
+    """Whether ``ref``'s tag is on its registry; a read error other than 404 raises."""
+    try:
+        registry.resolve(ref)
+    except urllib.error.HTTPError as error:
+        if error.code == NOT_FOUND:
+            return False
+        raise
+    return True
+
+
+def published_base(candidates: Sequence[str]) -> Optional[Dict[str, str]]:
+    """The first commit of ``candidates`` whose three app images CI published as ``sha-<7>``."""
+    for sha in candidates:
+        if not FULL_SHA.match(sha):
+            raise ValueError(f"not a full commit sha: {sha!r}")
+        tag = f"sha-{sha[:SHORT_SHA]}"
+        if all(_published(f"{PUBLISHED_PREFIX}{name}:{tag}") for name in PUBLISHED_NAMES):
+            return {"tag": tag, "revision": sha}
+    return None
+
+
 # --------------------------------------------------------------------------- pull
 
 
@@ -128,6 +183,23 @@ def received_bytes(device_table: str, interface: str) -> int:
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def tee_runner(log: Path) -> Callable[[List[str]], int]:
+    """A runner that shows the command's output and keeps a copy in ``log``."""
+    def run(command: List[str]) -> int:
+        with open(log, "w", encoding="utf-8") as kept, subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace") as process:
+            for line in process.stdout:
+                sys.stdout.write(line)
+                kept.write(line)
+        return process.returncode
+    return run
+
+
+def rate_limited(text: str) -> List[str]:
+    """The output lines where a registry refused a pull over its rate limit."""
+    return [line.strip() for line in text.splitlines() if RATE_LIMITED.search(line)]
 
 
 def run_pull(
@@ -270,21 +342,42 @@ def check_service(service: str, spec: dict, mode: str, revision: str) -> dict:
         index, problem = _digest_problem(ref, repo_digests)
         if problem:
             failures.append(problem)
+    if mode == "build" and not ref.rsplit(":", 1)[-1].startswith(LOCAL_TAG_PREFIX):
+        failures.append(f"{ref} was built here under an official tag: a local build is tagged {LOCAL_TAG_PREFIX}*")
     return {
         "service": service, "container": spec["container_name"], "image": ref,
         "revision": label, "repo_digests": repo_digests, "index_digest": index, "failures": failures,
     }
 
 
-def stray_images(listing: Iterable[dict], project: str) -> List[str]:
-    """``docker image ls`` rows that show a local build: a ``local-*`` tag or compose's own name."""
+def stray_images(listing: Iterable[dict], project: str, local_allowed: bool = False) -> List[str]:
+    """``docker image ls`` rows that show a local build: a ``local-*`` tag or compose's own name.
+
+    ``local_allowed``: a source build (mode ``build``) is meant to carry ``local-*``.
+    """
     failures = []
     for row in listing:
         repository, tag = str(row.get("Repository", "")), str(row.get("Tag", ""))
-        if tag.startswith(LOCAL_TAG_PREFIX):
+        if tag.startswith(LOCAL_TAG_PREFIX) and not local_allowed:
             failures.append(f"{repository}:{tag} carries a {LOCAL_TAG_PREFIX}* tag")
         if repository.startswith(f"{project}-"):
             failures.append(f"{repository}:{tag} was built by docker compose (project {project})")
+    return failures
+
+
+def other_tags(listing: Iterable[dict], refs: Iterable[str]) -> List[str]:
+    """App images also present under another tag than the one the stack runs.
+
+    A ``local-*`` tag is left to ``stray_images``, which already reports it.
+    """
+    expected = dict(ref.rsplit(":", 1) for ref in refs)
+    failures = []
+    for row in listing:
+        repository, tag = str(row.get("Repository", "")), str(row.get("Tag", ""))
+        if repository in expected and tag not in (expected[repository], DANGLING) \
+                and not tag.startswith(LOCAL_TAG_PREFIX):
+            failures.append(f"{repository}:{tag} is here too: the app images must exist only under "
+                            f"{expected[repository]}")
     return failures
 
 
@@ -305,7 +398,8 @@ def check_images(config: dict, mode: str, revision: str, arch: str) -> dict:
     """
     services = [check_service(name, config["services"][name], mode, revision) for name in APP_SERVICES]
     listing = docker_lines("image", "ls", "--format", "{{json .}}")
-    stray = stray_images(listing, config["name"])
+    stray = stray_images(listing, config["name"], local_allowed=mode == "build")
+    extra = other_tags(listing, [row["image"] for row in services]) if mode == "pull" else []
     return {
         "mode": mode,
         "arch": arch,
@@ -314,7 +408,9 @@ def check_images(config: dict, mode: str, revision: str, arch: str) -> dict:
         "image_list": [{key: row.get(key) for key in ("Repository", "Tag", "ID", "Size")} for row in listing],
         "app_layer_bytes": app_layer_bytes([row["image"] for row in services], arch) if mode == "pull" else None,
         "stray": stray,
-        "failures": [f"{row['service']}: {failure}" for row in services for failure in row["failures"]] + stray,
+        "other_tags": extra,
+        "failures": [f"{row['service']}: {failure}" for row in services for failure in row["failures"]]
+        + stray + extra,
     }
 
 
@@ -333,23 +429,51 @@ def _say(failures: Sequence[str], what: str) -> int:
     return 1 if failures else 0
 
 
-def cmd_target(args: argparse.Namespace) -> int:
-    """Print the tag and revision, and append them to ``--outputs`` ($GITHUB_OUTPUT)."""
-    chosen = target(args.event, args.sha, args.tag, args.trigger, args.created)
-    lines = "".join(f"{key}={value}\n" for key, value in chosen.items())
+def _outputs(values: Dict[str, str], path: Optional[str]) -> None:
+    """Print ``key=value`` lines and append them to ``path`` ($GITHUB_OUTPUT)."""
+    lines = "".join(f"{key}={value}\n" for key, value in values.items())
     print(lines, end="")
-    if args.outputs:
-        with open(args.outputs, "a", encoding="utf-8") as outputs:
+    if path:
+        with open(path, "a", encoding="utf-8") as outputs:
             outputs.write(lines)
+
+
+def cmd_target(args: argparse.Namespace) -> int:
+    """The tag, the revision and the tag to pin for make up, as job outputs."""
+    chosen = target(args.event, args.sha, args.tag, args.trigger, args.created)
+    _outputs({**chosen, "pin": pin_for(args.event, args.trigger, chosen["tag"])}, args.outputs)
+    return 0
+
+
+def cmd_base(args: argparse.Namespace) -> int:
+    """sha-<7> of the merge base, or of the nearest candidate CI published, as job outputs."""
+    listed = [line.strip() for line in args.candidates.read_text(encoding="utf-8").splitlines() if line.strip()]
+    candidates = listed if listed[:1] == [args.merge_base] else [args.merge_base, *listed]
+    chosen = published_base(candidates)
+    if chosen is None:
+        print(f"::error title=smoke-images::CI published no images for the merge base {args.merge_base[:12]} "
+              f"or the {len(candidates) - 1} commits before it")
+        return 1
+    if chosen["revision"] != args.merge_base:
+        print(f"::warning title=smoke-images::CI published no images for the merge base {args.merge_base[:12]} "
+              f"(a [skip ci] merge, or a failed images run): using its ancestor {chosen['revision'][:12]}")
+    _outputs(chosen, args.outputs)
     return 0
 
 
 def cmd_pull(args: argparse.Namespace) -> int:
-    """Run the pull command after ``--`` and record its seconds and bytes."""
+    """Run the pull command after ``--`` and record its seconds, bytes and rate limits."""
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("smoke_images.py pull: give the pull command after --")
-    code, record = run_pull(command, args.images_before)
+    if args.log is None:
+        code, record = run_pull(command, args.images_before)
+    else:
+        code, record = run_pull(command, args.images_before, runner=tee_runner(args.log))
+        limited = rate_limited(args.log.read_text(encoding="utf-8", errors="replace"))
+        record = {**record, "rate_limited": len(limited), "rate_limit_lines": limited[:RATE_LIMIT_LINES_KEPT]}
+        for line in limited[:RATE_LIMIT_LINES_KEPT]:
+            print(f"::warning title=smoke-images::a registry refused a pull over its rate limit: {line}")
     _write(args.out, record)
     print(f"Pulled in {record['seconds']:.1f}s; {layers.mb(record['received_bytes'])} received on "
           f"{record['interface']}")
@@ -413,10 +537,16 @@ def build_parser() -> argparse.ArgumentParser:
     pick.add_argument("--tag", default="", help="workflow_dispatch: the tag to boot")
     pick.add_argument("--trigger", default="", help="workflow_run: the event that started the images run")
     pick.add_argument("--created", default="", help="workflow_run: when the images run was created (ISO 8601)")
-    pick.add_argument("--outputs", help="append tag= and revision= here ($GITHUB_OUTPUT)")
+    pick.add_argument("--outputs", help="append tag=, revision= and pin= here ($GITHUB_OUTPUT)")
+    base = commands.add_parser("base", help="sha-<7> of the merge base, or its nearest published ancestor")
+    base.add_argument("--merge-base", required=True, help="the pull request's merge-base commit")
+    base.add_argument("--candidates", type=Path, required=True,
+                      help="a file of commits, newest first, from the merge base back")
+    base.add_argument("--outputs", help="append tag= and revision= here ($GITHUB_OUTPUT)")
     pull = commands.add_parser("pull", help="time a pull and count the bytes received")
     pull.add_argument("--out", type=Path, required=True)
     pull.add_argument("--images-before", type=int, default=0, help="images in the cache before it was emptied")
+    pull.add_argument("--log", type=Path, help="keep the command's output here and count rate-limited pulls")
     pull.add_argument("command", nargs=argparse.REMAINDER, help="-- docker compose … pull")
     workers = commands.add_parser("workers", help="the backend runs without --reload, with --expect workers")
     workers.add_argument("--container", required=True)
@@ -439,8 +569,8 @@ def build_parser() -> argparse.ArgumentParser:
     return root
 
 
-COMMANDS = {"target": cmd_target, "pull": cmd_pull, "workers": cmd_workers, "images": cmd_images,
-            "report": cmd_report}
+COMMANDS = {"target": cmd_target, "base": cmd_base, "pull": cmd_pull, "workers": cmd_workers,
+            "images": cmd_images, "report": cmd_report}
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

@@ -27,6 +27,12 @@ name: smoke-fresh-clone
 # backend` finishes in under 8 s with an SSE client connected
 # (scripts/ci/smoke_production_backend.py).
 #
+# PRD-262 US-036 — docker-compose.yml names the published images, so the build here is
+# tagged local-<sha7> and labelled org.opencontainers.image.revision=HEAD, as make build
+# does; the smoke checks that every app container runs such an image
+# (scripts/ci/smoke_images.py images --mode build). PRD-262 US-039 moves the build to
+# `make build` itself.
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -78,6 +84,8 @@ on:
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_images.py"
+      - "scripts/ci/smoke_images_report.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -111,6 +119,8 @@ on:
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_images.py"
+      - "scripts/ci/smoke_images_report.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual

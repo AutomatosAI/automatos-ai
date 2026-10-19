@@ -48,21 +48,30 @@
 #
 # PRD-262 US-003 runs the same boot steps on images instead of a source build, for
 # .github/workflows/smoke-images.yml. SMOKE_IMAGES picks where the app images come from:
-#   (unset)   build them from this checkout (the fresh-clone lane, above);
-#   pull      the published path: docker-compose.images.yml with AUTOMATOS_IMAGE_TAG.
-#             The Docker image cache is emptied first, then `docker compose pull` is
-#             timed and the bytes it brought in are counted;
+#   (unset)   build them from this checkout (the fresh-clone lane, above), as make build
+#             does: tagged local-<sha7> and labelled with HEAD (AUTOMATOS_REVISION);
+#   pull      the published path a self-hoster takes (PRD-262 US-036): the Docker image
+#             cache is emptied, then `make up` runs on this clean checkout. With no
+#             AUTOMATOS_IMAGE_TAG (an empty one counts as none) make up picks the tag
+#             itself; a weekly or manual run pins it. make up pulls and starts the whole
+#             stack; it is timed, the bytes it brought in are counted, and its output is
+#             kept and searched for registry rate limits (Docker Hub's 429). It runs in
+#             the background, so the backend's and the frontend's boots are timed from
+#             their own start while it brings them up, never from when it returns; it
+#             must then exit 0;
 #   prebuilt  the pull-request variant: the workflow built the three amd64 images and
 #             tagged them with the GHCR names and AUTOMATOS_IMAGE_TAG, so compose
 #             neither pulls nor builds them.
-# Either way the stack starts with `up --no-build`, and scripts/ci/smoke_images.py
-# asserts what booted: the backend runs the production command (no --reload,
-# SMOKE_BACKEND_WORKERS workers), and each app container runs its
-# ghcr.io/automatosai/automatos-* image carrying the commit's revision label
-# (SMOKE_EXPECT_REVISION). With `pull`, each image's RepoDigests must also hold the
-# index digest its tag resolves to on GHCR, so nothing was built locally; no image may
-# carry a local-* tag or compose's own <project>-<service> name. The step summary
-# adds the pull, the first run from its start to :3000 200, and those checks.
+# The stack starts with `up --no-build` (make up's own, with `pull`), and
+# scripts/ci/smoke_images.py asserts what booted: in the image modes the backend runs the
+# production command (no --reload, SMOKE_BACKEND_WORKERS workers), and in every mode each
+# app container runs its ghcr.io/automatosai/automatos-* image carrying the commit's
+# revision label (SMOKE_EXPECT_REVISION; HEAD for a source build, whose tag must be
+# local-*). With `pull`, each image's RepoDigests must also hold the index digest its tag
+# resolves to on GHCR, so nothing was built locally, and the app images exist only under
+# that tag; no image may carry a local-* tag or compose's own <project>-<service> name.
+# The step summary adds make up's run, the first run from its start to :3000 200, and
+# those checks.
 #
 # PRD-262 US-008, in the pull-request variant (`prebuilt`) only: once the worker count
 # checks out, scripts/ci/smoke_worker_restart.py kills one uvicorn worker of the
@@ -102,12 +111,20 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 COMPOSE_FILE="docker-compose.yml"
-# The published images in place of the source builds (PRD-262 US-003).
-IMAGES_COMPOSE_FILE="docker-compose.images.yml"
 SMOKE_IMAGES="${SMOKE_IMAGES:-}"
+# smoke_images.py's name for where the app images come from; a source build is `build`.
+IMAGES_MODE="${SMOKE_IMAGES:-build}"
 COMPOSE_ARGS=(-f "$COMPOSE_FILE")
-if [ -n "$SMOKE_IMAGES" ]; then
-  COMPOSE_ARGS+=(-f "$IMAGES_COMPOSE_FILE")
+# An empty AUTOMATOS_IMAGE_TAG would make compose run :edge rather than the tag make up
+# wrote to .env, so an empty one is no tag (PRD-262 US-036).
+[ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || unset AUTOMATOS_IMAGE_TAG
+# A source build, as make build does it (PRD-262 US-036): the images carry HEAD as their
+# revision label and a local-<sha7> tag, never an official one.
+if [ -z "$SMOKE_IMAGES" ]; then
+  AUTOMATOS_REVISION="${AUTOMATOS_REVISION:-$(git rev-parse HEAD 2>/dev/null)}"
+  export AUTOMATOS_REVISION
+  export AUTOMATOS_IMAGE_TAG="${AUTOMATOS_IMAGE_TAG:-local-${AUTOMATOS_REVISION:0:7}}"
+  SMOKE_EXPECT_REVISION="${SMOKE_EXPECT_REVISION:-$AUTOMATOS_REVISION}"
 fi
 API_BASE="http://localhost:${API_PORT:-8000}"
 HEALTH_URL="${API_BASE}/health"
@@ -136,6 +153,10 @@ BOOTS_FILE="${OUT_DIR}/boots.jsonl"
 EVENTS_FILE="${OUT_DIR}/events.jsonl"
 # smoke_images.py's records (it reads them back from OUT_DIR for the report).
 PULL_FILE="${OUT_DIR}/pull.json"
+# make up's output (SMOKE_IMAGES=pull), kept for the rate-limit search and the artifact,
+# and its exit code, written when it ends.
+MAKE_UP_LOG="${OUT_DIR}/make-up.log"
+MAKE_UP_EXIT="${OUT_DIR}/make-up.exit"
 PROCESSES_FILE="${OUT_DIR}/processes.json"
 IMAGES_FILE="${OUT_DIR}/images.json"
 # smoke_worker_restart.py's record (PRD-262 US-008).
@@ -197,6 +218,7 @@ up_started_ns=""
 images_before=0
 api_local_written=""
 earlier_backend_id=""
+make_up_pid=""
 
 compose() {
   docker compose "${COMPOSE_ARGS[@]}" "$@"
@@ -208,14 +230,24 @@ fail() {
   exit 1
 }
 
-# Image modes need the tag to boot; a typo in the mode must not fall back to a build.
+# The prebuilt mode needs the tag its images carry; `pull` lets make up pick one when
+# none is given. A typo in the mode must not fall back to a build.
 check_mode() {
   case "$SMOKE_IMAGES" in
-    "") ;;
-    pull|prebuilt)
-      [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=${SMOKE_IMAGES} needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
+    ""|pull) ;;
+    prebuilt)
+      [ -n "${AUTOMATOS_IMAGE_TAG:-}" ] || fail "SMOKE_IMAGES=prebuilt needs AUTOMATOS_IMAGE_TAG (the tag to boot)" ;;
     *) fail "SMOKE_IMAGES must be unset, pull or prebuilt, not '${SMOKE_IMAGES}'" ;;
   esac
+}
+
+# The tag the stack runs: the one exported, else the one make up wrote to .env.
+image_tag() {
+  if [ -n "${AUTOMATOS_IMAGE_TAG:-}" ]; then
+    printf '%s' "$AUTOMATOS_IMAGE_TAG"
+  else
+    sed -n 's/^AUTOMATOS_IMAGE_TAG=//p' .env 2>/dev/null | tail -1
+  fi
 }
 
 # Runs before the exit trap is set, like refuse_existing_stack, so a refusal deletes nothing.
@@ -236,7 +268,7 @@ refuse_existing_stack() {
 print_banner() {
   echo "========================================="
   echo "PRD-176 fresh-clone smoke test (PRD-262 US-002 boot timings)"
-  echo "  images     : ${SMOKE_IMAGES:-built from this checkout}${SMOKE_IMAGES:+ (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG:-})}"
+  echo "  images     : ${SMOKE_IMAGES:-built from this checkout} (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG:-make up picks it})"
   echo "  health url : ${HEALTH_URL} (liveness), ${READY_URL} (readiness)"
   echo "  frontend   : ${FRONTEND_URL}"
   echo "  max wait   : ${MAX_WAIT_SECONDS}s per boot, polled every second"
@@ -293,13 +325,29 @@ empty_docker_cache() {
   echo "Docker image cache emptied (${images_before} image(s) were there)"
 }
 
-# Pulls every image of the default stack: the app images under AUTOMATOS_IMAGE_TAG and
-# the datastores. smoke_images.py times it and counts the bytes the runner received.
+# `make up` on this clean checkout (PRD-262 US-036): it picks the app images' tag (unless
+# AUTOMATOS_IMAGE_TAG pins one), pulls them and the datastores, and starts the whole
+# stack with --no-build. smoke_images.py times it, counts the bytes the runner received
+# and keeps its output in MAKE_UP_LOG, where it looks for registry rate limits. It runs
+# in the background while the boots are timed; finish_make_up waits for it.
 pull_images() {
   empty_docker_cache
-  echo "Pulling the stack's images (app images at ${AUTOMATOS_IMAGE_TAG})..."
-  python3 "$IMAGES_TOOL" pull --out "$PULL_FILE" --images-before "$images_before" -- \
-    docker compose "${COMPOSE_ARGS[@]}" pull --quiet || fail "docker compose pull failed"
+  rm -f "$MAKE_UP_EXIT"
+  echo "make up from an empty Docker cache (AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG:-not set: make up picks it})..."
+  {
+    python3 "$IMAGES_TOOL" pull --out "$PULL_FILE" --images-before "$images_before" --log "$MAKE_UP_LOG" -- \
+      make up
+    echo "$?" > "$MAKE_UP_EXIT"
+  } &
+  make_up_pid=$!
+}
+
+# Waits for the background make up (SMOKE_IMAGES=pull), which must exit 0.
+finish_make_up() {
+  [ -n "$make_up_pid" ] || return 0
+  wait "$make_up_pid"
+  make_up_pid=""
+  [ "$(cat "$MAKE_UP_EXIT" 2>/dev/null)" = "0" ] || fail "make up failed"
 }
 
 prepare_images() {
@@ -310,16 +358,31 @@ prepare_images() {
   esac
 }
 
-# $1 = the boot's label (fresh, warm-1, ...). Times /health and /health/ready from
-# the backend's StartedAt, then fetches /health/bootstrap.
+# $1 = the boot's label (fresh, warm-1, ...); further arguments go to smoke_boot.py. Times
+# /health and /health/ready from the backend's StartedAt, then fetches /health/bootstrap.
 wait_backend() {
-  python3 "$BOOT_TOOL" --label "$1" --container "$BACKEND_CONTAINER" \
+  local label="$1"
+  shift
+  python3 "$BOOT_TOOL" --label "$label" --container "$BACKEND_CONTAINER" \
     --url "health=${HEALTH_URL}" --url "ready=${READY_URL}" \
     --fetch "bootstrap=${BOOTSTRAP_URL}" \
-    --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE"
+    --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE" "$@"
+}
+
+# SMOKE_IMAGES=pull: make up starts the stack, so the fresh boot is timed from the backend's
+# own start as soon as make up has started it. A failed make up is the failure to report.
+boot_fresh_from_make_up() {
+  echo "Timing the fresh boot make up starts: liveness (/health), then readiness (/health/ready)..."
+  wait_backend fresh --wait-start --stop-file "$MAKE_UP_EXIT" && return 0
+  finish_make_up
+  fail "fresh boot: readiness not reached within ${MAX_WAIT_SECONDS}s (/health and /health/ready must both answer 200)"
 }
 
 boot_fresh() {
+  if [ "$SMOKE_IMAGES" = "pull" ]; then
+    boot_fresh_from_make_up
+    return
+  fi
   echo "Starting compose stack (postgres, redis, minio, workspace-worker, backend) on an empty database..."
   up_started_ns="$(date +%s%N)"
   compose up -d --no-build postgres redis minio backend || fail "docker compose up failed"
@@ -328,7 +391,22 @@ boot_fresh() {
     || fail "fresh boot: readiness not reached within ${MAX_WAIT_SECONDS}s (/health and /health/ready must both answer 200)"
 }
 
+# SMOKE_IMAGES=pull: make up starts the frontend once the backend is healthy; it is timed
+# from its own start, and Docker says where it published :3000.
+boot_frontend_from_make_up() {
+  echo "Timing the frontend make up starts once the backend is healthy..."
+  python3 "$BOOT_TOOL" --label frontend --container "$FRONTEND_CONTAINER" \
+    --wait-start --stop-file "$MAKE_UP_EXIT" --published-port 3000 --url "ui=${FRONTEND_URL}" \
+    --timeout "$MAX_WAIT_SECONDS" --out "$BOOTS_FILE" && return 0
+  finish_make_up
+  fail "the frontend never answered 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
+}
+
 boot_frontend() {
+  if [ "$SMOKE_IMAGES" = "pull" ]; then
+    boot_frontend_from_make_up
+    return
+  fi
   echo "Starting the frontend (compose holds it until the backend is healthy)..."
   compose up -d --no-build frontend || fail "docker compose up frontend failed"
   local address
@@ -366,14 +444,14 @@ check_worker_restart() {
     || fail "uvicorn did not replace a killed worker within 30s with /health 200 and no container restart"
 }
 
-# Image modes: every app container runs the image compose names for it, with this
-# commit's revision label; with `pull`, its RepoDigests prove it was pulled.
+# Every mode: every app container runs the image compose names for it, with this
+# commit's revision label. With `pull`, its RepoDigests prove it was pulled and nothing
+# was built; a source build must carry a local-* tag (PRD-262 US-036).
 check_images() {
-  [ -n "$SMOKE_IMAGES" ] || return 0
   compose config --format json > "$COMPOSE_CONFIG_FILE" || fail "docker compose config failed"
-  python3 "$IMAGES_TOOL" images --mode "$SMOKE_IMAGES" --config "$COMPOSE_CONFIG_FILE" \
+  python3 "$IMAGES_TOOL" images --mode "$IMAGES_MODE" --config "$COMPOSE_CONFIG_FILE" \
     --expect-revision "${SMOKE_EXPECT_REVISION:-}" --out "$IMAGES_FILE" \
-    || fail "an app container does not run the image this smoke expects, or an image was built locally"
+    || fail "an app container does not run the image this smoke expects: a wrong tag or revision label, or an image built instead of pulled"
 }
 
 # PRD-262 US-021: a document uploaded to the backend lands in MinIO through the pruned
@@ -481,15 +559,14 @@ write_report() {
     --build-seconds "$build_seconds" --outcome "$outcome" --failure "$failure" \
     --title "$(report_title)" \
     --json "${OUT_DIR}/smoke-report.json" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" || return 1
-  [ -n "$SMOKE_IMAGES" ] || return 0
-  python3 "$IMAGES_TOOL" report --mode "$SMOKE_IMAGES" --tag "${AUTOMATOS_IMAGE_TAG:-}" \
+  python3 "$IMAGES_TOOL" report --mode "$IMAGES_MODE" --tag "$(image_tag)" \
     --dir "$OUT_DIR" --results "$BOOTS_FILE" --up-started-ns "$up_started_ns" \
     --json "${OUT_DIR}/smoke-images-report.json" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 }
 
 report_title() {
   case "$SMOKE_IMAGES" in
-    pull) echo "smoke-images: the published images, pulled and booted (PRD-262 US-003)" ;;
+    pull) echo "smoke-images: make up pulls the published images and boots them (PRD-262 US-003, US-036)" ;;
     prebuilt) echo "smoke-images: this pull request's images, built in the job and booted (PRD-262 US-003)" ;;
     *) echo "Fresh-clone smoke: boot timings (PRD-262 US-002)" ;;
   esac
@@ -497,6 +574,8 @@ report_title() {
 
 finish() {
   local code=$?
+  # A make up still bringing the stack up ends before the teardown.
+  [ -z "$make_up_pid" ] || wait "$make_up_pid" 2>/dev/null
   if [ "$outcome" != "pass" ]; then
     dump_failure_logs
   fi
@@ -517,13 +596,15 @@ main() {
   refuse_existing_stack
   refuse_emptying_a_kept_image_cache
   trap finish EXIT
-  prepare_images
+  # Before the images: make up (SMOKE_IMAGES=pull) starts the stack itself.
   start_event_log
+  prepare_images
   boot_fresh
   check_backend_processes
   check_production_backend
   check_worker_restart
   boot_frontend
+  finish_make_up
   check_loopback_ports
   check_images
   check_document_storage

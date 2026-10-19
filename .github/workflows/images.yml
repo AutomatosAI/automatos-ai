@@ -9,10 +9,16 @@ name: images
 #   GHCR, so they are measured without publishing. Only publishing runs write
 #   the build cache; every run reads it (PRD-262 §9-Q13).
 # - A push to main publishes `sha-<short>`; a `v*` tag publishes `X.Y.Z` and
-#   `X.Y`. This workflow never moves `edge`: smoke-images.yml pulls and boots
-#   each main publish on both arches, and its promote-edge job then points
-#   `edge` at that `sha-<short>` (PRD-262 US-003). An image that cannot boot
-#   never reaches `edge`, the tag plain compose and the Helm chart pull.
+#   `X.Y`. Each image also gets `tree-<12>`, the first 12 characters of its
+#   build context's git tree (`git rev-parse HEAD:<context>`), the first time
+#   that tree is published and never again (PRD-262 US-036): a main commit with
+#   no `sha-<short>` of its own (a [skip ci] merge, or the minutes before this
+#   run publishes) can then still pull every image whose directory it did not
+#   change, which is what `make up` looks for. This workflow never moves
+#   `edge`: smoke-images.yml pulls and boots each main publish on both arches,
+#   and its promote-edge job then points `edge` at that `sha-<short>` (PRD-262
+#   US-003). An image that cannot boot never reaches `edge`, the tag plain
+#   compose and the Helm chart pull.
 # - Each architecture builds on its own native runner (no QEMU), pushes by
 #   digest and scans that digest with Grype, straight from the registry it was
 #   pushed to, so amd64 and arm64 are both scanned, on pull requests as on main.
@@ -559,15 +565,26 @@ jobs:
       fail-fast: false
       matrix:
         # The description is set on the multi-arch index, where GHCR reads it.
+        # `context` names the build context whose tree tags the image (tree-<12>).
         image:
           - name: api
+            context: orchestrator
             description: Automatos AI backend API (orchestrator), built without the graph-clustering extras. The edition is set at runtime by AUTH_EDITION. For now, run it with the repository's docker compose, which supplies the wait-migrate-seed entrypoint.
           - name: frontend
+            context: frontend
             description: Automatos AI web app, local edition. The API address is currently fixed at build time to http://localhost:8000; a runtime setting is coming.
           - name: workspace-worker
+            context: services/workspace-worker
             description: Automatos AI workspace worker (Code Canvas runtime), built without Chromium.
 
     steps:
+      # The context's git tree (tree-<12>, last step) and the tool that names it.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
       - name: Image name
         env:
           NAME: ${{ matrix.image.name }}
@@ -645,3 +662,28 @@ jobs:
         env:
           DIGEST: ${{ steps.index.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # PRD-262 US-036: tree-<12> of the image's build context, which `make up`
+      # pulls for a commit with no sha-<short> of its own (scripts/stack_images.py
+      # names the tag the same way). Like sha-<short>, it is never re-pushed: a
+      # schedule run skips this step, and a tree already published keeps the digest
+      # it has, with the revision of the commit that first built it. One source and
+      # no annotations, so imagetools pushes the signed index's bytes unchanged, as
+      # promote-edge does. A registry that cannot be read pushes nothing.
+      - name: Tag the context's tree (tree-<12>, once per tree)
+        if: github.event_name != 'schedule'
+        env:
+          CONTEXT: ${{ matrix.image.context }}
+          DIGEST: ${{ steps.index.outputs.digest }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag=$(python3 scripts/stack_images.py tree-tag --context "$CONTEXT")
+          status=0
+          python3 scripts/stack_images.py published "${IMAGE}:${tag}" || status=$?
+          case "$status" in
+            0) echo "${IMAGE}:${tag} was already published: a tree tag is never re-pushed" >> "$GITHUB_STEP_SUMMARY" ;;
+            1) docker buildx imagetools create -t "${IMAGE}:${tag}" "${IMAGE}@${DIGEST}"
+               echo "Published ${IMAGE}:${tag}" >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo "::warning title=tree tag::could not tell whether ${IMAGE}:${tag} is published, so it was not pushed" ;;
+          esac

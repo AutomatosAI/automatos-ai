@@ -7,9 +7,12 @@ record is None when the run stopped before its step, and the section says so, so
 failed run still shows how far it got.
 
 The section adds what the fresh-clone report (``smoke_report.py``) does not show: the
-pull's seconds and bytes, the first run from its start to ``/health/ready`` 200 and
-``:3000`` 200, which image each app container runs and whether it was pulled, and the
-uvicorn command with its worker count. Nothing here is a bar: PRD-262 US-004 sets them.
+pull's seconds and bytes (since PRD-262 US-036 the pull is ``make up``, which also
+starts the stack), any registry rate limit it met, the first run from its start to
+``/health/ready`` 200 and ``:3000`` 200, which image each app container runs and
+whether it was pulled, and the uvicorn command with its worker count. A source build
+(mode ``build``) reports its images' tags and revision labels. Nothing here is a bar:
+PRD-262 US-004 sets them.
 """
 from __future__ import annotations
 
@@ -92,26 +95,41 @@ def _seconds(value: Optional[float]) -> str:
     return "—" if value is None else f"**{value:.1f} s**"
 
 
+NOT_PULLED = {
+    "prebuilt": "- Pull: none. The images were built in this job, so the pull numbers "
+                "(bytes, seconds, nothing built) come from the main runs.",
+    "build": "- Pull: none. The app images were built from this checkout.",
+}
+
+
+def _rate_limit_line(pull: dict) -> List[str]:
+    if "rate_limited" not in pull:
+        return []
+    if not pull["rate_limited"]:
+        return ["- Registry rate limits (Docker Hub's 429): none."]
+    shown = "; ".join(f"`{line}`" for line in pull["rate_limit_lines"])
+    return [f"- Registry rate limits (Docker Hub's 429): **{pull['rate_limited']} line(s)**: {shown}"]
+
+
 def _pull_lines(data: dict) -> List[str]:
     pull, images = data["pull"], data["images"] or {}
-    if data["mode"] == "prebuilt":
-        return ["- Pull: none. The images were built in this job, so the pull numbers "
-                "(bytes, seconds, nothing built) come from the main runs."]
+    if data["mode"] in NOT_PULLED:
+        return [NOT_PULLED[data["mode"]]]
     if pull is None:
         return ["- Pull: not reached."]
     layer_bytes = images.get("app_layer_bytes")
     app = f" The app images' compressed layers on GHCR: {layers.mb(layer_bytes)}, each counted once." \
         if layer_bytes is not None else ""
     return [
-        f"- Pull into an empty Docker cache ({pull['images_before']} image(s) were removed first): "
-        f"{_seconds(pull['seconds'])}, **{layers.mb(pull['received_bytes'])}** received on "
-        f"`{pull['interface']}` (every image, TCP/IP and TLS overhead included).{app}"
-    ]
+        f"- `make up` into an empty Docker cache ({pull['images_before']} image(s) were removed first), "
+        f"pulling and starting the stack: {_seconds(pull['seconds'])}, **{layers.mb(pull['received_bytes'])}** "
+        f"received on `{pull['interface']}` (every image, TCP/IP and TLS overhead included).{app}"
+    ] + _rate_limit_line(pull)
 
 
 def _first_run_line(data: dict) -> str:
     run = data["first_run"]
-    start = "the start of the pull" if run["since"] == "pull" else "`docker compose up`"
+    start = "the start of `make up`" if run["since"] == "pull" else "`docker compose up`"
     return (f"- First run, from {start}: `/health/ready` 200 after {_seconds(run['ready_s'])}, "
             f":3000 200 after {_seconds(run['ui_s'])}.")
 
@@ -124,13 +142,17 @@ def _image_rows(images: Optional[dict]) -> List[str]:
              "|---|---|---|---|---|"]
     for row in images["services"]:
         digest = (f"`{row['index_digest'][:19]}…`" if row["index_digest"] else "—") if pulled \
-            else "not checked: built in this job"
+            else "not checked: built here"
         result = "ok" if not row["failures"] else "**FAIL**: " + "; ".join(row["failures"])
         lines.append(f"| {row['service']} | `{row['image']}` | `{(row['revision'] or 'none')[:12]}` "
                      f"| {digest} | {result} |")
     stray = images["stray"]
-    lines += ["", "- No `local-*` tag and no compose-built image: "
-              + ("ok." if not stray else "**FAIL**: " + "; ".join(stray))]
+    what = "No compose-built image" if images["mode"] == "build" else "No `local-*` tag and no compose-built image"
+    lines += ["", f"- {what}: " + ("ok." if not stray else "**FAIL**: " + "; ".join(stray))]
+    if pulled:
+        extra = images.get("other_tags") or []
+        lines.append("- Each app image only under the tag the stack runs: "
+                     + ("ok." if not extra else "**FAIL**: " + "; ".join(extra)))
     return lines
 
 
