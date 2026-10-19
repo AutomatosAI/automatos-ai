@@ -123,13 +123,13 @@ class TelegramAdapter(BaseChannelAdapter):
 
     def _start_intro(self) -> str:
         """The /start reply's first sentence, naming the workspace's public name."""
-        from channels.ai_notice import principal_name
         from core.database.database import SessionLocal
+        from core.public_principal import workspace_principal_name
         from modules.policy.ai_disclosure import telegram_start_intro
 
         db = SessionLocal()
         try:
-            return telegram_start_intro(principal_name(db, self.workspace_id))
+            return telegram_start_intro(workspace_principal_name(db, self.workspace_id))
         finally:
             db.close()
 

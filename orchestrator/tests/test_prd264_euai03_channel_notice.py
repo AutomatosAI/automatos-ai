@@ -7,7 +7,7 @@ first message to the person on the connection, the first after the idle gap,
 and any reply to "are you human?". ``channels/ai_notice.py`` keeps the
 last-notice time in Redis with a TTL equal to the gap; when Redis can't be
 read the notice is added. The principal is named only by a public name
-(FR-15, ``public_principal_name``).
+(FR-15), decided by ``core/public_principal.py``, the copy every surface shares.
 
 Nothing here is gated by ``AUTH_EDITION``; the ``edition`` fixture runs the
 stateful cases in both editions to prove it.
@@ -248,7 +248,7 @@ def test_no_pattern_puts_overlapping_whitespace_quantifiers_side_by_side():
     (7, ["x"], None),
 ])
 def test_public_principal_name(company, workspace, expected):
-    from modules.policy.ai_disclosure import public_principal_name
+    from core.public_principal import public_principal_name
 
     assert public_principal_name(company, workspace) == expected
 
@@ -261,12 +261,13 @@ def test_the_notice_names_the_principal_or_says_ai_assistant():
 
 
 def test_the_principal_is_looked_up_profile_first_then_workspace():
-    from channels.ai_notice import principal_name
+    from core.public_principal import workspace_principal_name
 
-    assert principal_name(FakeDb(company=SHOP, workspace_name="Ops Team"), WS) == SHOP
-    assert principal_name(FakeDb(company=None, workspace_name="Ops Team"), WS) == "Ops Team"
-    assert principal_name(FakeDb(company=None, workspace_name="Ada's Workspace"), WS) is None
-    assert principal_name(FakeDb(company=SHOP), "not-a-uuid") is None
+    assert workspace_principal_name(FakeDb(company=SHOP, workspace_name="Ops Team"), WS) == SHOP
+    assert workspace_principal_name(FakeDb(company=None, workspace_name="Ops Team"), WS) == "Ops Team"
+    assert workspace_principal_name(FakeDb(company=None, workspace_name="Ada's Workspace"), WS) is None
+    assert workspace_principal_name(FakeDb(company=SHOP), "not-a-uuid") is None
+    assert workspace_principal_name(None, WS) is None
 
 
 def test_the_channel_notice_never_names_an_auto_created_workspace(notice_state):
@@ -280,14 +281,14 @@ def test_the_channel_notice_never_names_an_auto_created_workspace(notice_state):
 
 
 def test_a_failed_principal_lookup_names_no_one_and_rolls_back():
-    from channels.ai_notice import principal_name
+    from core.public_principal import workspace_principal_name
 
     class Exploding(FakeDb):
         def execute(self, statement, params=None):
             raise RuntimeError("db gone")
 
     db = Exploding()
-    assert principal_name(db, WS) is None
+    assert workspace_principal_name(db, WS) is None
     assert db.rolled_back is True
 
 

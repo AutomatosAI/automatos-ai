@@ -10,7 +10,9 @@ D17: a deployer may reword the widget's first-turn line, but the badge is
 fixed, comes from :data:`BADGE_BY_LANGUAGE`, and a reworded line must contain
 the locale's badge term as a whole word. The server refuses any other line.
 
-Pure: stdlib only, no DB, no config, no network.
+Pure: no DB, no config, no network. Whether a name is public enough to show
+(FR-15) is decided in ``core/public_principal.py``, the one copy every
+surface shares.
 """
 from __future__ import annotations
 
@@ -19,6 +21,8 @@ import re
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional
+
+from core.public_principal import public_site_name
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +73,6 @@ NOTICE_SEPARATOR = "\n\n"
 # ── Auto Live voice (EUAI-04, PRD-264 §8, Guidelines ¶37) ──────────────────
 VOICE_GREETING = "Hi, this is Auto, your AI assistant."
 VOICE_REMINDER = "Just so you know, I'm an AI assistant."
-
-# FR-15: an auto-created workspace is named "{name or email}'s Workspace"
-# (core/auth/hybrid.py), so that form, or any name with an "@", may carry the
-# owner's name or email and is never used as a public name.
-AUTO_WORKSPACE_NAME_SUFFIX = "'s workspace"
-PERSONAL_DATA_MARK = "@"
 
 # A message asking whether the other side is a person or a bot: the reply to it
 # always carries the notice. English, Portuguese, Spanish, French, German and
@@ -248,45 +246,6 @@ def mark_ai_generated(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # ── Channel bots (EUAI-03) ─────────────────────────────────────────────────
-
-def _public_text(value: Any) -> Optional[str]:
-    """``value`` stripped when it is text that carries no personal-data mark."""
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    if not stripped or PERSONAL_DATA_MARK in stripped:
-        return None
-    return stripped
-
-
-def _public_chosen_name(value: Any) -> Optional[str]:
-    """``value`` stripped when it is public text and not the auto-created form."""
-    text = _public_text(value)
-    if text and not text.casefold().endswith(AUTO_WORKSPACE_NAME_SUFFIX):
-        return text
-    return None
-
-
-def public_principal_name(company_name: Any, workspace_name: Any) -> Optional[str]:
-    """The public name a notice may give for whom the AI acts (FR-15), or ``None``.
-
-    The business profile's ``company_name`` first; then the workspace name,
-    unless it is the auto-created "{name or email}'s Workspace" form. A name
-    holding an "@" is never used: it may be the owner's email.
-    """
-    return _public_text(company_name) or _public_chosen_name(workspace_name)
-
-
-def public_site_name(display_name: Any) -> Optional[str]:
-    """A Site's ``display_name`` when a widget notice may show it (FR-15), or ``None``.
-
-    The deployer sets it, but Sites created from a workspace (the PRD-008-A
-    backfill, ``ensure_shopify_site``) copy the workspace's name, which may be
-    the auto-created "{name or email}'s Workspace". That form, and any name
-    holding an "@", is never shown.
-    """
-    return _public_chosen_name(display_name)
-
 
 def channel_notice(principal: Optional[str]) -> str:
     """The channel bot notice: "AI assistant for {principal}." or "AI assistant."."""

@@ -118,11 +118,12 @@ def test_a_channel_never_runs_another_workspaces_agent(cafes, monkeypatch):
     import channels.ai_notice as ai_notice
     from channels.base import NO_ROUTE_REPLY, BaseChannelAdapter
     from core.models.routing import RoutingDecision
+    from core.public_principal import workspace_principal_name
     from modules.policy.ai_disclosure import channel_notice, prepend_notice
 
     # PRD-264 EUAI-03: the fallback is the first reply, so it carries the AI notice.
     monkeypatch.setattr(ai_notice, "_get_redis", lambda: None)
-    noticed = prepend_notice(channel_notice(ai_notice.principal_name(cafes.db, cafes.ours)), NO_ROUTE_REPLY)
+    noticed = prepend_notice(channel_notice(workspace_principal_name(cafes.db, cafes.ours)), NO_ROUTE_REPLY)
 
     class _Till(BaseChannelAdapter):
         async def start(self): ...

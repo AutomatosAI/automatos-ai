@@ -4,7 +4,8 @@ A person messaging a workspace on Telegram, Slack, Discord or WhatsApp is told,
 on first contact, that the reply comes from an AI and for whom: "AI assistant
 for {principal}." The rule for *when* lives in
 :func:`modules.policy.ai_disclosure.channel_notice_due`; this module holds the
-state it needs and the principal's public name.
+state it needs. The principal's public name comes from
+:func:`core.public_principal.workspace_principal_name` (FR-15).
 
 Both outbound channel paths call it, and nothing else sends to a channel:
 
@@ -27,11 +28,9 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
-from uuid import UUID
-
-from sqlalchemy import text as sql_text
 
 from config import config
+from core.public_principal import workspace_principal_name
 from modules.policy import ai_disclosure
 
 logger = logging.getLogger(__name__)
@@ -39,13 +38,6 @@ logger = logging.getLogger(__name__)
 NOTICE_KEY_PREFIX = "ai_notice:channel"
 SECONDS_PER_HOUR = 3600
 MIN_TTL_SECONDS = 1
-
-_COMPANY_NAME_SQL = sql_text(
-    "SELECT company_name FROM business_profiles "
-    "WHERE workspace_id = CAST(:ws AS uuid) AND company_name IS NOT NULL AND company_name <> '' "
-    "ORDER BY updated_at DESC LIMIT 1"
-)
-_WORKSPACE_NAME_SQL = sql_text("SELECT name FROM workspaces WHERE id = CAST(:ws AS uuid)")
 
 
 @dataclass(frozen=True)
@@ -134,34 +126,6 @@ def _notice_due_sync(key: str, inbound_text: Optional[str]) -> bool:
     )
 
 
-def _scalar(db: Any, statement: Any, workspace_id: str) -> Any:
-    """The first column of the first row ``statement`` returns, or ``None``."""
-    row = db.execute(statement, {"ws": workspace_id}).fetchone()
-    return row[0] if row else None
-
-
-def principal_name(db: Any, workspace_id: Any) -> Optional[str]:
-    """The public name of the workspace the AI acts for (FR-15), or ``None``.
-
-    Read inside a savepoint, so a failed lookup leaves the caller's session
-    usable. A failure names no one: the notice still says it is an AI.
-    """
-    try:
-        workspace = str(UUID(str(workspace_id)))
-    except ValueError:
-        return None
-    try:
-        with db.begin_nested():
-            company = _scalar(db, _COMPANY_NAME_SQL, workspace)
-            named = ai_disclosure.public_principal_name(company, None)
-            if named:
-                return named
-            return ai_disclosure.public_principal_name(None, _scalar(db, _WORKSPACE_NAME_SQL, workspace))
-    except Exception:
-        logger.exception("ai notice: principal lookup failed for ws=%s; the notice names no one", workspace)
-        return None
-
-
 async def notice_for(
     db: Any,
     *,
@@ -179,7 +143,7 @@ async def notice_for(
     due = await asyncio.to_thread(_notice_due_sync, key, inbound_text)
     if not due:
         return ChannelNotice(key=key, text=None)
-    return ChannelNotice(key=key, text=ai_disclosure.channel_notice(principal_name(db, workspace_id)))
+    return ChannelNotice(key=key, text=ai_disclosure.channel_notice(workspace_principal_name(db, workspace_id)))
 
 
 async def record_notice_sent(notice: ChannelNotice) -> None:
