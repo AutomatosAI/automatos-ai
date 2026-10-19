@@ -71,9 +71,10 @@ Templates tab of `/deliverables` through slots. To reach `/chat`, `/assignments`
 
 ## Where the registrations come from
 
-`PlacementSlot` reads the active theme's registered slots from `PlacementSlotsProvider`
-(`placement-slot.tsx`). These are the `slots` map of the theme's load result
-(`ThemeRegistrations.slots`, `lib/theme-host/types.ts`), which the loader has already limited to
-`THEME_SLOT_IDS`. The theme host provider (`theme-host-provider.tsx`, owned by A-04c in W-A2) must
-render that provider with `state.active?.slots ?? null` around its children. Until it does, every
-slot draws its fallback in the running app.
+`PlacementSlot` (`placement-slot.tsx`) reads the active theme's registered slots from the theme
+host context, through `useThemeHost()`. The theme host provider (`theme-host-provider.tsx`) puts
+them there: they are the `slots` map of the theme's load result (`ThemeRegistrations.slots`,
+`lib/theme-host/types.ts`), which the loader has already limited to `THEME_SLOT_IDS`. With no
+active theme the host passes `null`, and every slot draws its fallback, so the page has the DOM it
+had before. The browser lane proves a registered `page-header.mascot@1` draws on a live page
+(`e2e/browser/specs/placement-slots.spec.ts`, fixture `fixtures/hello-a12b-live/`).

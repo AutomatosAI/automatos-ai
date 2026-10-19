@@ -28,7 +28,6 @@ import {
   PAGE_HEADER_MASCOT_SLOT,
   PLACEMENT_SLOT_ATTR,
   PLACEMENT_SLOT_IDS,
-  PlacementSlotsProvider,
   type EmptyStatePlacementProps,
   type PageHeaderPlacementProps,
 } from '../placement-slot'
@@ -86,8 +85,14 @@ function slotsOf(entries: ReadonlyArray<readonly [SlotId, unknown]>): ReadonlyMa
 /** An active theme that registered only its frame: no placement anywhere. */
 const FRAME_ONLY = slotsOf([['frame@1', HelloFrame]])
 
+/** The host context of an active theme that registered `slots`, as the theme host provider builds it. */
+function activeHost(slots: ReadonlyMap<SlotId, unknown>, reportRenderFailure = vi.fn()): ThemeHostContextValue {
+  return { status: 'active', reason: null, frame: HelloFrame, slots, reportRenderFailure }
+}
+
+/** `node` under a host whose active theme registered `slots`; null renders it with no host at all. */
 function withSlots(slots: ReadonlyMap<SlotId, unknown> | null, node: React.ReactElement, studio = false): React.ReactElement {
-  const placed = slots === null ? node : <PlacementSlotsProvider slots={slots}>{node}</PlacementSlotsProvider>
+  const placed = slots === null ? node : <ThemeHostContext.Provider value={activeHost(slots)}>{node}</ThemeHostContext.Provider>
   return studio ? <UiStyleProvider initialStyle="studio">{placed}</UiStyleProvider> : placed
 }
 
@@ -110,12 +115,18 @@ function expectUnchanged(slots: ReadonlyMap<SlotId, unknown> | null): void {
 }
 
 describe('PRD-261 A-12b — no theme draws the same DOM', () => {
-  it('PageHeader (Studio and Classic) and EmptyState are unchanged with no provider', () => {
+  it('PageHeader (Studio and Classic) and EmptyState are unchanged with no theme host', () => {
     expectUnchanged(null)
   })
 
   it('…and unchanged under an active theme that placed nothing', () => {
     expectUnchanged(FRAME_ONLY)
+  })
+
+  it('…and unchanged under a host with no active theme (slots null)', () => {
+    const offHost: ThemeHostContextValue = { status: 'off', reason: null, frame: null, slots: null, reportRenderFailure: vi.fn() }
+    const { container } = render(<ThemeHostContext.Provider value={offHost}>{emptyState}</ThemeHostContext.Provider>)
+    expect(container.innerHTML).toBe(EMPTY_STATE_HTML)
   })
 
   it('every placement slot is one the loader accepts', () => {
@@ -157,12 +168,8 @@ describe('PRD-261 A-12b — a registered placement renders', () => {
   it('a placement that throws draws the fallback and tells the host', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const reportRenderFailure = vi.fn()
-    const host: ThemeHostContextValue = { status: 'active', reason: null, frame: HelloFrame, reportRenderFailure }
-    render(
-      <ThemeHostContext.Provider value={host}>
-        {withSlots(slotsOf([[EMPTY_STATE_MASCOT_SLOT, BrokenPlacement]]), emptyState)}
-      </ThemeHostContext.Provider>,
-    )
+    const host = activeHost(slotsOf([[EMPTY_STATE_MASCOT_SLOT, BrokenPlacement]]), reportRenderFailure)
+    render(<ThemeHostContext.Provider value={host}>{emptyState}</ThemeHostContext.Provider>)
     expect(screen.getByTestId('empty-icon')).toBeInTheDocument()
     expect(reportRenderFailure).toHaveBeenCalledTimes(1)
     expect(reportRenderFailure).toHaveBeenCalledWith(PLACEMENT_FAILURE)

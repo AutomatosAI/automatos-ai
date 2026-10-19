@@ -12,13 +12,12 @@
  * `data-theme-slot`, inside a boundary: if it throws, the fallback draws again and the host is
  * told, as the frame slot does (theme-frame-slot.tsx).
  *
- * The registrations come from PlacementSlotsProvider, given the active theme's slots
- * (ThemeRegistrations.slots, lib/theme-host/types.ts). Nothing in the app mounts it yet: the theme
- * host provider (theme-host-provider.tsx, A-04c in W-A2) is to render it with
- * `state.active?.slots ?? null` around its children. Until then every slot draws its fallback in
- * the running app (docs/theme-host/placement-reach.md).
+ * The registrations are the active theme's slots (ThemeRegistrations.slots, lib/theme-host/types.ts),
+ * which the theme host provider (theme-host-provider.tsx) puts in the host context; PlacementSlot
+ * reads them through useThemeHost(). With no host above, or no active theme, there are none
+ * (docs/theme-host/placement-reach.md).
  */
-import { createContext, useContext, type ComponentType, type ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 
 import { useIsStudio } from '@/hooks/use-studio-theme'
 import type { SlotId, ThemeBase } from '@/lib/theme-host/registry-types'
@@ -66,22 +65,9 @@ export type PlacementSlotProps =
 
 type PlacedComponent = ComponentType<PageHeaderPlacementProps | EmptyStatePlacementProps>
 
-/** The active theme's registered slots; null with no theme (and outside the provider). */
-const PlacementSlotsContext = createContext<ReadonlyMap<SlotId, unknown> | null>(null)
-
-interface PlacementSlotsProviderProps {
-  readonly slots: ReadonlyMap<SlotId, unknown> | null
-  readonly children: ReactNode
-}
-
-/** Hands the active theme's registered slots to every PlacementSlot below it. */
-export function PlacementSlotsProvider({ slots, children }: PlacementSlotsProviderProps) {
-  return <PlacementSlotsContext.Provider value={slots}>{children}</PlacementSlotsContext.Provider>
-}
-
-/** The component the active theme registered for `slot`, or null. The loader checked it is a component. */
-function usePlacedComponent(slot: PlacementSlotId): PlacedComponent | null {
-  const registered = useContext(PlacementSlotsContext)?.get(slot)
+/** The component `slots` holds for `slot`, or null. The loader checked it is a component. */
+function placedComponent(slots: ReadonlyMap<SlotId, unknown> | null | undefined, slot: PlacementSlotId): PlacedComponent | null {
+  const registered = slots?.get(slot)
   return registered === undefined ? null : (registered as PlacedComponent)
 }
 
@@ -96,8 +82,8 @@ function ignoreRenderFailure(): void {
 
 /** One placement slot: the theme's component when one is registered, else `fallback` unchanged. */
 export function PlacementSlot({ slot, props, fallback = null }: PlacementSlotProps) {
-  const Placed = usePlacedComponent(slot)
   const host = useThemeHost()
+  const Placed = placedComponent(host?.slots, slot)
   if (Placed === null) return <>{fallback}</>
   const hostAttrs = { [PLACEMENT_SLOT_ATTR]: slot }
   return (
