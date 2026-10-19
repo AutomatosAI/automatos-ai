@@ -35,6 +35,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+from core.monitoring.request_log_guard import guard_request_logs
+guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
 logger = logging.getLogger(__name__)
 
 

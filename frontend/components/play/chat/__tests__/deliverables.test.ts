@@ -1,5 +1,5 @@
 /**
- * PRD-260 §4, K8 — which Deliverables a turn made (components/play/chat/deliverables.ts), ported
+ * PRD-260 §4, K8 — which Deliverables a turn made (lib/chat/deliverables.ts), ported
  * from Automatos Play's tests/chat/deliverables.test.ts onto the core's shapes. P260-FX-09 (M76):
  * a receipt link is a path in the app or the core's absolute open_url (deliverable_open_url in
  * generate_document_tool.py: FRONTEND_URL + /deliverables?tab=outputs&deliverable=<id>); only its
@@ -14,7 +14,7 @@ import {
   deliverableIdFromLink,
   deliverablesFromReceipts,
   UNTITLED,
-} from '@/components/play/chat/deliverables'
+} from '@/lib/chat/deliverables'
 import type { Receipt } from '@/types'
 
 const ID = '9b2f4c1e-7a3d-4e5f-8a90-1b2c3d4e5f60'

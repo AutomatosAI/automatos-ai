@@ -2,10 +2,10 @@
 
 import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
 import { MissionSuggestionCard } from '@/components/chatbot/mission-suggestion-card'
+import { type MissionSuggestion, recentMessages } from '@/lib/chat/suggestion'
 import { useMissionStore } from '@/stores/mission-store'
 import type { ChatMessage } from '@/types'
 
-import { type MissionSuggestion, recentMessages } from './suggestion'
 import styles from './turn.module.css'
 
 /**

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { MainLayout } from '@/components/layout/main-layout'
 import { AutoMascot } from '@/components/mascot/auto-mascot'
-import { isDeliverableId } from '@/components/play/chat/deliverables'
+import { isDeliverableId } from '@/lib/chat/deliverables'
 import { PageColumns } from '@/components/play/shell/page-columns'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useDeliverables } from '@/hooks/use-deliverables-api'

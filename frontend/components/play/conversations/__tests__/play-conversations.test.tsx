@@ -9,7 +9,7 @@
  * "Now" is pinned to a local date, so it passes in any time zone.
  * P260-FX-24 (M22): one status line under the search box, there for the
  * page's life, says the search's result (the count, or that nothing matches).
- * P260-FX-25 (M69): the width comes from usePlayLayout (stood in for here;
+ * P260-FX-25 (M69): the width comes from useThemeLayout (stood in for here;
  * play-layout-phone.test.tsx runs the real one); while it isn't known (the
  * server, hydration) the page shows nothing, sends nowhere and asks for nothing.
  */
@@ -38,15 +38,18 @@ vi.mock('@/hooks/use-chat-session', () => ({
 const chatApi = vi.hoisted(() => ({ getChatHistory: vi.fn() }))
 vi.mock('@/lib/chat/api', () => chatApi)
 
-const style = vi.hoisted(() => ({ isPlay: true, narrow: false, widthUnknown: false }))
-vi.mock('@/hooks/use-studio-theme', () => ({
-  useIsPlay: () => style.isPlay,
-  useIsStudio: () => true,
-  usePlayLayout: () => {
-    if (!style.isPlay || style.narrow) return 'fallback'
-    return style.widthUnknown ? 'pending' : 'play'
-  },
-}))
+const style = vi.hoisted(() => ({ play: true, narrow: false, widthUnknown: false }))
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => true,
+    useActiveTheme: () => (style.play ? BUILTIN_PLAY_ENTRY : null),
+    useThemeLayout: () => {
+      if (!style.play || style.narrow) return 'fallback'
+      return style.widthUnknown ? 'pending' : 'theme'
+    },
+  }
+})
 
 vi.mock('@/components/mascot/auto-mascot', () => ({
   AutoMascot: ({ state }: { state: string }) => <div data-testid="auto" data-state={state} />,
@@ -105,7 +108,7 @@ afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   vi.restoreAllMocks()
-  style.isPlay = true
+  style.play = true
   style.narrow = false
   style.widthUnknown = false
 })
@@ -248,7 +251,7 @@ describe('PlayConversations — empty and failed', () => {
 
 describe('PlayConversations — only under Play at >= 1024 px', () => {
   it('sends the browser to /chat when the style is not Play, showing nothing', () => {
-    style.isPlay = false
+    style.play = false
     renderPage()
     expect(nav.replace).toHaveBeenCalledWith('/chat')
     expect(screen.queryByRole('heading', { name: 'Conversations' })).not.toBeInTheDocument()

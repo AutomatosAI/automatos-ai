@@ -3,6 +3,10 @@
  * reads the automatos-style cookie (parseUiStyle) and sends Classic, Studio, a
  * missing and a tampered cookie to /chat before anything paints; under Play it
  * renders MainLayout (fullBleed) with Play's Conversations screen.
+ *
+ * PRD-261 A-02b: "under Play" is the style builtin Play's, `theme:builtin:play`,
+ * which the legacy `play` cookie parses to as well; any other theme (an installed
+ * one) has no Conversations page here and goes to /chat.
  */
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
@@ -42,9 +46,15 @@ afterEach(() => {
   cookieJar.style = undefined
 })
 
+/** An installed theme's style: a lowercase uuid after `theme:install:`. */
+const INSTALLED_STYLE = 'theme:install:0b7c6a52-3f1d-4e8a-9c2b-5d4e6f7a8b9c'
+
 describe('/conversations', () => {
-  it('renders Play’s Conversations inside MainLayout under Play', async () => {
-    cookieJar.style = 'play'
+  it.each([
+    ['the style builtin Play is', 'theme:builtin:play'],
+    ['a legacy play cookie', 'play'],
+  ])('renders Play’s Conversations inside MainLayout under %s', async (_label, value) => {
+    cookieJar.style = value
     render(await ConversationsPage())
     expect(redirectMock).not.toHaveBeenCalled()
     expect(screen.getByTestId('main-layout')).toHaveAttribute('data-full-bleed', 'true')
@@ -55,6 +65,7 @@ describe('/conversations', () => {
     ['Studio', 'studio'],
     ['Classic', 'classic'],
     ['a tampered cookie (the default style)', 'play; studio'],
+    ['an installed theme', INSTALLED_STYLE],
     ['no cookie (the default style)', undefined],
   ])('redirects to /chat under %s', async (_label, value) => {
     cookieJar.style = value

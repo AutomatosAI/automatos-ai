@@ -4,12 +4,12 @@ import type { ReactNode } from 'react'
 
 import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
 import { useWorkspaceOptional } from '@/components/workspace-provider'
+import type { MissionSuggestion } from '@/lib/chat/suggestion'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import type { ChatMessage } from '@/types'
 
 import { PlayMissionSuggestion } from './mission-suggestion'
 import { SnagBox, TURN_FAILED } from './snag-box'
-import type { MissionSuggestion } from './suggestion'
 import styles from './turn.module.css'
 
 /**

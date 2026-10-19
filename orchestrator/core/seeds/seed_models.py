@@ -14,6 +14,8 @@ from core.database.database import get_db_session
 import logging
 
 logging.basicConfig(level=logging.INFO)
+from core.monitoring.request_log_guard import guard_request_logs
+guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
 logger = logging.getLogger(__name__)
 
 

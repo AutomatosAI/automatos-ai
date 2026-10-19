@@ -950,6 +950,11 @@ class Config:
     # Escalation threshold: prescriptions at or above this risk are flagged high
     # priority and escalated for human approval (when self-management is on).
     HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
+    # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
+    # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
+    # where F408, F409 and F416 happened. It becomes a trigger only through
+    # services.schedule_util.scheduler_cron_trigger (F240: weekday as day names).
+    HARNESS_SWEEP_CRON: str = os.getenv("HARNESS_SWEEP_CRON", "0 10 * * 1")
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
@@ -1501,6 +1506,27 @@ class Config:
     PLUGIN_MAX_UPLOAD_SIZE_MB: int = int(os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "10"))
     PLUGIN_LLM_SCAN_MODEL: str = os.getenv("PLUGIN_LLM_SCAN_MODEL", "claude-haiku-4-5")
     PLUGIN_CACHE_TTL_SECONDS: int = int(os.getenv("PLUGIN_CACHE_TTL_SECONDS", "3600"))
+
+    # =============================================================================
+    # PRD-261 INSTALLABLE THEMES (Gerard D1, 18 Oct 2026; PRD Q25 size limits)
+    # =============================================================================
+    # Private code uploads platform-wide: on | off | admins | auto. `auto` is the
+    # DEFAULT of each workspace's own setting (local edition on; SaaS on only in a
+    # single-member workspace) that a workspace admin may switch on; `off` is a
+    # ceiling. An unknown value is read as off (services/themes/records.py).
+    THEMES_PRIVATE_UPLOAD: str = (os.getenv("THEMES_PRIVATE_UPLOAD", "auto") or "auto").strip().lower()
+    # The theme Marketplace (W-C1 routes read it): on | off.
+    THEMES_MARKETPLACE: str = (os.getenv("THEMES_MARKETPLACE", "on") or "on").strip().lower()
+    # The .autotheme as uploaded; main.py sizes the import route's body limit from it.
+    THEME_MAX_PACKAGE_MB: int = int(os.getenv("THEME_MAX_PACKAGE_MB", "10"))
+    # JS plus CSS, the entry module, and each mascot clip (D1-a: 3 MB, 300 KB, 1 MB).
+    THEME_MAX_CODE_KB: int = int(os.getenv("THEME_MAX_CODE_KB", "3072"))
+    THEME_MAX_ENTRY_KB: int = int(os.getenv("THEME_MAX_ENTRY_KB", "300"))
+    THEME_MAX_CLIP_KB: int = int(os.getenv("THEME_MAX_CLIP_KB", "1024"))
+    # How long a browser keeps a theme file (immutable: the URL carries the digest).
+    THEME_FILE_CACHE_SECONDS: int = int(os.getenv("THEME_FILE_CACHE_SECONDS", "86400"))
+    # Step-up on sensitive routes (themes now; role changes with W-A2): a first factor this recent (D1-e: 10).
+    STEP_UP_MAX_AGE_MINUTES: int = int(os.getenv("STEP_UP_MAX_AGE_MINUTES", "10"))
 
     # =============================================================================
     # RECIPE EXECUTION (Scratchpad, Logs, Memory)
