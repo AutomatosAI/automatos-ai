@@ -4,6 +4,12 @@ import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useIsStudio } from '@/hooks/use-studio-theme'
+import {
+  PAGE_HEADER_ART_SLOT,
+  PAGE_HEADER_MASCOT_SLOT,
+  PlacementSlot,
+  type PageHeaderPlacementProps,
+} from '@/components/theme-host/placement-slot'
 
 export interface PageHeaderProps {
   /** First word(s) of the title — rendered in foreground */
@@ -36,6 +42,10 @@ export interface PageHeaderProps {
  * — `cc-headrow` / `cc-head` / `cc-eyebrow` / `cc-h1` / `cc-sub` / `cc-actions`
  * — so every page that uses this primitive is a Studio page in both tones.
  * Nothing crosses between the styles: each branch is its own markup.
+ *
+ * PRD-261 A-12b: both branches carry the placement slots `page-header.art@1` (before the head)
+ * and `page-header.mascot@1` (after it, before the actions). With no theme they draw nothing,
+ * so the markup above is exactly what renders.
  */
 export function PageHeader({
   title,
@@ -47,11 +57,18 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   const isStudio = useIsStudio()
+  const placement: PageHeaderPlacementProps = {
+    base: isStudio ? 'studio' : 'classic',
+    title,
+    titleAccent,
+    eyebrow: eyebrow ?? null,
+  }
 
   if (isStudio) {
     const sub = lede ?? subtitle
     return (
       <div className={cn('cc-headrow', className)}>
+        <PlacementSlot slot={PAGE_HEADER_ART_SLOT} props={placement} />
         <div className="cc-head">
           {eyebrow && <p className="cc-eyebrow">{eyebrow}</p>}
           <h1 data-testid="page-title" className="cc-h1">
@@ -59,6 +76,7 @@ export function PageHeader({
           </h1>
           {sub && <p className="cc-sub">{sub}</p>}
         </div>
+        <PlacementSlot slot={PAGE_HEADER_MASCOT_SLOT} props={placement} />
         {actions && <div className="cc-actions">{actions}</div>}
       </div>
     )
@@ -74,6 +92,7 @@ export function PageHeader({
         className
       )}
     >
+      <PlacementSlot slot={PAGE_HEADER_ART_SLOT} props={placement} />
       <div className="min-w-0">
         {eyebrow && (
           <p
@@ -96,6 +115,7 @@ export function PageHeader({
           <p className="text-sm md:text-base text-muted-foreground">{subtitle}</p>
         ) : null}
       </div>
+      <PlacementSlot slot={PAGE_HEADER_MASCOT_SLOT} props={placement} />
       {actions && (
         <div className="flex items-center gap-2 md:gap-3 shrink-0 flex-wrap">
           {actions}

@@ -7,7 +7,9 @@ fastapi>=0.115.0,<0.116.0
 # 0.115.x + starlette 0.41.x is the tested, working pair. (F092 — dep pinning.)
 starlette>=0.40.0,<0.42.0
 uvicorn[standard]==0.24.0
-websockets==12.0
+# google-genai needs websockets>=13 (#1169). 13.1 is the last release before 14 deprecated
+# the legacy API uvicorn 0.24 serves WebSockets with; checked with a FastAPI echo.
+websockets==13.1
 
 # Database
 sqlalchemy==2.0.23
@@ -91,9 +93,9 @@ opencv-python-headless>=4.10.0  # Upgraded for numpy 2.x compat (needed by camel
 
 # AI provider clients (API-based, no local models)
 tiktoken>=0.5.0  # Token counting for context management (RAG, context_guard)
-openai>=1.45.0
+openai>=3.26.0  # 3.x sends through httpx2: the log guard (#1051) and the httpx2 spans (#1112) expect it
 anthropic>=0.40.0,<1.0.0
-google-generativeai>=0.8.0  # Google Gemini native API
+google-genai>=2.31.0  # Google Gemini native API (google-generativeai is retired, #1169)
 
 # Data & ML (actively used in multi-agent optimization + RAG)
 numpy>=1.26.2,<3.0.0
