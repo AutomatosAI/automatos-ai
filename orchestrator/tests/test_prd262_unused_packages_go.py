@@ -12,7 +12,9 @@ US-024 moved Gemini onto the OpenAI-compatible adapter: google-generativeai left
 google-ai-generativelanguage and google-api-python-client (Google's API discovery
 documents), which only it brought. US-025 removed pandas: create_xlsx reads CSV and JSON
 with the standard library, and PandasAIService, which cannot run (pandasai was never
-installed), imports it only inside its methods. This suite checks:
+installed), imports it only inside its methods. US-026 vendored the two text splitters
+the ingest uses: langchain-text-splitters and langchain-core left, and with them
+langsmith and zstandard, which only langchain-core brought. This suite checks:
 
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
@@ -33,9 +35,8 @@ installed), imports it only inside its methods. This suite checks:
 - `git grep -i camelot -- orchestrator` lists this file alone (US-023): the test stubs,
   comments and code that named it are gone, and this file has to name it to forbid it.
 
-FORBIDDEN_IMPORTS is meant to grow: W3 adds langchain_text_splitters and langchain_core
-(US-026) and tree_sitter_language_pack (US-028). A dotted name forbids that module and
-everything under it.
+FORBIDDEN_IMPORTS is meant to grow: US-028 adds tree_sitter_language_pack. A dotted name
+forbids that module and everything under it.
 
 Pure file reads, plus the check script run with this Python: no Docker, no network.
 """
@@ -75,13 +76,16 @@ FORBIDDEN_IMPORTS = {
     "google.ai.generativelanguage": "google-ai-generativelanguage",  # US-024: only the SDK
     "googleapiclient": "google-api-python-client",  # US-024: brought these two
     "pandas": "pandas",  # US-025: create_xlsx reads CSV and JSON with the standard library
+    "langchain_text_splitters": "langchain-text-splitters",  # US-026: vendored in
+    "langchain_core": "langchain-core",  # modules/rag/chunking/text_splitters.py
 }
 # (file under orchestrator/, forbidden name) -> the scope prefix where it may still be
 # imported. US-025: PandasAIService binds pandas only once pandasai imports, which it never
 # does in an image; deleting the service and its routes instead is §9-Q16, still open.
 ALLOWED_SCOPES = {("modules/tools/services/pandas_ai_service.py", "pandas"): "PandasAIService."}
-# Distributions no image installs: the ones above plus python-jose's closure.
-REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa"}
+# Distributions no image installs: the ones above plus python-jose's closure, and the two
+# langchain-core brought that nothing else needs (US-026).
+REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa", "langsmith", "zstandard"}
 # Railway's [leiden] build keeps these until US-027: scikit-learn through graspologic,
 # pandas through statsmodels and seaborn.
 RAILWAY_KEEPS = frozenset({"scikit-learn", "pandas"})
