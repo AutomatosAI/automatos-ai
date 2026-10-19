@@ -39,8 +39,10 @@ ships no grammars and downloaded each one on first use, left. This suite checks:
 - CI looks inside both builds (scripts/ci/image_dists_absent.py): test.yml's
   prod-image-parity checks the default-argument build Railway makes, smoke-images-pr the
   one images.yml publishes. Since US-027 the two install the same lock;
-- `git grep -i camelot -- orchestrator` lists this file alone (US-023): the test stubs,
-  comments and code that named it are gone, and this file has to name it to forbid it.
+- `git grep -i camelot -- orchestrator` lists this file and the FR-6 import report's
+  suite alone (US-023): the test stubs, comments and code that named it are gone; this
+  file names it to forbid it, and test_prd262_import_main_report.py to hold FR-6's list
+  (US-032), which names it.
 
 FORBIDDEN_IMPORTS is meant to grow. A dotted name forbids that module and everything
 under it.
@@ -335,13 +337,16 @@ def test_no_module_under_orchestrator_imports_a_removed_package():
 def test_only_this_guard_still_names_the_old_table_extractor():
     """PRD-262 US-023: the stubs, comments and code that named camelot are gone.
 
-    `git grep -i camelot -- orchestrator` lists this file alone, which names it in
-    FORBIDDEN_IMPORTS. The reference script and its pins live in scripts/ci/reference/.
+    `git grep -i camelot -- orchestrator` lists this file, which names it in
+    FORBIDDEN_IMPORTS, and the suite of the FR-6 import report (PRD-262 US-032), whose
+    module list FR-6 defines with camelot first. The reference script and its pins live
+    in scripts/ci/reference/.
     """
     proc = subprocess.run(["git", "grep", "-il", "camelot", "--", "orchestrator"],
                           cwd=str(ROOT), capture_output=True, text=True, timeout=60, check=False)
     assert proc.returncode in (0, 1), proc.stderr  # git grep exits 1 when nothing matches
-    assert proc.stdout.split() == ["orchestrator/tests/test_prd262_unused_packages_go.py"], proc.stdout
+    assert proc.stdout.split() == ["orchestrator/tests/test_prd262_import_main_report.py",
+                                   "orchestrator/tests/test_prd262_unused_packages_go.py"], proc.stdout
 
 
 # --------------------------------------------------------------------------- requirements

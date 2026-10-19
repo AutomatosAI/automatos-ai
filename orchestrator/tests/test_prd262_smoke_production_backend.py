@@ -63,7 +63,7 @@ PRODUCTION = _rows(
     (4251, ENTRYPOINT_PID, ENTRYPOINT_ARGS),
     (4252, 4251, "sleep 30"),
 )
-# Today's production CMD: `sh -c "alembic upgrade heads && uvicorn …"` sits in between.
+# The production CMD before US-029: `sh -c "alembic upgrade heads && uvicorn …"` sat in between.
 SHELL_BETWEEN = _rows(
     (ENTRYPOINT_PID, 4080, ENTRYPOINT_ARGS),
     (4190, ENTRYPOINT_PID, "sh -c alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --workers 4"),
