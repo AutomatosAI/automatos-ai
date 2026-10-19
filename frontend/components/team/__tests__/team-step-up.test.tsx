@@ -1,11 +1,10 @@
 /**
- * PRD-261 A-07f (Gerard D1-d, #1157) — the team page's role change under step-up.
+ * PRD-261 A-07f (#1157) — the team page's role change and the invite modal under step-up.
  *
- * In SaaS the server refuses a role change without a sign-in from the last few minutes
- * (orchestrator/api/team.py `STEP_UP`) with HTTP 403 and Clerk's reverification hint at the top
- * level. The role change goes through `useStepUp` (lib/theme-host/api.ts), so the person sees
- * Clerk's "confirm it's you" and the request is sent once more, instead of a failure. D1-d scopes
- * step-up to the role change only: the invite modal is unchanged.
+ * In SaaS the server refuses a role change or an invitation without a sign-in from the last few
+ * minutes (orchestrator/api/team.py `STEP_UP`) with HTTP 403 and Clerk's reverification hint at the
+ * top level. Both callers go through `useStepUp` (lib/theme-host/api.ts), so the person sees
+ * Clerk's "confirm it's you" and the request is sent once more, instead of a failure.
  *
  * The real `apiClient` runs over a stubbed `fetch`, so the hint travels the real error path
  * (`httpErrorOf` attaches the body). Clerk's real `useReverification` needs a mounted
@@ -100,6 +99,7 @@ async function load(edition: 'saas' | 'local') {
   vi.stubEnv('NEXT_PUBLIC_AUTH_EDITION', edition)
   return {
     ...(await import('@/components/team/team-management')),
+    ...(await import('@/components/team/invite-modal')),
     ...(await import('@/lib/theme-host/api')),
   }
 }
@@ -123,6 +123,7 @@ afterEach(() => {
 
 const ROLE = `PATCH /api/workspaces/${WS}/team/members/5/role`
 const MEMBERS = `GET /api/workspaces/${WS}/team/members`
+const INVITE = `POST /api/workspaces/${WS}/team/invite`
 
 async function changeSamToAdmin(edition: 'saas' | 'local', roleAnswers: Response[]) {
   const calls = stubBackend({ [MEMBERS]: [json([MEMBER])], [ROLE]: roleAnswers })
@@ -169,5 +170,56 @@ describe('TeamManagement role change (local edition)', () => {
     await waitFor(() => expect(calls.filter((c) => c === ROLE)).toHaveLength(1))
     expect(clerk.useReverification).not.toHaveBeenCalled()
     expect(alert).not.toHaveBeenCalled()
+  })
+})
+
+async function inviteAdmin(edition: 'saas' | 'local', inviteAnswers: Response[]) {
+  const calls = stubBackend({ [INVITE]: inviteAnswers })
+  const onInvite = vi.fn()
+  const { InviteModal } = await load(edition)
+  render(<InviteModal isOpen onClose={() => {}} onInvite={onInvite} workspaceId={WS} />)
+  fireEvent.change(screen.getByPlaceholderText('colleague@company.com'), { target: { value: 'new@example.com' } })
+  fireEvent.change(screen.getByDisplayValue('Editor'), { target: { value: 'admin' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send Invitation' }))
+  return { calls, onInvite }
+}
+
+const INVITED = { id: 41, email: 'new@example.com', role: 'admin', status: 'pending', expires_at: 'x', created_at: 'x' }
+
+describe('InviteModal (saas)', () => {
+  it('a step-up 403 shows Clerk\'s prompt and the invitation is sent once more', async () => {
+    const { calls, onInvite } = await inviteAdmin('saas', [json(STEP_UP_BODY, 403), json(INVITED)])
+
+    await waitFor(() => expect(onInvite).toHaveBeenCalledTimes(1))
+    expect(calls).toEqual([INVITE, INVITE])
+    expect(clerk.prompts).toBe(1)
+  })
+
+  it('a closed prompt sends nothing more and shows why', async () => {
+    clerk.answer = 'close'
+    const { calls, onInvite } = await inviteAdmin('saas', [json(STEP_UP_BODY, 403)])
+    const { STEP_UP_CANCELLED_MESSAGE } = await import('@/lib/theme-host/api')
+
+    expect(await screen.findByText(STEP_UP_CANCELLED_MESSAGE)).toBeInTheDocument()
+    expect(calls).toEqual([INVITE])
+    expect(onInvite).not.toHaveBeenCalled()
+  })
+
+  it('any other refusal shows the server\'s sentence without a prompt', async () => {
+    const { onInvite } = await inviteAdmin('saas', [json({ detail: 'This person is already a member.' }, 400)])
+
+    expect(await screen.findByText('This person is already a member.')).toBeInTheDocument()
+    expect(clerk.prompts).toBe(0)
+    expect(onInvite).not.toHaveBeenCalled()
+  })
+})
+
+describe('InviteModal (local edition)', () => {
+  it('sends the invitation once and never asks Clerk', async () => {
+    const { calls, onInvite } = await inviteAdmin('local', [json(INVITED)])
+
+    await waitFor(() => expect(onInvite).toHaveBeenCalledTimes(1))
+    expect(calls).toEqual([INVITE])
+    expect(clerk.useReverification).not.toHaveBeenCalled()
   })
 })
