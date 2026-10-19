@@ -167,6 +167,10 @@ what each target runs, from the repository root. On native Windows, run the
 the repository when it is not set.
 
 ```bash
+# make env: .env with the three secrets (section 2). make up, make build and make dev run it first.
+sh scripts/stack_env.sh              # creates .env from .env.example; fills the three while empty or CHANGE_ME,
+                                     # before the first start only
+
 # make up: the published images for this checkout, then start and tidy up
 mkdir -p <deliverables>/projects     # PowerShell: New-Item -ItemType Directory -Force <deliverables>\projects
 python3 scripts/stack_images.py up   # picks the tag (below), gets the images, writes AUTOMATOS_IMAGE_TAG to .env
@@ -200,6 +204,25 @@ docker compose logs -f --tail=200 $(s)
 # make asks you to type 'reset' first; this command does not ask.
 docker compose down -v --remove-orphans
 ```
+
+`make env` is `scripts/stack_env.sh` (POSIX sh, `openssl` and the `docker`
+CLI). Without it, the same by hand, from the repository root:
+
+```bash
+[ -f .env ] || { cp .env.example .env && chmod 600 .env; }
+# Only before the first start: once the automatos_postgres_data volume exists, skip this
+# (Postgres keeps its first password; section 2 says how to rotate one).
+docker volume inspect automatos_postgres_data > /dev/null 2>&1 || for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
+  if grep -qE "^${key}=(CHANGE_ME.*)?$" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=$(openssl rand -hex 24)|" .env && rm -f .env.bak
+  fi
+done
+```
+
+In PowerShell, without a POSIX shell: `Copy-Item .env.example .env`, then
+replace each of the three `CHANGE_ME_…` values in `.env` with the output of
+`$b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })`,
+one run per secret. A key missing from `.env` gets a line of its own.
 
 `make up` and `make build` do three more things. They move a
 deliverables folder laid out before 2026-09-09 up one level, once (`make dev`
@@ -318,15 +341,48 @@ empty value stops `docker compose up` with the message shown:
 
 **Channels (Settings → Channels).** Available in the local edition. Telegram runs in *polling* mode by default here, so a bot works — and answers agent questions from Telegram replies (PRD-225) — with no public URL. Slack, Discord and WhatsApp receive inbound messages only through webhooks, so their inbound needs a public URL in front of the orchestrator (a tunnel); outbound delivery works for every platform without one.
 
-Any non-empty values work on a private machine. They have no defaults on
-purpose: a public repository must not ship known passwords.
+`make up` writes them for you. Its first step, `make env` (§1b), creates `.env`
+from `.env.example` and gives each of the three a random value
+(`openssl rand -hex 24`) while it is empty or still the `CHANGE_ME_…` placeholder
+`.env.example` ships. It does that only before the first start, while the
+`automatos_postgres_data` volume does not exist, because Postgres keeps the
+password it was created with; it never changes any other value, nor one you
+export in the shell. So the whole install is:
 
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
-cp .env.example .env      # fill in section 1 (the three secrets)
-docker compose up
+make up
 ```
+
+Your own values work too: set them in `.env` before the first `make up`. Keep
+`.env` with your data: the database opens only with the `POSTGRES_PASSWORD` it
+was created with.
+
+**No install runs on a placeholder.** The values in `.env.example` are public, so
+the backend refuses to start a command while any of the three starts with
+`CHANGE_ME`, and `make env` stops on an install that has already started with
+one. Both print the same message: which secrets, and how to rotate them. An
+unset or empty value passes the backend's check (Helm and Railway set
+`DATABASE_URL` and `REDIS_URL` instead of the two passwords); compose's own
+`${VAR:?}` stops an empty one. To rotate on an install whose data you keep:
+
+- `POSTGRES_PASSWORD`: change it in Postgres first, then put the same value in
+  `.env`:
+
+  ```bash
+  new=$(openssl rand -hex 24)
+  docker compose exec postgres psql -U postgres -d orchestrator_db -c "ALTER USER postgres PASSWORD '$new'"
+  sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$new|" .env && rm -f .env.bak
+  ```
+
+- `REDIS_PASSWORD` and `API_KEY`: a new value in `.env` alone
+  (`openssl rand -hex 24`). Both are read at every start
+  (`redis-server --requirepass`, and the backend's environment).
+
+Then `make up` (or `docker compose up -d`) restarts what changed. An install with
+no data to keep can start over instead: `docker compose down -v` deletes its
+volumes, and the next `make up` generates all three.
 
 **One model key** makes the agents think. The platform boots and serves without
 one, but chat, agents and embeddings have no model to call until you set one of
@@ -876,6 +932,13 @@ two together.
 `REDIS_PASSWORD` / `API_KEY`). Compose refused to start: the variable is
 missing or empty. `.env` must sit next to `docker-compose.yml`; a value of
 nothing counts as unset.
+
+**`Placeholder secrets: … Each still starts with CHANGE_ME`** from `make env`, or
+in the backend's log with the backend restarting. `.env` still holds a
+placeholder from `.env.example`, on an install that has already started, so
+nothing generated a value for it. Rotate it as §2 shows, or, with no data to
+keep, `docker compose down -v` and `make up` again. `make env` changes nothing
+on its own once the database volume exists.
 
 **Logs.** `make logs` follows the whole stack (`make logs s=backend` for one
 service). The same with plain compose: `docker compose logs -f backend` (boot

@@ -15,8 +15,9 @@ MAKEFILE = REPO / "Makefile"
 GUIDE = REPO / "docs" / "getting-started" / "self-hosting.md"
 SECTION_START = "## 1b. "
 # The Makefile variables whose recipe lines the guide must show expanded: the two compose
-# commands and the tag picker make up and make build run (PRD-262 US-036).
-COMPOSE_VARS = ("COMPOSE", "DEV_COMPOSE", "STACK_IMAGES")
+# commands, the tag picker make up and make build run (PRD-262 US-036) and make env's
+# secrets script (PRD-262 US-037).
+COMPOSE_VARS = ("COMPOSE", "DEV_COMPOSE", "STACK_IMAGES", "STACK_ENV")
 TARGET_HEADER = re.compile(r"^([a-z][a-z-]*):\s*$")
 DOCKER_COMMAND = re.compile(r"\bdocker (?:image|builder|system) [a-z]+(?: -f)?")
 HOST_FLAG = re.compile(r"(--[a-z][a-z-]*)")
@@ -58,7 +59,9 @@ def _expected_commands(recipe: list, variables: dict) -> list:
     expected = []
     for line in recipe:
         for name, value in variables.items():
-            if line.startswith(f"$({name}) "):
+            if line == f"$({name})":
+                expected.append(value)
+            elif line.startswith(f"$({name}) "):
                 expected.append(f"{value} {line[len(name) + 3:].strip()}".split(OUTPUT_ONLY_FLAG)[0])
         expected.extend(DOCKER_COMMAND.findall(line))
         if "automatos_cli_host" in line:
@@ -68,7 +71,7 @@ def _expected_commands(recipe: list, variables: dict) -> list:
 
 def test_the_guide_names_every_make_target():
     targets = _recipes(MAKEFILE.read_text(encoding="utf-8"))
-    assert {"up", "down", "cli-host-install"} <= set(targets), "Makefile parse drift"
+    assert {"env", "up", "down", "cli-host-install"} <= set(targets), "Makefile parse drift"
     section = _section()
     missing = [target for target in targets if f"make {target}" not in section]
     assert not missing, f"self-hosting.md §1b does not cover {missing}"

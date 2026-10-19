@@ -5,6 +5,10 @@
 # previous image untagged and grows the build cache, which is what turns a
 # 3.7 GB stack into 12 GB of disk. `make up` never leaves that behind.
 #
+#   make env     create .env from .env.example and fill POSTGRES_PASSWORD,
+#                REDIS_PASSWORD and API_KEY with random values while they are
+#                empty or CHANGE_ME, before the first start only (PRD-262 US-037).
+#                make up, make build and make dev run it first.
 #   make up      the published images for this checkout, pulled from GHCR, then
 #                start and tidy up (PRD-262 US-036). It picks one tag for the
 #                three app images, says which and why, builds only what CI has
@@ -30,8 +34,10 @@ COMPOSE      ?= docker compose
 DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
 # Picks the app images' tag for make up and make build (PRD-262 US-036).
 STACK_IMAGES ?= python3 scripts/stack_images.py
+# Writes .env's three secrets for make env (PRD-262 US-037).
+STACK_ENV    ?= sh scripts/stack_env.sh
 
-.PHONY: up build dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
+.PHONY: env up build dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
 
 # The commit a local build is made from: docker-compose.yml stamps it on each app
 # image as org.opencontainers.image.revision (PRD-262 US-036). HEAD, with -dirty
@@ -83,7 +89,15 @@ define migrate_workspace_layout
 fi
 endef
 
+# .env with the three secrets (scripts/stack_env.sh): generated before the first
+# start, never changed after it. An install that started on a CHANGE_ME placeholder
+# stops here with how to rotate it. up, build and dev run it as their first recipe
+# line, not as a prerequisite, so the #818 guide test still parses `up:`.
+env:
+	@$(STACK_ENV)
+
 up:
+	@$(MAKE) --no-print-directory env
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
 	@$(STACK_IMAGES) up
@@ -96,6 +110,7 @@ up:
 # publishes) under local-<sha7>, written to .env first so the build and every
 # later compose command use it. Compose never builds under an official tag.
 build:
+	@$(MAKE) --no-print-directory env
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
 	@$(STACK_IMAGES) build
@@ -106,6 +121,7 @@ build:
 	@$(MAKE) --no-print-directory cli-host-nudge
 
 dev:
+	@$(MAKE) --no-print-directory env
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)/projects"
 	$(migrate_workspace_layout)
 	$(DEV_COMPOSE) up -d --build --remove-orphans
