@@ -40,6 +40,8 @@ SHOP = "Harbour Coffee"
 NOTICE = "AI assistant for Harbour Coffee."
 REPLY = "We open at 8."
 WS = str(uuid4())
+#: One channel_connections row for every send in a test: the notice state is per connection.
+CONNECTION_ID = uuid4()
 CHAT_ID = "4242"
 
 
@@ -77,7 +79,7 @@ class FakeDb:
     """The rows the sender and the notice read: the channel row and the principal."""
 
     def __init__(self, channel_config: Optional[dict] = None) -> None:
-        self.channel_row = NS(id=uuid4(), config=channel_config or {}, metadata={})
+        self.channel_row = NS(id=CONNECTION_ID, config=channel_config or {}, metadata={})
 
     def execute(self, statement: Any, params: Any = None) -> _Result:
         sql = str(statement)

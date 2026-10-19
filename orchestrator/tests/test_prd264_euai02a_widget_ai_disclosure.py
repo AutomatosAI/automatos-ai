@@ -402,3 +402,22 @@ def test_a_save_of_other_settings_is_untouched(monkeypatch, edition):
     resp = client.patch(f"/api/sites/{site.id}/settings", json={"settings": {"cart_idle": {"enabled": True}}})
     assert resp.status_code == 200, resp.text
     assert saved == [{"cart_idle": {"enabled": True}}]
+
+
+def test_a_failed_settings_lookup_still_sends_the_default_notice(edition, monkeypatch):
+    """A failed Site/settings read never breaks widget chat: the read runs in a
+    savepoint and the notice falls back to the unnamed English line."""
+    from sqlalchemy.exc import ProgrammingError
+
+    import api.widgets.config as widget_config
+
+    def _fail(*_args, **_kwargs):
+        raise ProgrammingError("SELECT sites", {}, Exception('relation "sites" does not exist'))
+
+    monkeypatch.setattr(widget_config, "resolve_widget_source", _fail)
+    db = MagicMock()
+
+    disclosure = widget_config.resolve_ai_disclosure(db, uuid4())
+
+    assert (disclosure.badge, disclosure.line, disclosure.locale) == ("AI", "You are chatting with an AI assistant.", "en")
+    db.begin_nested.assert_called_once()

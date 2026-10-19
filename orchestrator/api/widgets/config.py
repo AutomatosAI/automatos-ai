@@ -26,6 +26,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db
@@ -148,8 +149,18 @@ def resolve_widget_config(db: Session, workspace_id: UUID) -> dict:
 
 
 def resolve_ai_disclosure(db: Session, workspace_id: UUID) -> AIDisclosure:
-    """The AI notice for a workspace's widget (PRD-264 EUAI-02a)."""
-    source = resolve_widget_source(db, workspace_id)
+    """The AI notice for a workspace's widget (PRD-264 EUAI-02a).
+
+    The settings are read inside a savepoint. If the read fails, the default
+    notice (English, no name) is used and the caller's session stays usable:
+    the notice is always sent, and a failed lookup never breaks the chat.
+    """
+    try:
+        with db.begin_nested():
+            source = resolve_widget_source(db, workspace_id)
+    except SQLAlchemyError:
+        logger.exception("[PRD-264] widget notice: settings lookup failed for ws=%s; the default notice is used", workspace_id)
+        return build_disclosure(None, None)
     return build_disclosure(source.settings, source.name)
 
 
