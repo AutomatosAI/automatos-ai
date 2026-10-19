@@ -3,7 +3,8 @@
 Each library swap's reference runs from a ``requirements-<name>.in`` that pins every
 package it installs, compiled by uv into a ``.lock`` with hashes. The suites that hold
 a swap to its reference check that the lock is its input pinned and hashed
-(``test_prd262_pdf_tables.py``, ``test_prd262_text_splitters.py``).
+(``test_prd262_pdf_tables.py``, ``test_prd262_text_splitters.py``,
+``test_prd262_leiden_adapter.py``).
 """
 from __future__ import annotations
 

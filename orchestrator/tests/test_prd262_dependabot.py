@@ -18,8 +18,8 @@ A pin with nothing to move it freezes security fixes, so the two travel together
   moves;
 * every Python lock file has an updater, or is listed below with the reason
   Dependabot cannot update it. A new lock (US-044) fails here until one or the
-  other is true; US-022's three API locks and the frozen reference locks of US-023
-  and US-026 are listed.
+  other is true; US-022's API locks (two since US-027 removed Railway's [leiden]
+  lock) and the frozen reference locks of US-023, US-026 and US-027 are listed.
 
 Pure file reads: no Docker, no network.
 """
