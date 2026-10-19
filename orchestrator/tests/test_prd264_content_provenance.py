@@ -417,3 +417,77 @@ def test_the_rate_setting_is_named_in_the_config_surface():
     surface = json.loads((ORCH / "reports" / "config-surface.json").read_text(encoding="utf-8"))
     assert "PROVENANCE_RATE_PER_MINUTE" in surface["settings"]
     assert config.PROVENANCE_RATE_PER_MINUTE >= 1
+
+
+# --------------------------------------------------------------------------- the hash stays private (FR-17)
+
+
+def test_every_answer_tells_browsers_and_proxies_not_to_keep_it(client, db_session, seed_workspace, monkeypatch):
+    from config import config
+
+    _mark(db_session, seed_workspace())
+    monkeypatch.setattr(config, "PROVENANCE_RATE_PER_MINUTE", 3)
+    ip = {"X-Forwarded-For": "203.0.113.21"}
+
+    answers = [client.get(f"/api/public/provenance/{digest}", headers=ip) for digest in (KNOWN, UNKNOWN, "nope")]
+    limited = client.get(f"/api/public/provenance/{KNOWN}", headers=ip)
+
+    assert [a.status_code for a in answers] == [200, 200, 422]
+    assert limited.status_code == 429
+    for response in (*answers, limited):
+        assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_a_redis_outage_lets_the_check_through_and_names_this_limiter(client, monkeypatch, caplog):
+    import logging
+
+    from api import provenance
+    from api.widgets.rate_limit import RateLimitStore
+
+    monkeypatch.setattr(provenance, "_rate_store", RateLimitStore(redis_factory=lambda: None))
+
+    with caplog.at_level(logging.ERROR, logger="api.widgets.rate_limit"):
+        response = client.get(f"/api/public/provenance/{UNKNOWN}", headers={"X-Forwarded-For": "203.0.113.22"})
+
+    assert response.status_code == 200   # fail-open is unchanged
+    (line,) = [r.getMessage() for r in caplog.records if "FAIL-OPEN" in r.getMessage()]
+    assert line.startswith(f"{provenance.RATE_LIMITER_LABEL} FAIL-OPEN")
+    assert UNKNOWN not in line
+
+
+def test_another_limiter_s_fail_open_line_is_unchanged(caplog):
+    import logging
+
+    from api.widgets.rate_limit import DEFAULT_LIMITER_LABEL, RateLimitStore
+
+    with caplog.at_level(logging.ERROR, logger="api.widgets.rate_limit"):
+        allowed = RateLimitStore(redis_factory=lambda: None).check("ip:192.0.2.1", 5)[0]
+
+    assert allowed is True
+    assert DEFAULT_LIMITER_LABEL == "widget rate limiter"
+    assert any(r.getMessage().startswith("widget rate limiter FAIL-OPEN") for r in caplog.records)
+
+
+def test_a_database_error_answers_503_and_logs_no_hash(client, monkeypatch, caplog):
+    import logging
+
+    from sqlalchemy.exc import OperationalError
+
+    from api import provenance
+
+    def _down(_db, sha256):
+        raise OperationalError("SELECT ... WHERE sha256 = %(sha256_1)s", {"sha256_1": sha256},
+                               Exception("server closed the connection"))
+
+    monkeypatch.setattr(provenance, "provenance_answer", _down)
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.get(f"/api/public/provenance/{KNOWN}")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": provenance.LOOKUP_FAILED_DETAIL}
+    assert response.headers["Cache-Control"] == "no-store"
+    assert any("OperationalError" in r.getMessage() for r in caplog.records)
+    # The test's own HTTP client logs its request URL; only the server side counts here.
+    server_side = [r for r in caplog.records if not r.name.startswith(("httpx", "httpcore"))]
+    assert not [r for r in server_side if KNOWN in r.getMessage() or (r.exc_text and KNOWN in r.exc_text)]

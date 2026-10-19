@@ -15,6 +15,11 @@ So the route is held small:
   limit runs before the hash is checked, so malformed requests count too. An IPv6 caller
   is counted per /64 (one subscriber), and a client-IP value that is not an IP address
   shares one bucket, so it can't write an arbitrary key into Redis (``rate_bucket_for``).
+* The hash stays private (FR-17): every answer, refusals included, carries
+  ``Cache-Control: no-store``, so no browser or proxy keeps a record of a check; a
+  database error is logged by its type only, never its text (which holds the bound
+  hash); the request-metrics, log-context, access-log and trace paths collapse the
+  hash segment to ``{sha256}`` (``core.monitoring.path_digests``).
 
 Both editions serve it the same way. A bearer token or workspace header the browser
 sends along is ignored.
@@ -22,9 +27,11 @@ sends along is ignored.
 from __future__ import annotations
 
 import ipaddress
+import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from api.credentials import get_client_ip
@@ -42,6 +49,13 @@ IPV6_BUCKET_PREFIX_LENGTH = 64
 UNPARSABLE_IP_BUCKET = f"{RATE_BUCKET_PREFIX}:unparsable"
 BAD_HASH_DETAIL = "Send the file's SHA-256 as 64 lower-case hex characters."
 RATE_LIMITED_DETAIL = "Too many checks from this address. Try again in a minute."
+LOOKUP_FAILED_DETAIL = "The check is unavailable right now. Try again in a minute."
+# No answer about a visitor's file is kept by a browser, a proxy or a CDN (FR-17).
+NO_STORE_HEADERS = {"Cache-Control": "no-store"}
+# What the shared limiter's fail-open ERROR line calls this limiter.
+RATE_LIMITER_LABEL = "provenance rate limiter"
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix=PROVENANCE_ROUTE_PREFIX, tags=["Provenance"])
 
@@ -53,9 +67,10 @@ def rate_bucket_for(request: Request) -> str:
     """The rate-limit bucket for this caller: one IPv4 address or one IPv6 /64.
 
     The address comes from ``get_client_ip`` (the first X-Forwarded-For hop, as main.py's
-    global limiter reads it; on Railway the edge replaces a client-sent header,
-    so the first hop is the connecting address). It is parsed as an IP so the Redis key
-    and the fail-open log line only ever hold an address: anything else shares
+    global limiter reads it). That trusts the edge to replace a client-sent header, so
+    the first hop is the connecting address; on Railway this is unverified until a
+    probe is run (docs/compliance/DETECTION.md, an owner decision). It is parsed as an
+    IP so the Redis key and the fail-open log line only ever hold an address: anything else shares
     ``UNPARSABLE_IP_BUCKET``. An IPv4-mapped IPv6 address counts as its IPv4 address.
     """
     try:
@@ -79,18 +94,20 @@ def limit_checks_per_ip(request: Request) -> None:
     """
     allowed, _limit, _remaining, reset_seconds = _rate_store.check(
         rate_bucket_for(request), config.PROVENANCE_RATE_PER_MINUTE, PROVENANCE_WINDOW_SECONDS,
+        label=RATE_LIMITER_LABEL,
     )
     if not allowed:
         raise HTTPException(
             status_code=429,
             detail=RATE_LIMITED_DETAIL,
-            headers={"Retry-After": str(reset_seconds)},
+            headers={**NO_STORE_HEADERS, "Retry-After": str(reset_seconds)},
         )
 
 
 @router.get("/{sha256}")
 def check_provenance(
     sha256: str,
+    response: Response,
     _rate_limited: None = Depends(limit_checks_per_ip),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -98,7 +115,15 @@ def check_provenance(
 
     A plain ``def`` (AGENTS.md): one indexed read on a synchronous session, in the
     threadpool. A re-encoded or edited file has a different hash and answers no.
+    A database error answers 503; its text carries the bound hash, so only its type
+    is logged.
     """
+    response.headers.update(NO_STORE_HEADERS)
     if not is_sha256_hex(sha256):
-        raise HTTPException(status_code=422, detail=BAD_HASH_DETAIL)
-    return provenance_answer(db, sha256)
+        raise HTTPException(status_code=422, detail=BAD_HASH_DETAIL, headers={**NO_STORE_HEADERS})
+    try:
+        return provenance_answer(db, sha256)
+    except SQLAlchemyError as exc:
+        logger.error("[provenance] lookup failed (%s); answering 503", type(exc).__name__)
+        raise HTTPException(status_code=503, detail=LOOKUP_FAILED_DETAIL,
+                            headers={**NO_STORE_HEADERS}) from None

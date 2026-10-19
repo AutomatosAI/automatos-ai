@@ -100,7 +100,15 @@ describe('/verify — public in both editions, owned by the host', () => {
 
   it('is a public route of the saas middleware', () => {
     const publicList = middleware.slice(middleware.indexOf('createRouteMatcher(['), middleware.indexOf(']);'))
-    expect(publicList).toContain('"/verify(.*)"')
+    expect(publicList).toContain('"/verify"')
+    expect(publicList).toContain('"/verify/(.*)"')
+  })
+
+  it('makes only /verify and its sub-paths public, not /verify-email or /verification', () => {
+    const publicList = middleware.slice(middleware.indexOf('createRouteMatcher(['), middleware.indexOf(']);'))
+    const patterns = Array.from(publicList.matchAll(/^\s*"([^"]+)",/gm), (match) => match[1])
+    const verifyPatterns = patterns.filter((pattern) => pattern.startsWith('/verif'))
+    expect(verifyPatterns).toEqual(['/verify', '/verify/(.*)'])
   })
 
   it('exists in the local edition', async () => {
