@@ -28,6 +28,23 @@ CAPTION = "Our Guji Uraga is in: bergamot, peach and black tea."
 
 
 @pytest.fixture
+def db_session(test_engine):
+    """conftest's rolled-back session, but a call's own rollback undoes only what came after the last
+    commit (a SAVEPOINT), as in production: submit_social_post rolls back a refused submit, and the
+    post, the card and the click were each committed by a request of their own before the click ran.
+    conftest's session lets that rollback take the whole test's transaction, the post with it."""
+    from sqlalchemy.orm import Session
+
+    connection = test_engine.connect()
+    outer = connection.begin()
+    session = Session(bind=connection, join_transaction_mode="create_savepoint")
+    yield session
+    session.close()
+    outer.rollback()
+    connection.close()
+
+
+@pytest.fixture
 def desk(db_session, seed_workspace, monkeypatch):
     """A workspace with Socials on, its owner, Auto's executor, and posts to submit."""
     import modules.socials.notify as notify
@@ -190,7 +207,7 @@ def test_a_post_that_moved_before_the_click_is_unchanged_and_the_click_given_bac
     asked = _submit(desk, {"post_id": str(post.id)})
     grant = _click(desk, asked)
     post.status = "needs_approval"
-    desk.db.flush()
+    desk.db.commit()                     # the card, the click and the move came before the click's run
 
     ran = _submit(desk, dict(grant.details["params"]))
 

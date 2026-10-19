@@ -178,7 +178,7 @@ def test_a_widget_visitors_page_over_budget_shows_only_what_a_visitor_may_see(bo
         page = _page(board, limit=200)
     said = _seen(page)
 
-    rows = [line for line in said.splitlines() if line.startswith("id ")]
+    rows = [line for line in said.splitlines() if re.match(r"id \d+ \| ", line)]       # the legend opens "id | " too
     assert VISITOR_LEGEND in said and rows and HEADER.search(said)
     assert count_tokens(said) <= PAGE_TOKENS
     for absent in (AGENT, "medium", "risk-4", "#16", "#17", BRIEF_WORDS.strip()):

@@ -49,7 +49,7 @@ def test_the_wire_lists_them_and_says_what_the_tools_reach():
     listed = asyncio.run(rpc.handle_message({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, CTX,
                                             server_version="1.0", call=_unused))
     names = [t["name"] for t in listed["result"]["tools"]]
-    assert names[10:12] == ["query_database", "query_graph"]
+    assert names[11:13] == ["query_database", "query_graph"]           # N17-9: read_document sits before them
     hello = asyncio.run(rpc.handle_message({"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {}},
                                            CTX, server_version="1.0", call=_unused))
     assert "the owner's database" in hello["result"]["instructions"]

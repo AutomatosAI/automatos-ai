@@ -91,6 +91,6 @@ def test_the_chat_loop_logs_its_cut_at_the_budget_it_cuts_to():
     assert service._TOOL_RESULT_TOKEN_BUDGET == tool_cut.TOOL_RESULT_TOKEN_BUDGET == 2000
     tracker = service.StreamingChatService._track_search_spiral
     assert tracker.__code__.co_qualname == "logs_what_the_cut_keeps.<locals>.wrapped"
-    raw = {"raw_result": {"results": ["passage " * 400]}}                             # no llm_context: the raw result
+    raw = {"raw_result": {"results": ["passage " * 3000]}}                            # no llm_context: the raw result
     assert tool_cut.answer_tokens(raw) > tool_cut.TOOL_RESULT_TOKEN_BUDGET
     assert tool_cut.answer_tokens({"llm_context": "short"}) == 0 == tool_cut.answer_tokens("not a result")
