@@ -366,6 +366,8 @@ def _args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     # A skipped file's warning names its path, which holds the workspace id.
     logger.setLevel(logging.ERROR if args.summary_only else logging.INFO)
     from config import config
