@@ -22,6 +22,8 @@ from typing import Dict, Any, Optional, Union
 from datetime import datetime
 from urllib.parse import urlparse
 
+from core.llm.defaults import ANTHROPIC_KEY_PROBE_MODEL
+
 logger = logging.getLogger(__name__)
 
 def _is_private_ip(hostname: str) -> bool:
@@ -181,7 +183,7 @@ class CredentialTester:
         
         # Test with a simple message
         payload = {
-            'model': 'claude-3-haiku-20240307',
+            'model': ANTHROPIC_KEY_PROBE_MODEL,
             'max_tokens': 10,
             'messages': [{'role': 'user', 'content': 'Hello'}]
         }

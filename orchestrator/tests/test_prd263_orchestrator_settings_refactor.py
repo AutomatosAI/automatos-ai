@@ -109,34 +109,28 @@ def flagged(monkeypatch):
     return calls
 
 
-def test_sync_auto_llm_writes_model_config_and_the_global_orchestrator_llm_settings(flagged):
+def test_sync_auto_llm_writes_the_auto_row_and_never_the_platform_settings(flagged, monkeypatch):
+    """19 Oct 2026: the save no longer writes system_settings orchestrator_llm (one
+    workspace's choice became every workspace's default). The row is marked: a pair
+    other than the platform default is this workspace's choice
+    (tests/test_auto_model_workspace_save.py holds the marking)."""
+    monkeypatch.setattr("core.llm.new_agent_model.default_route", lambda: ("anthropic", "claude-haiku-5-5"))
     agent = SimpleNamespace(model_config={"provider": "old", "extra": 1})
     db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = None
 
     auto.sync_auto_llm(db, agent, {"provider": "anthropic", "model_id": "claude", "bogus": 2})
 
-    assert agent.model_config == {"provider": "anthropic", "extra": 1, "model_id": "claude"}
-    added = [call.args[0] for call in db.add.call_args_list]
-    assert [(row.category, row.key, row.value, row.default_value) for row in added] == [
-        ("orchestrator_llm", "provider", "anthropic", "anthropic"),
-        ("orchestrator_llm", "model", "claude", "claude"),
-    ]
+    assert agent.model_config == {"provider": "anthropic", "extra": 1, "model_id": "claude", "source": "workspace_choice"}
+    assert db.mock_calls == []                                   # no query, no add: system_settings untouched
     assert flagged == ["model_config"]
 
 
-def test_sync_auto_llm_updates_an_existing_setting_and_skips_no_llm(flagged):
-    row = SimpleNamespace(value="old")
-    db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = row
-    auto.sync_auto_llm(db, SimpleNamespace(model_config=None), {"model_id": "m"})
-    assert row.value == "m"
-    db.add.assert_not_called()
-
+def test_sync_auto_llm_skips_a_save_with_no_llm(flagged):
     untouched = SimpleNamespace(model_config={"a": 1})
     auto.sync_auto_llm(MagicMock(), untouched, None)
+    auto.sync_auto_llm(MagicMock(), untouched, "not a dict")
     assert untouched.model_config == {"a": 1}
-    assert flagged == ["model_config"]
+    assert flagged == []
 
 
 def test_sync_auto_configuration_writes_personality_mode_first(flagged):

@@ -5,8 +5,6 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 def register_marketplace_actions(registry: ActionRegistry) -> None:
     """Register marketplace discovery, workspace inventory, and install actions."""
-    from core.llm.defaults import DEFAULT_LLM_MODEL
-
     # ── Marketplace Discovery (read) ────────────────────────────────
 
     registry.register(ActionDefinition(
@@ -263,35 +261,6 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "enable skill code-review",
             "add the analysis skill",
         ],
-    ))
-
-    registry.register(ActionDefinition(
-        name="platform_install_model",
-        description=(
-            "Install an LLM model from OpenRouter catalog. "
-            f"Use OpenRouter's vendor/model id, like '{DEFAULT_LLM_MODEL}'. "
-            "Idempotent — re-installing reactivates inactive installs. "
-            "Auto-creates registry entry from OpenRouter cache if needed."
-        ),
-        category="marketplace",
-        parameters={
-            "type": "object",
-            "properties": {
-                "model_id": {
-                    "type": "string",
-                    "description": f"OpenRouter model ID (e.g. '{DEFAULT_LLM_MODEL}').",
-                },
-            },
-            "required": ["model_id"],
-        },
-        permission_level="write",
-        tags=["marketplace", "models", "llm", "install", "enable"],
-        examples=[
-            f"install {DEFAULT_LLM_MODEL}",
-            "add model google/gemini-2.5-pro",
-            "enable openai/gpt-4o",
-        ],
-        accepts=("provider",),
     ))
 
     # PRD-143 S11: the disable side of platform_install_plugin (administration
