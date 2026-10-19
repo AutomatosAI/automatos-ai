@@ -224,6 +224,8 @@ def submission_conflict(db: Session, manifest: Mapping[str, Any], digest: str, s
     """After a concurrent submission won a unique index: the clash it left, as a message, or None.
 
     The losing call's own checks ran before the winner committed; run again, they see its rows.
+    PostgreSQL raises the unique violation only once the winner has committed (an insert that
+    meets an uncommitted key waits for that transaction), so the re-check never races it.
     """
     try:
         check_submission(db, manifest, digest, submitter)
