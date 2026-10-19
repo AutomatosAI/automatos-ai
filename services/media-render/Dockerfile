@@ -107,11 +107,20 @@ ENV HYPERFRAMES_NO_TELEMETRY=1 \
     CONTAINER=true
 
 WORKDIR /opt/media-render/js
-COPY js/package.json js/package-lock.json ./
+COPY js/package.json js/package-lock.json js/prune.txt ./
 # gsap.min.js is staged into every render from /opt/media-render/vendor.
+# PRD-262 #7: then what render, check and snapshot never load goes (about 75 MB):
+# the paths js/prune.txt lists (`rm -r`, so a path a bump moved fails the build),
+# every source map, type declaration and Markdown file but the licences and
+# notices, and the .bin links left pointing at nothing. media-render.yml traces
+# Node's module loading through a render, a check and a snapshot to prove it.
 RUN npm ci --omit=dev --no-fund --no-audit \
     && mkdir -p /opt/media-render/vendor \
-    && cp node_modules/gsap/dist/gsap.min.js /opt/media-render/vendor/gsap.min.js
+    && cp node_modules/gsap/dist/gsap.min.js /opt/media-render/vendor/gsap.min.js \
+    && sed -e 's/#.*//' -e '/^[[:space:]]*$/d' prune.txt | (cd node_modules && xargs rm -r --) \
+    && find node_modules -type f \( -name '*.map' -o -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' -o -name '*.md' \) \
+        ! -iname '*licen[cs]e*' ! -iname '*notice*' -delete \
+    && find node_modules/.bin -xtype l -delete
 ENV PATH=/opt/media-render/js/node_modules/.bin:$PATH
 
 # chrome-headless-shell, installed at build so a render never downloads it. It

@@ -210,7 +210,7 @@ def test_the_lock_records_each_sharp_builds_libc_so_npm_ci_skips_the_musl_ones()
 
 def test_the_js_stage_installs_exactly_the_lock():
     js = _stage("js")
-    assert "COPY js/package.json js/package-lock.json ./" in js
+    assert "COPY js/package.json js/package-lock.json js/prune.txt ./" in js
     assert "RUN npm ci --omit=dev --no-fund --no-audit" in js
     assert "npm install" not in _instructions(DOCKERFILE)
     assert "cp node_modules/gsap/dist/gsap.min.js /opt/media-render/vendor/gsap.min.js" in js
