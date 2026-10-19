@@ -178,10 +178,11 @@ mkdir -p <deliverables>/projects     # PowerShell: New-Item -ItemType Directory 
 python3 scripts/stack_images.py up   # picks the tag (below), gets the images, writes AUTOMATOS_IMAGE_TAG to .env
 docker compose up -d --no-build --remove-orphans
 docker image prune -f
-docker builder prune -f
+docker builder prune -f --filter until=168h
 
 # make build: the three app images built from your checkout instead, as local-<sha7>
 python3 scripts/stack_images.py build   # writes AUTOMATOS_IMAGE_TAG=local-<sha7> to .env
+docker compose up -d postgres redis minio   # first, so they start while the images build
 docker compose build backend frontend workspace-worker
 docker compose up -d --no-build --remove-orphans
 
@@ -191,9 +192,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --r
 # make down: stop, keep your data
 docker compose down --remove-orphans
 
-# make clean: dangling images and unused build cache, never your data
+# make clean: dangling images and build cache unused for a week, never your data
 docker image prune -f
-docker builder prune -f
+docker builder prune -f --filter until=168h
 
 # make status: what is running, and the disk it uses
 docker compose ps
@@ -233,6 +234,11 @@ In PowerShell, without a POSIX shell: `Copy-Item .env.example .env`, then
 replace each of the three `CHANGE_ME_…` values in `.env` with the output of
 `$b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') })`,
 one run per secret. A key missing from `.env` gets a line of its own.
+
+`make build` starts `postgres`, `redis` and `minio` before it builds, so their
+image pull happens first and their first-run initialisation and health checks
+pass while the app images build; the backend still waits for all three to be
+healthy. If the build fails, those three keep running until `make down`.
 
 `make up` and `make build` do three more things. They move a
 deliverables folder laid out before 2026-09-09 up one level, once (`make dev`
@@ -1067,16 +1073,25 @@ repository's Apache-2.0 licence with a DCO sign-off — see
 Rebuilding leaves the previous image untagged and grows the build cache, and
 Docker keeps both indefinitely — that is what turns 3.7 GB of images into 12 GB
 of disk. `make up`, `make build` and `make dev` clean up after themselves, so
-this stays flat on its own. To reclaim at any time:
+this stays bounded on its own. To reclaim at any time:
 
 ```bash
-make clean     # or: docker image prune -f && docker builder prune -f
+make clean     # or: docker image prune -f && docker builder prune -f --filter until=168h
 ```
 
-`make clean` removes only untagged images and unused build cache. It never
-prunes volumes: a stopped stack's database volume looks "unused" to Docker, so
-`docker volume prune` would delete your data. Only `make reset` removes data,
-and it asks first.
+`make clean` removes only untagged images and the build cache nothing has used
+for a week. The week is deliberate: the dependency installs (the web app's
+`npm install`, the API's `pip install`) run in build stages no image keeps, so
+a plain `docker builder prune -f` deletes them, and the next `make build` or
+`make dev` after a `git pull` would install every dependency again (several
+minutes). Kept, a rebuild after a code change reuses them. A week of frequent
+dependency changes can hold a few copies; `docker builder prune -f` reclaims
+all of it, at the price of that reinstall. `make up` on published images builds
+nothing, so it has no build cache to keep.
+
+`make clean` never prunes volumes: a stopped stack's database volume looks
+"unused" to Docker, so `docker volume prune` would delete your data. Only
+`make reset` removes data, and it asks first.
 
 **Docker Desktop's own cache limit.** Docker garbage-collects the build cache
 only once it passes `defaultKeepStorage` — 20 GB by default, so in practice it
