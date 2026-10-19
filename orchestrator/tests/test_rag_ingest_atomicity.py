@@ -133,10 +133,15 @@ for _pkg in ("modules", "modules.rag", "modules.rag.ingestion"):
 
 # semantic_chunker / multimodal are referenced from manager.py inside ``try``
 # blocks — they fail to import gracefully. Pre-stub so the try block fails
-# fast without dragging in PIL/Image internals.
-sys.modules.setdefault(
-    "modules.rag.chunking", types.ModuleType("modules.rag.chunking")
-)
+# fast without dragging in PIL/Image internals. The ``modules.rag.chunking``
+# stub carries a path like its parents: manager.py imports the vendored
+# splitters from ``modules.rag.chunking.text_splitters`` at module top
+# (PRD-262 US-026), so a bare stub would fail the import whenever this module
+# is collected before anything loads the real ``modules.rag``.
+_chunking_stub = types.ModuleType("modules.rag.chunking")
+_chunking_stub.__path__ = [str(ORCH_ROOT / "modules" / "rag" / "chunking")]
+if sys.modules.setdefault("modules.rag.chunking", _chunking_stub) is _chunking_stub:
+    _LEAKED_PARENT_STUBS["modules.rag.chunking"] = _chunking_stub
 _sc_stub = types.ModuleType("modules.rag.chunking.semantic_chunker")
 _sc_stub.SemanticChunker = MagicMock()
 _sc_stub.ChunkingStrategy = MagicMock()
