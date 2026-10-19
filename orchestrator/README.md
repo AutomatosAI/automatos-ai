@@ -96,8 +96,9 @@ request:
 | `schema-drift` | The four-writer drift check. |
 | eval lanes | NL2SQL, retrieval-recall, memory-recall and graph-uplift harness self-tests (informational). |
 
-Alongside it: `smoke-fresh-clone` (a real `docker compose up` from an empty
-checkout must reach a green `/health` and `/health/ready` and a frontend that
+Alongside it: `smoke-fresh-clone` (a real `make build` from an empty checkout,
+the production stages built from source, must reach a green `/health` and
+`/health/ready` and a frontend that
 answers on `:3000`, and the boots are timed; `scripts/ci/smoke-fresh-clone.sh`
 refuses to run on a Docker host with its own Automatos containers or volumes,
 because its teardown deletes the stack's volumes), `smoke-images` (`make up`
@@ -108,12 +109,17 @@ host's image cache unless `SMOKE_EMPTY_IMAGE_CACHE=true`), `import-linter`
 (module-boundary contracts in `orchestrator/.importlinter`), `dco`,
 `gitleaks`, `CodeQL`, `malware-scan` and `check-shopify-isolation`.
 
-Pure tests (no database) can be run inside the compose image:
+Pure tests (no database) run on the host, in a Python 3.11 environment with the
+backend's runtime and dev requirements installed the way CI's backend job installs
+them (`.github/workflows/test.yml`):
 
 ```bash
-docker compose run --rm --no-deps -v "$PWD:/repo" -w /repo/orchestrator backend \
-  python -m pytest tests/test_prd209_quickstart_honest.py -q -p no:cacheprovider
+cd orchestrator && python -m pytest tests/test_prd209_quickstart_honest.py -q -p no:cacheprovider
 ```
+
+Not inside a compose image: neither backend stage carries pytest, which only the dev
+requirements install (PRD-262 US-014), and plain `docker compose run backend` now runs
+the published production image (US-035).
 
 Tests that need Postgres need the schema `init_test_db.py` builds; CI is the
 reference run for those.
