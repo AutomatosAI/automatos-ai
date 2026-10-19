@@ -282,6 +282,8 @@ Tags: **Human-gated** (Gerard does or approves it, outside the loop) · **Needs 
 - [ ] With option (b) or a `ttl_seconds` parameter: a maintainer issue is opened and approved before either file changes.
 
 #### US-026a: P1 safety facts are recorded privately before PR-1B and PR-1D merge
+**Recorded:** US-026a, 19 Oct 2026: HARNESS_SELF_MANAGEMENT_ENABLED confirmed off in prod.
+
 **Description:** As Gerard, I want the prod facts that decide P1's safety recorded before PR-1B and PR-1D merge, so rollback detection is not deleted while the legacy apply path could still be on in prod (US-014b, PR-1D), and the sweep design matches the replica count (US-011, PR-1B).
 *Tags: Human-gated*
 **Files:** a private ops note outside every public repo (for example `<workspace>/.claude/PRD263-OPS.md`); this PRD (one line) · **Depends on:** — · **Blocks:** PR-1B, PR-1D
