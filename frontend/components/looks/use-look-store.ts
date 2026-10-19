@@ -171,8 +171,13 @@ export const apiLookServer: LookServer = {
 /** How long after the last change a save is sent: one drag of the glow is many changes. */
 export const LOOK_SEND_DELAY_MS = 600
 
-/** Answers that mean the server will never keep this save as sent: the user is told, and it isn't sent again. */
-const REFUSED_STATUSES: readonly number[] = [400, 404, 409, 413, 422]
+/**
+ * Answers that mean the server will never keep this save as sent: the user is told, and it isn't sent again.
+ * 403 is one: no person behind the caller, or no members:read (orchestrator/api/themes_looks.py); the looks
+ * routes ask for no step-up, so a 403 here is never a reverification to retry. 401 (signed out) carries no
+ * status from apiClient and stays pending, sent on the next load.
+ */
+const REFUSED_STATUSES: readonly number[] = [400, 403, 404, 409, 413, 422]
 
 /** The server keeps looks per workspace, a uuid: a scope without one (a test, no workspace) has nowhere to send them. */
 const WORKSPACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

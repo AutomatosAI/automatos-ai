@@ -169,11 +169,12 @@ describe('write-through', () => {
     await waitFor(() => expect(hasLookMark(() => store, SCOPE, HELLO.keys, 'pending')).toBe(false))
   })
 
-  it("shows the not-kept notice when the server refuses a save, and doesn't send it again", async () => {
+  // 403: no person behind the caller (themes_looks.py NO_PERSON) or no members:read; looks routes have no step-up.
+  it.each([400, 403])("shows the not-kept notice when the server refuses a save (%i), and doesn't send it again", async (status) => {
     const store = memoryStorage()
     metServer(store, HELLO.keys)
     const server = fakeServer()
-    server.write.mockImplementation(() => Promise.reject(refusal(400)))
+    server.write.mockImplementation(() => Promise.reject(refusal(status)))
     const { result } = renderInstalled(store, server)
     await waitFor(() => expect(server.read).toHaveBeenCalled())
     act(() => result.current.setLook(AURORA))
