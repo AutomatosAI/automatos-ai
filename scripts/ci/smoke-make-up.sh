@@ -17,7 +17,13 @@
 #     is recorded as a measurement here: make up has returned before they are polled;
 #   - PRD-262 US-037: no secret is exported, so make up's first step, make env, created
 #     .env from .env.example and wrote POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to it
-#     as 48 hex characters each, which the stack then ran on.
+#     as 48 hex characters each, which the stack then ran on;
+#   - PRD-262 US-038: the health gates, from Docker's start and health_status events,
+#     streamed for the whole run (scripts/ci/smoke_health_gates.py). Compose probes each
+#     service every second while it starts (this pull request's docker-compose.yml), so
+#     redis and minio turn healthy within 2 s of their start, postgres is reported, and
+#     the frontend, which compose starts once the backend is healthy, starts within 3 s
+#     of that.
 #
 # Built for a throwaway Docker host, such as a CI runner: its teardown removes the stack
 # with its volumes, so it refuses to start on a host that has Automatos containers or
@@ -44,8 +50,14 @@ STACK_NAME_PATTERN='^automatos_'
 # PRD-262 US-037: the .env make up writes, and a secret line as make env writes it.
 ENV_FILE=".env"
 GENERATED_SECRET='^(POSTGRES_PASSWORD|REDIS_PASSWORD|API_KEY)=[0-9a-f]{48}$'
+# PRD-262 US-038: Docker's start and health_status events, the gates read off them, and
+# their record.
+EVENTS_FILE="${OUT_DIR}/events.jsonl"
+GATES_TOOL="scripts/ci/smoke_health_gates.py"
+GATES_FILE="${OUT_DIR}/health-gates.json"
 
 outcome="fail"
+events_pid=""
 
 fail() {
   echo "FAIL: $1" >&2
@@ -77,6 +89,34 @@ check_generated_secrets() {
     || fail "make up did not write POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY to .env as 48 hex characters each (make env): ${found:-0} of 3"
 }
 
+# Docker replays only a short buffer of past events, so the start and health_status
+# events are streamed to a file from before make up starts anything (as
+# smoke-fresh-clone.sh does). --since replays the moments before the stream attaches.
+start_event_log() {
+  docker events --since "$(date +%s)" \
+    --filter type=container --filter event=start --filter event=health_status \
+    --format '{{json .}}' > "$EVENTS_FILE" &
+  events_pid=$!
+}
+
+stop_event_log() {
+  if [ -n "$events_pid" ]; then
+    kill "$events_pid" 2>/dev/null || true
+    wait "$events_pid" 2>/dev/null || true
+    events_pid=""
+  fi
+}
+
+# PRD-262 US-038: make up's compose started every service, the frontend once the backend
+# was healthy, so every gate applies: redis and minio healthy within 2 s of their start,
+# the frontend started within 3 s of the backend turning healthy; postgres is reported.
+check_health_gates() {
+  stop_event_log
+  python3 "$GATES_TOOL" --events "$EVENTS_FILE" --frontend gate \
+    --out "$GATES_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a health gate missed its bar: redis or minio turned healthy more than 2s after it started, or the frontend started more than 3s after the backend turned healthy (PRD-262 US-038)"
+}
+
 check_nothing_was_built() {
   docker compose config --format json > "$COMPOSE_CONFIG_FILE" || fail "docker compose config failed"
   python3 "$IMAGES_TOOL" images --mode pull --config "$COMPOSE_CONFIG_FILE" \
@@ -86,6 +126,7 @@ check_nothing_was_built() {
 
 finish() {
   local code=$?
+  stop_event_log
   if [ "$outcome" != "pass" ]; then
     docker compose logs --tail 150 backend frontend >&2 || true
   fi
@@ -103,6 +144,7 @@ main() {
   # PRD-262 US-037: no secret is exported; make env generates them.
   unset POSTGRES_PASSWORD REDIS_PASSWORD API_KEY
   trap finish EXIT
+  start_event_log
   echo "make up with AUTOMATOS_IMAGE_TAG=${AUTOMATOS_IMAGE_TAG} on this pull request's checkout..."
   make up 2>&1 | tee "$MAKE_UP_LOG" || fail "make up failed"
   check_generated_secrets
@@ -111,9 +153,10 @@ main() {
   wait_for frontend automatos_frontend "ui=${FRONTEND_URL}" \
     || fail "the frontend did not answer 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
   check_nothing_was_built
+  check_health_gates
   outcome="pass"
   echo "OK: make up wrote three generated secrets to .env, ran the published ${AUTOMATOS_IMAGE_TAG} images," \
-    "built nothing, and the stack answered /health/ready 200 and :3000 200"
+    "built nothing, the stack answered /health/ready 200 and :3000 200, and the health gates held"
 }
 
 main "$@"

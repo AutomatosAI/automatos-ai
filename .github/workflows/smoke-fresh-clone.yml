@@ -27,6 +27,13 @@ name: smoke-fresh-clone
 # backend` finishes in under 8 s with an SSE client connected
 # (scripts/ci/smoke_production_backend.py).
 #
+# PRD-262 US-038 — compose probes each service every second while it starts
+# (start_interval). Once the frontend answers, scripts/ci/smoke_health_gates.py reads
+# Docker's start and health_status events: redis and minio must turn healthy within 2 s
+# of their start, and postgres's time on this fresh volume is reported. The smoke starts
+# the frontend itself here, after its checks, so the frontend's gap is reported; the
+# make up lanes (smoke-images.yml) gate it.
+#
 # PRD-262 US-036 — docker-compose.yml names the published images, so the build here is
 # tagged local-<sha7> and labelled org.opencontainers.image.revision=HEAD, as make build
 # does; the smoke checks that every app container runs such an image
@@ -85,6 +92,7 @@ on:
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
       - "scripts/ci/smoke_images.py"
       - "scripts/ci/smoke_images_report.py"
       - ".github/workflows/smoke-fresh-clone.yml"
@@ -121,6 +129,7 @@ on:
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
       - "scripts/ci/smoke_images.py"
       - "scripts/ci/smoke_images_report.py"
       - ".github/workflows/smoke-fresh-clone.yml"

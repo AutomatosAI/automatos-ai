@@ -57,11 +57,18 @@ name: smoke-images
 #   `docker compose up -d --no-deps backend` recreates, and `docker compose stop backend`
 #   finishes in under 8 s with an SSE client connected
 #   (scripts/ci/smoke_production_backend.py).
+# - Every job, the health gates (PRD-262 US-038), read off Docker's start and
+#   health_status events (scripts/ci/smoke_health_gates.py): compose probes each service
+#   every second while it starts, so redis and minio must turn healthy within 2 s of
+#   their start (postgres is reported: Gerard sets its bar from this number). Where make
+#   up's compose starts the frontend (the main runs and make-up-pr), it must start within
+#   3 s of the backend turning healthy. make up stops first, naming the floor, on a Docker
+#   older than Engine 25 or Compose 2.24.4 (scripts/stack_docker_floor.sh).
 #
 # Report only until PRD-262 US-004 sets the bars: no time or size fails a job, except
-# US-035's stop in under 8 s. A boot that never answers 200, an image built instead of
-# pulled, a missing or wrong revision label, a backend with --reload or the wrong worker
-# count, or a failed US-035 check fails it from day one.
+# US-035's stop in under 8 s and US-038's health gates. A boot that never answers 200,
+# an image built instead of pulled, a missing or wrong revision label, a backend with
+# --reload or the wrong worker count, or a failed US-035 check fails it from day one.
 #
 # workflow_run and workflow_dispatch work only once this file is on main. Actions are
 # pinned to a commit; the comment names the release. NON-REQUIRED at introduction.
@@ -101,10 +108,12 @@ on:
       - "scripts/ci/smoke_worker_restart.py"
       - "scripts/ci/smoke_document_presign.py"
       - "scripts/ci/smoke_production_backend.py"
+      - "scripts/ci/smoke_health_gates.py"
       - "scripts/ci/smoke-make-up.sh"
       - "scripts/ci/smoke-make-env.sh"
       - "scripts/stack_images.py"
       - "scripts/stack_env.sh"
+      - "scripts/stack_docker_floor.sh"
       - ".env.example"
       - "docker-compose*.yml"
       - "Makefile"

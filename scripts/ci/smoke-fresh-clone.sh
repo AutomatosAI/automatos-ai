@@ -106,11 +106,22 @@
 # backend` must finish in under STOP_MAX_SECONDS. The recreated backend is a new
 # container, so the report reads the earlier one's log from the copy taken before it.
 #
+# PRD-262 US-038, in every mode, once the frontend answers: compose probes each service
+# every second while it starts (start_interval), and scripts/ci/smoke_health_gates.py
+# reads the gates off Docker's start and health_status events. redis and minio must turn
+# healthy within 2 s of their start; postgres is reported (on this fresh volume its TCP
+# probe passes only after initdb's restart). With SMOKE_IMAGES=pull, compose starts the
+# frontend the moment the backend turns healthy, and it must start within 3 s of that;
+# the other modes start the frontend here, after their own checks, so its gap is only
+# reported.
+#
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, the document came back, and the backend ran as the production stage should.
+# loopback, the document came back, the backend ran as the production stage should, and
+# the health gates held their bars.
 # Exit 1 = a boot failed, a port listens beyond this machine, the backend's build context
 # is over its budget, the document did not come back from object storage, a US-035
-# check failed, or make up wrote no generated secrets to .env (US-037).
+# check failed, make up wrote no generated secrets to .env (US-037), or a health gate
+# missed its bar (US-038).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -194,6 +205,9 @@ STOP_MAX_SECONDS=8
 API_LOCAL="envs/api.local"
 API_LOCAL_KEY="AUTOMATOS_SMOKE_API_LOCAL_PROBE"
 API_LOCAL_SAVED="${RUNNER_TEMP:-/tmp}/smoke-api.local.saved"
+# PRD-262 US-038: the health gates, read off EVENTS_FILE, and their record.
+GATES_TOOL="scripts/ci/smoke_health_gates.py"
+GATES_FILE="${OUT_DIR}/health-gates.json"
 # The backend's log up to its recreate: the new container's log starts empty, so the
 # report reads the earlier boots' lines from this copy.
 EARLIER_BACKEND_LOG="${RUNNER_TEMP:-/tmp}/smoke-backend-before-recreate.log"
@@ -448,6 +462,20 @@ boot_frontend() {
     || fail "the frontend never answered 200 on ${FRONTEND_URL} within ${MAX_WAIT_SECONDS}s"
 }
 
+# PRD-262 US-038: redis and minio healthy within 2 s of their start, postgres reported,
+# from Docker's events (EVENTS_FILE, streamed since before the stack started). With
+# SMOKE_IMAGES=pull, make up's compose started the frontend once the backend was
+# healthy, so that gap is gated too; here the smoke starts it itself, so it is reported.
+check_health_gates() {
+  local frontend="report"
+  if [ "$SMOKE_IMAGES" = "pull" ]; then
+    frontend="gate"
+  fi
+  python3 "$GATES_TOOL" --events "$EVENTS_FILE" --frontend "$frontend" \
+    --out "$GATES_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a health gate missed its bar: redis or minio turned healthy more than 2s after it started, or the frontend started more than 3s after the backend turned healthy (PRD-262 US-038)"
+}
+
 # PRD-262 US-005: the frontend, and every other published port, listens on 127.0.0.1.
 # The frontend is already running, so the check starts nothing; it only reads ports.
 check_loopback_ports() {
@@ -637,6 +665,7 @@ main() {
   boot_frontend
   finish_make_up
   check_generated_secrets
+  check_health_gates
   check_loopback_ports
   check_images
   check_document_storage
@@ -647,8 +676,8 @@ main() {
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot and" \
     "${WARM_RESTARTS} warm restarts, :3000 answered 200, a document came back from" \
-    "object storage and the backend ran as the production stage — the local edition" \
-    "serves with NO external credentials"
+    "object storage, the backend ran as the production stage and the health gates held" \
+    "— the local edition serves with NO external credentials"
 }
 
 main "$@"
