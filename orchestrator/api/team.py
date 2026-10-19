@@ -231,6 +231,7 @@ async def invite_member(
         created_at=invitation.created_at.isoformat()
     )
 
+# Step-up (Clerk reverification) for role changes lands with its client flow: PRD-261 W-A2, issue #1157.
 @router.patch(
     "/members/{member_id}/role",
     dependencies=[Depends(require_workspace_permission("members:change_role"))],

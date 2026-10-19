@@ -11,7 +11,7 @@ const nav = vi.hoisted(() => ({ query: 'ticket=612', replace: vi.fn() }))
 const board = vi.hoisted(() => ({ task: undefined as unknown, isError: false }))
 const session = vi.hoisted(() => ({ newDraft: vi.fn() }))
 // PRD-260 M67: which chat /chat shows (Play's at >= 1024 px under Play, else the core's).
-const look = vi.hoisted(() => ({ play: false, narrow: false }))
+const look = vi.hoisted(() => ({ play: false, narrow: false, ownsChat: true }))
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(nav.query),
@@ -19,12 +19,16 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: any) => <a href={String(href)} {...rest}>{children}</a> }))
 vi.mock('@/hooks/use-board-tasks', () => ({ useBoardTask: () => ({ data: board.task, isError: board.isError }) }))
-// Play's width source, the one PlayRouteSwitch reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
-vi.mock('@/hooks/use-studio-theme', () => ({
-  useIsStudio: () => true,
-  useIsPlay: () => look.play,
-  usePlayLayout: () => (look.play && !look.narrow ? 'play' : 'fallback'),
-}))
+// The theme's width source, the one PlayRouteSwitch reads (P260-FX-25): Play's chat only under Play at >= 1024 px.
+// PRD-261 A-02b: the bar asks whether the active theme's entry owns /chat; builtin Play's does.
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => true,
+    useActiveTheme: () => (look.play ? { ...BUILTIN_PLAY_ENTRY, ownsPages: look.ownsChat ? BUILTIN_PLAY_ENTRY.ownsPages : [] } : null),
+    useThemeLayout: () => (look.play && !look.narrow ? 'theme' : 'fallback'),
+  }
+})
 // A small stand-in for the chat-session store: an open tab, and a draft Discuss opens.
 const { OPEN_TAB } = vi.hoisted(() => ({
   OPEN_TAB: { activeChatId: 'chat-old', openChatIds: ['chat-old'], titles: { 'chat-old': 'Rota questions' }, draftOpen: false },
@@ -67,6 +71,7 @@ beforeEach(() => {
   board.isError = false
   look.play = false
   look.narrow = false
+  look.ownsChat = true
   useDiscussionStore.getState().end()
   ;(useChatSessionStore as any).setState({ session: OPEN_TAB })
 })
@@ -147,6 +152,14 @@ describe("DiscussionBar's hint (PRD-260 M67)", () => {
     cleanup()
     look.play = true
     look.narrow = true
+    render(<DiscussionBar />)
+    expect(screen.getByText(STUDIO_HINT)).toBeInTheDocument()
+    expect(screen.queryByText(PLAY_HINT)).toBeNull()
+  })
+
+  it("keeps Studio's hint under a theme at its width whose entry doesn't own /chat (PRD-261 A-02b)", () => {
+    look.play = true
+    look.ownsChat = false
     render(<DiscussionBar />)
     expect(screen.getByText(STUDIO_HINT)).toBeInTheDocument()
     expect(screen.queryByText(PLAY_HINT)).toBeNull()

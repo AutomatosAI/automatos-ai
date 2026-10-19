@@ -13,7 +13,7 @@
  * another tab, a post or a type drill-down still keeps the core's page.
  * P260-FX-23 (M17): the layout hands the switch Play's shelf through its lazy
  * slot, so the shelf arrives a moment after the first render (findBy*).
- * P260-FX-25 (M69): the width comes from usePlayLayout (stood in for here);
+ * P260-FX-25 (M69): the width comes from useThemeLayout (stood in for here);
  * while it isn't known (the server, hydration) neither the shelf nor the page
  * and its deep link mount.
  */
@@ -27,14 +27,17 @@ vi.mock('next/navigation', () => ({
   usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.search),
 }))
-vi.mock('@/hooks/use-studio-theme', () => ({
-  useIsStudio: () => true,
-  useIsPlay: () => state.play,
-  usePlayLayout: () => {
-    if (!state.play || state.narrow) return 'fallback'
-    return state.widthUnknown ? 'pending' : 'play'
-  },
-}))
+vi.mock('@/hooks/use-studio-theme', async () => {
+  const { BUILTIN_PLAY_ENTRY } = await import('@/lib/theme-host/builtin/play-entry')
+  return {
+    useIsStudio: () => true,
+    useActiveTheme: () => (state.play ? BUILTIN_PLAY_ENTRY : null),
+    useThemeLayout: () => {
+      if (!state.play || state.narrow) return 'fallback'
+      return state.widthUnknown ? 'pending' : 'theme'
+    },
+  }
+})
 vi.mock('@/components/play/deliverables/play-shelf', () => ({ PlayShelf: () => <div data-testid="play-shelf" /> }))
 vi.mock('@/components/deliverables/deliverable-deep-link', () => ({
   DeliverableDeepLink: () => <div data-testid="deep-link" />,

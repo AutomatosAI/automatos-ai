@@ -41,6 +41,8 @@ from core.seeds.seed_shopify_agents import SHOPIFY_AGENTS
 from core.seeds.seed_socials_package import SOCIALS_PACKAGE
 
 logging.basicConfig(level=logging.INFO)
+from core.monitoring.request_log_guard import guard_request_logs
+guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
 logger = logging.getLogger(__name__)
 
 # The real inventory, indexed by slug — the single citation for every member ref.

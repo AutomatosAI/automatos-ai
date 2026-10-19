@@ -6,9 +6,9 @@ served a route manifest of about a dozen routes. Since FastAPI 0.137 an included
 router stays one node of ``app.routes`` with no path, so every walk over the routes
 flattens them with ``iter_route_contexts``.
 
-- requirements.txt pins fastapi, starlette (>= 1.0.1), uvicorn[standard] 0.50.1 (the
-  newest that accepts websockets 12.0) and websockets 12.0 exactly, and this suite runs
-  on those versions;
+- requirements.txt pins fastapi, starlette (>= 1.0.1), uvicorn[standard] 0.50.1 and
+  websockets 13.1 (google-genai needs >= 13, #1169) exactly, uvicorn's [standard] extra
+  accepts that websockets, and this suite runs on those versions;
 - in a FRESH process (tests/web_stack_probe.py, DB unreachable), every router of
   router_manifest.py is mounted: the app serves each of its endpoints, and the app's
   routing answers each of its HTTP paths (405 to a method no route takes, never 404);
@@ -24,12 +24,13 @@ import os
 import re
 import subprocess
 import sys
-from importlib.metadata import version
+from importlib.metadata import requires, version
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from packaging.requirements import Requirement
 from pydantic import BaseModel
 
 ORCH_ROOT = Path(__file__).resolve().parents[1]
@@ -44,9 +45,10 @@ PIN = re.compile(r"^([A-Za-z0-9_.-]+)(\[[a-z,]+\])?==([0-9][0-9.]*)\s*(#.*)?$")
 WEB_STACK = {"fastapi", "starlette", "uvicorn", "websockets"}
 # GHSA-86qp-5c8j-p5mr is fixed in starlette 1.0.1.
 STARLETTE_FIXED = (1, 0, 1)
-# The newest uvicorn whose [standard] extra accepts websockets 12.0 (0.50.2 needs >= 13).
+# uvicorn 0.50.1 brings the --workers manager that restarts a dead worker (since 0.30).
 UVICORN_PIN = "0.50.1"
-WEBSOCKETS_PIN = "12.0"
+# google-genai needs websockets >= 13 (#1169); 14 deprecated the legacy API uvicorn serves with.
+WEBSOCKETS_PIN = "13.1"
 
 
 def _pins() -> dict:
@@ -70,6 +72,18 @@ def test_the_web_stack_is_pinned_exactly():
     assert pins["websockets"] == ("", WEBSOCKETS_PIN)
     # The rate limiter's subclass keeps slowapi's dispatch line for line.
     assert pins["slowapi"] == ("", "0.1.10")
+
+
+def test_uvicorns_standard_extra_accepts_the_pinned_websockets():
+    """#1169 moved websockets to 13.1 for google-genai; uvicorn[standard] must still take it.
+    The installed uvicorn's own metadata is read with ``packaging`` (pytest's dependency)."""
+    declared = requires("uvicorn") or []
+    wanted = [Requirement(line) for line in declared]
+    websockets = [req for req in wanted
+                  if req.name == "websockets" and req.marker is not None and req.marker.evaluate({"extra": "standard"})]
+    assert websockets, f"uvicorn[standard] no longer names websockets: {declared}"
+    for req in websockets:
+        assert req.specifier.contains(WEBSOCKETS_PIN), f"{req} refuses websockets {WEBSOCKETS_PIN}"
 
 
 def test_the_suite_runs_on_the_pinned_versions():

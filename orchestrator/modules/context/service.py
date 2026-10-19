@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from modules.context.budget import (
@@ -50,6 +51,7 @@ from modules.context.result import ContextResult
 from modules.context.sections import SECTION_REGISTRY, SectionContext
 from core.observability.tracer import fire_assembly_trace
 from modules.context.sections.conversation import ConversationSection
+from modules.context.sections.skills import SKILL_BODIES_KEY, SkillsSection
 from modules.context.sections.tools import ToolLoadingStrategy, ToolsSection
 
 # PRD-127: Ephemeral attachments
@@ -84,6 +86,32 @@ VOLATILE_SECTIONS = frozenset(
 )
 
 
+@dataclass(frozen=True)
+class _Assembly:
+    """What steps 3-7 of ``build_context`` produce: the rendered sections, the
+    budget's choice among them, the system prompt and the tools."""
+
+    rendered: list[RenderedSection]
+    included: list[RenderedSection]
+    trimmed_names: list[str]
+    budget: TokenBudget
+    system_prompt: str
+    cacheable_prefix: Optional[str]
+    prompt_tokens: int
+    tools: list[dict[str, Any]]
+    tool_choice: str
+
+
+def _served_skill_bodies(ctx: SectionContext, sections_included: list[str]) -> list[dict[str, Any]]:
+    """PRD-263 US-062: the core skill bodies that served the turn, by content hash.
+
+    The skills section records them as it renders (its render returns text only).
+    A skills section the budget dropped put no body in the prompt, so it
+    records nothing in the trace.
+    """
+    if SkillsSection.name not in sections_included:
+        return []
+    return [dict(body) for body in ctx.kwargs.get(SKILL_BODIES_KEY) or []]
 
 
 class ContextService:
@@ -161,6 +189,61 @@ class ContextService:
             kwargs=extra_kwargs,
         )
 
+        return await self._build_from_context(
+            mode, config, ctx, resolved_model_id, attachment_ids, start
+        )
+
+    async def _build_from_context(
+        self, mode: ContextMode, config: ModeConfig, ctx: SectionContext,
+        resolved_model_id: Optional[str], attachment_ids: Optional[list[str]], start: float,
+    ) -> ContextResult:
+        """Turn a built ``SectionContext`` into the ``ContextResult`` (steps 3-11)."""
+        assembly = await self._render_and_assemble(mode, config, ctx, resolved_model_id)
+
+        # --- 8. Format messages ---
+        formatted_messages = self._format_messages(
+            config, ctx, assembly.budget, assembly.prompt_tokens, attachment_ids
+        )
+
+        # --- 9. Compute final metadata ---
+        total_token_estimate = (
+            assembly.prompt_tokens
+            + sum(count_tokens(m.get("content", "")) for m in formatted_messages)
+        )
+
+        # --- 10. PRD-127: Inject attachment parts into messages ---
+        formatted_messages, attachment_failures = await self._inject_attachments(
+            formatted_messages, attachment_ids, ctx.workspace_id, resolved_model_id
+        )
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        # --- 11. The immutable result, its log line and its trace ---
+        result = self._result(
+            mode, ctx, assembly, formatted_messages, total_token_estimate,
+            elapsed_ms, resolved_model_id, attachment_failures,
+        )
+        agent_id = getattr(ctx.agent, "id", "?") if ctx.agent else "?"
+        self._log_build(result, agent_id, len(attachment_ids) if attachment_ids else 0)
+
+        # PRD-201 S1: emit the assembly trace onto the observability seam. The
+        # durable per-turn row (messages.context_trace) is written by the turn
+        # writer from result.to_assembly_trace() regardless of TRACING_ENABLED;
+        # this fire only mirrors it to Langfuse when tracing is ON. Guarded —
+        # never fails a build.
+        fire_assembly_trace(
+            trace=result.to_assembly_trace(),
+            workspace_id=ctx.workspace_id,
+            metadata={"agent_id": agent_id},
+        )
+
+        return result
+
+    async def _render_and_assemble(
+        self, mode: ContextMode, config: ModeConfig, ctx: SectionContext, resolved_model_id: Optional[str],
+    ) -> _Assembly:
+        """Steps 3-7: render the mode's sections, fit them to the model's
+        budget, assemble the system prompt and load the tools."""
         # --- 3. Instantiate sections from config ---
         sections = self._instantiate_sections(config)
 
@@ -182,87 +265,81 @@ class ContextService:
 
             # --- 6. Assemble system prompt (PRD-201 S4: cache-stable ordering) ---
             system_prompt, cacheable_prefix = self._assemble_prompt(included)
-            prompt_token_estimate = count_tokens(system_prompt)
 
             # --- 7. Load tools ---
             tools, tool_choice = await self._load_tools(config, ctx)
 
-        # --- 8. Format messages ---
-        formatted_messages = self._format_messages(
-            config, ctx, budget, prompt_token_estimate, attachment_ids
+        return _Assembly(
+            rendered=rendered, included=included, trimmed_names=trimmed_names, budget=budget,
+            system_prompt=system_prompt, cacheable_prefix=cacheable_prefix,
+            prompt_tokens=count_tokens(system_prompt), tools=tools, tool_choice=tool_choice,
         )
 
-        # --- 9. Compute final metadata ---
-        sections_included = [s.name for s in included if s.content]
-        total_token_estimate = (
-            prompt_token_estimate
-            + sum(count_tokens(m.get("content", "")) for m in formatted_messages)
-        )
+    async def _inject_attachments(
+        self, messages: list[dict[str, Any]], attachment_ids: Optional[list[str]],
+        workspace_id: str, resolved_model_id: Optional[str],
+    ) -> tuple[list[dict[str, Any]], list[dict]]:
+        """Step 10 (PRD-127): the turn's attachments, in its last user message.
 
-        # --- 10. PRD-127: Inject attachment parts into messages ---
+        Returns the messages and the attachments that could not be loaded
+        (PRD-223 S0.3). A vision error reaches the caller; any other failure
+        tells the model the content did not arrive.
+        """
+        if not attachment_ids:
+            return messages, []
         attachment_failures: list[dict] = []
-        if attachment_ids:
-            try:
-                resolver = AttachmentResolver(db_session=self._db_session)
-                attachment_parts, attachment_failures = await resolver.resolve(
-                    attachment_ids=[UUID(aid) for aid in attachment_ids],
-                    workspace_id=UUID(workspace_id),
-                    model_id=resolved_model_id or "",
+        try:
+            resolver = AttachmentResolver(db_session=self._db_session)
+            attachment_parts, attachment_failures = await resolver.resolve(
+                attachment_ids=[UUID(aid) for aid in attachment_ids],
+                workspace_id=UUID(workspace_id),
+                model_id=resolved_model_id or "",
+            )
+            if attachment_parts:
+                messages = inject_parts_into_last_user_message(messages, attachment_parts)
+                logger.info(
+                    "[ContextService] Injected %d attachment parts into messages",
+                    len(attachment_parts),
                 )
-                if attachment_parts:
-                    formatted_messages = inject_parts_into_last_user_message(
-                        formatted_messages, attachment_parts
-                    )
-                    logger.info(
-                        "[ContextService] Injected %d attachment parts into messages",
-                        len(attachment_parts),
-                    )
-                if attachment_failures:
-                    logger.warning(
-                        "[ContextService] %d attachment(s) unavailable: %s",
-                        len(attachment_failures),
-                        [f.get("filename") or f.get("attachment_id") for f in attachment_failures],
-                    )
-            except VisionNotSupportedError:
-                # Re-raise vision errors — caller should handle
-                raise
-            except Exception as e:
-                logger.error(
-                    "[ContextService] Attachment resolution failed: %s", e, exc_info=True
+            if attachment_failures:
+                logger.warning(
+                    "[ContextService] %d attachment(s) unavailable: %s",
+                    len(attachment_failures),
+                    [f.get("filename") or f.get("attachment_id") for f in attachment_failures],
                 )
-                # PRD-223 S0.3: continue without the attachments, but NEVER
-                # silently — the model must be told the content did not
-                # arrive, or it will infer/fabricate from the filename.
-                from modules.attachments.resolver import build_unavailable_marker
-                attachment_failures = [
-                    {"attachment_id": str(aid), "filename": None, "reason": "resolution error"}
-                    for aid in attachment_ids
-                ]
-                formatted_messages = inject_parts_into_last_user_message(
-                    formatted_messages, [build_unavailable_marker(attachment_failures)]
-                )
+        except VisionNotSupportedError:
+            # Re-raise vision errors — caller should handle
+            raise
+        except Exception as e:
+            logger.error(
+                "[ContextService] Attachment resolution failed: %s", e, exc_info=True
+            )
+            # PRD-223 S0.3: continue without the attachments, but NEVER
+            # silently — the model must be told the content did not
+            # arrive, or it will infer/fabricate from the filename.
+            from modules.attachments.resolver import build_unavailable_marker
+            attachment_failures = [
+                {"attachment_id": str(aid), "filename": None, "reason": "resolution error"}
+                for aid in attachment_ids
+            ]
+            messages = inject_parts_into_last_user_message(
+                messages, [build_unavailable_marker(attachment_failures)]
+            )
+        return messages, attachment_failures
 
-        elapsed_ms = (time.perf_counter() - start) * 1000
-
-        agent_id = getattr(agent, "id", "?") if agent else "?"
-        logger.info(
-            "[ContextService] mode=%s agent=%s sections=%s trimmed=%s "
-            "token_estimate=%d/%d tools=%d attachments=%d prep_time=%.1fms",
-            mode.value if isinstance(mode, ContextMode) else mode,
-            agent_id,
-            sections_included,
-            trimmed_names,
-            total_token_estimate,
-            budget.available_for_sections,
-            len(tools),
-            len(attachment_ids) if attachment_ids else 0,
-            elapsed_ms,
-        )
+    @staticmethod
+    def _result(
+        mode: ContextMode, ctx: SectionContext, assembly: _Assembly, messages: list[dict[str, Any]],
+        token_estimate: int, elapsed_ms: float, resolved_model_id: Optional[str],
+        attachment_failures: list[dict],
+    ) -> ContextResult:
+        """Step 11: the immutable ``ContextResult``, with its assembly trace."""
+        sections_included = [s.name for s in assembly.included if s.content]
 
         # PRD-201 S1: the per-section trace the assembler used to discard —
         # every rendered section with its priority, honest token count, whether
         # it rendered anything, and whether the budgeter trimmed it.
-        _trimmed_set = set(trimmed_names)
+        _trimmed_set = set(assembly.trimmed_names)
         section_trace = [
             {
                 "name": s.name,
@@ -271,42 +348,41 @@ class ContextService:
                 "rendered_nonempty": bool(s.content),
                 "trimmed": s.name in _trimmed_set,
             }
-            for s in rendered
+            for s in assembly.rendered
         ]
 
-        result = ContextResult(
-            system_prompt=system_prompt,
-            messages=formatted_messages,
-            tools=tools,
-            tool_choice=tool_choice,
+        return ContextResult(
+            system_prompt=assembly.system_prompt,
+            messages=messages,
+            tools=assembly.tools,
+            tool_choice=assembly.tool_choice,
             mode=mode.value if isinstance(mode, ContextMode) else str(mode),
             sections_included=sections_included,
-            sections_trimmed=trimmed_names,
-            token_estimate=total_token_estimate,
-            token_budget=budget.available_for_sections,
+            sections_trimmed=assembly.trimmed_names,
+            token_estimate=token_estimate,
+            token_budget=assembly.budget.available_for_sections,
             memory_context=ctx.kwargs.get("_memory_context"),
             user_name=ctx.kwargs.get("_user_name"),
             preparation_time_ms=elapsed_ms,
             model=resolved_model_id,
-            budget_total=budget.total,
+            budget_total=assembly.budget.total,
             sections=section_trace,
             injected_memory_ids=list(ctx.kwargs.get("_injected_memory_ids") or []),
-            cacheable_prefix=cacheable_prefix,
+            skill_bodies=_served_skill_bodies(ctx, sections_included),
+            cacheable_prefix=assembly.cacheable_prefix,
             attachment_failures=attachment_failures,
         )
 
-        # PRD-201 S1: emit the assembly trace onto the observability seam. The
-        # durable per-turn row (messages.context_trace) is written by the turn
-        # writer from result.to_assembly_trace() regardless of TRACING_ENABLED;
-        # this fire only mirrors it to Langfuse when tracing is ON. Guarded —
-        # never fails a build.
-        fire_assembly_trace(
-            trace=result.to_assembly_trace(),
-            workspace_id=workspace_id,
-            metadata={"agent_id": agent_id},
+    @staticmethod
+    def _log_build(result: ContextResult, agent_id: Any, attachment_count: int) -> None:
+        """One INFO line per build: sections, trims, tokens, tools and prep time."""
+        logger.info(
+            "[ContextService] mode=%s agent=%s sections=%s trimmed=%s "
+            "token_estimate=%d/%d tools=%d attachments=%d prep_time=%.1fms",
+            result.mode, agent_id, result.sections_included, result.sections_trimmed,
+            result.token_estimate, result.token_budget, len(result.tools), attachment_count,
+            result.preparation_time_ms,
         )
-
-        return result
 
     # ------------------------------------------------------------------
     # Planning Context Pack (PRD-164 S1, Q61)

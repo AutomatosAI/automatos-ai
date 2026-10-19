@@ -15,8 +15,8 @@ is gated behind two checks, in this order, BEFORE any state is touched:
 ``/approve`` short-circuits the weekly tick: it applies the prescription now via
 the existing ``HarnessService._auto_apply_prescription`` and records the board
 task id in the shared US-021 ledger, so the next tick never re-applies it.
-``/reject`` marks the board task ``rejected`` so ``_get_rejected_signatures``
-suppresses the same prescription on future ticks.
+``/reject`` marks the board task ``rejected``, so the card is closed and never
+applied: ``/approve`` refuses it, and the card-to-Done path reads ``done`` cards only.
 
 Wiring into the live channel inbound path is done in US-026 (the gate that
 enables the flag on a canary workspace and exercises this path end-to-end).
@@ -374,7 +374,7 @@ async def _reject(
     rx_id: str,
     caller_identity: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Mark the board task rejected so it is never proposed or applied again."""
+    """Mark the board task rejected so it is never applied."""
     from core.models.core import BoardTask
 
     raw_id = task.get("id")
@@ -397,8 +397,7 @@ async def _reject(
 
     # The board action layer only permits the five kanban statuses, so set
     # 'rejected' on the ORM row directly (this is internal server code, not an
-    # LLM tool call). The title is left untouched: it carries the signature
-    # _get_rejected_signatures matches on to suppress re-proposal next tick.
+    # LLM tool call). The title is left untouched.
     user_id = _caller_user_id(caller_identity)
     row.status = "rejected"
     row.blocked_reason = f"Rejected by workspace admin (user {user_id}) via command"

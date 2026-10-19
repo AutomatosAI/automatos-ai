@@ -1,0 +1,26 @@
+/* PRD-261 A-10a: the SDK-context hello theme's one stylesheet. Every rule sits under
+   html.hello-a10a, the theme's own class, and its colours come from the preset's variables. */
+html.hello-a10a .hello-a10a-frame {
+  min-height: 100vh;
+  background: var(--hello-a10a-ground);
+  color: var(--hello-a10a-ink);
+}
+
+html.hello-a10a .hello-a10a-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 24px;
+  background-color: var(--hello-a10a-accent);
+  color: var(--hello-a10a-ground);
+}
+
+html.hello-a10a .hello-a10a-bar a,
+html.hello-a10a .hello-a10a-bar button {
+  color: inherit;
+}
+
+html.hello-a10a .hello-a10a-content {
+  padding: 24px;
+}
