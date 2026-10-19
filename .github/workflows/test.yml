@@ -930,8 +930,8 @@ jobs:
   # Dockerfile defaults to production — Clerk outage, #668). Railway builds the
   # three Dockerfiles with NO build args (railway.json: DOCKERFILE; the last
   # stage, production), so this lane builds exactly that and checks what got baked:
-  # the frontend's edition literal, the backend's graph extras, the worker's
-  # browser. Non-required like the other lanes; the required flip is the repo
+  # the frontend's edition literal, the backend's Leiden clustering (graspologic-native,
+  # no graspologic, since PRD-262 US-027), the worker's browser. Non-required like the other lanes; the required flip is the repo
   # admin's call.
   prod-image-parity:
     name: Prod images built with default args carry production behaviour (non-required)
@@ -995,11 +995,29 @@ jobs:
       # as large as the context budget, before the backend build below.
       - name: Backend — seed dummy uploads and caches in the build context
         run: python3 scripts/ci/build_context.py seed orchestrator
-      - name: Backend — graph extras present with no args
+      # PRD-262 US-027: the Knowledge Graph's Leiden clustering comes from graspologic-native
+      # through modules/knowledge/leiden_partition.py, in this build as in every other.
+      # The adapter clusters two triangles joined by an edge inside the image, and
+      # graspologic, which Railway's [leiden] extra installed with about 585 MB, does not
+      # import.
+      - name: Backend — Leiden through graspologic-native, and no graspologic
+        env:
+          LEIDEN: |
+            import graspologic_native
+            import networkx as nx
+            from modules.knowledge.leiden_partition import cluster
+            graph = nx.Graph([("a", "b"), ("b", "c"), ("c", "a"), ("d", "e"), ("e", "f"), ("f", "d"), ("c", "d")])
+            found = cluster(graph)
+            assert found == {0: ["a", "b", "c"], 1: ["d", "e", "f"]}, found
+            print("graspologic-native clusters in the image:", found)
         run: |
           set -o pipefail
           docker build --target production -t parity-be orchestrator/ 2>&1 | tee "$RUNNER_TEMP/parity-be-build.log"
-          docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
+          docker run --rm parity-be python -c "$LEIDEN"
+          if docker run --rm parity-be python -c "import graspologic"; then
+            echo "::error::the production backend image imports graspologic (PRD-262 US-027)"; exit 1
+          fi
+          echo "import graspologic fails in the image, as it should"
       # The production stage copies the whole context, so what the build sent is what
       # orchestrator/.dockerignore let in (scripts/ci/build_context.py reads it off the log).
       - name: Backend — the build context left the uploads and caches out
@@ -1023,10 +1041,12 @@ jobs:
       # pandas. US-026: nor langchain's splitters and core, which were vendored, with
       # langsmith and zstandard. This is the Railway build, which since US-027 installs
       # the same lock as the GHCR build smoke-images.yml's smoke-images-pr checks: its
-      # [leiden] extra, which kept scikit-learn and pandas, is gone.
+      # [leiden] extra, which kept scikit-learn and pandas, is gone, with graspologic and
+      # the heavy rest it brought (numba, llvmlite, POT, gensim, statsmodels, matplotlib,
+      # seaborn, umap-learn).
       - name: Backend — no package the code never imports
         env:
-          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas langchain-text-splitters langchain-core langsmith zstandard
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas langchain-text-splitters langchain-core langsmith zstandard graspologic numba llvmlite pot gensim statsmodels matplotlib seaborn umap-learn
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py

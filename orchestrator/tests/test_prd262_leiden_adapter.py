@@ -24,7 +24,9 @@ the adapter to graspologic without graspologic installed:
   graph_service takes ``cluster`` from the adapter;
 - the goldens cover every graph; the reference lock is its input pinned and hashed, at
   the API lock's graspologic-native and networkx; the reference script refuses to
-  record without graspologic; CI re-records whenever any of it changes.
+  record without graspologic; CI re-records whenever any of it changes;
+- test.yml's prod-image-parity runs the adapter inside the default-argument (Railway)
+  build and fails if graspologic imports there; its snippet runs here too.
 
 The adapter and graspologic-native run here; graspologic never does.
 """
@@ -35,6 +37,7 @@ import importlib.util
 import inspect
 import json
 import re
+import subprocess
 import sys
 import warnings
 from pathlib import Path
@@ -330,3 +333,20 @@ def test_ci_re_records_the_partitions_whenever_they_or_their_inputs_change():
     setup = next(step for step in workflow["jobs"]["reference-goldens"]["steps"]
                  if "setup-python" in step.get("uses", ""))
     assert setup["with"]["python-version"] == "3.11", "graspologic 3.3.0 requires Python below 3.12"
+
+
+def test_prod_image_parity_clusters_with_graspologic_native_and_cannot_import_graspologic():
+    """PRD-262 US-027 rewrote the "graph extras present with no args" step."""
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    step = next(step for step in workflow["jobs"]["prod-image-parity"]["steps"]
+                if "-t parity-be orchestrator/" in step.get("run", ""))
+    check, run = step["env"]["LEIDEN"], step["run"]
+    assert "import graspologic_native" in check
+    assert "from modules.knowledge.leiden_partition import cluster" in check
+    assert 'docker run --rm parity-be python -c "$LEIDEN"' in run
+    assert 'if docker run --rm parity-be python -c "import graspologic"; then' in run and "exit 1" in run
+    assert "graspologic," not in run, "the [leiden] extras check is gone"
+    done = subprocess.run([sys.executable, "-c", check], cwd=ORCH, capture_output=True, text=True,
+                          timeout=120, check=False)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "graspologic-native clusters in the image" in done.stdout

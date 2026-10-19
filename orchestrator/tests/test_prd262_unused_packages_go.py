@@ -15,7 +15,10 @@ documents), which only it brought. US-025 removed pandas: create_xlsx reads CSV 
 with the standard library, and PandasAIService, which cannot run (pandasai was never
 installed), imports it only inside its methods. US-026 vendored the two text splitters
 the ingest uses: langchain-text-splitters and langchain-core left, and with them
-langsmith and zstandard, which only langchain-core brought. This suite checks:
+langsmith and zstandard, which only langchain-core brought. US-027 serves graphify's
+Leiden calls from graspologic-native: graspologic left with graphifyy's [leiden] extra,
+and with it numba, llvmlite, POT, gensim, statsmodels, matplotlib, seaborn and
+umap-learn, which no image installs now. This suite checks:
 
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
@@ -79,14 +82,20 @@ FORBIDDEN_IMPORTS = {
     "pandas": "pandas",  # US-025: create_xlsx reads CSV and JSON with the standard library
     "langchain_text_splitters": "langchain-text-splitters",  # US-026: vendored in
     "langchain_core": "langchain-core",  # modules/rag/chunking/text_splitters.py
+    # US-027: modules/knowledge/leiden_partition.py calls graspologic_native, which this
+    # name does not cover (a dotted name forbids its module and what is under it only).
+    "graspologic": "graspologic",
 }
 # (file under orchestrator/, forbidden name) -> the scope prefix where it may still be
 # imported. US-025: PandasAIService binds pandas only once pandasai imports, which it never
 # does in an image; deleting the service and its routes instead is §9-Q16, still open.
 ALLOWED_SCOPES = {("modules/tools/services/pandas_ai_service.py", "pandas"): "PandasAIService."}
-# Distributions no image installs: the ones above plus python-jose's closure, and the two
-# langchain-core brought that nothing else needs (US-026).
-REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa", "langsmith", "zstandard"}
+# Distributions no image installs: the ones above plus python-jose's closure, the two
+# langchain-core brought that nothing else needs (US-026), and the heavy part of what
+# graspologic brought to Railway's build, about 585 MB with it (US-027).
+LEIDEN_EXTRAS = frozenset({"numba", "llvmlite", "pot", "gensim", "statsmodels", "matplotlib", "seaborn",
+                           "umap-learn"})
+REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa", "langsmith", "zstandard"} | LEIDEN_EXTRAS
 # pysher 1.0.8 is a pure-Python sdist; graspologic, the other, left with US-027.
 WHEEL_EXCEPTIONS = "pysher"
 
@@ -216,6 +225,20 @@ def test_a_dotted_name_forbids_its_module_and_what_is_under_it_only():
         (6, "googleapiclient"),
         (6, "googleapiclient.discovery"),
     }
+    lines = source.splitlines()
+    assert all(_MENTION.search(lines[line - 1].encode()) for line, _ in hits), "the pre-filter keeps them"
+
+
+def test_graspologic_is_forbidden_and_graspologic_native_is_not():
+    """US-027: the adapter imports graspologic-native; graspologic is in no image."""
+    source = (
+        "import graspologic_native\n"
+        "from graspologic.partition import leiden\n"
+        "import graspologic\n"
+        "import graspologic_nativex\n"
+    )
+    hits = {(site.line, site.module) for site in import_sites(source, "sample.py") if forbidden(site)}
+    assert hits == {(2, "graspologic.partition"), (2, "graspologic.partition.leiden"), (3, "graspologic")}
     lines = source.splitlines()
     assert all(_MENTION.search(lines[line - 1].encode()) for line, _ in hits), "the pre-filter keeps them"
 
