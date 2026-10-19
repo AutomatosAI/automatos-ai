@@ -34,7 +34,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Copy, Key, Plus, Trash2, AlertTriangle, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api-client";
-import { themeErrorMessage, useStepUp } from "@/lib/theme-host/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,16 +147,6 @@ function isExpired(expiresAt: string | null): boolean {
   return new Date(expiresAt) < new Date();
 }
 
-/**
- * PRD-261 A-07f (#1157): a new key is a standing credential, so in SaaS minting one needs a
- * sign-in from the last few minutes (orchestrator/api/api_keys.py `STEP_UP`). Called through
- * `useStepUp`, so a refusal opens Clerk's "confirm it's you" and the key is requested once more;
- * the local edition sends it as is.
- */
-function postApiKey(payload: CreateKeyPayload) {
-  return apiClient.post<CreateKeyResponse>("/api/api-keys", payload);
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -180,7 +169,6 @@ export function ApiKeyManager() {
 
   // Key created success dialog
   const [createdKey, setCreatedKey] = useState<string | null>(null);
-  const createKey = useStepUp(postApiKey);
   const [copied, setCopied] = useState(false);
 
   // Revoke confirmation
@@ -283,15 +271,18 @@ export function ApiKeyManager() {
         }
       }
 
-      const data = await createKey(payload);
+      const data = await apiClient.request<CreateKeyResponse>("/api/api-keys", {
+        method: "POST",
+        body: payload as any,
+      });
       setCreatedKey(data.key);
       setCreateOpen(false);
       resetForm();
       await fetchKeys();
       toast.success("API key created");
     } catch (err) {
-      // The server's sentence, the closed confirmation, or "couldn't confirm it's you".
-      toast.error(themeErrorMessage(err));
+      const msg = err instanceof Error ? err.message : "Failed to create key";
+      toast.error(msg);
       console.error("[ApiKeyManager] create error:", err);
     } finally {
       setCreateLoading(false);

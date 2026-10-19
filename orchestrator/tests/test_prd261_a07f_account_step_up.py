@@ -1,25 +1,24 @@
-"""PRD-261 A-07f: step-up on the routes that grant a person or a key rights (Gerard D1-d, #1157).
+"""PRD-261 A-07f: step-up on the workspace role change (Gerard D1-d, #1157).
 
-The workspace role change (``members:change_role``), the invite (``members:invite``) and SDK key
-creation (``workspace:manage``) each need, in SaaS, a sign-in from the last
+The role change (``members:change_role``) needs, in SaaS, a sign-in from the last
 ``STEP_UP_MAX_AGE_MINUTES`` minutes: theme code runs in the page as the signed-in user, and this
-stops it promoting, inviting or minting a key silently. The real routers run on a mini app with
-the step-up handler installed, the REAL permission gate (only the caller's workspace role is
-stubbed) and the REAL step-up dependency. Pins:
+stops it promoting someone silently. D1-d and #1157 scope the step-up to this route ONLY: the
+invite (``members:invite``) and SDK key creation (``workspace:manage``) carry none until a
+maintainer decision says otherwise, and that is pinned here too. The real routers run on a mini
+app with the step-up handler installed, the REAL permission gate (only the caller's workspace
+role is stubbed) and the REAL step-up dependency. Pins:
 
-* SaaS, no fresh first factor (missing, never verified, too old): 403 with Clerk's
-  reverification body at the top level, and no handler runs (nothing written, nobody invited,
-  no key minted);
+* SaaS, no fresh first factor (missing, never verified, too old): the role change answers 403
+  with Clerk's reverification body at the top level, and nothing is written;
 * a caller the permission gate refuses gets the plain 403, never a reverification prompt;
-* a key context in SaaS cannot reverify: ``step_up_unavailable``, and no key is minted;
-* SaaS with a fresh first factor: each route runs as before;
-* local edition: each route runs with no step-up (one anonymous owner, nobody to re-sign-in).
+* SaaS with a fresh first factor: the role change runs as before;
+* local edition: the role change runs with no step-up (one anonymous owner);
+* the invite and key creation run in SaaS with no fresh first factor (outside D1-d).
 
 The route table facts (which routes carry the dependency, in which order) are
 ``test_prd261_b2_wire.py``. The chat tools ``platform_set_member_role`` and
-``platform_invite_member`` are NOT covered: their handlers receive ``(db, workspace_id,
-params)`` and the caller context (consumers/chatbot/service.py ``build_tool_caller_context``)
-carries no verified token claims, so there is no ``fva`` to check there.
+``platform_invite_member`` are NOT covered: their handlers receive no verified token (see the
+A-07f notes).
 """
 from __future__ import annotations
 
@@ -64,6 +63,9 @@ KEY_CREATE = ("post", "/api/api-keys", {"json": {"name": "ci", "key_type": "serv
 CALLS = {"role change": ROLE_CHANGE, "invite": INVITE, "key creation": KEY_CREATE}
 # What each handler does once it runs: the status it answers with.
 RAN_STATUS = {"role change": 200, "invite": 200, "key creation": 201}
+# D1-d (#1157): the only route here that carries step-up.
+STEPPED_UP = "role change"
+NOT_STEPPED_UP = ("invite", "key creation")
 
 
 # ---------------------------------------------------------------------------
@@ -171,9 +173,8 @@ def saas(monkeypatch):
 
 
 @pytest.mark.parametrize("fva", [None, [-1, -1], [config.STEP_UP_MAX_AGE_MINUTES + 5, -1]])
-@pytest.mark.parametrize("name", sorted(CALLS))
-def test_without_a_fresh_step_up_saas_refuses_with_the_reverification_body(saas, account, fva, name):
-    resp = _call(account, _clerk(fva), name)
+def test_without_a_fresh_step_up_saas_refuses_a_role_change_with_the_reverification_body(saas, account, fva):
+    resp = _call(account, _clerk(fva), STEPPED_UP)
     assert resp.status_code == 403, resp.text
     body = resp.json()
     assert body["clerk_error"]["reason"] == "reverification-error"  # top level, never under detail
@@ -184,35 +185,35 @@ def test_without_a_fresh_step_up_saas_refuses_with_the_reverification_body(saas,
 
 
 @pytest.mark.parametrize("name", sorted(CALLS))
-def test_a_viewer_is_refused_by_the_gate_before_any_reverification_prompt(saas, account, name):
+def test_a_viewer_is_refused_by_the_gate_with_no_reverification_prompt(saas, account, name):
     account.role = "viewer"
     resp = _call(account, _clerk(None), name)
     assert resp.status_code == 403 and "clerk_error" not in resp.json()
     assert _nothing_ran(account)
 
 
-def test_a_key_cannot_mint_a_key_in_saas_because_it_cannot_reverify(saas, account):
-    resp = _call(account, _clerk(None, auth_type="api_key"), "key creation")
-    assert resp.status_code == 403, resp.text
-    assert resp.json()["detail"]["code"] == step_up.STEP_UP_UNAVAILABLE_CODE
-    assert _nothing_ran(account)
-
-
 # ---------------------------------------------------------------------------
-# Allowed: a fresh step-up in SaaS, and the local edition
+# Allowed: a fresh step-up in SaaS, the local edition, and the routes outside D1-d
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", sorted(CALLS))
-def test_with_a_fresh_step_up_saas_runs_the_route(saas, account, name):
-    resp = _call(account, _clerk([1, -1]), name)
-    assert resp.status_code == RAN_STATUS[name], resp.text
-    assert _ran(account, name)
+def test_with_a_fresh_step_up_saas_runs_the_role_change(saas, account):
+    resp = _call(account, _clerk([1, -1]), STEPPED_UP)
+    assert resp.status_code == RAN_STATUS[STEPPED_UP], resp.text
+    assert _ran(account, STEPPED_UP)
 
 
 @pytest.mark.parametrize("name", sorted(CALLS))
 def test_the_local_edition_runs_the_route_with_no_step_up(monkeypatch, account, name):
     monkeypatch.setattr(config, "AUTH_EDITION", "local")
     resp = _call(account, _local_operator(), name)
+    assert resp.status_code == RAN_STATUS[name], resp.text
+    assert _ran(account, name)
+
+
+@pytest.mark.parametrize("name", NOT_STEPPED_UP)
+def test_the_invite_and_key_creation_need_no_step_up_in_saas(saas, account, name):
+    # Outside D1-d (#1157): adding step-up here is an auth change that needs its own decision.
+    resp = _call(account, _clerk(None), name)
     assert resp.status_code == RAN_STATUS[name], resp.text
     assert _ran(account, name)
