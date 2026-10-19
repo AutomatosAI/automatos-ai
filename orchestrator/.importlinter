@@ -82,5 +82,4 @@ ignore_imports =
     modules.rag.service -> modules.search.vector_store.backends.pgvector_local_backend
     modules.rag.service -> modules.search.vector_store.backends.s3_vectors_backend
     modules.rag.services.cloud_sync_service -> modules.search.vector_store.backends.s3_vectors_backend
-    modules.voice.ai_notice -> modules.policy.ai_disclosure
     modules.workflows.recipes.jira_bug_triage -> modules.codegraph.codegraph_service

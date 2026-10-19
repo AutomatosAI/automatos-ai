@@ -364,21 +364,3 @@ def voice_greeting(configured: Any, locale: Any) -> str:
             return stripped
     logger.warning("ai_disclosure: voice greeting refused (no AI term); speaking the default")
     return VOICE_GREETING
-
-
-def voice_reminder_due(
-    *,
-    reconnected: bool,
-    last_notice_at: float,
-    now: float,
-    interval_seconds: float,
-) -> bool:
-    """Whether Auto's next spoken response opens with :data:`VOICE_REMINDER`.
-
-    After an automatic reconnect, and once ``interval_seconds`` of call time
-    have passed since the caller last heard that Auto is an AI. An interval of
-    0 or less reminds on every response: the reminder never turns off.
-    """
-    if reconnected:
-        return True
-    return now - last_notice_at >= interval_seconds

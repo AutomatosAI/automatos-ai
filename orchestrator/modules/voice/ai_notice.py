@@ -3,13 +3,17 @@
 Two duties on a live call, both kept by ``live_socket.LiveCallSocket``:
 
 * **Auto speaks first, and says it is an AI.** The begin frame (response 0)
-  carries :func:`greeting`. Retell speaks the content of response 0 as the
-  call's opening line, so it is never empty.
+  carries the greeting. Retell speaks the content of response 0 as the call's
+  opening line, so it is never empty.
 * **Reminders in a longer call.** After an automatic reconnect, and every
   ``config.VOICE_AI_REMINDER_MINUTES`` of call time, the next response opens
-  with "Just so you know, I'm an AI assistant." The rule and the texts live in
-  :mod:`modules.policy.ai_disclosure`; this module holds the settings and the
-  reconnect state.
+  with "Just so you know, I'm an AI assistant." This module holds that rule,
+  its setting and the reconnect state.
+
+The texts are built in ``modules/policy/ai_disclosure.py``, the one place a
+notice is built. The route (``api/voice_retell.py``) lends them to the socket
+through ``live_socket.SocketPorts``, so this feature module never imports
+another one (the PRD-211 independence contract in ``orchestrator/.importlinter``).
 
 A reconnect is a new socket for a call that already had one (Retell opens a
 new connection to the same URL, up to twice, when pings stop). The API runs
@@ -27,7 +31,6 @@ import logging
 from typing import Any, Optional
 
 from config import config
-from modules.policy import ai_disclosure
 
 logger = logging.getLogger(__name__)
 
@@ -41,29 +44,26 @@ MIN_CALL_MINUTES = 1
 REMINDER_SEPARATOR = " "
 
 
-def greeting() -> str:
-    """The line Auto speaks first: ``VOICE_AI_GREETING``, or the default when it lacks the AI term."""
-    return ai_disclosure.voice_greeting(config.VOICE_AI_GREETING, config.VOICE_LIVE_LANGUAGE)
-
-
 def reminder_interval_seconds() -> float:
     """``VOICE_AI_REMINDER_MINUTES`` in seconds (0 or less: every response)."""
     return float(config.VOICE_AI_REMINDER_MINUTES) * SECONDS_PER_MINUTE
 
 
 def reminder_due(*, reconnected: bool, last_notice_at: float, now: float) -> bool:
-    """Whether the next response opens with the reminder, at the configured interval."""
-    return ai_disclosure.voice_reminder_due(
-        reconnected=reconnected,
-        last_notice_at=last_notice_at,
-        now=now,
-        interval_seconds=reminder_interval_seconds(),
-    )
+    """Whether Auto's next spoken response opens with the reminder.
+
+    After an automatic reconnect, and once ``VOICE_AI_REMINDER_MINUTES`` of
+    call time have passed since the caller last heard that Auto is an AI. An
+    interval of 0 or less reminds on every response: the reminder never turns off.
+    """
+    if reconnected:
+        return True
+    return now - last_notice_at >= reminder_interval_seconds()
 
 
-def reminder_frame_text() -> str:
-    """The reminder as the first content frame of a response."""
-    return f"{ai_disclosure.VOICE_REMINDER}{REMINDER_SEPARATOR}"
+def reminder_frame_text(reminder: str) -> str:
+    """``reminder`` as the first content frame of a response."""
+    return f"{reminder}{REMINDER_SEPARATOR}"
 
 
 def socket_mark_key(call_id: str) -> str:

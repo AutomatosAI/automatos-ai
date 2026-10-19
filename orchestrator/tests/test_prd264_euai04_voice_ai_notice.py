@@ -13,13 +13,20 @@ that it is an AI, and reminds in longer calls.
 * With a fake clock past ``VOICE_AI_REMINDER_MINUTES`` the next response opens
   with the reminder, once.
 
+The route (``api/voice_retell.py``) builds the greeting and the reminder in
+``modules/policy/ai_disclosure.py`` and lends them to the socket through
+``SocketPorts``; every socket here runs on the route's own ports, so the
+wiring is what is tested.
+
 Nothing here is gated by ``AUTH_EDITION``; the ``edition`` fixture runs the
 socket cases in both editions to prove it. No Retell, no model, no network,
 no database.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
+import dataclasses
 import sys
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -154,12 +161,20 @@ def _reconnect_says(value: bool):
     return socket_reconnected
 
 
+def _route_ports(stream_turn: Callable, *, clock: Clock, socket_reconnected=None) -> live_socket.SocketPorts:
+    """The ports the route lends a call (its AI notice texts included), with a
+    fake turn stream, status read and clock."""
+    import api.voice_retell as vr
+
+    extra = {} if socket_reconnected is None else {"socket_reconnected": socket_reconnected}
+    return dataclasses.replace(
+        vr._socket_ports(), stream_turn=stream_turn, call_status=lambda cid: "started", clock=clock, **extra
+    )
+
+
 def _run_call(script: list, *, clock: Clock, socket_reconnected=None) -> ScriptedSocket:
     """Drive one socket of a call through ``script``; return what it sent."""
-    extra = {} if socket_reconnected is None else {"socket_reconnected": socket_reconnected}
-    ports = live_socket.SocketPorts(
-        stream_turn=_answer, call_status=lambda cid: "started", clock=clock, **extra
-    )
+    ports = _route_ports(_answer, clock=clock, socket_reconnected=socket_reconnected)
     ws = ScriptedSocket(script)
     asyncio.run(live_socket.LiveCallSocket(ws, CALL_ID, ports).run())
     return ws
@@ -299,12 +314,7 @@ def test_the_reminder_comes_before_the_slow_turn_ack(monkeypatch):
         await asyncio.sleep(SLOW_SEND_SECONDS * 2)
         yield {"response_id": req.response_id, "content": "answer", "content_complete": True}
 
-    ports = live_socket.SocketPorts(
-        stream_turn=slow_answer,
-        call_status=lambda cid: "started",
-        clock=Clock(T0),
-        socket_reconnected=_reconnect_says(True),
-    )
+    ports = _route_ports(slow_answer, clock=Clock(T0), socket_reconnected=_reconnect_says(True))
     ws = SlowReminderSocket([CALL_DETAILS, _turn(1)])
     asyncio.run(live_socket.LiveCallSocket(ws, CALL_ID, ports).run())
 
@@ -355,11 +365,45 @@ def test_the_interval_follows_the_setting(monkeypatch):
     assert _contents(ws, 1)[0].startswith(REMINDER)
 
 
-def test_the_reminder_rule_never_turns_off():
-    due = ai_disclosure.voice_reminder_due
-    assert due(reconnected=True, last_notice_at=T0, now=T0, interval_seconds=600) is True
-    assert due(reconnected=False, last_notice_at=T0, now=T0 + 599, interval_seconds=600) is False
-    assert due(reconnected=False, last_notice_at=T0, now=T0 + 600, interval_seconds=600) is True
+def test_the_reminder_rule_never_turns_off(monkeypatch):
+    due = ai_notice.reminder_due
+    assert due(reconnected=True, last_notice_at=T0, now=T0) is True
+    assert due(reconnected=False, last_notice_at=T0, now=T0 + 599) is False
+    assert due(reconnected=False, last_notice_at=T0, now=T0 + 600) is True
     # 0 (or less) is not an off switch: every response reminds
-    assert due(reconnected=False, last_notice_at=T0, now=T0, interval_seconds=0) is True
-    assert due(reconnected=False, last_notice_at=T0, now=T0, interval_seconds=-60) is True
+    for minutes in (0.0, -1.0):
+        monkeypatch.setattr(app_config, "VOICE_AI_REMINDER_MINUTES", minutes)
+        assert due(reconnected=False, last_notice_at=T0, now=T0) is True
+
+
+# ---------------------------------------------------------------------------
+# The texts come from the route: the voice module imports no other feature module
+# ---------------------------------------------------------------------------
+
+def test_the_route_lends_the_texts_from_the_one_rules_module():
+    import api.voice_retell as vr
+
+    ports = vr._socket_ports()
+    assert ports.ai_greeting == DEFAULT_GREETING
+    assert ports.ai_reminder == ai_disclosure.VOICE_REMINDER == REMINDER
+    assert ai_notice.reminder_frame_text(ports.ai_reminder).startswith(REMINDER)
+
+
+def test_a_socket_cannot_be_built_without_the_ai_texts():
+    with pytest.raises(TypeError):
+        live_socket.SocketPorts(stream_turn=_answer, call_status=lambda cid: "started")  # type: ignore[call-arg]
+
+
+def _imported_modules(module: Any) -> set[str]:
+    """Every module name a source file imports (top level or inside a function)."""
+    nodes = list(ast.walk(ast.parse(Path(module.__file__).read_text(encoding="utf-8"))))
+    froms = {node.module for node in nodes if isinstance(node, ast.ImportFrom) and node.module}
+    plain = {alias.name for node in nodes if isinstance(node, ast.Import) for alias in node.names}
+    return froms | plain
+
+
+def test_the_voice_module_does_not_import_the_policy_module():
+    """PRD-211 independence: modules.voice never imports modules.policy."""
+    for module in (ai_notice, live_socket):
+        imported = _imported_modules(module)
+        assert not any(name.startswith("modules.policy") for name in imported), (module.__name__, imported)

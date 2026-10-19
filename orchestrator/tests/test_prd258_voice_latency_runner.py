@@ -105,6 +105,7 @@ class _ScriptedSocket:
 
 
 def test_the_ws_handler_reads_the_simulators_frames():
+    from modules.policy import ai_disclosure
     from modules.voice import live_socket
     from scripts.eval.voice_latency import protocol
 
@@ -121,7 +122,11 @@ def test_the_ws_handler_reads_the_simulators_frames():
         return False
 
     ports = live_socket.SocketPorts(
-        stream_turn=stream, call_status=lambda cid: "minted", socket_reconnected=first_socket
+        stream_turn=stream,
+        call_status=lambda cid: "minted",
+        ai_greeting=ai_disclosure.VOICE_GREETING,
+        ai_reminder=ai_disclosure.VOICE_REMINDER,
+        socket_reconnected=first_socket,
     )
     session = live_socket.LiveCallSocket(ws, _CALL_ID, ports)
     asyncio.run(session.run())

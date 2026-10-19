@@ -22,9 +22,9 @@ grows); the route lends the session its turn stream and the call-status read,
 late-bound, so the agent loop stays where it is.
 
 PRD-264 EUAI-04 (EU AI Act Art. 50(1)): Auto speaks first and says it is an
-AI (the begin frame carries ``ai_notice.greeting()``, never empty); after an
-automatic reconnect, and every ``VOICE_AI_REMINDER_MINUTES`` of call time, the
-next response opens with the reminder (``modules/voice/ai_notice.py``).
+AI (the begin frame carries the greeting the route lends, never empty);
+after an automatic reconnect, and every ``VOICE_AI_REMINDER_MINUTES`` of call
+time, the next response opens with the reminder (``modules/voice/ai_notice.py``).
 """
 
 from __future__ import annotations
@@ -68,15 +68,21 @@ BEGIN_RESPONSE_ID = 0
 
 @dataclass(frozen=True)
 class SocketPorts:
-    """What the route lends a call: Auto's turn stream and the call's live status.
+    """What the route lends a call: Auto's turn stream, the call's live status and
+    the AI notice texts.
 
-    ``socket_reconnected`` says whether this socket is an automatic reconnect
-    of the call; ``clock`` reads call time in seconds. Both default to the real
-    ones; tests pass fakes.
+    ``ai_greeting`` is Auto's opening line and ``ai_reminder`` the line that
+    opens a response when a reminder is due (PRD-264 EUAI-04). The route builds
+    both in ``modules/policy/ai_disclosure.py``; this feature module never
+    imports another one. ``socket_reconnected`` says whether this socket is an
+    automatic reconnect of the call; ``clock`` reads call time in seconds. Both
+    default to the real ones; tests pass fakes.
     """
 
     stream_turn: Callable[[RetellLLMRequest], AsyncIterator[dict]]
     call_status: Callable[[str], Optional[str]]
+    ai_greeting: str
+    ai_reminder: str
     socket_reconnected: Callable[[str], Awaitable[bool]] = ai_notice.socket_reconnected
     clock: Callable[[], float] = monotonic
 
@@ -85,11 +91,9 @@ def _closing_frame(response_id: int) -> dict:
     return wrap_ws_response({"response_id": response_id, "content": "", "content_complete": True})
 
 
-def _begin_frame() -> dict:
+def _begin_frame(greeting: str) -> dict:
     """Response 0: Auto's opening line, which says it is an AI (never empty)."""
-    return wrap_ws_response(
-        {"response_id": BEGIN_RESPONSE_ID, "content": ai_notice.greeting(), "content_complete": True}
-    )
+    return wrap_ws_response({"response_id": BEGIN_RESPONSE_ID, "content": greeting, "content_complete": True})
 
 
 class _TurnMarks:
@@ -204,7 +208,7 @@ class LiveCallSocket:
         if self._begun:
             return True
         self._begun = True
-        sent = await self.safe_send(_begin_frame())
+        sent = await self.safe_send(_begin_frame(self._ports.ai_greeting))
         self._last_ai_notice_at = self._ports.clock()
         self._reminder_owed = await self._ports.socket_reconnected(self._call_id)
         logger.info(
@@ -273,7 +277,8 @@ class LiveCallSocket:
         now = self._ports.clock()
         if not ai_notice.reminder_due(reconnected=self._reminder_owed, last_notice_at=self._last_ai_notice_at, now=now):
             return
-        frame = {"response_id": req.response_id, "content": ai_notice.reminder_frame_text(), "content_complete": False}
+        content = ai_notice.reminder_frame_text(self._ports.ai_reminder)
+        frame = {"response_id": req.response_id, "content": content, "content_complete": False}
         if not await self.safe_send(wrap_ws_response(frame)):
             return
         turn.content_sent()
