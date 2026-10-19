@@ -108,7 +108,7 @@ def test_the_dockerfile_keeps_exactly_the_services_the_prd_names():
 def test_the_prune_runs_in_pybuild_after_the_strip_and_before_the_base_copies_it():
     stage = _pybuild()
     install = next(i for i, line in enumerate(stage) if "pip install" in line)
-    strip = next(i for i, line in enumerate(stage) if "strip --strip-debug" in line)
+    strip = next(i for i, line in enumerate(stage) if "strip --strip-unneeded" in line)
     prune = next(i for i, line in enumerate(stage) if "botocore/data" in line)
     assert install < strip < prune
     instructions = _instructions(DOCKERFILE)

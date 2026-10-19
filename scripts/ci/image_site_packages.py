@@ -1,9 +1,10 @@
 """PRD-262 US-020: the API image's site-packages still loads after pybuild's prune.
 
-orchestrator/Dockerfile's pybuild stage strips the debug sections from every compiled
-library it installs (``strip --strip-debug``, leaving the auditwheel ``*.libs``
-directories and ``.dynsym`` alone) and deletes every directory named exactly ``tests``
-under site-packages. CI runs this inside the built image, with the image's own Python
+orchestrator/Dockerfile's pybuild stage strips the debug sections and the static symbol
+table from every compiled library it installs (``strip --strip-unneeded``, leaving the
+auditwheel ``*.libs`` directories and ``.dynsym`` alone; PRD-262 US-020 and the 19 Oct
+breakdown's row #25) and deletes every directory named exactly ``tests`` under
+site-packages. CI runs this inside the built image, with the image's own Python
 and as the image's user:
 
     docker run --rm -i --entrypoint python IMAGE - < scripts/ci/image_site_packages.py
@@ -16,7 +17,7 @@ binutils):
   imported by its dotted name;
 - any other is a plain library that a package opens through ctypes (for example
   ``pypdfium2_raw/libpdfium.so``), and is opened with ``ctypes.CDLL``;
-- none may carry a ``.debug_*`` section.
+- none may carry a ``.debug_*`` section or a ``.symtab``.
 
 The failures must be exactly the ``EXPECTED_FAILURES`` whose files this image has: any
 other ImportError or OSError fails, and so does a listed one that now loads, so the
@@ -60,6 +61,9 @@ EXPECTED_FAILURES: Dict[str, str] = {
 LIBRARY_GLOB = "*.so*"  # the files orchestrator/Dockerfile's strip names
 AUDITWHEEL_SUFFIX = ".libs"  # auditwheel's vendored libraries: not stripped, not probed
 DEBUG_PREFIXES = (".debug_", ".zdebug_")
+# The static symbol table, which strip --strip-unneeded removes with its .strtab (PRD-262
+# row #25); .dynsym, which the loader and ctypes read, is a section of its own and stays.
+SYMBOL_TABLE = ".symtab"
 TESTS_DIR = "tests"
 KEPT_TESTING = ("numpy/testing", "sqlalchemy/testing", "alembic/testing")
 # The python base image's own packages, in its own layers, which pybuild's prune never
@@ -187,6 +191,12 @@ def debug_sections(elf: Elf) -> Tuple[str, ...]:
     return tuple(section.name for section in elf.sections if section.name.startswith(DEBUG_PREFIXES))
 
 
+def unneeded_sections(elf: Elf) -> Tuple[str, ...]:
+    """The sections ``strip --strip-unneeded`` removes that ``elf`` still has: its debug sections
+    and its static symbol table."""
+    return debug_sections(elf) + tuple(section.name for section in elf.sections if section.name == SYMBOL_TABLE)
+
+
 def _name_offsets(data, strings: Section, symbol: str) -> frozenset:
     """Every offset in a string table at which ``symbol`` sits as a whole string."""
     wanted, start, end = symbol.encode() + b"\0", strings.offset, strings.offset + strings.size
@@ -244,13 +254,14 @@ def native_files(site: Path) -> List[Path]:
 
 
 def _inspect(path: Path, symbol: str) -> Tuple[bool, Tuple[str, ...]]:
-    """(whether the file exports ``symbol``, its debug sections), read without loading it."""
+    """(whether the file exports ``symbol``, the sections the strip should have removed), read
+    without loading it."""
     with path.open("rb") as handle:
         if os.fstat(handle.fileno()).st_size == 0:
             raise ValueError("empty file")
         with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
             elf = parse(data)
-            return exports(data, elf, symbol), debug_sections(elf)
+            return exports(data, elf, symbol), unneeded_sections(elf)
 
 
 def _mapped(path: Path) -> bool:
@@ -317,7 +328,7 @@ def probe(site: Path, path: Path) -> Result:
 
 
 def problems_with(results: Sequence[Result], expected: Dict[str, str]) -> List[str]:
-    """Unexpected failures, listed failures that now load, and debug sections. Pure."""
+    """Unexpected failures, listed failures that now load, and sections the strip left. Pure."""
     if not results:
         return ["no *.so file under site-packages: the walk found nothing to check"]
     failed = {result.key: result.error for result in results if result.error}
@@ -393,7 +404,7 @@ def main() -> int:
     for problem in problems:
         print(f"::error title=site-packages (PRD-262 US-020)::{problem}")
     if not problems:
-        print(f"every file loads as expected, none carries debug sections, no {TESTS_DIR}/ is left, "
+        print(f"every file loads as expected, none carries debug sections or {SYMBOL_TABLE}, no {TESTS_DIR}/ is left, "
               f"and `{APP_IMPORT}` works with no stale bytecode")
     return 1 if problems else 0
 

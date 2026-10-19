@@ -71,9 +71,12 @@ RUN python split_lock.py requirements.lock stable.txt rest.txt && \
             -r "$half.txt" || exit 1; \
     done
 
-# What runs, and nothing else (PRD-262 US-020). strip --strip-debug drops the .debug_*
-# sections from every compiled library (about 91 MB of the 16 Oct pip layer) and leaves
-# .dynsym, which the loader resolves symbols through, as it is. It skips the auditwheel
+# What runs, and nothing else (PRD-262 US-020). strip --strip-unneeded drops the .debug_*
+# sections from every compiled library (about 91 MB of the 16 Oct pip layer) and, since
+# the 19 Oct breakdown's row #25, the static symbol table too (.symtab and .strtab, about
+# 18 MB more: scipy, cryptography, pypdfium2_raw, tiktoken …). It leaves .dynsym, which
+# the loader, dlsym and ctypes resolve symbols through, as it is; a native crash's
+# backtrace loses the names of local functions, nothing else. It skips the auditwheel
 # *.libs directories: they hold about 1 MB of it, in libraries auditwheel renamed and
 # rewrote with patchelf, the kind of file strip has broken before. The extensions that
 # link them were rewritten too, so CI loads every file the strip touched
@@ -81,7 +84,7 @@ RUN python split_lock.py requirements.lock stable.txt rest.txt && \
 # site-packages goes (about 108 MB); numpy.testing, sqlalchemy.testing and
 # alembic.testing are importable APIs, not test suites, and stay. /install holds both
 # halves of the lock (/install/stable and /install/rest), so this covers both.
-RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-debug {} + && \
+RUN find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-unneeded {} + && \
     find /install -type d -name tests -path '*/site-packages/*' -prune -exec rm -rf {} +
 
 # botocore keeps the models of the services we call, and no others (PRD-262 US-021).

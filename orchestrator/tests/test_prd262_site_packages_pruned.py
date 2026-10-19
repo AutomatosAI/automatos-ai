@@ -1,8 +1,9 @@
 """PRD-262 US-020: site-packages ships without debug info and test suites.
 
-After its install, pybuild strips the debug sections from every compiled library
-outside the auditwheel ``*.libs`` directories (``strip --strip-debug``, which leaves
-``.dynsym`` alone) and deletes every directory named exactly ``tests`` under
+After its install, pybuild strips the debug sections and the static symbol table from
+every compiled library outside the auditwheel ``*.libs`` directories (``strip
+--strip-unneeded``, which leaves ``.dynsym`` alone; the 19 Oct breakdown's row #25 moved
+it on from ``--strip-debug``) and deletes every directory named exactly ``tests`` under
 site-packages. Its apt list names binutils for the strip. CI proves the result inside
 the built image with scripts/ci/image_site_packages.py: test.yml's prod-image-parity
 runs it on the Railway build, and images.yml on the GHCR build, on both arches.
@@ -13,7 +14,8 @@ This suite checks:
   copies /install's two halves (PRD-262 US-022), with the glob and the ``*.libs``
   exclusion the script also uses;
 - the script's ELF reader, on ELF files built here (32- and 64-bit, both byte orders)
-  and, on Linux, on this interpreter's own extension modules;
+  and, on Linux, on this interpreter's own extension modules: it finds the debug
+  sections and the ``.symtab`` the strip removes;
 - how the script names, finds, loads and judges files, including an extension its
   package loads under another name (opencv's cv2), the tree check, and the throwaway
   settings it imports the app with;
@@ -44,7 +46,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 DOCKERFILE = (ROOT / "orchestrator" / "Dockerfile").read_text(encoding="utf-8")
 SCRIPT = ROOT / "scripts" / "ci" / "image_site_packages.py"
 SCRIPT_RUN = "docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_site_packages.py"
-STRIP = "find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-debug {} +"
+STRIP = "find /install -type f -name '*.so*' -not -path '*.libs/*' -exec strip --strip-unneeded {} +"
 PRUNE_TESTS = "find /install -type d -name tests -path '*/site-packages/*' -prune -exec rm -rf {} +"
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
 LINUX_ONLY = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -53,7 +55,7 @@ LINUX_ONLY = pytest.mark.skipif(not sys.platform.startswith("linux"),
 STB_LOCAL, STB_GLOBAL, STB_WEAK = 0, 1, 2
 STV_DEFAULT, STV_HIDDEN, STV_PROTECTED = 0, 2, 3
 STT_FUNC = 2
-SHT_PROGBITS, SHT_STRTAB, SHT_DYNSYM = 1, 3, 11
+SHT_PROGBITS, SHT_SYMTAB, SHT_STRTAB, SHT_DYNSYM = 1, 2, 3, 11
 DEFINED, UNDEFINED = 7, 0  # a section index, and SHN_UNDEF
 # Standard-library modules CPython builds as shared extensions on Linux, small ones first.
 STDLIB_EXTENSIONS = ("_json", "_csv", "_struct", "array", "math", "select", "_ctypes")
@@ -90,9 +92,10 @@ def _strings(names: list[str]) -> tuple[bytes, list[int]]:
     return table, offsets
 
 
-def _elf(cls: int = 2, order: str = "<", symbols=(), debug: bool = True) -> bytes:
+def _elf(cls: int = 2, order: str = "<", symbols=(), debug: bool = True, symtab: bool = False) -> bytes:
     """A small ELF shared object: .dynstr, .dynsym holding ``symbols`` ((name, binding,
-    visibility, section index) each), an optional .debug_info, and .shstrtab."""
+    visibility, section index) each), an optional .debug_info, an optional (empty) .symtab,
+    and .shstrtab."""
     fmt = site_packages.FORMATS[cls]
     dynstr, name_offsets = _strings([name for name, *_ in symbols])
     dynsym = bytes(struct.calcsize(order + fmt.symbol)) + b"".join(
@@ -101,6 +104,7 @@ def _elf(cls: int = 2, order: str = "<", symbols=(), debug: bool = True) -> byte
     contents = [(".dynstr", SHT_STRTAB, dynstr, 0, 0), (".dynsym", SHT_DYNSYM, dynsym, 1,
                                                        struct.calcsize(order + fmt.symbol))]
     contents += [(".debug_info", SHT_PROGBITS, b"\x01" * 32, 0, 0)] if debug else []
+    contents += [(".symtab", SHT_SYMTAB, b"", 0, 0)] if symtab else []
     shstrtab, section_names = _strings([name for name, *_ in contents] + [".shstrtab"])
     contents.append((".shstrtab", SHT_STRTAB, shstrtab, 0, 0))
     ident_size = site_packages.EI_NIDENT
@@ -131,6 +135,19 @@ def test_the_reader_finds_an_exported_init_and_the_debug_sections(cls, order):
     assert not site_packages.exports(data, elf, "PyInit_other")
     assert site_packages.debug_sections(elf) == (".debug_info",)
     assert site_packages.debug_sections(site_packages.parse(_elf(cls, order, debug=False))) == ()
+
+
+@pytest.mark.parametrize("cls,order", LAYOUTS)
+def test_the_reader_finds_the_static_symbol_table_strip_unneeded_removes(cls, order):
+    """PRD-262 row #25: --strip-unneeded removes .symtab with the debug sections; .dynsym stays."""
+    kept = _elf(cls, order, [("PyInit_demo", STB_GLOBAL, STV_DEFAULT, DEFINED)], debug=True, symtab=True)
+    elf = site_packages.parse(kept)
+
+    assert site_packages.unneeded_sections(elf) == (".debug_info", ".symtab")
+    assert site_packages.exports(kept, elf, "PyInit_demo"), "the loader's table is a section of its own"
+    stripped = site_packages.parse(_elf(cls, order, [("PyInit_demo", STB_GLOBAL, STV_DEFAULT, DEFINED)], debug=False))
+    assert site_packages.unneeded_sections(stripped) == ()
+    assert site_packages.SYMBOL_TABLE == ".symtab"
 
 
 @pytest.mark.parametrize("binding,visibility,index,exported", [
@@ -393,7 +410,9 @@ def test_pybuild_strips_debug_info_and_deletes_tests_after_the_install():
 
     assert install < prune, "the prune works on what the install put in /install"
     assert run == f"RUN {STRIP} && {PRUNE_TESTS}", run
-    assert "|| true" not in run and "--strip-all" not in run and "--strip-unneeded" not in run
+    # --strip-unneeded (PRD-262 row #25): the debug sections and .symtab; --strip-all would
+    # also drop what a relocatable object needs, and --strip-debug leaves .symtab.
+    assert "|| true" not in run and "--strip-all" not in run and "--strip-debug" not in run
     assert "-name testing" not in DOCKERFILE, "numpy.testing, sqlalchemy.testing and alembic.testing stay"
     assert sum("strip" in line for line in _instructions(DOCKERFILE)) == 1, "only pybuild strips"
 

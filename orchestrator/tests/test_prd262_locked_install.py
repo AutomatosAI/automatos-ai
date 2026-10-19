@@ -116,7 +116,7 @@ def test_the_install_is_the_lock_exactly_in_two_halves():
 def test_site_packages_compiles_after_the_strip_and_the_prune():
     pybuild = _stage("pybuild")
     at = pybuild.index(_run("compileall"))
-    assert at > pybuild.index(_run("strip --strip-debug")) and at > pybuild.index(_run("botocore/data"))
+    assert at > pybuild.index(_run("strip --strip-unneeded")) and at > pybuild.index(_run("botocore/data"))
     assert at == len(pybuild) - 1, "the last pybuild step: nothing changes site-packages after it"
     assert _run("compileall") == f"RUN for prefix in /install/stable /install/rest; do {COMPILE} || exit 1; done"
 
