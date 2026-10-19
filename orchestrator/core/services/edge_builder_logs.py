@@ -8,11 +8,12 @@ window by id, loads only the columns the edges and affinities use, and keeps one
 slim dict per row; a page's ORM rows are dropped before the next is read.
 
 PRD-263 US-018: the read keeps production rows, the synthetic signal rows (PRD-232
-gap and shown markers) and untagged rows; rows tagged ``eval`` or ``replay`` stay out
-of the Knowledge Graph builder. Replay traffic is still logged as production until it
-is tagged, so today this removes no replay row. A wait for the owner's click
-(``asked``) is never read: build_edges counts every status but ``success`` as a
-failure, so an ask would become a ``fails_for_intent`` for its tool.
+gap and shown markers) and untagged rows, and no other tag: rows tagged ``eval`` or
+``replay``, and the ``synthetic`` rows scripts/eval/tool_routing/seed_telemetry writes
+from the eval queries, stay out of the Knowledge Graph builder. Replay traffic is still
+logged as production until it is tagged, so today this removes no replay row. A wait
+for the owner's click (``asked``) is never read: build_edges counts every status but
+``success`` as a failure, so an ask would become a ``fails_for_intent`` for its tool.
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ _DEFAULT_LOG_PAGE_SIZE = 1000  # config.EDGE_BUILDER_LOG_PAGE_SIZE overrides
 
 # The telemetry_source values the builder reads, besides untagged (NULL) rows: the
 # literals modules/tools/execution/telemetry.py writes (its default and
-# SYNTHETIC_SIGNAL_SOURCE). Kept literal so this read never loads the tool package.
+# SYNTHETIC_SIGNAL_SOURCE). An allowlist, so any other tag (eval, replay, synthetic)
+# stays out. Kept literal so this read never loads the tool package.
 READ_SOURCES = ("production", "synthetic_signal")
 # telemetry.ASKED_STATUS: a call that waited for the owner's click, never read.
 ASKED_STATUS = "asked"

@@ -6,18 +6,20 @@ mapping each to known-correct actions with realistic agent bias, timing noise,
 and multi-action turn grouping. Idempotent — clears prior synthetic data before
 inserting fresh rows.
 
+PRD-263 US-018: the nightly EdgeBuilder reads only ``production``, ``synthetic_signal``
+and untagged rows (core/services/edge_builder_logs.READ_SOURCES), so these rows, tagged
+``synthetic``, never reach the routing graph. The ``--verify`` step ran build_edges(),
+which now reads none of these rows (only the production rows already in the database),
+so it verified nothing about the seed, and is removed.
+
 Usage:
     cd orchestrator
-    python -m scripts.eval.tool_routing.seed_telemetry [--verify]
-
-Options:
-    --verify    After seeding, call build_edges() and print edge summary
+    python -m scripts.eval.tool_routing.seed_telemetry [--dry-run]
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hashlib
 import json
 import logging
@@ -412,34 +414,6 @@ def seed_telemetry(db: Session, rows: List[Dict[str, Any]]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Verification (optional --verify flag)
-# ---------------------------------------------------------------------------
-
-
-async def verify_edge_build() -> None:
-    """Run build_edges() after seeding to verify end-to-end pipeline."""
-    from core.services.edge_builder import build_edges
-
-    logger.info("Running build_edges() to verify pipeline...")
-    summary = await build_edges(window=timedelta(days=TIME_WINDOW_DAYS + 1))
-
-    print(f"\n{'='*60}")
-    print("Edge Build Verification Summary")
-    print(f"{'='*60}")
-    print(f"  Logs processed:    {summary.logs_processed}")
-    print(f"  Edges built:       {summary.edges_built}")
-    print(f"  Affinities built:  {summary.affinities_built}")
-    print(f"  Intent clusters:   {summary.intent_clusters}")
-    print(f"  Duration (ms):     {summary.duration_ms}")
-    print(f"{'='*60}")
-
-    if summary.edges_built == 0:
-        print("\n  WARNING: No edges built — check sample_floor or turn grouping")
-    if summary.affinities_built == 0:
-        print("\n  WARNING: No affinities built — check cluster assignment")
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -459,11 +433,6 @@ def main() -> None:
     """Entry point for python -m scripts.eval.tool_routing.seed_telemetry."""
     parser = argparse.ArgumentParser(
         description="Seed synthetic telemetry for cold-start pipeline validation"
-    )
-    parser.add_argument(
-        "--verify",
-        action="store_true",
-        help="After seeding, run build_edges() and print summary",
     )
     parser.add_argument(
         "--dry-run",
@@ -516,9 +485,6 @@ def main() -> None:
     with get_db_session() as db:
         inserted = seed_telemetry(db, rows)
         logger.info(f"Inserted {inserted} synthetic telemetry rows")
-
-    if args.verify:
-        asyncio.run(verify_edge_build())
 
     print(f"\nDone. {len(rows)} synthetic rows seeded with telemetry_source='{TELEMETRY_SOURCE}'")
 

@@ -91,6 +91,19 @@ def test_an_owner_only_ask_fires_no_routing_failure_signal():
     assert recorder.signals == []
 
 
+def test_the_row_and_the_router_read_an_ask_inside_an_envelope_alike():
+    """One reading of an ask (card_raised.is_waiting): an ask one envelope down (an
+    executor's ``data``) is logged as asked AND sends no signal, so the two never split."""
+    nested = {"success": False, "data": _owner_only_ask()}
+    recorder = _Recorder()
+
+    row = _logged(nested)
+    _routed(nested, recorder)
+
+    assert (row.status, row.error_message) == (telemetry.ASKED_STATUS, None)
+    assert recorder.signals == []
+
+
 def test_a_refused_call_and_a_done_call_are_still_signalled():
     refused, done = _Recorder(), _Recorder()
 

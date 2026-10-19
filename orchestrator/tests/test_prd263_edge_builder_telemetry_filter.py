@@ -5,7 +5,8 @@ filter: rows tagged ``eval`` or ``replay`` fed the Knowledge Graph builder, and 
 the owner's click, which build_edges counts as a failure like every status but
 ``success``, became a ``fails_for_intent`` for its tool. The read now keeps
 ``telemetry_source`` production, ``synthetic_signal`` (the PRD-232 gap and shown markers)
-or NULL, and never a row whose status is ``asked``.
+or NULL, so any other tag (``synthetic``, seed_telemetry's eval-query rows, included)
+stays out, and never a row whose status is ``asked``.
 
 Rows go into the transactional ``db_session``. The build_edges case reads them with the
 real loader and fakes the rest: the embedder, the cluster write (every loaded log in one
@@ -80,7 +81,7 @@ def _wire(monkeypatch, db_session):
     return seen
 
 
-def test_eval_replay_and_asked_rows_are_left_out_and_synthetic_and_untagged_rows_are_read(
+def test_eval_replay_seeded_and_asked_rows_are_left_out_and_signal_and_untagged_rows_are_read(
         db_session, seed_workspace):
     ws = seed_workspace(name="edge-builder-filter")
     read = {
@@ -88,7 +89,7 @@ def test_eval_replay_and_asked_rows_are_left_out_and_synthetic_and_untagged_rows
         _log(db_session, ws, source="synthetic_signal", status="gap", action="__tool_gap__", app="PLATFORM"),
         _log(db_session, ws, source=None, status="error"),
     }
-    for source in ("eval", "replay"):
+    for source in ("eval", "replay", "synthetic"):
         _log(db_session, ws, source=source, status="error")
     _log(db_session, ws, status="asked", action=ASKED_ACTION, app="PLATFORM")
 
