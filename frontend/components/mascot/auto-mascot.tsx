@@ -3,12 +3,14 @@
 import { type SyntheticEvent, useCallback, useState } from 'react'
 
 import { type MascotPlayer, useMascotPlayer } from '@/hooks/use-mascot-player'
-import { usePrefersReducedMotion, useVideoFormat } from '@/hooks/use-media-preferences'
+import { useVideoFormat } from '@/hooks/use-media-preferences'
 import { captionFor, clipUrls, pageGlow, posterUrl, type VideoFormat } from '@/lib/mascot/media'
 import { ringTone } from '@/lib/mascot/ring'
 import type { MascotName } from '@/lib/mascot/types'
 
 import styles from './auto-mascot.module.css'
+import { MascotPauseButton } from './mascot-pause-button'
+import { useMascotMotion } from './use-mascot-motion'
 
 /**
  * PRD-260 D6 — Auto: the clip for the reducer's state, the light ring under him
@@ -23,6 +25,13 @@ import styles from './auto-mascot.module.css'
  * there is no stand-in for missing files. A `decorative` Auto (a specimen whose
  * page names his state in its own words) is hidden from assistive technology:
  * no image role, no name, no caption read out (P260-FX-24, M74).
+ *
+ * PRD-261 A-13b (F10, WCAG 2.2.2): under him sits the Pause Auto control,
+ * wherever he can move (not decorative, not under the OS reduced-motion
+ * setting). Paused, he is his still and his ring stops (data-motion="still"),
+ * and he stays paused across a state change, a remount and a reload, in every
+ * tab of this browser (lib/mascot/pause.ts). Under reduced motion he is the
+ * same still, with no control, since nothing moves.
  */
 
 export type AutoMascotSize = 'small' | 'regular' | 'large'
@@ -74,11 +83,11 @@ export function AutoMascot({
   playing = true,
   decorative = false,
 }: AutoMascotProps) {
-  const reducedMotion = usePrefersReducedMotion()
+  const motion = useMascotMotion()
   const format = useVideoFormat()
   // One clip that won't play, or blocked autoplay, means stills from then on, not a stuck clip.
   const [videoFailed, setVideoFailed] = useState(false)
-  const video = playing && !reducedMotion && !videoFailed ? format : null
+  const video = playing && !motion.still && !videoFailed ? format : null
   const player = useMascotPlayer({ target: state, still: video === null, onClipEnded })
   const label = caption ?? captionFor(state)
 
@@ -89,7 +98,12 @@ export function AutoMascot({
   const onVideoBlocked = useCallback(() => setVideoFailed(true), [])
 
   return (
-    <div className={styles.auto} data-size={size} aria-hidden={decorative ? true : undefined}>
+    <div
+      className={styles.auto}
+      data-size={size}
+      data-motion={motion.still ? 'still' : undefined}
+      aria-hidden={decorative ? true : undefined}
+    >
       {/* data-glow: app/play-theme.css lights the page behind everything from it (body:has). */}
       <div
         className={styles.stage}
@@ -117,6 +131,9 @@ export function AutoMascot({
           <span className={styles.captionTitle}>{label}</span>
           {detail && <span className={styles.captionDetail}>{detail}</span>}
         </p>
+      )}
+      {!decorative && !motion.reducedMotion && (
+        <MascotPauseButton paused={motion.paused} onToggle={motion.togglePaused} />
       )}
     </div>
   )
