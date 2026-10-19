@@ -12,7 +12,9 @@ files go only once every week they hold is in harness_runs.
 """
 from __future__ import annotations
 
+import errno
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -269,6 +271,25 @@ def test_remove_files_never_follows_or_removes_a_link(workspace, volume, tmp_pat
 
     assert (elsewhere / "victim.json").read_text() == "{}"
     assert (harness / "linked.json").is_symlink() and (harness / "linked-dir").is_symlink()
+    assert not (harness / "runs" / "last_run.json").exists()
+
+
+def test_remove_files_never_opens_a_linked_directory(workspace, volume, tmp_path_factory, monkeypatch):
+    # Opening a linked directory opens its target: one the script cannot read would stop every run.
+    harness = volume / str(workspace) / "harness"
+    (harness / "linked-dir").symlink_to(tmp_path_factory.mktemp("unreadable"), target_is_directory=True)
+    real_open = os.open
+
+    def unreadable_target(path, flags, mode=0o777, *, dir_fd=None):
+        if os.fspath(path) == "linked-dir":
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), path)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", unreadable_target)
+        assert _backfill("--apply", "--remove-files") == 0
+
+    assert (harness / "linked-dir").is_symlink()
     assert not (harness / "runs" / "last_run.json").exists()
 
 

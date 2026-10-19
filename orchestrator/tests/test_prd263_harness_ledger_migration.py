@@ -84,6 +84,14 @@ def _quoted(sql: str) -> set:
     return set(re.findall(r"'([a-z_]+)'", sql))
 
 
+def _f156_table(db) -> None:
+    """The F156 ledger, built by the f156 revision in a schema of its own (rolled back)."""
+    db.execute(text("SET LOCAL lock_timeout = '5s'"))
+    db.execute(text("CREATE SCHEMA " + F156_SCHEMA))
+    db.execute(text("SET LOCAL search_path TO " + F156_SCHEMA + ", public"))
+    _run(db, F156)
+
+
 def test_the_model_and_the_migration_declare_one_shape():
     from sqlalchemy import CheckConstraint
 
@@ -116,10 +124,7 @@ def test_the_model_and_the_migration_declare_one_shape():
 def test_a_held_row_becomes_expired_and_the_upgraded_f156_table_matches_the_model(db_session, seed_workspace):
     ws = seed_workspace()
     model = _shape(db_session, "public")
-    db_session.execute(text("SET LOCAL lock_timeout = '5s'"))
-    db_session.execute(text("CREATE SCHEMA " + F156_SCHEMA))
-    db_session.execute(text("SET LOCAL search_path TO " + F156_SCHEMA + ", public"))
-    _run(db_session, F156)
+    _f156_table(db_session)
     db_session.execute(text("INSERT INTO harness_task_ledger (workspace_id, board_task_id, state) "
                             "VALUES (CAST(:ws AS uuid), 1, 'held'), (CAST(:ws AS uuid), 2, 'applied')"), {"ws": ws})
 
@@ -131,6 +136,28 @@ def test_a_held_row_becomes_expired_and_the_upgraded_f156_table_matches_the_mode
     assert _shape(db_session, F156_SCHEMA) == model
     _run(db_session, MIGRATION)  # a second run changes nothing
     assert _shape(db_session, F156_SCHEMA) == model
+
+
+def test_the_downgrade_restores_the_f156_table_and_keeps_every_row(db_session, seed_workspace):
+    ws = seed_workspace()
+    _f156_table(db_session)
+    f156 = _shape(db_session, F156_SCHEMA)
+    _run(db_session, MIGRATION)
+    db_session.execute(_INSERT, {"ws": ws, "task": 1, "state": "applied", "rx": None})
+    db_session.execute(_INSERT, {"ws": ws, "task": 2, "state": "expired", "rx": None})
+    db_session.execute(_INSERT, {"ws": ws, "task": None, "state": "pending", "rx": "rx-7-001"})
+
+    _run(db_session, MIGRATION, "downgrade")
+
+    states = db_session.execute(text("SELECT board_task_id, state FROM harness_task_ledger "
+                                     "WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": ws}).all()
+    assert dict(states) == {1: "applied", 2: "held", None: "held"}
+    # The F156 shape again, except that board_task_id stays nullable (a row raised without a card).
+    nullable_task = [row[:3] + ("YES",) + row[4:] if row[0] == "board_task_id" else row for row in f156["columns"]]
+    assert nullable_task != f156["columns"]
+    assert _shape(db_session, F156_SCHEMA) == {**f156, "columns": nullable_task}
+    _run(db_session, MIGRATION, "downgrade")  # a second run changes nothing
+    assert _shape(db_session, F156_SCHEMA) == {**f156, "columns": nullable_task}
 
 
 def test_the_upgrade_keeps_a_create_all_table_as_it_is(db_session):

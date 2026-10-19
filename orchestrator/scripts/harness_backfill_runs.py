@@ -297,10 +297,14 @@ def remove_json_files(harness_dir: Path, apply: bool) -> int:
     harness directory swapped for a link, is not entered) and the file is checked and
     unlinked by directory descriptor, so a link swapped in meanwhile cannot send the
     removal to another workspace's files. A linked file is left alone. A directory
-    that cannot be read stops the run instead of being skipped unseen.
+    that cannot be read stops the run instead of being skipped unseen. A linked
+    directory is pruned before os.fwalk opens it: opening one opens its target, and a
+    target the script cannot read would stop every run.
     """
     removed = 0
-    for _path, _dirs, names, dir_fd in os.fwalk(harness_dir, onerror=_raise, follow_symlinks=False):
+    for _path, dirs, names, dir_fd in os.fwalk(harness_dir, onerror=_raise, follow_symlinks=False):
+        # In place, as os.fwalk reads the list back to choose what to descend into.
+        dirs[:] = [name for name in dirs if stat.S_ISDIR(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode)]
         for name in names:
             if not name.endswith(JSON_SUFFIX):
                 continue
