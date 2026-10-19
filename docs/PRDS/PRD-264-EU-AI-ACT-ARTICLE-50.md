@@ -164,7 +164,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 **Acceptance criteria:**
 - [ ] `ai_disclosure` is added to `PUBLIC_WIDGET_CONFIG_KEYS`. It is always present in the public config, built by the server, never read raw from settings: `{"badge": <locale term>, "line": <first-turn sentence>, "locale": <code>}`.
 - [ ] The badge comes from one table in `ai_disclosure.py` (`en` → `AI`, `pt`, `es`, `fr`, `it` → `IA`, `de` → `KI`; any other locale → `AI`). No widget setting changes it (D17).
-- [ ] The default line is "You are chatting with an AI assistant for {site}.", where `{site}` is the site's name, falling back to the workspace name. A deployer's own line is accepted only if it contains the locale's badge term as a whole word. Otherwise the settings save returns HTTP 422 with "The AI notice must say it is an AI (for this language: '{term}')."
+- [ ] The default line is "You are chatting with an AI assistant for {site}.", where `{site}` is the Site's `display_name`, which the deployer sets as a public name. With no Site name, the line is "You are chatting with an AI assistant." The workspace name never appears in public widget output: auto-created workspaces are named after the person ("{name or email}'s Workspace", `orchestrator/core/auth/hybrid.py:323`), so it can carry personal data (FR-15). A deployer's own line is accepted only if it contains the locale's badge term as a whole word. Otherwise the settings save returns HTTP 422 with "The AI notice must say it is an AI (for this language: '{term}')."
 - [ ] The first SSE event of `POST /api/widgets/chat` is `{"type": "ai_disclosure", ...}`, sent before any token.
 - [ ] Every assistant message event in the widget stream carries `"ai_generated": true` (Art. 50(2) for widget text; EUAI-09 covers the in-app stream).
 - [ ] Tests: the config always carries `ai_disclosure`, including when the workspace has no widget settings; a line without the term is refused; a Portuguese line with "IA" is accepted; the first stream event is the notice; both editions.
@@ -189,10 +189,10 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 
 **Acceptance criteria:**
 - [ ] One function in `ai_disclosure.py` decides whether a message to a person needs the notice: the first message to that person on that connection, the first after an idle gap (`AI_DISCLOSURE_IDLE_HOURS`, default 24), and any reply to a message that asks whether they are talking to a human or a bot (a small multilingual pattern list in the same module).
-- [ ] The notice, "AI assistant for {workspace}.", is prepended at **both** outbound points: the adapter reply at `base.py:209` and `send_to_channel` in `sender.py`, which carries webhook replies, notifications, agent asks and destination dispatches.
+- [ ] The notice, "AI assistant for {principal}." (or "AI assistant." when there is no public name, FR-15), is prepended at **both** outbound points: the adapter reply at `base.py:209` and `send_to_channel` in `sender.py`, which carries webhook replies, notifications, agent asks and destination dispatches.
 - [ ] The generic webhook driver gets `"ai_generated": true` and `"ai_disclosure": "<notice>"` as payload fields instead of a text prefix, because its receiver is a system.
 - [ ] The last-notice time per workspace, connection and person is kept in Redis with a TTL equal to the idle gap. If Redis can't be read, the notice is added (fail toward telling).
-- [ ] The Telegram /start reply says "I'm an AI assistant for {workspace}." in its first sentence.
+- [ ] The Telegram /start reply says "I'm an AI assistant for {principal}." (or "I'm an AI assistant.") in its first sentence.
 - [ ] An architecture test fails if any module other than `base.py` calls an adapter's `send_message`, or any module other than `sender.py` calls a driver's `send`, so a new path can't skip the notice.
 - [ ] Tests for each adapter and each driver: the first message carries the notice once, a second within the gap doesn't, one after the gap does, "are you human?" triggers it, and Redis down adds it.
 
@@ -224,7 +224,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 **Repo · wave:** automatos-ai · EU-C1 · **Files:** `orchestrator/modules/policy/ai_disclosure.py` (a data map of send actions to their body parameter), `orchestrator/modules/tools/discovery/owner_only.py` (`is_composio_send` at `:160`), the point in the tool executor where the owner card is built, tests · **Depends on:** EUAI-03 (the module)
 
 **Acceptance criteria:**
-- [ ] Every external send an agent starts (`is_composio_send` true) carries, as the first line of its body, "Written and sent by an AI agent on behalf of {workspace}." (Guidelines ¶36). HTML bodies get it as a first paragraph.
+- [ ] Every external send an agent starts (`is_composio_send` true) carries, as the first line of its body, "Written and sent by an AI agent on behalf of {principal}." (Guidelines ¶36), or "Written and sent by an AI agent on behalf of the sender." when there is no public name (FR-15). HTML bodies get it as a first paragraph.
 - [ ] A data map in `ai_disclosure.py` names each send action's body parameter (for example `GMAIL_SEND_EMAIL` → `body`). A completeness test fails if any action that `is_composio_send` accepts has no entry.
 - [ ] The line is added before the owner's send card is built, so the card shows the final body and the owner approves exactly what goes out.
 - [ ] Sends a person makes directly are unchanged. The builder lists every caller of `orchestrator/api/widget_email.py` `send_email` (`:445`) and `reply_to_email` (`:493`) in the PR. If an agent can reach either, the line is added there too.
@@ -242,7 +242,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - [ ] The label is "Auto is an AI" (or "{agent name} is an AI" when another agent answers), uses theme tokens, never `dark:` classes, and has `role="note"` with the same words for screen readers.
 - [ ] **No theme can hide it.** On mount and when the theme changes, the label checks that it is displayed, visible, not zero-sized and inside the viewport. If not, the chat input is disabled with "This theme hides the AI notice, so chat is paused. Switch theme in Settings." No manifest field turns the label off.
 - [ ] Theme-host test (`ai-label.test.ts`): the label renders with builtin Play, with a fixture theme that registers `/chat`, and with a fixture theme whose CSS sets `display:none`, `visibility:hidden`, `opacity:0` or zero size on it, and in each hiding case the input is disabled.
-- [ ] Every agent's system prompt, Auto's, marketplace agents' and custom personas', ends with a platform rule: "If anyone asks whether they are talking to a person or an AI, say that you are an AI agent acting for {workspace}. Never claim or imply that you are human." It is appended after the persona text, so a persona can't remove it. A test asserts the rule in the assembled prompt for Auto, a marketplace agent and an agent with a custom persona.
+- [ ] Every agent's system prompt, Auto's, marketplace agents' and custom personas', ends with a platform rule: "If anyone asks whether they are talking to a person or an AI, say that you are an AI agent acting for {principal}. Never claim or imply that you are human." `{principal}` follows FR-15; with no public name the rule reads "say that you are an AI agent". It is appended after the persona text, so a persona can't remove it. A test asserts the rule in the assembled prompt for Auto, a marketplace agent and an agent with a custom persona.
 - [ ] **[UI]** Owner check on the deployed build: the label shows on `/chat` in the default look and in Play, in light and dark.
 
 #### EUAI-11b: PRD-261 and the theme skill state the host's AI label rule (S)
@@ -420,6 +420,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - **FR-12:** Each network's own AI label is set at publish where its API supports one, and the receipt says what was set.
 - **FR-13:** Every image, video and voice generation path refuses sexual content of real, identifiable people and any sexual content involving minors (ART5-1, by Fri 20 Nov).
 - **FR-14:** No public page states that a notice or mark is live before it has been checked in production (EUAI-15).
+- **FR-15:** A notice names its principal only by a public name. The widget uses the Site's `display_name`. Channel bots, agent-sent email and messages use, in order, the business profile's `company_name` (`orchestrator/core/models/business_profiles.py`), then the workspace name only when it is not the auto-created "{name or email}'s Workspace" form and contains no "@". Otherwise the notice carries no name. One function in `ai_disclosure.py` (`public_principal_name`) decides this, and a test covers each case. (Added 19 Oct after a security review: the workspace name can carry the owner's name or email.)
 
 ## 7. Non-goals
 
@@ -441,8 +442,8 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 | Widget header and popups | Badge `AI` beside the title; popups read "AI assistant" | "You are chatting with an AI assistant for {site}." (deployer may reword, D17) |
 | In-app chat, Mission Mode, Play, theme `/chat` and `/x/` routes | "Auto is an AI" by the input | — (the label is always visible) |
 | Voice panel | "AI voice assistant" for the whole call | Spoken: "Hi, this is Auto, your AI assistant." |
-| Channel bots | — | "AI assistant for {workspace}." before the first reply, and again after the idle gap |
-| Agent-sent email and messages | — | At the top: "Written and sent by an AI agent on behalf of {workspace}." |
+| Channel bots | — | "AI assistant for {principal}." before the first reply, and again after the idle gap (FR-15 for the name) |
+| Agent-sent email and messages | — | At the top: "Written and sent by an AI agent on behalf of {principal}." (FR-15) |
 | Academy web and app tutors | "AI tutor" in the header | Empty state and first turn say "AI tutor" |
 | Socials deep-fake label | On-video label at the start, caption label, spoken line for audio-only posts | "AI-generated" |
 | Blog widget | "AI-generated" on agent-written posts until reviewed | — |
