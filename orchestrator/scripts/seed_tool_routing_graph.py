@@ -336,6 +336,17 @@ def _print_summary(summary: SeedSummary, workspace_id: Optional[str]) -> None:
         print("  Note: intent clustering/affinities are computed only on a real run.")
 
 
+def _configure_logging() -> None:
+    """Console logging for this script, with the request-log guard on it (#1178)."""
+    from core.monitoring.request_log_guard import guard_request_logs
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    guard_request_logs()  # no request URL or SDK request body in this script's logs
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -366,12 +377,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-    from core.monitoring.request_log_guard import guard_request_logs
-    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
+    _configure_logging()
 
     if not args.yes:
         print(REFUSAL)
