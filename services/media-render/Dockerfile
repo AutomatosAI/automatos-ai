@@ -191,22 +191,40 @@ RUN set -eux; \
 # - onnxruntime's libonnxruntime.so.* (29 MB) is a library its Python module
 #   does not link; onnxruntime is imported before the layer is kept, so a release
 #   that starts linking it fails the build here. numpy's tests go too.
+# - PRD-262 #18 (about 25.6 MB): onnxruntime's transformers, quantization and tools
+#   (never imported: the service loads onnxruntime.capi alone) and numpy's f2py go;
+#   protobuf and flatbuffers, which only those import, are left out of the lock
+#   (requirements.in); espeakng_loader's two extra copies of libespeak-ng.so become
+#   links to it (the build fails if they differ); every shared library is stripped
+#   (binutils here alone). The espeak build below then speaks through the stripped
+#   library, and the probes load every native part before the layer is kept.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS py
 COPY --from=uv /uv /usr/local/bin/uv
 COPY requirements.lock /opt/media-render/requirements.lock
 COPY media_render/espeak_build.py /opt/media-render/build/espeak_build.py
 RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends binutils; \
+    rm -rf /var/lib/apt/lists/*; \
     uv venv --python /usr/local/bin/python3.12 /opt/venv; \
     uv pip install --python /opt/venv/bin/python --no-cache --compile-bytecode --require-hashes --no-deps \
         -r /opt/media-render/requirements.lock; \
     site=/opt/venv/lib/python3.12/site-packages; \
+    rm "$site"/onnxruntime/capi/libonnxruntime.so.*; \
+    find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +; \
+    rm -r "$site"/onnxruntime/transformers "$site"/onnxruntime/quantization "$site"/onnxruntime/tools \
+        "$site"/numpy/f2py /opt/venv/bin/f2py; \
+    for lib in "$site"/espeakng_loader/libespeak-ng.so.*; do \
+        cmp "$lib" "$site"/espeakng_loader/libespeak-ng.so; \
+        ln -sf libespeak-ng.so "$lib"; \
+    done; \
+    find "$site" -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded {} +; \
     mv "$(/opt/venv/bin/python -c 'import espeakng_loader; print(espeakng_loader.get_data_path())')" /opt/espeak; \
     test -f /opt/espeak/phontab; \
     test ! -L /opt/espeak; \
     /opt/venv/bin/python /opt/media-render/build/espeak_build.py /opt/espeak /opt/media-render/espeak-phonemes.json; \
     chmod -R a+rX /opt/espeak; \
-    rm "$site"/onnxruntime/capi/libonnxruntime.so.*; \
-    find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +; \
+    /opt/venv/bin/python -c 'import ctypes, aiohttp, numpy, soundfile, espeakng_loader; ctypes.CDLL(espeakng_loader.get_library_path()).espeak_Initialize'; \
     /opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'
 ENV PATH=/opt/venv/bin:$PATH
 

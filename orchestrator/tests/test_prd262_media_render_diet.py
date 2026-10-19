@@ -141,8 +141,9 @@ def test_the_py_stage_trims_the_venv_in_the_run_that_installs_the_lock():
     onnxruntime = run.index('rm "$site"/onnxruntime/capi/libonnxruntime.so.*;')
     numpy = run.index('find "$site/numpy" -type d -name tests -prune -exec rm -rf {} +;')
     probe = run.index("/opt/venv/bin/python -c 'import onnxruntime as o; print(o.get_available_providers())'")
-    assert install < run.index("site=/opt/venv/lib/python3.12/site-packages;") < move < onnxruntime < probe
-    assert install < numpy < probe
+    # PRD-262 #18: the deletions come first, so the strip after them skips what goes.
+    assert install < run.index("site=/opt/venv/lib/python3.12/site-packages;") < onnxruntime < move < probe
+    assert install < numpy < move
     assert "cp -r" not in _stage("py")
     # libonnxruntime_providers_shared.so stays: the pattern is the unlinked library's.
     assert "libonnxruntime_providers" not in run
