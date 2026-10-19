@@ -2,7 +2,7 @@
 
 Article 50 of the EU AI Act (Regulation (EU) 2024/1689) puts transparency duties on two parties. The **provider** of an AI system is Automatos. The **deployer** is the customer who uses Automatos in their own business, and also Automatos itself for its own sites and posts. This guide lists, surface by surface, what Automatos builds for Article 50 and what the deployer still has to do.
 
-It describes what PRD-264 (`docs/PRDS/PRD-264-EU-AI-ACT-ARTICLE-50.md`) builds. It is not legal advice, and it claims no conformity or certification. Counsel confirms the legal reading (PRD-264 D9).
+It describes what PRD-264 (`docs/PRDS/PRD-264-EU-AI-ACT-ARTICLE-50.md`) builds. It is not legal advice, and it claims no conformity or certification. Counsel has not yet reviewed this reading: the legal reviewer is still to be named (PRD-264 D9, §3).
 
 ## Read this first: what is live
 

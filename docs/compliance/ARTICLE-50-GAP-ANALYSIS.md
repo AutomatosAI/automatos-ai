@@ -4,11 +4,11 @@ Automatos has not signed the Code of Practice on transparency of AI-generated co
 
 Gerard decided on 19 Oct 2026 not to sign before Web Summit and to write this analysis instead (PRD-264 D12), and not to build an imperceptible watermark now (D11). Signing is revisited after Web Summit (below).
 
-It describes what PRD-264 (`docs/PRDS/PRD-264-EU-AI-ACT-ARTICLE-50.md`) builds. It claims no conformity or certification, and it is not legal advice. Counsel confirms the legal reading (D9).
+It describes what PRD-264 (`docs/PRDS/PRD-264-EU-AI-ACT-ARTICLE-50.md`) builds. It claims no conformity or certification, and it is not legal advice. Counsel has not yet reviewed this reading: the legal reviewer is still to be named (PRD-264 D9, §3).
 
 ## Status: what is live
 
-**On 19 Oct 2026 none of the PRD-264 marking or detection code was on `main`.** Every measure below is live only once its story is merged and deployed. The stories ship in waves EU-B1 (EUAI-06a, target merge Fri 23 Oct), EU-C2 (EUAI-09, EUAI-10, target Thu 29 Oct) and EU-B2 (EUAI-06b, target Fri 30 Oct). The posture page at automatos.app/eu-ai-act lists what has been checked in production (EUAI-15) and links this analysis.
+**On 19 Oct 2026 none of the PRD-264 marking or detection code was on `main`.** Every measure below is live only once its story is merged and deployed. The stories ship in waves EU-B1 (EUAI-06a, target merge Fri 23 Oct), EU-C2 (EUAI-09, EUAI-10, target Thu 29 Oct) and EU-B2 (EUAI-06b, target Fri 30 Oct). Once EUAI-15 ships (wave EU-D), the posture page at automatos.app/eu-ai-act will list what has been checked in production and link this analysis. Until then it does neither.
 
 ## The legal frame
 
