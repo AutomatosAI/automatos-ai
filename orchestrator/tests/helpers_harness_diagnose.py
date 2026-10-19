@@ -2,11 +2,12 @@
 
 Rows go into the transactional ``db_session`` (rolled back after each test), and
 ``judge`` runs the real pipeline (``HarnessService._run_recorded``: COLLECT,
-DIAGNOSE, PRESCRIBE, APPLY, REPORT) for one ISO week on its own harness_runs row.
+DIAGNOSE, PRESCRIBE, REPORT) for one ISO week on its own harness_runs row.
 The platform actions must be faked first (``helpers_harness_runs.fake_platform``).
 Weeks are named by their offset from 2026-W42 (Monday 12 Oct 2026), so nothing
-depends on today's date. Shared by test_prd263_harness_diagnose_realdb.py and
-test_prd263_harness_verdict_history_realdb.py.
+depends on today's date. Shared by test_prd263_harness_diagnose_realdb.py,
+test_prd263_harness_verdict_history_realdb.py, test_prd263_harness_tool_failure_window.py
+and test_prd263_harness_report_only.py.
 """
 from __future__ import annotations
 
@@ -74,6 +75,19 @@ def runs(db, ws, agent_id, week_offset, count, *, cost=0.0, tokens=1000, tier="d
     db.flush()
 
 
+def tool_runs(db, ws, agent_id, week_offset, count, *, app="GMAIL", status="success", error_code=None,
+              error_message=None, source="production") -> None:
+    """``count`` tool runs of ``app`` by the agent in that week (tool_execution_logs is naive UTC)."""
+    from core.models.composio_cache import ToolExecutionLog
+
+    moment = at(week_offset).replace(tzinfo=None)
+    for _ in range(count):
+        db.add(ToolExecutionLog(workspace_id=UUID(str(ws)), agent_id=agent_id, app_name=app,
+                                action_name=f"{app}_SEND_EMAIL", status=status, error_code=error_code,
+                                error_message=error_message, telemetry_source=source, executed_at=moment))
+    db.flush()
+
+
 def applied_change(db, ws, agent_id, moment, board_task_id=1) -> None:
     """A harness_task_ledger row for a change HARNESS applied to the agent at ``moment``."""
     db.execute(text("INSERT INTO harness_task_ledger (workspace_id, board_task_id, state, entry, created_at) "
@@ -88,8 +102,8 @@ def judge(db, ws, week=WEEK) -> Dict[str, Any]:
 
     run_id = harness_runs.open_run(db, UUID(str(ws)), week)
     asyncio.run(HarnessService()._run_recorded(db, UUID(str(ws)), run_id, week))
-    row = db.execute(text("SELECT status, report_status, coverage, counts, verdicts, report_md FROM harness_runs "
-                          "WHERE id = :id"), {"id": run_id}).mappings().one()
+    row = db.execute(text("SELECT status, report_status, coverage, counts, verdicts, prescriptions, report_md "
+                          "FROM harness_runs WHERE id = :id"), {"id": run_id}).mappings().one()
     assert row["status"] == "completed", row["report_status"]
     return dict(row)
 

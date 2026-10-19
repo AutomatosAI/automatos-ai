@@ -6,6 +6,10 @@ browser widgets (proactive engagement, cart-idle, callback form). The
 whitelist is imported, never duplicated, so the tool can never write a
 settings key the widget layer doesn't expose. ``workspace_id`` comes from
 the executor context, never the params.
+
+PRD-264 EUAI-02a: ``ai_disclosure`` is one of those keys. What the widget
+receives under it is built by the server; what may be stored under it is a
+deployer's reworded ``line``, refused unless it says it is an AI (D17).
 """
 
 import logging
@@ -20,7 +24,7 @@ logger = logging.getLogger(__name__)
 async def get_widget_config(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Read the workspace's public widget config (the slice browser widgets see)."""
     try:
-        from api.widgets.config import PUBLIC_WIDGET_CONFIG_KEYS, _project_public_keys
+        from api.widgets.config import PUBLIC_WIDGET_CONFIG_KEYS, project_public_config
         from core.models.workspaces import Workspace
 
         ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
@@ -29,7 +33,8 @@ async def get_widget_config(db: Session, workspace_id: UUID, params: Dict[str, A
 
         return {
             "success": True,
-            "widget_config": _project_public_keys(ws.settings) or {},
+            # PRD-264 FR-15: never the workspace name in a widget notice.
+            "widget_config": project_public_config(ws.settings, None),
             "configurable_keys": list(PUBLIC_WIDGET_CONFIG_KEYS),
         }
     except Exception as exc:
@@ -45,6 +50,7 @@ async def update_widget_config(db: Session, workspace_id: UUID, params: Dict[str
     try:
         from api.widgets.config import PUBLIC_WIDGET_CONFIG_KEYS
         from core.models.workspaces import Workspace
+        from modules.policy.ai_disclosure import AIDisclosureRejected, validate_settings
 
         if key not in PUBLIC_WIDGET_CONFIG_KEYS:
             return {
@@ -58,8 +64,14 @@ async def update_widget_config(db: Session, workspace_id: UUID, params: Dict[str
         if ws is None:
             return {"success": False, "error": "Workspace not found"}
 
+        updated = {**(ws.settings or {}), key: value}
+        try:
+            validate_settings(updated)
+        except AIDisclosureRejected as exc:
+            return {"success": False, "error": str(exc)}
+
         previous = (ws.settings or {}).get(key)
-        ws.settings = {**(ws.settings or {}), key: value}
+        ws.settings = updated
         db.commit()
 
         return {"success": True, "key": key, "config": value, "previous": previous}

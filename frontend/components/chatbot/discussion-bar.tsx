@@ -84,8 +84,9 @@ function EndButton({ onEnd }: { onEnd: () => void }) {
 }
 
 /** The theme's own chat is what /chat shows: the active theme owns /chat and its layout renders
- * (PRD-260 D7, the PlayRouteSwitch in app/chat/layout.tsx), read from the switch's own width
- * source (P260-FX-25; PRD-261 A-02b). Its message box has no agent picker, so the hint differs there. */
+ * it (PRD-260 D7, the ThemeSlot page entry in app/chat/layout.tsx, PRD-261 A-04b), read from the
+ * same width source, useThemeLayout (P260-FX-25; PRD-261 A-02b). Its message box has no agent
+ * picker, so the hint differs there. */
 function useThemeChatOnScreen(): boolean {
   const ownsChat = useActiveTheme()?.ownsPages.includes(CHAT_ROUTE) ?? false
   const layout = useThemeLayout()

@@ -9,7 +9,9 @@ a histogram family that lived until the next restart.
 - every vendored copy is byte-identical to services/shared;
 - the FastAPI middleware (agent-opt-worker) and the aiohttp middleware
   (workspace-worker) label by route template, with one "unmatched" label for
-  paths no route matches, and an "OTHER" method for non-standard methods.
+  paths no route matches, and an "OTHER" method for non-standard methods;
+- the aiohttp /metrics answers 200 with prometheus_client's own content type
+  (PRD-262 US-045: it raised on the charset in it, so the worker's /metrics was 500).
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import uuid
 from pathlib import Path
 
 from prometheus_client import CollectorRegistry
+from prometheus_client.parser import text_string_to_metric_families
 
 ROOT = Path(__file__).resolve().parents[2]
 SHARED = ROOT / "services" / "shared" / "automatos_metrics.py"
@@ -119,3 +122,36 @@ def test_aiohttp_requests_are_labelled_by_route_template():
     assert statuses == [200, 200, 200] + [404] * len(SCANNER_PATHS) + [405, 405]
     assert _labels(metrics, "prd262-aiohttp", "endpoint") == {"/workspaces/{workspace_id}/files", "unmatched"}
     assert _labels(metrics, "prd262-aiohttp", "method") == {"GET", "POST", "OTHER"}
+
+
+def test_aiohttp_metrics_answers_200_with_the_client_librarys_content_type():
+    """PRD-262 US-045: the workspace worker's /metrics answered 500. prometheus_client's
+    content type carries a charset, and aiohttp raises when content_type holds one."""
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    metrics = _load_shared()
+    assert "charset=" in metrics.CONTENT_TYPE_LATEST, "the case this test guards no longer arises"
+
+    async def ok(request):
+        return web.json_response({"ok": True})
+
+    async def scenario() -> tuple[int, str, str]:
+        app = web.Application()
+        app.router.add_get("/health", ok)
+        metrics.add_aiohttp_metrics(app, service="prd262-aiohttp-scrape")
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.get("/health")).status == 200
+            scrape = await client.get("/metrics")
+            return scrape.status, scrape.headers.get("Content-Type", ""), await scrape.text()
+
+    status, content_type, body = asyncio.run(scenario())
+    assert status == 200, body
+    assert content_type == metrics.CONTENT_TYPE_LATEST
+    scraped = {
+        (sample.name, tuple(sorted(sample.labels.items()))): sample.value
+        for family in text_string_to_metric_families(body)
+        for sample in family.samples
+    }
+    health = ("prd262_aiohttp_scrape_requests_total", (("endpoint", "/health"), ("method", "GET"), ("status", "200")))
+    assert scraped.get(health) == 1.0, sorted(scraped)

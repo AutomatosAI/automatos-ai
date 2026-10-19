@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 # the GLOBAL, admin-only CTO agent via seed_cto_agent.py — NOT this per-workspace
 # Auto agent, whose persona is _default_persona() below: friendly base + doctrine.)
 PLATFORM_SKILL = "platform-management"
+# Auto's output budget on a new row: higher than a default agent's.
+AUTO_MAX_TOKENS = 4000
 
 _FRIENDLY_FALLBACK = """\
 **Who I Am:**
@@ -330,16 +332,15 @@ def sync_auto_personas(db: Session) -> dict:
 
 
 def _get_default_model_config() -> dict:
-    """Build default model_config for new Auto agents.
+    """model_config for a new Auto: the platform default (system_settings
+    ``orchestrator_llm``, else core/llm/defaults' pair, via
+    ``new_agent_model_config``), marked as inheriting so an admin's later change of
+    that default moves this row too (core/llm/auto_model_sync). A model chosen in
+    Settings > Orchestrator replaces it on the row and is never moved."""
+    from core.llm.auto_model_sync import inheriting_model_config
+    from core.llm.new_agent_model import new_agent_model_config
 
-    Uses the shared defaults from core.llm.defaults (single source of truth
-    for LLM fallbacks).  The user configures the actual provider+model via
-    Settings > Orchestrator which writes directly to the Auto agent row.
-    """
-    from core.llm.defaults import get_default_model_config
-    mc = get_default_model_config()
-    mc["max_tokens"] = 4000  # Auto gets higher limit than default agents
-    return mc
+    return inheriting_model_config({**new_agent_model_config(), "max_tokens": AUTO_MAX_TOKENS})
 
 
 def _assign_skill_to_agent(db: Session, agent: Agent, skill: Skill) -> None:

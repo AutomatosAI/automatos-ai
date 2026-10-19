@@ -12,7 +12,7 @@ import styles from './opening.module.css'
 
 /**
  * PRD-260 §4 — Play's chat at /chat, mounted by app/chat/layout.tsx through
- * PlayRouteSwitch under Play at >= 1024 px (K7), inside Play's frame
+ * ThemeSlot (PRD-261 A-04b) under Play at >= 1024 px (K7), inside Play's frame
  * (MainLayout fullBleed). The conversation on screen is the core's
  * (usePlayConversation: the session store and lib/chat/api.ts); while it
  * settles or loads, Auto says so. The chat screen is keyed by the

@@ -71,7 +71,7 @@ jobs:
     steps:
       # The planner and the test files it searches; nothing else is needed here.
       - name: Checkout (the test files and the planner)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             orchestrator/tests
@@ -199,10 +199,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -216,7 +216,7 @@ jobs:
         run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the system-library downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/apt-archives
           key: apt-archives-${{ runner.os }}-${{ hashFiles('.github/workflows/test.yml') }}-${{ steps.week.outputs.week }}
@@ -320,7 +320,7 @@ jobs:
 
       - name: Keep this shard's coverage data
         if: needs.changes.outputs.backend_mode == 'full'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-shard-${{ matrix.shard }}
           path: |
@@ -358,17 +358,17 @@ jobs:
 
       - name: Checkout
         if: env.MODE == 'full'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
         if: env.MODE == 'full'
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
       - name: The shards' coverage data
         if: env.MODE == 'full'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-shard-*
           path: orchestrator
@@ -406,12 +406,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout (full history, for the diff against the base)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -467,10 +467,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -532,10 +532,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -583,10 +583,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -624,10 +624,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -672,10 +672,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -751,10 +751,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -923,7 +923,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # PRD-262 US-046: no CI build passes Clerk keys, and clerkMiddleware and ClerkProvider
       # throw without them, so the build gets a format-valid production-instance publishable
       # key, made here and never committed. The edition is still the Dockerfile's default.
@@ -1037,12 +1037,110 @@ jobs:
         run: |
           docker build --target production -t parity-be orchestrator/
           docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
-      - name: Worker — headless browser present with no args
+      # PRD-262 US-043: Railway's worker carries Chromium's headless shell only, every
+      # library it links resolves after Mesa's drivers are purged, and Playwright runs
+      # on the image's Node rather than its own bundled copy.
+      - name: Worker — the headless shell only, every library resolved, no Mesa
         run: |
           docker build -t parity-wk services/workspace-worker/
           # --entrypoint: the worker image's entrypoint.sh execs the worker itself
           # (ignoring CMD) and dies on Redis — we only want to look inside the image.
-          docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
+          in_image() { docker run --rm --entrypoint sh parity-wk -c "$1"; }
+          in_image 'ls /opt/playwright-browsers'
+          bad=0
+          if in_image 'ls -d /opt/playwright-browsers/chromium-[0-9]*'; then
+            echo "::error::the worker image carries the full Chromium; html_to_png runs only the headless shell"; bad=1
+          fi
+          if ! in_image 'ls -d /opt/playwright-browsers/chromium_headless_shell-*'; then
+            echo "::error::the worker image has no chromium_headless_shell-* directory"; bad=1
+          fi
+          if ! libs=$(in_image 'shell=$(find /opt/playwright-browsers -type f -name chrome-headless-shell) && ldd "$shell" "$(dirname "$shell")"/*.so*'); then
+            echo "::error::ldd could not read the headless shell"; bad=1
+          fi
+          echo "$libs"
+          if grep 'not found' <<< "$libs"; then
+            echo "::error::the headless shell links the libraries above, which the image lacks"; bad=1
+          fi
+          for pkg in mesa-libgallium libllvm19 libz3-4; do
+            if in_image "dpkg -s $pkg > /dev/null 2>&1"; then
+              echo "::error::the worker image still has the Debian package $pkg"; bad=1
+            else
+              echo "$pkg: purged"
+            fi
+          done
+          if ! docker run --rm --entrypoint python parity-wk -c 'import os, playwright; from importlib.metadata import version; node = os.path.join(os.path.dirname(playwright.__file__), "driver", "node"); assert not os.path.exists(node), node; print("Playwright", version("playwright"), "runs on", os.environ["PLAYWRIGHT_NODEJS_PATH"])'; then
+            echo "::error::Playwright still carries its bundled Node, or PLAYWRIGHT_NODEJS_PATH is unset"; bad=1
+          fi
+          exit "$bad"
+      # The worker's own launch arguments, as uid 1000 (the worker user, with its own
+      # HOME): set_content then screenshot for a Latin and a CJK fixture, and the CJK
+      # text must be drawn with a font fontconfig lists for U+4E2D; then the worker's
+      # html_to_png on a workspace file.
+      - name: Worker — renders PNGs as uid 1000, CJK included
+        run: |
+          docker run --rm -i --user 1000 --entrypoint python parity-wk - <<'PY'
+          import asyncio
+          import subprocess
+          import uuid
+
+          from playwright.async_api import async_playwright
+
+          from executor import WorkspaceToolExecutor
+          from workspace_manager import WorkspaceManager
+
+          ARGS = ["--no-sandbox", "--disable-dev-shm-usage", "--allow-file-access-from-files", "--disable-web-security"]
+          PNG = b"\x89PNG\r\n\x1a\n"
+          FIXTURES = {
+              "latin": "<p id='text' style='font: 32px sans-serif'>Automatos render check</p>",
+              "cjk": "<p id='text' lang='zh' style='font: 32px sans-serif'>中文渲染 日本語 한국어</p>",
+          }
+          listed = subprocess.run(["fc-list", ":charset=4e2d", "family"], capture_output=True, text=True, check=True).stdout
+          CJK_FAMILIES = {name.strip() for line in listed.splitlines() for name in line.split(",") if name.strip()}
+          assert CJK_FAMILIES, "fontconfig lists no font with U+4E2D"
+
+
+          async def fonts_used(page):
+              cdp = await page.context.new_cdp_session(page)
+              await cdp.send("DOM.enable")
+              await cdp.send("CSS.enable")
+              root = (await cdp.send("DOM.getDocument"))["root"]["nodeId"]
+              node = (await cdp.send("DOM.querySelector", {"nodeId": root, "selector": "#text"}))["nodeId"]
+              fonts = (await cdp.send("CSS.getPlatformFontsForNode", {"nodeId": node}))["fonts"]
+              await cdp.detach()
+              return {font["familyName"] for font in fonts}
+
+
+          async def render_fixtures():
+              async with async_playwright() as pw:
+                  browser = await pw.chromium.launch(args=ARGS)
+                  print("headless shell", browser.version)
+                  page = await browser.new_page(viewport={"width": 640, "height": 120})
+                  used = {}
+                  for name, html in FIXTURES.items():
+                      await page.set_content(html)
+                      png = await page.screenshot(type="png")
+                      used[name] = await fonts_used(page)
+                      print(f"{name}: {len(png)} bytes, drawn with {sorted(used[name])}")
+                      assert png.startswith(PNG) and len(png) > len(PNG), f"{name}: no PNG"
+                  await browser.close()
+              assert used["cjk"] & CJK_FAMILIES, f"CJK drawn with {sorted(used['cjk'])}, none of {sorted(CJK_FAMILIES)}"
+
+
+          async def render_with_the_worker():
+              ws = WorkspaceManager(str(uuid.uuid4()))
+              ws.ensure_workspace_exists()
+              card = ws.root / "content" / "card.html"
+              card.write_text("<!doctype html><meta charset='utf-8'><h1>中文 Automatos</h1>", encoding="utf-8")
+              result = await WorkspaceToolExecutor(ws).html_to_png(
+                  url=f"file://{card}", viewport_w=320, viewport_h=120,
+                  output_path="content/card.png", wait_for=None)
+              print("html_to_png:", result)
+              assert result.get("success") and result["file_size_bytes"] > 0, result
+
+
+          asyncio.run(render_fixtures())
+          asyncio.run(render_with_the_worker())
+          PY
       # PRD-262 US-007: Node 24 copied from the official image, with npm, corepack and
       # the exact pnpm pin; nothing NodeSource brought (one package per check).
       - name: Worker — Node 24 from the official image, pnpm pinned, no NodeSource leftovers
@@ -1068,6 +1166,99 @@ jobs:
             if in_image "test -e $path"; then echo "::error::the worker image has $path"; bad=1; else echo "$path: absent"; fi
           done
           exit "$bad"
+      # PRD-262 US-043: the local edition and the GHCR image (INSTALL_BROWSER=false)
+      # carry no Playwright and no browser.
+      - name: Worker — the INSTALL_BROWSER=false build carries no Playwright
+        run: |
+          docker build --build-arg INSTALL_BROWSER=false -t parity-wk-local services/workspace-worker/
+          if docker run --rm --entrypoint python parity-wk-local -c 'import playwright' 2> /dev/null; then
+            echo "::error::the INSTALL_BROWSER=false worker image installs Playwright"; exit 1
+          fi
+          if docker run --rm --entrypoint sh parity-wk-local -c 'test -e /opt/playwright-browsers'; then
+            echo "::error::the INSTALL_BROWSER=false worker image carries /opt/playwright-browsers"; exit 1
+          fi
+          echo "INSTALL_BROWSER=false: import playwright fails and /opt/playwright-browsers is absent"
+      # PRD-262 US-044: both worker builds install the hash-checked lock through the
+      # pinned uv: the SDK at the lock's pin with its bundled CLI runnable, uv at its
+      # image's tag, no SQLAlchemy, and an installed set whose requirements hold.
+      - name: Worker — the locked set, the SDK at the lock's pin, uv at its tag, no SQLAlchemy
+        run: |
+          want_sdk=$(grep -oE '^claude-agent-sdk==[^ ;\\]+' services/workspace-worker/requirements.lock | cut -d= -f3)
+          want_uv=$(grep -oE 'ghcr\.io/astral-sh/uv:[0-9]+\.[0-9]+\.[0-9]+@' services/workspace-worker/Dockerfile | sed -E 's/.*uv:([0-9.]+)@/\1/')
+          echo "lock: claude-agent-sdk $want_sdk; Dockerfile: uv $want_uv"
+          if [ -z "$want_sdk" ] || [ -z "$want_uv" ]; then
+            echo "::error::could not read the SDK pin from requirements.lock or the uv tag from the Dockerfile"; exit 1
+          fi
+          bad=0
+          for image in parity-wk parity-wk-local; do
+            sdk=$(docker run --rm --entrypoint pip "$image" show claude-agent-sdk | awk '/^Version:/ {print $2}')
+            uv=$(docker run --rm --entrypoint uv "$image" --version | awk '{print $2}')
+            echo "$image: claude-agent-sdk $sdk, uv $uv"
+            if [ "$sdk" != "$want_sdk" ]; then echo "::error::$image has claude-agent-sdk '$sdk', not the lock's $want_sdk"; bad=1; fi
+            if [ "$uv" != "$want_uv" ]; then echo "::error::$image has uv '$uv', not the pinned $want_uv"; bad=1; fi
+            if docker run --rm --entrypoint python "$image" -c 'import sqlalchemy' 2> /dev/null; then
+              echo "::error::$image can import sqlalchemy; the worker writes task_executions through psycopg2"; bad=1
+            fi
+            if ! docker run --rm --entrypoint pip "$image" check; then
+              echo "::error::$image's installed packages do not satisfy each other's requirements: a dependency is missing from the lock's install"; bad=1
+            fi
+            sdk_dir=$(docker run --rm --entrypoint python "$image" -c 'import os, claude_agent_sdk; print(os.path.dirname(claude_agent_sdk.__file__))')
+            if ! docker run --rm --entrypoint timeout "$image" 60 "$sdk_dir/_bundled/claude" --version; then
+              echo "::error::$image cannot run the Claude CLI the SDK bundles ($sdk_dir/_bundled/claude)"; bad=1
+            fi
+          done
+          exit "$bad"
+      # PRD-262 US-045: the entrypoint's ownership block, in throwaway containers of the
+      # Railway build. First a root-owned workspace holding a symlink to a root-owned file
+      # outside the volume: the link is re-owned and the file it points to is not, a file
+      # the worker already owns is left alone (its ctime holds), and projects/ is skipped.
+      # Then a read-only volume: every chown fails, the block logs that, and the script
+      # still starts the worker. A stand-in `python`, first on PATH, takes the worker's
+      # place and prints the uid gosu dropped it to.
+      - name: Worker — the entrypoint re-owns the volume without following links, and logs what it cannot
+        run: |
+          docker volume create parity-wk-readonly > /dev/null
+          docker run --rm -v parity-wk-readonly:/srv/readonly --entrypoint sh parity-wk \
+            -c 'mkdir -p /srv/readonly/ws && touch /srv/readonly/ws/file'
+          docker run --rm -i -v parity-wk-readonly:/srv/readonly:ro --entrypoint bash parity-wk -s <<'SH'
+          set -uo pipefail
+          bad=0
+          check() { if [ "$2" = "$3" ]; then echo "$1: $2"; else echo "::error::$1: '$2', expected '$3'"; bad=1; fi; }
+          owner() { stat -c %U "$1"; }  # no -L: a symlink's own owner
+          mkdir -p /tmp/stand-in
+          printf '#!/bin/sh\necho "worker started as uid $(id -u)"\n' > /tmp/stand-in/python
+          chmod 755 /tmp/stand-in/python
+          boot() { WORKSPACE_VOLUME_PATH="$1" PATH="/tmp/stand-in:$PATH" entrypoint.sh 2>&1; }
+
+          vol=/tmp/volume
+          mkdir -p "$vol/ws/projects" "$vol/ws/sub"
+          echo secret > /tmp/outside
+          ln -s /tmp/outside "$vol/ws/link"
+          touch "$vol/ws/sub/file" "$vol/ws/projects/mine" "$vol/ws/owned"
+          chown worker:worker "$vol/ws/owned"
+          owned_ctime=$(stat -c %z "$vol/ws/owned")
+          sleep 1
+          out=$(boot "$vol"); code=$?
+          echo "$out"
+          check "entrypoint exit" "$code" 0
+          check "the root-owned file the symlink points to" "$(owner /tmp/outside)" root
+          check "the symlink" "$(owner "$vol/ws/link")" worker
+          check "a file in the volume" "$(owner "$vol/ws/sub/file")" worker
+          check "the volume root" "$(owner "$vol")" worker
+          check "projects/" "$(owner "$vol/ws/projects")" root
+          check "a file in projects/" "$(owner "$vol/ws/projects/mine")" root
+          check "the ctime of a file the worker already owned" "$(stat -c %z "$vol/ws/owned")" "$owned_ctime"
+          check "the worker" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
+          check "failed-chown lines on a writable volume" "$(grep -c 'could not be re-owned' <<< "$out")" 0
+
+          out=$(boot /srv/readonly); code=$?
+          echo "$out"
+          check "entrypoint exit on a read-only volume" "$code" 0
+          check "the log line" "$(grep -c '^\[entrypoint\] some files could not be re-owned$' <<< "$out")" 1
+          check "the worker after the failed chown" "$(grep -o 'started as uid [0-9]*' <<< "$out")" "started as uid 1000"
+          check "the read-only file" "$(owner /srv/readonly/ws/file)" root
+          exit "$bad"
+          SH
 
   # The media-render lanes (the image, the fixture renders, the seeded templates in 4 shards)
   # run on demand only, in .github/workflows/media-render.yml (Gerard, 7 Oct 2026: not on
@@ -1101,10 +1292,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
@@ -1144,10 +1335,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -1240,10 +1431,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -1299,9 +1490,9 @@ jobs:
         working-directory: services/cli-host
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Install pytest
@@ -1324,9 +1515,9 @@ jobs:
         working-directory: services/cli-host
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Install pytest
@@ -1354,7 +1545,7 @@ jobs:
       IMAGE: agent-opt-worker:ci
       TEST_IMAGE: agent-opt-worker:test
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: The lock keeps the PyPI package `fi` out, and every pin carries a hash
         run: |
           lock="$CONTEXT/requirements.lock"
@@ -1444,9 +1635,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: Install pytest

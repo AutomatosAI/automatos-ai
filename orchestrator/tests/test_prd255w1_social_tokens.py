@@ -81,10 +81,13 @@ from core.media_render_bundle import (  # noqa: E402
 from core.social_templates import SOCIAL_IMAGE, SOCIAL_VIDEO, resolve_variables  # noqa: E402
 from media_render.bundle import parse_bundle  # noqa: E402  (media-render's own parser: stdlib only)
 from media_render.config import load_settings  # noqa: E402
+from media_render.voices_build import load_catalogue  # noqa: E402
 from modules.documents.brand_fonts import brand_kit_for_media_render  # noqa: E402
 from modules.documents.brand_kit import get_brand_kit  # noqa: E402
 from modules.documents.social_starters import social_starters  # noqa: E402
 
+# media-render's voices: the catalogue its voices file holds (PRD-262 US-052).
+VOICES = frozenset(load_catalogue())
 WS = UUID("6d0b5c1e-8f1a-4c2b-9d3e-0a1b2c3d4e66")
 # The US-003 fixtures: Automatos as its v1 kit has it; Harbourline with its v2 rules stored.
 AUTOMATOS = {"name": "Automatos", "primary_color": "#c44a1a", "secondary_color": "#1d3658", "text_color": "#1a1a2e"}
@@ -144,7 +147,7 @@ def test_every_base_token_is_still_emitted_and_media_render_accepts_the_bundle()
         tokens = brand_tokens({**kit, "font_family": "Inter, sans-serif"})
         assert BASE_TOKENS <= set(tokens)
         assert {"display-scale", "body-scale", "logo-chip"} <= set(tokens)
-        parse_bundle(_bundle(kit), load_settings({}), {})  # the tokens are single CSS values, within the cap
+        parse_bundle(_bundle(kit), load_settings({}), {}, VOICES)  # the tokens are single CSS values, within the cap
 
 
 def test_a_kit_without_stored_roles_takes_the_documents_paper():

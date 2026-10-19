@@ -18,7 +18,7 @@ selection — at a fraction of the cost.
 | `prompt_builder.py` | Replicates production prompt, plus filtered top-K mode |
 | `run_eval.py` | Cartesian runner over (model × mode × query), writes `results/results.jsonl` |
 | `score.py` | Aggregations + markdown report (`results/report.md`) + CSV summary |
-| `seed_telemetry.py` | Generates 2000+ synthetic `ToolExecutionLog` rows for cold-start graph seeding (PRD-139 US-006) |
+| `seed_telemetry.py` | Generates 2000+ synthetic `ToolExecutionLog` rows (PRD-139 US-006); EdgeBuilder does not read them since PRD-263 US-018 |
 | `_registry_bootstrap.py` | Loads `ActionRegistry` without booting the full orchestrator package chain |
 | `results/` | All eval output (gitignored) |
 | `.embedding_cache.json` | Disk-cached embeddings, keyed by `model::sha256(text)` (gitignored) |
@@ -185,27 +185,28 @@ In `prompt_builder.py`:
 ## Seeding synthetic telemetry (PRD-139 US-006)
 
 The graph-based routing layer (PRD-139) needs execution telemetry before it
-can build edges and affinities. `seed_telemetry.py` bootstraps this by
-generating 2000+ synthetic `tool_execution_logs` rows from the 47 eval queries.
+can build edges and affinities. `seed_telemetry.py` was written to bootstrap
+this by generating 2000+ synthetic `tool_execution_logs` rows from the 47 eval
+queries.
 
-### Full pipeline: seed -> build -> eval
+Since PRD-263 US-018 the nightly EdgeBuilder reads only rows tagged
+`production` or `synthetic_signal` and untagged rows
+(`core/services/edge_builder_logs.py`, `READ_SOURCES`). The seeded rows are
+tagged `synthetic`, so they no longer reach the routing graph: graph mode in
+`run_eval` uses the edges the nightly build made from those sources, and reports
+`graph (no-edges)` when the graph has none. The `--verify` flag ran
+`build_edges()`, which now reads none of the seeded rows (only the production
+rows already in the database), so it verified nothing about the seed and was
+removed.
 
 ```bash
 cd orchestrator
 
-# Step 1: Seed the eval set (if not already done)
+# Seed the eval set (if not already done)
 python -m scripts.eval.tool_routing.seed_eval_set
 
-# Step 2: Seed synthetic telemetry into tool_execution_logs
+# Seed synthetic telemetry into tool_execution_logs
 python -m scripts.eval.tool_routing.seed_telemetry
-
-# Step 3: Build graph edges from the telemetry
-#   seed_telemetry --verify does steps 2+3 in one shot:
-python -m scripts.eval.tool_routing.seed_telemetry --verify
-
-# Step 4: Run the eval with graph mode enabled
-#   (requires TOOL_ROUTING_GRAPH=true in .env)
-python -m scripts.eval.tool_routing.run_eval
 ```
 
 ### Dry run (no DB write)
@@ -225,33 +226,14 @@ python -m scripts.eval.tool_routing.seed_telemetry --dry-run
 - **Multi-action turns**: paired actions (e.g. `platform_get_latest_report`
   -> `platform_submit_report`) in the same turn to create `used_after` edges
 - **Timestamps** spread over 30 days with realistic hour-of-day distribution
-- All rows tagged `telemetry_source='synthetic'` so production analysis can
-  filter them out
+- All rows tagged `telemetry_source='synthetic'`: EdgeBuilder, the tool-call
+  SLO rate and HARNESS's read model all leave them out
 
 ### Idempotency
 
 The script is idempotent. Before inserting, it deletes all rows where
 `telemetry_source='synthetic'`. Running it again replaces synthetic data
 without touching production rows.
-
-### Verifying the pipeline
-
-After seeding, `--verify` calls `build_edges()` from the edge builder service
-(US-003) and prints a summary:
-
-```
-Edge Build Verification Summary
-============================================================
-  Logs processed:    2174
-  Edges built:       42
-  Affinities built:  156
-  Intent clusters:   8
-  Duration (ms):     1234
-============================================================
-```
-
-If edges or affinities are 0, check that the sample floor (`_SAMPLE_FLOOR=3`
-in edge_builder.py) isn't filtering everything out.
 
 ## What this *doesn't* measure
 

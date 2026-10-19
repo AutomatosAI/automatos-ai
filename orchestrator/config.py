@@ -936,20 +936,11 @@ class Config:
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
-    # PRD-141 Phase 5: gates HARNESS self-management (auto-applying approved
-    # config changes back onto the platform). HIGH RISK — default OFF. Nothing
-    # in Phase 5 may take effect unless this is true.
+    # PRD-141 Phase 5: gates the owner's /approve of a [HARNESS] card
+    # (api/harness_commands.py, until PRD-263 US-047). HIGH RISK — default OFF.
+    # The weekly run is report_only and applies nothing whatever its value
+    # (PRD-263 US-016); US-054 redefines it as the switch for approval grants.
     HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
-    # PRD-142 Wave 4 (§12.3): HARNESS risk thresholds — Railway-overridable env vars
-    # (change in Railway + restart, no file edit). Auto-apply ceilings: a prescription
-    # auto-applies only when its risk_score <= the workspace's ceiling; higher risk is
-    # queued for human approval. Workspaces at autonomy=full get the higher ceiling,
-    # standard workspaces the lower one.
-    HARNESS_AUTO_APPLY_MAX_RISK_STANDARD: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_STANDARD", "2"))
-    HARNESS_AUTO_APPLY_MAX_RISK_FULL: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_FULL", "3"))
-    # Escalation threshold: prescriptions at or above this risk are flagged high
-    # priority and escalated for human approval (when self-management is on).
-    HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
     # PRD-263 US-012: when the HARNESS weekly sweep runs, as a five-field cron read in
     # UTC. Default Monday 10:00 UTC: a weekday daytime hour, outside the night window
     # where F408, F409 and F416 happened. It becomes a trigger only through
@@ -977,6 +968,11 @@ class Config:
     HARNESS_COST_ABS_RISE: float = float(os.getenv("HARNESS_COST_ABS_RISE", "0.005"))
     HARNESS_STRONG_P: float = float(os.getenv("HARNESS_STRONG_P", "0.001"))
     HARNESS_MIN_COVERAGE: float = float(os.getenv("HARNESS_MIN_COVERAGE", "0.5"))
+    # PRD-263 US-019 (FR-8): an agent's calls of one app in the judged week flag when there
+    # are at least HARNESS_MIN_SAMPLES and the Wilson lower bound (95%) of their failure
+    # rate is at least HARNESS_TOOL_FAIL_WILSON_MIN. A flag carried by sign-in and
+    # connection failures is reported as "reconnect <app>", never as a bad tool.
+    HARNESS_TOOL_FAIL_WILSON_MIN: float = float(os.getenv("HARNESS_TOOL_FAIL_WILSON_MIN", "0.5"))
 
     # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
     # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
@@ -1246,6 +1242,11 @@ class Config:
     COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))
     COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
+    # PRD-264 EUAI-03 (EU AI Act Art. 50(1)): a channel bot's reply carries "AI
+    # assistant for {principal}." on first contact with a person and again once
+    # this many hours have passed since the last notice. The last-notice time
+    # lives in Redis with this TTL (channels/ai_notice.py). No setting turns it off.
+    AI_DISCLOSURE_IDLE_HOURS: int = int(os.getenv("AI_DISCLOSURE_IDLE_HOURS", "24"))
     # SEMANTIC_TOOL_ROUTING (default ON) and TOOL_ROUTING_GRAPH (default OFF, below)
     # gate DIFFERENT surfaces — PRD-232 US-002 split them after C2 found the
     # inversion. SEMANTIC_TOOL_ROUTING gates EMBEDDING narrowing everywhere:
@@ -1955,6 +1956,17 @@ class Config:
     VOICE_LIVE_FIRST_FRAME_ACK_TEXT: str = os.getenv(
         "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment."
     )
+    # PRD-264 EUAI-04 (EU AI Act Art. 50(1)): Auto Live speaks first, and its
+    # opening line says it is an AI. A greeting that is empty or lacks the AI
+    # term for VOICE_LIVE_LANGUAGE ("AI", "IA", "KI") is never spoken; the
+    # default is (modules/policy/ai_disclosure.py). No setting silences it.
+    VOICE_AI_GREETING: str = os.getenv(
+        "VOICE_AI_GREETING", "Hi, this is Auto, your AI assistant."
+    )
+    # Every this many minutes of call time, and after an automatic reconnect,
+    # the next response opens with "Just so you know, I'm an AI assistant."
+    # (Guidelines ¶37). 0 or less reminds on every response; it never turns off.
+    VOICE_AI_REMINDER_MINUTES: float = float(os.getenv("VOICE_AI_REMINDER_MINUTES", "10"))
     # PRD-207: Retell agent STT / turn-taking tuning — set at agent creation
     # AND re-applied on every one-click re-arm. Pinning the language stops
     # multilingual STT from hallucinating confident nonsense; background-speech

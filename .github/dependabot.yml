@@ -18,9 +18,10 @@
 #
 # Python lock files: Dependabot's pip and uv updaters read only *.txt and *.in
 # files, and both recompile without uv's --overrides. They cannot update
-# services/agent-opt-worker/requirements.lock, so it has no entry here; the test
-# lists it with that reason. Security alerts and security updates for the npm and
-# pip manifests are repository settings and stay on.
+# services/agent-opt-worker/requirements.lock or the workspace worker's
+# requirements.lock and requirements-browser.lock (PRD-262 US-044), so those have
+# no entry here; the test lists each with its reason. Security alerts and security
+# updates for the npm and pip manifests are repository settings and stay on.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -84,4 +85,42 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       compose-images:
+        patterns: ["*"]
+
+  # media-render's Python dependencies (PRD-262 US-053). The pip updater reads
+  # requirements.in and requirements-test.txt here and moves their pins; it cannot
+  # rewrite requirements.lock (see the Python lock files note above). Its pull
+  # request therefore fails orchestrator/tests/test_prd262_media_render_stages.py,
+  # which holds the lock to requirements.in, until the lock is compiled again with
+  # the command at the top of requirements.in and pushed to the same branch.
+  - package-ecosystem: pip
+    directory: /services/media-render
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      media-render-python:
+        patterns: ["*"]
+
+  # media-render's Node packages (PRD-262 US-053): Hyperframes, GSAP and the
+  # playwright-core the arm64 build uses. npm rewrites package-lock.json itself.
+  # A Hyperframes bump moves the amd64 headless shell with it (its CHROME_VERSION),
+  # so its pull request needs a media-render.yml run before it merges.
+  - package-ecosystem: npm
+    directory: /services/media-render/js
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      media-render-js:
         patterns: ["*"]

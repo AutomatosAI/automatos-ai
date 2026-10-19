@@ -8,6 +8,7 @@
 import type { WorkspaceExposure } from '@/components/workspace-provider'
 import { filterNavForEdition, navExposureForEdition } from '@/lib/auth-edition'
 import { isNavItemVisible } from '@/lib/nav-exposure'
+import { PLAY_CONVERSATIONS_HREF } from '@/lib/theme-host/builtin/play-entry'
 import { LOOKS_HREF } from '@/lib/ticket-links'
 import {
   STUDIO_MENU_FOOTER,
@@ -44,8 +45,8 @@ export interface PlayNavAccess {
   readonly exposure: WorkspaceExposure | null | undefined
 }
 
-/** Play's conversation list (T-006): right after Chat. */
-export const PLAY_CONVERSATIONS_ITEM: PlayNavItem = { id: 'conversations', label: 'Conversations', href: '/conversations' }
+/** Play's conversation list (T-006): right after Chat, at its theme route (/conversations only redirects there). */
+export const PLAY_CONVERSATIONS_ITEM: PlayNavItem = { id: 'conversations', label: 'Conversations', href: PLAY_CONVERSATIONS_HREF }
 /** Make it yours (T-008a): last, on its own. */
 export const PLAY_LOOK_ITEM: PlayNavItem = { id: 'looks', label: 'Look', href: LOOKS_HREF }
 const CONVERSATIONS_FOLLOW = 'chat'

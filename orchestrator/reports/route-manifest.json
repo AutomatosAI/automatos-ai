@@ -1,5 +1,5 @@
 {
-  "route_count": 941,
+  "route_count": 943,
   "routes": [
     {
       "method": "GET",
@@ -1923,6 +1923,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/models/platform-default"
+    },
+    {
+      "method": "GET",
       "path": "/api/models/providers/"
     },
     {
@@ -2356,6 +2360,10 @@
     {
       "method": "PATCH",
       "path": "/api/socials/posts/{post_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/socials/posts/{post_id}/ai-labels"
     },
     {
       "method": "POST",

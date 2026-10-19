@@ -1,0 +1,57 @@
+{
+  "_comment": "PRD-261 A-12f test data only: the bodies specs/pages-documents.spec.ts answers the Knowledge page's endpoints with, in the shapes the backend sends (orchestrator/api/documents.py, api/teams, api/cloud_documents.py, the database sources route).",
+  "documents": [
+    {
+      "id": 1201,
+      "filename": "Field handbook.pdf",
+      "file_type": "pdf",
+      "status": "completed",
+      "chunk_count": 12,
+      "team_access": ["finance"],
+      "upload_date": "2026-10-19T09:00:00",
+      "processed_date": "2026-10-19T09:01:00",
+      "partial": false
+    },
+    {
+      "id": 1202,
+      "filename": "Pricing notes.md",
+      "file_type": "md",
+      "status": "processing",
+      "chunk_count": 0,
+      "team_access": [],
+      "upload_date": "2026-10-19T10:00:00",
+      "processed_date": null,
+      "partial": false
+    }
+  ],
+  "stats": {
+    "total_documents": 2,
+    "status_distribution": { "completed": 1, "processing": 1 },
+    "total_chunks": 12,
+    "agent_outputs": 3
+  },
+  "teams": [{ "id": 31, "name": "Finance", "normalized_name": "finance" }],
+  "teamCounts": { "counts": { "finance": 1 }, "untagged": 1, "total": 2 },
+  "connections": [
+    {
+      "id": 71,
+      "app_name": "googledrive",
+      "status": "active",
+      "sync_enabled": true,
+      "total_documents_synced": 4,
+      "root_folder_path": "/Team"
+    }
+  ],
+  "databaseSources": [
+    {
+      "id": 51,
+      "name": "Sales DB",
+      "dialect": "postgresql",
+      "status": "active",
+      "schema_tables_count": 8,
+      "last_introspected": "2026-10-18T12:00:00",
+      "credential_id": 2
+    }
+  ],
+  "templates": []
+}

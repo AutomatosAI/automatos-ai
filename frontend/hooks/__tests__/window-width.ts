@@ -3,8 +3,8 @@
  * queries: window.matchMedia answers `(max-width: Npx)` and `(min-width: Npx)`
  * as a window that wide would, and no other query (reduced motion, colour
  * scheme) matches. Resizing tells every listener whose query flips, as a
- * browser's `change` event does. P260-FX-25 (M69): Play's width source
- * (usePlayLayout) and useIsTabletOrBelow both read it.
+ * browser's `change` event does. P260-FX-25 (M69): a theme's width source
+ * (useThemeLayout) and useIsTabletOrBelow both read it.
  */
 
 /** A phone, below Play's 1024 px (D7). */

@@ -2,9 +2,11 @@
 
 At 697ca7d6e DIAGNOSE read ``success_rate``, ``cost_7d``, ``efficiency_score`` and
 ``error_rate`` off ``platform_list_agents`` rows that never carry them, so every delta
-was 0 and every agent STABLE. DIAGNOSE (``services.harness_diagnose``, and the two
-DIAGNOSE methods of ``HarnessService``) now reads agent rows only through the names in
-``DIAGNOSE_READS``, and those names must be fields ``harness_metrics`` returns.
+was 0 and every agent STABLE. DIAGNOSE (``services.harness_diagnose``, and the DIAGNOSE
+method of ``HarnessService``) now reads agent rows only through the names in
+``DIAGNOSE_READS``, and those names must be fields ``harness_metrics`` returns. The
+tool-failure judgment (PRD-263 US-019) lives in ``harness_diagnose`` and reads the tool
+rows, never an agent row, so it is scanned with the rest.
 
 Agent rows are bound to the name ``row`` in the DIAGNOSE code. The AST scan collects
 every ``row["..."]`` and ``row.get("...")`` key there; keys read through the metric
@@ -24,7 +26,8 @@ from services import harness_metrics as hm
 SERVICES = Path(__file__).resolve().parents[1] / "services"
 ROW_NAME = "row"
 # The DIAGNOSE methods of HarnessService; every function of harness_diagnose.py is DIAGNOSE.
-SERVICE_DIAGNOSE_FUNCTIONS = {"_phase_diagnose", "_diagnose_tool_failures"}
+# _diagnose_tool_failures went with US-019: harness_diagnose.tool_failure_issues replaced it.
+SERVICE_DIAGNOSE_FUNCTIONS = {"_phase_diagnose"}
 # The fields DIAGNOSE read at 697ca7d6e that no agent row carries.
 LEGACY_FIELDS = {"success_rate", "cost_7d", "efficiency_score", "error_rate", "model", "heartbeat_cost_7d",
                  "token_usage_7d"}

@@ -131,6 +131,7 @@ FONTS_DIR = "assets/brand/fonts/"
 BUNDLED_FONT_FILES = "bundled_font_files"
 # A voice toolkit's lines (US-111), fetched by media-render from our storage.
 VOICE_DIR = "assets/voice/"
+AI_INPUTS = "ai_inputs"  # PRD-264 EUAI-06a: the bundle key media-render marks its files from
 LOGO_NAME = "logo"
 LOGO_MARK_NAME = "logo-mark"
 LOGO_DARK_NAME = "logo-dark"
@@ -390,6 +391,20 @@ def voice_script(bundle: Mapping[str, Any]) -> List[Tuple[str, str]]:
     ]
 
 
+def ai_inputs(*, footage: bool = False, stills: bool = False, voice: bool = False, uploads: bool = False) -> Dict[str, bool]:
+    """A bundle's ``ai_inputs`` (PRD-264 EUAI-06a): which of the render's inputs are AI-made
+    (AI footage, AI stills, a synthetic voice) and whether the person's own uploads are in it.
+    The template's own visuals are in every render. media-render marks each file it makes
+    from them (``services/media-render/media_render/provenance.py``)."""
+    return {"footage": footage, "stills": stills, "voice": voice, "uploads": uploads, "template": True}
+
+
+def with_template_inputs(bundle: Mapping[str, Any]) -> Dict[str, Any]:
+    """A copy of ``bundle`` declaring the inputs of a render no slot file joins (a document's
+    social render): the template, and a synthetic voice when it speaks its script."""
+    return {**dict(bundle), AI_INPUTS: ai_inputs(voice=bool(voice_script(bundle)))}
+
+
 def with_voice_files(bundle: Mapping[str, Any], files: Mapping[str, Tuple[str, str]]) -> Dict[str, Any]:
     """A copy of ``bundle`` whose spoken lines are files (US-111, D11).
 
@@ -448,8 +463,10 @@ def with_slot_files(bundle: Mapping[str, Any], files: Mapping[str, str]) -> Dict
 
 
 __all__ = [
+    "AI_INPUTS",
     "NO_LOGO",
     "VOICE_DIR",
+    "ai_inputs",
     "brand_name",
     "brand_tokens",
     "build_bundle",
@@ -457,5 +474,6 @@ __all__ = [
     "render_size",
     "voice_script",
     "with_slot_files",
+    "with_template_inputs",
     "with_voice_files",
 ]
