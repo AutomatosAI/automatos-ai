@@ -83,6 +83,8 @@ def main() -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     counts = _apply() if args.apply else _dry_run()
     _print_plan(counts, applied=args.apply)
     if not args.apply:
