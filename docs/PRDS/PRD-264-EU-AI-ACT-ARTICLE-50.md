@@ -103,8 +103,8 @@ Decision numbers D9 and D11 to D15 are the 18 Oct plan's, so they match the plan
 
 | Lane | Tue 20 – Fri 23 Oct | Mon 26 – Fri 30 Oct |
 |---|---|---|
-| 1 · media-render | **EU-B1** `feat/prd-264-media-metadata`: EUAI-06a. Built Tue 20 – Thu 22, merged Fri 23. A session prepares EUAI-06b's signing set-up on a scratch branch from Tue 20. | **EU-B2** `feat/prd-264-c2pa-signing`: EUAI-06b. Built Mon 26 – Thu 29, merged Fri 30. |
-| 2 · conversations backend | **EU-A1** `feat/prd-264-art50-core`: EUAI-02a, EUAI-03, EUAI-04, EUAI-05. Built Tue 20 – Fri 23, merged as soon as CI is green (target Mon 26). | **EU-C1** `feat/prd-264-sends-deployer`: EUAI-07, EUAI-08a, EUAI-08b. Built Mon 26 – Wed 28, merged Thu 29. |
+| 1 · media and Socials labels | **EU-B1** `feat/prd-264-media-metadata`: EUAI-05, then EUAI-06a, which reuses EUAI-05's AI-media rule for the render flags. Built Mon 19 – Thu 22, merged Fri 23. A session prepares EUAI-06b's signing set-up on a scratch branch from Tue 20. | **EU-B2** `feat/prd-264-c2pa-signing`: EUAI-06b. Built Mon 26 – Thu 29, merged Fri 30. |
+| 2 · conversations backend | **EU-A1** `feat/prd-264-art50-core`: EUAI-02a (including `ai_generated` on widget stream messages), EUAI-03, EUAI-04. Built Mon 19 – Fri 23, merged as soon as CI is green (target Mon 26). | **EU-C1** `feat/prd-264-sends-deployer`: EUAI-07, EUAI-08a, EUAI-08b. Built Mon 26 – Wed 28, merged Thu 29. |
 | 3 · surfaces | **EU-A2** `feat/prd-264-chat-label`: EUAI-11a. Built Tue 20 – Wed 21, merged Mon 26 at the latest. Then **EU-W** (automatos-widget-sdk `feat/ai-disclosure-notice`): EUAI-02b, EUAI-08c, built from Thu 22. | EU-W merged and published by Wed 28 |
 | 4 · marking and detection | **EU-C2** `feat/prd-264-marking-detect`: EUAI-09, EUAI-10, EUAI-12 (guide), EUAI-14. Built from Tue 20. | EU-C2 built by Wed 28, merged Thu 29 |
 | Session (not a builder) | **EU-0** `docs/prd-264-art50`: this PRD, the PRD-132 corrections, the last EUAI-01 rows. Merged Wed 21. **pl** EUAI-11b (Wed 21). **aca** EUAI-11d (Wed 21 – Fri 23). | **EU-D**: EUAI-12 Terms and GitBook (Mon 26 – Fri 30). **EUAI-15** status flip after the production check (Fri 30). |
@@ -126,8 +126,8 @@ Decision numbers D9 and D11 to D15 are the 18 Oct plan's, so they match the plan
 | Wave | Repo · branch | Stories | Est. changed lines, excl. tests [I] | Done when |
 |---|---|---|---|---|
 | EU-0 | automatos-ai `docs/prd-264-art50` | PRD-264, §13, EUAI-01 docs rows | docs only | Merged Wed 21 |
-| EU-B1 | automatos-ai `feat/prd-264-media-metadata` | EUAI-06a | ~250 | Merged Fri 23; CI reads the XMP back for every format |
-| EU-A1 | automatos-ai `feat/prd-264-art50-core` | EUAI-02a, 03, 04, 05 | ~650 (over AGENTS.md's ~400; one wave, one PR by Gerard's rule) | Merged Mon 26 |
+| EU-B1 | automatos-ai `feat/prd-264-media-metadata` | EUAI-05, EUAI-06a | ~400 | Merged Fri 23; CI reads the XMP back for every format |
+| EU-A1 | automatos-ai `feat/prd-264-art50-core` | EUAI-02a, 03, 04 | ~500 (over AGENTS.md's ~400; one wave, one PR by Gerard's rule) | Merged Mon 26 |
 | EU-A2 | automatos-ai `feat/prd-264-chat-label` | EUAI-11a | ~300 | Merged Mon 26 |
 | EU-W | automatos-widget-sdk `feat/ai-disclosure-notice` | EUAI-02b, 08c | ~350 | Merged and published to `widgets.automatos.app/v0` by Wed 28 |
 | EU-C1 | automatos-ai `feat/prd-264-sends-deployer` | EUAI-07, 08a, 08b | ~550 | Merged Thu 29 |
@@ -166,6 +166,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 - [ ] The badge comes from one table in `ai_disclosure.py` (`en` → `AI`, `pt`, `es`, `fr`, `it` → `IA`, `de` → `KI`; any other locale → `AI`). No widget setting changes it (D17).
 - [ ] The default line is "You are chatting with an AI assistant for {site}.", where `{site}` is the site's name, falling back to the workspace name. A deployer's own line is accepted only if it contains the locale's badge term as a whole word. Otherwise the settings save returns HTTP 422 with "The AI notice must say it is an AI (for this language: '{term}')."
 - [ ] The first SSE event of `POST /api/widgets/chat` is `{"type": "ai_disclosure", ...}`, sent before any token.
+- [ ] Every assistant message event in the widget stream carries `"ai_generated": true` (Art. 50(2) for widget text; EUAI-09 covers the in-app stream).
 - [ ] Tests: the config always carries `ai_disclosure`, including when the workspace has no widget settings; a line without the term is refused; a Portuguese line with "IA" is accepted; the first stream event is the notice; both editions.
 
 #### EUAI-02b: The widget shows an AI badge and a first-turn notice that no override removes (M)
@@ -207,7 +208,7 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 
 #### EUAI-05: Each network's own AI label is set at publish (S)
 **Description:** As a customer publishing a post with AI media, I want each network's AI label set for me where the network supports one, so the post is labelled where it is seen.
-**Repo · wave:** automatos-ai · EU-A1 · **Files:** `orchestrator/modules/socials/ai_media.py` (new), `orchestrator/modules/socials/service.py` (`footage_generated` at `:336-344`; the file is 1,149 lines, so it only calls the new module), `orchestrator/modules/socials/channel_adapters.py` (`:457`, `:487`), `frontend/components/deliverables/socials/socials-post-receipts.tsx`, tests · **Depends on:** —
+**Repo · wave:** automatos-ai · EU-B1 (moved from EU-A1 on 19 Oct, because EUAI-06a reuses its rule) · **Files:** `orchestrator/modules/socials/ai_media.py` (new), `orchestrator/modules/socials/service.py` (`footage_generated` at `:336-344`; the file is 1,149 lines, so it only calls the new module), `orchestrator/modules/socials/channel_adapters.py` (`:457`, `:487`), `frontend/components/deliverables/socials/socials-post-receipts.tsx`, tests · **Depends on:** —
 
 **Acceptance criteria:**
 - [ ] `ai_media.py` decides whether a post carries AI media: AI footage (today's `footage_generated` rule), AI stills, and synthetic voice (Kokoro, the default, and any voice toolkit). A post whose media are all the person's own uploads and templates is not AI media.
@@ -304,8 +305,8 @@ Done on 19 Oct and not repeated: the product site (posture line in `src/pages/bl
 **Acceptance criteria:**
 - [ ] Generated PDFs carry the IPTC DigitalSourceType in their XMP metadata. DOCX and XLSX carry it as a custom document property (`AIGenerated` with the IPTC term). The builder uses the libraries already pinned. Any new one goes through D14's issue first.
 - [ ] Generated images keep any upstream C2PA manifest and get the IPTC XMP mark when they have none.
-- [ ] Every assistant message in the chat SSE payload carries `"ai_generated": true`, and the rendered message has `data-ai-generated="true"`. The widget stream does the same.
-- [ ] The blog API returns `ai_generated: true` for posts with `author_agent_id` set and not marked reviewed (EUAI-08b).
+- [ ] Every assistant message in the chat SSE payload carries `"ai_generated": true`, and the rendered message has `data-ai-generated="true"`. (The widget stream's `ai_generated` ships in EUAI-02a, which owns `api/widgets/chat.py`.)
+- [ ] The blog API returns `ai_generated: true` for posts with `author_agent_id` set. EUAI-08b adds the "and not marked reviewed" condition when its columns land.
 - [ ] A read-back test for each format: PDF, DOCX, XLSX, PNG, JPEG, and one SSE message.
 
 #### EUAI-10: A provenance record and a public detection route (M)
