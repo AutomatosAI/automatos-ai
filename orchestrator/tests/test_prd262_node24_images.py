@@ -43,7 +43,9 @@ NODE_COPIES = {
         "/usr/local/lib/node_modules/corepack",
         "/usr/local/lib/node_modules/npm",
     ],
-    "services/media-render/Dockerfile": ["/usr/local/bin/node"],
+    # PRD-262 #22: media-render takes the binary from its node-stripped stage instead
+    # (tests/test_prd262_media_render_cuts.py).
+    "services/media-render/Dockerfile": [],
 }
 NODE_DOCKERFILES = (
     "frontend/Dockerfile",

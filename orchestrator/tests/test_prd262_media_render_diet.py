@@ -114,8 +114,10 @@ def test_the_chrome_stage_installs_binutils_first_and_strips_the_arm64_shell():
     assert 'fi; test -x "$BIN"; if readelf -SW "$BIN" | grep -F .symtab; then' in run
     check = run.index("readelf -SW")
     assert "exit 1" in run[check : run.index("mv ", check)]
-    # strip and readelf stay in this builder stage.
-    assert "binutils" not in _stage("runtime") and "strip" not in _stage("runtime")
+    # strip and readelf stay in the builder stages; the runtime only names the
+    # node-stripped stage it copies node from (PRD-262 #22).
+    runtime = _stage("runtime").replace("--from=node-stripped ", "--from=<node> ")
+    assert "binutils" not in runtime and "strip" not in runtime and "readelf" not in runtime
 
 
 def test_the_chrome_stage_keeps_only_en_us_pak():

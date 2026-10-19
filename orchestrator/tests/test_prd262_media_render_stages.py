@@ -47,7 +47,7 @@ DEPENDABOT = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
 WORKFLOW = yaml.safe_load((ROOT / ".github" / "workflows" / "media-render.yml").read_text())
 
 PINNED_PYTHON = re.compile(r"python:3\.12-slim@sha256:[0-9a-f]{64}")
-STAGES = ("node", "uv", "assets-fetch", "assets", "kokoro", "js", "chrome", "py", "music", "runtime", "test", "production")
+STAGES = ("node", "node-stripped", "uv", "assets-fetch", "assets", "kokoro", "js", "chrome", "py", "music", "runtime", "test", "production")
 COPIED_IN = {
     "kokoro": "/opt/kokoro",
     "js": "/opt/media-render/js",

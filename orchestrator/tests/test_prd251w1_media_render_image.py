@@ -94,7 +94,9 @@ def test_hyperframes_is_pinned_exactly_on_node_24():
     # PRD-262 US-007: Node comes from the official image's named stage, not NodeSource.
     assert re.search(r"^FROM node:24-trixie-slim@sha256:[0-9a-f]{64} AS node$", DOCKERFILE, re.M)
     assert re.search(r"^FROM node AS js$", DOCKERFILE, re.M)
-    assert "COPY --link --from=node /usr/local/bin/node /usr/local/bin/node" in _stage("runtime")
+    # PRD-262 #22: the binary from the stripped stage built on that one.
+    assert re.search(r"^FROM node AS node-stripped$", DOCKERFILE, re.M)
+    assert "COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node" in _stage("runtime")
     # The instructions, not the comments: the comment that says NodeSource is gone names it.
     assert "nodesource" not in _instructions(DOCKERFILE).lower()
 

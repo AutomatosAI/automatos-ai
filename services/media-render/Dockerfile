@@ -43,6 +43,14 @@ ARG MEDIA_ASSETS=fetch
 # only place an updater reads (it never reads a bare `COPY --from=<image>`).
 FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS node
 
+# Node, stripped. The same stage, byte for byte, in services/workspace-worker/Dockerfile
+# and services/media-render/Dockerfile, so the two images share one node layer on a host.
+FROM node AS node-stripped
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends binutils \
+ && strip --strip-unneeded --preserve-dates /usr/local/bin/node \
+ && rm -rf /var/lib/apt/lists/*
+
 # uv from its own image, in a named stage for the same reason (as the worker's, US-044).
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
@@ -210,6 +218,11 @@ RUN python /opt/media-render/build/music_build.py /opt/media-render/build/manife
 
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS runtime
 
+# PRD-262 #22: the node binary stripped (about 20 MB of symbols). First on the base:
+# where the worker copies it the same way, a host with both images keeps one node
+# layer. The binary alone: Hyperframes is the js stage's locked tree, so no npm.
+COPY --link --from=node-stripped /usr/local/bin/node /usr/local/bin/node
+
 WORKDIR /app
 
 # Off before anything runs the CLI, as in the js stage: every render runs it here.
@@ -257,9 +270,7 @@ RUN set -eux; \
     fi; \
     fc-cache -f
 
-# Each part from its stage. The node binary alone: Hyperframes is the js stage's
-# locked tree, so the runtime needs no npm.
-COPY --link --from=node /usr/local/bin/node /usr/local/bin/node
+# Each part from its stage (node is the first layer, above).
 COPY --link --from=kokoro /opt/kokoro /opt/kokoro
 COPY --link --from=py /opt/venv /opt/venv
 COPY --link --from=py /opt/espeak /opt/espeak
