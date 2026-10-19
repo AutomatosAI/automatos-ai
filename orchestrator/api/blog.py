@@ -22,6 +22,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.workspaces import Workspace
+from core.services.blog_post_view import post_view  # PRD-264 EUAI-09: ai_generated
 from core.services.blog_service import BlogService
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ async def create_post(
         seo_title=body.seo_title,
         seo_description=body.seo_description,
     )
-    return post.to_dict(include_content=True)
+    return post_view(post, include_content=True)
 
 
 @router.get("/posts")
@@ -116,7 +117,7 @@ async def list_posts(
         per_page=per_page,
     )
     return {
-        "posts": [p.to_dict(include_content=False) for p in result["posts"]],
+        "posts": [post_view(p, include_content=False) for p in result["posts"]],
         "total": result["total"],
         "page": result["page"],
         "per_page": result["per_page"],
@@ -135,7 +136,7 @@ async def get_post(
     post = svc.get_post(post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    data = post.to_dict(include_content=False)
+    data = post_view(post, include_content=False)
     data["content"] = await svc.get_content(post)
     return data
 
@@ -153,7 +154,7 @@ async def update_post(
     post = await svc.update_post(post_id, **updates)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post.to_dict(include_content=True)
+    return post_view(post, include_content=True)
 
 
 @router.delete("/posts/{post_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
@@ -180,7 +181,7 @@ async def publish_post(
     post = svc.publish_post(post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post.to_dict(include_content=False)
+    return post_view(post, include_content=False)
 
 
 @router.post("/posts/{post_id}/unpublish", dependencies=[Depends(require_workspace_permission("documents:update"))])
@@ -194,7 +195,7 @@ async def unpublish_post(
     post = svc.unpublish_post(post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post.to_dict(include_content=False)
+    return post_view(post, include_content=False)
 
 
 # ---------------------------------------------------------------------------

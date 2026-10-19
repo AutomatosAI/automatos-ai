@@ -29,11 +29,26 @@ The answer never says which workspace, customer or person made the file. It also
 ## Limits
 
 - **A changed file has a different fingerprint and reads "no".** Any edit gives the file a new SHA-256, even one you can't see or hear. That includes re-encoding, compressing, cropping, resizing, trimming, taking a screenshot or converting the format. Social networks and messaging apps usually re-encode uploads, so a copy downloaded from one of them reads "no" even when Automatos made the original. The check proves a match. A "no" does not prove that AI wasn't involved.
-- **Only marked files are recorded.** A row is written when Automatos produces a marked file. The writers are the stories that mark files: generated documents and images (PRD-264 EUAI-09) and media-render outputs (EUAI-06b). **Until those stories merge, every file reads "no".** Chat answers are marked inside the message (EUAI-09) and are not recorded, so you can't look up a chat answer by its hash.
+- **Only marked files are recorded.** A row is written when Automatos produces a marked file. The writers are the stories that mark files: generated documents and images (PRD-264 EUAI-09) and media-render outputs (EUAI-06b). **Until EUAI-06b merges, media-render files read "no".** Chat answers are marked inside the message (EUAI-09) and are not recorded, so you can't look up a chat answer by its hash. A document a person fills in by hand (the Studio's Generate, a template preview) is not AI-generated, so it carries no mark and reads "no".
 - **Content Credentials (C2PA).** Once EUAI-06b ships, signed media files also carry a C2PA manifest. You can read a manifest with any Content Credentials tool, for example [contentcredentials.org/verify](https://contentcredentials.org/verify). That tool works on files from any C2PA tool, but it can only read a manifest the file still carries. The `/verify` page links to it.
 - **No watermark yet.** An imperceptible watermark that survives re-encoding is not built (PRD-264 decision D11). Until it is, the metadata marks and this hash record are how a file is detected. `docs/compliance/ARTICLE-50-GAP-ANALYSIS.md` (EUAI-14) explains the gap.
 - **Rate limit.** Each IP address gets `PROVENANCE_RATE_PER_MINUTE` checks a minute (default 30). An IPv6 caller is counted per /64. Over that, the route answers `429` with a `Retry-After` header. If Redis is unreachable, the limiter lets checks through and logs an error.
 - **The local edition answers for its own files only.** A self-hosted instance knows only the files it produced itself, so ask the instance that made the file.
+
+## The marks inside a file (EUAI-09)
+
+Each file Automatos generates also says in its own metadata that AI made it, so tools can read it without asking Automatos. The term is the IPTC Digital Source Type: `compositeWithTrainedAlgorithmicMedia` for a document (an agent's text in the workspace's own template and letterhead), `trainedAlgorithmicMedia` for an image an image model made.
+
+| File | Where the mark is |
+|---|---|
+| PDF | The XMP packet in the document catalogue's `/Metadata` stream: `Iptc4xmpExt:DigitalSourceType` and `xmpMM:InstanceID` |
+| DOCX, XLSX | Custom document properties (File > Properties > Custom): `AIGenerated` holds the IPTC term, `AIInstanceID` the instance id |
+| PNG | An XMP packet in an `iTXt` chunk (`XML:com.adobe.xmp`) |
+| JPEG | An XMP packet in an `APP1` segment |
+| Chat answers | `"ai_generated": true` on the frames that open and close each assistant message in the chat stream, and `data-ai-generated="true"` on the message in the page |
+| Blog posts | `ai_generated: true` in the blog API for a post an agent wrote |
+
+The mark holds the term and a random instance id (`xmp.iid:<uuid>`) only: no workspace, person, prompt or file name. The instance id is new for every file, so two files made from identical input never share a fingerprint, and a predictable document (a templated letter) can't be confirmed by hashing guesses. An image that already carries a C2PA manifest from the model that made it is kept byte for byte, with its manifest. WebP and GIF images carry no metadata mark (no library the platform ships writes one without re-encoding the picture) and get no provenance row.
 
 ## What is stored
 
@@ -48,7 +63,7 @@ The table is `content_provenance`. It has one row per marked file per workspace:
 | `created_at` | When the file was recorded |
 | `workspace_id` | The workspace, for tenancy and erasure only. The public answer never reads it |
 
-No prompt, user, file name or path is stored (Guidelines para. 94). Code writes rows through `services/content_provenance.py` `record_marked_file(db, workspace_id, sha256, kind, generator, manifest_id=None)`. Writing the same file twice in one workspace keeps the first row.
+No prompt, user, file name or path is stored (Guidelines para. 94). Code writes rows through `services/content_provenance.py` `record_marked_file(db, workspace_id, sha256, kind, generator, manifest_id=None)`, or `record_produced_file(...)` with a session of its own (documents and images). Writing the same file twice in one workspace keeps the first row. A failed write is logged by its error class, never with the hash.
 
 **Erasure.** Workspace erasure (`gdpr_service.erase_workspace`) deletes the workspace's rows. It uses the same self-maintaining SQL purge as every other workspace-scoped table, and the foreign key cascades when the workspace row goes. After erasure, the workspace's files read "no".
 

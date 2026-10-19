@@ -9,17 +9,23 @@
   ``{"made_by_automatos_ai": true, "kind": ..., "date": "YYYY-MM-DD"}`` from the
   earliest row with that hash, or ``{"made_by_automatos_ai": false}``. It reads only
   the kind and the date, so it can never carry a workspace, a person or a file name.
+* **Record as the file is made.** ``record_produced_file`` is the writer's best-effort
+  form for code that has no session of its own to commit (EUAI-09's documents and
+  images): its own session, off the event loop (F105), committed at once.
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import timezone
 from typing import Any, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from core.best_effort import off_loop
 from core.models.content_provenance import (
     GENERATOR_MAX_LENGTH,
     MANIFEST_ID_MAX_LENGTH,
@@ -27,6 +33,8 @@ from core.models.content_provenance import (
     UNIQUE_FILE_CONSTRAINT,
     ContentProvenance,
 )
+
+logger = logging.getLogger(__name__)
 
 # A SHA-256 as the route and the table take it: 64 lower-case hex characters, nothing else.
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
@@ -78,6 +86,41 @@ def record_marked_file(
         constraint=UNIQUE_FILE_CONSTRAINT,
     )
     return db.execute(statement).rowcount == 1
+
+
+@off_loop
+def record_produced_file(
+    workspace_id: UUID | str,
+    sha256: str,
+    kind: str,
+    generator: str,
+    manifest_id: Optional[str] = None,
+) -> Optional[bool]:
+    """Record a marked file in a session of its own, committed at once (EUAI-09).
+
+    Called on an event loop, the write runs on the best-effort threads and this returns
+    None at once (``core.best_effort.off_loop``); anywhere else it runs inline. A write
+    that fails is rolled back, logged with its kind and workspace and returns False: the
+    file it describes is already marked and delivered, and only its hash lookup misses.
+    The hash itself is never logged (FR-17): a log line must not let anyone tie a file
+    to the workspace that made it, so the failure is logged by its class (a database
+    error's text carries the statement's parameters, the hash among them).
+    Inline, True when a row was added and False when it was not (already there, or failed).
+    """
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        added = record_marked_file(db, workspace_id, sha256, kind, generator, manifest_id=manifest_id)
+        db.commit()
+        return added
+    except (SQLAlchemyError, ValueError) as e:
+        db.rollback()
+        logger.error("[provenance] a %s file of workspace %s was not recorded (%s)",
+                     kind, workspace_id, type(e).__name__)
+        return False
+    finally:
+        db.close()
 
 
 def provenance_answer(db: Session, sha256: str) -> Dict[str, Any]:
