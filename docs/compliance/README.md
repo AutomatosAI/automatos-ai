@@ -22,6 +22,8 @@ PRD-181 (Wave 11) on top of the merged enforcement substrate (Wave 4 policy plan
 | **EU-AI-Act Annex-IV technical file** | **Scaffold** | [`EU-AI-ACT-ANNEX-IV.md`](./EU-AI-ACT-ANNEX-IV.md) — sections mapped to real components; formal write-up is a **flagged fast-follow**. |
 | **Formal risk-classification (is the system high-risk?)** | **Fast-follow** | Not done. See the Annex-IV §5 and its checklist. |
 | **EU-AI-Act Art.50(2) detection** | **Real (route and record)** | [`DETECTION.md`](./DETECTION.md): the public `/verify` page and `GET /api/public/provenance/{sha256}` over `content_provenance` (PRD-264 EUAI-10). Rows are written by the marking stories (EUAI-09, EUAI-06b). |
+| **EU-AI-Act Art.50 provider vs. deployer guide** | **Guide (describes PRD-264)** | [`ARTICLE-50.md`](./ARTICLE-50.md): surface by surface, what Automatos provides (notices, marks, the detection route) and what the deployer does (PRD-264 EUAI-12). Each part is live only once its story is merged and deployed. |
+| **EU-AI-Act Art.50(2) Code of Practice gap analysis** | **Analysis (not a signatory, D12)** | [`ARTICLE-50-GAP-ANALYSIS.md`](./ARTICLE-50-GAP-ANALYSIS.md): each Code commitment, what Automatos does and doesn't, the watermark gap (D11), revisited after Web Summit (PRD-264 EUAI-14). |
 
 ## Known GDPR gaps (documented, not silently skipped)
 
