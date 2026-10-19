@@ -29,10 +29,11 @@ W-A3, so the names A-10c added on top of A-10a's need no version bump; any chang
 
 Paths in **Read by** are under `frontend/`: `c/` is `components/`, `l/` is `lib/`.
 
-## 1. The core modules Play's folders import (73: 61 in §0, W-A1's three, and the rows W-A2 added)
+## 1. The core modules Play's folders import (74: 61 in §0, W-A1's three, the rows W-A2 added and PRD-264's one)
 
 | Module | Read by | Map | SDK names | Why |
 |---|---|---|---|---|
+| `@/components/ai-label/ai-label-fence` | c/play/chat/message-box.tsx | host-only | — | PRD-264 EUAI-11a: the host's AI label fence around the composer, which disables it while a theme hides the label. The host keeps it; once Play is a package, the SDK's chat area pauses its composer the same way (see "Host-owned AI label" below). |
 | `@/components/chatbot/mission-created-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionCreatedCard` | The host's card for the Mission the chat created. |
 | `@/components/chatbot/mission-suggestion-card` | c/play/chat/mission-suggestion.tsx | SDK | `cards.MissionSuggestionCard` | The host's card offering a Mission. |
 | `@/components/chatbot/task-card` | c/play/chat/reply-cards.tsx | SDK | `cards.TaskCard` | The host's task card. |
@@ -168,3 +169,38 @@ seam owner adds a row and a name here first. Chat and deliverables read the hook
 | `cards.CorePage`, `cards.FilePreview` | Wrapping core's own page inside a theme's page; the host's file preview. |
 | `looks.useLook`, `looks.saveLook`, `looks.listLooks`, `looks.exportLook`, `looks.importLook` | The active look and the saved looks; Play's own `lib/looks` store is the look runtime the host mounts from A-13c (PA-9). |
 | `assets.assetUrl` | The URL of a file in the theme's package (Play's mascot clips move from `public/auto` into it, A-16b). |
+
+## Host-owned AI label (PRD-264 EUAI-11a, EUAI-11b)
+
+EU AI Act Art. 50(1) and (5): a person chatting in the app is told, at first exposure and for the whole
+session, that they are talking to an AI. The host draws that notice; no theme draws it, moves it or turns it
+off, and no manifest field, SDK name or setting does either.
+
+- **Where the host draws it.** `app/chat/layout.tsx` wraps `ThemeSlot` (the theme's page slot) in
+  `AiLabelGate` (`frontend/components/ai-label/ai-label.tsx`), which renders the label after it, outside it. So
+  the default chat (with Mission Mode), Play's chat and any theme's `/chat` show it, once. Every `/x/` theme
+  route (`app/x/[...path]/page.tsx`, Play's Conversations among them) renders the same gate around
+  `MainLayout`, on the left (Auto's widget takes the bottom right), so the label sits outside the theme's frame
+  and route. Every theme route gets it: a manifest's `uses` is checked (`lib/theme-host/package-manifest.ts`)
+  but not handed to the host, so the host can't yet tell which routes use the `chat` area.
+  `components/theme-host/__tests__/theme-slot-route.test.tsx` proves the gate is there. Auto's floating
+  widget, which `MainLayout` draws on every page but `/chat` (theme-drawn pages among them), carries its own
+  label inside its panel (`WidgetAiLabelFrame`, `frontend/components/ai-label/widget-ai-label.tsx`), checked
+  the same way; while it is hidden, the widget's input and starter chips are disabled.
+- **What it says.** "Auto is an AI", or "{agent name} is an AI" while the owner's picked agent answers
+  (`frontend/lib/ai-label/copy.ts`), in theme tokens, with `role="note"` and the same words for screen readers.
+- **What happens if a theme hides it.** The label checks on mount, whenever `<html>`'s classes or attributes or
+  `<head>`'s elements change (a theme or tone switch, a theme stylesheet arriving), on resize and every two
+  seconds that it is displayed, visible, opaque, not zero-sized and inside the viewport
+  (`frontend/lib/ai-label/visibility.ts`). While it isn't, every composer inside `AiLabelFence` is disabled
+  (the default chat's input through `FencedMultimodalInput`, Play's message box) and the chat says "This theme
+  hides the AI notice, so chat is paused. Switch theme in Settings." The fence wraps the composer only, never a
+  whole chat screen, so the approval cards in a reply stay clickable (they are protected surfaces).
+- **The SDK's chat area** (`frontend/lib/theme-sdk/chat.ts`, a stub today) takes the rule when A-11b fills it:
+  a theme's composer built on `chat.useChatController` must pause the same way while the label is hidden, and
+  the chat stream must not start until the host's label is mounted. A-11b's tests prove both.
+- **Proof.** `frontend/lib/theme-host/__tests__/ai-label.test.ts` renders the chat layout with the default chat,
+  builtin Play's chat and a fixture theme that owns `/chat`, then with hostile fixture sheets that set
+  `display:none`, `visibility:hidden`, `opacity:0`, zero size or an off-screen position on the label: in each
+  hiding case the input is disabled. `frontend/lib/theme-host/__tests__/ai-label-widget.test.tsx` does the
+  same for Auto's floating widget.
