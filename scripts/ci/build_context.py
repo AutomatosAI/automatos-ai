@@ -23,8 +23,8 @@ on a real build in CI:
         ``BUDGET_BYTES``, or when the log holds no such transfer.
 
 test.yml's prod-image-parity checks the production build, whose last layer copies the
-whole context. scripts/ci/smoke-fresh-clone.sh checks the compose build of the
-development stage, which copies no code since US-017. Stdlib only.
+whole context. scripts/ci/smoke-fresh-clone.sh checks the compose build, which builds the
+production stage too since PRD-262 US-035. Stdlib only.
 """
 from __future__ import annotations
 

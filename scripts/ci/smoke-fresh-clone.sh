@@ -80,10 +80,22 @@
 # which puts it in MinIO through that botocore, and the host fetches it back by the
 # presigned URL the Documents page's download call answers with.
 #
+# PRD-262 US-035, in every mode: compose runs the backend's production stage, and hot
+# reload is `make dev`'s. scripts/ci/smoke_production_backend.py checks, after the fresh
+# boot, that no bind mount lays the checkout over /app, nothing runs --reload, and the
+# process the entrypoint's watchdog signals (SERVER_PID) is uvicorn itself, with no sh in
+# between (docker top). After the warm restarts it writes a key to envs/api.local alone,
+# recreates the backend with `docker compose up -d --no-deps backend` as the night tooling
+# does, and finds the key inside it (a checkout's own envs/api.local is kept and put back).
+# Last, with an SSE client holding the board's event stream open, `docker compose stop
+# backend` must finish in under STOP_MAX_SECONDS. The recreated backend is a new
+# container, so the report reads the earlier one's log from the copy taken before it.
+#
 # Exit 0 = every boot answered 200 with no external creds, every published port is on
-# loopback, and the document came back. Exit 1 = a boot failed, a port listens beyond
-# this machine, the backend's build context is over its budget, or the document did not
-# come back from object storage.
+# loopback, the document came back, and the backend ran as the production stage should.
+# Exit 1 = a boot failed, a port listens beyond this machine, the backend's build context
+# is over its budget, the document did not come back from object storage, or a US-035
+# check failed.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -137,6 +149,24 @@ DOCUMENT_FILE="${OUT_DIR}/document-presign.json"
 STORAGE_URL="http://localhost:${MINIO_PORT:-9000}"
 # Outside OUT_DIR, so the resolved compose file (with the stack's env) is not uploaded.
 COMPOSE_CONFIG_FILE="${RUNNER_TEMP:-/tmp}/smoke-compose-config.json"
+# PRD-262 US-035: the production backend's checks, and their records.
+PRODUCTION_TOOL="scripts/ci/smoke_production_backend.py"
+PRODUCTION_FILE="${OUT_DIR}/production-backend.json"
+API_LOCAL_RECORD="${OUT_DIR}/api-local.json"
+STOP_FILE="${OUT_DIR}/stop-backend.json"
+# The SSE stream the browser keeps open (frontend/hooks/use-board-event-stream.ts). It
+# sends its first event at once and then only heartbeats, so it never ends by itself.
+SSE_URL="${API_BASE}/api/v1/tasks/stream"
+STOP_MAX_SECONDS=8
+# The night tooling's override file (docker-compose.yml's env_file), the key the smoke
+# writes to it alone, and where a checkout's own copy waits until finish puts it back.
+# Outside OUT_DIR, which the workflow uploads.
+API_LOCAL="envs/api.local"
+API_LOCAL_KEY="AUTOMATOS_SMOKE_API_LOCAL_PROBE"
+API_LOCAL_SAVED="${RUNNER_TEMP:-/tmp}/smoke-api.local.saved"
+# The backend's log up to its recreate: the new container's log starts empty, so the
+# report reads the earlier boots' lines from this copy.
+EARLIER_BACKEND_LOG="${RUNNER_TEMP:-/tmp}/smoke-backend-before-recreate.log"
 # The production stage's CMD runs `uvicorn ... --workers 4` (orchestrator/Dockerfile).
 BACKEND_WORKERS="${SMOKE_BACKEND_WORKERS:-4}"
 # docker-compose.yml's container_name values and named volumes all start with this.
@@ -165,6 +195,8 @@ build_seconds=""
 events_pid=""
 up_started_ns=""
 images_before=0
+api_local_written=""
+earlier_backend_id=""
 
 compose() {
   docker compose "${COMPOSE_ARGS[@]}" "$@"
@@ -238,7 +270,7 @@ stop_event_log() {
 # The build is timed for the record only: CI build time has no bar (PRD-262 §7).
 # Piped, so BuildKit prints its plain progress, `transferring context` lines included.
 build_images() {
-  echo "Building the backend (development stage), workspace-worker and frontend images..."
+  echo "Building the backend (production stage), workspace-worker and frontend images..."
   local started=$SECONDS
   compose build backend workspace-worker frontend 2>&1 | tee "$BUILD_LOG" || fail "docker compose build failed"
   build_seconds=$((SECONDS - started))
@@ -246,8 +278,8 @@ build_images() {
   check_build_context
 }
 
-# PRD-262 US-017: the backend's build sent only code. The development stage copies none
-# (compose mounts the source), and orchestrator/.dockerignore keeps the rest out.
+# PRD-262 US-017: the backend's build sent only code. The production stage copies the
+# context, and orchestrator/.dockerignore keeps the checkout's uploads and caches out of it.
 check_build_context() {
   python3 "$CONTEXT_TOOL" check --service backend "$BUILD_LOG" \
     || fail "the backend's build context is over its budget, or the build log does not show it"
@@ -362,6 +394,66 @@ warm_restarts() {
   done
 }
 
+# PRD-262 US-035: the backend runs the production stage. No bind mount lays the checkout
+# over /app, nothing runs --reload, and SERVER_PID, the process the entrypoint's watchdog
+# and `docker stop` signal, is uvicorn itself (docker top), with no sh in between.
+check_production_backend() {
+  python3 "$PRODUCTION_TOOL" process --container "$BACKEND_CONTAINER" \
+    --out "$PRODUCTION_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "the backend does not run as the production stage should: a bind mount over /app, --reload, or a shell between the entrypoint and uvicorn"
+}
+
+# $1 = the value. Appends the key to envs/api.local, after any lines a checkout's own copy
+# holds; that copy waits in API_LOCAL_SAVED until finish puts it back.
+write_api_local_probe() {
+  rm -f "$API_LOCAL_SAVED"
+  if [ -e "$API_LOCAL" ]; then
+    cp -p "$API_LOCAL" "$API_LOCAL_SAVED" || fail "could not set this checkout's envs/api.local aside"
+  fi
+  api_local_written="true"
+  printf '\n%s=%s\n' "$API_LOCAL_KEY" "$1" >> "$API_LOCAL" || fail "could not write envs/api.local"
+}
+
+restore_api_local() {
+  [ -n "$api_local_written" ] || return 0
+  if [ -e "$API_LOCAL_SAVED" ]; then
+    mv -f "$API_LOCAL_SAVED" "$API_LOCAL"
+  else
+    rm -f "$API_LOCAL"
+  fi
+}
+
+# PRD-262 US-035 (TESTER): the night tooling edits envs/api.local, then recreates the
+# backend with `docker compose up -d --no-deps backend`. A key only that file sets must
+# reach the new container. The old container's log is copied first, for the report.
+check_api_local_reaches_backend() {
+  local value="us035-$$-${RANDOM}"
+  write_api_local_probe "$value"
+  earlier_backend_id="$(docker inspect -f '{{.Id}}' "$BACKEND_CONTAINER")" \
+    || fail "could not read the backend container's id before recreating it"
+  docker logs -t "$BACKEND_CONTAINER" > "$EARLIER_BACKEND_LOG" 2>&1 \
+    || echo "::warning title=smoke-fresh-clone::could not copy the backend's log before its recreate; the report misses the earlier boots' alembic runs"
+  echo "Recreating the backend with a key only envs/api.local sets (docker compose up -d --no-deps backend)..."
+  compose up -d --no-build --no-deps backend || fail "docker compose up -d --no-deps backend failed"
+  wait_backend recreate \
+    || fail "the recreated backend: readiness not reached within ${MAX_WAIT_SECONDS}s"
+  python3 "$PRODUCTION_TOOL" env --container "$BACKEND_CONTAINER" --key "$API_LOCAL_KEY" --value "$value" \
+    --out "$API_LOCAL_RECORD" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    || fail "a key set only in envs/api.local did not reach the backend recreated by docker compose up -d --no-deps backend"
+}
+
+# PRD-262 US-035: with an SSE client connected, `docker compose stop backend` finishes in
+# under STOP_MAX_SECONDS: uvicorn gives up on the open stream after
+# UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN (envs/api.defaults) instead of holding the stop until
+# Docker's 10 s kill. It stops the backend, so it runs last.
+check_stop_with_sse_client() {
+  echo "Stopping the backend with an SSE client connected (${SSE_URL})..."
+  python3 "$PRODUCTION_TOOL" stop --url "$SSE_URL" --max-seconds "$STOP_MAX_SECONDS" \
+    --out "$STOP_FILE" --summary "${GITHUB_STEP_SUMMARY:-/dev/stdout}" \
+    -- docker compose "${COMPOSE_ARGS[@]}" stop backend \
+    || fail "docker compose stop backend did not finish in under ${STOP_MAX_SECONDS}s with an SSE client connected"
+}
+
 dump_failure_logs() {
   echo "----- postgres logs (tail) — initdb/schema errors surface here -----" >&2
   compose logs --tail 200 postgres >&2 || true
@@ -371,9 +463,16 @@ dump_failure_logs() {
   compose logs --tail 80 frontend >&2 || true
 }
 
+# The log of the backend container check_api_local_reaches_backend replaced, if it did.
+replaced_backend_log() {
+  [ -n "$earlier_backend_id" ] || return 0
+  [ "$(docker inspect -f '{{.Id}}' "$BACKEND_CONTAINER" 2>/dev/null)" != "$earlier_backend_id" ] || return 0
+  cat "$EARLIER_BACKEND_LOG" 2>/dev/null || true
+}
+
 # The step summary is written on every exit, pass or fail.
 write_report() {
-  docker logs -t "$BACKEND_CONTAINER" > "${OUT_DIR}/backend.log" 2>&1 || true
+  { replaced_backend_log; docker logs -t "$BACKEND_CONTAINER" 2>&1; } > "${OUT_DIR}/backend.log" || true
   compose logs -t --no-color > "${OUT_DIR}/compose.log" 2>&1 || true
   stop_event_log
   python3 "$REPORT_TOOL" \
@@ -406,6 +505,7 @@ finish() {
     code=1
   fi
   compose down -v || true
+  restore_api_local
   exit "$code"
 }
 
@@ -421,17 +521,21 @@ main() {
   start_event_log
   boot_fresh
   check_backend_processes
+  check_production_backend
   check_worker_restart
   boot_frontend
   check_loopback_ports
   check_images
   check_document_storage
   warm_restarts
+  check_api_local_reaches_backend
+  check_stop_with_sse_client
   outcome="pass"
   failure=""
   echo "OK: /health and /health/ready (readiness) answered 200 on the fresh boot and" \
-    "${WARM_RESTARTS} warm restarts, :3000 answered 200 and a document came back from" \
-    "object storage — the local edition serves with NO external credentials"
+    "${WARM_RESTARTS} warm restarts, :3000 answered 200, a document came back from" \
+    "object storage and the backend ran as the production stage — the local edition" \
+    "serves with NO external credentials"
 }
 
 main "$@"

@@ -19,6 +19,14 @@ name: smoke-fresh-clone
 # MinIO through that botocore, and fetches it back from the host by its presigned URL
 # (scripts/ci/smoke_document_presign.py).
 #
+# PRD-262 US-035 — compose runs the backend's production stage; hot reload is `make dev`.
+# After the fresh boot the smoke checks that no bind mount lays the checkout over /app,
+# nothing runs --reload, and the entrypoint's watchdog signals uvicorn itself (docker
+# top). After the warm restarts, a key written only to envs/api.local reaches the backend
+# that `docker compose up -d --no-deps backend` recreates, and `docker compose stop
+# backend` finishes in under 8 s with an SSE client connected
+# (scripts/ci/smoke_production_backend.py).
+#
 # PRD-262 US-002 — it also measures the first run for the boot bars in PRD-262 §8:
 # the fresh boot and two warm restarts of the backend to /health 200 and to
 # /health/ready 200, timed from the container's start and polled every second,
@@ -69,6 +77,7 @@ on:
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_production_backend.py"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
     branches:
@@ -101,6 +110,7 @@ on:
       - "scripts/ci/smoke_report.py"
       - "scripts/ci/build_context.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_production_backend.py"
       - ".github/workflows/smoke-fresh-clone.yml"
 
 # A newer push to a pull request cancels its older run. Main, nightly and manual

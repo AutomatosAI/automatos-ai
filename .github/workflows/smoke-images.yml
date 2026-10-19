@@ -37,10 +37,17 @@ name: smoke-images
 # - Both jobs, before the warm restarts: a document uploaded to the backend goes into
 #   MinIO through the image's pruned botocore, and the host fetches it back by its
 #   presigned URL (scripts/ci/smoke_document_presign.py, PRD-262 US-021).
+# - Both jobs, the production backend in compose (PRD-262 US-035): no bind mount over
+#   /app, no --reload, and uvicorn is the process the entrypoint's watchdog signals; after
+#   the warm restarts a key written only to envs/api.local reaches the backend that
+#   `docker compose up -d --no-deps backend` recreates, and `docker compose stop backend`
+#   finishes in under 8 s with an SSE client connected
+#   (scripts/ci/smoke_production_backend.py).
 #
-# Report only until PRD-262 US-004 sets the bars: no time or size fails a job. A boot
-# that never answers 200, an image built instead of pulled, a missing or wrong revision
-# label, or a backend with --reload or the wrong worker count fails it from day one.
+# Report only until PRD-262 US-004 sets the bars: no time or size fails a job, except
+# US-035's stop in under 8 s. A boot that never answers 200, an image built instead of
+# pulled, a missing or wrong revision label, a backend with --reload or the wrong worker
+# count, or a failed US-035 check fails it from day one.
 #
 # workflow_run and workflow_dispatch work only once this file is on main. Actions are
 # pinned to a commit; the comment names the release. NON-REQUIRED at introduction.
@@ -79,6 +86,7 @@ on:
       - "scripts/ci/smoke_images_report.py"
       - "scripts/ci/smoke_worker_restart.py"
       - "scripts/ci/smoke_document_presign.py"
+      - "scripts/ci/smoke_production_backend.py"
       - "docker-compose*.yml"
       - "Makefile"
       - "envs/**"
