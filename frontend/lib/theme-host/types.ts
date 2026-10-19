@@ -40,11 +40,17 @@ export interface ThemeDefinition {
  * - `auth` (A-08b): the session was refused (401/403) on the active-theme read, the entry or a
  *   theme file, as when it expired. It is the session's fault, not the theme's, so it never
  *   counts toward the three-failure revert (A-04c).
- * - `revoked`: the installed version was revoked.
- * - `opt-in`: private code the member has not opted in to (PRD-261 Q6).
+ * - `revoked`: the installed version was revoked. A `warn` revocation never fails the load (the
+ *   theme runs and the host shows a notice, ThemeLoadOk.revoked); a `disable` one names no theme
+ *   (ThemeLoadAbsent), as the server's own choice rewrite does.
+ * - `opt-in`: private code the member has not opted in to (PRD-261 Q6): GET /api/themes/active
+ *   says `optIn.required`, so no theme file is asked for (the files proxy would 404 each one).
+ * - `unavailable`: the theme's files could not be reached (a 5xx from the files proxy, a network
+ *   failure, or the host's own sources chunk not loading, as after a deploy). Not the theme's
+ *   fault, so it never counts toward the revert either.
  */
 export type ThemeFailureReason = 'manifest' | 'engines' | 'load' | 'register' | 'look' | 'render'
-  | 'auth' | 'revoked' | 'opt-in'
+  | 'auth' | 'revoked' | 'opt-in' | 'unavailable'
 
 /** What the host is doing: no theme here, loading one, showing one, fell back, or safe mode. */
 export type ThemeHostStatus = 'off' | 'loading' | 'active' | 'failed' | 'safe-mode'
@@ -88,11 +94,20 @@ export interface ThemeRegistrations {
   readonly routes: ReadonlyMap<string, unknown>
 }
 
+/** A `warn` revocation of the running version (GET /api/themes/active `theme.revoked`): it still runs. */
+export interface ThemeRevocationWarning {
+  readonly level: 'warn'
+  /** The maintainer's reason, shown as text; empty when none was given. */
+  readonly reason: string
+}
+
 export interface ThemeLoadOk extends ThemeRegistrations {
   readonly ok: true
   readonly ref: ThemeRef
   /** The installed theme's checked manifest; null for a builtin theme, which has a registry entry instead. */
   readonly manifest: SpikeManifest | null
+  /** A `warn` revocation of this installed version, for the host's notice; absent or null for none. */
+  readonly revoked?: ThemeRevocationWarning | null
   /** Removes the theme's class, stylesheet and variables, then runs its unregister; safe to call twice. */
   readonly cleanup: () => void
 }

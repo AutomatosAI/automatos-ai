@@ -29,7 +29,10 @@
 # cloudfront:GetInvalidation.
 #
 # Manual run: Actions -> "Theme SDK types to CDN (main)" -> "Run workflow"
-# (e.g. after the secrets are added, or after a change to the deploy script).
+# (e.g. after the secrets are added, or after a change to the deploy script),
+# with main selected. A run from any other branch is skipped: the version path is
+# immutable and the marker makes every later main run skip, so a branch's
+# unreviewed package must never reach it.
 
 name: Theme SDK types to CDN (main)
 
@@ -50,6 +53,8 @@ permissions:
 
 jobs:
   deploy:
+    # Only main ships: workflow_dispatch can be started on any branch.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20   # the invalidation waiter alone may take 10
     steps:

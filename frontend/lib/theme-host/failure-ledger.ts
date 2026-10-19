@@ -6,9 +6,10 @@
  *
  * Only the theme's own failures count: `render`, `load`, `register`, `look` and `engines`. A
  * refused session (`auth`, A-08b) is the session's fault; `revoked` and `opt-in` are the server's
- * answer, not a broken theme; `manifest` is refused before any of the theme's code runs; and a
- * page that throws inside the frame never reaches the host (A-04a's page boundary), so none of
- * them count.
+ * answer, not a broken theme; `unavailable` (a 5xx or no answer from the files proxy, or the
+ * host's own chunk not loading) is the platform's, so an outage never moves anyone to Studio;
+ * `manifest` is refused before any of the theme's code runs; and a page that throws inside the
+ * frame never reaches the host (A-04a's page boundary), so none of them count.
  *
  * Storage errors (blocked site data, a full store, a value another script wrote) mean "nothing
  * remembered", never a throw: without storage each failure counts alone, so the revert never

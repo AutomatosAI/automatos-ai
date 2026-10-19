@@ -105,7 +105,11 @@ export const THEME_FAILURE_TEXT: Readonly<Record<ThemeFailureReason, string>> = 
   auth: 'Your session was refused. Sign in again to load it.',
   revoked: 'This version of it was withdrawn.',
   'opt-in': 'You have not opted in to its private code.',
+  unavailable: 'Its files could not be reached just now. Reload to try again.',
 }
+
+/** A `warn` revocation: the theme runs, and this notice says its version was withdrawn. */
+export const THEME_REVOKED_WARNING_NOTICE = 'This theme is still running, but its maintainer withdrew this version.'
 
 /** The revert's notice has its own id, so the host turning off (which dismisses its notice) leaves it. */
 export const THEME_REVERT_NOTICE_ID = 'theme-host-revert'
@@ -185,14 +189,25 @@ function isSafeModeHere(): boolean {
   return isSafeModeRequested(pathname === SAFE_MODE_PATH ? SAFE_MODE_QUERY : search, safeSessionStorage())
 }
 
-/** The sources chunk, fetched on demand; a chunk that fails to load is a 'load' failure. */
+function failedStart(reason: ThemeFailureReason, error: unknown): ThemeLoadResult {
+  console.error(LOG_PREFIX, reason, error)
+  return { ok: false, reason, detail: error instanceof Error ? error.message : String(error) }
+}
+
+/**
+ * The sources chunk, fetched on demand. A chunk that fails to load is the host's own chunk (a
+ * deploy, the network), not the theme's: 'unavailable', which never counts toward the revert.
+ */
 async function startTheme(style: UiStyle): Promise<ThemeLoadResult> {
+  const chunk = await import('@/lib/theme-host/sources').then(
+    (sources) => ({ ok: true as const, sources }),
+    (error: unknown) => ({ ok: false as const, error }),
+  )
+  if (!chunk.ok) return failedStart('unavailable', chunk.error)
   try {
-    const { loadThemeForStyle } = await import('@/lib/theme-host/sources')
-    return await loadThemeForStyle(style)
+    return await chunk.sources.loadThemeForStyle(style)
   } catch (error) {
-    console.error(LOG_PREFIX, 'load', error)
-    return { ok: false, reason: 'load', detail: error instanceof Error ? error.message : String(error) }
+    return failedStart('load', error)
   }
 }
 
@@ -278,10 +293,17 @@ function useThemeHostAttributes(status: ThemeHostStatus, reason: ThemeFailureRea
   useEffect(() => clearThemeHostAttributes, [])
 }
 
-/** The one notice: the fallback with its reason, or safe mode; gone again once the theme is off or active. */
-function useThemeNotice(status: ThemeHostStatus, reason: ThemeFailureReason | null): void {
+/**
+ * The one notice: the fallback with its reason, or safe mode; gone again once the theme is off or
+ * active, except for an active theme whose version has a `warn` revocation (`warning` is its reason).
+ */
+function useThemeNotice(status: ThemeHostStatus, reason: ThemeFailureReason | null, warning: string | null): void {
   useEffect(() => {
-    if (status === 'failed' && reason !== null) {
+    if (status === 'active' && warning !== null) {
+      const description = warning || THEME_FAILURE_TEXT.revoked
+      toast.warning(THEME_REVOKED_WARNING_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity, description })
+      toast.dismiss(THEME_REVERT_NOTICE_ID)
+    } else if (status === 'failed' && reason !== null) {
       toast.error(THEME_FALLBACK_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity, description: THEME_FAILURE_TEXT[reason] })
     } else if (status === 'safe-mode') {
       toast(THEME_SAFE_MODE_NOTICE, { id: THEME_NOTICE_ID, duration: Infinity })
@@ -291,7 +313,7 @@ function useThemeNotice(status: ThemeHostStatus, reason: ThemeFailureReason | nu
       toast.dismiss(THEME_NOTICE_ID)
       toast.dismiss(THEME_REVERT_NOTICE_ID)
     }
-  }, [status, reason])
+  }, [status, reason, warning])
 }
 
 type SetStyle = UiStyleContextValue['setStyle']
@@ -341,7 +363,7 @@ export function ThemeHostProvider({ children }: { children: ReactNode }) {
   const uiStyle = useUiStyleOptional()
   const { state, reportRenderFailure } = useThemeLoad(installedThemeStyle(uiStyle))
   useThemeHostAttributes(state.status, state.reason)
-  useThemeNotice(state.status, state.reason)
+  useThemeNotice(state.status, state.reason, state.active?.revoked?.reason ?? null)
   useFailureRevert(state, uiStyle?.setStyle ?? null)
   const value = useMemo<ThemeHostContextValue>(
     () => ({
@@ -349,6 +371,8 @@ export function ThemeHostProvider({ children }: { children: ReactNode }) {
       reason: state.reason,
       frame: state.active?.frame ?? null,
       slots: state.active?.slots ?? null,
+      pages: state.active?.pages ?? null,
+      routes: state.active?.routes ?? null,
       reportRenderFailure,
     }),
     [state, reportRenderFailure],

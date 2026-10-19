@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => ({
   loadThemeForStyle: vi.fn(),
   setStyle: vi.fn(),
   putThemeChoice: vi.fn(),
-  toast: Object.assign(vi.fn(), { error: vi.fn(), dismiss: vi.fn() }),
+  toast: Object.assign(vi.fn(), { error: vi.fn(), warning: vi.fn(), dismiss: vi.fn() }),
 }))
 
 vi.mock('@/contexts/ui-style-context', () => ({
@@ -50,10 +50,12 @@ import {
   THEME_FALLBACK_NOTICE,
   THEME_REVERT_NOTICE_ID,
   THEME_REVERTED_NOTICE,
+  THEME_REVOKED_WARNING_NOTICE,
   THEME_SAFE_MODE_NOTICE,
   ThemeHostProvider,
 } from '../theme-host-provider'
 import { useThemeHost } from '../theme-host-context'
+import { useActiveThemeSlots } from '../theme-slot-registrations'
 
 const HOST_GLOBAL = '__AUTOMATOS_THEME_HOST__'
 const MANIFEST: SpikeManifest = {
@@ -144,6 +146,7 @@ beforeEach(() => {
   mocks.putThemeChoice.mockResolvedValue({ choice: 'studio', theme: null })
   mocks.toast.mockReset()
   mocks.toast.error.mockReset()
+  mocks.toast.warning.mockReset()
   mocks.toast.dismiss.mockReset()
 })
 
@@ -316,6 +319,57 @@ describe('PRD-261 A-04a — ThemeHostProvider under an installed theme style', (
     unmount()
     expect(cleanup).toHaveBeenCalledTimes(1)
     expect(hostStatus()).toBeNull()
+  })
+})
+
+describe('PRD-261 A-04b seam — ThemeHostProvider hands the theme\'s pages and routes to the slots', () => {
+  function HelloRoute() {
+    return <p>hello route</p>
+  }
+
+  function ChatPage() {
+    return <p>theme chat</p>
+  }
+
+  /** What ThemeSlot and ThemeSlotRoute read: the registrations useActiveThemeSlots hands them. */
+  function SlotsProbe() {
+    const { registrations } = useActiveThemeSlots()
+    if (registrations === null) return <p>no registrations</p>
+    const Route = registrations.routes.get('hello') as React.ComponentType | undefined
+    const Page = registrations.pages.get('/chat') as React.ComponentType | undefined
+    return <div>{Route ? <Route /> : <p>no route</p>}{Page ? <Page /> : <p>no page</p>}</div>
+  }
+
+  it("hands registerRoute's routes and registerPage's pages from the loaded theme", async () => {
+    const loaded = okResult() as Extract<ThemeLoadResult, { ok: true }>
+    const routes = new Map<string, unknown>([['hello', HelloRoute]])
+    const pages = new Map<string, unknown>([['/chat', ChatPage]])
+    mocks.loadThemeForStyle.mockResolvedValue({ ...loaded, routes, pages })
+    render(<ThemeHostProvider><SlotsProbe /></ThemeHostProvider>)
+    expect(await screen.findByText('hello route')).toBeInTheDocument()
+    expect(screen.getByText('theme chat')).toBeInTheDocument()
+  })
+})
+
+describe('PRD-261 seam — a warn revocation of the running theme', () => {
+  it('keeps the theme active and shows the warning with the maintainer\'s reason', async () => {
+    const loaded = okResult() as Extract<ThemeLoadResult, { ok: true }>
+    mocks.loadThemeForStyle.mockResolvedValue({ ...loaded, revoked: { level: 'warn', reason: 'Update soon.' } })
+    render(app())
+    await screen.findByTestId('f')
+    await waitFor(() => expect(hostStatus()).toBe('active'))
+    expect(mocks.toast.warning).toHaveBeenCalledWith(
+      THEME_REVOKED_WARNING_NOTICE,
+      expect.objectContaining({ id: THEME_NOTICE_ID, description: 'Update soon.' }),
+    )
+    expect(mocks.toast.error).not.toHaveBeenCalled()
+  })
+
+  it('shows no warning for a theme with no revocation', async () => {
+    mocks.loadThemeForStyle.mockResolvedValue(okResult())
+    render(app())
+    await screen.findByTestId('f')
+    expect(mocks.toast.warning).not.toHaveBeenCalled()
   })
 })
 

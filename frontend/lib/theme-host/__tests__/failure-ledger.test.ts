@@ -52,7 +52,7 @@ afterEach(() => {
 
 describe('PRD-261 A-04c — which failures count', () => {
   const counted: ThemeFailureReason[] = ['render', 'load', 'register', 'look', 'engines']
-  const ignored: ThemeFailureReason[] = ['auth', 'manifest', 'revoked', 'opt-in']
+  const ignored: ThemeFailureReason[] = ['auth', 'manifest', 'revoked', 'opt-in', 'unavailable']
 
   it.each(counted)('%s is the theme\'s own failure and counts', (reason) => {
     expect(countsTowardRevert(reason)).toBe(true)

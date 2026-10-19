@@ -44,22 +44,13 @@ const INSTALLED_LOADING: ActiveThemeSlots = { layout: 'pending', registrations: 
 const NO_SLOTS: ReadonlyMap<SlotId, unknown> = new Map()
 const NO_PAGES: ReadonlyMap<string, unknown> = new Map()
 
-/**
- * The theme host's pages and routes. The context carries them once the provider hands over the
- * whole load result (the W-A2 seam: theme-host-provider.tsx, the A-04c lane's file); until then an
- * installed theme's pages and routes read as none, and its frame and slots still draw.
- */
-type HostWithPages = ThemeHostContextValue & {
-  readonly pages?: ReadonlyMap<string, unknown> | null
-  readonly routes?: ReadonlyMap<string, unknown> | null
-}
-
 function layoutOf(layout: ThemeLayout): ThemeSlotLayout {
   if (layout === 'fallback') return 'narrow'
   return layout
 }
 
-function hostRegistrations(host: HostWithPages): ThemeRegistrations | null {
+/** The theme host's registrations; the provider hands over the frame, slots, pages and routes it loaded. */
+function hostRegistrations(host: ThemeHostContextValue): ThemeRegistrations | null {
   if (host.frame === null) return null
   return {
     frame: host.frame,
@@ -103,6 +94,8 @@ function builtinHostValue(registrations: ThemeRegistrations | null): ThemeHostCo
     reason: null,
     frame: registrations.frame,
     slots: registrations.slots,
+    pages: registrations.pages,
+    routes: registrations.routes,
     reportRenderFailure: logBuiltinRenderFailure,
   }
 }

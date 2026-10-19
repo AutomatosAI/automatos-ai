@@ -25,6 +25,12 @@
  *
  * A-08c: the digest the active-theme answer names is left in a cookie for the root layout's boot
  * cache (boot-server.ts), which fetches a boot of any other digest again.
+ *
+ * The answer's other fields: `optIn.required` (private code this member has not opted in to)
+ * fails the load as `opt-in` before any theme file is asked for, since the files proxy would
+ * 404 each one; a `warn` revocation (`theme.revoked`) loads the theme and hands the warning on
+ * (ThemeLoadOk.revoked) for the host's notice. A 5xx from the files proxy, or a network failure,
+ * fails as `unavailable`: the files could not be reached, which is not the theme's fault.
  */
 import { apiClient } from '@/lib/api-client'
 import { writeCookie } from '@/lib/cookies'
@@ -40,7 +46,15 @@ import { isInstalledThemeStyle, themeRefOf } from './registry'
 import type { ThemeRef } from './registry-types'
 import { SDK_VERSION } from './sdk'
 import { THEME_DIGEST_COOKIE, THEME_DIGEST_HINT_SEPARATOR } from './types'
-import type { LoaderDeps, SpikeManifest, ThemeLoadAbsent, ThemeLoadOk, ThemeLoadResult, ThemeSource } from './types'
+import type {
+  LoaderDeps,
+  SpikeManifest,
+  ThemeLoadAbsent,
+  ThemeLoadOk,
+  ThemeLoadResult,
+  ThemeRevocationWarning,
+  ThemeSource,
+} from './types'
 
 const INSTALL_REF_PREFIX = 'install:'
 /** What GET /api/themes/active answers when the workspace has no active install. */
@@ -52,6 +66,10 @@ const AUTH_REFUSED_STATUSES: readonly number[] = [401, 403]
 const API_CLIENT_401_PREFIX = 'HTTP 401'
 /** The status probe after a failed import asks for one byte, so it never downloads the entry again. */
 const STATUS_PROBE_RANGE = 'bytes=0-0'
+/** From this status up the files proxy (or the backend behind it) could not serve the file. */
+const UNAVAILABLE_FROM_STATUS = 500
+/** The revocation level that still runs the theme (orchestrator/services/themes/revocations.py). */
+const REVOKE_WARN = 'warn'
 
 /** The HTTP status apiClient puts on the error it throws, if it has one. */
 function httpStatusOf(error: unknown): unknown {
@@ -65,15 +83,25 @@ export function isAuthRefusal(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith(API_CLIENT_401_PREFIX)
 }
 
+/** Fails as `reason` with `error`, whatever step it runs inside (step keeps the first reason). */
+function failAs<T>(reason: 'auth' | 'opt-in' | 'unavailable', error: unknown): Promise<T> {
+  return step<T>(reason, () => {
+    throw error
+  })
+}
+
+/** A file status that means the files could not be reached: a 5xx, or no answer at all (null). */
+export function isUnavailableStatus(status: number | null): boolean {
+  return status === null || status >= UNAVAILABLE_FROM_STATUS
+}
+
 /** Runs `run`; a refused session fails as `auth` rather than as the reason of the step around it. */
 export async function refusedAsAuth<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error) {
     if (!isAuthRefusal(error)) throw error
-    return step<T>('auth', () => {
-      throw error
-    })
+    return failAs<T>('auth', error)
   }
 }
 
@@ -110,12 +138,44 @@ export function absenceOf(answer: unknown, installId: string): string | null {
   return null
 }
 
-type ActiveManifest = { readonly manifest: SpikeManifest } | { readonly absent: string }
+/** The `theme` object of the active-theme answer, or null. */
+function activeThemeOf(answer: unknown): Record<string, unknown> | null {
+  return isRecord(answer) && isRecord(answer.theme) ? answer.theme : null
+}
 
-/** A theme file's JSON, from the files proxy on the page's own origin; a failure carries its status. */
+/** Whether the answer says this member has not opted in to the theme's private code (Q6). */
+export function optInRequired(answer: unknown): boolean {
+  const optIn = activeThemeOf(answer)?.optIn
+  return isRecord(optIn) && optIn.required === true
+}
+
+/** The answer's `warn` revocation of the running version, or null (a `disable` one names no theme). */
+export function revocationWarningOf(answer: unknown): ThemeRevocationWarning | null {
+  const revoked = activeThemeOf(answer)?.revoked
+  if (!isRecord(revoked) || revoked.level !== REVOKE_WARN) return null
+  return { level: REVOKE_WARN, reason: typeof revoked.reason === 'string' ? revoked.reason : '' }
+}
+
+type ActiveManifest =
+  | { readonly manifest: SpikeManifest; readonly revoked: ThemeRevocationWarning | null }
+  | { readonly absent: string }
+
+/**
+ * A theme file's JSON, from the files proxy on the page's own origin; a failure carries its
+ * status. A 5xx or a network failure fails as `unavailable`.
+ */
 async function fetchSameOriginJson(url: string): Promise<unknown> {
-  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
-  if (!response.ok) throw Object.assign(new Error(`GET ${url} answered ${response.status}`), { status: response.status })
+  let response: Response
+  try {
+    response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
+  } catch (error) {
+    return failAs('unavailable', error)
+  }
+  if (!response.ok) {
+    const failure = Object.assign(new Error(`GET ${url} answered ${response.status}`), { status: response.status })
+    if (isUnavailableStatus(response.status)) return failAs('unavailable', failure)
+    throw failure
+  }
   return response.json()
 }
 
@@ -137,7 +197,8 @@ export async function themeFileStatus(url: string): Promise<number | null> {
 
 /**
  * Imports an installed theme's entry. When the import fails and the entry answers 401 or 403,
- * the load fails as `auth` (the session, not the theme); any other failure is rethrown as it was.
+ * the load fails as `auth` (the session, not the theme); a 5xx or no answer to the probe fails as
+ * `unavailable`; any other failure is rethrown as it was.
  */
 export async function importInstalledEntry(
   url: string,
@@ -148,6 +209,7 @@ export async function importInstalledEntry(
     return await importModule(url)
   } catch (error) {
     const status = await probeStatus(url)
+    if (isUnavailableStatus(status)) return failAs('unavailable', error)
     if (status === null || !AUTH_REFUSED_STATUSES.includes(status)) throw error
     return refusedAsAuth(() => Promise.reject(Object.assign(new Error(`GET ${url} answered ${status}`), { status })))
   }
@@ -181,12 +243,15 @@ async function readActiveManifest(installId: string, deps: LoaderDeps): Promise<
   const answer = await withTimeout(refusedAsAuth(() => deps.fetchActive()), deps.timeoutMs, timedOut)
   const absent = absenceOf(answer, installId)
   if (absent !== null) return { absent }
+  if (optInRequired(answer)) {
+    return failAs<ActiveManifest>('opt-in', new Error(`GET ${THEME_ACTIVE_ENDPOINT}: the member has not opted in to the install ${installId}`))
+  }
   const active = parseActiveInstall(answer, installId)
   if (!active.ok) throw new Error(active.detail)
   deps.rememberDigest?.(installId, active.digest)
   const parsed = parseSpikeManifest(active.manifest, active.filesRoot)
   if (!parsed.ok) throw new Error(parsed.detail)
-  return { manifest: parsed.manifest }
+  return { manifest: parsed.manifest, revoked: revocationWarningOf(answer) }
 }
 
 /** The theme installed in the workspace as `installId` (a lowercase uuid). */
@@ -199,7 +264,8 @@ export function installedThemeSource(installId: string): ThemeSource {
         const host = await step('load', () => deps.exposeHost())
         const active = await step('manifest', () => readActiveManifest(installId, deps))
         if ('absent' in active) return noActiveInstall(active.absent)
-        return loadFromManifest(ref, active.manifest, host.sdkVersion, deps)
+        const loaded = await loadFromManifest(ref, active.manifest, host.sdkVersion, deps)
+        return active.revoked === null ? loaded : { ...loaded, revoked: active.revoked }
       }),
   }
 }

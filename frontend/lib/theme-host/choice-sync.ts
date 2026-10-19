@@ -12,7 +12,10 @@
  *   style rewrites the cookie; an installed one reloads the page, at most once per tab (R16: the
  *   guard is in sessionStorage, and with no sessionStorage the tab never reloads). Safe mode asks
  *   nothing. The appearance-defaults step (ui-style-context.tsx) ran at mount, before any
- *   workspace was known, so a server choice always lands after it.
+ *   workspace was known, so a server choice always lands after it. An answer is dropped when a
+ *   pick was made while it was in flight, or when the tab left the installed theme it was on
+ *   (the host's three-failure revert to Studio, A-04c): the answer can only name the choice the
+ *   server held before, and following it would reload straight back into the failing theme.
  * - The server answers 'studio' both for a stored Studio and for "no choice, no default"; the two
  *   can't be told apart, so a server Studio never moves a tab off Classic or a builtin theme (a
  *   pick made before PA-12; builtin Play until A-18 moves it). It does move a tab off an installed
@@ -190,6 +193,15 @@ function applyServerStyle(ui: UiStyleContextValue, workspaceId: string, target: 
   else persistUiStyle(target)
 }
 
+/**
+ * Whether the tab moved on while the check was in flight: a pick, or the tab leaving the installed
+ * theme it was on when the check was sent (the host's revert, which is no pick).
+ */
+function movedOnSince(picksBefore: number, styleBefore: UiStyle | null, current: UiStyleContextValue): boolean {
+  if (picksMade !== picksBefore) return true
+  return styleBefore !== null && isInstalledThemeStyle(styleBefore) && current.style !== styleBefore
+}
+
 /** Once per workspace and tab, outside safe mode: GET /api/themes/active and follow a differing choice. */
 function useServerChoiceCheck(workspaceId: string): void {
   const ui = useUiStyleOptional()
@@ -201,11 +213,12 @@ function useServerChoiceCheck(workspaceId: string): void {
     if (isSafeModeRequested(window.location.search, safeSessionStorage())) return
     checkedInThisDocument.add(workspaceId)
     const picksBefore = picksMade
+    const styleBefore = uiRef.current?.style ?? null
     apiClient
       .getActiveTheme()
       .then((active) => {
         const current = uiRef.current
-        if (current === null || picksMade !== picksBefore) return
+        if (current === null || movedOnSince(picksBefore, styleBefore, current)) return
         const target = reconcileTarget(current.style, active)
         if (target === null) recordCheck(workspaceId, CHECKED)
         else applyServerStyle(current, workspaceId, target)

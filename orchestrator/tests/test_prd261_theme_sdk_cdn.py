@@ -353,6 +353,12 @@ def test_workflow_triggers_on_main_for_the_package_and_the_surface_and_by_hand()
     assert "pull_request" not in on
 
 
+def test_workflow_deploys_from_main_only_even_when_run_by_hand():
+    # workflow_dispatch can start on any branch; the immutable version path and the
+    # completion marker mean a branch's package would ship for good.
+    assert _workflow()["jobs"]["deploy"]["if"] == "github.ref == 'refs/heads/main'"
+
+
 def test_workflow_never_cancels_a_deploy_and_reads_contents_only():
     workflow = _workflow()
     assert workflow["concurrency"]["cancel-in-progress"] is False

@@ -3,7 +3,8 @@
  * own failure: a 401 or 403 on GET /api/themes/active (apiClient's 401 error carries no status, so
  * its message is read), on the preset (a same-origin file) or on the entry. import() reports no
  * status, so after a failed entry import one byte of the entry is fetched again to read it. Any
- * other failure keeps its reason ('manifest', 'load', 'look').
+ * other failure keeps its reason ('manifest', 'load', 'look'), except a 5xx or no answer from the
+ * files proxy, which is 'unavailable' (sources-active-notices.test.ts).
  */
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
@@ -114,9 +115,9 @@ describe('PRD-261 A-08b — the entry refused', () => {
     expect(await reasonAt('load', () => importInstalledEntry(ENTRY_URL, importFails, async () => 403))).toBe('auth')
   })
 
-  it("keeps 'load' when the entry answers anything else, or the probe fails", async () => {
+  it("keeps 'load' when the entry answers anything else (a 5xx or no answer is 'unavailable')", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    for (const status of [206, 200, 404, 500, null]) {
+    for (const status of [206, 200, 404]) {
       expect(await reasonAt('load', () => importInstalledEntry(ENTRY_URL, importFails, async () => status))).toBe('load')
     }
   })
@@ -159,9 +160,9 @@ describe('PRD-261 A-08b — themeFileStatus', () => {
 })
 
 describe('PRD-261 A-08b — the preset refused', () => {
-  it("fails as 'auth' on a 401 or 403, and keeps 'look' otherwise", async () => {
+  it("fails as 'auth' on a 401 or 403, 'unavailable' on a 5xx, and keeps 'look' otherwise", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    for (const [status, reason] of [[401, 'auth'], [403, 'auth'], [404, 'look'], [500, 'look']] as const) {
+    for (const [status, reason] of [[401, 'auth'], [403, 'auth'], [404, 'look'], [500, 'unavailable']] as const) {
       stubFetchStatus(status)
       expect(await reasonAt('look', () => defaultLoaderDeps().fetchJson(PRESET_URL))).toBe(reason)
     }

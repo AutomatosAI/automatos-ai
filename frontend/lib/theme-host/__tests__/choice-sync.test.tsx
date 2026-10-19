@@ -7,7 +7,8 @@
  *   the tab, an installed one with one reload at most (sessionStorage guard; none without it).
  * - The appearance-defaults step never overrides a server choice, and never stores one.
  * - A server Studio moves a tab only off an installed theme (off anything else it may mean "no
- *   choice"); safe mode asks nothing; a pick made while the check is in flight wins.
+ *   choice"); safe mode asks nothing; a pick made while the check is in flight wins, and so does
+ *   the host's revert to Studio (A-04c), so its answer never reloads back into the failing theme.
  * - The entries: installs join as theme:install:<id>, 'Private · not reviewed' when unreviewed;
  *   D1-c hides builtin Play once automatos/play is installed, except from a member still on it.
  */
@@ -306,6 +307,24 @@ describe('the server choice check (once per workspace and tab)', () => {
     await act(async () => { answer(activeAnswer('builtin:play')) })
     await settle()
     expect(styleShown()).toBe('classic')
+  })
+
+  it("drops an answer that lands after the host's revert to Studio, which is no pick (A-04c)", async () => {
+    seenDefaults()
+    let answer: (value: unknown) => void = () => {}
+    vi.spyOn(apiClient, 'getActiveTheme').mockReturnValue(new Promise((resolve) => { answer = resolve }))
+    const reload = vi.fn()
+    function Revert() {
+      const { setStyle } = useUiStyle()
+      return <button onClick={() => setStyle('studio')}>revert</button>
+    }
+    mount(INSTALLED_STYLE, reload, <Revert />)
+    await settle()
+    act(() => { screen.getByText('revert').click() })
+    await act(async () => { answer(activeAnswer(INSTALL_ID)) })
+    await settle()
+    expect(styleShown()).toBe('studio')
+    expect(reload).not.toHaveBeenCalled()
   })
 
   it('a failed check changes nothing', async () => {
