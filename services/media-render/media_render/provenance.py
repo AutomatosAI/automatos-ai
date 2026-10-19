@@ -38,6 +38,9 @@ about who made the file or from what.
 **Nothing personal.** The packet carries those two properties and nothing else: the write
 clears whatever XMP a file carried first, so no user, workspace, prompt or file path can
 reach it (Guidelines ¶94).
+
+**Then the signature** (EUAI-06b): each file marked here is signed with a C2PA manifest
+after its mark, by content_credentials.py, under the same instance id.
 """
 
 from __future__ import annotations
@@ -278,17 +281,26 @@ def read_packet(path: Path, *, exiftool_bin: str, timeout_seconds: int) -> bytes
     return _run([exiftool_bin, "-b", "-XMP", str(path)], timeout_seconds, f"read the XMP of {path.name}").stdout
 
 
-def carry_mark(source: bytes, jpeg: bytes, *, exiftool_bin: str, timeout_seconds: int) -> bytes:
+@dataclass(frozen=True)
+class CarriedMark:
+    """A converted file's bytes, and the mark and instance id it was given (``None``: unmarked)."""
+
+    data: bytes
+    kind: Optional[str] = None
+    instance_id: Optional[str] = None
+
+
+def carry_mark(source: bytes, jpeg: bytes, *, exiftool_bin: str, timeout_seconds: int) -> CarriedMark:
     """``jpeg``, converted from ``source``, carrying the AI mark ``source`` carried (a rendered
     still's), since the conversion drops it, under its own fresh instance id. A source with
-    no AI mark gives the JPEG none."""
+    no AI mark gives the JPEG none. The caller then signs a marked JPEG (EUAI-06b)."""
     with tempfile.TemporaryDirectory(prefix="media-render-jpeg-") as scratch:
         original = Path(scratch) / SOURCE_NAME
         original.write_bytes(source)
         kind = read_source_type(original, exiftool_bin=exiftool_bin, timeout_seconds=timeout_seconds)
         if kind not in AI_SOURCE_TYPES:
-            return jpeg
+            return CarriedMark(jpeg)
         target = Path(scratch) / JPEG_NAME
         target.write_bytes(jpeg)
-        mark(target, kind, exiftool_bin=exiftool_bin, timeout_seconds=timeout_seconds)
-        return target.read_bytes()
+        instance_id = mark(target, kind, exiftool_bin=exiftool_bin, timeout_seconds=timeout_seconds)
+        return CarriedMark(target.read_bytes(), kind, instance_id)

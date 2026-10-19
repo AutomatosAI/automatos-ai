@@ -30,6 +30,12 @@ the job: a render never ships unmarked. The Kokoro lines' own WAVs (``audio/vo``
 their fitted copies (``audio/fit``) are not marked: they never leave the service (no
 output names them, and the job drops them when its render ends), and the mix and the
 video they reach carry the mark. So the timed voice step runs no exiftool.
+
+Each marked file is then signed with a C2PA manifest (EUAI-06b, content_credentials.py),
+keeping as ingredients the job's inputs that carry one (and, in the video, the signed
+mix). A file whose signing fails still ships with its XMP mark, and the failure is logged
+with the job and counted. Each marked output names its ``digital_source_type``, its
+``sha256`` and its ``manifest_id`` (``None`` when unsigned), for the provenance rows.
 """
 
 from __future__ import annotations
@@ -46,11 +52,12 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Protocol, Seque
 import aiohttp
 from yarl import URL
 
-from . import audio, fit, hyperframes, probe, provenance
+from . import audio, content_credentials, fit, hyperframes, probe, provenance
 from .bundle import Bundle, MediaInput
 from .check_report import CheckReportError, parse_check_output
 from .composition import GSAP_PATH, MIX_PATH
 from .config import Settings
+from .content_credentials import AUDIO_PREFIX, VISUAL_PREFIXES, ContentSigner, Ingredient, MarkRecord
 from .hyperframes import LOG_TAIL_CHARS
 from .jobs import Job
 from .media_urls import redact, url_allowed
@@ -67,6 +74,9 @@ FIT_DIR = "fit"
 CHUNK_BYTES = 1 << 16
 # How far one voice line may run into the next, or past the end, before it counts.
 VOICE_TOLERANCE_SECONDS = 0.05
+# Which inputs may be a file's ingredients (EUAI-06b): the video takes any, a picture the visuals, the mix the audio.
+ANY_INPUT = VISUAL_PREFIXES + (AUDIO_PREFIX,)
+AUDIO_INPUTS = (AUDIO_PREFIX,)
 
 
 class PipelineError(RuntimeError):
@@ -244,15 +254,21 @@ def mix_plan(bundle: Bundle, lines: Sequence[PlacedLine], project_dir: Path) -> 
     )
 
 
+def _mark_fields(record: Optional[MarkRecord]) -> Dict[str, Any]:
+    """What an output says about its mark: nothing when it carries none."""
+    return record.fields() if record is not None else {}
+
+
 def _refused(findings: Sequence[Dict[str, Any]], report: Dict[str, Any]) -> CheckOutcome:
     summary = {"ok": False, "errors": len(findings), "warnings": 0, "sections": {"audio": {"ok": False}}}
     return CheckOutcome(ok=False, findings=tuple(findings), report={**report, "check": summary, "findings": list(findings)})
 
 
 class RenderPipeline:
-    def __init__(self, settings: Settings, speaker: Speaker) -> None:
+    def __init__(self, settings: Settings, speaker: Speaker, signer: Optional[ContentSigner] = None) -> None:
         self._settings = settings
         self._speaker = speaker
+        self._signer = signer or ContentSigner(settings)
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def start(self) -> None:
@@ -329,15 +345,32 @@ class RenderPipeline:
             )
         return fitted
 
-    async def _mark(self, path: Path, kind: Optional[str], code: str) -> None:
-        """EUAI-06a: ``path``'s AI mark, after its last encode; a file that cannot be marked fails with ``code``."""
+    async def _ingredients(
+        self, job: Job, kind: Optional[str], prefixes: Tuple[str, ...], extra: Sequence[Path] = ()
+    ) -> Tuple[Ingredient, ...]:
+        """EUAI-06b: the job's inputs (and ``extra``) of these types that carry a C2PA manifest; none for an unmarked file."""
+        if kind is None:
+            return ()
+        paths = [*(job.project_dir / item.path for item in job.bundle.media), *extra]
+        return await asyncio.to_thread(content_credentials.ingredients_in, paths, prefixes)
+
+    async def _mark(
+        self, job: Job, path: Path, kind: Optional[str], code: str, ingredients: Sequence[Ingredient] = ()
+    ) -> Optional[MarkRecord]:
+        """``path``'s AI mark after its last encode (EUAI-06a), then its signed manifest (EUAI-06b).
+        A file that cannot be marked fails with ``code``; one that cannot be signed keeps its mark."""
         settings = self._settings
         try:
-            await asyncio.to_thread(
+            instance_id = await asyncio.to_thread(
                 provenance.mark, path, kind, exiftool_bin=settings.exiftool_bin, timeout_seconds=settings.mark_timeout_seconds
             )
         except provenance.ProvenanceError as exc:
             raise PipelineError(code, f"{path.name} could not be marked as AI-made", detail=str(exc)) from None
+        if kind is None:
+            return None
+        return await asyncio.to_thread(
+            self._signer.sign, path, kind, job=f"render {job.id}", instance_id=instance_id, ingredients=ingredients
+        )
 
     async def _mix(self, job: Job, lines: Sequence[PlacedLine]) -> Dict[str, Any]:
         """The mix, the composition's one <audio>, marked for its audio elements; its loudness facts."""
@@ -352,7 +385,8 @@ class RenderPipeline:
             )
         except audio.MixError as exc:
             raise PipelineError("mix_failed", "the mix could not be made", detail=str(exc)) from None
-        await self._mark(target, provenance.audio_type(job.bundle), "mix_failed")
+        kind = provenance.audio_type(job.bundle)
+        await self._mark(job, target, kind, "mix_failed", await self._ingredients(job, kind, AUDIO_INPUTS))
         return facts
 
     async def prepare_and_check(self, job: Job) -> CheckOutcome:
@@ -418,7 +452,9 @@ class RenderPipeline:
             if run.timed_out:
                 raise PipelineError("render_timed_out", f"the render ran past {settings.render_timeout_seconds} s")
             raise PipelineError("render_failed", f"hyperframes render exited {run.returncode}", detail=run.tail())
-        await self._mark(output, provenance.video_type(job.bundle), "render_failed")
+        kind = provenance.video_type(job.bundle)
+        ingredients = await self._ingredients(job, kind, ANY_INPUT, (job.project_dir / MIX_PATH,))
+        record = await self._mark(job, output, kind, "render_failed", ingredients)
         started = time.monotonic()
         try:
             facts = probe.output_facts(
@@ -436,6 +472,7 @@ class RenderPipeline:
             "bytes": output.stat().st_size,
             "duration": facts["duration"],
             "probe": facts,
+            **_mark_fields(record),
         }
         timings = {"render_seconds": run.seconds, "probe_seconds": round(time.monotonic() - started, 3)}
         return RenderResult(outputs=(entry,), timings=timings)
@@ -474,73 +511,91 @@ class RenderPipeline:
             raise PipelineError(f"{kind}_failed", message, detail=run.tail())
         return frames, run.seconds
 
+    async def _still_frame(
+        self, job: Job, frame: Path, name: str, kind: Optional[str], ingredients: Sequence[Ingredient]
+    ) -> Dict[str, Any]:
+        """One still: the frame flattened to an opaque RGB PNG at the composition's size, marked and signed."""
+        settings, composition = self._settings, job.bundle.composition
+        target = job.output_dir / name
+        flatten = ["-i", str(frame), "-frames:v", "1", "-pix_fmt", "rgb24", str(target)]
+        await asyncio.to_thread(self._ffmpeg, flatten, f"flattening {frame.name}", code="still_failed")
+        record = await self._mark(job, target, kind, "still_failed", ingredients)
+        try:
+            info = await asyncio.to_thread(
+                probe.probe, target, ffprobe_bin=settings.ffprobe_bin, timeout_seconds=settings.probe_timeout_seconds
+            )
+        except probe.ProbeError as exc:
+            raise PipelineError("still_failed", str(exc)) from None
+        width, height = probe.image_size(info)
+        if (width, height) != (composition.width, composition.height):
+            message = f"{name} is {width}x{height}, not the composition's {composition.width}x{composition.height}"
+            raise PipelineError("still_failed", message)
+        return {
+            "name": name,
+            "kind": "still",
+            "aspect": composition.aspect,
+            "width": width,
+            "height": height,
+            "bytes": target.stat().st_size,
+            **_mark_fields(record),
+        }
+
     async def still(self, job: Job) -> RenderResult:
         """The image: a full-size, opaque PNG of the checked composition at each moment (a carousel's slides)."""
-        settings, composition = self._settings, job.bundle.composition
         at = job.bundle.still.at
         job.output_dir.mkdir(parents=True, exist_ok=True)
         frames, seconds = await self._snapshots(job, at, "still")
         started = time.monotonic()
+        kind = provenance.image_type(job.bundle)
+        ingredients = await self._ingredients(job, kind, VISUAL_PREFIXES)
         outputs: List[Dict[str, Any]] = []
         for index, (frame, moment) in enumerate(zip(frames, at), start=1):
             name = STILL_NAME if len(at) == 1 else STILL_NAMES.format(index)
-            target = job.output_dir / name
-            flatten = ["-i", str(frame), "-frames:v", "1", "-pix_fmt", "rgb24", str(target)]
-            await asyncio.to_thread(self._ffmpeg, flatten, f"flattening {frame.name}", code="still_failed")
-            await self._mark(target, provenance.image_type(job.bundle), "still_failed")
-            try:
-                info = await asyncio.to_thread(
-                    probe.probe, target, ffprobe_bin=settings.ffprobe_bin, timeout_seconds=settings.probe_timeout_seconds
-                )
-            except probe.ProbeError as exc:
-                raise PipelineError("still_failed", str(exc)) from None
-            width, height = probe.image_size(info)
-            if (width, height) != (composition.width, composition.height):
-                message = f"{name} is {width}x{height}, not the composition's {composition.width}x{composition.height}"
-                raise PipelineError("still_failed", message)
-            outputs.append(
-                {
-                    "name": name,
-                    "kind": "still",
-                    "index": index,
-                    "at": moment,
-                    "aspect": composition.aspect,
-                    "width": width,
-                    "height": height,
-                    "bytes": target.stat().st_size,
-                }
-            )
+            entry = await self._still_frame(job, frame, name, kind, ingredients)
+            outputs.append({**entry, "index": index, "at": moment})
         shutil.rmtree(job.dir / SNAPSHOT_DIR, ignore_errors=True)
         timings = {"still_seconds": seconds, "encode_seconds": round(time.monotonic() - started, 3)}
         return RenderResult(outputs=tuple(outputs), timings=timings)
 
+    async def _preview_frames(
+        self, job: Job, frames: Sequence[Path], size: Tuple[int, int], kind: Optional[str], ingredients: Sequence[Ingredient]
+    ) -> List[Dict[str, Any]]:
+        """Each snapshot scaled to the preview's size, marked and signed, in time order."""
+        width, height = size
+        scale = f"scale={width}:{height}:flags=area"
+        outputs: List[Dict[str, Any]] = []
+        for index, (frame, moment) in enumerate(zip(frames, job.bundle.preview.at), start=1):
+            name = PREVIEW_FRAME.format(index)
+            target = job.output_dir / name
+            await asyncio.to_thread(self._ffmpeg, ["-i", str(frame), "-vf", scale, "-frames:v", "1", str(target)], f"scaling {frame.name}")
+            record = await self._mark(job, target, kind, "preview_failed", ingredients)
+            outputs.append(
+                {
+                    "name": name, "kind": "frame", "at": moment, "width": width, "height": height,
+                    "bytes": target.stat().st_size, **_mark_fields(record),
+                }
+            )
+        return outputs
+
     async def preview(self, job: Job) -> RenderResult:
         """Snapshots of the checked composition at the preview's moments, small, and a short reel of them."""
         settings, composition = self._settings, job.bundle.composition
-        at = job.bundle.preview.at
         shots = job.dir / SNAPSHOT_DIR
         job.output_dir.mkdir(parents=True, exist_ok=True)
-        frames, snapshot_seconds = await self._snapshots(job, at, "preview")
+        frames, snapshot_seconds = await self._snapshots(job, job.bundle.preview.at, "preview")
         started = time.monotonic()
         width = settings.preview_width
         height = int(round(composition.height * width / composition.width / 2)) * 2
-        outputs: List[Dict[str, Any]] = []
-        for index, (frame, moment) in enumerate(zip(frames, at), start=1):
-            name = PREVIEW_FRAME.format(index)
-            target = job.output_dir / name
-            scale = f"scale={width}:{height}:flags=area"
-            await asyncio.to_thread(self._ffmpeg, ["-i", str(frame), "-vf", scale, "-frames:v", "1", str(target)], f"scaling {frame.name}")
-            await self._mark(target, provenance.image_type(job.bundle), "preview_failed")
-            outputs.append(
-                {"name": name, "kind": "frame", "at": moment, "width": width, "height": height, "bytes": target.stat().st_size}
-            )
+        kind = provenance.image_type(job.bundle)
+        ingredients = await self._ingredients(job, kind, VISUAL_PREFIXES)
+        outputs = await self._preview_frames(job, frames, (width, height), kind, ingredients)
         reel = job.output_dir / PREVIEW_REEL
         reel_argv = [
             "-framerate", str(settings.preview_reel_fps), "-start_number", "1", "-i", str(job.output_dir / PREVIEW_FRAMES),
             "-vf", "format=yuv420p", "-r", str(settings.render_fps), "-c:v", "libx264", "-movflags", "+faststart", str(reel),
         ]
         await asyncio.to_thread(self._ffmpeg, reel_argv, "joining the frames into the reel")
-        await self._mark(reel, provenance.image_type(job.bundle), "preview_failed")
+        record = await self._mark(job, reel, kind, "preview_failed", ingredients)
         try:
             facts = probe.output_facts(
                 await asyncio.to_thread(
@@ -558,6 +613,7 @@ class RenderPipeline:
                 "bytes": reel.stat().st_size,
                 "duration": facts["duration"],
                 "probe": facts,
+                **_mark_fields(record),
             }
         )
         shutil.rmtree(shots, ignore_errors=True)

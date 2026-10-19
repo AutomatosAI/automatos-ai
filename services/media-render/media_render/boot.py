@@ -14,6 +14,7 @@ from typing import List, Mapping, Sequence
 
 from .config import ESPEAK_DATA_PATH_LIMIT, HYPERFRAMES_OFF_SWITCHES, TOKEN_ENV, Settings
 from .music import MusicLibraryError, load_library
+from .signing_keys import configured_problems
 from .voices_build import VoicesError, voice_names
 
 BOOT_FAILURE_EXIT_CODE = 2
@@ -93,6 +94,13 @@ def marker_problems(settings: Settings) -> List[str]:
     return []
 
 
+def signing_problems(settings: Settings) -> List[str]:
+    """PRD-264 EUAI-06b: a configured C2PA chain and key that could sign nothing stop the container.
+
+    None configured is no problem: this install makes its own on first use (signing_keys.py)."""
+    return configured_problems(settings)
+
+
 def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
     return [
         *espeak_data_path_problems(settings.espeak_data_path),
@@ -101,6 +109,7 @@ def boot_problems(settings: Settings, env: Mapping[str, str]) -> List[str]:
         *music_library_problems(settings),
         *kokoro_voice_problems(settings),
         *marker_problems(settings),
+        *signing_problems(settings),
     ]
 
 
