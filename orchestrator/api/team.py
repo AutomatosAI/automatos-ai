@@ -27,13 +27,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/team", tags=["team"])
 
-# PRD-261 A-07f (Gerard D1-d, #1157): an invitation and a role change each grant a person
-# rights in this workspace, so in SaaS each needs a sign-in from the last
-# STEP_UP_MAX_AGE_MINUTES minutes (core/auth/step_up.py; the local edition passes). Theme
-# code runs in the page as the signed-in user, and this stops it inviting or promoting
-# someone silently. It is layered AFTER the permission gate, so a caller the gate refuses
-# gets the plain 403, never a reverification prompt. The client answers the refusal with
-# Clerk's reverification and retries once (components/team/*, lib/theme-host/api.ts).
+# PRD-261 A-07f (Gerard D1-d, #1157): a role change grants a person rights in this workspace,
+# so in SaaS it needs a sign-in from the last STEP_UP_MAX_AGE_MINUTES minutes
+# (core/auth/step_up.py; the local edition passes). Theme code runs in the page as the
+# signed-in user, and this stops it promoting someone silently. It is layered AFTER the
+# permission gate, so a caller the gate refuses gets the plain 403, never a reverification
+# prompt. The client answers the refusal with Clerk's reverification and retries once
+# (components/team/team-management.tsx, lib/theme-host/api.ts). D1-d scopes step-up to the
+# role change only: the invite carries none until a maintainer decision adds it.
 STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
 # Public router for accept-invitation — uses Clerk JWT directly without going
@@ -205,8 +206,7 @@ async def list_team_members(
 @router.post(
     "/invite",
     response_model=InvitationResponse,
-    # Every invitable role (admin, editor, viewer) grants access, so every invite needs step-up.
-    dependencies=[Depends(require_workspace_permission("members:invite")), Depends(STEP_UP)],
+    dependencies=[Depends(require_workspace_permission("members:invite"))],
 )
 async def invite_member(
     workspace_id: str,

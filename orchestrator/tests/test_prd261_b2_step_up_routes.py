@@ -9,8 +9,8 @@ gate (only the caller's workspace role is stubbed) and the REAL step-up dependen
 * a caller the permission gate refuses gets the plain 403, never a reverification prompt;
 * rollback (it switches the running theme code, like update) runs with a fresh step-up in
   SaaS and with none in the local edition;
-* the workspace role change, the invite and SDK key creation carry the same step-up since
-  PRD-261 A-07f (W-A2, #1157): their refusals are ``test_prd261_a07f_account_step_up.py``.
+* the workspace role change carries the same step-up since PRD-261 A-07f (W-A2, Gerard D1-d,
+  #1157): its refusals are ``test_prd261_a07f_account_step_up.py``.
 
 The route table facts (which routes carry the dependency, in which order) are
 ``test_prd261_b2_wire.py``.
