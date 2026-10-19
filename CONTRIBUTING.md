@@ -102,6 +102,7 @@ AI-assisted contributions are welcome, and most contributions now start in one. 
 | `malware-scan` | Known malicious payloads and hidden loaders. **Required.** |
 | `CodeQL`, `check-shopify-isolation` | Static analysis, and the Shopify package's isolation. |
 | `action-pins` | Every `uses:` names a 40-hex commit, and so does every `uses:` inside a composite action or reusable workflow those commits point at, read from GitHub at that commit. Exceptions, each with its reason, are in `.github/action-pin-exceptions.json`. It runs when a workflow, the check or that list changes. |
+| `large-files` | No file over 5 MB comes into the repository: on every pull request and every push to `main`, `scripts/ci/check_large_files.py` fails on a newly tracked file over 5 MB, or one that grew past it. Every clone downloads the whole tree, `git clone --depth 1` included, so large media goes in a release asset. |
 
 Lanes marked non-required in their workflow file still run and still report. Treat red as red.
 
