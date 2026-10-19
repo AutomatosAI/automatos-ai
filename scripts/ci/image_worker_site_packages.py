@@ -12,7 +12,9 @@ Each check names the row of the 19 Oct size breakdown it proves:
   no ``.debug_*`` section and still loads, each in a fresh interpreter: one that exports
   ``PyInit_<name>`` is imported by its dotted name, any other is opened with ctypes. The
   extensions named in ``MUST_LOAD`` must be among them, so an empty glob never passes;
-- row 47, the tests directories: none named exactly ``tests`` is left.
+- row 47, the tests directories: none named exactly ``tests`` is left;
+- the distributions a cut removed (``REMOVED``, each with its row) are not installed,
+  and what replaced them imports: redis.asyncio without hiredis's parser.
 
 binutils (readelf) comes with build-essential, which the worker keeps for its agents.
 Standard library only. Exit 0 when every check passes, 1 otherwise.
@@ -23,6 +25,7 @@ import re
 import subprocess
 import sys
 import sysconfig
+from importlib import metadata
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -45,6 +48,16 @@ MUST_LOAD = frozenset({
 
 # Row 47.
 TESTS_DIR = "tests"
+
+# Distributions a cut took out of the lock, by the breakdown row that took it.
+REMOVED = {
+    "hiredis": "row 47",
+    "python-dotenv": "row 47",
+}
+# What the worker imports in their place, each in a fresh interpreter.
+REPLACEMENT_IMPORTS = (
+    "import redis.asyncio, redis.utils; assert not redis.utils.HIREDIS_AVAILABLE",
+)
 
 Check = Callable[[], List[str]]
 
@@ -112,12 +125,33 @@ def check_tests_dirs() -> List[str]:
     return [f"{path.relative_to(SITE)} is in the image" for path in sorted(SITE.rglob(TESTS_DIR)) if path.is_dir()]
 
 
+# --------------------------------------------------------------------------- removed distributions
+
+
+def installed(name: str) -> bool:
+    try:
+        metadata.distribution(name)
+    except metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+def check_removed() -> List[str]:
+    """Each removed distribution is gone, and its replacement imports."""
+    failures = [f"{name} ({row}) is still installed" for name, row in REMOVED.items() if installed(name)]
+    for code in REPLACEMENT_IMPORTS:
+        exit_code, output = run([sys.executable, "-c", code])
+        failures += [f"{code!r} failed, exit {exit_code}: {output[-STDERR_TAIL_CHARS:]}"] if exit_code else []
+    return failures
+
+
 # --------------------------------------------------------------------------- the run
 
 
 CHECKS: Tuple[Tuple[str, Check], ...] = (
     ("row 40: every stripped library loads, with no debug sections", check_strip),
     ("row 47: no tests directories in site-packages", check_tests_dirs),
+    ("row 47: the removed distributions are gone, their replacements import", check_removed),
 )
 
 

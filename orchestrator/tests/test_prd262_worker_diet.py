@@ -15,6 +15,8 @@ runs on the image it built, on both arches:
 - row 47, tests: the same RUN deletes every directory named exactly `tests`;
 - row 47, npm: an `npm` stage drops npm's docs and man pages before the copy, and the
   pnpm install's RUN deletes Node's compile cache and npm's logs it leaves behind;
+- row 47, hiredis and python-dotenv: out of requirements.in and the lock; redis-py
+  parses replies in Python, and no worker module imports dotenv;
 - row 47, gosu: gone from the apt list; entrypoint.sh drops to the worker with setpriv
   (test_prd262_worker_boot.py runs the entrypoint, and test.yml's parity job checks the
   worker's uid and HOME in the Railway build).
@@ -221,6 +223,43 @@ def test_the_in_image_check_names_extensions_as_python_imports_them(monkeypatch,
         (tmp_path / relative).write_bytes(b"")
     found = [site_packages.module_name(path) for path in site_packages.stripped_files()]
     assert found == ["_cffi_backend", "cryptography.hazmat.bindings._rust", "rpds.rpds"], "*.libs is skipped"
+
+
+# --------------------------------------------------------------------------- row 47, the lock
+
+
+def _lock_pins(name: str) -> set[str]:
+    return set(re.findall(r"^([a-z0-9][a-z0-9._-]*)==", (WORKER / name).read_text(), re.M))
+
+
+def _requirement_lines() -> list[str]:
+    lines = [line.split("#", 1)[0].strip() for line in (WORKER / "requirements.in").read_text().splitlines()]
+    return [line for line in lines if line]
+
+
+def _worker_imports() -> set[str]:
+    """The top-level module of every import in the worker's own code."""
+    found = set()
+    for path in WORKER.glob("*.py"):
+        for line in path.read_text().splitlines():
+            match = re.match(r"\s*(?:from|import)\s+([A-Za-z_][\w]*)", line)
+            found |= {match.group(1)} if match else set()
+    return found
+
+
+def test_redis_has_no_hiredis_extra_and_python_dotenv_is_gone():
+    requirements = _requirement_lines()
+    assert [line for line in requirements if line.startswith("redis")] == ["redis>=5.0.0,<8.0.0"]
+    assert not [line for line in requirements if "dotenv" in line or "hiredis" in line]
+    for lock in ("requirements.lock", "requirements-browser.lock"):
+        assert not _lock_pins(lock) & {"hiredis", "python-dotenv"}, lock
+    assert "redis" in _lock_pins("requirements.lock")
+    assert not _worker_imports() & {"dotenv", "hiredis"}, "the worker imports what the lock dropped"
+
+
+def test_the_in_image_check_looks_for_the_removed_distributions():
+    assert {"hiredis", "python-dotenv"} <= set(site_packages.REMOVED)
+    assert any("HIREDIS_AVAILABLE" in code for code in site_packages.REPLACEMENT_IMPORTS)
 
 
 # --------------------------------------------------------------------------- images.yml

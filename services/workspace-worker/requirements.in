@@ -16,15 +16,16 @@
 #     --universal --python-version 3.12 --generate-hashes \
 #     -o services/workspace-worker/requirements-browser.lock
 
-# Redis (async)
-redis[hiredis]>=5.0.0,<8.0.0
+# Redis (async). No [hiredis] extra (PRD-262, row 47: 1.1 MB): redis-py parses replies
+# in Python instead, which the worker's queue rate never notices.
+redis>=5.0.0,<8.0.0
 
 # HTTP server for health check
 aiohttp>=3.9.0,<3.14.0
 
-# Shared with orchestrator (already in main requirements)
+# Shared with orchestrator (already in main requirements). No python-dotenv: no worker
+# module imports it (PRD-262, row 47).
 pydantic>=2.0.0,<3.0.0
-python-dotenv>=1.0.0,<2.0.0
 
 # Database (task status updates): the one UPDATE in task_executions_db.py, run
 # through psycopg2 in a thread. No SQLAlchemy (PRD-262 US-044).
