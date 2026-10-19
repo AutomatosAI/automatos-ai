@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from .image_blocks import decoded_image
+from .image_blocks import decode_image, image_source
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +31,16 @@ _IMAGE_FORMATS = {"image/png": "png", "image/jpeg": "jpeg", "image/gif": "gif", 
 
 def _image_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """A base64 image or a data URL (``image_blocks``) as a Converse image; None, logged,
-    for a format Converse doesn't take or an image whose bytes aren't in the message."""
-    image = decoded_image(block)
-    if image is None:
+    for a format Converse doesn't take or an image whose bytes aren't in the message. Only
+    an image Converse takes is decoded, so a bad one of any other type is left out too."""
+    source = image_source(block)
+    if source is None:
         return None
-    media_type, data = image
+    media_type, data = source
     if media_type not in _IMAGE_FORMATS:
         logger.warning("[bedrock] an image of type %r has no Converse form; left out", media_type)
         return None
-    return {"image": {"format": _IMAGE_FORMATS[media_type], "source": {"bytes": data}}}
+    return {"image": {"format": _IMAGE_FORMATS[media_type], "source": {"bytes": decode_image(data)}}}
 
 
 def _tool_result(tool_use_id: Any, content: Any) -> Dict[str, Any]:

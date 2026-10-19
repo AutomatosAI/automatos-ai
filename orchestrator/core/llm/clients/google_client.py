@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from config import config
 from .base import BaseLLMProvider, LLMResponse, request_max_tokens, run_blocking
-from .image_blocks import decoded_image
+from .image_blocks import decode_image, image_source
 
 try:
     from google import genai
@@ -61,17 +61,18 @@ def _text(content: Any) -> str:
 
 def _image_part(block: Dict[str, Any]) -> Optional[Any]:
     """An image block as a Gemini inline-bytes part; None for any other block, and None,
-    logged, for an image Gemini can't be sent (its type, or only a URL in the message)."""
-    image = decoded_image(block)
-    if image is None:
+    logged, for an image Gemini can't be sent (its type, or no bytes in the message). Only
+    an image Gemini takes is decoded, so a bad one of any other type is left out too."""
+    source = image_source(block)
+    if source is None:
         if block.get("type") in ("image", "image_url"):
-            logger.warning("[gemini] an image given only by URL can't be sent inline; left out")
+            logger.warning("[gemini] an image given only by URL (or malformed) can't be sent inline; left out")
         return None
-    media_type, data = image
+    media_type, data = source
     if media_type not in _GEMINI_IMAGES:
         logger.warning("[gemini] an image of type %r has no Gemini form; left out", media_type)
         return None
-    return types.Part.from_bytes(data=data, mime_type=media_type)
+    return types.Part.from_bytes(data=decode_image(data), mime_type=media_type)
 
 
 def _parts(content: Any) -> List[Any]:

@@ -6,7 +6,7 @@ A message's content can carry an image as an Anthropic-style base64 block
 OpenAI-style data URL (``{"type": "image_url", "image_url": {"url": "data:…;base64,…"}}``,
 as ``modules/attachments/resolver.py`` builds for a small attachment). Bedrock's Converse
 (#1172) and Gemini (#1180) both take the bytes and a media type; each says which media
-types it accepts.
+types it accepts, and decodes only those (:func:`image_source`, then :func:`decode_image`).
 """
 
 import base64
@@ -21,27 +21,36 @@ _ALIASES = {"image/jpg": "image/jpeg"}
 _DATA_URL = re.compile(r"^data:([^;,]*)(?:;[^;,]*?)*?;base64,(.*)$", re.IGNORECASE | re.DOTALL)
 
 
-def _decoded(media_type: str, data: str) -> Tuple[str, bytes]:
-    kind = (media_type or "").strip().lower()
-    try:   # whitespace is dropped first: MIME-wrapped base64 breaks its lines
-        return _ALIASES.get(kind, kind), base64.b64decode("".join(data.split()), validate=True)
-    except (binascii.Error, ValueError) as error:
-        raise ValueError("An image in the conversation isn't valid base64, so it can't be sent.") from error
-
-
 def _mapping(value: Any) -> Dict[str, Any]:
     """``value`` when it is a dict; ``{}`` for anything else (a bare URL string, say), so a
     malformed block is left out like any other non-image block, never an AttributeError."""
     return value if isinstance(value, dict) else {}
 
 
-def decoded_image(block: Dict[str, Any]) -> Optional[Tuple[str, bytes]]:
-    """``(media type, bytes)`` for a base64 image block or a data URL; None for any other
-    block, a plain ``https://`` image URL included (its bytes aren't in the message).
-    Raises ``ValueError`` for data that isn't valid base64."""
+def _source(media_type: Any, data: Any) -> Optional[Tuple[str, str]]:
+    if not isinstance(media_type, str) or not isinstance(data, str):
+        return None   # a field that isn't text: no image, as for any other malformed block
+    kind = media_type.strip().lower()
+    return _ALIASES.get(kind, kind), data
+
+
+def image_source(block: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """``(media type, base64 data)``, not yet decoded, for a base64 image block or a data
+    URL; None for any other block: a plain ``https://`` image URL (its bytes aren't in the
+    message), or one whose fields aren't text. A caller checks the media type first and
+    decodes only an image it can send, with :func:`decode_image`."""
     source = _mapping(block.get("source"))
     if block.get("type") == "image" and source.get("type") == "base64":
-        return _decoded(source.get("media_type", ""), source.get("data", ""))
-    url = str(_mapping(block.get("image_url")).get("url", ""))
-    match = _DATA_URL.match(url) if block.get("type") == "image_url" else None
-    return _decoded(match.group(1), match.group(2)) if match else None
+        return _source(source.get("media_type", ""), source.get("data", ""))
+    url = _mapping(block.get("image_url")).get("url", "")
+    match = _DATA_URL.match(url) if block.get("type") == "image_url" and isinstance(url, str) else None
+    return _source(match.group(1), match.group(2)) if match else None
+
+
+def decode_image(data: str) -> bytes:
+    """An image's base64 data as bytes, strictly; whitespace is dropped first, as
+    MIME-wrapped base64 breaks its lines. Raises ``ValueError`` for data that isn't base64."""
+    try:
+        return base64.b64decode("".join(data.split()), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("An image in the conversation isn't valid base64, so it can't be sent.") from error

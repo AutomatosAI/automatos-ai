@@ -98,7 +98,10 @@ def test_a_data_url_written_another_valid_way_still_reaches_gemini(sent, url):
 
 def test_a_malformed_image_block_is_left_out_not_a_failed_request(sent):
     _ask({"type": "text", "text": "Here."}, {"type": "image_url", "image_url": "https://files.example/cat.png"},
-         {"type": "image", "source": "not-a-mapping"})
+         {"type": "image", "source": "not-a-mapping"},
+         {"type": "image", "source": {"type": "base64", "media_type": 7, "data": None}},   # fields that aren't text
+         {"type": "image_url", "image_url": {"url": 42}},
+         {"type": "image_url", "image_url": {"url": "data:image/gif;base64,!!!"}})        # a type Gemini skips, never decoded
     assert _parts(sent[0]) == [{"text": "Here."}]
 
 
