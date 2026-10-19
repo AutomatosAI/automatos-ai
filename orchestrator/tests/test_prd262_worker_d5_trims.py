@@ -119,11 +119,25 @@ PACKAGE_FILES = {
 }
 AMD64_ONLY = {"libgcc-14-dev": _in(GCC_DIR, "crtprec32.o crtprec64.o crtprec80.o libquadmath.a libquadmath.so")}
 
-# What row 12 deletes: the runtimes, and libgcc-14-dev's archives, preinit objects and links.
+# The compiler itself, named for the arch ({p}). It ships libhwasan_preinit.o, which
+# libgcc-14-dev does not, on both arches (the first local build kept it: 20 Oct 2026).
+COMPILER_PACKAGES = {"amd64": "gcc-14-x86-64-linux-gnu", "arm64": "gcc-14-aarch64-linux-gnu"}
+COMPILER_FILES = [f"/usr/bin/{{t}}-{tool}-14" for tool in (
+    "gcc gcc-ar gcc-nm gcc-ranlib gcov gcov-dump gcov-tool lto-dump").split()] + _in(GCC_DIR, (
+    "libcc1.so libgomp.spec libhwasan_preinit.o libitm.spec liblto_plugin.so libsanitizer.spec"
+    " plugin/libcc1plugin.so plugin/libcc1plugin.so.0 plugin/libcc1plugin.so.0.0.0"
+    " plugin/libcp1plugin.so plugin/libcp1plugin.so.0 plugin/libcp1plugin.so.0.0.0"
+)) + _in("/usr/libexec/gcc/{t}/14", "collect2 liblto_plugin.so lto-wrapper lto1") + [
+    "/usr/share/doc/{p}", "/usr/share/lintian/overrides/{p}",
+    *[f"/usr/share/man/man1/{{t}}-{tool}-14.1.gz" for tool in ("gcc-ar", "gcc-nm", "gcc-ranlib")],
+]
+
+# What row 12 deletes: the runtimes, libgcc-14-dev's archives, preinit objects and links,
+# and the compiler package's libhwasan_preinit.o.
 SANITIZERS_REMOVED = [path for soname in SANITIZER_PACKAGES.values()
                       for path in (f"{LIB_DIR}/{soname}", f"{LIB_DIR}/{soname}.0.0")] + _in(GCC_DIR, (
-    "libasan.a libasan.so libasan_preinit.o libhwasan.a libhwasan.so liblsan.a liblsan.so"
-    " liblsan_preinit.o libtsan.a libtsan.so libtsan_preinit.o libubsan.a libubsan.so"
+    "libasan.a libasan.so libasan_preinit.o libhwasan.a libhwasan.so libhwasan_preinit.o liblsan.a"
+    " liblsan.so liblsan_preinit.o libtsan.a libtsan.so libtsan_preinit.o libubsan.a libubsan.so"
 ))
 ARCHIVES_REMOVED = [f"{LIB_DIR}/libc.a", f"{GCC_DIR}/libstdc++.a"]
 
@@ -131,8 +145,10 @@ ARCHIVES_REMOVED = [f"{LIB_DIR}/libc.a", f"{GCC_DIR}/libstdc++.a"]
 def _installed(arch: str, without: tuple[str, ...] = ()) -> dict[str, list[str]]:
     """Each installed package's file list on ``arch``, less the packages ``without`` names."""
     extras = AMD64_ONLY if arch == "amd64" else {}
-    return {package: [path.format(t=TRIPLETS[arch]) for path in files + extras.get(package, [])]
-            for package, files in PACKAGE_FILES.items() if package not in without}
+    packages = {**PACKAGE_FILES, COMPILER_PACKAGES[arch]: COMPILER_FILES}
+    return {package: [path.format(t=TRIPLETS[arch], p=COMPILER_PACKAGES[arch])
+                      for path in files + extras.get(package, [])]
+            for package, files in packages.items() if package not in without}
 
 
 # --------------------------------------------------------------------------- the stand-ins
@@ -222,7 +238,7 @@ def test_each_list_comes_from_dpkg_and_an_empty_one_fails_the_run():
     ):
         command = re.search(rf"&& {name}=\$\((.*?)\) +&&", APT_RUN).group(1) + ")"
         assert source in command and command.endswith(pattern), name
-    for packages in ("'libgcc-[0-9]*-dev'", "'libstdc++-[0-9]*-dev'"):
+    for packages in ("'libgcc-[0-9]*-dev'", "'gcc-[0-9]*-*-linux-gnu'", "'libstdc++-[0-9]*-dev'"):
         assert packages in APT_RUN, packages
     for name in toolchain.SANITIZER_NAMES:
         assert f"'lib{name}[0-9]*'" in APT_RUN, name
@@ -258,7 +274,8 @@ def test_an_arch_without_one_sanitizer_package_still_builds(tmp_path):
 
 @needs_sh
 def test_no_sanitizer_file_at_all_fails_the_run(tmp_path):
-    code, calls = _run_trims(tmp_path, "arm64", without=(*SANITIZER_PACKAGES, "libgcc-14-dev"))
+    code, calls = _run_trims(tmp_path, "arm64",
+                             without=(*SANITIZER_PACKAGES, "libgcc-14-dev", COMPILER_PACKAGES["arm64"]))
     assert code != 0
     assert calls == [], "nothing deleted, and the RUN stops before ldconfig"
 

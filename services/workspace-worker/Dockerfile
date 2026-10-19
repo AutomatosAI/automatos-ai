@@ -98,6 +98,7 @@ WORKDIR /app
 # - PRD-262 (row 27): libpq5, the libpq the psycopg2 stage's build links. Its own
 #   dependencies (libssl3t64, libgssapi-krb5-2, libldap2) are already here.
 # - PRD-262 §3-D5 (row 12): the sanitizer runtimes, their .a and gcc's links; -fsanitize stops linking.
+#   libhwasan_preinit.o is the compiler package's (gcc-14-<triplet>), not libgcc-14-dev's.
 # - PRD-262 §3-D5 (row 31): libc.a and libstdc++.a; gcc -static and -static-libstdc++ stop linking.
 #   dpkg -L lists both on each arch, and a list that comes back empty fails the RUN. Only
 #   files go, no package, so dpkg records no broken dependency for a later apt-get install.
@@ -111,7 +112,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         /usr/lib/git-core/git-http-push /usr/lib/git-core/git-imap-send \
         /usr/lib/git-core/git-shell /usr/lib/git-core/scalar \
     && ln -sf /usr/bin/git /usr/lib/git-core/git \
-    && sanitizers=$(dpkg-query -W -f '${db:Status-Abbrev} ${binary:Package}\n' 'libgcc-[0-9]*-dev' \
+    && sanitizers=$(dpkg-query -W -f '${db:Status-Abbrev} ${binary:Package}\n' \
+            'libgcc-[0-9]*-dev' 'gcc-[0-9]*-*-linux-gnu' \
             'libasan[0-9]*' 'libhwasan[0-9]*' 'liblsan[0-9]*' 'libtsan[0-9]*' 'libubsan[0-9]*' 2>/dev/null \
         | awk '$1 == "ii" {print $2}' | xargs -r dpkg -L \
         | grep -E '^/usr/lib/.+/lib(asan|hwasan|lsan|tsan|ubsan)[._][^/]*$') \
