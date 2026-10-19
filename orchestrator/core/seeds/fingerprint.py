@@ -66,6 +66,7 @@ INPUT_FILES = (
     "core/database/load_seed_data.py",
     "core/llm/defaults.py",
     "core/llm/list_prices.py",
+    "core/monitoring/request_log_guard.py",
     "core/services/anthropic_catalog_sync.py",
     "modules/documents/presets.py",
     "modules/documents/seed_templates.py",
@@ -289,4 +290,6 @@ def main(argv: Optional[Sequence[str]] = None, stdin: Optional[TextIO] = None) -
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
+    from core.monitoring.request_log_guard import guard_request_logs
+    guard_request_logs()  # no request URL or SDK request body in this script's logs (#1178)
     sys.exit(main())

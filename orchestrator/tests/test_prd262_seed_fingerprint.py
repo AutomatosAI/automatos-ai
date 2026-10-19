@@ -189,10 +189,16 @@ def test_the_check_imports_config_but_not_the_app():
     modules = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
     modules |= {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
     local = {module for module in modules if module.split(".")[0] in _orchestrator_tops()}
-    assert local == {"config"}, local
+    # The #1178 request-log guard every script that configures logging installs; it
+    # imports only the standard library, which the second check below holds it to.
+    assert local == {"config", "core.monitoring.request_log_guard"}, local
+    guard = ast.parse((_ORCH / "core" / "monitoring" / "request_log_guard.py").read_text(encoding="utf-8"))
+    assert not [node for node in ast.walk(guard) if isinstance(node, ast.ImportFrom) and node.module
+                and node.module.split(".")[0] in _orchestrator_tops()], "the guard imports the app"
     third_party = {module.split(".")[0] for module in modules} - set(sys.stdlib_module_names) - {"__future__"}
     # dotenv: the check reads orchestrator/.env as the app does; sqlalchemy: inside the storage functions.
-    assert third_party <= {"config", "dotenv", "sqlalchemy"}, third_party
+    # config and core are the two local modules pinned exactly above.
+    assert third_party <= {"config", "core", "dotenv", "sqlalchemy"}, third_party
 
 
 # --------------------------------------------------------------------------- clean runs
