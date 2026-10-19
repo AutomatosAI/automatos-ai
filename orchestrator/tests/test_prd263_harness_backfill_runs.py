@@ -186,3 +186,34 @@ def test_a_linked_workspace_directory_is_never_followed(workspace, volume, new_s
 
     assert hr.runs(new_session, workspace) == []
     assert f"workspace {workspace}" not in capsys.readouterr().out
+
+
+def test_a_run_dated_this_week_or_later_is_never_imported(workspace, volume, new_session, capsys):
+    # A file on the volume could be planted: a time from the current ISO week on would
+    # settle the week the sweep is about to judge, so it is unusable.
+    from datetime import datetime, timedelta, timezone
+
+    harness = volume / str(workspace) / "harness"
+    now = datetime.now(timezone.utc)
+    for name, at in (("now", now), ("future", now + timedelta(days=30))):
+        (harness / "baselines" / f"{name}.json").write_text(json.dumps({**SECOND, "created_at": at.isoformat()}))
+
+    assert _backfill("--apply") == 0
+
+    assert sorted(row["cur_window"] for row in hr.runs(new_session, workspace)) == [
+        FIRST_WEEK, SECOND_WEEK, LAST_RUN_WEEK]
+    assert "7 files (3 unusable), 3 weeks, inserted 3" in capsys.readouterr().out
+
+
+def test_only_known_integer_sufficiency_keys_reach_counts(workspace, volume, new_session):
+    harness = volume / str(workspace) / "harness"
+    (harness / "runs" / "last_run.json").write_text(json.dumps({
+        "status": "dormant_insufficient_agents", "timestamp": LAST_RUN["timestamp"],
+        "sufficiency": {"active_agents": 2, "min_required_agents": 3, "agents_ok": False,
+                        "note": "x" * 50, "nested": {"a": 1}},
+    }))
+
+    assert _backfill("--apply") == 0
+
+    last = {row["cur_window"]: row for row in hr.runs(new_session, workspace)}[LAST_RUN_WEEK]
+    assert last["counts"] == {"active_agents": 2, "min_required_agents": 3}

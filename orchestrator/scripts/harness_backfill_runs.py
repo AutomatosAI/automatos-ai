@@ -45,7 +45,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import reduce
 from pathlib import Path
 from typing import TYPE_CHECKING, AbstractSet, Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -79,6 +79,13 @@ QUEUED_CHANGES = "queued_changes"
 QUEUED_COUNT = "queued"
 # What a failed run that left no reason says it failed of.
 UNKNOWN_ERROR = "unknown"
+# Bounds on a time read from a file on the volume, which a workspace's tools can
+# write: nothing before HARNESS first shipped (PRD-121), and nothing from the
+# current ISO week on, so an imported row can never settle the week the sweep is
+# about to judge (week_is_settled) or stand as the latest run.
+HARNESS_FIRST_SHIPPED = datetime(2026, 3, 31, tzinfo=timezone.utc)
+# The old loop's last_run.json sufficiency keys kept in counts (integers only).
+SUFFICIENCY_KEYS = ("active_agents", "min_required_agents", "heartbeat_days_available", "min_required_days")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -146,6 +153,19 @@ def _parse_time(value: Any, fallback: Optional[datetime] = None) -> Optional[dat
     return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment.astimezone(timezone.utc)
 
 
+def _current_week_start(now: Optional[datetime] = None) -> datetime:
+    """Monday 00:00 UTC of the ISO week containing ``now`` (default: the time of import)."""
+    today = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return datetime(today.year, today.month, today.day, tzinfo=timezone.utc) - timedelta(days=today.weekday())
+
+
+def _plausible(at: Optional[datetime]) -> Optional[datetime]:
+    """``at`` when it lies between HARNESS's first release and the current ISO week, else None."""
+    if at is None or not HARNESS_FIRST_SHIPPED <= at < _current_week_start():
+        return None
+    return at
+
+
 def _day_of(path: Path) -> Optional[datetime]:
     """Midnight UTC of a ``<YYYY-MM-DD>.json`` archive's day, or None for another name."""
     return _parse_time(path.stem)
@@ -165,7 +185,7 @@ def _changes(data: Dict[str, Any], key: str, outcome: str) -> List[Dict[str, Any
 
 def _baseline_row(data: Dict[str, Any], path: Path) -> Optional[Dict[str, Any]]:
     """A completed run's harness_runs row from its baseline, or None without a time."""
-    at = _parse_time(data.get("created_at"), _day_of(path))
+    at = _plausible(_parse_time(data.get("created_at"), _day_of(path)))
     if at is None:
         return None
     applied = _changes(data, APPLIED_CHANGES, harness_runs.IMPORTED_APPLIED)
@@ -191,7 +211,7 @@ def _last_run_row(data: Dict[str, Any], baselines: Sequence[Dict[str, Any]]) -> 
 
     Its iteration is the one it recorded, else that of the newest baseline before it.
     """
-    status, at = data.get("status"), _parse_time(data.get("timestamp"))
+    status, at = data.get("status"), _plausible(_parse_time(data.get("timestamp")))
     if status not in LAST_RUN_STATUSES or at is None:
         return None
     earlier = [row["iteration"] for row in baselines if row["started_at"] <= at]
@@ -204,8 +224,12 @@ def _last_run_row(data: Dict[str, Any], baselines: Sequence[Dict[str, Any]]) -> 
     }
     if status == RUN_FAILED:
         row["report_status"] = harness_runs.failure(str(data.get("error") or UNKNOWN_ERROR))
-    if isinstance(data.get("sufficiency"), dict):
-        row["counts"] = data["sufficiency"]
+    sufficiency = data.get("sufficiency")
+    if isinstance(sufficiency, dict):
+        row["counts"] = {
+            key: int(sufficiency[key]) for key in SUFFICIENCY_KEYS
+            if isinstance(sufficiency.get(key), int) and not isinstance(sufficiency.get(key), bool)
+        }
     return row
 
 
