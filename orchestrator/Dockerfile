@@ -4,6 +4,7 @@
 # Stages:
 #   - base: Common dependencies
 #   - development: Hot reload; no code (compose mounts the source over /app)
+#   - compile: the code, with its boot modules compiled; never ships itself
 #   - production: Optimized, minimal image
 # =============================================================================
 
@@ -190,6 +191,28 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 CMD exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5
 
 # =============================================================================
+# Compile Stage - the code, and its boot modules' bytecode (PRD-262 US-032)
+# =============================================================================
+# The production image's only source of app bytecode: .dockerignore keeps a
+# checkout's .pyc out of the context (PRD-262 US-017), and nothing else writes any
+# under /app. FROM base, so the bytecode is the runtime interpreter's. It compiles
+# the modules every API process imports at boot (scripts/boot_modules.py: main's
+# static import closure, the routers router_manifest.py mounts and the entrypoint's
+# seed check), not all of /app: bytecode changes with every code edit, so it rides
+# in every code-only update. unchecked-hash: Python never compares a .pyc with its
+# source, so the build's file times can't make one stale, and a new container
+# imports the boot set instead of compiling it first. PYTHONHASHSEED=0 fixes the
+# string hashes, the one input of a .pyc that changes from run to run. The list
+# goes to /tmp, which the production stage does not copy. §9-Q7: the bytecode stays
+# only if .github/workflows/bytecode-experiment.yml shows a new container reaching
+# /health 200 at least 2 s sooner with it, within US-016's update bar.
+FROM base as compile
+
+COPY . .
+RUN python scripts/boot_modules.py > /tmp/boot-modules.txt && \
+    PYTHONHASHSEED=0 python -m compileall -q --invalidation-mode unchecked-hash -i /tmp/boot-modules.txt
+
+# =============================================================================
 # Production Stage - Optimized & Minimal
 # =============================================================================
 FROM base as production
@@ -222,13 +245,14 @@ COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The healthcheck (F416): the HEALTHCHECK below and the entrypoint's watchdog both run it.
 COPY --chmod=0755 docker-healthcheck.sh /usr/local/bin/docker-healthcheck.sh
 
-# The application code: the stage's last filesystem layer, so a code-only update
-# downloads this one layer (PRD-262 US-016; images.yml judges it against
-# .github/image-budgets.json's update bar). Owned by the user created above, by
-# its numeric id. Everything after it only sets image metadata. The test tools
-# are in requirements-dev.txt, which only CI installs; .dockerignore keeps the
-# rest of the context out.
-COPY --chown=1000:1000 . .
+# The application code, with its boot modules' bytecode from the compile stage
+# (PRD-262 US-032): the stage's last filesystem layer, code and bytecode together,
+# so a code-only update downloads this one layer (PRD-262 US-016; images.yml
+# judges it against .github/image-budgets.json's update bar). Owned by the user
+# created above, by its numeric id. Everything after it only sets image metadata.
+# The test tools are in requirements-dev.txt, which only CI installs;
+# .dockerignore keeps the rest of the context out.
+COPY --from=compile --chown=1000:1000 /app /app
 USER automatos
 
 # Expose port

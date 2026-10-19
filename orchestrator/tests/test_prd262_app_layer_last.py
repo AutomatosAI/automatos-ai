@@ -5,7 +5,10 @@ The production stage used to copy the code in with `COPY . .` and then run
 `pip uninstall` RUN that US-014 removed sat between them. A code-only update
 downloaded 14.7 MB in three layers over 1 MB. Now the stage creates the user and its
 writable directories first, compiles the stdlib, copies the entrypoint and the
-healthcheck, and ends with `COPY --chown=1000:1000 . .` as its last filesystem layer.
+healthcheck, and ends with the code as its last filesystem layer, owned by the user.
+Since PRD-262 US-032 that layer is `COPY --from=compile --chown=1000:1000 /app /app`:
+the compile stage copies the context and compiles the boot modules, so code and
+bytecode arrive together, in one layer (test_prd262_app_bytecode.py checks that stage).
 
 This suite checks:
 
@@ -14,8 +17,10 @@ This suite checks:
 - every named volume a compose file mounts under /app lands on a directory the user
   owns, so a fresh volume starts writable;
 - what a code change rebuilds, modelled on the committed Dockerfile with the layer
-  sizes recorded from `edge` (tests/fixtures/prd262_edge_images.json): one layer,
-  within the update bar, where the old order cost 14.65 MB in three layers;
+  sizes recorded from `edge` (tests/fixtures/prd262_edge_images.json): one layer, whose
+  source share is within the update bar, where the old order cost 14.65 MB in three
+  layers. The bytecode's share is measured, not modelled (US-032's experiment and
+  images.yml's update bar on the real image);
 - the update bar in .github/image-budgets.json, its verdict, and the `budget` command
   images.yml runs on every build, in the file's mode (warn until US-004);
 - the stdlib compile's layer counts as the runtime (`system`), so a rebuilt compile is
@@ -45,7 +50,10 @@ EDGE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "prd262_edge_image
 EDGE = json.loads(EDGE_FIXTURE.read_text(encoding="utf-8"))
 COMPOSE_FILES = ("docker-compose.yml", "docker-compose.dev.yml", "docker-compose.images.yml")
 
-APP_COPY = "COPY --chown=1000:1000 . ."
+# The code and its boot modules' bytecode, from the compile stage (PRD-262 US-032).
+APP_COPY = "COPY --from=compile --chown=1000:1000 /app /app"
+# How BuildKit records that COPY in the image's history: no flags.
+APP_COPY_HISTORY = "COPY /app /app"
 WRITABLE = ("/app/logs", "/app/vector_stores", "/app/projects", "/app/exports", "/app/data")
 # Instructions that only set image metadata, and those that can add a filesystem layer.
 METADATA = {"USER", "EXPOSE", "HEALTHCHECK", "ENTRYPOINT", "CMD", "ENV", "LABEL", "STOPSIGNAL", "ARG", "SHELL"}
@@ -80,16 +88,17 @@ def _instructions(text: str) -> list[str]:
     return [" ".join(line.split()) for line in _CONTINUATION.sub(" ", code).splitlines() if line.strip()]
 
 
-def _production() -> list[str]:
-    """The production stage's instructions after its FROM."""
+def _stage(name: str) -> list[str]:
+    """A stage's instructions after its FROM."""
     instructions = _instructions(DOCKERFILE)
-    start = next(i for i, line in enumerate(instructions) if re.fullmatch(r"FROM \S+ as production", line, re.I))
+    start = next(i for i, line in enumerate(instructions) if re.fullmatch(rf"FROM \S+ as {name}", line, re.I))
     end = next((i for i in range(start + 1, len(instructions)) if instructions[i].upper().startswith("FROM ")),
                len(instructions))
     return instructions[start + 1:end]
 
 
-PRODUCTION = _production()
+PRODUCTION = _stage("production")
+COMPILE = _stage("compile")
 
 
 def _word(line: str) -> str:
@@ -99,6 +108,11 @@ def _word(line: str) -> str:
 def _reads_the_whole_context(line: str) -> bool:
     """A COPY or ADD of the build context's root, which every code change invalidates."""
     return bool(re.fullmatch(r"(?:COPY|ADD) (?:--(?!from=)\S+ )*\. \S+", line))
+
+
+def _carries_the_code(line: str) -> bool:
+    """A layer every code change rebuilds: the context's root, or /app from the stage that copied it."""
+    return _reads_the_whole_context(line) or line == APP_COPY
 
 
 def _commands(run: str) -> list[list[str]]:
@@ -126,8 +140,10 @@ def test_the_user_and_its_writable_directories_come_first():
 
 def test_the_code_is_copied_in_under_the_users_numeric_id():
     uid = _commands(PRODUCTION[0])[0][3]
-    assert APP_COPY == f"COPY --chown={uid}:{uid} . ."
-    assert [line for line in PRODUCTION if _reads_the_whole_context(line)] == [APP_COPY]
+    assert APP_COPY == f"COPY --from=compile --chown={uid}:{uid} /app /app"
+    assert [line for line in PRODUCTION if _carries_the_code(line)] == [APP_COPY]
+    assert not [line for line in PRODUCTION if _reads_the_whole_context(line)], "the code comes from the compile stage"
+    assert [line for line in COMPILE if _reads_the_whole_context(line)] == ["COPY . ."]
 
 
 def test_the_code_is_the_last_filesystem_layer_and_only_metadata_follows():
@@ -215,8 +231,12 @@ def _digest(tag: str, position: int) -> str:
 
 
 def _size(line: str) -> int:
-    """The size `edge` recorded for this production-stage instruction, or the assumed one."""
-    if _reads_the_whole_context(line):
+    """The size `edge` recorded for this production-stage instruction, or the assumed one.
+
+    The app layer gets the source's recorded size: the bytecode's share is measured on
+    the real image (PRD-262 US-032), not assumed here.
+    """
+    if _carries_the_code(line):
         return RECORDED["COPY . ."]
     if "compileall" in line:
         return STDLIB_PYC_BYTES
@@ -235,9 +255,9 @@ def _committed_image() -> tuple[dict, dict]:
 
 
 def _code_change(manifest: dict, config: dict) -> dict:
-    """``manifest`` after a code-only change: every layer from the first that reads the whole context is rebuilt."""
+    """``manifest`` after a code-only change: every layer from the first that carries the code is rebuilt."""
     texts = [layers.instruction(entry) for entry in config["history"] if not entry.get("empty_layer")]
-    first = next(i for i, text in enumerate(texts) if _reads_the_whole_context(text))
+    first = next(i for i, text in enumerate(texts) if _carries_the_code(text))
     changed = copy.deepcopy(manifest)
     for position in range(first, len(changed["layers"])):
         changed["layers"][position]["digest"] = _digest("code", position)
@@ -257,10 +277,14 @@ def _old_code_update() -> dict:
 
 
 def test_a_code_change_now_downloads_the_app_layer_alone_within_the_bar():
+    """One new layer, the code and its bytecode. Its source share (5.3 MB in `edge`) is within
+    the 6 MB bar; what the bytecode adds is measured on the real image (PRD-262 US-032, §9-Q7)."""
     edge, config = _committed_image()
     measured = _measured(_code_change(edge, config), config, edge)
     delta = measured["delta"]
     assert (delta["change"], delta["layers"], delta["bytes"]) == ("code-only", 1, RECORDED["COPY . ."])
+    (fresh,) = delta["new_digests"]
+    assert next(row for row in measured["layers"] if row["digest"] == fresh)["instruction"] == APP_COPY
     verdict = layers.update_verdict(measured, FAIL_MODE)
     assert verdict.level == "ok", verdict.message
     assert "5.3 MB, with 1 new layers over 1 MB, within its bar" in verdict.message
@@ -351,3 +375,4 @@ def test_the_stdlib_compile_is_the_runtime_and_an_app_compile_is_code():
     assert layers.kind_of("RUN python -m compileall -q /app") == "code"
     assert layers.kind_of("COPY --from=compile --chown=1000:1000 /app /app") == "code"
     assert layers.kind_of(APP_COPY) == "code"
+    assert layers.kind_of(APP_COPY_HISTORY) == "code", "the app layer as the image's history names it"

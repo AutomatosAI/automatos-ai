@@ -9,7 +9,8 @@ They now live in requirements-dev.txt, which only CI installs. This suite checks
   files name no package twice;
 - the Dockerfile installs requirements.txt alone, has no `pip uninstall`, and its
   production stage compiles the stdlib once, as root, excluding site-packages, before
-  the app code is copied in;
+  the app code is copied in; the only other compile is the compile stage's, of the
+  app's boot modules (PRD-262 US-032);
 - every CI install of requirements.txt installs the dev file in the same pip command,
   and every pip cache key on requirements.txt lists the dev file too;
 - the image workflows watch the dev file;
@@ -111,10 +112,15 @@ def test_no_pip_uninstall_is_left():
 
 def test_the_production_stage_compiles_the_stdlib_once_as_root_before_the_app():
     production = _stage(DOCKERFILE, "production")
-    compiles = [line for line in _instructions(DOCKERFILE) if "compileall" in line]
+    compiles = [line for line in production if "compileall" in line]
     assert compiles == [STDLIB_COMPILE], "one stdlib compile, site-packages excluded, unchecked-hash"
+    # The only other compile is the app's boot modules, in the compile stage the app
+    # layer comes from (PRD-262 US-032); it compiles nothing under /usr/local.
+    elsewhere = [line for line in _instructions(DOCKERFILE) if "compileall" in line and line not in production]
+    assert len(elsewhere) == 1 and elsewhere[0] in _stage(DOCKERFILE, "compile"), elsewhere
+    assert "/usr/local" not in elsewhere[0]
     at = production.index(STDLIB_COMPILE)
-    app = next(i for i, line in enumerate(production) if re.fullmatch(r"COPY (--\S+ )*\. \.", line))
+    app = next(i for i, line in enumerate(production) if re.fullmatch(r"COPY (--\S+ )*(\. \.|/app /app)", line))
     assert at < app, "before the app code, so a code change reuses the layer"
     users = [i for i, line in enumerate(production) if line.startswith("USER ")]
     assert users and at < users[0], "as root: the automatos user can't write to /usr/local"

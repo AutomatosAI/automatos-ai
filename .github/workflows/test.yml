@@ -87,11 +87,12 @@ jobs:
           # What the three default-args builds bake: Dockerfiles, dependency
           # manifests, the frontend edition literal, the worker image; the scripts
           # that look inside them (packages, system tools, the Helvetica render, the
-          # test image, site-packages' native libraries, botocore's services), the one
-          # that reads the API's build context off its log, and the clone tests the
+          # test image, site-packages' native libraries, botocore's services, the app's
+          # bytecode), the one that reads the API's build context off its log, the list
+          # of boot modules the API's compile stage compiles, and the clone tests the
           # test image runs.
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.txt|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore|image_app_bytecode)\.py$|^orchestrator/scripts/boot_modules\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -1032,8 +1033,9 @@ jobs:
           set -o pipefail
           docker build --target production -t parity-be orchestrator/ 2>&1 | tee "$RUNNER_TEMP/parity-be-build.log"
           docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
-      # The production stage copies the whole context, so what the build sent is what
-      # orchestrator/.dockerignore let in (scripts/ci/build_context.py reads it off the log).
+      # The compile stage copies the whole context (the production stage copies /app from
+      # it, PRD-262 US-032), so what the build sent is what orchestrator/.dockerignore let
+      # in (scripts/ci/build_context.py reads it off the log).
       - name: Backend — the build context left the uploads and caches out
         run: python3 scripts/ci/build_context.py check "$RUNNER_TEMP/parity-be-build.log"
       # PRD-262 US-014: the test tools are in requirements-dev.txt, which only CI
@@ -1082,6 +1084,14 @@ jobs:
       # gid 1000) instead of through a `chown -R /app` layer, and /app and the
       # directories the named volumes mount on are the user's own, so the app writes
       # there as before. Runs as the image's own user.
+      # PRD-262 US-032: the compile stage compiles the boot modules (the image's own
+      # scripts/boot_modules.py lists them), and the production stage copies them in with
+      # the code. Every .pyc under /app is this Python's unchecked-hash bytecode of the
+      # source beside it, the compiled set is exactly that list, and `import main` rewrites
+      # none of it; the modules it compiles at start-up anyway are reported
+      # (scripts/ci/image_app_bytecode.py). Runs as the image's own user.
+      - name: Backend — the boot modules ship as bytecode of their own source
+        run: docker run --rm -i --entrypoint python parity-be - < scripts/ci/image_app_bytecode.py
       - name: Backend — the app and its writable directories belong to the automatos user
         run: |
           docker run --rm --entrypoint sh parity-be -c '
