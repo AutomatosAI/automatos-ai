@@ -42,8 +42,12 @@ INPUT = "requirements.in"
 IMAGE_LOCKS = ("requirements.lock",)
 TOOLS = {"pytest", "pytest-asyncio", "pytest-timeout", "pytest-cov", "black", "isort", "import-linter"}
 STDLIB = "/usr/local/lib/python3.11"
+# site-packages' bytecode is pybuild's; idlelib, tkinter, turtledemo, lib2to3 and pydoc_data
+# never run in the API (PRD-262, the 19 Oct breakdown's row #47).
+STDLIB_EXCLUDED = ("idlelib", "tkinter", "turtledemo", "lib2to3", "pydoc_data")
+STDLIB_EXCLUDE = f"/site-packages/|/({'|'.join(STDLIB_EXCLUDED)})/"
 STDLIB_COMPILE = (
-    f"RUN python -m compileall -q -x '/site-packages/' --invalidation-mode unchecked-hash {STDLIB}"
+    f"RUN python -m compileall -q -x '{STDLIB_EXCLUDE}' --invalidation-mode unchecked-hash {STDLIB}"
 )
 _CONTINUATION = re.compile(r"\\[ \t]*\n")
 _NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
@@ -117,6 +121,22 @@ def test_the_image_never_installs_the_dev_file():
 def test_no_pip_uninstall_is_left():
     """The uninstall RUN added a layer instead of removing one, and missed three tools."""
     assert not [line for line in _instructions(DOCKERFILE) if "pip uninstall" in line]
+
+
+@pytest.mark.parametrize("path,excluded", [
+    (f"{STDLIB}/site-packages/numpy/__init__.py", True),
+    (f"{STDLIB}/idlelib/editor.py", True),
+    (f"{STDLIB}/tkinter/__init__.py", True),
+    (f"{STDLIB}/turtledemo/clock.py", True),
+    (f"{STDLIB}/lib2to3/main.py", True),
+    (f"{STDLIB}/pydoc_data/topics.py", True),
+    (f"{STDLIB}/json/decoder.py", False),
+    (f"{STDLIB}/pydoc.py", False),  # the module stays compiled; only its help-topic data goes
+    (f"{STDLIB}/asyncio/tasks.py", False),
+])
+def test_the_stdlib_compile_skips_only_what_never_runs(path, excluded):
+    """compileall searches -x's pattern in each file's full path (PRD-262 row #47)."""
+    assert bool(re.search(STDLIB_EXCLUDE, path)) is excluded
 
 
 def test_the_production_stage_compiles_the_stdlib_once_as_root_before_the_app():
