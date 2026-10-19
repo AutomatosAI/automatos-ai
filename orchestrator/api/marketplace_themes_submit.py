@@ -15,14 +15,19 @@ A workspace member submits a ``.autotheme`` for review:
    time (``services/themes/upload_claim.py``, scope ``marketplace``: an overlapping one is 409,
    try again, so a resent request never pays for the stage twice); the request's read
    transaction ends before the stage, so no connection waits idle in transaction while it runs.
-   The LLM check reads ``source/`` only on the hosted edition, where the isolated job rebuilds
-   ``dist/`` from it; the local edition never has that job, so it reads ``dist/``;
+   What it may spend (``services/themes/review_limits.py``): a review slot in this process is
+   taken first, before the claim's connection (503 with ``Retry-After`` when
+   ``THEME_REVIEW_MAX_CONCURRENT`` stages already run); a person past
+   ``THEME_SUBMISSIONS_PER_DAY`` in 24 hours is 429; and the LLM check gets what is left of
+   ``THEME_REVIEW_DAILY_TOKENS``. The LLM check reads ``dist/``, and ``source/`` too when shipped;
 6. the files are stored under ``themes/<publisher>/<slug>/<version>/`` before the commit, so a
    failed write leaves no row (503); the row is ``owner_type`` 'marketplace', ``status``
    'pending', ``reviewed`` false, with the stage's report and verdict, and its review events.
 
 201 with the submission; 200 with the existing one when these exact bytes were submitted
-already. Nothing is published: a person reviews every version (C-03a, D3).
+already. The answer carries the stage's verdict and its plain checks; the LLM check's score and
+findings are the reviewer's alone (``review_stage.member_view``). Nothing is published: a person
+reviews every version (C-03a, D3).
 
 Gates, in order: ``members:read``, the Marketplace switch, then a fresh step-up (A-07c,
 ``STEP_UP_MAX_AGE_MINUTES``), so a caller refused anyway is never asked to reverify. C1-wire
@@ -33,7 +38,7 @@ mount it on a test app. A plain ``def`` (a synchronous session and S3 client, in
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.exc import IntegrityError
@@ -49,7 +54,8 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from services.themes.package import ThemePackage as CheckedThemePackage
 from services.themes.package import ThemePackageError, cap_bytes, read_theme_package
-from services.themes.review_stage import run_review_stage
+from services.themes import review_limits
+from services.themes.review_stage import member_view, run_review_stage
 from services.themes.storage import theme_prefix, write_theme_files
 from services.themes.upload_claim import upload_claim
 from services.themes.submissions import (
@@ -80,12 +86,13 @@ def require_marketplace() -> None:
         raise HTTPException(status_code=403, detail=MARKETPLACE_OFF)
 
 
-def marketplace_review(checked: CheckedThemePackage, package_bytes: int) -> Dict[str, Any]:
-    """C-02a's stage on a submission. On the hosted edition the LLM check reads ``source/`` when the
-    package ships it, because the isolated job (C-02b) rebuilds ``dist/`` from it and approve needs
-    its passing note. The local edition never has that job (approve skips the note there), so it
-    reads ``dist/``: the code the browser runs."""
-    return run_review_stage(checked, package_bytes, prefer_source=not config.IS_LOCAL_EDITION)
+def marketplace_review(checked: CheckedThemePackage, package_bytes: int,
+                       token_budget: Optional[int] = None) -> Dict[str, Any]:
+    """C-02a's stage on a submission. The LLM check always reads ``dist/``, the code the browser
+    runs, and ``source/`` as well when the package ships it (the isolated job, C-02b, rebuilds
+    ``dist/`` from it); one score, the highest of both. ``token_budget``: what is left of the day's
+    review tokens (the route always passes it)."""
+    return run_review_stage(checked, package_bytes, include_source=True, token_budget=token_budget)
 
 
 def submission_review_stage() -> ReviewStage:
@@ -146,17 +153,24 @@ def _refusal(db: Session, exc: Exception) -> HTTPException:
     return HTTPException(status_code=status, detail=str(exc))
 
 
-def _report(db: Session, checked: CheckedThemePackage, stage: ReviewStage, package_bytes: int) -> Dict[str, Any]:
+def _report(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage: ReviewStage,
+            package_bytes: int) -> Dict[str, Any]:
     """The stage's report; the existing one when these bytes were submitted already (reused as it is).
 
-    The read transaction ends before the stage, so the session holds no connection while it runs;
-    ``save_submission`` checks everything again under its row lock.
+    A person past ``THEME_SUBMISSIONS_PER_DAY`` is 429 before the stage; the stage gets what is
+    left of the day's review tokens. The read transaction ends before the stage, so the session
+    holds no connection while it runs; ``save_submission`` checks everything again under its row lock.
     """
     existing = submission_by_digest(db, checked.digest)
     if existing is not None:
         return dict(existing.scan_report or {"verdict": existing.scan_verdict})
+    refusal = review_limits.submission_quota_refusal(db, submitter.user_pk)
+    if refusal is not None:
+        db.rollback()
+        raise HTTPException(status_code=429, detail=refusal)
+    tokens_left = review_limits.tokens_left_today(db)
     db.rollback()
-    return stage(checked, package_bytes)
+    return stage(checked, package_bytes, token_budget=tokens_left)
 
 
 def _save_claimed(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage: ReviewStage,
@@ -166,7 +180,7 @@ def _save_claimed(db: Session, checked: CheckedThemePackage, submitter: Submitte
     prefix = theme_prefix(manifest["id"], manifest["version"])
     try:
         check_submission(db, manifest, checked.digest, submitter)
-        report = _report(db, checked, stage, package_bytes)
+        report = _report(db, checked, submitter, stage, package_bytes)
         return save_submission(db, checked, submitter, prefix, report, store=lambda: _store(prefix, checked))
     except (PublisherReserved, SubmissionConflict) as exc:
         raise _refusal(db, exc) from exc
@@ -176,6 +190,21 @@ def _save_claimed(db: Session, checked: CheckedThemePackage, submitter: Submitte
 
 def _save(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage: ReviewStage,
           package_bytes: int) -> SavedSubmission:
+    """Review and save in a review slot, under the (marketplace, digest) claim.
+
+    The slot is taken first, before the claim holds a connection: 503 with ``Retry-After`` while
+    ``THEME_REVIEW_MAX_CONCURRENT`` stages run here; 409 while another submission of these bytes runs.
+    """
+    with review_limits.review_slot() as slot:
+        if not slot:
+            logger.info("[Themes] Submission of %s refused: every review slot is busy", checked.manifest["id"])
+            db.rollback()
+            raise HTTPException(status_code=503, detail=review_limits.REVIEWS_BUSY, headers=review_limits.busy_headers())
+        return _save_in_slot(db, checked, submitter, stage, package_bytes)
+
+
+def _save_in_slot(db: Session, checked: CheckedThemePackage, submitter: Submitter, stage: ReviewStage,
+                  package_bytes: int) -> SavedSubmission:
     """Review and save under the (marketplace, digest) claim: 409 while another submission of these bytes runs."""
     with upload_claim(db, CLAIM_SCOPE, checked.digest) as claimed:
         if not claimed:
@@ -193,7 +222,7 @@ def submission_item(saved: SavedSubmission) -> Dict[str, Any]:
             "id": str(package.id), "themeId": package.theme_id, "version": package.version,
             "name": (package.manifest or {}).get("name"), "digest": package.digest,
             "ownerType": package.owner_type, "status": package.status, "reviewed": bool(package.reviewed),
-            "scanVerdict": package.scan_verdict, "scanReport": package.scan_report,
+            "scanVerdict": package.scan_verdict, "scanReport": member_view(package.scan_report),
         },
         "duplicate": not saved.created,
     }

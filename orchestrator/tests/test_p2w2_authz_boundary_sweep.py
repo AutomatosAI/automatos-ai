@@ -172,6 +172,11 @@ ADMIN_GATED_IN_HANDLER = {
     # PRD-261 C-03a (C1-wire): the theme review queue. Platform-wide, not workspace-scoped:
     # every handler calls `_require_admin(ctx)` (`caller_is_admin`, super-admin-inclusive)
     # first. Submit and listing install are workspace-gated (bucket a), not listed here.
+    # W-C1 L7: report-note, approve, deactivate and signature also carry a fresh step-up,
+    # behind the same admin check run as a dependency (`require_theme_admin`, before the
+    # step-up), so a non-admin gets the plain 403; the bucket is unchanged (the handler still
+    # asserts `_require_admin(ctx)` first). Order pinned in test_prd261_c1_wire.py and
+    # test_prd261_admin_themes.py.
     ("POST", "/api/admin/themes/{package_id}/approve"),
     ("POST", "/api/admin/themes/{package_id}/deactivate"),
     ("POST", "/api/admin/themes/{package_id}/reject"),

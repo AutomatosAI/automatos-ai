@@ -174,12 +174,15 @@ def _rows(env, model):
 
 def _stage(verdict):
     calls = []
+    budgets = []
 
-    def stage(checked, package_bytes):
+    def stage(checked, package_bytes, token_budget=None):
         calls.append(sorted(checked.files))
+        budgets.append(token_budget)
         return {"schema": "automatos-theme-scan/v1", "verdict": verdict, "checks": {}}
 
     stage.calls = calls
+    stage.budgets = budgets
     return stage
 
 
@@ -236,7 +239,7 @@ def test_a_submission_is_a_pending_marketplace_row_with_its_stage_verdict(env):
     assert (publisher.publisher, publisher.owner_user_id, publisher.reserved) == ("automatos-e2e", 1, False)
 
 
-def test_by_default_the_c02a_stage_runs_on_source_and_with_no_llm_key_a_person_may_approve(env):
+def test_by_default_the_c02a_stage_runs_on_dist_and_source_and_with_no_llm_key_a_person_may_approve(env):
     # C1-wire: submit's default stage is C-02a's, never A-07a's "not_run" report (approve refuses that).
     data = build.build_package(replace={"source/src/index.tsx": b"export default {}\n"})
     response = _submit(_client(env, _ctx()), data)
@@ -244,10 +247,10 @@ def test_by_default_the_c02a_stage_runs_on_source_and_with_no_llm_key_a_person_m
     (row,) = _rows(env, ThemePackage)
     llm = row.scan_report["checks"]["llm"]
     assert row.scan_verdict == "review_required" and row.scan_report["schema"] == "automatos-theme-scan/v2"
-    assert llm["reason"].startswith(DID_NOT_RUN) and llm["read"] == "source"
+    assert llm["reason"].startswith(DID_NOT_RUN) and llm["read"] == "dist+source"
 
     admin = _client(env, _ctx("admin_1", system_role="admin"))
-    note = {"summary": "isolated job: reproducible build, digests equal", "outcome": "pass"}
+    note = {"summary": f"Outcome: pass\nPackage digest:  {row.digest}\nreproducible build", "outcome": "pass"}
     assert admin.post(f"/api/admin/themes/{row.id}/report-note", json=note).status_code == 200
     approved = admin.post(f"/api/admin/themes/{row.id}/approve")
     assert approved.status_code == 200, approved.text
@@ -295,8 +298,8 @@ def test_a_submission_overlapping_one_of_the_same_bytes_is_409_and_never_runs_th
     assert _submit(client, _hello()).status_code == 201 and len(stage.calls) == 1
 
 
-@pytest.mark.parametrize("edition, read", [("saas", "source"), ("local", "dist")])
-def test_the_llm_check_reads_source_only_where_the_isolated_rebuild_exists(env, monkeypatch, edition, read):
+@pytest.mark.parametrize("edition", ["saas", "local"])
+def test_the_llm_check_always_reads_dist_and_source_too_when_shipped(env, monkeypatch, edition):
     from api.marketplace_themes_submit import marketplace_review
     from services.themes.package import read_theme_package
 
@@ -304,8 +307,20 @@ def test_the_llm_check_reads_source_only_where_the_isolated_rebuild_exists(env, 
     data = build.build_package(replace={"source/src/index.tsx": b"export default {}\n"})
     llm = marketplace_review(read_theme_package(data), len(data))["checks"]["llm"]
 
-    assert llm["read"] == read
-    assert ("dist/entry.js" in llm["files"]) is (read == "dist")
+    assert llm["read"] == "dist+source"
+    assert "dist/entry.js" in llm["files"] and llm["files"][-1] == "source/src/index.tsx"
+
+
+def test_the_submitter_sees_the_verdict_and_plain_checks_never_the_llm_check(env):
+    response = _submit(_client(env, _ctx()), _hello())
+    assert response.status_code == 201, response.text
+    report = response.json()["package"]["scanReport"]
+    (row,) = _rows(env, ThemePackage)
+    assert "llm" in row.scan_report["checks"] and "summary" in row.scan_report  # the reviewer keeps it all
+    assert report["verdict"] == row.scan_verdict and "llm" not in report["checks"] and "summary" not in report
+    assert {"sizes", "cssScope", "looks", "uses", "clonedFrom"} <= set(report["checks"])
+    again = _submit(_client(env, _ctx()), _hello())  # the duplicate answer hides it too
+    assert again.status_code == 200 and "llm" not in again.json()["package"]["scanReport"]["checks"]
 
 
 def test_a_private_upload_and_then_a_submit_of_the_same_bytes_both_succeed(env):
@@ -402,9 +417,10 @@ def test_a_version_lower_than_one_submitted_is_409(env):
     assert response.status_code == 409 and "1.2.0" in response.json()["detail"]
 
 
-def test_one_open_submission_is_off_by_default(env):
-    assert submissions.ONE_OPEN_SUBMISSION_DEFAULT is False
-    client = _client(env, _ctx())
+def test_one_open_submission_is_on_by_default_and_can_be_turned_off(env):
+    assert submissions.ONE_OPEN_SUBMISSION_DEFAULT is True
+    assert 'os.getenv("THEMES_ONE_OPEN_SUBMISSION", "true")' in (ORCH_ROOT / "config.py").read_text(encoding="utf-8")
+    client = _client(env, _ctx())  # the env fixture turns it off
     assert _submit(client, _hello()).status_code == 201
     assert _submit(client, _hello(version="1.0.1")).status_code == 201
 
@@ -449,3 +465,112 @@ def test_a_store_failure_is_503_and_leaves_no_row(env):
     assert response.status_code == 503
     assert _rows(env, ThemePackage) == [] and _rows(env, ThemePublisher) == []
     assert _rows(env, ThemeReviewEvent) == []
+
+
+# ---------------------------------------------------------------------------
+# H1: what a submission may spend
+# ---------------------------------------------------------------------------
+
+
+def test_a_full_review_slot_is_503_with_retry_after_and_never_runs_the_stage(env, monkeypatch):
+    from services.themes import review_limits
+
+    monkeypatch.setattr(config, "THEME_REVIEW_MAX_CONCURRENT", 1, raising=False)
+    stage = _stage("review_required")
+    with review_limits.review_slot() as held:
+        assert held
+        response = _submit(_client(env, _ctx(), stage=stage), _hello())
+    assert response.status_code == 503 and response.json()["detail"] == review_limits.REVIEWS_BUSY
+    assert response.headers["Retry-After"] == str(review_limits.BUSY_RETRY_SECONDS)
+    assert stage.calls == [] and _rows(env, ThemePackage) == []
+    assert review_limits.stages_running() == 0
+    assert _submit(_client(env, _ctx(), stage=stage), _hello()).status_code == 201
+    assert review_limits.stages_running() == 0  # the slot is given back
+
+
+def test_the_review_slot_is_taken_before_the_upload_claim(env, monkeypatch):
+    import api.marketplace_themes_submit as submit_api
+    from services.themes import review_limits
+
+    order = []
+    real_slot, real_claim = review_limits.review_slot, submit_api.upload_claim
+
+    def slot():
+        order.append("slot")
+        return real_slot()
+
+    def claim(*args):
+        order.append("claim")
+        return real_claim(*args)
+
+    monkeypatch.setattr(review_limits, "review_slot", slot)
+    monkeypatch.setattr(submit_api, "upload_claim", claim)
+    assert _submit(_client(env, _ctx(), stage=_stage("pass")), _hello()).status_code == 201
+    assert order == ["slot", "claim"]
+
+
+def test_a_person_past_the_daily_submissions_is_429_before_the_stage(env, monkeypatch):
+    from services.themes import review_limits
+
+    monkeypatch.setattr(config, "THEME_SUBMISSIONS_PER_DAY", 2, raising=False)
+    stage = _stage("review_required")
+    client = _client(env, _ctx(), stage=stage)
+    for version in ("1.0.0", "1.0.1"):
+        assert _submit(client, _hello(version=version)).status_code == 201
+    response = _submit(client, _hello(version="1.0.2"))
+    assert response.status_code == 429
+    assert response.json()["detail"] == review_limits.SUBMISSIONS_QUOTA.format(limit=2)
+    assert len(stage.calls) == 2
+    assert _submit(client, _hello(version="1.0.1")).status_code == 200  # the same bytes cost nothing
+    other = _client(env, _ctx("user_2"), stage=stage)
+    assert _submit(other, _hello(id="automatos-e2e-2/hello")).status_code == 201  # per person
+
+
+def test_submissions_older_than_a_day_no_longer_count(env, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setattr(config, "THEME_SUBMISSIONS_PER_DAY", 1, raising=False)
+    client = _client(env, _ctx(), stage=_stage("pass"))
+    assert _submit(client, _hello()).status_code == 201
+    assert _submit(client, _hello(version="1.0.1")).status_code == 429
+    session = env.sessions()
+    try:
+        session.query(ThemePackage).update({"created_at": datetime.now(timezone.utc) - timedelta(hours=25)})
+        session.commit()
+    finally:
+        session.close()
+    assert _submit(client, _hello(version="1.0.1")).status_code == 201
+
+
+def test_the_stage_gets_what_is_left_of_the_days_review_tokens(env, monkeypatch):
+    monkeypatch.setattr(config, "THEME_REVIEW_DAILY_TOKENS", 5000, raising=False)
+    session = env.sessions()
+    try:
+        session.add(ThemePackage(
+            theme_id="acme/old", version="1.0.0", owner_type="workspace", workspace_id=uuid4(), digest="ab" * 32,
+            manifest={}, file_manifest={}, storage_prefix="themes/x/", scan_verdict="pass",
+            scan_report={"checks": {"llm": {"tokensUsed": 1200}}},
+        ))
+        session.commit()
+    finally:
+        session.close()
+    stage = _stage("pass")
+    assert _submit(_client(env, _ctx(), stage=stage), _hello()).status_code == 201
+    assert stage.budgets == [3800]
+
+
+def test_with_the_days_tokens_spent_the_llm_check_never_runs_and_the_verdict_is_review_required(env, monkeypatch):
+    from services.themes import llm_stage
+
+    monkeypatch.setattr(config, "THEME_REVIEW_DAILY_TOKENS", 1, raising=False)
+    monkeypatch.setattr(llm_stage, "_client_call", lambda: (_never_called, None))
+    response = _submit(_client(env, _ctx()), _hello())
+    assert response.status_code == 201, response.text
+    (row,) = _rows(env, ThemePackage)
+    llm = row.scan_report["checks"]["llm"]
+    assert row.scan_verdict == "review_required" and llm["calls"] == 0
+    assert llm["reason"] == "LLM stage did not run: daily budget reached."
+
+
+def _never_called(model, text):
+    raise AssertionError("the LLM was called although the day's budget was spent")

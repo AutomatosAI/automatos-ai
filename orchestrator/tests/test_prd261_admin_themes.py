@@ -13,6 +13,9 @@ holding the theme tables and a small ``users`` table, with the REAL ``caller_is_
   only; the reviewer's isolated-job note is stored and gates approval on the hosted edition;
 * reject needs a reason; deactivate writes a ``disable`` revocation of the digest;
 * every route refuses a non-admin, and a workspace's private upload is 404 here;
+* report-note, approve, deactivate and signature need a fresh step-up after the admin check
+  (a non-admin gets the plain 403, never a reverification prompt); a ``pass`` note must carry
+  the kit's ``Package digest:  <digest>`` line for this version and ``Outcome: pass``;
 * auto-publish never applies; no signing key in config.
 """
 from __future__ import annotations
@@ -41,6 +44,8 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
+import time  # noqa: E402
+
 import sqlalchemy as sa  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.routing import APIRoute  # noqa: E402
@@ -51,6 +56,7 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 import api.admin_themes as admin_api  # noqa: E402
 import core.models  # noqa: E402,F401  (registers every table the FKs name)
 from config import config  # noqa: E402
+from core.auth import step_up  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.auth.hybrid import get_request_context_hybrid  # noqa: E402
 from core.database.database import get_db  # noqa: E402
@@ -61,13 +67,25 @@ from services.themes.digest import package_digest  # noqa: E402
 ADMIN_PK, MEMBER_PK = 7, 8
 TABLES = [m.__table__ for m in (ThemePackage, ThemeReviewEvent, ThemeRevocation, ThemeInstallation)]
 GOOD_SIGNATURE = base64.b64encode(bytes(range(64))).decode("ascii")
-PASSING_NOTE = {"summary": "isolated job: build reproducible, digests equal, JS rules clean", "outcome": "pass"}
+NOTE_TAIL = "isolated job: build reproducible, digests equal, JS rules clean"
+FAILED_NOTE = {"summary": "Outcome: fail\ndigest differs after rebuild", "outcome": "fail"}
 BASE = "/api/admin/themes"
 
 
-def _ctx(role="admin", clerk="clerk-7"):
-    user = UserContext(id=clerk, clerk_user_id=clerk, system_role=role, raw_claims={"sub": clerk})
+def _ctx(role="admin", clerk="clerk-7", fresh=True):
+    """A Clerk caller; ``fresh`` signed in a minute ago, so the admin routes' step-up passes."""
+    claims = {"sub": clerk, "iat": int(time.time())}
+    if fresh:
+        claims["fva"] = [1, -1]
+    user = UserContext(id=clerk, clerk_user_id=clerk, system_role=role, raw_claims=claims)
     return RequestContext(workspace_id=uuid.uuid4(), user=user, auth_type="clerk")
+
+
+def _passing_note(package):
+    """The kit's summary for this version (automatos-play scripts/review/summary.ts header lines)."""
+    summary = (f"Automatos theme review (automatos-theme-review/v1): {package.theme_id} {package.version}\n"
+               f"Outcome: pass\nExpected digest: {package.digest}\nPackage digest:  {package.digest}\n\n{NOTE_TAIL}")
+    return {"summary": summary, "outcome": "pass"}
 
 
 @pytest.fixture
@@ -82,6 +100,7 @@ def api(monkeypatch):
     state = SimpleNamespace(db=session, ctx=_ctx())
     app = FastAPI()
     app.include_router(admin_api.router)
+    step_up.install_step_up_handler(app)
     app.dependency_overrides[get_request_context_hybrid] = lambda: state.ctx
     app.dependency_overrides[get_db] = lambda: session
     state.client = TestClient(app)
@@ -123,7 +142,7 @@ def _events(db, package, event=None):
 
 
 def _note(api, package, body=None):
-    return api.client.post(f"{BASE}/{package.id}/report-note", json=body or PASSING_NOTE)
+    return api.client.post(f"{BASE}/{package.id}/report-note", json=body or _passing_note(package))
 
 
 def _approve(api, package, with_note=True):
@@ -191,7 +210,7 @@ def test_hosted_edition_needs_a_passing_isolated_job_note(api):
     package = _package(api.db)
     resp = _approve(api, package, with_note=False)
     assert resp.status_code == 409 and "isolated review job" in resp.json()["detail"]
-    assert _note(api, package, {"summary": "digest differs after rebuild", "outcome": "fail"}).status_code == 200
+    assert _note(api, package, FAILED_NOTE).status_code == 200
     resp = api.client.post(f"{BASE}/{package.id}/approve")
     assert resp.status_code == 409 and "failed" in resp.json()["detail"]
     assert _approve(api, package).status_code == 200  # the latest note wins
@@ -351,7 +370,7 @@ def test_every_route_refuses_a_non_admin(api, signed_in):
     package = _package(api.db)
     anonymous = RequestContext(workspace_id=uuid.uuid4(), user=None, auth_type="anonymous")
     api.ctx = _ctx(role="user", clerk="clerk-8") if signed_in else anonymous
-    bodies = {"report-note": PASSING_NOTE, "reject": {"reason": "x"}, "deactivate": {"reason": "x"},
+    bodies = {"report-note": _passing_note(package), "reject": {"reason": "x"}, "deactivate": {"reason": "x"},
               "signature": {"requestId": str(uuid.uuid4()), "signature": GOOD_SIGNATURE}}
     assert api.client.get(f"{BASE}/pending").status_code == 403
     assert api.client.get(f"{BASE}/{package.id}/report").status_code == 403
@@ -380,3 +399,85 @@ def test_no_signing_key_in_config():
             assert not re.search(rf"^\s*(import|from)\s+[^\n]*{banned}", source, re.MULTILINE), (path, banned)
     # signing reads no setting at all: there is no key to read
     assert not re.search(r"^\s*(from config import|import config)", inspect.getsource(signing), re.MULTILINE)
+
+
+# --- L6: a passing note names this version ------------------------------------------------
+
+
+def test_a_passing_note_must_carry_this_versions_digest_line_and_outcome_pass(api):
+    package = _package(api.db)
+    other = _package(api.db, version="1.1.0")
+    good = _passing_note(package)["summary"]
+    refused = [
+        NOTE_TAIL,  # no kit lines at all
+        good.replace(f"Package digest:  {package.digest}", f"Package digest:  {other.digest}"),  # another version
+        good.replace("Package digest:  ", "Package digest: "),  # not as the kit prints it
+        good.replace("Outcome: pass", "Outcome: fail"),
+    ]
+    for summary in refused:
+        resp = _note(api, package, {"summary": summary, "outcome": "pass"})
+        assert resp.status_code == 400 and package.digest in resp.json()["detail"], summary
+    assert _events(api.db, package, "report_note") == []
+    indented = "\r\n".join(f"  {line}" for line in good.splitlines())  # a paste may indent or carry CRLF
+    assert _note(api, package, {"summary": indented, "outcome": "pass"}).status_code == 200
+    assert _note(api, package, FAILED_NOTE).status_code == 200  # a failing note needs no lines
+
+
+def test_a_note_for_another_version_never_approves_this_one(api):
+    package = _package(api.db)
+    other = _package(api.db, version="1.1.0")
+    assert _note(api, package, {**_passing_note(other)}).status_code == 400
+    assert api.client.post(f"{BASE}/{package.id}/approve").status_code == 409
+
+
+# --- L7: step-up on the routes that publish, take down or vouch ------------------------------
+
+STEPPED_UP = ("report-note", "approve", "deactivate", "signature")
+
+
+def test_the_four_routes_carry_the_admin_check_then_step_up_and_the_rest_none():
+    for route in _routes():
+        calls = [dep.call for dep in route.dependant.dependencies]
+        marked = [n for n, call in enumerate(calls) if getattr(call, step_up.STEP_UP_MARKER_ATTR, None)]
+        tail = route.path.rsplit("/", 1)[-1]
+        if tail in STEPPED_UP:
+            assert marked and calls.index(admin_api.require_theme_admin) < marked[0], route.path
+            assert getattr(calls[marked[0]], step_up.STEP_UP_MARKER_ATTR) == config.STEP_UP_MAX_AGE_MINUTES
+        else:
+            assert marked == [], route.path
+
+
+def test_a_stale_admin_sign_in_is_asked_to_step_up_and_nothing_changes(api):
+    package = _package(api.db)
+    assert _approve(api, package).status_code == 200
+    pending = _package(api.db, version="1.1.0")
+    api.ctx = _ctx(fresh=False)
+    bodies = {"report-note": _passing_note(pending), "deactivate": {"reason": "x"},
+              "signature": {"requestId": str(uuid.uuid4()), "signature": GOOD_SIGNATURE}}
+    for action in STEPPED_UP:
+        target = package if action in ("deactivate", "signature") else pending
+        resp = api.client.post(f"{BASE}/{target.id}/{action}", json=bodies.get(action))
+        assert resp.status_code == 403 and resp.json()["clerk_error"]["reason"] == step_up.REVERIFICATION_REASON, action
+    api.db.refresh(package)
+    api.db.refresh(pending)
+    assert (package.status, pending.status) == ("approved", "pending")
+    assert _events(api.db, pending) == [] and package.signature is None
+    # reject and the reads carry no step-up
+    assert api.client.get(f"{BASE}/{pending.id}/report").status_code == 200
+    assert api.client.post(f"{BASE}/{pending.id}/reject", json={"reason": "x"}).status_code == 200
+
+
+def test_a_non_admin_with_a_stale_sign_in_gets_the_plain_403_never_a_reverification(api):
+    package = _package(api.db)
+    api.ctx = _ctx(role="user", clerk="clerk-8", fresh=False)
+    bodies = {"report-note": _passing_note(package), "deactivate": {"reason": "x"},
+              "signature": {"requestId": str(uuid.uuid4()), "signature": GOOD_SIGNATURE}}
+    for action in STEPPED_UP:
+        resp = api.client.post(f"{BASE}/{package.id}/{action}", json=bodies.get(action))
+        assert resp.status_code == 403 and resp.json() == {"detail": admin_api.ADMIN_REQUIRED}, action
+
+
+def test_the_local_edition_needs_no_step_up(api, monkeypatch):
+    monkeypatch.setattr(config, "AUTH_EDITION", "local")
+    api.ctx = _ctx(fresh=False)
+    assert _approve(api, _package(api.db), with_note=False).status_code == 200

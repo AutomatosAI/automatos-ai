@@ -24,6 +24,11 @@ host can't make yet:
 The verdict: any error → ``blocked`` (approve refuses it, C-03a); any warning →
 ``review_required``; else ``pass``. ``not_measured`` never moves it. The stage never returns
 ``not_run``: that verdict means the stage itself never ran (a row stored before W-C1).
+
+Who sees what: the whole report is the reviewer's (the admin queue, ``review.report``). The
+person who uploaded or submitted the package, and a workspace comparing versions, get
+``member_view``: the verdict and the plain checks, never the LLM check's score, findings or
+summary, so nobody can tune a package against the model's answers.
 """
 
 from __future__ import annotations
@@ -45,6 +50,10 @@ LEVEL_PASS, LEVEL_WARNING, LEVEL_ERROR, LEVEL_NOT_MEASURED = "pass", "warning", 
 LEVELS = (LEVEL_PASS, LEVEL_WARNING, LEVEL_ERROR, LEVEL_NOT_MEASURED)
 VERDICT_PASS, VERDICT_REVIEW, VERDICT_BLOCKED = "pass", "review_required", "blocked"
 READER_CHECKS = ("sizes", "cssScope", "looks")
+# Checks only the reviewer sees: the LLM stage's score and findings (``member_view``).
+ADMIN_ONLY_CHECKS = frozenset({"llm"})
+# The level counts give the LLM check's level away, so they are the reviewer's too.
+ADMIN_ONLY_REPORT_KEYS = frozenset({"summary"})
 
 STALE_CLONES = (
     "{count} cloned page(s) copied a core file this host has changed since, so the clone may miss "
@@ -83,18 +92,21 @@ def _counts(checks: Mapping[str, Mapping[str, Any]]) -> Dict[str, int]:
 
 
 def run_review_stage(
-    checked: ThemePackage, package_bytes: int, *, prefer_source: bool = True,
+    checked: ThemePackage, package_bytes: int, *, include_source: bool = True,
     llm_call: Optional[ChunkCall] = None, surface: Optional[SurfaceAreas] = None,
+    token_budget: Optional[int] = None,
 ) -> Dict[str, Any]:
     """The scan report of a checked package, with its verdict; see the module docstring.
 
-    ``prefer_source``: read ``source/`` for the LLM stage when shipped (a Marketplace submission,
-    whose ``dist/`` the isolated job rebuilds); a private upload passes False. ``llm_call`` and
-    ``surface`` replace the Anthropic call and this host's SDK names (tests).
+    ``include_source``: the LLM stage reads ``source/`` too when shipped (a Marketplace
+    submission, whose ``dist/`` the isolated job rebuilds), never instead of ``dist/``; a private
+    upload passes False. ``token_budget``: what theme reviews may still spend today
+    (``review_limits.tokens_left_today``; the routes always pass it). ``llm_call`` and ``surface``
+    replace the Anthropic call and this host's SDK names (tests).
     Call it from a thread with no running event loop (``asyncio.run``).
     """
     data = {path: item.data for path, item in checked.files.items()}
-    llm = run_llm_stage(data, prefer_source=prefer_source, call=llm_call)
+    llm = run_llm_stage(data, include_source=include_source, call=llm_call, token_budget=token_budget)
     checks = {
         **_reader_checks(checked, package_bytes),
         "uses": uses_check(checked.manifest, data, surface),
@@ -105,3 +117,18 @@ def run_review_stage(
     logger.info("[Themes] Review stage for %s@%s: %s (LLM risk %d, %s)", checked.manifest.get("id"),
                 checked.manifest.get("version"), verdict, llm.risk_score, "ran" if llm.ran else "did not run")
     return {"schema": REPORT_SCHEMA, "stage": STAGE, "verdict": verdict, "summary": _counts(checks), "checks": checks}
+
+
+def member_view(report: Any) -> Optional[Dict[str, Any]]:
+    """The report as its uploader or submitter sees it: the verdict and the non-LLM checks.
+
+    The LLM check's score, findings and summary stay with the reviewer (``ADMIN_ONLY_CHECKS``),
+    as do the level counts (``ADMIN_ONLY_REPORT_KEYS``). A report in an older shape keeps its keys.
+    """
+    if not isinstance(report, Mapping):
+        return None
+    view = {key: value for key, value in report.items() if key not in ADMIN_ONLY_REPORT_KEYS}
+    checks = report.get("checks")
+    if isinstance(checks, Mapping):
+        view["checks"] = {name: check for name, check in checks.items() if name not in ADMIN_ONLY_CHECKS}
+    return view

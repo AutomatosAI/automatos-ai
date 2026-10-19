@@ -1070,6 +1070,13 @@ def _body_limit_for(path: str) -> int:
     return MAX_UPLOAD_SIZE if any(path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
 
 
+# PRD-261 W-C1 (M4): on the capped upload paths the body is counted as it arrives, so a chunked
+# upload past the cap is 413 and one with no length or chunking is 411, before FastAPI parses the
+# form (which happens before any auth dependency runs). Every other path passes through untouched.
+from core.security.body_limit import CappedBodyMiddleware
+app.add_middleware(CappedBodyMiddleware, limits=PATH_BODY_LIMITS)
+
+
 @app.middleware("http")
 async def limit_request_body(request, call_next):
     from starlette.responses import JSONResponse

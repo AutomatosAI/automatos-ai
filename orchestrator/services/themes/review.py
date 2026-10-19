@@ -7,8 +7,11 @@ never in the queue and answers 404 here, exactly as a missing row does):
 * **pending** and **report**: the versions waiting for review, oldest first, and one
   version's scan report, the reviewer's notes, its review history and its signature request;
 * **report note**: the reviewer pastes the summary of the kit's isolated review job (C-02b, a
-  person-run job with no network after install and no secrets) with its outcome. The
-  orchestrator never runs submitter code and never polls GitHub;
+  person-run job with no network after install and no secrets) with its outcome. A ``pass``
+  note must be that job's summary for THIS version: it must hold the kit's lines
+  ``Package digest:  <this version's digest>`` and ``Outcome: pass`` exactly as
+  ``scripts/review/summary.ts`` prints them, so a note for another version, or a failed run,
+  can't approve this one. The orchestrator never runs submitter code and never polls GitHub;
 * **approve**: refuses a ``blocked`` scan and a ``not_run`` scan (unlike
   ``admin_plugins.py:222-223``), a version that isn't pending, and a digest under a live
   ``disable`` revocation. On the hosted edition it also needs the latest isolated-job note to
@@ -66,6 +69,14 @@ NOTE_MISSING = (
 NOTE_FAILED = "The isolated review job's latest summary says it failed. Re-run it, or reject this version."
 NOT_APPROVED = "Only an approved version can be deactivated. Reject a pending one instead."
 NUL_IN_TEXT = "The text has a NUL character in it. Paste plain text."
+# The kit's summary lines (automatos-play scripts/review/summary.ts, ``header``): two spaces after
+# "Package digest:" so the digests line up.
+NOTE_DIGEST_LINE = "Package digest:  {digest}"
+NOTE_OUTCOME_PASS_LINE = "Outcome: pass"
+NOTE_NOT_THIS_VERSION = (
+    "A passing note must be the isolated review job's summary for this version: paste it as the kit "
+    "printed it, with the lines \"Package digest:  {digest}\" and \"Outcome: pass\"."
+)
 EMPTY_TEXT = "Write a reason or summary; it can't be blank."
 
 
@@ -222,16 +233,29 @@ def _record(
     ))
 
 
+def note_names_this_version(summary: str, digest: str) -> bool:
+    """True when the kit's summary holds this digest's line and ``Outcome: pass``, each as a whole line.
+
+    Lines are compared with their ends trimmed (a paste may indent them or carry CRLF); the
+    text inside each line must be exactly the kit's.
+    """
+    lines = {line.strip() for line in summary.splitlines()}
+    return NOTE_DIGEST_LINE.format(digest=digest) in lines and NOTE_OUTCOME_PASS_LINE in lines
+
+
 def add_report_note(
     db: Session, package_id: UUID, summary: str, outcome: str, actor_pk: Optional[int],
 ) -> Dict[str, Any]:
-    """Store the reviewer's pasted isolated-job summary for a pending version."""
+    """Store the reviewer's pasted isolated-job summary for a pending version; a ``pass`` must name this version."""
     package = queued_package(db, package_id, lock=True)
     if package.status != STATUS_PENDING:
         raise ThemeReviewError(CONFLICT, NOT_PENDING.format(status=package.status, action="given a review note"))
     if outcome not in NOTE_OUTCOMES:
         raise ThemeReviewError(BAD_REQUEST, "The outcome is 'pass' or 'fail'.")
-    detail = {"summary": plain_text(summary), "outcome": outcome}
+    text = plain_text(summary)
+    if outcome == NOTE_PASS and not note_names_this_version(text, package.digest):
+        raise ThemeReviewError(BAD_REQUEST, NOTE_NOT_THIS_VERSION.format(digest=package.digest))
+    detail = {"summary": text, "outcome": outcome}
     _record(db, package, EVENT_REPORT_NOTE, package.status, actor_pk, detail=detail)
     return {**package_summary(package), "reportNote": {**detail, "by": actor_pk}}
 

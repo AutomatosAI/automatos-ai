@@ -13,7 +13,7 @@ Rules, in the order they are checked:
   claimed by its first submitter, and a later submission under it by someone else is a
   :class:`PublisherTaken` (409);
 * Q9, one open submission per author, is the flag ``THEMES_ONE_OPEN_SUBMISSION`` in
-  ``config.py`` (off until Gerard answers): when on, an author with a pending
+  ``config.py`` (on by default, so one author can't queue many paid review stages): when on, an author with a pending
   submission of other bytes gets a :class:`SubmissionConflict`;
 * a version the Marketplace already holds with other files, or one not higher than the
   theme's highest submitted version, is a :class:`SubmissionConflict`.
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 THEME_SUBMIT_ROUTE = "/api/marketplace/themes/submit"
 MARKETPLACE_SETTING = "THEMES_MARKETPLACE"
 ONE_OPEN_SUBMISSION_SETTING = "THEMES_ONE_OPEN_SUBMISSION"
-ONE_OPEN_SUBMISSION_DEFAULT = False
+ONE_OPEN_SUBMISSION_DEFAULT = True
 SWITCH_ON, SWITCH_OFF = "on", "off"
 TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
 OWNER_MARKETPLACE = "marketplace"
@@ -57,10 +57,11 @@ EVENT_SUBMITTED, EVENT_SCANNED = "submitted", "scanned"
 MARKETPLACE_OFF = "The theme Marketplace is turned off on this platform."
 NO_PERSON = "Sign in as a person to submit a theme to the Marketplace."
 
-# The automated review stage: the checked package and its size in bytes → the scan report,
-# whose "verdict" is one of THEME_SCAN_VERDICTS. The router's ``submission_review_stage`` gives
-# C-02a's stage (``services/themes/review_stage.py``), reading ``source/`` when it is shipped.
-ReviewStage = Callable[[CheckedThemePackage, int], Dict[str, Any]]
+# The automated review stage: the checked package, its size in bytes and the keyword
+# ``token_budget`` (the LLM tokens theme reviews may still spend today) → the scan report, whose
+# "verdict" is one of THEME_SCAN_VERDICTS. The router's ``submission_review_stage`` gives C-02a's
+# stage (``services/themes/review_stage.py``), reading ``dist/`` and ``source/`` when it is shipped.
+ReviewStage = Callable[..., Dict[str, Any]]
 
 
 class SubmissionConflict(ValueError):

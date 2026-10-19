@@ -19,7 +19,12 @@ Every handler checks ``caller_is_admin`` (``core/auth/roles.py:28-34``) first, t
 (``hybrid.py:642``), so the queue works there too. A version that isn't a Marketplace
 submission answers 404, as a missing one does. D3 (19 Oct): a person reviews every version;
 the orchestrator never signs and never calls GitHub (``services/themes/signing.py``).
-Plain ``def`` handlers over the synchronous session (AGENTS.md).
+
+The four routes that publish, take down or vouch for a version (``report-note``, ``approve``,
+``deactivate`` and ``signature``) also need a fresh step-up (A-07c, ``STEP_UP_MAX_AGE_MINUTES``):
+``require_theme_admin`` runs first as a dependency, so a non-admin gets the plain 403 and is
+never asked to reverify, then ``STEP_UP``. The handler still checks ``_require_admin(ctx)``
+first (the authZ sweep reads it there). Plain ``def`` handlers over the synchronous session (AGENTS.md).
 """
 
 from __future__ import annotations
@@ -33,10 +38,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.principal import resolve_user_pk
 from core.auth.roles import caller_is_admin
+from core.auth.step_up import require_step_up
 from core.database.database import get_db
 from services.themes import review
 from services.themes.choices import CONFLICT, ThemeInstallError
@@ -51,6 +58,8 @@ ADMIN_REQUIRED = "Only an Automatos admin can review Marketplace themes."
 CONCURRENT_CHANGE = "Someone changed this version at the same moment. Reload and try again."
 REASON_MAX = 2000
 SUMMARY_MAX = 20000
+
+STEP_UP = require_step_up(config.STEP_UP_MAX_AGE_MINUTES)
 
 T = TypeVar("T")
 
@@ -83,6 +92,15 @@ def _require_admin(ctx: RequestContext) -> None:
     user = getattr(ctx, "user", None)
     if user is None or not caller_is_admin(user):
         raise HTTPException(status_code=FORBIDDEN, detail=ADMIN_REQUIRED)
+
+
+def require_theme_admin(ctx: RequestContext = Depends(get_request_context_hybrid)) -> None:
+    """``_require_admin`` as a dependency, listed before ``STEP_UP``: a non-admin is never asked to reverify."""
+    _require_admin(ctx)
+
+
+# The admin check, then a fresh step-up: on the routes that publish, take down or vouch for a version.
+ADMIN_STEP_UP = [Depends(require_theme_admin), Depends(STEP_UP)]
 
 
 def _run(db: Session, work: Callable[[], T], commit: bool) -> T:
@@ -121,7 +139,7 @@ def get_theme_report(
     return _run(db, lambda: review.report(db, package_id), commit=False)
 
 
-@router.post("/{package_id}/report-note")
+@router.post("/{package_id}/report-note", dependencies=ADMIN_STEP_UP)
 def add_theme_report_note(
     package_id: UUID, body: ReportNoteBody,
     ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
@@ -132,7 +150,7 @@ def add_theme_report_note(
     return _run(db, lambda: review.add_report_note(db, package_id, body.summary, body.outcome, actor), commit=True)
 
 
-@router.post("/{package_id}/approve")
+@router.post("/{package_id}/approve", dependencies=ADMIN_STEP_UP)
 def approve_theme(
     package_id: UUID, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -155,7 +173,7 @@ def reject_theme(
     return _run(db, lambda: review.reject(db, package_id, body.reason, actor), commit=True)
 
 
-@router.post("/{package_id}/deactivate")
+@router.post("/{package_id}/deactivate", dependencies=ADMIN_STEP_UP)
 def deactivate_theme(
     package_id: UUID, body: ReasonBody,
     ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),
@@ -168,7 +186,7 @@ def deactivate_theme(
     return answer
 
 
-@router.post("/{package_id}/signature")
+@router.post("/{package_id}/signature", dependencies=ADMIN_STEP_UP)
 def store_theme_signature(
     package_id: UUID, body: SignatureBody,
     ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db),

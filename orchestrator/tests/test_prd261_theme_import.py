@@ -231,8 +231,13 @@ def test_a_good_package_is_201_stored_privately_and_installed(env):
 
 def test_the_scan_report_holds_the_server_checks_and_the_review_stage(env):
     body = _upload(_client(env, _local_ctx(uuid4())), _hello()).json()
-    report = body["package"]["scanReport"]
+    shown = body["package"]["scanReport"]
+    (row,) = _rows(env, ThemePackage)
+    report = row.scan_report
     checks = report["checks"]
+    # The uploader sees the verdict and the plain checks; the LLM check is the platform reviewer's.
+    assert shown["verdict"] == report["verdict"] and "summary" not in shown
+    assert shown["checks"] == {name: check for name, check in checks.items() if name != "llm"}
 
     assert report["schema"] == "automatos-theme-scan/v2" and report["verdict"] == VERDICT_NO_LLM
     assert checks["sizes"]["status"] == "pass" and checks["sizes"]["entryBytes"] > 0
@@ -275,7 +280,8 @@ def test_a_blocked_verdict_is_stored_with_the_upload_never_hidden(env, monkeypat
     response = _upload(_client(env, _local_ctx(uuid4())), _hello())
 
     assert response.status_code == 201 and response.json()["package"]["scanVerdict"] == "blocked"
-    assert calls == [{"prefer_source": False}]
+    assert [sorted(call) for call in calls] == [["include_source", "token_budget"]]
+    assert calls[0]["include_source"] is False and calls[0]["token_budget"] > 0
     (row,) = _rows(env, ThemePackage)
     assert row.scan_verdict == "blocked" and row.scan_report["checks"]["llm"]["level"] == "error"
 
@@ -636,3 +642,55 @@ def test_storage_keys_stay_under_the_workspace_prefix():
     for bad_path in ("../x", "a//b", "/abs", "a\\b", "./a", ""):
         with pytest.raises(ValueError):
             storage.theme_key(_prefix(workspace_a), bad_path)
+
+
+# ---------------------------------------------------------------------------
+# H1: what a private upload may spend
+# ---------------------------------------------------------------------------
+
+
+def test_a_full_review_slot_is_503_with_retry_after_and_never_runs_the_stage(env, monkeypatch):
+    from services.themes import review_limits
+
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    monkeypatch.setattr(config, "THEME_REVIEW_MAX_CONCURRENT", 1, raising=False)
+    client = _client(env, _local_ctx(uuid4()))
+    with review_limits.review_slot() as held:
+        assert held
+        response = _upload(client, _hello())
+    assert response.status_code == 503 and response.json()["detail"] == review_limits.REVIEWS_BUSY
+    assert response.headers["Retry-After"] == str(review_limits.BUSY_RETRY_SECONDS)
+    assert calls == [] and _rows(env, ThemePackage) == []
+    assert _upload(client, _hello()).status_code == 201 and len(calls) == 1
+
+
+def test_a_workspace_past_the_daily_uploads_is_429_before_the_stage(env, monkeypatch):
+    from services.themes import review_limits
+
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    monkeypatch.setattr(config, "THEME_UPLOADS_PER_DAY", 2, raising=False)
+    workspace = uuid4()
+    client = _client(env, _local_ctx(workspace))
+    for version in ("1.0.0", "1.0.1"):
+        assert _upload(client, _hello(version=version)).status_code == 201
+    response = _upload(client, _hello(version="1.0.2"))
+    assert response.status_code == 429
+    assert response.json()["detail"] == review_limits.UPLOADS_QUOTA.format(limit=2)
+    assert len(calls) == 2
+    assert _upload(client, _hello(version="1.0.1")).status_code == 200  # the same bytes cost nothing
+    assert _upload(_client(env, _local_ctx(uuid4())), _hello(version="1.0.2")).status_code == 201  # per workspace
+
+
+def test_the_upload_stage_gets_what_is_left_of_the_days_review_tokens(env, monkeypatch):
+    calls = []
+    _risky_llm(monkeypatch, calls)
+    monkeypatch.setattr(config, "THEME_REVIEW_DAILY_TOKENS", 1, raising=False)
+    client = _client(env, _local_ctx(uuid4()))
+    assert _upload(client, _hello()).status_code == 201
+    (row,) = _rows(env, ThemePackage)
+    llm = row.scan_report["checks"]["llm"]
+    assert calls[0]["token_budget"] == 1
+    assert row.scan_verdict == "review_required" and llm["calls"] == 0
+    assert llm["reason"] == "LLM stage did not run: daily budget reached."

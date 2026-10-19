@@ -23,7 +23,7 @@ from services.themes import sdk_uses  # noqa: E402
 from services.themes.contract import core_page_hashes  # noqa: E402
 from services.themes.llm_stage import DID_NOT_RUN  # noqa: E402
 from services.themes.package import read_theme_package  # noqa: E402
-from services.themes.review_stage import REPORT_SCHEMA, run_review_stage, verdict_of  # noqa: E402
+from services.themes.review_stage import REPORT_SCHEMA, member_view, run_review_stage, verdict_of  # noqa: E402
 from tests.fixtures.themes import build  # noqa: E402
 
 SURFACE = {
@@ -190,7 +190,7 @@ def test_with_no_llm_key_the_verdict_is_review_required_which_a_reviewer_may_app
     assert llm["reason"].startswith(DID_NOT_RUN)
 
 
-def test_a_submission_reads_source_and_a_private_upload_reads_dist():
+def test_a_submission_reads_dist_and_source_and_a_private_upload_reads_dist():
     replace = {
         build.MANIFEST: build.changed_manifest({"uses": ["theme"]}),
         "source/src/index.tsx": b"export default {}\n",
@@ -199,6 +199,32 @@ def test_a_submission_reads_source_and_a_private_upload_reads_dist():
     checked = read_theme_package(data)
 
     submitted = run_review_stage(checked, len(data), llm_call=_llm(), surface=SURFACE)["checks"]["llm"]
-    private = run_review_stage(checked, len(data), prefer_source=False, llm_call=_llm(), surface=SURFACE)["checks"]["llm"]
-    assert (submitted["read"], submitted["files"]) == ("source", ["source/src/index.tsx"])
+    private = run_review_stage(checked, len(data), include_source=False, llm_call=_llm(), surface=SURFACE)["checks"]["llm"]
+    assert submitted["read"] == "dist+source" and submitted["files"][-1] == "source/src/index.tsx"
+    assert "dist/entry.js" in submitted["files"]  # source/ never replaces dist/
     assert private["read"] == "dist" and "dist/entry.js" in private["files"]
+    assert not any(path.startswith("source/") for path in private["files"])
+
+
+def test_the_member_view_keeps_the_verdict_and_plain_checks_never_the_llm_check():
+    report = _review(score=40)
+    view = member_view(report)
+    assert view["verdict"] == report["verdict"] == "review_required" and view["schema"] == REPORT_SCHEMA
+    assert set(view["checks"]) == set(report["checks"]) - {"llm"} and "summary" not in view
+    assert "llm" in report["checks"] and report["checks"]["llm"]["riskScore"] == 40  # the stored report keeps it
+    assert member_view({"contrast": "ok"}) == {"contrast": "ok"}  # an older shape keeps its keys
+    assert member_view(None) is None
+
+
+def test_a_token_budget_too_small_for_the_stage_makes_no_call():
+    checked, size = _checked()
+    asked = []
+
+    def call(model, text):
+        asked.append(text)
+        return _reply(0)
+
+    report = run_review_stage(checked, size, llm_call=call, surface=SURFACE, token_budget=1)
+    llm = report["checks"]["llm"]
+    assert asked == [] and report["verdict"] == "review_required"
+    assert llm["reason"] == "LLM stage did not run: daily budget reached." and llm["level"] == "warning"

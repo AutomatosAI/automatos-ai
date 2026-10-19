@@ -59,7 +59,7 @@ import core.models  # noqa: E402,F401  (registers every table the FKs name)
 from config import config  # noqa: E402
 from core.auth import step_up  # noqa: E402
 from core.models.themes import ThemeInstallation, ThemePackage, ThemeReviewEvent, ThemeRevocation  # noqa: E402
-from services.themes import llm_stage, review, submissions  # noqa: E402
+from services.themes import llm_stage, review, review_limits, submissions  # noqa: E402
 from services.themes.digest import package_digest  # noqa: E402
 from tests.test_p2w2_authz_boundary_sweep import ADMIN_GATED_IN_HANDLER  # noqa: E402
 from tests.test_prd261_b2_wire import STEP_UP_ROUTES as B2_STEP_UP_ROUTES  # noqa: E402
@@ -77,13 +77,22 @@ C1_ROUTES = {
     ("POST", ADMIN + "/approve"), ("POST", ADMIN + "/reject"), ("POST", ADMIN + "/deactivate"),
     ("POST", ADMIN + "/signature"),
 }
-C1_STEP_UP_ROUTES = {("POST", "/api/marketplace/themes/submit"), ("POST", LISTING + "/install")}
+# L7: the admin routes that publish, take down or vouch for a version need a fresh step-up too.
+ADMIN_STEP_UP_ROUTES = {
+    ("POST", ADMIN + "/report-note"), ("POST", ADMIN + "/approve"), ("POST", ADMIN + "/deactivate"),
+    ("POST", ADMIN + "/signature"),
+}
+C1_STEP_UP_ROUTES = {("POST", "/api/marketplace/themes/submit"), ("POST", LISTING + "/install")} | ADMIN_STEP_UP_ROUTES
 C1_CONFIG_DEFAULTS = {
-    "THEMES_ONE_OPEN_SUBMISSION": False,
+    "THEMES_ONE_OPEN_SUBMISSION": True,
     "THEME_LLM_CHUNK_TOKENS": llm_stage.DEFAULT_CHUNK_TOKENS,
     "THEME_LLM_MAX_CHUNKS": llm_stage.DEFAULT_MAX_CHUNKS,
     "THEME_LLM_STAGE_SECONDS": llm_stage.DEFAULT_STAGE_SECONDS,
     "THEME_LLM_TIMEOUT_SECONDS": llm_stage.DEFAULT_TIMEOUT_SECONDS,
+    "THEME_REVIEW_MAX_CONCURRENT": review_limits.DEFAULT_MAX_CONCURRENT,
+    "THEME_SUBMISSIONS_PER_DAY": review_limits.DEFAULT_SUBMISSIONS_PER_DAY,
+    "THEME_UPLOADS_PER_DAY": review_limits.DEFAULT_UPLOADS_PER_DAY,
+    "THEME_REVIEW_DAILY_TOKENS": review_limits.DEFAULT_DAILY_TOKENS,
 }
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 MB, MULTIPART_ENVELOPE = 1024 * 1024, 512 * 1024
@@ -170,7 +179,7 @@ def test_no_w_c1_config_name_holds_a_key():
 # ---------------------------------------------------------------------------
 
 
-def test_step_up_is_on_submit_and_listing_install_only_after_the_gate():
+def test_step_up_is_on_submit_listing_install_and_four_admin_routes_only_after_the_gate():
     marked = set()
     for key, route in _c1_routes().items():
         calls = _calls(route.dependant)
@@ -179,7 +188,9 @@ def test_step_up_is_on_submit_and_listing_install_only_after_the_gate():
             continue
         marked.add(key)
         assert getattr(calls[at], step_up.STEP_UP_MARKER_ATTR) == config.STEP_UP_MAX_AGE_MINUTES
-        assert _index(calls, _is_gate) < at, f"{key}: the permission gate must run before step-up"
+        gate = admin_api.require_theme_admin if key in ADMIN_STEP_UP_ROUTES else None
+        first = calls.index(gate) if gate is not None else _index(calls, _is_gate)
+        assert first is not None and first < at, f"{key}: the admin or permission gate must run before step-up"
     assert marked == C1_STEP_UP_ROUTES
 
 
@@ -252,6 +263,10 @@ print(json.dumps({
     "submit_limit": main._body_limit_for("/api/marketplace/themes/submit"),
     "listing_limit": main._body_limit_for("/api/marketplace/themes/acme.ink/install"),
     "default_limit": main.MAX_BODY_SIZE,
+    "capped_body": [
+        dict(item.kwargs.get("limits", {})) == main.PATH_BODY_LIMITS
+        for item in main.app.user_middleware if item.cls.__name__ == "CappedBodyMiddleware"
+    ],
 }))
 """
 
@@ -290,8 +305,13 @@ def test_no_earlier_route_shadows_a_w_c1_route(live_app):
         assert handler.startswith(modules[key] + ".") and path == key[1], f"{key} is answered by {answer}"
 
 
-def test_the_app_carries_step_up_on_the_w_b2_routes_and_the_two_w_c1_routes_only(live_app):
+def test_the_app_carries_step_up_on_the_w_b2_routes_and_the_w_c1_ones_only(live_app):
     assert {_key(name) for name in live_app["step_up"]} == B2_STEP_UP_ROUTES | C1_STEP_UP_ROUTES
+
+
+def test_the_capped_paths_count_their_body_on_the_wire(live_app):
+    # M4: the app carries the ASGI middleware once, over exactly main.PATH_BODY_LIMITS.
+    assert live_app["capped_body"] == [True]
 
 
 def test_the_submit_body_limit_is_sized_from_the_package_cap(live_app):
@@ -342,7 +362,8 @@ def test_approving_a_version_offers_it_to_older_listing_installs(db):
     db.commit()
     new = _version(db, "1.1.0", "pending")
 
-    review.add_report_note(db, new.id, "isolated job: reproducible build, digests equal", "pass", None)
+    note = f"Outcome: pass\nPackage digest:  {new.digest}\nisolated job: reproducible build, digests equal"
+    review.add_report_note(db, new.id, note, "pass", None)
     answer = review.approve(db, new.id, None)
     db.commit()
 
