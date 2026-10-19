@@ -201,7 +201,7 @@ Qdrant is a dedicated vector similarity search engine used for durable (L3) and 
 *   **Dedicated Vector Store**: Optimized for vector search operations.
 *   **Field Memory**: Used for `VectorFieldSharedContext` which handles concepts like resonance, decay, and attractors in agent memory [orchestrator/requirements.in:73-73]().
 *   **Local Deployment**: The `qdrant/qdrant:latest` Docker image is used for local setups [docker-compose.yml:124-124]().
-*   **Configuration**: `QDRANT_URL` environment variable is used to connect to the Qdrant instance [docker-compose.yml:119-119](). The `qdrant-client` Python package is a dependency [orchestrator/requirements.in:73-73]().
+*   **Configuration**: `QDRANT_URL` environment variable is used to connect to the Qdrant instance [docker-compose.yml:119-119](). The API reaches it over Qdrant's REST API through `orchestrator/core/qdrant` (`QdrantRestClient`), on httpx; the `qdrant-client` package left the image with grpcio and portalocker (PRD-262) and stays only in `requirements-dev.txt`, for the PRD-108 tests that search with its in-memory engine.
 
 ### `S3 Vectors` (AWS S3 Backend)
 

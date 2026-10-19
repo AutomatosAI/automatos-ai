@@ -29,8 +29,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 ORCH = ROOT / "orchestrator"
 SPLIT_SCRIPT = ORCH / "scripts" / "split_lock.py"
-# The stable set PRD-262 US-022 names, as PEP 503 names.
-PRD_STABLE = {"numpy", "scipy", "grpcio", "cryptography", "sqlalchemy", "pillow", "lxml", "fonttools",
+# The stable set PRD-262 US-022 names, as PEP 503 names, but grpcio: it left the lock with
+# qdrant-client, which core/qdrant replaced (the 19 Oct breakdown's row #20).
+PRD_STABLE = {"numpy", "scipy", "cryptography", "sqlalchemy", "pillow", "lxml", "fonttools",
               "uvloop", "asyncpg", "pydantic-core"}
 
 

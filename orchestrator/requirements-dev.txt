@@ -18,3 +18,7 @@ isort==5.12.0
 # .importlinter — the CI lane .github/workflows/import-linter.yml fails loud on
 # a new feature->feature import edge.
 import-linter==2.1
+# The PRD-108 field proofs (tests/test_prd108_proof.py, test_prd108_scenarios.py) search
+# with qdrant-client's in-memory engine. The app reaches Qdrant through core/qdrant, so
+# the image has neither it nor the grpcio and portalocker it brings (PRD-262 row #20).
+qdrant-client==1.19.1

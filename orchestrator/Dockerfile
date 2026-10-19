@@ -50,8 +50,8 @@ COPY requirements.lock scripts/split_lock.py ./
 # The lock, exactly (PRD-262 US-022): every pin with its hashes, so CI, GHCR and
 # Railway install the same versions, and --no-deps resolves nothing. The lock goes in
 # two halves, each into its own prefix, which the base stage copies as its own layer:
-# first the stable set split_lock.py names (numpy, scipy, grpcio, cryptography,
-# SQLAlchemy, Pillow, lxml, fonttools, uvloop, asyncpg, pydantic-core), then the
+# first the stable set split_lock.py names (numpy, scipy, cryptography, SQLAlchemy,
+# Pillow, lxml, fonttools, uvloop, asyncpg, pydantic-core), then the
 # rest, so a bump outside the stable set leaves the first layer as it was.
 # --prefix keeps each half in a tree of its own; the scripts it writes run
 # /usr/local/bin/python, where the base stage puts both trees.

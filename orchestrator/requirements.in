@@ -91,8 +91,10 @@ cachetools>=5.3.0
 # Redis & SSH
 redis>=4.5.0
 
-# Qdrant — PRD-108 shared mission field
-qdrant-client>=1.12.0
+# Qdrant (PRD-108's mission field, PRD-187's durable memory) is reached over its REST API
+# through core/qdrant on httpx (PRD-262, the 19 Oct breakdown's row #20): qdrant-client
+# brought grpcio and portalocker for a gRPC transport the code never used. The PRD-108
+# proofs run on qdrant-client's in-memory engine, so requirements-dev.txt keeps it for CI.
 paramiko>=2.9.0
 jsonschema>=4.0.0
 

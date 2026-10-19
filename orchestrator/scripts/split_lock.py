@@ -31,9 +31,10 @@ import sys
 from pathlib import Path
 from typing import List, NamedTuple, Tuple
 
-# The stable set PRD-262 US-022 names, as PEP 503 names.
+# The stable set PRD-262 US-022 names, as PEP 503 names, but grpcio, which left the lock
+# with qdrant-client (the 19 Oct breakdown's row #20).
 STABLE = frozenset({
-    "numpy", "scipy", "grpcio", "cryptography", "sqlalchemy", "pillow", "lxml", "fonttools",
+    "numpy", "scipy", "cryptography", "sqlalchemy", "pillow", "lxml", "fonttools",
     "uvloop", "asyncpg", "pydantic-core",
 })
 # Pinned, never installed in an image (PRD-262 row #11, about 47 MB): graphifyy requires
