@@ -26,6 +26,8 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 const SKIPPED = new Set(['default', '__esModule'])
 const STATUSES = ['built', 'stub']
 const BUILT_BY_THIS_STORY = ['theme', 'context', 'navigation', 'notices', 'events']
+/** Areas a later lane has filled since (W-A4: A-12a deliverables and cards). */
+const BUILT_BY_LATER_LANES = ['deliverables', 'cards']
 
 /** Every area and its module, written out so the bundler sees each import. */
 const AREA_MODULES: Readonly<Record<string, ModuleLoader>> = {
@@ -93,9 +95,9 @@ describe('PRD-261 A-10a — the surface files', () => {
     expect(PLANNED.filter((name, index) => PLANNED.indexOf(name) !== index)).toEqual([])
   })
 
-  it('marks the five areas A-10a builds as built, and every other area as a stub', () => {
+  it('marks the five areas A-10a builds and the areas later lanes filled as built, and every other area as a stub', () => {
     const built = SURFACES.filter((surface) => surface.status === 'built').map((surface) => surface.area)
-    expect(built.sort()).toEqual([...BUILT_BY_THIS_STORY].sort())
+    expect(built.sort()).toEqual([...BUILT_BY_THIS_STORY, ...BUILT_BY_LATER_LANES].sort())
   })
 
   it('re-exports every area from index.ts', () => {
