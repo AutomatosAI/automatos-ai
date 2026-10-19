@@ -284,12 +284,14 @@ jobs:
       # pdfplumber replaced. US-025: nor pandas. US-026: nor langchain's splitters and
       # core, which were vendored, with langsmith and zstandard. US-027: nor graspologic
       # and the heavy rest Railway's [leiden] extra brought (numba, llvmlite, POT, gensim,
-      # statsmodels, matplotlib, seaborn, umap-learn). test.yml's prod-image-parity checks
-      # the Railway build, the same lock since US-027.
+      # statsmodels, matplotlib, seaborn, umap-learn). US-028: nor tree-sitter-language-pack,
+      # which downloaded its grammars; the code graph parses with each language's own
+      # package. test.yml's prod-image-parity checks the Railway build, the same lock since
+      # US-027.
       - name: The api image has no package the code never imports
         env:
           IMAGE: ghcr.io/automatosai/automatos-api:${{ steps.target.outputs.tag }}
-          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas langchain-text-splitters langchain-core langsmith zstandard graspologic numba llvmlite pot gensim statsmodels matplotlib seaborn umap-learn
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas langchain-text-splitters langchain-core langsmith zstandard graspologic numba llvmlite pot gensim statsmodels matplotlib seaborn umap-learn tree-sitter-language-pack
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python "$IMAGE" - "${names[@]}" < scripts/ci/image_dists_absent.py

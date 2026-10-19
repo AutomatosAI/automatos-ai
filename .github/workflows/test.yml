@@ -91,10 +91,11 @@ jobs:
           # US-022), the frontend edition literal, the worker image; the scripts
           # that look inside them (packages, system tools, the Helvetica render, the
           # test image, site-packages' native libraries, botocore's services), the one
-          # that reads the API's build context off its log, and the clone tests the
-          # test image runs.
+          # that reads the API's build context off its log, and the tests the test
+          # image runs: the clone tests, and the code-graph parser's language tests
+          # with the parser and their fixtures (PRD-262 US-028).
           PROD_IMAGE_PATHS: >-
-            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.(txt|in|lock)|scripts/split_lock\.py|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore)\.py$|^orchestrator/tests/test_prd262_codegraph_clone\.py$|^\.github/workflows/test\.yml$
+            ^frontend/(Dockerfile|\.dockerignore|package(-lock)?\.json|next\.config\.[a-z]+|lib/auth-edition\.ts)$|^orchestrator/(Dockerfile|\.dockerignore|requirements[^/]*\.(txt|in|lock)|scripts/split_lock\.py|pyproject\.toml)$|^services/workspace-worker/|^scripts/ci/(image_dists_absent|build_context|image_system_tools|image_pdf_fixture|image_test_image|image_site_packages|image_botocore)\.py$|^orchestrator/tests/test_prd262_codegraph_(clone|languages)\.py$|^orchestrator/tests/fixtures/codegraph_languages/|^orchestrator/modules/codegraph/parsers/|^\.github/workflows/test\.yml$
           # The frontend lane also reads the committed route manifest (route-contract).
           FRONTEND_PATHS: ^frontend/|^orchestrator/reports/route-manifest\.json$|^\.github/workflows/test\.yml$
           CLI_HOST_PATHS: ^services/cli-host/|^\.github/workflows/test\.yml$
@@ -1043,10 +1044,11 @@ jobs:
       # the same lock as the GHCR build smoke-images.yml's smoke-images-pr checks: its
       # [leiden] extra, which kept scikit-learn and pandas, is gone, with graspologic and
       # the heavy rest it brought (numba, llvmlite, POT, gensim, statsmodels, matplotlib,
-      # seaborn, umap-learn).
+      # seaborn, umap-learn). US-028: nor tree-sitter-language-pack, which downloaded its
+      # grammars; the code graph parses with each language's own package.
       - name: Backend — no package the code never imports
         env:
-          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas langchain-text-splitters langchain-core langsmith zstandard graspologic numba llvmlite pot gensim statsmodels matplotlib seaborn umap-learn
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas langchain-text-splitters langchain-core langsmith zstandard graspologic numba llvmlite pot gensim statsmodels matplotlib seaborn umap-learn tree-sitter-language-pack
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python parity-be - "${names[@]}" < scripts/ci/image_dists_absent.py
@@ -1141,6 +1143,16 @@ jobs:
           python3 scripts/ci/image_test_image.py build parity-be parity-be-test
           python3 scripts/ci/image_test_image.py pytest parity-be-test \
             -q --timeout=120 tests/test_prd262_codegraph_clone.py
+      # PRD-262 US-028: the code graph parses each language with the grammar of its own
+      # installed tree_sitter_* package; tree-sitter-language-pack, which downloaded its
+      # grammars on first use, is gone. In the same test image, off the network, the parser
+      # reads one fixture per supported extension and returns its symbols, so a grammar
+      # the image lacked would fail here instead of being fetched. The test image goes
+      # after this, its last run.
+      - name: Backend — the code-graph parser reads every language off the network, in the test image
+        run: |
+          python3 scripts/ci/image_test_image.py pytest parity-be-test --network none \
+            -q --timeout=120 tests/test_prd262_codegraph_languages.py
           docker image rm parity-be-test > /dev/null
       - name: Worker — headless browser present with no args
         run: |

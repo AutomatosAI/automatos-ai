@@ -18,7 +18,9 @@ the ingest uses: langchain-text-splitters and langchain-core left, and with them
 langsmith and zstandard, which only langchain-core brought. US-027 serves graphify's
 Leiden calls from graspologic-native: graspologic left with graphifyy's [leiden] extra,
 and with it numba, llvmlite, POT, gensim, statsmodels, matplotlib, seaborn and
-umap-learn, which no image installs now. This suite checks:
+umap-learn, which no image installs now. US-028 parses each code-graph language with the
+grammar of its own tree_sitter_* package: tree-sitter-language-pack, which since 1.0.0
+ships no grammars and downloaded each one on first use, left. This suite checks:
 
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
@@ -39,8 +41,8 @@ umap-learn, which no image installs now. This suite checks:
 - `git grep -i camelot -- orchestrator` lists this file alone (US-023): the test stubs,
   comments and code that named it are gone, and this file has to name it to forbid it.
 
-FORBIDDEN_IMPORTS is meant to grow: US-028 adds tree_sitter_language_pack. A dotted name
-forbids that module and everything under it.
+FORBIDDEN_IMPORTS is meant to grow. A dotted name forbids that module and everything
+under it.
 
 Pure file reads, plus the check script run with this Python: no Docker, no network.
 """
@@ -85,6 +87,9 @@ FORBIDDEN_IMPORTS = {
     # US-027: modules/knowledge/leiden_partition.py calls graspologic_native, which this
     # name does not cover (a dotted name forbids its module and what is under it only).
     "graspologic": "graspologic",
+    # US-028: the code graph's grammars come from their own packages (tree_sitter_python,
+    # ...), which this name does not cover.
+    "tree_sitter_language_pack": "tree-sitter-language-pack",
 }
 # (file under orchestrator/, forbidden name) -> the scope prefix where it may still be
 # imported. US-025: PandasAIService binds pandas only once pandasai imports, which it never
@@ -239,6 +244,25 @@ def test_graspologic_is_forbidden_and_graspologic_native_is_not():
     )
     hits = {(site.line, site.module) for site in import_sites(source, "sample.py") if forbidden(site)}
     assert hits == {(2, "graspologic.partition"), (2, "graspologic.partition.leiden"), (3, "graspologic")}
+    lines = source.splitlines()
+    assert all(_MENTION.search(lines[line - 1].encode()) for line, _ in hits), "the pre-filter keeps them"
+
+
+def test_the_language_pack_is_forbidden_and_the_grammar_packages_are_not():
+    """US-028: the code-graph parser imports tree_sitter and one tree_sitter_* package per language."""
+    source = (
+        "import tree_sitter\n"
+        "import tree_sitter_python\n"
+        "from tree_sitter_language_pack import get_parser\n"
+        "importlib.import_module('tree_sitter_language_pack')\n"
+        "import tree_sitter_language_packs\n"
+    )
+    hits = {(site.line, site.module) for site in import_sites(source, "sample.py") if forbidden(site)}
+    assert hits == {
+        (3, "tree_sitter_language_pack"),
+        (3, "tree_sitter_language_pack.get_parser"),
+        (4, "tree_sitter_language_pack"),
+    }
     lines = source.splitlines()
     assert all(_MENTION.search(lines[line - 1].encode()) for line, _ in hits), "the pre-filter keeps them"
 
