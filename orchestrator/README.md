@@ -37,8 +37,8 @@ orchestrator/
 There is no bare-metal setup to maintain. From the repository root:
 
 ```bash
-cp .env.example .env     # POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY (+ one LLM key)
-make dev                 # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+make dev                 # make env writes .env's three secrets, then
+                         # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 - Under `make dev` the `backend` service builds this directory with the

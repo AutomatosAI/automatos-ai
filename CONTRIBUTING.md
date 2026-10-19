@@ -47,10 +47,10 @@ Other welcome contributions:
 ```bash
 git clone https://github.com/<you>/automatos-ai.git
 cd automatos-ai
-cp .env.example .env        # POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY and one LLM key
 make dev                    # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
+- **`.env`.** `make dev`, `make up` and `make build` first run `make env`, which creates `.env` from `.env.example` and generates `POSTGRES_PASSWORD`, `REDIS_PASSWORD` and `API_KEY` while they are empty or `CHANGE_ME`, before the first start only. The backend refuses to start on a `CHANGE_ME` value. Add one LLM key in Settings → API Keys, or in `.env`.
 - **Reload mode.** `make dev` builds the backend's and the frontend's development stages, bind-mounts their source directories (`./orchestrator` → `/app`, `./frontend` → `/app`) and runs them in reload mode (`uvicorn --reload`, `npm run dev`), so edits are picked up without a rebuild. A dependency change needs `make dev` again, which rebuilds.
 - **Plain `docker compose up` and `make up` run the published images, not your checkout.** They run the production stages CI builds and scans: the code is inside the images, nothing is mounted over it and nothing reloads. `make up` builds only an image whose folder has uncommitted changes, under a `local-<sha7>-dirty` tag, and says so.
 - **`make build`** builds the three app images from your checkout as the production stages, under `local-<sha7>`: your change, run the way users run it. A retest stack from an unmerged ref: `AUTOMATOS_IMAGE_TAG=local-<ref> docker compose up -d --build` (set the tag in that stack's `.env`).

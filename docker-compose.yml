@@ -2,7 +2,8 @@
 # Automatos AI - Unified Docker Compose
 # =============================================================================
 # Quick Start:
-#   1. Copy .env.example to .env and set required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY)
+#   1. .env with the required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY): `make up`
+#      writes them (make env, PRD-262 US-037); without make, self-hosting.md §1b
 #   PRD-234/262: every published port, the web app included, listens on ${BIND_ADDRESS:-127.0.0.1}
 #   — this machine only. Set BIND_ADDRESS=0.0.0.0 in .env to expose them to your network
 #   deliberately (whoever reaches the local edition is its owner; session mode runs commands).
@@ -32,7 +33,9 @@
 # AUTOMATOS_REVISION (make exports git HEAD, -dirty with uncommitted changes in a
 # context; `unknown` without it), as the published images are by CI.
 #
-# A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
+# A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY,
+# none of them a CHANGE_ME placeholder from .env.example: the backend refuses to start
+# on one (orchestrator/docker-secrets-guard.sh).
 # LLM keys live in the database (Settings → API Keys) or in .env; the stored key
 # also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
 #

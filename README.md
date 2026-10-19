@@ -23,8 +23,7 @@ Automatos is an operating system for AI work. You command a workforce of special
 
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git && cd automatos-ai
-cp .env.example .env   # set POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
-make up                # → http://localhost:3000, no login
+make up                # writes .env with three random secrets, then → http://localhost:3000, no login
 ```
 
 ## Why an operating system?
@@ -193,8 +192,8 @@ Upload documents, sync folders from Dropbox and cloud storage (the cloud connect
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
-cp .env.example .env    # set the 3 required secrets: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
-make up                 # pulls the images CI published for this commit (about 1.3 GB), then starts the stack
+make up                 # writes .env with POSTGRES_PASSWORD, REDIS_PASSWORD and API_KEY generated, pulls the images
+                        # CI published for this commit (about 1.3 GB), then starts the stack
 ```
 
 Then open http://localhost:3000 (API reference at http://localhost:8000/docs).

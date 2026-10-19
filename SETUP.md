@@ -109,22 +109,31 @@ cd automatos-ai
 ### 3. Create `.env` with the three secrets
 
 The stack refuses to start without `POSTGRES_PASSWORD`, `REDIS_PASSWORD` and
-`API_KEY`. Generate random values; nobody needs to remember them.
-
-This block is safe to run again: it creates `.env` only if it's missing and
-fills in a secret only while it is still empty or a `CHANGE_ME` placeholder.
-**Never replace a secret on an install that has already started**: the database
-keeps the password it was created with, and the stack stops connecting.
+`API_KEY`, and refuses the `CHANGE_ME` placeholders `.env.example` ships.
+`make env` generates random values; nobody needs to remember them. (`make up`
+runs it first anyway; running it now lets you add the settings below.)
 
 ```bash
-[ -f .env ] || cp .env.example .env
-for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
+make env
+```
+
+It is safe to run again: it creates `.env` from `.env.example` only if it's
+missing, and fills in a secret only while it is still empty or a `CHANGE_ME`
+placeholder, and only before the first start. **Never replace a secret on an
+install that has already started**: the database keeps the password it was
+created with, and the stack stops connecting. On such an install `make env`
+changes nothing; if it finds a placeholder there it stops and prints how to
+rotate it.
+
+No `make`? The same by hand:
+
+```bash
+[ -f .env ] || { cp .env.example .env && chmod 600 .env; }
+docker volume inspect automatos_postgres_data > /dev/null 2>&1 || for key in POSTGRES_PASSWORD REDIS_PASSWORD API_KEY; do
   if grep -qE "^${key}=(CHANGE_ME.*)?$" .env; then
-    value=$(openssl rand -hex 24)
-    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env
+    sed -i.bak "s|^${key}=.*|${key}=$(openssl rand -hex 24)|" .env && rm -f .env.bak
   fi
 done
-rm -f .env.bak
 ```
 
 Then set where Automatos keeps its files, as an **absolute path**. This is the
@@ -287,6 +296,7 @@ brings the weekly rebuild with fresh OS packages.
 | `make: command not found` | make isn't installed | `sudo apt install make`, or use the plain `docker compose` command in step 4 |
 | `port is already allocated` / `address already in use` | Something else uses 5432, 3000 or 8000 (often a local Postgres) | Set `POSTGRES_PORT`, `FRONTEND_PORT` or `API_PORT` in `.env` (step 3) |
 | `required variable POSTGRES_PASSWORD is missing` | `.env` is missing or the secrets are empty | Redo step 3 |
+| `Placeholder secrets: … Each still starts with CHANGE_ME` (from `make env`, or the backend keeps restarting with it in its log) | An install that already started on the `.env.example` placeholders | Rotate them as it prints ([self-hosting guide §2](docs/getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)). On the install you just made, with nothing in it yet: `docker compose down -v`, then `make up` |
 | Backend stays `unhealthy` | Usually a slow first boot | Wait 2–3 minutes, then `docker compose logs backend --tail 50` |
 | Session files don't appear under their session in Explorer | `AUTOMATOS_WORKSPACE_DIR` is relative (`./workspaces`), or the code is under `/mnt/c` while Docker sees `C:\` | Use an absolute Linux path (step 3) and keep everything inside WSL2 |
 | `Session mode on Windows needs Windows 10 version 1809 or later` | The host was started on an older Windows | Run it inside Ubuntu (WSL2) |

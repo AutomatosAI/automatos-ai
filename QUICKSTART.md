@@ -10,7 +10,7 @@ troubleshooting, how the editions relate) is
 the step-by-step install for macOS, Linux and Windows (WSL2), with a check
 after each step.
 
-## 1. Set the three required secrets
+## 1. The three required secrets
 
 Compose refuses to start until these three are set (they have no built-in
 defaults, on purpose — a public image must not ship with known passwords):
@@ -19,15 +19,16 @@ defaults, on purpose — a public image must not ship with known passwords):
 - `REDIS_PASSWORD` — the Redis password
 - `API_KEY` — the backend's own API key
 
-Copy the example env file and fill them in (any non-empty values work locally):
+`make up` writes them for you: its first step, `make env`, creates `.env` from
+`.env.example` and gives each one a random value (`openssl rand -hex 24`) while
+it is empty or still the `CHANGE_ME` placeholder, before the first start only.
+`git clone` and `make up` (step 2) are the whole install. To choose your own
+values, run `make env` (or `cp .env.example .env`) and set them in `.env` before
+the first `make up`.
 
-```bash
-cp .env.example .env
-# then edit .env and set:
-#   POSTGRES_PASSWORD=<choose-any-value>
-#   REDIS_PASSWORD=<choose-any-value>
-#   API_KEY=<choose-any-value>
-```
+The stack never runs on the `CHANGE_ME` placeholders: the backend refuses to
+start on one, and `make env` stops on an install that already started with one.
+Both say how to rotate it.
 
 That is the whole requirement — everything else (edition, workspace id, storage,
 ports) already has a working default in the compose file and `envs/*.defaults`.
@@ -122,8 +123,8 @@ The published web app calls the API at `http://localhost:8000` and MinIO at
 why. `make build` builds all three images from your checkout; `make dev` is for
 editing the code with hot reload. `make status` shows what is running and what
 it costs; `make down` stops it; `make clean` reclaims space at any time (it
-never touches your data). Plain `docker compose up` works too: it runs the tag
-in `.env`, or `edge`.
+never touches your data). Plain `docker compose up` works too, once `.env` has
+the three secrets (`make env`): it runs the tag in `.env`, or `edge`.
 
 The first boot builds the database schema, runs the seeds and then serves.
 `http://localhost:8000/health` answers as soon as the API process
@@ -288,6 +289,10 @@ Database migrations run on every backend boot.
 - **"POSTGRES_PASSWORD is required" / "REDIS_PASSWORD is required" /
   "API_KEY is required":** one of the three required secrets is missing from
   `.env` — see step 1.
+- **"Placeholder secrets: … Each still starts with CHANGE_ME":** `.env` still
+  holds an `.env.example` placeholder on an install that has already started.
+  Rotate it as the message shows ([guide §2](docs/getting-started/self-hosting.md#2-the-three-secrets-and-the-one-key)),
+  or, with no data to keep, `docker compose down -v` and `make up` again.
 - **"password authentication failed" after changing `POSTGRES_PASSWORD`:** the
   existing Postgres volume keeps the password it was initialised with — reset
   with `docker compose down -v` or `ALTER USER` it; see the guide.
