@@ -285,12 +285,13 @@ jobs:
 
       # PRD-262 US-015, US-018 and US-023: the GHCR build (no [leiden] extra) installs
       # no package the code never imports, scikit-learn included, nor camelot and its
-      # opencv, which pdfplumber replaced. test.yml's prod-image-parity checks the
-      # Railway build, which keeps scikit-learn until US-027.
+      # opencv, which pdfplumber replaced. US-025: nor pandas. test.yml's
+      # prod-image-parity checks the Railway build, which keeps scikit-learn and pandas
+      # until US-027.
       - name: The api image has no package the code never imports
         env:
           IMAGE: ghcr.io/automatosai/automatos-api:${{ steps.target.outputs.tag }}
-          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client
+          REMOVED: nltk passlib python-jose ecdsa rsa pgvector scikit-learn futureagi gotenberg-client camelot-py opencv-python-headless google-generativeai google-ai-generativelanguage google-api-python-client pandas
         run: |
           read -ra names <<< "$REMOVED"
           docker run --rm -i --entrypoint python "$IMAGE" - "${names[@]}" < scripts/ci/image_dists_absent.py

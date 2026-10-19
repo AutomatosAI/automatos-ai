@@ -10,14 +10,18 @@ ConversionService, which nothing called. US-023 replaced camelot-py with pdfplum
 text strategy, and opencv-python-headless, which only camelot imported, went with it.
 US-024 moved Gemini onto the OpenAI-compatible adapter: google-generativeai left, with
 google-ai-generativelanguage and google-api-python-client (Google's API discovery
-documents), which only it brought. This suite checks:
+documents), which only it brought. US-025 removed pandas: create_xlsx reads CSV and JSON
+with the standard library, and PandasAIService, which cannot run (pandasai was never
+installed), imports it only inside its methods. This suite checks:
 
 - no module under orchestrator/, tests included, imports one of them: an AST walk over
   `import`, `from ... import` and the lazy forms (importlib.import_module, __import__,
-  importlib.util.find_spec, pytest.importorskip) with a literal name, at any depth;
+  importlib.util.find_spec, pytest.importorskip) with a literal name, at any depth. The
+  one exception is ALLOWED_SCOPES: pandas inside PandasAIService's methods;
 - requirements.in, requirements-dev.txt and the locks compiled from them (PRD-262
-  US-022) name none of them (the [leiden] lock only scikit-learn), the Dockerfile's one
-  install is the hashed lock, never futureagi, and start.sh no longer downloads NLTK data;
+  US-022) name none of them (the [leiden] lock only scikit-learn and pandas), the
+  Dockerfile's one install is the hashed lock, never futureagi, and start.sh no longer
+  downloads NLTK data;
 - graphifyy is pinned exactly in requirements.in, and with the [leiden] extra at the same
   version in requirements-leiden.in; psutil is pinned at 6 or later, the first release
   with aarch64 wheels;
@@ -29,10 +33,9 @@ documents), which only it brought. This suite checks:
 - `git grep -i camelot -- orchestrator` lists this file alone (US-023): the test stubs,
   comments and code that named it are gone, and this file has to name it to forbid it.
 
-FORBIDDEN_IMPORTS is meant to grow: W3 adds pandas
-outside pandas_ai_service.py's methods (US-025, which can filter on ImportSite.scope),
-langchain_text_splitters and langchain_core (US-026) and tree_sitter_language_pack
-(US-028). A dotted name forbids that module and everything under it.
+FORBIDDEN_IMPORTS is meant to grow: W3 adds langchain_text_splitters and langchain_core
+(US-026) and tree_sitter_language_pack (US-028). A dotted name forbids that module and
+everything under it.
 
 Pure file reads, plus the check script run with this Python: no Docker, no network.
 """
@@ -71,11 +74,17 @@ FORBIDDEN_IMPORTS = {
     "google.generativeai": "google-generativeai",  # US-024: Gemini is on the openai client
     "google.ai.generativelanguage": "google-ai-generativelanguage",  # US-024: only the SDK
     "googleapiclient": "google-api-python-client",  # US-024: brought these two
+    "pandas": "pandas",  # US-025: create_xlsx reads CSV and JSON with the standard library
 }
+# (file under orchestrator/, forbidden name) -> the scope prefix where it may still be
+# imported. US-025: PandasAIService binds pandas only once pandasai imports, which it never
+# does in an image; deleting the service and its routes instead is §9-Q16, still open.
+ALLOWED_SCOPES = {("modules/tools/services/pandas_ai_service.py", "pandas"): "PandasAIService."}
 # Distributions no image installs: the ones above plus python-jose's closure.
 REMOVED_DISTS = frozenset(FORBIDDEN_IMPORTS.values()) | {"ecdsa", "rsa"}
-# Railway's [leiden] build keeps this one, through graspologic, until US-027.
-RAILWAY_KEEPS = frozenset({"scikit-learn"})
+# Railway's [leiden] build keeps these until US-027: scikit-learn through graspologic,
+# pandas through statsmodels and seaborn.
+RAILWAY_KEEPS = frozenset({"scikit-learn", "pandas"})
 WHEEL_EXCEPTIONS = "pysher,graspologic"
 
 SKIP_DIRS = frozenset({"venv", ".venv", "node_modules", "__pycache__", "site-packages"})
@@ -133,6 +142,12 @@ def forbidden(site: ImportSite) -> str | None:
     """The forbidden name ``site`` imports, if any."""
     return next((name for name in FORBIDDEN_IMPORTS
                  if site.module == name or site.module.startswith(f"{name}.")), None)
+
+
+def allowed(site: ImportSite) -> bool:
+    """Whether ``site`` imports its forbidden name where ALLOWED_SCOPES lets it."""
+    scope = ALLOWED_SCOPES.get((site.path, forbidden(site)))
+    return scope is not None and site.scope.startswith(scope)
 
 
 def _python_files() -> list[Path]:
@@ -202,6 +217,49 @@ def test_a_dotted_name_forbids_its_module_and_what_is_under_it_only():
     assert all(_MENTION.search(lines[line - 1].encode()) for line, _ in hits), "the pre-filter keeps them"
 
 
+PANDAS_SAMPLE = '''
+import pandas
+from pandas import DataFrame
+def helper():
+    import pandas as pd
+class PandasAIService:
+    def _init_pandasai(self):
+        global pd
+        import pandas as pd
+    def generate_insight(self):
+        def inner():
+            import pandas.api.types
+class PandasAIServiceTwin:
+    def method(self):
+        import pandas
+'''
+PANDAS_SERVICE = "modules/tools/services/pandas_ai_service.py"
+
+
+def test_pandas_is_allowed_only_inside_the_pandasai_services_methods():
+    """US-025: not at module level, not in a module-level function, not in another class or file."""
+    sites = [site for site in import_sites(PANDAS_SAMPLE, PANDAS_SERVICE) if forbidden(site)]
+    assert {(site.line, site.scope) for site in sites if allowed(site)} == {
+        (9, "PandasAIService._init_pandasai"),
+        (12, "PandasAIService.generate_insight.inner"),
+    }
+    assert {(site.line, site.module) for site in sites if not allowed(site)} == {
+        (2, "pandas"), (3, "pandas"), (3, "pandas.DataFrame"), (5, "pandas"), (15, "pandas"),
+    }
+    elsewhere = [site for site in import_sites(PANDAS_SAMPLE, "modules/tools/execution/exec_document.py")
+                 if forbidden(site)]
+    assert len(elsewhere) == len(sites) and not any(allowed(site) for site in elsewhere)
+
+
+def test_the_pandasai_service_imports_pandas_inside_its_methods_only():
+    """US-025: importing the module (at boot, through modules/tools/services/__init__.py and
+    modules/nl2sql/service.py) never loads pandas; an enabled service still binds it."""
+    source = (ORCH / PANDAS_SERVICE).read_bytes()
+    sites = [site for site in import_sites(source, PANDAS_SERVICE) if forbidden(site)]
+    assert sites, "PandasAIService binds pandas once pandasai imports"
+    assert all(allowed(site) for site in sites), sites
+
+
 def _offenders(files: list[Path]) -> list[str]:
     offenders = []
     for path in files:
@@ -210,7 +268,7 @@ def _offenders(files: list[Path]) -> list[str]:
             continue
         rel = path.relative_to(ORCH).as_posix()
         offenders += [f"{rel}:{site.line}: {site.module} ({FORBIDDEN_IMPORTS[forbidden(site)]})"
-                      for site in import_sites(source, rel) if forbidden(site)]
+                      for site in import_sites(source, rel) if forbidden(site) and not allowed(site)]
     return offenders
 
 
