@@ -96,15 +96,11 @@ if "magic" not in sys.modules:
     _magic.from_file = lambda *a, **k: "text/plain"
     sys.modules["magic"] = _magic
 
-# pytesseract / PIL / pandas are pulled by the multimodal processors which
+# pytesseract / PIL are pulled by the multimodal processors which
 # manager.py reaches only at *call* time — but ``modules.rag.__init__`` does
-# top-level eager imports, so stubbing here is the simplest unblock.
+# top-level eager imports, so stubbing here is the simplest unblock. (pandas
+# was stubbed here too until PRD-262 US-025: the processors no longer use it.)
 sys.modules.setdefault("pytesseract", types.ModuleType("pytesseract"))
-
-if "pandas" not in sys.modules:
-    _pandas = types.ModuleType("pandas")
-    _pandas.DataFrame = type("DataFrame", (), {})  # type-annotation marker
-    sys.modules["pandas"] = _pandas
 
 if "PIL" not in sys.modules:
     _pil = types.ModuleType("PIL")
@@ -137,7 +133,7 @@ for _pkg in ("modules", "modules.rag", "modules.rag.ingestion"):
 
 # semantic_chunker / multimodal are referenced from manager.py inside ``try``
 # blocks — they fail to import gracefully. Pre-stub so the try block fails
-# fast without dragging in pandas/PIL/Image internals.
+# fast without dragging in PIL/Image internals.
 sys.modules.setdefault(
     "modules.rag.chunking", types.ModuleType("modules.rag.chunking")
 )
@@ -147,7 +143,7 @@ _sc_stub.ChunkingStrategy = MagicMock()
 sys.modules.setdefault("modules.rag.chunking.semantic_chunker", _sc_stub)
 
 # Pre-stub multimodal so import-time references resolve without pytesseract /
-# pandas internals being walked.
+# PIL internals being walked.
 _mm_stub = types.ModuleType("modules.rag.ingestion.multimodal")
 _mm_stub.TableProcessor = MagicMock
 _mm_stub.FormulaProcessor = MagicMock
