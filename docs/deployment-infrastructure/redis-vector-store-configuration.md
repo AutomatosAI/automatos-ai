@@ -22,7 +22,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/modules/search/vector_store/__init__.py](orchestrator/modules/search/vector_store/__init__.py)
 - [orchestrator/modules/search/vector_store/backends/pgvector_local_backend.py](orchestrator/modules/search/vector_store/backends/pgvector_local_backend.py)
 - [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py](orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/scripts/eval/retrieval_recall/corpus.jsonl](orchestrator/scripts/eval/retrieval_recall/corpus.jsonl)
 - [orchestrator/scripts/eval/retrieval_recall/gold_set.jsonl](orchestrator/scripts/eval/retrieval_recall/gold_set.jsonl)
 - [orchestrator/scripts/recreate_s3_index.py](orchestrator/scripts/recreate_s3_index.py)
@@ -191,7 +191,7 @@ Automatos AI supports multiple vector store backends for RAG (Retrieval Augmente
 **Key Features:**
 *   **Integrated Storage**: Vectors are stored alongside other data in PostgreSQL, simplifying data management.
 *   **Local Development**: Ideal for local development environments where a separate vector database might be overkill.
-*   **Requirements**: The `pgvector` Python package is listed as a core dependency [orchestrator/requirements.txt:17-17]().
+*   **Requirements**: The `pgvector` Python package is listed as a core dependency [orchestrator/requirements.in:17-17]().
 
 ### `Qdrant` (Vector Database)
 
@@ -199,9 +199,9 @@ Qdrant is a dedicated vector similarity search engine used for durable (L3) and 
 
 **Key Features:**
 *   **Dedicated Vector Store**: Optimized for vector search operations.
-*   **Field Memory**: Used for `VectorFieldSharedContext` which handles concepts like resonance, decay, and attractors in agent memory [orchestrator/requirements.txt:73-73]().
+*   **Field Memory**: Used for `VectorFieldSharedContext` which handles concepts like resonance, decay, and attractors in agent memory [orchestrator/requirements.in:73-73]().
 *   **Local Deployment**: The `qdrant/qdrant:latest` Docker image is used for local setups [docker-compose.yml:124-124]().
-*   **Configuration**: `QDRANT_URL` environment variable is used to connect to the Qdrant instance [docker-compose.yml:119-119](). The `qdrant-client` Python package is a dependency [orchestrator/requirements.txt:73-73]().
+*   **Configuration**: `QDRANT_URL` environment variable is used to connect to the Qdrant instance [docker-compose.yml:119-119](). The `qdrant-client` Python package is a dependency [orchestrator/requirements.in:73-73]().
 
 ### `S3 Vectors` (AWS S3 Backend)
 
@@ -212,7 +212,7 @@ Qdrant is a dedicated vector similarity search engine used for durable (L3) and 
 *   **Multi-Tenancy**: Supports shared buckets or templated buckets per workspace (`{workspace_id}` placeholder). Tenant isolation is enforced at query time by filtering on `workspace_id` metadata [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py:58-67]().
 *   **Index Management**: Automatically creates buckets and indexes if they don't exist. It includes a dimension mismatch check (`IndexDimensionMismatchError`) to prevent writing or querying against incorrectly dimensioned indexes [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py:131-161]().
 *   **Configuration**: Configured via environment variables such as `S3_VECTORS_BUCKET`, `S3_VECTORS_INDEX_NAME`, `S3_VECTORS_DIMENSION`, `S3_VECTORS_METRIC`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` [orchestrator/modules/search/vector_store/backends/s3_vectors_backend.py:43-48]().
-*   **Dependencies**: Uses `boto3` for AWS interaction [orchestrator/requirements.txt:124-124]().
+*   **Dependencies**: Uses `boto3` for AWS interaction [orchestrator/requirements.in:124-124]().
 
 **S3 Vectors Backend Initialization Flow**
 

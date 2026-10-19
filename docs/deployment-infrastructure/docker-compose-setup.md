@@ -21,7 +21,7 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py](orchestrator/alembic/versions/prd222_veteran_skip_backfill.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
 - [orchestrator/core/seeds/seed_local_first_run.py](orchestrator/core/seeds/seed_local_first_run.py)
-- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/requirements.in](orchestrator/requirements.in)
 - [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
 - [orchestrator/tests/test_prd222_onboarding_reset.py](orchestrator/tests/test_prd222_onboarding_reset.py)
 - [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
@@ -212,12 +212,12 @@ Sources: [orchestrator/Dockerfile:131](), [frontend/Dockerfile:129](), [docker-c
 
 ### Backend (Orchestrator)
 The backend uses a multi-stage Dockerfile [orchestrator/Dockerfile:1-8]().
-- **`pybuild` stage**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and Python packages from `requirements.txt` [orchestrator/Dockerfile:19-59](). It conditionally installs `graphifyy[leiden]` based on `INSTALL_GRAPH_EXTRAS` build argument [orchestrator/Dockerfile:38-58]().
+- **`pybuild` stage**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and the locked Python packages from `requirements.lock`, with uv, every pin hash-checked and installed in two layers (PRD-262 US-022) [orchestrator/Dockerfile](). The `INSTALL_GRAPH_EXTRAS` build argument picks `requirements-leiden.lock` instead, which adds `graphifyy[leiden]` [orchestrator/Dockerfile]().
 - **`base` stage**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz-subset0`, `libcairo2`, `fonts-dejavu-core`, `fonts-urw-base35` [orchestrator/Dockerfile:70-107]().
 - **`development` stage**: Includes hot-reload capabilities and debugging tools. The entrypoint `docker-entrypoint.sh` is mounted from the host, and the default command runs `alembic upgrade heads` before starting `uvicorn` with `--reload` [orchestrator/Dockerfile:91-131]().
 - **`production` stage**: Optimized and minimal, copying only necessary application code and running `uvicorn` with multiple workers [orchestrator/Dockerfile:136-184]().
 
-Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/requirements.txt:1-142]()
+Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/requirements.in:1-142]()
 
 ### Frontend
 The frontend uses a multi-stage Dockerfile for a Next.js standalone build [frontend/Dockerfile:1-9]().
