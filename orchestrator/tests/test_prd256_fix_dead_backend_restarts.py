@@ -1,7 +1,7 @@
 """F416 (night 14): a backend that stops serving ends its container, so it restarts.
 
 The nightly EdgeBuilder ran the backend out of memory; the kernel killed the
-uvicorn worker, and uvicorn's supervisor (``--reload``, as compose runs it)
+uvicorn worker, and uvicorn's supervisor (``--reload``, as compose ran it then)
 stayed up serving nothing. The container stayed "running" and unhealthy for
 ~5 h: Docker's ``restart: unless-stopped`` never applies to a container that is
 only unhealthy.
@@ -38,6 +38,7 @@ _ENTRYPOINT = _ORCH / "docker-entrypoint.sh"
 _HEALTHCHECK = _ORCH / "docker-healthcheck.sh"
 _DOCKERFILE = _ORCH / "Dockerfile"
 _COMPOSE = _REPO / "docker-compose.yml"
+_DEV_COMPOSE = _REPO / "docker-compose.dev.yml"
 _API_DEFAULTS = _REPO / "envs" / "api.defaults"
 
 _RUN_TIMEOUT_SECONDS = 30
@@ -241,8 +242,8 @@ def test_the_healthcheck_fails_when_nothing_serves():
 # --- the wiring: compose and the image run the same probe, and restart --------
 
 
-def _compose_backend() -> dict:
-    return yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"]["backend"]
+def _compose_backend(path: Path = _COMPOSE) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["services"]["backend"]
 
 
 def _seconds(value: str) -> int:
@@ -261,7 +262,11 @@ def test_compose_runs_the_probe_restarts_and_turns_the_watchdog_on():
     backend = _compose_backend()
     assert backend["restart"] == "unless-stopped"
     assert backend["healthcheck"]["test"] == ["CMD", "docker-healthcheck.sh"]
-    assert "./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro" in backend["volumes"]
+    # PRD-262 US-035: the default stack runs the image's own probe; `make dev` mounts the
+    # checkout's copy over it, so an edit to it applies without a rebuild.
+    mount = "./orchestrator/docker-healthcheck.sh:/usr/local/bin/docker-healthcheck.sh:ro"
+    assert not any("docker-healthcheck.sh" in str(volume) for volume in backend["volumes"])
+    assert mount in _compose_backend(_DEV_COMPOSE)["volumes"]
     lines = _API_DEFAULTS.read_text(encoding="utf-8").splitlines()
     assert "AUTOMATOS_LIVENESS_WATCHDOG=true" in lines
 
