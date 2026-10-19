@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from packaging.requirements import Requirement
 from pydantic import BaseModel
 
 ORCH_ROOT = Path(__file__).resolve().parents[1]
@@ -74,12 +75,15 @@ def test_the_web_stack_is_pinned_exactly():
 
 
 def test_uvicorns_standard_extra_accepts_the_pinned_websockets():
-    """#1169 moved websockets to 13.1 for google-genai; uvicorn[standard] must still take it."""
-    spec = next(r for r in requires("uvicorn") or [] if r.startswith("websockets") and '"standard"' in r)
-    floor = re.search(r">=\s*([0-9][0-9.]*)", spec)
-    ceiling = re.search(r"<\s*([0-9][0-9.]*)", spec)
-    assert floor is None or _numbers(WEBSOCKETS_PIN) >= _numbers(floor.group(1)), spec
-    assert ceiling is None or _numbers(WEBSOCKETS_PIN) < _numbers(ceiling.group(1)), spec
+    """#1169 moved websockets to 13.1 for google-genai; uvicorn[standard] must still take it.
+    The installed uvicorn's own metadata is read with ``packaging`` (pytest's dependency)."""
+    declared = requires("uvicorn") or []
+    wanted = [Requirement(line) for line in declared]
+    websockets = [req for req in wanted
+                  if req.name == "websockets" and req.marker is not None and req.marker.evaluate({"extra": "standard"})]
+    assert websockets, f"uvicorn[standard] no longer names websockets: {declared}"
+    for req in websockets:
+        assert req.specifier.contains(WEBSOCKETS_PIN), f"{req} refuses websockets {WEBSOCKETS_PIN}"
 
 
 def test_the_suite_runs_on_the_pinned_versions():
