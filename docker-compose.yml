@@ -2,6 +2,9 @@
 # Automatos AI - Unified Docker Compose
 # =============================================================================
 # Quick Start:
+#   0. Docker Engine 25 or later with Compose 2.24.4 or later. The healthchecks below
+#      probe every second while a service starts (start_interval), and Compose refuses
+#      that key on an older engine. `make up` checks both first (PRD-262 US-038).
 #   1. .env with the required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY): `make up`
 #      writes them (make env, PRD-262 US-037); without make, self-hosting.md §1b
 #   PRD-234/262: every published port, the web app included, listens on ${BIND_ADDRESS:-127.0.0.1}
@@ -75,12 +78,18 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later), so the backend starts within about a second of Postgres being ready.
+    # Over TCP (-h 127.0.0.1): on a fresh volume, initdb first runs a temporary server
+    # that listens on the unix socket alone, and a socket probe would pass on it. The
+    # start period covers a slow first initdb, so the 1 s probes last until it is done.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 60s
+      start_interval: 1s
     networks:
       - automatos
 
@@ -105,12 +114,17 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later); CI holds it to healthy within 2 s of its start
+    # (scripts/ci/smoke_health_gates.py). The 1 s probes run only inside start_period,
+    # and the first passing one ends it, so the longer period costs a fast start nothing.
     healthcheck:
       test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks:
       - automatos
 
@@ -143,12 +157,17 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later); CI holds it to healthy within 2 s of its start
+    # (scripts/ci/smoke_health_gates.py). The 1 s probes run only inside start_period,
+    # and the first passing one ends it, so the longer period costs a fast start nothing.
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+      start_period: 30s
+      start_interval: 1s
     networks:
       - automatos
   # (minio-init deleted — S4's storage factory calls ensure_bucket() on first
@@ -357,6 +376,10 @@ services:
       # frontend never started. A probe that passes inside start_period marks it
       # healthy at once, so a fast boot waits for nothing more.
       start_period: 300s
+      # PRD-262 US-038: inside start_period Docker probes every second, not every 30 s
+      # (Docker Engine 25 or later), so the frontend, which waits for a healthy
+      # backend, starts within about 2 s of the backend answering /health.
+      start_interval: 1s
     networks:
       - automatos
 
@@ -499,12 +522,15 @@ services:
         limits:
           cpus: '2.0'
           memory: 2G
+    # PRD-262 US-038: probed every second while it starts (start_interval, Docker Engine
+    # 25 or later), within a start period long enough for a slow first start.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 60s
+      start_interval: 1s
     networks:
       - automatos
 
@@ -552,7 +578,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 60s
+      # PRD-262 US-038: probed every second while it starts (Docker Engine 25 or later),
+      # within a start period long enough for the renderer's first start.
+      start_interval: 1s
     networks:
       - automatos
 

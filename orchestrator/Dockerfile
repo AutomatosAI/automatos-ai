@@ -176,8 +176,12 @@ USER automatos
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Health check. While the server starts, Docker probes every second instead of every
+# 30 s (--start-interval, Docker Engine 25 or later; the syntax directive on line 1 lets
+# older builders read it), so the container reports healthy within about a second of
+# /health answering (PRD-262 US-038). Compose sets its own (docker-compose.yml);
+# Railway runs its own health check, not this one.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --start-interval=1s --retries=3 \
     CMD docker-healthcheck.sh
 
 # Set entrypoint
@@ -242,8 +246,12 @@ USER automatos
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+# Health check. While the server starts, Docker probes every second instead of every
+# 30 s (--start-interval, Docker Engine 25 or later; the syntax directive on line 1 lets
+# older builders read it), so the container reports healthy within about a second of
+# /health answering (PRD-262 US-038). Compose sets its own (docker-compose.yml);
+# Railway runs its own health check, not this one.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --start-interval=1s --retries=3 \
     CMD docker-healthcheck.sh
 
 # Set entrypoint
