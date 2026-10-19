@@ -2,10 +2,8 @@
 GraphifyService — Knowledge-graph build, cache, and export
 ===========================================================
 
-Single point of contact for all graphify library calls. Other modules
-import from here instead of touching graphify directly, so upstream API
-changes only require edits in this file and in leiden_partition.py, which
-serves graphify.cluster's Leiden calls from graspologic-native (PRD-262 US-027).
+Single point of contact for graphify, with leiden_partition.py (its Leiden calls,
+PRD-262 US-027): other modules import from here, so graphify changes stay here.
 
 Pipeline:
   collect sources → extract → merge → build_from_json →
@@ -59,8 +57,7 @@ from core.graph_storage import DbWorkspaceClient
 from core.llm.manager import get_system_setting
 from modules.knowledge.graph_direction import edge_payload, oriented_pairs
 from modules.knowledge.graph_provenance import SOURCE_DOC_ATTR, prune_document_facts, stamp_source_document
-# graphify's cluster(), with its two Leiden calls on graspologic-native (PRD-262 US-027).
-from modules.knowledge.leiden_partition import cluster
+from modules.knowledge.leiden_partition import cluster  # graphify's, Leiden on graspologic-native
 from modules.knowledge.primitive_heartbeat import _emit_graph_primitive
 from services.agent_output_scope import graph_pending_without_agent_outputs, graph_skips_agent_outputs  # F305
 
